@@ -107,12 +107,14 @@ afterAll(async () => {
 });
 
 describe.sequential('product telemetry persisted consent — real routes', () => {
-  it('defaults off for missing or corrupt state and round-trips one server-readable choice', async () => {
+  it('resolves unchosen usage on for missing or corrupt state and round-trips explicit choices', async () => {
+    rmSync(join(dataDir, 'settings.toml'), { force: true });
     rmSync(join(dataDir, 'operator-defaults.json'), { force: true });
-    expect(operatorDefaults!.resolveProductTelemetryEnabledSync()).toBe(false);
+    expect(operatorDefaults!.resolveProductTelemetryEnabledSync()).toBe(true);
 
     writeFileSync(join(dataDir, 'operator-defaults.json'), '{corrupt');
-    expect(operatorDefaults!.resolveProductTelemetryEnabledSync()).toBe(false);
+    expect(operatorDefaults!.resolveProductTelemetryEnabledSync()).toBe(true);
+    expect(await (await telemetryRoute.GET()).json()).toEqual({ enabled: false });
 
     const enabledResponse = await operatorDefaultsRoute!.POST(defaultsRequest({ productTelemetryEnabled: true }));
     const enabledBody = await enabledResponse.json();
@@ -129,6 +131,7 @@ describe.sequential('product telemetry persisted consent — real routes', () =>
     const disabledResponse = await operatorDefaultsRoute!.POST(defaultsRequest({ productTelemetryEnabled: false }));
     expect((await disabledResponse.json()).values.productTelemetryEnabled).toBe(false);
     expect(operatorDefaults!.resolveProductTelemetryEnabledSync()).toBe(false);
+    expect(readProductTelemetryInColdProcess()).toBe('false');
   });
 
   it('blocks the panel route while off and emits only the allowlisted payload while on', async () => {

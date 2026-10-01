@@ -6,7 +6,7 @@
 
 import { proxyBaseUrl } from '@/lib/cortex/qa/llm/inference-route';
 import { readCachedEntitlement } from '@/lib/entitlement/license';
-import { resolveProductTelemetryEnabledSync } from '@/lib/operator/defaults';
+import { getOperatorDefaultsSync } from '@/lib/operator/defaults';
 
 import { sanitizeProductEvent, type ProductEventName, type ProductEventProps } from './events';
 import { isProductTelemetryAllowed } from './policy';
@@ -16,8 +16,12 @@ import { isProductTelemetryAllowed } from './policy';
  * current runtime supplies false; once it ships its resolver belongs here.
  */
 export function isProductTelemetryEnabled(): boolean {
+  const { productTelemetryEnabled, telemetryConsentAnswered } = getOperatorDefaultsSync().values;
+  // Existing explicit opt-ins keep working. Default-on waits for the privacy
+  // screen to finish, so one-click off is persisted before the first event.
+  if (productTelemetryEnabled !== true && !telemetryConsentAnswered) return false;
   return isProductTelemetryAllowed({
-    productTelemetryEnabled: resolveProductTelemetryEnabledSync(),
+    productTelemetryEnabled: productTelemetryEnabled !== false,
     localOnlyMode: false,
   });
 }

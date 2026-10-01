@@ -285,7 +285,7 @@ export interface OperatorDefaults extends KnowledgeSourceDefaults, StorageReserv
   updateAutoApply: UpdateAutoApply;
   /** Collide aggregator override. Auto follows the active composer backend. */
   collideAggregator: CollideAggregator;
-  /** Coarse product-usage telemetry. Explicit opt-in, persisted, and default off. */ productTelemetryEnabled: boolean;
+  /** Coarse usage analytics: null = never chosen (default on), true = on, false = off. */ productTelemetryEnabled: boolean | null;
   /** First-run telemetry prompt was answered with both independent choices. */ telemetryConsentAnswered: boolean;
   /** Crash-log upload opt-in; local capture continues while off. Env: `O8_TELEMETRY_OPT_IN`. */ telemetryOptIn: boolean;
   /** Crash-log endpoint, consulted only when telemetryOptIn is on. */ telemetryIngestUrl: string;
@@ -389,7 +389,7 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   targetingAction: { runtime: 'codex', model: '', effort: 'high' },
   updateAutoApply: 'off',
   collideAggregator: 'auto',
-  productTelemetryEnabled: false,
+  productTelemetryEnabled: null,
   telemetryConsentAnswered: false,
   telemetryOptIn: false, // Local capture only, nothing uploaded.
   telemetryIngestUrl: '',
@@ -541,7 +541,7 @@ function resolveFromFile(stored: StoredOperatorDefaults): FileOperatorDefaults {
   if (isCollideAggregator(stored.collideAggregator)) {
     result.collideAggregator = stored.collideAggregator;
   }
-  if (typeof stored.productTelemetryEnabled === 'boolean') result.productTelemetryEnabled = stored.productTelemetryEnabled;
+  if (stored.productTelemetryEnabled === null || typeof stored.productTelemetryEnabled === 'boolean') result.productTelemetryEnabled = stored.productTelemetryEnabled;
   if (typeof stored.telemetryConsentAnswered === 'boolean') result.telemetryConsentAnswered = stored.telemetryConsentAnswered;
   if (typeof stored.telemetryOptIn === 'boolean') {
     result.telemetryOptIn = stored.telemetryOptIn;
@@ -1017,7 +1017,7 @@ async function updateOperatorDefaultsOnce(update: Partial<OperatorDefaults>, exp
     }
     stored.collideAggregator = update.collideAggregator;
   }
-  if (update.productTelemetryEnabled !== undefined) stored.productTelemetryEnabled = Boolean(update.productTelemetryEnabled);
+  if (update.productTelemetryEnabled !== undefined) stored.productTelemetryEnabled = update.productTelemetryEnabled;
   if (update.telemetryConsentAnswered !== undefined) stored.telemetryConsentAnswered = Boolean(update.telemetryConsentAnswered);
   if (update.telemetryOptIn !== undefined) {
     stored.telemetryOptIn = Boolean(update.telemetryOptIn);
@@ -1227,9 +1227,9 @@ export function resolveCollideAggregatorSync(): CollideAggregator {
   return getOperatorDefaultsSync().values.collideAggregator;
 }
 
-/** Whether coarse product telemetry is explicitly opted in (default off). */
+/** Effective usage preference. First-run disclosure is a separate egress gate. */
 export function resolveProductTelemetryEnabledSync(): boolean {
-  return getOperatorDefaultsSync().values.productTelemetryEnabled;
+  return getOperatorDefaultsSync().values.productTelemetryEnabled !== false;
 }
 
 /** Whether crash-telemetry upload is opted in (Rock 2, default off). */

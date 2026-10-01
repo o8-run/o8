@@ -69,7 +69,7 @@ describe.skipIf(!executablePath)('privacy control contrast in rendered onboardin
           (window as unknown as { mount: (...args: unknown[]) => void }).mount(palette, false);
         }, palette);
         await page.getByRole('button', { name: 'Keep crash reports off', exact: true }).click();
-        await page.getByRole('button', { name: 'Keep product usage off', exact: true }).click();
+        await page.getByRole('button', { name: 'Turn off', exact: true }).click();
         const metrics = await page.locator('button[aria-pressed="true"], footer button').evaluateAll((buttons) => buttons.map((button) => {
           const style = getComputedStyle(button);
           return { color: style.color, background: style.backgroundColor, declaredColor: (button as HTMLElement).style.color };
@@ -92,11 +92,11 @@ describe.skipIf(!executablePath)('privacy control contrast in rendered onboardin
           await page.evaluate(({ palette, workspaceSurface }) => {
             (window as unknown as { mount: (...args: unknown[]) => void }).mount(palette, true, workspaceSurface);
           }, { palette, workspaceSurface });
-          const save = page.getByRole('button', { name: 'Save both choices', exact: true });
+          const save = page.getByRole('button', { name: 'Save privacy choices', exact: true });
           await expect.poll(() => save.isDisabled()).toBe(true);
           await page.getByRole('button', { name: 'Keep crash reports off', exact: true }).click();
-          await expect.poll(() => save.isDisabled()).toBe(true);
-          await page.getByRole('button', { name: 'Keep product usage off', exact: true }).click();
+          await expect.poll(() => save.isEnabled()).toBe(true);
+          await page.getByRole('button', { name: 'Turn off', exact: true }).click();
           await expect.poll(() => save.isEnabled()).toBe(true);
           const measure = async () => page.locator('button[aria-pressed="true"], footer button').evaluateAll((buttons) => buttons.map((button) => {
             const style = getComputedStyle(button);
@@ -111,6 +111,7 @@ describe.skipIf(!executablePath)('privacy control contrast in rendered onboardin
             expect(contrast(metric.color, metric.background), JSON.stringify(metric)).toBeGreaterThanOrEqual(4.5);
           }
           expect(await page.evaluate(() => (window as unknown as { posts: unknown[] }).posts)).toEqual([
+            { productTelemetryEnabled: false },
             { crashReportsEnabled: false, productTelemetryEnabled: false, telemetryConsentAnswered: true },
           ]);
         } finally { await page.close(); }
