@@ -6,14 +6,17 @@ impl Render for Shell {
         let revision = self.revision;
         let painted = self.painted.clone();
         let active = self.active();
-        let content = active
+        let content = self
+            .settings
             .as_ref()
-            .and_then(|t| self.content.get(&self.key(t)))
-            .map(|c| match c {
-                Content::Brain(brain) => brain.clone().into_any_element(),
-                Content::Session(s) => s.clone().into_any_element(),
-                Content::Grid(g) => g.clone().into_any_element(),
-                Content::Inbox(inbox) => inbox.clone().into_any_element(),
+            .map(|s| s.clone().into_any_element())
+            .or_else(|| {
+                active.as_ref().and_then(|t| self.content.get(&self.key(t))).map(|c| match c {
+                    Content::Brain(brain) => brain.clone().into_any_element(),
+                    Content::Session(s) => s.clone().into_any_element(),
+                    Content::Grid(g) => g.clone().into_any_element(),
+                    Content::Inbox(inbox) => inbox.clone().into_any_element(),
+                })
             });
         div()
             .size_full()
@@ -59,6 +62,17 @@ impl Render for Shell {
                                 }))
                         },
                     ))
+                    .child(
+                        div()
+                            .id("shell-settings")
+                            .debug_selector(|| "shell-settings".into())
+                            .cursor_pointer()
+                            .p(px(6.))
+                            .child("Settings")
+                            .on_click(
+                                cx.listener(|this, _, window, cx| this.open_settings(window, cx)),
+                            ),
+                    )
                     .child(
                         div()
                             .id("shell-palette")

@@ -1,0 +1,7 @@
+test shell::tests::settings::settings_fixture_all_default_controls_persist_and_refresh ... ok
+test shell::tests::settings::settings_fixture_provider_keys_presence_save_cancel_remove_enable_check_and_refusals ... ok
+test shell::tests::settings::settings_fixture_toml_save_reload_conflict_and_cancel ... ok
+test shell::tests::settings::settings_fixture_unauthorized_and_close_restore_shell ... ok
+test shell::tests::settings::settings_fixture_validation_locks_loading_errors_and_empty ... ok
+test shell::tests::settings_opens_from_shell_command_palette ... ok
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 39 filtered out; finished in 90.71s

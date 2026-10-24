@@ -36,6 +36,9 @@ async function main() {
   const realtimeAddress = realtime.address();
   if (!realtimeAddress || typeof realtimeAddress === 'string') throw new Error('Missing publication fixture port');
   process.env.CORTEX_REALTIME_INTERNAL_ORIGIN = `http://127.0.0.1:${realtimeAddress.port}`;
+  // Isolate profile and process boundaries before production modules can cache
+  // a runtime path or a subprocess function during import.
+  const settings = process.argv.includes('--settings') ? await (await import('./settings-fixture')).settingsFixture(root) : null;
   const { ensureV71ComposerQueueSchema } = await import('../../src/lib/db/v71-composer-queue-migration');
   const { getSqlite } = await import('../../src/lib/db');
   ensureV71ComposerQueueSchema(getSqlite());
@@ -112,6 +115,7 @@ async function main() {
     ...(inboxRoutes && approvalRoutes ? {
       '/api/panel/supervisor-inbox': inboxRoutes.GET, '/api/panel/approvals': approvalRoutes.GET,
     } : {}),
+    ...(settings ? Object.fromEntries(Object.entries(settings.routes).filter(([key]) => key.startsWith('GET ')).map(([key, route]) => [key.slice(4), route])) : {}),
     ...(review ? {
       '/api/worktrees/diff': worktreeDiff.GET,
       '/api/orchestrator/review-state': reviewState.GET,
@@ -130,13 +134,15 @@ async function main() {
       if (process.argv.includes('--terminal') && req.method === 'GET' && url.pathname === '/api/panel/status') {
         res.writeHead(200, { 'Content-Type': 'application/json' }).end('{}'); return;
       }
-      const route = req.method === 'POST' && url.pathname === '/api/cortex/ask' && brainAsk ? brainAsk
+      const settingsRoute = settings?.routes[`${req.method} ${url.pathname}`];
+      const control = settings && url.pathname === '/__fixture/settings' && req.method === 'POST' ? settings.control : null;
+      const route = control ?? settingsRoute ?? (req.method === 'POST' && url.pathname === '/api/cortex/ask' && brainAsk ? brainAsk
         : req.method === 'GET' ? getRoutes[url.pathname]
         : composer && url.pathname === '/api/orchestrator/composer-queue'
           ? req.method === 'POST' ? queue.POST : req.method === 'PATCH' ? queue.PATCH : req.method === 'DELETE' ? queue.DELETE : null
           : review && req.method === 'POST' && url.pathname === '/api/orchestrator/review' ? reviewDecision.POST
             : approvalRoutes && req.method === 'POST' && url.pathname === '/api/panel/approvals' ? approvalRoutes.POST
-              : planProxy && req.method === 'POST' && url.pathname === '/api/v2/proxy/llm' ? planProxy.POST : null;
+              : planProxy && req.method === 'POST' && url.pathname === '/api/v2/proxy/llm' ? planProxy.POST : null);
       if (!route) { res.writeHead(404).end(); return; }
       // Prevent this development host from becoming a provider-history reader.
       if (route === history && !seeds.some(seed => `llm-chat:${seed.id}` === url.searchParams.get('sessionKey'))
@@ -144,7 +150,7 @@ async function main() {
       if (route === context && !seeds.some(seed => seed.id === url.searchParams.get('tabId'))) { res.writeHead(404).end(); return; }
       let body = '';
       for await (const chunk of req) { body += String(chunk); if (body.length > 1024 * 1024) throw new Error('Fixture body limit'); }
-      if (body) {
+      if (body && !settingsRoute && !control) {
         const target = JSON.parse(body) as { threadId?: string; repoPath?: string; packetId?: string; id?: string; action?: string };
         const owned = route === brainAsk ? target.repoPath === repo || !target.repoPath : route === reviewDecision.POST
           ? ['next-review-approve', 'next-review-reject'].includes(target.packetId ?? '')
@@ -165,7 +171,8 @@ async function main() {
       }
       if (gate.status === 200 && route === approvalRoutes?.POST && JSON.parse(body).action === 'approve'
         && inboxPlan?.approvals.some((approval) => approval.id === JSON.parse(body).id)) inboxPlan.beforeDecision();
-      const response = gate.status === 200 ? await route(request) : gate;
+      const response = gate.status === 200 ? settingsRoute ? await settings!.run(route, request) : await route(request) : gate;
+      if (settingsRoute && req.method !== 'GET' && response.ok && settings!.dropResponse()) { res.destroy(); return; }
       // PATCH exercises actual steer admission and its persisted transcript echo.
       if (composer && response.ok && (route === queue.PATCH || (route === queue.POST && JSON.parse(body).intent === 'steer-now'))) {
         const { claimComposerSteer } = await import('../../src/lib/orchestrator/composer-queue');

@@ -24,6 +24,14 @@ including Ctrl+Alt+W to close one pane, reach the grid. Drafts remain in memory
 while switching workspaces and sessions. An unavailable local server has a clear
 error and Retry control.
 
+Settings opens from the shell's Settings button, the Open settings command, or
+Ctrl+, / Cmd+,. This partial port edits shared server defaults, provider keys and
+revision-checked settings.toml. It works without a saved workspace. Values are
+read from the existing routes; credentials are write-only and never enter shell
+state. See the [control parity table](evidence/settings/parity.md) and
+[fixture verification](evidence/settings/verification.md) for the remaining
+desktop controls and the headless CPU frame measurements.
+
 Window size/position, selected workspace, open surfaces, sidebar selection and
 composer focus are stored in `next-shell.json` beside the resolved local config,
 or in `--shell-state ABSOLUTE_FILE`. The grid retains its existing per-workspace

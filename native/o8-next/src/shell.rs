@@ -4,6 +4,7 @@ use crate::{
     inbox::{Inbox, OpenSession},
     pane_grid::Grid,
     pane_layout,
+    settings::Settings,
     shell_state::{State, Tab, Workspace},
     ui::Surface,
 };
@@ -29,6 +30,7 @@ enum Command {
     Diff,
     Terminal,
     Inbox,
+    Settings,
 }
 impl Command {
     fn label(&self, sessions: &[Session]) -> String {
@@ -47,6 +49,7 @@ impl Command {
             Self::Diff => "Open diff for a packet".into(),
             Self::Terminal => "Open terminal".into(),
             Self::Inbox => "Open Inbox".into(),
+            Self::Settings => "Open settings".into(),
         }
     }
 }
@@ -73,6 +76,8 @@ pub struct Shell {
     revision: u64,
     painted: Rc<Cell<u64>>,
     subscriptions: Vec<gpui::Subscription>,
+    settings: Option<Entity<Settings>>,
+    settings_subscription: Option<gpui::Subscription>,
 }
 impl Shell {
     fn new(
@@ -101,6 +106,8 @@ impl Shell {
             revision: 0,
             painted: Rc::new(Cell::new(u64::MAX)),
             subscriptions: vec![],
+            settings: None,
+            settings_subscription: None,
         };
         shell
             .subscriptions
@@ -279,6 +286,10 @@ impl Shell {
             self.focus.focus(window);
             return;
         }
+        if let Some(settings) = &self.settings {
+            settings.read(cx).focus(window);
+            return;
+        }
         if let Some(tab) = self.active() {
             match self.content.get(&self.key(&tab)) {
                 Some(Content::Session(session)) => session.read(cx).shell_focus(
@@ -310,7 +321,7 @@ impl Shell {
         cx.notify();
     }
     fn capture(&mut self, window: &Window, cx: &App) {
-        if self.palette {
+        if self.palette || self.settings.is_some() {
             return;
         }
         if let Some(tab) = self.active() {
@@ -333,6 +344,7 @@ impl Shell {
             Command::Grid,
             Command::Diff,
             Command::Terminal,
+            Command::Settings,
         ];
         if let Some(id) = match self.active() {
             Some(Tab::Session(id)) => Some(
@@ -360,12 +372,19 @@ impl Shell {
             .collect()
     }
     fn execute(&mut self, command: Command, window: &mut Window, cx: &mut Context<Self>) {
+        if matches!(command, Command::Settings) {
+            self.open_settings(window, cx);
+            return;
+        }
+        self.settings = None;
+        self.settings_subscription = None;
         let (tab, composer) = match command {
             Command::Session(id) => (Tab::Session(id), false),
             Command::Message(id) => (Tab::Session(id), true),
             Command::Brain => (Tab::Brain, false),
             Command::Grid => (Tab::Grid, false),
             Command::Inbox => (Tab::Inbox, false),
+            Command::Settings => unreachable!(),
             Command::Diff | Command::Terminal => {
                 self.notice = "This surface is not available in this build. The terminal and packet diff changes must land before the shell can open them.".into();
                 self.palette = false;
@@ -400,10 +419,39 @@ impl Shell {
         self.revision += 1;
         cx.notify();
     }
+    fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.capture(window, cx);
+        self.palette = false;
+        let client = self.client.clone();
+        let settings = cx.new(|cx| Settings::new(client, window, cx));
+        self.settings_subscription = Some(cx.subscribe_in(
+            &settings,
+            window,
+            |this, _, _: &crate::settings::Close, window, cx| this.close_settings(window, cx),
+        ));
+        self.settings = Some(settings);
+        self.revision += 1;
+        cx.notify();
+    }
+    fn close_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.settings = None;
+        self.settings_subscription = None;
+        self.restore_focus(window, cx);
+        self.revision += 1;
+        cx.notify();
+    }
     fn key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let key = event.keystroke.key.as_str();
         let modifiers = event.keystroke.modifiers;
-        if (modifiers.control || modifiers.platform) && key == "k" {
+        if (modifiers.control || modifiers.platform) && key == "," {
+            if self.settings.is_some() {
+                self.close_settings(window, cx);
+            } else {
+                self.open_settings(window, cx);
+            }
+        } else if self.settings.is_some() && modifiers.control && !modifiers.alt && key == "w" {
+            self.close_settings(window, cx);
+        } else if (modifiers.control || modifiers.platform) && key == "k" {
             if !self.palette {
                 self.capture(window, cx);
             }

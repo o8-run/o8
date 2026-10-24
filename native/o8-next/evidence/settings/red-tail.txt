@@ -1,0 +1,31 @@
+running 6 tests
+test shell::tests::settings::settings_fixture_all_default_controls_persist_and_refresh ...
+Settings must load through the shell and fixture server
+FAILED
+test shell::tests::settings::settings_fixture_provider_keys_presence_save_cancel_remove_enable_check_and_refusals ...
+Settings must load through the shell and fixture server
+FAILED
+test shell::tests::settings::settings_fixture_toml_save_reload_conflict_and_cancel ...
+Settings must load through the shell and fixture server
+FAILED
+test shell::tests::settings::settings_fixture_unauthorized_and_close_restore_shell ...
+Settings must load through the shell and fixture server
+FAILED
+test shell::tests::settings::settings_fixture_validation_locks_loading_errors_and_empty ...
+Settings must load through the shell and fixture server
+FAILED
+test shell::tests::settings_opens_from_shell_command_palette ...
+Settings must be reachable through the real shell command palette
+FAILED
+
+failures:
+
+failures:
+    shell::tests::settings::settings_fixture_all_default_controls_persist_and_refresh
+    shell::tests::settings::settings_fixture_provider_keys_presence_save_cancel_remove_enable_check_and_refusals
+    shell::tests::settings::settings_fixture_toml_save_reload_conflict_and_cancel
+    shell::tests::settings::settings_fixture_unauthorized_and_close_restore_shell
+    shell::tests::settings::settings_fixture_validation_locks_loading_errors_and_empty
+    shell::tests::settings_opens_from_shell_command_palette
+
+test result: FAILED. 0 passed; 6 failed; 0 ignored; 0 measured; 33 filtered out; finished in 28.43s

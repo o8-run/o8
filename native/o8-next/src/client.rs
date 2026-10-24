@@ -158,6 +158,67 @@ impl Client {
         client.workspace = Some(workspace.into());
         client
     }
+    /// Settings shares the existing operator bearer, loopback policy, redirect
+    /// refusal, timeout and response bound. No credential response is retained.
+    pub(crate) fn settings_request<T: DeserializeOwned>(
+        &self,
+        method: &str,
+        path: &str,
+        body: Value,
+    ) -> Result<T, crate::settings::RequestError> {
+        use crate::settings::RequestError;
+        let url = self.origin.join(path).map_err(|_| RequestError {
+            status: None,
+            message: "Invalid settings route".into(),
+        })?;
+        let mut request = self.agent.request(method, url.as_str());
+        if let Some(token) = &self.token {
+            request = request.set("Authorization", &format!("Bearer {token}"));
+        }
+        let response = if method == "GET" {
+            request.call()
+        } else {
+            request.send_json(body)
+        };
+        match response {
+            Ok(response) => Self::read(response).map_err(|_| RequestError {
+                status: None,
+                message: "Invalid settings response. Refresh before trying again.".into(),
+            }),
+            Err(ureq::Error::Status(status, response)) => {
+                #[derive(Deserialize)]
+                struct ErrorBody {
+                    error: String,
+                }
+                let detail = Self::read::<ErrorBody>(response).ok().map(|v| v.error);
+                let message = if path.starts_with("/api/v2/keys") {
+                    // Credential endpoints may include provider text. Only fixed
+                    // route refusals may reach UI; never echo supplied key data.
+                    match detail.as_deref() {
+                        Some(
+                            "Invalid API key"
+                            | "Key cannot be empty"
+                            | "No OpenRouter key is connected"
+                            | "Turn the OpenRouter connection on before checking it",
+                        ) => detail.unwrap(),
+                        _ => format!(
+                            "Key action refused (HTTP {status}). Previous keys were preserved."
+                        ),
+                    }
+                } else {
+                    detail.unwrap_or_else(|| format!("Settings request refused (HTTP {status})."))
+                };
+                Err(RequestError {
+                    status: Some(status),
+                    message,
+                })
+            }
+            Err(_) => Err(RequestError {
+                status: None,
+                message: "The result is unconfirmed. Refresh settings before trying again.".into(),
+            }),
+        }
+    }
     pub fn sessions(&self) -> Result<Vec<Session>, String> {
         let mut sessions = self
             .get::<Sessions>("/api/mobile/orchestrator/threads", &[("limit", "500")])?

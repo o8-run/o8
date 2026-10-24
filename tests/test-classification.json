@@ -4003,6 +4003,14 @@
       ]
     },
     {
+      "path": "tests/next-settings-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/next-startup-route-loading-real-path.test.ts",
       "reasons": [
         "child-process",

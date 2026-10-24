@@ -11,15 +11,13 @@ struct Fixture {
     server: Child,
     client: Client,
     root: PathBuf,
+    origin: String,
 }
 impl Fixture {
-    fn new() -> Self {
-        Self::mode(false)
-    }
-    fn brain() -> Self {
-        Self::mode(true)
-    }
-    fn mode(brain: bool) -> Self {
+    fn new() -> Self { Self::mode(false, false) }
+    fn brain() -> Self { Self::mode(true, false) }
+    fn start(settings: bool) -> Self { Self::mode(false, settings) }
+    fn mode(brain: bool, settings: bool) -> Self {
         let root = std::env::temp_dir().join(format!(
             "o8-shell-{}-{}",
             std::process::id(),
@@ -29,7 +27,9 @@ impl Fixture {
                 .as_nanos()
         ));
         fs::create_dir(&root).unwrap();
-        let mut server = Process::new("node")
+        let root = fs::canonicalize(root).unwrap();
+        let mut process = Process::new("node");
+        process
             .current_dir(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.."))
             .args([
                 "--import",
@@ -39,40 +39,51 @@ impl Fixture {
                 "scripts/next/dev-server.ts",
                 "--composer",
                 "--shell",
-            ])
-            .args(if brain { vec!["--brain"] } else { vec![] })
-            .env(
-                "O8_NEXT_BRAIN_REQUEST_LOG",
-                root.join("brain-requests.json"),
-            )
+            ]);
+        if brain { process.arg("--brain"); }
+        if settings { process.arg("--settings"); }
+        let mut server = process
+            .env("O8_NEXT_BRAIN_REQUEST_LOG", root.join("brain-requests.json"))
             .env("O8_NEXT_API_TOKEN", "fixture-shell-bearer")
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            .stderr(Stdio::from(
+                fs::File::create(root.join("fixture.log")).unwrap(),
+            ))
             .spawn()
             .unwrap();
         let mut lines = BufReader::new(server.stdout.take().unwrap()).lines();
-        let origin = lines
-            .by_ref()
+        let origin = lines.by_ref()
             .find_map(|line| {
                 serde_json::from_str::<Value>(&line.ok()?).ok()?["origin"]
                     .as_str()
                     .map(str::to_owned)
             })
             .expect("fixture origin");
+        // Keep draining production-handler diagnostics after startup.
         std::thread::spawn(move || for _ in lines {});
         Self {
             server,
             client: Client::authenticated(&origin, Some("fixture-shell-bearer".into())).unwrap(),
             root,
+            origin,
         }
     }
 }
+
+#[path = "settings_tests.rs"]
+mod settings;
 impl Drop for Fixture {
     fn drop(&mut self) {
         let _ = Process::new("kill")
             .args(["-TERM", &self.server.id().to_string()])
             .status();
         let _ = self.server.wait();
+        if let Ok(directory) = std::env::var("O8_NEXT_SETTINGS_DIAGNOSTICS") {
+            let _ = fs::copy(
+                self.root.join("fixture.log"),
+                PathBuf::from(directory).join(format!("fixture-{}.log", self.server.id())),
+            );
+        }
         let _ = fs::remove_dir_all(&self.root);
     }
 }
@@ -119,6 +130,25 @@ fn ready(shell: &Entity<Shell>, cx: &mut VisualTestContext) {
         }
     }
     panic!("selected fixture history must reach CPU scene paint through the existing surface");
+}
+
+#[gpui::test]
+fn settings_opens_from_shell_command_palette(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    let (shell, mut visual) = open(
+        fixture.client.clone(),
+        fixture.root.join("settings-shell.json"),
+        State::default(),
+        cx,
+    );
+    ready(&shell, &mut visual);
+    visual.simulate_keystrokes("ctrl-k");
+    visual.simulate_keystrokes("s e t t i n g s enter");
+    draw(&mut visual);
+    assert!(
+        visual.debug_bounds("settings-page").is_some(),
+        "Settings must be reachable through the real shell command palette"
+    );
 }
 
 #[gpui::test]
