@@ -22,6 +22,8 @@ export async function GET(request: NextRequest) {
       id: entry.id,
       role: entry.role,
       text: entry.text,
+      tokens: entry.tokens,
+      model: entry.model,
       type: entry.type ?? 'message',
       timestamp: entry.timestamp.getTime(),
       timestampLabel: entry.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -43,6 +45,8 @@ export async function GET(request: NextRequest) {
       transcript.push({
         id: `steer-${event.seq}`,
         role: 'user',
+        tokens: undefined,
+        model: undefined,
         text: `${event.failed ? 'Steer failed to start' : event.source} · ${timestampLabel}\n\n${event.text}${event.note && event.note !== event.text ? `\n\n${event.note}` : ''}`,
         type: 'message',
         timestamp: timestampMs,

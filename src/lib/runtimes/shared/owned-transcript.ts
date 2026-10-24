@@ -25,6 +25,7 @@ function runtimeEntry(
       : entry.kind === 'tool' ? 'tool'
       : 'system',
     text: entry.text,
+    ...(entry.tokens ? { tokens: entry.tokens, model: entry.model } : {}),
     timestamp: transcriptTimestamp(entry.timestamp, fallbackTimestamp),
     toolName: entry.kind === 'tool' ? entry.label : undefined,
     thinking: entry.thinking,

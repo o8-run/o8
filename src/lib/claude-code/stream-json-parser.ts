@@ -1,3 +1,4 @@
+import { cacheUsageEvidence } from '@/lib/prompt-cache/usage-evidence';
 export type ClaudeCodeStreamJsonChatEvent =
   | { type: 'delta'; text: string; blockIndex?: number; messageIndex?: number; messageKey?: string }
   | { type: 'thinking'; text: string; blockIndex?: number; messageIndex?: number; messageKey?: string }
@@ -9,6 +10,8 @@ export type ClaudeCodeStreamJsonChatEvent =
       outputTokens: number;
       cacheReadTokens?: number;
       cacheWriteTokens?: number;
+      cacheRetentionMs?: number;
+      cacheObserved?: boolean;
       costUsd?: number;
     }
   | { type: 'plan_step'; id?: string | null; text: string; status?: 'pending' | 'active' | 'complete' }
@@ -26,6 +29,8 @@ export type ClaudeCodeStreamJsonParserEvent =
       outputTokens?: number;
       cacheReadTokens?: number;
       cacheWriteTokens?: number;
+      cacheRetentionMs?: number;
+      cacheObserved?: boolean;
       costUsd?: number;
       duration?: number;
     };
@@ -121,10 +126,11 @@ function usageFromClaude(input: unknown, costUsd?: number): Extract<ClaudeCodeSt
   if (inputTokens <= 0 && outputTokens <= 0 && cacheReadTokens <= 0 && cacheWriteTokens <= 0 && typeof nextCost !== 'number') return null;
   return {
     type: 'usage',
+    ...cacheUsageEvidence(usage ?? {}),
     inputTokens,
     outputTokens,
-    ...(cacheReadTokens > 0 ? { cacheReadTokens } : {}),
-    ...(cacheWriteTokens > 0 ? { cacheWriteTokens } : {}),
+    ...((usage?.cache_read_input_tokens ?? usage?.cacheReadTokens) !== undefined && cacheReadTokens >= 0 ? { cacheReadTokens } : {}),
+    ...((usage?.cache_creation_input_tokens ?? usage?.cacheWriteTokens) !== undefined && cacheWriteTokens >= 0 ? { cacheWriteTokens } : {}),
     ...(typeof nextCost === 'number' ? { costUsd: nextCost } : {}),
   };
 }
@@ -324,6 +330,8 @@ export function createClaudeCodeStreamJsonParser(
       ...(isError ? { isError: true } : {}),
       ...(subtype ? { subtype } : {}),
       ...(sessionId ? { sessionId } : {}),
+      ...(usage?.cacheObserved === false ? { cacheObserved: false } : {}),
+      ...(usage?.cacheRetentionMs ? { cacheRetentionMs: usage.cacheRetentionMs } : {}),
       ...(typeof usage?.inputTokens === 'number' ? { inputTokens: usage.inputTokens } : {}),
       ...(typeof usage?.outputTokens === 'number' ? { outputTokens: usage.outputTokens } : {}),
       ...(typeof usage?.cacheReadTokens === 'number' ? { cacheReadTokens: usage.cacheReadTokens } : {}),

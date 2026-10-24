@@ -180,6 +180,8 @@ export interface RuntimeTranscriptToolCall {
 }
 
 export interface RuntimeTranscriptEntry {
+  model?: string;
+  tokens?: import('@/lib/mobile/types').MobileTranscriptEntry['tokens'];
   id: string;
   role: TranscriptRole;
   text: string;

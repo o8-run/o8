@@ -1,4 +1,6 @@
 'use client';
+import { ComposerFrame } from './chat-panel/ComposerFrame';
+import { SessionCacheIndicator } from '../SessionCacheIndicator';
 
 import { sendBoundComposerTurn } from './use-orchestrator-stream/bound-composer-turn';
 import { ManagedChatVoiceEntry } from './chat-panel/ManagedChatVoiceEntry';
@@ -2013,19 +2015,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, ThoughtsCha
         showDraftClearedToast={showDraftClearedToast}
         thoughtsBodyBackground={thoughtsBodyBackground}
       />
-      <div
-        // The composer follows the empty-state prompt in normal flex flow.
-        // Both center against the full pane, including in split layouts.
-        style={{
-          flexShrink: 0,
-          width: '100%',
-          maxWidth: composeFirst ? 900 : undefined,
-          marginRight: 'auto',
-          marginLeft: 'auto',
-          // Keep position in layout so resizing reflows without overlap.
-          transform: 'none',
-        }}
-      >
+      <ComposerFrame composeFirst={composeFirst}>
       {backendSwitch.pending ? (
         <BackendSwitchChoice
           target={backendSwitch.pending}
@@ -2034,6 +2024,10 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, ThoughtsCha
           onCancel={backendSwitch.clearPending}
         />
       ) : null}
+      {!isChatMode ? <SessionCacheIndicator session={isSingleMode ? singleRuntimeSessionRef.current : threadId ?? null}
+        runtime={isSingleMode ? singleRuntime : activeBackendIdentity}
+        model={orchestratorModel ?? [...backendMessages].reverse().find(entry => entry.role === 'assistant')?.model ?? null}
+        entries={backendMessages} running={displayWaiting} /> : null}
       <VisualComposerArea dictationScopeKey={JSON.stringify([workspaceModeKey, lockedMode ?? orchestrationMode, threadId ?? 'draft'])} visual={{ active: open && isOrchestratorMode && !contextualConversation,
         target: threadId && resolvedRepoPath ? { threadId, repoPath: resolvedRepoPath } : null,
         label: `${composerRepoLabel} · current chat`, capture: captureQueuedSend }}
@@ -2132,7 +2126,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, ThoughtsCha
           />
         );
       })() : null}
-      </div>
+      </ComposerFrame>
     </div>
   </WorkerDisclosureProvider>);
 });

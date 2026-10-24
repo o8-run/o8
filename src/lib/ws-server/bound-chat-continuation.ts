@@ -45,7 +45,9 @@ export async function runBoundChatContinuation(
     tabId: expected.threadId, repoPath: input.repoPath, messageId: assistantMessageId, content: text,
     backend: backend.id, model: expected.model, receipt, sessionId, timestampMs: startedAt,
     ...(done?.usage ? { tokens: { input: done.usage.inputTokens, output: done.usage.outputTokens,
-      cacheRead: done.usage.cacheReadTokens, cacheWrite: done.usage.cacheWriteTokens } } : {}),
+      cacheRead: done.usage.cacheReadTokens, cacheWrite: done.usage.cacheWriteTokens,
+      ...((done.usage.cacheObserved === false) ? { cacheObserved: false } : {}),
+      ...(done.usage.cacheRetentionMs ? { cacheRetentionMs: done.usage.cacheRetentionMs } : {}) } } : {}),
   });
   try {
     if (input.claim && !input.claim()) return;

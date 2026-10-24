@@ -1,3 +1,4 @@
+import { observedCacheTokens, reportedRunModel } from '@/lib/prompt-cache/usage-evidence';
 /** Pure Claude log parsing; importing this module creates no runtime store. */
 import { createClaudeCodeStreamJsonParser, type ClaudeCodeStreamJsonParserEvent } from './stream-json-parser';
 import type { OwnedRunRecord, OwnedTailEntry, ParsedRunLog } from '@/lib/runtimes/shared/owned-session/types';
@@ -160,6 +161,13 @@ export function parseClaudeOwnedRunLog(raw: string, run: OwnedRunRecord): Parsed
   const usage = [...events].reverse().find(
     (event): event is Extract<ClaudeCodeStreamJsonParserEvent, { type: 'usage' }> => event.type === 'usage',
   );
+  const assistant = [...entries].reverse().find(entry => entry.kind === 'message');
+  const terminalUsage = done?.inputTokens !== undefined ? done : usage;
+  if (assistant && terminalUsage) {
+    assistant.model = reportedRunModel(raw);
+    assistant.tokens = observedCacheTokens({ ...terminalUsage });
+    assistant.timestamp = run.finishedAt ?? run.startedAt;
+  }
   const inputTokens = done?.inputTokens ?? usage?.inputTokens ?? 0;
   const cacheReadTokens = done?.cacheReadTokens ?? usage?.cacheReadTokens ?? 0;
   const contextTokens = inputTokens + cacheReadTokens;

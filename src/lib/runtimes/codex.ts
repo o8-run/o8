@@ -334,6 +334,8 @@ export const codexRuntime: AgentRuntime = {
         : entry.kind === 'tool-output' ? 'system' as const
         : 'system' as const,
       text: entry.text,
+      tokens: entry.tokens,
+      model: entry.model,
       timestamp: parseTranscriptTimestamp(entry.timestamp, entry.timestampLabel),
       toolName: entry.kind === 'tool' ? entry.label : undefined,
     }));

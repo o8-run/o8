@@ -1,3 +1,4 @@
+import { cacheUsageEvidence } from '@/lib/prompt-cache/usage-evidence';
 import { planFromToolInput, type OrchestratorPlanStep } from './orchestrator-plan';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 
@@ -50,10 +51,12 @@ export type OrchestratorEvent =
   };
 
 export interface OrchestratorTurnUsage {
+  cacheObserved?: boolean;
+  cacheRetentionMs?: number;
   inputTokens: number;
   outputTokens: number;
   cacheReadTokens: number;
-  cacheWriteTokens: number;
+  cacheWriteTokens?: number;
 }
 
 type ContentBlock = {
@@ -104,12 +107,14 @@ export function parseOrchestratorTurnUsage(event: Record<string, unknown>): Orch
     : null;
   if (!usage) return null;
   const parsed = {
+    ...cacheUsageEvidence(usage),
     inputTokens: tokenCount(usage.input_tokens ?? usage.inputTokens),
     outputTokens: tokenCount(usage.output_tokens ?? usage.outputTokens),
     cacheReadTokens: tokenCount(usage.cache_read_input_tokens ?? usage.cacheReadTokens),
-    cacheWriteTokens: tokenCount(usage.cache_creation_input_tokens ?? usage.cacheWriteTokens),
+    ...((usage.cache_creation_input_tokens ?? usage.cacheWriteTokens) !== undefined
+      ? { cacheWriteTokens: tokenCount(usage.cache_creation_input_tokens ?? usage.cacheWriteTokens) } : {}),
   };
-  return Object.values(parsed).some((value) => value > 0) ? parsed : null;
+  return [parsed.inputTokens, parsed.outputTokens, parsed.cacheReadTokens, parsed.cacheWriteTokens].some(value => (value ?? 0) > 0) ? parsed : null;
 }
 
 export function createToolCallTracker(): ToolCallTracker {
