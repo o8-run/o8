@@ -44,3 +44,19 @@ Three fixture runs: first CPU frame 79.4 ms median; 77.6–83.7 ms range; loaded
 interaction 15.6 ms median; 55.3 ms p95 (27 samples). No baseline timing existed because the shell had no
 Activity surface. See the receipts and `summary.json`; these are debug-build
 CPU scene timings, not physical presentation latency.
+
+
+Review correction 1: repository identity in grouping
+
+The real shell's All repositories / CI controls reproduced two registered forks
+with the same commit SHA: only one commit row survived, and the passing fork's CI
+replaced the original repository's failure. The red output is preserved in
+`review-1-red.txt` (1 failed). Both commit deduplication and CI attachment now
+require matching repository identity and SHA; unknown local identities remain
+separate. The same fixture now retains two commit rows with failure and success
+badges on their respective repositories. `review-1-green.txt` records the passing
+regression, all 9 Activity tests, and all 12 shared-shell tests.
+Typecheck fast, tsc with an 8 GiB heap, touched-file ESLint, rule-check against
+HEAD (1 TypeScript file), and test classification passed. Full `npm test` passed:
+1,233 files and 8,896 tests, with 3 files / 5 tests skipped. No release, version,
+deployment or publishing files were changed.

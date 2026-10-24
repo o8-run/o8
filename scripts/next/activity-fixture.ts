@@ -2,7 +2,7 @@
  * only the upstream GitHub transport is authored. No account or network access. */
 import { generateKeyPairSync, randomBytes } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import type { NextRequest } from 'next/server';
 
@@ -13,14 +13,21 @@ export async function installActivityFixture(repo: string) {
   execFileSync('git', ['-C', repo, 'add', '.']);
   execFileSync('git', ['-C', repo, 'commit', '-qm', 'Fixture local commit']);
   execFileSync('git', ['-C', repo, 'remote', 'add', 'origin', 'https://github.com/example/activity.git']);
-  const { addRepo } = await import('../../src/lib/repos/registry');
-  await addRepo(repo);
+  const { addRepo, touchRepo } = await import('../../src/lib/repos/registry');
+  const activityRepo = await addRepo(repo);
   const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
   Object.assign(process.env, { GITHUB_APP_ID: '1', GITHUB_APP_PRIVATE_KEY: privateKey.export({ type: 'pkcs8', format: 'pem' }),
     GITHUB_API_BASE_URL: 'http://activity-upstream.invalid' });
   const originalFetch = globalThis.fetch;
   const token = randomBytes(32).toString('hex');
-  let mode = 'ready';
+  let mode = process.argv.includes('--activity-forks') ? 'forks' : 'ready';
+  if (mode === 'forks') {
+    const forkRepo = join(dirname(repo), 'fork-repo');
+    execFileSync('git', ['clone', '--quiet', '--no-hardlinks', repo, forkRepo]);
+    execFileSync('git', ['-C', forkRepo, 'remote', 'set-url', 'origin', 'https://github.com/example/activity-fork.git']);
+    await addRepo(forkRepo);
+    await touchRepo(activityRepo.id, new Date(Date.now() + 1000).toISOString());
+  }
   let dropped = false;
   const mutations: string[] = [];
   const calls: string[] = [];
@@ -37,12 +44,13 @@ export async function installActivityFixture(repo: string) {
       throw new Error('Activity fixture refuses external traffic');
     }
     const path = url.pathname; calls.push(path);
+    const fork = path.startsWith('/repos/example/activity-fork/');
     if (path.endsWith('/installation')) return Response.json({ id: mode === 'refused' ? 2 : mode === 'malformed' ? 3 : 1 });
     if (path.endsWith('/access_tokens')) return Response.json({ token, expires_at: new Date(Date.now() + 3_600_000).toISOString() });
     if (mode === 'refused') return Response.json({ message: 'Fixture rate limit' }, { status: 429, headers: { 'Retry-After': '300' } });
     if (path.endsWith('/actions/runs/91/jobs')) return Response.json({ jobs: [{ id: 92, name: 'Typecheck', conclusion: 'failure', steps: [{ name: 'Compile', conclusion: 'failure' }] }] });
     if (path.endsWith('/actions/runs/91')) return Response.json(mode === 'malformed' ? { ...run, id: 999 } : run);
-    if (path.endsWith('/actions/runs')) return Response.json({ workflow_runs: mode === 'empty' ? [] : [{ ...run, head_sha: mode === 'prefix' ? 'd'.repeat(40) : run.head_sha }] });
+    if (path.endsWith('/actions/runs')) return Response.json({ workflow_runs: mode === 'empty' ? [] : [{ ...run, id: fork ? 93 : run.id, conclusion: fork ? 'success' : run.conclusion, head_sha: mode === 'forks' ? 'd'.repeat(7) : mode === 'prefix' ? 'd'.repeat(40) : run.head_sha }] });
     if (path.endsWith('/commits')) return Response.json(mode === 'empty' ? [] : [{ sha: 'd'.repeat(40), commit: { message: 'Fixture remote commit', committer: { date } } }]);
     if (path.endsWith('/pulls/7')) return Response.json(pull);
     if (path.endsWith('/pulls/7/files')) return Response.json([{ filename: 'activity.txt', additions: 2, deletions: 1 }]);

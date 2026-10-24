@@ -1,0 +1,15 @@
+running 1 test
+test shell::tests::activity_tests::activity_fork_commits_keep_their_own_ci_badges ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 47 filtered out; finished in 7.55s
+
+
+Activity suite:
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 39 filtered out; finished in 95.59s
+
+Shared shell suite:
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 36 filtered out; finished in 91.09s
+
+Full npm test:
+Test Files  1233 passed | 3 skipped (1236)
+Tests  8896 passed | 5 skipped (8901)

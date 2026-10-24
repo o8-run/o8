@@ -286,16 +286,18 @@ pub fn load(client: &Client, targets: &[Repo], previous: HashMap<String, Streams
         }
         Err(error) => out.errors.push(error.message),
     }
-    // Desktop groups matching CI runs into commits, including those in CI counts.
+    // Group repository/SHA pairs; unknown local identities must stay separate.
     let mut grouped = vec![];
     for row in &out.rows {
         if row.kind == "ci" {
             let sha = text(&row.data, "headSha").to_lowercase();
             if !sha.is_empty() {
-                if let Some(commit) = grouped
-                    .iter_mut()
-                    .find(|c: &&mut Row| c.kind == "commit" && sha == c.id.to_lowercase())
-                {
+                if let Some(commit) = grouped.iter_mut().find(|c: &&mut Row| {
+                    c.kind == "commit"
+                        && row.repo.is_some()
+                        && c.repo == row.repo
+                        && sha == c.id.to_lowercase()
+                }) {
                     commit.ci = Some(Box::new(row.clone()));
                     if row.date > commit.date {
                         commit.date = row.date.clone();
@@ -305,9 +307,10 @@ pub fn load(client: &Client, targets: &[Repo], previous: HashMap<String, Streams
             }
         }
         if row.kind != "commit"
+            || row.repo.is_none()
             || !grouped
                 .iter()
-                .any(|c: &Row| c.kind == "commit" && c.id == row.id)
+                .any(|c: &Row| c.kind == "commit" && c.repo == row.repo && c.id == row.id)
         {
             grouped.push(row.clone());
         }

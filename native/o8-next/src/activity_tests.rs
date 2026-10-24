@@ -392,3 +392,42 @@ fn activity_short_commit_prefix_keeps_ci_detail_reachable(cx: &mut TestAppContex
     activity_click(cx, "activity-row-ci-91");
     assert!(cx.debug_bounds("activity-ci-job-0").is_some());
 }
+
+#[gpui::test]
+fn activity_fork_commits_keep_their_own_ci_badges(cx: &mut TestAppContext) {
+    let fixture = Fixture::activity_forks();
+    let (shell, mut visual, _) = activity_open(&fixture, cx);
+    let cx = &mut visual;
+    let _: Value = fixture
+        .client
+        .get("/api/activity-fixture", &[("mode", "forks")])
+        .unwrap();
+    activity_click(cx, "activity-scope-all");
+    activity_click(cx, "activity-filter-ci");
+    let view = activity_view(&shell, cx);
+    let badges = view.read_with(cx, |v, _| {
+        v.rows
+            .iter()
+            .filter(|row| row.kind == "commit" && row.id == "ddddddd")
+            .map(|row| {
+                (
+                    row.repo.clone().unwrap(),
+                    row.ci
+                        .as_ref()
+                        .map(|ci| ci.data["conclusion"].as_str().unwrap().to_owned()),
+                )
+            })
+            .collect::<std::collections::BTreeMap<_, _>>()
+    });
+    assert_eq!(
+        badges,
+        std::collections::BTreeMap::from([
+            ("example/activity".to_owned(), Some("failure".to_owned())),
+            (
+                "example/activity-fork".to_owned(),
+                Some("success".to_owned())
+            ),
+        ]),
+        "Forks sharing a SHA must retain separate commit rows and repository-owned CI badges"
+    );
+}

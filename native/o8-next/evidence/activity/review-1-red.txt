@@ -1,0 +1,17 @@
+running 1 test
+test shell::tests::activity_tests::activity_fork_commits_keep_their_own_ci_badges ...
+thread 'shell::tests::activity_tests::activity_fork_commits_keep_their_own_ci_badges' (58163) panicked at src/activity_tests.rs:412:5:
+assertion `left == right` failed: Forks sharing a SHA must retain separate commit rows and repository-owned CI badges
+  left: {"example/activity": Some("success")}
+ right: {"example/activity": Some("failure"), "example/activity-fork": Some("success")}
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    shell::tests::activity_tests::activity_fork_commits_keep_their_own_ci_badges
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 47 filtered out; finished in 3.62s
+
+error: test failed, to rerun pass `--bin o8-next`
