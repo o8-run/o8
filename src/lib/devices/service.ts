@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { helperEnvironment, inspectPlatforms, inspectTools, installedTool, installTool, stopOwnedChild } from './tools';
 import { DeviceError, type DeviceState, type DeviceTool } from './types';
+import { DeviceControllers } from './controllers';
 
 async function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -72,12 +73,13 @@ export class DeviceManager {
   constructor(readonly root: string) {}
 
   async state(): Promise<DeviceState> {
+    const phase = this.phase;
     if (!this.platformRead || Date.now() - this.platformRead.at > 10_000) this.platformRead = { at: Date.now(), value: inspectPlatforms() };
     const [tools, platforms, agent] = await Promise.all([inspectTools(this.root), this.platformRead.value, installedTool(this.root, 'agent')]);
-    return { phase: this.phase, tools, platforms,
+    return { phase, tools, platforms, controllers: await new DeviceControllers(this.root).roster(),
       ...(this.error ? { error: this.error } : {}), ...(this.stage ? { stage: this.stage } : {}),
       ...(agent ? { agentCommand: [process.execPath, agent] } : {}),
-      ...(this.phase === 'running' && this.embedOrigin && this.token ? { embedUrl: `${this.embedOrigin}/?token=${encodeURIComponent(this.token)}`, devices: this.devices } : {}),
+      ...(phase === 'running' && this.embedOrigin && this.token ? { embedUrl: `${this.embedOrigin}/?token=${encodeURIComponent(this.token)}`, devices: this.devices } : {}),
     };
   }
 

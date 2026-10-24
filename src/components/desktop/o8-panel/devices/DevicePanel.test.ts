@@ -77,10 +77,10 @@ it('keeps shared-device instructions available while the viewer is live', async 
   expect(host.querySelector('summary')?.textContent).toContain('Shared device');
   await act(async () => findButton('Copy agent instructions').click());
   const instructions = writeText.mock.calls[0] as unknown as [string];
-  expect(instructions[0]).toContain('session list');
-  expect(instructions[0]).toContain('distinct --session');
-  expect(instructions[0]).toContain('Do not override AGENT_DEVICE_STATE_DIR');
-  expect(instructions[0]).toContain("'/agent'\\''s cli'");
+  expect(instructions[0]).toContain('o8_device');
+  expect(instructions[0]).toContain('automatically');
+  expect(instructions[0]).toContain('handoff');
+  expect(instructions[0]).not.toContain('/agent');
   expect(host.querySelector('iframe')).not.toBeNull();
 });
 it('backs off after a live status timeout and recovers without remounting the viewer', async () => {
@@ -103,4 +103,20 @@ it('backs off after a live status timeout and recovers without remounting the vi
   await act(async () => vi.advanceTimersByTimeAsync(1));
   expect(host.querySelector('summary')?.textContent).toContain('Shared device');
   expect(host.querySelector('iframe')).toBe(frame);
+});
+it('keeps viewing passive and shows attributed controllers with an explicit operator takeover', async () => {
+  const running = { ...base, phase: 'running', embedUrl: 'http://127.0.0.1:3333/',
+    devices: [{ id: 'ios-1', name: 'Fixture phone', platform: 'ios', state: 'running' }],
+    controllers: [{ deviceId: 'ios-1', active: { session: 'worker-a', label: 'Conversation a · Worker a', kind: 'worker' },
+      waiting: [{ session: 'worker-b', label: 'Conversation b · Worker b', kind: 'worker' }],
+      lastInput: { action: 'press', label: 'Conversation a · Worker a', x: 20, y: 30 } }],
+  };
+  vi.mocked(fetch).mockImplementation(async () => Response.json(running));
+  await act(async () => root.render(createElement(DevicePanel, { active: true })));
+  expect(host.textContent).toContain('Conversation a · Worker a');
+  expect(host.textContent).toContain('Conversation b · Worker b');
+  expect(host.querySelector('iframe')?.closest('[inert]')).not.toBeNull();
+  expect(host.querySelector('[aria-label="Last agent input"]')?.textContent).toContain('press');
+  await act(async () => findButton('Take operator control').click());
+  expect(fetch).toHaveBeenLastCalledWith('/api/panel/devices', expect.objectContaining({ body: JSON.stringify({ action: 'take-control', deviceId: 'ios-1', expectedSession: 'worker-a' }) }));
 });

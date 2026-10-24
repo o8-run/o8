@@ -9,6 +9,10 @@ import {
 import { pathWithNodeRuntime } from '@/lib/util/node-on-path';
 
 import type { OwnedRunMode, OwnedRuntimeAdapter, OwnedSessionRecord } from './types';
+import { installedTool } from '@/lib/devices/tools';
+import { getDeviceManager } from '@/lib/devices/service';
+import { devMcpServerLaunch, findBundledMcpServer, resolveToolSpineApiBase } from '@/lib/mcp/tool-spine/build';
+import { fileURLToPath } from 'node:url';
 
 export interface PreparedOwnedWorkerMcpConfig {
   configPath?: string;
@@ -69,6 +73,16 @@ export async function prepareOwnedWorkerMcpConfig({
       reason: `Unable to load operator-registered MCP servers: ${resolution.error}`,
     });
     return { sandboxReadPaths: [], servers: [] };
+  }
+  // Installed controls attach automatically. This never installs or starts a helper,
+  // and the transport inherits only the packet credential from the worker process.
+  if (await installedTool(getDeviceManager().root, 'agent')) {
+    const bundled = findBundledMcpServer('operator-mcp-proxy.mjs');
+    const launch = bundled ? { command: process.execPath, args: [bundled] }
+      : devMcpServerLaunch(fileURLToPath(new URL('../../../mcp/operator-mcp-proxy.ts', import.meta.url)));
+    resolution.servers.push({ id: 'builtin:devices', name: 'o8-devices', ...launch,
+      env: { O8_DEVICE_WORKER_ONLY: '1', O8_DEVICE_CONVERSATION_ID: session.threadId ?? session.packetId,
+        O8_API_BASE: resolveToolSpineApiBase(), O8_DATA_DIR: path.dirname(getDeviceManager().root), O8_MCP_TOOL_LOADING: 'full' } });
   }
   if (resolution.servers.length === 0) return { sandboxReadPaths: [], servers: [] };
 

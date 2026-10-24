@@ -156,6 +156,8 @@ const DEVICE_CAPABILITIES: Array<{ methods: ReadonlySet<string>; path: RegExp }>
 ];
 
 const WORKER_CAPABILITIES: Array<{ methods: ReadonlySet<string>; path: RegExp }> = [
+  // Packet-bound device authority; this route exposes only the device tool profile.
+  { methods: new Set(['POST']), path: /^\/api\/devices\/agent\/?$/ },
   // Display-only pages are checked against the worker's exact packet in every handler.
   { methods: new Set(['GET', 'POST']), path: /^\/api\/visualizations\/?$/ },
   { methods: new Set(['GET']), path: /^\/api\/visualizations\/vis-[0-9a-f-]+\/?$/ },

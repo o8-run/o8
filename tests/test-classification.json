@@ -2677,6 +2677,14 @@
       ]
     },
     {
+      "path": "tests/device-controller-handoff.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener",
+        "process-signal"
+      ]
+    },
+    {
       "path": "tests/device-session-routes-real-path.test.ts",
       "reasons": [
         "network-listener",
