@@ -1,3 +1,4 @@
+import { workerParentEnvironment } from './worker-environment';
 import { deferredMcpArgumentsForCheck } from './deferred-mcp-arguments';
 import { createHash } from 'node:crypto';
 import { realpathSync } from 'node:fs';
@@ -104,7 +105,17 @@ export function providerConfigEnvironment(input: Record<string, string>, runtime
 
 /** The only ambient inheritance point. Runtime identity and persisted API opt-in are required. */
 export function childEnvironment(options: SpawnOptions & { env?: Record<string, string | undefined>; inherit?: boolean } = {}): ReturnType<typeof resolvedEnvironment> {
-  const input = options.inherit === false ? options.env ?? {} : { ...process.env, ...options.env };
+  let parent: Record<string, string | undefined> = {};
+  if (options.inherit !== false) {
+    parent = options.runtimeId || options.runtimeLaunch
+      ? workerParentEnvironment(process.env, options.runtimeId) : process.env;
+    // Credentials still enter only through the existing runtime billing/injection policy.
+    if (permitsApiCredentials(options.runtimeId)) {
+      parent = { ...parent };
+      for (const [name, value] of Object.entries(process.env)) if (providerCredentialName(name)) parent[name] = value;
+    }
+  }
+  const input = { ...parent, ...options.env };
   return resolvedEnvironment(input, options.inject !== false && permitsApiCredentials(options.runtimeId), { ...options, deniedValues: [...((options as Context).deniedValues ?? []), ...(options.env ? contexts.get(options.env)?.deniedValues ?? [] : [])] });
 }
 
