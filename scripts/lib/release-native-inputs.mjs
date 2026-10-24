@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, lstatSync, readFileSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { parse as parseToml } from 'smol-toml';
 import { resolveReleaseBuildEnvironment, resolveReleaseConfig } from './release-config.mjs';
 
 export const NATIVE_ARTIFACT = 'src-tauri/target/.release-native-artifact';
@@ -54,18 +55,70 @@ export function nativeSourceInputs(root) {
 const hash = value => createHash('sha256').update(value).digest('hex');
 const COMPILER_ENV = /^(CARGO_|RUST|CC($|_)|CXX($|_)|AR($|_)|CFLAGS|CXXFLAGS|CPPFLAGS|LDFLAGS|LIBRARY_PATH$|PKG_CONFIG|CMAKE|BINDGEN_|SDKROOT$|DEVELOPER_DIR$|MACOSX_DEPLOYMENT_TARGET$|IPHONEOS_DEPLOYMENT_TARGET$|SWIFT|TAURI_|O8_SENTRY_DSN$|SENTRY_DSN$|NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY$)/;
 
-export function nativeBuildSettings(root, buildOptions = {}) {
+export function nativeCacheRestoreGuard(identity) {
+  const { inputs, toolchains, environment, buildOptions } = identity.compatibility;
+  // Tauri adds its target/config environment after the wrapper collects identity.
+  // Effective config assets are checked separately; Cargo options already chose
+  // the verified cache entry and each architecture's executable within it.
+  const compiler = Object.fromEntries(Object.entries(environment)
+    .filter(([key]) => key !== 'TAURI_CONFIG' && !key.startsWith('TAURI_ENV_')));
+  return hash(JSON.stringify({ source: identity.sourceSha256, inputs, toolchains, compiler, embedded: buildOptions.embedded }));
+}
+
+function parseConfig(contents, toml = false) {
+  try { return toml ? parseToml(contents) : JSON.parse(contents); }
+  catch { throw new Error('Native cache configuration could not be parsed.'); }
+}
+
+function embeddedInput(path) {
+  if (!existsSync(path)) return 'missing';
+  const metadata = lstatSync(path);
+  if (metadata.isSymbolicLink()) throw new Error('Embedded frontend input is a symbolic link.');
+  if (metadata.isFile()) return hash(readFileSync(path));
+  if (!metadata.isDirectory()) throw new Error('Embedded frontend input is not a regular file or directory.');
+  return hash(JSON.stringify(readdirSync(path).sort().map(name => [name, embeddedInput(join(path, name))])));
+}
+
+export function nativeBuildSettings(root, buildOptions = {}, env = process.env) {
   const args = buildOptions.cargoTauriArgs ?? [];
   const configs = [];
+  let frontendDist;
+  function apply(config) {
+    if (config.build === null) frontendDist = undefined;
+    else if (config.build && Object.hasOwn(config.build, 'frontendDist')) frontendDist = config.build.frontendDist;
+  }
+  function readConfig(path) {
+    const contents = readFileSync(path, 'utf8');
+    return parseConfig(contents, path.endsWith('.toml'));
+  }
+  const tauri = join(root, 'src-tauri');
+  apply(readConfig(join(tauri, 'tauri.conf.json')));
+  const targetIndex = args.indexOf('--target');
+  const target = targetIndex >= 0 ? args[targetIndex + 1] : args.find(arg => arg.startsWith('--target='))?.slice(9);
+  const platform = target ? target.includes('apple') ? 'macos' : target.includes('windows') ? 'windows' : 'linux'
+    : process.platform === 'darwin' ? 'macos' : process.platform === 'win32' ? 'windows' : 'linux';
+  for (const name of [`tauri.${platform}.conf.json`, `tauri.${platform}.conf.json5`, `Tauri.${platform}.toml`]) {
+    if (existsSync(join(tauri, name))) { apply(readConfig(join(tauri, name))); break; }
+  }
+  let hasOverrides = false;
   for (let index = 0; index < args.length && args[index] !== '--'; index++) {
     const arg = args[index];
     const config = arg === '--config' || arg === '-c' ? args[++index] : arg.startsWith('--config=') ? arg.slice(9) : null;
-    if (config && !config.trimStart().startsWith('{')) {
-      const path = resolve(root, config);
-      configs.push(existsSync(path) ? hash(readFileSync(path)) : 'missing');
+    if (config) {
+      hasOverrides = true;
+      if (config.trimStart().startsWith('{')) apply(parseConfig(config));
+      else {
+        const path = resolve(root, config);
+        configs.push(hash(readFileSync(path)));
+        apply(readConfig(path));
+      }
     }
   }
-  return { optionsSha256: hash(JSON.stringify(buildOptions)), configs };
+  if (!hasOverrides && env.TAURI_CONFIG) apply(parseConfig(env.TAURI_CONFIG));
+  const files = Array.isArray(frontendDist);
+  const embedded = (files ? frontendDist : frontendDist ? [frontendDist] : [])
+    .map(path => !files && /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(path) ? 'url' : embeddedInput(resolve(tauri, path)));
+  return { optionsSha256: hash(JSON.stringify(buildOptions)), configs, embedded };
 }
 
 export function compilerEnvironment(root, phase, env) {

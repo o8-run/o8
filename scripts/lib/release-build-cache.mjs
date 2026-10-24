@@ -317,7 +317,7 @@ export function collectReleaseBuildCacheIdentity(root, phase, options = {}) {
     platform: process.platform,
     arch: process.arch,
     buildMode: 'release',
-    buildOptions: phase === 'native' ? nativeBuildSettings(root, options.buildOptions) : options.buildOptions ?? {},
+    buildOptions: phase === 'native' ? nativeBuildSettings(root, options.buildOptions, options.env ?? process.env) : options.buildOptions ?? {},
     targets: config.targets,
     excludes: config.excludes,
     toolchains: Object.fromEntries(config.toolchains.map(([name, command, args]) => [

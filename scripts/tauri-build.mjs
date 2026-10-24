@@ -7,6 +7,7 @@ import process from 'node:process';
 import { parse as parseToml } from 'smol-toml';
 import { releaseCargoTarget } from './lib/release-cargo-target.mjs';
 import { resolveReleaseBuildEnvironment } from './lib/release-config.mjs';
+import { nativeCacheRestoreGuard } from './lib/release-native-inputs.mjs';
 import {
   captureReleaseBuildCache,
   collectReleaseBuildCacheIdentity,
@@ -76,6 +77,7 @@ const env = {
   ...(nativeArtifact ? {
     O8_RELEASE_NATIVE_ROOT: root,
     O8_RELEASE_NATIVE_CACHE_HIT: nativeRestore.status.startsWith('hit_') ? '1' : '0',
+    O8_RELEASE_NATIVE_CACHE_GUARD: nativeIdentity ? nativeCacheRestoreGuard(nativeIdentity) : '',
     O8_RELEASE_CARGO_TARGET_DIR: persistentTarget,
     CARGO_TARGET_DIR: join(root, 'src-tauri/target'),
   } : {}),
@@ -98,11 +100,16 @@ const nativeBuildDurationMs = Number.isFinite(prebuildCompletedAt)
 let nativeCapture;
 if (!build.error && build.status === 0) {
   try {
-    nativeIdentity = nativeIdentity ?? collectReleaseBuildCacheIdentity(root, 'native', { env: buildEnv, buildOptions: nativeBuildOptions });
-    nativeCapture = await captureReleaseBuildCache(root, 'native', {
+    const builtIdentity = collectReleaseBuildCacheIdentity(root, 'native', { env: buildEnv, buildOptions: nativeBuildOptions });
+    nativeCapture = !nativeIdentity || nativeIdentity.entrySha256 !== builtIdentity.entrySha256 ? {
+      phase: 'native',
+      status: 'bypass',
+      reason: nativeIdentity ? 'source_changed_during_build' : 'source_identity_unavailable',
+      durationMs: 0,
+    } : await captureReleaseBuildCache(root, 'native', {
       cacheRoot,
       runId,
-      identity: nativeIdentity,
+      identity: builtIdentity,
       buildDurationMs: nativeBuildDurationMs,
       buildOptions: nativeBuildOptions,
       env: buildEnv,

@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -61,6 +61,14 @@ const root = process.env.O8_FIXTURE_ROOT;
 const event = row => fs.appendFileSync(path.join(root, '.fixture/events'), JSON.stringify(row) + '\\n');
 const value = (name, values = args) => values.find(a => a.startsWith(name + '='))?.slice(name.length + 1) || values[values.indexOf(name) + 1];
 function compile(values) {
+  if (process.env.O8_FIXTURE_CHANGE_DURING_COMPILE) {
+    fs.writeFileSync(path.join(root, 'src-tauri/src/lib.rs'), '// source B during compilation');
+    if (process.env.O8_FIXTURE_CHANGE_DURING_COMPILE === 'committed') {
+      cp.execFileSync('git', ['add', 'src-tauri/src/lib.rs'], { cwd: root });
+      cp.execFileSync('git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
+        '-c', 'commit.gpgsign=false', '-c', 'core.hooksPath=/dev/null', 'commit', '--quiet', '--allow-empty', '-m', 'compile mutation'], { cwd: root });
+    }
+  }
   const target = value('--target', values);
   const targetDir = process.env.CARGO_TARGET_DIR || path.join(root, 'src-tauri/target');
   const release = path.join(targetDir, target || '', values.includes('--release') ? 'release' : 'debug');
@@ -68,7 +76,15 @@ function compile(values) {
   const dependencyWarm = fs.existsSync(dependency);
   fs.mkdirSync(release, { recursive: true });
   fs.mkdirSync(path.dirname(dependency), { recursive: true }); fs.writeFileSync(dependency, 'compiled dependency');
-  fs.writeFileSync(path.join(release, 'o8'), 'compiled native executable' + (process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY || ''));
+  let embedded = '';
+  const frontend = JSON.parse(process.env.TAURI_CONFIG || '{}').build?.frontendDist;
+  if (frontend) {
+    const directory = path.resolve(root, 'src-tauri', frontend);
+    embedded = fs.readdirSync(directory).sort().map(name => fs.readFileSync(path.join(directory, name), 'utf8')).join('');
+  }
+  const changedSource = fs.readFileSync(path.join(root, 'src-tauri/src/lib.rs'), 'utf8').includes('source B during compilation')
+    ? 'source B during compilation' : '';
+  fs.writeFileSync(path.join(release, 'o8'), 'compiled native executable' + (process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY || '') + embedded + changedSource);
   const helper = path.join(release, 'speech_recognizer');
   if (!fs.existsSync(helper)) fs.writeFileSync(helper, 'native helper' + (process.env.MACOSX_DEPLOYMENT_TARGET || ''));
   fs.mkdirSync(path.join(root, 'src-tauri/helpers'), { recursive: true });
@@ -78,6 +94,11 @@ function compile(values) {
 }
 if (args[0] === 'tauri' && args[1] === 'build') {
   event({ phase: 'prebuild' });
+  if (process.env.O8_FIXTURE_FRONTEND_DURING_PREBUILD)
+    fs.writeFileSync(path.join(root, 'frontend/app.js'), 'frontend B from prebuild');
+  const configArgument = args.includes('--config') ? value('--config') : args.find(a => a.startsWith('--config='))?.slice(9);
+  if (configArgument) process.env.TAURI_CONFIG = configArgument.startsWith('{')
+    ? configArgument : fs.readFileSync(path.resolve(root, configArgument), 'utf8');
   const runner = args.includes('--runner') ? value('--runner') : null;
   for (const target of ['x86_64-apple-darwin', 'aarch64-apple-darwin']) {
     const values = ['build', ...(args.includes('--debug') ? [] : ['--release']), '--target', target];
@@ -115,6 +136,64 @@ else throw new Error('Unexpected Cargo invocation');
 }
 
 describe('native release cache real entry points', { timeout: 120_000 }, () => {
+  it.each(['dirty', 'committed'])('refuses capture when source becomes %s during compilation', kind => {
+    const f = compilerFixture();
+    const original = readFileSync(join(f.root, 'src-tauri/src/lib.rs'), 'utf8');
+    const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: f.root, encoding: 'utf8' }).trim();
+    const output = f.run({ O8_FIXTURE_CHANGE_DURING_COMPILE: kind });
+    expect(output).toContain('native capture=bypass reason=source_changed_during_build');
+    expect(readFileSync(join(f.root, 'src-tauri/target/x86_64-apple-darwin/release/o8'), 'utf8')).toContain('source B during compilation');
+    expect(readdirSync(f.cacheRoot)).not.toContain('entries');
+    execFileSync('git', ['switch', '--detach', head], { cwd: f.root, stdio: 'pipe' });
+    put(f.root, 'src-tauri/src/lib.rs', original);
+    rmSync(join(f.root, 'src-tauri/target'), { recursive: true, force: true });
+    expect(f.run()).toContain('native restore=miss');
+    expect(f.events().filter(row => row.phase === 'compile')).toHaveLength(4);
+    expect(readFileSync(join(f.root, 'src-tauri/target/x86_64-apple-darwin/release/o8'), 'utf8')).not.toContain('source B during compilation');
+  });
+
+  it.each(['index.html', 'app.js'])('rebuilds when a custom frontendDist changes %s under an unchanged config', name => {
+    const f = compilerFixture();
+    put(f.root, 'frontend/index.html', '<html>frontend A</html>');
+    put(f.root, 'frontend/app.js', 'frontend A');
+    put(f.root, 'src-tauri/custom.json', '{"build":{"frontendDist":"../frontend"}}');
+    commit(f.root);
+    const args = [...buildOptions.cargoTauriArgs, '--config', 'src-tauri/custom.json'];
+    f.run({}, args);
+    put(f.root, 'frontend/' + name, 'frontend B'); commit(f.root);
+    rmSync(join(f.root, 'src-tauri/target'), { recursive: true, force: true });
+    expect(f.run({}, args)).toContain('native restore=miss');
+    expect(f.events().filter(row => row.phase === 'compile')).toHaveLength(4);
+    expect(readFileSync(join(f.root, 'src-tauri/target/x86_64-apple-darwin/release/o8'), 'utf8')).toContain('frontend B');
+  });
+
+  it('revalidates a restored executable after prebuild regenerates ignored frontend assets', () => {
+    const f = compilerFixture();
+    put(f.root, '.gitignore', readFileSync(join(f.root, '.gitignore'), 'utf8') + 'frontend/\n');
+    put(f.root, 'frontend/app.js', 'frontend A');
+    put(f.root, 'src-tauri/custom.json', '{"build":{"frontendDist":"../frontend"}}'); commit(f.root);
+    const args = [...buildOptions.cargoTauriArgs, '--config', 'src-tauri/custom.json'];
+    f.run({}, args);
+    const output = f.run({ O8_FIXTURE_FRONTEND_DURING_PREBUILD: '1' }, args);
+    expect(readFileSync(join(f.root, 'src-tauri/target/x86_64-apple-darwin/release/o8'), 'utf8')).toContain('frontend B from prebuild');
+    expect(f.events().filter(row => row.phase === 'compile')).toHaveLength(4);
+    expect(output).toContain('native capture=bypass reason=source_changed_during_build');
+  });
+
+  it('hashes scheme-looking frontend file-array entries as local files', async () => {
+    const f = fixture();
+    put(f.root, '.gitignore', readFileSync(join(f.root, '.gitignore'), 'utf8') + 'src-tauri/asset:page.html\n');
+    put(f.root, 'src-tauri/asset:page.html', 'frontend A');
+    put(f.root, 'src-tauri/custom.json', '{"build":{"frontendDist":["asset:page.html"]}}'); commit(f.root);
+    const options = { env: f.env, buildOptions: { ...buildOptions,
+      cargoTauriArgs: [...buildOptions.cargoTauriArgs, '--config', 'src-tauri/custom.json'] } };
+    put(f.root, 'src-tauri/target/.release-native-artifact/o8', 'native A');
+    expect(await captureReleaseBuildCache(f.root, 'native', options)).toMatchObject({ status: 'captured' });
+    put(f.root, 'src-tauri/asset:page.html', 'frontend B');
+    rmSync(join(f.root, 'src-tauri/target'), { recursive: true, force: true });
+    expect(await restoreReleaseBuildCache(f.root, 'native', options)).toMatchObject({ status: 'miss' });
+  });
+
   it('restores unchanged native code after a web-only commit and skips both native compiles', () => {
     const f = compilerFixture();
     f.run();
@@ -148,7 +227,7 @@ describe('native release cache real entry points', { timeout: 120_000 }, () => {
     const f = compilerFixture();
     f.run();
     const first = f.events().filter(row => row.phase === 'compile');
-    expect(first.map(row => row.targetDir)).toEqual([f.env.O8_RELEASE_CARGO_TARGET_DIR, f.env.O8_RELEASE_CARGO_TARGET_DIR]);
+    expect(first.map(row => realpathSync(row.targetDir))).toEqual([realpathSync(f.env.O8_RELEASE_CARGO_TARGET_DIR), realpathSync(f.env.O8_RELEASE_CARGO_TARGET_DIR)]);
     expect(first.map(row => row.dependencyWarm)).toEqual([false, false]);
     const second = join(f.base, 'fresh');
     execFileSync('git', ['clone', '--quiet', f.root, second]);
@@ -159,10 +238,10 @@ describe('native release cache real entry points', { timeout: 120_000 }, () => {
     });
     expect(result.status, result.stdout + result.stderr).toBe(0);
     const rows = readFileSync(join(second, '.fixture/events'), 'utf8').trim().split('\n').map(row => JSON.parse(row));
-    expect(rows.filter(row => row.phase === 'compile').every(row => row.targetDir === f.env.O8_RELEASE_CARGO_TARGET_DIR)).toBe(true);
+    expect(rows.filter(row => row.phase === 'compile').every(row => realpathSync(row.targetDir) === realpathSync(f.env.O8_RELEASE_CARGO_TARGET_DIR))).toBe(true);
     expect(rows.filter(row => row.phase === 'compile').map(row => row.dependencyWarm)).toEqual([true, true]);
     f.run({}, ['--debug', ...buildOptions.cargoTauriArgs]);
-    expect(f.events().filter(row => row.phase === 'compile').slice(-2).every(row => row.targetDir === join(f.root, 'src-tauri/target'))).toBe(true);
+    expect(f.events().filter(row => row.phase === 'compile').slice(-2).every(row => realpathSync(row.targetDir) === realpathSync(join(f.root, 'src-tauri/target')))).toBe(true);
   });
 
   it.each(['corrupt', 'mismatched'])('refuses a %s native artifact and recompiles', mode => {

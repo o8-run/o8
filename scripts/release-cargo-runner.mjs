@@ -2,7 +2,8 @@
 import { spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, lstatSync, mkdirSync, rmSync, rmdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { NATIVE_ARTIFACT } from './lib/release-native-inputs.mjs';
+import { NATIVE_ARTIFACT, nativeCacheRestoreGuard } from './lib/release-native-inputs.mjs';
+import { collectReleaseBuildCacheIdentity } from './lib/release-build-cache.mjs';
 import { pruneReleaseCargoTarget, releaseCargoTarget } from './lib/release-cargo-target.mjs';
 
 const root = process.env.O8_RELEASE_NATIVE_ROOT;
@@ -27,7 +28,17 @@ function copy(from, to) {
   copyFileSync(from, to);
 }
 
-if (process.env.O8_RELEASE_NATIVE_CACHE_HIT === '1' && existsSync(join(artifact, 'target', binary))
+let verifiedHit = false;
+if (process.env.O8_RELEASE_NATIVE_CACHE_HIT === '1') {
+  try {
+    const current = collectReleaseBuildCacheIdentity(root, 'native', {
+      buildOptions: { cargoTauriArgs: args, nativeArtifact: true },
+    });
+    verifiedHit = nativeCacheRestoreGuard(current) === process.env.O8_RELEASE_NATIVE_CACHE_GUARD;
+  } catch { /* An unavailable identity must compile normally. */ }
+  if (!verifiedHit) console.log('[release-cache] native reuse invalidated after prebuild');
+}
+if (verifiedHit && existsSync(join(artifact, 'target', binary))
   && helperNames.every(name => existsSync(join(artifact, 'helpers', name)))) {
   copy(join(artifact, 'target', binary), join(output, binary));
   for (const name of helperNames) copy(join(artifact, 'helpers', name), join(root, 'src-tauri/helpers', name));
