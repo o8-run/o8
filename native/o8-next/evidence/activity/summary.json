@@ -1,0 +1,16 @@
+{
+  "runs": 3,
+  "firstFrameMedianMs": 79.402046,
+  "firstFrameRangeMs": [
+    77.550386,
+    83.748183
+  ],
+  "contentFrameMedianMs": 100.519937,
+  "contentFrameRangeMs": [
+    95.919455,
+    102.586991
+  ],
+  "interactionSamples": 27,
+  "interactionMedianMs": 15.612072,
+  "interactionP95Ms": 55.302216
+}

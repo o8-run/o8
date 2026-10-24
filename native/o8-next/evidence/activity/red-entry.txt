@@ -1,0 +1,38 @@
+   |         ^^^^^^^
+
+warning: `o8-next` (bin "o8-next") generated 2 warnings
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.44s
+warning: the following packages contain code that will be rejected by a future version of Rust: proc-macro-error2 v2.0.1
+note: to see what the problems were, use the option `--future-incompat-report`, or run `cargo report future-incompatibilities --id 1`
+     Running unittests src/main.rs (native/o8-next/target/debug/deps/o8_next-a1e56fba38d38a8c)
+
+running 4 tests
+test shell::tests::activity_ci_refusal_retains_details_and_manual_retry ...
+thread 'shell::tests::activity_ci_refusal_retains_details_and_manual_retry' (12032) panicked at src/shell_tests.rs:373:5:
+Activity must be reachable from the real shell
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+test shell::tests::activity_feed_details_filters_and_links ...
+thread 'shell::tests::activity_feed_details_filters_and_links' (12098) panicked at src/shell_tests.rs:373:5:
+Activity must be reachable from the real shell
+FAILED
+test shell::tests::activity_packet_hold_release_stop_and_auth_refusal ...
+thread 'shell::tests::activity_packet_hold_release_stop_and_auth_refusal' (12134) panicked at src/shell_tests.rs:373:5:
+Activity must be reachable from the real shell
+FAILED
+test shell::tests::activity_palette_reaches_native_pane ...
+thread 'shell::tests::activity_palette_reaches_native_pane' (12170) panicked at src/shell_tests.rs:363:5:
+Activity command must open a native pane through the real shell palette
+FAILED
+
+failures:
+
+failures:
+    shell::tests::activity_ci_refusal_retains_details_and_manual_retry
+    shell::tests::activity_feed_details_filters_and_links
+    shell::tests::activity_packet_hold_release_stop_and_auth_refusal
+    shell::tests::activity_palette_reaches_native_pane
+
+test result: FAILED. 0 passed; 4 failed; 0 ignored; 0 measured; 33 filtered out; finished in 9.89s
+
+error: test failed, to rerun pass `--bin o8-next`

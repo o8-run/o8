@@ -1,0 +1,29 @@
+{
+  "platform": "linux",
+  "endpoint": "headless GPUI CPU scene paint, fixture HTTP, no compositor",
+  "openToFirstFrameMs": 79.402046,
+  "openToContentFrameMs": 100.519937,
+  "interactionToFrameMs": [
+    52.639585000000004,
+    54.862263,
+    15.883128999999998,
+    13.840712,
+    12.440932,
+    13.017750999999999,
+    15.612072,
+    20.246897999999998,
+    30.524113
+  ],
+  "build": "debug",
+  "interactionLabels": [
+    "scope-all",
+    "scope-repository",
+    "filter-commits",
+    "filter-prs",
+    "filter-issues",
+    "filter-ci",
+    "filter-packets",
+    "filter-all",
+    "expand-ci"
+  ]
+}

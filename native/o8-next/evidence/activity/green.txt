@@ -1,0 +1,23 @@
+running 8 tests
+test shell::tests::activity_tests::activity_ci_refusal_retains_details_and_manual_retry ... ok
+test shell::tests::activity_tests::activity_empty_local_auth_and_scoped_retention ... ok
+test shell::tests::activity_tests::activity_feed_details_filters_and_links ... O8_NEXT_ACTIVITY_EVIDENCE {"platform":"linux","endpoint":"headless GPUI CPU scene paint, fixture HTTP, no compositor","openToFirstFrameMs":154.20021500000001,"openToContentFrameMs":175.882259,"interactionToFrameMs":[98.49550599999999,147.248232,24.569038000000003,41.670091,37.200414,34.51456,17.244020999999996,21.058065,41.648716]}
+ok
+test shell::tests::activity_tests::activity_loading_error_and_keyboard_controls ... ok
+test shell::tests::activity_tests::activity_packet_hold_release_and_stop_mission ... ok
+test shell::tests::activity_tests::activity_palette_reaches_native_pane ... ok
+test shell::tests::activity_tests::activity_short_commit_prefix_keeps_ci_detail_reachable ... ok
+test shell::tests::activity_tests::activity_stop_replays_lost_response_with_one_identity ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 39 filtered out; finished in 50.46s
+
+Full native suite:
+test result: ok. 44 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 361.91s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+Full npm test:
+Test Files  1233 passed | 3 skipped (1236)
+Tests  8896 passed | 5 skipped (8901)

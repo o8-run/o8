@@ -1,0 +1,24 @@
+  = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+   Compiling o8-next v0.0.0 (/workspace/o8/native/o8-next)
+warning: `o8-next` (bin "o8-next") generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.22s
+warning: the following packages contain code that will be rejected by a future version of Rust: proc-macro-error2 v2.0.1
+note: to see what the problems were, use the option `--future-incompat-report`, or run `cargo report future-incompatibilities --id 1`
+     Running unittests src/main.rs (native/o8-next/target/debug/deps/o8_next-a1e56fba38d38a8c)
+
+running 1 test
+test shell::tests::activity_tests::activity_loading_error_and_keyboard_controls ...
+thread 'shell::tests::activity_tests::activity_loading_error_and_keyboard_controls' (17788) panicked at src/activity_tests.rs:351:5:
+Native filters must be reachable by keyboard
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    shell::tests::activity_tests::activity_loading_error_and_keyboard_controls
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 39 filtered out; finished in 2.38s
+
+error: test failed, to rerun pass `--bin o8-next`
