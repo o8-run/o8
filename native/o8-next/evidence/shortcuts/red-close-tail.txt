@@ -1,0 +1,17 @@
+running 1 test
+test shell::tests::shortcuts_overlay_bindings_dismissal_and_typing ...
+thread 'shell::tests::shortcuts_overlay_bindings_dismissal_and_typing' (32920) panicked at src/shell_tests.rs:400:5:
+assertion `left == right` failed: Enter activates the focused close button
+  left: Some(FocusHandle(FocusId(4v1)))
+ right: Some(FocusHandle(FocusId(2v1)))
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    shell::tests::shortcuts_overlay_bindings_dismissal_and_typing
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 33 filtered out; finished in 3.48s
+
+error: test failed, to rerun pass `--bin o8-next`
