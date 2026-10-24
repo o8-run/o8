@@ -5575,6 +5575,24 @@
       ]
     },
     {
+      "path": "tests/server-bundle-size-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path",
+        "terminal-host"
+      ]
+    },
+    {
+      "path": "tests/server-bundles-packaged-layout-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener",
+        "process-signal",
+        "real-path",
+        "terminal-host"
+      ]
+    },
+    {
       "path": "tests/server-only-stub-node-options.test.ts",
       "reasons": [
         "child-process"

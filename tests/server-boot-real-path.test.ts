@@ -4,7 +4,7 @@ import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSyn
 import { createServer, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { build } from 'esbuild';
+import { bundleServers } from '../scripts/lib/server-bundles.mjs';
 import { WebSocket } from 'ws';
 import { afterAll, expect, it } from 'vitest';
 
@@ -70,34 +70,26 @@ it('serves compiled WS health and ping before Next, and fences first use until e
   const token = 'fixture-boot-token';
   writeFileSync(join(state, 'ws-token'), token, { mode: 0o600 });
   const compiled = join(root, 'ws-server.mjs');
-  await build({
-    entryPoints: ['src/ws-server.ts'], outfile: compiled, bundle: true, platform: 'node', format: 'esm',
-    alias: { 'server-only': resolve('tests/stubs/server-only.ts') },
-    external: ['node-pty', 'better-sqlite3', 'bindings'],
-    nodePaths: [resolve('node_modules')],
-    banner: { js: `import { createRequire as __o8BootRequire } from 'node:module';
-import { fileURLToPath as __fileURLToPath } from 'node:url';
-import { dirname as __dirnameOf } from 'node:path';
-const require = __o8BootRequire(${JSON.stringify(resolve('package.json'))});
-const __filename = __fileURLToPath(import.meta.url); const __dirname = __dirnameOf(__filename);` },
-    logLevel: 'silent',
-    plugins: [{ name: 'observe-real-boot', setup(builder) {
-      builder.onLoad({ filter: /[/\\]src[/\\]ws-server\.ts$/ }, async ({ path }) => {
-        let contents = readFileSync(path, 'utf8');
-        // Observe completed calls in the real entry point; no recovery subsystem is stubbed.
-        for (const [call, step] of steps) {
-          if (!contents.includes(call)) throw new Error(`Missing boot observation: ${step}`);
-          contents = contents.replace(call, `${call}\n__bootDone(${JSON.stringify(step)});`);
-        }
-        contents = contents.replace('const db = getDb();', `if (existsSync(${JSON.stringify(join(root, 'fail'))})) throw new Error('fixture recovery failure');\nconst db = getDb();`);
-        contents = contents.replace('  switch (msg.type) {', `  if (msg.type === 'realtime-subscribe') __bootDone('first-ws-use');\n  switch (msg.type) {`);
-        contents = `import { appendFileSync as __append } from 'node:fs';
+  // Observe the real WS source while building the same split layout the
+  // exporter ships, including its generated launcher and sibling chunks.
+  mkdirSync(join(root, 'src'));
+  mkdirSync(join(root, 'scripts'));
+  symlinkSync(resolve('src/lib'), join(root, 'src/lib'), 'junction');
+  writeFileSync(join(root, 'tsconfig.json'), readFileSync(resolve('tsconfig.json')));
+  writeFileSync(join(root, 'scripts/server-only-stub.js'), readFileSync(resolve('scripts/server-only-stub.js')));
+  let contents = readFileSync(resolve('src/ws-server.ts'), 'utf8');
+  // Observe completed calls in the real entry point; no recovery subsystem is stubbed.
+  for (const [call, step] of steps) {
+    if (!contents.includes(call)) throw new Error(`Missing boot observation: ${step}`);
+    contents = contents.replace(call, `${call}\n__bootDone(${JSON.stringify(step)});`);
+  }
+  contents = contents.replace('const db = getDb();', `if (existsSync(${JSON.stringify(join(root, 'fail'))})) throw new Error('fixture recovery failure');\nconst db = getDb();`);
+  contents = contents.replace('  switch (msg.type) {', `  if (msg.type === 'realtime-subscribe') __bootDone('first-ws-use');\n  switch (msg.type) {`);
+  contents = `import { appendFileSync as __append } from 'node:fs';
 function __bootDone(step: string) { __append(${JSON.stringify(journal)}, JSON.stringify(step) + '\\n'); }
 ${contents}`;
-        return { contents, loader: 'ts' };
-      });
-    } }],
-  });
+  writeFileSync(join(root, 'src/ws-server.ts'), contents);
+  bundleServers({ root, outDir: root });
   const apiPort = await freePort();
   const wsPort = await freePort();
   api = createServer((request, response) => {

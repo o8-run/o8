@@ -71,6 +71,24 @@ jobs:
           path: tsconfig.tsbuildinfo
           key: ${{ steps.typecheck-cache.outputs.cache-primary-key }}
 
+  server-bundle-size:
+    name: Server Bundle Size
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm install -g "$(node -p 'require("./package.json").packageManager')"
+      - run: npm ci --prefer-offline
+      - name: Build exported server bundles and enforce committed budgets
+        run: node scripts/check-server-bundle-size.mjs
+      - name: Reject the large-dependency fixture
+        run: npx vitest run tests/server-bundle-size-real-path.test.ts
+
   typecheck-parity:
     name: Weekly Type Checker Parity
     if: github.event.schedule == '17 5 * * 0' || github.event_name == 'workflow_dispatch'
