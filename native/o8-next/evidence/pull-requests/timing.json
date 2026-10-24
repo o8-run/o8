@@ -1,0 +1,35 @@
+{
+  "endpoint": "Linux headless GPUI CPU scene paint; no font shaping, GPU or compositor",
+  "openToFirstFrameMs": 23.32866,
+  "detailSelectionToFrameMs": 29.402637,
+  "interactionToFrameMs": [
+    13.578178,
+    13.241938999999999,
+    13.144857,
+    13.182127999999999,
+    13.017704,
+    15.309197,
+    13.26167,
+    13.331187,
+    13.022534,
+    13.815401,
+    13.267332,
+    13.24094,
+    13.477177,
+    13.494378,
+    13.385285999999999,
+    13.536686,
+    13.836243999999999,
+    13.235774000000001,
+    13.112237,
+    13.012284000000001
+  ],
+  "interactionSummaryMs": {
+    "samples": 20,
+    "min": 13.012284000000001,
+    "median": 13.264501,
+    "p95": 13.836243999999999,
+    "max": 15.309197
+  },
+  "profile": "Rust debug; warm fixture host; Node 22; published GPUI 0.2.2 TestAppContext"
+}
