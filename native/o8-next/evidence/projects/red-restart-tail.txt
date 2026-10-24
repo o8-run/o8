@@ -1,0 +1,17 @@
+
+running 1 test
+test shell::tests::projects_tests::projects_switch_active_without_saved_sessions ... O8_NEXT_PROJECTS_SWITCH_EVIDENCE {"endpoint":"first completed GPUI TestAppContext CPU scene paint; debug build; test text system; no GPU/compositor","interactionToFrameMs":[32.869481,21.277394,21.060699,19.114872000000002,18.388847,19.683574,18.769098000000003,17.802205,19.783493999999997,20.570218,25.794600000000003,22.814207,21.232364,17.362022,18.921353,19.464209,18.992194,20.018538,18.831963000000002,20.684039000000002]}
+
+thread 'shell::tests::projects_tests::projects_switch_active_without_saved_sessions' (22498) panicked at src/projects_tests.rs:291:5:
+restart must honor the active empty project instead of selecting an unrelated saved session
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    shell::tests::projects_tests::projects_switch_active_without_saved_sessions
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 38 filtered out; finished in 2.71s
+
+error: test failed, to rerun pass `--bin o8-next`

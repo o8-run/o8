@@ -4,6 +4,8 @@ use crate::{
     inbox::{Inbox, OpenSession},
     pane_grid::Grid,
     pane_layout,
+    projects::{Changed, Projects},
+    projects_model::{Ledger, WorkspaceChange},
     settings::Settings,
     shell_state::{State, Tab, Workspace},
     ui::Surface,
@@ -23,6 +25,7 @@ use std::{
 pub const HELP: &str = "App shell: --app-shell --shell-state ABSOLUTE_FILE --server ORIGIN [--offscreen]. The o8 next launcher resolves existing local configuration.";
 #[derive(Clone)]
 enum Command {
+    Projects,
     Session(String),
     Brain,
     Grid,
@@ -36,6 +39,7 @@ enum Command {
 impl Command {
     fn label(&self, sessions: &[Session]) -> String {
         match self {
+            Self::Projects => "Open projects and repositories".into(),
             Self::Session(id) => format!(
                 "Open session: {}",
                 sessions
@@ -81,6 +85,8 @@ pub struct Shell {
     subscriptions: Vec<gpui::Subscription>,
     settings: Option<Entity<Settings>>,
     settings_subscription: Option<gpui::Subscription>,
+    projects: Option<Entity<Projects>>,
+    projects_open: bool,
 }
 impl Shell {
     fn new(
@@ -111,6 +117,8 @@ impl Shell {
             subscriptions: vec![],
             settings: None,
             settings_subscription: None,
+            projects: None,
+            projects_open: false,
         };
         shell
             .subscriptions
@@ -140,6 +148,53 @@ impl Shell {
             self.notice = format!("{error}. View state remains in memory.");
         }
     }
+    fn open_projects(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.capture(window, cx);
+        if self.projects.is_none() {
+            let client = self.client.clone();
+            let projects = cx.new(|cx| Projects::new(client, cx));
+            self.subscriptions.push(cx.subscribe_in(
+                &projects,
+                window,
+                |this, _, event: &Changed, window, cx| {
+                    for path in &event.removed {
+                        this.workspaces.retain(|w| w != path);
+                        this.state.workspaces.remove(path);
+                        this.content
+                            .retain(|key, _| !key.starts_with(&format!("{path}|")));
+                        if this.state.selected.as_ref() == Some(path) {
+                            this.state.selected = None;
+                        }
+                    }
+                    for path in &event.registered {
+                        if !this.workspaces.contains(path) {
+                            this.workspaces.push(path.clone());
+                        }
+                    }
+                    match &event.workspace {
+                        Some(WorkspaceChange::Select(path)) => this.state.selected = path.clone(),
+                        Some(WorkspaceChange::Open(path)) => {
+                            this.state.selected = Some(path.clone());
+                            this.projects_open = false;
+                            this.ensure(window, cx);
+                            this.restore_focus(window, cx);
+                        }
+                        None => {}
+                    }
+                    this.persist();
+                    this.revision += 1;
+                    cx.notify();
+                },
+            ));
+            self.projects = Some(projects);
+        } else if let Some(projects) = &self.projects {
+            projects.update(cx, |view, cx| view.load(cx));
+        }
+        self.projects_open = true;
+        self.palette = false;
+        self.focus.focus(window);
+        cx.notify();
+    }
     fn load(&mut self, cx: &mut Context<Self>) {
         if self.loading {
             return;
@@ -147,19 +202,32 @@ impl Shell {
         self.loading = true;
         self.notice = "Connecting to local o8 server…".into();
         let client = self.client.clone();
-        let task = cx
-            .background_executor()
-            .spawn(async move { client.sessions() });
+        let task = cx.background_executor().spawn(async move {
+            let sessions = client.sessions()?;
+            // Older fixture modes only expose session routes. The app server
+            // also supplies the desktop ledger, including empty projects.
+            let ledger = client.get::<Ledger>("/api/panel/projects", &[]).ok();
+            Ok::<_, String>((sessions, ledger))
+        });
         cx.spawn(async move |this, cx| {
             let result = task.await;
             let _ = this.update(cx, |this, cx| {
                 this.loading = false;
                 match result {
-                    Ok(sessions) => {
+                    Ok((sessions, ledger)) => {
                         this.sessions = sessions;
-                        this.workspaces = this.sessions.iter().filter_map(|s| s.repo_path.clone()).collect::<BTreeSet<_>>().into_iter().collect();
+                        let mut workspaces = this.sessions.iter().filter_map(|s| s.repo_path.clone()).collect::<BTreeSet<_>>();
+                        if let Some(ledger) = &ledger {
+                            workspaces.extend(ledger.projects.iter().flat_map(|p| p.repo_paths.clone()));
+                        }
+                        this.workspaces = workspaces.into_iter().collect();
                         this.connected = true;
-                        if !this.state.selected.as_ref().is_some_and(|w| this.workspaces.contains(w)) {
+                        let active = ledger.as_ref().and_then(|ledger| ledger.projects.iter().find(|p| p.id == ledger.active_project_id && p.id != "default"));
+                        if let Some(active) = active {
+                            if !this.state.selected.as_ref().is_some_and(|w| active.repo_paths.contains(w)) {
+                                this.state.selected = active.repo_paths.first().cloned();
+                            }
+                        } else if !this.state.selected.as_ref().is_some_and(|w| this.workspaces.contains(w)) {
                             this.state.selected = this.workspaces.first().cloned();
                         }
                         this.notice = if this.workspaces.is_empty() { "Connected. No saved workspace sessions." } else { "Connected · Ctrl+K / Cmd+K: commands · Ctrl+Tab: next surface" }.into();
@@ -288,7 +356,7 @@ impl Shell {
         self.restore_focus(window, cx);
     }
     fn restore_focus(&self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.palette {
+        if self.palette || self.projects_open {
             self.focus.focus(window);
             return;
         }
@@ -320,6 +388,7 @@ impl Shell {
         }
         self.capture(window, cx);
         self.state.selected = Some(workspace);
+        self.projects_open = false;
         self.palette = false;
         self.ensure(window, cx);
         self.restore_focus(window, cx);
@@ -328,7 +397,7 @@ impl Shell {
         cx.notify();
     }
     fn capture(&mut self, window: &Window, cx: &App) {
-        if self.palette || self.settings.is_some() {
+        if self.palette || self.settings.is_some() || self.projects_open {
             return;
         }
         if let Some(tab) = self.active() {
@@ -348,6 +417,7 @@ impl Shell {
         let mut commands = vec![
             Command::Brain,
             Command::Inbox,
+            Command::Projects,
             Command::Grid,
             Command::Diff,
             Command::Terminal,
@@ -384,9 +454,14 @@ impl Shell {
             self.open_settings(window, cx);
             return;
         }
+        if matches!(command, Command::Projects) {
+            self.open_projects(window, cx);
+            return;
+        }
         self.settings = None;
         self.settings_subscription = None;
         let (tab, composer) = match command {
+            Command::Projects => unreachable!(),
             Command::Session(id) => (Tab::Session(id), false),
             Command::Message(id) => (Tab::Session(id), true),
             Command::Brain => (Tab::Brain, false),
@@ -402,6 +477,7 @@ impl Shell {
                 return;
             }
         };
+        self.projects_open = false;
         // An empty key stores the global Inbox before any workspace exists.
         if let Some(workspace) = self
             .state
@@ -431,6 +507,7 @@ impl Shell {
     fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.capture(window, cx);
         self.palette = false;
+        self.projects_open = false;
         let client = self.client.clone();
         let settings = cx.new(|cx| Settings::new(client, window, cx));
         self.settings_subscription = Some(cx.subscribe_in(
@@ -498,6 +575,7 @@ impl Shell {
             }
         } else if modifiers.control && !modifiers.alt && !modifiers.platform && key == "tab" {
             self.capture(window, cx);
+            self.projects_open = false;
             if let Some(saved) = self
                 .state
                 .selected

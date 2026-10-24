@@ -1,0 +1,18 @@
+test shell::tests::projects_tests::projects_auth_refusal_and_retry ... ok
+test shell::tests::projects_tests::projects_first_run_crud_membership_and_focus ... O8_NEXT_PROJECTS_EVIDENCE {"endpoint":"first completed GPUI TestAppContext CPU scene paint; debug build; test text system; no GPU/compositor","openToFirstFrameMs":16.952233,"workspaceOpenToFrameMs":20.352757999999998,"registeredReposAfterRemove":0}
+test shell::tests::projects_tests::projects_lost_registration_response_preserves_membership_role ... ok
+test shell::tests::projects_tests::projects_palette_loading_and_cancel ... ok
+test shell::tests::projects_tests::projects_preserve_session_focus_and_allow_inbox_navigation ... ok
+test shell::tests::projects_tests::projects_reconnect_and_runtime_removal_refusal ... ok
+test shell::tests::projects_tests::projects_switch_active_without_saved_sessions ... O8_NEXT_PROJECTS_SWITCH_EVIDENCE {"endpoint":"first completed GPUI TestAppContext CPU scene paint; debug build; test text system; no GPU/compositor","interactionToFrameMs":[23.744778,23.022612000000002,22.954234,24.818162,24.308745,20.092906,20.367027999999998,20.679949,20.429928,19.365828,19.04432,20.971908000000003,19.215807,19.334586,19.871363,19.896660999999998,18.925601,18.665008,18.906372,19.728328]}
+test result: ok. 43 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 243.69s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+ Test Files  2 passed (2)
+      Tests  9 passed (9)
+
+ Test Files  1233 passed | 3 skipped (1236)
+      Tests  8896 passed | 5 skipped (8901)

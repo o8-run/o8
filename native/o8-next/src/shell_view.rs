@@ -2,7 +2,9 @@ use super::*;
 use crate::theme::current as theme;
 impl Render for Shell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        self.ensure(window, cx);
+        if !self.projects_open {
+            self.ensure(window, cx);
+        }
         let revision = self.revision;
         let painted = self.painted.clone();
         let active = self.active();
@@ -11,16 +13,20 @@ impl Render for Shell {
             .as_ref()
             .map(|s| s.clone().into_any_element())
             .or_else(|| {
-                active
-                    .as_ref()
-                    .and_then(|t| self.content.get(&self.key(t)))
-                    .map(|c| match c {
-                        Content::Brain(brain) => brain.clone().into_any_element(),
-                        Content::Session(s) => s.clone().into_any_element(),
-                        Content::Grid(g) => g.clone().into_any_element(),
-                        Content::Inbox(inbox) => inbox.clone().into_any_element(),
-                        Content::Issues(issues) => issues.clone().into_any_element(),
-                    })
+                if self.projects_open {
+                    self.projects.as_ref().map(|p| p.clone().into_any_element())
+                } else {
+                    active
+                        .as_ref()
+                        .and_then(|t| self.content.get(&self.key(t)))
+                        .map(|c| match c {
+                            Content::Brain(brain) => brain.clone().into_any_element(),
+                            Content::Session(s) => s.clone().into_any_element(),
+                            Content::Grid(g) => g.clone().into_any_element(),
+                            Content::Inbox(inbox) => inbox.clone().into_any_element(),
+                            Content::Issues(issues) => issues.clone().into_any_element(),
+                        })
+                }
             });
         div()
             .size_full()
@@ -43,6 +49,32 @@ impl Render for Shell {
                         cx.listener(|_, _, window, _| window.prevent_default()),
                     )
                     .child("o8 next alpha")
+                    .child(
+                        div()
+                            .id("shell-projects")
+                            .debug_selector(|| "shell-projects".into())
+                            .cursor_pointer()
+                            .p(px(6.))
+                            .child("Projects")
+                            .on_click(
+                                cx.listener(|this, _, window, cx| this.open_projects(window, cx)),
+                            ),
+                    )
+                    .when(self.projects_open, |view| {
+                        view.child(
+                            div()
+                                .id("shell-workspace")
+                                .debug_selector(|| "shell-workspace".into())
+                                .cursor_pointer()
+                                .p(px(6.))
+                                .child("Back to workspace")
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.projects_open = false;
+                                    this.restore_focus(window, cx);
+                                    cx.notify();
+                                })),
+                        )
+                    })
                     .children(self.workspaces.clone().into_iter().enumerate().map(
                         |(i, workspace)| {
                             let label = std::path::Path::new(&workspace)
@@ -162,6 +194,7 @@ impl Render for Shell {
                                     .child(t.label())
                                     .on_click(cx.listener(move |this, _, window, cx| {
                                         this.capture(window, cx);
+                                        this.projects_open = false;
                                         this.state
                                             .workspaces
                                             .get_mut(this.state.selected.as_deref().unwrap_or(""))

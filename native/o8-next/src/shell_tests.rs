@@ -11,19 +11,20 @@ struct Fixture {
     server: Child,
     client: Client,
     root: PathBuf,
+    folders: Vec<String>,
     origin: String,
 }
 impl Fixture {
     fn new() -> Self {
-        Self::mode(false, false)
+        Self::start_mode(false, "")
     }
     fn brain() -> Self {
-        Self::mode(true, false)
+        Self::start_mode(false, "--brain")
     }
     fn start(settings: bool) -> Self {
-        Self::mode(false, settings)
+        Self::start_mode(false, if settings { "--settings" } else { "" })
     }
-    fn mode(brain: bool, settings: bool) -> Self {
+    fn start_mode(projects: bool, option: &str) -> Self {
         let root = std::env::temp_dir().join(format!(
             "o8-shell-{}-{}",
             std::process::id(),
@@ -34,10 +35,20 @@ impl Fixture {
         ));
         fs::create_dir(&root).unwrap();
         let root = fs::canonicalize(root).unwrap();
-        let mut process = Process::new("node");
-        process
-            .current_dir(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.."))
-            .args([
+        let mut command = Process::new("node");
+        if projects {
+            command
+                .arg("--import")
+                .arg("./scripts/register-server-only-stub.mjs")
+                .arg("--import")
+                .arg("tsx")
+                .arg("scripts/next/dev-server.ts")
+                .arg("--projects");
+            if !option.is_empty() {
+                command.args(option.split_whitespace());
+            }
+        } else {
+            command.args([
                 "--import",
                 "./scripts/register-server-only-stub.mjs",
                 "--import",
@@ -46,13 +57,12 @@ impl Fixture {
                 "--composer",
                 "--shell",
             ]);
-        if brain {
-            process.arg("--brain");
         }
-        if settings {
-            process.arg("--settings");
+        if !projects {
+            command.args(option.split_whitespace());
         }
-        let mut server = process
+        let mut server = command
+            .current_dir(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.."))
             .env(
                 "O8_NEXT_BRAIN_REQUEST_LOG",
                 root.join("brain-requests.json"),
@@ -64,40 +74,42 @@ impl Fixture {
             ))
             .spawn()
             .unwrap();
-        let mut lines = BufReader::new(server.stdout.take().unwrap()).lines();
-        let origin = lines
+        let mut output = BufReader::new(server.stdout.take().unwrap()).lines();
+        let receipt = output
             .by_ref()
             .find_map(|line| {
-                serde_json::from_str::<Value>(&line.ok()?).ok()?["origin"]
-                    .as_str()
-                    .map(str::to_owned)
+                let data = serde_json::from_str::<Value>(&line.ok()?).ok()?;
+                data["origin"].as_str()?;
+                Some(data)
             })
             .expect("fixture origin");
-        // Keep draining production-handler diagnostics after startup.
-        std::thread::spawn(move || for _ in lines {});
+        // Production repository scans may log after the receipt. Keep stdout
+        // drained so those writes cannot terminate the owned host with EPIPE.
+        std::thread::spawn(move || for _ in output {});
         Self {
             server,
-            client: Client::authenticated(&origin, Some("fixture-shell-bearer".into())).unwrap(),
+            client: Client::authenticated(
+                receipt["origin"].as_str().unwrap(),
+                Some("fixture-shell-bearer".into()),
+            )
+            .unwrap(),
             root,
-            origin,
+            folders: receipt["folders"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|s| s.as_str().unwrap().to_owned())
+                .collect(),
+            origin: receipt["origin"].as_str().unwrap().to_owned(),
         }
     }
 }
-
-#[path = "settings_tests.rs"]
-mod settings;
 impl Drop for Fixture {
     fn drop(&mut self) {
         let _ = Process::new("kill")
             .args(["-TERM", &self.server.id().to_string()])
             .status();
         let _ = self.server.wait();
-        if let Ok(directory) = std::env::var("O8_NEXT_SETTINGS_DIAGNOSTICS") {
-            let _ = fs::copy(
-                self.root.join("fixture.log"),
-                PathBuf::from(directory).join(format!("fixture-{}.log", self.server.id())),
-            );
-        }
         let _ = fs::remove_dir_all(&self.root);
     }
 }
@@ -145,25 +157,6 @@ fn ready(shell: &Entity<Shell>, cx: &mut VisualTestContext) {
         }
     }
     panic!("selected fixture history must reach CPU scene paint through the existing surface");
-}
-
-#[gpui::test]
-fn settings_opens_from_shell_command_palette(cx: &mut TestAppContext) {
-    let fixture = Fixture::new();
-    let (shell, mut visual) = open(
-        fixture.client.clone(),
-        fixture.root.join("settings-shell.json"),
-        State::default(),
-        cx,
-    );
-    ready(&shell, &mut visual);
-    visual.simulate_keystrokes("ctrl-k");
-    visual.simulate_keystrokes("s e t t i n g s enter");
-    draw(&mut visual);
-    assert!(
-        visual.debug_bounds("settings-page").is_some(),
-        "Settings must be reachable through the real shell command palette"
-    );
 }
 
 #[gpui::test]
@@ -440,3 +433,6 @@ fn inbox_is_reachable_from_the_real_shell_palette(cx: &mut TestAppContext) {
     );
     assert!(cx.debug_bounds("inbox-view-replies").is_some());
 }
+
+#[path = "projects_tests.rs"]
+mod projects_tests;

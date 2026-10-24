@@ -1,0 +1,295 @@
+//! Desktop project/store and registry wire shapes. No alternate persistence layer.
+use crate::client::Client;
+use serde::Deserialize;
+use serde_json::{Value, json};
+
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Link {
+    pub repo_id: String,
+    pub role: Option<String>,
+}
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Project {
+    pub id: String,
+    pub name: String,
+    pub slug: String,
+    pub description: Option<String>,
+    pub main_repo_id: Option<String>,
+    pub repos: Vec<Link>,
+}
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Repo {
+    pub id: String,
+    pub name: String,
+    pub local_path: String,
+    pub exists: bool,
+}
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LedgerProject {
+    pub id: String,
+    pub name: String,
+    pub repo_paths: Vec<String>,
+}
+#[derive(Default, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Ledger {
+    pub projects: Vec<LedgerProject>,
+    pub active_project_id: String,
+}
+#[derive(Default, Clone)]
+pub struct Snapshot {
+    pub projects: Vec<Project>,
+    pub repos: Vec<Repo>,
+    pub ledger: Ledger,
+}
+impl Snapshot {
+    pub fn load(client: &Client) -> Result<Self, String> {
+        #[derive(Deserialize)]
+        struct Projects {
+            projects: Vec<Project>,
+        }
+        #[derive(Deserialize)]
+        struct Repos {
+            repos: Vec<Repo>,
+        }
+        let projects: Projects = client.get("/api/projects", &[])?;
+        let repos: Repos = client.get("/api/panel/repos", &[])?;
+        let ledger = client.get("/api/panel/projects", &[])?;
+        Ok(Self {
+            projects: projects.projects,
+            repos: repos.repos,
+            ledger,
+        })
+    }
+    pub fn workspace(&self, project: &Project) -> Option<&Repo> {
+        let id = project
+            .main_repo_id
+            .as_deref()
+            .or_else(|| project.repos.first().map(|r| r.repo_id.as_str()))?;
+        self.repos.iter().find(|r| r.id == id)
+    }
+    pub fn ledger_id<'a>(&'a self, project: &'a Project) -> &'a str {
+        self.ledger
+            .projects
+            .iter()
+            .find(|p| p.id == project.id && p.name.eq_ignore_ascii_case(&project.name))
+            .or_else(|| {
+                self.ledger
+                    .projects
+                    .iter()
+                    .find(|p| p.name.eq_ignore_ascii_case(&project.name))
+            })
+            .or_else(|| self.ledger.projects.iter().find(|p| p.id == project.id))
+            .map(|p| p.id.as_str())
+            .unwrap_or(&project.id)
+    }
+}
+pub const ROLES: &[&str] = &[
+    "",
+    "frontend",
+    "backend",
+    "fullstack",
+    "mobile",
+    "library",
+    "service",
+    "infra",
+    "docs",
+    "site",
+    "shared",
+];
+pub fn route(id: &str) -> String {
+    let encoded: String = url::form_urlencoded::byte_serialize(id.as_bytes()).collect();
+    format!("/api/projects/{encoded}")
+}
+pub fn member_route(project: &str, repo: &str) -> String {
+    format!(
+        "{}/repos/{}",
+        route(project),
+        route(repo).trim_start_matches("/api/projects/")
+    )
+}
+#[derive(Clone)]
+pub enum Action {
+    Save {
+        id: Option<String>,
+        name: String,
+        slug: String,
+        description: String,
+    },
+    Delete(String),
+    Link(String, String),
+    Unlink(String, String),
+    Main(String, String),
+    Role(String, String, Option<String>),
+    Validate(String),
+    Register(String, Option<String>),
+    Remove(String),
+    Open(String, String),
+    Activate(String),
+}
+pub struct Outcome {
+    pub snapshot: Snapshot,
+    pub validation: Option<Value>,
+    pub workspace: Option<WorkspaceChange>,
+}
+pub enum WorkspaceChange {
+    Select(Option<String>),
+    Open(String),
+}
+impl Action {
+    pub fn run(&self, client: &Client) -> Result<Outcome, String> {
+        let request =
+            |method: &str, path: &str, body: Value| client.project_request(method, path, &body);
+        let mut validation = None;
+        let mut workspace = None;
+        match self {
+            Self::Save {
+                id,
+                name,
+                slug,
+                description,
+            } => {
+                if name.trim().is_empty() {
+                    return Err("Project name is required.".into());
+                }
+                let body = json!({"name":name.trim(),"description":description.trim()});
+                if let Some(id) = id {
+                    request("PATCH", &route(id), body)?;
+                } else {
+                    let mut body = body;
+                    if !slug.trim().is_empty() {
+                        body["slug"] = json!(slug.trim());
+                    }
+                    body["suggestionOrigin"] = json!("manual");
+                    request("POST", "/api/projects", body)?;
+                }
+            }
+            Self::Delete(id) => {
+                request(
+                    "DELETE",
+                    &route(id).replacen("/api/projects/", "/api/panel/projects/", 1),
+                    json!({}),
+                )?;
+            }
+            Self::Link(id, repo) => {
+                request(
+                    "POST",
+                    &format!("{}/repos", route(id)),
+                    json!({"repoId":repo,"role":null}),
+                )?;
+            }
+            Self::Unlink(id, repo) => {
+                request("DELETE", &member_route(id, repo), json!({}))?;
+            }
+            Self::Main(id, repo) => {
+                request("PATCH", &route(id), json!({"mainRepoId":repo}))?;
+            }
+            Self::Role(id, repo, role) => {
+                request("PATCH", &member_route(id, repo), json!({"role":role}))?;
+            }
+            Self::Validate(path) => {
+                validation = Some(
+                    request(
+                        "POST",
+                        "/api/panel/repos",
+                        json!({"action":"validate","localPath":path.trim()}),
+                    )?["repo"]
+                        .clone(),
+                );
+            }
+            Self::Register(path, project) => {
+                let validated = request(
+                    "POST",
+                    "/api/panel/repos",
+                    json!({"action":"validate","localPath":path.trim()}),
+                )?;
+                let canonical = validated["repo"]["localPath"]
+                    .as_str()
+                    .ok_or("Invalid repository validation")?;
+                let current: Value = request("GET", "/api/panel/repos", json!({}))?;
+                let known = current["repos"]
+                    .as_array()
+                    .and_then(|repos| repos.iter().find(|r| r["localPath"] == canonical))
+                    .cloned();
+                let repo = if let Some(known) = known {
+                    known
+                } else {
+                    match request(
+                        "POST",
+                        "/api/panel/repos",
+                        json!({"action":"add","localPath":canonical}),
+                    ) {
+                        Ok(result) => result["repo"].clone(),
+                        Err(error) => {
+                            let check = request("GET", "/api/panel/repos", json!({}))?;
+                            check["repos"]
+                                .as_array()
+                                .and_then(|repos| {
+                                    repos.iter().find(|r| r["localPath"] == canonical)
+                                })
+                                .cloned()
+                                .ok_or(error)?
+                        }
+                    }
+                };
+                if let Some(id) = project {
+                    let repo_id = repo["id"].as_str().ok_or("Invalid registered repository")?;
+                    let link = || -> Result<(), String> {
+                        let projects = request("GET", "/api/projects", json!({}))?;
+                        let linked = projects["projects"]
+                            .as_array()
+                            .and_then(|projects| projects.iter().find(|p| p["id"] == id.as_str()))
+                            .and_then(|p| p["repos"].as_array())
+                            .is_some_and(|links| {
+                                links.iter().any(|link| link["repoId"] == repo_id)
+                            });
+                        if !linked {
+                            request(
+                                "POST",
+                                &format!("{}/repos", route(id)),
+                                json!({"repoId":repo_id,"role":null}),
+                            )?;
+                        }
+                        Ok(())
+                    };
+                    link().map_err(|error| format!("Repository registered; project link failed. Retry adding to reuse the entry. {error}"))?;
+                }
+            }
+            Self::Remove(id) => {
+                request("DELETE", "/api/panel/repos", json!({"id":id}))?;
+            }
+            Self::Open(project, path) => {
+                request(
+                    "POST",
+                    "/api/panel/projects/active",
+                    json!({"projectId":project}),
+                )?;
+                workspace = Some(WorkspaceChange::Open(path.clone()));
+            }
+            Self::Activate(id) => {
+                let ledger = request(
+                    "POST",
+                    "/api/panel/projects/active",
+                    json!({"projectId":id}),
+                )?;
+                let path = ledger["projects"]
+                    .as_array()
+                    .and_then(|projects| projects.iter().find(|p| p["id"] == id.as_str()))
+                    .and_then(|p| p["repoPaths"].as_array())
+                    .and_then(|paths| paths.first())
+                    .and_then(Value::as_str)
+                    .map(str::to_owned);
+                workspace = Some(WorkspaceChange::Select(path));
+            }
+        }
+        Ok(Outcome {
+            snapshot: Snapshot::load(client)?,
+            validation,
+            workspace,
+        })
+    }
+}

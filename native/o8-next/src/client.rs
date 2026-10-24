@@ -218,6 +218,37 @@ impl Client {
         client.workspace = Some(workspace.into());
         client
     }
+    /// Project controls use the desktop routes and the selected operator bearer.
+    pub(crate) fn project_request(
+        &self,
+        method: &str,
+        path: &str,
+        body: &Value,
+    ) -> Result<Value, String> {
+        let url = self
+            .origin
+            .join(path)
+            .map_err(|_| "Invalid project route")?;
+        let mut request = self.agent.request(method, url.as_str());
+        if let Some(token) = &self.token {
+            request = request.set("Authorization", &format!("Bearer {token}"));
+        }
+        let response = if method == "GET" {
+            request.call()
+        } else {
+            request.send_json(body.clone())
+        };
+        match response {
+            Ok(response) => Self::read(response),
+            Err(ureq::Error::Status(status, response)) => {
+                let data = Self::read::<Value>(response).unwrap_or(Value::Null);
+                let message = data["error"].as_str().unwrap_or("Project request refused");
+                let note = data["note"].as_str().unwrap_or("");
+                Err(format!("{} (HTTP {status}). {}", message.chars().take(512).collect::<String>(), note.chars().take(512).collect::<String>()))
+            }
+            Err(_) => Err("Could not reach the selected server. Refresh to check saved state before retrying.".into()),
+        }
+    }
     /// Settings shares the existing operator bearer, loopback policy, redirect
     /// refusal, timeout and response bound. No credential response is retained.
     pub(crate) fn settings_request<T: DeserializeOwned>(

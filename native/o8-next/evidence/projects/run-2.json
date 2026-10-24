@@ -1,0 +1,32 @@
+{
+  "endpoint": "first completed GPUI TestAppContext CPU scene paint; debug build; test text system; no GPU/compositor",
+  "openToFirstFrameMs": 14.733527,
+  "workspaceOpenToFrameMs": 18.074078,
+  "registeredReposAfterRemove": 0,
+  "platform": "linux",
+  "node": "22.23.4",
+  "rust": "1.99.1",
+  "build": "debug",
+  "interactionToFrameMs": [
+    27.230166999999998,
+    30.054893999999997,
+    28.925366,
+    28.026985,
+    21.487972000000003,
+    23.955483,
+    24.780072999999998,
+    21.34671,
+    20.985331,
+    19.748321,
+    21.589054,
+    20.676902000000002,
+    19.552892,
+    19.635106,
+    22.789589,
+    24.375474,
+    21.39701,
+    21.148071,
+    22.658152,
+    23.314734
+  ]
+}

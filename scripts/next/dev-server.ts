@@ -46,7 +46,7 @@ async function main() {
   // adding post-boot recordings (their deliberately tight timestamps are valid).
   const { listMobileOrchestratorThreads } = await import('../../src/lib/mobile/orchestrator-thread-history');
   listMobileOrchestratorThreads();
-  const seeds = (process.argv.includes('--inbox-empty') ? [] : JSON.parse(readFileSync(resolve('native/o8-next/fixtures/sessions.json'), 'utf8'))) as Array<{ id: string; title: string; messages: Array<Record<string, unknown>> }>;
+  const seeds = ((process.argv.includes('--inbox-empty') || process.argv.includes('--projects')) ? [] : JSON.parse(readFileSync(resolve('native/o8-next/fixtures/sessions.json'), 'utf8'))) as Array<{ id: string; title: string; messages: Array<Record<string, unknown>> }>;
   for (const seed of seeds) {
     writeFileSync(join(dataDir, 'chat-history', `${seed.id}.json`), JSON.stringify({ ...seed,
       messages: seed.messages, repoPath: repo, repoName: 'fixture-repo', backend: 'claude', model: 'claude-code',
@@ -78,6 +78,8 @@ async function main() {
   const { GET: context } = await import('../../src/app/api/v2/chat-history/route');
   const { GET: state } = await import('../../src/app/api/orchestrator/state/route');
   await isolateTranscriptDiscovery(transcriptFixtures);
+  const projectFixture = process.argv.includes('--projects')
+    ? await (await import('./projects-fixture')).projectsFixture(root) : null;
   const { GET: inventory } = await import('../../src/app/api/runtime/inventory/route');
   const brain = process.argv.includes('--brain');
   if (brain) await (await import('./brain-fixture')).seedBrainFixture(dataDir, repo);
@@ -139,7 +141,7 @@ async function main() {
       }
       const settingsRoute = settings?.routes[`${req.method} ${url.pathname}`];
       const control = settings && url.pathname === '/__fixture/settings' && req.method === 'POST' ? settings.control : null;
-      const route = control ?? settingsRoute ?? (req.method === 'POST' && url.pathname === '/api/cortex/ask' && brainAsk ? brainAsk
+      const route = control ?? settingsRoute ?? projectFixture?.route(req.method ?? 'GET', url.pathname) ?? (req.method === 'POST' && url.pathname === '/api/cortex/ask' && brainAsk ? brainAsk
         : req.method === 'GET' ? getRoutes[url.pathname]
         : composer && url.pathname === '/api/orchestrator/composer-queue'
           ? req.method === 'POST' ? queue.POST : req.method === 'PATCH' ? queue.PATCH : req.method === 'DELETE' ? queue.DELETE : null
@@ -154,7 +156,7 @@ async function main() {
       if (route === context && !seeds.some(seed => seed.id === url.searchParams.get('tabId'))) { res.writeHead(404).end(); return; }
       let body = '';
       for await (const chunk of req) { body += String(chunk); if (body.length > 1024 * 1024) throw new Error('Fixture body limit'); }
-      if (body && !settingsRoute && !control && !issues?.posts[url.pathname]) {
+      if (body && !settingsRoute && !control && !issues?.posts[url.pathname] && !projectFixture?.route(req.method ?? 'GET', url.pathname)) {
         const target = JSON.parse(body) as { threadId?: string; repoPath?: string; packetId?: string; id?: string; action?: string };
         const owned = route === brainAsk ? target.repoPath === repo || !target.repoPath : route === reviewDecision.POST
           ? ['next-review-approve', 'next-review-reject'].includes(target.packetId ?? '')
@@ -177,6 +179,9 @@ async function main() {
         && inboxPlan?.approvals.some((approval) => approval.id === JSON.parse(body).id)) inboxPlan.beforeDecision();
       const response = gate.status === 200 ? settingsRoute ? await settings!.run(route, request) : await route(request) : gate;
       if (settingsRoute && req.method !== 'GET' && response.ok && settings!.dropResponse()) { res.destroy(); return; }
+      if (projectFixture?.dropResponse(req.method ?? 'GET', url.pathname, body, response)) {
+        res.destroy(); return;
+      }
       // PATCH exercises actual steer admission and its persisted transcript echo.
       if (composer && response.ok && (route === queue.PATCH || (route === queue.POST && JSON.parse(body).intent === 'steer-now'))) {
         const { claimComposerSteer } = await import('../../src/lib/orchestrator/composer-queue');
@@ -221,6 +226,7 @@ async function main() {
       process.stdout.write(`${JSON.stringify({ configDir: dataDir })}\n`);
     }
     process.stdout.write(`${JSON.stringify({ origin: `http://127.0.0.1:${address.port}`,
+      ...(projectFixture ? { folders: projectFixture.folders } : {}),
       ...(peer ? { terminalSession: peer.sessionName } : {}) })}\n`);
   });
   async function close() {

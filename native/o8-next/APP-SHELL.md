@@ -36,6 +36,21 @@ one-second interval. See the [control parity table](evidence/settings/parity.md)
 [fixture verification](evidence/settings/verification.md) for the remaining
 desktop controls and the headless CPU frame measurements.
 
+Projects is available from the shell header and command palette, including on a
+first run without saved sessions. It uses the desktop project ledger, membership
+and repository routes with the existing operator bearer. Create or edit a project,
+register a local Git folder, assign repository roles and a main repository, switch
+the active project, or open its repository in the shell. Removal confirms before
+calling the existing server action and displays refusals without clearing saved
+state. Reopening Projects refreshes its snapshot. Empty active projects stay empty
+after restarting the shell. The shared GPUI editor handles text fields.
+
+The disposable host's `--projects` mode exposes these production routes and prints
+two owned Git folders with its origin. `--projects-refuse-remove` injects an
+uninterruptible fixture session; `--projects-drop-add` loses the first successful
+registration response. See [project parity and verification](evidence/projects/verification.md)
+for the controls that are ported, the remaining controls and fixture measurements.
+
 Window size/position, selected workspace, open surfaces, sidebar selection and
 composer focus are stored in `next-shell.json` beside the resolved local config,
 or in `--shell-state ABSOLUTE_FILE`. The grid retains its existing per-workspace
