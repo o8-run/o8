@@ -62,7 +62,7 @@ export async function runPrebuild({ runBuild, canReuse }) {
   }
 
   async function cachedPhase(cachePhase, label, command, args) {
-    const identityOptions = cachePhase === 'web' ? { env } : {};
+    const identityOptions = { env };
     let identity;
     let restore;
     try {
@@ -87,6 +87,8 @@ export async function runPrebuild({ runBuild, canReuse }) {
       const { runRegisteredBuild } = await import('./registered-build.mjs');
       const code = await runRegisteredBuild(producerRun);
       if (code !== 0) throw new Error(`web build failed with exit ${code}`);
+    } else if (restore.status === 'hit_exact' || restore.status === 'hit_compatible') {
+      console.log(`[tauri-prebuild] ${label} skipped (verified executable cache)`);
     } else await phase(label, command, args);
     const buildDurationMs = Date.now() - buildStarted;
     let capture;

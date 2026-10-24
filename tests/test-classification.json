@@ -5134,6 +5134,15 @@
       ]
     },
     {
+      "path": "tests/release-native-cache.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "native-build"
+      ]
+    },
+    {
       "path": "tests/release-native-module-check.test.ts",
       "reasons": [
         "child-process"
