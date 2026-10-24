@@ -1,15 +1,17 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { build } from 'esbuild';
-import { chromium, type Browser, type Page } from 'playwright-core';
+import { chromium, webkit, type Browser, type Page } from 'playwright-core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { resolveBrowserPath } from '../scripts/bench/measure-browser-boot.mjs';
 import { getPalette, resolveTheme } from '../src/lib/theme/registry';
+import { navigationTouchInput, swipeNavigation } from './fixtures/navigation-touch';
 
 const proofDir = process.env.O8_NAVIGATION_PROOF_DIR;
 const proofState = process.env.O8_NAVIGATION_PROOF_STATE ?? 'after';
 const sourceRoot = path.resolve(process.env.O8_NAVIGATION_SOURCE_ROOT ?? '.');
 const executablePath = resolveBrowserPath();
+const useWebKit = process.env.O8_NAVIGATION_BROWSER === 'webkit';
 const sizes = [{ width: 1280, height: 720 }, { width: 1366, height: 768 }, { width: 1920, height: 1080 }];
 const rows = '[data-o8-agent-panel] [role="button"][aria-label]';
 const scroll = '[data-o8-agent-panel] .hide-scrollbar';
@@ -75,9 +77,10 @@ async function measure(page: Page) {
   }, { rows, scroll });
 }
 
-describe.skipIf(!executablePath)('navigation density through the rendered shell', () => {
+describe.skipIf(!useWebKit && !executablePath)('navigation density through the rendered shell', () => {
   let browser: Browser;
   let bundle: string;
+  let controlScrollTop: number;
   beforeAll(async () => {
     const result = await build({
       entryPoints: ['tests/fixtures/navigation-density.tsx'], bundle: true, write: false,
@@ -91,9 +94,22 @@ describe.skipIf(!executablePath)('navigation density through the rendered shell'
       } }], legalComments: 'none', logLevel: 'silent',
     });
     bundle = result.outputFiles[0].text;
-    browser = await chromium.launch({ executablePath: executablePath!, headless: true,
+    browser = useWebKit ? await webkit.launch({ headless: true }) : await chromium.launch({ executablePath: executablePath!, headless: true,
       ignoreDefaultArgs: ['--hide-scrollbars'],
       args: ['--disable-features=OverlayScrollbar,FluentOverlayScrollbar'] });
+    // Keep a CSS-free control: desktop touch-event emulation can deliver
+    // trusted TouchEvents without providing the platform's pan recognizer.
+    const control = await browser.newPage({ viewport: sizes[0], hasTouch: true });
+    try {
+      await control.setContent('<div id="control" style="height:680px;width:320px;overflow:auto"><div style="height:5000px">Touch pan control</div></div>');
+      const input = await navigationTouchInput(control, useWebKit);
+      const box = (await control.locator('#control').boundingBox())!;
+      await swipeNavigation(control, input, box, true, useWebKit);
+      await settle(control);
+      controlScrollTop = await control.locator('#control').evaluate(node => node.scrollTop);
+      console.info('[navigation-touch-control]', JSON.stringify({ browser: useWebKit ? 'webkit' : 'chromium', top: controlScrollTop }));
+      await input.detach?.();
+    } finally { await control.close(); }
     if (proofDir) fs.mkdirSync(proofDir, { recursive: true });
   }, 60_000);
   afterAll(async () => { await browser?.close(); });
@@ -185,23 +201,33 @@ describe.skipIf(!executablePath)('navigation density through the rendered shell'
           window.addEventListener('pointermove', event => {
             if (event.pointerType === 'touch' && event.defaultPrevented) state.preventedMoves++;
           });
+          const trace = { starts: 0, moves: 0, prevented: 0, target: [] as object[], owners: [] as string[] };
+          Object.assign(window, { touchNavigationTrace: trace });
+          document.addEventListener('touchstart', event => {
+            if (event.isTrusted) trace.starts++;
+            if (trace.target.length) return;
+            trace.target = event.composedPath().filter((node): node is HTMLElement => node instanceof HTMLElement)
+              .map(node => ({ tag: node.tagName, scroller: node.classList.contains('hide-scrollbar'),
+                overflow: getComputedStyle(node).overflow, touch: getComputedStyle(node).touchAction,
+                overscroll: getComputedStyle(node).overscrollBehavior,
+                height: node.clientHeight, content: node.scrollHeight }));
+          }, { passive: true });
+          window.addEventListener('touchmove', event => {
+            if (event.isTrusted) trace.moves++;
+            if (event.defaultPrevented) trace.prevented++;
+          }, { passive: true });
+          document.addEventListener('scroll', event => {
+            const node = event.target;
+            if (!(node instanceof HTMLElement)) return;
+            const owner = node.classList.contains('hide-scrollbar') ? 'agent-panel' : node.tagName;
+            if (!trace.owners.includes(owner)) trace.owners.push(owner);
+          }, { capture: true, passive: true });
         });
-        const cdp = await page.context().newCDPSession(page);
+        const input = await navigationTouchInput(page, useWebKit);
         for (const yDistance of [-20_000, 20_000]) {
           for (let swipe = 0; swipe < 20; swipe++) {
-            const start = yDistance < 0 ? box.y + box.height - 80 : box.y + 80;
-            await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: box.x + box.width / 2, y: start }] });
-            // Cross the app's 6px drag threshold before the browser's pan
-            // threshold, as a real finger does at the start of a slow swipe.
-            await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: box.x + box.width / 2,
-              y: start + (yDistance < 0 ? -8 : 8) }] });
+            await swipeNavigation(page, input, box, yDistance < 0, useWebKit);
             await settle(page);
-            for (let step = 1; step <= 8; step++) {
-              await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: box.x + box.width / 2,
-                y: start + (yDistance < 0 ? -1 : 1) * step * (box.height - 160) / 8 }] });
-              await settle(page);
-            }
-            await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
             if (await page.locator(scroll).evaluate((node, down) => down
               ? node.scrollTop + node.clientHeight >= node.scrollHeight - 1 : node.scrollTop === 0, yDistance < 0)) break;
           }
@@ -210,12 +236,21 @@ describe.skipIf(!executablePath)('navigation density through the rendered shell'
             touchNavigationState: { dragStarts: number; preventedMoves: number };
           }).touchNavigationState);
           console.info('[navigation-touch-ownership]', touchState);
+          const trace = await page.evaluate(() => (window as unknown as {
+            touchNavigationTrace: { starts: number; moves: number; prevented: number; target: object[]; owners: string[] };
+          }).touchNavigationTrace);
+          console.info('[navigation-touch-trace]', JSON.stringify({ browser: useWebKit ? 'webkit' : 'chromium', ...trace }));
+          expect(trace.starts, 'gesture must deliver trusted touch input').toBeGreaterThan(0);
+          expect(trace.moves).toBeGreaterThan(0);
+          expect(trace.prevented).toBe(0);
           expect(touchState, 'touch panning must not activate pane dragging or cancel pointer moves')
             .toEqual({ dragStarts: 0, preventedMoves: 0 });
           await expect.poll(() => page.locator(scroll).evaluate((node, down) => down
             ? node.scrollTop + node.clientHeight >= node.scrollHeight - 1 : node.scrollTop === 0, yDistance < 0)).toBe(true);
+          expect(trace.owners, `native pan control scrollTop=${controlScrollTop}; touched panel must own scrolling`)
+            .toEqual(['agent-panel']);
         }
-        await cdp.detach();
+        await input.detach?.();
         // A cancelled mouse drag must not leave click suppression armed for
         // the next touch tap on the same row on a hybrid laptop.
         await last.press('Enter');
