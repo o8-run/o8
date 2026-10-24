@@ -1,5 +1,6 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 
 import { appendEvent } from '@/lib/lane/registry';
 import { readPinnedLaneCreationBaseCommit } from '@/lib/lane/creation-base';
@@ -7,7 +8,12 @@ import { renameExactChildDirectory } from '@/lib/workspace/exact-parent-operatio
 import { isDependencyMaterializationIncomplete, verifyDependencyMaterialization } from '@/lib/workspace/dependency-materialization-verification';
 import { assertWorktreeMaterializationIdentity, captureWorktreeMaterializationIdentity, type WorktreeMaterializationIdentity } from './materialization-identity';
 import { materializationAwareExecFile, withWorktreeMaterializationExecution } from './materialization-execution';
-import { readPinnedWorkspaceFile, readPinnedWorkspaceFileReceipt } from './materialization-leaf-io';
+import { inspectPinnedWorkspaceEntry, readPinnedWorkspaceFile, readPinnedWorkspaceFileReceipt } from './materialization-leaf-io';
+import { assertWarmFilesystemBudget, assertWarmPacketSlot, reserveWarmPacketSlot } from './warm-packet-budget';
+import { assertWarmPacketSeal, type WarmPacketSeal } from './warm-packet-integrity';
+import { allowWorktreeRemoval } from './live-process-guard';
+import { settlePinnedWorkspaceReadSession } from './materialization-read-session';
+import { listReposFresh } from '@/lib/repos/registry';
 import { recoverWarmPacketTransfers } from './warm-packet-recovery';
 import { readWorktreeMetaSnapshot, withWorktreeMetaTransaction } from './metadata-store';
 import type { WorktreeManager } from './manager';
@@ -21,7 +27,7 @@ const MAX_ENTRY_BYTES = 4 * 1024 ** 3;
 const MAX_BYTES = MAX_ENTRIES * MAX_ENTRY_BYTES;
 const entries: Entry[] = [];
 const requests = new Map<string, Request>();
-const pending: Array<{ request: Request; info?: WorktreeInfo; }> = [];
+const pending: Array<{ request: Request; token: string; info?: WorktreeInfo; }> = [];
 const recovered = new Set<string>();
 let building: Promise<void> | null = null;
 let timer: ReturnType<typeof setTimeout> | null = null;
@@ -34,8 +40,7 @@ let refresh: ReturnType<typeof setInterval> | null = null;
 function startRefresh(): void {
   if (refresh || stopped) return;
   refresh = setInterval(() => {
-    const request = requests.values().next().value as Request | undefined;
-    if (request) scheduleWarmPacketWorktrees(request.opts, request.manager);
+    if (requests.size) queueRefill(0);
   }, 30_000);
   refresh.unref();
 }
@@ -51,7 +56,8 @@ interface Entry {
   dependencies: WorktreeMaterializationIdentity;
   hooks: NonNullable<Awaited<ReturnType<typeof readPinnedWorkspaceFileReceipt>>>;
   bytes: number;
-  state: 'ready' | 'retiring' | 'binding';
+  seal: WarmPacketSeal;
+  state: 'ready' | 'held' | 'retiring' | 'binding';
 }
 const git = (cwd: string, args: string[]) => materializationAwareExecFile('git', args, { cwd, windowsHide: true, timeout: 5_000 });
 
@@ -78,19 +84,32 @@ async function fingerprint(opts: WarmPacketOptions): Promise<{ key: string; head
 }
 
 async function retire(entry: Entry): Promise<void> {
-  if (entry.state !== 'ready') throw new Error('Warm worktree is already claimed.');
+  if (entry.state !== 'ready' && entry.state !== 'held') throw new Error('Warm worktree is already claimed.');
   entry.state = 'retiring';
   // Retain the slot and disk charge if exact cleanup refuses ownership.
   try {
     await entry.request.manager.retireWarmWorktree(entry.info.id);
     const index = entries.indexOf(entry);
     if (index >= 0) entries.splice(index, 1);
-  } catch (error) { entry.state = 'ready'; throw error; }
+  } catch (error) { entry.state = 'held'; throw error; }
+}
+
+async function currentRequest(request: Request): Promise<boolean> {
+  if (stopped || requests.get(request.opts.repoRoot) !== request) return false;
+  const repo = (await listReposFresh()).find(repo => repo.localPath === request.opts.repoRoot);
+  if (!repo?.setup?.installOnCreateWorkspace || !repo.setup.installCommand
+    || !isDeepStrictEqual(repo.setup, request.opts.repoSetup)) {
+    if (requests.get(request.opts.repoRoot) === request) requests.delete(request.opts.repoRoot);
+    return false;
+  }
+  return true;
 }
 
 async function fill(): Promise<void> {
   for (const request of requests.values()) {
     if (stopped || performance.now() < foregroundQuietUntil) return;
+    if (!await currentRequest(request)) continue;
+    await assertWarmFilesystemBudget(request.opts.repoRoot);
     if (!recovered.has(request.opts.repoRoot)) {
       await recoverWarmPacketTransfers(request.opts.repoRoot, request.manager);
       const old = await readWorktreeMetaSnapshot(request.opts.repoRoot);
@@ -103,57 +122,49 @@ async function fill(): Promise<void> {
     }
     const current = await fingerprint(request.opts);
     for (const entry of [...entries]) {
-      if (entry.request.opts.repoRoot === request.opts.repoRoot && entry.key !== current?.key) await retire(entry);
+      if (entry.state !== 'binding' && entry.request.opts.repoRoot === request.opts.repoRoot && entry.key !== current?.key) await retire(entry);
     }
-    if (!current) continue;
+    if (!current || !await currentRequest(request)) continue;
     while (!stopped && performance.now() >= foregroundQuietUntil && entries.length + pending.length < MAX_ENTRIES
       && entries.filter(entry => entry.request.opts.repoRoot === request.opts.repoRoot).length < Math.min(MAX_ENTRIES, Math.max(1, request.opts.capacity ?? MAX_ENTRIES))
       && entries.reduce((n, entry) => n + entry.bytes, 0) + MAX_ENTRY_BYTES <= MAX_BYTES) {
-      const reservation: { request: Request; info?: WorktreeInfo; } = { request };
+      if (!await currentRequest(request)) break;
+      const token = reserveWarmPacketSlot(request.opts.repoRoot);
+      if (!token) break;
+      const reservation: { request: Request; token: string; info?: WorktreeInfo; } = { request, token };
       pending.push(reservation);
       try {
         const { worktree: info, hooks } = await request.manager.prepareWarmWorktree({
-          agentType: request.opts.agentType, taskName: `warm-${randomUUID()}`, baseBranch: 'main',
-          warmBaseCommit: current.head, repoSetup: request.opts.repoSetup, isolationPreference: request.opts.isolationPreference,
+          agentType: request.opts.agentType, taskName: `warm-${token}`, baseBranch: 'main',
+          warmBaseCommit: current.head, warmReservationToken: token, repoSetup: request.opts.repoSetup, isolationPreference: request.opts.isolationPreference,
         }, created => { reservation.info = created; });
         const identity = await captureWorktreeMaterializationIdentity(info.path);
-        await withWorktreeMaterializationExecution(info.path, identity, () => materializationAwareExecFile(process.execPath, ['-e', `
-        const fs = require('node:fs'), path = require('node:path');
-        const root = fs.realpathSync('.');
-        const pending = ['.'];
-        while (pending.length) {
-          const directory = pending.pop();
-          for (const name of fs.readdirSync(directory)) {
-            if (directory === '.' && name === '.git') continue;
-            const file = path.join(directory, name), entry = fs.lstatSync(file);
-            if (entry.isSymbolicLink()) {
-              const link = fs.readlinkSync(file);
-              if (path.isAbsolute(link) || !fs.realpathSync(file).startsWith(root + path.sep))
-                throw new Error('Warm dependencies contain a non-relocatable link.');
-            } else if (entry.isDirectory()) pending.push(file);
-          }
-        }
-      `], { cwd: info.path, timeout: 60_000, windowsHide: true }));
+        if ((await inspectPinnedWorkspaceEntry(info.path, identity, '.git'))?.kind !== 'file') throw new Error('Warm pool requires a linked Git worktree, not a private Git clone.');
+        const seal = (await readWorktreeMetaSnapshot(request.opts.repoRoot))[info.id]?.warmPool?.seal;
+        if (!seal) throw new Error('Warm worktree has no original sealed inventory.');
         const dependencies = await captureWorktreeMaterializationIdentity(path.join(info.path, 'node_modules'));
         const { stdout } = await withWorktreeMaterializationExecution(info.path, identity, () => (
           materializationAwareExecFile('du', ['-sk', '.'], { cwd: info.path, windowsHide: true, timeout: 30_000 })
         ));
         const bytes = Number(stdout.trim().split(/\s/)[0]) * 1024;
-        const entry: Entry = { request, ...current, info, identity, dependencies, hooks, bytes, state: 'ready' };
-        entries.push(entry);
-        pending.splice(pending.indexOf(reservation), 1);
+        const entry: Entry = { request, ...current, info, identity, dependencies, hooks, seal, bytes, state: 'ready' };
         if (!Number.isSafeInteger(bytes) || bytes < 0 || bytes > MAX_ENTRY_BYTES || stopped
-          || (await fingerprint(request.opts))?.key !== current.key) {
-          await retire(entry);
+          || !await currentRequest(request) || (await fingerprint(request.opts))?.key !== current.key) {
+          await request.manager.retireWarmWorktree(info.id);
+          pending.splice(pending.indexOf(reservation), 1);
           break;
         }
+        entries.push(entry);
+        pending.splice(pending.indexOf(reservation), 1);
       } catch (error) {
-        if (reservation.info && !entries.some(entry => entry.info.id === reservation.info!.id)) {
-          const meta = await readWorktreeMetaSnapshot(request.opts.repoRoot);
-          if (meta[reservation.info.id]) await request.manager.retireWarmWorktree(reservation.info.id);
+        if (reservation.info) {
+          const entry = entries.find(entry => entry.info.id === reservation.info!.id);
+          if (entry) entry.state = 'held';
+          await withWorktreeMetaTransaction(request.opts.repoRoot, async transaction => {
+            const meta = (await transaction.readAll())[reservation.info!.id];
+            if (meta?.warmPool?.slotToken === token) await transaction.save(meta.id, { ...meta, warmPool: { ...meta.warmPool, held: true } });
+          });
         }
-        const slot = pending.indexOf(reservation);
-        if (slot >= 0) pending.splice(slot, 1);
         throw error;
       }
     }
@@ -162,7 +173,8 @@ async function fill(): Promise<void> {
 
 /** Awaitable for lifecycle tests and idle startup; dispatch never awaits a refill. */
 export async function prepareWarmPacketWorktrees(opts: WarmPacketOptions, manager: WorktreeManager): Promise<void> {
-  if (stopped || process.platform === 'win32') return;
+  if (stopped || process.platform !== 'linux') return;
+  if (!opts.repoSetup?.installOnCreateWorkspace || !opts.repoSetup.installCommand) { requests.delete(opts.repoRoot); return; }
   requests.set(opts.repoRoot, { opts, manager });
   startRefresh();
   if (!building) {
@@ -172,14 +184,18 @@ export async function prepareWarmPacketWorktrees(opts: WarmPacketOptions, manage
 }
 
 export function scheduleWarmPacketWorktrees(opts: WarmPacketOptions, manager: WorktreeManager): void {
-  if (stopped || process.platform === 'win32') return;
+  if (stopped || process.platform !== 'linux') return;
   // Credential-policy validation also runs in generated child helpers. Keep
   // new background spawns outside every foreground worker's startup window.
   foregroundQuietUntil = Math.max(foregroundQuietUntil, performance.now() + FOREGROUND_QUIET_MS);
-  if (!opts.repoSetup?.installOnCreateWorkspace || !opts.repoSetup.installCommand) return;
+  if (!opts.repoSetup?.installOnCreateWorkspace || !opts.repoSetup.installCommand) { requests.delete(opts.repoRoot); return; }
   requests.set(opts.repoRoot, { opts, manager });
   startRefresh();
-  if (timer) return;
+  queueRefill(FOREGROUND_QUIET_MS);
+}
+
+function queueRefill(delay: number): void {
+  if (timer || stopped) return;
   const refill = () => {
     timer = null;
     if (stopped) return;
@@ -192,7 +208,7 @@ export function scheduleWarmPacketWorktrees(opts: WarmPacketOptions, manager: Wo
     const filling = building ?? (building = fill().finally(() => { building = null; }));
     void filling.catch(() => { /* Cold provisioning remains authoritative. */ });
   };
-  timer = setTimeout(refill, FOREGROUND_QUIET_MS);
+  timer = setTimeout(refill, delay);
   timer.unref();
 }
 
@@ -231,6 +247,7 @@ export async function bindWarmPacketWorktree(input: {
   const completion = new Promise<void>(resolve => { release = resolve; });
   activeBindings.add(completion);
   try {
+    await settlePinnedWorkspaceReadSession();
     await assertWorktreeMaterializationIdentity(entry.info.path, entry.identity);
     await assertWorktreeMaterializationIdentity(path.join(entry.info.path, 'node_modules'), entry.dependencies);
     const hooks = await readPinnedWorkspaceFileReceipt(entry.info.path, entry.identity, '.claude/settings.local.json');
@@ -239,7 +256,11 @@ export async function bindWarmPacketWorktree(input: {
     }
     const meta = (await readWorktreeMetaSnapshot(repoRoot))[entry.info.id];
     if (!meta || meta.status !== 'setup' || meta.sessionKey || meta.packetId || meta.environmentReferences
-      || !meta.warmPool || meta.dependencyMaterialization?.mode !== 'native') throw new Error('Warm worktree lost its unused native ownership.');
+      || !meta.warmPool || meta.warmPool.held || meta.dependencyMaterialization?.mode !== 'native') throw new Error('Warm worktree lost its unused native ownership.');
+    if (JSON.stringify(meta.warmPool.seal) !== JSON.stringify(entry.seal)) throw new Error('Warm worktree lost its original durable seal.');
+    assertWarmPacketSlot(repoRoot, meta.warmPool.slotToken, entry.info.id);
+    if (!await allowWorktreeRemoval(entry.info.path, { logPrefix: 'warm-binding' })) throw new Error('Warm worktree has a live or unknown process.');
+    await assertWarmPacketSeal(entry.info.path, entry.identity, entry.seal);
     await withWorktreeMaterializationExecution(entry.info.path, entry.identity, async () => {
       const head = (await git(entry.info.path, ['rev-parse', '--verify', 'HEAD^{commit}'])).stdout.trim();
       if (head !== current.head || (await git(entry.info.path, ['status', '--porcelain', '--untracked-files=no'])).stdout.trim()) {
@@ -252,18 +273,22 @@ export async function bindWarmPacketWorktree(input: {
     let targetPublished = false;
     try {
       await withWorktreeMetaTransaction(repoRoot, async transaction => {
-        if ((await transaction.readAll())[taskId]) throw new Error('Warm packet destination already has an owner.');
+        const currentMetadata = await transaction.readAll();
+        if (currentMetadata[taskId]) throw new Error('Warm packet destination already has an owner.');
+        if (JSON.stringify(currentMetadata[entry.info.id]) !== JSON.stringify(meta)) throw new Error('Warm source ownership changed before transfer.');
         // Publish target authority BEFORE rename; a crash never leaves an unowned tree.
         const { warmPool: _warmPool, ...packetMeta } = meta;
         void _warmPool;
         await transaction.save(taskId, {
           ...packetMeta, id: taskId, packetId: opts.packetId, laneId: opts.laneId,
           agentType: opts.agentType, branchName, baseBranch, taskName: opts.taskName, status: 'creating',
-          warmTransfer: { sourceId: entry.info.id, sourceBranch: entry.info.branch, head: current.head },
+          warmTransfer: { sourceId: entry.info.id, sourceBranch: entry.info.branch, head: current.head,
+            seal: entry.seal, slotToken: meta.warmPool!.slotToken },
           materializationIdentity: nextIdentity, materializationParentIdentity: baseExecutionIdentity, creationOwner: input.creationOwner
         });
         targetPublished = true;
         if ((await fingerprint({ repoRoot, ...opts }))?.key !== current.key) throw new Error('Warm generation changed during binding.');
+        if (!await allowWorktreeRemoval(entry.info.path, { logPrefix: 'warm-rename' })) throw new Error('Warm worktree acquired a live process before rename.');
         await renameExactChildDirectory(path.dirname(worktreePath), baseExecutionIdentity, entry.info.path, worktreePath, entry.identity);
         renamed = true;
         await assertWorktreeMaterializationIdentity(worktreePath, nextIdentity);
@@ -285,6 +310,8 @@ export async function bindWarmPacketWorktree(input: {
             stage: 'dependency_selection', path: 'warm-worktree', reason: 'matching-main-and-lockfile'
           });
         });
+        await assertWarmPacketSeal(worktreePath, nextIdentity, entry.seal, true, branchName);
+        if (!await allowWorktreeRemoval(worktreePath, { logPrefix: 'warm-bound' })) throw new Error('Warm worktree acquired a live process during binding.');
         await transaction.remove(entry.info.id);
       });
     } catch (error) {
@@ -315,6 +342,6 @@ export async function bindWarmPacketWorktree(input: {
     }
     entries.splice(entries.indexOf(entry), 1);
     return { ...entry.info, id: taskId, path: worktreePath, branch: branchName, agentType: opts.agentType, status: 'setup' };
-  } catch (error) { entry.state = 'ready'; throw error; }
+  } catch (error) { entry.state = 'held'; throw error; }
   finally { release(); activeBindings.delete(completion); }
 }

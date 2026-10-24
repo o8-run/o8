@@ -83,6 +83,8 @@ export interface ConflictEntry {
 export interface CreateWorktreeOptions {
   /** Internal idle preparation, pinned to the observed main commit. */
   warmBaseCommit?: string;
+  /** Durable pool reservation, acquired before any warm creation. */
+  warmReservationToken?: string;
   /** Agent type (determines creation strategy) */
   agentType: AgentType;
   /** Human-readable task name (used for branch + dir naming) */
@@ -168,9 +170,9 @@ export interface WorktreeMetaStore {
 
 export interface WorktreeMetaEntry {
   /** Unused idle preparation; removed before packet ownership is published. */
-  warmPool?: { head: string };
+  warmPool?: { head: string; slotToken?: string; held?: boolean; seal?: import('./warm-packet-integrity').WarmPacketSeal };
   /** Durable source authority while an unused tree is transferred to a packet. */
-  warmTransfer?: { sourceId: string; sourceBranch: string; head: string };
+  warmTransfer?: { sourceId: string; sourceBranch: string; head: string; slotToken?: string; seal?: import('./warm-packet-integrity').WarmPacketSeal };
   /** Exact link targets provisioned by the manager, never environment contents. */
   environmentReferences?: Record<string, string>;
   /** Creation-time association for bounded terminal discovery, including collision slots. */

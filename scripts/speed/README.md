@@ -247,6 +247,14 @@ payload and run the before and after arms without competing builds or tests.
 
 ## Account-free warm packet dispatch
 
+Warm preparation is currently eligible only on Linux linked Git worktrees when
+the entire workspace filesystem reports a capacity of at most four GiB. Larger
+filesystems and APFS clones use cold provisioning. This conservative gate does
+not provision a per-directory quota; dependency-cache accounting remains
+separate. The fixture models the bounded-filesystem capability for its controlled
+repositories. Its latency receipts do not prove a physical quota or that warming
+is enabled on the host filesystem.
+
 `dispatch-fixture.mjs` drives `runDispatchTick` with a fixture installer and owned
 runtime executable. It verifies persisted worker stdout, lane preparation events,
 private dependency writes, the consumed directory inode and shutdown cleanup.
@@ -274,18 +282,27 @@ and private logs stay under the selected output directory. These measurements do
 not establish provider startup, real package installation, macOS volume sharing
 or the mission CLI wait-window contract.
 
-The pool retains at most two unused entries, checks a four GiB entry budget and
-eight GiB aggregate budget before publication, and keeps failed cleanup charged.
-Preparation uses normal storage admission; these retained-entry limits are not
-an installer filesystem quota. Entries contain native dependency trees and
-relative internal links. Mounted images and non-relocatable links use cold
-provisioning. Main, lockfile, setup contract, platform and runtime ABI select a
+The pool reserves at most two durable global slots before creation, reconciles every
+authoritative metadata root at restart, and keeps failed or uncertain cleanup
+charged. Unreserved legacy trees block new preparation. Preparation uses normal
+storage admission and refuses an unbounded workspace filesystem before starting
+an installer. Entries contain private native dependencies and verified internal
+link chains. Mounted images and private Git/APFS clones are ineligible.
+Main, lockfile, setup contract, platform and runtime ABI select a
 generation. Entries are consumed once; dispatched worktrees never return to the
 pool. Refills run asynchronously, with installation outside the shared Git
 provision queue. New background preparation waits five seconds after foreground
 workspace creation to reduce child-helper contention during worker startup.
 WS shutdown awaits active transfers and preparation, then uses
 the existing exact retirement path for unused entries.
+
+A successful, quiescent preparation receives one immutable byte/content and
+identity seal covering ignored/untracked files and linked Git administration.
+Binding rechecks that seal, the expected Git transition and fresh process state.
+Only the original pristine seal authorizes retirement; claims retain that proof
+through rename, purge capture and replay. Unsealed, edited or uncertain trees
+remain retained. Full inventory verification adds latency; keep failed speed
+samples when evaluating the three-second target.
 
 Additional hermetic variants use the same test entry point:
 `O8_SPEED_INVALIDATION=main` or `lock`, `O8_SPEED_BINDING_FAULT=1`,
@@ -297,3 +314,10 @@ runtime paths, settings inode/environment and refill ordering, then holds the
 real credential-policy coordination lock for 200 ms during child startup.
 The child must acquire the lock and revalidate policy before producing output;
 the fixture's stdout deadline is unchanged.
+
+`O8_SPEED_WARM_ADVERSARY` selects preservation and lifecycle probes:
+`dirty-shutdown`, `dirty-invalidation`, `dirty-purge`, `unsealed`, `git-admin`,
+`live`, `live-purge`, `live-purge-paused`, `dependency-link`, `dependency-bytes`,
+`env`, `moved-head`, `installer-chain`, `apfs-exclude`, `budget`, `restart`,
+`disabled`, `disabled-registry`, or `metadata-revoked`. `O8_SPEED_MAC_ASSERTIONS=1` exercises the
+portable cold-selection assertions; it does not validate macOS filesystem behavior.

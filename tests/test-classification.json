@@ -4463,6 +4463,7 @@
     {
       "path": "tests/packet-launch-budget-real-path.test.ts",
       "reasons": [
+        "apfs-tool",
         "child-process",
         "executable-fixture",
         "git-cli",

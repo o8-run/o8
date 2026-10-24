@@ -163,6 +163,8 @@ export interface ExactDirectoryManifestEntry {
   size: number;
   mtimeMs: number;
   ctimeMs: number;
+  contentSha256?: string;
+  symlinkTarget?: string;
 }
 
 export interface ExactDirectoryManifest {
@@ -178,6 +180,8 @@ const path = require('node:path');
 const readline = require('node:readline');
 let rootCanonical;
 const directories = [];
+const sealBuffer = process.env.O8_PURGE_CAPTURE_CONTENTS === '1' ? Buffer.allocUnsafe(1024 * 1024) : null;
+let sealBytes = 0;
 let phase = 'capture';
 let phaseStarted = Date.now();
 function progress(entries, done = false) {
@@ -273,7 +277,36 @@ async function manifestAt() {
       mtimeMs: stat.mtimeMs,
       ctimeMs: stat.ctimeMs,
     };
+    if (process.env.O8_PURGE_CAPTURE_CONTENTS === '1' && kind === 'file') {
+      sealBytes += stat.size;
+      if (sealBytes > 4 * 1024 ** 3) throw new Error('Warm seal byte budget exceeded.');
+      entry.contentSha256 = await inDirectory(path.dirname(relative), byPath, async () => {
+        const handle = await fsp.open(path.basename(relative), fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
+        try {
+          const before = await handle.stat();
+          if (!sameIdentity(before, entry) || !sameFileRevision(before, entry) || before.nlink !== entry.linkCount) throw new Error('Sealed file changed before reading.');
+          const hash = crypto.createHash('sha256');
+          const buffer = sealBuffer;
+          let read = 0;
+          for (;;) {
+            const { bytesRead } = await handle.read(buffer, 0, buffer.length, null);
+            if (!bytesRead) break;
+            read += bytesRead;
+            if (read > before.size) throw new Error('Sealed file grew while reading.');
+            hash.update(buffer.subarray(0, bytesRead));
+          }
+          const after = await handle.stat();
+          const named = await fsp.lstat(path.basename(relative));
+          if (read !== before.size || !sameIdentity(after, entry) || !sameFileRevision(after, entry) || after.nlink !== entry.linkCount
+            || !sameIdentity(named, entry) || !sameFileRevision(named, entry)) throw new Error('Sealed file changed while reading.');
+          return hash.digest('hex');
+        } finally { await handle.close(); }
+      });
+    } else if (process.env.O8_PURGE_CAPTURE_CONTENTS === '1' && kind === 'symlink') {
+      entry.symlinkTarget = await inDirectory(path.dirname(relative), byPath, () => fsp.readlink(path.basename(relative)));
+    }
     entries.push(entry);
+    if (sealBuffer && entries.length > 262144) throw new Error('Warm seal entry budget exceeded.');
     progress(entries.length);
     byPath.set(relative, entry);
     if (kind === 'directory') {
@@ -589,10 +622,11 @@ export async function captureExactDirectoryManifestFingerprint(
 export async function captureExactDirectoryManifest(
   candidatePath: string,
   identity: { device: number; inode: number },
+  options: { contents?: boolean } = {},
 ): Promise<ExactDirectoryManifest> {
   const child = spawn(process.execPath, ['-e', PURGE_CAPTURE_SCRIPT], {
     cwd: candidatePath,
-    env: childEnvironment({ env: { O8_PURGE_EXPECTED_DEVICE: String(identity.device), O8_PURGE_EXPECTED_INODE: String(identity.inode), O8_PURGE_CAPTURE_ONLY: '1' } }),
+    env: childEnvironment({ env: { O8_PURGE_EXPECTED_DEVICE: String(identity.device), O8_PURGE_EXPECTED_INODE: String(identity.inode), O8_PURGE_CAPTURE_ONLY: '1', ...(options.contents ? { O8_PURGE_CAPTURE_CONTENTS: '1' } : {}) } }),
     stdio: ['pipe', 'pipe', 'pipe'],
     windowsHide: true,
   });
@@ -601,7 +635,9 @@ export async function captureExactDirectoryManifest(
   child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
   child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
   child.stdin.end('{"entries":[]}\n');
+  const deadline = options.contents ? setTimeout(() => child.kill('SIGKILL'), 60_000) : undefined;
   const code = await new Promise<number | null>((resolve) => child.once('close', resolve));
+  clearTimeout(deadline);
   reportPurgePhases(stdout);
   const match = /O8_PURGE_CAPTURED ([0-9a-f]{64})\n/.exec(stdout);
   const manifestMatch = /O8_PURGE_MANIFEST ([A-Za-z0-9_-]+)\n/.exec(stdout);
