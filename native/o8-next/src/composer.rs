@@ -12,6 +12,7 @@ struct Snapshot {
 pub struct Submit(pub bool);
 impl EventEmitter<Submit> for Composer {}
 pub struct Composer {
+    source: bool,
     pub focus: FocusHandle,
     pub text: String,
     selection: Range<usize>,
@@ -31,6 +32,7 @@ pub struct Composer {
 impl Composer {
     pub fn new(cx: &mut Context<Self>) -> Self {
         Self {
+            source: false,
             focus: cx.focus_handle(),
             text: String::new(),
             selection: 0..0,
@@ -50,6 +52,11 @@ impl Composer {
     }
     pub fn composing(&self) -> bool {
         self.marked.is_some()
+    }
+    pub fn source(cx: &mut Context<Self>) -> Self {
+        let mut editor = Self::new(cx);
+        editor.source = true;
+        editor
     }
     fn snapshot(&self) -> Snapshot {
         Snapshot {
@@ -171,6 +178,7 @@ impl Composer {
             .map(|i| cursor + i)
             .unwrap_or(self.text.len());
         match key.key.as_str() {
+            "enter" if self.source => self.replace_text_in_range(None, "\n", window, cx),
             "enter" if command && key.modifiers.shift => cx.emit(Submit(true)),
             "enter" if !key.modifiers.shift => cx.emit(Submit(false)),
             "enter" => self.replace_text_in_range(None, "\n", window, cx),
@@ -392,15 +400,20 @@ impl EntityInputHandler for Composer {
     }
 }
 impl Render for Composer {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let input = cx.entity();
         let height = self.height;
+        let cap = if self.source {
+            (window.viewport_size().height - px(260.)).max(px(80.))
+        } else {
+            px(176.)
+        };
         div()
             .id("composer-input")
             .debug_selector(|| "composer-input".into())
             .track_focus(&self.focus)
             .cursor(CursorStyle::IBeam)
-            .max_h(px(176.))
+            .max_h(cap)
             .overflow_y_scroll()
             .track_scroll(&self.scroll)
             .border_1()
@@ -547,7 +560,7 @@ impl Render for Composer {
                                     let cursor_y = position.y - bounds.top();
                                     let top = -scroll.y;
                                     // The viewport excludes the input's padding and border.
-                                    let visible = height.min(px(158.));
+                                    let visible = height.min(cap - px(18.));
                                     let bottom = top + visible;
                                     let next = if cursor_y < top {
                                         -cursor_y

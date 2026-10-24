@@ -10,6 +10,10 @@ use tree_sitter::{Language, Node, Parser};
 #[derive(Clone, Debug, PartialEq)]
 pub enum Target {
     Packet(String),
+    Commit {
+        workspace: String,
+        hash: String,
+    },
     Worktree {
         path: String,
         base: Option<String>,
@@ -66,6 +70,19 @@ pub struct Document {
 impl Target {
     pub fn read(&self, client: &Client) -> Result<(Document, Value), String> {
         let response: Response = match self {
+            Self::Commit { workspace, hash } => {
+                let data: Value = client.get(
+                    &format!("/api/panel/commits/{hash}"),
+                    &[("workspace", workspace)],
+                )?;
+                if !data["commit"].is_object() {
+                    return Err("Commit unavailable".into());
+                }
+                serde_json::from_value(
+                    json!({"diff":data["commit"]["diff"],"headSha":data["commit"]["hash"]}),
+                )
+                .map_err(|_| "Invalid commit diff")?
+            }
             Self::Packet(packet) => {
                 // Packet ids occupy exactly one path segment.
                 let id: String = url::form_urlencoded::byte_serialize(packet.as_bytes()).collect();
