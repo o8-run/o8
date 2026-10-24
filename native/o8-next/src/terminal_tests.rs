@@ -172,20 +172,41 @@ fn production_pty_to_gpui_terminal(cx: &mut TestAppContext) {
     }));
     // Resize the actual GPUI viewport. Its canvas computes the grid and sends
     // terminal-resize; the fixture reads the resulting kernel winsize.
-    cx.simulate_resize(size(px(768.), px(584.)));
-    draw(&pane, cx);
-    draw(&pane, cx);
-    let dimensions = pane.read_with(cx, |pane, _| pane.grid.lock().unwrap().size());
-    thread::sleep(Duration::from_millis(10));
-    command("size", cx);
-    until(&pane, cx, |pane| {
-        pane.grid
-            .lock()
-            .unwrap()
-            .text()
-            .contains(&format!("SIZE {} {}", dimensions.0, dimensions.1))
-    });
-    assert_eq!(dimensions, Size(96, 31));
+    for (width, height, expected) in [(768., 584., Size(92, 29)), (793., 607., Size(95, 30))] {
+        cx.simulate_resize(size(px(width), px(height)));
+        draw(&pane, cx);
+        draw(&pane, cx);
+        let (bounds, dimensions) = pane.read_with(cx, |pane, _| {
+            (pane.painted_bounds.get(), pane.grid.lock().unwrap().size())
+        });
+        // Desktop CSS: 12px panel padding on every side, plus xterm's 2px
+        // top/left content padding. The native status strip occupies 26px.
+        assert_eq!(
+            bounds.origin,
+            point(px(14.), px(40.)),
+            "terminal content must be inset"
+        );
+        assert_eq!(bounds.size, size(px(width - 26.), px(height - 52.)));
+        assert_eq!(dimensions, expected);
+        assert_eq!(
+            dimensions,
+            Size(
+                (f32::from(bounds.size.width) / 8.).floor() as usize,
+                (f32::from(bounds.size.height) / 18.).floor() as usize,
+            ),
+            "PTY columns/rows must use the visible canvas and unchanged 8x18px cells"
+        );
+        thread::sleep(Duration::from_millis(10));
+        command("size", cx);
+        until(&pane, cx, |pane| {
+            pane.grid
+                .lock()
+                .unwrap()
+                .text()
+                .contains(&format!("SIZE {} {}", dimensions.0, dimensions.1))
+        });
+        println!("terminal viewport={width}x{height} content={bounds:?} kernel-pty={dimensions:?}");
+    }
     // Quantify two distinct endpoints: local input dispatch -> CPU scene, and
     // input -> actual server/PTY echo -> first CPU scene containing that echo.
     let mut echo = vec![];

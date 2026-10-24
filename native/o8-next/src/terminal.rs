@@ -36,6 +36,8 @@ pub struct Pane {
     pub painted_bytes: Rc<Cell<u64>>,
     pub painted_cells: Rc<Cell<usize>>,
     pub painted_cursor: Rc<Cell<bool>>,
+    #[cfg(test)]
+    painted_bounds: Rc<Cell<Bounds<Pixels>>>,
     pub paints: Rc<Cell<usize>>,
     composition: String,
 }
@@ -65,6 +67,8 @@ impl Pane {
             painted_bytes: Rc::new(Cell::new(0)),
             painted_cells: Rc::new(Cell::new(0)),
             painted_cursor: Rc::new(Cell::new(false)),
+            #[cfg(test)]
+            painted_bounds: Rc::new(Cell::new(Bounds::default())),
             paints: Rc::new(Cell::new(0)),
             composition: String::new(),
         }
@@ -264,6 +268,8 @@ impl Render for Pane {
         let painted_bytes = self.painted_bytes.clone();
         let painted_cells = self.painted_cells.clone();
         let painted_cursor = self.painted_cursor.clone();
+        #[cfg(test)]
+        let painted_bounds = self.painted_bounds.clone();
         let paints = self.paints.clone();
         let focus = self.focus.clone();
         div()
@@ -295,119 +301,143 @@ impl Render for Pane {
                     .child(self.notice),
             )
             .child(
-                canvas(
-                    move |bounds, _, cx| {
-                        measured.update(cx, |this, cx| {
-                            let columns =
-                                (f32::from(bounds.size.width) / CELL_WIDTH).floor() as usize;
-                            let rows =
-                                (f32::from(bounds.size.height) / CELL_HEIGHT).floor() as usize;
-                            let dimensions = Size(columns.clamp(2, 500), rows.clamp(1, 300));
-                            if this.grid.lock().unwrap().resize(dimensions) {
-                                this.link.resize(dimensions);
-                                cx.notify();
-                            }
-                        });
-                    },
-                    move |bounds, _, window, cx| {
-                        window.handle_input(
-                            &focus,
-                            ElementInputHandler::new(bounds, view.clone()),
-                            cx,
-                        );
-                        let (cells, cursor, revision, bytes) = {
-                            let grid = grid.lock().unwrap();
-                            (grid.cells(), grid.cursor(), grid.revision, grid.bytes)
-                        };
-                        for cell in &cells {
-                            let origin = bounds.origin
-                                + point(
-                                    px(cell.x as f32 * CELL_WIDTH),
-                                    px(cell.y as f32 * CELL_HEIGHT),
+                // Match WorkspaceTerminalPanels' 12px panel padding and
+                // XtermPanel's additional 2px top/left content padding.
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .w_full()
+                    .pt(px(14.))
+                    .pl(px(14.))
+                    .pr(px(12.))
+                    .pb(px(12.))
+                    .child(
+                        canvas(
+                            move |bounds, _, cx| {
+                                measured.update(cx, |this, cx| {
+                                    let columns = (f32::from(bounds.size.width) / CELL_WIDTH)
+                                        .floor()
+                                        as usize;
+                                    let rows = (f32::from(bounds.size.height) / CELL_HEIGHT).floor()
+                                        as usize;
+                                    let dimensions =
+                                        Size(columns.clamp(2, 500), rows.clamp(1, 300));
+                                    if this.grid.lock().unwrap().resize(dimensions) {
+                                        this.link.resize(dimensions);
+                                        cx.notify();
+                                    }
+                                });
+                            },
+                            move |bounds, _, window, cx| {
+                                #[cfg(test)]
+                                painted_bounds.set(bounds);
+                                window.handle_input(
+                                    &focus,
+                                    ElementInputHandler::new(bounds, view.clone()),
+                                    cx,
                                 );
-                            if cell.background != u32::from(theme().code_background) >> 8 {
-                                window.paint_quad(fill(
-                                    Bounds::new(
-                                        origin,
-                                        size(px(cell.width as f32 * CELL_WIDTH), px(CELL_HEIGHT)),
-                                    ),
-                                    rgb(cell.background),
-                                ));
-                            }
-                            if cell.text == " " {
-                                continue;
-                            }
-                            let mut face = font(theme().font_mono);
-                            if cell.flags.contains(Flags::BOLD) {
-                                face.weight = gpui::FontWeight::BOLD;
-                            }
-                            if cell.flags.contains(Flags::ITALIC) {
-                                face.style = gpui::FontStyle::Italic;
-                            }
-                            let run = TextRun {
-                                len: cell.text.len(),
-                                font: face,
-                                color: rgb(cell.foreground).into(),
-                                background_color: None,
-                                underline: cell.flags.intersects(Flags::ALL_UNDERLINES).then_some(
-                                    gpui::UnderlineStyle {
-                                        thickness: px(1.),
-                                        color: None,
-                                        wavy: false,
-                                    },
-                                ),
-                                strikethrough: cell.flags.contains(Flags::STRIKEOUT).then_some(
-                                    gpui::StrikethroughStyle {
-                                        thickness: px(1.),
-                                        color: None,
-                                    },
-                                ),
-                            };
-                            let line = window.text_system().shape_line(
-                                cell.text.clone().into(),
-                                px(13.),
-                                &[run],
-                                None,
-                            );
-                            line.paint(origin, px(CELL_HEIGHT), window, cx)
-                                .expect("terminal glyph paint");
-                        }
-                        if let Some((x, y, shape)) = cursor {
-                            let width = cells
-                                .iter()
-                                .find(|cell| cell.x == x && cell.y == y)
-                                .map(|cell| cell.width)
-                                .unwrap_or(1) as f32;
-                            let origin = bounds.origin
-                                + point(px(x as f32 * CELL_WIDTH), px(y as f32 * CELL_HEIGHT));
-                            let (offset, dimensions) = match shape {
-                                CursorShape::Underline => (
-                                    point(px(0.), px(CELL_HEIGHT - 2.)),
-                                    size(px(CELL_WIDTH), px(2.)),
-                                ),
-                                CursorShape::Beam => {
-                                    (point(px(0.), px(0.)), size(px(2.), px(CELL_HEIGHT)))
+                                let (cells, cursor, revision, bytes) = {
+                                    let grid = grid.lock().unwrap();
+                                    (grid.cells(), grid.cursor(), grid.revision, grid.bytes)
+                                };
+                                for cell in &cells {
+                                    let origin = bounds.origin
+                                        + point(
+                                            px(cell.x as f32 * CELL_WIDTH),
+                                            px(cell.y as f32 * CELL_HEIGHT),
+                                        );
+                                    if cell.background != u32::from(theme().code_background) >> 8 {
+                                        window.paint_quad(fill(
+                                            Bounds::new(
+                                                origin,
+                                                size(
+                                                    px(cell.width as f32 * CELL_WIDTH),
+                                                    px(CELL_HEIGHT),
+                                                ),
+                                            ),
+                                            rgb(cell.background),
+                                        ));
+                                    }
+                                    if cell.text == " " {
+                                        continue;
+                                    }
+                                    let mut face = font(theme().font_mono);
+                                    if cell.flags.contains(Flags::BOLD) {
+                                        face.weight = gpui::FontWeight::BOLD;
+                                    }
+                                    if cell.flags.contains(Flags::ITALIC) {
+                                        face.style = gpui::FontStyle::Italic;
+                                    }
+                                    let run = TextRun {
+                                        len: cell.text.len(),
+                                        font: face,
+                                        color: rgb(cell.foreground).into(),
+                                        background_color: None,
+                                        underline: cell
+                                            .flags
+                                            .intersects(Flags::ALL_UNDERLINES)
+                                            .then_some(gpui::UnderlineStyle {
+                                                thickness: px(1.),
+                                                color: None,
+                                                wavy: false,
+                                            }),
+                                        strikethrough: cell
+                                            .flags
+                                            .contains(Flags::STRIKEOUT)
+                                            .then_some(gpui::StrikethroughStyle {
+                                                thickness: px(1.),
+                                                color: None,
+                                            }),
+                                    };
+                                    let line = window.text_system().shape_line(
+                                        cell.text.clone().into(),
+                                        px(13.),
+                                        &[run],
+                                        None,
+                                    );
+                                    line.paint(origin, px(CELL_HEIGHT), window, cx)
+                                        .expect("terminal glyph paint");
                                 }
-                                _ => (
-                                    point(px(0.), px(0.)),
-                                    size(px(CELL_WIDTH * width), px(CELL_HEIGHT)),
-                                ),
-                            };
-                            window.paint_quad(fill(
-                                Bounds::new(origin + offset, dimensions),
-                                theme().terminal_cursor,
-                            ));
-                        }
-                        painted_cells.set(cells.len());
-                        painted_cursor.set(cursor.is_some());
-                        painted.set(revision);
-                        painted_bytes.set(bytes);
-                        paints.set(paints.get() + 1);
-                    },
-                )
-                .flex_1()
-                .w_full()
-                .overflow_hidden(),
+                                if let Some((x, y, shape)) = cursor {
+                                    let width = cells
+                                        .iter()
+                                        .find(|cell| cell.x == x && cell.y == y)
+                                        .map(|cell| cell.width)
+                                        .unwrap_or(1)
+                                        as f32;
+                                    let origin = bounds.origin
+                                        + point(
+                                            px(x as f32 * CELL_WIDTH),
+                                            px(y as f32 * CELL_HEIGHT),
+                                        );
+                                    let (offset, dimensions) = match shape {
+                                        CursorShape::Underline => (
+                                            point(px(0.), px(CELL_HEIGHT - 2.)),
+                                            size(px(CELL_WIDTH), px(2.)),
+                                        ),
+                                        CursorShape::Beam => {
+                                            (point(px(0.), px(0.)), size(px(2.), px(CELL_HEIGHT)))
+                                        }
+                                        _ => (
+                                            point(px(0.), px(0.)),
+                                            size(px(CELL_WIDTH * width), px(CELL_HEIGHT)),
+                                        ),
+                                    };
+                                    window.paint_quad(fill(
+                                        Bounds::new(origin + offset, dimensions),
+                                        theme().terminal_cursor,
+                                    ));
+                                }
+                                painted_cells.set(cells.len());
+                                painted_cursor.set(cursor.is_some());
+                                painted.set(revision);
+                                painted_bytes.set(bytes);
+                                paints.set(paints.get() + 1);
+                            },
+                        )
+                        .size_full()
+                        .overflow_hidden(),
+                    ),
             )
     }
 }
