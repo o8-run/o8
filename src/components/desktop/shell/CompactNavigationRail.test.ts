@@ -86,11 +86,11 @@ it('keeps navigation usable with the chat list open or closed and reads fresh us
       await act(async () => button(label).click());
       expect(callback).toHaveBeenCalledOnce();
       expect(button(label).style.minWidth).toBe('44px');
-      expect(button(label).style.minHeight).toBe('44px');
+      expect(button(label).style.minHeight).toBe('var(--o8-navigation-target, 44px)');
     }
     expect(button('More navigation').nextElementSibling).toBe(button('PRs'));
     expect(button('More navigation').style.minWidth).toBe('44px');
-    expect(button('More navigation').style.minHeight).toBe('44px');
+    expect(button('More navigation').style.minHeight).toBe('var(--o8-navigation-target, 44px)');
     expect(host.querySelector('[aria-label="Handoffs"]')).toBeNull();
     await act(async () => button('Runtime usage').focus());
     expect(document.getElementById('o8-rail-usage-tooltip')?.textContent).toContain('40% used');

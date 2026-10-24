@@ -1,0 +1,362 @@
+{
+  "issue": 2878,
+  "baseCommit": "cdc3e6ea96eced47bdd5d3d04ee9a48919ba4261",
+  "fixtureChats": 72,
+  "runtime": "Node 22.23.4; Linux Chromium",
+  "countDefinition": "Fully visible row boxes within the scroll viewport, excluding partial rows and the 4px top / 32px bottom fades.",
+  "before": [
+    {
+      "size": {
+        "width": 1280,
+        "height": 720
+      },
+      "theme": "light",
+      "expanded": {
+        "visibleChats": 7,
+        "renderedChats": 72,
+        "rowHeight": 78,
+        "titleSize": "13.5px",
+        "railTarget": 44,
+        "railIcon": 19,
+        "horizontalOverflow": false,
+        "scrollbars": [
+          {
+            "width": "none",
+            "gutter": "auto",
+            "reserved": 0,
+            "webkitDisplay": "none"
+          },
+          {
+            "width": "none",
+            "gutter": "auto",
+            "reserved": 0,
+            "webkitDisplay": "none"
+          }
+        ]
+      },
+      "collapsed": {
+        "visibleChats": 0,
+        "renderedChats": 72,
+        "rowHeight": 0,
+        "titleSize": "13.5px",
+        "railTarget": 44,
+        "railIcon": 19,
+        "horizontalOverflow": false,
+        "scrollbars": [
+          {
+            "width": "none",
+            "gutter": "auto",
+            "reserved": 0,
+            "webkitDisplay": "none"
+          },
+          {
+            "width": "none",
+            "gutter": "auto",
+            "reserved": 0,
+            "webkitDisplay": "none"
+          }
+        ]
+      }
+    },
+    {
+      "size": {
+        "width": 1366,
+        "height": 768
+      },
+      "theme": "light",
+      "expanded": {
+        "visibleChats": 8,
+        "renderedChats": 72,
+        "rowHeight": 78,
+        "titleSize": "13.5px",
+        "railTarget": 44,
+        "railIcon": 19,
+        "horizontalOverflow": false,
+        "scrollbars": [
+          {
+            "width": "none",
+            "gutter": "auto",
+            "reserved": 0,
+            "webkitDisplay": "none"
+          },
+          {
+            "width": "none",
+            "gutter": "auto",
+            "reserved": 0,
+            "webkitDisplay": "none"
+          }
+        ]
+      },
+      "collapsed": {
+        "visibleChats": 0,
+        "renderedChats": 72,
+        "rowHeight": 0,
+        "titleSize": "13.5px",
+        "railTarget": 44,
+        "railIcon": 19,
+        "horizontalOverflow": false,
+        "scrollbars": [
+          {
+            "width": "none",
+            "gutter": "auto",
+            "reserved": 0,
+            "webkitDisplay": "none"
+          },
+          {
+            "width": "none",
+            "gutter": "auto",
+            "reserved": 0,
+            "webkitDisplay": "none"
+          }
+        ]
+      }
+    },
+    {
+      "size": {
+        "width": 1920,
+        "height": 1080
+      },
+      "theme": "light",
+      "expanded": {
+        "visibleChats": 12,
+        "renderedChats": 72,
+        "rowHeight": 78,
+        "titleSize": "13.5px",
+        "railTarget": 44,
+        "railIcon": 19,
+        "horizontalOverflow": false,
+        "scrollbars": [
+          {
+            "width": "none",
+            "gutter": "auto",
+            "reserved": 0,
+            "webkitDisplay": "none"
+          },
+          {
+            "width": "none",
+            "gutter": "auto",
+            "reserved": 0,
+            "webkitDisplay": "none"
+          }
+        ]
+      },
+      "collapsed": {
+        "visibleChats": 0,
+        "renderedChats": 72,
+        "rowHeight": 0,
+        "titleSize": "13.5px",
+        "railTarget": 44,
+        "railIcon": 19,
+        "horizontalOverflow": false,
+        "scrollbars": [
+          {
+            "width": "none",
+            "gutter": "auto",
+            "reserved": 0,
+            "webkitDisplay": "none"
+          },
+          {
+            "width": "none",
+            "gutter": "auto",
+            "reserved": 0,
+            "webkitDisplay": "none"
+          }
+        ]
+      }
+    }
+  ],
+  "after": [
+    {
+      "size": {
+        "width": 1280,
+        "height": 720
+      },
+      "theme": "light",
+      "expanded": {
+        "visibleChats": 9,
+        "renderedChats": 72,
+        "rowHeight": 64,
+        "titleSize": "13.5px",
+        "railTarget": 32,
+        "railIcon": 16,
+        "horizontalOverflow": false,
+        "scrollbars": [
+          {
+            "width": "none",
+            "gutter": "auto",
+            "reserved": 0,
+            "webkitDisplay": "none"
+          },
+          {
+            "width": "none",
+            "gutter": "auto",
+            "reserved": 0,
+            "webkitDisplay": "none"
+          }
+        ]
+      },
+      "collapsed": {
+        "visibleChats": 0,
+        "renderedChats": 72,
+        "rowHeight": 0,
+        "titleSize": "13.5px",
+        "railTarget": 32,
+        "railIcon": 16,
+        "horizontalOverflow": false,
+        "scrollbars": [
+          {
+            "width": "none",
+            "gutter": "auto",
+            "reserved": 0,
+            "webkitDisplay": "none"
+          },
+          {
+            "width": "none",
+            "gutter": "auto",
+            "reserved": 0,
+            "webkitDisplay": "none"
+          }
+        ]
+      }
+    },
+    {
+      "size": {
+        "width": 1366,
+        "height": 768
+      },
+      "theme": "light",
+      "expanded": {
+        "visibleChats": 10,
+        "renderedChats": 72,
+        "rowHeight": 64,
+        "titleSize": "13.5px",
+        "railTarget": 32,
+        "railIcon": 16,
+        "horizontalOverflow": false,
+        "scrollbars": [
+          {
+            "width": "none",
+            "gutter": "auto",
+            "reserved": 0,
+            "webkitDisplay": "none"
+          },
+          {
+            "width": "none",
+            "gutter": "auto",
+            "reserved": 0,
+            "webkitDisplay": "none"
+          }
+        ]
+      },
+      "collapsed": {
+        "visibleChats": 0,
+        "renderedChats": 72,
+        "rowHeight": 0,
+        "titleSize": "13.5px",
+        "railTarget": 32,
+        "railIcon": 16,
+        "horizontalOverflow": false,
+        "scrollbars": [
+          {
+            "width": "none",
+            "gutter": "auto",
+            "reserved": 0,
+            "webkitDisplay": "none"
+          },
+          {
+            "width": "none",
+            "gutter": "auto",
+            "reserved": 0,
+            "webkitDisplay": "none"
+          }
+        ]
+      }
+    },
+    {
+      "size": {
+        "width": 1920,
+        "height": 1080
+      },
+      "theme": "light",
+      "expanded": {
+        "visibleChats": 12,
+        "renderedChats": 72,
+        "rowHeight": 78,
+        "titleSize": "13.5px",
+        "railTarget": 44,
+        "railIcon": 19,
+        "horizontalOverflow": false,
+        "scrollbars": [
+          {
+            "width": "none",
+            "gutter": "auto",
+            "reserved": 0,
+            "webkitDisplay": "none"
+          },
+          {
+            "width": "none",
+            "gutter": "auto",
+            "reserved": 0,
+            "webkitDisplay": "none"
+          }
+        ]
+      },
+      "collapsed": {
+        "visibleChats": 0,
+        "renderedChats": 72,
+        "rowHeight": 0,
+        "titleSize": "13.5px",
+        "railTarget": 44,
+        "railIcon": 19,
+        "horizontalOverflow": false,
+        "scrollbars": [
+          {
+            "width": "none",
+            "gutter": "auto",
+            "reserved": 0,
+            "webkitDisplay": "none"
+          },
+          {
+            "width": "none",
+            "gutter": "auto",
+            "reserved": 0,
+            "webkitDisplay": "none"
+          }
+        ]
+      }
+    }
+  ],
+  "menuScrollbar": {
+    "before": {
+      "width": "auto",
+      "reserved": 15,
+      "webkitDisplay": "inline"
+    },
+    "after": {
+      "width": "none",
+      "reserved": 0,
+      "webkitDisplay": "none"
+    }
+  },
+  "clickTargetMinimum": {
+    "before": 16,
+    "afterAtLeast": 28
+  },
+  "tests": [
+    "tests/navigation-density-real-path.test.ts",
+    "tests/sidebar-review-layout-real-path.test.ts",
+    "src/components/desktop/shell/CompactNavigationRail.test.ts"
+  ],
+  "redTail": [
+    "Test Files  1 failed (1)",
+    "Tests  6 failed (6)"
+  ],
+  "greenTail": [
+    "Test Files  3 passed (3)",
+    "Tests  20 passed (20)"
+  ],
+  "remaining": [
+    "Native-app reproduction, OS always-show verification and native screenshots require the operator.",
+    "Collapsed navigation hides the chat column; more visible collapsed chats remains unmet."
+  ]
+}

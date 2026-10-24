@@ -27,9 +27,10 @@ import { trackWorkspacePaneDrag } from '@/lib/tiles/workspace-pane-drag';
 const railButton: CSSProperties = {
   position: 'relative',
   width: 44,
-  height: 44,
+  height: 'var(--o8-navigation-target, 44px)',
   minWidth: 44,
-  minHeight: 44,
+  minHeight: 'var(--o8-navigation-target, 44px)',
+  flexShrink: 0,
   padding: 0,
   display: 'flex',
   alignItems: 'center',

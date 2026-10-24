@@ -3982,6 +3982,12 @@
       ]
     },
     {
+      "path": "tests/navigation-density-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/next-brain-real-path.test.ts",
       "reasons": [
         "child-process",
