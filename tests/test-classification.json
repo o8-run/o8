@@ -4120,6 +4120,14 @@
       ]
     },
     {
+      "path": "tests/next-syntax-retry-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/next-terminal-real-path.test.ts",
       "reasons": [
         "child-process",

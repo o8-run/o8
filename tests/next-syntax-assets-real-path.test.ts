@@ -65,3 +65,22 @@ it('does not cache an upstream failure and lets the existing view retry', async 
   expect((await GET(request(path), params('themes', '4.5.0', 'nord.mjs'))).status).toBe(502);
   expect((await GET(request(path), params('themes', '4.5.0', 'nord.mjs'))).status).toBe(200);
 });
+
+it('serves attempt directories while keeping embedded grammar imports in that attempt', async () => {
+  const retryModulePath = '@/app/syntax/attempt/[attempt]/[kind]/[version]/[name]/route';
+  const { GET } = await import(retryModulePath);
+  const source = readFileSync(resolve('node_modules/@shikijs/langs/dist/vue.mjs'), 'utf8');
+  const upstream = vi.fn(async () => new Response(source));
+  vi.stubGlobal('fetch', upstream);
+  const path = '/syntax/attempt/attempt-fixture/langs/4.5.0/vue.mjs';
+  const context = { params: Promise.resolve({ kind: 'langs', version: '4.5.0', attempt: 'attempt-fixture', name: 'vue.mjs' }) };
+  const response = await GET(request(path), context);
+  expect(response.status).toBe(200);
+  expect(await response.text()).toBe(source);
+  expect(upstream).toHaveBeenCalledWith('https://cdn.jsdelivr.net/npm/@shikijs/langs@4.5.0/dist/vue.mjs', expect.anything());
+  const dependencies = [...source.matchAll(/from ['"](.+?\.mjs)['"]/g)];
+  expect(dependencies.length).toBeGreaterThan(0);
+  for (const dependency of dependencies) {
+    expect(new URL(dependency[1], request(path).url).pathname).toContain('/syntax/attempt/attempt-fixture/langs/4.5.0/');
+  }
+});

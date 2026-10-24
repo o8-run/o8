@@ -1,12 +1,17 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { NextRequest } from 'next/server';
 import { afterAll, expect, it, vi } from 'vitest';
 import { chromium, type Browser } from 'playwright-core';
 
-const root = mkdtempSync(join(tmpdir(), 'o8-playwright-runtime-'));
+const fixture = mkdtempSync(join(tmpdir(), 'o8-playwright-runtime-'));
+const checkout = join(fixture, 'checkout');
+const root = join(fixture, 'checkout-link');
+mkdirSync(checkout);
+// Model platforms whose temporary directory is exposed through an alias.
+symlinkSync(checkout, root, 'junction');
 execFileSync('git', ['init', '-q', '-b', 'main', root]);
 const image = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 let viewport = { width: 728, height: 800 };
@@ -32,7 +37,7 @@ const browser = { newContext: vi.fn(async () => context), close: vi.fn(async () 
 // The runtime package is real; only its browser-process boundary is a fixture.
 const launch = vi.spyOn(chromium, 'launch').mockResolvedValue(browser as unknown as Browser);
 const { closeDb } = await import('@/lib/db');
-afterAll(() => { launch.mockRestore(); closeDb(); rmSync(root, { recursive: true, force: true }); });
+afterAll(() => { launch.mockRestore(); closeDb(); rmSync(fixture, { recursive: true, force: true }); });
 
 it('keeps Playwright available for browser-engine actions and live-view frames', async () => {
   const { POST } = await import('@/app/api/browser/engine/act/route');
@@ -58,10 +63,10 @@ it('keeps Playwright available for authenticated visualization screenshot previe
   const { addRepo } = await import('@/lib/repos/registry');
   const { getOrCreateWsToken } = await import('@/lib/ws-auth');
   const { POST } = await import('@/app/api/visualizations/preview/route');
-  await addRepo(root);
+  const repo = await addRepo(root);
   const response = await POST(new Request('http://localhost/api/visualizations/preview', {
     method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${getOrCreateWsToken()}` },
-    body: JSON.stringify({ repoPath: root, threadId: 'thoughts-preview-fixture', html: '<h1>Fixture chart</h1>', width: 728 }),
+    body: JSON.stringify({ repoPath: repo.localPath, threadId: 'thoughts-preview-fixture', html: '<h1>Fixture chart</h1>', width: 728 }),
   }));
   const result = await response.json();
   expect(response.status, JSON.stringify(result)).toBe(200);
