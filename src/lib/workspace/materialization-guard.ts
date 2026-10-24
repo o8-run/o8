@@ -1,3 +1,5 @@
+import { getLane } from '@/lib/lane/registry';
+import { readStandingLane } from '@/lib/lane/standing-store';
 import path from 'node:path';
 
 import { findLaneByPacket } from '@/lib/lane/registry';
@@ -86,7 +88,15 @@ export async function inspectOwnedWorkspaceMaterialization(
       // receipt below, so an arbitrary cwd cannot authorize itself.
       let packetRefusal: string | null = null;
       if (matches.length === 0 && input.binding.repositoryUuid === null
-        && isManagedPacketWorktreeId(path.basename(bindingPath), packetId)) {
+        && (isManagedPacketWorktreeId(path.basename(bindingPath), packetId)
+          || (() => {
+            const lane = input.laneId ? getLane(input.laneId) : null;
+            const standing = lane ? readStandingLane(lane.id) : null;
+            return Boolean(lane && standing && !standing.stopped && !standing.removed
+              && lane.packetId === packetId && lane.sessionKey === input.surfaceId
+              && lane.worktreePath && path.resolve(lane.worktreePath) === bindingPath
+              && standing.tasks.some(task => task.id === packetId && ['dispatching', 'running', 'done'].includes(task.phase)));
+          })())) {
         const lane = dependencies.findLaneByPacket(packetId);
         const laneRepoPath = lane?.repoPath?.trim() ? path.resolve(lane.repoPath) : null;
         // A packet-bound launch always carries its lane id, so a blank one is

@@ -1,3 +1,4 @@
+import { readStandingLane } from './standing-store';
 import { assertLaunchAttachment } from '@/lib/lane/commands-launch-admission';
 import { withPreRunLaunchCancellation } from '@/lib/lane/pre-run-cancellation';
 import { assertOwnedActionGuard } from '@/lib/runtimes/shared/owned-session/action-admission';
@@ -65,6 +66,7 @@ async function launchSessionInner(
   actor: LaneEventActor,
 ): Promise<LaneCommandResult> {
   assertOwnedActionGuard();
+  if (readStandingLane(command.laneId)?.stopped) return { ok: false, laneId: command.laneId, note: 'Standing lane is stopped.' };
   const lane = getLane(command.laneId);
   if (!lane) return { ok: false, laneId: command.laneId, note: 'Lane not found.' };
   if (!listDispatchableRuntimes({ includeExperimental: true }).includes(lane.runtime) && !(lane.runtime === 'cloud' && lane.packetId)) {

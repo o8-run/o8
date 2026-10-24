@@ -45,6 +45,7 @@ import { runInbox } from './commands/inbox.js';
 import { runConversationPrs } from './commands/conversation-prs.js';
 import { runHistory } from './commands/history.js';
 import { runLead } from './commands/lead.js';
+import { runStandingLane, STANDING_LANE_ACTIONS } from './commands/standing-lane.js';
 import { runLaneTouches } from './commands/lane.js';
 import { runArtifact } from './commands/artifact.js';
 import { runLease } from './commands/lease.js';
@@ -282,6 +283,7 @@ commands:
   msg send|inbox       send a bounded agent message (--reply-to ID, --close) or read this session's inbox
   presence list|join   list live sessions or register an explicit external name
   cortex observe       propose a worker observation for the orchestrator
+  lane create|list|send|status|transcript|steer|stop|remove  standing worker lanes
   lane touches         active lanes touching a path or packet diff
   artifact create      attach an interactive task artifact to this packet or a thread (--title --html <file> --actions <file.json>)
   artifact status|receipts <id>  writability + last receipt, or every submission
@@ -483,6 +485,7 @@ async function dispatch(args: ParsedArgs): Promise<number> {
       return runArtifact(args.mode, secondary, args.rest);
     case 'lane': {
       if (secondary === 'touches') return runLaneTouches(args.mode, args.rest);
+      if (STANDING_LANE_ACTIONS.includes(secondary)) return runStandingLane(args.mode, secondary, args.rest);
       throw unknownSubcommandError('lane', secondary);
     }
     case 'lease':

@@ -4,6 +4,7 @@ import type { CloseUnmergedDisposition } from '@/lib/orchestrator/close-unmerged
 export const PACKET_RECEIPT_SCHEMA = 'o8/packet-receipt/v1' as const;
 
 export type PacketDisposition =
+  | { kind: 'pr_opened'; branch: string; commit: string; prNumber: number; verification: string[]; openedAt: string }
   | {
     kind: 'merged';
     mergeCommit: string;
@@ -53,6 +54,7 @@ export interface UnsignedPacketReceipt {
     baseBranch: string;
   };
   disposition: PacketDisposition;
+  task?: { branch: string; commit: string; prNumber: number; verification: string[] };
   reviews: PacketReceiptReview[];
   approvals: PacketReceiptApproval[];
   runtime: string;

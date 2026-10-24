@@ -304,8 +304,8 @@ export function getDispatchBlocker(
   packet: OrchestratorPacket,
   allPackets: OrchestratorPacket[],
 ): string | null {
+  if (packet.standingLaneId) return 'Standing lane owns sequential dispatch.';
   const candidate = packet.status === 'recovering' ? clearStaleLaneBinding(packet) : packet;
-
   // #1391 — salvaged work is not a fault to heal. A packet whose latest lane
   // sits in reviewing/merging (silent-exit salvage, open PR, approved review)
   // must never auto-redispatch, whatever churn its status/queueState went

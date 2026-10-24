@@ -1,3 +1,4 @@
+import { holdStandingLane, readStandingLane } from './standing-store';
 import { withWorkAdmission } from '@/lib/app-update/work-launch-admission';
 /**
  * Lane Command Bus
@@ -223,17 +224,16 @@ async function dispatchUnlocked(
     }
 
     case 'send_turn': {
+      if (readStandingLane(command.laneId)?.stopped) return { ok: false, laneId: command.laneId, note: 'Standing lane is stopped.' };
       const lane = getLane(command.laneId);
       if (!lane) return { ok: false, laneId: command.laneId, note: 'Lane not found.' };
       if (!lane.sessionKey) return { ok: false, laneId: command.laneId, note: 'No active session on this lane.' };
 
       try {
         const { performRuntimeAction } = await import('@/lib/runtime/actions');
-        const result = await performRuntimeAction({
-          action: 'steer',
-          surfaceId: lane.sessionKey,
-          message: command.message,
-        });
+        const result = readStandingLane(lane.id)
+          ? await (await import('@/lib/runtimes')).getRuntime(lane.runtime)!.resume(lane.sessionKey, command.message)
+          : await performRuntimeAction({ action: 'steer', surfaceId: lane.sessionKey, message: command.message });
 
         if (result.ok) {
           rebindLaneSessionIfChanged(command.laneId, lane.sessionKey, result.sessionKey, actor);
@@ -271,6 +271,7 @@ async function dispatchUnlocked(
     }
 
     case 'stop': {
+      holdStandingLane(command.laneId);
       const lane = getLane(command.laneId);
       if (!lane) return { ok: false, laneId: command.laneId, note: 'Lane not found.' };
 
@@ -280,7 +281,8 @@ async function dispatchUnlocked(
       //    state under the same lock — setting operatorStopped + held atomically
       //    here means getDispatchBlocker rejects every relaunch path before the
       //    interrupt can race a re-dispatch in. (2026-06-22)
-      if (lane.packetId) {
+      const standing = readStandingLane(lane.id);
+      if (lane.packetId && (!standing || standing.tasks.some(task => task.phase === 'running' || task.phase === 'dispatching'))) {
         try {
           if (!await persistLanePacketHold(lane.packetId, lane)) {
             return {
@@ -570,6 +572,7 @@ async function dispatchUnlocked(
     }
 
     case 'create_pr': {
+      if (readStandingLane(command.laneId)?.stopped) return { ok: false, laneId: command.laneId, note: 'Standing lane is stopped.' };
       const lane = getLane(command.laneId);
       if (!lane) return { ok: false, laneId: command.laneId, note: 'Lane not found.' };
       if (!lane.worktreePath) return { ok: false, laneId: command.laneId, note: 'No worktree to create PR from. Lane is on the main working tree.' };
@@ -632,6 +635,7 @@ async function dispatchUnlocked(
         });
         if (governanceDrift) return governanceDrift;
 
+        if (readStandingLane(command.laneId)?.stopped) return { ok: false, laneId: command.laneId, note: 'Standing lane is stopped.' };
         setLaneStatus(command.laneId, 'merging', actor, 'creating_pr');
 
         try {
@@ -709,6 +713,7 @@ async function dispatchUnlocked(
         });
         if (publicationGovernanceDrift) return publicationGovernanceDrift;
 
+        if (readStandingLane(command.laneId)?.stopped) throw new Error('Standing lane was stopped before publication.');
         // Push the immutable reviewed commit, never the mutable local branch.
         await laneGit(lockedLane.worktreePath, lockedLane.repoPath, [
           'push',
@@ -716,6 +721,7 @@ async function dispatchUnlocked(
           `${reviewedSnapshotSha}:refs/heads/${lockedLane.branch}`,
         ]);
 
+        if (readStandingLane(command.laneId)?.stopped) throw new Error('Standing lane was stopped before PR creation.');
         // Create PR via gh CLI
         const prTitle = lockedLane.label || `${lockedLane.branch}`;
         const prResult = await materializationAwareExecFile('gh', [
@@ -746,7 +752,7 @@ async function dispatchUnlocked(
         const updated = getLane(command.laneId);
         return { ok: true, laneId: command.laneId, note: `PR created: ${prUrl}${associationNote}`, lane: updated ?? undefined };
         } catch (err) {
-          setLaneStatus(command.laneId, 'reviewing', 'system', 'pr_failed');
+          if (!readStandingLane(command.laneId)?.stopped) setLaneStatus(command.laneId, 'reviewing', 'system', 'pr_failed');
           const message = err instanceof Error ? err.message : 'PR creation failed.';
           return { ok: false, laneId: command.laneId, note: message };
         }
@@ -755,6 +761,7 @@ async function dispatchUnlocked(
     }
 
     case 'merge': {
+      if (readStandingLane(command.laneId)) return { ok: false, laneId: command.laneId, note: 'Standing worker lanes never merge.' };
       const lane = getLane(command.laneId);
       if (!lane) return { ok: false, laneId: command.laneId, note: 'Lane not found.' };
       const spokenEvidence = validateSpokenReviewEvidenceBundle(command);

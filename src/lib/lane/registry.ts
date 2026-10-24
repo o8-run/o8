@@ -397,7 +397,7 @@ export function findLaneByRepoAndBranch(repoPath: string, branch: string): Lane 
 
 export function updateLane(
   laneId: string,
-  updates: Partial<Pick<Lane, 'status' | 'outcome' | 'outcomeNote' | 'model' | 'sessionKey' | 'worktreePath' | 'writerToken' | 'label' | 'lastHeartbeatAt' | 'lastEventAt' | 'lastEventLabel' | 'packetId' | 'prNumber'>>,
+  updates: Partial<Pick<Lane, 'status' | 'outcome' | 'outcomeNote' | 'model' | 'sessionKey' | 'worktreePath' | 'writerToken' | 'label' | 'lastHeartbeatAt' | 'lastEventAt' | 'lastEventLabel' | 'packetId' | 'prNumber' | 'branch'>>,
   actor: LaneEventActor = 'system', eventPayload: Record<string, unknown> = {},
 ): Lane | null {
   const db = getSqlite();
@@ -428,7 +428,7 @@ export function updateLane(
       'lastHeartbeatAt',
       'lastEventAt',
       'lastEventLabel',
-      'packetId', 'prNumber',
+      'packetId', 'prNumber', 'branch',
     ];
 
     for (const key of updatableKeys) {

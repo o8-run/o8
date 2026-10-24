@@ -115,7 +115,7 @@ function queryButtonLabel(kind: TruthQueryKind, busyKind: TruthQueryKind | null)
 function dispositionWhen(receipt: PacketReceipt): string {
   return receipt.disposition.kind === 'merged'
     ? receipt.disposition.releasedAt
-    : receipt.disposition.closedAt;
+    : receipt.disposition.kind === 'pr_opened' ? receipt.disposition.openedAt : receipt.disposition.closedAt;
 }
 
 function answerState(receipt: PacketReceipt): string {

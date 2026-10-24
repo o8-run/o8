@@ -272,6 +272,7 @@ function mergedSummary(receipt: PacketReceipt): string {
   if (receipt.disposition.kind === 'merged') {
     return `Packet ${receipt.packetId} (${receipt.packetTitle}) merged as ${receipt.disposition.mergeCommit} at ${receipt.disposition.releasedAt}.`;
   }
+  if (receipt.disposition.kind === 'pr_opened') return `Packet ${receipt.packetId} (${receipt.packetTitle}) opened pull request #${receipt.disposition.prNumber} from ${receipt.disposition.branch} at ${receipt.disposition.commit}.`;
   return `Packet ${receipt.packetId} (${receipt.packetTitle}) was discarded as ${receipt.disposition.disposition} at ${receipt.disposition.closedAt}: ${receipt.disposition.reason}`;
 }
 

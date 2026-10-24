@@ -1,3 +1,4 @@
+import { readStandingLane } from '@/lib/lane/standing-store';
 import { signalBridgeTerminalSession } from '@/lib/runtime/pty-bridge';
 import { timestampMillis } from '@/lib/util/relative-age';
 import { assertOwnedSessionProcessIdentity } from './process-identity';
@@ -102,6 +103,8 @@ export function createFleetComputer({
 
     const now = Date.now();
     const sessions = allSessions.filter((session) => {
+      const standing = session.laneId ? readStandingLane(session.laneId) : null;
+      if (standing && !standing.removed) return true;
       if (session.activeRun || session.capacityWait) return true;
       const latest = latestRun(session);
       const lastActivityStr = latest?.finishedAt ?? latest?.startedAt ?? session.updatedAt;

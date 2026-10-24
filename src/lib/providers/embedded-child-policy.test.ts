@@ -98,6 +98,23 @@ describe('generated helper child creation after delayed IPC', () => {
     expect(JSON.parse(readFileSync(input.marker, 'utf8'))).toEqual({});
   });
 
+  it.each([false, true])('waits for a brief launch lock and revalidates policy after release (rotated=%s)', async rotated => {
+    const input = fixture();
+    const lock = new Database(join(input.directory, '.provider-keys.lock'));
+    let release: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const result = await delayed(input, { OPENAI_API_KEY: 'current', O8_CHILD_CREDENTIAL_POLICY: input.stamp }, () => {
+        lock.exec('BEGIN EXCLUSIVE');
+        release = setTimeout(() => {
+          if (rotated) writeFileSync(join(input.directory, 'provider-launch-policy.json'), '{"version":1,"epoch":"changed"}');
+          lock.close();
+        }, 150);
+      });
+      expect(result.ok).toBe(!rotated);
+      expect(existsSync(input.marker)).toBe(!rotated);
+    } finally { clearTimeout(release); if (lock.open) lock.close(); }
+  });
+
   it('refuses a nested spawn while the shared SQLite lock is held', async () => {
     const input = fixture();
     const lock = new Database(join(input.directory, '.provider-keys.lock'));

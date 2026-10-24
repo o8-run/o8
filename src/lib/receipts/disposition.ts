@@ -56,6 +56,14 @@ export function buildDiscardedPacketDisposition(input: {
 export function parsePacketDisposition(value: unknown): PacketDisposition | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const record = value as Record<string, unknown>;
+  if (record.kind === 'pr_opened') {
+    if (typeof record.branch !== 'string' || typeof record.commit !== 'string'
+      || typeof record.prNumber !== 'number' || !Number.isInteger(record.prNumber) || record.prNumber < 1
+      || !Array.isArray(record.verification) || !record.verification.every(item => typeof item === 'string')
+      || typeof record.openedAt !== 'string') return null;
+    return { kind: 'pr_opened', branch: record.branch, commit: record.commit, prNumber: record.prNumber,
+      verification: record.verification, openedAt: record.openedAt };
+  }
   if (record.kind === 'merged') {
     if (
       typeof record.mergeCommit !== 'string'

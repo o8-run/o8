@@ -351,3 +351,10 @@ describe('outside worker split broker', () => {
     expect(mounts).toEqual(['thread-parent']);
   });
 });
+
+it('keeps the standing worker pane when its task packet is archived', () => {
+  queueOutsideWorkerSplit({ sessionKey: 'codex-owned:standing-pane', runtime: 'codex',
+    repoPath: '/tmp/standing-fixture', packetId: 'standing-task', laneId: 'lane-standing' });
+  expect(outsideWorkerSessionKeysForSettledPackets([{ id: 'standing-task', status: 'archived',
+    releaseState: 'pending', standingLaneId: 'lane-standing' }])).toEqual([]);
+});

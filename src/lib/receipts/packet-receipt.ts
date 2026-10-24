@@ -205,6 +205,8 @@ async function buildPacketReceipt(input: {
       baseBranch: input.lane.baseBranch,
     },
     disposition: input.disposition,
+    ...(input.disposition.kind === 'pr_opened' ? { task: { branch: input.disposition.branch,
+      commit: input.disposition.commit, prNumber: input.disposition.prNumber, verification: input.disposition.verification } } : {}),
     reviews: collectReviews(getLaneEvents(input.lane.id, 10_000),
       new Map(listReviewCosts([input.packet.id]).map((turn) => [turn.reviewTurnId, turn.payer]))),
     approvals: collectApprovals(input.packet.id, input.lane),

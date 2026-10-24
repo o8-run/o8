@@ -1,3 +1,4 @@
+import { readStandingLane } from '@/lib/lane/standing-store';
 import { findLaneBySession, setLaneStatus, updateLane } from '@/lib/lane/registry';
 import { probeNoChangesProduced } from '@/lib/lane/no-changes-produced';
 import type { Lane } from '@/lib/lane/types';
@@ -36,6 +37,11 @@ export async function handleAgentCompletion(
 ): Promise<AgentCompletionDecision | void> {
   const lane = findLaneBySession(surfaceId);
   if (!lane) return;
+  if (readStandingLane(lane.id)) {
+    const { reconcileStandingLane } = await import('@/lib/lane/standing');
+    await reconcileStandingLane(lane.id);
+    return;
+  }
   const handoffTurn = completionHandoffTurnCheck(lane);
   const guard = createCompletionTurnGuard(lane, { checkCurrent: handoffTurn.check });
   const { enqueueAutoReview, triggerHeadlessSprintTick,

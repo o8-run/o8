@@ -1,5 +1,7 @@
 'use client';
 
+import { workerPacketForSession } from '@/lib/orchestrator/worker-session-packet';
+
 /**
  * SessionTranscriptPane — sessionKey-only transcript surface.
  *
@@ -59,7 +61,7 @@ export function SessionTranscriptPane({
     return () => { stopRefresh(); controller.abort(); };
   }, [agent, sessionKey]);
   const packet = useMemo(
-    () => data?.missionState?.packets.find((entry) => entry.lane?.sessionKey === sessionKey) ?? null,
+    () => workerPacketForSession(data?.missionState?.packets ?? [], sessionKey),
     [data?.missionState?.packets, sessionKey],
   );
 

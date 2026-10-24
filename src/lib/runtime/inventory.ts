@@ -1,3 +1,4 @@
+import { projectStandingWorkers } from '@/lib/lane/standing-presentation';
 // Inventory aggregation. See docs/internals/runtime-adapter-contract.md
 import { existsSync } from 'node:fs';
 import os from 'node:os';
@@ -525,7 +526,7 @@ async function buildCliRuntimeSnapshot(options: { fresh: boolean }): Promise<Fle
     new Set(agents.map((agent) => agent.sessionKey)),
   );
   agents.push(...fallbackAgents);
-  const visibleAgents = applyHuddleLaneStatus(agents);
+  const visibleAgents = projectStandingWorkers(applyHuddleLaneStatus(agents));
 
   const liveSessionKeys = new Set(
     [...discovered, ...resolvedDiscoveredAll.filter(({ session }) => fallbackAgents.some((agent) => agent.sessionKey === session.sessionKey))]

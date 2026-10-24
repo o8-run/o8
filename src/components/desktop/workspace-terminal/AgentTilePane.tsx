@@ -247,10 +247,11 @@ function useAgentTileStickToBottom(active: boolean, changeKey: string, hasConten
 }
 
 export function canSteerAgentState(
-  agent: Pick<FleetAgent, 'status'> | null,
+  agent: Pick<FleetAgent, 'status' | 'standingLane'> | null,
   packet: Pick<OrchestratorPacket, 'status' | 'blockedReason'> | null | undefined,
   sessionKey?: string,
 ): boolean {
+  if (agent?.standingLane) return !agent.standingLane.stopped;
   const agentStatus = (agent?.status ?? '').toLowerCase();
   const packetStatus = (packet?.status ?? '').toLowerCase();
   const blockedReason = (packet?.blockedReason ?? '').toLowerCase();
@@ -308,7 +309,7 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
   const loadingFallbackRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
   const name = useMemo(() => displayName(agent, packet, sessionKey), [agent, packet, sessionKey]);
-  const displayTitle = shortWorkerTitle({ label: packet ? packet.title : agent?.currentTask || agent?.name, branch: packet?.branchTarget, fallback: name });
+  const displayTitle = shortWorkerTitle({ label: agent?.standingLane ? agent.currentTask : packet ? packet.title : agent?.currentTask || agent?.name, branch: packet?.branchTarget, fallback: name });
   const displayEntries = useMemo(() => normalizeAgentTileTranscript(
     entries,
     name,
@@ -484,7 +485,7 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
       }}
     >
       <WorkerPaneHeader title={displayTitle} branch={packet?.branchTarget} issueNumber={packet?.issue?.number}
-        runtime={getRuntimeCapability(runtime).label} model={modelLabel} compact={compact} status={status}
+        queueDepth={agent?.standingLane?.queueDepth} runtime={getRuntimeCapability(runtime).label} model={modelLabel} compact={compact} status={status}
         statusLabel={statusEvidence ? terminalStatusCaption(statusEvidence)
           : packet?.status === 'archived' ? 'Archived' : packet?.status === 'released' ? 'Complete' : STATUS_META[status].label}
         actions={<>

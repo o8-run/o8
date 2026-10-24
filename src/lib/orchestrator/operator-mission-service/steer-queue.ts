@@ -92,12 +92,13 @@ function reconcileAbandonedSend(row: QueueRow, event: LaneEvent): void {
 }
 
 /** The existing authenticated server wake owns delivery, including after restart. */
-export async function drainQueuedPacketSteers(): Promise<void> {
+export async function drainQueuedPacketSteers(laneId?: string): Promise<void> {
   const { deliverQueuedPacketSteer } = await import('./steer');
   // One message per lane per wake preserves FIFO even if inventory lags a new turn.
   const lanes = new Set<string>();
   let attempted = 0;
   for (const row of openSteers()) {
+    if (laneId && row.lane_id !== laneId) continue;
     if (lanes.has(row.lane_id)) continue;
     lanes.add(row.lane_id);
     const event: LaneEvent = { id: row.id, laneId: row.lane_id, verb: 'steered_packet',
@@ -107,4 +108,8 @@ export async function drainQueuedPacketSteers(): Promise<void> {
     // A refusal has its own persisted receipt and must not block other workers.
     await deliverQueuedPacketSteer(event).catch(() => {});
   }
+}
+
+export function hasQueuedPacketSteers(laneId: string): boolean {
+  return openSteers().some(row => row.lane_id === laneId);
 }

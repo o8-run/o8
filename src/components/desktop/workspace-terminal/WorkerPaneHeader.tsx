@@ -13,9 +13,9 @@ export const WORKER_ICON_BUTTON: CSSProperties = {
 };
 const ellipsis: CSSProperties = { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' };
 
-export function WorkerPaneHeader({ title, branch, issueNumber, runtime, model, status, statusLabel, compact, actions }: {
+export function WorkerPaneHeader({ title, branch, issueNumber, runtime, model, status, statusLabel, compact, actions, queueDepth }: {
   title: string; branch?: string | null; issueNumber?: number; runtime: string; model?: string | null;
-  status: string; statusLabel: string; compact: boolean; actions?: ReactNode;
+  status: string; statusLabel: string; compact: boolean; queueDepth?: number; actions?: ReactNode;
 }) {
   return <div data-worker-pane-header style={{
     height: 28, minHeight: 28, display: 'grid', alignItems: 'center', gap: 6,
@@ -37,6 +37,7 @@ export function WorkerPaneHeader({ title, branch, issueNumber, runtime, model, s
       ...ellipsis, display: 'flex', gap: 4, justifyContent: 'flex-end',
       color: 'var(--t-text-faint)', fontSize: compact ? 10 : 12,
     }}>
+      {queueDepth !== undefined ? <span data-standing-queue-depth style={{ ...ellipsis, flexShrink: 0 }}>{queueDepth} queued</span> : null}
       <span style={{ ...ellipsis, flexShrink: 0 }}>{runtime}</span>
       {model ? <span data-worker-model title={[runtime, model].join(' · ')} style={ellipsis}>· {model}</span> : null}
     </span>

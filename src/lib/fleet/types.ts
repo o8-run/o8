@@ -97,6 +97,7 @@ export interface AgentSummary {
   /** Normalized terminal status explanation for orchestrator runtime sessions. */
   statusEvidence?: TerminalStatusEvidence;
   currentTask: string;
+  standingLane?: { laneId: string; currentTask: string | null; queueDepth: number; stopped: boolean };
   /** Worker-posted implementation plan while the lane is huddling. */
   huddlePlan?: string;
   workspace: string;

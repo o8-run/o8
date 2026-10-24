@@ -647,3 +647,17 @@ it.each(['codex', 'claude-code'])('shows an honest cache estimate beside the %s 
   })));
   expect(host!.querySelector('[data-session-cache]')?.textContent).toContain('Cache unknown · estimate');
 });
+
+it('keeps a standing pane on its current task and displays its queue after the prior packet settles', () => {
+  const sessionKey = 'codex-owned:standing-pane';
+  const packets = ['first', 'second'].map((id, index) => ({ id, title: `Task ${id}`,
+    standingLaneId: 'lane-standing', status: index === 0 ? 'archived' : 'running',
+    lane: { laneId: 'lane-standing', sessionKey, repoPath: '/projects/fixture' },
+  } as OrchestratorPacket));
+  context.value = { agents: [{ sessionKey, runtime: 'codex', status: 'running', currentTask: 'Task second',
+    standingLane: { laneId: 'lane-standing', currentTask: 'Task second', queueDepth: 1, stopped: false } }],
+  missionState: { packets } } as unknown as OrchestratorDataValue;
+  act(() => root?.render(createElement(SessionTranscriptPane, { sessionKey })));
+  expect(host!.querySelector('[data-worker-title]')?.textContent).toBe('Task second');
+  expect(host!.querySelector('[data-standing-queue-depth]')?.textContent).toBe('1 queued');
+});

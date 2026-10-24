@@ -1,3 +1,4 @@
+import { holdStandingLane } from '@/lib/lane/standing-store';
 /**
  * Stop / kill an agent — the symmetric counterpart to dispatch (#1286).
  *
@@ -108,6 +109,8 @@ async function stopPacketInner(
   const lanes = stopGuard
     ? collectPacketLifecycleLanes(stopGuard.previousPacket, stopGuard.repoPath, persistedLanes)
     : persistedLanes;
+
+  for (const lane of lanes) holdStandingLane(lane.id);
 
   // #1528 — idempotent no-op: nothing bound anywhere means nothing to stop.
   // Stopping an already-gone packet must return success in milliseconds, never

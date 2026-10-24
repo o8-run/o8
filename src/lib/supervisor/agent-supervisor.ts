@@ -383,11 +383,11 @@ function pollIntervalForAgent(
   return pollIntervalMs;
 }
 // ── Core Poll Tick ──
-
 async function supervisorTick(): Promise<void> {
+  if (callbacks) void import('@/lib/lane/standing').then(module => module.reconcileStandingLanes())
+    .catch(error => console.warn('[standing-lane] reconciliation failed', error));
   callbacks?.onHeartbeat?.();
   if (!callbacks || watchedAgents.size === 0) return;
-
   const now = Date.now();
   const dueAgents = [...watchedAgents.values()]
     .filter((watched) => watched.nextPollAt <= now)

@@ -1,3 +1,4 @@
+import { assertStandingSpawn } from './standing-task';
 import type { ChildProcess } from 'node:child_process';
 import { spawnWithWorkAdmission as spawn } from '@/lib/app-update/work-launch-admission';
 import { bindDeferredCodexMcpLaunch } from '@/lib/providers/deferred-mcp-arguments';
@@ -40,6 +41,7 @@ function withCheckedLaunch<T>(input: LaunchInput, create: (launch: { command: st
     };
     const launch = input.runtimeId === 'codex'
       ? bindDeferredCodexMcpLaunch(env, input.args, input.mcpServers ?? [], build) : build(input.args);
+    assertStandingSpawn(input.session);
     assertControlledLaunchGrantCurrent(input.session);
     assertOwnedActionAdmission(input.session, input.runId);
     return create(launch, env);

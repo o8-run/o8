@@ -1,3 +1,5 @@
+import { readStandingLane } from '@/lib/lane/standing-store';
+import { bindStandingTask, withStandingSessionMutation } from './standing-task';
 import { providerFromConfig } from './controlled-provider';
 import { assertOwnedActionFence } from './action-fence';
 import { assertRuntimeEffortPin } from '@/lib/orchestrator/effort-pin';
@@ -221,6 +223,7 @@ export function createOwnedSessionStore(
     const session = {
       surfaceId: `${surfacePrefix}${id}`,
       ...(executionPolicy ? { executionPolicy, autoRetry: false } : {}),
+      ...(request.laneId && readStandingLane(request.laneId) ? { autoRetry: false } : {}),
       launchMutationId: request.clientMutationId?.trim() || undefined,
       controlledTask: request.controlledTask ? { ...request.controlledTask } : undefined,
       laneId: request.laneId?.trim() || undefined,
@@ -294,7 +297,7 @@ export function createOwnedSessionStore(
 
   async function resume(surfaceId: string, prompt: string) {
     try {
-      return await withSurfaceLock(surfaceId, () => withOwnedArtifactAdmission(root, () => resumeInner(surfaceId, prompt)));
+      return await withStandingSessionMutation(surfaceId, () => withSurfaceLock(surfaceId, () => withOwnedArtifactAdmission(root, () => resumeInner(surfaceId, prompt))));
     } catch (error) {
       if (error instanceof OwnedArtifactAdmissionError) return { ok: false, note: error.message, sideEffect: error.sideEffect };
       throw error;
@@ -362,6 +365,7 @@ export function createOwnedSessionStore(
         throw new Error(`This owned ${adapter.squadShortName} session does not have a thread id yet, so resume is not available.`);
       }
 
+      if (bindStandingTask(session, normalizedWorkspaceBinding(session))) await io.saveSession(session);
       if (automaticRunId) assertAutomaticRecoveryGeneration(await io.findSession(surfaceId), automaticRunId);
       assertOwnedActionAdmission(await io.findSession(surfaceId));
       await assertOwnedActionFence(surfaceId, await io.findSession(surfaceId));

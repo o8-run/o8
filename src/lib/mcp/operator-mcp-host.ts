@@ -1,5 +1,6 @@
 import { CONVERSATION_PR_TOOLS, handleConversationPrs } from './operator-handlers/conversation-prs';
 import { PR_STACK_TOOLS, handlePrStack } from './operator-handlers/pr-stack';
+import { STANDING_LANE_TOOLS, STANDING_LANE_HANDLERS } from './operator-handlers/standing-lanes';
 import { safeErrorText } from '@/lib/mcp/api-error';
 import { discoverMcp, isModernMcpRequest, modernMcpCall, modernMcpError, modernMcpResult } from './operator-mcp-protocol';
 import { nativeReadGeneration } from '@/lib/mcp/native-read-publication';
@@ -276,6 +277,7 @@ async function handleUserContext(): Promise<McpToolResult> {
 
 const TOOLS: McpTool[] = [
   ...CONVERSATION_PR_TOOLS,
+  ...STANDING_LANE_TOOLS,
   ...STATUS_TOOLS.filter((tool) => tool.name === 'o8_send'),
   ...STATUS_TOOLS.filter((tool) => tool.name === 'o8_status'),
   ...USER_CONTEXT_TOOLS,
@@ -358,6 +360,7 @@ export function operatorToolsForProfile(profile = process.env.O8_OPERATOR_MCP_PR
 }
 
 const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<McpToolResult>> = {
+  ...STANDING_LANE_HANDLERS,
   o8_send: handleSend,
   o8_status: handleStatus,
   o8_approve: handleApprove,

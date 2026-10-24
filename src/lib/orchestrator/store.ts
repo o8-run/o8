@@ -320,7 +320,7 @@ function normalizePacket(raw: unknown, index: number, existing: Array<Pick<Orche
   const workerRouting = normalizeWorkerRouting(packet.workerRouting, runtime, workerIntent);
   return {
     id: typeof packet.id === 'string' && packet.id.trim() ? packet.id.trim() : `pkt-${Date.now()}-${index + 1}`,
-    referenceLabel,
+    referenceLabel, standingLaneId: typeof packet.standingLaneId === 'string' ? packet.standingLaneId : undefined,
     title: typeof packet.title === 'string' && packet.title.trim() ? packet.title : `Packet ${index + 1}`,
     summary: typeof packet.summary === 'string' ? packet.summary : '', origin: packet.origin === 'design-mode' ? 'design-mode' : undefined,
     ...normalizePacketWorkspaceIdentity(packet),
@@ -926,7 +926,7 @@ export function reconcileOrchestratorMissionState(
     inputs.domainLanes && inputs.domainLanes.length > 0
       ? new Map(inputs.domainLanes.map((domainLane) => [domainLane.packetId, domainLane]))
       : null;
-  const reconciledPackets = packets.map((packet) => {
+  const reconciledPackets = packets.map((packet) => { if (packet.standingLaneId) return packet;
     const dependency = packetReleaseBlockedBy(packet, packets);
     const laneMatch = packet.lane
       ? laneByTab.get(`${packet.lane.tileId}:${packet.lane.tabId}`)

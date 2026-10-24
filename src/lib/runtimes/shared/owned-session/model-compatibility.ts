@@ -1,3 +1,4 @@
+import { readStandingLane } from '@/lib/lane/standing-store';
 import type { OwnedSessionIo } from './session-io';
 import type { OwnedRunController } from './run-controller';
 import type { OwnedRuntimeAdapter, OwnedSessionRecord } from './types';
@@ -11,6 +12,7 @@ export function createModelCompatibilityRecovery({ adapter, io, withSurfaceLock,
   spawnOwnedRun: OwnedRunController['spawnOwnedRun'];
 }) {
   return async (session: OwnedSessionRecord, surfaceLockHeld = false): Promise<boolean> => {
+    if (session.laneId && readStandingLane(session.laneId)) return false;
     if (session.executionPolicy !== undefined || !adapter.modelCompatibilityFallback || session.activeRun || session.recentRuns[0]?.outcome !== 'failed') return false;
     const recover = async () => {
       const current = await io.findSession(session.surfaceId);

@@ -260,10 +260,10 @@ export function outsideWorkerSessionKeysForPacketIds(packetIds: ReadonlySet<stri
 }
 
 export function outsideWorkerSessionKeysForSettledPackets(
-  packets: ReadonlyArray<{ id: string; status: string; releaseState: string; archivedAt?: string | null }>,
+  packets: ReadonlyArray<{ id: string; status: string; releaseState: string; archivedAt?: string | null; standingLaneId?: string }>,
 ): string[] {
   return outsideWorkerSessionKeysForPacketIds(new Set(packets
-    .filter((packet) => packet.releaseState === 'released' || packet.status === 'archived' || Boolean(packet.archivedAt))
+    .filter((packet) => !packet.standingLaneId && (packet.releaseState === 'released' || packet.status === 'archived' || Boolean(packet.archivedAt)))
     .map((packet) => packet.id)));
 }
 

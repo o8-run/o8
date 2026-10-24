@@ -247,6 +247,7 @@ function fullPacketFixture() {
       error: null,
     },
     recovery: null,
+    standingLaneId: 'lane-standing-fixture',
   } satisfies Required<OrchestratorPacket>;
 
   return packet;

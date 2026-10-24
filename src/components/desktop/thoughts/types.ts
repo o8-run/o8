@@ -12,6 +12,7 @@ export type PendingApproval = ApprovalRecord;
 export type ThoughtMode = 'orchestrate' | 'chat' | 'history';
 
 export interface FleetAgent {
+  standingLane?: { laneId: string; currentTask: string | null; queueDepth: number; stopped: boolean };
   name?: string;
   status?: string;
   currentTask?: string;

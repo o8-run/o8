@@ -1,5 +1,7 @@
 'use client';
 
+import { workerPacketForSession } from '@/lib/orchestrator/worker-session-packet';
+
 import {
   useEffect,
   useMemo,
@@ -119,7 +121,7 @@ function packetForSession(
   packets: OrchestratorPacket[],
   sessionKey: string,
 ): OrchestratorPacket | null {
-  return packets.find((packet) => packet.lane?.sessionKey === sessionKey) ?? null;
+  return workerPacketForSession(packets, sessionKey);
 }
 
 function agentForSession(agents: FleetAgent[], sessionKey: string): FleetAgent | null {
