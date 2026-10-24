@@ -39,6 +39,26 @@ beforeEach(() => {
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); client.clear(); vi.unstubAllGlobals(); });
 
 describe('pull request selection', () => {
+  it('focuses each native stack layer on its own diff and dependency view', async () => {
+    const stack = { status: 'ready', stale: false, source: 'github-native', revision: 'revision', fetchedAt: '2026-01-01T00:00:00Z', attemptedAt: '2026-01-01T00:00:00Z',
+      snapshot: { id: 70, number: 7, trunk: 'main', layers: [11, 12, 13].map((number, index) => ({ number, title: `Layer ${number}`, state: 'open', headRef: `layer-${number}`, baseRef: index ? `layer-${number - 1}` : 'main', headSha: String(index + 1).repeat(40), baseSha: String(index).repeat(40) })) } };
+    fetchMock.mockImplementation(async (url: string) => { const number = Number(url.match(/prs\/(\d+)/)?.[1]); return Response.json({ pr: { ...detail(number), stack, files: [{ path: `layer-${number}.ts`, status: 'modified', additions: 1, deletions: 0, patch: '@@ -1 +1 @@\n-old\n+new' }], changedFiles: 1 } }); });
+    await render(11);
+    expect(host.textContent).toContain('Native GitHub stack #7');
+    for (const number of [12, 13, 11]) {
+      await act(async () => host.querySelector<HTMLButtonElement>(`[data-stack-layer="${number}"]`)!.click());
+      await settleTimeline();
+      expect(host.querySelector('[data-pr-detail]')?.getAttribute('data-pr-detail')).toBe(String(number));
+      expect(host.querySelector('[role="tab"][aria-selected="true"]')?.id).toMatch(/-changes$/);
+      expect(host.querySelector(`[data-pr-file="layer-${number}.ts"]`)).not.toBeNull();
+      expect(host.querySelector(`[data-stack-layer="${number}"]`)?.getAttribute('aria-current')).toBe('true');
+    }
+    await act(async () => host.querySelector<HTMLButtonElement>('[data-stack-layer="12"]')!.click());
+    await settleTimeline(); await render(13); await render(11);
+    expect(host.querySelector('[data-pr-detail]')?.getAttribute('data-pr-detail')).toBe('11');
+    expect(fetchMock.mock.calls.every(([, init]) => !init?.method || init.method === 'GET')).toBe(true);
+  });
+
   it('uses the loaded files for the same breakdown in the header and Changes without another request', async () => {
     const files = [{ path: 'src/a.ts', status: 'modified', additions: 10, deletions: 2, patch: '' }, { path: 'tests/b.ts', status: 'modified', additions: 4, deletions: 0, patch: '' }];
     fetchMock.mockResolvedValue(Response.json({ pr: { ...detail(9805), files, changedFiles: 2, additions: 14, deletions: 2 } }));

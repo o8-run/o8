@@ -43,7 +43,7 @@ describe('workspace PR list', () => {
     await act(async () => button('Pull request layout').click());
     await act(async () => Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')).find((item) => item.textContent === 'Branch stacks')!.click());
     expect(rows().map((row) => row.dataset.prNumber)).toEqual(['1', '2']);
-    expect(host.textContent).toContain('Depends on #1');
+    expect(host.textContent).toContain('Inferred dependency on #1');
     await act(async () => rows()[1].click());
     await act(async () => button('Pull request layout').click());
     await act(async () => Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')).find((item) => item.textContent === 'By author')!.click());

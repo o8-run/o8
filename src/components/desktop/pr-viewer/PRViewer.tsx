@@ -3,6 +3,7 @@
 
 import React from 'react';
 import { GithubReadStatus } from '@/components/github/GithubReadStatus';
+import { PrStackSummary } from '../agent-panel/PrStackSummary';
 import { ExternalLink, RefreshCw } from '../lucide-shims';
 import { LIGHT_CANVAS_VARS } from '../canvas-utils';
 import type { PRViewerProps } from './types';
@@ -16,11 +17,15 @@ import { PRReviewThreadsSection } from './PRReviewThreadsSection';
 import { openExternalUrl } from '@/lib/desktop/open-external';
 
 export function PRViewer({
-  prNumber,
+  prNumber: initialNumber,
   repo,
   active = true,
   onInjectChatContext,
 }: PRViewerProps) {
+  const owner = `${repo || ''}:${initialNumber}`;
+  const [selection, setSelection] = React.useState({ owner, number: initialNumber });
+  const prNumber = selection.owner === owner ? selection.number : initialNumber;
+  if (selection.owner !== owner) setSelection({ owner, number: initialNumber });
   const data = usePRData(prNumber, repo, onInjectChatContext, active);
 
   if (data.loading) {
@@ -108,6 +113,11 @@ export function PRViewer({
         commentInputRef={data.commentInputRef}
       />
 
+      {data.pr.stack ? <div style={{ paddingTop: 8, paddingRight: 20, paddingBottom: 8, paddingLeft: 20 }}>
+        <PrStackSummary observation={data.pr.stack} prNumber={prNumber} repo={repo} retained={data.retainedStack} onSelect={number => {
+          setSelection({ owner, number }); data.setActiveSection('files');
+        }} />
+      </div> : null}
       {/* Content */}
       <div style={{ flex: 1, overflowY: 'auto', paddingTop: 16, paddingRight: 20, paddingBottom: 16, paddingLeft: 20, color: '#374151' }}>
         {data.activeSection === 'overview' ? (

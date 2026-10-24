@@ -13,6 +13,7 @@
 import { PullRequestConversations } from '@/components/conversation-prs/PullRequestConversations';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
+import { PrStackSummary } from '@/components/desktop/agent-panel/PrStackSummary';
 import { useTheme } from './ThemeContext';
 import { parseDiff, type ParsedDiffFile, type ParsedDiffHunk } from '@/lib/llm/diff-parse';
 import { fetchMobileDiff, type MobileDiffPayload, type MobileDiffSource } from '@/lib/mobile/diff-fetch';
@@ -194,14 +195,23 @@ const HunkBlock = memo(function HunkBlock({
 export const MobileDiffViewer = memo(function MobileDiffViewer({
   open,
   onClose,
-  source,
+  source: initialSource,
   title,
   subtitle,
 }: MobileDiffViewerProps) {
   const { colors } = useTheme();
+  const owner = JSON.stringify(initialSource?.kind === 'pr' ? ['pr', initialSource.repo.toLowerCase(), initialSource.number]
+    : [initialSource?.kind, initialSource?.sessionKey, initialSource?.worktreePath, initialSource?.baseBranch]);
+  const [selection, setSelection] = useState<{ owner: string; source: MobileDiffSource | null }>({ owner, source: initialSource });
+  const source = selection.owner === owner ? selection.source : initialSource;
+  if (selection.owner !== owner) setSelection({ owner, source: initialSource });
   const [result, setResult] = useState<{ source: MobileDiffSource; payload: MobileDiffPayload } | null>(null);
   const activeResult = open && source && result?.source === source ? result : null;
   const payload = activeResult?.payload ?? null;
+  const layer = source?.kind === 'pr' ? payload?.stack?.snapshot?.layers.find(layer => layer.number === source.number) : undefined;
+  const navigated = source?.kind === 'pr' && initialSource?.kind === 'pr' && source.number !== initialSource.number;
+  const displayTitle = navigated ? `PR #${source.number}${layer ? ` · ${layer.title}` : ''}` : title;
+  const displaySubtitle = navigated ? `${source.repo} #${source.number}` : subtitle;
   const loading = Boolean(open && source && !activeResult);
   const error = activeResult?.payload.error && !activeResult.payload.rawDiff
     ? activeResult.payload.error
@@ -284,7 +294,7 @@ export const MobileDiffViewer = memo(function MobileDiffViewer({
     <div
       role="dialog"
       aria-modal="true"
-      aria-label={`Diff viewer: ${title}`}
+      aria-label={`Diff viewer: ${displayTitle}`}
       onClick={handleBackdropClick}
       style={{
         position: 'fixed',
@@ -324,7 +334,7 @@ export const MobileDiffViewer = memo(function MobileDiffViewer({
                 textOverflow: 'ellipsis',
               }}
             >
-              {title}
+              {displayTitle}
             </div>
             <div
               style={{
@@ -338,7 +348,7 @@ export const MobileDiffViewer = memo(function MobileDiffViewer({
               {stats.fileCount} file{stats.fileCount === 1 ? '' : 's'} changed
               <span style={{ color: '#30d158', marginLeft: 8 }}>+{stats.additions}</span>
               <span style={{ color: '#ff453a', marginLeft: 6 }}>−{stats.deletions}</span>
-              {subtitle ? <span style={{ marginLeft: 8, color: colors.textTertiary }}>· {subtitle}</span> : null}
+              {displaySubtitle ? <span style={{ marginLeft: 8, color: colors.textTertiary }}>· {displaySubtitle}</span> : null}
             </div>
           </div>
           <button
@@ -436,6 +446,8 @@ export const MobileDiffViewer = memo(function MobileDiffViewer({
             WebkitOverflowScrolling: 'touch',
           }}
         >
+          {payload?.stack && source?.kind === 'pr' ? <PrStackSummary observation={payload.stack} prNumber={source.number} repo={source.repo}
+            onSelect={number => setSelection({ owner, source: { kind: 'pr', repo: source.repo, number } })} /> : null}
           {loading && !payload ? (
             <div
               style={{

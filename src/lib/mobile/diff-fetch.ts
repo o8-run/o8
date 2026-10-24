@@ -1,3 +1,4 @@
+import { validPrStackObservation, type PullRequestStackObservation } from '@/lib/github-client/pr-stack';
 /**
  * Mobile diff fetch helper. Picks the right endpoint and returns a unified
  * diff body that `parseDiff()` (from `@/lib/llm/diff-parse`) can consume.
@@ -15,6 +16,7 @@ export type MobileDiffSource =
   | { kind: 'pr'; repo: string; number: number };
 
 export interface MobileDiffPayload {
+  stack?: PullRequestStackObservation;
   rawDiff: string;
   additions: number;
   deletions: number;
@@ -98,7 +100,7 @@ async function fetchPrDiff(
 ): Promise<MobileDiffPayload> {
   const context = getMobileGithubContext();
   const data = await context.client.fetchQuery(githubItemQuery<{
-    pr?: { additions?: number; deletions?: number; changedFiles?: number; files?: PrFile[] }; error?: string;
+    pr?: { stack?: unknown; additions?: number; deletions?: number; changedFiles?: number; files?: PrFile[] }; error?: string;
   }>(source.repo, 'pr-files', source.number,
     `/api/panel/prs/${source.number}?repo=${encodeURIComponent(source.repo)}`, context));
   if (data.error) {
@@ -110,6 +112,7 @@ async function fetchPrDiff(
   }
   return {
     rawDiff: synthesizePrDiff(pr.files),
+    ...(validPrStackObservation(pr.stack, source.number) ? { stack: pr.stack } : {}),
     additions: pr.additions ?? 0,
     deletions: pr.deletions ?? 0,
     fileCount: pr.changedFiles ?? pr.files.length,

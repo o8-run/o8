@@ -1,5 +1,7 @@
 'use client';
 
+import { PrStackSummary } from '../agent-panel/PrStackSummary';
+
 import { memo, useCallback, useId, useLayoutEffect, useRef, useState } from 'react';
 import { PullRequestConversations } from '@/components/conversation-prs/PullRequestConversations';
 import { PrPanelHeader } from './PrPanelHeader';
@@ -8,7 +10,7 @@ import { PrChangesToolbar } from './PrChangesToolbar';
 import { PrSummary } from './PrSummary';
 import { PrBrainComposer, prBrainContext } from './PrBrainComposer';
 import { openComposerBrain } from '../brain/brain-events';
-import { usePrViewState } from './usePrViewState';
+import { openPrChangesView, usePrViewState } from './usePrViewState';
 import { ChangesTab } from './tabs/ChangesTab';
 import { ChecksTab } from './tabs/ChecksTab';
 import { ReviewsTab } from './tabs/ReviewsTab';
@@ -21,7 +23,19 @@ import { ArtifactStrip } from '../artifacts/ArtifactStrip';
 import { useArtifacts } from '../artifacts/useArtifacts';
 import type { PrComposerMode, PrPanelProps, PrReviewAction } from './types';
 
-export const PrPanel = memo(function PrPanel({ prNumber, repoSlug, repoPath, onClose, active = true, id }: PrPanelProps) {
+export const PrPanel = memo(function PrPanel(props: PrPanelProps) {
+  const owner = `${props.repoSlug || props.repoPath || ''}:${props.prNumber}`;
+  const [selection, setSelection] = useState({ owner, number: props.prNumber });
+  const number = selection.owner === owner ? selection.number : props.prNumber;
+  if (selection.owner !== owner) setSelection({ owner, number: props.prNumber });
+  return <PrPanelContent {...props} prNumber={number} onSelectStack={next => {
+    openPrChangesView(`${props.repoSlug || props.repoPath || ''}:${next}`);
+    setSelection({ owner, number: next });
+    props.onSelectLayer?.(next);
+  }} />;
+});
+
+const PrPanelContent = memo(function PrPanelContent({ prNumber, repoSlug, repoPath, onClose, active = true, id, onSelectStack }: PrPanelProps & { onSelectStack: (number: number) => void }) {
   const selectionKey = `${repoSlug || repoPath || ''}:${prNumber}`;
   const { view, update, recordScroll, scrollFor } = usePrViewState(selectionKey);
   const { detail, loading, error, refresh, updatedAt } = usePrDetail(prNumber, repoSlug, active, view.activeTab === 'checks');
@@ -134,6 +148,9 @@ export const PrPanel = memo(function PrPanel({ prNumber, repoSlug, repoPath, onC
       <PullRequestConversations repo={detail.resolvedRepo || repoSlug || ''} number={detail.number} active={active} />
       {error ? <div role="alert" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 12, fontSize: 11, color: 'var(--t-danger)' }}>{error}<button type="button" onClick={refresh} style={{ border: 0, borderRadius: 6, padding: 6, background: 'var(--t-hover)', color: 'var(--t-text)', font: 'inherit', cursor: 'pointer' }}>Retry</button></div> : null}
       <GithubReadStatus error={error} updatedAt={updatedAt} />
+      {detail.stack ? <div style={{ paddingTop: 8, paddingRight: 14, paddingBottom: 8, paddingLeft: 14, flexShrink: 0 }}>
+        <PrStackSummary observation={detail.stack} prNumber={prNumber} onSelect={onSelectStack} retained={Boolean(error)} repo={repoSlug || detail.resolvedRepo} />
+      </div> : null}
       <PrPanelTabs
         activeTab={view.activeTab}
         onChange={(activeTab) => update({ activeTab })}

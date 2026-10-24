@@ -1,0 +1,30 @@
+// @vitest-environment jsdom
+import { act, createElement } from 'react';
+import { createRoot } from 'react-dom/client';
+import { expect, it, vi } from 'vitest';
+import { MobileDiffViewer } from './MobileDiffViewer';
+vi.mock('./ThemeContext', () => ({ useTheme: () => ({ colors: { bg: '#f5f3ef', frostStrong: '#fff', text: '#111', textSecondary: '#555', textTertiary: '#777' } }) }));
+it('navigates native stack layers inside the live mobile diff sheet', async () => {
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  const host = document.createElement('div'); document.body.append(host); const root = createRoot(host);
+  const stack = { status: 'ready', stale: false, source: 'github-native', revision: 'revision', fetchedAt: '2026-01-01T00:00:00Z', attemptedAt: '2026-01-01T00:00:00Z',
+    snapshot: { id: 70, number: 7, trunk: 'main', layers: [11, 12, 13].map((number, index) => ({ number, title: `Layer ${number}`, state: 'open', headRef: `layer-${number}`, baseRef: index ? `layer-${number - 1}` : 'main', headSha: String(index + 1).repeat(40), baseSha: String(index).repeat(40) })) } };
+  const observed = { ...stack, history: ['a', 'b', 'a'].map(revision => ({ revision, source: 'github-native', trigger: 'target', snapshot: stack.snapshot, fetchedAt: stack.fetchedAt })) };
+  const errors = vi.spyOn(console, 'error');
+  const fetcher = vi.fn(async (url: string) => { const number = Number(url.match(/prs\/(\d+)/)?.[1]); return Response.json({ pr: { stack: observed, files: [{ path: `layer-${number}.ts`, patch: '@@ -1 +1 @@\n-old\n+new' }], additions: 1, deletions: 1 } }); });
+  vi.stubGlobal('fetch', fetcher);
+  try {
+    await act(async () => root.render(createElement(MobileDiffViewer, { open: true, onClose: () => {}, source: { kind: 'pr', repo: 'example/repo', number: 11 }, title: 'PR #11' })));
+    expect(host.textContent).toContain('Native GitHub stack #7');
+    for (const number of [12, 13, 11]) {
+      await act(async () => host.querySelector<HTMLButtonElement>(`[data-stack-layer="${number}"]`)!.click());
+      expect(host.textContent).toContain(`layer-${number}.ts`);
+      expect(host.querySelector('[role="dialog"]')?.getAttribute('aria-label')).toContain(`PR #${number}`);
+      await act(async () => root.render(createElement(MobileDiffViewer, { open: true, onClose: () => {}, source: { kind: 'pr', repo: 'example/repo', number: 11 }, title: 'PR #11', subtitle: 'example/repo #11' })));
+      expect(host.querySelector(`[data-stack-layer="${number}"]`)?.getAttribute('aria-current')).toBe('true');
+      expect(host.querySelector(`a[href="https://github.com/example/repo/pull/${number}"]`)).not.toBeNull();
+    }
+    expect(errors.mock.calls.some(call => String(call[0]).includes('same key'))).toBe(false);
+    expect(fetcher.mock.calls.every(([url]) => url.startsWith('/api/panel/prs/'))).toBe(true);
+  } finally { await act(async () => root.unmount()); host.remove(); errors.mockRestore(); vi.unstubAllGlobals(); }
+});

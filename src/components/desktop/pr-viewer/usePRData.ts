@@ -662,6 +662,7 @@ export function usePRData(
   ]);
 
   return {
+    retainedStack: Boolean(pr && detailQuery.error),
     pr,
     loading,
     error,

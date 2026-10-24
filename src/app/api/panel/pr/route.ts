@@ -15,7 +15,7 @@ export async function GET(request: NextRequest) {
 
   try {
     const data = await fetchGitHubPullRequestDetail(repo, parseInt(number, 10));
-    const stack = await readPullRequestStack(repo, data.number, data.githubScope);
+    const stack = await readPullRequestStack(repo, data.number, data.githubScope, { identity: data.githubIdentity });
 
     const checksStatus = (() => {
       const checks = data.statusCheckRollup || [];

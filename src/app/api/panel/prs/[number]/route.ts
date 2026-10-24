@@ -1,3 +1,4 @@
+import { readPullRequestStack } from '@/lib/github-broker/pull-request-stack';
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
@@ -55,7 +56,8 @@ export async function GET(
     ]);
     const localRepo = (await listRepos().catch(() => []))
       .find((entry) => normalizeRepoSlug(entry.remoteUrl) === repo) ?? null;
-    const { githubScope, ...publicPr } = pr;
+    const { githubScope, githubIdentity, ...publicPr } = pr;
+    const stack = await readPullRequestStack(repo, prNum, githubScope, { identity: githubIdentity, priority });
     if (githubScope && commentsData.githubScope !== githubScope) throw new Error('GitHub authorization changed during the read.');
     await waitForPrRemarkWrites(repo, prNum);
     const watch = githubScope ? recordPrWatchSnapshot({ scope: githubScope, repo, number: prNum, head: pr.headSha, state: pr.mergedAt ? 'merged' : pr.state,
@@ -85,6 +87,7 @@ export async function GET(
     return NextResponse.json({
       pr: {
         ...publicPr,
+        stack,
         watch,
         discussionIncomplete: commentsData.discussionIncomplete,
         resolvedRepo: repo,

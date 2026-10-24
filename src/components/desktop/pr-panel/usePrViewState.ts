@@ -49,3 +49,6 @@ export function usePrViewState(key: string) {
   const scrollFor = useCallback((tab: PrTabId) => readView(key).scroll[tab] ?? 0, [key]);
   return { view, update, recordScroll, scrollFor };
 }
+
+/** Layer navigation opens that PR's own saved diff view. */
+export function openPrChangesView(key: string) { readView(key).activeTab = 'changes'; }

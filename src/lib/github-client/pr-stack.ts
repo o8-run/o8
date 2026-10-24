@@ -16,6 +16,12 @@ export function validPrStackObservation(value: unknown, target: number): value i
     || value.source !== 'github-native' || typeof value.stale !== 'boolean' || !iso(value.attemptedAt)
     || (value.fetchedAt !== null && !iso(value.fetchedAt))
     || (value.revision !== null && !text(value.revision))) return false;
+  if (value.history !== undefined && (!Array.isArray(value.history) || value.history.length > 20 || !value.history.every(entry =>
+    record(entry) && text(entry.revision) && iso(entry.fetchedAt) && entry.source === 'github-native'
+    && ['target', 'webhook'].includes(String(entry.trigger))
+    && validPrStackObservation({ ...value, history: undefined, status: entry.snapshot === null ? 'none' : 'ready',
+      snapshot: entry.snapshot, fetchedAt: entry.fetchedAt, revision: entry.revision }, entry.snapshot === null ? target
+        : record(entry.snapshot) && Array.isArray(entry.snapshot.layers) && record(entry.snapshot.layers[0]) ? Number(entry.snapshot.layers[0].number) : 0)))) return false;
   const snapshot = value.snapshot;
   if (snapshot === null) return value.status !== 'ready';
   if (['none', 'unauthorized', 'unsupported_cross_fork'].includes(value.status)

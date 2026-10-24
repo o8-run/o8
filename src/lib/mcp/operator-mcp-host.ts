@@ -1,4 +1,5 @@
 import { CONVERSATION_PR_TOOLS, handleConversationPrs } from './operator-handlers/conversation-prs';
+import { PR_STACK_TOOLS, handlePrStack } from './operator-handlers/pr-stack';
 import { safeErrorText } from '@/lib/mcp/api-error';
 import { discoverMcp, isModernMcpRequest, modernMcpCall, modernMcpError, modernMcpResult } from './operator-mcp-protocol';
 import { nativeReadGeneration } from '@/lib/mcp/native-read-publication';
@@ -316,6 +317,7 @@ const TOOLS: McpTool[] = [
   ...MISSION_TOOLS.filter((tool) => tool.name === 'o8_task_archive'),
   ...MISSION_TOOLS.filter((tool) => tool.name === 'o8_task_prune'),
   ...PROBLEM_TOOLS,
+  ...PR_STACK_TOOLS,
   ...MISSION_TOOLS.filter((tool) => tool.name === 'wait_for_mission_ready'),
   ...MISSION_TOOLS.filter((tool) => tool.name === 'submit_review'),
   ...CLOSE_PACKET_TOOLS,
@@ -439,6 +441,7 @@ const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<M
   o8_task_report: handleTaskReport,
   o8_task_archive: handleTaskArchive,
   o8_task_prune: handleTaskPrune,
+  o8_pr_stack: handlePrStack,
   o8_problem_list: handleProblemList,
   o8_problem_get: handleProblemGet,
   wait_for_mission_ready: handleWaitForMissionReady,

@@ -62,6 +62,7 @@ export interface PrIssueComment {
 }
 
 export interface PrDetail {
+  stack?: import('@/lib/github-client/pr-stack').PullRequestStackObservation;
   number: number;
   title: string;
   body: string;
@@ -105,6 +106,7 @@ export interface PrDetailResponse {
 export type CheckBucket = 'failing' | 'running' | 'passed' | 'neutral' | 'skipped';
 
 export interface PrPanelProps {
+  onSelectLayer?: (number: number) => void;
   active?: boolean;
   id?: string;
   prNumber: number;

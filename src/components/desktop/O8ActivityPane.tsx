@@ -375,6 +375,7 @@ export const O8ActivityPane = memo(function O8ActivityPane({
         prNumber={selectedPr.number}
         repoSlug={selectedPr.repo ?? repoSlug ?? null}
         repoPath={repoPath ?? null}
+        onSelectLayer={number => { setSelectedPr({ number, repo: selectedPr.repo }); onSelectPR?.(number, selectedPr.repo ?? undefined); }}
         onClose={() => { setSelectedPr(null); onClosePR?.(selectedPr.number, selectedPr.repo); }}
       />
     );

@@ -1,3 +1,4 @@
+import { validPrStackObservation } from '@/lib/github-client/pr-stack';
 import { queryOptions, type QueryClient } from '@tanstack/react-query';
 import { issueListQuery } from '@/lib/github-client';
 import { getQueryClient } from '@/lib/query/client';
@@ -16,6 +17,7 @@ export function prPanelDetailKey(repo: string | null | undefined, number: number
 
 function validDetail(value: unknown, number: number, repo: string | null): value is PrDetail {
   if (!record(value) || value.number !== number) return false;
+  if (value.stack !== undefined && !validPrStackObservation(value.stack, number)) return false;
   if (!['title', 'body', 'author', 'headRefName', 'baseRefName', 'url', 'createdAt', 'updatedAt'].every(key => typeof value[key] === 'string')) return false;
   if (typeof value.state !== 'string' || !['open', 'closed', 'merged'].includes(value.state.toLowerCase())) return false;
   if (!['additions', 'deletions', 'changedFiles'].every(key => count(value[key])) || typeof value.mergeable !== 'boolean') return false;

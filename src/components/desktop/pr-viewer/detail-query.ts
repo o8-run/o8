@@ -1,4 +1,5 @@
 import { assertGithubRead, assertGithubScope, githubReadOnMount } from '@/lib/github-client/refresh-policy';
+import { validPrStackObservation } from '@/lib/github-client/pr-stack';
 import { queryOptions, type QueryClient } from '@tanstack/react-query';
 import { GITHUB_LIST_FRESH_MS } from '@/lib/github-client';
 import { normalizePRDetail } from './shared';
@@ -16,6 +17,7 @@ export function prViewerDetailQuery(repo: string | undefined, number: number, ma
       const response = await fetch(`/api/panel/prs/${number}${repoParam}`, { signal });
       assertGithubRead(response, client, slug ?? '');
       const data = await response.json() as { pr: PRDetail };
+      if (data.pr.stack !== undefined && !validPrStackObservation(data.pr.stack, number)) throw new Error('Invalid pull request stack response.');
       return normalizePRDetail(data.pr);
     },
     staleTime: query => ['CLOSED', 'MERGED'].includes(query.state.data?.state?.toUpperCase() ?? '')

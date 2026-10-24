@@ -3964,6 +3964,8 @@
     {
       "path": "tests/native-pr-stack-read-real-path.test.ts",
       "reasons": [
+        "child-process",
+        "network-listener",
         "real-path"
       ]
     },
