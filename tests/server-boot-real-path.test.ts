@@ -1,11 +1,14 @@
 import { spawn, execFileSync, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
+import { randomUUID } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
-import { tmpdir } from 'node:os';
+import { devNull, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { bundleServers } from '../scripts/lib/server-bundles.mjs';
 import { stagePackagedNativeAddons } from './helpers/packaged-native-addons';
+import { dashTmuxServerName } from '@/lib/ws-server/dash-terminal-persistence';
+import { resolveTmuxBinary } from '@/lib/ws-server/pty-support';
 import { WebSocket } from 'ws';
 import { afterAll, expect, it } from 'vitest';
 
@@ -13,6 +16,22 @@ const root = mkdtempSync(join(tmpdir(), 'o8-server-boot-'));
 const state = join(root, 'state');
 const journal = join(root, 'boot.jsonl');
 const release = join(root, 'release');
+// macOS socket paths have a short limit; avoid its long per-user temp path.
+const tmuxRoot = mkdtempSync(join(process.platform === 'win32' ? tmpdir() : '/tmp', 'o8-boot-tmux-'));
+const tmuxServerName = `o8-boot-${randomUUID()}`;
+const unrelatedTmuxServer = dashTmuxServerName();
+const unrelatedSessions = ['cortex-dash-unrelated-one', 'cortex-dash-unrelated-two'];
+const tmuxBin = resolveTmuxBinary();
+const tmuxAvailable = process.platform !== 'win32' && (() => {
+  try { execFileSync(tmuxBin, ['-V'], { stdio: 'ignore', timeout: 3000 }); return true; } catch { return false; }
+})();
+function tmux(server: string, ...args: string[]): string {
+  return execFileSync(tmuxBin, ['-L', server, '-f', devNull, ...args], {
+    env: { NODE_ENV: 'test', PATH: process.env.PATH, HOME: tmuxRoot, TMUX_TMPDIR: tmuxRoot, TERM: 'xterm-256color' },
+    encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 3000,
+  });
+}
+
 const steps = [
   ['await terminalHostReady;', 'terminal-host'],
   ['expireStaleApprovals();', 'approvals'],
@@ -58,11 +77,20 @@ afterAll(async () => {
     api.closeAllConnections();
     await new Promise<void>(done => api!.close(() => done()));
   }
+  // Every cleanup command is scoped to sockets under this fixture's directory.
+  if (tmuxAvailable) for (const server of [tmuxServerName, unrelatedTmuxServer]) {
+    try { tmux(server, 'kill-server'); } catch { /* No server was started, or it already exited. */ }
+  }
+  rmSync(tmuxRoot, { recursive: true, force: true });
   rmSync(root, { recursive: true, force: true });
 });
 
 it('serves compiled WS health and ping before Next, and fences first use until every recovery phase finishes', async () => {
   mkdirSync(state);
+  if (tmuxAvailable) tmux(tmuxServerName, 'start-server', ';', 'set-option', '-s', 'exit-empty', 'off');
+  if (tmuxAvailable) for (const name of unrelatedSessions) {
+    tmux(unrelatedTmuxServer, 'new-session', '-d', '-s', name, 'sleep', '300');
+  }
   symlinkSync(resolve('node_modules'), join(root, 'node_modules'), 'junction');
   const isolated = join(root, 'isolated');
   mkdirSync(isolated);
@@ -111,6 +139,7 @@ ${contents}`;
   let diagnostic = '';
   const launch = () => spawn(process.execPath, [compiled], { env: {
     NODE_ENV: 'test', PATH: process.env.PATH, HOME: isolated, USERPROFILE: isolated,
+    TMUX_BIN: tmuxBin, TMUX_TMPDIR: tmuxRoot, O8_DASH_TMUX_SERVER_NAME: tmuxServerName,
     O8_DATA_DIR: state, CORTEX_IDE_DATA_DIR: state, CORTEX_IDE_DB_PATH: join(state, 'db.sqlite'),
     CORTEX_IDE_REVIEW_REPO_ROOT: repo, O8_API_PORT: String(apiPort), O8_WS_PORT: String(wsPort),
     NEXT_ORIGIN: `http://127.0.0.1:${apiPort}`, O8_SILENT_EXIT_DETECTOR_ENABLED: '0',
@@ -179,4 +208,8 @@ ${contents}`;
   const [code] = await once(child, 'exit');
   expect(code).toBe(1);
   expect(readFileSync(journal, 'utf8').trim().split('\n').map(line => JSON.parse(line))).toEqual(['terminal-host']);
+  if (tmuxAvailable) {
+    expect(tmux(unrelatedTmuxServer, 'list-sessions', '-F', '#{session_name}').trim().split('\n').sort())
+      .toEqual(unrelatedSessions);
+  }
 }, 30_000);

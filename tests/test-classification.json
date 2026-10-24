@@ -5571,7 +5571,8 @@
         "network-listener",
         "process-signal",
         "real-path",
-        "terminal-host"
+        "terminal-host",
+        "terminal-tool"
       ]
     },
     {
