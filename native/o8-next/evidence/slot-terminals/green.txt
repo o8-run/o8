@@ -1,0 +1,18 @@
+ Test Files  5 passed (5)
+      Tests  14 passed (14)
+test result: ok. 19 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 138.42s
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.27s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+measurement run 1: test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 21 filtered out; finished in 9.06s
+measurement run 2: test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 21 filtered out; finished in 9.77s
+measurement run 3: test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 21 filtered out; finished in 9.65s
+npm test: Test Files  1222 passed | 3 skipped (1225)
+npm test: Tests  8675 passed | 4 skipped (8679)
+npm test: Duration  728.68s (transform 173.69s, setup 67.18s, import 1054.13s, tests 728.35s, environment 624.90s)
+NODE_OPTIONS=--max-old-space-size=8192 npx tsc --noEmit: exit 0
+Touched JS/TS ESLint: exit 0
+[rule-check] OK — scanned 4 file(s), zero violations vs 8bb34ead4
+[test-classification] manifest matches resource-owning source markers
+cargo fmt --check: exit 0
+Audited 465 packages, no GPL or excluded application crates
+Audited 448 packages, no GPL or excluded application crates
