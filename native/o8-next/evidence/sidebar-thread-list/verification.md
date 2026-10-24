@@ -91,3 +91,6 @@ and the newly landed grid-terminal path.
 Main had no `native/o8-next/src/theme.rs` at start (31ccf0315); sidebar colors
 stay local to its new view file. The final branch integrates current main's grid
 terminal changes without editing release, version, deployment or publishing files.
+
+[Correction round 1](correction-1/README.md) records the test-first fix for a live
+message shifting a chat across offset pages, plus the repeated-page fallback.

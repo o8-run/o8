@@ -3,6 +3,83 @@ use super::*;
 use gpui::{ScrollDelta, ScrollStrategy, ScrollWheelEvent};
 use std::io::Write;
 
+#[test]
+fn sidebar_message_between_pages_keeps_every_thread() {
+    let fixture = Fixture::with_options(&["--sidebar", "--sidebar-paging-message"]);
+    let sessions = fixture
+        .client
+        .sidebar_sessions()
+        .expect("an incoming message between pages must not fail sidebar discovery");
+    let desktop: Value = fixture
+        .client
+        .get("/api/v2/chat-history/list", &[("include", "orchestrator")])
+        .unwrap();
+    let expected: std::collections::BTreeSet<_> = desktop["conversations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|row| row["tabId"].as_str())
+        .filter(|id| id.starts_with("thoughts-sidebar-"))
+        .collect();
+    let actual: Vec<_> = sessions
+        .iter()
+        .filter(|row| row.id.starts_with("thoughts-sidebar-"))
+        .collect();
+    assert_eq!(expected.len(), 2000);
+    assert_eq!(
+        actual.len(),
+        2000,
+        "offset overlap must not skip a later row"
+    );
+    assert_eq!(
+        actual
+            .iter()
+            .map(|row| row.id.as_str())
+            .collect::<std::collections::BTreeSet<_>>(),
+        expected,
+        "the paged native list must retain every desktop record exactly once"
+    );
+    assert_eq!(actual[0].id, "thoughts-sidebar-0001");
+    assert_eq!(actual[0].status, "running");
+    assert_eq!(actual[0].message_count, 3);
+    let persisted: Value = fixture
+        .client
+        .get(
+            "/api/v2/chat-history",
+            &[("tabId", "thoughts-sidebar-0001")],
+        )
+        .unwrap();
+    assert!(
+        persisted["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["id"] == "paging-live-user")
+    );
+}
+
+#[test]
+fn sidebar_repeated_full_page_retains_available_threads() {
+    let fixture = Fixture::with_options(&["--sidebar", "--sidebar-repeat-page"]);
+    let sessions = fixture
+        .client
+        .sidebar_sessions()
+        .expect("a repeated page must keep the sidebar available");
+    assert_eq!(
+        sessions
+            .iter()
+            .filter(|row| row.id.starts_with("thoughts-sidebar-"))
+            .count(),
+        500
+    );
+    let unique: std::collections::BTreeSet<_> = sessions.iter().map(|row| &row.id).collect();
+    assert_eq!(
+        unique.len(),
+        sessions.len(),
+        "bounded repeated-page fallback must deduplicate records"
+    );
+}
+
 fn oracle(fixture: &Fixture) -> Value {
     let output = Process::new("node")
         .current_dir(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.."))

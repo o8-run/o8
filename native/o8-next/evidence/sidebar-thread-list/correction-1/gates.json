@@ -1,0 +1,9 @@
+{
+  "tsc": 0,
+  "typecheck-fast": 0,
+  "eslint": 0,
+  "rule-check": 0,
+  "classification": 0,
+  "focused-js": 0,
+  "npm-test": 0
+}

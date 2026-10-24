@@ -1,0 +1,15 @@
+running 1 test
+test shell::tests::sidebar_tests::sidebar_repeated_full_page_retains_available_threads ...
+thread 'shell::tests::sidebar_tests::sidebar_repeated_full_page_retains_available_threads' (74747) panicked at src/sidebar_tests.rs:67:10:
+a repeated page must keep the sidebar available: "Thread pagination is unavailable. Update the selected server."
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    shell::tests::sidebar_tests::sidebar_repeated_full_page_retains_available_threads
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 38 filtered out; finished in 2.54s
+
+error: test failed, to rerun pass `--bin o8-next`
