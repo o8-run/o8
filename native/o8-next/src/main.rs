@@ -2,6 +2,7 @@
 mod activity;
 mod client;
 mod composer;
+mod customize;
 mod diff;
 #[cfg(test)]
 mod diff_tests;

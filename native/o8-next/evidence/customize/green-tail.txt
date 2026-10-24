@@ -1,0 +1,7 @@
+test shell::tests::customize_auth_error_and_retry ... ok
+test shell::tests::customize_inventory_and_prompt_crud ... O8_NEXT_CUSTOMIZE_EVIDENCE {"endpoint":"headless GPUI CPU scene; no GPU/compositor","openToFirstFrameMs":38.628474000000004,"interactionToFrameMs":50.794449}
+ok
+test shell::tests::shell_palette_switch_restart_and_server_down ... O8_NEXT_SHELL_EVIDENCE {"endpoint":"GPUI TestAppContext CPU scene paint; test text system; no GPU/compositor","platform":"linux","launchToInteractiveMs":386.34583,"paletteOpenToFrameMs":[33.269496000000004,34.85769,29.465893,26.235545,35.260417000000004,39.746307,26.213123000000003,30.235196,27.728666999999998,29.406146,29.965195,30.550632,32.379551,33.451930999999995,32.927423,29.541878,27.411656,34.902002,29.592133999999998,27.499326],"workspaceSwitchMs":[91.78385399999999,33.147452,25.203276,32.495514,26.708684,58.368806,25.735467,33.489067999999996,25.897169,143.382217],"idleMemoryMiB":36.03125,"workspaces":2,"restoredSurfaces":3}
+ok
+test shell::tests::shell_retains_sidebar_selection_and_view_identity ... ok
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 31 filtered out; finished in 17.49s

@@ -66,6 +66,7 @@ pub struct Shell {
     revision: u64,
     painted: Rc<Cell<u64>>,
     subscriptions: Vec<gpui::Subscription>,
+    customize: Option<Entity<crate::customize::Customize>>,
 }
 impl Shell {
     fn new(
@@ -94,6 +95,7 @@ impl Shell {
             revision: 0,
             painted: Rc::new(Cell::new(u64::MAX)),
             subscriptions: vec![],
+            customize: None,
         };
         shell
             .subscriptions
@@ -349,6 +351,9 @@ impl Shell {
         cx.notify();
     }
     fn key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if self.customize.is_some() {
+            return;
+        }
         let key = event.keystroke.key.as_str();
         let modifiers = event.keystroke.modifiers;
         if (modifiers.control || modifiers.platform) && key == "k" {

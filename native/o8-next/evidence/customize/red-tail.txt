@@ -1,0 +1,20 @@
+running 2 tests
+test shell::tests::customize_auth_error_and_retry ...
+thread 'shell::tests::customize_auth_error_and_retry' (21104) panicked at src/shell_tests.rs:357:28:
+missing control: customize-open
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+test shell::tests::customize_inventory_and_prompt_crud ...
+thread 'shell::tests::customize_inventory_and_prompt_crud' (21754) panicked at src/shell_tests.rs:357:28:
+missing control: customize-open
+FAILED
+
+failures:
+
+failures:
+    shell::tests::customize_auth_error_and_retry
+    shell::tests::customize_inventory_and_prompt_crud
+
+test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 33 filtered out; finished in 13.19s
+
+error: test failed, to rerun pass `--bin o8-next`

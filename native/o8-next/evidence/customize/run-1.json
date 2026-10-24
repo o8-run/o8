@@ -1,0 +1,21 @@
+{
+  "endpoint": "headless GPUI CPU scene; no GPU/compositor",
+  "openToFirstFrameMs": 38.628474000000004,
+  "interactionToFrameMs": 50.794449,
+  "platform": "linux",
+  "build": "debug",
+  "samples": 1,
+  "before": {
+    "surface": false,
+    "regressionsPassed": 0,
+    "regressionsFailed": 2,
+    "openToFirstFrameMs": null,
+    "interactionToFrameMs": null
+  },
+  "after": {
+    "regressionsPassed": 2,
+    "regressionsFailed": 0,
+    "shellTestsPassed": 4
+  },
+  "beforeTimingReason": "No native Customize surface on the base commit."
+}

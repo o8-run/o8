@@ -145,6 +145,34 @@ impl Client {
         client.workspace = Some(workspace.into());
         client
     }
+    pub(crate) fn customize_write(
+        &self,
+        method: &str,
+        path: &str,
+        body: &Value,
+    ) -> Result<Value, String> {
+        let url = self
+            .origin
+            .join(path)
+            .map_err(|_| "Invalid customization route")?;
+        let mut request = self.agent.request(method, url.as_str());
+        if let Some(token) = &self.token {
+            request = request.set("Authorization", &format!("Bearer {token}"));
+        }
+        let result = if method == "DELETE" {
+            request.call()
+        } else {
+            request.send_json(body.clone())
+        };
+        let response = result.map_err(|error| match error {
+            ureq::Error::Status(code, response) => {
+                let detail = Self::read::<Value>(response).ok().and_then(|v| v["error"]["message"].as_str().or(v["error"].as_str()).map(str::to_owned));
+                detail.unwrap_or_else(|| format!("Customization rejected (HTTP {code}). Try again."))
+            }
+            _ => "The change could not be confirmed. Your draft is retained. Refresh before retrying.".into(),
+        })?;
+        Self::read(response)
+    }
     pub fn sessions(&self) -> Result<Vec<Session>, String> {
         let mut sessions = self
             .get::<Sessions>("/api/mobile/orchestrator/threads", &[("limit", "500")])?

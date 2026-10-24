@@ -14,6 +14,9 @@ struct Fixture {
 }
 impl Fixture {
     fn new() -> Self {
+        Self::with_mode("--shell")
+    }
+    fn with_mode(mode: &str) -> Self {
         let root = std::env::temp_dir().join(format!(
             "o8-shell-{}-{}",
             std::process::id(),
@@ -32,21 +35,23 @@ impl Fixture {
                 "tsx",
                 "scripts/next/dev-server.ts",
                 "--composer",
-                "--shell",
+                mode,
             ])
             .env("O8_NEXT_API_TOKEN", "fixture-shell-bearer")
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()
             .unwrap();
-        let origin = BufReader::new(server.stdout.take().unwrap())
-            .lines()
+        let mut lines = BufReader::new(server.stdout.take().unwrap()).lines();
+        let origin = lines
+            .by_ref()
             .find_map(|line| {
                 serde_json::from_str::<Value>(&line.ok()?).ok()?["origin"]
                     .as_str()
                     .map(str::to_owned)
             })
             .expect("fixture origin");
+        std::thread::spawn(move || for _ in lines {});
         Self {
             server,
             client: Client::authenticated(&origin, Some("fixture-shell-bearer".into())).unwrap(),
@@ -343,4 +348,182 @@ fn shell_retains_sidebar_selection_and_view_identity(cx: &mut TestAppContext) {
         before, after,
         "changing the session in the sidebar must retain the existing Surface and its drafts"
     );
+}
+
+fn custom_click(cx: &mut VisualTestContext, selector: &'static str) {
+    draw(cx);
+    let bounds = cx
+        .debug_bounds(selector)
+        .unwrap_or_else(|| panic!("missing control: {selector}"));
+    cx.simulate_click(bounds.center(), gpui::Modifiers::default());
+    cx.run_until_parked();
+    draw(cx);
+}
+#[gpui::test]
+fn customize_inventory_and_prompt_crud(cx: &mut TestAppContext) {
+    let fixture = Fixture::with_mode("--customize");
+    let repos: Value = fixture.client.get("/api/panel/repos", &[]).unwrap();
+    let repo = repos["repos"][0]["localPath"].as_str().unwrap().to_owned();
+    let state = State {
+        selected: Some(repo.clone()),
+        ..State::default()
+    };
+    let (_shell, mut visual) = open(
+        fixture.client.clone(),
+        fixture.root.join("customize.json"),
+        state,
+        cx,
+    );
+    let cx = &mut visual;
+    cx.run_until_parked();
+    draw(cx);
+    let start = Instant::now();
+    custom_click(cx, "customize-open");
+    let open_ms = start.elapsed().as_secs_f64() * 1000.;
+    custom_click(cx, "custom-tab-agents");
+    custom_click(cx, "custom-copy-0");
+    assert!(
+        cx.read_from_clipboard()
+            .unwrap()
+            .text()
+            .unwrap()
+            .contains("Fixture")
+    );
+    custom_click(cx, "custom-personal");
+    custom_click(cx, "custom-copy-0");
+    assert!(
+        cx.read_from_clipboard()
+            .unwrap()
+            .text()
+            .unwrap()
+            .contains("Personal")
+    );
+    custom_click(cx, "custom-workspace");
+    custom_click(cx, "custom-tab-skills");
+    custom_click(cx, "custom-copy-0");
+    assert!(
+        cx.read_from_clipboard()
+            .unwrap()
+            .text()
+            .unwrap()
+            .contains("Fixture skill")
+    );
+    custom_click(cx, "custom-tab-hooks");
+    custom_click(cx, "custom-copy-0");
+    assert!(
+        cx.read_from_clipboard()
+            .unwrap()
+            .text()
+            .unwrap()
+            .contains("fixture-hook")
+    );
+    custom_click(cx, "custom-tab-connections");
+    assert!(cx.debug_bounds("custom-row-0").is_some());
+    custom_click(cx, "custom-tab-rules");
+    custom_click(cx, "custom-copy-0");
+    assert!(
+        cx.read_from_clipboard()
+            .unwrap()
+            .text()
+            .unwrap()
+            .contains("Fixture instruction")
+    );
+    custom_click(cx, "custom-tab-prompts");
+    assert!(cx.debug_bounds("custom-empty").is_some());
+    custom_click(cx, "custom-new");
+    custom_click(cx, "custom-save");
+    assert!(
+        cx.debug_bounds("custom-error").is_some(),
+        "server validation must retain the editor"
+    );
+    custom_click(cx, "custom-title");
+    cx.simulate_input("Saved fixture");
+    custom_click(cx, "custom-body");
+    cx.simulate_input("Reusable fixture text");
+    custom_click(cx, "custom-tags");
+    cx.simulate_input("review, fixture");
+    custom_click(cx, "custom-save");
+    let saved: Value = fixture
+        .client
+        .get(
+            "/api/prompt-library",
+            &[("repoPath", &repo), ("scope", "available")],
+        )
+        .unwrap();
+    assert_eq!(saved["prompts"][0]["title"], "Saved fixture");
+    assert_eq!(saved["prompts"][0]["tags"], json!(["review", "fixture"]));
+    assert_eq!(
+        fs::canonicalize(saved["prompts"][0]["repoPath"].as_str().unwrap()).unwrap(),
+        fs::canonicalize(&repo).unwrap()
+    );
+    custom_click(cx, "custom-copy-0");
+    assert_eq!(
+        cx.read_from_clipboard().unwrap().text().unwrap(),
+        "Reusable fixture text"
+    );
+    custom_click(cx, "custom-edit-0");
+    custom_click(cx, "custom-title");
+    cx.simulate_keystrokes("ctrl-a");
+    cx.simulate_input("Cancelled");
+    custom_click(cx, "custom-cancel");
+    let cancelled: Value = fixture
+        .client
+        .get("/api/prompt-library", &[("repoPath", &repo)])
+        .unwrap();
+    assert_eq!(cancelled["prompts"][0]["title"], "Saved fixture");
+    custom_click(cx, "custom-edit-0");
+    custom_click(cx, "custom-title");
+    cx.simulate_keystrokes("ctrl-a");
+    cx.simulate_input("Updated fixture");
+    custom_click(cx, "custom-save");
+    let updated: Value = fixture
+        .client
+        .get("/api/prompt-library", &[("repoPath", &repo)])
+        .unwrap();
+    assert_eq!(updated["prompts"][0]["title"], "Updated fixture");
+    custom_click(cx, "custom-search");
+    let start = Instant::now();
+    cx.simulate_input("unmatched");
+    draw(cx);
+    let interaction = start.elapsed().as_secs_f64() * 1000.;
+    assert!(cx.debug_bounds("custom-no-matches").is_some());
+    cx.simulate_keystrokes("ctrl-a backspace");
+    draw(cx);
+    custom_click(cx, "custom-refresh");
+    custom_click(cx, "custom-delete-0");
+    custom_click(cx, "custom-delete-cancel");
+    let retained: Value = fixture
+        .client
+        .get("/api/prompt-library", &[("repoPath", &repo)])
+        .unwrap();
+    assert_eq!(retained["prompts"].as_array().unwrap().len(), 1);
+    custom_click(cx, "custom-delete-0");
+    custom_click(cx, "custom-delete-confirm");
+    let empty: Value = fixture
+        .client
+        .get("/api/prompt-library", &[("repoPath", &repo)])
+        .unwrap();
+    assert_eq!(empty["prompts"], json!([]));
+    custom_click(cx, "customize-close");
+    println!(
+        "O8_NEXT_CUSTOMIZE_EVIDENCE {}",
+        json!({"endpoint":"headless GPUI CPU scene; no GPU/compositor","openToFirstFrameMs":open_ms,"interactionToFrameMs":interaction})
+    );
+}
+#[gpui::test]
+fn customize_auth_error_and_retry(cx: &mut TestAppContext) {
+    let fixture = Fixture::with_mode("--customize-denied");
+    let (_shell, mut visual) = open(
+        fixture.client.clone(),
+        fixture.root.join("denied.json"),
+        State::default(),
+        cx,
+    );
+    let cx = &mut visual;
+    cx.run_until_parked();
+    draw(cx);
+    custom_click(cx, "customize-open");
+    assert!(cx.debug_bounds("custom-error").is_some());
+    custom_click(cx, "custom-refresh");
+    assert!(cx.debug_bounds("custom-error").is_some());
 }

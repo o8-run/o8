@@ -13,6 +13,11 @@ impl Render for Shell {
                 Content::Session(s) => s.clone().into_any_element(),
                 Content::Grid(g) => g.clone().into_any_element(),
             });
+        let content = self
+            .customize
+            .as_ref()
+            .map(|view| view.clone().into_any_element())
+            .or(content);
         div()
             .size_full()
             .flex()
@@ -34,6 +39,48 @@ impl Render for Shell {
                         cx.listener(|_, _, window, _| window.prevent_default()),
                     )
                     .child("o8 next alpha")
+                    .child(
+                        div()
+                            .id("customize-open")
+                            .debug_selector(|| "customize-open".into())
+                            .p(px(6.))
+                            .cursor_pointer()
+                            .child("Customize")
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                if this.customize.is_none() {
+                                    this.capture(window, cx);
+                                    this.palette = false;
+                                    this.customize = Some(cx.new(|cx| {
+                                        crate::customize::Customize::new(
+                                            this.client.clone(),
+                                            this.state.selected.clone(),
+                                            cx,
+                                        )
+                                    }));
+                                    this.revision += 1;
+                                    cx.notify();
+                                }
+                            })),
+                    )
+                    .when(self.customize.is_some(), |v| {
+                        v.child(
+                            div()
+                                .id("customize-close")
+                                .debug_selector(|| "customize-close".into())
+                                .p(px(6.))
+                                .cursor_pointer()
+                                .child("Close Customize")
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    if this.customize.as_ref().is_some_and(|v| v.read(cx).busy()) {
+                                        return;
+                                    }
+                                    this.customize = None;
+                                    this.restore_focus(window, cx);
+                                    this.revision += 1;
+                                    cx.notify();
+                                })),
+                        )
+                    })
                     .children(self.workspaces.clone().into_iter().enumerate().map(
                         |(i, workspace)| {
                             let label = std::path::Path::new(&workspace)

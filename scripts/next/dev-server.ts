@@ -13,6 +13,10 @@ import { attachTranscriptSocket } from './transcript-socket';
 import { startTerminalFixture } from './terminal-fixture';
 
 async function main() {
+  if (process.argv.some(arg => arg.startsWith('--customize'))) {
+    await (await import('./customize-fixture')).startCustomizeServer();
+    return;
+  }
   if (process.argv.includes('--worker')) {
     await (await import('./worker-server')).startWorkerServer();
     return;
