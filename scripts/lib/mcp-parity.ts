@@ -8,7 +8,7 @@ export interface RecordedMcpRequest {
   /** Exact freshness pointers after parsing text content; validated timestamp fields are also allowed. */
   freshness?: string[];
 }
-export interface McpExchange { status: number; headers: Record<string, string>; body: unknown }
+export interface McpExchange { status: number; headers: Record<string, string>; body: unknown; catalogBytes?: string }
 const timestampNames = new Set(['capturedAt', 'createdAt', 'updatedAt', 'decidedAt', 'generatedAt', 'checkedAt', 'observedAt', 'timestamp']);
 function timestamp(value: unknown): boolean {
   return typeof value === 'number' ? Number.isFinite(value) && value >= 946684800000
@@ -84,7 +84,13 @@ export async function sendRecordedMcp(base: string, token: string, recording: Re
     const value = response.headers.get(key);
     return value === null ? [] : [[key, value]];
   }));
-  return { status: response.status, headers, body };
+  // Catalog parity includes the exact wire bytes; tool results retain their
+  // field-by-field comparison and narrowly declared freshness allowances.
+  const responses: unknown[] = Array.isArray(body) ? body : [body];
+  const catalog = responses.some((entry) => entry && typeof entry === 'object'
+    && Array.isArray((entry as { result?: { tools?: unknown } }).result?.tools));
+  return { status: response.status, headers, body,
+    ...(catalog ? { catalogBytes: raw } : {}) };
 }
 
 export async function replayMcp(reference: string, candidate: string, token: string, requests: RecordedMcpRequest[]): Promise<number> {

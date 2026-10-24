@@ -1,7 +1,7 @@
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -21,7 +21,9 @@ vi.mock('@/lib/runtimes/shared/auth-detect', () => ({
   getDispatchableRuntimeAvailability: async () => [],
 }));
 
-const directory = process.env.CORTEX_IDE_DATA_DIR!;
+const directory = realpathSync(process.env.CORTEX_IDE_DATA_DIR!);
+// The existing native publisher uses Linux process identity; other hosts test the TS fallback.
+const nativeReadTest = it.runIf(process.platform === 'linux');
 process.env.CORTEX_IDE_DB_PATH = join(directory, 'cortex-ide.db');
 const token = 'o8d-fixture-operator-credential';
 writeFileSync(join(directory, 'ws-token'), token);
@@ -95,8 +97,8 @@ function toolPayload(exchange: Awaited<ReturnType<typeof call>>) {
   return JSON.parse((exchange.body as { result: { content: Array<{ text: string }> } }).result.content[0].text);
 }
 
-async function startRust(upstream: string, native = false, database?: string): Promise<string> {
-  const binary = process.env.O8D_MCP_TEST_BINARY ?? 'crates/o8d/target/debug/o8d-mcp';
+async function startRust(upstream: string, native = false, database?: string, executable?: string): Promise<string> {
+  const binary = executable ?? process.env.O8D_MCP_TEST_BINARY ?? 'crates/o8d/target/debug/o8d';
   const child = spawn(binary, ['--experimental-mcp', '--listen', '127.0.0.1:0', '--upstream', upstream,
     ...(native ? ['--native-reads', '--data-dir', directory] : [])], {
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -131,8 +133,8 @@ beforeAll(async () => {
   process.env.O8_API_PORT = String(address.port);
   process.env.O8_API_BASE = base;
   writeFileSync(join(directory, 'api-port'), String(address.port));
-  const repo = join(directory, 'repo');
-  mkdirSync(repo, { recursive: true });
+  mkdirSync(join(directory, 'repo'), { recursive: true });
+  const repo = realpathSync(join(directory, 'repo'));
   await promisify(execFile)('git', ['init', '--quiet', repo]);
   writeFileSync(join(directory, 'repos.json'), JSON.stringify({ version: 1, repos: [{
     id: 'fixture-repo', name: 'Fixture', localPath: repo, remoteUrl: null,
@@ -172,6 +174,91 @@ afterAll(async () => {
 });
 
 describe('o8d MCP through the real HTTP JSON-RPC entry point', () => {
+  it('serves MCP from the o8d executable only with explicit opt-in', async () => {
+    const binary = process.env.O8D_TEST_BINARY ?? 'crates/o8d/target/debug/o8d';
+    await expect(promisify(execFile)(binary, ['--listen', '127.0.0.1:0', '--upstream', base])).rejects.toThrow('o8d failed');
+    const endpoint = await startRust(base, true, undefined, binary);
+    const recording = { name: 'initialize', body: { jsonrpc: '2.0', id: 'initialize', method: 'initialize' } };
+    compareMcpExchanges(await sendRecordedMcp(base, token, recording), await sendRecordedMcp(endpoint, token, recording));
+    expect(await replayMcp(base, endpoint, token, records)).toBe(records.length);
+  }, 120_000);
+
+  it('owns legacy initialization after authorization and preserves session responses', async () => {
+    const body = JSON.stringify({ jsonrpc: '2.0', id: 'session', method: 'initialize' });
+    seen.length = 0;
+    const response = await fetch(`${nativeRust}/api/mcp`, { method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body });
+    expect(response.status).toBe(200);
+    expect(response.headers.get('mcp-session-id')).toMatch(/^[a-f0-9-]{36}$/);
+    expect((await response.json()).result.protocolVersion).toBe('2024-11-05');
+    expect(seen.filter((entry) => entry.path === '/api/mcp').map((entry) => JSON.parse(entry.body).method)).toEqual(['o8d/read-context']);
+    for (const credential of ['absent', 'invalid', 'read-only'] as const) {
+      const recording = { name: 'initialize refusal', credential, body };
+      compareMcpExchanges(await sendRecordedMcp(base, token, recording), await sendRecordedMcp(nativeRust, token, recording));
+    }
+    const notification = await fetch(`${nativeRust}/api/mcp`, { method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', method: 'initialize' }) });
+    expect(notification.status).toBe(202);
+    expect(notification.headers.get('mcp-session-id')).toMatch(/^[a-f0-9-]{36}$/);
+    expect(await notification.text()).toBe('');
+  });
+
+  it('preserves catalog batches byte for byte and in request order', async () => {
+    const body = '[{"jsonrpc":"2.0","id":1.0,"method":"tools/list"},{"jsonrpc":"2.0","id":"catalog-two","method":"tools/list"}]';
+    const options = { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body };
+    const expected = await fetch(`${base}/api/mcp`, options);
+    seen.length = 0;
+    const actual = await fetch(`${nativeRust}/api/mcp`, options);
+    expect(actual.status).toBe(expected.status);
+    expect(Buffer.from(await actual.arrayBuffer()).equals(Buffer.from(await expected.arrayBuffer()))).toBe(true);
+    const forwarded = seen.filter((entry) => entry.path === '/api/mcp');
+    expect(forwarded).toHaveLength(1);
+    expect(forwarded[0].body).toBe(body);
+  });
+
+  it.each(['o8_send', 'dispatch_mission', 'o8_approve', 'approve_and_merge'])(
+    'forwards %s unchanged for the TypeScript profile refusal', async (name) => {
+      const body = JSON.stringify({ jsonrpc: '2.0', id: name, method: 'tools/call', params: {
+        name, arguments: { fixture: 'must stay unchanged' },
+      } });
+      const recording = { name, body, headers: { 'x-o8-mcp-profile': 'unknown', 'x-fixture-correlation': name } };
+      const reference = await sendRecordedMcp(base, token, recording);
+      seen.length = 0;
+      compareMcpExchanges(reference, await sendRecordedMcp(nativeRust, token, recording));
+      const forwarded = seen.filter((entry) => entry.path === '/api/mcp');
+      expect(forwarded).toHaveLength(1);
+      expect(forwarded[0].body).toBe(body);
+      expect(forwarded[0].headers['x-fixture-correlation']).toBe(name);
+      expect(reference.body).toMatchObject({ result: { isError: true } });
+    },
+  );
+
+  it.each(['full', 'dogfood', 'visualizations', 'unknown'])('returns byte-identical catalog JSON for the %s profile', async (profile) => {
+    const body = readFileSync('tests/fixtures/mcp-parity/list.json', 'utf8');
+    const options = { method: 'POST', headers: { authorization: `Bearer ${token}`,
+      'content-type': 'application/json', 'x-o8-mcp-profile': profile }, body };
+    const responses = await Promise.all([base, rust, nativeRust].map((url) => fetch(`${url}/api/mcp`, options)));
+    expect(responses.map((response) => response.status)).toEqual([200, 200, 200]);
+    const bytes = await Promise.all(responses.map(async (response) => Buffer.from(await response.arrayBuffer())));
+    for (const candidate of bytes.slice(1)) expect(candidate.equals(bytes[0])).toBe(true);
+  });
+
+  it.each([false, true])('rejects catalog byte drift through the URL replay harness (batch=%s)', async (batch) => {
+    const catalog = readFileSync('tests/fixtures/mcp-parity/list.json', 'utf8');
+    const body = batch ? `[${catalog}]` : catalog;
+    const reference = await fetch(`${base}/api/mcp`, { method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body });
+    const reordered = JSON.stringify(await reference.json(), null, 2);
+    const candidate = createServer((_request, response) => {
+      response.writeHead(200, { 'content-type': 'application/json' }).end(reordered);
+    });
+    const endpoint = await listen(candidate);
+    try {
+      await expect(replayMcp(base, endpoint, token, [{ name: 'catalog byte drift', body }])).rejects.toThrow('mismatch');
+    } finally { await stop(candidate); }
+  });
+
   it('replays the recorded tools/list request against both servers', async () => {
     const body = readFileSync('tests/fixtures/mcp-parity/list.json', 'utf8');
     const results = await Promise.all([base, rust].map((url) => sendRecordedMcp(url, token, { name: 'catalog', body })));
@@ -188,7 +275,7 @@ describe('o8d MCP through the real HTTP JSON-RPC entry point', () => {
     expect(await replayMcp(base, nativeRust, token, records)).toBe(records.length);
   }, 120_000);
 
-  it.each(['o8_status', 'get_mission_status', 'o8_task_list', 'o8_list_repos', 'o8_list_projects', 'o8_lease_list'])(
+  nativeReadTest.each(['o8_status', 'get_mission_status', 'o8_task_list', 'o8_list_repos', 'o8_list_projects', 'o8_lease_list'])(
     'reads %s natively with zero TypeScript requests', async (name) => {
       const expected = await call(base, name);
       seen.length = 0;
@@ -204,7 +291,7 @@ describe('o8d MCP through the real HTTP JSON-RPC entry point', () => {
     expect(await replayMcp(base, nativeRust, token, additional)).toBe(additional.length);
   });
 
-  it('sees committed WAL updates without modifying SQLite or the registries', async () => {
+  nativeReadTest('sees committed WAL updates without modifying SQLite or the registries', async () => {
     const sqlite = getSqlite();
     expect(sqlite.pragma('journal_mode', { simple: true })).toBe('wal');
     const lane = createLane({ repoPath: join(directory, 'repo'), runtime: 'codex', branch: 'fixture/native-wal', label: 'Native WAL fixture' });
@@ -256,7 +343,7 @@ describe('o8d MCP through the real HTTP JSON-RPC entry point', () => {
     }
   });
 
-  it('falls back on malformed policy, stale publisher identity and disabled reads', async () => {
+  nativeReadTest('falls back on malformed policy, stale publisher identity and disabled reads', async () => {
     await call(base, 'o8_list_repos');
     const sqlite = getSqlite();
     const row = sqlite.prepare("SELECT value FROM app_state WHERE key = 'o8d/mcp/v1/policy'").get() as { value: string };
@@ -290,7 +377,7 @@ describe('o8d MCP through the real HTTP JSON-RPC entry point', () => {
     } finally { writeFileSync(join(directory, 'orchestrator-state.json'), saved); }
   });
 
-  it('refuses an unbound publisher generation even when its process identity is live', async () => {
+  nativeReadTest('refuses an unbound publisher generation even when its process identity is live', async () => {
     const upstream = createServer((_request, response) => {
       response.writeHead(403, { 'content-type': 'application/json' }).end('{"error":"Fixture upstream refuses"}');
     });
@@ -428,7 +515,7 @@ describe('o8d MCP through the real HTTP JSON-RPC entry point', () => {
       const expected = await sendRecordedMcp(base, token, recording);
       seen.length = 0;
       compareMcpExchanges(expected, await sendRecordedMcp(nativeRust, token, recording));
-      expect(seen).toHaveLength(0);
+      expect(seen).toHaveLength(process.platform === 'linux' ? 0 : 1);
       expect((await call(nativeRust, 'o8_status')).body).toMatchObject({ result: { isError: true } });
     } finally { delete process.env.O8_OPERATOR_MCP_PROFILE; }
     delete process.env.O8D_MCP_READS;
@@ -495,9 +582,9 @@ describe('o8d MCP through the real HTTP JSON-RPC entry point', () => {
   });
 
   it('requires runtime opt-in and rejects non-loopback upstreams', async () => {
-    const binary = process.env.O8D_MCP_TEST_BINARY ?? 'crates/o8d/target/debug/o8d-mcp';
+    const binary = process.env.O8D_MCP_TEST_BINARY ?? 'crates/o8d/target/debug/o8d';
     for (const args of [[], ['--experimental-mcp', '--listen', '0.0.0.0:0', '--upstream', base], ['--experimental-mcp', '--listen', '127.0.0.1:0', '--upstream', 'http://remote.invalid:1234']]) {
-      await expect(promisify(execFile)(binary, args)).rejects.toThrow('o8d MCP failed');
+      await expect(promisify(execFile)(binary, args)).rejects.toThrow('o8d failed');
     }
   });
 

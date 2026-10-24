@@ -28,6 +28,15 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let arguments = env::args().skip(1).collect::<Vec<_>>();
     if arguments
         .iter()
+        .any(|argument| argument == "--experimental-mcp")
+    {
+        #[cfg(feature = "experimental-mcp")]
+        return o8d::mcp::run(&arguments).await;
+        #[cfg(not(feature = "experimental-mcp"))]
+        return Err("MCP unavailable".into());
+    }
+    if arguments
+        .iter()
         .any(|argument| argument == "--experimental-http")
     {
         #[cfg(feature = "experimental-http")]
