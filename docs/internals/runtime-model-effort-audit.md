@@ -96,8 +96,8 @@ claude, codex, openclaw, hermes, acp, opencode, collide, fable, o8, pi and muse.
 | Mobile global settings | Global thinkingEffort preference | Separate from per-model worker effort; downstream lead limitations still apply |
 | Mobile Ask | Separate allowlisted model and effort vocabulary to planner route | Opus low becomes medium; malformed values become xhigh, #4620 |
 | CLI chat API | effort to Codex argv; Gemini/OpenCode concrete pins refused | Captured executable tests retained; no live provider claim |
-| Native OpenAI API | o3, o3-mini, o4-mini: low/medium/high to reasoning_effort | Other concrete pairs refused until an API mapping is established; omission/adaptive retain existing default behavior |
-| Native Anthropic API | Existing thinking model allowlist: low/medium/high/max/xhigh to budgets 4000/10000/24000/48000/60000 | max_tokens reserves 4000 answer tokens, at most 64000 for these mappings; ultra/unmapped models refused |
+| Native OpenAI API | o3, o3-mini, o4-mini, including YYYY-MM-DD snapshots: low/medium/high to reasoning_effort | Effort support uses the family; the request keeps the exact snapshot id. Other concrete pairs are refused |
+| Native Anthropic API | Existing thinking model families, including YYYYMMDD snapshots: low/medium/high/max/xhigh to budgets 4000/10000/24000/48000/60000 | The request keeps the exact snapshot id; max_tokens reserves 4000 answer tokens, at most 64000 for these mappings; ultra/unmapped models refused |
 | Native Anthropic default/adaptive | Omission selects adaptive on the existing adaptive-model allowlist; explicit adaptive omits thinking | This historical default/reset distinction does not mean disabled thinking |
 | Native Google and ChatGPT plan APIs | Omitted/default or adaptive only | Concrete independent effort refused; current transports have no verified mapping |
 | Operator API | Existing managed Low/High service policy | A service tier; provider and fallback policy determine actual reasoning |
