@@ -536,3 +536,25 @@ uses GPUI. No GPL application crates are used. See
 [slot terminal verification](evidence/slot-terminals/verification.md) for retained
 red/green receipts, six-slot measurements and the remaining display acceptance.
 The shipped Tauri app is unchanged.
+
+
+
+
+## Issues in the opt-in app shell
+
+Open **Issues** from the app shell command palette. Registered GitHub repositories
+use the existing operator-authenticated panel routes. Search open issues by title
+or number, or open a number directly to read a closed issue. The native viewer
+includes Markdown, metadata, labels, readiness, GitHub links and retry with retained
+data after a failed refresh.
+
+New issue supports title, Markdown description, labels, preview, enhancement and
+creation through the desktop's existing routes. Link an issue and open **Task
+composer** to choose a saved worker session in the existing sidebar. **Work on
+issue** sends its context through that session's normal durable composer queue;
+missing checkouts and existing drafts refuse the launch. Link choices are scoped
+to the selected session and stay in memory; submitted context persists in the
+queue and worker history. Fresh desktop CLI-session creation is not ported here.
+
+This adds no installed-app default, server route, dependency, release or publishing
+change. See `evidence/issues/verification.md` for parity and fixture measurements.

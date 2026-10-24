@@ -49,7 +49,8 @@ async function main() {
           yield append(` ${tick}`);
         }
       } else {
-        yield append(`Worker received: ${words}`);
+        const issueContext = text.includes('Linked GitHub issue #7 in fixture/alpha') && text.includes('Issue fixture context.');
+        yield append(issueContext ? 'Linked issue context received' : `Worker received: ${words}`);
       }
       yield { type: 'done', reason: 'stop', message };
     } });

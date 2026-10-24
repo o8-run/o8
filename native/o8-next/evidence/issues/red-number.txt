@@ -1,0 +1,13 @@
+running 1 test
+test shell::issue_tests::issues_view_search_link_clear_and_worker_task ...
+thread 'shell::issue_tests::issues_view_search_link_clear_and_worker_task' panicked at src/issue_tests.rs:70:5:
+real control did not reach CPU paint: issue-open-number
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    shell::issue_tests::issues_view_search_link_clear_and_worker_task
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 38 filtered out; finished in 4.64s

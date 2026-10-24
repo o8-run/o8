@@ -131,6 +131,7 @@ fn ready(shell: &Entity<Shell>, cx: &mut VisualTestContext) {
                     Content::Brain(brain) => {
                         brain.read(cx).painted.get() == brain.read(cx).revision
                     }
+                    Content::Issues(_) => false,
                     Content::Session(s) => s.read(cx).shell_ready(),
                     Content::Grid(g) => g
                         .read(cx)

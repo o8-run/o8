@@ -19,6 +19,7 @@ impl Render for Shell {
                         Content::Session(s) => s.clone().into_any_element(),
                         Content::Grid(g) => g.clone().into_any_element(),
                         Content::Inbox(inbox) => inbox.clone().into_any_element(),
+                        Content::Issues(issues) => issues.clone().into_any_element(),
                     })
             });
         div()

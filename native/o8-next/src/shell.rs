@@ -31,6 +31,7 @@ enum Command {
     Terminal,
     Inbox,
     Settings,
+    Issues,
 }
 impl Command {
     fn label(&self, sessions: &[Session]) -> String {
@@ -50,6 +51,7 @@ impl Command {
             Self::Terminal => "Open terminal".into(),
             Self::Inbox => "Open Inbox".into(),
             Self::Settings => "Open settings".into(),
+            Self::Issues => "Open issues".into(),
         }
     }
 }
@@ -58,6 +60,7 @@ enum Content {
     Brain(Entity<crate::brain::Brain>),
     Grid(Entity<Grid>),
     Inbox(Entity<Inbox>),
+    Issues(Entity<crate::issues::Issues>),
 }
 pub struct Shell {
     client: Client,
@@ -247,6 +250,9 @@ impl Shell {
                 }));
                 Content::Inbox(inbox)
             }
+            Tab::Issues => Content::Issues(cx.new(|cx| {
+                crate::issues::Issues::new(self.client.clone(), Some(workspace.clone()), window, cx)
+            })),
             Tab::Session(id) => {
                 let id = self
                     .current()
@@ -301,6 +307,7 @@ impl Shell {
                 // Grid reestablishes its own keyboard focus when opened or clicked.
                 Some(Content::Grid(grid)) => grid.update(cx, |g, cx| g.shell_focus(window, cx)),
                 Some(Content::Inbox(inbox)) => inbox.read(cx).focus(window),
+                Some(Content::Issues(issues)) => issues.read(cx).focus(window, cx),
                 _ => self.focus.focus(window),
             }
         } else {
@@ -345,6 +352,7 @@ impl Shell {
             Command::Diff,
             Command::Terminal,
             Command::Settings,
+            Command::Issues,
         ];
         if let Some(id) = match self.active() {
             Some(Tab::Session(id)) => Some(
@@ -385,6 +393,7 @@ impl Shell {
             Command::Grid => (Tab::Grid, false),
             Command::Inbox => (Tab::Inbox, false),
             Command::Settings => unreachable!(),
+            Command::Issues => (Tab::Issues, false),
             Command::Diff | Command::Terminal => {
                 self.notice = "This surface is not available in this build. The terminal and packet diff changes must land before the shell can open them.".into();
                 self.palette = false;
@@ -540,6 +549,7 @@ impl Shell {
         for content in self.content.values() {
             match content {
                 Content::Brain(_) => {}
+                Content::Issues(issues) => issues.update(cx, |s, cx| s.tick(refresh, cx)),
                 Content::Session(s) => s.update(cx, |s, cx| s.shell_tick(refresh, cx)),
                 Content::Grid(g) => g.update(cx, |g, cx| {
                     g.poll(cx);
@@ -563,3 +573,7 @@ mod tests;
 #[cfg(test)]
 #[path = "inbox_tests.rs"]
 mod inbox_tests;
+
+#[cfg(test)]
+#[path = "issue_tests.rs"]
+mod issue_tests;

@@ -14,6 +14,7 @@ pub enum Tab {
     Grid,
     Brain,
     Inbox,
+    Issues,
 }
 impl Tab {
     pub fn label(&self) -> &'static str {
@@ -22,6 +23,7 @@ impl Tab {
             Self::Grid => "Grid",
             Self::Brain => "Brain",
             Self::Inbox => "Inbox",
+            Self::Issues => "Issues",
         }
     }
 }

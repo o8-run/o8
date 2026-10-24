@@ -1,0 +1,24 @@
+ FAIL  tests/next-issues-real-path.test.ts > uses production issue routes, operator admission and installation boundaries, and persists creation
+AssertionError: expected 404 to be 401 // Object.is equality
+
+- Expected
++ Received
+
+- 401
++ 404
+
+ ❯ tests/next-issues-real-path.test.ts:34:54
+     32| it('uses production issue routes, operator admission and installation …
+     33|   const list = '/api/panel/issues?repo=fixture/alpha';
+     34|   expect((await api(list, undefined, false)).status).toBe(401);
+       |                                                      ^
+     35|   const response = await api(list);
+     36|   expect(response.status).toBe(200);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed (1)
+   Start at  22:23:07
+   Duration  14.18s (transform 57ms, setup 98ms, import 22ms, tests 13.72s, environment 0ms)

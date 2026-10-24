@@ -1,0 +1,7 @@
+---- shell::issue_tests::issues_errors_retry_stale_and_account_switch stdout ----
+
+thread 'shell::issue_tests::issues_errors_retry_stale_and_account_switch' panicked at src/issue_tests.rs:336:5:
+assertion `left == right` failed
+  left: String("fixture/alpha")
+ right: "fixture/beta"
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace

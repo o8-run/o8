@@ -56,6 +56,8 @@ async function main() {
     const { seedShellWorkspace } = await import('./shell-fixture');
     seeds.push(seedShellWorkspace(dataDir, root));
   }
+  const issues = process.argv.includes('--issues')
+    ? await (await import('./issues-fixture')).issueFixture(dataDir, root, repo) : null;
   const composer = process.argv.includes('--composer');
   const transcriptFixtures = process.argv.includes('--transcript');
   if (transcriptFixtures) seeds.push(...seedTranscriptFixtures(dataDir, repo));
@@ -108,6 +110,7 @@ async function main() {
       }, configurable: true });
   }
   const getRoutes: Record<string, (request: NextRequest) => Promise<Response>> = {
+    ...issues?.gets,
     '/api/mobile/orchestrator/threads': sessions, '/api/mobile/history': history,
     '/api/v2/chat-history': context, '/api/orchestrator/state': state,
     '/api/orchestrator/composer-queue': queue.GET, '/api/panel/ws-info': wsInfo,
@@ -142,7 +145,8 @@ async function main() {
           ? req.method === 'POST' ? queue.POST : req.method === 'PATCH' ? queue.PATCH : req.method === 'DELETE' ? queue.DELETE : null
           : review && req.method === 'POST' && url.pathname === '/api/orchestrator/review' ? reviewDecision.POST
             : approvalRoutes && req.method === 'POST' && url.pathname === '/api/panel/approvals' ? approvalRoutes.POST
-              : planProxy && req.method === 'POST' && url.pathname === '/api/v2/proxy/llm' ? planProxy.POST : null);
+              : planProxy && req.method === 'POST' && url.pathname === '/api/v2/proxy/llm' ? planProxy.POST
+                : req.method === 'POST' ? issues?.posts[url.pathname] : null);
       if (!route) { res.writeHead(404).end(); return; }
       // Prevent this development host from becoming a provider-history reader.
       if (route === history && !seeds.some(seed => `llm-chat:${seed.id}` === url.searchParams.get('sessionKey'))
@@ -150,7 +154,7 @@ async function main() {
       if (route === context && !seeds.some(seed => seed.id === url.searchParams.get('tabId'))) { res.writeHead(404).end(); return; }
       let body = '';
       for await (const chunk of req) { body += String(chunk); if (body.length > 1024 * 1024) throw new Error('Fixture body limit'); }
-      if (body && !settingsRoute && !control) {
+      if (body && !settingsRoute && !control && !issues?.posts[url.pathname]) {
         const target = JSON.parse(body) as { threadId?: string; repoPath?: string; packetId?: string; id?: string; action?: string };
         const owned = route === brainAsk ? target.repoPath === repo || !target.repoPath : route === reviewDecision.POST
           ? ['next-review-approve', 'next-review-reject'].includes(target.packetId ?? '')
@@ -221,6 +225,7 @@ async function main() {
   });
   async function close() {
     await inboxPlan?.close();
+    issues?.close();
     await closeTerminal();
     closeSockets();
     server.closeAllConnections(); server.close();

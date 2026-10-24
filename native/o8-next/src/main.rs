@@ -9,6 +9,7 @@ mod diff_tests;
 mod diff_ui;
 mod grid_sessions;
 mod inbox;
+mod issues;
 mod merge;
 mod model;
 mod pane;

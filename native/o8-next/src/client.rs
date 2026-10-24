@@ -73,6 +73,60 @@ pub struct Client {
     workspace: Option<String>,
 }
 impl Client {
+    /// Desktop issue contracts, with the same operator credential as other native reads.
+    pub(crate) fn issue_request(
+        &self,
+        method: &str,
+        path: &str,
+        query: &[(&str, &str)],
+        body: Option<Value>,
+    ) -> Result<Value, crate::issues::IssueError> {
+        use crate::issues::IssueError;
+        let mut url = self
+            .origin
+            .join(path)
+            .map_err(|_| IssueError::from("Invalid issue route".to_owned()))?;
+        url.query_pairs_mut().extend_pairs(query.iter().copied());
+        let mut request = self.agent.request(method, url.as_str());
+        if let Some(token) = &self.token {
+            request = request.set("Authorization", &format!("Bearer {token}"));
+        }
+        let result = if let Some(body) = body {
+            request.send_json(body)
+        } else {
+            request.call()
+        };
+        let response = match result {
+            Ok(response) => response,
+            Err(ureq::Error::Status(status, response)) => {
+                let retry_after = response
+                    .header("Retry-After")
+                    .and_then(|s| s.parse::<u64>().ok())
+                    .unwrap_or(0);
+                let value = Self::read::<Value>(response).unwrap_or(Value::Null);
+                return Err(IssueError {
+                    message: format!(
+                        "HTTP {status}: {}",
+                        value["error"].as_str().unwrap_or("Issue request refused")
+                    ),
+                    retry_after,
+                });
+            }
+            Err(_) => {
+                return Err(IssueError::from(
+                    "Could not reach the selected server. Draft retained.".to_owned(),
+                ));
+            }
+        };
+        let value: Value = Self::read(response).map_err(IssueError::from)?;
+        // Broker lists may contain a usable stale snapshot alongside an error.
+        if !value["issues"].is_array()
+            && let Some(error) = value["error"].as_str()
+        {
+            return Err(IssueError::from(error.to_owned()));
+        }
+        Ok(value)
+    }
     pub fn new(origin: &str) -> Result<Self, String> {
         Self::authenticated(origin, std::env::var("O8_NEXT_API_TOKEN").ok())?
             .with_desktop_session(std::env::var("O8_NEXT_CLERK_SESSION_TOKEN").ok())
