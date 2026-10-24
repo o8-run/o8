@@ -10,6 +10,7 @@ impl Render for Shell {
             .as_ref()
             .and_then(|t| self.content.get(&self.key(t)))
             .map(|c| match c {
+                Content::Brain(brain) => brain.clone().into_any_element(),
                 Content::Session(s) => s.clone().into_any_element(),
                 Content::Grid(g) => g.clone().into_any_element(),
             });

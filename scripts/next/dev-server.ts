@@ -74,6 +74,10 @@ async function main() {
   const { GET: state } = await import('../../src/app/api/orchestrator/state/route');
   await isolateTranscriptDiscovery(transcriptFixtures);
   const { GET: inventory } = await import('../../src/app/api/runtime/inventory/route');
+  const brain = process.argv.includes('--brain');
+  if (brain) await (await import('./brain-fixture')).seedBrainFixture(dataDir, repo);
+  const brainAsk = brain ? (await import('../../src/app/api/cortex/ask/route')).POST : null;
+  const brainRequests: unknown[] = [];
   const review = process.argv.includes('--review');
   if (review) await (await import('./review-fixture')).seedReviewFixture(repo);
   const packetDiff = await import('../../src/app/api/lanes/[id]/diff/route');
@@ -114,7 +118,8 @@ async function main() {
       if (process.argv.includes('--terminal') && req.method === 'GET' && url.pathname === '/api/panel/status') {
         res.writeHead(200, { 'Content-Type': 'application/json' }).end('{}'); return;
       }
-      const route = req.method === 'GET' ? getRoutes[url.pathname]
+      const route = req.method === 'POST' && url.pathname === '/api/cortex/ask' && brainAsk ? brainAsk
+        : req.method === 'GET' ? getRoutes[url.pathname]
         : composer && url.pathname === '/api/orchestrator/composer-queue'
           ? req.method === 'POST' ? queue.POST : req.method === 'PATCH' ? queue.PATCH : req.method === 'DELETE' ? queue.DELETE : null
           : review && req.method === 'POST' && url.pathname === '/api/orchestrator/review' ? reviewDecision.POST : null;
@@ -127,7 +132,7 @@ async function main() {
       for await (const chunk of req) { body += String(chunk); if (body.length > 1024 * 1024) throw new Error('Fixture body limit'); }
       if (body) {
         const target = JSON.parse(body) as { threadId?: string; repoPath?: string; packetId?: string };
-        const owned = route === reviewDecision.POST
+        const owned = route === brainAsk ? target.repoPath === repo || !target.repoPath : route === reviewDecision.POST
           ? ['next-review-approve', 'next-review-reject'].includes(target.packetId ?? '')
           : target.threadId?.startsWith('thoughts-composer-') && target.repoPath === repo;
         if (!owned) { res.writeHead(400).end(); return; }
@@ -136,6 +141,10 @@ async function main() {
         headers: { host: url.host, 'Content-Type': 'application/json', 'x-o8-client-addr': '127.0.0.1',
           ...(req.headers.authorization ? { authorization: req.headers.authorization } : {}) }, ...(body ? { body } : {}) });
       const gate = panelGateMiddleware(request);
+      if (route === brainAsk && gate.status === 200 && body && process.env.O8_NEXT_BRAIN_REQUEST_LOG) {
+        brainRequests.push(JSON.parse(body));
+        writeFileSync(process.env.O8_NEXT_BRAIN_REQUEST_LOG, JSON.stringify(brainRequests));
+      }
       const response = gate.status === 200 ? await route(request) : gate;
       // PATCH exercises actual steer admission and its persisted transcript echo.
       if (composer && response.ok && (route === queue.PATCH || (route === queue.POST && JSON.parse(body).intent === 'steer-now'))) {
@@ -153,7 +162,12 @@ async function main() {
         reviewResponseLost = true; res.destroy(); return;
       }
       res.writeHead(response.status, Object.fromEntries(response.headers));
-      res.end(Buffer.from(await response.arrayBuffer()));
+      if (route === brainAsk && response.body) {
+        const reader = response.body.getReader();
+        res.on('close', () => { void reader.cancel().catch(() => {}); });
+        for (;;) { const { done, value } = await reader.read(); if (done) break; res.write(value); }
+        res.end();
+      } else res.end(Buffer.from(await response.arrayBuffer()));
     } catch { res.writeHead(500).end('fixture route failed'); }
   });
   const terminal = process.argv.includes('--terminal');

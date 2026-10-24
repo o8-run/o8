@@ -12,12 +12,14 @@ use std::{
 pub enum Tab {
     Session(String),
     Grid,
+    Brain,
 }
 impl Tab {
     pub fn label(&self) -> &'static str {
         match self {
             Self::Session(_) => "Session",
             Self::Grid => "Grid",
+            Self::Brain => "Brain",
         }
     }
 }

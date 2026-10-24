@@ -375,3 +375,6 @@ mod tests {
         assert!(Client::new("http://[::1]:32000").is_ok());
     }
 }
+
+#[path = "brain_transport.rs"]
+mod brain_transport;

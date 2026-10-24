@@ -1,0 +1,31 @@
+{
+  "endpoint": "GPUI TestAppContext CPU scene paint with test text; no GPU/compositor",
+  "platform": "linux",
+  "openToFirstFrameMs": 43.991566000000006,
+  "askToAnswerFrameMs": 174.636596,
+  "clearToFrameMs": 17.32365,
+  "inputToFrameP95Ms": 8.454728999999999,
+  "inputToFrameMsSorted": [
+    6.76369,
+    6.792359,
+    6.796738,
+    6.858523,
+    6.944654,
+    6.95936,
+    7.030253999999999,
+    7.031155,
+    7.175206,
+    7.514153,
+    7.516951,
+    7.630502,
+    7.814293,
+    8.011884,
+    8.144027999999999,
+    8.213168999999999,
+    8.275291000000001,
+    8.333943999999999,
+    8.454728999999999,
+    9.290246999999999
+  ],
+  "profile": "debug"
+}

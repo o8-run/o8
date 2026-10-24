@@ -1,0 +1,17 @@
+running 2 tests
+test shell::tests::brain_tests::brain_fixture_actions_sources_search_clear_and_refusals ...
+assertion failed: brain.read_with(cx, |b, _| b.busy)
+FAILED
+test shell::tests::brain_tests::brain_fixture_errors_cancel_retention_and_workspace_isolation ...
+assertion failed: brain.read_with(cx, |b, _| b.error.is_none())
+FAILED
+
+failures:
+
+failures:
+    shell::tests::brain_tests::brain_fixture_actions_sources_search_clear_and_refusals
+    shell::tests::brain_tests::brain_fixture_errors_cancel_retention_and_workspace_isolation
+
+test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 34 filtered out; finished in 4.30s
+
+error: test failed, to rerun pass `--bin o8-next`

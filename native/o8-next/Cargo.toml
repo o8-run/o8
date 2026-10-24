@@ -6,6 +6,7 @@ license = "Apache-2.0"
 publish = false
 
 [dependencies]
+async-channel = "=2.5.0"
 alacritty_terminal = { version = "=0.26.0", default-features = false }
 base64 = "=0.22.1"
 tungstenite = { version = "=0.28.0", default-features = false, features = ["handshake"] }

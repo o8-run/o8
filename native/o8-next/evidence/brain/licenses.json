@@ -1,0 +1,22 @@
+[
+  {
+    "target": "x86_64-unknown-linux-gnu",
+    "packages": 472,
+    "gplPackages": 0,
+    "addedDirectDependency": {
+      "name": "async-channel",
+      "version": "2.5.0",
+      "license": "Apache-2.0 OR MIT"
+    }
+  },
+  {
+    "target": "x86_64-apple-darwin",
+    "packages": 455,
+    "gplPackages": 0,
+    "addedDirectDependency": {
+      "name": "async-channel",
+      "version": "2.5.0",
+      "license": "Apache-2.0 OR MIT"
+    }
+  }
+]

@@ -1,0 +1,13 @@
+running 1 test
+test ui::tests::brain_dock_tests::brain_dock_returns_focus_and_keeps_each_session_draft ...
+minimizing Brain returns focus to its launching composer
+FAILED
+
+failures:
+
+failures:
+    ui::tests::brain_dock_tests::brain_dock_returns_focus_and_keeps_each_session_draft
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 36 filtered out; finished in 1.94s
+
+error: test failed, to rerun pass `--bin o8-next`

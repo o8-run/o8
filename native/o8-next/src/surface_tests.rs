@@ -273,3 +273,6 @@ fn fixture_send_selected_queue_promote_and_echo(cx: &mut TestAppContext) {
         "keyToFrameMs":keys,"sendToFirstEchoMs":echo,"queueBefore":0,"queueAfter":1,"transcriptBefore":1,"transcriptAfter":history.transcript.len()})
     );
 }
+
+#[path = "brain_dock_tests.rs"]
+mod brain_dock_tests;

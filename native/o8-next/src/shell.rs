@@ -22,6 +22,7 @@ pub const HELP: &str = "App shell: --app-shell --shell-state ABSOLUTE_FILE --ser
 #[derive(Clone)]
 enum Command {
     Session(String),
+    Brain,
     Grid,
     Message(String),
     Diff,
@@ -38,6 +39,7 @@ impl Command {
                     .map(|s| s.title.as_str())
                     .unwrap_or("Unavailable")
             ),
+            Self::Brain => "Open Brain".into(),
             Self::Grid => "Open grid".into(),
             Self::Message(_) => "New message in selected session".into(),
             Self::Diff => "Open diff for a packet".into(),
@@ -47,6 +49,7 @@ impl Command {
 }
 enum Content {
     Session(Entity<Surface>),
+    Brain(Entity<crate::brain::Brain>),
     Grid(Entity<Grid>),
 }
 pub struct Shell {
@@ -208,6 +211,9 @@ impl Shell {
         }
         let client = self.client.in_workspace(&workspace);
         let content = match tab {
+            Tab::Brain => Content::Brain(
+                cx.new(|cx| crate::brain::Brain::new(client, workspace, None, window, cx)),
+            ),
             Tab::Session(id) => {
                 let id = self
                     .current()
@@ -250,6 +256,7 @@ impl Shell {
                     window,
                     cx,
                 ),
+                Some(Content::Brain(brain)) => brain.read(cx).focus(window, cx),
                 // Grid reestablishes its own keyboard focus when opened or clicked.
                 Some(Content::Grid(grid)) => grid.update(cx, |g, cx| g.shell_focus(window, cx)),
                 _ => self.focus.focus(window),
@@ -289,7 +296,12 @@ impl Shell {
         }
     }
     fn commands(&self) -> Vec<Command> {
-        let mut commands = vec![Command::Grid, Command::Diff, Command::Terminal];
+        let mut commands = vec![
+            Command::Brain,
+            Command::Grid,
+            Command::Diff,
+            Command::Terminal,
+        ];
         if let Some(id) = match self.active() {
             Some(Tab::Session(id)) => Some(
                 self.current()
@@ -319,6 +331,7 @@ impl Shell {
         let (tab, composer) = match command {
             Command::Session(id) => (Tab::Session(id), false),
             Command::Message(id) => (Tab::Session(id), true),
+            Command::Brain => (Tab::Brain, false),
             Command::Grid => (Tab::Grid, false),
             Command::Diff | Command::Terminal => {
                 self.notice = "This surface is not available in this build. The terminal and packet diff changes must land before the shell can open them.".into();
@@ -439,6 +452,7 @@ impl Shell {
         }
         for content in self.content.values() {
             match content {
+                Content::Brain(_) => {}
                 Content::Session(s) => s.update(cx, |s, cx| s.shell_tick(refresh, cx)),
                 Content::Grid(g) => g.update(cx, |g, cx| {
                     g.poll(cx);

@@ -1,0 +1,8 @@
+running 4 tests
+test shell::tests::brain_tests::brain_fixture_actions_sources_search_clear_and_refusals ...
+ok
+test shell::tests::brain_tests::brain_fixture_errors_cancel_retention_and_workspace_isolation ... ok
+test shell::tests::brain_tests::brain_opens_from_the_real_shell_palette ... ok
+test ui::tests::brain_dock_tests::brain_dock_returns_focus_and_keeps_each_session_draft ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 33 filtered out; finished in 11.17s

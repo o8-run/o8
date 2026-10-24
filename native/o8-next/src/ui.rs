@@ -1,4 +1,6 @@
 use crate::theme::current as theme;
+#[path = "brain_dock.rs"]
+mod brain_dock;
 #[path = "composer_bench.rs"]
 mod composer_bench;
 #[path = "conversation.rs"]
@@ -33,6 +35,7 @@ use std::{
 
 pub(crate) struct Surface {
     client: Client,
+    brains: HashMap<String, gpui::Entity<crate::brain::Brain>>,
     composer: gpui::Entity<Composer>,
     drafts: HashMap<String, gpui::Entity<Composer>>,
     pending: HashMap<String, Value>,
@@ -64,6 +67,7 @@ impl Surface {
         focus.focus(window);
         Self {
             client,
+            brains: HashMap::new(),
             composer: cx.new(Composer::new),
             drafts: HashMap::new(),
             pending: HashMap::new(),
@@ -91,6 +95,14 @@ impl Surface {
         }
     }
     fn select(&mut self, id: String, cx: &mut Context<Self>) {
+        if self.selected.as_ref() != Some(&id) {
+            if let Some(brain) = self.selected.as_ref().and_then(|id| self.brains.get(id)) {
+                brain.update(cx, |brain, cx| {
+                    brain.expanded = false;
+                    cx.notify();
+                });
+            }
+        }
         if !self.drafts.contains_key(&id) {
             let editor = cx.new(Composer::new);
             self.subscriptions
@@ -336,6 +348,7 @@ impl Render for Surface {
             .font_weight(gpui::FontWeight::LIGHT)
             .text_size(px(13.))
             .track_focus(&self.focus)
+            .capture_key_down(cx.listener(Self::brain_key))
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                 match event.keystroke.key.as_str() {
                     "tab" => {
@@ -414,6 +427,7 @@ impl Render for Surface {
                     .items_center()
                     .gap(px(16.))
                     .child("o8 next")
+                    .child(self.brain_control(cx))
                     .child(
                         div()
                             .id("refresh")
@@ -458,8 +472,12 @@ impl Render for Surface {
                                             )
                                             .children(group.rows.into_iter().map(|session| {
                                                 let id = session.id.clone();
+                                                let selector = id.clone();
                                                 div()
                                                     .id(gpui::ElementId::Name(id.clone().into()))
+                                                    .debug_selector(move || {
+                                                        format!("session-{selector}")
+                                                    })
                                                     .px(px(12.))
                                                     .py(px(5.))
                                                     .rounded(px(8.))
@@ -489,9 +507,12 @@ impl Render for Surface {
                                                                 session.status
                                                             )),
                                                     )
-                                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                                        this.select(id.clone(), cx)
-                                                    }))
+                                                    .on_click(cx.listener(
+                                                        move |this, _, window, cx| {
+                                                            this.select(id.clone(), cx);
+                                                            this.focus.focus(window);
+                                                        },
+                                                    ))
                                             }))
                                     }),
                             ),
@@ -526,6 +547,7 @@ impl Render for Surface {
                                 .flex_1()
                                 .min_h_0(),
                             )
+                            .child(self.brain_panel(cx))
                             .child(self.composer_panel(cx)),
                     ),
             )
@@ -762,11 +784,11 @@ impl LiveMeasurement {
     }
 }
 #[cfg(test)]
+#[path = "o8d_read_tests.rs"]
+mod o8d_read_tests;
+#[cfg(test)]
 #[path = "surface_tests.rs"]
 mod tests;
 #[cfg(test)]
 #[path = "transcript_tests.rs"]
 mod transcript_tests;
-#[cfg(test)]
-#[path = "o8d_read_tests.rs"]
-mod o8d_read_tests;

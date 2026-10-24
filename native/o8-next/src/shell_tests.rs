@@ -14,6 +14,12 @@ struct Fixture {
 }
 impl Fixture {
     fn new() -> Self {
+        Self::mode(false)
+    }
+    fn brain() -> Self {
+        Self::mode(true)
+    }
+    fn mode(brain: bool) -> Self {
         let root = std::env::temp_dir().join(format!(
             "o8-shell-{}-{}",
             std::process::id(),
@@ -34,19 +40,26 @@ impl Fixture {
                 "--composer",
                 "--shell",
             ])
+            .args(if brain { vec!["--brain"] } else { vec![] })
+            .env(
+                "O8_NEXT_BRAIN_REQUEST_LOG",
+                root.join("brain-requests.json"),
+            )
             .env("O8_NEXT_API_TOKEN", "fixture-shell-bearer")
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()
             .unwrap();
-        let origin = BufReader::new(server.stdout.take().unwrap())
-            .lines()
+        let mut lines = BufReader::new(server.stdout.take().unwrap()).lines();
+        let origin = lines
+            .by_ref()
             .find_map(|line| {
                 serde_json::from_str::<Value>(&line.ok()?).ok()?["origin"]
                     .as_str()
                     .map(str::to_owned)
             })
             .expect("fixture origin");
+        std::thread::spawn(move || for _ in lines {});
         Self {
             server,
             client: Client::authenticated(&origin, Some("fixture-shell-bearer".into())).unwrap(),
@@ -90,6 +103,9 @@ fn ready(shell: &Entity<Shell>, cx: &mut VisualTestContext) {
             s.active()
                 .and_then(|t| s.content.get(&s.key(&t)))
                 .is_some_and(|c| match c {
+                    Content::Brain(brain) => {
+                        brain.read(cx).painted.get() == brain.read(cx).revision
+                    }
                     Content::Session(s) => s.read(cx).shell_ready(),
                     Content::Grid(g) => g
                         .read(cx)
@@ -344,3 +360,6 @@ fn shell_retains_sidebar_selection_and_view_identity(cx: &mut TestAppContext) {
         "changing the session in the sidebar must retain the existing Surface and its drafts"
     );
 }
+
+#[path = "brain_tests.rs"]
+mod brain_tests;
