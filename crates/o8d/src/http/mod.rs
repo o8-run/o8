@@ -1,4 +1,4 @@
-//! Opt-in persisted reads for the native client. No upstream, migration or writer.
+//! Opt-in persisted reads, with orchestration requests forwarded to their TS owner.
 mod chat;
 mod queue;
 
@@ -12,6 +12,7 @@ use axum::{
 };
 use rusqlite::{Connection, OpenFlags};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::{
     collections::HashMap,
     io::Read,
@@ -30,6 +31,8 @@ type ReadResult = Result<Value, ()>;
 pub struct Store {
     directory: PathBuf,
     database: PathBuf,
+    owner: Option<SocketAddr>,
+    client: reqwest::Client,
 }
 impl Store {
     fn file(&self, path: &Path, limit: u64) -> Result<Vec<u8>, ()> {
@@ -167,13 +170,34 @@ async fn handle(State(store): State<Arc<Store>>, request: Request<Body>) -> Resp
             json!({"error":"Unauthorized", "detail":"This endpoint is restricted to local o8 clients. Requests from other origins must present a valid bearer token."}),
         );
     }
-    if request.method() != "GET" {
+    let path = request.uri().path().to_owned();
+    let method = request.method().as_str();
+    let native_read = matches!(
+        path.as_str(),
+        "/api/mobile/orchestrator/threads"
+            | "/api/mobile/history"
+            | "/api/v2/chat-history"
+            | "/api/orchestrator/state"
+            | "/api/runtime/inventory"
+            | "/api/orchestrator/composer-queue"
+            | "/api/panel/ws-info"
+            | "/api/orchestrator/review-state"
+            | "/api/worktrees/diff"
+    ) || (path.starts_with("/api/lanes/")
+        && path.ends_with("/diff")
+        && path.split('/').count() == 5);
+    let native_write = (path == "/api/orchestrator/composer-queue"
+        && matches!(method, "POST" | "PATCH" | "DELETE"))
+        || (path == "/api/orchestrator/review" && method == "POST");
+    if method != "GET" && !(store.owner.is_some() && native_write) {
         return reply(
             StatusCode::METHOD_NOT_ALLOWED,
             json!({"error":"Read-only endpoint"}),
         );
     }
-    let path = request.uri().path().to_owned();
+    if !native_read && !native_write {
+        return reply(StatusCode::NOT_FOUND, json!({"error":"Not found"}));
+    }
     let mut params = Params::new();
     for (key, value) in
         form_urlencoded::parse(request.uri().query().unwrap_or("").as_bytes()).into_owned()
@@ -182,10 +206,132 @@ async fn handle(State(store): State<Arc<Store>>, request: Request<Body>) -> Resp
         params.entry(key).or_insert(value);
     }
     let work = store.clone();
-    match tokio::task::spawn_blocking(move || dispatch(&work, &path, &params)).await {
+    // Reconciliation and live capability checks always run in their owner. A
+    // saved-history projection may additionally request its lane/runtime overlay.
+    if store.owner.is_some()
+        && (native_write
+            || matches!(
+                path.as_str(),
+                "/api/orchestrator/state"
+                    | "/api/runtime/inventory"
+                    | "/api/panel/ws-info"
+                    | "/api/orchestrator/composer-queue"
+                    | "/api/orchestrator/review-state"
+                    | "/api/worktrees/diff"
+            )
+            || path.starts_with("/api/lanes/"))
+    {
+        return forward(&store, request).await;
+    }
+    let response = match tokio::task::spawn_blocking(move || dispatch(&work, &path, &params)).await
+    {
         Ok(response) => response,
         Err(_) => unavailable(),
+    };
+    if response.status() == StatusCode::SERVICE_UNAVAILABLE && store.owner.is_some() {
+        return forward(&store, request).await;
     }
+    response
+}
+
+async fn forward(store: &Store, request: Request<Body>) -> Response {
+    // A saved read can need a TS lane overlay, but a parsing failure must not
+    // bypass the persisted reader's profile and 64 MiB input boundary.
+    let mut params = Params::new();
+    for (key, value) in
+        form_urlencoded::parse(request.uri().query().unwrap_or("").as_bytes()).into_owned()
+    {
+        params.entry(key).or_insert(value);
+    }
+    let saved_id = match request.uri().path() {
+        "/api/mobile/history" => value(&params, "sessionKey")
+            .trim()
+            .strip_prefix("llm-chat:"),
+        "/api/v2/chat-history" => Some(value(&params, "tabId")),
+        _ => None,
+    };
+    if saved_id.is_some_and(|id| store.history(id).is_err()) {
+        return unavailable();
+    }
+    // Refuse cross-profile persisted roots before delegating to the writer.
+    for name in ["cortex-ide.db", "orchestrator-state.json", "chat-history"] {
+        let path = store.directory.join(name);
+        if std::fs::symlink_metadata(&path).is_ok()
+            && !path
+                .canonicalize()
+                .is_ok_and(|p| p.starts_with(&store.directory))
+        {
+            return unavailable();
+        }
+    }
+    if let Ok(entries) = std::fs::read_dir(store.directory.join("chat-history")) {
+        for entry in entries {
+            let Ok(entry) = entry else {
+                return unavailable();
+            };
+            if entry.file_type().is_ok_and(|kind| kind.is_symlink())
+                && !entry
+                    .path()
+                    .canonicalize()
+                    .is_ok_and(|p| p.starts_with(&store.directory))
+            {
+                return unavailable();
+            }
+        }
+    }
+    let Some(owner) = store.owner else {
+        return unavailable();
+    };
+    let url = format!("http://{owner}{}", request.uri());
+    let (parts, body) = request.into_parts();
+    let Ok(bytes) = axum::body::to_bytes(body, RESPONSE_LIMIT).await else {
+        return reply(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            json!({"error":"Request exceeds 16 MiB"}),
+        );
+    };
+    let mut upstream = store.client.request(parts.method, url).header(
+        "x-o8d-profile",
+        format!(
+            "{:x}",
+            Sha256::digest(store.directory.to_string_lossy().as_bytes())
+        ),
+    );
+    // Do not propagate client-supplied peer/profile/principal headers.
+    for name in ["authorization", "content-type"] {
+        if let Some(value) = parts.headers.get(name) {
+            upstream = upstream.header(name, value);
+        }
+    }
+    let Ok(mut response) = upstream.body(bytes).send().await else {
+        return unavailable();
+    };
+    let status = response.status();
+    let headers = response.headers().clone();
+    let mut bytes = Vec::new();
+    loop {
+        match response.chunk().await {
+            Ok(Some(chunk)) if bytes.len() + chunk.len() <= RESPONSE_LIMIT => {
+                bytes.extend_from_slice(&chunk)
+            }
+            Ok(Some(_)) => {
+                return reply(
+                    StatusCode::PAYLOAD_TOO_LARGE,
+                    json!({"error":"Response exceeds 16 MiB"}),
+                )
+            }
+            Ok(None) => break,
+            Err(_) => return unavailable(),
+        }
+    }
+    let mut result = Response::new(Body::from(bytes));
+    *result.status_mut() = status;
+    for name in ["content-type", "cache-control"] {
+        if let Some(value) = headers.get(name) {
+            result.headers_mut().insert(name, value.clone());
+        }
+    }
+    result
 }
 fn dispatch(store: &Store, path: &str, params: &Params) -> Response {
     match path {
@@ -252,9 +398,22 @@ pub async fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>>
         PathBuf::from(option("--data-dir").ok_or("explicit profile directory required")?)
             .canonicalize()?;
     let database = directory.join("cortex-ide.db");
+    let owner = option("--owner-upstream")
+        .map(|value| value.parse::<SocketAddr>())
+        .transpose()?;
+    if owner.is_some_and(|address| !address.ip().is_loopback() || address.port() == 0) {
+        return Err("numeric loopback owner required".into());
+    }
     let store = Store {
         directory,
         database,
+        owner,
+        client: reqwest::Client::builder()
+            .no_proxy()
+            .redirect(reqwest::redirect::Policy::none())
+            .connect_timeout(std::time::Duration::from_secs(1))
+            .timeout(std::time::Duration::from_secs(15))
+            .build()?,
     };
     store.token().map_err(|_| "existing credential required")?;
     let listener = TcpListener::bind(address).await?;

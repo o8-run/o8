@@ -47,7 +47,7 @@ import { attachSymonTextSession } from '@/lib/mobile/symon-text-attachment';
  */
 
 import { TASK_ARTIFACT_ACTION_ID_PATTERN, TASK_ARTIFACT_ID_PATTERN, type TaskArtifactActionStamp } from '@/lib/task-artifacts/types';
-import { watch, existsSync } from 'node:fs';
+import { watch, existsSync, writeFileSync } from 'node:fs';
 import { readFile, stat, access } from 'node:fs/promises';
 import { basename, extname, isAbsolute, join, resolve } from 'node:path';
 import { execFile, execFileSync } from '@/lib/providers/child-process';
@@ -474,6 +474,11 @@ const NEXT_READY_POLL_MS = 250;
 const NEXT_READY_TIMEOUT_MS = 10_000;
 
 async function waitForNextReady(): Promise<void> {
+  if (process.env.O8_NEXT_HTTP_OWNER === '1') {
+    await fetchRuntimeInventorySnapshot(true);
+    await getMobileInboxSnapshot({ fresh: true });
+    return;
+  }
   const url = buildNextUrl('/api/panel/status');
   const deadline = Date.now() + NEXT_READY_TIMEOUT_MS;
   while (Date.now() < deadline) {
@@ -7673,6 +7678,11 @@ const httpServer = createServer(async (req, res) => {
     }
     return;
   }
+  if (process.env.O8_NEXT_HTTP_OWNER === '1' && req.url?.startsWith('/api/')) {
+    const { serveNativeHttp } = await import('@/lib/ws-server/native-http-owner');
+    await serveNativeHttp(req, res);
+    return;
+  }
   // CORS headers — allow localhost, Tauri, and private/Tailscale IPs (mobile remote access)
   const { apiPort } = resolvePortInfo();
   const allowedOrigins = new Set([
@@ -9538,6 +9548,11 @@ httpServer.on('error', (err: NodeJS.ErrnoException) => {
 // managed by the stall detector and lifecycle system.
 
 async function bootstrapWsServer() {
+  if (process.env.O8_NEXT_HTTP_OWNER === '1') {
+    const { repairFlippedOrchestratorTranscripts, repairComposerPreamblePollution } = await import('@/lib/mobile/orchestrator-thread-history');
+    repairFlippedOrchestratorTranscripts();
+    repairComposerPreamblePollution();
+  }
   if (o8dBridge) {
     await o8dBridge.start();
   } else {
@@ -9550,6 +9565,9 @@ async function bootstrapWsServer() {
     });
   }
 
+  if (process.env.O8_NEXT_HTTP_OWNER === '1') {
+    writeFileSync(join(getDataDir(), 'ws-port'), String(WS_PORT));
+  }
   await waitForNextReady();
   if (shuttingDown) return;
   await terminalHostReady;

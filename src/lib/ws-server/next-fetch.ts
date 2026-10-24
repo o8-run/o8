@@ -9,7 +9,7 @@
  * uses and cached on first call (getOrCreateWsToken does a file read each time).
  */
 
-import { getApiBase } from '@/lib/panel/api-port';
+import { getApiBase, getWsBase } from '@/lib/panel/api-port';
 import type {
   RuntimeActionRequest,
   RuntimeActionResult,
@@ -39,6 +39,7 @@ function wsToken(): string {
 }
 
 function getNextOrigin(): string {
+  if (process.env.O8_NEXT_HTTP_OWNER === '1') return getWsBase().replace(/^ws:/, 'http:');
   return process.env.NEXT_ORIGIN ?? getApiBase();
 }
 
@@ -102,12 +103,16 @@ export async function fetchNextJson<T>(
     headers['Content-Type'] = 'application/json';
   }
 
-  const response = await fetchWithRetry(buildNextUrl(pathname, options.searchParams), {
+  const url = buildNextUrl(pathname, options.searchParams);
+  const init = {
     method: options.method ?? 'GET',
     headers,
     body: options.body === undefined ? undefined : JSON.stringify(options.body),
     signal: AbortSignal.timeout(options.timeoutMs ?? FETCH_TIMEOUT_MS),
-  });
+  };
+  const response = process.env.O8_NEXT_HTTP_OWNER === '1'
+    ? await fetchOwnedJsonResponse(url, init)
+    : await fetchWithRetry(url, init);
 
   const payload = await response.json().catch(() => null);
   if (!response.ok) {
@@ -126,6 +131,20 @@ export async function fetchNextJson<T>(
   }
 
   return payload as T;
+}
+
+async function fetchOwnedJsonResponse(url: string, init: RequestInit): Promise<Response> {
+  const [{ NextRequest }, { dispatchNativeHttp }] = await Promise.all([
+    import('next/server'), import('./native-http-routes'),
+  ]);
+  const signal = init.signal;
+  signal?.throwIfAborted();
+  return new Promise<Response>((resolve, reject) => {
+    const abort = () => reject(signal?.reason);
+    signal?.addEventListener('abort', abort, { once: true });
+    dispatchNativeHttp(new NextRequest(url, { ...init, signal: signal ?? undefined })).then(resolve, reject)
+      .finally(() => signal?.removeEventListener('abort', abort));
+  });
 }
 
 function requireMutationReceipt<T>(pathname: string, payload: T): T {

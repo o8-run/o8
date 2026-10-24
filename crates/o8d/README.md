@@ -88,6 +88,8 @@ The older standalone comparison remains in `scripts/bench/ws-event-bus.ts`;
 
 The separate HTTP transport is documented in [Experimental MCP transport](MCP.md).
 
-The partial native-client saved HTTP reads experiment uses its own feature and
-runtime flag. See [saved HTTP reads](HTTP.md) for the route inventory, replay
-harness and remaining startup requirements.
+The native-client HTTP experiment uses its own feature and runtime flag. Its
+optional TypeScript owner hosts the existing handlers in the WS process so
+native discovery, reconciliation, writes and streams can run without a Next
+server. See [native HTTP](HTTP.md) for the explicit opt-ins, route inventory,
+replay harness and Linux fixture measurements. Default startup is unchanged.
