@@ -14,6 +14,10 @@ import { startTerminalFixture } from './terminal-fixture';
 import { surfaceEntries, type SurfaceContext, type SurfaceRoutes } from './surface-routes';
 
 async function main() {
+  if (process.argv.includes('--onboarding')) {
+    await (await import('./onboarding-fixture')).startOnboardingServer();
+    return;
+  }
   if (process.argv.includes('--worker')) {
     await (await import('./worker-server')).startWorkerServer();
     return;

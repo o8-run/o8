@@ -23,6 +23,7 @@ mod settings;
 mod settings_fields;
 mod settings_secret;
 mod shell;
+mod setup;
 mod shell_state;
 mod sidebar;
 mod stream;
