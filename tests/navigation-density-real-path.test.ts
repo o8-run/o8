@@ -178,11 +178,24 @@ describe.skipIf(!executablePath)('navigation density through the rendered shell'
         await expect.poll(() => page.locator(scroll).evaluate(node => node.scrollTop + node.clientHeight >= node.scrollHeight - 1)).toBe(true);
         await page.mouse.wheel(0, -20_000);
         await expect.poll(() => page.locator(scroll).evaluate(node => node.scrollTop)).toBe(0);
+        await page.evaluate(() => {
+          const state = { dragStarts: 0, preventedMoves: 0 };
+          Object.assign(window, { touchNavigationState: state });
+          window.addEventListener('o8:thread-drag:start', () => state.dragStarts++);
+          window.addEventListener('pointermove', event => {
+            if (event.pointerType === 'touch' && event.defaultPrevented) state.preventedMoves++;
+          });
+        });
         const cdp = await page.context().newCDPSession(page);
         for (const yDistance of [-20_000, 20_000]) {
           for (let swipe = 0; swipe < 20; swipe++) {
             const start = yDistance < 0 ? box.y + box.height - 80 : box.y + 80;
             await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: box.x + box.width / 2, y: start }] });
+            // Cross the app's 6px drag threshold before the browser's pan
+            // threshold, as a real finger does at the start of a slow swipe.
+            await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: box.x + box.width / 2,
+              y: start + (yDistance < 0 ? -8 : 8) }] });
+            await settle(page);
             for (let step = 1; step <= 8; step++) {
               await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: box.x + box.width / 2,
                 y: start + (yDistance < 0 ? -1 : 1) * step * (box.height - 160) / 8 }] });
@@ -193,10 +206,28 @@ describe.skipIf(!executablePath)('navigation density through the rendered shell'
               ? node.scrollTop + node.clientHeight >= node.scrollHeight - 1 : node.scrollTop === 0, yDistance < 0)) break;
           }
           console.info('[navigation-touch]', yDistance, await page.locator(scroll).evaluate(node => ({ top: node.scrollTop, height: node.scrollHeight, client: node.clientHeight })));
+          const touchState = await page.evaluate(() => (window as unknown as {
+            touchNavigationState: { dragStarts: number; preventedMoves: number };
+          }).touchNavigationState);
+          console.info('[navigation-touch-ownership]', touchState);
+          expect(touchState, 'touch panning must not activate pane dragging or cancel pointer moves')
+            .toEqual({ dragStarts: 0, preventedMoves: 0 });
           await expect.poll(() => page.locator(scroll).evaluate((node, down) => down
             ? node.scrollTop + node.clientHeight >= node.scrollHeight - 1 : node.scrollTop === 0, yDistance < 0)).toBe(true);
         }
         await cdp.detach();
+        // A cancelled mouse drag must not leave click suppression armed for
+        // the next touch tap on the same row on a hybrid laptop.
+        await last.press('Enter');
+        await first.focus();
+        const firstBox = (await first.boundingBox())!;
+        await page.mouse.move(firstBox.x + firstBox.width / 2, firstBox.y + firstBox.height / 2);
+        await page.mouse.down();
+        await page.mouse.move(box.x + box.width + 80, box.y + 160, { steps: 4 });
+        await page.keyboard.press('Escape');
+        await page.mouse.up();
+        await first.tap();
+        expect(await page.evaluate(() => (window as unknown as { selectedChat: string }).selectedChat)).toBe('fixture-chat-0');
         // Portal content is outside the rail's DOM subtree. Force its real
         // bounded scroll surface to overflow to exercise always-on OS bars.
         await page.getByRole('button', { name: 'More navigation', exact: true }).click();

@@ -236,6 +236,7 @@ export function HistoryChatRow({
     if (disabled || event.button !== 0) return;
     dragActivatedRef.current = false;
     dragDisposeRef.current?.();
+    if (event.pointerType === 'touch') return;
     dragDisposeRef.current = trackThreadDrag(
       { clientX: event.clientX, clientY: event.clientY, pointerId: event.pointerId },
       {
