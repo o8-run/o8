@@ -4012,10 +4012,25 @@
       ]
     },
     {
+      "path": "tests/next-compiler-runtime-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/next-diff-review-real-path.test.ts",
       "reasons": [
         "child-process",
         "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/next-highlighting-real-path.test.ts",
+      "reasons": [
+        "native-build",
         "real-path"
       ]
     },
@@ -4040,6 +4055,30 @@
       "reasons": [
         "child-process",
         "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/next-monaco-chunk-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/next-monaco-runtime-real-path.test.ts",
+      "reasons": [
+        "native-build",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/next-playwright-runtime-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
         "real-path"
       ]
     },
@@ -4071,6 +4110,12 @@
       "reasons": [
         "child-process",
         "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/next-syntax-assets-real-path.test.ts",
+      "reasons": [
         "real-path"
       ]
     },
