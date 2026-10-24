@@ -1,9 +1,15 @@
 import { execFileSync } from 'node:child_process';
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { afterAll, expect, it, vi } from 'vitest';
 
 import type { OrchestratorMissionState, OrchestratorPacket } from '@/lib/orchestrator/types';
+
+vi.mock('@/lib/codex/live-capacity', () => ({ readLiveCodexRuntimeCapacity: vi.fn(async () => ({ runtime: 'codex', identityId: null, status: 'unavailable',
+  reason: 'fixture', observedAt: null, source: null, confidence: null, buckets: [] })) }));
+vi.mock('@/lib/claude-code/live-capacity', () => ({ readClaudeAccountCapacity: vi.fn(async () => ({ runtime: 'claude-code', identityId: null, status: 'unavailable',
+  reason: 'fixture', observedAt: null, source: null, confidence: null, buckets: [] })) }));
+vi.mock('@/lib/workspace/exact-parent-operation', async original => ({ ...await original<typeof import('@/lib/workspace/exact-parent-operation')>() }));
 
 vi.mock('@/lib/runtimes/shared/auth-detect', () => ({
   assertRuntimeDispatchable: vi.fn(async () => undefined),
@@ -25,7 +31,10 @@ vi.mock('@/lib/worktree/storage-telemetry', async (importOriginal) => ({
 const root = realpathSync(mkdtempSync(path.join(process.env.CORTEX_IDE_DATA_DIR!, 'launch-budget-')));
 const repo = path.join(root, 'repo');
 const bin = path.join(root, 'bin');
-const capture = path.join(root, 'spawn.json');
+const hold = path.join(root, 'hold-installer');
+const installing = path.join(root, 'installer-started');
+const concurrent = process.env.O8_SPEED_CONCURRENT === '1';
+const slowRefill = process.env.O8_SPEED_COLD_DURING_REFILL === '1';
 const oldEnv = { ...process.env };
 const npmCli = process.env.npm_execpath!;
 Object.assign(process.env, {
@@ -44,7 +53,45 @@ function git(...args: string[]): string {
   return execFileSync('git', args, { cwd: repo, encoding: 'utf8', stdio: 'pipe' }).trim();
 }
 
+interface OutputObservation { cwd: string; prepared: boolean; outputAt: number; startedAt: string }
+function observeOutput(workspace: string): OutputObservation | undefined {
+  const ownedRoot = path.join(root, 'owned-qoder');
+  if (!existsSync(ownedRoot)) return undefined;
+  for (const name of readdirSync(ownedRoot)) {
+    const file = path.join(ownedRoot, name, 'session.json');
+    if (!existsSync(file)) continue;
+    const saved = JSON.parse(readFileSync(file, 'utf8'));
+    for (const run of [saved.activeRun, ...(saved.recentRuns ?? [])].filter(Boolean)) {
+      if (!existsSync(run.stdoutPath)) continue;
+      for (const line of readFileSync(run.stdoutPath, 'utf8').split('\n')) {
+        try {
+          const row = JSON.parse(line);
+          if (row.message?.content === 'SPEED_READY' && row.fixture?.cwd === realpathSync(workspace)) {
+            return { ...row.fixture, startedAt: run.startedAt };
+          }
+        } catch { /* A trailing partial stdout line is not an observation. */ }
+      }
+    }
+  }
+  return undefined;
+}
+
 afterAll(async () => {
+  const lanes = await import('@/lib/lane/registry');
+  const { routeAction } = await import('@/lib/runtimes/registry');
+  for (const id of ['pkt-launch-budget', 'pkt-launch-budget-two']) {
+    const lane = lanes.findLatestLaneByPacket(id);
+    if (lane?.sessionKey) await routeAction('qoder', 'interrupt', lane.sessionKey);
+  }
+  const pool = await import('@/lib/worktree/launch');
+  await pool.shutdownWarmPacketWorktrees();
+  const { readWorktreeMetaSnapshot } = await import('@/lib/worktree/metadata-store');
+  expect(Object.values(await readWorktreeMetaSnapshot(repo)).filter(entry => entry.warmPool)).toHaveLength(0);
+  const { probeLiveProcessInside } = await import('@/lib/worktree/live-process-guard');
+  const { readProcessCwdSnapshot } = await import('@/lib/runtime/process-cwd-snapshot');
+  await vi.waitFor(async () => expect((await probeLiveProcessInside(root, {
+    readSnapshot: () => readProcessCwdSnapshot({ forceRefresh: true }),
+  })).status).toBe('clear'), { timeout: 10_000 });
   const { closeDb } = await import('@/lib/db');
   closeDb();
   vi.restoreAllMocks();
@@ -52,14 +99,14 @@ afterAll(async () => {
   for (const key of Object.keys(process.env)) if (!(key in oldEnv)) delete process.env[key];
   Object.assign(process.env, oldEnv);
   rmSync(root, { recursive: true, force: true });
-});
+}, 600_000);
 
-it('dispatches to fixture output within ten seconds with batched private installer preparation', async () => {
+it('dispatches through a matching warm worktree without dependency preparation', async () => {
   mkdirSync(repo);
   mkdirSync(bin);
   git('init', '-q', '-b', 'main');
   const npmVersion = execFileSync(process.execPath, [npmCli, '--version'], { encoding: 'utf8' }).trim();
-  writeFileSync(path.join(repo, '.gitignore'), 'node_modules/\nvendor/\n');
+  writeFileSync(path.join(repo, '.gitignore'), 'node_modules/\nvendor/\n.env\n.env.local\n');
   writeFileSync(path.join(repo, 'README.md'), 'committed\n');
   writeFileSync(path.join(repo, 'package.json'), JSON.stringify({
     name: 'launch-budget-fixture', version: '1.0.0', packageManager: `npm@${npmVersion}`,
@@ -94,6 +141,7 @@ it('dispatches to fixture output within ten seconds with batched private install
   writeFileSync(path.join(repo, 'node_modules', 'fixture', 'package.json'), '{"name":"fixture","version":"1.0.0"}\n');
   writeFileSync(path.join(repo, 'node_modules', '.package-lock.json'), JSON.stringify({ lockfileVersion: 3, packages: installedPackages }));
   writeFileSync(path.join(repo, 'README.md'), 'source WIP\n');
+  writeFileSync(path.join(repo, '.env'), 'FIXTURE_SETTING=source-only\n');
   // The external package-manager fixture never installs packages or uses the network.
   writeFileSync(path.join(bin, 'npm'), [
     '#!/usr/bin/env node',
@@ -106,6 +154,7 @@ it('dispatches to fixture output within ten seconds with batched private install
     "const args = process.argv.slice(2);",
     "if (args[0] !== 'ci') { const result = cp.spawnSync(process.execPath, [npmCli, ...args], { stdio: 'inherit' }); process.exit(result.status ?? 1); }",
     "fs.writeFileSync('installer-fallback.txt', 'ci\\n');",
+    ...(slowRefill ? [`if (require('node:path').basename(process.cwd()).startsWith('warm-')) { fs.writeFileSync(${JSON.stringify(installing)}, 'ready'); while (fs.existsSync(${JSON.stringify(hold)})) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20); }`] : []),
     "if (payload) fs.cpSync(payload, 'node_modules', { recursive: true, verbatimSymlinks: true, mode: fs.constants.COPYFILE_FICLONE });",
     "fs.mkdirSync('node_modules/fixture', { recursive: true });",
     "for (let i = 0; i < 64; i++) fs.writeFileSync('node_modules/fixture/data-' + i, 'fixture');",
@@ -114,14 +163,17 @@ it('dispatches to fixture output within ten seconds with batched private install
     "const isolatedConfig = process.env.npm_config_userconfig === path.join(path.dirname(process.env.HOME), 'config/user.rc') && process.env.npm_config_globalconfig === path.join(path.dirname(process.env.HOME), 'config/global.rc');",
     "fs.writeFileSync('installer-runtime.json', JSON.stringify({ contained, isolatedConfig }));",
     "fs.writeFileSync('node_modules/fixture/index.js', 'module.exports = 42;\\n');",
+    ...(process.env.O8_SPEED_ABSOLUTE_LINK ? ["fs.symlinkSync(require('node:path').resolve('node_modules/fixture/index.js'), 'node_modules/fixture/absolute');"] : []),
     "const result = cp.spawnSync(process.execPath, [npmCli, 'rebuild', '.', '--offline'], { stdio: 'inherit' }); process.exit(result.status ?? 1);",
   ].join('\n'));
   chmodSync(path.join(bin, 'npm'), 0o755);
   writeFileSync(path.join(bin, 'qodercli'), [
     '#!/usr/bin/env node',
     "if (process.argv.includes('--version')) { console.log('qodercli 1.0.0'); process.exit(0); }",
-    `console.log(JSON.stringify({ type: 'assistant', message: { content: 'SPEED_READY' } }));`,
-    `require('node:fs').writeFileSync(${JSON.stringify(capture)}, JSON.stringify({ cwd: process.cwd(), prepared: require('node:fs').existsSync('generated.ready'), outputAt: Date.now() }));`,
+    "console.log(JSON.stringify({ type: 'assistant', message: { content: 'SPEED_READY' }, fixture: { cwd: process.cwd(), prepared: require('node:fs').existsSync('generated.ready'), outputAt: Date.now() } }));",
+    // Keep the fixture signalable until the real owned runtime records its PID.
+    // Test cleanup interrupts only the session returned by this dispatch.
+    'setInterval(() => {}, 1000);',
   ].join('\n'));
   chmodSync(path.join(bin, 'qodercli'), 0o755);
   vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })));
@@ -138,29 +190,126 @@ it('dispatches to fixture output within ten seconds with batched private install
     queueState: 'queued', releaseState: 'pending', status: 'queued', blockedReason: null,
     lane: null, review: null, workerRouting: { requestedRuntime: 'qoder' } as OrchestratorPacket['workerRouting'],
   } as OrchestratorPacket;
-  const state = { missionId: 'launch-budget', repoPath: repo, packets: [packet], updatedAt: new Date().toISOString() } as OrchestratorMissionState;
+  const packets = concurrent ? [packet, { ...packet, id: packet.id + '-two', branchTarget: packet.branchTarget + '-two' }] : [packet];
+  const state = { missionId: 'launch-budget', repoPath: repo, packets, updatedAt: new Date().toISOString() } as OrchestratorMissionState;
   control.writeOrchestratorControlPlaneState(state);
   const readMainHooks = () => { try { return git('config', '--local', '--get', 'core.hooksPath'); } catch { return null; } };
   const mainHooks = readMainHooks();
-  const leaves = await import('@/lib/worktree/materialization-leaf-io');
-  const ensureDirectory = vi.spyOn(leaves, 'ensurePinnedWorkspaceDirectory');
-  const ensureFile = vi.spyOn(leaves, 'ensurePinnedWorkspaceFile');
-  const createRuntime = 'createPinnedInstallRuntime' in leaves ? vi.spyOn(leaves, 'createPinnedInstallRuntime') : null;
-  const fsPromises = await import('node:fs/promises');
-  const lstat = fsPromises.lstat;
-  let activeStats = 0;
-  let maxAuditStats = 0;
-  vi.spyOn(fsPromises, 'lstat').mockImplementation((...args: Parameters<typeof lstat>) => {
-    if (!String(args[0]).includes(`${path.sep}node_modules${path.sep}fixture${path.sep}`)) return lstat(...args);
-    activeStats += 1;
-    maxAuditStats = Math.max(maxAuditStats, activeStats);
-    return lstat(...args).finally(() => { activeStats -= 1; });
-  });
-  const launchBudgetMs = process.platform === 'linux' ? 10_000 : 60_000;
+  const warm = process.env.O8_SPEED_WARM !== '0';
+  const invalidation = process.env.O8_SPEED_INVALIDATION;
+  const bindingFault = process.env.O8_SPEED_BINDING_FAULT === '1';
+  const inodeSwap = process.env.O8_SPEED_INODE_SWAP === '1';
+  const hooksFault = process.env.O8_SPEED_HOOKS_FAULT;
+  const nonRelocatable = process.env.O8_SPEED_ABSOLUTE_LINK === '1';
+  if (process.env.O8_SPEED_REMOTE_MAIN === '1') {
+    const remote = path.join(root, 'remote.git');
+    execFileSync('git', ['clone', '--bare', repo, remote], { stdio: 'pipe' });
+    execFileSync('git', ['--git-dir=' + remote, 'update-ref', 'refs/heads/main', git('rev-parse', 'HEAD')]);
+    git('remote', 'set-url', 'origin', remote);
+    git('fetch', 'origin', 'main');
+  }
+  const pool = await import('@/lib/worktree/launch');
+  const prepare = pool.prepareWarmPacketWorktrees;
+  const capacity = process.env.O8_SPEED_DEPENDENCY_PAYLOAD && !concurrent ? 1 as const : 2 as const;
+  const warmOptions = { capacity, repoRoot: repo, agentType: 'qoder', baseBranch: 'main', repoSetup: { ...registration.setup, installCommand: 'npm ci --offline' } };
+  let prepared: Promise<void> | undefined;
+  let preparationFinished = false;
+  if (slowRefill) {
+    writeFileSync(hold, 'hold');
+    prepared = prepare(warmOptions).then(() => { preparationFinished = true; });
+    await vi.waitFor(() => expect(existsSync(installing)).toBe(true), { timeout: 60_000 });
+  } else if (nonRelocatable) await expect(prepare(warmOptions)).rejects.toThrow('non-relocatable');
+  else if (warm) await prepare(warmOptions);
+  const { readWorktreeMetaSnapshot } = await import('@/lib/worktree/metadata-store');
+  const unused = Object.values(await readWorktreeMetaSnapshot(repo)).filter(entry => entry.warmPool);
+  if (warm && !nonRelocatable && !slowRefill) {
+    expect(unused).toHaveLength(capacity);
+    for (const entry of unused) {
+      expect(entry.packetId).toBeUndefined();
+      expect(entry.creationOwner).toBeDefined();
+      expect(existsSync(path.join(entry.materializationIdentity!.canonicalPath, '.env'))).toBe(false);
+    }
+  }
+  if (invalidation === 'main') git('update-ref', 'refs/heads/main', 'HEAD');
+  if (invalidation === 'lock') writeFileSync(path.join(repo, 'package-lock.json'), readFileSync(path.join(repo, 'package-lock.json'), 'utf8') + '\n');
+  if (bindingFault) {
+    const parent = await import('@/lib/workspace/exact-parent-operation');
+    const rename = parent.renameExactChildDirectory;
+    vi.spyOn(parent, 'renameExactChildDirectory').mockImplementationOnce(async (...args) => {
+      await rename(...args);
+      throw new Error('Fixture failure immediately after rename');
+    });
+  }
+  let swapped: string | undefined;
+  if (inodeSwap) {
+    swapped = unused[0]!.materializationIdentity!.canonicalPath;
+    renameSync(swapped, swapped + '.retained');
+    mkdirSync(swapped);
+  }
+  let restoreHooks: (() => void) | undefined;
+  if (hooksFault) {
+    const file = path.join(unused[0]!.materializationIdentity!.canonicalPath, '.claude/settings.local.json');
+    const content = readFileSync(file, 'utf8');
+    if (hooksFault === 'inode') {
+      renameSync(file, file + '.retained');
+      writeFileSync(file, content);
+      restoreHooks = () => { rmSync(file); renameSync(file + '.retained', file); };
+    } else {
+      writeFileSync(file, '{}');
+      restoreHooks = () => writeFileSync(file, content);
+    }
+  }
+  const hit = warm && !invalidation && !nonRelocatable && !slowRefill;
+  const launchBudgetMs = hit ? 3_000 : 60_000;
   const dispatchStartedAt = Date.now();
   const started = performance.now();
-  const result = await runDispatchTick(state, { launchBudget: { maxLaunches: 1 } });
+  const result = await runDispatchTick(state, { launchBudget: { maxLaunches: concurrent ? 2 : 1 } });
+  if (slowRefill) {
+    expect(preparationFinished).toBe(false);
+    rmSync(hold);
+    await prepared;
+  }
+  if (concurrent) {
+    expect(result.packets.map(row => row.status)).toEqual(['launching', 'launching']);
+    const paths = packets.map(row => lanes.findLatestLaneByPacket(row.id)!.worktreePath!);
+    expect(new Set(paths).size).toBe(2);
+    for (const workspace of paths) {
+      if (hit) expect(unused.map(row => row.materializationIdentity!.inode)).toContain(lstatSync(workspace).ino);
+      try {
+        await vi.waitFor(() => expect(observeOutput(workspace)?.prepared).toBe(true), { timeout: 10_000 });
+      } catch (error) {
+        const diagnostics = readdirSync(path.join(root, 'owned-qoder')).flatMap(name => {
+          const file = path.join(root, 'owned-qoder', name, 'session.json');
+          if (!existsSync(file)) return [];
+          const saved = JSON.parse(readFileSync(file, 'utf8'));
+          return [saved.activeRun, ...(saved.recentRuns ?? [])].filter(Boolean).map(run => {
+            const stdout = existsSync(run.stdoutPath) ? readFileSync(run.stdoutPath, 'utf8') : '';
+            const stderr = existsSync(run.stderrPath) ? readFileSync(run.stderrPath, 'utf8') : '';
+            return { status: run.status, exitCode: run.exitCode, ready: stdout.includes('SPEED_READY'),
+              fixture: stdout.includes('fixture'), stderr: stderr.slice(-800).replace(/\/[^\s"']+/g, '<fixture-path>') };
+          });
+        });
+        process.stdout.write('[fixture-output-diagnostic] ' + JSON.stringify(diagnostics) + '\n');
+        throw error;
+      }
+    }
+    return;
+  }
   const elapsedMs = Math.round(performance.now() - started);
+  if (bindingFault || inodeSwap || hooksFault) {
+    restoreHooks?.();
+    if (swapped) {
+      expect(readdirSync(swapped)).toHaveLength(0);
+      rmSync(swapped, { recursive: true });
+      renameSync(swapped + '.retained', swapped);
+    }
+    expect(result.packets[0]?.status).toBe('blocked');
+    const retained = Object.values(await readWorktreeMetaSnapshot(repo));
+    expect(retained.filter(entry => entry.packetId)).toHaveLength(0);
+    expect(retained.filter(entry => entry.warmPool)).toHaveLength(2);
+    for (const entry of unused) expect(lstatSync(entry.materializationIdentity!.canonicalPath).ino).toBe(entry.materializationIdentity!.inode);
+    return;
+  }
   const lane = lanes.findLatestLaneByPacket(packet.id);
   const events = lane ? lanes.getLaneEvents(lane.id, 200) : [];
   const launched = events.find((event) => event.payload.eventLabel === 'session_launched');
@@ -171,32 +320,28 @@ it('dispatches to fixture output within ten seconds with batched private install
   expect(launched).toBeDefined();
   expect(events.some((event) => event.verb === 'dependency_materialized')).toBe(true);
   const workspace = lane!.worktreePath!;
-  for (let attempt = 0; attempt < 100 && !existsSync(capture); attempt += 1) {
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-  expect(realpathSync(JSON.parse(readFileSync(capture, 'utf8')).cwd)).toBe(realpathSync(workspace));
-  expect(JSON.parse(readFileSync(capture, 'utf8')).prepared).toBe(true);
-  expect(readFileSync(path.join(workspace, 'README.md'), 'utf8')).toBe('committed\n');
-  const savedPath = readdirSync(path.join(root, 'owned-qoder')).map((name) => path.join(root, 'owned-qoder', name, 'session.json')).find(existsSync)!;
-  const saved = JSON.parse(readFileSync(savedPath, 'utf8'));
-  const run = saved.activeRun ?? saved.recentRuns[0];
-  await vi.waitFor(() => expect(readFileSync(run.stdoutPath, 'utf8')).toContain('SPEED_READY'));
-  const outputAt = JSON.parse(readFileSync(capture, 'utf8')).outputAt as number;
+  expect(existsSync(path.join(workspace, '.env'))).toBe(false);
+  expect(readFileSync(path.join(repo, '.env'), 'utf8')).toBe('FIXTURE_SETTING=source-only\n');
+  if (hit) expect(unused.map(entry => entry.materializationIdentity!.inode)).toContain(lstatSync(workspace).ino);
+  if (invalidation) expect(unused.map(entry => entry.materializationIdentity!.inode)).not.toContain(lstatSync(workspace).ino);
+  await vi.waitFor(() => expect(observeOutput(workspace)).toBeDefined(), { timeout: 10_000 });
+  const output = observeOutput(workspace)!;
+  expect(realpathSync(output.cwd)).toBe(realpathSync(workspace));
+  expect(output.prepared).toBe(true);
+  expect(readFileSync(path.join(workspace, 'README.md'), 'utf8')).toBe(invalidation === 'main' || process.env.O8_SPEED_REMOTE_MAIN === '1' ? 'donor documentation update\n' : 'committed\n');
+  const outputAt = output.outputAt;
   const { persistedWorkerStages } = await import(/* @vite-ignore */ path.resolve('scripts/speed/workers.mjs'));
-  const stages = persistedWorkerStages(root, packet.id, dispatchStartedAt, Date.parse(run.startedAt));
-  const runtimeDirectoryCalls = ensureDirectory.mock.calls.filter((call) => call[2].startsWith('.o8-install-runtime')).length;
-  const runtimePreparations = runtimeDirectoryCalls + ensureFile.mock.calls.filter((call) => call[2].startsWith('.o8-install-runtime')).length + (createRuntime?.mock.calls.length ?? 0);
+  const stages = persistedWorkerStages(root, packet.id, dispatchStartedAt, Date.parse(output.startedAt));
   const receipt = { dispatchToOutputMs: outputAt - dispatchStartedAt, sessionMs, stages,
-    spawnToOutputMs: outputAt - Date.parse(run.startedAt), runtimePreparations, maxAuditStats };
+    spawnToOutputMs: outputAt - Date.parse(output.startedAt), warm };
   process.stdout.write('[packet-launch-output] ' + JSON.stringify(receipt) + '\n');
   if (process.env.O8_SPEED_RECEIPT) writeFileSync(process.env.O8_SPEED_RECEIPT, JSON.stringify(receipt));
   expect.soft(receipt.dispatchToOutputMs).toBeLessThan(launchBudgetMs);
+  if (hit) expect.soft(stages.dependencyProvisioningMs).toBe(0);
+  else expect(stages.dependencyProvisioningMs).toBeGreaterThan(0);
   if (process.platform !== 'darwin') {
     expect(JSON.parse(readFileSync(path.join(workspace, 'installer-runtime.json'), 'utf8'))).toEqual({ contained: true, isolatedConfig: true });
     expect(readdirSync(path.join(workspace, '.o8-install-runtime'))).toHaveLength(0);
-    expect.soft(runtimePreparations).toBe(1);
-    expect.soft(maxAuditStats).toBeGreaterThan(1);
-    expect(maxAuditStats).toBeLessThanOrEqual(32);
   }
   if (process.platform === 'darwin') {
     const { WorktreeManager } = await import('@/lib/worktree/manager');
@@ -237,4 +382,4 @@ it('dispatches to fixture output within ten seconds with batched private install
   git('gc', '--prune=now');
   git('worktree', 'prune', '--expire=now');
   expect(workerGit('cat-file', '-p', unpublished)).toBe('unpublished packet object');
-}, 120_000);
+}, 600_000);

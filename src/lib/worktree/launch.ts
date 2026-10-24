@@ -19,6 +19,12 @@
  */
 
 import { WorktreeManager } from './manager';
+import { scheduleWarmPacketWorktrees, prepareWarmPacketWorktrees as prepareWarm, type WarmPacketOptions } from './warm-packet-pool';
+export { shutdownWarmPacketWorktrees } from './warm-packet-pool';
+
+export async function prepareWarmPacketWorktrees(opts: WarmPacketOptions): Promise<void> {
+  await prepareWarm(opts, getManager(opts.repoRoot));
+}
 import { withPinnedWorkspaceReadSession } from './materialization-read-session';
 import type { AgentType, WorktreeInfo, WorkspaceIsolationPreference } from './types';
 import type { RepoSetupConfig, RepoSetupEnvMode } from '@/lib/repos/types';
@@ -158,6 +164,7 @@ export async function prepareLaunchWorktree(
     managed: opts.agentType === 'claude-code' ? true : undefined,
   }));
 
+  if (opts.packetId) scheduleWarmPacketWorktrees(opts, mgr);
   return {
     worktree,
     cwd: worktree.path, // All agents run inside the managed worktree directory

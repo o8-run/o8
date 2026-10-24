@@ -10008,7 +10008,8 @@ const wsStartupReady = bootstrapWsServer().catch(() => {
 
 // ── Graceful shutdown ──
 
-function shutdown(signal: string, exitCode = 0) {
+async function shutdown(signal: string, exitCode = 0) {
+  if (shuttingDown) return;
   shuttingDown = true;
   o8dBridge?.stop();
   console.log(`[ws-server] ${signal} received — shutting down gracefully`);
@@ -10057,6 +10058,14 @@ function shutdown(signal: string, exitCode = 0) {
     try { client.ws.close(1001, 'server shutting down'); } catch { /* already gone */ }
   }
   clients.clear();
+
+  try {
+    const { shutdownWarmPacketWorktrees } = await import('@/lib/worktree/warm-packet-pool');
+    await shutdownWarmPacketWorktrees();
+  } catch {
+    console.error('[ws-server] Warm worktree cleanup retained unresolved ownership.');
+    exitCode = 1;
+  }
 
   // Close HTTP + WS server, then exit
   wss.close(() => {

@@ -22,12 +22,22 @@ interface ManagedWorktreeAdmissionInput {
   repoRoot: string;
   packetId?: string;
   reservationId?: string;
+  /** Dependency-only idle preparation does not mutate the Git registry. */
+  backgroundSetup?: boolean;
+}
+
+/** Serialize only shared Git administration, never idle dependency installation. */
+export async function withManagedWorktreeRegistryQueue<T>(repoRoot: string, operation: () => Promise<T>): Promise<T> {
+  const canonicalRepo = await realpath(repoRoot);
+  const rootKey = createHash('sha256').update(canonicalRepo).digest('hex');
+  return withWorktreeProvisionQueue(`managed-worktree-root:${rootKey}`, () => {}, operation);
 }
 
 export async function withManagedWorktreeStorageAdmission<T>(
   input: ManagedWorktreeAdmissionInput,
   materialize: (volumeId: string, rootIdentity: StorageRootIdentity) => Promise<T>,
 ): Promise<T> {
+  if (input.backgroundSetup) return withManagedWorktreeStorageAdmissionUnlocked(input, materialize);
   const canonicalRepo = await realpath(input.repoRoot);
   const rootKey = createHash('sha256').update(canonicalRepo).digest('hex');
   return withWorktreeProvisionQueue(`managed-worktree-root:${rootKey}`, (position) => {

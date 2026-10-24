@@ -243,3 +243,51 @@ real package-manager installation time or provider first-token latency. Private
 logs and numeric receipts stay in the selected evidence directory. Any failed
 regression or incomplete sample makes the harness exit nonzero. Compare the same
 payload and run the before and after arms without competing builds or tests.
+
+
+## Account-free warm packet dispatch
+
+`dispatch-fixture.mjs` drives `runDispatchTick` with a fixture installer and owned
+runtime executable. It verifies persisted worker stdout, lane preparation events,
+private dependency writes, the consumed directory inode and shutdown cleanup.
+The fixture emits immediately and stays alive until its returned session is
+interrupted through the runtime router; cleanup checks that no process remains
+inside its owned repository. It never uses a provider account. Freeze one payload
+outside the source checkout before comparing arms: test caches can change an
+active installation, and source scanners can traverse a copied payload inside
+the checkout. Run both arms sequentially without competing builds or tests:
+
+```sh
+node -e "require('node:fs').cpSync('node_modules', '../work/launch-payload', { recursive: true, verbatimSymlinks: true, errorOnExist: true, force: false })"
+node scripts/speed/dispatch-fixture.mjs --payload=../work/launch-payload --cold --output=work/launch-cold
+node scripts/speed/dispatch-fixture.mjs --payload=../work/launch-payload --output=work/launch-warm
+```
+
+Each arm runs three disposable fixture repositories. Large-payload timing uses
+one configured entry, which the measured packet consumes. The small lifecycle
+variants use the default two entries and verify unused-entry shutdown retirement. The optional installed
+payload is copied privately; the fixture manifest is synthetic. A warm dispatch
+must record zero dependency preparation and reach fixture output in under three
+seconds. Cold dispatch retains the existing provisioning path. Numeric receipts
+and private logs stay under the selected output directory. These measurements do
+not establish provider startup, real package installation, macOS volume sharing
+or the mission CLI wait-window contract.
+
+The pool retains at most two unused entries, checks a four GiB entry budget and
+eight GiB aggregate budget before publication, and keeps failed cleanup charged.
+Preparation uses normal storage admission; these retained-entry limits are not
+an installer filesystem quota. Entries contain native dependency trees and
+relative internal links. Mounted images and non-relocatable links use cold
+provisioning. Main, lockfile, setup contract, platform and runtime ABI select a
+generation. Entries are consumed once; dispatched worktrees never return to the
+pool. Refills run asynchronously, with installation outside the shared Git
+provision queue. New background preparation waits five seconds after foreground
+workspace creation to reduce child-helper contention during worker startup.
+WS shutdown awaits active transfers and preparation, then uses
+the existing exact retirement path for unused entries.
+
+Additional hermetic variants use the same test entry point:
+`O8_SPEED_INVALIDATION=main` or `lock`, `O8_SPEED_BINDING_FAULT=1`,
+`O8_SPEED_INODE_SWAP=1`, `O8_SPEED_ABSOLUTE_LINK=1`,
+`O8_SPEED_REMOTE_MAIN=1`, `O8_SPEED_HOOKS_FAULT=inode` or `content`,
+`O8_SPEED_CONCURRENT=1`, and `O8_SPEED_COLD_DURING_REFILL=1`.

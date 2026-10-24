@@ -1,0 +1,268 @@
+{
+  "schema": "o8/worker-launch-warm-pool-4136/v1",
+  "baseCommit": "4120a4f53",
+  "environment": {
+    "platform": "linux",
+    "nodeMajor": 22
+  },
+  "fixture": {
+    "test": "tests/packet-launch-budget-real-path.test.ts",
+    "entryPoint": "runDispatchTick",
+    "harness": "scripts/speed/dispatch-fixture.mjs",
+    "payload": "one immutable copy of installed node_modules, shared by all three measurement arms",
+    "manifest": "synthetic",
+    "runtime": "owned executable fixture, immediate stdout then real runtime interrupt",
+    "timedPoolCapacity": 1,
+    "lifecyclePoolCapacity": 2,
+    "samplesPerArm": 3
+  },
+  "beforeMain": {
+    "samples": [
+      {
+        "sample": 1,
+        "admissionMs": 376,
+        "otherWorkspaceMs": 1423,
+        "dependencyPreparationMs": 20659,
+        "bindingToRecordedStartMs": 197,
+        "recordedStartToOutputMs": 105,
+        "dispatchToOutputMs": 22760,
+        "dispatchToPersistedLaunchMs": 22968
+      },
+      {
+        "sample": 2,
+        "admissionMs": 311,
+        "otherWorkspaceMs": 1296,
+        "dependencyPreparationMs": 13433,
+        "bindingToRecordedStartMs": 285,
+        "recordedStartToOutputMs": 94,
+        "dispatchToOutputMs": 15419,
+        "dispatchToPersistedLaunchMs": 15600
+      },
+      {
+        "sample": 3,
+        "admissionMs": 351,
+        "otherWorkspaceMs": 1357,
+        "dependencyPreparationMs": 14322,
+        "bindingToRecordedStartMs": 154,
+        "recordedStartToOutputMs": 97,
+        "dispatchToOutputMs": 16281,
+        "dispatchToPersistedLaunchMs": 16461
+      }
+    ],
+    "medians": {
+      "admissionMs": 351,
+      "otherWorkspaceMs": 1357,
+      "dependencyPreparationMs": 14322,
+      "bindingToRecordedStartMs": 197,
+      "recordedStartToOutputMs": 97,
+      "dispatchToOutputMs": 16281,
+      "dispatchToPersistedLaunchMs": 16461
+    },
+    "failures": []
+  },
+  "afterColdFallback": {
+    "samples": [
+      {
+        "sample": 1,
+        "admissionMs": 305,
+        "otherWorkspaceMs": 1333,
+        "dependencyPreparationMs": 13083,
+        "bindingToRecordedStartMs": 175,
+        "recordedStartToOutputMs": 92,
+        "dispatchToOutputMs": 14988,
+        "dispatchToPersistedLaunchMs": 15148
+      },
+      {
+        "sample": 2,
+        "admissionMs": 326,
+        "otherWorkspaceMs": 1414,
+        "dependencyPreparationMs": 11517,
+        "bindingToRecordedStartMs": 176,
+        "recordedStartToOutputMs": 92,
+        "dispatchToOutputMs": 13525,
+        "dispatchToPersistedLaunchMs": 13691
+      },
+      {
+        "sample": 3,
+        "admissionMs": 337,
+        "otherWorkspaceMs": 1325,
+        "dependencyPreparationMs": 14537,
+        "bindingToRecordedStartMs": 167,
+        "recordedStartToOutputMs": 106,
+        "dispatchToOutputMs": 16472,
+        "dispatchToPersistedLaunchMs": 16599
+      }
+    ],
+    "medians": {
+      "admissionMs": 326,
+      "otherWorkspaceMs": 1333,
+      "dependencyPreparationMs": 13083,
+      "bindingToRecordedStartMs": 175,
+      "recordedStartToOutputMs": 92,
+      "dispatchToOutputMs": 14988,
+      "dispatchToPersistedLaunchMs": 15148
+    },
+    "failures": []
+  },
+  "afterWarm": {
+    "samples": [
+      {
+        "sample": 1,
+        "admissionMs": 186,
+        "otherWorkspaceMs": 858,
+        "dependencyPreparationMs": 0,
+        "bindingToRecordedStartMs": 175,
+        "recordedStartToOutputMs": 81,
+        "dispatchToOutputMs": 1300,
+        "dispatchToPersistedLaunchMs": 1497
+      }
+    ],
+    "medians": {
+      "admissionMs": 186,
+      "otherWorkspaceMs": 858,
+      "dependencyPreparationMs": 0,
+      "bindingToRecordedStartMs": 175,
+      "recordedStartToOutputMs": 81,
+      "dispatchToOutputMs": 1300,
+      "dispatchToPersistedLaunchMs": 1497
+    },
+    "failures": [
+      {
+        "sample": 2,
+        "exitCode": 1,
+        "error": null
+      },
+      {
+        "sample": 3,
+        "exitCode": 1,
+        "error": null
+      }
+    ]
+  },
+  "failedWarmAttempts": [
+    {
+      "sample": 2,
+      "outputObserved": false,
+      "dispatchToPersistedLaunchMs": 1517,
+      "dispatchTickMs": 1525
+    },
+    {
+      "sample": 3,
+      "outputObserved": false,
+      "dispatchToPersistedLaunchMs": 1566,
+      "dispatchTickMs": 1575
+    }
+  ],
+  "target": {
+    "dispatchToOutputMsExclusive": 3000,
+    "allWarmSamplesPassed": false,
+    "coldMedianDeltaMs": -1293
+  },
+  "verification": {
+    "finalChecks": {
+      "frozen-default": 0,
+      "frozen-main": 0,
+      "frozen-concurrent": 0,
+      "frozen-refill": 0,
+      "payload-snapshot": 0,
+      "frozen-before": 0,
+      "frozen-cold": 0,
+      "frozen-warm": 1,
+      "frozen-tsc": 0,
+      "frozen-eslint": 0,
+      "frozen-rules": 0,
+      "classification": 0,
+      "frozen-fast": 0
+    },
+    "dispatchVariants": {
+      "default": 0,
+      "main": 0,
+      "concurrent": 0,
+      "refill": 0,
+      "lock": 1,
+      "remote": 0,
+      "rename": 0,
+      "inode": 0,
+      "absolute-link": 0,
+      "hooks-inode": 0,
+      "hooks-content": 0
+    },
+    "typecheckFastExitCode": 0,
+    "fullNpmTestExitCode": 0,
+    "fullNpmTestTail": [
+      "Test Files  1224 passed | 3 skipped (1227)",
+      "Tests  8724 passed | 4 skipped (8728)",
+      "Duration  524.64s (transform 30.61s, setup 47.21s, import 715.64s, tests 533.28s, environment 451.08s)"
+    ],
+    "relatedTestFiles": [
+      "src/lib/workspace/dependency-install.test.ts",
+      "src/lib/worktree/materialization-leaf-io.test.ts",
+      "src/lib/worktree/create-auto-prune-serialization.test.ts",
+      "src/lib/worktree/prelaunch-dependency-link.test.ts",
+      "tests/dependency-directory-clone-real-path.test.ts"
+    ],
+    "relatedTestsTail": [
+      "Test Files  5 passed (5)",
+      "Tests  65 passed | 25 skipped (90)",
+      "Duration  49.16s (transform 3.09s, setup 168ms, import 5.51s, tests 42.63s, environment 0ms)"
+    ],
+    "installCleanupTest": "src/lib/worktree/dependency-install-manager-real-path.test.ts",
+    "installCleanupMainExitCode": 1,
+    "installCleanupBranchExitCode": 1,
+    "installCleanupMainTail": [
+      "Test Files  1 failed (1)",
+      "Tests  1 failed | 3 passed | 1 skipped (5)",
+      "Duration  31.19s (transform 2.60s, setup 60ms, import 3.55s, tests 27.35s, environment 0ms)"
+    ],
+    "installCleanupBranchTail": [
+      "Test Files  1 failed (1)",
+      "Tests  1 failed | 3 passed | 1 skipped (5)",
+      "Duration  38.74s (transform 3.60s, setup 60ms, import 4.76s, tests 33.70s, environment 0ms)"
+    ],
+    "redTail": [
+      "expected 56410 to be less than 3000",
+      "expected 51833 to be +0",
+      "Test Files 1 failed (1)",
+      "Tests 1 failed (1)"
+    ],
+    "finalWarmTails": {
+      "1": [
+        "Test Files  1 passed (1)",
+        "Tests  1 passed (1)",
+        "Duration  29.89s (transform 7.84s, setup 65ms, import 71ms, tests 29.52s, environment 0ms)"
+      ],
+      "2": [
+        "Test Files  1 failed (1)",
+        "Tests  1 failed (1)",
+        "Duration  272.41s (transform 6.72s, setup 50ms, import 65ms, tests 272.07s, environment 0ms)"
+      ],
+      "3": [
+        "Test Files  1 failed (1)",
+        "Tests  1 failed (1)",
+        "Duration  268.96s (transform 7.35s, setup 61ms, import 66ms, tests 268.58s, environment 0ms)"
+      ]
+    },
+    "earlierIteration": "Earlier warm/concurrent runs failed with missing output; an owned child reported SQLite contention in the existing credential-policy guard. The guard was preserved. Final runs use the held fixture lifetime and a five-second foreground refill quiet window.",
+    "twoEntryLargeLifecycle": {
+      "dispatchToOutputMs": 2383,
+      "wholeFixtureMs": 429860,
+      "passed": true
+    }
+  },
+  "limits": [
+    "Fixture installer and runtime use no provider accounts or network.",
+    "Output uses an adjacent fixture timestamp, and its stdout presence is verified in persisted owned-run output.",
+    "Recorded runtime start is not a kernel spawn timestamp. Phase medians are independent.",
+    "Arms ran sequentially on one host; filesystem cache and host I/O affect cold-copy latency.",
+    "Final timing uses one consumed entry. Default two-entry lifecycle and concurrency are separate cases."
+  ],
+  "remaining": [
+    "The warm target did not pass in every final sample; the numeric evidence includes all samples and failures.",
+    "Some final dispatch variants failed: lock.",
+    "A strict peak disk quota during installation remains unimplemented. The four/eight GiB budgets apply before publication; oversized transient installer writes can exceed them.",
+    "Process-restart fault injection at each transfer boundary and shutdown-during-fill/bind fault cases remain unverified.",
+    "A real-entry live-process-at-binding fixture remains missing; preparation and retirement use the existing guards.",
+    "Large unused-tree retirement remains slow: the separate two-entry large-payload lifecycle fixture passed in 429.86 s overall, including preparation and cleanup.",
+    "The issue\u2019s reference macOS timing, less-than-100-MB second-packet volume growth, and mission CLI wait-window/phase-receipt acceptance remain unverified in this Linux environment."
+  ]
+}
