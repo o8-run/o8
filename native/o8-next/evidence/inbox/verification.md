@@ -116,3 +116,71 @@ cargo +stable test --release --locked --manifest-path crates/o8d/Cargo.toml --fe
 cargo +stable build --release --locked --manifest-path native/o8-next/Cargo.toml
 O8D_HTTP_TEST_BINARY="$PWD/crates/o8d/target/release/o8d" cargo +stable test --release --locked --manifest-path native/o8-next/Cargo.toml -- --nocapture --test-threads=1
 ```
+
+## Review correction round 1
+
+The native approval request now forwards the explicit short-lived desktop
+session as `x-clerk-session-token`, matching the desktop ChatGPT-plan path.
+Production middleware, JWT signature/issuer/expiry checks, desktop binding,
+principal, owner, session and plan-selection checks are unchanged. The launcher
+drops the session for worker launches or a different explicit server origin.
+The original desktop binding must exist; native does not acquire, bind or refresh
+the identity. It is never stored in shell state, arguments or logs.
+
+`inbox_plan_session_header_preserves_desktop_authority_and_continuation` uses
+the existing fixture host, real signed synthetic Clerk JWTs and real approval/
+proxy handlers. Only external JWKS/provider transport and credential storage
+use fixtures. Missing, invalid, expired, wrong-owner and wrong-session identities
+leave the record untouched; a worker with a valid session still receives 403.
+After the desktop comparison, its file is removed. Native approval independently
+recreates the exact edit and persists an approved, completed continuation.
+
+The buttons retain stable GPUI focus handles. Tab/Shift+Tab traverses enabled
+actions and scrolls them into view; Enter/Space activates without opening a
+session. A painted border shows focus. Busy/uncertain controls are skipped, and
+changing views restores the Inbox focus handle. The keyboard test checks actual
+focus and the painted ring, because GPUI test debug bounds can outlive elements.
+
+Red receipts, saved before fixes:
+
+```text
+approval action must be reachable by Tab and show a visible focus ring
+native plan approval must send the same verified desktop session header
+  left: String("pending")
+ right: "approved"
+view keys must keep working after removing the focused approval button
+  left: 3
+ right: 2
+launcher credential isolation: 2 failed | 4 passed (6)
+```
+
+Two platform-related failures were reproduced on Linux by giving the production
+fixture host a symlinked `TMPDIR`:
+
+| Test | Before | Correction |
+| --- | --- | --- |
+| `inbox_cards_counts_statuses_and_approval_match_desktop_routes` | Count mismatch: saved session alias differs from canonical repository registration | Canonicalize the owned fixture root before persisting paths |
+| `inbox_opens_related_session_and_pull_request_and_restores` | PR action absent because the contribution was filtered out by that mismatch | The same canonical-root correction preserves the contribution |
+
+The symlink is retained in the regression fixture, so Linux continues to
+exercise the macOS-style path alias. This explains those two reproduced failures;
+actual macOS execution remains unavailable. Attached PR CI contains green Linux
+and Windows Rust gates, without the reported macOS failure logs.
+
+Final correction verification:
+
+```text
+test result: ok. 32 passed; 0 failed; 2 ignored
+CLI integration tests: 6 passed
+Test Files  1230 passed | 3 skipped (1233)
+Tests       8855 passed | 5 skipped (8860)
+desktop/launcher regressions: 9 passed in 2 files
+```
+
+Inbox real-path checks increased from four to six. Both type-check commands,
+ESLint on touched TypeScript, the three-file correction rule check, touched Rust
+formatting and the locked release build pass. An additional unchanged
+`plan-entry.test.ts` integration run was blocked by its global credential-lock
+directory under the Cloud sandbox; no credential-store policy was changed to
+make it pass. The new native signed-session fixture uses isolated storage and
+passes the real authority and continuation paths above.

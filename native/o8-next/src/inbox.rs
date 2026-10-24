@@ -4,7 +4,7 @@ use gpui::{Context, EventEmitter, FocusHandle, Window};
 use serde::Deserialize;
 use serde_json::Value;
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     time::{Duration, Instant},
 };
 
@@ -227,6 +227,7 @@ pub struct Inbox {
     pub(crate) loaded: bool,
     pub(crate) errors: [Option<String>; 3],
     pub(crate) busy: Option<String>,
+    pub(crate) action_focus: HashMap<String, [FocusHandle; 2]>,
     uncertain: HashSet<String>,
     pub(crate) notice: String,
     pub(crate) scroll: gpui::ScrollHandle,
@@ -251,6 +252,7 @@ impl Inbox {
             loaded: false,
             errors: Default::default(),
             busy: None,
+            action_focus: HashMap::new(),
             uncertain: HashSet::new(),
             notice: String::new(),
             scroll: gpui::ScrollHandle::new(),
@@ -315,13 +317,13 @@ impl Inbox {
                     Err(error) => this.errors[2] = Some(format!("Approvals could not be refreshed. Previous approvals are still shown. {error}")),
                 }
                 this.loaded = true;
-                this.rebuild();
+                this.rebuild(cx);
                 cx.notify();
             });
         }).detach();
         cx.notify();
     }
-    fn rebuild(&mut self) {
+    fn rebuild(&mut self, cx: &mut Context<Self>) {
         let scoped = |item: &&Value| {
             if !item["problemDossierId"].is_null()
                 && item["problemDossierId"]
@@ -444,6 +446,16 @@ impl Inbox {
         self.selected = self
             .selected
             .min(self.cards[self.lane].len().saturating_sub(1));
+        self.action_focus.retain(|id, _| {
+            self.approvals
+                .iter()
+                .any(|approval| approval["id"] == id.as_str())
+        });
+        for card in &self.cards[2] {
+            self.action_focus
+                .entry(card.id.clone())
+                .or_insert_with(|| [cx.focus_handle(), cx.focus_handle()]);
+        }
     }
     pub(crate) fn select_lane(&mut self, lane: usize, cx: &mut Context<Self>) {
         self.lane = lane;
@@ -459,7 +471,7 @@ impl Inbox {
         self.revision += 1;
         self.items.clear();
         self.feed = Feed::default();
-        self.rebuild();
+        self.rebuild(cx);
         self.loaded = false;
         self.load(cx);
         cx.notify();
@@ -471,10 +483,17 @@ impl Inbox {
             && self.busy.is_none()
             && !self.uncertain.contains(&card.id)
     }
-    pub(crate) fn decide(&mut self, card: Card, approve: bool, cx: &mut Context<Self>) {
+    pub(crate) fn decide(
+        &mut self,
+        card: Card,
+        approve: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if !self.can_resolve(&card) {
             return;
         }
+        self.focus.focus(window);
         let id = card.id;
         self.busy = Some(id.clone());
         self.notice = if approve {

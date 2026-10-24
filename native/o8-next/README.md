@@ -168,6 +168,17 @@ disables both decision controls. An unconfirmed delivery refreshes persisted sta
 before another decision. Session links open the exact existing transcript;
 GitHub links use the platform URL opener restricted to HTTPS GitHub URLs.
 
+Approval buttons accept Tab/Shift+Tab and Enter/Space, paint a visible focus ring,
+and skip busy or unconfirmed decisions. View navigation returns focus to Inbox.
+For ChatGPT-plan cards, the launching host can supply its current desktop session
+through `O8_NEXT_CLERK_SESSION_TOKEN`. It is sent only on the approval POST as
+`x-clerk-session-token`, alongside the operator bearer, through the desktop's
+existing owner/session/account/generation checks. The original signed-in desktop
+binding must already exist. This standalone experiment does not acquire, bind or
+refresh that short-lived identity; missing or expired sessions remain refused.
+The credential stays in process memory and is excluded from arguments, logs and
+saved shell state. The shell launcher drops it for workers or a different origin.
+
 There was no `theme.rs` on the starting main baseline. Inbox colors are local to
 `src/inbox_view.rs`, using the existing native shell palette and desktop type sizes.
 Headless verification uses production route handlers and persisted fixtures:

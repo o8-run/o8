@@ -2,7 +2,7 @@
  * background server startup, provider calls, app connections, or app data paths. */
 import { createServer } from 'node:http';
 import { randomBytes } from 'node:crypto';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -17,7 +17,7 @@ async function main() {
     await (await import('./worker-server')).startWorkerServer();
     return;
   }
-  const root = mkdtempSync(join(tmpdir(), 'o8-next-dev-'));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'o8-next-dev-')));
   const dataDir = join(root, 'data');
   const repo = join(root, 'fixture-repo');
   mkdirSync(join(dataDir, 'chat-history'), { recursive: true });
@@ -77,6 +77,10 @@ async function main() {
   const review = process.argv.includes('--review');
   const inbox = process.argv.includes('--inbox');
   const inboxApprovals = inbox && !process.argv.includes('--inbox-empty') ? await (await import('./inbox-fixture')).seedInboxFixture(repo, dataDir) : [];
+  const inboxPlan = process.argv.includes('--inbox-plan') && process.env.O8_NEXT_INBOX_PLAN_FIXTURE
+    ? await (await import('./inbox-plan-fixture')).seedInboxPlanFixture(repo, dataDir, fixtureToken, process.env.O8_NEXT_INBOX_PLAN_FIXTURE) : null;
+  if (inboxPlan) inboxApprovals.push(...inboxPlan.approvals);
+  const planProxy = inboxPlan ? await import('../../src/app/api/v2/proxy/llm/route') : null;
   const inboxRoutes = inbox ? await import('../../src/app/api/panel/supervisor-inbox/route') : null;
   const approvalRoutes = inbox ? await import('../../src/app/api/panel/approvals/route') : null;
   if (inbox && process.env.O8_NEXT_INBOX_ORACLE) await (await import('./inbox-fixture')).writeInboxOracle(process.env.O8_NEXT_INBOX_ORACLE);
@@ -126,7 +130,8 @@ async function main() {
         : composer && url.pathname === '/api/orchestrator/composer-queue'
           ? req.method === 'POST' ? queue.POST : req.method === 'PATCH' ? queue.PATCH : req.method === 'DELETE' ? queue.DELETE : null
           : review && req.method === 'POST' && url.pathname === '/api/orchestrator/review' ? reviewDecision.POST
-            : approvalRoutes && req.method === 'POST' && url.pathname === '/api/panel/approvals' ? approvalRoutes.POST : null;
+            : approvalRoutes && req.method === 'POST' && url.pathname === '/api/panel/approvals' ? approvalRoutes.POST
+              : planProxy && req.method === 'POST' && url.pathname === '/api/v2/proxy/llm' ? planProxy.POST : null;
       if (!route) { res.writeHead(404).end(); return; }
       // Prevent this development host from becoming a provider-history reader.
       if (route === history && !seeds.some(seed => `llm-chat:${seed.id}` === url.searchParams.get('sessionKey'))
@@ -139,13 +144,18 @@ async function main() {
         const owned = route === reviewDecision.POST
           ? ['next-review-approve', 'next-review-reject'].includes(target.packetId ?? '')
           : route === approvalRoutes?.POST ? inboxApprovals.some((approval) => approval.id === target.id) && ['approve', 'reject'].includes(target.action ?? '')
+          : route === planProxy?.POST ? ['inbox-plan-native', 'inbox-plan-desktop'].includes(String(req.headers['x-tab-id'])) && target.repoPath === repo
           : target.threadId?.startsWith('thoughts-composer-') && target.repoPath === repo;
         if (!owned) { res.writeHead(400).end(); return; }
       }
       const request = new NextRequest(url, { method: req.method,
         headers: { host: url.host, 'Content-Type': 'application/json', 'x-o8-client-addr': '127.0.0.1',
-          ...(req.headers.authorization ? { authorization: req.headers.authorization } : {}) }, ...(body ? { body } : {}) });
+          ...(req.headers.authorization ? { authorization: req.headers.authorization } : {}),
+          ...(typeof req.headers['x-clerk-session-token'] === 'string' ? { 'x-clerk-session-token': req.headers['x-clerk-session-token'] } : {}),
+          ...(typeof req.headers['x-tab-id'] === 'string' ? { 'x-tab-id': req.headers['x-tab-id'] } : {}) }, ...(body ? { body } : {}) });
       const gate = panelGateMiddleware(request);
+      if (gate.status === 200 && route === approvalRoutes?.POST && JSON.parse(body).action === 'approve'
+        && inboxPlan?.approvals.some((approval) => approval.id === JSON.parse(body).id)) inboxPlan.beforeDecision();
       const response = gate.status === 200 ? await route(request) : gate;
       // PATCH exercises actual steer admission and its persisted transcript echo.
       if (composer && response.ok && (route === queue.PATCH || (route === queue.POST && JSON.parse(body).intent === 'steer-now'))) {
@@ -189,6 +199,7 @@ async function main() {
       ...(peer ? { terminalSession: peer.sessionName } : {}) })}\n`);
   });
   async function close() {
+    await inboxPlan?.close();
     await closeTerminal();
     closeSockets();
     server.closeAllConnections(); server.close();

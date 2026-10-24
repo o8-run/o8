@@ -11,15 +11,48 @@ const WARNING: u32 = 0xffb454;
 const ACCENT: u32 = 0xff5a1f;
 
 impl Inbox {
-    fn key_down(&mut self, event: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
+    fn key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         if event.keystroke.modifiers.control || event.keystroke.modifiers.platform {
             return;
         }
         match event.keystroke.key.as_str() {
-            "left" => self.select_lane((self.lane + 4) % 5, cx),
-            "right" => self.select_lane((self.lane + 1) % 5, cx),
-            "home" => self.select_lane(0, cx),
-            "end" => self.select_lane(4, cx),
+            "tab" => {
+                let controls = self.cards[self.lane]
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, card)| self.can_resolve(card))
+                    .flat_map(|(index, card)| {
+                        self.action_focus[&card.id]
+                            .iter()
+                            .cloned()
+                            .map(move |handle| (index, handle))
+                    })
+                    .collect::<Vec<_>>();
+                if !controls.is_empty() {
+                    let current = controls
+                        .iter()
+                        .position(|(_, handle)| handle.is_focused(window));
+                    let next = if event.keystroke.modifiers.shift {
+                        current
+                            .map(|i| (i + controls.len() - 1) % controls.len())
+                            .unwrap_or(controls.len() - 1)
+                    } else {
+                        current.map(|i| (i + 1) % controls.len()).unwrap_or(0)
+                    };
+                    self.selected = controls[next].0;
+                    controls[next].1.focus(window);
+                }
+            }
+            "left" | "right" | "home" | "end" => {
+                let lane = match event.keystroke.key.as_str() {
+                    "left" => (self.lane + 4) % 5,
+                    "right" => (self.lane + 1) % 5,
+                    "home" => 0,
+                    _ => 4,
+                };
+                self.focus.focus(window);
+                self.select_lane(lane, cx);
+            }
             "up" => self.selected = self.selected.saturating_sub(1),
             "down" => {
                 self.selected =
@@ -37,13 +70,17 @@ impl Inbox {
         cx.stop_propagation();
         cx.notify();
     }
-    fn card(&self, card: Card, index: usize, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+    fn card(
+        &self,
+        card: Card,
+        index: usize,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement + use<> {
         let id = card.id.clone();
         let source_id = format!("inbox-source-{}-{}", card.id, card.source);
         let status_id = format!("inbox-status-{}-{}", card.id, card.status);
         let can_resolve = self.can_resolve(&card);
-        let approve = card.clone();
-        let reject = card.clone();
         let open = card.clone();
         let status = format!(
             "{}{}{}",
@@ -77,23 +114,81 @@ impl Inbox {
                         .hover(|s| s.bg(rgb(CARD)))
                         .child(if card.session.is_empty() { "Open on GitHub" } else { "Open session" })
                         .on_click(cx.listener(move |this, _, _, cx| this.open(&open, cx)))))
-                .when(card.approval, |v| v
-                    .child(div().id(("inbox-reject", index)).debug_selector({ let id = card.id.clone(); move || format!("inbox-reject-{id}") })
-                        .p(px(10.)).min_h(px(44.)).rounded(px(8.)).text_size(px(12.))
-                        .text_color(rgb(if can_resolve { TEXT } else { MUTED }))
-                        .child(if self.busy.as_ref() == Some(&card.id) { "Resolving…" } else { "Reject" })
-                        .when(can_resolve, |v| v.cursor_pointer().hover(|s| s.bg(rgb(CARD)))
-                            .on_click(cx.listener(move |this, _, _, cx| this.decide(reject.clone(), false, cx)))))
-                    .child(div().id(("inbox-approve", index)).debug_selector({ let id = card.id.clone(); move || format!("inbox-approve-{id}") })
-                        .p(px(10.)).min_h(px(44.)).rounded(px(8.)).text_size(px(12.))
-                        .bg(rgb(if can_resolve { ACCENT } else { CARD }))
-                        .text_color(rgb(if can_resolve { TEXT } else { MUTED })).child("Approve")
-                        .when(can_resolve, |v| v.cursor_pointer()
-                            .on_click(cx.listener(move |this, _, _, cx| this.decide(approve.clone(), true, cx)))))))
+                .when(card.approval, |v| v.children([false, true].map(|approve| {
+                    self.decision_button(card.clone(), index, approve, can_resolve, window, cx)
+                }))))
+    }
+    fn decision_button(
+        &self,
+        card: Card,
+        index: usize,
+        approve: bool,
+        enabled: bool,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement + use<> {
+        let action = if approve { "approve" } else { "reject" };
+        let focus = self.action_focus[&card.id][usize::from(approve)].clone();
+        let focused = focus.is_focused(window);
+        let clicked = card.clone();
+        let keyboard = card.clone();
+        div()
+            .id(gpui::SharedString::from(format!(
+                "inbox-{action}-{}",
+                card.id
+            )))
+            .debug_selector({
+                let id = card.id.clone();
+                move || format!("inbox-{action}-{id}")
+            })
+            .relative()
+            .track_focus(&focus)
+            .tab_index((index * 2 + usize::from(approve)) as isize)
+            .tab_stop(enabled)
+            .p(px(10.))
+            .min_h(px(44.))
+            .rounded(px(8.))
+            .text_size(px(12.))
+            .bg(rgb(if approve && enabled { ACCENT } else { CARD }))
+            .text_color(rgb(if enabled { TEXT } else { MUTED }))
+            .child(if self.busy.as_ref() == Some(&card.id) {
+                "Resolving…"
+            } else if approve {
+                "Approve"
+            } else {
+                "Reject"
+            })
+            .when(focused, |v| {
+                v.child(
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .rounded(px(8.))
+                        .border_2()
+                        .border_color(rgb(WARNING))
+                        .debug_selector({
+                            let id = card.id.clone();
+                            move || format!("inbox-focus-{action}-{id}")
+                        }),
+                )
+            })
+            .when(enabled, |v| {
+                v.cursor_pointer()
+                    .hover(|s| s.bg(rgb(HOVER)))
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.decide(clicked.clone(), approve, window, cx)
+                    }))
+                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+                        if matches!(event.keystroke.key.as_str(), "enter" | "space" | " ") {
+                            this.decide(keyboard.clone(), approve, window, cx);
+                            cx.stop_propagation();
+                        }
+                    }))
+            })
     }
 }
 impl Render for Inbox {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let error = self.error().map(str::to_owned);
         let empty =
             self.loaded && !self.loading && error.is_none() && self.cards[self.lane].is_empty();
@@ -106,6 +201,9 @@ impl Render for Inbox {
             .font_weight(FontWeight::LIGHT)
             .text_size(px(13.))
             .track_focus(&self.focus)
+            .tab_group()
+            .tab_index(-1)
+            .tab_stop(false)
             .on_key_down(cx.listener(Self::key_down))
             .child(
                 div()
@@ -278,7 +376,7 @@ impl Render for Inbox {
                             .clone()
                             .into_iter()
                             .enumerate()
-                            .map(|(i, card)| self.card(card, i, cx)),
+                            .map(|(i, card)| self.card(card, i, window, cx)),
                     ),
             )
     }

@@ -21,6 +21,9 @@ impl Fixture {
         Self::start(false)
     }
     fn start(empty: bool) -> Self {
+        Self::start_mode(empty, false)
+    }
+    fn start_mode(empty: bool, plan: bool) -> Self {
         let root = std::env::temp_dir().join(format!(
             "o8-inbox-{}-{}",
             std::process::id(),
@@ -30,7 +33,18 @@ impl Fixture {
                 .as_nanos()
         ));
         fs::create_dir(&root).unwrap();
-        let mut server = Process::new("node")
+        #[cfg(unix)]
+        let alias = {
+            let target = root.join("fixture-temp");
+            fs::create_dir(&target).unwrap();
+            let alias = root.join("temp-alias");
+            std::os::unix::fs::symlink(target, &alias).unwrap();
+            alias
+        };
+        let mut command = Process::new("node");
+        #[cfg(unix)]
+        command.env("TMPDIR", &alias);
+        let mut server = command
             .current_dir(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.."))
             .args([
                 "--import",
@@ -42,8 +56,10 @@ impl Fixture {
                 "--inbox",
             ])
             .args(if empty { vec!["--inbox-empty"] } else { vec![] })
+            .args(if plan { vec!["--inbox-plan"] } else { vec![] })
             .env("O8_NEXT_API_TOKEN", "fixture-inbox-operator-credential")
             .env("O8_NEXT_INBOX_ORACLE", root.join("oracle.json"))
+            .env("O8_NEXT_INBOX_PLAN_FIXTURE", root.join("plan.json"))
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()
@@ -129,6 +145,248 @@ fn click(cx: &mut gpui::VisualTestContext, selector: &str) {
     cx.simulate_click(bounds.center(), gpui::Modifiers::default());
     cx.run_until_parked();
     draw(cx);
+}
+
+fn tab_to_action(shell: &Entity<Shell>, cx: &mut gpui::VisualTestContext, id: &str, approve: bool) {
+    let selector = format!(
+        "inbox-focus-{}-{id}",
+        if approve { "approve" } else { "reject" }
+    );
+    for _ in 0..24 {
+        cx.simulate_keystrokes("tab");
+        draw(cx);
+        let focused = shell.update_in(cx, |shell, window, cx| {
+            match shell.content.get(&shell.key(&Tab::Inbox)).unwrap() {
+                Content::Inbox(inbox) => {
+                    inbox.read(cx).action_focus[id][usize::from(approve)].is_focused(window)
+                }
+                _ => false,
+            }
+        });
+        if focused {
+            assert!(
+                bounds(cx, &selector).is_some(),
+                "focused button must paint its focus ring"
+            );
+            return;
+        }
+    }
+    panic!("approval action must be reachable by Tab and show a visible focus ring");
+}
+
+#[gpui::test]
+fn inbox_keyboard_buttons_activate_enter_space_and_skip_disabled(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    let records = fixture.records();
+    let id = |title: &str| {
+        records
+            .iter()
+            .find(|record| record["title"] == title)
+            .unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    };
+    let (shell, mut visual) = open(
+        fixture.client.clone(),
+        fixture.root.join("keyboard.json"),
+        State::default(),
+        cx,
+    );
+    let cx = &mut visual;
+    cx.run_until_parked();
+    draw(cx);
+    cx.simulate_keystrokes("ctrl-k");
+    cx.simulate_keystrokes("i n b o x enter");
+    cx.run_until_parked();
+    draw(cx);
+    click(cx, "inbox-view-approvals");
+    tab_to_action(&shell, cx, &id("Native approve"), true);
+    cx.simulate_keystrokes("right");
+    draw(cx);
+    cx.simulate_keystrokes("left");
+    draw(cx);
+    assert_eq!(
+        shell.read_with(cx, |s, cx| {
+            match s.content.get(&s.key(&Tab::Inbox)).unwrap() {
+                Content::Inbox(inbox) => inbox.read(cx).lane,
+                _ => usize::MAX,
+            }
+        }),
+        2,
+        "view keys must keep working after removing the focused approval button"
+    );
+    tab_to_action(&shell, cx, &id("Native approve"), true);
+    cx.simulate_keystrokes("enter");
+    cx.run_until_parked();
+    draw(cx);
+    assert_eq!(
+        fixture
+            .records()
+            .iter()
+            .find(|record| record["id"] == id("Native approve"))
+            .unwrap()["status"],
+        "approved"
+    );
+    assert_eq!(
+        shell.read_with(cx, |s, _| s.active()),
+        Some(Tab::Inbox),
+        "Enter on a decision must not open its session"
+    );
+    tab_to_action(&shell, cx, &id("Native reject"), false);
+    cx.simulate_keystrokes("space");
+    cx.run_until_parked();
+    draw(cx);
+    assert_eq!(
+        fixture
+            .records()
+            .iter()
+            .find(|record| record["id"] == id("Native reject"))
+            .unwrap()["status"],
+        "rejected"
+    );
+    for _ in 0..12 {
+        cx.simulate_keystrokes("tab");
+        draw(cx);
+        for action in ["approve", "reject"] {
+            assert!(
+                bounds(
+                    cx,
+                    &format!("inbox-focus-{action}-{}", id("Unconfirmed continuation"))
+                )
+                .is_none()
+            );
+        }
+    }
+    cx.simulate_keystrokes("shift-tab");
+    draw(cx);
+    assert_eq!(shell.read_with(cx, |s, _| s.active()), Some(Tab::Inbox));
+}
+
+#[gpui::test]
+fn inbox_plan_session_header_preserves_desktop_authority_and_continuation(cx: &mut TestAppContext) {
+    let fixture = Fixture::start_mode(false, true);
+    let plan: Value =
+        serde_json::from_slice(&fs::read(fixture.root.join("plan.json")).unwrap()).unwrap();
+    let id = plan["nativeId"].as_str().unwrap();
+    let file = PathBuf::from(plan["file"].as_str().unwrap());
+    let before = fixture
+        .records()
+        .into_iter()
+        .find(|record| record["id"] == id)
+        .unwrap();
+    assert!(
+        fixture
+            .client
+            .inbox_decision(id, true)
+            .unwrap_err()
+            .contains("HTTP 401")
+    );
+    for (session, expected) in [
+        ("invalid-session", 401),
+        (plan["expired"].as_str().unwrap(), 401),
+    ] {
+        let response = ureq::post(&format!("{}/api/panel/approvals", fixture.origin))
+            .set("Authorization", "Bearer fixture-inbox-operator-credential")
+            .set("x-clerk-session-token", session)
+            .send_json(serde_json::json!({"action":"approve","id":id}))
+            .unwrap_err();
+        assert!(matches!(response, ureq::Error::Status(status, _) if status == expected));
+    }
+    for field in ["wrongOwner", "wrongSession"] {
+        let response = ureq::post(&format!("{}/api/panel/approvals", fixture.origin))
+            .set("Authorization", "Bearer fixture-inbox-operator-credential")
+            .set("x-clerk-session-token", plan[field].as_str().unwrap())
+            .send_json(serde_json::json!({"action":"approve","id":id}))
+            .unwrap_err();
+        assert!(matches!(response, ureq::Error::Status(401 | 403 | 409, _)));
+    }
+    assert_eq!(
+        fixture
+            .records()
+            .iter()
+            .find(|record| record["id"] == id)
+            .unwrap(),
+        &before
+    );
+    assert!(
+        !file.exists(),
+        "refused identities must not execute the tool"
+    );
+    let desktop: Value = ureq::post(&format!("{}/api/panel/approvals", fixture.origin))
+        .set("Authorization", "Bearer fixture-inbox-operator-credential")
+        .set("x-clerk-session-token", plan["valid"].as_str().unwrap())
+        .send_json(serde_json::json!({"action":"approve","id":plan["desktopId"]}))
+        .unwrap()
+        .into_json()
+        .unwrap();
+    assert_eq!(desktop["approval"]["status"], "approved");
+    assert!(
+        file.exists(),
+        "desktop fixture continuation failed: {}",
+        desktop["note"]
+    );
+    fs::remove_file(&file).unwrap();
+    let native = fixture
+        .client
+        .clone()
+        .with_desktop_session(Some(plan["valid"].as_str().unwrap().into()))
+        .unwrap();
+    let worker = Client::authenticated(
+        &fixture.origin,
+        Some("fixture-inbox-worker-credential".into()),
+    )
+    .unwrap()
+    .with_desktop_session(Some(plan["valid"].as_str().unwrap().into()))
+    .unwrap();
+    assert!(
+        worker
+            .inbox_decision(id, true)
+            .unwrap_err()
+            .contains("HTTP 403")
+    );
+    assert!(
+        !file.exists(),
+        "the worker must not execute the approved tool"
+    );
+    let desktop_record = fixture
+        .records()
+        .into_iter()
+        .find(|record| record["id"] == plan["desktopId"])
+        .unwrap();
+    let (shell, mut visual) = open(
+        native,
+        fixture.root.join("plan-shell.json"),
+        State::default(),
+        cx,
+    );
+    let cx = &mut visual;
+    cx.run_until_parked();
+    draw(cx);
+    cx.simulate_keystrokes("ctrl-k");
+    cx.simulate_keystrokes("i n b o x enter");
+    cx.run_until_parked();
+    draw(cx);
+    click(cx, "inbox-view-approvals");
+    click(cx, &format!("inbox-approve-{id}"));
+    let after = fixture
+        .records()
+        .into_iter()
+        .find(|record| record["id"] == id)
+        .unwrap();
+    assert_eq!(
+        after["status"], "approved",
+        "native plan approval must send the same verified desktop session header"
+    );
+    for field in ["action", "actor", "continuationStatus"] {
+        assert_eq!(
+            after["resolution"][field],
+            desktop_record["resolution"][field]
+        );
+    }
+    assert_eq!(after["resolution"]["continuationStatus"], "completed");
+    assert_eq!(fs::read_to_string(&file).unwrap(), "bounded test edit");
+    assert_eq!(shell.read_with(cx, |s, _| s.active()), Some(Tab::Inbox));
 }
 
 #[gpui::test]

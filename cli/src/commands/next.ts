@@ -34,6 +34,9 @@ export async function runNext(args: string[]): Promise<number> {
       throw new CliError('invalid_args', 'App shell requires a numeric loopback HTTP origin.', EXIT.INVALID_ARGS);
     }
     if (serverAt < 0) forwarded.push('--server', config.apiBase);
+    if (config.source.token === 'worker' || url.origin !== config.apiBase) {
+      delete env.O8_NEXT_CLERK_SESSION_TOKEN;
+    }
     // An explicitly selected fixture server must never inherit another server's
     // disk credential. Worker credentials keep their existing lower authority.
     if (config.source.token === 'worker') {
