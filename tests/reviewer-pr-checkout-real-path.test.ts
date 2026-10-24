@@ -50,6 +50,11 @@ function quote(value: string) { return `'${value.replaceAll("'", "'\\''")}'`; }
 const root = realpathSync(mkdtempSync(join(tmpdir(), 'o8-review-pr-')));
 const data = join(root, 'data');
 mkdirSync(data);
+// Disposable checkouts must not depend on the operator's global Git identity.
+const gitConfig = join(root, 'empty.gitconfig');
+writeFileSync(gitConfig, '');
+vi.stubEnv('GIT_CONFIG_GLOBAL', gitConfig);
+vi.stubEnv('GIT_CONFIG_NOSYSTEM', '1');
 process.env.O8_DATA_DIR = data;
 process.env.CORTEX_IDE_DATA_DIR = data;
 process.env.O8_WORKTREE_ROOT = join(root, 'workspaces');
@@ -204,6 +209,9 @@ describe('reviewer PR checkout through delegate dispatch', () => {
   it('starts an editable repair at the selected PR head and durably records that source', async () => {
     process.env.O8_APFS_COW_WORKSPACES = '0';
     const f = await fixture('repair-head');
+    // Match an isolated CI checkout without a configured commit author.
+    git(f.repo, 'config', '--unset', 'user.name');
+    git(f.repo, 'config', '--unset', 'user.email');
     const response = await POST(request(f.repo, { reviewPullRequest: undefined, readOnly: false,
       repairPullRequest: 7, expectedRepairHeadSha: f.head }));
     const result = await response.json();
@@ -217,8 +225,10 @@ describe('reviewer PR checkout through delegate dispatch', () => {
     expect(result.repairSource).toEqual({ pullRequest: 7, headSha: f.head });
     expect(git(f.repo, 'rev-parse', 'HEAD')).toBe(f.base);
     const { assertReviewerPrCheckout } = await import('@/lib/orchestrator/reviewer-pr-source');
+    git(launched.cwd!, 'config', 'user.useConfigOnly', 'true');
     writeFileSync(join(launched.cwd!, 'repair.txt'), 'repair commit\n');
-    git(launched.cwd!, 'add', 'repair.txt'); git(launched.cwd!, 'commit', '-qm', 'repair');
+    git(launched.cwd!, 'add', 'repair.txt');
+    git(launched.cwd!, '-c', 'user.name=test', '-c', 'user.email=test@example.test', 'commit', '-qm', 'repair');
     await expect(assertReviewerPrCheckout(result.packetId, launched.cwd!)).resolves.toBeUndefined();
     git(launched.cwd!, 'checkout', '--detach', f.base);
     await expect(assertReviewerPrCheckout(result.packetId, launched.cwd!)).rejects.toThrow('pinned PR head');
