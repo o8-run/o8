@@ -35,6 +35,7 @@ pub struct Pane {
     pub painted_bytes: Rc<Cell<u64>>,
     pub painted_cells: Rc<Cell<usize>>,
     pub painted_cursor: Rc<Cell<bool>>,
+    pub paints: Rc<Cell<usize>>,
     composition: String,
 }
 impl Pane {
@@ -44,10 +45,15 @@ impl Pane {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        let pane = Self::attached(client, session, cx);
+        pane.focus.focus(window);
+        pane
+    }
+    /// Grid attachment never takes focus from another slot.
+    pub fn attached(client: Client, session: String, cx: &mut Context<Self>) -> Self {
         let dimensions = Size(80, 24);
         let grid = Arc::new(Mutex::new(Grid::new(dimensions)));
         let focus = cx.focus_handle();
-        focus.focus(window);
         Self {
             grid: grid.clone(),
             link: terminal_transport::connect(client, session, dimensions, grid),
@@ -58,10 +64,17 @@ impl Pane {
             painted_bytes: Rc::new(Cell::new(0)),
             painted_cells: Rc::new(Cell::new(0)),
             painted_cursor: Rc::new(Cell::new(false)),
+            paints: Rc::new(Cell::new(0)),
             composition: String::new(),
         }
     }
+    pub fn focus_handle(&self) -> FocusHandle {
+        self.focus.clone()
+    }
     pub fn poll(&mut self, cx: &mut Context<Self>) {
+        self.poll_visible(true, cx);
+    }
+    pub fn poll_visible(&mut self, visible: bool, cx: &mut Context<Self>) -> bool {
         let started = Instant::now();
         let mut changed = false;
         // Consume coalesced notifications; parsing stays on the socket thread.
@@ -93,9 +106,10 @@ impl Pane {
                 break;
             }
         }
-        if changed {
+        if changed && visible {
             cx.notify();
         }
+        changed
     }
     fn input(&mut self, text: String, cx: &mut Context<Self>) {
         if !self.ready {
@@ -249,6 +263,7 @@ impl Render for Pane {
         let painted_bytes = self.painted_bytes.clone();
         let painted_cells = self.painted_cells.clone();
         let painted_cursor = self.painted_cursor.clone();
+        let paints = self.paints.clone();
         let focus = self.focus.clone();
         div()
             .size_full()
@@ -389,6 +404,7 @@ impl Render for Pane {
                         painted_cursor.set(cursor.is_some());
                         painted.set(revision);
                         painted_bytes.set(bytes);
+                        paints.set(paints.get() + 1);
                     },
                 )
                 .flex_1()

@@ -1,0 +1,14 @@
+thread 'pane_grid::tests::slot_terminal_choice_is_keyboard_reachable_and_persisted' (11418) panicked at src/pane_grid_tests.rs:393:5:
+assertion `left == right` failed: Ctrl+Alt+T must persist the focused slot's terminal choice
+  left: Null
+ right: "terminal"
+test pane_grid::tests::slot_terminal_choice_is_keyboard_reachable_and_persisted ... FAILED
+
+failures:
+
+failures:
+    pane_grid::tests::slot_terminal_choice_is_keyboard_reachable_and_persisted
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 19 filtered out; finished in 21.75s
+
+error: test failed, to rerun pass `--bin o8-next`

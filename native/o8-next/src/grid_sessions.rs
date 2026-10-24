@@ -43,11 +43,13 @@ pub fn load(client: &Client, workspace: &str) -> Result<Vec<Session>, String> {
         }
         if let Some(existing) = sessions.iter_mut().find(|s| key(s) == session_key) {
             existing.repo_path = Some(workspace.into());
+            existing.tmux_session = agent["tmuxSession"].as_str().map(str::to_owned);
             continue;
         }
         let session: Session = serde_json::from_value(json!({
             "id":session_key,"title":agent["name"].as_str().unwrap_or("Worker"),
-            "status":agent["status"].as_str().unwrap_or("idle"),"runtime":agent["runtime"],"repoPath":workspace
+            "status":agent["status"].as_str().unwrap_or("idle"),"runtime":agent["runtime"],"repoPath":workspace,
+            "tmuxSession":agent["tmuxSession"]
         })).map_err(|_| "Invalid worker inventory")?;
         sessions.push(session);
     }

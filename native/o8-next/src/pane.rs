@@ -85,6 +85,8 @@ pub struct Pane {
     pub painted: Rc<Cell<u64>>,
     pub paints: Rc<Cell<usize>>,
     pub painted_rows: Rc<RefCell<BTreeSet<usize>>>,
+    pub terminal_session: Option<String>,
+    pub terminal: Option<gpui::Entity<crate::terminal::Pane>>,
 }
 impl Pane {
     pub fn new(key: Option<String>) -> Self {
@@ -101,11 +103,20 @@ impl Pane {
             painted: Rc::new(Cell::new(u64::MAX)),
             paints: Rc::new(Cell::new(0)),
             painted_rows: Rc::new(RefCell::new(BTreeSet::new())),
+            terminal_session: None,
+            terminal: None,
         }
     }
     pub fn metadata(&mut self, session: &Session) {
         self.title = title(&session.title);
         self.state = state(session);
+        let binding = session.tmux_session.clone().filter(|value| {
+            !value.trim().is_empty() && value.len() <= 200 && !value.chars().any(char::is_control)
+        });
+        if self.terminal_session != binding {
+            self.terminal = None;
+            self.terminal_session = binding;
+        }
     }
     pub fn install(&mut self, history: History, client: Client) {
         let key = history.session_key.clone();

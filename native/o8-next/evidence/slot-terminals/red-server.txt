@@ -1,0 +1,22 @@
+ FAIL  tests/o8-next-grid-terminal-real-path.test.ts > projects exact per-worker terminal bindings and attaches independent PTYs through production entry points
+AssertionError: six runtime workers must expose exact terminal bindings: expected [] to have a length of 6 but got +0
+
+- Expected
++ Received
+
+- 6
++ 0
+
+ ❯ tests/o8-next-grid-terminal-real-path.test.ts:25:80
+     23|     };
+     24|     const workers = inventory.agents.filter(agent => agent.sessionKey.…
+     25|     expect(workers, 'six runtime workers must expose exact terminal bi…
+       |                                                                                ^
+     26|     expect(new Set(workers.map(worker => worker.tmuxSession)).size).to…
+     27|     const info = await (await fetch(`${origin}/api/panel/ws-info`, { h…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed (1)

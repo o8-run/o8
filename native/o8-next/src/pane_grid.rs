@@ -4,7 +4,7 @@ use crate::{
     client::{Client, Session},
     grid_sessions,
     pane::Pane,
-    pane_layout::{Layout, Options, SIZES},
+    pane_layout::{Layout, Options, SIZES, View},
 };
 use gpui::{
     App, Application, Bounds, Context, FocusHandle, KeyDownEvent, Render, Window, WindowBounds,
@@ -24,6 +24,7 @@ pub struct Grid {
     loaded: bool,
     refreshing: bool,
     loading: HashSet<String>,
+    focus_pending: bool,
 }
 impl Grid {
     pub(crate) fn shell_focus(&self, window: &mut Window, _: &mut Context<Self>) {
@@ -56,6 +57,7 @@ impl Grid {
             loaded: saved.is_some(),
             refreshing: false,
             loading: HashSet::new(),
+            focus_pending: true,
         }
     }
     fn persist(&mut self) {
@@ -85,7 +87,7 @@ impl Grid {
                             this.panes = this.layout.sessions.iter().cloned().map(Pane::new).collect();
                             this.loaded = true;
                         }
-                        this.notice = if this.sessions.is_empty() { "No sessions in the selected workspace." } else { "Ctrl+Alt+arrows: focus · +Shift: move · W: close · P: choose session · Enter: zoom" }.into();
+                        this.notice = if this.sessions.is_empty() { "No sessions in the selected workspace." } else { "Ctrl+Alt+arrows: focus · +Shift: move · T: transcript/terminal · W: close · P: session · Enter: zoom" }.into();
                         this.persist();
                         this.reload(cx);
                     }
@@ -139,9 +141,15 @@ impl Grid {
     pub fn poll(&mut self, cx: &mut Context<Self>) {
         let mut visible_changed = false;
         for (index, pane) in self.panes.iter_mut().enumerate() {
-            if pane.poll() && index < self.layout.size && (!self.zoom || index == self.layout.focus)
-            {
+            let visible = index < self.layout.size && (!self.zoom || index == self.layout.focus);
+            if pane.poll() && visible && self.layout.views[index] == View::Transcript {
                 visible_changed = true;
+            }
+            if let Some(terminal) = &pane.terminal {
+                let painting = visible && self.layout.views[index] == View::Terminal;
+                visible_changed |= terminal
+                    .update(cx, |terminal, cx| terminal.poll_visible(painting, cx))
+                    && painting;
             }
         }
         if visible_changed {
@@ -150,7 +158,44 @@ impl Grid {
     }
     fn focus(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
         self.layout.focus = index.min(self.layout.size - 1);
+        self.focus_slot(window, cx);
+        self.persist();
+        cx.notify();
+    }
+    fn focus_slot(&self, window: &mut Window, cx: &mut Context<Self>) {
+        let index = self.layout.focus;
+        if self.layout.views[index] == View::Terminal {
+            if let Some(terminal) = &self.panes[index].terminal {
+                terminal.read(cx).focus_handle().focus(window);
+                return;
+            }
+        }
         self.focus.focus(window);
+    }
+    fn attach_terminals(&mut self, cx: &mut Context<Self>) {
+        for (index, pane) in self.panes.iter_mut().enumerate() {
+            if self.layout.views[index] == View::Terminal && pane.terminal.is_none() {
+                if let Some(session) = &pane.terminal_session {
+                    let client = self.client.clone();
+                    let session = session.clone();
+                    pane.terminal =
+                        Some(cx.new(|cx| crate::terminal::Pane::attached(client, session, cx)));
+                    if index == self.layout.focus {
+                        self.focus_pending = true;
+                    }
+                }
+            }
+        }
+    }
+    fn toggle_view(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let view = &mut self.layout.views[self.layout.focus];
+        *view = if *view == View::Transcript {
+            View::Terminal
+        } else {
+            View::Transcript
+        };
+        self.attach_terminals(cx);
+        self.focus_slot(window, cx);
         self.persist();
         cx.notify();
     }
@@ -158,6 +203,7 @@ impl Grid {
         self.layout.size = size;
         self.layout.focus = self.layout.focus.min(size - 1);
         self.zoom = false;
+        self.focus_pending = true;
         self.persist();
         cx.notify();
     }
@@ -166,6 +212,7 @@ impl Grid {
         // Dropping Pane cancels only its viewer subscription, never the worker.
         self.panes[index] = Pane::new(None);
         self.layout.sessions[index] = None;
+        self.focus_pending = true;
         self.persist();
         cx.notify();
     }
@@ -184,6 +231,7 @@ impl Grid {
         if let Some(key) = key {
             self.panes[index] = Pane::new(Some(key.clone()));
             self.layout.sessions[index] = Some(key);
+            self.focus_pending = true;
             self.persist();
             self.reload(cx);
         }
@@ -198,6 +246,7 @@ impl Grid {
                     let next = self.layout.neighbor(key);
                     if modifiers.shift {
                         self.layout.sessions.swap(self.layout.focus, next);
+                        self.layout.views.swap(self.layout.focus, next);
                         self.panes.swap(self.layout.focus, next);
                     }
                     self.focus(next, window, cx);
@@ -205,6 +254,7 @@ impl Grid {
                 "1" | "2" | "4" | "6" => self.resize(key.parse().unwrap(), cx),
                 "w" => self.close(cx),
                 "p" => self.choose(cx),
+                "t" => self.toggle_view(window, cx),
                 "enter" => {
                     self.zoom = !self.zoom;
                     cx.notify();
@@ -212,6 +262,10 @@ impl Grid {
                 _ => return,
             }
         } else {
+            // Tab, Home/End, arrows and control keys belong to the focused PTY.
+            if self.layout.views[self.layout.focus] == View::Terminal {
+                return;
+            }
             match key {
                 "tab" => {
                     let next = if modifiers.shift {
@@ -232,6 +286,18 @@ impl Grid {
     }
     fn pane(&self, index: usize, cx: &mut Context<Self>) -> gpui::AnyElement {
         let pane = &self.panes[index];
+        let terminal = self.layout.views[index] == View::Terminal;
+        let content = if terminal {
+            match &pane.terminal {
+                Some(entity) => entity.clone().into_any_element(),
+                None => div()
+                    .p(px(8.))
+                    .child("No terminal is available for this session. Ctrl+Alt+T: transcript.")
+                    .into_any_element(),
+            }
+        } else {
+            pane.content()
+        };
         let child = div()
             .id(("pane", index))
             .debug_selector(move || format!("pane-{index}"))
@@ -275,6 +341,17 @@ impl Grid {
                     )
                     .child(
                         div()
+                            .id(("pane-view", index))
+                            .cursor_pointer()
+                            .text_size(px(9.5))
+                            .child(if terminal { "Terminal" } else { "Transcript" })
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.layout.focus = index;
+                                this.toggle_view(window, cx);
+                            })),
+                    )
+                    .child(
+                        div()
                             .id(("close-pane", index))
                             .cursor_pointer()
                             .text_size(px(9.5))
@@ -285,7 +362,7 @@ impl Grid {
                             })),
                     ),
             )
-            .child(pane.content())
+            .child(content)
             .into_any_element();
         crate::pane::clipped(child)
     }
@@ -294,7 +371,12 @@ fn this_session<'a>(sessions: &'a [Session], key: &str) -> Option<&'a Session> {
     sessions.iter().find(|s| grid_sessions::key(s) == key)
 }
 impl Render for Grid {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.attach_terminals(cx);
+        if self.focus_pending {
+            self.focus_pending = false;
+            self.focus_slot(window, cx);
+        }
         let columns = self.layout.columns();
         let rows = if self.zoom {
             1
@@ -310,7 +392,7 @@ impl Render for Grid {
             .font_family(".AppleSystemUIFont")
             .text_size(px(13.))
             .track_focus(&self.focus)
-            .on_key_down(cx.listener(Self::key))
+            .capture_key_down(cx.listener(Self::key))
             .child(
                 div()
                     .h(px(36.))

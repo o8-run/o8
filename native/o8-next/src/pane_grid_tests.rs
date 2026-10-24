@@ -17,6 +17,9 @@ struct Fixture {
 }
 impl Fixture {
     fn new() -> Self {
+        Self::with_terminals(false)
+    }
+    fn with_terminals(terminals: bool) -> Self {
         let root = std::env::temp_dir().join(format!(
             "o8-pane-grid-{}-{}",
             std::process::id(),
@@ -35,6 +38,11 @@ impl Fixture {
                 "tsx",
                 "scripts/next/grid-dev-server.ts",
             ])
+            .args(if terminals {
+                vec!["--terminals"]
+            } else {
+                vec![]
+            })
             .env("O8_NEXT_API_TOKEN", "fixture-grid-bearer")
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
@@ -63,6 +71,20 @@ impl Fixture {
             workspace,
             file: root.join("layouts.json"),
         };
+        if terminals {
+            options
+                .save(&Layout::new(
+                    6,
+                    (0..6).map(|index| {
+                        if index < 3 {
+                            format!("pi-owned:grid-terminal-{index}")
+                        } else {
+                            format!("llm-chat:thoughts-grid-{index}")
+                        }
+                    }),
+                ))
+                .unwrap();
+        }
         Self {
             server,
             client,
@@ -378,3 +400,27 @@ fn pane_grid_measurement(cx: &mut TestAppContext) {
         "frameMs":frames,"keyToFrameMs":keys,"idleMemoryMiB":rss,"finalSequences":sequences})
     );
 }
+
+#[gpui::test]
+fn slot_terminal_choice_is_keyboard_reachable_and_persisted(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    let (grid, cx) = cx.add_window_view(|window, cx| {
+        Grid::new(fixture.client.clone(), fixture.options.clone(), window, cx)
+    });
+    grid.update(cx, |g, cx| g.load(cx));
+    cx.run_until_parked();
+    draw(cx);
+    cx.simulate_keystrokes("ctrl-alt-t");
+    let saved: Value = serde_json::from_slice(&fs::read(&fixture.options.file).unwrap()).unwrap();
+    assert_eq!(
+        saved[&fixture.options.workspace]["views"][0], "terminal",
+        "Ctrl+Alt+T must persist the focused slot's terminal choice"
+    );
+    assert_eq!(saved[&fixture.options.workspace]["views"][1], "transcript");
+    cx.simulate_keystrokes("ctrl-alt-t");
+    let saved: Value = serde_json::from_slice(&fs::read(&fixture.options.file).unwrap()).unwrap();
+    assert_eq!(saved[&fixture.options.workspace]["views"][0], "transcript");
+}
+
+#[path = "grid_terminal_tests.rs"]
+mod terminals;

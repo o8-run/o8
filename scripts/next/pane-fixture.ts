@@ -5,7 +5,7 @@ import type { Server } from 'node:http';
 import { WebSocketServer } from 'ws';
 import type { RuntimeSession } from '../../src/lib/runtimes/types';
 
-export async function installPaneRuntime(dataDir: string, repo: string) {
+export async function installPaneRuntime(dataDir: string, repo: string, terminals = false) {
   // Replace discovery only, retaining production inventory projection and the
   // owned runtime's actual persisted transcript reader. No provider is started.
   const { getAllRuntimes, getRuntime } = await import('../../src/lib/runtimes');
@@ -30,7 +30,22 @@ export async function installPaneRuntime(dataDir: string, repo: string) {
     sessionCapabilities: { canSendInput: false, canInterrupt: false, canReviewDiffs: false } } satisfies RuntimeSession;
   const pi = getRuntime('pi');
   if (!pi) throw new Error('Fixture runtime is not registered');
-  Object.defineProperty(pi, 'discoverSessions', { value: async () => [worker], configurable: true });
+  Object.defineProperty(pi, 'discoverSessions', { value: async () => terminals ? Array.from({ length: 6 }, (_, index) => {
+    const key = `grid-terminal-${index}`;
+    const dir = join(dataDir, 'owned-pi', key);
+    mkdirSync(dir, { recursive: true });
+    const stdout = join(dir, 'stdout.jsonl');
+    writeFileSync(stdout, JSON.stringify({ type: 'message_update', assistantMessageEvent: {
+      type: 'text_delta', delta: `Persisted pi-owned:${key} answer`,
+    } }) + '\n' + JSON.stringify({ type: 'agent_end' }) + '\n');
+    writeFileSync(join(dir, 'session.json'), JSON.stringify({ surfaceId: `pi-owned:${key}`,
+      sessionDir: dir, cwd: repo, repoPath: repo, title: `Terminal worker ${index}`,
+      createdAt: timestamp, updatedAt: timestamp, recentRuns: [{ id: key, mode: 'launch',
+        prompt: 'Fixture prompt', startedAt: timestamp, finishedAt: timestamp,
+        stdoutPath: stdout, stderrPath, outcome: 'finished' }] }));
+    return { ...worker, sessionKey: `pi-owned:${key}`, displayName: `Terminal worker ${index}`,
+      tmuxSession: `cortex-next-grid-${index}` };
+  }) : [worker], configurable: true });
 }
 
 export function seedPaneGrid(dataDir: string, repo: string) {

@@ -1,11 +1,11 @@
-/** Owns the production WS server and one existing PTY in the disposable store.
+/** Owns the production WS server and fixture PTYs in the disposable store.
  * No server handler is replaced; Python is the deterministic terminal workload. */
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { createServer } from 'node:net';
 import { join, resolve } from 'node:path';
 
-export async function startTerminalFixture(dataDir: string, repo: string, apiPort: number, token: string) {
+export async function startTerminalFixture(dataDir: string, repo: string, apiPort: number, token: string, sessionNames = ['cortex-next-terminal-fixture']) {
   const reservation = createServer();
   await new Promise<void>(ready => reservation.listen(0, '127.0.0.1', ready));
   const address = reservation.address();
@@ -36,15 +36,17 @@ export async function startTerminalFixture(dataDir: string, repo: string, apiPor
       if (Date.now() > deadline || child.exitCode !== null) throw new Error('Terminal fixture did not start');
       await new Promise(ready => setTimeout(ready, 20));
     }
-    const sessionName = 'cortex-next-terminal-fixture';
+    const sessionName = sessionNames[0];
     const script = resolve('native/o8-next/fixtures/terminal.py').replaceAll("'", "'\\''");
-    const response = await fetch(`http://127.0.0.1:${port}/terminal-spawn`, {
-      method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionName, shellCommand: `python3 '${script}'`, cwd: repo, cols: 80, rows: 24 }),
-    });
-    if (!response.ok) throw new Error(`Fixture PTY spawn failed (${response.status})`);
+    for (const sessionName of sessionNames) {
+      const response = await fetch(`http://127.0.0.1:${port}/terminal-spawn`, {
+        method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionName, shellCommand: `python3 '${script}'`, cwd: repo, cols: 80, rows: 24 }),
+      });
+      if (!response.ok) throw new Error(`Fixture PTY spawn failed (${response.status})`);
+    }
     // Spawn acknowledges the PTY, not the child's first write. Consumers must
     // observe readiness through terminal data before asserting replay content.
-    return { port, sessionName, close };
+    return { port, sessionName, sessionNames, close };
   } catch (error) { await close(); throw error; }
 }
