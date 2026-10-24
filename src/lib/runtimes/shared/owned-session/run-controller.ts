@@ -1,6 +1,8 @@
 import { createWorkerFailureHandler } from './worker-failure';
 import { assertRuntimeEffortPin } from '@/lib/orchestrator/effort-pin';
 import { assertOwnedActionFence, hasOwnedActionFence } from './action-fence';
+import { assertStandingSpawn } from './standing-task';
+import { confirmOwnedLaunchAdmission } from './launch-admission-outcome';
 import { createCapacityRecovery } from './capacity-wait';
 import { packetCargoEnvironment } from '@/lib/worktree/cargo-target-cache';
 import { controlledProviderSandbox } from './controlled-provider-sandbox';
@@ -666,6 +668,7 @@ export function createOwnedRunController({
 
         try {
           assertOwnedActionAdmission(session, runId);
+          assertStandingSpawn(session);
           assertLaunchCredentialPolicy(runtimeId, credentialPolicy);
           const bridgeEnv = ownedSpawnEnvironment(session, spawnEnv, true);
           const hasProviderCredentials = Object.entries(bridgeEnv).some(([name, value]) => value && providerCredentialName(name));
@@ -778,6 +781,8 @@ export function createOwnedRunController({
           });
         }
         await assertOwnedSessionProcessIdentity(session, runtimeId);
+        const cancelled = confirmOwnedLaunchAdmission(session, run, io);
+        if (cancelled) await cancelled;
         return run;
       });
     } catch (error) {

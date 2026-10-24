@@ -5845,6 +5845,22 @@
       ]
     },
     {
+      "path": "tests/standing-bridge-stop-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/standing-dispatch-budget-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/standing-worker-lanes-real-path.test.ts",
       "reasons": [
         "child-process",

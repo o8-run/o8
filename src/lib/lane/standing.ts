@@ -15,6 +15,7 @@ import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
 import { THINKING_EFFORTS, type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import { createPacketReceiptForClosedPacket } from '@/lib/receipts/packet-receipt';
 import { readOwnedSessionRecord } from '@/lib/runtimes/shared/owned-session-index';
+import type { OwnedRunRecord } from '@/lib/runtimes/shared/owned-session/types';
 import { withStandingLaneMutation as exclusive } from './standing-lock';
 import { dispatch } from './commands';
 import { getLane, listLanes, setLaneStatus, updateLane } from './registry';
@@ -79,6 +80,10 @@ export async function createStandingLane(input: Record<string, unknown>) {
 async function clean(laneId: string, handoff = true): Promise<void> {
   const { lane } = stateFor(laneId);
   if (!lane.worktreePath) return;
+  const flags = await laneGit(lane.worktreePath, lane.repoPath, ['ls-files', '-v', '-z']);
+  if (flags.stdout.split('\0').some(entry => entry[0] === 'S' || /^[a-z]/.test(entry))) {
+    throw new Error('Tracked index flags can hide uncommitted edits; clear skip-worktree and assume-unchanged before checkout reuse.');
+  }
   const status = await laneGit(lane.worktreePath, lane.repoPath, ['status', '--porcelain', '-z', '--untracked-files=all', ...(handoff ? ['--ignored=traditional'] : [])]);
   const entries = status.stdout.split('\0').filter(Boolean);
   const safetyEntry = `!! ${MANAGED_WORKSPACE_SAFETY_SETTINGS}`;
@@ -124,7 +129,6 @@ async function startNext(laneId: string, state: StandingLaneState): Promise<void
   if (readStandingLane(laneId)?.stopped || state.blockedReason) return;
   const task = state.tasks.find(task => task.phase === 'queued');
   if (!task) return;
-  await clean(laneId);
   const { lane } = stateFor(laneId);
   if (lane.sessionKey && (await readOwnedSessionRecord(lane.sessionKey))?.activeRun) return;
   const authority = await resolvePacketCreationBase({ repoPath: lane.repoPath, packetId: task.id,
@@ -211,20 +215,32 @@ export async function reconcileStandingLane(laneId: string) {
       if (task) {
         if (!lane.sessionKey) throw new Error('Task dispatch did not attach a durable session; review before retrying.');
         let session = await readOwnedSessionRecord(lane.sessionKey);
-        if (session?.activeRun) {
-          await getRuntime(lane.runtime)!.discoverSessions();
-          session = await readOwnedSessionRecord(lane.sessionKey);
+        let run: OwnedRunRecord | undefined;
+        // Atomic metadata publication can invalidate one read. Recheck the whole proof,
+        // never combine a newer header with an older run or replay an uncertain dispatch.
+        for (let attempt = 0; attempt < 2; attempt++) {
+          if (attempt) session = await readOwnedSessionRecord(lane.sessionKey);
+          if (session?.activeRun) {
+            await getRuntime(lane.runtime)!.discoverSessions();
+            session = await readOwnedSessionRecord(lane.sessionKey);
+          }
+          const candidate = task.runId
+            ? [session?.activeRun, ...(session?.recentRuns ?? [])].find(entry => entry?.id === task.runId)
+            : session?.activeRun ?? session?.recentRuns[0];
+          const current = getLane(laneId);
+          if (session?.surfaceId === lane.sessionKey && session.packetId === task.id
+            && current?.sessionKey === lane.sessionKey && current.packetId === task.id && current.branch === task.branch
+            && candidate?.prompt.includes(`Standing worker task ${task.id}.`)
+            && (!task.runId || candidate.id === task.runId)
+            && task.startedAt && candidate.startedAt >= task.startedAt) { run = candidate; break; }
         }
-        const run = task.runId
-          ? [session?.activeRun, ...(session?.recentRuns ?? [])].find(run => run?.id === task.runId)
-          : session?.activeRun ?? session?.recentRuns[0];
-        if (!session || session.packetId !== task.id || lane.packetId !== task.id || lane.branch !== task.branch
-          || !run || !run.prompt.includes(`Standing worker task ${task.id}.`)
-          || (task.runId && run.id !== task.runId)
-          || !task.startedAt || run.startedAt < task.startedAt) {
+        if (!session || !run) {
           throw new Error('Task dispatch outcome is unconfirmed; previous runtime output cannot complete this task.');
         }
-        if (session.activeRun) return standingLaneStatus(laneId);
+        if (session.activeRun || run.outcome === 'running') {
+          if (!session.activeRun) await getRuntime(lane.runtime)!.discoverSessions();
+          return standingLaneStatus(laneId);
+        }
         if (hasQueuedPacketSteers(laneId)) {
           await drainQueuedPacketSteers(laneId);
           if (hasQueuedPacketSteers(laneId) || (await readOwnedSessionRecord(lane.sessionKey))?.activeRun) return standingLaneStatus(laneId);

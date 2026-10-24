@@ -35,6 +35,9 @@ for (let sample = 1; sample <= samples; sample++) {
     const row = JSON.parse(fs.readFileSync(file, 'utf8'));
     if (!soak && !standing) row.stages.otherWorkspaceMs = row.stages.workspaceProvisioningMs - row.stages.dependencyProvisioningMs;
     receipt.samples.push({ sample, ...row });
+    if (standing && (!Number.isFinite(row.dispatchToOutputMs) || row.dispatchToOutputMs < 0 || row.dispatchToOutputMs >= 2000)) {
+      receipt.failures.push({ sample, error: 'standing_dispatch_budget_exceeded', dispatchToOutputMs: row.dispatchToOutputMs, targetMs: 2000 });
+    }
   }
   if (result.status !== 0) receipt.failures.push({ sample, exitCode: result.status, error: result.error?.code ?? null });
   writeJson(path.join(output, 'receipt.json'), receipt);
