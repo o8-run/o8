@@ -19,6 +19,11 @@ impl Surface {
             self.reconcile(cx);
         }
     }
+    pub(crate) fn shell_open(&mut self, id: String, cx: &mut Context<Self>) {
+        if self.selected.as_ref() != Some(&id) {
+            self.select(id, cx);
+        }
+    }
     pub(crate) fn shell_focus(&self, composer: bool, window: &mut Window, cx: &App) {
         if composer {
             self.composer.read(cx).focus.focus(window);

@@ -11,7 +11,7 @@ export interface ManagedVoicePresentation {
 /** The satellite paints facts only; the main chat retains audio and all execution authority. */
 export function useManagedVoicePresentation(input: {
   state: LiveState; stateRef: RefObject<LiveState>; session: RefObject<LiveSession | null>;
-  level: RefObject<number>; label: string;
+  level: RefObject<number>; label: string; personalKey?: boolean;
 }) {
   const current = useRef(input);
   useEffect(() => { current.current = input; });
@@ -35,7 +35,8 @@ export function useManagedVoicePresentation(input: {
           epoch ??= await invoke<number>('managed_voice_presentation_epoch');
           const presentation: ManagedVoicePresentation = { owner, epoch, phase: phase === 'idle' ? 'closed' : phase,
             dismissed: disposed, label: value.label, level: value.level.current,
-            connectedSeconds: value.session.current?.usage?.providerConnectedSeconds ?? null };
+            connectedSeconds: (value.personalKey ? value.session.current?.elapsedSeconds : undefined)
+              ?? value.session.current?.usage?.providerConnectedSeconds ?? null };
           await invoke('managed_voice_overlay_update', { presentation });
           presented = !ending;
         }

@@ -108,7 +108,8 @@ The launcher requires both the opt-in flag and an explicit absolute executable
 path. The native client requires an explicit numeric loopback HTTP origin with a
 port; it does not discover installed configuration, read app data files, follow
 redirects or use environment proxies. The composer requires an explicit HTTP
-operator bearer in `O8_NEXT_API_TOKEN`; queue POST/PATCH/DELETE are its only mutations.
+operator bearer in `O8_NEXT_API_TOKEN`; its mutations use the existing composer
+queue and Inbox approval endpoints.
 Responses are bounded to 16 MiB and requests time out after five seconds.
 
 ## Existing contracts
@@ -147,6 +148,56 @@ optimistic local entries and supported metadata while allowing old server histor
 to disappear. Unpaged retention is capped at the web store's 200 entries; explicit
 backfill retains the requested older pages. The client never
 assumes that updates append or that completed tool results are immutable.
+
+## Native Inbox
+
+In the app shell, use Ctrl+K / Cmd+K and **Open Inbox**. Needs reply,
+Contributions, Approvals, Agent issues and History show their own counts, source
+and status. This workspace and All repositories scope the thread and incident
+views; approvals always span all workspaces. Left/Right changes views, Up/Down
+selects cards, Enter opens the related session or GitHub thread, and F5 refreshes.
+Scrolling has no visible track. Returning to the surface retains its selected view.
+Before any session is saved, Inbox opens globally without requiring a workspace.
+
+Reads use the desktop's `/api/panel/supervisor-inbox` and
+`/api/panel/approvals` routes. Reply deduplication, dismissed/history membership
+and dossier exclusion match the desktop. Cached GitHub freshness and truncation
+remain visible. Failed reads retain previous cards and expose a refresh error.
+Approve and Reject send the same `{ action, id }` POST as the desktop to
+`/api/panel/approvals`; existing middleware, principal checks and durable
+continuation rules remain authoritative. A recorded but unconfirmed continuation
+disables both decision controls. An unconfirmed delivery refreshes persisted state
+before another decision. Session links open the exact existing transcript;
+GitHub links use the platform URL opener restricted to HTTPS GitHub URLs.
+
+Approval buttons accept Tab/Shift+Tab and Enter/Space, paint a visible focus ring,
+and skip busy or unconfirmed decisions. View navigation returns focus to Inbox.
+For ChatGPT-plan cards, the launching host can supply its current desktop session
+through `O8_NEXT_CLERK_SESSION_TOKEN`. It is sent only on the approval POST as
+`x-clerk-session-token`, alongside the operator bearer, through the desktop's
+existing owner/session/account/generation checks. The original signed-in desktop
+binding must already exist. This standalone experiment does not acquire, bind or
+refresh that short-lived identity; missing or expired sessions remain refused.
+The credential stays in process memory and is excluded from arguments, logs and
+saved shell state. The shell launcher drops it for workers or a different origin.
+
+Inbox uses the shared semantic colors and platform fonts in `src/theme.rs`,
+which landed on main during review. Desktop type sizes remain unchanged.
+Headless verification uses production route handlers and persisted fixtures:
+
+```sh
+cargo +stable test --release --locked --manifest-path native/o8-next/Cargo.toml inbox -- --nocapture --test-threads=1
+cargo +stable build --release --locked --manifest-path native/o8-next/Cargo.toml
+node --import ./scripts/register-server-only-stub.mjs --import tsx scripts/next/dev-server.ts --shell --inbox
+```
+
+The fixture host is account-free. GPUI TestAppContext opens the production shell
+with offscreen window options, compares all five views with the desktop routes,
+and compares native/desktop persisted approval decisions and audit events.
+It also covers worker refusal, uncertain continuations, exact session selection,
+GitHub navigation, restart, empty/error states, and compact/wide geometry.
+These are CPU scene and layout checks with the test text system, not font, GPU
+or compositor acceptance.
 
 ## Verification
 

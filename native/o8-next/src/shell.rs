@@ -1,6 +1,7 @@
 //! Opt-in shell. Uses only main's surfaces; unavailable surfaces stay explicit.
 use crate::{
     client::{Client, Session},
+    inbox::{Inbox, OpenSession},
     pane_grid::Grid,
     pane_layout,
     shell_state::{State, Tab, Workspace},
@@ -27,6 +28,7 @@ enum Command {
     Message(String),
     Diff,
     Terminal,
+    Inbox,
 }
 impl Command {
     fn label(&self, sessions: &[Session]) -> String {
@@ -44,6 +46,7 @@ impl Command {
             Self::Message(_) => "New message in selected session".into(),
             Self::Diff => "Open diff for a packet".into(),
             Self::Terminal => "Open terminal".into(),
+            Self::Inbox => "Open Inbox".into(),
         }
     }
 }
@@ -51,6 +54,7 @@ enum Content {
     Session(Entity<Surface>),
     Brain(Entity<crate::brain::Brain>),
     Grid(Entity<Grid>),
+    Inbox(Entity<Inbox>),
 }
 pub struct Shell {
     client: Client,
@@ -170,9 +174,8 @@ impl Shell {
     }
     fn current(&self) -> Option<&Workspace> {
         self.state
-            .selected
-            .as_ref()
-            .and_then(|w| self.state.workspaces.get(w))
+            .workspaces
+            .get(self.state.selected.as_deref().unwrap_or(""))
     }
     fn key(&self, tab: &Tab) -> String {
         format!("{}|{:?}", self.state.selected.as_deref().unwrap_or(""), tab)
@@ -184,8 +187,10 @@ impl Shell {
         if !self.connected {
             return;
         }
-        let Some(workspace) = self.state.selected.clone() else {
-            return;
+        let workspace = match self.state.selected.clone() {
+            Some(workspace) => workspace,
+            None if self.active() == Some(Tab::Inbox) => String::new(),
+            None => return,
         };
         if !self.state.workspaces.contains_key(&workspace) {
             let tabs = self
@@ -214,15 +219,40 @@ impl Shell {
             Tab::Brain => Content::Brain(
                 cx.new(|cx| crate::brain::Brain::new(client, workspace, None, window, cx)),
             ),
+            Tab::Inbox => {
+                let inbox = cx.new(|cx| Inbox::new(client, workspace, cx));
+                self.subscriptions.push(cx.subscribe_in(&inbox, window, |this, _, event: &OpenSession, window, cx| {
+                    if let Some(session) = this.sessions.iter().find(|s| s.key() == event.0 || s.id == event.0).cloned() {
+                        if let Some(workspace) = session.repo_path {
+                            this.switch(workspace, window, cx);
+                        }
+                        let id = session.id;
+                        this.execute(Command::Session(id.clone()), window, cx);
+                        if let Some(Content::Session(surface)) = this.content.get(&this.key(&Tab::Session(id.clone()))) {
+                            surface.update(cx, |surface, cx| surface.shell_open(id, cx));
+                        }
+                        this.capture(window, cx);
+                        this.persist();
+                    } else {
+                        this.notice = "Related session is unavailable. Refresh the server connection and try again.".into();
+                        cx.notify();
+                    }
+                }));
+                Content::Inbox(inbox)
+            }
             Tab::Session(id) => {
                 let id = self
                     .current()
                     .and_then(|w| w.selections.get(&id))
                     .cloned()
                     .unwrap_or(id);
-                let sessions = self.workspace_sessions();
+                let mut sessions = self.workspace_sessions();
                 if !sessions.iter().any(|s| s.id == id) {
-                    return;
+                    if let Some(session) = self.sessions.iter().find(|s| s.id == id) {
+                        sessions.push(session.clone());
+                    } else {
+                        return;
+                    }
                 }
                 Content::Session(cx.new(|cx| Surface::shell_new(client, sessions, id, window, cx)))
             }
@@ -259,6 +289,7 @@ impl Shell {
                 Some(Content::Brain(brain)) => brain.read(cx).focus(window, cx),
                 // Grid reestablishes its own keyboard focus when opened or clicked.
                 Some(Content::Grid(grid)) => grid.update(cx, |g, cx| g.shell_focus(window, cx)),
+                Some(Content::Inbox(inbox)) => inbox.read(cx).focus(window),
                 _ => self.focus.focus(window),
             }
         } else {
@@ -298,6 +329,7 @@ impl Shell {
     fn commands(&self) -> Vec<Command> {
         let mut commands = vec![
             Command::Brain,
+            Command::Inbox,
             Command::Grid,
             Command::Diff,
             Command::Terminal,
@@ -333,6 +365,7 @@ impl Shell {
             Command::Message(id) => (Tab::Session(id), true),
             Command::Brain => (Tab::Brain, false),
             Command::Grid => (Tab::Grid, false),
+            Command::Inbox => (Tab::Inbox, false),
             Command::Diff | Command::Terminal => {
                 self.notice = "This surface is not available in this build. The terminal and packet diff changes must land before the shell can open them.".into();
                 self.palette = false;
@@ -341,8 +374,14 @@ impl Shell {
                 return;
             }
         };
-        if let Some(workspace) = self.state.selected.as_ref() {
-            let saved = self.state.workspaces.entry(workspace.clone()).or_default();
+        // An empty key stores the global Inbox before any workspace exists.
+        if let Some(workspace) = self
+            .state
+            .selected
+            .clone()
+            .or_else(|| (tab == Tab::Inbox).then(String::new))
+        {
+            let saved = self.state.workspaces.entry(workspace).or_default();
             let index = saved.tabs.iter().position(|t| t == &tab);
             if index.is_none() && saved.tabs.len() >= 32 {
                 self.notice = "Close a surface before opening another.".into();
@@ -426,7 +465,7 @@ impl Shell {
                 let saved = self
                     .state
                     .workspaces
-                    .get_mut(self.state.selected.as_ref().unwrap())
+                    .get_mut(self.state.selected.as_deref().unwrap_or(""))
                     .unwrap();
                 if let Tab::Session(id) = &tab {
                     saved.selections.remove(id);
@@ -460,6 +499,7 @@ impl Shell {
                         g.load(cx);
                     }
                 }),
+                Content::Inbox(inbox) => inbox.update(cx, |inbox, cx| inbox.tick(cx)),
             }
         }
     }
@@ -471,3 +511,7 @@ pub use view::try_launch;
 #[cfg(test)]
 #[path = "shell_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "inbox_tests.rs"]
+mod inbox_tests;

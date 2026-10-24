@@ -76,7 +76,7 @@ impl Drop for Fixture {
         let _ = fs::remove_dir_all(&self.root);
     }
 }
-fn open(
+pub(super) fn open(
     client: Client,
     file: PathBuf,
     state: State,
@@ -87,7 +87,7 @@ fn open(
     let visual = VisualTestContext::from_window(handle.into(), cx);
     (shell, visual)
 }
-fn draw(cx: &mut VisualTestContext) {
+pub(super) fn draw(cx: &mut VisualTestContext) {
     cx.update(|window, cx| {
         window.refresh();
         window.draw(cx).clear();
@@ -112,6 +112,7 @@ fn ready(shell: &Entity<Shell>, cx: &mut VisualTestContext) {
                         .panes
                         .iter()
                         .any(|p| p.transcript.is_some() && !p.painted_rows.borrow().is_empty()),
+                    Content::Inbox(inbox) => inbox.read(cx).loaded && !inbox.read(cx).loading,
                 })
         }) {
             return;
@@ -363,3 +364,34 @@ fn shell_retains_sidebar_selection_and_view_identity(cx: &mut TestAppContext) {
 
 #[path = "brain_tests.rs"]
 mod brain_tests;
+#[gpui::test]
+fn inbox_is_reachable_from_the_real_shell_palette(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    let (shell, mut visual) = open(
+        fixture.client.clone(),
+        fixture.root.join("inbox.json"),
+        State::default(),
+        cx,
+    );
+    let cx = &mut visual;
+    ready(&shell, cx);
+    cx.simulate_keystrokes("ctrl-k");
+    cx.simulate_keystrokes("i n b o x");
+    assert_eq!(
+        shell.read_with(cx, |s, _| s
+            .commands()
+            .iter()
+            .map(|c| c.label(&s.sessions))
+            .collect::<Vec<_>>()),
+        vec!["Open Inbox"],
+        "Inbox must be a native surface reachable through the production command palette"
+    );
+    cx.simulate_keystrokes("enter");
+    cx.run_until_parked();
+    draw(cx);
+    assert_eq!(
+        shell.read_with(cx, |s, _| s.active().unwrap().label()),
+        "Inbox"
+    );
+    assert!(cx.debug_bounds("inbox-view-replies").is_some());
+}

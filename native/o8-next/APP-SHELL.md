@@ -17,7 +17,9 @@ configuration's disk credential. The normal explicit fixture modes remain availa
 The shell lists workspaces with saved sessions. Ctrl+K or Cmd+K opens searchable
 commands; arrows and Enter choose, Escape cancels. Open session, Open grid and
 New message use the existing views; New message focuses the selected session's
-composer. Ctrl+Tab cycles surfaces and Ctrl+W closes a surface. Grid shortcuts,
+composer. Open Inbox opens the native Needs reply, Contributions, Approvals,
+Agent issues and History surface. Its tab is restored with the other open surfaces.
+Ctrl+Tab cycles surfaces and Ctrl+W closes a surface. Grid shortcuts,
 including Ctrl+Alt+W to close one pane, reach the grid. Drafts remain in memory
 while switching workspaces and sessions. An unavailable local server has a clear
 error and Retry control.

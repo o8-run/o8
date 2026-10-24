@@ -69,11 +69,13 @@ pub struct Client {
     origin: Url,
     agent: ureq::Agent,
     token: Option<String>,
+    desktop_session: Option<String>,
     workspace: Option<String>,
 }
 impl Client {
     pub fn new(origin: &str) -> Result<Self, String> {
-        Self::authenticated(origin, std::env::var("O8_NEXT_API_TOKEN").ok())
+        Self::authenticated(origin, std::env::var("O8_NEXT_API_TOKEN").ok())?
+            .with_desktop_session(std::env::var("O8_NEXT_CLERK_SESSION_TOKEN").ok())
     }
     pub fn authenticated(origin: &str, token: Option<String>) -> Result<Self, String> {
         if token
@@ -103,12 +105,23 @@ impl Client {
             origin,
             workspace: None,
             token: token.filter(|s| !s.trim().is_empty()),
+            desktop_session: None,
             agent: ureq::AgentBuilder::new()
                 .redirects(0)
                 .try_proxy_from_env(false)
                 .timeout(Duration::from_secs(5))
                 .build(),
         })
+    }
+    /// Explicit short-lived desktop identity for the selected server; never discovered or persisted.
+    pub fn with_desktop_session(mut self, session: Option<String>) -> Result<Self, String> {
+        if session.as_ref().is_some_and(|s| {
+            s.len() > 16 * 1024 || !s.is_ascii() || s.chars().any(char::is_control)
+        }) {
+            return Err("Invalid desktop session credential format".into());
+        }
+        self.desktop_session = session.filter(|s| !s.trim().is_empty());
+        Ok(self)
     }
     pub(crate) fn get<T: DeserializeOwned>(
         &self,
@@ -318,6 +331,32 @@ impl Client {
     }
     pub fn review_state(&self, packet: &str) -> Result<Value, String> {
         self.get("/api/orchestrator/review-state", &[("packetId", packet)])
+    }
+    /// The desktop Inbox's decision endpoint owns principal checks and durable resolution.
+    pub fn inbox_decision(&self, id: &str, approve: bool) -> Result<Value, String> {
+        let url = self.origin.join("/api/panel/approvals").unwrap();
+        let mut request = self.agent.post(url.as_str());
+        if let Some(token) = &self.token {
+            request = request.set("Authorization", &format!("Bearer {token}"));
+        }
+        if let Some(session) = &self.desktop_session {
+            request = request.set("x-clerk-session-token", session);
+        }
+        match request.send_json(json!({"id":id,"action":if approve {"approve"} else {"reject"}})) {
+            Ok(response) => {
+                let body: Value = Self::read(response)?;
+                if body["ok"] == false {
+                    return Err(body["error"].as_str().or(body["note"].as_str()).unwrap_or("Approval could not be resolved").into());
+                }
+                Ok(body)
+            }
+            Err(ureq::Error::Status(status, response)) => {
+                let body = Self::read::<Value>(response).unwrap_or_default();
+                Err(body["error"].as_str().or(body["note"].as_str())
+                    .map(|message| format!("{message} (HTTP {status})")).unwrap_or_else(|| format!("Approval refused (HTTP {status})")))
+            }
+            Err(_) => Err("Decision unconfirmed. Refresh to inspect the recorded approval before another action.".into()),
+        }
     }
     pub fn review(&self, body: &Value) -> Result<Value, String> {
         let url = self.origin.join("/api/orchestrator/review").unwrap();

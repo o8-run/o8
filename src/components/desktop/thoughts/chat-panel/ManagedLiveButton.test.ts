@@ -417,7 +417,9 @@ it('keeps an explicit personal-key choice from silently reverting to the managed
   expect(container.querySelector('button')!.title).toContain('billed to your key');
   const previous = fixture.backend;
   await act(async () => container.querySelector('button')!.click());
+  expect(container.querySelector('button')!.getAttribute('aria-label')).toBe('Continue GPT Live for this conversation');
   await act(async () => container.querySelector('button')!.click());
-  expect(document.querySelector('[role="dialog"]')).not.toBeNull();
-  expect(fixture.backend).toBe(previous);
+  expect(document.querySelector('[role="dialog"]')).toBeNull();
+  expect(fixture.backend).not.toBe(previous);
+  expect(fixture.backend).toMatchObject({ binding: previous!.binding, source: 'byok' });
 });

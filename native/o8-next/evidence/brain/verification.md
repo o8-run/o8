@@ -50,6 +50,8 @@ answers. They inspect persisted request payloads and shell state, canonicalize
 repository paths, and prove that clearing a slow answer cannot repopulate a new
 conversation. The source count is painted before the slow fixture answer ends.
 The shared editor's existing IME and Unicode tests run in the native suite.
+All six shared-shell tests, including Brain and Inbox palette entry points, pass
+on the reconciled main base; see [shell integration](green-shell-integration.txt).
 
 `tests/next-brain-real-path.test.ts` drives the real production Brain route and
 operator middleware. Retrieval reads an authored indexed directive; citation
@@ -60,7 +62,7 @@ sanitized runtime failures are covered without an account.
 
 Before/after: 0 to 2 native Brain entry points; 0 to 4 passing native Brain tests;
 0 to 2 passing production-route Brain tests. The 7 related route/parity files
-passed all 23 tests. See [native action green](green-actions.txt),
+passed all 24 tests. See [native action green](green-actions.txt),
 [dock green](green-dock.txt) and [HTTP green](green-http.txt).
 
 The locked dependency graphs audit 472 Linux packages and 455 macOS packages with
@@ -102,9 +104,9 @@ The fixture server and saved session reads are ready before the open timer start
 
 | Run | Open to first Brain frame (ms) | Input to frame p95 (ms) | Ask to answer frame (ms) | Clear to frame (ms) |
 | --- | ---: | ---: | ---: | ---: |
-| 1 | 44.32 | 8.32 | 169.69 | 17.38 |
-| 2 | 43.99 | 8.45 | 174.64 | 17.32 |
-| 3 | 44.10 | 13.42 | 171.45 | 27.22 |
+| 1 | 43.93 | 7.87 | 166.06 | 16.07 |
+| 2 | 45.24 | 7.91 | 168.75 | 16.83 |
+| 3 | 45.19 | 7.94 | 168.66 | 15.72 |
 
 Raw receipts: [run 1](run-1.json), [run 2](run-2.json), [run 3](run-3.json).
 Before the change Brain had no native entry point, so latency has no numeric
@@ -120,14 +122,14 @@ rule check against the current main base passed. The rule check scanned both
 changed non-test TypeScript files, rather than accepting an unresolved base.
 
 ```text
-test result: ok. 34 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 243.10s
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
-test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
-test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+test result: ok. 40 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 407.40s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
 test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
 Test Files  1233 passed | 3 skipped (1236)
       Tests  8896 passed | 5 skipped (8901)
-   Duration  558.29s (transform 118.48s, setup 51.45s, import 758.70s, tests 538.23s, environment 563.02s)
+   Duration  479.15s (transform 29.13s, setup 45.13s, import 594.01s, tests 549.49s, environment 457.29s)
 ```
 
 Three explicitly opt-in native measurement workloads remain ignored by the

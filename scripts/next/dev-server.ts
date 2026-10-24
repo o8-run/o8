@@ -2,7 +2,7 @@
  * background server startup, provider calls, app connections, or app data paths. */
 import { createServer } from 'node:http';
 import { randomBytes } from 'node:crypto';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -17,7 +17,7 @@ async function main() {
     await (await import('./worker-server')).startWorkerServer();
     return;
   }
-  const root = mkdtempSync(join(tmpdir(), 'o8-next-dev-'));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'o8-next-dev-')));
   const dataDir = join(root, 'data');
   const repo = join(root, 'fixture-repo');
   mkdirSync(join(dataDir, 'chat-history'), { recursive: true });
@@ -43,13 +43,13 @@ async function main() {
   // adding post-boot recordings (their deliberately tight timestamps are valid).
   const { listMobileOrchestratorThreads } = await import('../../src/lib/mobile/orchestrator-thread-history');
   listMobileOrchestratorThreads();
-  const seeds = JSON.parse(readFileSync(resolve('native/o8-next/fixtures/sessions.json'), 'utf8')) as Array<{ id: string; title: string; messages: Array<Record<string, unknown>> }>;
+  const seeds = (process.argv.includes('--inbox-empty') ? [] : JSON.parse(readFileSync(resolve('native/o8-next/fixtures/sessions.json'), 'utf8'))) as Array<{ id: string; title: string; messages: Array<Record<string, unknown>> }>;
   for (const seed of seeds) {
     writeFileSync(join(dataDir, 'chat-history', `${seed.id}.json`), JSON.stringify({ ...seed,
       messages: seed.messages, repoPath: repo, repoName: 'fixture-repo', backend: 'claude', model: 'claude-code',
       savedAt: '2026-10-01T00:00:00.000Z', orchestratorVisible: true }));
   }
-  if (process.argv.includes('--shell')) {
+  if (process.argv.includes('--shell') && !process.argv.includes('--inbox-empty')) {
     const { seedShellWorkspace } = await import('./shell-fixture');
     seeds.push(seedShellWorkspace(dataDir, root));
   }
@@ -79,6 +79,15 @@ async function main() {
   const brainAsk = brain ? (await import('../../src/app/api/cortex/ask/route')).POST : null;
   const brainRequests: unknown[] = [];
   const review = process.argv.includes('--review');
+  const inbox = process.argv.includes('--inbox');
+  const inboxApprovals = inbox && !process.argv.includes('--inbox-empty') ? await (await import('./inbox-fixture')).seedInboxFixture(repo, dataDir) : [];
+  const inboxPlan = process.argv.includes('--inbox-plan') && process.env.O8_NEXT_INBOX_PLAN_FIXTURE
+    ? await (await import('./inbox-plan-fixture')).seedInboxPlanFixture(repo, dataDir, fixtureToken, process.env.O8_NEXT_INBOX_PLAN_FIXTURE) : null;
+  if (inboxPlan) inboxApprovals.push(...inboxPlan.approvals);
+  const planProxy = inboxPlan ? await import('../../src/app/api/v2/proxy/llm/route') : null;
+  const inboxRoutes = inbox ? await import('../../src/app/api/panel/supervisor-inbox/route') : null;
+  const approvalRoutes = inbox ? await import('../../src/app/api/panel/approvals/route') : null;
+  if (inbox && process.env.O8_NEXT_INBOX_ORACLE) await (await import('./inbox-fixture')).writeInboxOracle(process.env.O8_NEXT_INBOX_ORACLE);
   if (review) await (await import('./review-fixture')).seedReviewFixture(repo);
   const packetDiff = await import('../../src/app/api/lanes/[id]/diff/route');
   const worktreeDiff = await import('../../src/app/api/worktrees/diff/route');
@@ -100,6 +109,9 @@ async function main() {
     '/api/v2/chat-history': context, '/api/orchestrator/state': state,
     '/api/orchestrator/composer-queue': queue.GET, '/api/panel/ws-info': wsInfo,
     '/api/runtime/inventory': inventory,
+    ...(inboxRoutes && approvalRoutes ? {
+      '/api/panel/supervisor-inbox': inboxRoutes.GET, '/api/panel/approvals': approvalRoutes.GET,
+    } : {}),
     ...(review ? {
       '/api/worktrees/diff': worktreeDiff.GET,
       '/api/orchestrator/review-state': reviewState.GET,
@@ -122,7 +134,9 @@ async function main() {
         : req.method === 'GET' ? getRoutes[url.pathname]
         : composer && url.pathname === '/api/orchestrator/composer-queue'
           ? req.method === 'POST' ? queue.POST : req.method === 'PATCH' ? queue.PATCH : req.method === 'DELETE' ? queue.DELETE : null
-          : review && req.method === 'POST' && url.pathname === '/api/orchestrator/review' ? reviewDecision.POST : null;
+          : review && req.method === 'POST' && url.pathname === '/api/orchestrator/review' ? reviewDecision.POST
+            : approvalRoutes && req.method === 'POST' && url.pathname === '/api/panel/approvals' ? approvalRoutes.POST
+              : planProxy && req.method === 'POST' && url.pathname === '/api/v2/proxy/llm' ? planProxy.POST : null;
       if (!route) { res.writeHead(404).end(); return; }
       // Prevent this development host from becoming a provider-history reader.
       if (route === history && !seeds.some(seed => `llm-chat:${seed.id}` === url.searchParams.get('sessionKey'))
@@ -131,20 +145,26 @@ async function main() {
       let body = '';
       for await (const chunk of req) { body += String(chunk); if (body.length > 1024 * 1024) throw new Error('Fixture body limit'); }
       if (body) {
-        const target = JSON.parse(body) as { threadId?: string; repoPath?: string; packetId?: string };
+        const target = JSON.parse(body) as { threadId?: string; repoPath?: string; packetId?: string; id?: string; action?: string };
         const owned = route === brainAsk ? target.repoPath === repo || !target.repoPath : route === reviewDecision.POST
           ? ['next-review-approve', 'next-review-reject'].includes(target.packetId ?? '')
+          : route === approvalRoutes?.POST ? inboxApprovals.some((approval) => approval.id === target.id) && ['approve', 'reject'].includes(target.action ?? '')
+          : route === planProxy?.POST ? ['inbox-plan-native', 'inbox-plan-desktop'].includes(String(req.headers['x-tab-id'])) && target.repoPath === repo
           : target.threadId?.startsWith('thoughts-composer-') && target.repoPath === repo;
         if (!owned) { res.writeHead(400).end(); return; }
       }
       const request = new NextRequest(url, { method: req.method,
         headers: { host: url.host, 'Content-Type': 'application/json', 'x-o8-client-addr': '127.0.0.1',
-          ...(req.headers.authorization ? { authorization: req.headers.authorization } : {}) }, ...(body ? { body } : {}) });
+          ...(req.headers.authorization ? { authorization: req.headers.authorization } : {}),
+          ...(typeof req.headers['x-clerk-session-token'] === 'string' ? { 'x-clerk-session-token': req.headers['x-clerk-session-token'] } : {}),
+          ...(typeof req.headers['x-tab-id'] === 'string' ? { 'x-tab-id': req.headers['x-tab-id'] } : {}) }, ...(body ? { body } : {}) });
       const gate = panelGateMiddleware(request);
       if (route === brainAsk && gate.status === 200 && body && process.env.O8_NEXT_BRAIN_REQUEST_LOG) {
         brainRequests.push(JSON.parse(body));
         writeFileSync(process.env.O8_NEXT_BRAIN_REQUEST_LOG, JSON.stringify(brainRequests));
       }
+      if (gate.status === 200 && route === approvalRoutes?.POST && JSON.parse(body).action === 'approve'
+        && inboxPlan?.approvals.some((approval) => approval.id === JSON.parse(body).id)) inboxPlan.beforeDecision();
       const response = gate.status === 200 ? await route(request) : gate;
       // PATCH exercises actual steer admission and its persisted transcript echo.
       if (composer && response.ok && (route === queue.PATCH || (route === queue.POST && JSON.parse(body).intent === 'steer-now'))) {
@@ -193,6 +213,7 @@ async function main() {
       ...(peer ? { terminalSession: peer.sessionName } : {}) })}\n`);
   });
   async function close() {
+    await inboxPlan?.close();
     await closeTerminal();
     closeSockets();
     server.closeAllConnections(); server.close();

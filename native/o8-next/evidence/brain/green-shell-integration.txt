@@ -1,0 +1,7 @@
+test shell::tests::brain_tests::brain_fixture_actions_sources_search_clear_and_refusals ...
+test shell::tests::brain_tests::brain_fixture_errors_cancel_retention_and_workspace_isolation ... ok
+test shell::tests::brain_tests::brain_opens_from_the_real_shell_palette ... ok
+test shell::tests::inbox_is_reachable_from_the_real_shell_palette ... ok
+test shell::tests::shell_palette_switch_restart_and_server_down ...
+test shell::tests::shell_retains_sidebar_selection_and_view_identity ... ok
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 37 filtered out; finished in 16.50s
