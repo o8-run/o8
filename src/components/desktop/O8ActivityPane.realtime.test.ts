@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -26,12 +27,13 @@ import { O8ActivityPane } from './O8ActivityPane';
 const repo = { defaultBranch: 'main', addedAt: '2026-10-20T00:00:00Z', lastOpenedAt: null, storagePressureParkingDisabled: false, setup: { envMode: 'copy' as const, envFiles: [], installCommand: null, installOnCreateWorkspace: false, buildCommand: null, runBuildOnCreateWorkspace: false, devCommand: null, defaultPort: null, workspaceIsolationPreference: 'auto' as const }, id: 'widgets', name: 'widgets', localPath: '/fixture/widgets', remoteUrl: 'https://github.com/example/widgets' };
 let host: HTMLDivElement;
 let root: Root;
+let queryClient: QueryClient;
 let requests: string[];
 let revision: number;
 
 async function render(active = true) {
   await act(async () => {
-    root.render(createElement(O8ActivityPane, { active, repoSlug: 'example/widgets', registeredRepos: [repo] }));
+    root.render(createElement(QueryClientProvider, { client: queryClient }, createElement(O8ActivityPane, { active, repoSlug: 'example/widgets', registeredRepos: [repo] })));
   });
 }
 
@@ -50,6 +52,7 @@ beforeEach(() => {
   host = document.createElement('div');
   document.body.append(host);
   root = createRoot(host);
+  queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   requests = [];
   revision = 1;
   vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
@@ -65,6 +68,7 @@ beforeEach(() => {
 
 afterEach(async () => {
   await act(async () => root.unmount());
+  queryClient.clear();
   host.remove();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -101,7 +105,7 @@ describe('Activity realtime refresh boundary', () => {
     expect(host.textContent).toContain('Retain input revision 2');
   });
 
-  it('keeps lifecycle refresh, inactivity and reactivation recovery', async () => {
+  it('keeps lifecycle refresh and reuses the fresh snapshot on reactivation', async () => {
     await render();
     revision = 2;
     await act(async () => window.dispatchEvent(new Event('o8:lifecycle-reconcile')));
@@ -111,15 +115,15 @@ describe('Activity realtime refresh boundary', () => {
     await signal([{ channel: 'review', event: 'review.snapshot' }]);
     expect(count('prs')).toBe(2);
     await render();
-    expect(count('prs')).toBe(3);
-    expect(host.textContent).toContain('Retain input revision 3');
+    expect(count('prs')).toBe(2);
+    expect(host.textContent).toContain('Retain input revision 2');
   });
 
-  it('retains the existing five-minute missed-event fallback', async () => {
+  it('uses the shared two-minute visible missed-event fallback', async () => {
     vi.useFakeTimers();
     await render();
     revision = 2;
-    await act(async () => { await vi.advanceTimersByTimeAsync(300_000); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(120_000); });
     expect(count('prs')).toBe(2);
     expect(host.textContent).toContain('Retain input revision 2');
   });

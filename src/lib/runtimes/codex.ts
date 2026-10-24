@@ -334,6 +334,8 @@ export const codexRuntime: AgentRuntime = {
         : entry.kind === 'tool-output' ? 'system' as const
         : 'system' as const,
       text: entry.text,
+      tokens: entry.tokens,
+      model: entry.model,
       timestamp: parseTranscriptTimestamp(entry.timestamp, entry.timestampLabel),
       toolName: entry.kind === 'tool' ? entry.label : undefined,
     }));
@@ -350,7 +352,7 @@ export const codexRuntime: AgentRuntime = {
     // `ollama:`/`lmstudio:` default) reaches every dispatch path, scoped to o8
     // workers. A per-mission model still wins.
     const model = opts.model ?? (resolveDefaultDispatchModelSync() || undefined);
-    const effort = resolveDefaultWorkerEffortSync('codex', opts.effort);
+    const effort = resolveDefaultWorkerEffortSync('codex', opts.effort, model);
     const result = await launchOwnedCodexSession({
       cwd: opts.cwd,
       prompt: opts.prompt,

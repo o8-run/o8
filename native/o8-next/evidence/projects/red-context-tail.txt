@@ -1,0 +1,17 @@
+     Running unittests src/main.rs (native/o8-next/target/debug/deps/o8_next-a1e56fba38d38a8c)
+
+running 1 test
+test shell::tests::projects_tests::projects_switch_active_without_saved_sessions ...
+thread 'shell::tests::projects_tests::projects_switch_active_without_saved_sessions' (19144) panicked at src/projects_tests.rs:187:9:
+switching to an empty project must clear the previous repository context
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    shell::tests::projects_tests::projects_switch_active_without_saved_sessions
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 37 filtered out; finished in 1.77s
+
+error: test failed, to rerun pass `--bin o8-next`

@@ -1,4 +1,5 @@
 'use client';
+import { ProviderCacheStats } from '../SessionCacheIndicator';
 
 import { useState, type ReactNode } from 'react';
 
@@ -195,6 +196,7 @@ function RuntimeCapacityCard({
         <div style={{ color: MUTED, fontSize: 10.5 }}>Current local sign-in</div>
       )}
 
+      <ProviderCacheStats runtime={capacity.runtime} />
       {capacity.buckets.map((bucket) => (
         <div key={bucket.id} style={{ display: 'grid', gap: 2 }}>
           <div style={{ display: 'flex', gap: 6, alignItems: 'baseline' }}>

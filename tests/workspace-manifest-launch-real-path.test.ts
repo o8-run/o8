@@ -95,12 +95,12 @@ describe.sequential('workspace manifest packet launch real path', () => {
       services: [
         {
           name: 'api',
-          command: 'run-api',
+          command: 'exec sleep 600',
           port: { preferred: 43_300, env: 'API_PORT' },
         },
         {
           name: 'web',
-          command: 'run-web',
+          command: 'exec sleep 600',
           port: { preferred: 43_300, env: 'WEB_PORT' },
           health: { tcp: true, timeoutMs: 2_000 },
         },
@@ -129,6 +129,11 @@ describe.sequential('workspace manifest packet launch real path', () => {
   });
 
   afterAll(async () => {
+    const { listManagedRuns } = await import('@/lib/runtimes/managed-runs/registry');
+    const { settleTerminalWorkspaceManifest } = await import('@/lib/workspace/manifest/lifecycle');
+    for (const run of await listManagedRuns()) {
+      if (run.workspaceService && run.cwd.startsWith(`${tempRoot}${path.sep}`)) await settleTerminalWorkspaceManifest(run.workspaceService);
+    }
     for (const socket of setupSockets) socket.destroy();
     await Promise.all(setupServers.map(closeServer));
     const { closeDb } = await import('@/lib/db');
@@ -257,7 +262,7 @@ describe.sequential('workspace manifest packet launch real path', () => {
       version: 1,
       setup: ['prepare-workspace'],
       services: [{
-        name: 'web', command: 'run-web', port: { preferred: 43_400, env: 'WEB_PORT' },
+        name: 'web', command: 'exec sleep 600', port: { preferred: 43_400, env: 'WEB_PORT' },
         health: kind === 'tcp' ? { tcp: true, timeoutMs: 2_000 }
           : { http: 'http://127.0.0.1:{{port}}/health', timeoutMs: 2_000 },
       }],

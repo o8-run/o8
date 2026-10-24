@@ -1,0 +1,83 @@
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/next-issues-account-real-path.test.ts > refuses another account replaying a receipt on the same installation
+AssertionError: expected 200 to be 409 // Object.is equality
+
+- Expected
++ Received
+
+- 409
++ 200
+
+ ❯ tests/next-issues-account-real-path.test.ts:41:25
+     39|   await api(controlPath, { account: 'b' });
+     40|   const replay = await api(createPath, body);
+     41|   expect(replay.status).toBe(409);
+       |                         ^
+     42|   expect(await replay.json()).not.toHaveProperty('url');
+     43|   await api(controlPath, { account: 'a' });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  tests/next-issues-account-real-path.test.ts > refuses sending an A draft with B credentials when the account switches at reservation
+AssertionError: expected [ { …(2) } ] to have a length of +0 but got 1
+
+- Expected
++ Received
+
+- 0
++ 1
+
+ ❯ tests/next-issues-account-real-path.test.ts:52:84
+     50|   const response = await api(createPath, body);
+     51|   const { postsSeen } = await (await api(controlPath, {})).json();
+     52|   expect(postsSeen.filter((post: { title: string }) => post.title === …
+       |                                                                                    ^
+     53|   expect(response.status).toBe(409);
+     54|   expect((await api(createPath, body)).status).toBe(409);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  tests/next-issues-account-real-path.test.ts > retries the original key after a definite 429 and its cooldown
+AssertionError: expected 409 to be 200 // Object.is equality
+
+- Expected
++ Received
+
+- 200
++ 409
+
+ ❯ tests/next-issues-account-real-path.test.ts:66:24
+     64|   await delay(2200);
+     65|   const retry = await api(createPath, body);
+     66|   expect(retry.status).toBe(200);
+       |                        ^
+     67|   expect(await retry.json()).toMatchObject({ ok: true });
+     68|   expect(refused.status).toBe(429);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+ FAIL  tests/next-issues-account-real-path.test.ts > keeps the committed receipt with A when the account changes while its reply is held
+AssertionError: expected 200 to be 409 // Object.is equality
+
+- Expected
++ Received
+
+- 409
++ 200
+
+ ❯ tests/next-issues-account-real-path.test.ts:81:27
+     79|   await api(controlPath, { account: 'b', releaseReply: true });
+     80|   const response = await creation;
+     81|   expect(response.status).toBe(409);
+       |                           ^
+     82|   expect(await response.json()).not.toHaveProperty('url');
+     83|   expect((await api(createPath, body)).status).toBe(409);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/4]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  4 failed (4)
+   Start at  02:32:01
+   Duration  9.52s (transform 52ms, setup 70ms, import 13ms, tests 9.16s, environment 0ms)

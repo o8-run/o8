@@ -1,0 +1,80 @@
+name: macOS 14 DMG Compatibility
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/macos-dmg-compatibility.yml'
+      - 'scripts/sign-and-notarize.mjs'
+      - 'src-tauri/tauri.conf.json'
+      - 'tests/workflow-policy.test.ts'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos14-dmg-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lzma-dmg:
+    name: Verify and mount LZMA on macOS 14
+    runs-on: macos-14
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Build, verify and mount an unsigned fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          fixture_os=$(sw_vers -productVersion)
+          case "$fixture_os" in 14.*) ;; *) printf 'Expected macOS 14, got %s\n' "$fixture_os"; exit 1 ;; esac
+          fixture_minimum=$(python3 -c 'import json; print(json.load(open("src-tauri/tauri.conf.json"))["bundle"]["macOS"]["minimumSystemVersion"])')
+          case "$fixture_minimum" in 14.*) ;; *) printf 'Update the minimum-OS runner for %s\n' "$fixture_minimum"; exit 1 ;; esac
+          fixture_root=$(mktemp -d "$RUNNER_TEMP/o8-lzma.XXXXXX")
+          fixture_mount="$fixture_root/mounted"
+          fixture_app="$fixture_root/staging/o8-fixture.app"
+          fixture_mounted=0
+          cleanup_fixture() {
+            if [ "$fixture_mounted" = 1 ]; then hdiutil detach "$fixture_mount" -quiet; fi
+            rm -rf "$fixture_root"
+          }
+          trap cleanup_fixture EXIT
+          mkdir -p "$fixture_app/Contents/MacOS" "$fixture_app/Contents/Resources" "$fixture_mount"
+          cat > "$fixture_app/Contents/Info.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+          <key>CFBundleIdentifier</key><string>run.o8.dmg-fixture</string>
+          <key>CFBundleExecutable</key><string>o8-fixture</string>
+          <key>CFBundlePackageType</key><string>APPL</string>
+          <key>CFBundleShortVersionString</key><string>0.0.0</string>
+          <key>LSMinimumSystemVersion</key><string>$fixture_minimum</string>
+          </dict></plist>
+          PLIST
+          printf '#!/bin/sh\nexit 0\n' > "$fixture_app/Contents/MacOS/o8-fixture"
+          chmod 755 "$fixture_app/Contents/MacOS/o8-fixture"
+          printf 'macOS 14 LZMA fixture resource\n' > "$fixture_app/Contents/Resources/payload.txt"
+          fixture_started=$(date +%s)
+          hdiutil create -quiet -volname 'o8 Fixture' -srcfolder "$fixture_root/staging" -format ULMO "$fixture_root/fixture.dmg"
+          fixture_created=$(date +%s)
+          hdiutil imageinfo "$fixture_root/fixture.dmg" | grep -i 'lzma'
+          hdiutil verify "$fixture_root/fixture.dmg"
+          fixture_verified=$(date +%s)
+          hdiutil attach "$fixture_root/fixture.dmg" -readonly -nobrowse -noautoopen -mountpoint "$fixture_mount"
+          fixture_mounted=1
+          fixture_attached=$(date +%s)
+          plutil -lint "$fixture_mount/o8-fixture.app/Contents/Info.plist"
+          test "$(plutil -extract CFBundleIdentifier raw -o - "$fixture_mount/o8-fixture.app/Contents/Info.plist")" = 'run.o8.dmg-fixture'
+          test -x "$fixture_mount/o8-fixture.app/Contents/MacOS/o8-fixture"
+          for fixture_file in Info.plist MacOS/o8-fixture Resources/payload.txt; do
+            cmp "$fixture_app/Contents/$fixture_file" "$fixture_mount/o8-fixture.app/Contents/$fixture_file"
+          done
+          hdiutil detach "$fixture_mount" -quiet
+          fixture_mounted=0
+          fixture_finished=$(date +%s)
+          printf 'macos14-lzma: OS=%s create=%ss verify=%ss attach=%ss bundle-and-detach=%ss total=%ss\n' \
+            "$fixture_os" "$((fixture_created-fixture_started))" "$((fixture_verified-fixture_created))" \
+            "$((fixture_attached-fixture_verified))" "$((fixture_finished-fixture_attached))" "$((fixture_finished-fixture_started))" | tee -a "$GITHUB_STEP_SUMMARY"

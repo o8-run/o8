@@ -1,22 +1,9 @@
+import { assertGithubRead, GithubReadDeferredError as PrCountDeferredError } from '@/lib/github-client/refresh-policy';
+import { useGithubWindowHidden } from '@/lib/github-client/visibility';
 import { useCallback, useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { pullRequestListQuery } from '@/lib/github-client';
 
-class PrCountDeferredError extends Error {
-  constructor(status: number, readonly retryAt: number) { super(`PR count request paused (${status})`); }
-}
-function retryAt(response: Response) {
-  const now = Date.now();
-  const retry = response.headers.get('retry-after');
-  if (retry) {
-    const seconds = Number(retry);
-    if (Number.isFinite(seconds) && seconds > 0) return now + seconds * 1000;
-    const date = Date.parse(retry);
-    if (Number.isFinite(date) && date > now) return date;
-  }
-  const reset = Number(response.headers.get('x-ratelimit-reset')) * 1000;
-  return reset > now ? reset : now + 300_000;
-}
 function isObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
@@ -27,7 +14,7 @@ const options = {
   queryKey: ['gh', null, 'diagnostics-pr-count'],
   queryFn: async ({ signal }: { signal: AbortSignal }): Promise<{ count: number }> => {
     const response = await fetch('/api/panel/prs', { cache: 'no-store', signal });
-    if (response.status === 403 || response.status === 429) throw new PrCountDeferredError(response.status, retryAt(response));
+    assertGithubRead(response);
     if (!response.ok) throw new Error(`PR count request failed (${response.status})`);
     const data: unknown = await response.json();
     if (!isObject(data) || data.error || data.unavailable || !Array.isArray(data.prs)
@@ -41,9 +28,11 @@ const options = {
 
 export function useDiagnosticsPrCount() {
   const client = useQueryClient();
+  const hidden = useGithubWindowHidden();
   const [now, setNow] = useState(() => Date.now());
   const query = useQuery({
     ...options,
+    refetchInterval: hidden ? 300_000 : 120_000,
     enabled: entry => !(entry.state.error instanceof PrCountDeferredError
       && Math.max(now, entry.state.errorUpdatedAt) < entry.state.error.retryAt),
   });

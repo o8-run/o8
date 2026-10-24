@@ -6,7 +6,7 @@ publish = false
 
 [features]
 default = []
-experimental-mcp = ["dep:axum", "dep:reqwest", "dep:rusqlite", "dep:sha2", "dep:chrono", "dep:unicode-normalization"]
+experimental-mcp = ["dep:libc", "dep:axum", "dep:reqwest", "dep:rusqlite", "dep:sha2", "dep:chrono", "dep:unicode-normalization", "dep:uuid"]
 experimental-ws = ["dep:tokio-tungstenite", "dep:futures-util", "dep:form_urlencoded", "dep:subtle", "dep:uuid"]
 experimental-supervisor = ["dep:libc", "dep:base64", "dep:subtle", "dep:uuid"]
 experimental-http = ["dep:axum", "dep:form_urlencoded", "dep:subtle", "dep:rusqlite", "dep:chrono", "dep:sha2", "dep:base64"]

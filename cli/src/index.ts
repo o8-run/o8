@@ -1,3 +1,4 @@
+import { runPrStack } from './commands/pr-stack.js';
 import { runNext } from './commands/next.js';
 import { runSetup } from './commands/setup.js';
 /**
@@ -41,6 +42,7 @@ import {
   runVerify,
 } from './commands/harness.js';
 import { runInbox } from './commands/inbox.js';
+import { runConversationPrs } from './commands/conversation-prs.js';
 import { runHistory } from './commands/history.js';
 import { runLead } from './commands/lead.js';
 import { runLaneTouches } from './commands/lane.js';
@@ -223,6 +225,7 @@ commands:
   version              CLI version + connected server version
   doctor               verify port + token resolution, ping server; --repair reinstalls the o8 CLI symlink
   status               snapshot: running packets, lanes, merges, approvals
+  conversation-prs list|add|remove|reverse  durable conversation PR provenance
   history <thread-id>  continuous orchestrator transcript + audited handoff seams
   lead start           create a persistent lead (--repo --backend --model --effort --brief --idempotency-key)
   lead send            send a replay-safe turn to the same lead
@@ -308,6 +311,7 @@ commands:
   project add-repo <project> <repo>     attach a registered repo to a project
   project remove-repo <project> <repo>  detach it while preserving registration and disk
   project delete <target>               remove a project and exclusive repo registrations; disk is preserved
+  pr-stack --repo owner/repo --number N  read native PR layers, revisions and provenance
   problem list         recurring problems detected across independent work (--all includes suppressed)
   problem show <id>    full evidence, remedy, and closure state for one problem dossier
   plugin list          list reviewed executable actions [--plugin ID]
@@ -413,6 +417,8 @@ async function dispatch(args: ParsedArgs): Promise<number> {
       return runDoctor(args.mode, args.rest);
     case 'status':
       return runStatus(args.mode);
+    case 'conversation-prs':
+      return runConversationPrs(args.mode, singleLevelArgs(secondary, args.rest, args.secondaryBeforeRest));
     case 'history':
       return runHistory(args.mode, singleLevelArgs(secondary, args.rest, args.secondaryBeforeRest));
     case 'lead':
@@ -495,6 +501,8 @@ async function dispatch(args: ParsedArgs): Promise<number> {
       return runRepo(args.mode, secondary, args.rest);
     case 'project':
       return runProject(args.mode, secondary, args.rest);
+    case 'pr-stack':
+      return runPrStack(args.mode, singleLevelArgs(secondary, args.rest, args.secondaryBeforeRest));
     case 'problem':
       return runProblem(args.mode, secondary, args.rest);
     case 'plugin':

@@ -4,6 +4,7 @@ import { composerQueuePayloadMatches } from './queue-payload-match';
 import { composerBackendSupportsImages } from '@/lib/mobile/composer-image-validation';
 import { buildVisualInstructionPayload } from './visual-instruction';
 import type { VisualInstructionDraft } from './visual-draft-store';
+import { visualMeaningContext } from './visual-meaning';
 
 export class VisualInstructionDeliveryError extends Error {
   constructor(message: string, readonly uncertain = false) { super(message); this.name = 'VisualInstructionDeliveryError'; }
@@ -20,7 +21,7 @@ export async function submitVisualInstruction(draft: VisualInstructionDraft, tra
   if (template.split(VISUAL_REQUEST_MARKER).length !== 2) throw new VisualInstructionDeliveryError('The captured send route is incomplete. Keep the draft and select its conversation.');
   const question = visualQuestionEvidence(draft);
   const pending = question ? `\nAn optional clarification was shown for these pixels and left unanswered: ${JSON.stringify(question)}. Inspect the evidence; if this ambiguity still matters, continue this same question in the existing chat.` : '';
-  const payload = { ...draft.template, text: result.text, wireMessage: template.replace(VISUAL_REQUEST_MARKER, () => result.wireMessage + pending), images: result.images };
+  const payload = { ...draft.template, text: result.text, wireMessage: template.replace(VISUAL_REQUEST_MARKER, () => result.wireMessage + pending + visualMeaningContext(draft)), images: result.images };
   if (payload.wireMessage.length > 250_000) throw new VisualInstructionDeliveryError('This visual request exceeds the chat limit. Shorten the instruction or use fewer frames.');
   const response = await transport('/api/orchestrator/composer-queue', { method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ ...draft.request.target, id: `visual-${draft.request.id}`, intent: 'send-next', payload }) });

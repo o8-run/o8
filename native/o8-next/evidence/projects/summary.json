@@ -1,0 +1,22 @@
+{
+  "openToFirstFrame": {
+    "samples": 3,
+    "p50Ms": 14.733527,
+    "p95Ms": 14.746897
+  },
+  "workspaceOpenToFrame": {
+    "samples": 3,
+    "p50Ms": 20.621591000000002,
+    "p95Ms": 21.56593
+  },
+  "activeProjectInteractionToFrame": {
+    "samples": 60,
+    "p50Ms": 21.5567595,
+    "p95Ms": 28.925366
+  },
+  "before": {
+    "projectsControlAvailable": false,
+    "comparableLatencyMs": null
+  },
+  "endpoint": "first completed GPUI TestAppContext CPU scene paint; debug build; test text system; no GPU/compositor"
+}

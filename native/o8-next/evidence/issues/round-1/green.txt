@@ -1,0 +1,49 @@
+Node 22 / stable Rust / Linux. Final checks, exit 0:
+
+NODE_OPTIONS=--max-old-space-size=8192 npx tsc --noEmit
+npm run typecheck:fast
+tsrs has no linux-x64 build; using tsc 5.8.2
+
+npx eslint src/app/api/panel/issues/create/route.ts src/lib/github-broker/actions.ts scripts/next/issues-fixture.ts tests/next-issues-real-path.test.ts
+
+npm run test:classify
+[test-classification] 1233 hermetic, 884 resource-owning
+node scripts/classify-tests.mjs --check
+[test-classification] manifest matches resource-owning source markers
+
+npm run rule-check -- --base=origin/main
+[rule-check] OK — scanned 6 file(s), zero violations vs origin/main
+
+npx vitest run tests/next-issues-real-path.test.ts tests/composer-next-worker-real-path.test.ts tests/o8-next-shell-real-path.test.ts
+Test Files  3 passed (3)
+Tests  10 passed (10)
+
+cargo test --release --locked --manifest-path native/o8-next/Cargo.toml -- --test-threads=1
+test shell::issue_tests::issues_errors_retry_stale_and_account_switch ... ok
+test shell::issue_tests::review_tests::round1_repository_drafts_survive_a_b_a ... ok
+test shell::issue_tests::review_tests::round1_repository_switch_survives_a_frame_between_mouse_events ... ok
+test shell::issue_tests::review_tests::round1_symlink_worker_survives_real_refresh_and_send ... ok
+test shell::issue_tests::review_tests::round1_timed_out_create_retry_commits_once ... ok
+test shell::tests::brain_tests::brain_fixture_actions_sources_search_clear_and_refusals ... ok
+test shell::tests::brain_tests::brain_fixture_errors_cancel_retention_and_workspace_isolation ... ok
+test shell::tests::brain_tests::brain_opens_from_the_real_shell_palette ... ok
+test result: ok. 50 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 201.98s
+CLI test files: diff_cli.rs (1), pane_grid_cli.rs (3), shell_cli.rs (2), terminal_cli.rs (1); all 7 passed.
+
+rustfmt --edition 2024 --config skip_children=true,reorder_modules=false --check native/o8-next/src/client.rs native/o8-next/src/issue_tests.rs native/o8-next/src/issue_review_tests.rs native/o8-next/src/issues.rs native/o8-next/src/issues_view.rs native/o8-next/src/shell_session.rs native/o8-next/src/ui.rs native/o8-next/src/shell.rs native/o8-next/src/shell_tests.rs
+
+cargo build --release --locked --manifest-path native/o8-next/Cargo.toml
+Finished release profile [optimized] target(s) in 17.91s
+
+Full npm gate (exit 1; unrelated expired Pi contract):
+npm test
+Test Files  1 failed | 1236 passed | 3 skipped (1240)
+Tests  4 failed | 8947 passed | 5 skipped (8956)
+Duration  390.51s
+All four failures: tests/pi-sdk-live-contract.test.ts
+Error: Billing contract is expired or outside the bounded test scope
+Contract expiry: 2026-10-25 00:00 UTC.
+The test and src/lib/pi/sdk/{live-contract,test-budget,test-transport}.ts match origin/main.
+Focused rerun of tests/pi-sdk-live-contract.test.ts reproduces the four failures.
+The first full attempt stopped before collection (missing Vitest cache directory);
+the result above follows restoring that directory and rerunning unchanged npm test.

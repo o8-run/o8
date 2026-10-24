@@ -1,4 +1,5 @@
 'use client';
+import { GithubReadStatus } from '@/components/github/GithubReadStatus';
 
 /**
  * O8ActivityPane — Activity feed for the O8 Panel right-side panel.
@@ -374,6 +375,7 @@ export const O8ActivityPane = memo(function O8ActivityPane({
         prNumber={selectedPr.number}
         repoSlug={selectedPr.repo ?? repoSlug ?? null}
         repoPath={repoPath ?? null}
+        onSelectLayer={number => { setSelectedPr({ number, repo: selectedPr.repo }); onSelectPR?.(number, selectedPr.repo ?? undefined); }}
         onClose={() => { setSelectedPr(null); onClosePR?.(selectedPr.number, selectedPr.repo); }}
       />
     );
@@ -509,7 +511,7 @@ export const O8ActivityPane = memo(function O8ActivityPane({
         {!loading && (data.workspaceError || data.remoteError) ? (
           <div role="status" style={{ paddingTop: 16, paddingRight: 14, paddingBottom: 16, paddingLeft: 14, color: 'var(--t-text-muted)', fontSize: 13, lineHeight: 1.45 }}>
             {data.workspaceError ? <div>{data.workspaceError}</div> : null}
-            {data.remoteError ? <div>{data.remoteError}</div> : null}
+            {data.remoteError ? <><div>{data.remoteError}</div><GithubReadStatus error={data.remoteError} updatedAt={data.remoteUpdatedAt ?? null} /></> : null}
             <div style={{ marginTop: 8 }}><RamsButton variant="ghost" onClick={() => setRetryNonce((n) => n + 1)}>Retry</RamsButton></div>
           </div>
         ) : null}

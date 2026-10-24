@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { lstat, mkdtemp, mkdir, readFile, realpath, symlink, writeFile } from 'node:fs/promises';
+import { lstat, mkdtemp, mkdir, readFile, readdir, realpath, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -33,7 +33,103 @@ afterEach(async () => {
   await Promise.all(cleanupRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
+async function makeSymbolFixture() {
+  const root = await makeRepoRoot();
+  const symbols = await makeRepoRoot();
+  const tools = path.join(root, 'tools');
+  await mkdir(tools);
+  await writeFile(path.join(root, 'package.json'), JSON.stringify({ name: 'o8', version: '0.1.999' }));
+  await writeFile(path.join(tools, 'dwarfdump'), `#!/usr/bin/env node
+const fs = require('node:fs');
+const p = process.argv.at(-1);
+const data = JSON.parse(fs.readFileSync(fs.statSync(p).isDirectory() ? p + '/Contents/Resources/DWARF/o8' : p));
+for (const entry of Array.isArray(data) ? data : [data]) console.log('UUID: ' + entry.uuid + ' (' + entry.cpu + ') ' + p);
+`, { mode: 0o700 });
+  const fixtures = [
+    ['aarch64-apple-darwin', 'arm64', 'AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA'],
+    ['x86_64-apple-darwin', 'x86_64', 'BBBBBBBB-BBBB-4BBB-8BBB-BBBBBBBBBBBB'],
+  ];
+  async function restore() {
+    for (const [triple, cpu, uuid] of fixtures) {
+      const release = path.join(root, 'src-tauri/target', triple, 'release');
+      const dwarf = path.join(release, 'deps/symbols.dSYM/Contents/Resources/DWARF');
+      await mkdir(dwarf, { recursive: true });
+      const contents = JSON.stringify({ uuid, cpu, symbols: `private source lines for ${cpu}` });
+      await writeFile(path.join(dwarf, 'o8'), contents);
+      await symlink('deps/symbols.dSYM', path.join(release, 'o8.dSYM'));
+      await writeFile(path.join(release, 'o8'), contents);
+    }
+    const universal = path.join(root, 'src-tauri/target/universal-apple-darwin/release');
+    await mkdir(universal, { recursive: true });
+    await writeFile(path.join(universal, 'o8'), JSON.stringify(fixtures.map(([, cpu, uuid]) => ({ cpu, uuid }))));
+  }
+  await restore();
+  const env = { ...process.env, PATH: `${tools}${path.delimiter}${process.env.PATH}`, O8_RELEASE_SYMBOLS_DIR: symbols };
+  return { root, symbols, fixtures, env, restore };
+}
+
+async function retainedDwarf(symbols: string, cpu: string, uuid: string) {
+  const directory = path.join(symbols, '0.1.999', cpu, uuid);
+  const [digest] = await readdir(directory);
+  expect(digest).toMatch(/^[a-f0-9]{64}$/);
+  return path.join(directory, digest, 'o8.dSYM/Contents/Resources/DWARF/o8');
+}
+
 describe('postship generated-output cleanup', () => {
+  it('retains both CPU dSYMs privately through the cleanup CLI before deleting the build tree', async () => {
+    const { root, symbols, fixtures, env } = await makeSymbolFixture();
+    const { stdout } = await runFile(process.execPath, [cleanupScript], { cwd: root, env });
+    expect(stdout).toContain('refused=0');
+    await expect(lstat(path.join(root, 'src-tauri/target'))).rejects.toMatchObject({ code: 'ENOENT' });
+    for (const [, cpu, uuid] of fixtures) {
+      const retained = await retainedDwarf(symbols, cpu, uuid);
+      expect(JSON.parse(await readFile(retained, 'utf8'))).toMatchObject({ cpu, uuid });
+      expect((await lstat(retained)).mode & 0o777).toBe(0o600);
+    }
+    expect((await lstat(symbols)).mode & 0o777).toBe(0o700);
+    await runFile(process.execPath, [cleanupScript], { cwd: root, env });
+    for (const [, cpu, uuid] of fixtures) {
+      await expect(readFile(await retainedDwarf(symbols, cpu, uuid))).resolves.toBeDefined();
+    }
+  });
+
+  it.each(['file', 'inside-checkout', 'symlink', 'filesystem-root'])('preserves the last build symbols when the retention root is %s', async (kind) => {
+    const f = await makeSymbolFixture();
+    let destination = path.join(f.symbols, 'not-a-directory');
+    if (kind === 'filesystem-root') destination = path.parse(f.root).root;
+    if (kind === 'file') await writeFile(destination, 'held');
+    if (kind === 'inside-checkout') destination = path.join(f.root, 'src-tauri/target/symbols');
+    if (kind === 'symlink') await symlink(f.symbols, destination);
+    const { stdout } = await runFile(process.execPath, [cleanupScript, '--best-effort'], {
+      cwd: f.root, env: { ...f.env, O8_RELEASE_SYMBOLS_DIR: destination },
+    });
+    expect(stdout).toContain('refused=1');
+    for (const [triple, cpu] of f.fixtures) {
+      const original = path.join(f.root, 'src-tauri/target', triple, 'release/o8.dSYM/Contents/Resources/DWARF/o8');
+      expect(JSON.parse(await readFile(original, 'utf8'))).toMatchObject({ cpu });
+    }
+  });
+
+  it('preserves build symbols if an existing retained copy is corrupt instead of overwriting it', async () => {
+    const f = await makeSymbolFixture();
+    await runFile(process.execPath, [cleanupScript], { cwd: f.root, env: f.env });
+    const retained = await retainedDwarf(f.symbols, f.fixtures[0][1], f.fixtures[0][2]);
+    await writeFile(retained, 'corrupt retained artifact');
+    await f.restore();
+    const { stdout } = await runFile(process.execPath, [cleanupScript, '--best-effort'], { cwd: f.root, env: f.env });
+    expect(stdout).toContain('refused=1');
+    expect(await readFile(retained, 'utf8')).toBe('corrupt retained artifact');
+    expect(JSON.parse(await readFile(path.join(f.root, 'src-tauri/target/aarch64-apple-darwin/release/o8.dSYM/Contents/Resources/DWARF/o8'), 'utf8'))).toMatchObject({ cpu: 'arm64' });
+  });
+
+  it('keeps mismatched executable and symbol UUIDs for recovery', async () => {
+    const f = await makeSymbolFixture();
+    await writeFile(path.join(f.root, 'src-tauri/target/aarch64-apple-darwin/release/o8'), JSON.stringify({ cpu: 'arm64', uuid: f.fixtures[1][2] }));
+    const { stdout } = await runFile(process.execPath, [cleanupScript, '--best-effort'], { cwd: f.root, env: f.env });
+    expect(stdout).toContain('refused=1');
+    await expect(lstat(path.join(f.root, 'src-tauri/target/aarch64-apple-darwin/release/o8.dSYM'))).resolves.toBeDefined();
+  });
+
   it('preserves unknown web output instead of inventing successful lifecycle ownership', async () => {
     const root = await makeRepoRoot();
     await mkdir(path.join(root, '.next'));

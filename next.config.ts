@@ -32,12 +32,19 @@ const nextConfig: NextConfig = {
       './src-tauri/sidecars/pi-write/target{,/**/*}',
       '**/node_modules/sharp/**/*',
       '**/node_modules/@img/**/*',
+      // Browserslist data is used by Next's build tools, never by the server.
+      '**/node_modules/caniuse-lite/**/*',
+      // The aliased highlighter bundles common data and fetches optional data.
+      // NFT also follows the original Shiki registries, duplicating every
+      // grammar/theme. Keep the package-name indexes used by the asset route.
+      '**/node_modules/@shikijs/{langs,themes}/dist/!(index).mjs',
+      '**/node_modules/@pierre/theme/dist/!(index).mjs',
     ],
   },
   // better-sqlite3 is a native module. The Pi packages load Node built-ins
   // (node:sqlite, node:fs) through dynamic imports a bundler stubs out, so
   // Node loads them as published.
-  serverExternalPackages: ['better-sqlite3', '@earendil-works/pi-ai', '@earendil-works/pi-durable', '@earendil-works/chord', '@muse-code/sdk'],
+  serverExternalPackages: ['typescript', 'better-sqlite3', '@earendil-works/pi-ai', '@earendil-works/pi-durable', '@earendil-works/chord', '@muse-code/sdk'],
   reactStrictMode: true,
   devIndicators: false,
   images: {
@@ -76,6 +83,13 @@ const nextConfig: NextConfig = {
   },
   turbopack: {},
   webpack: (config, { dev }) => {
+    // Pierre imports Shiki's all-language/all-theme entry points. Keep the app's
+    // common grammars local and resolve optional syntax assets on demand.
+    config.resolve.alias = {
+      ...config.resolve.alias,
+      'shiki$': `${__dirname}/src/lib/highlighting/shiki-bundle.ts`,
+      '@pierre/theming/themes$': `${__dirname}/src/lib/highlighting/pierre-themes.ts`,
+    };
     if (dev) {
       return config;
     }
@@ -92,7 +106,12 @@ const nextConfig: NextConfig = {
           monaco: {
             test: /[\\/]node_modules[\\/](monaco-editor|@monaco-editor)[\\/]/,
             name: 'vendor-monaco',
-            chunks: 'all' as const,
+            // Worker runtimes keep their compiler code out of the UI vendor
+            // chunk. Worker entries are async too, so 'async' is insufficient.
+            chunks: (chunk: { runtime?: string | Set<string> }) => {
+              const runtimes = typeof chunk.runtime === 'string' ? [chunk.runtime] : [...(chunk.runtime ?? [])];
+              return runtimes.some(runtime => runtime === 'webpack' || runtime === 'webpack-runtime');
+            },
             priority: 30,
           },
           xterm: {

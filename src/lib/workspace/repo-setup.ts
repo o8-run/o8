@@ -27,7 +27,7 @@ import {
   type DependencyMaterializationReceipt,
 } from './dependency-materializer';
 
-export type RepoSetupCommandInvocation = DependencyInstallInvocation;
+export type RepoSetupCommandInvocation = DependencyInstallInvocation & { maxOutputBytes?: number };
 
 export async function runRepoSetupCommand(
   invocation: RepoSetupCommandInvocation,
@@ -35,7 +35,7 @@ export async function runRepoSetupCommand(
   await materializationAwareExecFile(invocation.command, invocation.args, {
     cwd: invocation.cwd,
     timeout: invocation.timeoutMs,
-    maxBuffer: 8 * 1024 * 1024,
+    maxBuffer: invocation.maxOutputBytes ?? 8 * 1024 * 1024,
     windowsHide: true,
     env: invocation.env,
     signal: invocation.signal,

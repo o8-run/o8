@@ -1,0 +1,210 @@
+{
+  "baselineCommit": "f3f81af7faee9a96683ba46645517372e735ea37",
+  "before": {
+    "passed": 85,
+    "failed": 0,
+    "ignored": 3
+  },
+  "after": {
+    "passed": 85,
+    "failed": 0,
+    "ignored": 3
+  },
+  "identicalOriginalTestNames": 88,
+  "newNativeRegressionTestsPassed": 1,
+  "touchedNativeClippyDiagnostics": 0,
+  "movedTests": [
+    {
+      "before": "shell::inbox_tests::inbox_cards_counts_statuses_and_approval_match_desktop_routes",
+      "after": "shell::inbox::tests1::inbox_cards_counts_statuses_and_approval_match_desktop_routes"
+    },
+    {
+      "before": "shell::inbox_tests::inbox_empty_and_server_error_never_claim_a_false_clean_state",
+      "after": "shell::inbox::tests1::inbox_empty_and_server_error_never_claim_a_false_clean_state"
+    },
+    {
+      "before": "shell::inbox_tests::inbox_keyboard_buttons_activate_enter_space_and_skip_disabled",
+      "after": "shell::inbox::tests1::inbox_keyboard_buttons_activate_enter_space_and_skip_disabled"
+    },
+    {
+      "before": "shell::inbox_tests::inbox_opens_related_session_and_pull_request_and_restores",
+      "after": "shell::inbox::tests1::inbox_opens_related_session_and_pull_request_and_restores"
+    },
+    {
+      "before": "shell::inbox_tests::inbox_plan_session_header_preserves_desktop_authority_and_continuation",
+      "after": "shell::inbox::tests1::inbox_plan_session_header_preserves_desktop_authority_and_continuation"
+    },
+    {
+      "before": "shell::issue_tests::issues_create_enhance_preview_labels_and_success",
+      "after": "shell::issues::tests::issues_create_enhance_preview_labels_and_success"
+    },
+    {
+      "before": "shell::issue_tests::issues_errors_retry_stale_and_account_switch",
+      "after": "shell::issues::tests::issues_errors_retry_stale_and_account_switch"
+    },
+    {
+      "before": "shell::issue_tests::issues_interaction_frames_and_missing_checkout_refusal",
+      "after": "shell::issues::tests::issues_interaction_frames_and_missing_checkout_refusal"
+    },
+    {
+      "before": "shell::issue_tests::issues_link_follows_worker_selection",
+      "after": "shell::issues::tests::issues_link_follows_worker_selection"
+    },
+    {
+      "before": "shell::issue_tests::issues_view_search_link_clear_and_worker_task",
+      "after": "shell::issues::tests::issues_view_search_link_clear_and_worker_task"
+    },
+    {
+      "before": "shell::issue_tests::review_tests::round1_repository_drafts_survive_a_b_a",
+      "after": "shell::issues::tests::review_tests::round1_repository_drafts_survive_a_b_a"
+    },
+    {
+      "before": "shell::issue_tests::review_tests::round1_repository_switch_survives_a_frame_between_mouse_events",
+      "after": "shell::issues::tests::review_tests::round1_repository_switch_survives_a_frame_between_mouse_events"
+    },
+    {
+      "before": "shell::issue_tests::issues_worker_receives_linked_context_through_stream",
+      "after": "shell::issues::tests::issues_worker_receives_linked_context_through_stream"
+    },
+    {
+      "before": "shell::issue_tests::review_tests::round1_symlink_worker_survives_real_refresh_and_send",
+      "after": "shell::issues::tests::review_tests::round1_symlink_worker_survives_real_refresh_and_send"
+    },
+    {
+      "before": "shell::issue_tests::review_tests::round1_timed_out_create_retry_commits_once",
+      "after": "shell::issues::tests::review_tests::round1_timed_out_create_retry_commits_once"
+    },
+    {
+      "before": "shell::issue_tests::review_tests::round2_account_cannot_retry_another_accounts_timed_out_creation",
+      "after": "shell::issues::tests::review_tests::round2_account_cannot_retry_another_accounts_timed_out_creation"
+    },
+    {
+      "before": "shell::tests::brain_tests::brain_fixture_actions_sources_search_clear_and_refusals",
+      "after": "shell::brain::tests::brain_fixture_actions_sources_search_clear_and_refusals"
+    },
+    {
+      "before": "shell::issue_tests::review_tests::round2_definite_429_leaves_native_draft_editable_and_retryable",
+      "after": "shell::issues::tests::review_tests::round2_definite_429_leaves_native_draft_editable_and_retryable"
+    },
+    {
+      "before": "shell::tests::brain_tests::brain_fixture_errors_cancel_retention_and_workspace_isolation",
+      "after": "shell::brain::tests::brain_fixture_errors_cancel_retention_and_workspace_isolation"
+    },
+    {
+      "before": "shell::tests::brain_tests::brain_opens_from_the_real_shell_palette",
+      "after": "shell::brain::tests::brain_opens_from_the_real_shell_palette"
+    },
+    {
+      "before": "shell::tests::inbox_is_reachable_from_the_real_shell_palette",
+      "after": "shell::inbox::tests::inbox_is_reachable_from_the_real_shell_palette"
+    },
+    {
+      "before": "shell::tests::projects_tests::projects_auth_refusal_and_retry",
+      "after": "shell::projects::tests::projects_auth_refusal_and_retry"
+    },
+    {
+      "before": "shell::tests::projects_tests::projects_lost_registration_response_preserves_membership_role",
+      "after": "shell::projects::tests::projects_lost_registration_response_preserves_membership_role"
+    },
+    {
+      "before": "shell::tests::projects_tests::projects_first_run_crud_membership_and_focus",
+      "after": "shell::projects::tests::projects_first_run_crud_membership_and_focus"
+    },
+    {
+      "before": "shell::tests::projects_tests::projects_palette_loading_and_cancel",
+      "after": "shell::projects::tests::projects_palette_loading_and_cancel"
+    },
+    {
+      "before": "shell::tests::projects_tests::projects_preserve_session_focus_and_allow_inbox_navigation",
+      "after": "shell::projects::tests::projects_preserve_session_focus_and_allow_inbox_navigation"
+    },
+    {
+      "before": "shell::tests::projects_tests::projects_reconnect_and_runtime_removal_refusal",
+      "after": "shell::projects::tests::projects_reconnect_and_runtime_removal_refusal"
+    },
+    {
+      "before": "shell::tests::projects_tests::projects_switch_active_without_saved_sessions",
+      "after": "shell::projects::tests::projects_switch_active_without_saved_sessions"
+    },
+    {
+      "before": "shell::tests::projects_tests::review::review_p1_deletes_existing_duplicate_by_stable_id",
+      "after": "shell::projects::tests::review::review_p1_deletes_existing_duplicate_by_stable_id"
+    },
+    {
+      "before": "shell::tests::projects_tests::review::review_p2_project_open_resolves_repointed_repository",
+      "after": "shell::projects::tests::review::review_p2_project_open_resolves_repointed_repository"
+    },
+    {
+      "before": "shell::tests::projects_tests::review::review_p1_rejects_duplicate_rename_before_deleting_alpha",
+      "after": "shell::projects::tests::review::review_p1_rejects_duplicate_rename_before_deleting_alpha"
+    },
+    {
+      "before": "shell::tests::projects_tests::review::review_p2_repository_open_resolves_repointed_repository",
+      "after": "shell::projects::tests::review::review_p2_repository_open_resolves_repointed_repository"
+    },
+    {
+      "before": "shell::tests::projects_tests::review::round2_legacy_desktop_rename_before_native_read_keeps_one_pair",
+      "after": "shell::projects::tests::review::round2_legacy_desktop_rename_before_native_read_keeps_one_pair"
+    },
+    {
+      "before": "shell::tests::projects_tests::review::round2_legacy_open_resolves_id_pair",
+      "after": "shell::projects::tests::review::round2_legacy_open_resolves_id_pair"
+    },
+    {
+      "before": "shell::tests::projects_tests::review::round2_legacy_rename_updates_both_stable_ids",
+      "after": "shell::projects::tests::review::round2_legacy_rename_updates_both_stable_ids"
+    },
+    {
+      "before": "shell::tests::projects_tests::review::round2_legacy_switch_resolves_id_pair",
+      "after": "shell::projects::tests::review::round2_legacy_switch_resolves_id_pair"
+    },
+    {
+      "before": "shell::tests::projects_tests::review::round2_project_delete_refuses_unconfirmed_runtime",
+      "after": "shell::projects::tests::review::round2_project_delete_refuses_unconfirmed_runtime"
+    },
+    {
+      "before": "shell::tests::settings::review::settings_review_edit_reloads_the_desktop_value",
+      "after": "shell::settings::tests1::review::settings_review_edit_reloads_the_desktop_value"
+    },
+    {
+      "before": "shell::tests::settings::review::settings_review_stale_save_preserves_the_desktop_value",
+      "after": "shell::settings::tests1::review::settings_review_stale_save_preserves_the_desktop_value"
+    },
+    {
+      "before": "shell::tests::settings::review::settings_review_toml_never_reads_or_copies_saved_secrets",
+      "after": "shell::settings::tests1::review::settings_review_toml_never_reads_or_copies_saved_secrets"
+    },
+    {
+      "before": "shell::tests::settings::review::settings_review_updates_the_running_desktop_presentation",
+      "after": "shell::settings::tests1::review::settings_review_updates_the_running_desktop_presentation"
+    },
+    {
+      "before": "shell::tests::settings::settings_fixture_provider_keys_presence_save_cancel_remove_enable_check_and_refusals",
+      "after": "shell::settings::tests1::settings_fixture_provider_keys_presence_save_cancel_remove_enable_check_and_refusals"
+    },
+    {
+      "before": "shell::tests::settings::settings_fixture_toml_save_reload_conflict_and_cancel",
+      "after": "shell::settings::tests1::settings_fixture_toml_save_reload_conflict_and_cancel"
+    },
+    {
+      "before": "shell::tests::settings::settings_fixture_all_default_controls_persist_and_refresh",
+      "after": "shell::settings::tests1::settings_fixture_all_default_controls_persist_and_refresh"
+    },
+    {
+      "before": "shell::tests::settings::settings_fixture_unauthorized_and_close_restore_shell",
+      "after": "shell::settings::tests1::settings_fixture_unauthorized_and_close_restore_shell"
+    },
+    {
+      "before": "shell::tests::settings_opens_from_shell_command_palette",
+      "after": "shell::settings::tests::settings_opens_from_shell_command_palette"
+    },
+    {
+      "before": "shell::tests::settings::settings_fixture_validation_locks_loading_errors_and_empty",
+      "after": "shell::settings::tests1::settings_fixture_validation_locks_loading_errors_and_empty"
+    },
+    {
+      "before": "shell::tests::shell_retains_sidebar_selection_and_view_identity",
+      "after": "shell::session::tests::shell_retains_sidebar_selection_and_view_identity"
+    }
+  ]
+}

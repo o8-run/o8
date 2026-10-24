@@ -13,6 +13,7 @@ import type { PRDetail, PRSection, PRSectionTab, ActionResult } from './types';
 import { prStateStyles } from './constants';
 
 interface PRHeaderProps {
+  readOnly?: boolean;
   pr: PRDetail;
   activeSection: PRSection;
   setActiveSection: (section: PRSection) => void;
@@ -27,6 +28,7 @@ interface PRHeaderProps {
 
 function PRHeaderBase({
   pr,
+  readOnly = false,
   activeSection,
   setActiveSection,
   reviewThreadCount,
@@ -178,6 +180,7 @@ function PRHeaderBase({
           </div>
         ) : null}
 
+        {readOnly ? <span style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>Read-only stack</span> : null}
         {/* Section tabs + actions row */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 2, marginTop: 10 }}>
           {sections.map((s) => (
@@ -214,7 +217,7 @@ function PRHeaderBase({
           ))}
 
           {/* Action buttons -- only for open PRs */}
-          {pr.state === 'OPEN' && (
+          {!readOnly && pr.state === 'OPEN' && (
             <>
               <div style={{ flex: 1 }} />
               <button
@@ -328,7 +331,7 @@ function PRHeaderBase({
       </div>
 
       {/* Comment compose bar -- for open PRs */}
-      {pr.state === 'OPEN' && (
+      {!readOnly && pr.state === 'OPEN' && (
         <div style={{
           display: 'flex',
           alignItems: 'center',

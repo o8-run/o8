@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-import ts from 'typescript';
+import { loadTypeScriptCompiler } from '@/lib/typescript-compiler';
 
 import type { LaneFileChange } from '@/lib/lane/lane-diff-facts';
 
@@ -63,14 +63,14 @@ export function createExpiringLruCache<T>(maxEntries: number, ttlMs: number) {
   };
 }
 
-export function sourceImportSpecifiers(
+export async function sourceImportSpecifiers(
   filePath: string,
   content: string,
   parsedImports: Map<string, ParsedSourceImports>,
 ) {
   const cached = parsedImports.get(filePath);
   if (cached?.content === content) return cached.specifiers;
-  const specifiers = ts.preProcessFile(content, true, true).importedFiles.map((entry) => entry.fileName);
+  const specifiers = (await loadTypeScriptCompiler()).preProcessFile(content, true, true).importedFiles.map((entry) => entry.fileName);
   parsedImports.set(filePath, { content, specifiers });
   return specifiers;
 }

@@ -2,6 +2,8 @@ import { resolveRequestPrincipalContext } from '@/lib/auth/principal';
 import { headersIndicateLoopback, isLoopbackHostname, isTauriShellOrigin } from '@/lib/auth/loopback-request';
 import { getDeviceManager } from '@/lib/devices/service';
 import { DeviceError } from '@/lib/devices/types';
+import { DeviceControllers } from '@/lib/devices/controllers';
+import { controllerStream } from '@/lib/devices/controller-stream';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -36,7 +38,12 @@ function failure(error: unknown): Response {
 }
 
 export async function GET(request: Request): Promise<Response> {
-  try { authorize(request); return json(await getDeviceManager().state()); } catch (error) { return failure(error); }
+  try {
+    authorize(request);
+    const manager = getDeviceManager();
+    if (new URL(request.url).searchParams.get('stream') === 'controllers') return controllerStream(manager.root, request.signal);
+    return json(await manager.state());
+  } catch (error) { return failure(error); }
 }
 
 export async function POST(request: Request): Promise<Response> {
@@ -51,11 +58,26 @@ export async function POST(request: Request): Promise<Response> {
     } catch { throw new DeviceError('device_action_invalid', 'Choose a valid device panel action.', 400); }
     if (!body || typeof body !== 'object' || Array.isArray(body)) throw new DeviceError('device_action_invalid', 'Choose a valid device panel action.', 400);
     const input = body as Record<string, unknown>;
-    if (!['install', 'start', 'stop', 'refresh'].includes(String(input.action)) || Object.keys(input).some((key) => key !== 'action' && !(input.action === 'install' && key === 'tool'))) {
+    const controlAction = ['take-control', 'handoff', 'release-control'].includes(String(input.action));
+    const allowed = controlAction ? ['action', 'deviceId', 'expectedSession', 'targetSession'] : input.action === 'install' ? ['action', 'tool'] : ['action'];
+    if (!['install', 'start', 'stop', 'refresh', 'take-control', 'handoff', 'release-control'].includes(String(input.action)) || Object.keys(input).some(key => !allowed.includes(key))) {
       throw new DeviceError('device_action_invalid', 'Choose a valid device panel action.', 400);
     }
     const manager = getDeviceManager();
-    if (input.action === 'install') {
+    if (controlAction) {
+      if (typeof input.deviceId !== 'string' || !/^[a-zA-Z0-9_-]{1,256}$/.test(input.deviceId)
+        || !(input.expectedSession === null || typeof input.expectedSession === 'string')
+        || (input.action === 'handoff' && typeof input.targetSession !== 'string')) {
+        throw new DeviceError('device_action_invalid', 'Choose a current device controller.', 400);
+      }
+      const state = await manager.state();
+      if (state.phase !== 'running' || !state.devices?.some(device => device.id === input.deviceId && device.platform === 'ios' && device.state === 'running')) {
+        throw new DeviceError('device_unavailable', 'Open the iOS simulator in Devices first.', 409);
+      }
+      const controllers = new DeviceControllers(manager.root);
+      await controllers.handoff(input.deviceId, input.expectedSession as string | null,
+        input.action === 'handoff' ? input.targetSession as string : null, true, input.action === 'release-control');
+    } else if (input.action === 'install') {
       if (input.tool !== undefined && !['hub', 'agent', 'all'].includes(String(input.tool))) throw new DeviceError('device_action_invalid', 'Choose a valid device helper.', 400);
       manager.install((input.tool ?? 'all') as 'hub' | 'agent' | 'all');
     } else if (input.action === 'start') manager.start(origin);

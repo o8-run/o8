@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { type QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { act, createElement, type ReactNode } from 'react';
+import { act, createElement, useState, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getQueryClient } from '@/lib/query/client';
@@ -21,7 +21,7 @@ let client: QueryClient;
 const provide = (child: ReactNode) => createElement(QueryClientProvider, { client }, child);
 let host: HTMLDivElement;
 let root: Root;
-let fetchMock: ReturnType<typeof vi.fn>;
+let fetchMock: ReturnType<typeof vi.fn<(url: string, init?: RequestInit) => Promise<Response>>>;
 let onClose: ReturnType<typeof vi.fn<() => void>>;
 const settleTimeline = () => act(async () => {
   if (vi.isFakeTimers()) await vi.advanceTimersByTimeAsync(1);
@@ -33,12 +33,73 @@ beforeEach(() => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true }); vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener() {}, removeEventListener() {} }));
   client = getQueryClient(); client.clear();
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
-  onClose = vi.fn(); fetchMock = vi.fn(); vi.stubGlobal('fetch', fetchMock);
+  onClose = vi.fn(); fetchMock = vi.fn(); vi.stubGlobal('fetch', (url: string, init?: RequestInit) => String(url).startsWith('/api/orchestrator/pull-request-context') ? Promise.resolve(Response.json({ ok: true, result: { links: [], nextCursor: null } })) : fetchMock(url, init));
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
 });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); client.clear(); vi.unstubAllGlobals(); });
 
 describe('pull request selection', () => {
+  it('keeps stack layers read-only through controlled selection and a missing layer snapshot', async () => {
+    const stack = { status: 'ready', stale: false, source: 'github-native', revision: 'readonly-stack', fetchedAt: '2026-01-01T00:00:00Z', attemptedAt: '2026-01-01T00:00:00Z',
+      snapshot: { id: 70, number: 7, trunk: 'main', layers: [9811, 9812, 9813].map(number => ({ number, title: `Layer ${number}`, state: 'open', headRef: 'work', baseRef: 'main', headSha: 'a'.repeat(40), baseSha: 'b'.repeat(40) })) } };
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return Response.json({ action: 'merged' });
+      const number = Number(url.match(/prs\/(\d+)/)?.[1]);
+      return Response.json({ pr: { ...detail(number), statusCheckRollup: [{ name: 'failed-fixture', status: 'COMPLETED', conclusion: 'FAILURE' }], headSha: 'a'.repeat(40), mergeable: true, ...(number === 9811 ? { stack } : {}) } });
+    });
+    function Controlled({ number, repoSlug }: { number: number; repoSlug: string }) {
+      const origin = `${repoSlug}:${number}`;
+      const [selected, select] = useState({ origin, number });
+      const current = selected.origin === origin ? selected.number : number;
+      if (selected.origin !== origin) select({ origin, number });
+      return createElement(PrPanel, { prNumber: current, repoSlug, onClose, onSelectLayer: next => select({ origin, number: next }) });
+    }
+    const show = async (number: number, repoSlug = 'example/repo') => { await act(async () => root.render(provide(createElement(Controlled, { number, repoSlug })))); await settleTimeline(); };
+    await show(9811);
+    await act(async () => host.querySelector<HTMLButtonElement>('[data-stack-layer="9812"]')!.click());
+    await settleTimeline();
+    const merge = host.querySelector<HTMLButtonElement>('[aria-label="Merge pull request"]');
+    if (merge) {
+      await act(async () => merge.click());
+      await act(async () => [...host.querySelectorAll<HTMLButtonElement>('[role=menu] button')].find(button => button.textContent === 'Squash and merge')!.click());
+      await act(async () => [...host.querySelectorAll<HTMLButtonElement>('[role=dialog] button')].find(button => button.textContent === 'Squash and merge')!.click());
+    }
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'POST')).toEqual([]);
+    expect(host.querySelector('[aria-label="Merge pull request"]')).toBeNull();
+    expect(host.querySelector('[data-pr-actions]')).toBeNull();
+    expect(host.querySelector('[data-pr-brain-chat]')).toBeNull();
+    expect(host.textContent).toContain('Read-only stack');
+    await show(9812, 'example/other');
+    expect(host.querySelector('[aria-label="Merge pull request"]')).not.toBeNull();
+    await show(9811);
+    await act(async () => host.querySelector<HTMLButtonElement>('[data-stack-layer="9812"]')!.click());
+    await settleTimeline();
+    await act(async () => host.querySelector<HTMLButtonElement>('[role="tab"][id$="-checks"]')!.click());
+    expect([...host.querySelectorAll('button')].find(button => button.textContent === 'Fix failing checks')).toBeUndefined();
+    await show(9813); // Unrelated direct selection still has the ordinary writer.
+    expect(host.querySelector('[aria-label="Merge pull request"]')).not.toBeNull();
+  });
+
+  it('focuses each native stack layer on its own diff and dependency view', async () => {
+    const stack = { status: 'ready', stale: false, source: 'github-native', revision: 'revision', fetchedAt: '2026-01-01T00:00:00Z', attemptedAt: '2026-01-01T00:00:00Z',
+      snapshot: { id: 70, number: 7, trunk: 'main', layers: [11, 12, 13].map((number, index) => ({ number, title: `Layer ${number}`, state: 'open', headRef: `layer-${number}`, baseRef: index ? `layer-${number - 1}` : 'main', headSha: String(index + 1).repeat(40), baseSha: String(index).repeat(40) })) } };
+    fetchMock.mockImplementation(async (url: string) => { const number = Number(url.match(/prs\/(\d+)/)?.[1]); return Response.json({ pr: { ...detail(number), stack, files: [{ path: `layer-${number}.ts`, status: 'modified', additions: 1, deletions: 0, patch: '@@ -1 +1 @@\n-old\n+new' }], changedFiles: 1 } }); });
+    await render(11);
+    expect(host.textContent).toContain('Native GitHub stack #7');
+    for (const number of [12, 13, 11]) {
+      await act(async () => host.querySelector<HTMLButtonElement>(`[data-stack-layer="${number}"]`)!.click());
+      await settleTimeline();
+      expect(host.querySelector('[data-pr-detail]')?.getAttribute('data-pr-detail')).toBe(String(number));
+      expect(host.querySelector('[role="tab"][aria-selected="true"]')?.id).toMatch(/-changes$/);
+      expect(host.querySelector(`[data-pr-file="layer-${number}.ts"]`)).not.toBeNull();
+      expect(host.querySelector(`[data-stack-layer="${number}"]`)?.getAttribute('aria-current')).toBe('true');
+    }
+    await act(async () => host.querySelector<HTMLButtonElement>('[data-stack-layer="12"]')!.click());
+    await settleTimeline(); await render(13); await render(11);
+    expect(host.querySelector('[data-pr-detail]')?.getAttribute('data-pr-detail')).toBe('11');
+    expect(fetchMock.mock.calls.every(([, init]) => !init?.method || init.method === 'GET')).toBe(true);
+  });
+
   it('uses the loaded files for the same breakdown in the header and Changes without another request', async () => {
     const files = [{ path: 'src/a.ts', status: 'modified', additions: 10, deletions: 2, patch: '' }, { path: 'tests/b.ts', status: 'modified', additions: 4, deletions: 0, patch: '' }];
     fetchMock.mockResolvedValue(Response.json({ pr: { ...detail(9805), files, changedFiles: 2, additions: 14, deletions: 2 } }));
@@ -67,8 +128,14 @@ describe('pull request selection', () => {
       fetchMock.mockResolvedValueOnce(Response.json({ pr: current })).mockResolvedValueOnce(Response.json({ error: 'GitHub refresh is paused.' }, { status: 429, headers: { 'retry-after': '120' } })).mockResolvedValue(Response.json({ pr: current }));
       await render(9801);
       await act(async () => vi.advanceTimersByTimeAsync(30_000));
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const checks = host.querySelector<HTMLButtonElement>('[role="tab"][id$="-checks"]')!;
+      await act(async () => checks.click());
+      expect(checks.getAttribute('aria-selected')).toBe('true');
+      await act(async () => vi.advanceTimersByTimeAsync(30_000));
       expect(fetchMock).toHaveBeenCalledTimes(2);
       expect(fetchMock.mock.calls[1][0]).toContain('&poll=1');
+      await settleTimeline();
       expect(host.textContent).toContain('Change 9801'); expect(host.textContent).toContain('GitHub refresh is paused.');
       await act(async () => vi.advanceTimersByTimeAsync(90_000)); expect(fetchMock).toHaveBeenCalledTimes(2);
       await act(async () => vi.advanceTimersByTimeAsync(31_000)); expect(fetchMock).toHaveBeenCalledTimes(3);

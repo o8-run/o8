@@ -1,4 +1,5 @@
 import { resolveProviderKey } from '@/lib/providers/key-store';
+import { nativeApiModelFamily } from './effort-contract';
 import { O8_MANAGED_TEXT_MODEL, O8_MANAGED_ZERO_COST_MODEL } from '@/lib/cortex/qa/llm/inference-route';
 import { parseInlineMarkdownDataImages } from '@/lib/llm/inline-images';
 import { toolsForAnthropic, toolsForOpenAI } from '@/lib/llm/tools';
@@ -102,12 +103,13 @@ export const PROVIDERS: Record<Exclude<Provider, 'google' | 'operator'>, Provide
       'content-type': 'application/json',
     }),
     buildBody: (model, messages, options) => {
-      const isThinkingModel = THINKING_MODELS.has(model);
-      const maxTokens = isThinkingModel ? 16384 : 4096;
+      const isThinkingModel = THINKING_MODELS.has(nativeApiModelFamily('anthropic', model));
       const explicitBudget = options?.thinkingBudgetTokens;
       const budgetTokens = explicitBudget != null && Number.isFinite(explicitBudget) && explicitBudget > 0
         ? Math.floor(explicitBudget)
         : 10000;
+      // Enabled thinking requires budget_tokens < max_tokens. Leave room for the answer.
+      const maxTokens = isThinkingModel ? Math.max(16384, budgetTokens + 4000) : 4096;
 
       return {
         model,
@@ -199,7 +201,7 @@ export const PROVIDERS: Record<Exclude<Provider, 'google' | 'operator'>, Provide
     }),
     buildBody: (model, messages, _options) => {
       void _options;
-      const isReasoningModel = THINKING_MODELS.has(model);
+      const isReasoningModel = THINKING_MODELS.has(nativeApiModelFamily('openai', model));
 
       return {
         model,

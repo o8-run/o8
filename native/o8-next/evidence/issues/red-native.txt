@@ -1,0 +1,28 @@
+running 4 tests
+test shell::issue_tests::issues_create_enhance_preview_labels_and_success ...
+thread 'shell::issue_tests::issues_create_enhance_preview_labels_and_success' panicked at src/issue_tests.rs:38:5:
+real control did not reach CPU paint: issue-ready
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+test shell::issue_tests::issues_errors_retry_stale_and_account_switch ...
+thread 'shell::issue_tests::issues_errors_retry_stale_and_account_switch' panicked at src/issue_tests.rs:38:5:
+real control did not reach CPU paint: issue-ready
+FAILED
+test shell::issue_tests::issues_interaction_frames_and_missing_checkout_refusal ...
+thread 'shell::issue_tests::issues_interaction_frames_and_missing_checkout_refusal' panicked at src/issue_tests.rs:38:5:
+real control did not reach CPU paint: issue-ready
+FAILED
+test shell::issue_tests::issues_view_search_link_clear_and_worker_task ...
+thread 'shell::issue_tests::issues_view_search_link_clear_and_worker_task' panicked at src/issue_tests.rs:38:5:
+real control did not reach CPU paint: issue-ready
+FAILED
+
+failures:
+
+failures:
+    shell::issue_tests::issues_create_enhance_preview_labels_and_success
+    shell::issue_tests::issues_errors_retry_stale_and_account_switch
+    shell::issue_tests::issues_interaction_frames_and_missing_checkout_refusal
+    shell::issue_tests::issues_view_search_link_clear_and_worker_task
+
+test result: FAILED. 0 passed; 4 failed; 0 ignored; 0 measured; 33 filtered out; finished in 13.79s

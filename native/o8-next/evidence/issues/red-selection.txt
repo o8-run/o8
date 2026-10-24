@@ -1,0 +1,13 @@
+running 1 test
+test shell::issue_tests::issues_link_follows_worker_selection ...
+thread 'shell::issue_tests::issues_link_follows_worker_selection' panicked at src/issue_tests.rs:70:5:
+real control did not reach CPU paint: issue-unlinked
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    shell::issue_tests::issues_link_follows_worker_selection
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 38 filtered out; finished in 4.12s

@@ -1,3 +1,4 @@
+import { validPrStackObservation, type PullRequestStackObservation } from '@/lib/github-client/pr-stack';
 /**
  * Mobile diff fetch helper. Picks the right endpoint and returns a unified
  * diff body that `parseDiff()` (from `@/lib/llm/diff-parse`) can consume.
@@ -15,6 +16,7 @@ export type MobileDiffSource =
   | { kind: 'pr'; repo: string; number: number };
 
 export interface MobileDiffPayload {
+  stack?: PullRequestStackObservation;
   rawDiff: string;
   additions: number;
   deletions: number;
@@ -22,6 +24,8 @@ export interface MobileDiffPayload {
   error?: string;
 }
 
+import { getMobileGithubContext } from './github-cache';
+import { githubItemQuery } from '@/lib/github-client/item-query';
 import { getMobileWsToken } from '@/lib/mobile/ws-token-client';
 
 function getWsToken(): string {
@@ -94,22 +98,11 @@ async function fetchWorktreeDiff(
 async function fetchPrDiff(
   source: Extract<MobileDiffSource, { kind: 'pr' }>,
 ): Promise<MobileDiffPayload> {
-  const response = await fetch(
-    `/api/panel/prs/${source.number}?repo=${encodeURIComponent(source.repo)}`,
-    { cache: 'no-store', headers: authHeaders() },
-  );
-  if (!response.ok) {
-    return { rawDiff: '', additions: 0, deletions: 0, fileCount: 0, error: `HTTP ${response.status}` };
-  }
-  const data = await response.json() as {
-    pr?: {
-      additions?: number;
-      deletions?: number;
-      changedFiles?: number;
-      files?: PrFile[];
-    };
-    error?: string;
-  };
+  const context = getMobileGithubContext();
+  const data = await context.client.fetchQuery(githubItemQuery<{
+    pr?: { stack?: unknown; additions?: number; deletions?: number; changedFiles?: number; files?: PrFile[] }; error?: string;
+  }>(source.repo, 'pr-files', source.number,
+    `/api/panel/prs/${source.number}?repo=${encodeURIComponent(source.repo)}`, context));
   if (data.error) {
     return { rawDiff: '', additions: 0, deletions: 0, fileCount: 0, error: data.error };
   }
@@ -119,6 +112,7 @@ async function fetchPrDiff(
   }
   return {
     rawDiff: synthesizePrDiff(pr.files),
+    ...(validPrStackObservation(pr.stack, source.number) ? { stack: pr.stack } : {}),
     additions: pr.additions ?? 0,
     deletions: pr.deletions ?? 0,
     fileCount: pr.changedFiles ?? pr.files.length,

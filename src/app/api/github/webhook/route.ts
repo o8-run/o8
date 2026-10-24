@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { after, NextRequest, NextResponse } from 'next/server';
 import { createHash } from 'node:crypto';
 import { verifyGitHubWebhookSignature } from '@/lib/github-broker';
 import { recordAutomationSourceEvent } from '@/lib/automations/source-events';
@@ -243,6 +243,10 @@ export async function POST(request: NextRequest) {
           mergedAt: pr.merged_at ?? null,
         });
         markGitHubSyncSuccess(repoFullName, 'pull_requests', null);
+        const { enqueuePullRequestStackRefresh, drainPullRequestStackRefresh } = await import('@/lib/github-broker/pull-request-stack-refresh');
+        enqueuePullRequestStackRefresh(repoFullName, pr.number);
+        try { after(() => drainPullRequestStackRefresh()); }
+        catch { /* Outside a live request context, the supervisor consumes the persisted intent. */ }
         recordAutomationSourceEvent({
           sourceKind: 'repository',
           sourceId: repoFullName,

@@ -362,6 +362,7 @@ export type LaneEventVerb =
   // A checked-in workspace manifest allocated service ports and completed its
   // setup and one-shot health probes. Payload:
   // { services: [{ name, port }], preview?, durationMs, state: 'completed' }
+  | 'workspace_manifest_services_stopped'
   | 'workspace_manifest_applied'
   // Operator policy prevented a checked-in manifest from executing. Payload:
   // { policy, manifestHash, approvalId?, reason? }

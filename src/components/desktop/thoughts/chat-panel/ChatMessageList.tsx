@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, forwardRef, memo, useRef } from 'react';
+import { Fragment, forwardRef, memo, useEffect, useRef, useState, type RefObject } from 'react';
 import { DesktopAgentMessage } from '../../DesktopAgentMessage';
 import { ComposerEntryDelivery, ComposerQueuedMessages, type ComposerTranscriptQueue } from './ComposerQueuedMessages';
 import { SuggestedReplies } from '../SuggestedReplies';
@@ -126,7 +126,36 @@ interface ChatMessageListProps {
   onTaskArtifactDeliver?: (input: TaskArtifactDeliverInput) => boolean;
 }
 
-export const ChatMessageList = memo(forwardRef<HTMLDivElement, ChatMessageListProps>(function ChatMessageList({
+// Inactive can also mean a visible, unfocused split pane. Defer presentation
+// only after the actual retained surface reports zero width; its owner keeps
+// receiving every stream delta and supplies the latest snapshot on reveal.
+export const ChatMessageList = memo(forwardRef<HTMLDivElement, ChatMessageListProps>(function ChatMessageList(props, chatEndRef) {
+  const visibilityRef = useRef<HTMLDivElement>(null);
+  const [visible, setVisible] = useState(true);
+  const [presented, setPresented] = useState(props);
+  const presenting = props.active !== false || visible
+    || props.threadId !== presented.threadId || props.repoPath !== presented.repoPath;
+  useEffect(() => {
+    const container = visibilityRef.current;
+    if (!container || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(entries => {
+      for (const entry of entries) if (entry.target === container) setVisible(entry.contentRect.width > 0);
+    });
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, []);
+  // Retain one committed presentation, not a growing cache of stream snapshots.
+  // React restarts this small wrapper before reconciling the presentation.
+  if (presenting && presented !== props) setPresented(props);
+  return <ChatMessageListPresentation {...(presenting ? props : presented)} visibilityRef={visibilityRef} ref={chatEndRef} />;
+}));
+
+interface ChatMessageListPresentationProps extends ChatMessageListProps {
+  visibilityRef: RefObject<HTMLDivElement | null>;
+}
+
+const ChatMessageListPresentation = memo(forwardRef<HTMLDivElement, ChatMessageListPresentationProps>(function ChatMessageListPresentation({
+  visibilityRef,
   displayMessages: rawDisplayMessages,
   logLabel,
   displayWaiting,
@@ -218,7 +247,7 @@ export const ChatMessageList = memo(forwardRef<HTMLDivElement, ChatMessageListPr
     displayMessages[displayMessages.length - 1]?.text?.toLowerCase().includes('compact');
 
   return (
-    <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', minHeight: 0, flex: composeFirst ? '0 1 auto' : 1 }}>
+    <div ref={visibilityRef} style={{ position: 'relative', display: 'flex', flexDirection: 'column', minHeight: 0, flex: composeFirst ? '0 1 auto' : 1 }}>
     <TranscriptNavigator entries={displayMessages} scrollRef={scrollRef} />
     <div ref={scrollRef}
       role={logLabel ? 'log' : undefined}

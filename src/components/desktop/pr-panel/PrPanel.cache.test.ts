@@ -19,7 +19,7 @@ type Selection = { repo?: string | null; number?: number; active?: boolean };
 let host: HTMLDivElement;
 let root: Root;
 let client: QueryClient;
-let fetchMock: ReturnType<typeof vi.fn>;
+let fetchMock: ReturnType<typeof vi.fn<(url: string, init?: RequestInit) => Promise<Response>>>;
 async function flush() { for (let i = 0; i < 4; i++) await act(async () => { await vi.advanceTimersByTimeAsync(1); }); }
 async function render(selections: Selection[] = [{ repo: 'Org/Sample' }], composer?: Selection) {
   await act(async () => root.render(createElement(QueryClientProvider, { client }, ...selections.map((selection, index) => createElement(PrPanel, { key: index, prNumber: selection.number ?? 7, repoSlug: selection.repo, active: selection.active ?? true, onClose: () => {} })), composer ? createElement(PrCommentComposer, { detail: detail(composer.number ?? 7), repoSlug: composer.repo, draft: 'Posted comment', onDraftChange: () => {}, onCollapse: () => {} }) : null)));
@@ -41,7 +41,10 @@ beforeEach(() => {
   vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener() {}, removeEventListener() {} }));
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
-  fetchMock = vi.fn(async () => response()); vi.stubGlobal('fetch', fetchMock);
+  fetchMock = vi.fn(async () => response());
+  vi.stubGlobal('fetch', (url: string, init?: RequestInit) => String(url).startsWith('/api/orchestrator/pull-request-context')
+    ? Promise.resolve(Response.json({ ok: true, result: { links: [], nextCursor: null } }))
+    : fetchMock(url, init));
 });
 afterEach(async () => { await act(async () => root.unmount()); client.clear(); invalidateSWR('pr-detail'); host.remove(); vi.clearAllTimers(); vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
@@ -59,6 +62,22 @@ describe('compact PR detail snapshots through PrPanel', () => {
     await act(async () => fix!.click());
     expect(fetchMock.mock.calls.at(-1)?.[0]).toBe('/api/panel/prs/7/repair?repo=Org%2FSample');
     expect(panel?.textContent).toContain('Select failed checks');
+  });
+
+  it('does not use the fast checks cadence while another PR view is selected', async () => {
+    fetchMock.mockImplementation(async () => Response.json({ pr: { ...detail(), statusCheckRollup: [{ name: 'Tests', status: 'in_progress' }] } }));
+    await render();
+    const summary = host.querySelector<HTMLButtonElement>('[role=tab][id$="-summary"]')!;
+    await act(async () => summary.click()); expect(summary.getAttribute('aria-selected')).toBe('true');
+    await act(async () => vi.advanceTimersByTimeAsync(30_000)); await flush();
+    expect(reads()).toHaveLength(1);
+  });
+
+  it.each(['closed', 'merged'])('loads a %s PR once while retained and mounted', async state => {
+    fetchMock.mockImplementation(async () => Response.json({ pr: { ...detail(), state } }));
+    await render(); await act(async () => vi.advanceTimersByTimeAsync(600_000)); await flush();
+    expect(reads()).toHaveLength(1);
+    await render([]); await render(); expect(reads()).toHaveLength(1);
   });
 
   it('joins concurrent aliases while preserving the original request spelling', async () => {
@@ -110,7 +129,7 @@ describe('compact PR detail snapshots through PrPanel', () => {
 
   it('cancels abandoned reads and discards late replies rather than seeding obsolete detail', async () => {
     const held = deferred(); fetchMock.mockReturnValueOnce(held.promise); await render();
-    const oldSignal = reads()[0][1].signal as AbortSignal;
+    const oldSignal = reads()[0][1]!.signal as AbortSignal;
     fetchMock.mockResolvedValue(response(8, 'Other selection')); await render([{ repo: 'Org/Sample', number: 8 }]); expect(oldSignal.aborted).toBe(true);
     await act(async () => held.resolve(response(7, 'Obsolete change'))); await flush(); expect(host.textContent).not.toContain('Obsolete change');
     fetchMock.mockResolvedValue(response(7, 'Current change')); await render(); expect(host.textContent).toContain('Current change'); expect(reads()).toHaveLength(3);
@@ -118,7 +137,7 @@ describe('compact PR detail snapshots through PrPanel', () => {
 
   it('keeps one shared read alive while another alias observer remains', async () => {
     const held = deferred(); fetchMock.mockReturnValue(held.promise); await render([{ repo: 'Org/Sample' }, { repo: 'org/sample' }]);
-    const signal = reads()[0][1].signal as AbortSignal;
+    const signal = reads()[0][1]!.signal as AbortSignal;
     await render([{ repo: 'org/sample' }]); expect(signal.aborted).toBe(false); expect(reads()).toHaveLength(1);
     await act(async () => held.resolve(response())); await flush(); expect(host.textContent).toContain('Known change');
   });
@@ -131,12 +150,13 @@ describe('compact PR detail snapshots through PrPanel', () => {
   it('preserves fast running-check polling and background request labels without duplicate alias reads', async () => {
     fetchMock.mockImplementation(async () => Response.json({ pr: { ...detail(), statusCheckRollup: [{ name: 'test', status: 'in_progress' }] } }));
     await render([{ repo: 'Org/Sample' }, { repo: 'org/sample' }]);
+    await act(async () => { host.querySelector<HTMLButtonElement>('[role=tab][id$="-checks"]')!.click(); });
     await act(async () => vi.advanceTimersByTimeAsync(30_000)); await flush();
     expect(reads()).toHaveLength(2); expect(reads()[1][0]).toContain('&poll=1');
   });
 
-  it('keeps idle checks on the existing two-minute poll interval', async () => {
-    await render(); await act(async () => vi.advanceTimersByTimeAsync(30_000)); expect(reads()).toHaveLength(1);
+  it('keeps the summary on the two-minute poll interval', async () => {
+    await render(); await act(async () => host.querySelector<HTMLButtonElement>('[role=tab][id$="-summary"]')!.click()); await act(async () => vi.advanceTimersByTimeAsync(30_000)); expect(reads()).toHaveLength(1);
     await act(async () => vi.advanceTimersByTimeAsync(90_000)); await flush(); expect(reads()).toHaveLength(2); expect(reads()[1][0]).toContain('&poll=1');
   });
 
@@ -148,7 +168,7 @@ describe('compact PR detail snapshots through PrPanel', () => {
 
   it('retains known checks and respects quota backoff before the next scheduled read', async () => {
     fetchMock.mockImplementation(async () => Response.json({ pr: { ...detail(), statusCheckRollup: [{ name: 'test', status: 'in_progress' }] } }));
-    await render(); fetchMock.mockResolvedValueOnce(Response.json({ error: 'GitHub refresh is paused.' }, { status: 429, headers: { 'retry-after': '120' } }));
+    await render(); await act(async () => host.querySelector<HTMLButtonElement>('[role=tab][id$="-checks"]')!.click()); fetchMock.mockResolvedValueOnce(Response.json({ error: 'GitHub refresh is paused.' }, { status: 429, headers: { 'retry-after': '120' } }));
     await act(async () => vi.advanceTimersByTimeAsync(30_000)); await flush(); expect(reads()).toHaveLength(2);
     expect(host.textContent).toContain('Known change'); expect(host.textContent).toContain('GitHub refresh is paused.');
     await act(async () => vi.advanceTimersByTimeAsync(90_000)); expect(reads()).toHaveLength(2);
@@ -169,7 +189,7 @@ describe('compact PR detail snapshots through PrPanel', () => {
       if (firstRead) { firstRead = false; return held.promise; }
       return Promise.resolve(response(7, 'After comment'));
     });
-    await refresh(); const oldSignal = reads().at(-1)![1].signal as AbortSignal;
+    await refresh(); const oldSignal = reads().at(-1)![1]!.signal as AbortSignal;
     await act(async () => host.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))); await flush();
     expect(oldSignal.aborted).toBe(true); expect(host.textContent).toContain('After comment');
     await act(async () => held.resolve(response(7, 'Before comment'))); await flush(); expect(host.textContent).not.toContain('Before comment');
@@ -187,12 +207,14 @@ it('invalidates a default-scope snapshot only when its resolved repository match
   await render([{ repo: null }]); expect(host.textContent).toContain('Default after comment'); expect(reads()).toHaveLength(2);
 });
 
-it('rechooses the check cadence after manual refresh changes idle and running state', async () => {
+it('keeps checks polling fast through a refresh and slows it when leaving checks', async () => {
   await render();
+  await act(async () => host.querySelector<HTMLButtonElement>('[role=tab][id$="-checks"]')!.click());
   fetchMock.mockImplementation(async () => Response.json({ pr: { ...detail(), statusCheckRollup: [{ name: 'test', status: 'in_progress' }] } }));
   await refresh();
   await act(async () => vi.advanceTimersByTimeAsync(30_000)); await flush(); expect(reads()).toHaveLength(3);
   fetchMock.mockResolvedValue(response()); await refresh();
+  await act(async () => host.querySelector<HTMLButtonElement>('[role=tab][id$="-summary"]')!.click());
   await act(async () => vi.advanceTimersByTimeAsync(30_000)); expect(reads()).toHaveLength(4);
   await act(async () => vi.advanceTimersByTimeAsync(90_000)); await flush(); expect(reads()).toHaveLength(5);
 });

@@ -18,9 +18,9 @@ const snapshot = (title = 'Fixture change', state = 'OPEN', number = 7) => Respo
 const reads = () => fetchMock.mock.calls.filter(([url, init]) => String(url).startsWith('/api/panel/prs/') && init?.method !== 'POST');
 const writes = () => fetchMock.mock.calls.filter(([, init]) => init?.method === 'POST');
 async function settle(ms = 0) { await act(async () => vi.advanceTimersByTimeAsync(ms)); }
-async function render(count = 1, repo: string | undefined = 'org/sample', number = 7) {
+async function render(count = 1, repo: string | undefined = 'org/sample', number = 7, active = true) {
   await act(async () => root.render(createElement(QueryClientProvider, { client },
-    ...Array.from({ length: count }, (_, key) => createElement(PRViewer, { key, repo, prNumber: number })),
+    ...Array.from({ length: count }, (_, key) => createElement(PRViewer, { key, repo, prNumber: number, active })),
   ))); await settle(); await settle();
 }
 async function comment(text = 'Fixture comment') {
@@ -145,4 +145,75 @@ it('preserves the write acknowledgment when its refresh fails and retries on rem
   fetchMock.mockImplementation(async (url: string) => url === '/api/panel/repos' ? Response.json({ repos: [] }) : snapshot('Recovered after comment'));
   await render(0); await render(); expect(host.textContent).toContain('#7 Recovered after comment');
   expect(reads()).toHaveLength(3); expect(writes()).toHaveLength(1);
+});
+
+it('polls only the selected checks view and stops on hide, overview, or terminal state', async () => {
+  const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
+  await render(); await settle(30_000); expect(reads()).toHaveLength(1);
+  const select = async (label: string) => { await act(async () => [...host.querySelectorAll('button')].find(button => button.textContent?.includes(label))!.click()); await settle(); };
+  await select('Checks'); await settle(30_000); expect(reads()).toHaveLength(2);
+  hidden.mockReturnValue(true); await act(async () => document.dispatchEvent(new Event('visibilitychange')));
+  await settle(60_000); expect(reads()).toHaveLength(2);
+  hidden.mockReturnValue(false); await act(async () => document.dispatchEvent(new Event('visibilitychange')));
+  await select('Overview'); await settle(60_000); expect(reads()).toHaveLength(2);
+  fetchMock.mockImplementation(async (url: string) => url === '/api/panel/repos' ? Response.json({ repos: [] }) : snapshot('Merged change', 'MERGED'));
+  await select('Checks'); await settle(30_000); expect(reads()).toHaveLength(3);
+  await settle(180_000); expect(reads()).toHaveLength(3);
+});
+
+it('delivers the post-action refresh during a shared repository hold', async () => {
+  await render(); client.setQueryData(['gh-quota', 'org/sample'], Date.now() + 600_000);
+  fetchMock.mockImplementation(async (_url: string, init?: RequestInit) => init?.method === 'POST'
+    ? Response.json({ action: 'commented' }) : snapshot('Manual held refresh'));
+  await comment();
+  expect(reads()).toHaveLength(2); expect(host.textContent).toContain('Manual held refresh');
+});
+
+it('shares the selected review-thread read across simultaneous full viewers', async () => {
+  fetchMock.mockImplementation(async (url: string) => url.includes('/review/threads?') ? Response.json({ threads: [] })
+    : url === '/api/panel/repos' ? Response.json({ repos: [] }) : snapshot());
+  await render(2);
+  await act(async () => { for (const button of host.querySelectorAll('button')) if (button.textContent?.startsWith('Threads')) button.click(); });
+  await settle(); await settle();
+  expect(fetchMock.mock.calls.filter(([url]) => String(url).includes('/review/threads?'))).toHaveLength(1);
+});
+
+it('stops checks polling while the Canvas keeps the PR tab mounted but inactive', async () => {
+  await render();
+  await act(async () => [...host.querySelectorAll('button')].find(button => button.textContent?.startsWith('Checks'))!.click());
+  await settle(30_000); expect(reads()).toHaveLength(2);
+  await render(1, 'org/sample', 7, false); await settle(120_000); expect(reads()).toHaveLength(2);
+  await render(); await settle(); const before = reads().length;
+  await settle(30_000); expect(reads()).toHaveLength(before + 1);
+});
+
+it('focuses a native stack layer in the full viewer with its own files', async () => {
+  const stack = { status: 'ready', stale: false, source: 'github-native', revision: 'revision', fetchedAt: '2026-01-01T00:00:00Z', attemptedAt: '2026-01-01T00:00:00Z',
+    snapshot: { id: 70, number: 7, trunk: 'main', layers: [7, 8].map((number, index) => ({ number, title: `Layer ${number}`, state: 'open', headRef: `layer-${number}`, baseRef: index ? 'layer-7' : 'main', headSha: String(index + 1).repeat(40), baseSha: String(index).repeat(40) })) } };
+  fetchMock.mockImplementation(async (url: string) => {
+    if (url === '/api/panel/repos') return Response.json({ repos: [] });
+    const number = Number(url.match(/prs\/(\d+)/)?.[1]);
+    const body = await snapshot(`Layer ${number}`, 'OPEN', number).json();
+    return Response.json({ pr: { ...body.pr, stack, statusCheckRollup: [{ name: 'failed-fixture', status: 'COMPLETED', conclusion: 'FAILURE' }], files: [{ path: `layer-${number}.ts`, additions: 1, deletions: 0 }] } });
+  });
+  await render();
+  expect(host.textContent).toContain('Native GitHub stack #7');
+  await act(async () => host.querySelector<HTMLButtonElement>('[data-stack-layer="8"]')!.click());
+  await settle(); await settle();
+  expect(host.textContent).toContain('layer-8.ts');
+  expect(host.querySelector('[data-stack-layer="8"]')?.getAttribute('aria-current')).toBe('true');
+  expect(reads().at(-1)?.[0]).toContain('/prs/8?repo=org%2Fsample');
+  await act(async () => {
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'm', bubbles: true }));
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true }));
+  });
+  await settle();
+  expect(writes()).toEqual([]);
+  expect(host.querySelector('input[name="reviewComment"]')).toBeNull();
+  expect(host.textContent).toContain('Read-only stack');
+  await act(async () => [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.startsWith('Checks'))!.click());
+  await settle();
+  expect([...host.querySelectorAll('button')].find(button => button.textContent === 'Fix failing checks')).toBeUndefined();
+  await render(1, 'org/sample', 9); await render();
+  expect(host.textContent).toContain('#7 Layer 7');
 });

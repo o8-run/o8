@@ -2,6 +2,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ipcFetch } from '@/lib/tauri/ipc-fetch';
+import { useGithubWindowHidden } from '@/lib/github-client/visibility';
+import { githubRefreshInterval } from '@/lib/github-client/refresh-policy';
 import { linkedPullRequestListQuery } from '@/lib/github-client/linked-pr-list';
 import { FloatingDialog } from '../FloatingDialog';
 import { RamsButton } from '../settings/RamsButton';
@@ -10,6 +12,7 @@ import { repoSlugFromRemote } from '../canvas-utils';
 import { pullRequestStackRows } from '@/lib/github-broker/pull-request-stacks';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
 import { parsePullRequestLink, linkedPrIdentity } from './linked-pr-store';
+import { ConversationPullRequests } from '@/components/conversation-prs/ConversationPullRequests';
 import { useLinkedPullRequests } from './useLinkedPullRequests';
 
 export function LinkedPullRequests({ context, tabId, repoPath, repos, active, onOpen }: {
@@ -27,8 +30,10 @@ export function LinkedPullRequests({ context, tabId, repoPath, repos, active, on
   const requestRef = useRef<AbortController | null>(null);
   const selectedRepo = repos.find((repo) => repo.localPath === repoPath);
   const slug = repoSlugFromRemote(selectedRepo?.remoteUrl)?.toLowerCase() ?? null;
+  const hidden = useGithubWindowHidden();
   const dependencies = useQuery({
     ...linkedPullRequestListQuery(slug ?? ''),
+    refetchInterval: githubRefreshInterval(() => hidden),
     enabled: Boolean(active && slug && links.some((entry) => entry.repo === slug)),
   });
   const snapshot = dependencies.data;
@@ -67,6 +72,7 @@ export function LinkedPullRequests({ context, tabId, repoPath, repos, active, on
     } catch (cause) { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : 'The pull request could not be linked.'); }
     finally { if (requestRef.current === controller) { requestRef.current = null; setBusy(false); } }
   };
+  if (/^thread:thoughts-[A-Za-z0-9_-]{1,120}$/.test(context)) return <ConversationPullRequests threadId={context.slice(7)} active={active} repo={slug} legacyLinks={links} onOpen={onOpen} />;
   return <section aria-label="Linked pull requests" style={{ paddingTop: 8, paddingRight: 12, paddingBottom: 8, paddingLeft: 12, borderBottom: '1px solid var(--t-divider-subtle)', flexShrink: 0 }}>
     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
       <button type="button" aria-expanded={expanded} onClick={() => setExpanded((value) => !value)} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: 0, border: 0, background: 'transparent', color: 'var(--t-text-muted)', fontFamily: 'inherit', fontSize: 11, fontWeight: 300, cursor: 'pointer' }}><GitPullRequest size={12} />Linked PRs{links.length ? ` · ${links.length}` : ''}</button>
@@ -80,7 +86,7 @@ export function LinkedPullRequests({ context, tabId, repoPath, repos, active, on
     {!expanded && links.length > 2 ? <button type="button" onClick={() => setExpanded(true)} style={{ border: 0, padding: 0, marginTop: 6, background: 'transparent', color: 'var(--t-text-muted)', fontFamily: 'inherit', fontSize: 10, cursor: 'pointer' }}>Show {links.length - 2} more</button> : null}
     {expanded ? <div style={{ marginTop: 8, fontSize: 9.5, fontWeight: 260, letterSpacing: '-0.4px', color: 'var(--t-text-faint)' }}>{context.startsWith('worktree:') ? 'Saved for this worktree' : 'Saved for this conversation'}</div> : null}
     {expanded && related.some((row) => row.parent) ? <div style={{ marginTop: 8 }}>
-      <div style={{ color: 'var(--t-text-faint)', fontSize: 10, marginBottom: 4 }}>Branch dependencies{snapshot?.nextPage ? ' · partial list' : ''}</div>
+      <div style={{ color: 'var(--t-text-faint)', fontSize: 10, marginBottom: 4 }}>Inferred branch dependencies{snapshot?.nextPage ? ' · partial list' : ''}</div>
       {related.map((row) => <button key={row.pull.number} type="button" onClick={() => slug && onOpen?.(row.pull.number, slug)} style={{ display: 'block', maxWidth: '100%', textAlign: 'left', paddingTop: 4, paddingBottom: 4, paddingLeft: Math.min(row.depth, 5) * 10, paddingRight: 0, border: 0, background: 'transparent', color: 'var(--t-text-muted)', fontFamily: 'inherit', fontSize: 11, fontWeight: 300, cursor: 'pointer', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.depth ? '↳ ' : ''}#{row.pull.number} · {row.pull.headRefName}{row.ambiguous ? ' · dependency unclear' : ''}</button>)}
     </div> : null}
     {expanded && (readError || dependencyError) ? <div role="status" style={{ marginTop: 6, color: 'var(--t-text-muted)', fontSize: 11 }}>{readError || dependencyError}</div> : null}

@@ -49,6 +49,7 @@ export async function fetchGitHubIssueDetail(repoFullName: string, issueNumber: 
 export async function fetchGitHubPullRequestDetail(repoFullName: string, prNumber: number, suppliedReviewDecision?: Promise<string | null>, priority: GitHubReadPriority = 'interactive') {
   const { response, installation, scope } = await githubInstallationFetch(repoFullName, `/repos/${repoFullName}/pulls/${prNumber}`, { signal: AbortSignal.timeout(18_000) }, { priority, share: true });
   const pr = await parseGithubJson<{
+    id?: number;
     number: number;
     title: string;
     body?: string | null;
@@ -62,7 +63,7 @@ export async function fetchGitHubPullRequestDetail(repoFullName: string, prNumbe
     labels?: Array<{ name?: string | null }>;
     requested_reviewers?: Array<{ login?: string | null }>;
     head?: { ref?: string | null; sha?: string | null } | null;
-    base?: { ref?: string | null; sha?: string | null; repo?: { allow_merge_commit?: boolean; allow_squash_merge?: boolean; allow_rebase_merge?: boolean } } | null;
+    base?: { ref?: string | null; sha?: string | null; repo?: { id?: number; allow_merge_commit?: boolean; allow_squash_merge?: boolean; allow_rebase_merge?: boolean } } | null;
     additions?: number;
     deletions?: number;
     changed_files?: number;
@@ -89,6 +90,8 @@ export async function fetchGitHubPullRequestDetail(repoFullName: string, prNumbe
 
   return {
     githubScope: scope,
+    ...(Number.isSafeInteger(pr.id) && Number(pr.id) > 0 && Number.isSafeInteger(pr.base?.repo?.id) && Number(pr.base?.repo?.id) > 0
+      ? { githubIdentity: { repositoryId: pr.base!.repo!.id!, pullRequestId: pr.id! } } : {}),
     checksUnavailable,
     number: pr.number,
     title: pr.title ?? '',

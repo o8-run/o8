@@ -207,6 +207,8 @@ export type RebindOwnedWorkspaceResult =
 // ── Tail entries / groups ────────────────────────────────────────────────────
 
 export interface OwnedTailEntry {
+  model?: string;
+  tokens?: import('@/lib/mobile/types').MobileTranscriptEntry['tokens'];
   id: string;
   kind: 'message' | 'event' | 'tool' | 'tool-output';
   label: string;

@@ -1,6 +1,6 @@
 {
   "name": "o8",
-  "version": "0.1.807",
+  "version": "0.1.808",
   "description": "o8 — governance layer for autonomous engineering teams. Approvals, audit, organizational memory.",
   "license": "MIT",
   "productName": "o8",
@@ -11,7 +11,9 @@
   },
   "packageManager": "npm@11.21.1",
   "o8DependencyClone": {
-    "lifecycleInputs": ["scripts/postinstall.mjs"]
+    "lifecycleInputs": [
+      "scripts/postinstall.mjs"
+    ]
   },
   "scripts": {
     "worker:login": "node --import ./scripts/register-server-only-stub.mjs --import tsx scripts/connect-native-worker.ts",
@@ -168,7 +170,7 @@
     "micromark-extension-frontmatter": "2.0.0",
     "micromark-extension-gfm": "3.0.0",
     "monaco-editor": "^0.55.1",
-    "next": "^16.3.4",
+    "next": "^16.4.1",
     "playwright-core": "^1.60.0",
     "prosemirror-commands": "1.7.2",
     "prosemirror-history": "1.5.0",
@@ -216,6 +218,9 @@
     "vitest": "^4.1.11"
   },
   "overrides": {
+    "@earendil-works/pi-coding-agent": {
+      "undici": "8.12.2"
+    },
     "dompurify": "$dompurify",
     "esbuild": "0.28.1",
     "postcss": "8.5.26",

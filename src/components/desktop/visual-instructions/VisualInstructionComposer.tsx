@@ -114,8 +114,8 @@ export function VisualInstructionComposer(props: VisualInstructionComposerProps)
     if (!draft || busy || clearing.current || capturing || draft.status === 'saved' || !draft.request.utterance.trim() || !draft.request.frames.length) return;
     setBusy(true); setError(null);
     try {
-      await commitVisualInstruction(draft, () => alive.current && current.current.loaded && current.current.principal === draft.principal);
-      setExpanded(false);
+      const item = await commitVisualInstruction(draft, () => alive.current && current.current.loaded && current.current.principal === draft.principal);
+      if (item) setExpanded(false);
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause);
       setError(message);

@@ -1,3 +1,5 @@
+import { CONVERSATION_PR_TOOLS, handleConversationPrs } from './operator-handlers/conversation-prs';
+import { PR_STACK_TOOLS, handlePrStack } from './operator-handlers/pr-stack';
 import { safeErrorText } from '@/lib/mcp/api-error';
 import { discoverMcp, isModernMcpRequest, modernMcpCall, modernMcpError, modernMcpResult } from './operator-mcp-protocol';
 import { nativeReadGeneration } from '@/lib/mcp/native-read-publication';
@@ -117,6 +119,9 @@ import { TARGETING_TOOLS, handleTargets } from '@/lib/mcp/operator-handlers/targ
 import { TRUTH_TOOLS, handleTruthQuery } from '@/lib/mcp/operator-handlers/truth';
 import { UPDATE_TOOLS, handleUpdateApply } from '@/lib/mcp/operator-handlers/update';
 import { getDataDir } from '@/lib/data-dir-migration';
+import { DEVICE_TOOLS, handleDevice } from './operator-handlers/devices';
+import type { DeviceControllerContext } from '@/lib/devices/controller-store';
+import { DeviceError } from '@/lib/devices/types';
 
 export interface OperatorMcpRequest {
   jsonrpc: '2.0';
@@ -270,6 +275,7 @@ async function handleUserContext(): Promise<McpToolResult> {
 }
 
 const TOOLS: McpTool[] = [
+  ...CONVERSATION_PR_TOOLS,
   ...STATUS_TOOLS.filter((tool) => tool.name === 'o8_send'),
   ...STATUS_TOOLS.filter((tool) => tool.name === 'o8_status'),
   ...USER_CONTEXT_TOOLS,
@@ -294,6 +300,7 @@ const TOOLS: McpTool[] = [
   ...BROADCAST_TOOLS,
   ...UPDATE_TOOLS,
   ...O8_WEBVIEW_TOOLS,
+  ...DEVICE_TOOLS,
   ...CANVAS_TOOLS,
   ...TASK_ARTIFACT_TOOLS,
   ...VISUALIZATION_TOOLS,
@@ -314,6 +321,7 @@ const TOOLS: McpTool[] = [
   ...MISSION_TOOLS.filter((tool) => tool.name === 'o8_task_archive'),
   ...MISSION_TOOLS.filter((tool) => tool.name === 'o8_task_prune'),
   ...PROBLEM_TOOLS,
+  ...PR_STACK_TOOLS,
   ...MISSION_TOOLS.filter((tool) => tool.name === 'wait_for_mission_ready'),
   ...MISSION_TOOLS.filter((tool) => tool.name === 'submit_review'),
   ...CLOSE_PACKET_TOOLS,
@@ -343,6 +351,7 @@ export function operatorToolsForProfile(profile = process.env.O8_OPERATOR_MCP_PR
   if (!profile || profile === 'full') return TOOLS;
   if (profile === 'dogfood') return TOOLS.filter((tool) => DOGFOOD_TOOL_NAMES.has(tool.name));
   if (profile === 'visualizations') return VISUALIZATION_TOOLS;
+  if (profile === 'devices') return DEVICE_TOOLS;
   // An explicitly requested but unknown profile fails closed. A typo in a
   // safety launcher must not silently restore approvals or task tools.
   return [];
@@ -354,6 +363,7 @@ const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<M
   o8_approve: handleApprove,
   o8_reject: handleReject,
   o8_history: handleHistory,
+  o8_conversation_prs: handleConversationPrs,
   o8_lane_events: handleLaneEvents,
   o8_packet_transcript: handleTranscript,
   steer_packet: handleSteerPacket,
@@ -436,6 +446,7 @@ const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<M
   o8_task_report: handleTaskReport,
   o8_task_archive: handleTaskArchive,
   o8_task_prune: handleTaskPrune,
+  o8_pr_stack: handlePrStack,
   o8_problem_list: handleProblemList,
   o8_problem_get: handleProblemGet,
   wait_for_mission_ready: handleWaitForMissionReady,
@@ -450,19 +461,19 @@ const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<M
   report_packet_event: handleReportPacketEvent,
 };
 
-export async function handleOperatorMcpMessage(message: OperatorMcpRequest, requestedProfile?: string): Promise<OperatorMcpResponse | null> {
+export async function handleOperatorMcpMessage(message: OperatorMcpRequest, requestedProfile?: string, deviceContext?: DeviceControllerContext): Promise<OperatorMcpResponse | null> {
   if (isModernMcpRequest(message)) {
     const refusal = modernMcpError(message);
     if (refusal) return refusal;
     if (message.method === 'server/discover') return { jsonrpc: '2.0', id: message.id!, result: discoverMcp() };
     if (message.method === 'initialize') return { jsonrpc: '2.0', id: message.id!, error: { code: -32601, message: 'Modern MCP uses server/discover' } };
-    const response = await dispatchOperatorMcpMessage(modernMcpCall(message), requestedProfile);
+    const response = await dispatchOperatorMcpMessage(modernMcpCall(message), requestedProfile, deviceContext);
     return response?.result === undefined ? response : { ...response, result: modernMcpResult(response.result, message.method === 'tools/list') };
   }
-  return dispatchOperatorMcpMessage(message, requestedProfile);
+  return dispatchOperatorMcpMessage(message, requestedProfile, deviceContext);
 }
 
-async function dispatchOperatorMcpMessage(message: OperatorMcpRequest, requestedProfile?: string): Promise<OperatorMcpResponse | null> {
+async function dispatchOperatorMcpMessage(message: OperatorMcpRequest, requestedProfile?: string, deviceContext?: DeviceControllerContext): Promise<OperatorMcpResponse | null> {
   const { method, id, params } = message;
   if (id === undefined || id === null) return null;
 
@@ -514,11 +525,12 @@ async function dispatchOperatorMcpMessage(message: OperatorMcpRequest, requested
         result: textResult(`Tool unavailable in operator MCP profile ${profile}: ${toolName}`, true),
       };
     }
-    const handler = TOOL_HANDLERS[toolName];
+    const handler = toolName === 'o8_device' ? (args: Record<string, unknown>) => handleDevice(args, deviceContext) : TOOL_HANDLERS[toolName];
     if (!handler) return { jsonrpc: '2.0', id, result: textResult(`Unknown tool: ${toolName}`, true) };
     try {
       return { jsonrpc: '2.0', id, result: await handler(toolArgs) };
     } catch (error) {
+      if (error instanceof DeviceError) return { jsonrpc: '2.0', id, result: jsonResult({ error: { code: error.code, message: error.message } }, true) };
       return { jsonrpc: '2.0', id, result: textResult(`Tool error: ${safeErrorText(error)}`, true) };
     }
   }

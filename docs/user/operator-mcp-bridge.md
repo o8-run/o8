@@ -72,6 +72,37 @@ Full-profile owned orchestrators can discover definitions through
 retain the complete catalog. See [deferred tool loading](../internals/deferred-mcp-tools.md)
 for runtime boundaries, worker opt-in and the full-loading override.
 
+## Opt-in o8d MCP endpoint
+
+Build `crates/o8d` with the `experimental-mcp` Cargo feature. The `o8d`
+executable accepts `--experimental-mcp`, `--listen` with a loopback socket
+address, and `--upstream` with the running TypeScript server's loopback HTTP
+origin. The existing `o8d-mcp` executable accepts the same arguments. Both
+require the explicit runtime flag; default endpoint selection is unchanged.
+
+To use the existing native readers, enable `O8D_MCP_READS=1` on the
+TypeScript server and pass `--native-reads --data-dir` with the same absolute
+data directory to o8d. `CORTEX_IDE_DB_PATH` selects an alternate database.
+On Linux, `o8_status`, `get_mission_status`, `o8_task_list`, `o8_list_repos`,
+`o8_list_projects` and `o8_lease_list` read persisted state without a
+TypeScript round trip after the publisher generation is authenticated.
+Fresh status, stale snapshots, unsupported state and other platforms use
+the original TypeScript handler. Native readers never migrate or write state.
+
+Legacy initialization is handled by o8d after TypeScript authenticates the
+caller. Catalog responses, including catalog batches, retain the exact bytes
+from the authoritative TypeScript registry and its profile filter. Every
+other tool, including dispatch, writes and approvals, retains its original
+request body and headers through the TypeScript handler. Modern protocol
+requests also retain the TypeScript path.
+
+`tests/o8d-mcp-parity-real-path.test.ts` starts production middleware, route
+handlers and o8d against isolated fixture state. `scripts/mcp-parity.ts`
+replays recorded calls against two listeners, compares catalog bytes and
+compares tool results and refusals field by field. `scripts/mcp-benchmark.mjs`
+measures both listeners with ten warmups and 100 alternating samples per
+operation. These fixture measurements do not represent a desktop session.
+
 ## Stateless protocol requests
 
 The operator host supports `2026-07-28` requests alongside the existing

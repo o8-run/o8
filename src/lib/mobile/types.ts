@@ -376,7 +376,7 @@ export interface MobileTranscriptEntry {
   backend?: OrchestratorBackendId;
   model?: string;
   receipt?: MobileTurnReceipt;
-  tokens?: { input: number; output: number; cacheRead?: number; cacheWrite?: number };
+  tokens?: { input: number; output: number; cacheRead?: number; cacheWrite?: number; cacheRetentionMs?: number; cacheObserved?: boolean };
   costUsd?: number;
   sources?: MobileTranscriptSource[];
   thinking?: string;

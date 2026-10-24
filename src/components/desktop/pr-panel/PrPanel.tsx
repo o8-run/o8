@@ -1,17 +1,22 @@
 'use client';
 
+import { PrStackSummary } from '../agent-panel/PrStackSummary';
+import { usePrStackSelection } from './usePrStackSelection';
+
 import { memo, useCallback, useId, useLayoutEffect, useRef, useState } from 'react';
+import { PullRequestConversations } from '@/components/conversation-prs/PullRequestConversations';
 import { PrPanelHeader } from './PrPanelHeader';
 import { PrPanelTabs } from './PrPanelTabs';
 import { PrChangesToolbar } from './PrChangesToolbar';
 import { PrSummary } from './PrSummary';
 import { PrBrainComposer, prBrainContext } from './PrBrainComposer';
 import { openComposerBrain } from '../brain/brain-events';
-import { usePrViewState } from './usePrViewState';
+import { openPrChangesView, usePrViewState } from './usePrViewState';
 import { ChangesTab } from './tabs/ChangesTab';
 import { ChecksTab } from './tabs/ChecksTab';
 import { ReviewsTab } from './tabs/ReviewsTab';
 import { TimelineTab } from './tabs/TimelineTab';
+import { GithubReadStatus } from '@/components/github/GithubReadStatus';
 import { usePrDetail } from './usePrDetail';
 import { PrReviewGuide } from './PrReviewGuide';
 import { X } from '../lucide-shims';
@@ -19,11 +24,21 @@ import { ArtifactStrip } from '../artifacts/ArtifactStrip';
 import { useArtifacts } from '../artifacts/useArtifacts';
 import type { PrComposerMode, PrPanelProps, PrReviewAction } from './types';
 
-export const PrPanel = memo(function PrPanel({ prNumber, repoSlug, repoPath, onClose, active = true, id }: PrPanelProps) {
-  const { detail, loading, error, refresh } = usePrDetail(prNumber, repoSlug, active);
-  const hasDetail = Boolean(detail);
+export const PrPanel = memo(function PrPanel(props: PrPanelProps) {
+  const selection = usePrStackSelection(props.repoSlug || props.repoPath || '', props.prNumber, props.readOnly);
+  return <PrPanelContent {...props} prNumber={selection.number} readOnly={selection.readOnly} onSelectStack={next => {
+    openPrChangesView(`${props.repoSlug || props.repoPath || ''}:${next}`);
+    selection.select(next);
+    props.onSelectLayer?.(next);
+  }} />;
+});
+
+const PrPanelContent = memo(function PrPanelContent({ prNumber, repoSlug, repoPath, onClose, active = true, id, readOnly = false, onSelectStack }: PrPanelProps & { onSelectStack: (number: number) => void }) {
   const selectionKey = `${repoSlug || repoPath || ''}:${prNumber}`;
   const { view, update, recordScroll, scrollFor } = usePrViewState(selectionKey);
+  const { detail, loading, error, refresh, updatedAt } = usePrDetail(prNumber, repoSlug, active, view.activeTab === 'checks');
+  const stackReadOnly = readOnly || Boolean(detail?.stack?.snapshot);
+  const hasDetail = Boolean(detail);
   const panelId = useId();
   const scrollRef = useRef<HTMLDivElement>(null);
   const [fileJump, setFileJump] = useState(0);
@@ -126,10 +141,15 @@ export const PrPanel = memo(function PrPanel({ prNumber, repoSlug, repoPath, onC
 
   return (
     <div id={id || panelId} data-pr-detail={detail.number} style={containerStyle} onKeyDown={onKeyDown}>
-      <PrPanelHeader detail={detail} repoSlug={repoSlug} repoPath={repoPath} showDiffStats={active && view.activeTab !== 'changes'} onRefresh={refresh} onComposerMode={changeComposerMode} onAsk={(prompt) => {
+      <PrPanelHeader readOnly={stackReadOnly} detail={detail} repoSlug={repoSlug} repoPath={repoPath} showDiffStats={active && view.activeTab !== 'changes'} onRefresh={refresh} onComposerMode={changeComposerMode} onAsk={(prompt) => {
         if (repoPath) openComposerBrain({ repoPath, prompt, context: prBrainContext(detail, repoSlug) });
       }} />
+      <PullRequestConversations repo={detail.resolvedRepo || repoSlug || ''} number={detail.number} active={active} />
       {error ? <div role="alert" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 12, fontSize: 11, color: 'var(--t-danger)' }}>{error}<button type="button" onClick={refresh} style={{ border: 0, borderRadius: 6, padding: 6, background: 'var(--t-hover)', color: 'var(--t-text)', font: 'inherit', cursor: 'pointer' }}>Retry</button></div> : null}
+      <GithubReadStatus error={error} updatedAt={updatedAt} />
+      {detail.stack ? <div style={{ paddingTop: 8, paddingRight: 14, paddingBottom: 8, paddingLeft: 14, flexShrink: 0 }}>
+        <PrStackSummary observation={detail.stack} prNumber={prNumber} onSelect={onSelectStack} retained={Boolean(error)} repo={repoSlug || detail.resolvedRepo} />
+      </div> : null}
       <PrPanelTabs
         activeTab={view.activeTab}
         onChange={(activeTab) => update({ activeTab })}
@@ -160,7 +180,7 @@ export const PrPanel = memo(function PrPanel({ prNumber, repoSlug, repoPath, onC
             />
           </>
         ) : null}
-        {tab === 'checks' ? <ChecksTab checks={detail.statusCheckRollup} repo={repoSlug || detail.resolvedRepo} number={prNumber} /> : null}
+        {tab === 'checks' ? <ChecksTab readOnly={stackReadOnly} checks={detail.statusCheckRollup} repo={repoSlug || detail.resolvedRepo} number={prNumber} /> : null}
         {tab === 'reviews' ? (
           <ReviewsTab
             reviewComments={detail.reviewComments}
@@ -172,7 +192,7 @@ export const PrPanel = memo(function PrPanel({ prNumber, repoSlug, repoPath, onC
         ) : null}
         </div>
       </div>)}
-      {view.composerMode !== 'brain' ? <PrBrainComposer allowBrain={false} key={`${selectionKey}:${repoPath || ''}`} detail={detail} repoSlug={repoSlug} repoPath={repoPath} draft={view.questionDraft} onDraftChange={() => {}} mode={view.composerMode} onModeChange={changeComposerMode} commentDraft={view.commentDraft} onCommentDraftChange={changeCommentDraft} reviewDraft={view.reviewDraft} onReviewDraftChange={changeReviewDraft} reviewAction={view.reviewAction} onReviewActionChange={changeReviewAction} reviewHeadSha={view.reviewHeadSha} onReviewHeadChange={changeReviewHead} onCommentPosted={refresh} /> : null}
+      {!stackReadOnly && view.composerMode !== 'brain' ? <PrBrainComposer allowBrain={false} key={`${selectionKey}:${repoPath || ''}`} detail={detail} repoSlug={repoSlug} repoPath={repoPath} draft={view.questionDraft} onDraftChange={() => {}} mode={view.composerMode} onModeChange={changeComposerMode} commentDraft={view.commentDraft} onCommentDraftChange={changeCommentDraft} reviewDraft={view.reviewDraft} onReviewDraftChange={changeReviewDraft} reviewAction={view.reviewAction} onReviewActionChange={changeReviewAction} reviewHeadSha={view.reviewHeadSha} onReviewHeadChange={changeReviewHead} onCommentPosted={refresh} /> : null}
     </div>
   );
 });

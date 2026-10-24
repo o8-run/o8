@@ -37,6 +37,7 @@ import { createGoogleToolResponseStream } from './google-native-tools';
 import { streamOpenRouterFallback } from './operator-fallback';
 import { toolsForOpenAI } from '@/lib/llm/tools';
 import { isOpenRouterEnabled } from '@/lib/providers/openrouter-connection';
+import { applyNativeApiEffort, nativeApiEffortError } from './effort-contract';
 
 const UPSTREAM_TIMEOUT_MS = 30_000;
 const TOKENS_PER_MILLION = 1_000_000;
@@ -155,7 +156,7 @@ function thinkingBudgetForEffort(effort: ThinkingEffort | null): number | null {
     case 'max':
       return 48_000;
     case 'xhigh':
-      return 64_000;
+      return 60_000;
     case 'adaptive':
     default:
       return null;
@@ -322,6 +323,8 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
   if (!isSupportedProvider(provider)) {
     return jsonError(`Unsupported provider: ${provider}`, 400);
   }
+  const effortError = nativeApiEffortError(provider, model, rawThinkingEffort);
+  if (effortError) return jsonError('The requested effort has no supported mapping for this provider and model. Omit effort or choose a supported combination.', 400, effortError);
 
   let planOwner: string | null = null;
   let planSelection: { accountId: string; generation: number; desktopEpoch: string } | undefined;
@@ -559,6 +562,7 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
     if (provider === 'anthropic') {
       applyAnthropicThinkingConfig(upstreamBody, model, requestedThinkingEffort);
     }
+    applyNativeApiEffort(upstreamBody, provider, requestedThinkingEffort);
     if (provider === 'anthropic' && anthropicTaskBudget) {
       upstreamBody.task_budget = anthropicTaskBudget.taskBudget;
       console.info(

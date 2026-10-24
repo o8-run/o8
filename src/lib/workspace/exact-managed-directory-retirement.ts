@@ -248,6 +248,12 @@ async function finishClaimUnlocked(
     });
     await beforeRetirementPurge?.(claim.claimPath);
     const manifest = await captureExactDirectoryManifest(claim.claimPath, expected);
+    // A warm claim may only purge its original sealed inventory. Recheck after
+    // capture so this manifest cannot bless an intervening edit as disposable.
+    if (claim.authority?.warmSeal) await verifyRetirementAuthority({
+      authority: claim.authority, sourcePath: claim.sourcePath, candidatePath: claim.claimPath,
+      identity: expected, verifyContents: true,
+    });
     if (manifest.entries.some((entry) => entry.kind === 'other')
       || (claim.authority?.retirementReason === 'empty-orphan' && manifest.entries.length !== 1)) {
       throw new Error('Exact retirement refuses unsupported or unowned nonempty content before purge.');

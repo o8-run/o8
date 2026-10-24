@@ -1,3 +1,4 @@
+import { drainPullRequestStackRefresh } from '@/lib/github-broker/pull-request-stack-refresh';
 import { hasGitHubBrokerAccess } from '@/lib/github-broker/auth';
 import { normalizeRepoSlug } from '@/lib/github-broker/repo';
 import {
@@ -12,6 +13,7 @@ function errorMessage(error: unknown): string {
 
 export async function runGitHubBrokerSyncSweep(): Promise<void> {
   if (!hasGitHubBrokerAccess()) return;
+  await drainPullRequestStackRefresh();
 
   let repos: Awaited<ReturnType<typeof listRepos>>;
   try {

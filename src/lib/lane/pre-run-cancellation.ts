@@ -3,22 +3,22 @@ import { getSqlite } from '@/lib/db';
 import { appendEvent, getLane, listLanes, setLaneStatus } from './registry';
 import type { Lane } from './types';
 import type { WorktreeInfo } from '@/lib/worktree/types';
+import { releasePacketStorageAfterWorktreeProvisionFailure } from './lane-storage-release';
 
 export type PreRunState = 'queued' | 'launching' | 'provisioning';
 const admission = new AsyncLocalStorage<() => void>();
 
 export function preRunState(lane: Lane): PreRunState {
-  if (lane.lastEventLabel?.startsWith('worktree_provision_queued')) return 'queued';
+  // Watchdog and other status labels cannot erase this attempt's effect-start
+  // fence. Absence is final only while the creator is still outside provisioning.
+  const progress = getSqlite().prepare(`SELECT verb FROM lane_events WHERE lane_id = ?
+    AND verb IN ('worktree_provision_started', 'worktree_provision_queued')
+    AND rowid > (SELECT COALESCE(MAX(rowid), 0) FROM lane_events WHERE lane_id = ?
+      AND verb = 'status_change' AND json_extract(payload_json, '$.status') = 'launching')
+    ORDER BY rowid DESC LIMIT 1`).pluck().get(lane.id, lane.id);
+  if (progress === 'worktree_provision_started') return 'provisioning';
+  if (progress === 'worktree_provision_queued') return 'queued';
   if (lane.lastEventLabel === 'worktree_provision_started') return 'provisioning';
-  if (lane.status === 'awaiting_orchestrator' && lane.lastEventLabel === 'launch_stalled') {
-    const progress = getSqlite().prepare(`SELECT verb FROM lane_events WHERE lane_id = ?
-      AND verb IN ('worktree_provision_started', 'worktree_provision_queued')
-      AND rowid > (SELECT COALESCE(MAX(rowid), 0) FROM lane_events WHERE lane_id = ?
-        AND verb = 'status_change' AND json_extract(payload_json, '$.status') = 'launching')
-      ORDER BY rowid DESC LIMIT 1`).pluck().get(lane.id, lane.id);
-    if (progress === 'worktree_provision_started') return 'provisioning';
-    if (progress === 'worktree_provision_queued') return 'queued';
-  }
   return 'launching';
 }
 
@@ -34,9 +34,16 @@ export function cancelPreRunPacketLaunches(packetIds: readonly string[], kind: '
         || !(lane.status === 'launching'
           || (lane.status === 'awaiting_orchestrator' && lane.lastEventLabel === 'launch_stalled'))) continue;
       const from = preRunState(lane);
-      eventIds[lane.id] = appendEvent(lane.id, 'pre_run_cancelled', 'user', { packetId: lane.packetId, kind, stoppedFrom: from }).id;
-      packetEvents.set(lane.packetId, { ...packetEvents.get(lane.packetId), [lane.id]: eventIds[lane.id] });
       setLaneStatus(lane.id, 'paused', 'user', 'operator_stopped');
+      // Paused admission fences a queued creator before materialization. A
+      // started creator may still have an in-flight effect, so its exact rollback
+      // must settle before checkout absence can authorize releasing the charge.
+      const storageRelease = from === 'provisioning' ? undefined
+        : releasePacketStorageAfterWorktreeProvisionFailure(lane, lane.packetId);
+      eventIds[lane.id] = appendEvent(lane.id, 'pre_run_cancelled', 'user', {
+        packetId: lane.packetId, kind, stoppedFrom: from, ...(storageRelease ? { storageRelease } : {}),
+      }).id;
+      packetEvents.set(lane.packetId, { ...packetEvents.get(lane.packetId), [lane.id]: eventIds[lane.id] });
       stoppedFrom.set(lane.packetId, from);
       laneIds.push(lane.id);
     }
@@ -62,7 +69,7 @@ export function assertPreRunAdmission(): void {
   admission.getStore()?.();
 }
 
-/** Exact-surface retirement must remain available after spawn admission closes. */
+/** Pool-owned work and exact retirement have lifetimes independent of a packet. */
 export function withoutPreRunAdmission<T>(cleanup: () => Promise<T>): Promise<T> {
   return admission.run(() => {}, cleanup);
 }

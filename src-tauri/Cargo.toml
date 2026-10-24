@@ -1,12 +1,20 @@
 [package]
 name = "o8"
-version = "0.1.807"
+version = "0.1.808"
 description = "o8 — governance layer for autonomous engineering teams"
 authors = ["hurttlocker"]
 license = "MIT"
 repository = "https://github.com/o8-run/o8"
 edition = "2021"
 rust-version = "1.77.2"
+
+[profile.release]
+strip = "symbols"
+lto = "thin"
+codegen-units = 1
+# Keep crash line tables in separate dSYM artifacts, outside the app bundle.
+debug = 1
+split-debuginfo = "packed"
 
 # Native context creation compiles capability URL patterns at runtime. Keep the
 # regex engine optimized in debug builds too; application code stays debuggable.

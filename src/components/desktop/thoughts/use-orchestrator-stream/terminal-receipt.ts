@@ -15,8 +15,10 @@ export function parseTerminalUsage(value: unknown): MobileTranscriptEntry['token
   return {
     input: token(usage.inputTokens),
     output: token(usage.outputTokens),
-    cacheRead: token(usage.cacheReadTokens),
-    cacheWrite: token(usage.cacheWriteTokens),
+    ...(usage.cacheObserved === false ? { cacheObserved: false } : {}),
+    ...(typeof usage.cacheReadTokens === 'number' && Number.isFinite(usage.cacheReadTokens) && usage.cacheReadTokens >= 0 ? { cacheRead: usage.cacheReadTokens } : {}),
+    ...(typeof usage.cacheWriteTokens === 'number' && Number.isFinite(usage.cacheWriteTokens) && usage.cacheWriteTokens >= 0 ? { cacheWrite: usage.cacheWriteTokens } : {}),
+    ...(typeof usage.cacheRetentionMs === 'number' && usage.cacheRetentionMs > 0 && usage.cacheRetentionMs <= 86400_000 ? { cacheRetentionMs: usage.cacheRetentionMs } : {}),
   };
 }
 

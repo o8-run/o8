@@ -11,6 +11,9 @@ describe('pull request branch dependencies', () => {
     const rows = pullRequestStackRows([pr(1, 'types', 'main', 'contributor/repo'), pr(2, 'types', 'main', null), pr(3, 'ui', 'types')], 'example/repo');
     expect(rows.every((row) => row.parent === null)).toBe(true);
   });
+  it('refuses a fork child even when its base ref matches a local parent', () => {
+    expect(pullRequestStackRows([pr(1, 'types'), pr(2, 'ui', 'types', 'fork/repo')], 'example/repo')[1]).toMatchObject({ parent: null, unsupportedCrossFork: true });
+  });
   it('keeps ambiguous parents and cycles visible without inventing their order', () => {
     const rows = pullRequestStackRows([pr(1, 'same'), pr(2, 'same'), pr(3, 'child', 'same'), pr(4, 'a', 'b'), pr(5, 'b', 'a')], 'example/repo');
     expect(rows.map((row) => row.pull.number)).toEqual([1, 2, 3, 4, 5]);

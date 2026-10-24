@@ -1760,12 +1760,64 @@ button.workflow-file-item.workflow-file-item-active {
   }
 }
 
-/* Compact navigation keeps wheel/keyboard scrolling without native bars. */
+/* Navigation owns nested and portalled scroll surfaces. No OS scrollbar gutter. */
+[data-o8-chat-list],
+[data-o8-chat-list] *,
+[data-o8-agent-panel],
+[data-o8-agent-panel] *,
+[data-mcp-scope="compact-navigation-rail"],
+[data-mcp-scope="compact-navigation-rail"] *,
+[data-mcp-scope="navigation-menu"],
+[data-mcp-scope="navigation-menu"] *,
+[data-mcp-scope="rail-usage-preview"],
+[data-mcp-scope="rail-usage-preview"] * {
+  scrollbar-width: none;
+  scrollbar-gutter: auto;
+}
+
+/* Section toggles and view pickers keep the same minimum target as chat rows. */
+[data-o8-chat-list] :is(button, [role="button"]) {
+  min-width: 28px;
+  min-height: 28px;
+}
+
+[data-o8-chat-list]::-webkit-scrollbar,
+[data-o8-chat-list] *::-webkit-scrollbar,
+[data-o8-agent-panel]::-webkit-scrollbar,
+[data-o8-agent-panel] *::-webkit-scrollbar,
+[data-mcp-scope="compact-navigation-rail"]::-webkit-scrollbar,
 [data-mcp-scope="compact-navigation-rail"] *::-webkit-scrollbar,
+[data-mcp-scope="navigation-menu"]::-webkit-scrollbar,
+[data-mcp-scope="navigation-menu"] *::-webkit-scrollbar,
+[data-mcp-scope="rail-usage-preview"]::-webkit-scrollbar,
 [data-mcp-scope="rail-usage-preview"] *::-webkit-scrollbar {
   display: none;
   width: 0;
   height: 0;
+}
+
+/* Laptop density preserves type sizes and the 28px compact-row floor. */
+@media (max-height: 800px) {
+  [data-mcp-scope="compact-navigation-rail"] {
+    --o8-navigation-target: 32px;
+  }
+
+  [data-mcp-scope="compact-navigation-rail"] [data-rail-action] svg {
+    max-width: 16px;
+    max-height: 16px;
+  }
+
+  [data-mcp-scope="compact-navigation-rail"] [data-sidebar-brand] img {
+    max-width: 20px;
+    max-height: 20px;
+  }
+
+  [data-o8-chat-list] {
+    --o8-navigation-preview-height: 64px;
+    --o8-navigation-row-height: 36px;
+    --o8-navigation-row-padding: 4px;
+    --o8-navigation-preview-gap: 4px;
+  }
 }
 
 /* Hide scrollbar — AgentPanel */

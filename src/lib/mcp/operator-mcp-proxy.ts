@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { existsSync, readFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { DEFAULT_API_PORT } from '@/lib/panel/api-port';
@@ -11,6 +12,7 @@ import type { McpTool } from './operator-handlers/shared';
 import { isModernMcpRequest, modernMcpError, modernMcpHeaders, modernMcpResult } from './operator-mcp-protocol';
 
 type JsonRpcId = number | string | null;
+const deviceWorker = randomUUID();
 
 
 function readTrimmed(path: string): string {
@@ -43,12 +45,17 @@ function send(value: unknown): void {
 }
 
 async function request(message: unknown): Promise<unknown> {
-  const token = readTrimmed(join(getDataDir(), 'ws-token'));
-  const response = await fetch(`${resolveApiBase()}/api/mcp`, {
+  const workerOnly = process.env.O8_DEVICE_WORKER_ONLY === '1';
+  const token = workerOnly ? process.env.O8_WORKER_TOKEN : readTrimmed(join(getDataDir(), 'ws-token'));
+  const response = await fetch(`${resolveApiBase()}${workerOnly ? '/api/devices/agent' : '/api/mcp'}`, {
     method: 'POST',
     headers: {
       Accept: 'application/json, text/event-stream',
       'Content-Type': 'application/json',
+      'x-o8-device-worker': deviceWorker,
+      'x-o8-device-conversation': process.env.O8_VISUALIZATION_THREAD_ID || deviceWorker,
+      'x-o8-device-pid': String(process.pid),
+      ...(workerOnly ? { 'x-o8-mcp-profile': 'devices' } : {}),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(process.env.O8_OPERATOR_MCP_PROFILE ? { 'x-o8-mcp-profile': process.env.O8_OPERATOR_MCP_PROFILE } : {}),
       ...modernMcpHeaders(message),

@@ -51,3 +51,20 @@ it('reports benchmark stderr when a missing browser prevents a receipt', async (
     env: { ...process.env, PLAYWRIGHT_BROWSERS_PATH: join(directory, 'missing-browsers') },
   })).rejects.toThrow(/did not produce a readable receipt[\s\S]*Executable doesn't exist/);
 }, 120000);
+
+
+it('keeps long-history selection, draft, keyboard navigation and fixture streams correct in Chromium', async () => {
+  await mkdir(directory, { recursive: true });
+  const output = join(directory, 'long-history.json');
+  await promisify(execFile)(process.execPath, ['scripts/bench/interactions/transcript-tab-reuse.mjs',
+    '--long-history', '--samples=1', `--output=${output}`,
+  ], { timeout: 240000 });
+  const receipt = JSON.parse(await readFile(output, 'utf8'));
+  expect(receipt.errors).toEqual([]);
+  expect(receipt.correct).toBe(true);
+  expect(receipt.falsification.budgetFailed).toBe(true);
+  expect(receipt.observations[0].control.injectedDelayApplications).toBe(1);
+  expect(receipt.fixture.map((fixture: { payloadBytes: number }) => fixture.payloadBytes)).toEqual([1704281, 1704281]);
+  expect(receipt.observations[0]).toMatchObject({ scrollRestored: true, selectionCopied: true,
+    keyboardSelection: true, streamTailCorrect: true, copyCorrect: true, jumpCorrect: true, mountedMessages: 10000 });
+}, 300000);

@@ -5,12 +5,13 @@ import { getDataDir } from '@/lib/data-dir-migration';
 import { getSqlite } from '@/lib/db';
 import { nativeReadCredentialMatches } from '@/lib/mcp/operator-handlers/shared';
 import { nativeMissionReadCredentialMatches } from '@/lib/mcp/operator-mission-tools';
+import { probeMetadataLockProcessIdentitySync } from '@/lib/worktree/metadata-lock-process-identity';
 
 export const nativeReadGeneration = randomUUID();
 const generation = nativeReadGeneration;
 const prefix = 'o8d/mcp/v1/';
 const nativeNames = new Set(['o8_status', 'get_mission_status', 'o8_task_list',
-  'o8_list_repos', 'o8_list_projects', 'o8_lease_list']);
+  'o8_list_repos', 'o8_list_projects', 'o8_lease_list', 'o8_lease_status', 'o8_spec_read']);
 let previousPolicy = '';
 
 // Publish authority, not a second tool catalog. The native reader still checks
@@ -18,12 +19,11 @@ let previousPolicy = '';
 export function publishNativeReadPolicy(base: string, profile: string, names: string[]): void {
   try {
     if (process.env.O8D_MCP_READS !== '1' && !previousPolicy) return;
-    if (process.platform !== 'linux') return;
-    const stat = readFileSync(`/proc/${process.pid}/stat`, 'utf8');
-    const startId = stat.slice(stat.lastIndexOf(') ') + 2).trim().split(/\s+/)[19];
+    const probe = probeMetadataLockProcessIdentitySync(process.pid);
+    if (probe.state !== 'live') return;
     const token = readFileSync(join(getDataDir(), 'ws-token'), 'utf8').trim();
     const policy = JSON.stringify({ schema: 'o8/mcp/native-policy/v1', base, generation,
-      pid: process.pid, startId, bootId: readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim(),
+      pid: process.pid, identity: probe.identity,
       enabled: process.env.O8D_MCP_READS === '1' && (!process.env.WS_TOKEN?.trim() || process.env.WS_TOKEN.trim() === token)
         && nativeReadCredentialMatches(token) && nativeMissionReadCredentialMatches(token), profile,
       tokenHash: createHash('sha256').update(token).digest('hex'),

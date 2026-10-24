@@ -568,114 +568,17 @@ if (existsSync(chunksDir)) {
   } catch (e) { console.warn('⚠️  Symlink step:', e.message); }
 }
 
-// Shared esbuild args for standalone server bundles (ws-server + MCP).
-//
-// `server-only` is a Next.js marker package — Next resolves it via a webpack
-// alias, but esbuild can't find it on its own. At runtime in a Node process
-// it's a no-op, so we point the import at a bare empty module. This MUST be
-// wired up, otherwise ws-server.ts silently fails to compile and the packaged
-// app ships without a WS server → client spams /ws → error storm → 100% CPU
-// next-server hang. See cortex-ide debugging session 2026-04-11.
-//
-// ESM banner also needs to synthesize `__filename` / `__dirname` / `require`
-// because a handful of CJS deps (e.g. source-map-support) reference them at
-// module level. Without the shim the bundle throws
-// `ReferenceError: __filename is not defined` the moment it loads.
-const SERVER_ONLY_STUB = join(root, 'scripts', 'server-only-stub.js');
-const ESM_BANNER = [
-  'import { createRequire as __o8_createRequire } from "module";',
-  'import { fileURLToPath as __o8_fileURLToPath } from "url";',
-  'import { dirname as __o8_dirname } from "path";',
-  'const require = __o8_createRequire(import.meta.url);',
-  'const __filename = __o8_fileURLToPath(import.meta.url);',
-  'const __dirname = __o8_dirname(__filename);',
-].join(' ');
-// esbuild's JS API instead of a shelled CLI string: the previous
-// single-quoted `--banner:js='...'` only survived POSIX shells — on Windows
-// cmd.exe the quotes aren't quoting, the banner shattered into fake input
-// files, and esbuild died with `Must use "outdir"` (#1673, first Windows run
-// to reach this script). The in-process API has no shell, no quoting, and no
-// npx-.cmd-shim problems on any platform.
-const { buildSync: esbuildBuildSync } = await import('esbuild');
-const SHARED_ESBUILD_OPTS = {
-  bundle: true,
-  platform: 'node',
-  format: 'esm',
-  alias: { 'server-only': SERVER_ONLY_STUB },
-  banner: { js: ESM_BANNER },
-  absWorkingDir: root,
-  logLevel: 'warning',
-};
-
-// Standalone server compiles are LOAD-BEARING for the packaged app. If any
-// fail, fail the whole prebuild — don't warn-and-ship a broken bundle.
-function compileServerBundle(label, entry, external = []) {
-  try {
-    const implementation = `${label}-impl.mjs`;
-    esbuildBuildSync({
-      ...SHARED_ESBUILD_OPTS,
-      entryPoints: [entry],
-      outfile: `out/server/${implementation}`,
-      external,
-    });
-    writeFileSync(join(server, `${label}.mjs`), `// Generated ABI-and-architecture-selecting entry for ${label}.\nimport { createRequire } from 'node:module';\nimport { dirname } from 'node:path';\nimport { fileURLToPath } from 'node:url';\nconst require = createRequire(import.meta.url);\n// darwin only: the multi-ABI prebuild selector exists for the dual-arch macOS\n// bundle; Windows/Linux load host-compiled build/Release directly (#1673).\nif (process.platform === 'darwin') {\n  require('./native-addon-runtime.cjs').prepareNativeAddons(dirname(fileURLToPath(import.meta.url)));\n}\nawait import('./${implementation}');\n`);
-    console.log(`📦 Compiled ${label}.mjs + ${implementation}`);
-  } catch (e) {
-    console.error(`❌ ${label} compilation failed — refusing to ship a broken bundle`);
-    console.error(`   ${e.message}`);
-    process.exit(1);
-  }
+// Keep the export and the per-PR size gate on the same build contract. Load
+// tooling only after the export input guards have accepted the staging tree.
+try {
+  const { bundleServers } = await import('./lib/server-bundles.mjs');
+  const { outputs } = bundleServers({ root, outDir: server });
+  console.log(`Compiled shared server bundles (${outputs.reduce((sum, output) => sum + output.bytes, 0)} bytes)`);
+} catch (error) {
+  console.error('Server compilation failed — refusing to ship a broken bundle');
+  console.error(error.message);
+  process.exit(1);
 }
-
-// The operator stdio proxy has no tool registry or native state. Keep its
-// launcher free of the native-addon bootstrap so per-client compatibility
-// processes stay small and only relay JSON-RPC to the in-app /api/mcp host.
-function compilePureNodeBundle(label, entry) {
-  try {
-    const implementation = `${label}-impl.mjs`;
-    esbuildBuildSync({
-      ...SHARED_ESBUILD_OPTS,
-      entryPoints: [entry],
-      outfile: `out/server/${implementation}`,
-    });
-    writeFileSync(
-      join(server, `${label}.mjs`),
-      `// Generated lightweight entry for ${label}.\nawait import('./${implementation}');\n`,
-    );
-    console.log(`📦 Compiled lightweight ${label}.mjs + ${implementation}`);
-  } catch (e) {
-    console.error(`❌ ${label} compilation failed — refusing to ship a broken bundle`);
-    console.error(`   ${e.message}`);
-    process.exit(1);
-  }
-}
-
-// Native modules must be external — esbuild can't bundle .node addons.
-// better-sqlite3 is used by the db layer (imported transitively through
-// repo registry + lane tables) and node-pty is used by the terminal bridge.
-const NATIVE_EXTERNALS = ['node-pty', 'better-sqlite3', 'bindings'];
-
-compileServerBundle('ws-server', 'src/ws-server.ts', NATIVE_EXTERNALS);
-
-// terminal-host fork target (#1498 follow-up). ws-server forks this when
-// O8_TERMINAL_HOST=child so node-pty spawn + data pump run in a separate
-// process. Sits next to ws-server.mjs in out/server/ — the child resolver
-// (terminal-host-client.ts) finds it via import.meta.url adjacency. Bundled
-// unconditionally so flipping the env in a packaged install just works; inline
-// (default) never forks it.
-compileServerBundle('terminal-host', 'src/lib/ws-server/terminal-host-entry.ts', NATIVE_EXTERNALS);
-
-// ── Compile MCP servers ──
-// Ships alongside the bundled Next.js backend so the packaged Tauri app
-// can expose MCP tools to Claude Desktop/Code without requiring `tsx` or
-// a source checkout.
-compileServerBundle('operator-mcp-server-main', 'src/lib/mcp/operator-mcp-server.ts', NATIVE_EXTERNALS);
-compileServerBundle('operator-mcp-server', 'src/lib/mcp/operator-mcp-server-bundle-entry.ts', NATIVE_EXTERNALS);
-compilePureNodeBundle('operator-mcp-proxy', 'src/lib/mcp/operator-mcp-proxy.ts');
-// Codex app-server bridge (#3573): runs Codex orchestrator turns in the operator's
-// Codex home when "Show chats in the Codex app" is on. Node built-ins only.
-compilePureNodeBundle('codex-app-bridge', 'src/lib/codex/app-server-exec-bridge.ts');
-compileServerBundle('cortex-mcp-server', 'src/lib/mcp/cortex-mcp-server.ts', NATIVE_EXTERNALS);
 
 // ── Bundle the Pi SDK worker (#3255) ──
 // The packaged server runs from Resources/server; piSdkScriptPath() looks for
@@ -817,11 +720,11 @@ for (const bundle of REQUIRED_BUNDLES) {
 
 // The WS process reports its own crashes, so its Sentry SDK must be compiled
 // into the artifact rather than resolved from the pruned standalone runtime.
-const wsImplementationPath = join(server, 'ws-server-impl.mjs');
-const wsImplementation = readFileSync(wsImplementationPath, 'utf8');
-if (/\b(?:import|require)\s*\(\s*['\"]@sentry\/node['\"]\s*\)/.test(wsImplementation)) {
-  console.error(`❌ WS bundle still externalizes @sentry/node: ${wsImplementationPath}`);
-  process.exit(1);
+for (const file of readdirSync(server).filter(file => file.endsWith('.mjs'))) {
+  if (/\b(?:import|require)\s*\(\s*['"]@sentry\/node['"]\s*\)/.test(readFileSync(join(server, file), 'utf8'))) {
+    console.error(`WS bundle still externalizes @sentry/node: ${file}`);
+    process.exit(1);
+  }
 }
 
 let size = '';

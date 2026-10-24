@@ -1,3 +1,5 @@
+import { coalesceClaudeTranscript } from './claude-code-transcript';
+import { observedCacheTokens } from '@/lib/prompt-cache/usage-evidence';
 /**
  * Claude Code Runtime Adapter
  *
@@ -240,6 +242,7 @@ interface ClaudeCodeMessage extends JsonlEntry {
   };
   usage?: Record<string, number>;
   message?: {
+    id?: string;
     role?: string;
     content?: MessageContent;
     model?: string;
@@ -992,6 +995,7 @@ export const claudeCodeRuntime: AgentRuntime = {
       buildCompactionTranscriptEntry(event)
     ));
     let entryIndex = 0;
+    const usageEntries = new Map<string, RuntimeTranscriptEntry>();
 
     for (const parsed of parsedEntries) {
       if (parsed.uuid && skippedEntryIds.has(parsed.uuid)) continue;
@@ -1011,9 +1015,15 @@ export const claudeCodeRuntime: AgentRuntime = {
       const id = parsed.uuid ?? `cc-${entryIndex}`;
       entryIndex++;
 
+      const providerMessage = parsed.message.id ?? parsed.uuid;
+      if (parsed.type === 'assistant' && providerMessage && parsed.message.usage) {
+        const prior = usageEntries.get(providerMessage);
+        if (prior) { prior.tokens = undefined; prior.model = undefined; }
+      }
       entries.push({
         id,
         role: parsed.type === 'user' ? 'user' : 'assistant',
+        ...(parsed.type === 'assistant' && parsed.message.usage ? { tokens: observedCacheTokens(parsed.message.usage), model: parsed.message.model } : {}),
         text,
         timestamp: parsed.timestamp ? new Date(parsed.timestamp) : new Date(),
         type: 'message',
@@ -1021,45 +1031,12 @@ export const claudeCodeRuntime: AgentRuntime = {
         filePath: parsed.type === 'assistant' ? extractFilePath(parsed.message.content) : undefined,
         toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
       });
+      if (parsed.type === 'assistant' && providerMessage && parsed.message.usage) usageEntries.set(providerMessage, entries[entries.length - 1]);
     }
 
     entries.sort((left, right) => left.timestamp.getTime() - right.timestamp.getTime());
 
-    // Coalesce consecutive assistant narration entries so the transcript reads
-    // as one flowing thought instead of one bubble per JSONL line. Keeps the
-    // LAST tool metadata and accumulates toolCalls so italic cards stay grouped
-    // with the surrounding narration.
-    const coalesced: RuntimeTranscriptEntry[] = [];
-    for (const entry of entries) {
-      const prev = coalesced[coalesced.length - 1];
-      const mergeable =
-        entry.role === 'assistant'
-        && entry.type === 'message'
-        && prev
-        && prev.role === 'assistant'
-        && prev.type === 'message';
-      if (mergeable && prev) {
-        const sep = entry.text.trim().length > 0 && prev.text.trim().length > 0 ? '\n\n' : '';
-        prev.text = `${prev.text}${sep}${entry.text}`;
-        prev.toolName = entry.toolName ?? prev.toolName;
-        prev.filePath = entry.filePath ?? prev.filePath;
-        prev.timestamp = entry.timestamp;
-        if (entry.toolCalls && entry.toolCalls.length > 0) {
-          prev.toolCalls = [...(prev.toolCalls ?? []), ...entry.toolCalls];
-        }
-        continue;
-      }
-      coalesced.push({ ...entry });
-    }
-
-    // Strip self-review tags from assistant narration — internal scaffolding
-    // shouldn't appear in the operator-facing transcript.
-    const SELF_REVIEW_RE = /\s*<self-review>[\s\S]*?<\/self-review>\s*/gi;
-    for (const entry of coalesced) {
-      if (entry.role === 'assistant' && entry.type === 'message') {
-        entry.text = entry.text.replace(SELF_REVIEW_RE, ' ').replace(/\s+$/, '').trim();
-      }
-    }
+    const coalesced = coalesceClaudeTranscript(entries);
 
     // sinceId filtering: return only entries after the given id
     let result = coalesced.filter(

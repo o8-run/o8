@@ -1,4 +1,6 @@
 import { createWorkerFailureHandler } from './worker-failure';
+import { assertRuntimeEffortPin } from '@/lib/orchestrator/effort-pin';
+import { assertOwnedActionFence, hasOwnedActionFence } from './action-fence';
 import { createCapacityRecovery } from './capacity-wait';
 import { packetCargoEnvironment } from '@/lib/worktree/cargo-target-cache';
 import { controlledProviderSandbox } from './controlled-provider-sandbox';
@@ -458,6 +460,7 @@ export function createOwnedRunController({
   }
 
   async function spawnOwnedRunInner(session: OwnedSessionRecord, prompt: string, mode: OwnedRunMode) {
+    assertRuntimeEffortPin(runtimeId, session.model, session.effort);
     assertOwnedSingleAttemptSpawn(session, runtimeId, mode);
     await ensureDir(path.join(session.sessionDir, RUNS_DIR));
 
@@ -632,6 +635,7 @@ export function createOwnedRunController({
         }, workspaceSpawnGuard);
         const materializationIdentity = spawnDecision.materializationIdentity ?? null;
         assertOwnedActionAdmission(await io.findSession(session.surfaceId));
+        await assertOwnedActionFence(session.surfaceId, await io.findSession(session.surfaceId));
         const bridgeLaunch = guardedWorkspaceInvocation(spawnBinary, spawnArgs, materializationIdentity);
         const cliCmd = [bridgeLaunch.command, ...bridgeLaunch.args].map(quoteShellArg).join(' ');
         const shellCmd = `${stdinPayload ? `printf %s ${quoteShellArg(stdinPayload)} | ` : ''}${cliCmd} | tee '${stdoutPath}' 2>'${stderrPath}'`;
@@ -666,7 +670,7 @@ export function createOwnedRunController({
           const bridgeEnv = ownedSpawnEnvironment(session, spawnEnv, true);
           const hasProviderCredentials = Object.entries(bridgeEnv).some(([name, value]) => value && providerCredentialName(name));
           // Credential-bearing launches require policy validation at OS spawn.
-          if (!useSupervisor && !hasProviderCredentials && !workerMcp.configPath && workerMcp.servers.length === 0 && process.platform !== 'win32' && session.executionPolicy === undefined && !carrierLaunch.carried && !crashSurvivableWorkersEnabled()) {
+          if (!hasOwnedActionFence() && !useSupervisor && !hasProviderCredentials && !workerMcp.configPath && workerMcp.servers.length === 0 && process.platform !== 'win32' && session.executionPolicy === undefined && !carrierLaunch.carried && !crashSurvivableWorkersEnabled()) {
             try {
               const result = await spawnBridgeTerminalSession({
                 sessionName: bridgeSessionName,

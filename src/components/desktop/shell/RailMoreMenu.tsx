@@ -39,7 +39,7 @@ export function RailMoreMenu({ buttonStyle, selected, onProjects, onCustomize, o
       style={{ ...buttonStyle, flexShrink: 0, background: open || selected ? 'var(--t-hover)' : 'transparent' }}>
       <svg aria-hidden="true" width="19" height="19" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.4" /><circle cx="12" cy="12" r="1.4" /><circle cx="19" cy="12" r="1.4" /></svg>
     </RailActionButton>
-    {open && anchor ? createPortal(<FloatingSurface ref={menuRef} id={id} role="menu" aria-label="More destinations" contentStyle={{ padding: 8, maxHeight: 'calc(100vh - 24px)', overflowY: 'auto' }}
+    {open && anchor ? createPortal(<FloatingSurface ref={menuRef} id={id} role="menu" aria-label="More destinations" data-mcp-scope="navigation-menu" contentStyle={{ padding: 8, maxHeight: 'calc(100vh - 24px)', overflowY: 'auto' }}
       onKeyDown={event => {
         const buttons = [...(menuRef.current?.querySelectorAll<HTMLButtonElement>('button') ?? [])];
         const index = buttons.indexOf(document.activeElement as HTMLButtonElement);

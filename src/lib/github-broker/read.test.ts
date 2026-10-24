@@ -1,5 +1,5 @@
 import { generateKeyPairSync } from 'node:crypto';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 const config = vi.hoisted(() => ({ value: {} as Record<string, unknown> }));
 vi.mock('./env', () => ({
@@ -8,7 +8,11 @@ vi.mock('./env', () => ({
 }));
 const { githubInstallationFetch } = await import('./auth');
 
-afterEach(() => vi.unstubAllGlobals());
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(Date.UTC(2026, 5, 1));
+});
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 it('threads the read deadline through installation lookup, token mint and final fetch', async () => {
   const key = generateKeyPairSync('rsa', { modulusLength: 2048 }).privateKey.export({ type: 'pkcs8', format: 'pem' });

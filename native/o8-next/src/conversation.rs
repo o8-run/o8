@@ -71,11 +71,16 @@ impl Surface {
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap()
                     .as_nanos();
-                let wire = if text.starts_with('/') {
+                let linked = self.linked_issues.get(&session.id).map(|i| i.context());
+                let contextual = linked
+                    .map(|context| format!("{context}\n\n{text}"))
+                    .unwrap_or_else(|| text.clone());
+                let wire = if text.starts_with('/') && !self.linked_issues.contains_key(&session.id)
+                {
                     text.clone()
                 } else {
                     format!(
-                        "[Mode: Solo] Work directly in this session yourself — do NOT dispatch worker agents or create missions. Edit, run, and verify with your own tools.\n\n{text}"
+                        "[Mode: Solo] Work directly in this session yourself — do NOT dispatch worker agents or create missions. Edit, run, and verify with your own tools.\n\n{contextual}"
                     )
                 };
                 let body = json!({"repoPath":repo,"threadId":session.id,"id":format!("next-{nonce:x}-{:x}", std::process::id()),

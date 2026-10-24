@@ -236,6 +236,7 @@ export function HistoryChatRow({
     if (disabled || event.button !== 0) return;
     dragActivatedRef.current = false;
     dragDisposeRef.current?.();
+    if (event.pointerType === 'touch') return;
     dragDisposeRef.current = trackThreadDrag(
       { clientX: event.clientX, clientY: event.clientY, pointerId: event.pointerId },
       {
@@ -300,7 +301,7 @@ export function HistoryChatRow({
       aria-disabled={disabled}
       style={{
         width: '100%',
-        minHeight: roomy ? (preview ? 78 : 52) : preview ? 64 : compact ? COMPACT_CHAT_ROW_HEIGHT : 42,
+        minHeight: roomy ? (preview ? 'var(--o8-navigation-preview-height, 78px)' : 'var(--o8-navigation-row-height, 52px)') : preview ? 64 : compact ? COMPACT_CHAT_ROW_HEIGHT : 42,
         borderRadius: compact ? CHAT_ROW_RADIUS : undefined,
         display: 'flex',
         alignItems: preview ? 'flex-start' : 'center',
@@ -316,9 +317,9 @@ export function HistoryChatRow({
         outline: keyboardFocused ? '2px solid var(--t-accent)' : 'none',
         outlineOffset: -3,
         fontFamily: REPO_FOCUS_FONT,
-        paddingTop: roomy ? 8 : 3,
+        paddingTop: roomy ? 'var(--o8-navigation-row-padding, 8px)' : 3,
         paddingRight: 12,
-        paddingBottom: roomy ? 8 : 3,
+        paddingBottom: roomy ? 'var(--o8-navigation-row-padding, 8px)' : 3,
         paddingLeft: 12,
         position: 'relative',
         transition: 'background 180ms ease, opacity 180ms ease',
@@ -357,7 +358,7 @@ export function HistoryChatRow({
           {inlineRepo ? <span style={{ flexShrink: 1, minWidth: 0, maxWidth: SIDEBAR_REPO_MAX_WIDTH, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
             fontSize: 11.5, fontWeight: 260, color: 'var(--t-text-faint)' }}>{inlineRepo}</span> : null}
         </span>
-        {preview ? <span style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', marginTop: roomy ? 6 : 4, fontSize: 11.5, lineHeight: roomy ? 1.45 : 1.4, color: 'var(--t-text-muted)' }}>{preview}</span> : null}
+        {preview ? <span style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', marginTop: roomy ? 'var(--o8-navigation-preview-gap, 6px)' : 4, fontSize: 11.5, lineHeight: roomy ? 1.45 : 1.4, color: 'var(--t-text-muted)' }}>{preview}</span> : null}
 
       </span>
       {/* Trailing meta — Antigravity-style: timestamp + status indicator

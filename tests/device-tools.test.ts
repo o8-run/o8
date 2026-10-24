@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DeviceState } from '@/lib/devices/types';
+import { stageDeviceViewerHelper } from './fixtures/device-viewer-helper';
 
 const root = mkdtempSync(join(tmpdir(), 'o8-device-tools-'));
 const dataDir = join(root, 'data');
@@ -11,6 +12,7 @@ const bin = join(root, 'bin');
 const control = join(root, 'control.json');
 const receipts = join(root, 'receipts.jsonl');
 const source = join(root, 'hub-fixture.mjs');
+const hubPackage = join(root, 'hub-package');
 const token = 'fixture-device-token-01234567890123456789';
 const previous = { PATH: process.env.PATH, O8_DATA_DIR: process.env.O8_DATA_DIR, CORTEX_IDE_DATA_DIR: process.env.CORTEX_IDE_DATA_DIR, WS_TOKEN: process.env.WS_TOKEN };
 process.env.O8_DATA_DIR = dataDir;
@@ -50,7 +52,9 @@ beforeAll(async () => {
   mkdirSync(bin, { recursive: true });
   mkdirSync(dataDir, { recursive: true });
   configure();
+  stageDeviceViewerHelper(hubPackage, join(root, 'manual.jsonl'), control);
   writeFileSync(source, `import { createServer } from 'node:http';
+import handler from './index.mjs';
 import { appendFileSync, readFileSync } from 'node:fs';
 const args = process.argv.slice(2);
 const config = JSON.parse(readFileSync(${JSON.stringify(control)}, 'utf8'));
@@ -60,8 +64,11 @@ const token = ${JSON.stringify(token)};
 if (config.fail) { console.error('secret=' + token); process.exit(4); }
 const port = Number(args[args.indexOf('--port') + 1]);
 const host = args[args.indexOf('--host') + 1];
-const server = createServer((req, res) => {
-  if (req.url === '/readyz') { res.end('ready'); return; }
+const server = createServer(async (req, res) => {
+  if (new URL(req.url, 'http://' + req.headers.host).pathname === '/readyz') {
+    const result = await handler(new Request('http://' + req.headers.host + req.url, { method: req.method }));
+    res.writeHead(result.status); res.end(await result.text()); return;
+  }
   const url = new URL(req.url, 'http://' + req.headers.host);
   if (url.pathname === '/' && url.searchParams.get('token') === token) {
     res.writeHead(302, { Location: '/', 'Set-Cookie': 'fixture_hub_access=' + token + '; HttpOnly; SameSite=Lax; Path=/' }); res.end(); return;
@@ -94,7 +101,8 @@ const target = args[args.indexOf('--prefix') + 1]; const pinned = args.at(-1); c
 const name = pinned.slice(0, split); const version = pinned.slice(split + 1);
 const pkg = path.join(target, 'node_modules', name); const entry = name === 'expo-device-hub' ? 'dist/server/cli.mjs' : 'bin/agent-device.mjs';
 fs.mkdirSync(path.dirname(path.join(pkg, entry)), { recursive: true });
-fs.writeFileSync(path.join(pkg, 'package.json'), JSON.stringify({ name, version: config.wrongVersion ? '0.0.0' : version }));
+fs.writeFileSync(path.join(pkg, 'package.json'), JSON.stringify({ name, version: config.wrongVersion ? '0.0.0' : version, type: 'module' }));
+if (name === 'expo-device-hub') fs.cpSync(${JSON.stringify(hubPackage)}, pkg, { recursive: true });
 fs.copyFileSync(${JSON.stringify(source)}, path.join(pkg, entry));
 `);
   chmodSync(join(bin, 'npm'), 0o755);

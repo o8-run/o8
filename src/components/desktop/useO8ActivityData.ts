@@ -1,3 +1,5 @@
+import { useQueryClient } from '@tanstack/react-query';
+import { useGithubWindowHidden } from '@/lib/github-client/visibility';
 import { useEffect, useRef, useState } from 'react';
 import { EMPTY_DATA, fetchRepoActivity, REMOTE_ACTIVITY_DELAYED, type RepoActivityData } from './o8-activity-helpers';
 
@@ -19,6 +21,9 @@ function isTranscriptOnlyBatch(event: Event): boolean {
 
 /** Retain remote streams per repository and checkout, while always revalidating local history. */
 export function useO8ActivityData(targets: ActivityTarget[], active: boolean, allRepos: boolean, retryNonce: number) {
+  const client = useQueryClient();
+  const hidden = useGithubWindowHidden();
+  const previousRetry = useRef(retryNonce);
   const scope = JSON.stringify([allRepos, targets.map(targetKey)]);
   const cache = useRef(new Map<string, RepoActivityData>());
   const [snapshot, setSnapshot] = useState({ scope, data: EMPTY_DATA, loading: true });
@@ -29,12 +34,14 @@ export function useO8ActivityData(targets: ActivityTarget[], active: boolean, al
     const controller = new AbortController();
     let inFlight: Promise<void> | null = null;
     let trailingRefresh = false;
+    let trailingFresh = false;
+    let trailingManual = false;
 
-    async function load(showSpinner: boolean) {
+    async function load(showSpinner: boolean, fresh: boolean, manual: boolean) {
       if (showSpinner) setSnapshot(previous => ({ scope, data: previous.scope === scope ? previous.data : EMPTY_DATA, loading: true }));
       const results = await Promise.all(targets.map(async target => {
         const key = targetKey(target);
-        const result = await fetchRepoActivity(target.repo, target.path, { previous: cache.current.get(key), signal: controller.signal });
+        const result = await fetchRepoActivity(target.repo, target.path, { previous: cache.current.get(key), signal: controller.signal, client, fresh, manual });
         return { key, result };
       }));
       // Some transports may ignore abort. Neither publish nor seed a retained snapshot from an obsolete read.
@@ -51,32 +58,34 @@ export function useO8ActivityData(targets: ActivityTarget[], active: boolean, al
         }
         if (results.some(({ result }) => result.workspaceError)) data.workspaceError = 'Some folders could not be read. Select a folder to inspect its activity and recovery options.';
         if (results.some(({ result }) => result.remoteError)) data.remoteError = REMOTE_ACTIVITY_DELAYED;
+        data.remoteUpdatedAt = Math.min(...results.map(({ result }) => result.remoteUpdatedAt ?? Infinity));
       }
       setSnapshot({ scope, data, loading: false });
     }
 
-    function scheduleLoad(showSpinner = false) {
+    function scheduleLoad(showSpinner = false, fresh = false, manual = false) {
       if (inFlight) {
-        trailingRefresh = true;
+        trailingRefresh = true; trailingFresh ||= fresh; trailingManual ||= manual;
         return;
       }
-      inFlight = load(showSpinner).finally(() => {
+      inFlight = load(showSpinner, fresh, manual).finally(() => {
         inFlight = null;
         if (trailingRefresh && !cancelled) {
           trailingRefresh = false;
-          scheduleLoad();
+          const force = trailingFresh; const userRefresh = trailingManual; trailingFresh = false; trailingManual = false; scheduleLoad(false, force, userRefresh);
         }
       });
     }
 
-    scheduleLoad(true);
-    const handler = () => { scheduleLoad(); };
+    const manual = previousRetry.current !== retryNonce; previousRetry.current = retryNonce;
+    scheduleLoad(true, manual, manual);
+    const handler = () => { scheduleLoad(false, true); };
     const handleRealtime = (event: Event) => {
-      if (!isTranscriptOnlyBatch(event)) scheduleLoad();
+      if (!isTranscriptOnlyBatch(event)) scheduleLoad(false, true);
     };
     window.addEventListener('o8:realtime', handleRealtime);
     window.addEventListener('o8:lifecycle-reconcile', handler);
-    const fallbackId = setInterval(handler, 300_000);
+    const fallbackId = setInterval(() => scheduleLoad(), hidden ? 300_000 : 120_000);
     return () => {
       cancelled = true;
       controller.abort();
@@ -84,7 +93,7 @@ export function useO8ActivityData(targets: ActivityTarget[], active: boolean, al
       window.removeEventListener('o8:lifecycle-reconcile', handler);
       clearInterval(fallbackId);
     };
-  }, [active, scope, targets, allRepos, retryNonce]);
+  }, [active, scope, targets, allRepos, retryNonce, client, hidden]);
 
   return snapshot.scope === scope ? snapshot : { scope, data: EMPTY_DATA, loading: true };
 }

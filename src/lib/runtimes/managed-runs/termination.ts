@@ -149,6 +149,10 @@ export async function terminateManagedRun(
     deps?: Partial<ManagedRunTerminationDeps>;
   },
 ): Promise<ManagedRunTerminationReceipt> {
+  if (record.workspaceService) {
+    const { stopManagedWorkspaceService } = await import('@/lib/workspace/manifest/services');
+    await stopManagedWorkspaceService(record);
+  }
   if (record.settlement) record = requestManagedRunStop(record.id) ?? record;
   const deps: ManagedRunTerminationDeps = {
     run: options.deps?.run ?? defaultRun,

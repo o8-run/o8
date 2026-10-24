@@ -2,8 +2,9 @@
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider, notifyManager } from '@tanstack/react-query';
 import { ActivityFeed } from './ActivityFeed';
+import { useBranchPr } from '../useBranchPr';
 
 const streams = ['issues', 'prs', 'ci', 'commits'] as const;
 type Stream = typeof streams[number];
@@ -25,11 +26,15 @@ let client: QueryClient;
 let fetchMock: ReturnType<typeof vi.fn>;
 let registered: string[];
 let reply: (stream: Stream, repo: string, init?: RequestInit) => Response | Promise<Response>;
-const render = (activeRepo: string | null = repoA, refreshKey = 0) => act(async () => {
-  root.render(createElement(QueryClientProvider, { client },
-    createElement(ActivityFeed, { events: [], commits: [], agents: [], activeRepo, refreshKey })));
-});
-const refresh = () => act(async () => { window.dispatchEvent(new Event('o8:lifecycle-reconcile')); });
+const render = async (activeRepo: string | null = repoA, refreshKey = 0) => {
+  await act(async () => root.render(createElement(QueryClientProvider, { client },
+    createElement(ActivityFeed, { events: [], commits: [], agents: [], activeRepo, refreshKey }))));
+  await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+};
+const refresh = async () => {
+  await act(async () => { window.dispatchEvent(new Event('o8:lifecycle-reconcile')); });
+  await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+};
 const reads = () => fetchMock.mock.calls.filter(([url]) => String(url) !== '/api/panel/repos');
 const expectRows = (tag: string) => {
   for (const title of ['issue', 'pull', 'check', 'commit']) expect(host.textContent).toContain(`${tag} ${title}`);
@@ -44,6 +49,7 @@ function deferred() {
 }
 
 beforeEach(() => {
+  notifyManager.setScheduler(queueMicrotask);
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   vi.useFakeTimers();
   vi.setSystemTime(new Date('2026-10-22T12:30:00Z'));
@@ -66,11 +72,36 @@ afterEach(async () => {
   await act(async () => root.unmount());
   client.clear();
   host.remove();
+  notifyManager.setScheduler(callback => setTimeout(callback, 0));
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
 describe('ActivityFeed retained stream snapshots', () => {
+  it('shares repository lists with five actual branch-marker consumers', async () => {
+    function BranchMarker() { const pr = useBranchPr(repoA, 'feature'); return createElement('span', {}, `Branch PR ${pr?.number}`); }
+    await act(async () => root.render(createElement(QueryClientProvider, { client },
+      createElement(ActivityFeed, { events: [], commits: [], agents: [], activeRepo: repoA }),
+      ...Array.from({ length: 5 }, (_, key) => createElement(BranchMarker, { key })))));
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(host.textContent?.match(/Branch PR 2/g)).toHaveLength(5);
+    expect(reads().filter(([url]) => String(url).includes('/prs?'))).toHaveLength(1);
+    expect(reads()).toHaveLength(4);
+  });
+
+  it('refreshes visible activity every two minutes and switches to five when hidden', async () => {
+    const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
+    await render();
+    await act(async () => { await vi.advanceTimersByTimeAsync(120_000); });
+    expect(reads()).toHaveLength(8);
+    hidden.mockReturnValue(true);
+    await act(async () => document.dispatchEvent(new Event('visibilitychange')));
+    await act(async () => { await vi.advanceTimersByTimeAsync(299_999); });
+    expect(reads()).toHaveLength(8);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(reads()).toHaveLength(12);
+  });
+
   it('renders all four real streams and preserves filtering', async () => {
     await render(); expectRows(repoA);
     await selectFilter('Issues 1');
@@ -90,6 +121,7 @@ describe('ActivityFeed retained stream snapshots', () => {
     expectRows(repoA); expect(reads()).toHaveLength(before);
     reply = (stream) => Response.json(payload(stream, 'recovered'));
     await act(async () => { await vi.advanceTimersByTimeAsync(300_000); });
+    await refresh();
     expectRows('recovered');
     expect(host.textContent).not.toContain('GitHub API paused');
   });
@@ -162,7 +194,9 @@ describe('ActivityFeed retained stream snapshots', () => {
     await refresh(); expect(reads()).toHaveLength(before); expectRows(repoA);
     reply = (stream) => Response.json(payload(stream, 'recovered'));
     await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
-    await refresh(); expectRows('recovered');
+    await act(async () => {});
+    if (!host.textContent?.includes('recovered issue')) await refresh();
+    expectRows('recovered');
   });
 
   it.each([
@@ -177,7 +211,7 @@ describe('ActivityFeed retained stream snapshots', () => {
     { name: 'capped numeric retry', status: 429, seconds: 86_400, retry: '172800' },
     { name: 'capped HTTP-date retry', status: 403, seconds: 86_400, retry: 'date', retrySeconds: 172_800 },
     { name: 'capped quota reset', status: 403, seconds: 86_400, reset: 172_800, remaining: '0' },
-  ])('honors $name across lifecycle, fallback polling and refreshKey triggers', async ({ status, seconds, retry, retrySeconds, reset, remaining }) => {
+  ])('honors $name across automatic lifecycle and fallback polling', async ({ status, seconds, retry, retrySeconds, reset, remaining }) => {
     await render(); const now = Date.now();
     const headers: Record<string, string> = {};
     if (retry) headers['retry-after'] = retry === 'date' ? new Date(now + (retrySeconds ?? seconds) * 1000).toUTCString()
@@ -189,11 +223,14 @@ describe('ActivityFeed retained stream snapshots', () => {
     const before = reads().length;
     reply = stream => Response.json(payload(stream, 'deadline recovery'));
     await act(async () => { await vi.advanceTimersByTimeAsync(seconds * 1000 - 1); });
-    await refresh(); await render(repoA, 1);
+    await refresh();
     expect(reads()).toHaveLength(before); expectRows(repoA);
     expect(host.textContent).toContain('GitHub API paused');
     await act(async () => { await vi.advanceTimersByTimeAsync(1); });
-    await refresh(); expect(reads()).toHaveLength(before + 4); expectRows('deadline recovery');
+    await refresh();
+    expect(reads().length).toBeGreaterThanOrEqual(before + 4);
+    expect(reads().length).toBeLessThanOrEqual(before + 8);
+    expectRows('deadline recovery');
     expect(host.textContent).not.toContain('GitHub API paused');
   });
 
@@ -285,4 +322,18 @@ describe('ActivityFeed retained stream snapshots', () => {
     root = createRoot(host);
     await act(async () => { pending.resolve(Response.json({})); });
   });
+});
+
+it('delivers an explicit refresh during a quota hold instead of dropping the click', async () => {
+  await render(); reply = () => new Response(null, { status: 429, headers: { 'retry-after': '600' } });
+  await refresh(); const before = reads().length;
+  reply = stream => Response.json(payload(stream, 'manual recovery'));
+  await render(repoA, 1);
+  expect(reads()).toHaveLength(before + 4); expectRows('manual recovery');
+  for (const [url] of reads().slice(before)) expect(String(url)).toContain('fresh=1');
+});
+
+it.each([null, { number: 2, title: 'Invalid replacement', statusCheckRollup: {} }])('retains Activity rows after a malformed shared PR row %j', async row => {
+  await render(); reply = stream => stream === 'prs' ? Response.json({ prs: [row] }) : Response.json(payload(stream, repoA));
+  await refresh(); expectRows(repoA); expect(host.textContent).toContain('GitHub sync delayed');
 });

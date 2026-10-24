@@ -477,6 +477,22 @@ export function serializeOperatorDefaultsToml(
   return stringify(document);
 }
 
+/** A strict schema projection: unknown tables, nested fields and comments never leave the server. */
+export function projectOperatorDefaultsToml(raw: string): { text: string; additionalSettingsSet: boolean } {
+  const values = parseOperatorDefaultsToml(raw);
+  for (const key of ['targetingTriage', 'targetingAction'] as const) {
+    const tier = values[key];
+    if (tier) values[key] = { runtime: tier.runtime, model: tier.model, effort: tier.effort };
+  }
+  const text = serializeOperatorDefaultsToml(values);
+  const hasAdditional = (stored: unknown, declared: unknown): boolean => {
+    if (!isRecord(stored)) return false;
+    return Object.entries(stored).some(([key, value]) => !isRecord(declared)
+      || !Object.hasOwn(declared, key) || hasAdditional(value, declared[key]));
+  };
+  return { text, additionalSettingsSet: hasAdditional(parseDocument(raw), parseDocument(text)) };
+}
+
 export async function writeFileAtomic(
   filePath: string,
   content: string,

@@ -1,0 +1,27 @@
+running 3 tests
+test shell::issue_tests::review_tests::round1_repository_drafts_survive_a_b_a ...
+thread 'shell::issue_tests::review_tests::round1_repository_drafts_survive_a_b_a' panicked at src/issue_tests.rs:168:5:
+real control did not reach CPU paint: issue-created-9
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+test shell::issue_tests::review_tests::round1_symlink_worker_survives_real_refresh_and_send ...
+thread 'shell::issue_tests::review_tests::round1_symlink_worker_survives_real_refresh_and_send' panicked at src/issue_review_tests.rs:56:5:
+assertion `left == right` failed: refresh must retain a canonical-equivalent workspace session
+  left: Null
+ right: "thoughts-composer-first"
+FAILED
+test shell::issue_tests::review_tests::round1_timed_out_create_retry_commits_once ...
+thread 'shell::issue_tests::review_tests::round1_timed_out_create_retry_commits_once' panicked at src/issue_review_tests.rs:44:5:
+assertion `left == right` failed: a 6.5-second committed response must not create another GitHub issue after the 5-second client timeout
+  left: 2
+ right: 1
+FAILED
+
+failures:
+
+failures:
+    shell::issue_tests::review_tests::round1_repository_drafts_survive_a_b_a
+    shell::issue_tests::review_tests::round1_symlink_worker_survives_real_refresh_and_send
+    shell::issue_tests::review_tests::round1_timed_out_create_retry_commits_once
+
+test result: FAILED. 0 passed; 3 failed; 0 ignored; 0 measured; 49 filtered out; finished in 13.16s

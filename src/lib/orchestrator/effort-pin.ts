@@ -1,5 +1,6 @@
 import { resolveCodexReasoningEffort } from '@/lib/codex/reasoning-effort';
-import { getRuntimeCapability } from '@/lib/orchestrator/runtime-capabilities';
+import { parseLocalModel } from '@/lib/codex/local-model';
+import { getRuntimeCapability, isOrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
 import {
   THINKING_EFFORTS,
   claudeEffortFlagValue,
@@ -47,6 +48,7 @@ export type EffortPinErrorCode =
   | 'conflicting_effort'
   | 'effort_unsupported_runtime'
   | 'effort_model_incompatible'
+  | 'effort_unsupported_model'
   | 'effort_coerced';
 
 /** Thrown by dispatch/runtime seams so routes can return a typed 400. */
@@ -137,6 +139,13 @@ export function resolveEffortPin(input: ResolveEffortPinInput): ResolveEffortPin
       message: `This o8 mission route cannot honor effort "${raw}" on runtime "${input.runtime}": that worker runtime has no reasoning-effort surface, so the pin would be dropped. Request a runtime that supports reasoning effort (codex or claude-code) or omit --effort.`,
     };
   }
+  if ((input.runtime === 'codex' || input.runtime === 'cloud')
+    && (input.model?.trim().toLowerCase() === 'gpt-4o' || parseLocalModel(input.model))) {
+    return {
+      ok: false, code: 'effort_unsupported_model',
+      message: `Effort "${raw}" has no verified reasoning transport for model "${input.model}". Omit effort or choose a reasoning model.`,
+    };
+  }
   // Judge the CALLER'S explicit model against what will actually launch, not a
   // pre-normalized routing value (profile resolution can drop a foreign-house
   // model before resolveWorkerRouting ever sees it).
@@ -166,4 +175,11 @@ export function resolveEffortPin(input: ResolveEffortPinInput): ResolveEffortPin
     };
   }
   return { ok: true, requestedEffort: raw, selectedEffort: raw };
+}
+
+/** Shared last admission boundary for owned launch, cold resume and automatic retries. */
+export function assertRuntimeEffortPin(runtime: string, model: string | null | undefined, effort: unknown): void {
+  if (!isOrchestratorRuntime(runtime)) return;
+  const pin = resolveEffortPin({ runtime, model: model ?? null, requestedEffort: effort });
+  if (!pin.ok) throw new EffortPinRejectionError(pin.code, pin.message);
 }

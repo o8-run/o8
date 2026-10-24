@@ -326,10 +326,9 @@ export function supportedEffortsForLead(
   if (backend !== 'claude' && backend !== 'fable' && backend !== 'codex' && backend !== 'auto') return [];
   // Adaptive is a provider thinking mode, not a manual effort level.
   const base = [...BASE_EFFORTS];
-  const supportsMax = backend === 'codex' && codexSupportsReasoningEffort(modelId, 'max');
   const supportsUltra = backend === 'codex' && codexSupportsReasoningEffort(modelId, 'ultra');
   if (backend === 'codex') {
-    const withoutUnsupported = base.filter((effort) => effort !== 'max' || supportsMax);
+    const withoutUnsupported = base.filter((effort) => effort !== 'adaptive' && codexSupportsReasoningEffort(modelId, effort));
     return ultraEnabled && supportsUltra ? [...withoutUnsupported, 'ultra'] : withoutUnsupported;
   }
   return base;
@@ -339,7 +338,8 @@ export function clampEffortToLead(
   effort: ThinkingEffort,
   options: readonly ThinkingEffort[],
 ): { effort: ThinkingEffort; clampedFrom: ThinkingEffort | null } {
-  if (options.length === 0 || options.includes(effort)) return { effort, clampedFrom: null };
+  if (options.length === 0) return { effort: 'adaptive', clampedFrom: effort === 'adaptive' ? null : effort };
+  if (options.includes(effort)) return { effort, clampedFrom: null };
   const fallback = [...options].sort((left, right) => {
     const leftDistance = Math.abs(EFFORT_RANK[left] - EFFORT_RANK[effort]);
     const rightDistance = Math.abs(EFFORT_RANK[right] - EFFORT_RANK[effort]);
@@ -380,7 +380,9 @@ export function resolveComposerSelectorState(input: ResolveComposerSelectorInput
     input.ultraEnabled,
   );
   const lockedEffortOptions: readonly ThinkingEffort[] = [];
-  const clamped = clampEffortToLead(requestedEffort, effortOptions);
+  const clamped = input.leadBackend === 'o8'
+    ? { effort: 'low' as const, clampedFrom: null }
+    : clampEffortToLead(requestedEffort, effortOptions);
   const effort = clamped.effort;
   const clampedFrom = clamped.clampedFrom
     ?? (input.clampNotice?.modelId === input.leadModelId ? input.clampNotice.from : null);

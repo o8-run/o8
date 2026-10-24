@@ -293,6 +293,7 @@ function reviewRequest(
     }>;
   },
   missingContractWaiverReason?: string,
+  findingSeverity: 'note' | 'warning' = 'note',
 ): NextRequest {
   return new NextRequest('http://localhost:3001/api/orchestrator/review', {
     method: 'POST',
@@ -310,7 +311,7 @@ function reviewRequest(
       missingContractWaiverReason,
       findings: [{
         file: 'safe.ts',
-        severity: 'note',
+        severity: findingSeverity,
         description: 'The expansion is intentional and reviewed.',
         status: 'accepted',
       }],
@@ -850,6 +851,10 @@ describe('requireApproval merge governance through the real command path', () =>
       token,
       fixture.lane.packetId!,
       fixture.reviewedHeadSha,
+      undefined,
+      undefined,
+      // Notes cannot waive budgets; this race explicitly accepts the warning.
+      'warning',
     ));
     for (let attempt = 0; attempt < 100; attempt += 1) {
       const auditLanded = listApprovalsForContext({ laneId: fixture.lane.id }).some((approval) => (
@@ -869,7 +874,7 @@ describe('requireApproval merge governance through the real command path', () =>
     const mergePayload = await mergeResponse.json();
 
     expect(reviewResponse.status).toBe(200);
-    expect(mergePayload).toMatchObject({ ok: true, result: { merged: true } });
+    expect(mergePayload, JSON.stringify(mergePayload)).toMatchObject({ ok: true, result: { merged: true } });
     expect(git(fixture.repo, ['rev-parse', 'HEAD'])).toBe(fixture.reviewedHeadSha);
     expect(getLane(fixture.lane.id)?.status).not.toBe('archived');
   }, 60_000);
@@ -1164,6 +1169,21 @@ describe('requireApproval merge governance through the real command path', () =>
   it('pushes the exact packet and opens a PR after a current spoken review', async () => {
     await updateOperatorDefaults({ requireApproval: 'always' });
     const { lane, repo, reviewedHeadSha } = await createStandardLane('current-spoken-pr');
+    const threadId = `thoughts-delivery-${lane.id}`;
+    const { writePersistedLlmChat } = await import('@/lib/llm/chat-history-store');
+    writePersistedLlmChat(threadId, { title: 'Delivery owner', messages: [] });
+    persistDispatcherMission(lane.packetId!, repo, threadId);
+    const { upsertGitHubPullRequest } = await import('@/lib/github-broker/store');
+    // This name belonged to a different repository. Its cached same-number PR is stale.
+    const stale = { repositoryId: 8002366, pullRequestId: 8001218, repoFullName: 'hurttlocker/o8', number: 1218,
+      title: 'Old repository delivery', state: 'open', author: { login: 'fixture' }, body: '', headRefName: lane.branch, baseRefName: 'main',
+      additions: 1, deletions: 0, changedFiles: 1, reviewDecision: null, statusCheckRollup: [], url: 'https://github.com/hurttlocker/o8/pull/1218',
+      createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z', closedAt: null, mergedAt: null };
+    upsertGitHubPullRequest(stale);
+    const broker = await import('@/lib/github-broker/auth');
+    const identityProbe = vi.spyOn(broker, 'githubInstallationFetch').mockResolvedValue({ installation: { id: 2366 }, scope: 'fixture-delivery',
+      response: Response.json({ id: 9001218, number: 1218, base: { repo: { id: 9002366 } }, html_url: stale.url }) });
+
     const result = await dispatch({ verb: 'create_pr', laneId: lane.id, actor: 'orchestrator' });
     const approval = listApprovalsForContext({ laneId: lane.id })
       .find((candidate) => candidate.id === result.approvalId)!;
@@ -1211,7 +1231,21 @@ describe('requireApproval merge governance through the real command path', () =>
 
     expect(git(repo, ['rev-parse', `origin/${lane.branch}`])).toBe(reviewedHeadSha);
     expect(getLane(lane.id)).toMatchObject({ status: 'reviewing', outcome: 'pr_opened' });
-  }, 30_000);
+    // The actual create_pr command journals ownership before verifying the provider identity.
+    expect(getSqlite().prepare('SELECT thread_id, packet_id FROM conversation_pr_delivery_intents WHERE lane_id = ?').get(lane.id))
+      .toEqual({ thread_id: threadId, packet_id: lane.packetId });
+    const { listPullRequestContext } = await import('@/lib/orchestrator/pull-request-context');
+    expect(listPullRequestContext({ threadId }).links).toEqual([expect.objectContaining({
+      kind: 'delivery', source: 'packet', packetId: lane.packetId, laneId: lane.id, repositoryId: 9002366, pullRequestId: 9001218, number: 1218,
+    })]);
+    expect(identityProbe).toHaveBeenCalledExactlyOnceWith('hurttlocker/o8', '/repos/hurttlocker/o8/pulls/1218', expect.anything(), expect.objectContaining({ share: false }));
+    // Refreshing the renamed old repository must never redirect this new delivery.
+    upsertGitHubPullRequest({ ...stale, repoFullName: 'fixture/renamed-old', url: 'https://github.com/fixture/renamed-old/pull/1218' });
+    expect(listPullRequestContext({ threadId }).links).toEqual([expect.objectContaining({
+      repositoryId: 9002366, pullRequestId: 9001218, url: stale.url,
+    })]);
+
+  }, 90_000);
 
   it('keeps a receipted approval pending when the request changes merge strategy', async () => {
     await updateOperatorDefaults({ requireApproval: 'always' });

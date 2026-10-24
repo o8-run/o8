@@ -1,3 +1,4 @@
+import { longHistoryFixture } from '../scripts/bench/interactions/long-history-fixture.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -667,5 +668,20 @@ describe('run gate', () => {
       validity: [],
     }], ['browser process 4242 survived the run']);
     expect(gate.runStatus).toBe('invalid');
+  });
+});
+
+
+describe('long transcript workload identity', () => {
+  it('records reproducible bytes and representative content for all 5,000 messages', () => {
+    const fixture = longHistoryFixture();
+    expect(fixture).toEqual(longHistoryFixture());
+    expect(fixture.messages).toHaveLength(5000);
+    expect(new Set(fixture.messages.map(message => message.id)).size).toBe(5000);
+    expect(fixture.payloadBytes).toBe(Buffer.byteLength(JSON.stringify(fixture.messages)));
+    expect(fixture.payloadBytes).toBe(1704281);
+    expect(fixture.messages.map(message => message.text).join('\n')).toMatch(/```typescript[\s\S]*```diff[\s\S]*Exit code: 0/);
+    expect(fixture.complexity).toMatchObject({ turns: 2500, messagesPerKind: 1000, fencedBlocks: 3000, tables: 1000 });
+    expect(longHistoryFixture(1).digest).not.toBe(fixture.digest);
   });
 });

@@ -1,3 +1,4 @@
+import { observedCacheTokens, reportedRunModel } from '@/lib/prompt-cache/usage-evidence';
 /** Pure Codex log parsing; importing this module creates no runtime store. */
 import { truncateText } from '@/lib/util/text';
 import { compactText } from '@/lib/runtimes/shared/owned-session/helpers';
@@ -394,6 +395,8 @@ export function codexParseRunLog(
       if (type === 'turn.completed') {
         completedTurn = true;
         const usage = (parsed.usage ?? {}) as Record<string, unknown>;
+        const assistant = [...entries].reverse().find(entry => entry.kind === 'message' && !entry.label.toLowerCase().includes('user'));
+        if (assistant) { assistant.model = reportedRunModel(raw); assistant.tokens = observedCacheTokens(usage, true); assistant.timestamp = run.finishedAt ?? timestamp; }
         const usageBits = [
           usage.input_tokens ? `${usage.input_tokens} in` : null,
           usage.cached_input_tokens ? `${usage.cached_input_tokens} cached` : null,

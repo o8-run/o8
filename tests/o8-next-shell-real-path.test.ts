@@ -43,7 +43,7 @@ function launcherProbe(receipt: string) {
       headers: { authorization: 'Bearer ' + process.env.O8_NEXT_API_TOKEN }
     });
     const body = await response.json();
-    require('node:fs').writeFileSync(${JSON.stringify(receipt)}, JSON.stringify({ args, status: response.status, sessions: body.threads?.length }));
+    require('node:fs').writeFileSync(${JSON.stringify(receipt)}, JSON.stringify({ args, status: response.status, sessions: body.threads?.length, desktopSession: Boolean(process.env.O8_NEXT_CLERK_SESSION_TOKEN) }));
   })().catch(() => process.exit(1));\n`);
   chmodSync(binary, 0o700);
   return binary;
@@ -52,11 +52,12 @@ function launcherProbe(receipt: string) {
 it('built CLI resolves the existing local config and authenticates production fixture routes without typed secrets', () => {
   const receipt = join(root, 'receipt.json');
   const binary = launcherProbe(receipt);
-  const env: NodeJS.ProcessEnv = { ...process.env, O8_DATA_DIR: configDir };
+  const env: NodeJS.ProcessEnv = { ...process.env, O8_DATA_DIR: configDir, O8_NEXT_CLERK_SESSION_TOKEN: 'fixture-desktop-session' };
   for (const key of ['O8_API_PORT', 'O8_API_TOKEN', 'O8_NEXT_API_TOKEN', 'O8_WORKER_TOKEN', 'O8_SPECTATOR_TOKEN']) delete env[key];
   execFileSync(process.execPath, ['cli/dist/o8.mjs', 'next', '--enable-next', '--binary', binary, '--app-shell'], { env, stdio: 'pipe' });
-  const result = JSON.parse(readFileSync(receipt, 'utf8')) as { args: string[]; status: number; sessions: number };
+  const result = JSON.parse(readFileSync(receipt, 'utf8')) as { args: string[]; status: number; sessions: number; desktopSession: boolean };
   expect(result.status).toBe(200);
+  expect(result.desktopSession).toBe(true);
   expect(result.sessions).toBeGreaterThanOrEqual(3);
   expect(result.args).toContain(origin);
   expect(result.args).toContain(join(configDir, 'next-shell.json'));
@@ -73,10 +74,11 @@ it('refuses to forward the local credential to an explicit foreign origin', () =
 it('keeps worker authority instead of replacing it with the local operator token', () => {
   const receipt = join(root, 'worker-receipt.json');
   const binary = launcherProbe(receipt);
-  const env: NodeJS.ProcessEnv = { ...process.env, O8_DATA_DIR: configDir, O8_WORKER_TOKEN: 'fixture-invalid-worker' };
+  const env: NodeJS.ProcessEnv = { ...process.env, O8_DATA_DIR: configDir, O8_WORKER_TOKEN: 'fixture-invalid-worker', O8_NEXT_CLERK_SESSION_TOKEN: 'fixture-desktop-session' };
   for (const key of ['O8_API_PORT', 'O8_API_TOKEN', 'O8_NEXT_API_TOKEN', 'O8_SPECTATOR_TOKEN']) delete env[key];
   execFileSync(process.execPath, ['cli/dist/o8.mjs', 'next', '--enable-next', '--binary', binary, '--app-shell'], { env, stdio: 'pipe' });
   expect(JSON.parse(readFileSync(receipt, 'utf8')).status).toBe(401);
+  expect(JSON.parse(readFileSync(receipt, 'utf8')).desktopSession).toBe(false);
 });
 
 it('does not upgrade a mixed worker and native environment to operator authority', () => {
@@ -103,4 +105,20 @@ it('suppresses inherited native operator credentials for a worker selecting anot
   execFileSync(process.execPath, ['cli/dist/o8.mjs', 'next', '--enable-next', '--binary', binary,
     '--app-shell', '--server', origin], { env, stdio: 'pipe' });
   expect(JSON.parse(readFileSync(receipt, 'utf8')).status).toBe(401);
+});
+
+
+it('does not forward the desktop account session to a different explicit loopback origin', () => {
+  const receipt = join(root, 'foreign-session.json');
+  const binary = launcherProbe(receipt);
+  const url = new URL(origin);
+  const env: NodeJS.ProcessEnv = { ...process.env, O8_DATA_DIR: configDir,
+    O8_API_PORT: String(Number(url.port) === 65535 ? 65534 : Number(url.port) + 1),
+    O8_NEXT_API_TOKEN: token, O8_NEXT_CLERK_SESSION_TOKEN: 'fixture-desktop-session' };
+  delete env.O8_WORKER_TOKEN;
+  execFileSync(process.execPath, ['cli/dist/o8.mjs', 'next', '--enable-next', '--binary', binary,
+    '--app-shell', '--server', origin], { env, stdio: 'pipe' });
+  const result = JSON.parse(readFileSync(receipt, 'utf8')) as { status: number; desktopSession: boolean };
+  expect(result.status).toBe(200);
+  expect(result.desktopSession).toBe(false);
 });

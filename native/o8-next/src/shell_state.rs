@@ -1,4 +1,5 @@
 //! Versioned shell view state only; credentials and message drafts never enter this file.
+pub use crate::shell::Tab;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
@@ -7,27 +8,24 @@ use std::{
     path::Path,
 };
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "surface", content = "session")]
-pub enum Tab {
-    Session(String),
-    Grid,
-}
-impl Tab {
-    pub fn label(&self) -> &'static str {
-        match self {
-            Self::Session(_) => "Session",
-            Self::Grid => "Grid",
-        }
-    }
-}
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct Workspace {
     pub tabs: Vec<Tab>,
     pub active: usize,
-    pub composer: bool,
-    #[serde(default)]
-    pub selections: BTreeMap<String, String>,
+    #[serde(flatten)]
+    pub surfaces: crate::shell::WorkspaceState,
+}
+// Retain existing session field access while its state lives in the session module.
+impl std::ops::Deref for Workspace {
+    type Target = crate::shell::session::Slice;
+    fn deref(&self) -> &Self::Target {
+        &self.surfaces.session
+    }
+}
+impl std::ops::DerefMut for Workspace {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.surfaces.session
+    }
 }
 #[derive(Clone, Serialize, Deserialize)]
 pub struct State {

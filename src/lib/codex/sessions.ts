@@ -1,3 +1,4 @@
+import { observedCacheTokens } from '@/lib/prompt-cache/usage-evidence';
 import { open, realpath } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -52,6 +53,7 @@ export function invalidateCodexDiscoveredFleetCache() {
 }
 
 export type RuntimeTailEntry = {
+  model?: string;
   id: string;
   kind: 'message' | 'event' | 'tool' | 'tool-output';
   role?: 'user' | 'assistant' | 'system';
@@ -60,10 +62,7 @@ export type RuntimeTailEntry = {
   timestamp?: string;
   timestampLabel?: string;
   thinking?: string;
-  tokens?: {
-    input: number;
-    output: number;
-  };
+  tokens?: import('@/lib/mobile/types').MobileTranscriptEntry['tokens'];
 };
 
 function compactText(value: string | null | undefined, max = 120) {
@@ -558,6 +557,11 @@ function summarizeTailFromJsonl(raw: string, limit = 50) {
   const entries: RuntimeTailEntry[] = [];
   const lines = raw.split('\n').slice(-Math.max(180, retainedLimit * 4));
   let pendingThinking = '';
+  let model: string | undefined;
+  let turnModel: string | undefined;
+  let userIndex = -1;
+  let cumulative: Record<string, unknown> | undefined;
+  let baseline: Record<string, unknown> | undefined;
 
   for (const line of lines) {
     if (!line.trim()) continue;
@@ -571,6 +575,7 @@ function summarizeTailFromJsonl(raw: string, limit = 50) {
 
     const type = String(parsed.type ?? '');
     const payload = (parsed.payload ?? {}) as Record<string, unknown>;
+    if (parsed.type === 'turn_context' && typeof payload.model === 'string') model = payload.model;
     const timestampLabel = parseTimestampLabel(typeof parsed.timestamp === 'string' ? parsed.timestamp : undefined);
 
     if (type === 'event_msg' && payload.type === 'agent_message') {
@@ -601,8 +606,13 @@ function summarizeTailFromJsonl(raw: string, limit = 50) {
       const text = extractTextParts((payload.content ?? []) as Array<Record<string, unknown>>).trim();
       if (role !== 'assistant' && role !== 'user') continue;
       if (!text) continue;
+      if (role === 'user') {
+        userIndex = entries.length;
+        baseline = cumulative;
+        turnModel = model;
+      }
       entries.push({
-        id: `${entries.length}-message`,
+        id: typeof payload.id === 'string' ? payload.id : `${String(parsed.timestamp ?? entries.length)}-${role}-message`,
         kind: 'message',
         label: compactText(`${role}${phase ? ` • ${phase}` : ''}`, 40),
         role: role === 'user' ? 'user' : 'assistant',
@@ -651,18 +661,32 @@ function summarizeTailFromJsonl(raw: string, limit = 50) {
       continue;
     }
 
-    if (type === 'turn.completed') {
-      const usage = (parsed.usage ?? payload.usage) as { input_tokens?: unknown; output_tokens?: unknown } | undefined;
-      const input = typeof usage?.input_tokens === 'number' ? usage.input_tokens : null;
-      const output = typeof usage?.output_tokens === 'number' ? usage.output_tokens : null;
-      if (input == null && output == null) continue;
-      for (let index = entries.length - 1; index >= 0; index -= 1) {
+    if (type === 'turn.completed' || (type === 'event_msg' && payload.type === 'token_count')) {
+      const info = payload.info && typeof payload.info === 'object' ? payload.info as Record<string, unknown> : {};
+      const reportedTotal = info.total_token_usage as Record<string, unknown> | undefined;
+      if (reportedTotal && typeof reportedTotal === 'object') cumulative = reportedTotal;
+      // A bounded tail can begin mid-turn. Without a pre-turn cumulative baseline,
+      // last_token_usage cannot describe all API calls in that turn: keep it unknown.
+      let usage = (parsed.usage ?? payload.usage) as Record<string, unknown> | undefined;
+      if (type === 'event_msg' && reportedTotal && baseline) {
+        usage = {};
+        for (const field of ['input_tokens', 'cached_input_tokens', 'output_tokens']) {
+          const end = reportedTotal[field]; const start = baseline[field];
+          if (typeof end === 'number' && Number.isFinite(end) && typeof start === 'number' && Number.isFinite(start) && end >= start) usage[field] = end - start;
+        }
+      }
+      if (!usage || userIndex < 0) continue;
+      for (let index = userIndex + 1; index < entries.length; index += 1) {
+        entries[index].tokens = undefined;
+        entries[index].model = undefined;
+      }
+      for (let index = entries.length - 1; index > userIndex; index -= 1) {
         const candidate = entries[index];
-        if (candidate.kind !== 'message') continue;
-        candidate.tokens = {
-          input: input ?? 0,
-          output: output ?? 0,
-        };
+        if (candidate.kind !== 'message' || candidate.role !== 'assistant') continue;
+        candidate.tokens = observedCacheTokens(usage, true);
+        candidate.model = model;
+        if (typeof parsed.timestamp === 'string') candidate.timestamp = parsed.timestamp;
+        if (turnModel !== model) candidate.tokens.cacheObserved = false;
         break;
       }
     }

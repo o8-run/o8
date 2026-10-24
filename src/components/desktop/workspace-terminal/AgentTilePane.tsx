@@ -1,4 +1,5 @@
 'use client';
+import { SessionCacheIndicator } from '../SessionCacheIndicator';
 
 import {
   memo,
@@ -560,6 +561,7 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
 
       {canSteer || attention || steerReceipt === 'unknown' ? (
         <form onSubmit={handleFormSubmit} style={{ flexShrink: 0, background: 'transparent' }}>
+          <SessionCacheIndicator session={sessionKey} runtime={runtime} model={modelLabel} entries={slice.messages.length ? slice.messages : entries} running={status === 'running'} />
           <WorkerPaneComposer key={sessionKey} textareaRef={textareaRef} scopeKey={sessionKey}
             active={focused} compact={compact} input={draft} onInputChange={next => {
               setDraft(next);

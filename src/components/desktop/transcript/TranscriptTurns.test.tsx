@@ -49,6 +49,21 @@ describe('completed activity through the shared renderer', () => {
     act(() => { details.open = true; details.dispatchEvent(new Event('toggle')); });
     render(false); expect(host.textContent).toContain('Inspecting');
   });
+  it('retains expanded work and message identity when a growing history starts deferring layout', () => {
+    render(false);
+    const details = host.querySelector('details')!;
+    act(() => { details.open = true; details.dispatchEvent(new Event('toggle')); });
+    const original = host.querySelector('[data-o8-message-id="a"]');
+    const growing: MobileTranscriptEntry[] = [...entries, ...Array.from({ length: 200 }, (_, index) => ({
+      id: `later-${index}`, role: 'user' as const, text: `Later request ${index}`,
+    }))];
+    act(() => root.render(<TranscriptTurns entries={growing} busy={false} repoPath="/repo"
+      nodes={growing.map(entry => <div key={entry.id} data-o8-message-id={entry.id}>{entry.text}</div>)} />));
+    expect(host.querySelector('[data-o8-message-id="a"]')).toBe(original);
+    expect(host.querySelector('details')).toBe(details);
+    expect(details.open).toBe(true);
+    expect(host.textContent).toContain('Inspecting');
+  });
   it('keeps conversational captions separate from the CLI final answer and work disclosure', () => {
     const voice = { sessionId: 'live', direction: 'output' as const, revision: 1, startMs: 0, endMs: 100 };
     const mixed: MobileTranscriptEntry[] = [entries[0],
@@ -84,9 +99,48 @@ describe('prompt navigation', () => {
     expect(host.querySelectorAll('nav button')).toHaveLength(6);
     act(() => host.querySelector<HTMLButtonElement>('nav button')!.click());
     expect(scroll.scrollTo).toHaveBeenCalledWith(expect.objectContaining({ behavior: 'instant' }));
+    const retained = host.querySelector('nav');
+    width = 0;
+    act(() => { scroll.dispatchEvent(new Event('scroll')); vi.runOnlyPendingTimers(); });
+    expect(host.querySelector('nav')).toBe(retained);
     width = 480;
     act(() => { scroll.dispatchEvent(new Event('scroll')); vi.runOnlyPendingTimers(); });
     expect(host.querySelector('nav')).toBeNull();
+  });
+});
+
+describe('long-history prompt navigation', () => {
+  it('bounds layout reads per scroll while jumping to the correct prompt among 5,000 messages', () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => setTimeout(() => callback(0), 0));
+    vi.stubGlobal('cancelAnimationFrame', clearTimeout);
+    const scroll = document.createElement('div');
+    const scrollRef = createRef<HTMLDivElement>(); scrollRef.current = scroll;
+    Object.defineProperties(scroll, { clientWidth: { value: 900 }, clientHeight: { value: 400 }, scrollHeight: { value: 500000 } });
+    scroll.getBoundingClientRect = () => ({ top: 0 } as DOMRect);
+    scroll.scrollTo = vi.fn();
+    window.matchMedia = vi.fn().mockReturnValue({ matches: true });
+    let reads = 0;
+    const history: MobileTranscriptEntry[] = Array.from({ length: 5000 }, (_, index) => ({
+      id: `long-${index}`, role: index % 2 ? 'assistant' : 'user', text: `Message ${index}`,
+    }));
+    for (const [index, entry] of history.entries()) {
+      const node = document.createElement('div'); node.dataset.o8MessageId = entry.id;
+      node.getBoundingClientRect = () => { reads++; return { top: index * 100 - scroll.scrollTop } as DOMRect; };
+      scroll.appendChild(node);
+    }
+    host.appendChild(scroll);
+    act(() => root.render(<TranscriptNavigator entries={history} scrollRef={scrollRef} />));
+    act(() => vi.runOnlyPendingTimers());
+    reads = 0; scroll.scrollTop = 250000;
+    const scans = vi.spyOn(scroll, 'querySelectorAll');
+    act(() => { scroll.dispatchEvent(new Event('scroll')); vi.runOnlyPendingTimers(); });
+    expect(host.querySelector('[aria-current="step"]')?.getAttribute('aria-label')).toContain('Message 2500');
+    console.info('[transcript-navigation] messages=5000 layoutReads=%d DOMScans=%d', reads, scans.mock.calls.length);
+    expect(reads).toBeLessThan(20);
+    expect(scans).not.toHaveBeenCalled();
+    act(() => host.querySelector<HTMLButtonElement>('[aria-label="Jump to prompt 2001: Message 4000"]')!.click());
+    expect(scroll.scrollTo).toHaveBeenCalledWith(expect.objectContaining({ top: 399982 }));
   });
 });
 

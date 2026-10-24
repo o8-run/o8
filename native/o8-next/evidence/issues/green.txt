@@ -1,0 +1,38 @@
+issues-rebased-ts-tests:
+ Test Files  3 passed (3)
+      Tests  8 passed (8)
+   Duration  48.60s (transform 109ms, setup 132ms, import 169ms, tests 47.62s, environment 0ms)
+
+issues-rebased-rust:
+test result: ok. 42 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 184.41s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+issues-rebased-full-npm:
+ Test Files  1233 passed | 3 skipped (1236)
+      Tests  8896 passed | 5 skipped (8901)
+   Duration  392.39s (transform 20.81s, setup 44.21s, import 488.16s, tests 406.49s, environment 362.28s)
+
+Combined native issue/Inbox controls:
+test shell::inbox_tests::inbox_cards_counts_statuses_and_approval_match_desktop_routes ... ok
+test shell::inbox_tests::inbox_empty_and_server_error_never_claim_a_false_clean_state ... ok
+test shell::inbox_tests::inbox_keyboard_buttons_activate_enter_space_and_skip_disabled ... ok
+test shell::inbox_tests::inbox_opens_related_session_and_pull_request_and_restores ... ok
+test shell::inbox_tests::inbox_plan_session_header_preserves_desktop_authority_and_continuation ... ok
+test shell::issue_tests::issues_create_enhance_preview_labels_and_success ... ok
+test shell::issue_tests::issues_errors_retry_stale_and_account_switch ... ok
+test shell::issue_tests::issues_interaction_frames_and_missing_checkout_refusal ... ok
+test shell::issue_tests::issues_link_follows_worker_selection ... ok
+test shell::issue_tests::issues_view_search_link_clear_and_worker_task ... ok
+test shell::issue_tests::issues_worker_receives_linked_context_through_stream ... ok
+test shell::tests::inbox_is_reachable_from_the_real_shell_palette ... ok
+
+npx tsc --noEmit (NODE_OPTIONS=--max-old-space-size=8192): passed
+npm run typecheck:fast: passed
+Touched-file ESLint: passed
+Rule check: four eligible files, zero violations vs origin/main
+Classification: manifest matches source markers
+Normal native build: passed
+License audit: Linux 472 / macOS 455 packages, zero GPL or excluded application crates

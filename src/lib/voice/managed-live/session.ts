@@ -24,6 +24,8 @@ export interface LiveSession {
   activity: () => void;
   readonly state: LiveState;
   readonly usage: LiveActivityUsage;
+  /** Ticks locally between provider receipts; terminal provider duration is authoritative. */
+  readonly elapsedSeconds?: number;
 }
 export class LiveTranscript {
   private fragments: Array<{ id: string; text: string; start: number; end: number }> = [];
@@ -114,7 +116,7 @@ export async function startManagedLive(backend: LiveBackend, onState: (state: Li
   if (signal?.aborted) controller.abort();
   attempt = launch();
   await attempt;
-  return { close, activity: () => current?.activity(), get state() { return state; }, get usage() { return current?.usage ?? emptyUsage; } };
+  return { close, activity: () => current?.activity(), get state() { return state; }, get usage() { return current?.usage ?? emptyUsage; }, get elapsedSeconds() { return current?.elapsedSeconds ?? 0; } };
 }
 
 async function startLiveAttempt(backend: LiveBackend, onState: (state: LiveState, detail?: string, canResume?: boolean, inputReleased?: Promise<void>) => void, signal?: AbortSignal, options?: LiveOptions): Promise<LiveSession> {
@@ -134,6 +136,14 @@ async function startLiveAttempt(backend: LiveBackend, onState: (state: LiveState
   const startupStep = <T,>(operation: Promise<T>) => Promise.race([operation, startupDeadline]);
   let cursor = 0;
   let activityPolicy = new LiveActivity(Date.now(), options?.idleTimeoutMs);
+  let startedAt = Date.now();
+  let endedAt: number | undefined;
+  const elapsedSeconds = () => {
+    const usage = activityPolicy.usage;
+    if (usage.providerUsageFinal && usage.providerConnectedSeconds !== null) return usage.providerConnectedSeconds;
+    return Math.max(usage.providerConnectedSeconds ?? 0, ((endedAt ?? Date.now()) - startedAt) / 1000);
+  };
+  let pendingNarration = 0;
   let idleClosed = false;
   let wasLive = false;
   let connectionFailed = false;
@@ -176,6 +186,7 @@ async function startLiveAttempt(backend: LiveBackend, onState: (state: LiveState
   const cleanup = () => {
     if (cleaned) return;
     cleaned = true; unsubscribe?.(); rejectStartup(new Error('Voice setup ended before becoming ready.')); signal?.removeEventListener('abort', abort);
+    endedAt = Date.now();
     clearTimeout(startupTimer); clearTimeout(pollTimer); clearTimeout(closeTimer); clearInterval(idleTimer);
     microphoneReleased = microphone?.stop() ?? Promise.resolve();
     void microphoneReleased.catch(() => {}); peer.close(); audio.pause(); audio.srcObject = null;
@@ -236,14 +247,18 @@ async function startLiveAttempt(backend: LiveBackend, onState: (state: LiveState
   function startPolling() { if (!pollingStarted && !cleaned && id) { pollingStarted = true; void poll(); } }
   const update = async (delegationId: string | null, text: string, spoken = true) => {
     if (state !== 'live') return; // The backend continues; a new session uses its transcript.
-    // Conservative character bound also stays below the API's 500-token limit.
-    for (let offset = 0; offset < text.length; offset += 400) {
-      if (state !== 'live') return;
-      await request({ action: 'event', event: {
-      type: spoken ? 'session.commentary.append' : 'session.thinking.append',
-      event_id: crypto.randomUUID(), delegation_id: delegationId, content: text.slice(offset, offset + 400),
-    } });
-    }
+    if (spoken) pendingNarration++;
+    try {
+      // Conservative character bound also stays below the API's 500-token limit.
+      for (let offset = 0; offset < text.length; offset += 400) {
+        if (state !== 'live') return;
+        await request({ action: 'event', event: {
+          type: spoken ? 'session.commentary.append' : 'session.thinking.append',
+          event_id: crypto.randomUUID(), delegation_id: delegationId, content: text.slice(offset, offset + 400),
+        } });
+        if (spoken) activityPolicy.narrationDelivered(Date.now());
+      }
+    } finally { if (spoken) pendingNarration--; }
   };
   async function poll() {
     try {
@@ -260,7 +275,9 @@ async function startLiveAttempt(backend: LiveBackend, onState: (state: LiveState
             && (entry.event.reason === 'connection_lost' || (connectionFailed && entry.event.reason === 'close_requested'));
           // Stop capture and detach the old result subscriber before a replacement can start.
           cleanup();
-          transition('closed', idleClosed ? 'Voice paused after inactivity. Resume when ready; backend work continues. Delayed speech detection can also cause a pause.' : undefined, canResume);
+          const detail = entry.event.reason === 'session_limit' ? 'Session limit reached.'
+            : idleClosed ? backend.source === 'byok' ? 'Paused after inactivity.' : 'Voice paused after inactivity. Resume when ready; backend work continues. Delayed speech detection can also cause a pause.' : undefined;
+          transition('closed', detail, canResume);
           return;
         }
         if (entry.event.type === 'o8.transport.unknown') { uncertain('Voice disconnected; backend work is unchanged.'); return; }
@@ -315,6 +332,7 @@ async function startLiveAttempt(backend: LiveBackend, onState: (state: LiveState
     signal?.throwIfAborted();
     if (cleaned || closePromise) throw new Error('Voice startup was cancelled.');
     activityPolicy = new LiveActivity(Date.now(), options?.idleTimeoutMs);
+    startedAt = Date.now();
     lastContext = backend.context().slice(0, 2400);
     startRequested = true;
     const result = await startupStep(request({ action: 'start', context: backend.context().slice(-8000), sdp: peer.localDescription?.sdp }).then(created => {
@@ -326,7 +344,7 @@ async function startLiveAttempt(backend: LiveBackend, onState: (state: LiveState
     if (cleaned || closePromise) {
       if (!cleaned) void request({ action: 'close' }).catch(() => {});
       startPolling();
-      return { close, activity, get state() { return state; }, get usage() { return activityPolicy.usage; } };
+      return { close, activity, get state() { return state; }, get usage() { return activityPolicy.usage; }, get elapsedSeconds() { return elapsedSeconds(); } };
     }
     signal?.addEventListener('abort', abort, { once: true });
     if (signal?.aborted) void close();
@@ -340,7 +358,7 @@ async function startLiveAttempt(backend: LiveBackend, onState: (state: LiveState
       }
     }
     clearTimeout(startupTimer);
-    if (cleaned) return { close, activity, get state() { return state; }, get usage() { return activityPolicy.usage; } };
+    if (cleaned) return { close, activity, get state() { return state; }, get usage() { return activityPolicy.usage; }, get elapsedSeconds() { return elapsedSeconds(); } };
     if (!closePromise && !signal?.aborted) { wasLive = true; activityPolicy.markReady(Date.now()); transition('live', localPreview ? 'Local microphone preview. No transcription, provider connection or backend instructions.' : undefined);
       unsubscribe = backend.subscribe?.((text, spoken) => update(null, text, spoken)); }
     idleTimer = setInterval(() => {
@@ -353,13 +371,13 @@ async function startLiveAttempt(backend: LiveBackend, onState: (state: LiveState
         if (output) outputAudible ||= energy && !audio.paused; else inputEnergy ||= energy;
       }
       options?.onLevel?.(state === 'live' ? Math.min(1, measuredLevel * 4) : 0);
-      if (state === 'live' && activityPolicy.shouldClose(Date.now(), inputEnergy, outputAudible)) { idleClosed = true; void close(); }
+      if (state === 'live' && pendingNarration === 0 && activityPolicy.shouldClose(Date.now(), inputEnergy, outputAudible)) { idleClosed = true; void close(); }
     }, 200);
     startPolling();
     if (signal?.aborted) await close();
-    return { close, activity, get state() { return state; }, get usage() { return activityPolicy.usage; } };
+    return { close, activity, get state() { return state; }, get usage() { return activityPolicy.usage; }, get elapsedSeconds() { return elapsedSeconds(); } };
   } catch (error) {
-    if (cleaned && startRequested) return { close, activity, get state() { return state; }, get usage() { return activityPolicy.usage; } };
+    if (cleaned && startRequested) return { close, activity, get state() { return state; }, get usage() { return activityPolicy.usage; }, get elapsedSeconds() { return elapsedSeconds(); } };
     if (!id && startRequested && backend.source === 'byok'
       && !(error instanceof LiveRequestError && error.status >= 400 && error.status < 500)) {
       // A lost response is not permission to buy another session. Resolve only
@@ -373,7 +391,7 @@ async function startLiveAttempt(backend: LiveBackend, onState: (state: LiveState
     }
     if (id) {
       await close(); // A failed setup can still have a confirmed final usage receipt.
-      return { close, activity, get state() { return state; }, get usage() { return activityPolicy.usage; } };
+      return { close, activity, get state() { return state; }, get usage() { return activityPolicy.usage; }, get elapsedSeconds() { return elapsedSeconds(); } };
     }
     transition(id || startRequested ? 'unknown' : 'error', error instanceof Error ? error.message : 'Could not connect voice');
     cleanup(); throw error;

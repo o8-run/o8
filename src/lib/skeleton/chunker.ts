@@ -10,6 +10,7 @@
  */
 
 import { readFileSync } from 'node:fs';
+import { loadTypeScriptCompiler } from '@/lib/typescript-compiler';
 import { hashContent } from './parser';
 import type { CodeChunk, FileChunks, SupportedLanguage, SymbolKind } from './types';
 
@@ -32,7 +33,7 @@ async function getTS(): Promise<TS | null> {
   if (_tsLoadFailed) return null;
 
   try {
-    _ts = await import('typescript');
+    _ts = await loadTypeScriptCompiler();
     return _ts;
   } catch {
     _tsLoadFailed = true;

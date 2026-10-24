@@ -78,7 +78,7 @@ export function ProjectsSwitcher({ projects, loading = false, activeProjectId, s
     </div>}
     <ComposerPopover anchorRef={anchor} open={open} align="start" onClose={() => setOpen(false)}>
       <motion.div initial={reduceMotion ? false : { y: -4 }} animate={{ y: 0 }} transition={{ duration: reduceMotion ? 0 : 0.18, ease: [0.22, 1, 0.36, 1] }}>
-        <FloatingSurface overlay style={{ width: 'min(300px, calc(100vw - 24px))', borderRadius: 16 }} contentStyle={{ padding: 6 }}>
+        <FloatingSurface overlay data-mcp-scope="navigation-menu" style={{ width: 'min(300px, calc(100vw - 24px))', borderRadius: 16 }} contentStyle={{ padding: 6 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingLeft: 9, paddingRight: 9, height: 35, borderBottom: '1px solid var(--t-divider-subtle)', color: 'var(--t-text-muted)', marginBottom: 4 }}>
             <ProjectGlyph kind="search" size={14} /><input aria-label="Search projects" placeholder="Search projects…" value={query} onChange={(event) => setQuery(event.currentTarget.value)} onKeyDown={(event) => {
               if (event.key === 'ArrowDown') { event.preventDefault(); event.currentTarget.closest('[data-composer-overlay]')?.querySelector<HTMLElement>('[data-project-choice]')?.focus(); }
@@ -107,7 +107,7 @@ export function ProjectsSwitcher({ projects, loading = false, activeProjectId, s
       </motion.div>
     </ComposerPopover>
     <ComposerPopover anchorRef={addAnchor} open={adding} align="end" onClose={() => setAdding(false)}>
-      <FloatingSurface overlay style={{ width: 'min(300px, calc(100vw - 24px))', borderRadius: 16 }} contentStyle={{ padding: 6 }}>
+      <FloatingSurface overlay data-mcp-scope="navigation-menu" style={{ width: 'min(300px, calc(100vw - 24px))', borderRadius: 16 }} contentStyle={{ padding: 6 }}>
         <div role="menu" aria-label="Add to workspace">
           <div style={{ paddingTop: 7, paddingRight: 9, paddingBottom: 4, paddingLeft: 9, fontSize: 10, color: 'var(--t-text-muted)' }}>Repository sources</div>
           <button type="button" role="menuitem" onClick={() => { setAdding(false); addAnchor.current?.focus(); onAddRepo(); }} onMouseEnter={(event) => hover(event, true)} onMouseLeave={(event) => hover(event)} style={{ ...rowStyle, minHeight: 42 }}><ProjectGlyph kind="folder" /><span><span style={{ display: 'block' }}>Local folder</span><span style={{ display: 'block', fontSize: 10.5, color: 'var(--t-text-muted)', marginTop: 2 }}>Choose a folder on this machine</span></span></button>

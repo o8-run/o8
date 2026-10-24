@@ -65,6 +65,11 @@ function transientRepo(remote?: string): string {
 }
 
 describe('GET /api/panel/prs transient repos', () => {
+  it('forwards an explicit fresh request to the broker instead of serving the TTL snapshot', async () => {
+    const response = await GET(new Request('http://localhost/api/panel/prs?repo=example%2Ffresh&fresh=1'));
+    expect(response.status).toBe(200);
+    expect(ensureGitHubPullRequests).toHaveBeenCalledWith('example/fresh', { fresh: true });
+  });
   it('resolves an unregistered local repo through its GitHub origin', async () => {
     const repoPath = transientRepo('git@github.com:example/transient.git');
     const response = await GET(new Request(

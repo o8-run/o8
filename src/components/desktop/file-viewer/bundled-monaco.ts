@@ -1,6 +1,6 @@
 export async function loadBundledMonacoEditor() {
   await import('@/lib/monaco-polyfills');
-  const [monaco, react] = await Promise.all([import('monaco-editor'), import('@monaco-editor/react')]);
+  const [monaco, react] = await Promise.all([import('./monaco-languages'), import('@monaco-editor/react')]);
   const host = self as typeof self & { MonacoEnvironment?: { getWorker: (id: string, label: string) => Worker } };
   host.MonacoEnvironment = {
     getWorker(_id, label) {

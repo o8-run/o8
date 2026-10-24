@@ -1,9 +1,15 @@
 import 'server-only';
 
-import { githubInstallationFetch } from './auth';
+import { githubInstallationFetch, type GitHubInstallationAuthorization } from './auth';
+import { GitHubRequestDeferredError } from './request-budget';
 import { upsertGitHubIssue } from './store';
 import { recordOwnPrRemark } from './pr-watch';
 import { beginPrRemarkWrite } from './pr-watch-writes';
+
+/** A definitive issue POST refusal; unlike a lost response, no issue was admitted. */
+export class GitHubIssueCreationRefusedError extends Error {
+  constructor(message: string, readonly retryAt?: number) { super(message); }
+}
 
 function buildGitHubError(response: Response, bodyText: string) {
   const reset = response.headers.get('x-ratelimit-reset');
@@ -55,6 +61,7 @@ export async function fetchGitHubLabels(repoFullName: string, limit = 50) {
 export async function createGitHubIssue(
   repoFullName: string,
   input: { title: string; body?: string; labels?: string[] },
+  authorization?: GitHubInstallationAuthorization,
 ) {
   const { response } = await githubInstallationFetch(repoFullName, `/repos/${repoFullName}/issues`, {
     method: 'POST',
@@ -64,7 +71,15 @@ export async function createGitHubIssue(
       body: input.body ?? '',
       labels: input.labels ?? [],
     }),
+  }, { authorization }).catch(error => {
+    // A budget refusal is either before dispatch or follows a definite 403/429.
+    // Neither admitted an issue; it must not become an outcome-unknown receipt.
+    if (error instanceof GitHubRequestDeferredError) throw new GitHubIssueCreationRefusedError(error.message, error.retryAt);
+    throw error;
   });
+  if (response.status >= 400 && response.status < 500) {
+    throw new GitHubIssueCreationRefusedError(buildGitHubError(response, await response.text().catch(() => '')).message);
+  }
 
   const issue = await parseGitHubJson<{
     id: number;

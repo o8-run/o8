@@ -1,0 +1,43 @@
+ FAIL  tests/next-brain-real-path.test.ts > uses production Brain SSE, retrieval, citations, operator auth and read-only runtime
+AssertionError: expected 404 to be 401 // Object.is equality
+
+- Expected
++ Received
+
+- 401
++ 404
+
+ ❯ tests/next-brain-real-path.test.ts:33:27
+     31|   for (const authorization of [undefined, 'Bearer invalid-fixture']) {
+     32|     const denied = await fetch(url, { method: 'POST', headers: { 'Cont…
+     33|     expect(denied.status).toBe(401);
+       |                           ^
+     34|   }
+     35|   const response = await fetch(url, { method: 'POST', headers, body });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  tests/next-brain-real-path.test.ts > keeps validation and runtime error responses on the production route
+AssertionError: expected 404 to be 400 // Object.is equality
+
+- Expected
++ Received
+
+- 400
++ 404
+
+ ❯ tests/next-brain-real-path.test.ts:47:24
+     45| it('keeps validation and runtime error responses on the production rou…
+     46|   const empty = await fetch(`${origin}/api/cortex/ask`, { method: 'POS…
+     47|   expect(empty.status).toBe(400);
+       |                        ^
+     48|   const response = await fetch(`${origin}/api/cortex/ask`, { method: '…
+     49|     body: JSON.stringify({ repoPath, conversation: true, question: 'Fi…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed (2)
+   Start at  22:22:04
+   Duration  11.81s (transform 65ms, setup 128ms, import 26ms, tests 11.17s, environment 0ms)

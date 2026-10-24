@@ -1,0 +1,328 @@
+{
+  "issue": 2878,
+  "pullRequest": 4624,
+  "verifiedOn": "2026-10-25",
+  "runtime": "macOS; Playwright 1.60.0; WebKit 26.4 (build 2287)",
+  "sourceHeadBeforeRebase": "010c99165359007df41413fbcda31c3dcafcbd4a",
+  "rebasedOn": "88770559f",
+  "entryPoint": "tests/navigation-density-real-path.test.ts",
+  "panel": "Production AgentPanel, ChatsTab, history rows, navigation rail, column, theme tokens and CSS; host/data services are fixtures.",
+  "input": "Trusted browser input. Trackpad-style strokes use pixel wheel deltas 24/48/72/96/96/72/48/24 in both directions. No physical trackpad, OS input, native app or programmatic scrolling substitutes for endpoint verification.",
+  "keyboard": "Option-Tab and Option-Shift-Tab in macOS WebKit; Tab and Shift-Tab in Chromium. Plain HTML control reproduced the platform keyboard behavior.",
+  "control": {
+    "rawTouch": {
+      "browser": "webkit",
+      "top": 0
+    },
+    "trackpad": [
+      {
+        "down": true,
+        "top": 4320,
+        "max": 4320
+      },
+      {
+        "down": false,
+        "top": 0,
+        "max": 4320
+      }
+    ]
+  },
+  "before": "All six raw-touch endpoint cases failed after the keyboard-driver correction; 20 starts and 180 moves per case, zero pan in the CSS-free control and panel.",
+  "after": "All six cases passed twice in WebKit; 26 touched tests passed in Chromium. Raw touch delivery and drag interference remain asserted; touchscreen endpoints remain asserted in Chromium.",
+  "cases": [
+    {
+      "size": {
+        "width": 1280,
+        "height": 720
+      },
+      "theme": "light",
+      "originalTouchFailure": {
+        "scrollTop": 0,
+        "trustedStarts": 20,
+        "trustedMoves": 180,
+        "preventedMoves": 0,
+        "scrollOwners": []
+      },
+      "trackpad": {
+        "bottom": 4008,
+        "top": 0,
+        "trustedPixelEvents": 144,
+        "preventedEvents": 0,
+        "scrollOwners": [
+          "agent-panel"
+        ]
+      },
+      "asserted": {
+        "wheelEndpoints": "passed",
+        "keyboardFirstAndLastActivation": "passed",
+        "visibleFocus": "passed",
+        "cancelledDragThenTouchTap": "passed",
+        "portalGutter": "passed",
+        "minimumTargets": "passed"
+      },
+      "visibleChats": {
+        "expanded": 9,
+        "collapsed": 0
+      },
+      "scrollbars": [
+        {
+          "width": "none",
+          "gutter": "auto",
+          "reserved": 0,
+          "webkitDisplay": "none"
+        },
+        {
+          "width": "none",
+          "gutter": "auto",
+          "reserved": 0,
+          "webkitDisplay": "none"
+        }
+      ]
+    },
+    {
+      "size": {
+        "width": 1280,
+        "height": 720
+      },
+      "theme": "dark",
+      "originalTouchFailure": {
+        "scrollTop": 0,
+        "trustedStarts": 20,
+        "trustedMoves": 180,
+        "preventedMoves": 0,
+        "scrollOwners": []
+      },
+      "trackpad": {
+        "bottom": 4008,
+        "top": 0,
+        "trustedPixelEvents": 144,
+        "preventedEvents": 0,
+        "scrollOwners": [
+          "agent-panel"
+        ]
+      },
+      "asserted": {
+        "wheelEndpoints": "passed",
+        "keyboardFirstAndLastActivation": "passed",
+        "visibleFocus": "passed",
+        "cancelledDragThenTouchTap": "passed",
+        "portalGutter": "passed",
+        "minimumTargets": "passed"
+      },
+      "visibleChats": {
+        "expanded": 9,
+        "collapsed": 0
+      },
+      "scrollbars": [
+        {
+          "width": "none",
+          "gutter": "auto",
+          "reserved": 0,
+          "webkitDisplay": "none"
+        },
+        {
+          "width": "none",
+          "gutter": "auto",
+          "reserved": 0,
+          "webkitDisplay": "none"
+        }
+      ]
+    },
+    {
+      "size": {
+        "width": 1366,
+        "height": 768
+      },
+      "theme": "light",
+      "originalTouchFailure": {
+        "scrollTop": 0,
+        "trustedStarts": 20,
+        "trustedMoves": 180,
+        "preventedMoves": 0,
+        "scrollOwners": []
+      },
+      "trackpad": {
+        "bottom": 3960,
+        "top": 0,
+        "trustedPixelEvents": 144,
+        "preventedEvents": 0,
+        "scrollOwners": [
+          "agent-panel"
+        ]
+      },
+      "asserted": {
+        "wheelEndpoints": "passed",
+        "keyboardFirstAndLastActivation": "passed",
+        "visibleFocus": "passed",
+        "cancelledDragThenTouchTap": "passed",
+        "portalGutter": "passed",
+        "minimumTargets": "passed"
+      },
+      "visibleChats": {
+        "expanded": 10,
+        "collapsed": 0
+      },
+      "scrollbars": [
+        {
+          "width": "none",
+          "gutter": "auto",
+          "reserved": 0,
+          "webkitDisplay": "none"
+        },
+        {
+          "width": "none",
+          "gutter": "auto",
+          "reserved": 0,
+          "webkitDisplay": "none"
+        }
+      ]
+    },
+    {
+      "size": {
+        "width": 1366,
+        "height": 768
+      },
+      "theme": "dark",
+      "originalTouchFailure": {
+        "scrollTop": 0,
+        "trustedStarts": 20,
+        "trustedMoves": 180,
+        "preventedMoves": 0,
+        "scrollOwners": []
+      },
+      "trackpad": {
+        "bottom": 3960,
+        "top": 0,
+        "trustedPixelEvents": 144,
+        "preventedEvents": 0,
+        "scrollOwners": [
+          "agent-panel"
+        ]
+      },
+      "asserted": {
+        "wheelEndpoints": "passed",
+        "keyboardFirstAndLastActivation": "passed",
+        "visibleFocus": "passed",
+        "cancelledDragThenTouchTap": "passed",
+        "portalGutter": "passed",
+        "minimumTargets": "passed"
+      },
+      "visibleChats": {
+        "expanded": 10,
+        "collapsed": 0
+      },
+      "scrollbars": [
+        {
+          "width": "none",
+          "gutter": "auto",
+          "reserved": 0,
+          "webkitDisplay": "none"
+        },
+        {
+          "width": "none",
+          "gutter": "auto",
+          "reserved": 0,
+          "webkitDisplay": "none"
+        }
+      ]
+    },
+    {
+      "size": {
+        "width": 1920,
+        "height": 1080
+      },
+      "theme": "light",
+      "originalTouchFailure": {
+        "scrollTop": 0,
+        "trustedStarts": 20,
+        "trustedMoves": 180,
+        "preventedMoves": 0,
+        "scrollOwners": []
+      },
+      "trackpad": {
+        "bottom": 4656,
+        "top": 0,
+        "trustedPixelEvents": 160,
+        "preventedEvents": 0,
+        "scrollOwners": [
+          "agent-panel"
+        ]
+      },
+      "asserted": {
+        "wheelEndpoints": "passed",
+        "keyboardFirstAndLastActivation": "passed",
+        "visibleFocus": "passed",
+        "cancelledDragThenTouchTap": "passed",
+        "portalGutter": "passed",
+        "minimumTargets": "passed"
+      },
+      "visibleChats": {
+        "expanded": 12,
+        "collapsed": 0
+      },
+      "scrollbars": [
+        {
+          "width": "none",
+          "gutter": "auto",
+          "reserved": 0,
+          "webkitDisplay": "none"
+        },
+        {
+          "width": "none",
+          "gutter": "auto",
+          "reserved": 0,
+          "webkitDisplay": "none"
+        }
+      ]
+    },
+    {
+      "size": {
+        "width": 1920,
+        "height": 1080
+      },
+      "theme": "dark",
+      "originalTouchFailure": {
+        "scrollTop": 0,
+        "trustedStarts": 20,
+        "trustedMoves": 180,
+        "preventedMoves": 0,
+        "scrollOwners": []
+      },
+      "trackpad": {
+        "bottom": 4656,
+        "top": 0,
+        "trustedPixelEvents": 160,
+        "preventedEvents": 0,
+        "scrollOwners": [
+          "agent-panel"
+        ]
+      },
+      "asserted": {
+        "wheelEndpoints": "passed",
+        "keyboardFirstAndLastActivation": "passed",
+        "visibleFocus": "passed",
+        "cancelledDragThenTouchTap": "passed",
+        "portalGutter": "passed",
+        "minimumTargets": "passed"
+      },
+      "visibleChats": {
+        "expanded": 12,
+        "collapsed": 0
+      },
+      "scrollbars": [
+        {
+          "width": "none",
+          "gutter": "auto",
+          "reserved": 0,
+          "webkitDisplay": "none"
+        },
+        {
+          "width": "none",
+          "gutter": "auto",
+          "reserved": 0,
+          "webkitDisplay": "none"
+        }
+      ]
+    }
+  ]
+}

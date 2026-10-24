@@ -1,3 +1,4 @@
+import { stopWorkspaceServices, readWorkspaceServiceState } from './services';
 import 'server-only';
 
 import { createHash, randomUUID } from 'node:crypto';
@@ -57,6 +58,14 @@ export interface WorkspaceManifestServiceReceipt {
   port: number | null;
   environment: NodeJS.ProcessEnv;
   health: WorkspaceManifestHealthReceipt | null;
+  pid?: number | null;
+  startedAt?: string;
+  finishedAt?: string;
+  exitCode?: number | null;
+  signal?: string | null;
+  restarts?: number;
+  outputBytes?: number;
+  attempts?: Array<Record<string, unknown>>;
 }
 
 export interface WorkspaceManifestReceipt {
@@ -64,6 +73,7 @@ export interface WorkspaceManifestReceipt {
   packetId: string;
   laneId: string;
   manifestHash: string;
+  serviceGeneration?: string;
   state: WorkspaceManifestState;
   pid: number;
   startedAt: string;
@@ -74,6 +84,7 @@ export interface WorkspaceManifestReceipt {
   setup: WorkspaceManifestSetupReceipt[];
   services: WorkspaceManifestServiceReceipt[];
   error?: string;
+  cleanup?: { state: string };
 }
 
 export interface WorkspaceManifestLifecycleRun {
@@ -83,6 +94,7 @@ export interface WorkspaceManifestLifecycleRun {
   readonly startedAt: string;
   readonly pid: number;
   readonly signal: AbortSignal;
+  serviceGeneration?: string;
 }
 
 interface ActiveWorkspaceManifestRun extends WorkspaceManifestLifecycleRun {
@@ -383,6 +395,9 @@ export async function beginWorkspaceManifestRun(input: {
   manifestHash: string;
 }): Promise<WorkspaceManifestLifecycleRun> {
   const worktreePath = path.resolve(input.worktreePath);
+  if (activeRuns.has(workspaceManifestReceiptPath(worktreePath))) throw new Error('Workspace manifest setup is already running.');
+  const prior = await readWorkspaceManifestReceipt(worktreePath);
+  if (prior) await stopWorkspaceServices({ worktreePath, packetId: prior.packetId, laneId: prior.laneId, serviceGeneration: prior.serviceGeneration });
   const startedAt = new Date().toISOString();
   const controller = new AbortController();
   const active: ActiveWorkspaceManifestRun = {
@@ -496,6 +511,25 @@ export async function settleWorkspaceManifestRun(
   });
 }
 
+export async function recordWorkspaceServiceOutcome(run: WorkspaceManifestLifecycleRun, failed = false): Promise<void> {
+  const state = await readWorkspaceServiceState(run);
+  if (!state || state.generation !== run.serviceGeneration) return;
+  await withReceiptMutation(run.worktreePath, async receiptPath => {
+    const receipt = await readReceiptFile(receiptPath);
+    if (!receipt || !sameAttempt(receipt, run)) return;
+    const updated: WorkspaceManifestReceipt = { ...receipt, services: state.services, ...(state.teardown ? { cleanup: state.teardown } : {}) };
+    if (failed && receipt.state === 'completed') {
+      updated.state = 'failed';
+      updated.error = state.error ?? 'Workspace service exited unexpectedly.';
+      updated.finishedAt = new Date().toISOString();
+      recordFailureSafely(updated);
+    }
+    await writeReceiptFile(run.worktreePath, receiptPath, updated);
+    if (state.state === 'stopped' && receipt.state === 'completed' && !receipt.cleanup) recordLaneEvent(run.laneId, 'workspace_manifest_services_stopped', 'system', { generation: state.generation, state: 'stopped' });
+    if ((failed || state.state === 'stopped') && !state.cleanupUnconfirmed && state.teardown?.state !== 'failed') await releaseWorkspacePortLeases(run);
+  });
+}
+
 export function finishWorkspaceManifestRun(run: WorkspaceManifestLifecycleRun): void {
   const receiptPath = workspaceManifestReceiptPath(run.worktreePath);
   const active = activeRuns.get(receiptPath);
@@ -508,6 +542,18 @@ export function finishWorkspaceManifestRun(run: WorkspaceManifestLifecycleRun): 
   }
 }
 
+async function settleOwnedServices(input: { worktreePath: string; packetId: string; laneId: string }): Promise<void> {
+  const receipt = await readWorkspaceManifestReceipt(input.worktreePath);
+  const run = receipt?.packetId === input.packetId && receipt.laneId === input.laneId
+    ? { ...receipt, worktreePath: input.worktreePath, signal: new AbortController().signal } : null;
+  try { await stopWorkspaceServices({ ...input, serviceGeneration: run?.serviceGeneration }); }
+  catch (error) {
+    if (run) await recordWorkspaceServiceOutcome(run, true);
+    throw error;
+  }
+  if (run) await recordWorkspaceServiceOutcome(run);
+}
+
 export function settleTerminalWorkspaceManifest(input: {
   worktreePath?: string | null;
   packetId: string;
@@ -517,26 +563,24 @@ export function settleTerminalWorkspaceManifest(input: {
   active?.controller.abort(new Error('Workspace manifest cancelled because its lane became terminal.'));
   const worktreePath = active?.worktreePath ?? input.worktreePath;
   return (async () => {
-    try {
-      let settlement: WorkspaceManifestSettlement = { receipt: null, changed: false };
-      if (active) {
-        settlement = await settleWorkspaceManifestRun(active, {
-          state: 'cancelled',
-          error: 'Workspace manifest cancelled because its lane became terminal.',
-        });
-      } else if (worktreePath) {
-        settlement = await settleReceiptDirectly({
-          worktreePath,
-          packetId: input.packetId,
-          laneId: input.laneId,
-          state: 'cancelled',
-          error: 'Workspace manifest cancelled because its lane became terminal.',
-        });
-      }
-      if (settlement.changed && settlement.receipt) recordFailureSafely(settlement.receipt);
-    } finally {
-      await releaseWorkspacePortLeases({ packetId: input.packetId, laneId: input.laneId });
+    if (worktreePath) await settleOwnedServices({ ...input, worktreePath });
+    let settlement: WorkspaceManifestSettlement = { receipt: null, changed: false };
+    if (active) {
+      settlement = await settleWorkspaceManifestRun(active, {
+        state: 'cancelled',
+        error: 'Workspace manifest cancelled because its lane became terminal.',
+      });
+    } else if (worktreePath) {
+      settlement = await settleReceiptDirectly({
+        worktreePath,
+        packetId: input.packetId,
+        laneId: input.laneId,
+        state: 'cancelled',
+        error: 'Workspace manifest cancelled because its lane became terminal.',
+      });
     }
+    if (settlement.changed && settlement.receipt) recordFailureSafely(settlement.receipt);
+    await releaseWorkspacePortLeases({ packetId: input.packetId, laneId: input.laneId });
   })();
 }
 
@@ -549,6 +593,7 @@ export function archiveWorkspaceManifestRunForReset(input: {
   active?.controller.abort(new Error('Workspace manifest cancelled by packet reset.'));
   const worktreePath = active?.worktreePath ?? input.worktreePath;
   return (async () => {
+    if (worktreePath) await settleOwnedServices({ ...input, worktreePath });
     await releaseWorkspacePortLeases({ packetId: input.packetId, laneId: input.laneId });
     if (!worktreePath) {
       return null;

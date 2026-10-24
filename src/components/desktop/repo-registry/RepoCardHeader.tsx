@@ -1,5 +1,6 @@
 'use client';
 
+import { GithubReadStatus } from '@/components/github/GithubReadStatus';
 import { memo, useState } from 'react';
 // Raw SVG icons — lucide-react doesn't render in Tauri webview
 function ChevronDownIcon({ size = 13 }: { size?: number }) {
@@ -460,6 +461,8 @@ function RepoCardHeaderBase({
         ) : null}
 
         {showHeaderHover ? (
+          <>
+          <GithubReadStatus error={model.prPreviewError} updatedAt={model.prPreviewUpdatedAt} />
           <RepoStatusHover
             repo={repo}
             anchorRect={hoverPreviewRect}
@@ -468,6 +471,7 @@ function RepoCardHeaderBase({
             onMouseEnter={holdPreviewHover}
             onMouseLeave={closePreviewHover}
           />
+          </>
         ) : null}
 
         {confirmingRemove ? (

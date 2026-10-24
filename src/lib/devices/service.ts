@@ -7,6 +7,9 @@ import { join } from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { helperEnvironment, inspectPlatforms, inspectTools, installedTool, installTool, stopOwnedChild } from './tools';
 import { DeviceError, type DeviceState, type DeviceTool } from './types';
+import { DeviceControllers } from './controllers';
+import { bindViewerAuthority } from './viewer-authority';
+import { VIEWER_BOOTSTRAP, VIEWER_BOUNDARIES, VIEWER_LOADER } from './viewer-bootstrap';
 
 async function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -68,16 +71,26 @@ export class DeviceManager {
   private frameAncestor?: string;
   private devices?: DeviceState['devices'];
   private platformRead?: { at: number; value: Promise<DeviceState['platforms']> };
+  private viewerGuarded = false;
 
   constructor(readonly root: string) {}
 
   async state(): Promise<DeviceState> {
+    // HMR may retain a helper started by an older, unfenced manager.
+    if (this.phase === 'running' && !this.viewerGuarded) {
+      await this.stop();
+      this.phase = 'error'; this.error = 'Reopen the device viewer to enable controller checks.';
+    }
+    const phase = this.phase;
     if (!this.platformRead || Date.now() - this.platformRead.at > 10_000) this.platformRead = { at: Date.now(), value: inspectPlatforms() };
     const [tools, platforms, agent] = await Promise.all([inspectTools(this.root), this.platformRead.value, installedTool(this.root, 'agent')]);
-    return { phase: this.phase, tools, platforms,
+    const authority = new DeviceControllers(this.root);
+    await authority.roster();
+    const snapshot = authority.snapshot();
+    return { phase, tools, platforms, controllers: snapshot.controllers, controllerRevision: snapshot.revision,
       ...(this.error ? { error: this.error } : {}), ...(this.stage ? { stage: this.stage } : {}),
       ...(agent ? { agentCommand: [process.execPath, agent] } : {}),
-      ...(this.phase === 'running' && this.embedOrigin && this.token ? { embedUrl: `${this.embedOrigin}/?token=${encodeURIComponent(this.token)}`, devices: this.devices } : {}),
+      ...(phase === 'running' && this.embedOrigin && this.token ? { embedUrl: `${this.embedOrigin}/?token=${encodeURIComponent(this.token)}`, devices: this.devices } : {}),
     };
   }
 
@@ -129,10 +142,12 @@ export class DeviceManager {
       await mkdir(join(this.root, 'sessions'), { recursive: true, mode: 0o700 });
       if (signal.aborted) return;
       const origin = `http://127.0.0.1:${port}`;
-      const child = spawn(process.execPath, [entry, '--host', '127.0.0.1', '--port', String(port), '--require-token', '--frame-ancestor', frameAncestor], {
-        cwd: this.root, env: helperEnvironment(this.root), stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
+      const child = spawn(process.execPath, ['--input-type=module', '-e', VIEWER_BOOTSTRAP, entry, JSON.stringify({ boundaries: VIEWER_BOUNDARIES, loader: VIEWER_LOADER }), '--host', '127.0.0.1', '--port', String(port), '--require-token', '--frame-ancestor', frameAncestor], {
+        cwd: this.root, env: helperEnvironment(this.root), stdio: ['ignore', 'pipe', 'pipe', 'ipc'], windowsHide: true,
       });
       this.child = child;
+      let guarded = false;
+      bindViewerAuthority(child, new DeviceControllers(this.root), () => this.child === child && this.phase === 'running', () => { guarded = true; this.viewerGuarded = true; });
       let output = '';
       let token: string | undefined;
       let exited = false;
@@ -155,7 +170,7 @@ export class DeviceManager {
       const ended = () => {
         exited = true;
         if (this.child === child && this.phase === 'running') {
-          this.child = null; this.origin = undefined; this.embedOrigin = undefined; this.token = undefined; this.devices = undefined;
+          this.child = null; this.origin = undefined; this.embedOrigin = undefined; this.token = undefined; this.devices = undefined; this.viewerGuarded = false;
           this.phase = 'error'; this.error = 'The device dashboard stopped. Reopen it to reconnect.';
         }
       };
@@ -164,7 +179,7 @@ export class DeviceManager {
       this.stage = 'Starting the device dashboard';
       const deadline = Date.now() + 30_000;
       while (Date.now() < deadline && !signal.aborted && !exited) {
-        if (token) {
+        if (token && guarded) {
           try {
             const requestSignal = AbortSignal.any([signal, AbortSignal.timeout(3_000)]);
             const options = { signal: requestSignal, redirect: 'error' as const, cache: 'no-store' as const };
@@ -191,7 +206,7 @@ export class DeviceManager {
 
   private async clearChild(): Promise<void> {
     const child = this.child;
-    this.child = null; this.origin = undefined; this.embedOrigin = undefined; this.token = undefined; this.devices = undefined;
+    this.child = null; this.origin = undefined; this.embedOrigin = undefined; this.token = undefined; this.devices = undefined; this.viewerGuarded = false;
     if (child) await stopOwnedChild(child);
   }
 

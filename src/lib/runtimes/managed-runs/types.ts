@@ -96,6 +96,8 @@ export interface ManagedRunRecord {
   processMarker?: string | null;
   /** Validated wrapper receipt path; absent on older data-directory records. */
   exitReceiptPath?: string;
+  /** Internal manifest supervisor binding; never accepted from worker registration bodies. */
+  workspaceService?: { worktreePath: string; packetId: string; laneId: string };
   mode: ManagedRunMode;
   startedAt: string;
   finishedAt?: string | null;

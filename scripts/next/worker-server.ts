@@ -1,6 +1,6 @@
 /** Disposable production HTTP handlers + src/ws-server.ts + real Pi SDK worker.
  * Only the model transport and external tool servers are replaced. */
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { randomBytes } from 'node:crypto';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
@@ -42,6 +42,9 @@ export async function startWorkerServer() {
   // Fence discovery to this owned store before exposing its production handler.
   const { getAllRuntimes } = await import('../../src/lib/runtimes');
   for (const runtime of getAllRuntimes()) runtime.discoverSessions = async () => [];
+  if (process.argv.includes('--issues')) execFileSync('git', ['init', '-q', repo]);
+  const issues = process.argv.includes('--issues')
+    ? await (await import('./issues-fixture')).issueFixture(data, root, repo) : null;
   const { GET: inventory } = await import('../../src/app/api/runtime/inventory/route');
   const { GET: sessions } = await import('../../src/app/api/mobile/orchestrator/threads/route');
   const { GET: history } = await import('../../src/app/api/mobile/history/route');
@@ -53,6 +56,7 @@ export async function startWorkerServer() {
   const queue = await import('../../src/app/api/orchestrator/composer-queue/route');
   const { panelGateMiddleware } = await import('../../src/middleware');
   const gets: Record<string, (request: NextRequest) => Promise<Response>> = {
+    ...issues?.gets,
     '/api/mobile/orchestrator/threads': sessions, '/api/mobile/history': history, '/api/panel/ws-info': wsInfo,
     '/api/v2/chat-history': context, '/api/orchestrator/state': state, '/api/orchestrator/composer-queue': queue.GET,
     '/api/panel/status': status, '/api/runtime/inventory': inventory,
@@ -65,13 +69,14 @@ export async function startWorkerServer() {
       requests.push(`${req.method} ${url.pathname}`);
       const route = req.method === 'GET' ? gets[url.pathname]
         : req.method === 'POST' && url.pathname === '/api/mobile/sync' ? sync
-        : url.pathname === '/api/orchestrator/composer-queue' ? mutations[req.method ?? ''] : undefined;
+        : url.pathname === '/api/orchestrator/composer-queue' ? mutations[req.method ?? '']
+        : req.method === 'POST' ? issues?.posts[url.pathname] : undefined;
       if (!route) { req.resume(); res.writeHead(404).end(); return; }
       if ((route === history && url.searchParams.get('sessionKey') !== 'llm-chat:thoughts-composer-first')
         || (route === context && url.searchParams.get('tabId') !== 'thoughts-composer-first')) { res.writeHead(404).end(); return; }
       let body = '';
       for await (const chunk of req) { body += String(chunk); if (body.length > 1024 * 1024) throw new Error('Fixture body limit'); }
-      if (body) {
+      if (body && !issues?.posts[url.pathname]) {
         const target = JSON.parse(body);
         const valid = route === sync
           ? target.history?.sessionKey === 'llm-chat:thoughts-composer-first' && Object.keys(target).every(key => key === 'history')
@@ -109,6 +114,7 @@ export async function startWorkerServer() {
   let closing = false;
   async function close() {
     if (closing) return; closing = true;
+    issues?.close();
     if (worker.exitCode === null && worker.signalCode === null) {
       const exited = once(worker, 'exit'); worker.kill('SIGTERM');
       const timer = setTimeout(() => worker.kill('SIGKILL'), 3000);

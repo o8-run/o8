@@ -159,7 +159,7 @@ hydrate();
 
 // ── Mutations ──
 
-export function registerManagedRun(rec: ManagedRunRecord): ManagedRunRecord {
+export function registerManagedRun(rec: ManagedRunRecord, requirePersistence = false): ManagedRunRecord {
   if (rec.exitReceiptPath !== undefined && !resolveManagedRunExitReceipt(rec.id, rec.exitReceiptPath)) {
     throw new Error('invalid_exit_receipt_path');
   }
@@ -169,7 +169,7 @@ export function registerManagedRun(rec: ManagedRunRecord): ManagedRunRecord {
       r.id, r.session, r.command, r.title ?? null, r.cwd, r.repo ?? null,
       r.packetId ?? null, r.laneId ?? null, r.panePid ?? null,
       r.processGroupId ?? null, r.processMarker ?? null, r.mode,
-      r.exitReceiptPath ?? null,
+      r.exitReceiptPath ?? null, r.workspaceService ?? null,
       r.settlement?.binding ?? null,
     ]);
     if (identity(existing) !== identity(rec)) throw new Error('managed_run_registration_conflict');
@@ -181,7 +181,7 @@ export function registerManagedRun(rec: ManagedRunRecord): ManagedRunRecord {
   ))) throw new Error('managed_run_execution_conflict');
   runs.set(rec.session, rec);
   prune();
-  try { persist(Boolean(rec.settlement), rec.settlement ? { session: rec.session, record: null } : undefined); }
+  try { persist(requirePersistence || Boolean(rec.settlement), requirePersistence || rec.settlement ? { session: rec.session, record: null } : undefined); }
   catch (error) { runs.delete(rec.session); throw error; }
   return rec;
 }

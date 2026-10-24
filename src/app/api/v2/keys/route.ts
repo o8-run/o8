@@ -79,9 +79,9 @@ const PROVIDERS: ProviderKeyConfig[] = [
 
 async function validateKey(config: ProviderKeyConfig, key: string): Promise<{ valid: boolean; error?: string }> {
   if (!config.validateUrl) return { valid: true };
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 8000);
     const headers: Record<string, string> = {};
 
     if (config.id === 'anthropic') {
@@ -95,9 +95,9 @@ async function validateKey(config: ProviderKeyConfig, key: string): Promise<{ va
         body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 1, messages: [{ role: 'user', content: 'hi' }] }),
         signal: controller.signal,
       });
-      clearTimeout(timeout);
       // 200 or 400 (bad request) means the key authenticated — only 401/403 means invalid
       if (res.status === 401 || res.status === 403) return { valid: false, error: 'Invalid API key' };
+      if (!res.ok && res.status !== 400) return { valid: true, error: `Provider validation unavailable (${res.status}) — key saved without verification` };
       return { valid: true };
     }
 
@@ -106,7 +106,6 @@ async function validateKey(config: ProviderKeyConfig, key: string): Promise<{ va
         headers: { 'x-goog-api-key': key },
         signal: controller.signal,
       });
-      clearTimeout(timeout);
       if (res.status === 400 || res.status === 401 || res.status === 403) return { valid: false, error: 'Invalid API key' };
       return { valid: true };
     }
@@ -118,13 +117,14 @@ async function validateKey(config: ProviderKeyConfig, key: string): Promise<{ va
     }
 
     const res = await fetch(config.validateUrl, { headers, signal: controller.signal });
-    clearTimeout(timeout);
     if (res.status === 401 || res.status === 403) return { valid: false, error: 'Invalid API key' };
     if (!res.ok) return { valid: true, error: `Provider validation unavailable (${res.status}) — key saved without verification` };
     return { valid: true };
   } catch {
     // Network error — don't block saving, just warn
     return { valid: true, error: 'Could not validate (network error) — key saved anyway' };
+  } finally {
+    clearTimeout(timeout);
   }
 }
 

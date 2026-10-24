@@ -638,3 +638,12 @@ it('refreshes a mounted pane from review through running, closed and archived pa
     if (status === 'running') expect(host?.querySelector('[data-worker-outcome]')).toBeNull();
   }
 });
+
+it.each(['codex', 'claude-code'])('shows an honest cache estimate beside the %s worker composer', async runtime => {
+  transcriptMock.slice.messages = [];
+  await act(async () => root!.render(createElement(AgentTilePane, {
+    sessionKey: `${runtime}-owned:cache-fixture`, agent: { name: 'Cache worker', status: 'idle', runtime },
+    focused: true, onClose() {}, onFocus() {},
+  })));
+  expect(host!.querySelector('[data-session-cache]')?.textContent).toContain('Cache unknown · estimate');
+});

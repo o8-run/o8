@@ -26,18 +26,41 @@ export function TranscriptNavigator({ entries, scrollRef }: {
     // changes and scrolling still measure through the retained observers.
     const promptIds = (JSON.parse(promptGeometryKey) as Array<[string, string]>).map(([id]) => id);
     const ids = new Set(promptIds);
+    let targets: HTMLElement[] | null = null;
     let frame = 0;
     const measure = () => {
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
+        // Retained tabs report zero width while hidden. Keep their navigation
+        // DOM and active prompt, so showing a long history does not remount
+        // thousands of prompt controls. A genuinely narrow visible pane still
+        // hides the navigator below the existing width threshold.
+        if (host.clientWidth === 0) return;
         setVisible(host.clientWidth >= 600 && host.scrollHeight > host.clientHeight + 120 && promptIds.length >= 4);
         const top = host.getBoundingClientRect().top + 80;
-        let current = promptIds[0] ?? '';
-        for (const element of host.querySelectorAll<HTMLElement>('[data-o8-message-id]')) {
-          const id = element.dataset.o8MessageId ?? '';
-          if (ids.has(id) && element.getBoundingClientRect().top <= top) current = id;
+        // The DOM follows transcript order. Locate the last prompt above the
+        // reading line with logarithmic layout reads, rather than forcing a
+        // layout for every prompt on every scroll. Prefer the turn container:
+        // measuring a descendant would defeat its content-visibility boundary.
+        // Prompt identity/title changes restart this effect. Streaming answers
+        // do not replace the retained prompt nodes; avoid a full DOM scan on
+        // each frame, including when the scroller's dimensions change.
+        if (!targets?.length || !host.contains(targets[0])) {
+          const seen = new Set<string>();
+          targets = [...host.querySelectorAll<HTMLElement>('[data-o8-turn-id], [data-o8-message-id]')].filter(element => {
+            const id = element.dataset.o8TurnId ?? element.dataset.o8MessageId ?? '';
+            if (!ids.has(id) || seen.has(id)) return false;
+            seen.add(id); return true;
+          });
         }
-        setActive(current);
+        let low = 0; let high = targets.length;
+        while (low < high) {
+          const middle = (low + high) >>> 1;
+          if (targets[middle].getBoundingClientRect().top <= top) low = middle + 1;
+          else high = middle;
+        }
+        const current = targets[Math.max(0, low - 1)];
+        setActive(current?.dataset.o8TurnId ?? current?.dataset.o8MessageId ?? promptIds[0] ?? '');
       });
     };
     const observer = new ResizeObserver(measure);
@@ -73,7 +96,8 @@ const TranscriptPrompt = memo(function TranscriptPrompt({ id, title, answer, ind
         aria-current={active ? 'step' : undefined} onMouseEnter={() => onHover(index)}
         onClick={() => {
           const host = scrollRef.current;
-          const target = [...host?.querySelectorAll<HTMLElement>('[data-o8-message-id]') ?? []].find(element => element.dataset.o8MessageId === id);
+          const target = [...host?.querySelectorAll<HTMLElement>('[data-o8-turn-id], [data-o8-message-id]') ?? []]
+            .find(element => (element.dataset.o8TurnId ?? element.dataset.o8MessageId) === id);
           if (!host || !target) return;
           const zoom = host.getBoundingClientRect().height / host.offsetHeight || 1;
           host.scrollTo({ top: host.scrollTop + (target.getBoundingClientRect().top - host.getBoundingClientRect().top) / zoom - 18,

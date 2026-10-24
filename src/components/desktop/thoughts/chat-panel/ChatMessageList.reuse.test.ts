@@ -16,6 +16,7 @@ vi.mock('../../DesktopAgentMessage', async (original) => {
 const { ChatMessageList } = await import('./ChatMessageList');
 let root: Root;
 let host: HTMLDivElement;
+const resizeObservers: Array<{ callback: ResizeObserverCallback; targets: Set<Element> }> = [];
 const history: MobileTranscriptEntry[] = Array.from({ length: 8 }, (_, index) => [
   { id: `old-user-${index}`, role: 'user' as const, text: `Request ${index}` },
   { id: `old-assistant-${index}`, role: 'assistant' as const, text: `Completed answer ${index}` },
@@ -33,7 +34,14 @@ async function render(active: boolean, messages = live, waiting = true) {
 }
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
-  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
+  resizeObservers.length = 0;
+  vi.stubGlobal('ResizeObserver', class {
+    readonly targets = new Set<Element>();
+    constructor(readonly callback: ResizeObserverCallback) { resizeObservers.push(this); }
+    observe(target: Element) { this.targets.add(target); }
+    unobserve(target: Element) { this.targets.delete(target); }
+    disconnect() { this.targets.clear(); }
+  });
   host = document.createElement('div'); document.body.append(host); root = createRoot(host); observed.rows = [];
 });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); });
@@ -74,5 +82,40 @@ it('preserves visible post-stream animation drain on the latest assistant', asyn
     await act(async () => vi.advanceTimersByTime(2000));
     expect(host.textContent).toContain(text);
     expect(observed.rows.filter(row => row.id.startsWith('old-'))).toEqual([]);
+  } finally { vi.useRealTimers(); }
+});
+
+it('does not walk hidden histories during background output and catches up on reveal', async () => {
+  await render(true);
+  const scroller = host.querySelector('.thoughts-scroll')!;
+  await render(false);
+  host.style.display = 'none';
+  await act(async () => {
+    for (const observer of resizeObservers) if (observer.targets.has(host.firstElementChild!)) {
+      observer.callback([{ target: host.firstElementChild!, contentRect: { width: 0 } } as ResizeObserverEntry], {} as ResizeObserver);
+    }
+  });
+  observed.rows = [];
+  let reads = 0;
+  const updated = live.map(entry => entry.id === 'live-assistant' ? { ...entry, text: 'Complete background tail' } : entry);
+  const tracked = new Proxy(updated, { get(target, key, receiver) { reads++; return Reflect.get(target, key, receiver); } });
+  await render(false, tracked);
+  expect(reads).toBe(0);
+  expect(observed.rows).toEqual([]);
+  expect(host.textContent).not.toContain('Complete background tail');
+  host.style.display = '';
+  await act(async () => {
+    for (const observer of resizeObservers) if (observer.targets.has(host.firstElementChild!)) {
+      observer.callback([{ target: host.firstElementChild!, contentRect: { width: 900 } } as ResizeObserverEntry], {} as ResizeObserver);
+    }
+  });
+  // A visible but unfocused split must update without an active-flag change.
+  expect(host.textContent).toContain('Complete background tail');
+  vi.useFakeTimers();
+  try {
+    await render(true, updated, false);
+    await act(async () => vi.advanceTimersByTime(2000));
+    expect(host.textContent).toContain('Complete background tail');
+    expect(host.querySelector('.thoughts-scroll')).toBe(scroller);
   } finally { vi.useRealTimers(); }
 });

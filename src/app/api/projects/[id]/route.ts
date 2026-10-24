@@ -1,10 +1,12 @@
+import { RepoRuntimeStopUnconfirmed } from '@/lib/repos/runtime-removal';
 import { NextResponse, type NextRequest } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
+import { deleteProject, getProjectsLedger } from '@/lib/repos/projects';
+import { resolveProjectIdentity } from '@/lib/repos/project-identity';
 import {
   getProjectWithRepos,
   updateProject,
 } from '@/lib/projects/store';
-import { deleteProject } from '@/lib/repos/projects';
 import { syncPanelLedgerFromProjectStore } from '@/lib/projects/context';
 
 export const runtime = 'nodejs';
@@ -69,13 +71,19 @@ export async function PATCH(
   }
 
   try {
-    const project = updateProject(id, updates);
+    // Capture the legacy pair before a name change can break its old slug bridge.
+    const ledger = await getProjectsLedger();
+    if (!ledger.projects.some((project) => project.id === id || project.sqliteProjectId === id)) {
+      return NextResponse.json({ error: 'Project not found.' }, { status: 404 });
+    }
+    const identity = resolveProjectIdentity(id, ledger);
+    const project = identity.sqlite ? updateProject(identity.sqlite.id, updates) : null;
     if (!project) {
       return NextResponse.json({ error: 'Project not found.' }, { status: 404 });
     }
-    const withRepos = getProjectWithRepos(id);
+    const withRepos = getProjectWithRepos(project.id);
     if (withRepos) {
-      await syncPanelLedgerFromProjectStore(withRepos);
+      await syncPanelLedgerFromProjectStore(withRepos, identity.project.id);
     }
     return NextResponse.json({ project: withRepos ?? project }, { headers: NO_STORE });
   } catch (err) {
@@ -101,6 +109,9 @@ export async function DELETE(
   try {
     await deleteProject(id);
   } catch (err) {
+    if (err instanceof RepoRuntimeStopUnconfirmed) {
+      return NextResponse.json({ ok: false, error: err.message, note: err.cleanup.note, stoppedSessions: err.cleanup }, { status: 409, headers: NO_STORE });
+    }
     const message = err instanceof Error ? err.message : 'Failed to delete project.';
     return NextResponse.json({ error: message }, { status: 400 });
   }

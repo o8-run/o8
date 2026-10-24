@@ -8,6 +8,7 @@ import { promisify } from 'node:util';
 import { generatedOutputLaunch } from './lib/generated-output-launch.mjs';
 import { boundBuildEnvironment } from './lib/release-build-profile.mjs';
 import { resolveReleaseBuildEnvironment } from './lib/release-config.mjs';
+import { retainMacosReleaseSymbols } from './lib/release-symbols.mjs';
 
 const runFile = promisify(execFile);
 
@@ -104,7 +105,7 @@ export async function assertGeneratedTreeHasSafeLinks(root, rootAlias, target, r
   }
 }
 
-export async function cleanupPostshipOutputs(repoRoot = process.cwd()) {
+export async function cleanupPostshipOutputs(repoRoot = process.cwd(), symbolsOptions = {}) {
   const rootAlias = path.resolve(repoRoot);
   const root = await realpath(rootAlias);
   await assertO8RepoRoot(root);
@@ -164,6 +165,7 @@ export async function cleanupPostshipOutputs(repoRoot = process.cwd()) {
 
     try {
       await assertGeneratedTreeHasSafeLinks(root, rootAlias, target, relativePath);
+      if (relativePath === 'src-tauri/target') await retainMacosReleaseSymbols(root, symbolsOptions);
       // Recursive rm unlinks nested symlinks without removing their destinations.
       await rm(target, { recursive: true, force: false, maxRetries: 0 });
       result.removed.push(relativePath);

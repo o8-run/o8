@@ -1,8 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { pullRequestListQuery } from '@/lib/github-client';
+import { useRepoPullRequests } from '@/lib/github-client';
 import { requestConfirm, toast } from '@/components/shared/ConfirmToastHost';
 import {
   FOCUS_REPO_SETUP_EVENT,
@@ -86,10 +85,7 @@ export function useRepoCardModel({
   const [hoveringHeader, setHoveringHeader] = useState(false);
   const [hoverPreviewRect, setHoverPreviewRect] = useState<DOMRect | null>(null);
   const githubSlug = useMemo(() => githubSlugFromRemote(repo.remoteUrl), [repo.remoteUrl]);
-  const prList = useQuery({
-    ...pullRequestListQuery(githubSlug ?? ''),
-    enabled: hoveringHeader && Boolean(githubSlug),
-  });
+  const prList = useRepoPullRequests(githubSlug, undefined, hoveringHeader);
   const prPreview = useMemo(() => (Array.isArray(prList.data?.prs) ? prList.data.prs : []).filter(pr => pr.state === 'OPEN'), [prList.data?.prs]);
   const prPreviewLoaded = Array.isArray(prList.data?.prs);
   const prPreviewLoading = prList.isFetching && !prPreviewLoaded;
@@ -643,6 +639,8 @@ export function useRepoCardModel({
     prPreviewLoading,
     prPreview,
     prPreviewLoaded,
+    prPreviewError: prList.error || prList.data?.error,
+    prPreviewUpdatedAt: prList.dataUpdatedAt,
     worktreeSummary,
     worktreeSummaryLoading,
     checkoutTarget,

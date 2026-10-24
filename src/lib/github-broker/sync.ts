@@ -1,4 +1,7 @@
 import 'server-only';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { GitHubRequestDeferredError, type GitHubReadPriority } from './request-budget';
+import { githubQuotaDeadline } from '@/lib/github-client/quota-deadline';
 
 import {
   getGitHubPullRequestByHead,
@@ -37,7 +40,8 @@ import {
 import { resolveVerifiedClosedOutsideHumanWaitingThread } from '@/lib/supervisor/outsider-inbox-builder';
 
 const GITHUB_SNAPSHOT_TTL_MS = 120_000; // 2 min — balance freshness with rate limit budget
-const githubInstallationFetch: typeof installationFetch = (repo, endpoint, init) => installationFetch(repo, endpoint, init, { priority: 'background' });
+const syncPriority = new AsyncLocalStorage<GitHubReadPriority>();
+const githubInstallationFetch: typeof installationFetch = (repo, endpoint, init) => installationFetch(repo, endpoint, init, { priority: syncPriority.getStore() ?? 'background' });
 
 const MAX_PULL_REQUEST_PAGES = 5;
 const MAX_ISSUE_PAGES = 5; // 5 pages * 100 = 500 issues max
@@ -69,6 +73,8 @@ function isFresh(lastSuccessfulAt?: string | null) {
 }
 
 function buildGitHubError(response: Response, bodyText: string) {
+  const deadline = githubQuotaDeadline(response);
+  if (deadline !== null) return new GitHubRequestDeferredError(deadline, 'rate-limit');
   const reset = response.headers.get('x-ratelimit-reset');
   const retryAfter = response.headers.get('retry-after');
   const remaining = response.headers.get('x-ratelimit-remaining');
@@ -672,17 +678,19 @@ export async function ensureGitHubIssues(repoFullName: string, options?: { fresh
     return {
       issues: current,
       error: current.length > 0 ? null : 'GitHub App is not configured.',
-      stale: true,
+      stale: true, lastSuccessfulAt: syncState?.lastSuccessfulAt ?? null,
     };
   }
 
-  if (!options?.fresh && current.length > 0 && isFresh(syncState?.lastSuccessfulAt)) {
-    return { issues: current, error: syncState?.lastError ?? null, stale: false };
+  if (!options?.fresh && isFresh(syncState?.lastSuccessfulAt)) {
+    return { issues: current, error: syncState?.lastError ?? null, stale: Boolean(syncState?.lastError), lastSuccessfulAt: syncState?.lastSuccessfulAt ?? null };
   }
 
+  let retryAt: number | null = null;
   try {
-    await syncIssues(repoFullName);
+    await syncPriority.run(options?.fresh ? 'interactive' : 'background', () => syncIssues(repoFullName));
   } catch (error) {
+    retryAt = error instanceof GitHubRequestDeferredError ? error.retryAt : null;
     markGitHubSyncError(repoFullName, 'issues', error instanceof Error ? error.message : 'Unable to sync GitHub issues');
   }
 
@@ -691,11 +699,11 @@ export async function ensureGitHubIssues(repoFullName: string, options?: { fresh
   return {
     issues: refreshed,
     error: nextState?.lastError ?? null,
-    stale: !isFresh(nextState?.lastSuccessfulAt),
+    stale: Boolean(nextState?.lastError) || !isFresh(nextState?.lastSuccessfulAt), lastSuccessfulAt: nextState?.lastSuccessfulAt ?? null, retryAt,
   };
 }
 
-export async function ensureGitHubPullRequests(repoFullName: string) {
+export async function ensureGitHubPullRequests(repoFullName: string, options?: { fresh?: boolean }) {
   const current = listGitHubPullRequests(repoFullName);
   const syncState = readGitHubSyncState(repoFullName, 'pull_requests');
 
@@ -703,17 +711,19 @@ export async function ensureGitHubPullRequests(repoFullName: string) {
     return {
       prs: current,
       error: current.length > 0 ? null : 'GitHub App is not configured.',
-      stale: true,
+      stale: true, lastSuccessfulAt: syncState?.lastSuccessfulAt ?? null,
     };
   }
 
-  if (current.length > 0 && isFresh(syncState?.lastSuccessfulAt)) {
-    return { prs: current, error: syncState?.lastError ?? null, stale: Boolean(syncState?.lastError) };
+  if (!options?.fresh && isFresh(syncState?.lastSuccessfulAt)) {
+    return { prs: current, error: syncState?.lastError ?? null, stale: Boolean(syncState?.lastError), lastSuccessfulAt: syncState?.lastSuccessfulAt ?? null };
   }
 
+  let retryAt: number | null = null;
   try {
-    await syncPullRequests(repoFullName);
+    await syncPriority.run(options?.fresh ? 'interactive' : 'background', () => syncPullRequests(repoFullName));
   } catch (error) {
+    retryAt = error instanceof GitHubRequestDeferredError ? error.retryAt : null;
     markGitHubSyncError(repoFullName, 'pull_requests', error instanceof Error ? error.message : 'Unable to sync GitHub pull requests');
   }
 
@@ -722,7 +732,7 @@ export async function ensureGitHubPullRequests(repoFullName: string) {
   return {
     prs: refreshed,
     error: nextState?.lastError ?? null,
-    stale: Boolean(nextState?.lastError) || !isFresh(nextState?.lastSuccessfulAt),
+    stale: Boolean(nextState?.lastError) || !isFresh(nextState?.lastSuccessfulAt), lastSuccessfulAt: nextState?.lastSuccessfulAt ?? null, retryAt,
   };
 }
 

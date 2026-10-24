@@ -2,7 +2,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
 import { fetchGitHubWorkflowRuns, resolveRepoSlug, DEFAULT_GITHUB_REPO } from '@/lib/github-broker';
-import { getCached, setCached, SLOW_TTL_MS } from '@/lib/github/cache';
+import { getCached, setCached } from '@/lib/github/cache';
 import { GitHubRequestDeferredError } from '@/lib/github-broker/request-budget';
 
 export async function GET(request: Request) {
@@ -13,9 +13,9 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Invalid repo format', runs: [] }, { status: 400 });
   }
 
-  // Check cache first (CI runs change slowly — 60s TTL)
+  // Match the shared two-minute list policy; explicit refresh bypasses it.
   const cacheKey = `ci:${repo}`;
-  const cached = getCached<unknown[]>(cacheKey, SLOW_TTL_MS);
+  const cached = searchParams.get('fresh') === '1' ? null : getCached<unknown[]>(cacheKey, 120_000);
   if (cached) {
     return NextResponse.json({ runs: cached, repo });
   }

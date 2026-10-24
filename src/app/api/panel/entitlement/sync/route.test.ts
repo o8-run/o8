@@ -71,6 +71,8 @@ async function post(body: unknown, token = sessionToken(20)) {
 
 describe('entitlement sync route', () => {
   beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(Date.UTC(2026, 5, 1));
     vi.resetModules();
     vi.clearAllMocks();
     tempDataDir = mkdtempSync(path.join(os.tmpdir(), 'o8-entitlement-sync-'));
@@ -101,6 +103,7 @@ describe('entitlement sync route', () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     if (tempDataDir) rmSync(tempDataDir, { recursive: true, force: true });
     tempDataDir = null;
     delete process.env.CORTEX_IDE_DATA_DIR;

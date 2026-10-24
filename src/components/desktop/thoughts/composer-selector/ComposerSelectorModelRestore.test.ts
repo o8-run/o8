@@ -12,6 +12,7 @@ import { composerModeStorageKey, writeStoredComposerMode } from '../composer-mod
 import { readComposerEffortMaps, writeComposerModelEffort, type ComposerSelectorMode } from './state';
 import { useComposerSelectorState } from './useComposerSelectorState';
 import { useOrchestratorModelState } from './useOrchestratorModelState';
+import type { OrchestratorBackendSetting } from '../operator-defaults';
 
 vi.mock('@/components/desktop/hooks/DesktopWebSocketContext', () => ({ useSharedDesktopWs: vi.fn() }));
 
@@ -83,6 +84,14 @@ function IsolatedSelector({ threadId = null }: { threadId?: string | null }) {
     onModelRestore: setModel, onModelChange: setModel, onEffortChange: setEffort });
   useEffect(() => { isolatedControls = controls; }, [controls]);
   return createElement('output', null, `${model}:${effort}`);
+}
+
+function EffortRestoreHarness({ backend, model }: { backend: OrchestratorBackendSetting; model: string }) {
+  const [effort, setEffort] = useState<ThinkingEffort>('high');
+  const controls = useComposerSelectorState({ enabled: true, mode: 'solo', modelId: model, modelLabel: model,
+    backend, effort, operatorDefaultEffort: 'high', adaptiveEnabled: true, threadId: 'effort-restore', repoPath: '/repo/fixture',
+    onEffortChange: setEffort });
+  return createElement('output', null, controls.state.effort);
 }
 
 describe('composer selector model restore', () => {
@@ -173,6 +182,18 @@ describe('composer selector model restore', () => {
     await act(async () => isolatedControls.onModelChange('gpt-6-sol'));
     expect(readStoredOrchestratorModel('/repo/alpha')).toBe('gpt-6-astra');
     expect(readComposerEffortMaps(null, 'gpt-6-luna')).toEqual(before);
+  });
+
+  it.each([
+    ['codex', 'gpt-4o'], ['codex', 'ollama:fixture'], ['opencode', 'provider/model/high'], ['pi', 'openai/gpt-6-luna'],
+  ] as const)('normalizes a stale saved effort on %s/%s and preserves valid choices on return', async (backend, model) => {
+    writeComposerModelEffort('gpt-6.1-sol', 'high', 'effort-restore');
+    writeComposerModelEffort(model, 'max', 'effort-restore');
+    await act(async () => root.render(createElement(EffortRestoreHarness, { backend, model })));
+    expect(container.querySelector('output')?.textContent).toBe('adaptive');
+    expect(readComposerEffortMaps('effort-restore', model).thread[model]).toBe('adaptive');
+    await act(async () => root.render(createElement(EffortRestoreHarness, { backend: 'codex', model: 'gpt-6.1-sol' })));
+    expect(container.querySelector('output')?.textContent).toBe('high');
   });
 
 });

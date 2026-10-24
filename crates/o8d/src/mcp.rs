@@ -1,5 +1,5 @@
-//! Opt-in MCP transport. Existing protected read APIs remain the state authority:
-//! they include SQLite, JSON ledgers, runtime observations and lease reconciliation.
+//! Opt-in MCP transport shared by o8d and the compatibility binary. Native reads
+//! are passive; TypeScript remains the authority for every other tool.
 use axum::{
     body::Bytes,
     extract::State,
@@ -22,6 +22,8 @@ const READ_TOOLS: &[&str] = &[
     "o8_list_repos",
     "o8_list_projects",
     "o8_lease_list",
+    "o8_lease_status",
+    "o8_spec_read",
 ];
 
 #[derive(Clone)]
@@ -105,6 +107,12 @@ impl McpServer {
             Err(_) => unavailable(),
         }
     }
+    async fn catalog(&self, headers: &HeaderMap, body: Bytes) -> Response {
+        match self.request(Method::POST, "/api/mcp", headers, body).await {
+            Ok(response) => relay_body(response, true).await,
+            Err(_) => unavailable(),
+        }
+    }
     async fn source(&self, path: &str, headers: &HeaderMap) -> Result<Value, ()> {
         let mut headers = headers.clone();
         headers.insert("x-o8-agent-tool", "1".parse().unwrap());
@@ -179,6 +187,24 @@ impl McpServer {
                 projections::projects(self.source("/api/panel/projects", headers).await?)
             }
             "o8_lease_list" => self.source("/api/leases", headers).await?,
+            "o8_lease_status" => {
+                args["resource"]
+                    .as_str()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .ok_or(())?;
+                self.source(&query("/api/leases", args, &["resource"], &[]), headers)
+                    .await?
+            }
+            "o8_spec_read" => {
+                args["repoPath"]
+                    .as_str()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .ok_or(())?;
+                self.source(&query("/api/repo-spec", args, &["repoPath"], &[]), headers)
+                    .await?
+            }
             _ => return Err(()),
         };
         Ok(
@@ -233,6 +259,9 @@ fn unavailable() -> Response {
     )
 }
 async fn relay(upstream: reqwest::Response) -> Response {
+    relay_body(upstream, false).await
+}
+async fn relay_body(upstream: reqwest::Response, catalog: bool) -> Response {
     let status = upstream.status();
     let mut headers = upstream.headers().clone();
     for name in [
@@ -244,17 +273,25 @@ async fn relay(upstream: reqwest::Response) -> Response {
         headers.remove(name);
     }
     match upstream.bytes().await {
-        Ok(body) => (status, headers, body).into_response(),
+        Ok(body) => {
+            if catalog
+                && status == StatusCode::OK
+                && serde_json::from_slice::<Value>(&body).is_err()
+            {
+                return unavailable();
+            }
+            (status, headers, body).into_response()
+        }
         Err(_) => unavailable(),
     }
 }
 fn native(message: &Value) -> bool {
     match message["method"].as_str() {
-        Some("tools/list") => true,
+        Some("initialize" | "tools/list") => true,
         Some("tools/call") => message["params"]["name"]
             .as_str()
             .is_some_and(|name| READ_TOOLS.contains(&name)),
-        // Unknown methods and initialization retain the existing transport semantics.
+        // Unknown methods retain the existing transport semantics.
         _ => false,
     }
 }
@@ -299,12 +336,29 @@ async fn handle(
     if messages.is_empty() || messages.iter().any(|message| !native(message)) {
         return server.proxy(method, &headers, body).await;
     }
-    if let Some(reader) = &server.native_reads {
+    // The registry and its field order belong to TypeScript. Relay the complete
+    // catalog exchange, including batches, without reconstructing any JSON.
+    if messages
+        .iter()
+        .any(|message| message["method"] == "tools/list")
+    {
+        return server.catalog(&headers, body).await;
+    }
+    let initialize = messages
+        .iter()
+        .any(|message| message["method"] == "initialize");
+    if let Some(reader) = server.native_reads.as_ref().filter(|_| {
+        !initialize
+            && messages
+                .iter()
+                .all(|message| message["method"] == "tools/call")
+    }) {
         // Read-only batches can safely retry through the original entry point.
         // No partial native result is returned on an unsupported source or error.
         let mut result = reader.read(&server.upstream, &headers, &messages);
         if result.is_err() {
-            if let Some(generation) = reader.pending_generation() {
+            if let Err(Some(pending)) = result.as_ref() {
+                let pending = pending.clone();
                 // Bind the live publisher to this upstream once per generation,
                 // using the caller's credential, never an ambient operator token.
                 let context =
@@ -325,8 +379,9 @@ async fn handle(
                     return relay(upstream).await;
                 }
                 if let Ok(context) = upstream.json::<Value>().await {
-                    if context["result"]["nativeGeneration"] == generation {
-                        reader.verify_generation(generation);
+                    if context["result"]["nativeGeneration"] == pending.generation
+                        && reader.verify_generation(pending).is_ok()
+                    {
                         result = reader.read(&server.upstream, &headers, &messages);
                     }
                 }
@@ -347,7 +402,7 @@ async fn handle(
                     )
                 }
             }
-            Err(()) => return server.proxy(method, &headers, body).await,
+            Err(_) => return server.proxy(method, &headers, body).await,
         }
     }
     let status_requests: Vec<Value> = messages.iter().enumerate().filter(|(_, message)| message["method"] == "tools/call" && message["params"]["name"] == "o8_status" && !message["id"].is_null() && !batch)
@@ -383,8 +438,9 @@ async fn handle(
         if id.is_null() {
             continue;
         }
-        let result = if message["method"] == "tools/list" {
-            json!({"tools":tools})
+        let result = if message["method"] == "initialize" {
+            json!({"protocolVersion":"2024-11-05", "capabilities":{"tools":{}},
+                "serverInfo":{"name":"o8-operator","version":"1.0.0"}})
         } else {
             let name = message["params"]["name"].as_str().unwrap_or("");
             if !tools.iter().any(|tool| tool["name"] == name) {
@@ -453,17 +509,25 @@ async fn handle(
         };
         responses.push(json!({"jsonrpc":"2.0","id":id,"result":result}));
     }
-    if responses.is_empty() {
-        return (StatusCode::ACCEPTED, [("content-type", "application/json")]).into_response();
+    let mut output = if responses.is_empty() {
+        (StatusCode::ACCEPTED, [("content-type", "application/json")]).into_response()
+    } else {
+        response(
+            StatusCode::OK,
+            if batch {
+                json!(responses)
+            } else {
+                responses.remove(0)
+            },
+        )
+    };
+    if initialize {
+        output.headers_mut().insert(
+            "mcp-session-id",
+            uuid::Uuid::new_v4().to_string().parse().unwrap(),
+        );
     }
-    response(
-        StatusCode::OK,
-        if batch {
-            json!(responses)
-        } else {
-            responses.remove(0)
-        },
-    )
+    output
 }
 
 pub async fn serve(listener: TcpListener, server: McpServer) -> std::io::Result<()> {
@@ -476,4 +540,41 @@ pub async fn serve(listener: TcpListener, server: McpServer) -> std::io::Result<
             .layer(axum::extract::DefaultBodyLimit::disable()),
     )
     .await
+}
+
+pub async fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    if !arguments.iter().any(|arg| arg == "--experimental-mcp") {
+        return Err("explicit opt-in required".into());
+    }
+    let option = |name: &str| {
+        arguments
+            .windows(2)
+            .find(|pair| pair[0] == name)
+            .map(|pair| pair[1].clone())
+    };
+    let address: std::net::SocketAddr = option("--listen").ok_or("listener required")?.parse()?;
+    if !address.ip().is_loopback() {
+        return Err("loopback listener required".into());
+    }
+    let upstream = option("--upstream").ok_or("upstream required")?;
+    let mut server = McpServer::new(&upstream)?;
+    if arguments.iter().any(|arg| arg == "--native-reads") {
+        let directory =
+            std::path::PathBuf::from(option("--data-dir").ok_or("data directory required")?);
+        if !directory.is_absolute() {
+            return Err("absolute data directory required".into());
+        }
+        let database = std::env::var_os("CORTEX_IDE_DB_PATH").map(std::path::PathBuf::from);
+        server = server.with_native_reads(directory, database);
+    }
+    let listener = TcpListener::bind(address).await?;
+    println!(
+        "{}",
+        json!({"listening": listener.local_addr()?.to_string()})
+    );
+    tokio::select! {
+        result = serve(listener, server) => { result?; }
+        _ = tokio::signal::ctrl_c() => {}
+    }
+    Ok(())
 }

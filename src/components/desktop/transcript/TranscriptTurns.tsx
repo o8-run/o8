@@ -20,13 +20,14 @@ export function TranscriptTurns({ entries, nodes, busy, repoPath, summary, turnC
     const end = starts[index + 1] ?? entries.length;
     const turnEntries = entries.slice(start, end);
     return <TranscriptTurn key={entries[start].id} entries={turnEntries} nodes={nodes.slice(start, end)}
-      busy={busy && end === entries.length} repoPath={repoPath}
+      busy={busy && end === entries.length} repoPath={repoPath} deferLayout={entries.length > 200}
       summary={summary && turnEntries.some(entry => entry.id === summary.assistantMessageId) ? summary : null}
       content={turnContent?.get(entries[start].id)} />;
   });
 }
 
 interface TranscriptTurnProps {
+  deferLayout: boolean;
   entries: MobileTranscriptEntry[];
   nodes: ReactNode[];
   busy: boolean;
@@ -52,13 +53,13 @@ function sameNode(left: ReactNode, right: ReactNode) {
   });
 }
 
-const TranscriptTurn = memo(function TranscriptTurn({ entries, nodes, busy, repoPath, summary, content }: TranscriptTurnProps) {
+const TranscriptTurn = memo(function TranscriptTurn({ entries, nodes, busy, repoPath, summary, content, deferLayout }: TranscriptTurnProps) {
   const turn = transcriptTurns(entries, busy)[0];
   const finalEntry = turn.final === null ? null : entries[turn.final];
   const receipt = finalEntry?.id === summary?.assistantMessageId ? summary : null;
   const history = new Set(turn.history);
   const files = finalEntry ? transcriptTurnFiles(entries.slice(turn.start, turn.end)) : [];
-  return <Fragment>
+  const body = <Fragment>
     {nodes.slice(turn.start, turn.end).map((node, offset) => {
       const index = turn.start + offset;
       if (history.has(index)) return index === turn.history[0]
@@ -77,7 +78,14 @@ const TranscriptTurn = memo(function TranscriptTurn({ entries, nodes, busy, repo
     })}
     {content}
   </Fragment>;
-}, (previous, next) => previous.busy === next.busy && previous.repoPath === next.repoPath
+  // Retain the real DOM for native selection, copy, find and keyboard focus.
+  // The browser can skip layout/paint for distant turns and remember measured
+  // heights without a second message cache or a scroll-driven React remount.
+  return <div data-o8-turn-id={entries[0].id} style={{
+    minWidth: 0, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 18,
+    contentVisibility: deferLayout ? 'auto' : undefined, containIntrinsicSize: deferLayout ? 'auto 240px' : undefined,
+  }}>{body}</div>;
+}, (previous, next) => previous.deferLayout === next.deferLayout && previous.busy === next.busy && previous.repoPath === next.repoPath
   && previous.summary === next.summary && previous.content === next.content
   && sameArray(previous.entries, next.entries) && previous.nodes.length === next.nodes.length
   && previous.nodes.every((node, index) => sameNode(node, next.nodes[index])));

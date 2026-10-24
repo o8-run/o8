@@ -55,6 +55,12 @@ it('serves production health before importing unrelated routes, then loads them 
   writeFileSync(observer, `
     const { appendFileSync } = require('node:fs');
     const NextServer = require(${JSON.stringify(resolve('node_modules/next/dist/server/next-server.js'))}).default;
+    const Module = require('node:module');
+    const load = Module._load;
+    Module._load = function (name, ...args) {
+      if (name === 'caniuse-lite' || name.startsWith('caniuse-lite/')) throw new Error('Build-only dependency requested at runtime');
+      return load.call(this, name, ...args);
+    };
     const preload = NextServer.prototype.unstable_preloadEntries;
     NextServer.prototype.unstable_preloadEntries = function (...args) {
       appendFileSync(${JSON.stringify(startupReceipt)}, 'started\\n');
@@ -92,4 +98,5 @@ it('serves production health before importing unrelated routes, then loads them 
   const response = await fetch(`http://127.0.0.1:${port}/api/unrelated`);
   expect(await response.json()).toEqual({ loaded: true });
   expect(readFileSync(marker, 'utf8')).toBe('imported\n');
+  expect(nextConfig.outputFileTracingExcludes?.['*']).toContain('**/node_modules/caniuse-lite/**/*');
 }, 120_000);

@@ -7,6 +7,7 @@ import { checkBucket } from '../check-status';
 import { PrCheckRepair } from '../PrCheckRepair';
 
 interface ChecksTabProps {
+  readOnly?: boolean;
   checks: PrCheck[];
   repo?: string;
   number?: number;
@@ -94,7 +95,7 @@ const CheckRow = memo(function CheckRow({ check, bucket }: { check: PrCheck; buc
   );
 });
 
-export const ChecksTab = memo(function ChecksTab({ checks, repo, number }: ChecksTabProps) {
+export const ChecksTab = memo(function ChecksTab({ checks, repo, number, readOnly = false }: ChecksTabProps) {
   const grouped = useMemo(() => {
     const map = new Map<CheckBucket, PrCheck[]>();
     for (const bucket of BUCKET_ORDER) map.set(bucket, []);
@@ -115,7 +116,7 @@ export const ChecksTab = memo(function ChecksTab({ checks, repo, number }: Check
 
   return (
     <div>
-      {repo && number ? <PrCheckRepair key={`${repo}:${number}`} repo={repo} number={number} failed={Boolean(grouped.get('failing')?.length)} /> : null}
+      {!readOnly && repo && number ? <PrCheckRepair key={`${repo}:${number}`} repo={repo} number={number} failed={Boolean(grouped.get('failing')?.length)} /> : null}
       {BUCKET_ORDER.map((bucket) => {
         const items = grouped.get(bucket) ?? [];
         if (items.length === 0) return null;

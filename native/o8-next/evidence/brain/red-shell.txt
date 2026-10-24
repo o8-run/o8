@@ -1,0 +1,15 @@
+running 1 test
+test shell::tests::brain_tests::brain_opens_from_the_real_shell_palette ...
+assertion `left == right` failed: Brain must be reachable from the opt-in shell's real command entry point
+  left: Some("Session")
+ right: Some("Brain")
+FAILED
+
+failures:
+
+failures:
+    shell::tests::brain_tests::brain_opens_from_the_real_shell_palette
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 33 filtered out; finished in 2.27s
+
+error: test failed, to rerun pass `--bin o8-next`

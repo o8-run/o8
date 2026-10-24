@@ -1,8 +1,13 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import process from 'node:process';
+import { parse as parseToml } from 'smol-toml';
+import { releaseCargoTarget } from './lib/release-cargo-target.mjs';
+import { resolveReleaseBuildEnvironment } from './lib/release-config.mjs';
+import { compilerEnvironment } from './lib/release-native-inputs.mjs';
 import {
   captureReleaseBuildCache,
   collectReleaseBuildCacheIdentity,
@@ -18,22 +23,43 @@ const root = process.cwd();
 const startedAt = Date.now();
 const runId = createReleaseBuildCacheRunId();
 const cacheRoot = resolveReleaseBuildCacheRoot();
+const buildEnv = resolveReleaseBuildEnvironment(root);
 const cargoTauriArgs = process.argv.slice(2);
-const nativeBuildOptions = { cargoTauriArgs };
 const targetFlagIndex = cargoTauriArgs.indexOf('--target');
-const requestedTarget = targetFlagIndex >= 0 ? cargoTauriArgs[targetFlagIndex + 1] : undefined;
+const requestedTarget = targetFlagIndex >= 0 ? cargoTauriArgs[targetFlagIndex + 1]
+  : cargoTauriArgs.find(arg => arg.startsWith('--target='))?.slice(9);
+const nativeArtifact = (requestedTarget?.endsWith('-apple-darwin') || (!requestedTarget && process.platform === 'darwin'))
+  && !cargoTauriArgs.some(arg => arg === '--debug' || arg === '--runner' || arg.startsWith('--runner=') || arg.startsWith('--profile') || arg.startsWith('--target-dir'));
+const persistentTarget = nativeArtifact ? releaseCargoTarget(root, cacheRoot).path : undefined;
+const nativeBuildOptions = { cargoTauriArgs, ...(nativeArtifact ? {
+  nativeArtifact: true,
+  // Until native runtime version reporting is externalized, a cached executable
+  // must retain its embedded Cargo/Tauri version identity.
+  binaryVersions: {
+    package: JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version,
+    cargo: parseToml(readFileSync(join(root, 'src-tauri/Cargo.toml'), 'utf8')).package.version,
+    tauri: JSON.parse(readFileSync(join(root, 'src-tauri/tauri.conf.json'), 'utf8')).version,
+  },
+} : {}) };
 const prebuildMarker = join(cacheRoot, 'runs', runId, 'prebuild-completed-at');
+const nativeContext = join(cacheRoot, 'runs', runId, '.native-context');
+const nativeState = join(cacheRoot, 'runs', runId, '.native-state');
 let nativeIdentity;
 let nativeRestore;
 
 try {
-  nativeIdentity = collectReleaseBuildCacheIdentity(root, 'native', { buildOptions: nativeBuildOptions });
-  nativeRestore = await restoreReleaseBuildCache(root, 'native', {
-    cacheRoot,
-    runId,
-    identity: nativeIdentity,
-    buildOptions: nativeBuildOptions,
-  });
+  if (nativeArtifact) {
+    nativeRestore = { phase: 'native', status: 'bypass', reason: 'deferred_until_after_prebuild', durationMs: 0 };
+  } else {
+    nativeIdentity = collectReleaseBuildCacheIdentity(root, 'native', { env: buildEnv, buildOptions: nativeBuildOptions });
+    nativeRestore = await restoreReleaseBuildCache(root, 'native', {
+      cacheRoot,
+      runId,
+      identity: nativeIdentity,
+      buildOptions: nativeBuildOptions,
+      env: buildEnv,
+    });
+  }
 } catch (error) {
   if (isReleaseBuildCacheSafetyError(error)) throw error;
   nativeRestore = {
@@ -49,14 +75,27 @@ console.log(
 );
 writeReleaseBuildCachePhaseReceipt(cacheRoot, runId, { phase: 'native', restore: nativeRestore });
 
+if (nativeArtifact) writeFileSync(nativeContext, JSON.stringify({ buildOptions: nativeBuildOptions,
+  compilerEnvironment: compilerEnvironment(root, 'native', buildEnv),
+  configEnvironment: { TAURI_CONFIG: buildEnv.TAURI_CONFIG },
+}), { mode: 0o600 });
 const env = {
-  ...process.env,
+  ...buildEnv,
   O8_RELEASE_BUILD_CACHE_DIR: cacheRoot,
   O8_RELEASE_CACHE_RUN_ID: runId,
   O8_RELEASE_CACHE_PREBUILD_MARKER: prebuildMarker,
+  ...(nativeArtifact ? {
+    O8_RELEASE_NATIVE_ROOT: root,
+    O8_RELEASE_NATIVE_CONTEXT: nativeContext,
+    O8_RELEASE_NATIVE_STATE: nativeState,
+    O8_RELEASE_CARGO_TARGET_DIR: persistentTarget,
+    CARGO_TARGET_DIR: join(root, 'src-tauri/target'),
+  } : {}),
   ...(requestedTarget ? { O8_TAURI_BUILD_TARGET: requestedTarget } : {}),
 };
-const build = spawnSync('cargo', ['tauri', 'build', ...cargoTauriArgs], {
+const runnerArgs = nativeArtifact
+  ? ['--runner', fileURLToPath(new URL('./release-cargo-runner.mjs', import.meta.url))] : [];
+const build = spawnSync('cargo', ['tauri', 'build', ...runnerArgs, ...cargoTauriArgs], {
   cwd: root,
   env,
   stdio: 'inherit',
@@ -71,13 +110,22 @@ const nativeBuildDurationMs = Number.isFinite(prebuildCompletedAt)
 let nativeCapture;
 if (!build.error && build.status === 0) {
   try {
-    nativeIdentity = nativeIdentity ?? collectReleaseBuildCacheIdentity(root, 'native', { buildOptions: nativeBuildOptions });
-    nativeCapture = await captureReleaseBuildCache(root, 'native', {
+    const state = nativeArtifact && existsSync(nativeState) ? JSON.parse(readFileSync(nativeState, 'utf8')) : null;
+    if (state) { nativeIdentity = state.identity; nativeRestore = state.restore; }
+    const context = nativeArtifact ? JSON.parse(readFileSync(nativeContext, 'utf8')) : {};
+    const builtIdentity = collectReleaseBuildCacheIdentity(root, 'native', { ...context, env: buildEnv, buildOptions: nativeBuildOptions });
+    nativeCapture = state?.invalidated || !nativeIdentity || nativeIdentity.entrySha256 !== builtIdentity.entrySha256 ? {
+      phase: 'native',
+      status: 'bypass',
+      reason: nativeIdentity ? 'source_changed_during_build' : 'source_identity_unavailable',
+      durationMs: 0,
+    } : await captureReleaseBuildCache(root, 'native', {
       cacheRoot,
       runId,
-      identity: nativeIdentity,
+      identity: builtIdentity,
       buildDurationMs: nativeBuildDurationMs,
       buildOptions: nativeBuildOptions,
+      env: buildEnv,
     });
   } catch (error) {
     if (isReleaseBuildCacheSafetyError(error)) throw error;

@@ -151,3 +151,20 @@ describe('shared GitHub list cache', () => {
     await expect(refreshGithubList(client, 'owner/repo', kind)).resolves.toEqual({ repo: 'owner/repo', [kind]: [] });
   });
 });
+
+it('never shortens a shared quota hold when a stale broker snapshot arrives later', async () => {
+  const deadline = Date.now() + 600_000;
+  client.setQueryData(['gh-quota', 'owner/repo'], deadline);
+  fetchMock.mockImplementationOnce(async () => listResponse({ repo: 'owner/repo', issues: [], stale: true, error: 'Deferred', retryAt: deadline - 300_000 }));
+  await refreshGithubList(client, 'owner/repo', 'issues');
+  expect(client.getQueryData(['gh-quota', 'owner/repo'])).toBe(deadline);
+});
+
+it('keeps a long quota hold after the ordinary unobserved cache lifetime', async () => {
+  vi.useFakeTimers();
+  fetchMock.mockImplementationOnce(async () => new Response(null, { status: 429, headers: { 'retry-after': '3600' } }));
+  await expect(client.fetchQuery(pullRequestListQuery('owner/repo'))).rejects.toThrow();
+  await vi.advanceTimersByTimeAsync(6 * 60_000);
+  await expect(client.fetchQuery(issueListQuery('owner/repo'))).rejects.toThrow(/paused/i);
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+});

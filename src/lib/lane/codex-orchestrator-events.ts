@@ -60,6 +60,9 @@ function normalizeUsage(usage: NonNullable<ParsedCodexLine['usage']>): Orchestra
     outputTokens: Math.max(0, usage.output_tokens ?? 0),
     cacheReadTokens,
     cacheWriteTokens: 0,
+    ...(!(typeof usage.input_tokens === 'number' && Number.isFinite(usage.input_tokens) && usage.input_tokens >= 0
+      && typeof usage.cached_input_tokens === 'number' && Number.isFinite(usage.cached_input_tokens) && usage.cached_input_tokens >= 0
+      && usage.cached_input_tokens <= usage.input_tokens) ? { cacheObserved: false } : {}),
   };
 }
 

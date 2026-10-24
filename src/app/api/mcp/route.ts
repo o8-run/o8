@@ -10,6 +10,7 @@ import { setApiBase } from '@/lib/mcp/operator-handlers/shared';
 import { getApiBase } from '@/lib/panel/api-port';
 import { publishNativeReadPolicy } from '@/lib/mcp/native-read-publication';
 import { modernMcpHttpStatus, prepareMcpHttp } from '@/lib/mcp/operator-mcp-protocol';
+import { resolveRequestPrincipalContext } from '@/lib/auth/principal';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -45,7 +46,11 @@ export async function POST(request: Request): Promise<Response> {
   const responses: OperatorMcpResponse[] = [];
   for (const message of messages) {
     try {
-      const response = await handleOperatorMcpMessage(message, request.headers.get('x-o8-mcp-profile') || undefined);
+      const deviceWorker = request.headers.get('x-o8-device-worker');
+      const deviceConversation = request.headers.get('x-o8-device-conversation');
+      const deviceContext = deviceWorker && deviceConversation && resolveRequestPrincipalContext(request).role === 'operator'
+        ? { worker: deviceWorker, conversation: deviceConversation, pid: Number(request.headers.get('x-o8-device-pid')) } : undefined;
+      const response = await handleOperatorMcpMessage(message, request.headers.get('x-o8-mcp-profile') || undefined, deviceContext);
       if (response) responses.push(response);
     } catch (error) {
       if (message && message.id !== undefined && message.id !== null) {

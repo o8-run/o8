@@ -1,16 +1,10 @@
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { createServer, Socket, type AddressInfo } from 'node:net';
+import { createServer, type AddressInfo } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-
-const network = vi.hoisted(() => ({ socket: null as import('node:net').Socket | null }));
-vi.mock('node:net', async original => {
-  const actual = await original<typeof import('node:net')>();
-  return { ...actual, connect: (...args: unknown[]) => network.socket ?? Reflect.apply(actual.connect, actual, args) };
-});
 
 const root = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'o8-manifest-tcp-')));
 const previousDataDir = process.env.CORTEX_IDE_DATA_DIR;
@@ -33,8 +27,8 @@ afterAll(async () => {
   rmSync(root, { recursive: true, force: true });
 });
 
-// Control connection completion at the network boundary. Manifest application,
-// Git, SQLite, lane cancellation and lease cleanup use their production paths.
+// Real supervisor processes own the health probes. Refusal/retry and cancellation
+// run against real loopback sockets, with Git, SQLite and lease readback.
 describe.sequential('workspace manifest TCP health lifecycle', () => {
   it.each(['healthy', 'failed', 'cancelled'] as const)('settles %s TCP health through manifest apply', async mode => {
     const listener = createServer();
@@ -46,7 +40,7 @@ describe.sequential('workspace manifest TCP health lifecycle', () => {
     execFileSync('git', ['init', '-q', '-b', 'main', repoPath]);
     writeFileSync(path.join(repoPath, 'o8.workspace.json'), JSON.stringify({
       version: 1,
-      services: [{ name: 'db', command: 'fixture-db', port: { preferred }, health: { tcp: true, timeoutMs: 30_000 } }],
+      services: [{ name: 'db', command: mode === 'healthy' ? `${process.execPath} -e \"require('node:net').createServer(s => s.end()).listen(Number(process.env.PORT), '127.0.0.1')\"` : 'exec sleep 600', port: { preferred }, health: { tcp: true, timeoutMs: mode === 'failed' ? 150 : 30_000 } }],
       preview: { url: 'http://127.0.0.1:{{port}}/' },
     }));
     execFileSync('git', ['add', 'o8.workspace.json'], { cwd: repoPath });
@@ -60,21 +54,16 @@ describe.sequential('workspace manifest TCP health lifecycle', () => {
     const lane = createLane({ repoPath, branch: 'main', baseBranch: 'main', runtime: 'codex', label: packetId, packetId });
     updateLane(lane.id, { worktreePath: repoPath }, 'system');
     setLaneStatus(lane.id, 'launching', 'system', 'fixture launch');
-    const socket = new Socket();
-    network.socket = socket;
     const application = applyWorkspaceManifest({ repoPath, worktreePath: repoPath, packetId, laneId: lane.id });
     let settled = false;
     void application.then(() => { settled = true; });
     try {
-      await vi.waitFor(() => expect(socket.listenerCount('connect')).toBeGreaterThan(0));
-      expect(socket.destroyed).toBe(false);
-      if (mode === 'healthy') socket.emit('connect');
-      else if (mode === 'failed') socket.emit('error', new Error('Fixture TCP refusal.'));
-      else setLaneStatus(lane.id, 'failed', 'system', 'cancel pending TCP health');
-      await vi.waitFor(() => {
-        expect(socket.destroyed).toBe(true);
-        expect(settled).toBe(true);
-      }, { timeout: 1_000 });
+      const { readWorkspaceServiceState } = await import('@/lib/workspace/manifest/services');
+      if (mode === 'cancelled') {
+        await vi.waitFor(async () => expect((await readWorkspaceServiceState({ worktreePath: repoPath, packetId, laneId: lane.id }))?.services).toHaveLength(1), { timeout: 5000 });
+        setLaneStatus(lane.id, 'failed', 'system', 'cancel pending TCP health');
+        await vi.waitFor(() => expect(settled).toBe(true), { timeout: 5000 });
+      }
       const result = await application;
       const receipt = await readWorkspaceManifestReceipt(repoPath);
       const events = getLaneEvents(lane.id, 100);
@@ -89,17 +78,14 @@ describe.sequential('workspace manifest TCP health lifecycle', () => {
         expect(events.filter(event => event.verb === 'workspace_manifest_failed')).toEqual([
           expect.objectContaining({ payload: expect.objectContaining({ state: mode, step: 'services' }) }),
         ]);
-        if (mode === 'failed') expect(receipt?.services[0].health).toMatchObject({ kind: 'tcp', ok: false, error: 'Fixture TCP refusal.' });
+        if (mode === 'failed') expect(receipt?.services[0].health).toMatchObject({ kind: 'tcp', ok: false, error: 'ECONNREFUSED' });
         else {
-          expect(receipt?.services).toEqual([]);
+          expect(receipt?.services).toHaveLength(1);
           expect(Object.values(await readWorkspacePortLeases()).some(lease => lease.laneId === lane.id)).toBe(false);
         }
       }
     } finally {
-      if (!socket.destroyed && socket.listenerCount('error') > 0) socket.emit('error', new Error('Fixture cleanup.'));
-      socket.destroy();
       await application;
-      network.socket = null;
       await settleTerminalWorkspaceManifest({ worktreePath: repoPath, packetId, laneId: lane.id });
     }
   }, 30_000);

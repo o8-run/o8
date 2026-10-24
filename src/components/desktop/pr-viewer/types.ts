@@ -3,6 +3,7 @@ import type { WorkflowStageBadge } from '@/lib/workflows/status';
 import type { AgentPanelChatInjectionPayload } from '@/lib/chat/injection';
 
 export interface PRDetail {
+  stack?: import('@/lib/github-client/pr-stack').PullRequestStackObservation;
   number: number;
   title: string;
   body: string;
@@ -105,6 +106,8 @@ export interface ReviewThreadTone {
 }
 
 export interface PRViewerProps {
+  readOnly?: boolean;
+  active?: boolean;
   prNumber: number;
   repo?: string;
   onInjectChatContext?: (payload: AgentPanelChatInjectionPayload) => void;

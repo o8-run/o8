@@ -44,6 +44,7 @@ import {
 import { isThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import { withStoragePressurePolicyLock } from '@/lib/orchestrator/storage-pressure-policy-lock';
 import { SettingsTomlConflictError } from '@/lib/settings/operator-defaults-store';
+import { mergeNativeSettingsToml, readNativeSettings, updateNativeSettings } from '@/lib/settings/native-settings';
 import { validateCredentialSafeUrl } from '@/lib/settings/credential-safe-url';
 import { resolveApfsDependencyImagesOverride } from '@/lib/workspace/dependency-image-policy';
 import {
@@ -700,8 +701,13 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
 }
 
 export async function GET(request: Request) {
+  const query = new URL(request.url).searchParams;
   try {
-    const query = new URL(request.url).searchParams;
+    if (query.get('include') === 'presentation') {
+      const { values } = await getOperatorDefaults();
+      return response({ values: { presentationQuietMode: values.presentationQuietMode, notificationsReviewReady: values.notificationsReviewReady } });
+    }
+    if (query.get('include') === 'native') return response(await readNativeSettings());
     if (query.get('include') === 'setup-built-in') return response({ builtInAgent: await readBuiltInAgentRuntime() });
     if (query.get('refresh') === 'runtime') invalidateRuntimeAuthCache();
     if (query.get('include') === 'values') {
@@ -722,12 +728,13 @@ export async function GET(request: Request) {
     }
     return response(operatorDefaultsPayload(data, settingsToml, cliAuth, dispatchableRuntimes));
   } catch (error) {
-    console.error('[panel-operator-defaults] Failed to load operator defaults:', error);
+    console.error('[panel-operator-defaults] Failed to load operator defaults:', query.get('include') === 'native' ? 'Native settings unavailable.' : error);
     return response({ error: 'Failed to load operator defaults.' }, 500);
   }
 }
 
 export async function POST(request: Request) {
+  const native = new URL(request.url).searchParams.get('include') === 'native';
   try {
     const body = await request.json().catch(() => null);
     if (!isRecord(body)) {
@@ -740,8 +747,9 @@ export async function POST(request: Request) {
       if (typeof body.settingsTomlRevision !== 'string' || !body.settingsTomlRevision) {
         return response({ error: 'settingsTomlRevision is required to save settings.toml.' }, 400);
       }
-      assertRoutingTomlCompatibility(body.settingsToml, OPERATOR_DEFAULTS_FALLBACK);
-      const tomlModel = parseOperatorDefaultsToml(body.settingsToml).threecodeWorkerModel;
+      if (native) body.settingsToml = await mergeNativeSettingsToml(body.settingsToml, body.settingsTomlRevision);
+      assertRoutingTomlCompatibility(body.settingsToml as string, OPERATOR_DEFAULTS_FALLBACK);
+      const tomlModel = parseOperatorDefaultsToml(body.settingsToml as string).threecodeWorkerModel;
       if (tomlModel) {
         await assertThreecodeWorkerModelAvailable(tomlModel);
       }
@@ -755,7 +763,7 @@ export async function POST(request: Request) {
         getOperatorDefaultsTomlState(),
         getDispatchableRuntimeAvailability(cliAuth),
       ]);
-      return response(operatorDefaultsPayload(updated, settingsToml, cliAuth, dispatchableRuntimes));
+      return response(native ? { ok: true } : operatorDefaultsPayload(updated, settingsToml, cliAuth, dispatchableRuntimes));
     }
     if (body.workerRuntimes !== undefined && !isWorkerRuntimeList(body.workerRuntimes)) {
       return response({ error: 'workerRuntimes must contain at least one dispatchable runtime.' }, 400);
@@ -769,16 +777,16 @@ export async function POST(request: Request) {
     }
     if (update.threecodeWorkerModel) await assertThreecodeWorkerModelAvailable(update.threecodeWorkerModel);
     const [updated, cliAuth] = await Promise.all([
-      withStoragePressurePolicyLock(() => updateOperatorDefaults(update)),
+      withStoragePressurePolicyLock(() => native ? updateNativeSettings(update, body.settingsTomlRevision) : updateOperatorDefaults(update)),
       getRuntimeAuthSnapshot(),
     ]);
     const [settingsToml, dispatchableRuntimes] = await Promise.all([
       getOperatorDefaultsTomlState(),
       getDispatchableRuntimeAvailability(cliAuth),
     ]);
-    return response(operatorDefaultsPayload(updated, settingsToml, cliAuth, dispatchableRuntimes));
+    return response(native ? { ok: true } : operatorDefaultsPayload(updated, settingsToml, cliAuth, dispatchableRuntimes));
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to update operator defaults.';
+    const message = native ? (error instanceof SettingsTomlConflictError ? 'Settings changed. Reload before saving.' : 'Settings update refused. Check the declared settings and try again.') : error instanceof Error ? error.message : 'Failed to update operator defaults.';
     console.error('[panel-operator-defaults] Failed to update operator defaults:', message);
     return response({ error: message }, error instanceof SettingsTomlConflictError ? 409 : 400);
   }

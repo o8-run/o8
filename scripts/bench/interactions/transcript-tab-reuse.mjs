@@ -9,6 +9,11 @@ import { webkit } from 'playwright-core';
 import { resolveBrowserPath } from '../measure-browser-boot.mjs';
 import { launchMeasuredBrowser, closeMeasuredBrowser } from './browser-runtime.mjs';
 import { percentile } from './statistics.mjs';
+import { runLongHistory } from './long-history.mjs';
+
+if (process.argv.includes('--long-history')) {
+  await runLongHistory();
+} else {
 
 const option = (key, fallback) => process.argv.find(value => value.startsWith(`--${key}=`))?.slice(key.length + 3) ?? fallback;
 const engine = option('engine', 'chromium');
@@ -132,4 +137,6 @@ try {
   if (errors.length) console.error('[transcript-tab-reuse] browser errors', JSON.stringify(errors));
   if (measured) await closeMeasuredBrowser(measured); else await browser?.close();
   await rm(directory, { recursive: true, force: true });
+}
+
 }

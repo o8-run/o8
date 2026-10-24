@@ -10,6 +10,7 @@ import {
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, normalize, relative, resolve, sep } from 'node:path';
 import { beginCacheStaging, cacheDestinationOccupied, finalizeCacheReceipt, ensurePrivateDirectory, tarArguments } from './release-build-cache-staging.mjs';
+import { compilerEnvironment, nativeBuildSettings, nativeCacheConfig, nativeSourceInputs, sameCachedTree, SPEECH_HELPERS } from './release-native-inputs.mjs';
 import { normalizeReleaseBuildCacheRecipeInput } from './release-build-cache-version-normalizer.mjs';
 
 export const RELEASE_BUILD_CACHE_SCHEMA = 'o8/release-build-cache-entry/v1';
@@ -74,10 +75,11 @@ const PHASE_CONFIG = Object.freeze({
     toolchains: [['node', process.execPath, ['--version']], ['npm', 'npm', ['--version']]],
   }),
   speech: Object.freeze({
-    targets: ['src-tauri/sidecars/speech-local/.build'],
+    targets: SPEECH_HELPERS,
     excludes: [],
     recipeInputs: [
       'src-tauri/sidecars/speech-local/Package.swift',
+      'src-tauri/sidecars/speech-local/Sources',
       'src-tauri/sidecars/speech-local/Package.resolved',
       'scripts/build-speech-local.mjs',
       'scripts/tauri-prebuild.mjs',
@@ -97,7 +99,7 @@ const PHASE_CONFIG = Object.freeze({
       'src/lib/worktree/materialization-execution.ts', 'src/lib/worktree/metadata-lock-process-identity.ts',
       'scripts/lib/release-build-cache-version-normalizer.mjs',
     ],
-    toolchains: [['swift', 'swift', ['--version']]],
+    toolchains: [['swift', 'swift', ['--version']], ['sdk', 'xcrun', ['--show-sdk-version']]],
   }),
   native: Object.freeze({
     targets: ['src-tauri/target/release'],
@@ -135,41 +137,14 @@ const PHASE_CONFIG = Object.freeze({
       ['cargo', 'cargo', ['--version']],
       ['rustc', 'rustc', ['--version']],
       ['rustcHost', 'rustc', ['-vV']],
+      ['swift', 'swift', ['--version']],
+      ['sdk', 'xcrun', ['--show-sdk-version']],
     ],
   }),
 });
 
-function explicitCargoTarget(buildOptions = {}) {
-  const args = Array.isArray(buildOptions.cargoTauriArgs) ? buildOptions.cargoTauriArgs : [];
-  for (let index = 0; index < args.length; index += 1) {
-    const argument = args[index];
-    if (argument === '--') break;
-    if (argument === '--target') return typeof args[index + 1] === 'string' ? args[index + 1] : null;
-    if (typeof argument === 'string' && argument.startsWith('--target=')) return argument.slice('--target='.length);
-  }
-  return null;
-}
-
-function nativeCacheConfig(buildOptions = {}) {
-  const target = explicitCargoTarget(buildOptions);
-  const targetTriples = target === 'universal-apple-darwin'
-    ? ['x86_64-apple-darwin', 'aarch64-apple-darwin', 'universal-apple-darwin']
-    : target ? [target] : [];
-  if (targetTriples.length === 0) return PHASE_CONFIG.native;
-  const targets = targetTriples.map((triple) => `src-tauri/target/${triple}/release`);
-  return {
-    ...PHASE_CONFIG.native,
-    targets,
-    excludes: targets.flatMap((releaseDir) => [
-      `${releaseDir}/bundle`,
-      `${releaseDir}/server`,
-      `${releaseDir}/build-cache-receipt.json`,
-    ]),
-  };
-}
-
 function phaseConfig(phase, buildOptions = {}) {
-  if (phase === 'native') return nativeCacheConfig(buildOptions);
+  if (phase === 'native') return nativeCacheConfig(PHASE_CONFIG.native, buildOptions);
   return PHASE_CONFIG[phase];
 }
 
@@ -197,14 +172,15 @@ async function sha256File(path) {
   return hash.digest('hex');
 }
 
-function commandVersion(root, command, args) {
+function commandVersion(root, command, args, env) {
   try {
     return execFileSync(command, args, {
       cwd: root,
+      env,
       encoding: 'utf8',
       timeout: 10_000,
       windowsHide: true,
-    }).trim().split('\n')[0];
+    }).trim();
   } catch {
     return 'unavailable';
   }
@@ -323,26 +299,31 @@ export function collectReleaseBuildCacheIdentity(root, phase, options = {}) {
   const config = phaseConfig(phase, options.buildOptions);
   if (!config) throw new Error(`unsupported release cache phase: ${phase}`);
   const inputs = [];
-  for (const path of config.recipeInputs) collectInputFiles(root, path, inputs);
+  const paths = new Set([...config.recipeInputs, 'scripts/lib/release-native-inputs.mjs']);
+  if (phase === 'native') {
+    for (const path of nativeSourceInputs(root)) paths.add(path);
+    for (const path of ['scripts/release-cargo-runner.mjs', 'scripts/lib/release-cargo-target.mjs', 'scripts/lib/release-config.mjs', 'scripts/tauri-export.mjs', 'scripts/loader-verify.mjs']) paths.add(path);
+  }
+  for (const path of paths) collectInputFiles(root, path, inputs);
   inputs.sort((left, right) => left.path.localeCompare(right.path));
   const environment = phase === 'web'
     ? Object.fromEntries(Object.keys(options.env ?? process.env)
       .filter((key) => WEB_ENVIRONMENT_PATTERNS.some((pattern) => pattern.test(key)))
       .sort()
       .map((key) => [key, sha256Text(String((options.env ?? process.env)[key] ?? ''))]))
-    : {};
+    : options.compilerEnvironment ?? compilerEnvironment(root, phase, options.env ?? process.env);
   const compatibility = {
     schema: 'o8/release-build-cache-compatibility/v1',
     phase,
     platform: process.platform,
     arch: process.arch,
     buildMode: 'release',
-    buildOptions: options.buildOptions ?? {},
+    buildOptions: phase === 'native' ? nativeBuildSettings(root, options.buildOptions, options.env ?? process.env) : options.buildOptions ?? {},
     targets: config.targets,
     excludes: config.excludes,
     toolchains: Object.fromEntries(config.toolchains.map(([name, command, args]) => [
       name,
-      commandVersion(root, command, args),
+      commandVersion(root, command, args, options.env ?? process.env),
     ])),
     inputs,
     environment,
@@ -473,7 +454,7 @@ async function verifyCacheEntry(root, identity, manifestPath, config) {
     || stableJson(manifest.excludes) !== stableJson(config.excludes)) {
     return { valid: false, reason: 'target_contract_mismatch' };
   }
-  if (identity.phase === 'native') {
+  if (identity.phase === 'native' && !config.portable) {
     if (!manifest.nativeCheckoutSha256) return { valid: false, reason: 'native_checkout_unverified' };
     if (manifest.nativeCheckoutSha256 !== nativeCheckoutIdentity(root)) {
       return { valid: false, reason: 'native_checkout_mismatch' };
@@ -551,22 +532,27 @@ export async function restoreReleaseBuildCache(root, phase, options = {}) {
     assertOutsideProjectNodeModules(cacheRoot, root);
     const destinations = verified.manifest.targets.map(target => join(root, target));
     destinations.forEach(target => assertOutsideProjectNodeModules(target, root));
-    if (cacheDestinationOccupied(destinations)) return { phase, status: 'miss', reason: 'destination_occupied', durationMs: Date.now() - started };
+    const occupied = cacheDestinationOccupied(destinations);
+    if (occupied && !config.portable && phase !== 'speech') return { phase, status: 'miss', reason: 'destination_occupied', durationMs: Date.now() - started };
     const staging = await beginCacheStaging(cacheRoot, root, phase, identity, { ...options, action: 'restore' });
     const restoreRoot = staging.path;
     try {
-      await staging.destinations(destinations);
+      if (!occupied) await staging.destinations(destinations);
       await staging.populate(['-xf', verified.archivePath]);
       for (const target of verified.manifest.targets) {
         const extracted = join(restoreRoot, target);
         if (!existsSync(extracted)) throw new Error(`cache target missing after extraction: ${target}`);
         assertTreeHasNoLinks(extracted);
       }
-      for (const target of verified.manifest.targets) {
+      if (occupied && !(await Promise.all(verified.manifest.targets.map(target =>
+        sameCachedTree(join(restoreRoot, target), join(root, target), sha256File)))).every(Boolean)) {
+        await staging.clean(); lastReason = 'destination_occupied'; continue;
+      }
+      if (!occupied) for (const target of verified.manifest.targets) {
         const extracted = join(restoreRoot, target);
         const destination = join(root, target);
         assertOutsideProjectNodeModules(destination, root);
-        await staging.promote(extracted, destination);
+        await staging.promote(extracted, destination, lstatSync(extracted).isDirectory() ? 'directory' : 'file');
       }
       await staging.clean();
       return {
@@ -713,7 +699,7 @@ export async function captureReleaseBuildCache(root, phase, options = {}) {
   ensurePrivateDirectory(directory);
   const finalManifestPath = manifestPathFor(directory, identity.entrySha256);
   const finalArchivePath = archivePathFor(directory, identity.entrySha256);
-  if (existsSync(finalManifestPath) && existsSync(finalArchivePath)) {
+  if (existsSync(finalManifestPath) || existsSync(finalArchivePath)) {
     const verified = await verifyCacheEntry(root, identity, finalManifestPath, config);
     if (verified.valid) {
       return {
@@ -724,6 +710,11 @@ export async function captureReleaseBuildCache(root, phase, options = {}) {
         archiveBytes: verified.manifest.archive.size,
         durationMs: Date.now() - started,
       };
+    }
+    for (const path of [finalManifestPath, finalArchivePath].filter(existsSync)) {
+      const metadata = lstatSync(path);
+      if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.nlink !== 1) throw new Error('Invalid cache entry is not a private regular file.');
+      removeCachePath(path, { force: true }, root);
     }
   }
   const staging = await beginCacheStaging(cacheRoot, root, phase, identity, { ...options, action: 'capture' });
@@ -745,7 +736,7 @@ export async function captureReleaseBuildCache(root, phase, options = {}) {
       sourceSha256: identity.sourceSha256,
       source: identity.source,
       compatibility: identity.compatibility,
-      ...(phase === 'native' ? { nativeCheckoutSha256: nativeCheckoutIdentity(root) } : {}),
+      ...(phase === 'native' && !config.portable ? { nativeCheckoutSha256: nativeCheckoutIdentity(root) } : {}),
       targets: config.targets,
       excludes: config.excludes,
       buildDurationMs: options.buildDurationMs ?? null,

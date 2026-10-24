@@ -1,5 +1,6 @@
 // Original Apache-2.0 native surface. All UI comes from the published gpui crate.
 mod activity;
+mod brain;
 mod client;
 mod composer;
 mod customize;
@@ -8,13 +9,20 @@ mod diff;
 mod diff_tests;
 mod diff_ui;
 mod grid_sessions;
+mod inbox;
+mod issues;
 mod merge;
 mod model;
 mod pane;
 mod pane_grid;
 mod pane_layout;
+mod projects;
+mod projects_model;
 mod retained;
 mod rich;
+mod settings;
+mod settings_fields;
+mod settings_secret;
 mod shell;
 mod shell_state;
 mod sidebar;

@@ -107,4 +107,25 @@ describe('generated helper child creation after delayed IPC', () => {
       expect(existsSync(input.marker)).toBe(false);
     } finally { lock.close(); }
   });
+
+  it.each([false, true])('revalidates policy after transient lock contention (changed=%s)', async changed => {
+    const input = fixture();
+    const lock = new Database(join(input.directory, '.provider-keys.lock'));
+    let release: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const result = await delayed(input, { OPENAI_API_KEY: 'current', O8_CHILD_CREDENTIAL_POLICY: input.stamp }, () => {
+        lock.exec('BEGIN EXCLUSIVE');
+        release = setTimeout(() => {
+          if (changed) writeFileSync(join(input.directory, 'provider-launch-policy.json'), '{"version":1,"epoch":"changed"}');
+          lock.close();
+        }, 100);
+      });
+      expect(result.ok).toBe(!changed);
+      expect(existsSync(input.marker)).toBe(!changed);
+      if (changed) expect(result.error).toContain('Child credential policy changed');
+    } finally {
+      clearTimeout(release);
+      if (lock.open) lock.close();
+    }
+  });
 });

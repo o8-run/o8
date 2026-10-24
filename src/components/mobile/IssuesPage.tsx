@@ -1,6 +1,12 @@
 'use client';
+import { githubSnapshotTime } from '@/lib/github-client/refresh-policy';
 
-import { Suspense, lazy, memo, useCallback, useEffect, useState } from 'react';
+import { useQueries } from '@tanstack/react-query';
+import { getMobileGithubContext, useMobileGithubContext } from '@/lib/mobile/github-cache';
+import { issueListQuery, pullRequestListQuery, refreshGithubList } from '@/lib/github-client';
+import { useGithubWindowHidden } from '@/lib/github-client/visibility';
+import { GithubReadStatus } from '@/components/github/GithubReadStatus';
+import { Suspense, lazy, memo, useCallback, useEffect, useRef, useState } from 'react';
 import { useTheme } from './ThemeContext';
 import { MobileIssuesPRCard, repoShortLabel, type IssuesPagePR } from './MobileIssuesPRCard';
 import { relativeTimeLabel } from '@/lib/format/relative-time';
@@ -364,16 +370,30 @@ function SectionHeader({ label }: { label: string }) {
   return <span style={sectionHeaderStyle(colors)}>{label}</span>;
 }
 
-export default function IssuesPage({ onBack, onOpenPR, hideHeader = false, refreshSignal = 0 }: IssuesPageProps) {
+export default function IssuesPage(props: IssuesPageProps) {
+  const context = useMobileGithubContext();
+  return <IssuesPageBody key={context.epoch} {...props} context={context} />;
+}
+
+function IssuesPageBody({ onBack, onOpenPR, hideHeader = false, refreshSignal = 0, context }: IssuesPageProps & { context: ReturnType<typeof getMobileGithubContext> }) {
   const { colors } = useTheme();
-  const [repos, setRepos] = useState<string[]>(DEFAULT_REPOS);
-  const [issues, setIssues] = useState<{ issue: Issue; repo: string }[]>([]);
-  const [prs, setPRs] = useState<{ pr: PR; repo: string }[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [repos, setRepos] = useState<string[]>(() => loadRegisteredRepos().filter(repo => repo.length > 0));
+
   const [activeTab, setActiveTab] = useState<'all' | 'issues' | 'prs'>('all');
   const [selectedRepo, setSelectedRepo] = useState('all');
   const [diffSheet, setDiffSheet] = useState<{ repo: string; pr: PR } | null>(null);
-  const [loadNote, setLoadNote] = useState<string | null>(null);
+  const hidden = useGithubWindowHidden();
+  const previousRefresh = useRef(refreshSignal);
+  const lists = useQueries({ queries: repos.flatMap(repo => [
+    { ...issueListQuery(repo, { headers: context.headers, beforeRead: context.beforeRead, isHidden: () => hidden }), select: (data: unknown) => data as { issues: Issue[]; error?: string } },
+    { ...pullRequestListQuery(repo, { headers: context.headers, beforeRead: context.beforeRead, isHidden: () => hidden }), select: (data: unknown) => data as { prs: PR[]; error?: string } },
+  ]) }, context.client);
+  const issues = repos.flatMap((repo, index) => ((lists[index * 2]?.data as { issues?: Issue[] })?.issues ?? []).map(issue => ({ issue, repo })));
+  const prs = repos.flatMap((repo, index) => ((lists[index * 2 + 1]?.data as { prs?: PR[] })?.prs ?? []).map(pr => ({ pr, repo })));
+  issues.sort((a, b) => b.issue.number - a.issue.number); prs.sort((a, b) => b.pr.number - a.pr.number);
+  const loading = lists.some(list => list.isPending);
+  const loadNote = lists.some(list => list.error || (list.data as { error?: string })?.error) ? 'GitHub refresh is delayed.' : null;
+  const lastUpdated = Math.min(...lists.filter(list => list.dataUpdatedAt).map(list => githubSnapshotTime(list.data, list.dataUpdatedAt)));
 
   const handleOpenPRDiff = useCallback(
     (repo: string, pr: PR) => {
@@ -389,9 +409,6 @@ export default function IssuesPage({ onBack, onOpenPR, hideHeader = false, refre
   // Pull the real registered repos from the panel registry. Fallback to
   // sessionStorage cache so the list isn't empty during the fetch.
   useEffect(() => {
-    const cached = loadRegisteredRepos();
-    if (cached.length > 0) setRepos(cached.filter((r) => r.length > 0));
-
     const wsToken = getMobileWsToken();
     const headers: Record<string, string> = {};
     if (wsToken) headers.Authorization = `Bearer ${wsToken}`;
@@ -411,61 +428,13 @@ export default function IssuesPage({ onBack, onOpenPR, hideHeader = false, refre
   }, []);
 
   const fetchAll = useCallback(async (repoList: string[]) => {
-    const validRepos = repoList.filter((r) => r && r.length > 0);
-    if (validRepos.length === 0) {
-      setIssues([]);
-      setPRs([]);
-      setLoadNote('No GitHub repositories are registered. Add an owner/repo above to begin.');
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    const wsToken = getMobileWsToken();
-    const headers: Record<string, string> = {};
-    if (wsToken) headers.Authorization = `Bearer ${wsToken}`;
-    const issueResults: { issue: Issue; repo: string }[] = [];
-    const prResults: { pr: PR; repo: string }[] = [];
-    const errors: string[] = [];
-    await Promise.all(
-      validRepos.map(async (repo) => {
-        try {
-          const issueResponse = await fetch(`/api/panel/issues?repo=${encodeURIComponent(repo)}`, { headers });
-          const issueData = await issueResponse.json() as { issues?: Issue[]; error?: string };
-          if (!issueResponse.ok || issueData.error) {
-            errors.push(issueData.error?.trim() || `Could not load issues for ${repo}.`);
-          }
-          for (const issue of issueData.issues ?? []) issueResults.push({ issue, repo });
-        } catch {
-          errors.push(`Could not load issues for ${repo}.`);
-        }
-        try {
-          const prResponse = await fetch(`/api/panel/prs?repo=${encodeURIComponent(repo)}`, { headers });
-          const prData = await prResponse.json() as { prs?: PR[]; error?: string };
-          if (!prResponse.ok || prData.error) {
-            errors.push(prData.error?.trim() || `Could not load pull requests for ${repo}.`);
-          }
-          for (const pr of prData.prs ?? []) prResults.push({ pr, repo });
-        } catch {
-          errors.push(`Could not load pull requests for ${repo}.`);
-        }
-      })
-    );
-    issueResults.sort((a, b) => b.issue.number - a.issue.number);
-    prResults.sort((a, b) => b.pr.number - a.pr.number);
-    setIssues(issueResults);
-    setPRs(prResults);
-    setLoadNote(errors[0] ?? null);
-    setLoading(false);
-  }, []);
-
+    await Promise.allSettled(repoList.flatMap(repo => [
+      refreshGithubList(context.client, repo, 'issues', undefined, context.headers, context.beforeRead),
+      refreshGithubList(context.client, repo, 'prs', undefined, context.headers, context.beforeRead),
+    ]));
+  }, [context]);
   useEffect(() => {
-    const timer = window.setTimeout(() => {
-      void fetchAll(repos);
-    }, 0);
-
-    return () => {
-      window.clearTimeout(timer);
-    };
+    if (previousRefresh.current !== refreshSignal) { previousRefresh.current = refreshSignal; void fetchAll(repos); }
   }, [fetchAll, repos, refreshSignal]);
 
   const addRepo = useCallback(
@@ -504,6 +473,7 @@ export default function IssuesPage({ onBack, onOpenPR, hideHeader = false, refre
   return (
    <PullToRefresh onRefresh={handleRefresh}>
     <div style={{ padding: '0 12px 24px', width: '100%', boxSizing: 'border-box', background: colors.bg, minHeight: '100%' }}>
+      <GithubReadStatus error={loadNote} updatedAt={Number.isFinite(lastUpdated) ? lastUpdated : null} />
       {hideHeader ? (
         <p style={{ margin: '8px 4px 12px', fontSize: 13, color: colors.textSecondary, fontWeight: 500 }}>
           {loading ? 'Loading...' : `${filteredIssues.length} issues · ${filteredPRs.length} PRs`}

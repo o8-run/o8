@@ -1,0 +1,24 @@
+ FAIL  tests/next-issues-real-path.test.ts > deduplicates concurrent keyed creation and replays its persisted receipt
+AssertionError: expected 11 to be 10 // Object.is equality
+
+- Expected
++ Received
+
+- 10
++ 11
+
+ ❯ tests/next-issues-real-path.test.ts:62:25
+     60|   expect(replies.map(reply => reply.status)).toEqual([200, 200]);
+     61|   const [first, second] = await Promise.all(replies.map(reply => reply…
+     62|   expect(second.number).toBe(first.number);
+       |                         ^
+     63|   const replay = await api('/api/panel/issues/create', body);
+     64|   expect(await replay.json()).toMatchObject({ ok: true, number: first.…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 passed (2)
+   Start at  00:22:12
+   Duration  6.91s (transform 39ms, setup 59ms, import 10ms, tests 6.60s, environment 0ms)

@@ -13,6 +13,7 @@ export interface ByokReceipt {
   providerId: string | null; state: 'connecting' | 'active' | 'closing' | 'unknown' | 'closed';
   pid: number; processIdentity: MetadataLockProcessIdentity;
   seconds: number; finalSeconds: number | null; closeRequestedAt: number | null;
+  closeReason?: 'session_limit';
   cursor: number; events: Array<{ cursor: number; event: ByokEvent }>;
   seen: Record<string, string>; sent: Record<string, { digest: string; state: 'pending' | 'submitted' }>;
   delegations: string[];
@@ -40,6 +41,7 @@ function validate(value: unknown): ByokReceipt {
     || (r.finalSeconds !== null && (typeof r.finalSeconds !== 'number' || !Number.isFinite(r.finalSeconds) || r.finalSeconds < r.seconds))
     || (r.state === 'closed' && r.finalSeconds === null)
     || (r.closeRequestedAt !== null && !Number.isSafeInteger(r.closeRequestedAt))
+    || (r.closeReason !== undefined && r.closeReason !== 'session_limit')
     || !Number.isSafeInteger(r.cursor) || r.cursor < 0 || !Array.isArray(r.events) || r.events.length > 512
     || !Array.isArray(r.delegations) || r.delegations.length > 4096 || !r.delegations.every(v => typeof v === 'string' && v.length <= 100)
     || !r.seen || typeof r.seen !== 'object' || Array.isArray(r.seen) || Object.keys(r.seen).length > 4096

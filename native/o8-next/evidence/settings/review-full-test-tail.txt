@@ -1,0 +1,16 @@
+First attempt: npm test
+Startup error before collection: ENOENT in experimental Vitest module cache.
+
+Retry: npm test -- --experimental.fsModuleCache=false
+ Test Files  1 failed | 1236 passed | 3 skipped (1240)
+      Tests  4 failed | 8947 passed | 5 skipped (8956)
+   Start at  00:45:36
+   Duration  785.41s (transform 165.86s, setup 73.57s, import 1058.00s, tests 836.11s, environment 759.10s)
+
+All four failed assertions: tests/pi-sdk-live-contract.test.ts
+Error: Billing contract is expired or outside the bounded test scope
+
+Untouched origin/main reproduction: npx vitest run tests/pi-sdk-live-contract.test.ts
+ Test Files  1 failed (1)
+      Tests  4 failed (4)
+   Duration  766ms (transform 205ms, setup 131ms, import 148ms, tests 54ms, environment 0ms)

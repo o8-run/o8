@@ -1,0 +1,42 @@
+running 8 tests
+test shell::tests::projects_tests::review::review_p1_deletes_existing_duplicate_by_stable_id ...
+thread 'shell::tests::projects_tests::review::review_p1_deletes_existing_duplicate_by_stable_id' (90194) panicked at src/projects_review_tests.rs:117:5:
+assertion `left == right` failed: Alpha must not be recreated under any ID
+  left: 2
+ right: 1
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+test shell::tests::projects_tests::review::review_p1_rejects_duplicate_rename_before_deleting_alpha ... ok
+test shell::tests::projects_tests::review::review_p2_project_open_resolves_repointed_repository ... ok
+test shell::tests::projects_tests::review::review_p2_repository_open_resolves_repointed_repository ... ok
+test shell::tests::projects_tests::review::round2_legacy_open_resolves_id_pair ...
+thread 'shell::tests::projects_tests::review::round2_legacy_open_resolves_id_pair' (90379) panicked at src/projects_review_tests.rs:307:5:
+legacy SQLite IDs must resolve before Open or Switch
+FAILED
+test shell::tests::projects_tests::review::round2_legacy_rename_updates_both_stable_ids ...
+thread 'shell::tests::projects_tests::review::round2_legacy_rename_updates_both_stable_ids' (90405) panicked at src/projects_review_tests.rs:281:5:
+assertion `left == right` failed: rename success must update the existing SQLite identity
+  left: String("Legacy alpha")
+ right: "Legacy renamed"
+FAILED
+test shell::tests::projects_tests::review::round2_legacy_switch_resolves_id_pair ...
+thread 'shell::tests::projects_tests::review::round2_legacy_switch_resolves_id_pair' (90474) panicked at src/projects_review_tests.rs:307:5:
+legacy SQLite IDs must resolve before Open or Switch
+FAILED
+test shell::tests::projects_tests::review::round2_project_delete_refuses_unconfirmed_runtime ...
+thread 'shell::tests::projects_tests::review::round2_project_delete_refuses_unconfirmed_runtime' (90500) panicked at src/projects_review_tests.rs:225:5:
+unconfirmed live runtime must retain the project before any destructive write
+FAILED
+
+failures:
+
+failures:
+    shell::tests::projects_tests::review::review_p1_deletes_existing_duplicate_by_stable_id
+    shell::tests::projects_tests::review::round2_legacy_open_resolves_id_pair
+    shell::tests::projects_tests::review::round2_legacy_rename_updates_both_stable_ids
+    shell::tests::projects_tests::review::round2_legacy_switch_resolves_id_pair
+    shell::tests::projects_tests::review::round2_project_delete_refuses_unconfirmed_runtime
+
+test result: FAILED. 3 passed; 5 failed; 0 ignored; 0 measured; 50 filtered out; finished in 14.72s
+
+error: test failed, to rerun pass `--bin o8-next`

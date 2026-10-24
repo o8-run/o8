@@ -69,6 +69,7 @@ export function buildTestClassificationReport(root) {
     return reasons.length > 0 ? [{ path, reasons }] : [];
   });
   return {
+    hermeticFiles: files.filter(path => !resourceOwning.some(entry => entry.path === path)),
     manifest: {
       schema: 'o8/test-classification/v1',
       generatedBy: 'node scripts/classify-tests.mjs --write',

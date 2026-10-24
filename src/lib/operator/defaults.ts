@@ -104,7 +104,7 @@ import {
   persistOperatorDefaults,
   readLegacyOperatorDefaults,
   readOperatorDefaultsTomlForUpdate,
-  withOperatorDefaultsUpdateRetry,
+  withOperatorDefaultsUpdateRetry, withOperatorDefaultsWriteLock, SettingsTomlConflictError,
   type OperatorDefaultsTomlState,
 } from '@/lib/settings/operator-defaults-store';
 export { getOperatorDefaultsTomlPath } from '@/lib/settings/operator-defaults-store';
@@ -860,12 +860,12 @@ export async function getOperatorDefaultsTomlState(): Promise<OperatorDefaultsTo
   return readOperatorDefaultsTomlState(values);
 }
 
-async function updateOperatorDefaultsOnce(update: Partial<OperatorDefaults>): Promise<OperatorDefaultsWithSources> {
+async function updateOperatorDefaultsOnce(update: Partial<OperatorDefaults>, expectedRevision?: string): Promise<OperatorDefaultsWithSources> {
   let stored: StoredOperatorDefaults = {};
   const { raw: existingToml, revision, values: tomlValues } = await readOperatorDefaultsTomlForUpdate();
+  if (expectedRevision && revision !== expectedRevision) throw new SettingsTomlConflictError();
   const legacyRaw = await readLegacyOperatorDefaults();
   if (legacyRaw) stored = parseStoredDefaults(legacyRaw);
-
   if (existingToml !== undefined) {
     Object.assign(stored, tomlValues);
     if (Object.prototype.hasOwnProperty.call(tomlValues, 'defaultDispatchRuntime')) {
@@ -1121,8 +1121,8 @@ async function updateOperatorDefaultsOnce(update: Partial<OperatorDefaults>): Pr
   return getOperatorDefaults();
 }
 
-export async function updateOperatorDefaults(update: Partial<OperatorDefaults>): Promise<OperatorDefaultsWithSources> {
-  return withOperatorDefaultsUpdateRetry(() => updateOperatorDefaultsOnce(update));
+export async function updateOperatorDefaults(update: Partial<OperatorDefaults>, expectedRevision?: string): Promise<OperatorDefaultsWithSources> {
+  return expectedRevision ? withOperatorDefaultsWriteLock(() => updateOperatorDefaultsOnce(update, expectedRevision)) : withOperatorDefaultsUpdateRetry(() => updateOperatorDefaultsOnce(update));
 }
 
 export async function applyOperatorDefaultsToml(raw: string, expectedRevision: string): Promise<OperatorDefaultsWithSources> {
@@ -1155,11 +1155,11 @@ export function resolveDefaultDispatchRuntimeSync(): OrchestratorRuntime { retur
 export function resolveDefaultWorkerEffortSync(
   runtime: OrchestratorRuntime,
   explicitEffort?: ThinkingEffort | null,
+  model?: string | null,
 ): ThinkingEffort | undefined {
   const values = getOperatorDefaultsSync().values;
   return resolveWorkerEffortDefault({
-    runtime,
-    explicitEffort,
+    runtime, explicitEffort, model,
     codexWorkerEffort: values.codexWorkerEffort,
     claudeWorkerEffort: values.claudeWorkerEffort,
   });

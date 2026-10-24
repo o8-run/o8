@@ -103,6 +103,7 @@ function receive(s: Running, raw: WebSocket.RawData) {
       if (seconds < s.record.seconds) throw new Error('Usage decreased');
       s.record.seconds = seconds;
       if (event.type === 'session.closed') {
+        if (s.record.closeReason) event.reason = s.record.closeReason;
         s.record.state = 'closed'; s.record.finalSeconds = seconds;
         clearTimeout(s.deadline); clearTimeout(s.closeTimer); clearInterval(s.authorityTimer);
       }
@@ -146,7 +147,10 @@ export function watchByokAuthority(s: Running, authorized: () => Promise<boolean
 }
 export function setByokDuration(s: Running, milliseconds: number): void {
   // This timer requests closure locally. It is not a provider-enforced ceiling.
-  s.deadline = setTimeout(() => closeByokSession(s), milliseconds); s.deadline.unref?.();
+  s.deadline = setTimeout(() => {
+    s.record.closeReason = 'session_limit';
+    closeByokSession(s);
+  }, milliseconds); s.deadline.unref?.();
 }
 export function sendByokEvent(s: Running, value: unknown): { data: Record<string, unknown>; status: number } {
   const event = eventObject(value);

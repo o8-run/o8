@@ -1,0 +1,34 @@
+running 4 tests
+test shell::tests::settings::review::settings_review_edit_reloads_the_desktop_value ...
+thread 'shell::tests::settings::review::settings_review_edit_reloads_the_desktop_value' (28643) panicked at src/settings_review_tests.rs:92:5:
+assertion `left == right` failed
+  left: Some("issue")
+ right: Some("desktop-newer")
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+test shell::tests::settings::review::settings_review_stale_save_preserves_the_desktop_value ...
+thread 'shell::tests::settings::review::settings_review_stale_save_preserves_the_desktop_value' (28705) panicked at src/settings_review_tests.rs:115:5:
+a stale save must be refused
+FAILED
+test shell::tests::settings::review::settings_review_toml_never_reads_or_copies_saved_secrets ...
+thread 'shell::tests::settings::review::settings_review_toml_never_reads_or_copies_saved_secrets' (28748) panicked at src/settings_review_tests.rs:34:5:
+saved TOML secrets must never reach the editor clipboard
+FAILED
+test shell::tests::settings::review::settings_review_updates_the_running_desktop_presentation ...
+thread 'shell::tests::settings::review::settings_review_updates_the_running_desktop_presentation' (28791) panicked at src/settings_review_tests.rs:139:5:
+assertion `left == right` failed: the running desktop must suppress overlays now
+  left: Bool(false)
+ right: true
+FAILED
+
+failures:
+
+failures:
+    shell::tests::settings::review::settings_review_edit_reloads_the_desktop_value
+    shell::tests::settings::review::settings_review_stale_save_preserves_the_desktop_value
+    shell::tests::settings::review::settings_review_toml_never_reads_or_copies_saved_secrets
+    shell::tests::settings::review::settings_review_updates_the_running_desktop_presentation
+
+test result: FAILED. 0 passed; 4 failed; 0 ignored; 0 measured; 49 filtered out; finished in 28.72s
+
+error: test failed, to rerun pass `--bin o8-next`

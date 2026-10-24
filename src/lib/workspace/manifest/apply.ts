@@ -2,7 +2,6 @@ import { childEnvironment } from '@/lib/providers/spawn-environment';
 import 'server-only';
 
 import { createHash } from 'node:crypto';
-import { connect } from 'node:net';
 import path from 'node:path';
 
 import { recordLaneEvent } from '@/lib/lane/events';
@@ -10,6 +9,7 @@ import { getOperatorDefaults } from '@/lib/operator/defaults';
 import { runRepoSetupCommand } from '@/lib/workspace/repo-setup';
 import {
   beginWorkspaceManifestRun,
+  recordWorkspaceServiceOutcome,
   finishWorkspaceManifestRun,
   settleWorkspaceManifestRun,
   updateWorkspaceManifestRun,
@@ -19,6 +19,7 @@ import {
   type WorkspaceManifestSetupReceipt,
   type WorkspaceManifestState,
 } from './lifecycle';
+import { startWorkspaceServices, activateWorkspaceServices, waitWorkspaceServices, stopWorkspaceServices, validateWorkspaceServicePaths, monitorWorkspaceServices, assertWorkspaceManifestSafe, readWorkspaceServiceState } from './services';
 import { loadWorkspaceManifestSource } from './loader';
 import {
   findWorkspaceManifestApproval,
@@ -27,8 +28,6 @@ import {
 import { allocateWorkspaceServicePorts } from './port-leases';
 import type {
   WorkspaceManifest,
-  WorkspaceManifestService,
-  WorkspaceManifestServiceHealth,
 } from './types';
 
 const DEFAULT_SETUP_TIMEOUT_MS = 45 * 60_000;
@@ -86,11 +85,6 @@ function formatError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function pathInside(candidate: string, root: string): boolean {
-  const relative = path.relative(root, candidate);
-  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
-}
-
 function setupShell(command: string): { command: string; args: string[] } {
   if (process.platform === 'win32') {
     return {
@@ -145,30 +139,6 @@ function resolveTemplate(
   return resolved;
 }
 
-function tcpHealth(port: number, timeoutMs: number, signal: AbortSignal): Promise<{ ok: boolean; error?: string }> {
-  return new Promise((resolve) => {
-    const socket = connect({ host: '127.0.0.1', port });
-    let settled = false;
-    const onAbort = () => finish({ ok: false, error: 'TCP health probe cancelled.' });
-    const finish = (result: { ok: boolean; error?: string }) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      signal.removeEventListener('abort', onAbort);
-      socket.destroy();
-      resolve(result);
-    };
-    const timer = setTimeout(
-      () => finish({ ok: false, error: `TCP health probe timed out after ${timeoutMs}ms.` }),
-      timeoutMs,
-    );
-    socket.once('connect', () => finish({ ok: true }));
-    socket.once('error', (error) => finish({ ok: false, error: error.message }));
-    signal.addEventListener('abort', onAbort, { once: true });
-    if (signal.aborted) onAbort();
-  });
-}
-
 async function httpHealth(
   url: string,
   timeoutMs: number,
@@ -207,39 +177,6 @@ export async function probeHttpHealth(
   };
 }
 
-async function probeHealth(input: {
-  health: WorkspaceManifestServiceHealth;
-  service: WorkspaceManifestService;
-  ports: Record<string, number>;
-  signal: AbortSignal;
-}): Promise<WorkspaceManifestHealthReceipt> {
-  const startedAt = Date.now();
-  const timeoutMs = input.health.timeoutMs ?? DEFAULT_HEALTH_TIMEOUT_MS;
-  const port = input.ports[input.service.name];
-  let kind: WorkspaceManifestHealthReceipt['kind'];
-  let target: string;
-  let result: { ok: boolean; error?: string };
-  if (input.health.http !== undefined) {
-    kind = 'http';
-    target = resolveTemplate(input.health.http, input.ports, port);
-    return probeHttpHealth(target, timeoutMs, input.signal);
-  } else {
-    kind = 'tcp';
-    target = port === undefined ? '127.0.0.1:(unallocated)' : `127.0.0.1:${port}`;
-    result = port === undefined
-      ? { ok: false, error: 'TCP health probe requires an allocated service port.' }
-      : await tcpHealth(port, timeoutMs, input.signal);
-  }
-  return {
-    kind,
-    target,
-    ok: result.ok,
-    durationMs: Date.now() - startedAt,
-    checkedAt: new Date().toISOString(),
-    ...(result.error ? { error: result.error } : {}),
-  };
-}
-
 async function applyLoadedManifest(input: {
   manifest: WorkspaceManifest;
   worktreePath: string;
@@ -260,9 +197,17 @@ async function applyLoadedManifest(input: {
   });
   await updateWorkspaceManifestRun(input.lifecycle, (receipt) => ({ ...receipt, ports }));
   const allocatedEnvironment = portEnvironment(input.manifest, ports);
-  const setupEnvironment = childEnvironment({ env: { ...allocatedEnvironment } });
+  await validateWorkspaceServicePaths(input.manifest, input.worktreePath);
+  await startWorkspaceServices({ ...input, environment: allocatedEnvironment, ports, resolveTemplate: (value, port) => resolveTemplate(value, ports, port), onGeneration: async generation => {
+    input.lifecycle.serviceGeneration = generation;
+    await updateWorkspaceManifestRun(input.lifecycle, receipt => ({ ...receipt, serviceGeneration: generation }));
+  } });
+  const setupEnvironment = childEnvironment({ inherit: false, inject: false, env: {
+    PATH: process.env.PATH, HOME: process.env.HOME, TMPDIR: process.env.TMPDIR, ...allocatedEnvironment,
+  } });
   const setupReceipts: WorkspaceManifestSetupReceipt[] = [];
   for (const [index, setupCommand] of (input.manifest.setup ?? []).entries()) {
+    if (input.lifecycle.signal.aborted) throw new WorkspaceManifestCancelledError();
     const step = `setup:${index + 1}` as const;
     const setupCommandId = commandId(setupCommand);
     await input.setStep(step, setupCommandId);
@@ -281,6 +226,7 @@ async function applyLoadedManifest(input: {
         ...shell,
         cwd: input.worktreePath,
         timeoutMs: input.setupTimeoutMs,
+        maxOutputBytes: input.manifest.limits?.outputLimitBytes,
         env: setupEnvironment,
         signal: AbortSignal.any([input.lifecycle.signal, timeoutController.signal]),
       });
@@ -306,33 +252,15 @@ async function applyLoadedManifest(input: {
     });
   }
   const serviceReceipts: WorkspaceManifestServiceReceipt[] = [];
+  if (input.lifecycle.signal.aborted) throw new WorkspaceManifestCancelledError();
   await input.setStep('services');
-  for (const service of services) {
+  if (services.length || input.manifest.teardown?.length) {
     if (input.lifecycle.signal.aborted) throw new WorkspaceManifestCancelledError();
-    const cwd = path.resolve(input.worktreePath, service.cwd ?? '.');
-    if (!pathInside(cwd, input.worktreePath)) {
-      throw new Error(`Service ${service.name} cwd escapes the packet worktree.`);
-    }
-    const health = service.health
-      ? await probeHealth({ health: service.health, service, ports, signal: input.lifecycle.signal })
-      : null;
-    if (input.lifecycle.signal.aborted) throw new WorkspaceManifestCancelledError();
-    const serviceReceipt: WorkspaceManifestServiceReceipt = {
-      name: service.name,
-      commandId: commandId(service.command),
-      cwd,
-      port: ports[service.name] ?? null,
-      environment: { ...service.env, ...allocatedEnvironment },
-      health,
-    };
-    serviceReceipts.push(serviceReceipt);
-    await updateWorkspaceManifestRun(input.lifecycle, (receipt) => ({
-      ...receipt,
-      services: [...receipt.services, serviceReceipt],
-    }));
-    if (health && !health.ok) {
-      throw new Error(`Service ${service.name} failed its ${health.kind.toUpperCase()} health check: ${health.error ?? 'Probe did not report ready.'}`);
-    }
+    await activateWorkspaceServices(input);
+    const state = await waitWorkspaceServices(input, input.lifecycle.signal);
+    serviceReceipts.push(...state.services);
+    await updateWorkspaceManifestRun(input.lifecycle, receipt => ({ ...receipt, services: state.services }));
+    if (state.state !== 'ready') throw new Error(state.error ?? 'Workspace services stopped before readiness.');
   }
   await input.setStep('preview');
   const firstPort = services.map((service) => ports[service.name]).find((port) => port !== undefined);
@@ -374,6 +302,7 @@ export async function applyWorkspaceManifest(input: {
   try {
     const loaded = await loadWorkspaceManifestSource(input.worktreePath);
     if (!loaded) return null;
+    assertWorkspaceManifestSafe(loaded.manifest);
     step = 'policy';
     const policy = (await getOperatorDefaults()).values.workspaceManifestPolicy;
     const decision = await resolveWorkspaceManifestExecution({
@@ -405,7 +334,7 @@ export async function applyWorkspaceManifest(input: {
       packetId: input.packetId,
       laneId: input.laneId,
       lifecycle,
-      setupTimeoutMs: setupTimeoutOverrideForTest ?? DEFAULT_SETUP_TIMEOUT_MS,
+      setupTimeoutMs: setupTimeoutOverrideForTest ?? loaded.manifest.limits?.timeoutMs ?? DEFAULT_SETUP_TIMEOUT_MS,
       setStep: async (next, setupCommandId) => {
         step = next;
         await updateWorkspaceManifestRun(lifecycle!, (receipt) => {
@@ -417,11 +346,21 @@ export async function applyWorkspaceManifest(input: {
       },
     });
     if (lifecycle.signal.aborted) throw new WorkspaceManifestCancelledError();
+    const previewOpen = loaded.manifest.preview?.autoOpen && result.preview
+      ? await (await import('./preview-open')).openWorkspacePreview(result.preview) : undefined;
+    if (lifecycle.signal.aborted) throw new WorkspaceManifestCancelledError();
+    if (loaded.manifest.services?.length) {
+      const current = await readWorkspaceServiceState({ ...input, serviceGeneration: lifecycle.serviceGeneration });
+      if (current?.state !== 'ready') throw new Error(current?.error ?? 'Workspace services are no longer ready.');
+    }
     const settlement = await settleWorkspaceManifestRun(lifecycle, { state: 'completed' });
     if (settlement.changed) {
+      const completedRun = lifecycle;
+      if (loaded.manifest.services?.length) monitorWorkspaceServices({ ...input, serviceGeneration: lifecycle.serviceGeneration }, async state => recordWorkspaceServiceOutcome(completedRun, state.state === 'failed'));
       recordEventSafely(input.laneId, 'workspace_manifest_applied', {
         services: Object.entries(result.ports).map(([name, port]) => ({ name, port })),
         ...(result.preview ? { preview: result.preview } : {}),
+        ...(previewOpen ? { previewOpen } : {}),
         durationMs: Date.now() - startedAt,
         state: 'completed',
       });
@@ -429,7 +368,13 @@ export async function applyWorkspaceManifest(input: {
     }
     return null;
   } catch (error) {
-    const message = formatError(error);
+    // Failed setup/provisioning owns settlement too; do not release routes before services stop.
+    let cleanupError: unknown;
+    if (lifecycle) {
+      try { await stopWorkspaceServices({ ...input, serviceGeneration: lifecycle.serviceGeneration }); }
+      catch (failure) { cleanupError = failure; }
+    }
+    const message = formatError(cleanupError ?? error);
     const state: Exclude<WorkspaceManifestState, 'running' | 'completed' | 'crashed'> =
       error instanceof WorkspaceManifestSetupTimeoutError
         ? 'timed_out'
@@ -445,6 +390,11 @@ export async function applyWorkspaceManifest(input: {
     const settlement = lifecycle
       ? await settleWorkspaceManifestRun(lifecycle, { state, step, commandId, error: message })
       : { receipt: null, changed: true };
+    if (lifecycle) {
+      await recordWorkspaceServiceOutcome(lifecycle);
+      const { releaseWorkspacePortLeases } = await import('./port-leases');
+      if (settlement.changed && !cleanupError) await releaseWorkspacePortLeases(input);
+    }
     if (settlement.changed) {
       recordEventSafely(input.laneId, 'workspace_manifest_failed', {
         step,
@@ -453,6 +403,7 @@ export async function applyWorkspaceManifest(input: {
         state,
       });
     }
+    if (cleanupError) throw cleanupError;
     return null;
   } finally {
     if (lifecycle) finishWorkspaceManifestRun(lifecycle);

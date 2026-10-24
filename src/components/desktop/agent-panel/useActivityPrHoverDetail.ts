@@ -35,7 +35,7 @@ class PrHoverDeferredError extends Error {
   }
 }
 
-function hoverQuery(repo: string, number: number | null) {
+export function activityPrHoverQuery(repo: string, number: number | null) {
   const queryKey = ['gh', repo, 'activity-pr-hover', number];
   return {
     ...pullRequestListQuery(repo),
@@ -62,7 +62,7 @@ function hoverQuery(repo: string, number: number | null) {
 export function useActivityPrHoverDetail(repo: string | null, number: number | null) {
   const queryClient = useQueryClient();
   const canonicalRepo = repo?.trim().toLowerCase() ?? '';
-  const options = useMemo(() => hoverQuery(canonicalRepo, number), [canonicalRepo, number]);
+  const options = useMemo(() => activityPrHoverQuery(canonicalRepo, number), [canonicalRepo, number]);
   const [now, setNow] = useState(() => Date.now());
   const query = useQuery({
     ...options,

@@ -1,0 +1,20 @@
+running 2 tests
+test shell::tests::projects_tests::projects_auth_refusal_and_retry ...
+thread 'shell::tests::projects_tests::projects_auth_refusal_and_retry' (11951) panicked at src/projects_tests.rs:12:62:
+missing native control: shell-projects
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+test shell::tests::projects_tests::projects_first_run_crud_membership_and_focus ...
+thread 'shell::tests::projects_tests::projects_first_run_crud_membership_and_focus' (11995) panicked at src/projects_tests.rs:12:62:
+missing native control: shell-projects
+FAILED
+
+failures:
+
+failures:
+    shell::tests::projects_tests::projects_auth_refusal_and_retry
+    shell::tests::projects_tests::projects_first_run_crud_membership_and_focus
+
+test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 33 filtered out; finished in 5.90s
+
+error: test failed, to rerun pass `--bin o8-next`

@@ -7,6 +7,7 @@ export interface PostshipCleanupResult {
   refused: Array<{ path: string; reason: string }>;
 }
 
-export function cleanupPostshipOutputs(repoRoot?: string): Promise<PostshipCleanupResult>;
+export function cleanupPostshipOutputs(repoRoot?: string,
+  options?: { symbolsRoot?: string }): Promise<PostshipCleanupResult>;
 export function assertGeneratedTreeHasSafeLinks(root: string, rootAlias: string,
   target: string, relativePath: string): Promise<void>;

@@ -7,14 +7,15 @@ const readLabels: Record<PullRequestStackObservation['status'], string> = {
   offline: 'Stack offline', unavailable: 'Stack unavailable',
 };
 
-export function PrStackSummary({ observation, prNumber, onSelect, retained = false }: {
-  observation: PullRequestStackObservation; prNumber: number; onSelect?: (number: number) => void; retained?: boolean;
+export function PrStackSummary({ observation, prNumber, onSelect, retained = false, repo }: {
+  observation: PullRequestStackObservation; prNumber: number; onSelect?: (number: number) => void; retained?: boolean; repo?: string;
 }) {
   const { snapshot, status, fetchedAt } = observation;
   const stale = observation.stale || retained;
   return <section aria-label="Pull request stack" style={{ minWidth: 0, borderTop: '1px solid var(--t-border)',
     paddingTop: 8, color: 'var(--t-text)', fontFamily: 'var(--font-sans-system)', fontSize: 11, fontWeight: 300 }}>
     <div>{readLabels[status]}{status === 'ready' && snapshot ? ` #${snapshot.number}` : ''}</div>
+    {repo ? <a href={`https://github.com/${repo}/pull/${prNumber}`} target="_blank" rel="noreferrer" style={{ color: 'var(--t-text-muted)' }}>Open PR #{prNumber} on GitHub</a> : null}
     {snapshot ? <>
       {stale ? <div style={{ color: 'var(--t-text-muted)', marginTop: 4 }}>Last known stack #{snapshot.number}</div> : null}
       <div style={{ color: 'var(--t-text-muted)', marginTop: 4, overflowWrap: 'anywhere' }}>Trunk: {snapshot.trunk}</div>
@@ -33,6 +34,11 @@ export function PrStackSummary({ observation, prNumber, onSelect, retained = fal
         </button>)}
       </div>
     </> : null}
+    {observation.history?.length ? <details style={{ marginTop: 6 }}><summary>Native revision history · {observation.history.length}</summary>
+      {observation.history.map((entry, index) => <div key={`${entry.revision}:${index}`} style={{ overflowWrap: 'anywhere', marginTop: 4 }}>
+        {entry.trigger} · <time dateTime={entry.fetchedAt}>{entry.fetchedAt}</time> · {entry.snapshot ? `stack #${entry.snapshot.number}: ${entry.snapshot.layers.map(layer => `#${layer.number}`).join(' → ')}` : 'No native stack'} · <code title={entry.revision}>{entry.revision.slice(0, 12)}</code>
+      </div>)}
+    </details> : null}
     {fetchedAt ? <div style={{ color: 'var(--t-text-faint)', fontSize: 9.5, marginTop: 4 }}>
       Last confirmed read: <time dateTime={fetchedAt} title={fetchedAt}>{fetchedAt}</time>
     </div> : null}

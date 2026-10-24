@@ -103,6 +103,7 @@ function resolveLaunchWorkerRouting(workerRouting: WorkerRouting): WorkerRouting
   const defaultEffort = resolveDefaultWorkerEffortSync(
     workerRouting.selectedRuntime,
     workerRouting.requestedEffort === 'adaptive' ? 'adaptive' : workerRouting.selectedEffort,
+    selectedModel,
   );
   const concreteEffort = defaultEffort === 'adaptive' ? undefined : defaultEffort;
   const selectedEffort = concreteEffort

@@ -75,6 +75,16 @@ impl Composer {
         self.composition = None;
         self.changed(cx);
     }
+    pub fn set_text(&mut self, text: &str, cx: &mut Context<Self>) {
+        self.undo.push(self.snapshot());
+        self.redo.clear();
+        self.text = text.to_owned();
+        self.selection = self.text.len()..self.text.len();
+        self.anchor = self.text.len();
+        self.marked = None;
+        self.composition = None;
+        self.changed(cx);
+    }
     fn changed(&mut self, cx: &mut Context<Self>) {
         self.revision += 1;
         self.reveal_cursor = true;

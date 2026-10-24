@@ -62,8 +62,9 @@ export async function spawnCredentialCheckedSupervised(input: LaunchInput & {
   const lease = reserveWorkLaunch(input.binary);
   lease.started(process.pid);
   let submitted = false;
+  let preparationError: unknown;
   try {
-    const receipt = await ownedSupervisorClient().spawn(() => withCheckedLaunch(input, (launch, env) => (
+    const receipt = await ownedSupervisorClient().spawn(() => { try { return withCheckedLaunch(input, (launch, env) => (
       withChildEnvironment(env, [launch.command, ...launch.args], resolved => {
         lease.started(process.pid);
         submitted = true;
@@ -74,12 +75,12 @@ export async function spawnCredentialCheckedSupervised(input: LaunchInput & {
           admissionPath: join(getDataDir(), 'work-launches', `${lease.id}.json`),
           ...(input.stdinPath ? { stdinPath: input.stdinPath } : {}) };
       }, true, input.session.repoPath)
-    )));
+    )); } catch (error) { preparationError = error; throw error; } });
     // The daemon transferred the admission reader before exec and releases it
     // after output and exit settle, independently of this server's lifetime.
     return receipt;
   } catch (error) {
     if (!submitted) lease.release();
-    throw error;
+    throw preparationError ?? error;
   }
 }

@@ -1,0 +1,24 @@
+ FAIL  tests/next-issues-real-path.test.ts > does not repeat a keyed creation when GitHub commits but its reply is lost
+AssertionError: expected [ { number: 11, …(10) }, …(1) ] to have a length of 1 but got 2
+
+- Expected
++ Received
+
+- 1
++ 2
+
+ ❯ tests/next-issues-real-path.test.ts:79:105
+     77|   const retry = await api('/api/panel/issues/create', body);
+     78|   const issues = await api('/api/panel/issues?repo=fixture/alpha&fresh…
+     79|   expect((await issues.json()).issues.filter((issue: { title: string }…
+       |                                                                                                         ^
+     80|   expect(first.status).toBe(409); expect(retry.status).toBe(409);
+     81|   expect(await retry.json()).toMatchObject({ ok: false, creationOutcom…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 2 passed (3)
+   Start at  00:31:23
+   Duration  7.04s (transform 39ms, setup 60ms, import 10ms, tests 6.71s, environment 0ms)

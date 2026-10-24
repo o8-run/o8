@@ -1,4 +1,5 @@
 import type { ManualThinkingEffort, ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
+import { parseLocalModel } from './local-model';
 
 /**
  * Codex reasoning-effort resolution — shared by the orchestrator session
@@ -34,6 +35,7 @@ export function codexSupportsReasoningEffort(
   model: string | null | undefined,
   effort: ManualThinkingEffort,
 ): boolean {
+  if (model?.trim().toLowerCase() === 'gpt-4o' || parseLocalModel(model)) return false;
   if (model?.trim().toLowerCase() === 'gpt-6.1-sol') {
     return SOL_EFFORTS.includes(effort as typeof SOL_EFFORTS[number]);
   }

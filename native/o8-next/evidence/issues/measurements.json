@@ -1,0 +1,8 @@
+{
+  "runs": 3,
+  "samplesPerRun": 20,
+  "openToFirstFrameMedianMs": 65.61462399999999,
+  "interactionP95MedianMs": 4.8359559999999995,
+  "endpoint": "GPUI TestAppContext CPU scene; no compositor",
+  "before": "Unavailable: no native issue surface"
+}

@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import type { RuntimeActionRequest, RuntimeActionResult } from '@/lib/runtime/actions';
+import { EffortPinRejectionError } from '@/lib/orchestrator/effort-pin';
 
 const h = vi.hoisted(() => ({
   perform: vi.fn<(request: RuntimeActionRequest) => Promise<RuntimeActionResult>>(async (request) => ({
@@ -53,6 +54,19 @@ describe('legacy runtime action persisted idempotency', () => {
   beforeEach(() => {
     h.perform.mockClear();
     h.publish.mockClear();
+  });
+
+  it('reports a known effort refusal and replays it after reopening the receipt database', async () => {
+    h.perform.mockRejectedValueOnce(new EffortPinRejectionError('effort_coerced', 'The saved effort cannot be honored on this model.'));
+    const body = { action: 'steer', surfaceId: 'codex-owned:effort-refusal', message: 'continue', clientMutationId: 'effort-refusal' };
+    const response = await route.POST(post(body));
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({ ok: false, code: 'effort_coerced', note: 'The saved effort cannot be honored on this model.' });
+    closeDb();
+    const replay = await route.POST(post(body));
+    expect(replay.status).toBe(400);
+    expect(replay.headers.get('x-o8-idempotency-replayed')).toBe('1');
+    expect(h.perform).toHaveBeenCalledTimes(1);
   });
 
   it('settles compiled CLI queued resume admission and replays its exact key after database reopen', async () => {

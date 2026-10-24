@@ -62,7 +62,7 @@ export async function runPrebuild({ runBuild, canReuse }) {
   }
 
   async function cachedPhase(cachePhase, label, command, args) {
-    const identityOptions = cachePhase === 'web' ? { env } : {};
+    const identityOptions = { env };
     let identity;
     let restore;
     try {
@@ -87,15 +87,20 @@ export async function runPrebuild({ runBuild, canReuse }) {
       const { runRegisteredBuild } = await import('./registered-build.mjs');
       const code = await runRegisteredBuild(producerRun);
       if (code !== 0) throw new Error(`web build failed with exit ${code}`);
+    } else if (restore.status === 'hit_exact' || restore.status === 'hit_compatible') {
+      console.log(`[tauri-prebuild] ${label} skipped (verified executable cache)`);
     } else await phase(label, command, args);
     const buildDurationMs = Date.now() - buildStarted;
     let capture;
     try {
-      identity = identity ?? collectReleaseBuildCacheIdentity(root, cachePhase, identityOptions);
-      capture = await captureReleaseBuildCache(root, cachePhase, {
+      const builtIdentity = cachePhase === 'speech' || !identity
+        ? collectReleaseBuildCacheIdentity(root, cachePhase, identityOptions) : identity;
+      capture = cachePhase === 'speech' && (!identity || identity.entrySha256 !== builtIdentity.entrySha256) ? {
+        phase: cachePhase, status: 'bypass', reason: 'source_changed_during_build', durationMs: 0,
+      } : await captureReleaseBuildCache(root, cachePhase, {
         cacheRoot,
         runId: cacheRunId,
-        identity,
+        identity: builtIdentity,
         buildDurationMs,
       });
     } catch (error) {
@@ -140,8 +145,11 @@ export async function runPrebuild({ runBuild, canReuse }) {
         await phase('Pi write helper', process.execPath, ['scripts/build-pi-write.mjs']);
         await cachedPhase('web', 'web build', 'npm', ['run', 'build']);
         await phase('Tauri export', process.execPath, ['scripts/tauri-export.mjs']);
-        const receipt = writeReleaseArtifactManifest(root, recipe);
-        console.log(`[tauri-prebuild] verified artifact ${recipe.recipeSha256.slice(0, 16)} (${receipt.manifest.outputs.length} checksums)`);
+        const builtRecipe = collectReleaseArtifactRecipe(root, version, { env });
+        if (builtRecipe.recipeSha256 === recipe.recipeSha256) {
+          const receipt = writeReleaseArtifactManifest(root, recipe);
+          console.log(`[tauri-prebuild] verified artifact ${recipe.recipeSha256.slice(0, 16)} (${receipt.manifest.outputs.length} checksums)`);
+        } else console.log('[tauri-prebuild] artifact capture=bypass reason=source_changed_during_build');
         await phase('packaged server smoke', process.execPath, ['scripts/packaged-server-smoke.mjs']);
         return 0;
       });

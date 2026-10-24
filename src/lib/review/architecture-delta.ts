@@ -7,7 +7,7 @@ import { open, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
-import ts from 'typescript';
+import { loadTypeScriptCompiler } from '@/lib/typescript-compiler';
 
 import { parseNameStatus, type LaneFileChange } from '@/lib/lane/lane-diff-facts';
 import type {
@@ -409,8 +409,8 @@ async function buildBeforeContents(
   return { contents, omittedPaths };
 }
 
-function parseResolverConfig(configPath: string, content: string): ResolverConfig {
-  const parsed = ts.parseConfigFileTextToJson(configPath, content);
+async function parseResolverConfig(configPath: string, content: string): Promise<ResolverConfig> {
+  const parsed = (await loadTypeScriptCompiler()).parseConfigFileTextToJson(configPath, content);
   if (parsed.error || !parsed.config || typeof parsed.config !== 'object') {
     return { aliases: [], baseRoots: [], warnings: [`Could not parse ${configPath}; configured aliases were omitted.`] };
   }
@@ -543,19 +543,19 @@ function splitEdgeKey(key: string) {
   return { from: key.slice(0, separator), to: key.slice(separator + 1) };
 }
 
-function buildGraph(
+async function buildGraph(
   contents: Map<string, string>,
   sourcePaths: Set<string>,
   config: ResolverConfig,
   changedPaths: Set<string>,
   parsedImports: Map<string, ParsedSourceImports>,
-): SnapshotGraph {
+): Promise<SnapshotGraph> {
   const edges = new Set<string>();
   const parsedSources = new Set<string>();
   let importsProcessed = 0;
   let truncated = false;
   for (const [from, content] of contents) {
-    const imported = sourceImportSpecifiers(from, content, parsedImports);
+    const imported = await sourceImportSpecifiers(from, content, parsedImports);
     if (
       imported.length > MAX_IMPORTS_PER_FILE
       || importsProcessed + imported.length > MAX_IMPORT_SPECIFIERS
@@ -754,8 +754,8 @@ export async function buildArchitectureDelta({
   ])].sort().slice(0, MAX_REPORTED_PATHS);
   const resolutionWarnings = [...new Set([...beforeResolver.warnings, ...afterResolver.warnings])].sort();
   const parsedImports = new Map<string, ParsedSourceImports>();
-  const beforeGraph = buildGraph(beforeContents, beforeSourcePaths, beforeResolver, changedPaths, parsedImports);
-  const afterGraph = buildGraph(afterContents, afterSourcePaths, afterResolver, changedPaths, parsedImports);
+  const beforeGraph = await buildGraph(beforeContents, beforeSourcePaths, beforeResolver, changedPaths, parsedImports);
+  const afterGraph = await buildGraph(afterContents, afterSourcePaths, afterResolver, changedPaths, parsedImports);
   const result = buildResult(
     beforeGraph,
     afterGraph,

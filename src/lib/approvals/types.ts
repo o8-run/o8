@@ -97,6 +97,8 @@ export interface ApprovalReferee {
 }
 
 export interface ApprovalAuditEvent {
+  /** Exact structured terminal projection used for an operator decision. */
+  terminalAdapter?: import('@/lib/terminal-status/approval-adapter').TerminalApprovalAdapter;
   type: 'created' | 'updated' | 'approved' | 'rejected' | 'resumed' | 'resume_failed'
     | 'orchestrator_review' | 'continuation_completed' | 'continuation_failed' | 'continuation_outcome_unknown';
   actor: ApprovalActor;

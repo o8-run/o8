@@ -5,7 +5,6 @@ import path from 'node:path';
 import {
   addRepoToProject,
   createProject,
-  getProjectBySlug,
   getProjectWithRepos,
   removeRepoFromProject,
 } from '@/lib/projects/store';
@@ -26,19 +25,11 @@ function normalizeRepoPath(repoPath: string) {
   return path.resolve(repoPath.trim().replace(/^~(?=\/|$)/, os.homedir()));
 }
 
-function resolveSqliteProject(project: Pick<ProjectRecord, 'id' | 'name'>) {
-  return getProjectWithRepos(project.id)
-    ?? (() => {
-      const bySlug = getProjectBySlug(projectNameToSlug(project.name));
-      return bySlug ? getProjectWithRepos(bySlug.id) : null;
-    })();
-}
-
 export async function reconcileSqliteProjectRepos(project: ProjectRecord, repoPaths: string[]): Promise<void> {
   const repos = await listRepos();
   const idByPath = new Map(repos.map((repo) => [normalizeRepoPath(repo.localPath), repo.id]));
   const targetRepoIds = new Set(repoPaths.map((repoPath) => idByPath.get(normalizeRepoPath(repoPath))).filter((id): id is string => Boolean(id)));
-  let sqlite = resolveSqliteProject(project);
+  let sqlite = getProjectWithRepos(project.sqliteProjectId ?? project.id);
   if (!sqlite) {
     const created = createProject({ name: project.name, slug: projectNameToSlug(project.name), description: null });
     sqlite = getProjectWithRepos(created.id);

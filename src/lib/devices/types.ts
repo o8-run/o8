@@ -1,6 +1,22 @@
 export type DeviceTool = 'hub' | 'agent';
 export type DevicePhase = 'idle' | 'installing' | 'starting' | 'running' | 'error';
 
+export interface DeviceController {
+  session: string;
+  label: string;
+  kind: 'worker' | 'operator';
+}
+
+export interface DeviceControllerRoster {
+  deviceId: string;
+  active: DeviceController | null;
+  waiting: DeviceController[];
+  busy: boolean;
+  operatorInput?: boolean;
+  error?: string;
+  lastInput?: { action: string; label: string; at: number; x?: number; y?: number };
+}
+
 export interface DeviceState {
   phase: DevicePhase;
   error?: string;
@@ -9,6 +25,8 @@ export interface DeviceState {
   platforms: Record<'ios' | 'android', { available: boolean; detail: string }>;
   embedUrl?: string;
   agentCommand?: string[];
+  controllers?: DeviceControllerRoster[];
+  controllerRevision?: number;
   devices?: Array<{ id: string; name: string; platform: 'ios' | 'android'; state: string; version?: string }>;
 }
 

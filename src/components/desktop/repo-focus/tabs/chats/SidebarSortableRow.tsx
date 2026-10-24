@@ -22,6 +22,8 @@ export function SidebarSortableRow({ item, insertion, onMove, siblings, children
       const control = (event.target as Element).closest('button,input,textarea,select,a');
       if (control && control !== event.currentTarget.firstElementChild) { event.stopPropagation(); return; }
       event.stopPropagation(); consumed.current = false; dispose.current?.();
+      // Clear an old mouse drag, then leave fingers to native scrolling.
+      if (event.pointerType === 'touch') return;
       dispose.current = trackThreadDrag(event, { threadId: item.tabId, title: item.title,
         mode: historySection(item) === 'orchestrator' ? 'orchestrator' : 'chat', repoPath: item.repoPath,
         sidebarItemId: item.tabId, navigationOnly: item.tabId.startsWith('sidebar-agent:') },

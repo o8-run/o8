@@ -9,7 +9,11 @@ use std::{fs, path::PathBuf, sync::Mutex, time::Duration};
 
 mod leases;
 mod mission;
+mod process_identity;
+mod publisher;
+use publisher::{Bindings, PendingPublisher};
 mod registries;
+mod spec;
 mod tasks;
 type ReadResult<T> = Result<T, ()>;
 
@@ -18,8 +22,7 @@ pub struct NativeReads {
     database: PathBuf,
     connection: Mutex<Option<Connection>>,
     file_identity: Mutex<Option<std::fs::Metadata>>,
-    verified_generation: Mutex<Option<String>>,
-    pending_generation: Mutex<Option<String>>,
+    publisher: Mutex<Bindings>,
 }
 impl NativeReads {
     pub fn new(directory: PathBuf, database: Option<PathBuf>) -> Self {
@@ -29,8 +32,7 @@ impl NativeReads {
             database,
             connection: Mutex::new(None),
             file_identity: Mutex::new(None),
-            verified_generation: Mutex::new(None),
-            pending_generation: Mutex::new(None),
+            publisher: Mutex::new(Bindings::default()),
         }
     }
     pub fn read(
@@ -38,6 +40,17 @@ impl NativeReads {
         upstream: &Url,
         headers: &HeaderMap,
         messages: &[Value],
+    ) -> Result<Vec<Value>, Option<PendingPublisher>> {
+        let mut pending = None;
+        self.read_checked(upstream, headers, messages, &mut pending)
+            .map_err(|_| pending)
+    }
+    fn read_checked(
+        &self,
+        upstream: &Url,
+        headers: &HeaderMap,
+        messages: &[Value],
+        pending: &mut Option<PendingPublisher>,
     ) -> ReadResult<Vec<Value>> {
         let mut guard = self.connection.lock().map_err(|_| ())?;
         let current_metadata = fs::metadata(&self.database).map_err(|_| ())?;
@@ -76,25 +89,7 @@ impl NativeReads {
             return Err(());
         }
         let pid = policy["pid"].as_u64().ok_or(())?;
-        if policy["bootId"].as_str()
-            != Some(
-                fs::read_to_string("/proc/sys/kernel/random/boot_id")
-                    .map_err(|_| ())?
-                    .trim(),
-            )
-        {
-            return Err(());
-        }
-        let stat = fs::read_to_string(format!("/proc/{pid}/stat")).map_err(|_| ())?;
-        let fields = stat
-            .rsplit_once(") ")
-            .ok_or(())?
-            .1
-            .split_whitespace()
-            .collect::<Vec<_>>();
-        if fields.get(19).copied() != policy["startId"].as_str() {
-            return Err(());
-        }
+        let identity = process_identity::observe(pid, &policy["identity"])?;
         let bearer = headers
             .get("authorization")
             .and_then(|v| v.to_str().ok())
@@ -129,8 +124,16 @@ impl NativeReads {
             Err(_) => return Err(()),
         }
         let generation = string(&policy, "generation")?;
-        if self.verified_generation.lock().map_err(|_| ())?.as_deref() != Some(generation) {
-            *self.pending_generation.lock().map_err(|_| ())? = Some(generation.to_owned());
+        if let Err(witness) = self
+            .publisher
+            .lock()
+            .map_err(|_| ())?
+            .check(PendingPublisher {
+                generation: generation.to_owned(),
+                identity: identity.clone(),
+            })
+        {
+            *pending = witness;
             return Err(());
         }
         let names = policy["names"].as_array().ok_or(())?;
@@ -167,6 +170,8 @@ impl NativeReads {
                     "o8_task_list" => tasks::read(self, &tx, &args)?,
                     "get_mission_status" => mission::read(self, &tx, &args)?,
                     "o8_lease_list" => leases::read(&tx)?,
+                    "o8_lease_status" => leases::status(&tx, &args)?,
+                    "o8_spec_read" => spec::read(&args)?,
                     _ => return Err(()),
                 };
                 json!({"isError":data.get("error").is_some(),"content":[{"type":"text","text":data.to_string()}]})
@@ -176,17 +181,8 @@ impl NativeReads {
         // Dropping a deferred read transaction rolls it back without writing.
         Ok(results)
     }
-    pub fn pending_generation(&self) -> Option<String> {
-        self.pending_generation.lock().ok()?.clone()
-    }
-    pub fn verify_generation(&self, generation: String) {
-        if let (Ok(mut verified), Ok(mut pending)) = (
-            self.verified_generation.lock(),
-            self.pending_generation.lock(),
-        ) {
-            *verified = Some(generation);
-            *pending = None;
-        }
+    pub fn verify_generation(&self, pending: PendingPublisher) -> ReadResult<()> {
+        self.publisher.lock().map_err(|_| ())?.verify(pending)
     }
     fn json(&self, filename: &str) -> ReadResult<Value> {
         serde_json::from_slice(&fs::read(self.directory.join(filename)).map_err(|_| ())?)

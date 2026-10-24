@@ -17,11 +17,15 @@ import { withPacketLifecycleSpawnLock } from '@/lib/orchestrator/lifecycle-mutat
 import { assertManagedRetirementQuiescence } from './retirement-process-authority';
 import { UnbankedArtifactSourceError } from './ignored-artifact-io';
 import type { CapturedPurgeProcessWitness } from './exact-directory-purge';
+import { assertWarmPacketSeal, type WarmPacketSeal } from '@/lib/worktree/warm-packet-integrity';
+import { allowWorktreeRemoval, probeLiveProcessInside } from '@/lib/worktree/live-process-guard';
+import { readCapturedPurgeCwdSnapshot } from './exact-directory-purge';
 
-export type ManagedRetirementReason = 'terminal' | 'creation-rollback' | 'empty-orphan';
+export type ManagedRetirementReason = 'terminal' | 'creation-rollback' | 'warm-pristine' | 'empty-orphan';
 
 /** Older claims may predate durable orphan authority while a warm close owns them. */
 export async function requiresPausedOrphanVerification(authority: Record<string, unknown> | null): Promise<boolean> {
+  if (authority?.warmSeal) return true;
   if (authority?.retirementReason !== 'terminal') return false;
   if (authority.orphanCloseOwner !== undefined) return true;
   if (typeof authority.preservationId !== 'string') throw new Error('Terminal retirement has no preservation owner.');
@@ -57,7 +61,7 @@ export async function admitRetirementAuthority(input: {
   reason: ManagedRetirementReason;
 }): Promise<Record<string, unknown>> {
   if (input.reason === 'empty-orphan') return { retirementReason: input.reason };
-  if (input.reason === 'creation-rollback') {
+  if (input.reason === 'creation-rollback' || input.reason === 'warm-pristine') {
     const metadata = (await readWorktreeMetaSnapshot(input.repositoryPath))[input.worktreeId];
     if (!metadata || metadata.claudeManaged
       || (metadata.status !== 'creating' && metadata.status !== 'setup') || !metadata.creationOwner
@@ -65,10 +69,17 @@ export async function admitRetirementAuthority(input: {
       || metadata.materializationIdentity.inode !== input.identity.inode) {
       throw new Error('Creation rollback has no matching durable creation authority.');
     }
+    if (metadata.warmTransfer) throw new Error('Transferred warm workspace requires preservation before retirement.');
+    const warm = metadata.warmPool;
+    if ((input.reason === 'warm-pristine') !== !!warm) throw new Error('Warm retirement requires its own pristine-content authority.');
+    if (warm && (metadata.packetId || metadata.laneId || metadata.sessionKey)) throw new Error('Warm retirement no longer owns an unused workspace.');
+    if (warm && !warm.seal) throw new Error('Unsealed warm workspace must remain retained.');
     const authority = { retirementReason: input.reason, creationOwner: metadata.creationOwner,
       repositoryPath: canonicalRepoRoot(input.repositoryPath), worktreeId: input.worktreeId,
-      sourceDevice: input.identity.device, sourceInode: input.identity.inode };
+      sourceDevice: input.identity.device, sourceInode: input.identity.inode,
+      ...(warm ? { warmSeal: warm.seal } : {}) };
     await verifyCreationAuthority(authority);
+    if (warm) await assertWarmPacketSeal(input.directoryPath, input.identity, warm.seal);
     return authority;
   }
   const preservationId = getWorkspaceRetirementPreservationId(input.directoryPath);
@@ -99,6 +110,11 @@ async function verifyCreationAuthority(authority: Record<string, unknown>): Prom
     || !identity || identity.device !== authority.sourceDevice || identity.inode !== authority.sourceInode) {
     throw new Error('Creation retirement manager authority changed after admission.');
   }
+  const warm = metadata.warmPool;
+  if (metadata.warmTransfer || !!warm !== !!authority.warmSeal
+    || (warm && (metadata.packetId || metadata.laneId || metadata.sessionKey || JSON.stringify(warm.seal) !== JSON.stringify(authority.warmSeal)))) {
+    throw new Error('Warm retirement lost its original content seal.');
+  }
   const observed = await probeMetadataLockProcessIdentity(owner.pid);
   if (observed.state === 'unknown'
     || (observed.state === 'live' && sameMetadataLockProcessIdentity(observed.identity, owner.identity)
@@ -127,7 +143,20 @@ async function verifyRetirementAuthorityNative(input: {
     });
     return verifyStandaloneRetirement({ ...input, authority });
   }
-  if (reason === 'creation-rollback') return verifyCreationAuthority(input.authority!);
+  if (reason === 'creation-rollback' || reason === 'warm-pristine') {
+    await verifyCreationAuthority(input.authority!);
+    if (input.verifyContents && input.authority!.warmSeal) {
+      await assertWarmPacketSeal(input.candidatePath, { ...input.identity, canonicalPath: input.candidatePath }, input.authority!.warmSeal as WarmPacketSeal);
+    }
+    if (input.authority!.warmSeal) {
+      if (input.capturedPurge) refreshCloseProcessObservation();
+      const clear = input.capturedPurge
+        ? (await probeLiveProcessInside(input.candidatePath, { snapshot: await readCapturedPurgeCwdSnapshot(input.capturedPurge, input.candidatePath) })).status === 'clear'
+        : await allowWorktreeRemoval(input.candidatePath, { logPrefix: 'warm-retirement' });
+      if (!clear) throw new Error('Warm retirement is live or unknown; retaining the tree.');
+    }
+    return;
+  }
   if (reason === 'empty-orphan') return;
   const preservationId = input.authority?.preservationId;
   if (reason !== 'terminal' || typeof preservationId !== 'string'

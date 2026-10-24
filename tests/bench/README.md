@@ -226,3 +226,42 @@ If governance is absent for a release, the scorecard records it as `automated â€
 ### Activity during transcript streaming
 
 The focused interaction scenario reuses the isolated stack, fixture and browser lifecycle above. Run it against a production build with `node scripts/bench/interactions/activity-stream-refresh.mjs --samples=3 --ticks=12 --output=tests/bench/latest/activity-stream-refresh.json`. Add `--browser=/path/to/chromium` when discovery is unavailable. It records client list requests over first and warm streaming windows, preserves mounted message identities and the unsent draft, and verifies mixed review-batch refresh plus fresh transcript delivery and message identities after transport reconnect. Bind the production artifact to its source with sealed build receipts; a checkout HEAD alone does not identify an existing bundle. Provider histories and read responses are simulated; this is not a live model or installed-native measurement. The zero-extra-read gate is intentionally falsifiable: `--negative-control` reinstates the obsolete list reads in the disposable page and must exit nonzero. Preserve raw receipts and compare matching builds, workload and machine.
+
+### Long transcript browser workload (#2163)
+
+Use the existing transcript runner, loading the original production components
+from the baseline commit without changing the worktree:
+
+```sh
+node scripts/bench/interactions/transcript-tab-reuse.mjs --long-history --samples=3 --source-ref=<baseline-commit> --label=before --output=work/2163/before.json
+node scripts/bench/interactions/transcript-tab-reuse.mjs --long-history --samples=3 --label=after --baseline=work/2163/before.json --output=work/2163/after.json
+```
+
+`--source-ref` substitutes TranscriptNavigator, TranscriptTurns and ChatMessageList; keep the
+checkout and dependencies identical for the paired run. `--check` exits nonzero for missing correctness evidence or a missed target.
+The absolute limits are warm switch <100 ms, cold component mount <300 ms,
+streaming input p95 <16 ms, and no scrolling long task >50 ms. Before judging a
+candidate, also require no increase in p95 relative to the matching baseline;
+receipts preserve every sample and ratio, including failures.
+
+Each of two histories has 5,000 deterministic messages: 1,000 each of prose,
+Markdown (including a table), TypeScript, unified diffs, and fenced tool output.
+The fixture records JSON UTF-8 payload bytes, SHA-256 and content counts. Each run
+collects one first-visit component switch, six retained switches, 239 frame
+intervals traversing the entire history in both directions, and 30 trusted keys
+per foreground/background 50 ms fixture stream. It uses the real ChatMessageList
+and ComposerArea, the existing input-to-next-frame observer, browser ownership,
+and distribution utilities. An injected 80 ms key handler must exceed the same
+16 ms input limit. The runner retains drafts and selection and checks native text
+selection, the production copy action, composer keyboard selection and prompt
+jumping. Hidden stream tails are verified through reveal, outside the measured lane.
+Add `--profile-input` for input CPU summaries. Raw samples stay in `work/`;
+only the under-60-line [summary](receipts/2163/summary.md) is checked in.
+
+These are **browser component receipts**. Cold means the first component mount
+with history already in memory; server loading/transfer, persisted cold-state
+restoration, full-dashboard subscriptions, native worker output, installed macOS
+behavior, hardware/display qualification, and native lifecycle cleanup remain
+separate acceptance items. A next-frame acknowledgement is a conservative browser
+paint observation, not display scanout. Do not lower the requested input threshold
+or silently replace this observer to make a 60 Hz run pass.

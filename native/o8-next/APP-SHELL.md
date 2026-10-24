@@ -17,10 +17,39 @@ configuration's disk credential. The normal explicit fixture modes remain availa
 The shell lists workspaces with saved sessions. Ctrl+K or Cmd+K opens searchable
 commands; arrows and Enter choose, Escape cancels. Open session, Open grid and
 New message use the existing views; New message focuses the selected session's
-composer. Ctrl+Tab cycles surfaces and Ctrl+W closes a surface. Grid shortcuts,
+composer. Open Inbox opens the native Needs reply, Contributions, Approvals,
+Agent issues and History surface. Its tab is restored with the other open surfaces.
+Ctrl+Tab cycles surfaces and Ctrl+W closes a surface. Grid shortcuts,
 including Ctrl+Alt+W to close one pane, reach the grid. Drafts remain in memory
 while switching workspaces and sessions. An unavailable local server has a clear
 error and Retry control.
+
+Settings opens from the shell's Settings button, the Open settings command, or
+Ctrl+, / Cmd+,. This partial port edits shared server defaults, provider keys and
+revision-checked settings.toml. It works without a saved workspace. Values are
+read from the existing routes; credentials are write-only and never enter shell
+state. TOML reads expose declared settings only; additional entries stay on the
+server and survive native saves. Text fields reload before Edit and reject a
+Save against an older file revision. The running desktop reconciles quiet mode
+and notification settings through its existing native commands on focus and a
+one-second interval. See the [control parity table](evidence/settings/parity.md) and
+[fixture verification](evidence/settings/verification.md) for the remaining
+desktop controls and the headless CPU frame measurements.
+
+Projects is available from the shell header and command palette, including on a
+first run without saved sessions. It uses the desktop project ledger, membership
+and repository routes with the existing operator bearer. Create or edit a project,
+register a local Git folder, assign repository roles and a main repository, switch
+the active project, or open its repository in the shell. Removal confirms before
+calling the existing server action and displays refusals without clearing saved
+state. Reopening Projects refreshes its snapshot. Empty active projects stay empty
+after restarting the shell. The shared GPUI editor handles text fields.
+
+The disposable host's `--projects` mode exposes these production routes and prints
+two owned Git folders with its origin. `--projects-refuse-remove` injects an
+uninterruptible fixture session; `--projects-drop-add` loses the first successful
+registration response. See [project parity and verification](evidence/projects/verification.md)
+for the controls that are ported, the remaining controls and fixture measurements.
 
 Window size/position, selected workspace, open surfaces, sidebar selection and
 composer focus are stored in `next-shell.json` beside the resolved local config,
@@ -46,4 +75,4 @@ Terminal and packet diff surfaces are not on this branch's main baseline. Their
 palette commands report that the surface is unavailable; they do not create
 placeholder tabs or claim an attach. Their integration remains open. See
 [app shell evidence](evidence/shell/verification.md) for measurements and exact
-remaining acceptance. The shipped Tauri app is unchanged.
+remaining acceptance. The shipped entry point remains Tauri; the separate client requires explicit opt-in.

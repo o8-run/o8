@@ -3,22 +3,27 @@ use super::*;
 fn live(pid: &Value, identity: &Value) -> ReadResult<()> {
     let pid = pid.as_u64().filter(|pid| *pid > 0).ok_or(())?;
     let identity: Value = serde_json::from_str(identity.as_str().ok_or(())?).map_err(|_| ())?;
-    if identity["version"] != 1 || identity["platform"] != "linux" {
+    process_identity::matches(pid, &identity)
+}
+
+pub(super) fn status(db: &Connection, args: &Value) -> ReadResult<Value> {
+    let resource = string(args, "resource")?.trim();
+    if resource.is_empty()
+        || resource.len() > 2048
+        || !resource.bytes().all(|b| (0x20..=0x7e).contains(&b))
+    {
         return Err(());
     }
-    let boot = fs::read_to_string("/proc/sys/kernel/random/boot_id").map_err(|_| ())?;
-    let stat = fs::read_to_string(format!("/proc/{pid}/stat")).map_err(|_| ())?;
-    let start = stat
-        .rsplit_once(") ")
-        .ok_or(())?
-        .1
-        .split_whitespace()
-        .nth(19)
-        .ok_or(())?;
-    if identity["bootId"] != boot.trim() || identity["startId"] != start {
-        return Err(());
-    }
-    Ok(())
+    let list = read(db)?;
+    let lease = array(&list["leases"])?
+        .iter()
+        .find(|lease| lease["resource"] == resource)
+        .cloned()
+        .unwrap_or_else(|| {
+            json!({"schema":"o8/resource-lease/v1","resource":resource,
+            "holder":null,"waiters":[],"blocked":null})
+        });
+    Ok(json!({"schema":"o8/resource-lease.status/v1","ok":true,"lease":lease}))
 }
 pub(super) fn read(db: &Connection) -> ReadResult<Value> {
     let holders = rows(db, "SELECT * FROM resource_leases ORDER BY resource ASC")?;

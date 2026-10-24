@@ -18,6 +18,7 @@ import type { PRDetail } from './types';
 import { DesktopGlassActionChip } from './shared';
 
 interface PRChecksSectionProps {
+  readOnly?: boolean;
   pr: PRDetail;
   activeItemIndex: number;
   addedContextKeys: Record<string, true>;
@@ -29,6 +30,7 @@ interface PRChecksSectionProps {
 
 function PRChecksSectionBase({
   pr,
+  readOnly = false,
   activeItemIndex,
   addedContextKeys,
   checkContextKey,
@@ -49,7 +51,7 @@ function PRChecksSectionBase({
 
   return (
     <div>
-      {repo ? <PrCheckRepair key={`${repo}:${pr.number}`} repo={repo} number={pr.number} failed={failedChecks.length > 0} /> : null}
+      {!readOnly && repo ? <PrCheckRepair key={`${repo}:${pr.number}`} repo={repo} number={pr.number} failed={failedChecks.length > 0} /> : null}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {failedChecks.length > 0 && onInjectChatContext ? (
           <div style={{ display: 'flex', justifyContent: 'flex-end' }}>

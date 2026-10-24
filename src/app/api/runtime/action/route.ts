@@ -10,6 +10,7 @@ import {
 } from '@/lib/orchestrator/idempotency-store';
 import type { RuntimeActionRequest } from '@/lib/runtime/actions';
 import { runtimeIdFromSessionKey } from '@/lib/runtime/transcript';
+import { EffortPinRejectionError, type EffortPinErrorCode } from '@/lib/orchestrator/effort-pin';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -18,7 +19,7 @@ const OUTCOME_UNKNOWN_MESSAGE = 'The action outcome is unknown; inspect the sess
 
 type RuntimeActionResult = Awaited<ReturnType<typeof performLegacyRuntimeActionViaAgentControl>>;
 type RuntimeActionReceipt =
-  | { kind: 'result'; result: RuntimeActionResult }
+  | { kind: 'result'; result: RuntimeActionResult & { code?: EffortPinErrorCode } }
   | { kind: 'outcome_unknown'; message: string };
 
 function runtimeActionIdempotencyBody(payload: RuntimeActionRequest): string {
@@ -97,6 +98,13 @@ export async function POST(request: NextRequest) {
             }),
           };
         } catch (error) {
+          if (error instanceof EffortPinRejectionError) {
+            return { kind: 'result', result: {
+              ok: false, action, surfaceId, sessionKey: surfaceId,
+              runtime: runtimeIdFromSessionKey(surfaceId) ?? 'unknown', clientMutationId,
+              status: 'unavailable', note: error.message, code: error.code,
+            } };
+          }
           console.error('[runtime-action] control failed:', error);
           return {
             kind: 'outcome_unknown',

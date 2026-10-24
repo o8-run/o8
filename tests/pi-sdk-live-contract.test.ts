@@ -1,16 +1,31 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, mkdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { MANAGED_INFERENCE_BODY_FIELDS, O8_MANAGED_FLASH_LITE_CONTRACT, O8_MANAGED_FLASH_LITE_MODEL } from '@/lib/pi/sdk/live-contract';
+import { MANAGED_INFERENCE_BODY_FIELDS, O8_MANAGED_FLASH_LITE_MODEL } from '@/lib/pi/sdk/live-contract';
 import { initializePiTestBudget, maximumPiRequestCost, readPiTestBudget, validatePiBillingContract } from '@/lib/pi/sdk/test-budget';
 import { createBudgetedPiTestTransport, resolveLivePiTestContract } from '@/lib/pi/sdk/test-transport';
 
 // Fields api.o8.run/v1/inference accepts, plus the three it strips first.
 const SERVER_FIELDS = new Set(['model', 'messages', 'max_tokens', 'stream', 'temperature', 'top_p',
   'tools', 'tool_choice', 'response_format', 'stop', 'stream_options', 'usage']);
+// Entirely synthetic bounds; no hosted pricing evidence or live authorization.
+const CONTRACT = {
+  id: 'offline-compatibility-fixture', modelId: O8_MANAGED_FLASH_LITE_MODEL.id,
+  endpoint: 'https://managed.example/v1/inference', evidence: 'Offline synthetic fixture',
+  expiresAt: Date.UTC(2020, 0, 2), coverage: 'all-including-failed-requests' as const,
+  contextWindow: 65_536, maxRequestBytes: 65_536, maxBillableInputTokens: 81_920,
+  maxBillableOutputTokens: 4_096, inputMicroUsdPerMillion: 180_000,
+  outputMicroUsdPerMillion: 720_000, fixedMicroUsdPerRequest: 0, maxCalls: 8,
+};
 const roots: string[] = [];
+// Offline checks run inside the contract window; expiry itself is asserted below.
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(CONTRACT.expiresAt - 86_400_000);
+});
 afterEach(async () => {
+  vi.useRealTimers();
   vi.unstubAllEnvs();
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })));
 });
@@ -19,12 +34,12 @@ async function runOnce(model = O8_MANAGED_FLASH_LITE_MODEL) {
   const root = await mkdtemp(join(tmpdir(), 'o8-pi-live-contract-')); roots.push(root);
   const workspace = join(root, 'workspace'); await mkdir(workspace);
   const ledgerPath = join(root, 'budget.sqlite');
-  initializePiTestBudget(ledgerPath, 1_000_000, O8_MANAGED_FLASH_LITE_CONTRACT);
+  initializePiTestBudget(ledgerPath, 1_000_000, CONTRACT);
   let body: Record<string, unknown> | undefined;
   let fetches = 0;
   const transport = createBudgetedPiTestTransport({
-    model, ledgerPath, workspace,
-    resolveRoute: async () => ({ via: 'proxy' as const, url: O8_MANAGED_FLASH_LITE_CONTRACT.endpoint, headers: { Authorization: 'Bearer synthetic-secret' } }),
+    model, ledgerPath, workspace, resolveContract: async () => CONTRACT,
+    resolveRoute: async () => ({ via: 'proxy' as const, url: CONTRACT.endpoint, headers: { Authorization: 'Bearer synthetic-secret' } }),
     fetch: async (_url, init) => {
       fetches += 1;
       body = JSON.parse(String(init?.body)) as Record<string, unknown>;
@@ -46,15 +61,24 @@ async function runOnce(model = O8_MANAGED_FLASH_LITE_MODEL) {
   return { body, fetches, error, ledger: readPiTestBudget(ledgerPath) };
 }
 
-describe('verified managed Pi live contract', () => {
-  it('is the live default and bounds every request at 17,696 micro-USD', async () => {
-    const live = await resolveLivePiTestContract();
-    expect(live).toEqual(O8_MANAGED_FLASH_LITE_CONTRACT);
+describe('offline Pi contract compatibility', () => {
+  it('has no default managed pricing contract after retirement', async () => {
+    expect(await resolveLivePiTestContract()).toBeNull();
+  });
+
+  it('bounds synthetic requests at 17,696 micro-USD', () => {
+    const live = CONTRACT;
     expect(() => validatePiBillingContract(live!)).not.toThrow();
     expect(maximumPiRequestCost(live!)).toBe(17_696);
     expect(maximumPiRequestCost(live!) * live!.maxCalls).toBeLessThan(1_000_000);
     expect(O8_MANAGED_FLASH_LITE_MODEL.id).toBe(live!.modelId);
     expect(O8_MANAGED_FLASH_LITE_MODEL.contextWindow).toBe(live!.contextWindow);
+  });
+
+  it('refuses the contract once it expires', async () => {
+    vi.setSystemTime(CONTRACT.expiresAt);
+    const live = CONTRACT;
+    expect(() => validatePiBillingContract(live!)).toThrow('Billing contract is expired');
   });
 
   it('sends only server-accepted fields through the guarded transport, offline', async () => {

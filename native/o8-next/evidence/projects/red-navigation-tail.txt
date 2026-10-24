@@ -1,0 +1,18 @@
+note: to see what the problems were, use the option `--future-incompat-report`, or run `cargo report future-incompatibilities --id 1`
+     Running unittests src/main.rs (native/o8-next/target/debug/deps/o8_next-a1e56fba38d38a8c)
+
+running 1 test
+test shell::tests::projects_tests::projects_preserve_session_focus_and_allow_inbox_navigation ...
+thread 'shell::tests::projects_tests::projects_preserve_session_focus_and_allow_inbox_navigation' (49608) panicked at src/projects_tests.rs:503:5:
+Projects must retain the hidden session's saved composer focus
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    shell::tests::projects_tests::projects_preserve_session_focus_and_allow_inbox_navigation
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 45 filtered out; finished in 2.18s
+
+error: test failed, to rerun pass `--bin o8-next`

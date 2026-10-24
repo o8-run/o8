@@ -58,9 +58,9 @@ jobs:
           key: ${{ runner.os }}-node22-typecheck-v1-${{ hashFiles('package-lock.json', 'tsconfig.json') }}-${{ github.sha }}
           restore-keys: ${{ runner.os }}-node22-typecheck-v1-${{ hashFiles('package-lock.json', 'tsconfig.json') }}-
       - run: npm run protocol:check
+      - name: Measure fast typecheck with its own heap budget
+        run: /usr/bin/time -f 'typecheck:fast wall=%e s peak_rss=%M KiB' npm run typecheck:fast
       - run: npm run typecheck
-        env:
-          NODE_OPTIONS: --max-old-space-size=8192
       # These bounded publication fixtures never contact release services or
       # build an app. Keep the stable/preview boundary on every PR.
       - name: Release channel policy
@@ -70,6 +70,24 @@ jobs:
         with:
           path: tsconfig.tsbuildinfo
           key: ${{ steps.typecheck-cache.outputs.cache-primary-key }}
+
+  server-bundle-size:
+    name: Server Bundle Size
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm install -g "$(node -p 'require("./package.json").packageManager')"
+      - run: npm ci --prefer-offline
+      - name: Build exported server bundles and enforce committed budgets
+        run: node scripts/check-server-bundle-size.mjs
+      - name: Reject the large-dependency fixture
+        run: npx vitest run tests/server-bundle-size-real-path.test.ts
 
   typecheck-parity:
     name: Weekly Type Checker Parity

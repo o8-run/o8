@@ -113,6 +113,7 @@ export function codexWorkerMcpOverrideArgs(servers: ResolvedWorkerMcpServer[]): 
         '-c', `${prefix}.command=${JSON.stringify(server.command)}`,
         '-c', `${prefix}.args=${args}`,
         '-c', `${prefix}.env=${env}`,
+        ...(server.id === 'builtin:devices' ? ['-c', `${prefix}.env_vars=["O8_WORKER_TOKEN"]`] : []),
       ];
     });
 }

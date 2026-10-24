@@ -3530,6 +3530,7 @@ name = "o8-next"
 version = "0.0.0"
 dependencies = [
  "alacritty_terminal",
+ "async-channel 2.5.0",
  "base64",
  "gpui",
  "regex",

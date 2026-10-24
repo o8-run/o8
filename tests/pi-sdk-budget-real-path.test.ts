@@ -7,7 +7,7 @@ import type { Model } from '@earendil-works/pi-ai';
 import { createPiSdkSession } from '@/lib/pi/sdk/session';
 import { initializePiTestBudget, reservePiTestRequest, readPiTestBudget, type ManagedPiBillingContract } from '@/lib/pi/sdk/test-budget';
 import { createBudgetedPiTestTransport } from '@/lib/pi/sdk/test-transport';
-import { O8_MANAGED_FLASH_LITE_CONTRACT, O8_MANAGED_FLASH_LITE_MODEL } from '@/lib/pi/sdk/live-contract';
+import { O8_MANAGED_FLASH_LITE_MODEL } from '@/lib/pi/sdk/live-contract';
 
 const model: Model<'openai-completions'> = { id: 'fixture', name: 'Fixture', api: 'openai-completions',
   provider: 'o8-managed', baseUrl: 'https://o8-host.invalid/v1', reasoning: false, input: ['text'],
@@ -34,12 +34,22 @@ async function collect(transport: ReturnType<typeof createBudgetedPiTestTranspor
   return events; }
 
 describe('managed Pi live-test budget boundary', () => {
-  it('refuses any model other than the verified live contract before any route or request', async () => {
-    const f = await fixture(); let calls = 0;
-    initializePiTestBudget(f.ledgerPath, 1_000_000, O8_MANAGED_FLASH_LITE_CONTRACT);
+  it('refuses the retired live default before any route or request', async () => {
+    const f = await fixture(); const c = contract(); let calls = 0;
+    initializePiTestBudget(f.ledgerPath, 1_000_000, c);
     const transport = createBudgetedPiTestTransport({ model, ledgerPath: f.ledgerPath, workspace: f.workspace,
       resolveRoute: async () => { calls++; return route(); }, fetch: async () => { calls++; return answer(); } });
-    await expect(collect(transport)).rejects.toThrow('does not match the trusted billing contract'); expect(calls).toBe(0);
+    await expect(collect(transport)).rejects.toThrow('A trusted hosted billing contract is required');
+    expect(calls).toBe(0);
+  });
+  it('refuses a model mismatch against a synthetic contract before any route or request', async () => {
+    const f = await fixture(); const c = contract(); let calls = 0;
+    initializePiTestBudget(f.ledgerPath, 1_000_000, c);
+    const transport = createBudgetedPiTestTransport({ model: { ...model, id: 'other-fixture' },
+      ledgerPath: f.ledgerPath, workspace: f.workspace, resolveContract: async () => c,
+      resolveRoute: async () => { calls++; return route(); }, fetch: async () => { calls++; return answer(); } });
+    await expect(collect(transport)).rejects.toThrow('does not match the trusted billing contract');
+    expect(calls).toBe(0);
   });
   it('reserves conservative complete-request cost before real SDK worker fetch and persists across sessions', async () => {
     const f = await fixture(); const c = contract(); initializePiTestBudget(f.ledgerPath, 40_000, c);

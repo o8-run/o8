@@ -1,6 +1,8 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { resolveCodexReasoningEffort } from '../../src/lib/codex/reasoning-effort';
 import type { ThinkingEffort } from '../../src/lib/orchestrator/thinking-effort';
+import { assertRuntimeEffortPin } from '../../src/lib/orchestrator/effort-pin';
+import { codexModelArgs } from '../../src/lib/codex/local-model';
 
 export interface RunCodexOptions { cwd: string; prompt: string; model?: string; effort?: ThinkingEffort; onChunk: (text: string) => Promise<void>; }
 export interface RunCodexResult { exitCode: number; stderrTail: string; aborted: boolean; }
@@ -32,8 +34,9 @@ function stopProcessTree(child: ChildProcess, signal: NodeJS.Signals): void {
 }
 
 export async function startCodex(opts: RunCodexOptions): Promise<RunningCodex> {
+  assertRuntimeEffortPin('cloud', opts.model, opts.effort);
   const codexArgs = ['exec', '--dangerously-bypass-approvals-and-sandbox', '--json'];
-  if (opts.model) codexArgs.push('--model', opts.model);
+  codexArgs.push(...codexModelArgs(opts.model));
   if (opts.effort && opts.effort !== 'adaptive') {
     codexArgs.push('-c', `model_reasoning_effort=${resolveCodexReasoningEffort(opts.effort, opts.model)}`);
   }

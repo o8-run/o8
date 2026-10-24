@@ -1,7 +1,5 @@
-import { spawnSync } from 'node:child_process';
 import { resolveTypecheckChecker } from './typecheck-checker.mjs';
+import { runTypecheckProcess } from './typecheck-process.mjs';
 
 const checker = resolveTypecheckChecker();
-const result = spawnSync(process.execPath, [checker.path, ...process.argv.slice(2)], { stdio: 'inherit' });
-if (result.error) throw result.error;
-process.exit(result.status ?? 1);
+process.exit(runTypecheckProcess(checker.path, process.argv.slice(2)));

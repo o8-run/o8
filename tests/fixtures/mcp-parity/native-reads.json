@@ -592,5 +592,231 @@
         "arguments": {}
       }
     }
+  },
+  {
+    "name": "o8_lease_status refuses absent",
+    "credential": "absent",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": "o8_lease_status",
+      "method": "tools/call",
+      "params": {
+        "name": "o8_lease_status",
+        "arguments": {
+          "resource": "fixture:mcp-parity"
+        }
+      }
+    }
+  },
+  {
+    "name": "o8_lease_status refuses invalid",
+    "credential": "invalid",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": "o8_lease_status",
+      "method": "tools/call",
+      "params": {
+        "name": "o8_lease_status",
+        "arguments": {
+          "resource": "fixture:mcp-parity"
+        }
+      }
+    }
+  },
+  {
+    "name": "o8_lease_status refuses read-only",
+    "credential": "read-only",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": "o8_lease_status",
+      "method": "tools/call",
+      "params": {
+        "name": "o8_lease_status",
+        "arguments": {
+          "resource": "fixture:mcp-parity"
+        }
+      }
+    }
+  },
+  {
+    "name": "o8_lease_status profile dogfood",
+    "headers": {
+      "x-o8-mcp-profile": "dogfood"
+    },
+    "body": {
+      "jsonrpc": "2.0",
+      "id": "o8_lease_status",
+      "method": "tools/call",
+      "params": {
+        "name": "o8_lease_status",
+        "arguments": {
+          "resource": "fixture:mcp-parity"
+        }
+      }
+    }
+  },
+  {
+    "name": "o8_lease_status profile visualizations",
+    "headers": {
+      "x-o8-mcp-profile": "visualizations"
+    },
+    "body": {
+      "jsonrpc": "2.0",
+      "id": "o8_lease_status",
+      "method": "tools/call",
+      "params": {
+        "name": "o8_lease_status",
+        "arguments": {
+          "resource": "fixture:mcp-parity"
+        }
+      }
+    }
+  },
+  {
+    "name": "o8_lease_status profile unknown",
+    "headers": {
+      "x-o8-mcp-profile": "unknown"
+    },
+    "body": {
+      "jsonrpc": "2.0",
+      "id": "o8_lease_status",
+      "method": "tools/call",
+      "params": {
+        "name": "o8_lease_status",
+        "arguments": {
+          "resource": "fixture:mcp-parity"
+        }
+      }
+    }
+  },
+  {
+    "name": "o8_lease_status profile f\u00f6\u00f6",
+    "headers": {
+      "x-o8-mcp-profile": "f\u00f6\u00f6"
+    },
+    "body": {
+      "jsonrpc": "2.0",
+      "id": "o8_lease_status",
+      "method": "tools/call",
+      "params": {
+        "name": "o8_lease_status",
+        "arguments": {
+          "resource": "fixture:mcp-parity"
+        }
+      }
+    }
+  },
+  {
+    "name": "o8_spec_read refuses absent",
+    "credential": "absent",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": "o8_spec_read",
+      "method": "tools/call",
+      "params": {
+        "name": "o8_spec_read",
+        "arguments": {
+          "repoPath": "$FIXTURE_REPO"
+        }
+      }
+    }
+  },
+  {
+    "name": "o8_spec_read refuses invalid",
+    "credential": "invalid",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": "o8_spec_read",
+      "method": "tools/call",
+      "params": {
+        "name": "o8_spec_read",
+        "arguments": {
+          "repoPath": "$FIXTURE_REPO"
+        }
+      }
+    }
+  },
+  {
+    "name": "o8_spec_read refuses read-only",
+    "credential": "read-only",
+    "body": {
+      "jsonrpc": "2.0",
+      "id": "o8_spec_read",
+      "method": "tools/call",
+      "params": {
+        "name": "o8_spec_read",
+        "arguments": {
+          "repoPath": "$FIXTURE_REPO"
+        }
+      }
+    }
+  },
+  {
+    "name": "o8_spec_read profile dogfood",
+    "headers": {
+      "x-o8-mcp-profile": "dogfood"
+    },
+    "body": {
+      "jsonrpc": "2.0",
+      "id": "o8_spec_read",
+      "method": "tools/call",
+      "params": {
+        "name": "o8_spec_read",
+        "arguments": {
+          "repoPath": "$FIXTURE_REPO"
+        }
+      }
+    }
+  },
+  {
+    "name": "o8_spec_read profile visualizations",
+    "headers": {
+      "x-o8-mcp-profile": "visualizations"
+    },
+    "body": {
+      "jsonrpc": "2.0",
+      "id": "o8_spec_read",
+      "method": "tools/call",
+      "params": {
+        "name": "o8_spec_read",
+        "arguments": {
+          "repoPath": "$FIXTURE_REPO"
+        }
+      }
+    }
+  },
+  {
+    "name": "o8_spec_read profile unknown",
+    "headers": {
+      "x-o8-mcp-profile": "unknown"
+    },
+    "body": {
+      "jsonrpc": "2.0",
+      "id": "o8_spec_read",
+      "method": "tools/call",
+      "params": {
+        "name": "o8_spec_read",
+        "arguments": {
+          "repoPath": "$FIXTURE_REPO"
+        }
+      }
+    }
+  },
+  {
+    "name": "o8_spec_read profile f\u00f6\u00f6",
+    "headers": {
+      "x-o8-mcp-profile": "f\u00f6\u00f6"
+    },
+    "body": {
+      "jsonrpc": "2.0",
+      "id": "o8_spec_read",
+      "method": "tools/call",
+      "params": {
+        "name": "o8_spec_read",
+        "arguments": {
+          "repoPath": "$FIXTURE_REPO"
+        }
+      }
+    }
   }
 ]

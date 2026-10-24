@@ -15,9 +15,13 @@ export interface PullRequestContextLink extends PullRequestContextIdentity {
   threadId: string;
   repositoryFullName: string;
   url: string;
-  kind: 'context';
-  source: 'operator';
+  kind: 'context' | 'review' | 'import' | 'delivery';
+  source: 'operator' | 'packet';
+  packetId?: string | null;
+  laneId?: string | null;
   createdAt: string;
+  threadTitle?: string;
+  threadAvailable?: boolean;
 }
 
 export class PullRequestContextError extends Error {
@@ -37,7 +41,7 @@ const SELECT_LINKS = `
   SELECT c.id, c.thread_id AS threadId, c.host, c.repository_id AS repositoryId,
     c.pull_request_id AS pullRequestId, c.number,
     c.repository_name AS repositoryFullName, p.url AS providerUrl,
-    c.kind, c.source, c.created_at AS createdAt
+    c.kind, c.source, c.packet_id AS packetId, c.lane_id AS laneId, c.created_at AS createdAt
   FROM conversation_pr_context c
   LEFT JOIN github_pull_requests p ON p.pull_request_id = c.pull_request_id
     AND p.repository_id = c.repository_id AND p.number = c.number
@@ -55,11 +59,12 @@ function githubRepositoryName(providerUrl: string | null, number: number): strin
 function asLink(row: ContextRow): PullRequestContextLink {
   const { providerUrl, ...link } = row;
   const repositoryFullName = githubRepositoryName(providerUrl, row.number) ?? row.repositoryFullName;
-  return { ...link, repositoryFullName, url: `https://${row.host}/${repositoryFullName}/pull/${row.number}` };
+  const thread = readPersistedLlmChat(row.threadId);
+  return { ...link, threadTitle: thread?.history.title ?? row.threadId, threadAvailable: Boolean(thread), repositoryFullName, url: `https://${row.host}/${repositoryFullName}/pull/${row.number}` };
 }
 
-/** Explicit context only. Branch names and primary delivery PRs never create associations here. */
-export function attachPullRequestContext(threadId: string, identity: PullRequestContextIdentity): {
+/** Explicit operator associations never change a packet's primary delivery PR. */
+export function attachPullRequestContext(threadId: string, identity: PullRequestContextIdentity, kind: 'context' | 'review' | 'import' = 'context'): {
   link: PullRequestContextLink; created: boolean;
 } {
   requireThread(threadId);
@@ -79,23 +84,23 @@ export function attachPullRequestContext(threadId: string, identity: PullRequest
     const result = db.prepare(`
       INSERT INTO conversation_pr_context
         (thread_id, host, repository_id, pull_request_id, number, repository_name, kind, source, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, 'context', 'operator', ?)
-      ON CONFLICT(thread_id, host, repository_id, pull_request_id) DO NOTHING
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'operator', ?)
+      ON CONFLICT(thread_id, host, repository_id, pull_request_id, kind, source_key) DO NOTHING
     `).run(threadId, identity.host, identity.repositoryId, identity.pullRequestId, identity.number,
-      repositoryName, new Date().toISOString());
+      repositoryName, kind, new Date().toISOString());
     const row = db.prepare(`${SELECT_LINKS}
-      WHERE c.thread_id = ? AND c.host = ? AND c.repository_id = ? AND c.pull_request_id = ?
-    `).get(threadId, identity.host, identity.repositoryId, identity.pullRequestId) as ContextRow;
+      WHERE c.thread_id = ? AND c.host = ? AND c.repository_id = ? AND c.pull_request_id = ? AND c.kind = ? AND c.source = 'operator'
+    `).get(threadId, identity.host, identity.repositoryId, identity.pullRequestId, kind) as ContextRow;
     return { link: asLink(row), created: result.changes > 0 };
   }).immediate();
 }
 
-export function unlinkPullRequestContext(threadId: string, identity: PullRequestContextIdentity): boolean {
+export function unlinkPullRequestContext(threadId: string, identity: PullRequestContextIdentity, kind: 'context' | 'review' | 'import' = 'context'): boolean {
   // Removal uses the durable identity, so deleted history or a stale mirror cannot trap a link.
   return getSqlite().prepare(`
     DELETE FROM conversation_pr_context
-    WHERE thread_id = ? AND host = ? AND repository_id = ? AND pull_request_id = ? AND number = ?
-  `).run(threadId, identity.host, identity.repositoryId, identity.pullRequestId, identity.number).changes > 0;
+    WHERE thread_id = ? AND host = ? AND repository_id = ? AND pull_request_id = ? AND number = ? AND kind = ? AND source = 'operator'
+  `).run(threadId, identity.host, identity.repositoryId, identity.pullRequestId, identity.number, kind).changes > 0;
 }
 
 export function listPullRequestContext(
