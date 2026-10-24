@@ -10,9 +10,13 @@ the existing `Client` and its explicit loopback origin/operator bearer. The PR
 list uses `/api/panel/prs?view=list`; details and writes use
 `/api/panel/prs/:number`. Confirmations freeze repository, number, head, comment
 and merge method. A repository change invalidates the previous detail. Busy,
-uncertain and partial-close delivery state is scoped to repository and PR and
-survives closing/reopening the shell's PR tab. Uncertain writes never retry
-automatically. Partial close retries only the close, preserving the posted comment.
+uncertain and partial-close delivery state is scoped to repository and PR in the
+GPUI app, shared by all workspace and window instances. It survives closing and
+reopening the shell's PR tab. Uncertain writes never retry automatically.
+Acknowledgment applies only to the displayed attempt and cannot release a newer
+busy or uncertain hold. Partial close retries only the close, preserving the
+posted comment. Metadata actions preserve unsent editor text; confirmed comment
+and review submissions may clear only the unchanged draft they sent.
 
 PR merge uses the desktop PR server route with the selected method and reviewed
 head. It never calls GitHub directly or substitutes a packet merge. When a packet
@@ -44,10 +48,10 @@ packet gates. Disable auto-merge remains available. This is an explicit parity g
 | Draft, Ready for review, Enable/Disable auto-merge, Close | Confirmed native PR actions | Ported; linked auto-merge enable refused |
 | Comment, Close with comment, retry partial close | Shared GPUI editor and native controls | Ported |
 | Review comment, Approve, Request changes, Use latest commit | Head-pinned review controls | Ported |
-| Busy, uncertain delivery, acknowledge after checking GitHub | Per-repository/PR delivery state | Ported |
+| Busy, uncertain delivery, acknowledge after checking GitHub | App-wide per-repository/PR delivery state shared across workspaces | Ported |
 | Summary, description, review decision, diff totals | Plain native summary | Partial; collapse and review guide missing |
 | Changes, file tree, open/collapse files, split/unified, syntax highlighting | Plain file patches with unavailable notice | Partial; file navigation and diff controls missing |
-| Checks, buckets, View run | Flat check rows and View run | Partial; bucket grouping missing |
+| Checks, buckets, View run | Desktop-ordered status buckets and View run | Ported |
 | Fix failing checks, selection, Start repair, receipt retry, open owner/worker | None | Missing |
 | Timeline, sort order, pagination, commits | None | Missing |
 | Issue and review discussion display | Plain discussion rows | Partial; rich rendering and thread controls missing |
@@ -80,5 +84,6 @@ text system does not shape native fonts, render on a GPU or present to a display
 These debug-profile measurements establish no macOS/display latency target.
 
 See [verification receipts](evidence/pull-requests/verification.md) and
+[correction-round receipts](evidence/pull-requests/correction-1.md), plus
 [raw timing samples](evidence/pull-requests/timing.json). Full desktop parity,
 every-gate native mutation coverage and packet-linked merging remain open.

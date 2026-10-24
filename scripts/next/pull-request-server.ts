@@ -63,7 +63,11 @@ async function main() {
       return Response.json(page === 2 ? [pulls.get(8), pulls.get(9), pulls.get(10)] : [pulls.get(7)], { headers: page === 1 ? { link: '<https://api.github.com/fixture?page=2>; rel="next"' } : {} });
     }
     if (path.endsWith('/files')) return Response.json([{ filename: 'change.rs', status: 'modified', additions: 1, deletions: 1, patch: '@@ -1 +1 @@\n-before\n+after' }]);
-    if (path.endsWith('/check-runs')) return Response.json({ check_runs: [{ name: 'CI', status: 'completed', conclusion: 'success', html_url: 'https://github.com/example/repo/actions/runs/1' }] });
+    if (path.endsWith('/check-runs')) return Response.json({ check_runs: [
+      { name: 'CI', status: 'completed', conclusion: 'success', html_url: 'https://github.com/example/repo/actions/runs/1' },
+      ...(process.argv.includes('--check-buckets') ? ['FAILURE', 'timed_out', 'action_required', 'startup_failure', '', null, 'neutral', 'future_conclusion', 'skipped', 'cancelled']
+        .map((conclusion, index) => ({ name: `Fixture check ${index}`, status: conclusion ? 'completed' : 'in_progress', conclusion })) : []),
+    ] });
     if (path.endsWith('/comments')) {
       if (method === 'POST') comments.push({ id: comments.length + 1, body: body.body, user: { login: 'fixture-author' }, created_at: new Date().toISOString() });
       if (body.body === 'Fixture partial close') failClose = true;

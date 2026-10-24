@@ -13,6 +13,9 @@ struct Fixture {
 }
 impl Fixture {
     fn new() -> Self {
+        Self::with_args(&[])
+    }
+    fn with_args(args: &[&str]) -> Self {
         let mut server = Command::new("node")
             .current_dir(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
             .args([
@@ -22,6 +25,7 @@ impl Fixture {
                 "tsx",
                 "scripts/next/pull-request-server.ts",
             ])
+            .args(args)
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()
@@ -101,9 +105,229 @@ fn perform(view: &Entity<PullRequests>, cx: &mut VisualTestContext, action: &str
     );
     click(cx, "pr-confirm");
     assert!(
-        !view.read_with(cx, |s, _| s.delivery().uncertain),
+        !view.read_with(cx, |s, cx| s.delivery(cx).uncertain),
         "{action} must settle"
     );
+}
+
+#[gpui::test]
+fn pull_requests_non_comment_actions_preserve_unsent_notes(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    let (view, cx) = cx.add_window_view(|w, cx| {
+        PullRequests::new(fixture.client.clone(), fixture.workspace.clone(), w, cx)
+    });
+    settle(cx);
+    click(cx, "pr-row-7");
+    input(&view, cx, "Unsent review notes");
+    for action in ["draft", "ready", "enable-auto-merge", "disable-auto-merge"] {
+        perform(&view, cx, action);
+        assert_eq!(
+            view.read_with(cx, |s, cx| s.editor.read(cx).text.clone()),
+            "Unsent review notes",
+            "{action} must preserve text it did not post"
+        );
+    }
+    assert!(
+        array(
+            &view.read_with(cx, |s, _| s.detail.clone()),
+            "issueComments"
+        )
+        .is_empty()
+    );
+    for receipt in fixture.receipts().iter().filter(|r| r["method"] == "POST") {
+        assert_eq!(
+            receipt["body"]["comment"], "",
+            "metadata actions must not send the unsent draft"
+        );
+    }
+    click(cx, "pr-comment");
+    view.update_in(cx, |s, w, cx| s.editor.read(cx).focus.focus(w));
+    cx.simulate_keystrokes("left");
+    click(cx, "pr-confirm");
+    assert!(
+        view.read_with(cx, |s, cx| s.editor.read(cx).text.is_empty()),
+        "a successful send after caret movement must clear its own unchanged draft"
+    );
+    assert!(
+        array(
+            &view.read_with(cx, |s, _| s.detail.clone()),
+            "issueComments"
+        )
+        .iter()
+        .any(|c| c["body"] == "Unsent review notes")
+    );
+    input(&view, cx, "Notes for later");
+    perform(&view, cx, "close");
+    assert_eq!(
+        view.read_with(cx, |s, cx| s.editor.read(cx).text.clone()),
+        "Notes for later"
+    );
+}
+
+#[gpui::test]
+fn pull_requests_uncertain_delivery_is_shared_across_worktrees(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    let worktree = std::path::Path::new(&fixture.workspace).with_file_name("linked-worktree");
+    for args in [
+        vec![
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.test",
+            "commit",
+            "--allow-empty",
+            "-qm",
+            "fixture base",
+        ],
+        vec![
+            "worktree",
+            "add",
+            "-qb",
+            "fixture-linked",
+            worktree.to_str().unwrap(),
+        ],
+    ] {
+        assert!(
+            Command::new("git")
+                .args(["-C", &fixture.workspace])
+                .args(args)
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .unwrap()
+                .success()
+        );
+    }
+    let first = {
+        let (view, visual) = cx.add_window_view(|w, cx| {
+            PullRequests::new(fixture.client.clone(), fixture.workspace.clone(), w, cx)
+        });
+        settle(visual);
+        click(visual, "pr-row-7");
+        input(&view, visual, "Fixture lose response");
+        click(visual, "pr-comment");
+        click(visual, "pr-confirm");
+        assert!(view.read_with(visual, |s, cx| s.delivery(cx).uncertain));
+        view
+    };
+    let posts_before = fixture
+        .receipts()
+        .iter()
+        .filter(|r| r["method"] == "POST")
+        .count();
+    assert_eq!(posts_before, 1);
+    let linked = worktree
+        .canonicalize()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    assert_ne!(linked, fixture.workspace);
+    let (second, visual) =
+        cx.add_window_view(|w, cx| PullRequests::new(fixture.client.clone(), linked, w, cx));
+    settle(visual);
+    click(visual, "pr-row-7");
+    input(&second, visual, "Fixture lose response");
+    click(visual, "pr-comment");
+    if second.read_with(visual, |s, _| s.confirmation.is_some()) {
+        click(visual, "pr-confirm");
+    }
+    let posts_after = fixture
+        .receipts()
+        .iter()
+        .filter(|r| r["method"] == "POST")
+        .count();
+    assert_eq!(
+        posts_after, posts_before,
+        "an uncertain write in worktree A must block another POST from worktree B"
+    );
+    assert!(second.read_with(visual, |s, cx| s.delivery(cx).uncertain));
+    assert_eq!(
+        array(
+            &second.read_with(visual, |s, _| s.detail.clone()),
+            "issueComments"
+        )
+        .len(),
+        1
+    );
+    click(visual, "pr-more");
+    click(visual, "pr-row-10");
+    input(&second, visual, "An independent PR comment");
+    perform(&second, visual, "comment");
+    click(visual, "pr-row-7");
+    click(visual, "pr-acknowledge");
+    assert!(
+        !first.read_with(visual, |s, cx| s.delivery(cx).uncertain),
+        "acknowledgment must release the same repository/PR hold everywhere"
+    );
+    input(&second, visual, "Fixture lose response");
+    click(visual, "pr-comment");
+    let old_attempt = second.read_with(visual, |s, cx| s.delivery(cx).attempt);
+    let key = second.read_with(visual, |s, _| s.delivery_key(7));
+    second.update(visual, |s, cx| {
+        s.confirm(cx);
+        assert!(s.delivery(cx).busy);
+        // Dispatch an acknowledgment captured by another window before its
+        // next repaint, while this new request is still in flight.
+        s.acknowledge(7, &key, old_attempt, cx);
+        assert!(
+            s.delivery(cx).busy,
+            "a stale acknowledgment cannot clear a newer busy hold"
+        );
+    });
+    settle(visual);
+    second.update(visual, |s, cx| {
+        assert!(s.delivery(cx).uncertain);
+        assert_ne!(s.delivery(cx).attempt, old_attempt);
+        s.acknowledge(7, &key, old_attempt, cx);
+        assert!(
+            s.delivery(cx).uncertain,
+            "a stale acknowledgment cannot acknowledge a newer failed attempt"
+        );
+    });
+    click(visual, "pr-acknowledge");
+    assert!(!first.read_with(visual, |s, cx| s.delivery(cx).uncertain));
+}
+
+#[gpui::test]
+fn pull_requests_check_buckets_match_desktop(cx: &mut TestAppContext) {
+    let fixture = Fixture::with_args(&["--check-buckets"]);
+    let (view, cx) = cx.add_window_view(|w, cx| {
+        PullRequests::new(fixture.client.clone(), fixture.workspace.clone(), w, cx)
+    });
+    settle(cx);
+    click(cx, "pr-row-7");
+    click(cx, "pr-tab-checks");
+    assert_eq!(
+        view.read_with(cx, |s, _| array(&s.detail, "statusCheckRollup").len()),
+        11
+    );
+    let mut previous = None;
+    for (bucket, members) in [
+        ("failing", vec![1, 2, 3, 4]),
+        ("running", vec![5, 6]),
+        ("passed", vec![0]),
+        ("neutral", vec![7, 8]),
+        ("skipped", vec![9, 10]),
+    ] {
+        let group = cx
+            .debug_bounds(Box::leak(
+                format!("pr-check-group-{bucket}").into_boxed_str(),
+            ))
+            .unwrap_or_else(|| panic!("missing desktop check bucket {bucket}"));
+        if let Some(bottom) = previous {
+            assert!(group.top() >= bottom);
+        }
+        for index in members {
+            let row = cx
+                .debug_bounds(Box::leak(format!("pr-check-row-{index}").into_boxed_str()))
+                .unwrap();
+            assert!(
+                row.top() >= group.top() && row.bottom() <= group.bottom(),
+                "check {index} must be inside {bucket}"
+            );
+        }
+        previous = Some(group.bottom());
+    }
 }
 
 #[gpui::test]
@@ -238,7 +462,7 @@ fn pull_requests_uncertain_delivery_and_partial_close(cx: &mut TestAppContext) {
     input(&view, cx, "Fixture lose response");
     click(cx, "pr-comment");
     click(cx, "pr-confirm");
-    assert!(view.read_with(cx, |s, _| s.delivery().uncertain));
+    assert!(view.read_with(cx, |s, cx| s.delivery(cx).uncertain));
     let count = fixture
         .receipts()
         .iter()
@@ -256,12 +480,12 @@ fn pull_requests_uncertain_delivery_and_partial_close(cx: &mut TestAppContext) {
     );
     click(cx, "pr-detail-close");
     click(cx, "pr-row-7");
-    assert!(view.read_with(cx, |s, _| s.delivery().uncertain));
+    assert!(view.read_with(cx, |s, cx| s.delivery(cx).uncertain));
     click(cx, "pr-acknowledge");
-    assert!(!view.read_with(cx, |s, _| s.delivery().uncertain));
+    assert!(!view.read_with(cx, |s, cx| s.delivery(cx).uncertain));
     input(&view, cx, "Fixture partial close");
     perform(&view, cx, "close-with-comment");
-    assert!(view.read_with(cx, |s, _| s.delivery().partial_close));
+    assert!(view.read_with(cx, |s, cx| s.delivery(cx).partial_close));
     click(cx, "pr-comment");
     assert!(view.read_with(cx, |s, _| s.confirmation.is_none()));
     perform(&view, cx, "retry-close");
@@ -324,7 +548,7 @@ fn pull_requests_filters_empty_retry_and_server_merge_refusal(cx: &mut TestAppCo
         )
         .unwrap();
     click(cx, "pr-confirm");
-    assert!(view.read_with(cx, |s, _| s.delivery().uncertain));
+    assert!(view.read_with(cx, |s, cx| s.delivery(cx).uncertain));
     assert!(view.read_with(cx, |s, _| s.detail["mergedAt"].is_null()));
     click(cx, "pr-acknowledge");
     assert_eq!(

@@ -12,10 +12,29 @@ pub fn array(v: &Value, key: &str) -> Vec<Value> {
 }
 #[derive(Clone, Default)]
 pub struct Delivery {
+    pub attempt: u64,
     pub uncertain: bool,
     pub partial_close: bool,
     pub busy: bool,
     pub notice: String,
+}
+#[derive(Default)]
+struct Deliveries(HashMap<String, Delivery>);
+impl gpui::Global for Deliveries {}
+
+fn delivery_key(repo: &str, number: u64) -> String {
+    format!("{}#{number}", repo.to_lowercase())
+}
+
+fn posts_draft(action: &str) -> bool {
+    [
+        "comment",
+        "close-with-comment",
+        "review-comment",
+        "approve",
+        "request-changes",
+    ]
+    .contains(&action)
 }
 #[derive(Clone)]
 pub struct Confirmation {
@@ -25,6 +44,7 @@ pub struct Confirmation {
     pub action: String,
     pub method: String,
     pub body: String,
+    pub draft: Option<String>,
 }
 pub struct PullRequests {
     client: Client,
@@ -48,7 +68,6 @@ pub struct PullRequests {
     pub error: String,
     pub detail_error: String,
     pub confirmation: Option<Confirmation>,
-    pub delivery: HashMap<String, Delivery>,
     pub review_head: String,
     pub packet: Option<String>,
     pub preview: Value,
@@ -68,6 +87,7 @@ impl PullRequests {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        cx.default_global::<Deliveries>();
         let search = cx.new(Composer::new);
         let editor = cx.new(Composer::new);
         let focus = cx.focus_handle();
@@ -79,6 +99,7 @@ impl PullRequests {
             cx.observe(&editor, |s, _, cx| {
                 s.changed(cx);
             }),
+            cx.observe_global::<Deliveries>(|s, cx| s.changed(cx)),
         ];
         let mut s = Self {
             client,
@@ -102,7 +123,6 @@ impl PullRequests {
             error: String::new(),
             detail_error: String::new(),
             confirmation: None,
-            delivery: HashMap::new(),
             review_head: String::new(),
             packet: None,
             preview: Value::Null,
@@ -321,9 +341,9 @@ impl PullRequests {
             .cloned()
             .collect()
     }
-    pub fn delivery(&self) -> Delivery {
+    pub fn delivery(&self, cx: &gpui::App) -> Delivery {
         self.selected
-            .and_then(|n| self.delivery.get(&self.delivery_key(n)))
+            .and_then(|n| cx.global::<Deliveries>().0.get(&self.delivery_key(n)))
             .cloned()
             .unwrap_or_default()
     }
@@ -331,10 +351,26 @@ impl PullRequests {
         let repo = self.detail["resolvedRepo"]
             .as_str()
             .unwrap_or_else(|| string(&self.page, "repo"));
-        format!("{repo}#{number}")
+        delivery_key(repo, number)
+    }
+    pub fn acknowledge(&mut self, number: u64, key: &str, attempt: u64, cx: &mut Context<Self>) {
+        if self.selected != Some(number) || self.delivery_key(number) != key {
+            return;
+        }
+        let Some(d) = cx.global_mut::<Deliveries>().0.get_mut(key) else {
+            return;
+        };
+        if d.attempt != attempt || d.busy || !d.uncertain {
+            return;
+        }
+        *d = Delivery {
+            attempt,
+            ..Default::default()
+        };
+        self.select(number, cx);
     }
     pub fn can(&self, action: &str, method: &str, cx: &gpui::App) -> bool {
-        let d = self.delivery();
+        let d = self.delivery(cx);
         let head = string(&self.detail, "headSha");
         if self.detail.is_null()
             || self.detail["resolvedRepo"] != self.page["repo"]
@@ -399,13 +435,15 @@ impl PullRequests {
         if !self.can(action, method, cx) {
             return;
         }
+        let draft = posts_draft(action).then(|| self.editor.read(cx).text.clone());
         self.confirmation = Some(Confirmation {
             repo: string(&self.detail, "resolvedRepo").into(),
             number: self.selected.unwrap(),
             head: string(&self.detail, "headSha").into(),
             action: action.into(),
             method: method.into(),
-            body: self.editor.read(cx).text.trim().into(),
+            body: draft.as_deref().unwrap_or("").trim().into(),
+            draft,
         });
         self.changed(cx);
     }
@@ -421,10 +459,14 @@ impl PullRequests {
             return;
         }
         self.confirmation = None;
-        self.delivery
-            .entry(format!("{}#{}", c.repo, c.number))
-            .or_default()
-            .busy = true;
+        let d = cx
+            .global_mut::<Deliveries>()
+            .0
+            .entry(delivery_key(&c.repo, c.number))
+            .or_default();
+        d.attempt = d.attempt.wrapping_add(1);
+        d.busy = true;
+        let attempt = d.attempt;
         let client = self.client.clone();
         let sent = c.clone();
         let task = cx.background_executor().spawn(async move {
@@ -434,15 +476,32 @@ impl PullRequests {
         });
         cx.spawn(async move |this, cx| {
             let result = task.await;
+            // Resolve the app-wide hold even if its originating surface closed.
+            let posted = cx.update(|cx| {
+                let d = cx.global_mut::<Deliveries>().0.entry(delivery_key(&c.repo, c.number)).or_default();
+                if d.attempt != attempt { return false; }
+                d.busy = false;
+                let confirmed = match result {
+                    Ok(v) if c.action == "close-with-comment" && v["commentPosted"] == true && v["ok"] != true => {
+                        d.partial_close = true;
+                        d.notice = "Comment posted. Closing could not be confirmed. Retry close without posting again.".into();
+                        true
+                    }
+                    Ok(v) if v["ok"] == true && v["outcomeUnknown"] != true && v["inProgress"] != true => {
+                        *d = Delivery { attempt, notice: format!("{} completed.", c.action), ..Default::default() };
+                        true
+                    }
+                    _ => {
+                        d.uncertain = true;
+                        d.notice = "Could not confirm delivery. Check this pull request on GitHub before another attempt.".into();
+                        false
+                    }
+                };
+                confirmed && c.draft.is_some()
+            }).unwrap_or(false);
             let _ = this.update(cx, |s, cx| {
-                let d = s.delivery.entry(format!("{}#{}", c.repo, c.number)).or_default(); d.busy = false;
-                match result {
-                    Ok(v) if c.action == "close-with-comment" && v["commentPosted"] == true && v["ok"] != true => { d.partial_close = true; d.notice = "Comment posted. Closing could not be confirmed. Retry close without posting again.".into(); }
-                    Ok(v) if v["ok"] == true && v["outcomeUnknown"] != true && v["inProgress"] != true => { *d = Delivery { notice: format!("{} completed.", c.action), ..Default::default() }; }
-                    _ => { d.uncertain = true; d.notice = "Could not confirm delivery. Check this pull request on GitHub before another attempt.".into(); }
-                }
                 if s.selected == Some(c.number) && string(&s.detail,"resolvedRepo") == c.repo {
-                    if !d.uncertain && s.editor.read(cx).text.trim() == c.body { s.editor.update(cx, |e,cx| e.clear(cx)); }
+                    if posted && c.draft.as_deref() == Some(s.editor.read(cx).text.as_str()) { s.editor.update(cx, |e,cx| e.clear(cx)); }
                     s.select(c.number, cx);
                 }
                 s.load(false, cx); s.changed(cx);

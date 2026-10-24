@@ -1,5 +1,15 @@
 use super::*;
 
+fn check_bucket(check: &Value) -> &'static str {
+    match string(check, "conclusion").to_lowercase().as_str() {
+        "failure" | "timed_out" | "action_required" | "startup_failure" => "failing",
+        "success" => "passed",
+        "skipped" | "cancelled" => "skipped",
+        "" => "running",
+        _ => "neutral",
+    }
+}
+
 impl PullRequests {
     pub(super) fn detail_view(&self, cx: &mut Context<Self>) -> AnyElement {
         let Some(number) = self.selected else {
@@ -164,7 +174,7 @@ impl PullRequests {
                     )),
             );
         }
-        let d = self.delivery();
+        let d = self.delivery(cx);
         if d.busy {
             panel = panel.child("Submitting…");
         }
@@ -180,14 +190,14 @@ impl PullRequests {
             );
         }
         if d.uncertain {
+            let key = self.delivery_key(number);
+            let attempt = d.attempt;
             panel = panel.child(self.button(
                 "pr-acknowledge",
                 "I've checked GitHub",
                 true,
                 move |s, _, _, cx| {
-                    s.delivery
-                        .insert(s.delivery_key(number), Delivery::default());
-                    s.select(number, cx);
+                    s.acknowledge(number, &key, attempt, cx);
                 },
                 cx,
             ));
@@ -279,26 +289,65 @@ impl PullRequests {
             if self.detail["checksUnavailable"] == true {
                 content = content.child("Some checks are unavailable. Refresh to try again.");
             }
-            for (i, c) in checks.into_iter().enumerate() {
-                let url = string(&c, "url").to_owned();
-                content = content.child(
-                    div()
-                        .flex()
-                        .gap(px(8.))
-                        .child(format!(
-                            "{} · {} · {}",
-                            string(&c, "name"),
-                            string(&c, "status"),
-                            string(&c, "conclusion")
-                        ))
-                        .child(self.button(
-                            &format!("pr-check-{i}"),
-                            "View run",
-                            url.starts_with("https://") || url.starts_with("http://"),
-                            move |_, _, _, cx| cx.open_url(&url),
-                            cx,
-                        )),
-                );
+            for (bucket, label) in [
+                ("failing", "Failing"),
+                ("running", "Running"),
+                ("passed", "Passed"),
+                ("neutral", "Neutral"),
+                ("skipped", "Skipped"),
+            ] {
+                let items: Vec<_> = checks
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, c)| check_bucket(c) == bucket)
+                    .collect();
+                if items.is_empty() {
+                    continue;
+                }
+                let mut group = div()
+                    .id(gpui::SharedString::from(format!("pr-check-group-{bucket}")))
+                    .debug_selector(move || format!("pr-check-group-{bucket}"))
+                    .flex()
+                    .flex_col()
+                    .flex_shrink_0()
+                    .gap(px(8.))
+                    .child(
+                        div()
+                            .text_size(px(10.))
+                            .text_color(theme().text_faint)
+                            .child(format!("{label} · {}", items.len())),
+                    );
+                for (i, c) in items {
+                    let url = string(c, "url").to_owned();
+                    group = group.child(
+                        div()
+                            .id(("pr-check-row", i))
+                            .debug_selector(move || format!("pr-check-row-{i}"))
+                            .flex()
+                            .flex_shrink_0()
+                            .gap(px(8.))
+                            .text_color(match bucket {
+                                "failing" => theme().danger,
+                                "passed" => theme().success,
+                                "running" => theme().warning,
+                                _ => theme().text_muted,
+                            })
+                            .child(format!(
+                                "{} · {} · {}",
+                                string(c, "name"),
+                                string(c, "status"),
+                                string(c, "conclusion")
+                            ))
+                            .child(self.button(
+                                &format!("pr-check-{i}"),
+                                "View run",
+                                url.starts_with("https://") || url.starts_with("http://"),
+                                move |_, _, _, cx| cx.open_url(&url),
+                                cx,
+                            )),
+                    );
+                }
+                content = content.child(group);
             }
         }
         if self.tab == "reviews" {
