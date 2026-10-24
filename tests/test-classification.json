@@ -3946,6 +3946,13 @@
       ]
     },
     {
+      "path": "tests/native-release-profile.test.ts",
+      "reasons": [
+        "child-process",
+        "native-build"
+      ]
+    },
+    {
       "path": "tests/native-worker-token-setup-real-path.test.ts",
       "reasons": [
         "child-process",
