@@ -5637,6 +5637,12 @@
       ]
     },
     {
+      "path": "tests/sign-in-disclosure-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/spawn-prompt-count-real-path.test.ts",
       "reasons": [
         "child-process",
