@@ -1,10 +1,11 @@
 import { spawn, execFileSync, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { bundleServers } from '../scripts/lib/server-bundles.mjs';
+import { stagePackagedNativeAddons } from './helpers/packaged-native-addons';
 import { WebSocket } from 'ws';
 import { afterAll, expect, it } from 'vitest';
 
@@ -90,6 +91,9 @@ function __bootDone(step: string) { __append(${JSON.stringify(journal)}, JSON.st
 ${contents}`;
   writeFileSync(join(root, 'src/ws-server.ts'), contents);
   bundleServers({ root, outDir: root });
+  // The compile-time dependency link must never become the packaged runtime.
+  unlinkSync(join(root, 'node_modules'));
+  stagePackagedNativeAddons({ projectRoot: process.cwd(), serverRoot: root });
   const apiPort = await freePort();
   const wsPort = await freePort();
   api = createServer((request, response) => {

@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { bundleServers, SERVER_ENTRIES } from '../scripts/lib/server-bundles.mjs';
+import { stagePackagedNativeAddons } from './helpers/packaged-native-addons';
 
 const root = mkdtempSync(join(tmpdir(), 'o8-server-layout-'));
 const serverDir = join(root, 'server');
@@ -60,10 +61,7 @@ beforeAll(async () => {
   report = bundleServers({ root: process.cwd(), outDir: serverDir });
   // Only native externals are installed. All JavaScript dependencies must come
   // from the generated entries/chunks, with no checkout node_modules above them.
-  for (const name of ['better-sqlite3', 'bindings', 'file-uri-to-path', 'node-pty']) {
-    cpSync(join(process.cwd(), 'node_modules', name), join(serverDir, 'node_modules', name), { recursive: true });
-  }
-  cpSync('scripts/native-addon-runtime.cjs', join(serverDir, 'native-addon-runtime.cjs'));
+  stagePackagedNativeAddons({ projectRoot: process.cwd(), serverRoot: serverDir });
   cpSync('src/lib/lane/orchestrator.md', join(serverDir, 'orchestrator.md'));
   api = createServer((request, response) => {
     let body = '';
@@ -108,6 +106,24 @@ describe('shared server bundles in the packaged layout', () => {
     for (const output of report.outputs) {
       expect(/^\s*\/\/[#@] sourceMappingURL=/m.test(readFileSync(join(serverDir, output.file), 'utf8')), output.file).toBe(false);
     }
+  });
+
+  it.skipIf(process.platform === 'win32')('boots the real native selector and addons from the macOS active-ABI package layout', () => {
+    const macServer = join(root, 'mac-server');
+    stagePackagedNativeAddons({ projectRoot: process.cwd(), serverRoot: macServer, platform: 'darwin' });
+    const probe = join(macServer, 'native-probe.cjs');
+    writeFileSync(probe, `
+      Object.defineProperty(process, 'platform', { value: 'darwin' });
+      require('./native-addon-runtime.cjs').prepareNativeAddons(__dirname);
+      const Database = require('better-sqlite3');
+      const db = new Database(':memory:');
+      console.log(JSON.stringify(db.prepare('select 1 as ready').get()));
+      db.close();
+      require('node-pty');
+    `);
+    const result = spawnSync(process.execPath, [probe], { encoding: 'utf8', timeout: 5000 });
+    expect(result.status, result.stderr.replace(/\/[^\s)]+/g, '<path>').slice(-400)).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual({ ready: 1 });
   });
 
   it.each(['operator-mcp-proxy', 'codex-app-bridge'])('keeps %s independent of native addons', label => {

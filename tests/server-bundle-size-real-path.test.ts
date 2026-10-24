@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { bundleServers, SERVER_ENTRIES } from '../scripts/lib/server-bundles.mjs';
@@ -81,15 +81,20 @@ describe('server size check CLI', () => {
   it('runs every minified launcher with native selection before imports and readable function names', () => {
     const { root } = fixture();
     writeFileSync(join(root, 'common.ts'), `
+      import { fileURLToPath } from 'node:url';
       export function namedBundleFixture() {
         return { name: namedBundleFixture.name, stack: new Error('fixture').stack,
-          selected: Boolean(globalThis.__nativeSelected), adjacent: new URL('./adjacent.txt', import.meta.url).pathname };
+          selected: Boolean(globalThis.__nativeSelected), adjacent: fileURLToPath(new URL('./adjacent.txt', import.meta.url)) };
       }
     `);
     for (const entry of entries) writeFileSync(join(root, entry),
       `import { namedBundleFixture } from '${'../'.repeat(entry.split('/').length - 1)}common'; console.log(JSON.stringify(namedBundleFixture()));`);
-    const outDir = join(root, 'built');
+    const built = join(root, 'built');
+    mkdirSync(built);
+    const outDir = join(root, 'built-alias');
+    symlinkSync(built, outDir, 'junction');
     bundleServers({ root, outDir });
+    writeFileSync(join(outDir, 'adjacent.txt'), 'fixture');
     writeFileSync(join(outDir, 'native-addon-runtime.cjs'), 'exports.prepareNativeAddons = () => { globalThis.__nativeSelected = true; };');
     const preload = join(root, 'platform.cjs');
     writeFileSync(preload, "Object.defineProperty(process, 'platform', { value: 'darwin' });");
@@ -100,7 +105,7 @@ describe('server size check CLI', () => {
       expect(answer.name).toBe('namedBundleFixture');
       expect(answer.stack).toContain('at namedBundleFixture');
       expect(answer.selected).toBe(!['operator-mcp-proxy', 'codex-app-bridge'].includes(label));
-      expect(answer.adjacent).toBe(join(outDir, 'adjacent.txt'));
+      expect(realpathSync(answer.adjacent)).toBe(realpathSync(join(outDir, 'adjacent.txt')));
     }
   });
 
