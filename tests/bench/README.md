@@ -237,7 +237,7 @@ node scripts/bench/interactions/transcript-tab-reuse.mjs --long-history --sample
 node scripts/bench/interactions/transcript-tab-reuse.mjs --long-history --samples=3 --label=after --baseline=work/2163/before.json --output=work/2163/after.json
 ```
 
-`--source-ref` substitutes only TranscriptNavigator and TranscriptTurns; keep the
+`--source-ref` substitutes TranscriptNavigator, TranscriptTurns and ChatMessageList; keep the
 checkout and dependencies identical for the paired run. `--check` exits nonzero for missing correctness evidence or a missed target.
 The absolute limits are warm switch <100 ms, cold component mount <300 ms,
 streaming input p95 <16 ms, and no scrolling long task >50 ms. Before judging a
@@ -254,7 +254,9 @@ and ComposerArea, the existing input-to-next-frame observer, browser ownership,
 and distribution utilities. An injected 80 ms key handler must exceed the same
 16 ms input limit. The runner retains drafts and selection and checks native text
 selection, the production copy action, composer keyboard selection and prompt
-jumping. It records sampled CPU profiles, main-thread task time and renderer heap.
+jumping. Hidden stream tails are verified through reveal, outside the measured lane.
+Add `--profile-input` for input CPU summaries. Raw samples stay in `work/`;
+only the under-60-line [summary](receipts/2163/summary.md) is checked in.
 
 These are **browser component receipts**. Cold means the first component mount
 with history already in memory; server loading/transfer, persisted cold-state

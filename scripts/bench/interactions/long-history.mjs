@@ -82,8 +82,12 @@ export async function runLongHistory() {
   const fixtures = [longHistoryFixture(0), longHistoryFixture(1)];
   const sourceRef = option('source-ref', null);
   const sources = new Map();
-  for (const name of ['TranscriptNavigator', 'TranscriptTurns']) {
-    const file = `src/components/desktop/transcript/${name}.tsx`;
+  for (const file of [
+    'src/components/desktop/transcript/TranscriptNavigator.tsx',
+    'src/components/desktop/transcript/TranscriptTurns.tsx',
+    'src/components/desktop/thoughts/chat-panel/ChatMessageList.tsx',
+  ]) {
+    const name = path.basename(file, '.tsx');
     sources.set(name, sourceRef ? execFileSync('git', ['show', `${sourceRef}:${file}`], {encoding: 'utf8'}) : await fs.readFile(file, 'utf8'));
   }
   const receipt = { schema: 'o8/transcript-long-history/v1', label: option('label', 'observation'),
@@ -98,10 +102,10 @@ export async function runLongHistory() {
   let measured;
   try {
     await fs.mkdir(path.dirname(output), { recursive: true });
-    receipt.sourceDigest = createHash('sha256').update(sources.get('TranscriptNavigator')).update(sources.get('TranscriptTurns')).digest('hex');
-    const built = await build({ absWorkingDir: process.cwd(), bundle: true, write: false, format: 'iife', platform: 'browser', minify: true,
+    receipt.sourceDigest = createHash('sha256').update(sources.get('TranscriptNavigator')).update(sources.get('TranscriptTurns')).update(sources.get('ChatMessageList')).digest('hex');
+    const built = await build({ absWorkingDir: process.cwd(), bundle: true, write: false, format: 'iife', platform: 'browser', minify: true, minifyIdentifiers: !process.argv.includes('--profile-input'),
       plugins: [{name: 'transcript-source-ref', setup(plugin) {
-        plugin.onLoad({filter: /\/transcript\/(TranscriptNavigator|TranscriptTurns)\.tsx$/}, args => ({loader: 'tsx', contents: sources.get(path.basename(args.path, '.tsx'))}));
+        plugin.onLoad({filter: /\/(TranscriptNavigator|TranscriptTurns|ChatMessageList)\.tsx$/}, args => ({loader: 'tsx', contents: sources.get(path.basename(args.path, '.tsx'))}));
       }}],
       alias: { '@': path.resolve('src') }, define: { 'process.env.NODE_ENV': '"production"', 'process.env': '{}', 'process.env.NEXT_RUNTIME': '"browser"' },
       stdin: { resolveDir: process.cwd(), loader: 'tsx', contents: `
@@ -194,6 +198,7 @@ export async function runLongHistory() {
         for (const mode of ['background', 'foreground']) {
           await page.evaluate(mode => { window.__setStreamMode(mode); }, mode);
           await page.waitForTimeout(200);
+          if (process.argv.includes('--profile-input')) await cdp.send('Profiler.start');
           const before = await metrics(cdp);
           const ticksBefore = await page.evaluate(() => window.__streamTicks ?? 0);
           const samples = [];
@@ -204,15 +209,13 @@ export async function runLongHistory() {
             samples.push(await pending);
             await page.keyboard.press('Backspace');
           }
+          const inputProfile = process.argv.includes('--profile-input') ? profileSummary((await cdp.send('Profiler.stop')).profile) : null;
           const after = await metrics(cdp);
-          inputs[mode] = { samples, ticks: await page.evaluate(() => window.__streamTicks) - ticksBefore,
+          inputs[mode] = { samples, inputProfile, ticks: await page.evaluate(() => window.__streamTicks) - ticksBefore,
             taskMs: (after.TaskDuration - before.TaskDuration) * 1000,
             heapBytes: after.JSHeapUsedSize };
         }
         await page.evaluate(() => window.__setStreamMode('paused'));
-        await page.waitForFunction(() => (window.__streamExpectedSuffix ?? []).every((suffix, session) =>
-          document.querySelector('[data-o8-message-id="s' + session + '-history-4999"]')?.textContent.includes(suffix.trimStart())), null, {timeout: 10000});
-        const streamTailCorrect = true;
         // Deliberately block the trusted key handler: the same observer and
         // latency gate must reject this control.
         await page.locator(composer).evaluate((element, delay) => element.addEventListener('keydown', () => {
@@ -224,6 +227,16 @@ export async function runLongHistory() {
         const control = await controlPending;
         control.injectedDelayApplications = await page.evaluate(() => window.__injectedDelayApplications);
         const finalMetrics = await metrics(cdp);
+        // Hidden presentation is allowed to defer DOM work. Verify every delta
+        // through the real reveal path, outside the measured input/counter lane.
+        for (const session of [1, 0]) {
+          await switchTo(page, session);
+          await page.waitForFunction(session => {
+            const suffix = window.__streamExpectedSuffix?.[session] ?? '';
+            return document.querySelector('[data-o8-message-id="s' + session + '-history-4999"]')?.textContent.includes(suffix.trimStart());
+          }, session, {timeout: 10000});
+        }
+        const streamTailCorrect = true;
         const selectionCopied = await page.evaluate(() => {
           const element = document.querySelector('[data-o8-message-id="s0-history-1"]');
           const range = document.createRange(); range.selectNodeContents(element);
