@@ -1,0 +1,622 @@
+//! Workspace sidebar. Rebuild descriptors on data/search changes; GPUI only
+//! materializes visible rows. Global snapshots are invalidations, since the
+//! desktop socket's initial tail is smaller than the complete HTTP inventory.
+use crate::{
+    client::{Client, Session},
+    composer::{Composer, Submit},
+    sidebar,
+    transport::{self, Incoming, Subscription},
+};
+use gpui::{
+    Context, Entity, EventEmitter, FocusHandle, KeyDownEvent, ScrollStrategy,
+    UniformListScrollHandle, Window, prelude::*,
+};
+use serde::Serialize;
+use serde_json::json;
+use std::{
+    cell::Cell,
+    collections::{BTreeMap, HashMap, HashSet},
+    rc::Rc,
+    time::{Duration, Instant},
+};
+
+#[derive(Clone)]
+pub enum Event {
+    Loaded(Vec<Session>),
+    Selected(String),
+    Error(String),
+}
+#[derive(Clone, Debug, Serialize, PartialEq)]
+pub struct Row {
+    pub kind: String,
+    pub workspace: String,
+    pub id: Option<String>,
+    pub title: String,
+    pub status: String,
+    pub unread: bool,
+    pub running: bool,
+}
+pub fn section(s: &Session) -> &'static str {
+    if s.status == "archived" {
+        "Archived"
+    } else if s.id.contains(':') {
+        "Workers"
+    } else if sidebar::rank(s) > 0 {
+        "Review"
+    } else if sidebar::working(s) {
+        "Working"
+    } else {
+        "Recent"
+    }
+}
+pub fn rows(sessions: &[Session], query: &str, message_matches: &HashSet<String>) -> Vec<Row> {
+    let query = query.trim().to_lowercase();
+    let mut workspaces: BTreeMap<String, Vec<&Session>> = BTreeMap::new();
+    for s in sessions {
+        let workspace = s.repo_path.as_deref().unwrap_or("Unassigned");
+        if !query.is_empty()
+            && !format!("{} {} {}", s.title, s.status, workspace)
+                .to_lowercase()
+                .contains(&query)
+            && !message_matches.contains(&s.id)
+        {
+            continue;
+        }
+        workspaces.entry(workspace.into()).or_default().push(s);
+    }
+    let mut groups: Vec<_> = workspaces.into_iter().collect();
+    groups.sort_by_key(|(path, _)| (label(path).to_lowercase(), path.clone()));
+    let mut result = vec![];
+    for (workspace, sessions) in groups {
+        let header = |kind: &str, title: String| Row {
+            kind: kind.into(),
+            workspace: workspace.clone(),
+            id: None,
+            title,
+            status: String::new(),
+            unread: false,
+            running: false,
+        };
+        result.push(header("workspace", label(&workspace)));
+        for name in ["Working", "Review", "Recent", "Workers", "Archived"] {
+            let mut selected: Vec<_> = sessions
+                .iter()
+                .copied()
+                .filter(|s| section(s) == name)
+                .collect();
+            selected.sort_by(|a, b| {
+                (if name == "Review" {
+                    sidebar::rank(b).cmp(&sidebar::rank(a))
+                } else {
+                    std::cmp::Ordering::Equal
+                })
+                .then_with(|| b.last_message_at.cmp(&a.last_message_at))
+            });
+            if selected.is_empty() {
+                continue;
+            }
+            result.push(header("section", name.into()));
+            result.extend(selected.into_iter().map(|s| Row {
+                kind: "thread".into(),
+                workspace: workspace.clone(),
+                id: Some(s.id.clone()),
+                title: s.title.clone(),
+                status: s.status.clone(),
+                unread: s.unread,
+                running: sidebar::working(s),
+            }));
+        }
+    }
+    result
+}
+fn label(path: &str) -> String {
+    path.rsplit('/')
+        .find(|s| !s.is_empty())
+        .unwrap_or(path)
+        .into()
+}
+
+pub struct ThreadList {
+    client: Client,
+    pub sessions: Vec<Session>,
+    pub rows: Rc<Vec<Row>>,
+    pub selected: Option<String>,
+    pub scroll: UniformListScrollHandle,
+    focus: FocusHandle,
+    editor: Entity<Composer>,
+    query: String,
+    search_pending: Option<Instant>,
+    search_running: bool,
+    search_matches: HashSet<String>,
+    search_error: String,
+    rename: Option<String>,
+    editing: bool,
+    choice: usize,
+    loading: bool,
+    saving: bool,
+    pending_archives: HashMap<String, String>,
+    dirty: Option<Instant>,
+    generation: u64,
+    last_load: Instant,
+    last_inventory: Instant,
+    inventory_loading: bool,
+    subscription: Subscription,
+    subscriptions: Vec<gpui::Subscription>,
+    notice: String,
+    pub painted: Rc<Cell<usize>>,
+    pub materialized: Rc<Cell<usize>>,
+}
+impl EventEmitter<Event> for ThreadList {}
+impl ThreadList {
+    #[cfg(test)]
+    pub(crate) fn diagnostic(&self) -> serde_json::Value {
+        json!({"notice":self.notice,"rename":self.rename,"editing":self.editing,"saving":self.saving,"loading":self.loading,"selected":self.selected,"choice":self.rows.get(self.choice)})
+    }
+    pub fn new(client: Client, cx: &mut Context<Self>) -> Self {
+        let editor = cx.new(Composer::new);
+        let observe = cx.observe(&editor, |this, editor, cx| {
+            if this.rename.is_none() {
+                let query = editor.read(cx).text.clone();
+                if query == this.query {
+                    return;
+                }
+                this.query = query;
+                this.search_matches.clear();
+                this.search_error.clear();
+                this.search_pending = (!this.query.trim().is_empty()).then(Instant::now);
+                this.rebuild();
+                cx.notify();
+            }
+        });
+        let submit = cx.subscribe(&editor, |this, _, _: &Submit, cx| this.submit(cx));
+        Self {
+            subscription: transport::subscribe_global(client.clone()),
+            client,
+            sessions: vec![],
+            rows: Rc::new(vec![]),
+            selected: None,
+            scroll: UniformListScrollHandle::new(),
+            focus: cx.focus_handle(),
+            editor,
+            query: String::new(),
+            search_pending: None,
+            search_running: false,
+            search_matches: HashSet::new(),
+            search_error: String::new(),
+            rename: None,
+            editing: false,
+            choice: 0,
+            loading: false,
+            saving: false,
+            pending_archives: HashMap::new(),
+            dirty: None,
+            generation: 0,
+            last_load: Instant::now(),
+            last_inventory: Instant::now(),
+            inventory_loading: false,
+            subscriptions: vec![observe, submit],
+            notice: String::new(),
+            painted: Rc::new(Cell::new(usize::MAX)),
+            materialized: Rc::new(Cell::new(0)),
+        }
+    }
+    fn rebuild(&mut self) {
+        let selected = self
+            .rows
+            .get(self.choice)
+            .and_then(|r| r.id.as_deref())
+            .map(str::to_owned);
+        self.rows = Rc::new(rows(&self.sessions, &self.query, &self.search_matches));
+        self.choice = selected
+            .and_then(|id| self.rows.iter().position(|r| r.id.as_deref() == Some(&id)))
+            .or_else(|| self.rows.iter().position(|r| r.id.is_some()))
+            .unwrap_or(0);
+    }
+    pub fn load(&mut self, cx: &mut Context<Self>) {
+        if self.loading || self.saving {
+            return;
+        }
+        self.loading = true;
+        self.dirty = None;
+        let generation = self.generation;
+        let client = self.client.clone();
+        let task = cx
+            .background_executor()
+            .spawn(async move { client.sidebar_sessions() });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            let _ = this.update(cx, |this, cx| {
+                this.loading = false;
+                if generation != this.generation {
+                    this.dirty = Some(Instant::now());
+                    return;
+                }
+                this.last_load = Instant::now();
+                this.last_inventory = Instant::now();
+                match result {
+                    Ok(mut sessions) => {
+                        let previous: HashMap<_, _> =
+                            this.sessions.iter().map(|s| (s.id.as_str(), s)).collect();
+                        for s in &mut sessions {
+                            if let Some(old) = previous.get(s.id.as_str()) {
+                                s.unread = this.selected.as_ref() != Some(&s.id)
+                                    && (old.unread || s.last_message_at > old.last_message_at);
+                            }
+                        }
+                        this.sessions = sessions;
+                        if !this.query.trim().is_empty() {
+                            this.search_pending = Some(Instant::now());
+                        }
+                        this.rebuild();
+                        this.notice.clear();
+                        cx.emit(Event::Loaded(this.sessions.clone()));
+                    }
+                    Err(error) => {
+                        this.notice = error.clone();
+                        cx.emit(Event::Error(error));
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+    pub fn tick(&mut self, cx: &mut Context<Self>) {
+        let messages: Vec<_> = self.subscription.receiver.try_iter().take(64).collect();
+        let mut changed = false;
+        for message in messages {
+            if let Incoming::Frame(frame) = message {
+                if frame["channel"] == "orchestrator-threads"
+                    && matches!(
+                        frame["event"].as_str(),
+                        Some("upsert" | "created" | "updated")
+                    )
+                {
+                    if let Ok(mut incoming) =
+                        serde_json::from_value::<Session>(frame["data"]["thread"].clone())
+                    {
+                        if incoming.status == "busy" {
+                            incoming.status = "running".into();
+                        }
+                        if let Some(old) = self.sessions.iter_mut().find(|s| s.id == incoming.id) {
+                            if incoming.last_message_at < old.last_message_at
+                                || old.status == "archived"
+                            {
+                                continue;
+                            }
+                            incoming.unread = self.selected.as_ref() != Some(&old.id)
+                                && (old.unread || incoming.last_message_at > old.last_message_at);
+                            incoming.packet_header = old.packet_header.clone();
+                            incoming.packet_state = old.packet_state;
+                            // Packet attention comes from the lifecycle API.
+                            // A thread's own failure can recover on this stream.
+                            if old.packet_state || old.outcome.is_some() {
+                                incoming.status = old.status.clone();
+                                incoming.rejected = old.rejected;
+                                incoming.outcome = old.outcome.clone();
+                            }
+                            if *old == incoming {
+                                continue;
+                            }
+                            *old = incoming;
+                        } else {
+                            self.sessions.push(incoming);
+                        }
+                        changed = true;
+                        // Fence an older in-flight HTTP read without making a
+                        // new inventory request for each streamed text chunk.
+                        self.generation += 1;
+                        continue;
+                    }
+                }
+                if matches!(
+                    frame["channel"].as_str(),
+                    Some("orchestrator-threads" | "agent-lifecycle" | "lane-lifecycle")
+                ) || frame["channel"] == "system" && frame["event"] == "connected"
+                    || frame["channel"] == "realtime"
+                        && frame["event"] == "batch"
+                        && frame["data"]["events"].as_array().is_some_and(|events| {
+                            events.iter().any(|event| {
+                                event["stream"] == "global"
+                                    && matches!(
+                                        event["channel"].as_str(),
+                                        Some(
+                                            "orchestrator-threads"
+                                                | "agent-lifecycle"
+                                                | "lane-lifecycle"
+                                        )
+                                    )
+                            })
+                        })
+                {
+                    self.generation += 1;
+                    self.dirty.get_or_insert_with(Instant::now);
+                }
+            }
+        }
+        if changed {
+            if !self.query.trim().is_empty() {
+                self.search_pending = Some(Instant::now());
+            }
+            self.rebuild();
+            cx.emit(Event::Loaded(self.sessions.clone()));
+            cx.notify();
+        }
+        if self.rename.is_none()
+            && !self.search_running
+            && self
+                .search_pending
+                .is_some_and(|time| time.elapsed() >= Duration::from_millis(300))
+        {
+            self.search_pending = None;
+            self.search_running = true;
+            let query = self.query.clone();
+            let requested = query.clone();
+            let client = self.client.clone();
+            let task = cx
+                .background_executor()
+                .spawn(async move { client.search_thread_ids(&requested) });
+            cx.spawn(async move |this, cx| {
+                let result = task.await;
+                let _ = this.update(cx, |this, cx| {
+                    this.search_running = false;
+                    if this.query != query {
+                        cx.notify();
+                        return;
+                    }
+                    match result {
+                        Ok(matches) => {
+                            this.search_matches = matches;
+                            this.search_error.clear();
+                            this.rebuild();
+                        }
+                        Err(error) => {
+                            this.search_error = format!("Message search unavailable: {error}")
+                        }
+                    }
+                    cx.notify();
+                });
+            })
+            .detach();
+            cx.notify();
+        }
+        // Same broad resilience cadence as the desktop sidebar. The loop drains
+        // a local event queue; it makes no 20ms HTTP requests.
+        if self
+            .dirty
+            .is_some_and(|time| time.elapsed() >= Duration::from_millis(300))
+            || self.last_load.elapsed() >= Duration::from_secs(300)
+        {
+            self.load(cx);
+        }
+        if !self.loading
+            && !self.inventory_loading
+            && self.last_inventory.elapsed() >= Duration::from_secs(10)
+        {
+            self.inventory_loading = true;
+            let generation = self.generation;
+            let client = self.client.clone();
+            let task = cx
+                .background_executor()
+                .spawn(async move { client.sidebar_workers() });
+            cx.spawn(async move |this, cx| {
+                let result = task.await;
+                let _ = this.update(cx, |this, cx| {
+                    this.inventory_loading = false;
+                    this.last_inventory = Instant::now();
+                    if this.loading || this.generation != generation {
+                        return;
+                    }
+                    if let Ok(mut workers) = result {
+                        for worker in &mut workers {
+                            if let Some(old) = this.sessions.iter().find(|s| s.id == worker.id) {
+                                worker.packet_header = old.packet_header.clone();
+                                worker.unread = old.unread
+                                    || this.selected.as_ref() != Some(&worker.id)
+                                        && worker.last_message_at > old.last_message_at;
+                            }
+                        }
+                        this.sessions.retain(|s| !s.id.contains(':'));
+                        workers
+                            .retain(|worker| !this.sessions.iter().any(|s| s.key() == worker.id));
+                        this.sessions.extend(workers);
+                        this.rebuild();
+                        cx.emit(Event::Loaded(this.sessions.clone()));
+                        cx.notify();
+                    }
+                });
+            })
+            .detach();
+        }
+    }
+    pub fn focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.rename.take().is_some() {
+            self.editor.update(cx, |editor, cx| editor.clear(cx));
+        }
+        self.editing = false;
+        self.focus.focus(window);
+        cx.notify();
+    }
+    pub fn sync_selection(&mut self, id: String, cx: &mut Context<Self>) {
+        if self.selected.as_ref() == Some(&id) {
+            return;
+        }
+        self.selected = Some(id.clone());
+        if let Some(session) = self.sessions.iter_mut().find(|s| s.id == id) {
+            session.unread = false;
+        }
+        self.rebuild();
+        if let Some(index) = self.rows.iter().position(|r| r.id.as_deref() == Some(&id)) {
+            self.choice = index;
+        }
+        cx.notify();
+    }
+    pub fn search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.rename.take().is_some() {
+            self.editor.update(cx, |editor, cx| editor.clear(cx));
+        }
+        self.editing = true;
+        self.editor.read(cx).focus.focus(window);
+        cx.notify();
+    }
+    pub fn choose(&mut self, id: String, cx: &mut Context<Self>) {
+        self.editing = false;
+        self.selected = Some(id.clone());
+        if let Some(s) = self.sessions.iter_mut().find(|s| s.id == id) {
+            s.unread = false;
+        }
+        self.rebuild();
+        cx.emit(Event::Selected(id));
+        cx.notify();
+    }
+    fn submit(&mut self, cx: &mut Context<Self>) {
+        if let Some(id) = self.rename.clone() {
+            let title = self.editor.read(cx).text.trim().to_string();
+            if !title.is_empty() {
+                self.mutate(id, json!({"title":title}), cx);
+            }
+        } else if let Some(id) = self.rows.get(self.choice).and_then(|r| r.id.clone()) {
+            self.choose(id, cx);
+        }
+    }
+    fn start_rename(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(id) = self
+            .rows
+            .get(self.choice)
+            .and_then(|r| r.id.clone())
+            .filter(|id| !id.contains(':'))
+        else {
+            return;
+        };
+        self.rename = Some(id);
+        self.search_pending = None;
+        self.editing = true;
+        self.editor.update(cx, |e, cx| e.clear(cx));
+        self.editor.read(cx).focus.focus(window);
+        cx.notify();
+    }
+    fn archive(&mut self, cx: &mut Context<Self>) {
+        let Some(row) = self.rows.get(self.choice).filter(|r| r.id.is_some()) else {
+            return;
+        };
+        if let Some(id) = row.id.as_ref().filter(|id| id.contains(':')).cloned() {
+            let mutation = self
+                .pending_archives
+                .entry(id.clone())
+                .or_insert_with(|| {
+                    format!(
+                        "next-sidebar-{}",
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap()
+                            .as_nanos()
+                    )
+                })
+                .clone();
+            self.mutate(id, json!({"clientMutationId":mutation}), cx);
+            return;
+        }
+        // Seconds since epoch are converted to the existing nullable ISO contract.
+        let date = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let archived = if row.status == "archived" {
+            serde_json::Value::Null
+        } else {
+            json!(iso_timestamp(date))
+        };
+        self.mutate(row.id.clone().unwrap(), json!({"archivedAt":archived}), cx);
+    }
+    fn mutate(&mut self, id: String, patch: serde_json::Value, cx: &mut Context<Self>) {
+        if self.saving {
+            return;
+        }
+        self.saving = true;
+        self.generation += 1;
+        let client = self.client.clone();
+        let task = cx.background_executor().spawn(async move {
+            if id.contains(':') {
+                client.archive_worker(&id, patch["clientMutationId"].as_str().unwrap())
+            } else {
+                client.patch_thread(&id, patch)
+            }
+        });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            let _ = this.update(cx, |this, cx| {
+                this.saving = false;
+                match result {
+                    Ok(()) => {
+                        this.rename = None;
+                        this.editing = false;
+                        this.editor.update(cx, |e, cx| e.clear(cx));
+                        this.load(cx);
+                    }
+                    Err(error) => this.notice = error,
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+    fn key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        let key = event.keystroke.key.as_str();
+        match key {
+            "escape" => {
+                self.rename = None;
+                self.editing = false;
+                self.editor.update(cx, |e, cx| e.clear(cx));
+                self.focus.focus(window);
+            }
+            "f2" => self.start_rename(window, cx),
+            "delete" if !self.editing => self.archive(cx),
+            "enter" if !self.editing => self.submit(cx),
+            "up" | "down" | "home" | "end" if !self.editing => {
+                let ids: Vec<_> = self
+                    .rows
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, r)| r.id.is_some())
+                    .map(|(i, _)| i)
+                    .collect();
+                if ids.is_empty() {
+                    return;
+                }
+                let current = ids.iter().position(|i| *i == self.choice).unwrap_or(0);
+                self.choice = ids[match key {
+                    "up" => current.saturating_sub(1),
+                    "down" => (current + 1).min(ids.len() - 1),
+                    "home" => 0,
+                    _ => ids.len() - 1,
+                }];
+                self.scroll.scroll_to_item(self.choice, ScrollStrategy::Top);
+            }
+            _ => return,
+        }
+        cx.stop_propagation();
+        cx.notify();
+    }
+}
+// Gregorian UTC conversion avoids a new dependency solely for archive metadata.
+fn iso_timestamp(seconds: u64) -> String {
+    let days = (seconds / 86400) as i64 + 719468;
+    let era = days / 146097;
+    let doe = days - era * 146097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let year = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = mp + if mp < 10 { 3 } else { -9 };
+    let year = year + i64::from(month <= 2);
+    format!(
+        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}.000Z",
+        seconds / 3600 % 24,
+        seconds / 60 % 60,
+        seconds % 60
+    )
+}
+#[path = "thread_list_view.rs"]
+mod view;

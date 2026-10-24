@@ -191,9 +191,13 @@ impl Surface {
         self.reconcile_revision += 1;
         let revision = self.reconcile_revision;
         let client = self.client.clone();
+        let embedded_sessions = self.embedded.then(|| self.sessions.clone());
         let task = cx.background_executor().spawn(async move {
             Ok::<_, String>((
-                client.sessions()?,
+                match embedded_sessions {
+                    Some(sessions) => sessions,
+                    None => client.sessions()?,
+                },
                 client.queue(&session)?,
                 client.history(&session.id)?,
             ))

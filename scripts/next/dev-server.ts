@@ -24,7 +24,7 @@ async function main() {
   mkdirSync(join(dataDir, 'chat-history'), { recursive: true });
   mkdirSync(repo);
   execFileSync('git', ['init', '-q', repo]);
-  Object.assign(process.env, { O8_DATA_DIR: dataDir, CORTEX_IDE_DATA_DIR: dataDir, CORTEX_IDE_DB_PATH: join(dataDir, 'fixture.db'), O8_OWNED_OPENCODE_ROOT: join(dataDir, 'owned-opencode'), NODE_ENV: 'test', WS_TOKEN: randomBytes(32).toString('hex') });
+  Object.assign(process.env, { O8_DATA_DIR: dataDir, CORTEX_IDE_DATA_DIR: dataDir, CORTEX_IDE_DB_PATH: join(dataDir, 'fixture.db'), O8_OWNED_OPENCODE_ROOT: join(dataDir, 'owned-opencode'), O8_OWNED_PI_ROOT: join(dataDir, 'owned-pi'), NODE_ENV: 'test', WS_TOKEN: randomBytes(32).toString('hex') });
   for (const key of ['O8_WORKER_TOKEN', 'O8_API_TOKEN', 'O8_SPECTATOR_TOKEN', 'O8_PACKAGED_APP']) delete process.env[key];
   const fixtureToken = process.env.O8_NEXT_API_TOKEN || randomBytes(32).toString('hex');
   writeFileSync(join(dataDir, 'ws-token'), fixtureToken, { mode: 0o600 });
@@ -119,7 +119,10 @@ async function main() {
   });
   const terminal = process.argv.includes('--terminal');
   const wsToken = getOrCreateWsToken();
+  const sidebarSocket = process.argv.includes('--sidebar')
+    ? (await import('./sidebar-socket')).attachSidebarSocket(server, wsToken, requests) : null;
   const closeSockets = terminal ? () => {}
+    : sidebarSocket ? sidebarSocket.close
     : (transcriptFixtures ? attachTranscriptSocket : attachReplaySocket)(server, wsToken, requests);
   let closeTerminal = async () => {};
   server.listen(0, '127.0.0.1', async () => {

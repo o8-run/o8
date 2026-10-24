@@ -8,6 +8,56 @@
 
 [Opt-in app shell](APP-SHELL.md): local connection, workspace switching and persisted session/grid surfaces. The explicit fixture modes below remain available.
 
+## Workspace thread sidebar (#4548)
+
+The app shell includes a virtual native list grouped by workspace, then Working,
+Review, Recent, Workers and Archived, including chats with no saved workspace
+under Unassigned. It uses the existing mobile thread route
+with bounded 500-record offset pages, the desktop archived-history route, runtime
+inventory and packet attention state. Worker keys are preserved when opening the
+existing session surface. The embedded transcript keeps its drafts and no longer
+renders a second session sidebar.
+
+Ctrl+F / Cmd+F opens search using the existing native text editor. Titles,
+workspaces and states filter immediately; message text uses the desktop history
+search route after a 300 ms debounce, rejecting results for an older query. F8 focuses
+sidebar navigation; Up/Down and Home/End move through threads and Enter opens
+the choice. Escape clears search. F2 renames a saved chat. Delete archives the
+choice or restores an archived saved chat. Mouse controls appear on hover or
+keyboard focus. Saved chat metadata uses the desktop PATCH endpoint; worker
+archive uses `/api/runtime/archive` with a retained mutation identity for retry.
+Worker renaming has no equivalent desktop action and is not offered.
+
+The global event stream updates thread summaries and invalidates metadata on
+snapshots and lifecycle events. A short snapshot never replaces the full list.
+Broad fallback refresh is five minutes; runtime-only discovery is ten seconds,
+matching the desktop rail. Session-history and composer reconciliation remain
+independent of sidebar discovery. Main had no native `theme.rs` at the start of
+this change; the new sidebar keeps its colors local to its own view file.
+
+The fixture host accepts `--sidebar` alongside `--composer --shell`. It authors
+2,000 chats across two workspaces plus the baseline fixture sessions and one
+persisted runtime worker, using production routes and a replay peer for the
+existing event schema. Run headless checks and measurements with the documented
+toolchain:
+
+```sh
+npx vitest run tests/next-sidebar-real-path.test.ts tests/o8-next-shell-real-path.test.ts tests/next-render-parity.test.ts tests/next-stream-parity.test.ts
+cargo +1.97.1 build --release --locked --manifest-path native/o8-next/Cargo.toml
+cargo +1.97.1 build --locked --manifest-path crates/o8d/Cargo.toml --features experimental-http --bin o8d
+cargo +1.97.1 test --locked --manifest-path crates/o8d/Cargo.toml --all-features
+cargo +1.97.1 test --release --locked --manifest-path native/o8-next/Cargo.toml -- --test-threads=1
+O8_NEXT_SIDEBAR_RESULTS="$PWD/work/sidebar.json" cargo +1.97.1 test --release --locked --manifest-path native/o8-next/Cargo.toml sidebar_2000_thread_first_paint_and_scroll_measurement -- --nocapture --test-threads=1
+```
+
+First paint includes HTTP bootstrap through the first painted sidebar row.
+Scroll samples include a wheel event and its next CPU scene paint, with bounded
+materialization and first/last-row paint assertions. Linux GPUI TestAppContext
+uses a test text system; these measurements do not include native font shaping,
+GPU presentation or compositor cadence.
+
+See the [preserved red/green receipts and 2,000-thread measurements](evidence/sidebar-thread-list/verification.md).
+
 Opt-in Rust GPUI surface for #4405, stacked on the static history slice in #4410.
 Lists saved orchestrator sessions beside runtime workers, bootstraps the selected
 session's latest 100 messages over HTTP, then subscribes to its existing WebSocket

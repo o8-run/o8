@@ -4157,6 +4157,14 @@
       ]
     },
     {
+      "path": "tests/next-sidebar-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/next-speed-receipt-real-path.test.ts",
       "reasons": [
         "child-process",

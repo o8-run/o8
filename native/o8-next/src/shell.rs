@@ -78,6 +78,31 @@ impl Shell {
     ) -> Self {
         let focus = cx.focus_handle();
         focus.focus(window);
+        let sidebar = cx.new(|cx| ThreadList::new(client.clone(), cx));
+        let sidebar_subscription = cx.subscribe_in(&sidebar, window, |this, _, event, window, cx| {
+            match event {
+                ThreadEvent::Loaded(sessions) => {
+                    this.loading = false;
+                    this.sessions = sessions.clone();
+                    this.workspaces = this.sessions.iter().map(|s| s.repo_path.clone().unwrap_or_else(|| "Unassigned".into())).collect::<BTreeSet<_>>().into_iter().collect();
+                    this.connected = true;
+                    if !this.state.selected.as_ref().is_some_and(|w| this.workspaces.contains(w)) {
+                        this.state.selected = this.workspaces.first().cloned();
+                    }
+                    this.notice = "Connected · Ctrl+F: search threads · F8: sidebar · Ctrl+K: commands".into();
+                    for content in this.content.values() {
+                        if let Content::Grid(grid) = content { grid.update(cx, |g, cx| g.load(cx)); }
+                    }
+                    this.persist();
+                }
+                ThreadEvent::Selected(id) => this.open_thread(id.clone(), window, cx),
+                ThreadEvent::Error(error) => {
+                    this.loading = false;
+                    this.notice = format!("Local server unavailable: {error}. Start the local o8 server, then Retry.");
+                }
+            }
+            cx.notify();
+        });
         let mut shell = Self {
             system_glass: false,
             client,
@@ -182,10 +207,43 @@ impl Shell {
         }).detach();
         cx.notify();
     }
+    fn open_thread(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(workspace) = self
+            .sessions
+            .iter()
+            .find(|s| s.id == id)
+            .map(|s| s.repo_path.clone().unwrap_or_else(|| "Unassigned".into()))
+        else {
+            return;
+        };
+        if self.state.selected.as_ref() != Some(&workspace) {
+            self.switch(workspace, window, cx);
+        }
+        if let Some(Tab::Session(original)) = self.active() {
+            let key = self.key(&Tab::Session(original.clone()));
+            let sessions = self.workspace_sessions();
+            if let Some(Content::Session(surface)) = self.content.get(&key) {
+                surface.update(cx, |s, cx| s.shell_select(sessions, id.clone(), cx));
+                self.state
+                    .workspaces
+                    .get_mut(self.state.selected.as_ref().unwrap())
+                    .unwrap()
+                    .selections
+                    .insert(original, id);
+                self.persist();
+                cx.notify();
+                return;
+            }
+        }
+        self.execute(Command::Session(id), window, cx);
+    }
     fn workspace_sessions(&self) -> Vec<Session> {
         self.sessions
             .iter()
-            .filter(|s| s.repo_path.as_ref() == self.state.selected.as_ref())
+            .filter(|s| {
+                Some(s.repo_path.as_deref().unwrap_or("Unassigned"))
+                    == self.state.selected.as_deref()
+            })
             .cloned()
             .collect()
     }
@@ -501,6 +559,19 @@ impl Shell {
         for extension in registry::extensions() {
             extension.tick(self, refresh, window, cx);
         }
+        let selected = self
+            .active()
+            .and_then(|tab| self.content.get(&self.key(&tab)))
+            .and_then(|content| match content {
+                Content::Session(surface) => surface.read(cx).shell_selection(window, cx).0,
+                Content::Grid(_) | Content::Inbox(_) | Content::Brain(_) | Content::Issues(_) => {
+                    None
+                }
+            });
+        if let Some(id) = selected {
+            self.sidebar.update(cx, |s, cx| s.sync_selection(id, cx));
+        }
+        self.sidebar.update(cx, |s, cx| s.tick(cx));
         let before = serde_json::to_vec(&self.state).unwrap();
         self.capture(window, cx);
         if before != serde_json::to_vec(&self.state).unwrap() {

@@ -270,6 +270,7 @@ export async function mobileOrchestratorThreadHistoryStatTokenAsync(): Promise<s
 export function listMobileOrchestratorThreads(options: {
   backend?: MobileOrchestratorBackend | null;
   limit?: number;
+  offset?: number;
 } = {}): MobileOrchestratorThread[] {
   const backendFilter = options.backend ?? null;
   const limit = options.limit ?? MAX_THREADS;
@@ -295,7 +296,8 @@ export function listMobileOrchestratorThreads(options: {
   threads.sort((left, right) => (
     new Date(right.lastMessageAt).getTime() - new Date(left.lastMessageAt).getTime()
   ));
-  return threads.slice(0, limit);
+  const offset = options.offset ?? 0;
+  return threads.slice(offset, offset + limit);
 }
 
 /**

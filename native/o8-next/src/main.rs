@@ -33,6 +33,8 @@ mod text;
 mod theme;
 #[cfg(test)]
 mod theme_tests;
+mod thread_list;
+mod thread_list_client;
 mod transport;
 mod ui;
 mod wake;

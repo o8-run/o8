@@ -1,0 +1,5 @@
+Intermediate full native attempts encountered diff-route connection and worker-transcript fixture timeouts.
+The final full run after integrating current main is green:
+34 native unit tests passed; 0 failed; 3 ignored measurement workloads.
+7 CLI tests passed; 0 failed.
+The final isolated sidebar measurement passed after all other checks finished.
