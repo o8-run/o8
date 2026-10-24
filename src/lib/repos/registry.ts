@@ -1,3 +1,4 @@
+import { assertNotKnowledgeSource } from '@/lib/cortex/knowledge/sources';
 import 'server-only';
 
 import { execFile } from '@/lib/providers/child-process';
@@ -524,6 +525,7 @@ export async function validateRepo(localPath: string) {
 }
 
 export async function addRepo(localPath: string) {
+  assertNotKnowledgeSource(localPath);
   const candidate = await inspectLocalRepo(localPath);
   const manifest = await loadWorkspaceManifestCache(candidate.localPath);
   const { entry, created } = await withRegistryMutation(async () => {

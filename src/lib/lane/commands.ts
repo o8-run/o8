@@ -1,3 +1,4 @@
+import { assertNotKnowledgeSource } from '@/lib/cortex/knowledge/sources';
 import { withWorkAdmission } from '@/lib/app-update/work-launch-admission';
 /**
  * Lane Command Bus
@@ -136,6 +137,7 @@ async function dispatchUnlocked(
 
   switch (command.verb) {
     case 'open_lane': {
+      try { assertNotKnowledgeSource(command.repoPath); } catch (error) { return { ok: false, laneId: '', note: error instanceof Error ? error.message : 'Knowledge sources are read-only.' }; }
       const workerRouting = resolveWorkerRouting({
         requestedRuntime: command.runtime,
         source: 'lane-open',

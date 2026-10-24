@@ -1,3 +1,4 @@
+import { assertNotKnowledgeSource } from '@/lib/cortex/knowledge/sources';
 import { assertReviewerPrCheckout } from '@/lib/orchestrator/reviewer-pr-source';
 import { assertPreRunAdmission, retireCancelledPreRunWorktree } from '@/lib/lane/pre-run-cancellation';
 import { AutomaticRecoveryRefusedError, withAutomaticRecoveryRequest, withOwnedAutomaticRecovery } from '@/lib/runtimes/shared/owned-session/automatic-recovery';
@@ -166,6 +167,7 @@ function auditRuntimeSteer(payload: RuntimeActionRequest, sessionKey: string): v
 }
 
 export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promise<RuntimeLaunchResult> {
+  assertNotKnowledgeSource(payload.repoPath); assertNotKnowledgeSource(payload.cwd);
   if (payload.automaticRecoverySurfaceId || payload.automaticRecoveryRunId) {
     if (!payload.automaticRecoverySurfaceId?.startsWith(`${payload.runtime}-owned:`) || !payload.automaticRecoveryRunId) {
       throw new Error('Automatic retry requires the original owned runtime and generation.');

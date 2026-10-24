@@ -1,3 +1,4 @@
+import { assertKnowledgeAnswerCurrent } from '@/lib/cortex/knowledge/answer-validity';
 /**
  * Cortex Q&A public API (epic #915 sub-2).
  *
@@ -398,7 +399,9 @@ async function runAskCortexUncached(
   let answer = '';
   const citations: Citation[] = [];
 
+  const assertKnowledgeCurrent = () => assertKnowledgeAnswerCurrent(topRows, memoryRevision);
   const emit: SseEmit = (name, payload) => {
+    assertKnowledgeCurrent();
     if (name === 'token') {
       answer += (payload as { text: string }).text ?? '';
     } else if (name === 'citation') {
@@ -409,6 +412,7 @@ async function runAskCortexUncached(
         title?: string;
         excerpt?: string;
         url?: string;
+        sourcePath?: string;
       };
       citations.push({
         kind: p.kind,
@@ -417,6 +421,7 @@ async function runAskCortexUncached(
         title: p.title,
         excerpt: p.excerpt,
         url: p.url,
+        ...(p.sourcePath ? { sourcePath: p.sourcePath } : {}),
       });
     }
   };
@@ -427,6 +432,7 @@ async function runAskCortexUncached(
     await composeClassB(question, repoPath, topRows, emit, composeOptions);
   }
 
+  assertKnowledgeCurrent();
   const result: AskCortexResult = {
     answer: answer.trim(),
     citations,
@@ -560,7 +566,9 @@ export async function runAskPipeline(
   let cachedAnswer = '';
   const cachedCitations: Citation[] = [];
 
+  const assertKnowledgeCurrent = () => assertKnowledgeAnswerCurrent(topRows, memoryRevision);
   const trackingEmit: SseEmit = (name, payload) => {
+    assertKnowledgeCurrent();
     if (name === 'token') {
       cachedAnswer += (payload as { text: string }).text ?? '';
     } else if (name === 'citation') {
@@ -571,6 +579,7 @@ export async function runAskPipeline(
         title?: string;
         excerpt?: string;
         url?: string;
+        sourcePath?: string;
       };
       cachedCitations.push({
         kind: p.kind,
@@ -579,6 +588,7 @@ export async function runAskPipeline(
         title: p.title,
         excerpt: p.excerpt,
         url: p.url,
+        ...(p.sourcePath ? { sourcePath: p.sourcePath } : {}),
       });
     }
     emit(name, payload);
@@ -590,6 +600,7 @@ export async function runAskPipeline(
     await composeClassB(question, repoPath, topRows, trackingEmit, options);
   }
 
+  assertKnowledgeCurrent();
   // Store in cache for follow-up identical questions.
   if (cachedAnswer.trim() && memoryRevision === readMemoryRevision()) {
     setCache(key, {

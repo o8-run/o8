@@ -15,7 +15,7 @@ import { TASK_ARTIFACT_TOOLS, handleTaskArtifact } from '@/lib/mcp/operator-hand
 import { VISUALIZATION_TOOLS, handleHtmlPreview, handleHtmlRender, handleVisualizationRead } from '@/lib/mcp/operator-handlers/visualization';
 import { BROADCAST_TOOLS, handleBroadcastPost, handleBroadcastSay, handleBroadcastToken } from '@/lib/mcp/operator-handlers/broadcast';
 import { CLOSE_PACKET_TOOLS, handleClosePacketUnmerged } from '@/lib/mcp/operator-handlers/close-packet';
-import { CORTEX_TOOLS, handleAsk, handleProposeObservation } from '@/lib/mcp/operator-handlers/cortex';
+import { CORTEX_TOOLS, CORTEX_HANDLERS } from '@/lib/mcp/operator-handlers/cortex';
 import { DIGEST_TOOLS, handleDigest, handleFetchRaw } from '@/lib/mcp/operator-handlers/digest';
 import { PROBLEM_TOOLS, handleProblemGet, handleProblemList } from '@/lib/mcp/operator-handlers/problems';
 import {
@@ -362,8 +362,7 @@ const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<M
   steer_packet: handleSteerPacket,
   o8_operator_defaults: handleOperatorDefaults,
   o8_setup: handleSetup,
-  cortex_propose_observation: handleProposeObservation,
-  cortex_ask: handleAsk,
+  ...CORTEX_HANDLERS,
   o8_feature_list: handleFeatureList,
   o8_feature_next: handleFeatureNext,
   o8_feature_add: handleFeatureAdd,

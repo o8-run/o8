@@ -1,3 +1,5 @@
+import { resolveRequestPrincipalContext } from '@/lib/auth/principal';
+import { parseKnowledgeSources } from '@/lib/operator/knowledge-source-defaults';
 import { NextResponse } from 'next/server';
 
 import {
@@ -467,6 +469,7 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
     }
     update.inAppOrchestratorEnabled = body.inAppOrchestratorEnabled;
   }
+  if (body.knowledgeSources !== undefined) update.knowledgeSources = parseKnowledgeSources(body.knowledgeSources);
   if (body.brainUseClaudeCli !== undefined) {
     if (typeof body.brainUseClaudeCli !== 'boolean') {
       throw new Error('brainUseClaudeCli must be boolean.');
@@ -740,6 +743,8 @@ export async function POST(request: Request) {
     if (!isRecord(body)) {
       return response({ error: 'Invalid request body.' }, 400);
     }
+    const sourceUpdate = body.knowledgeSources ?? (typeof body.settingsToml === 'string' ? parseOperatorDefaultsToml(body.settingsToml).knowledgeSources : undefined);
+    if ((sourceUpdate !== undefined || (body.settingsToml !== undefined && (await getOperatorDefaults()).values.knowledgeSources.length > 0)) && resolveRequestPrincipalContext(request).role !== 'operator') return response({ error: 'Knowledge sources require an operator credential.' }, 403);
     if (body.settingsToml !== undefined) {
       if (typeof body.settingsToml !== 'string') {
         return response({ error: 'settingsToml must be a string.' }, 400);

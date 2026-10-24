@@ -1,3 +1,4 @@
+import { parseKnowledgeSources } from '@/lib/operator/knowledge-source-defaults';
 import { randomUUID } from 'node:crypto';
 import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -253,6 +254,7 @@ function targetingTierField(section: string, key: string): TomlField<OperatorDef
  * test guards the same seam when this object is changed through untyped code.
  */
 export const OPERATOR_DEFAULTS_TOML_MAPPING = {
+  knowledgeSources: { path: ['brain', 'knowledge_sources'], parse: parseKnowledgeSources },
   subscriptionProfile: enumField('operator', 'subscription_profile', 'one of "both", "claude-only", or "codex-only"', isSubscriptionProfile),
   parallelCap: numberField('operator', 'parallel_cap', 'a positive safe integer', isParallelCap),
   meteredPacketCostCapUsd: numberField('operator', 'metered_packet_cost_cap_usd', 'a number greater than 0', (value) => value > 0),
