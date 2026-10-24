@@ -1,6 +1,6 @@
 import { mkdtemp, rm, writeFile, readFile } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
-import { request as httpRequest } from 'node:http';
+import { createServer, request as httpRequest } from 'node:http';
 import { promisify } from 'node:util';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -13,7 +13,12 @@ import { bindVerifiedDesktopSession, readDesktopPlanBinding } from '@/lib/auth/d
 import { readSignInEpoch } from '@/lib/github-broker/managed';
 import { getDataDir } from '@/lib/data-dir-migration';
 
-const state = vi.hoisted(() => ({ service: null as unknown, clerkKeys: null as unknown }));
+const state = vi.hoisted(() => ({ service: null as unknown, clerkKeys: null as unknown, credentialRoot: '' }));
+vi.mock('node:os', async (original) => {
+  const actual = await original<typeof import('node:os')>();
+  // Production rotation locks still run, inside the owned fixture root.
+  return { ...actual, homedir: () => state.credentialRoot || actual.homedir() };
+});
 vi.mock('jose', async (original) => {
   const actual = await original<typeof import('jose')>();
   return { ...actual, createRemoteJWKSet: (url: URL, options: unknown) => url.hostname === 'fixture-clerk.example.invalid' ? (...args: Parameters<ReturnType<typeof createLocalJWKSet>>) => (state.clerkKeys as ReturnType<typeof createLocalJWKSet>)(...args) : actual.createRemoteJWKSet(url, options as never) };
@@ -52,6 +57,7 @@ async function infer(extra: Record<string, unknown> = {}) {
 describe('ChatGPT plan route and persisted lifecycle', () => {
   beforeEach(async () => {
     directory = await mkdtemp(join(tmpdir(), 'o8-plan-fixture-'));
+    state.credentialRoot = directory;
     store = new FixturePlanStore(directory); fixture = await createPlanFixture(store); state.service = fixture.service;
     const pair = await generateKeyPair('RS256');
     state.clerkKeys = createLocalJWKSet({ keys: [{ ...await exportJWK(pair.publicKey), kid: 'clerk-fixture', alg: 'RS256' }] });
@@ -77,6 +83,60 @@ describe('ChatGPT plan route and persisted lifecycle', () => {
     expect(request.authorization).toBe('Bearer fixture-access-0');
     expect(request.body).toMatchObject({ model: 'fixture-plan-model', store: false, stream: true });
     expect(request.body).not.toHaveProperty('max_output_tokens'); expect(request.body).not.toHaveProperty('tools');
+  });
+
+  it('aborts plan inference upstream when the owner client disconnects before response headers', async () => {
+    await connect();
+    let waitingForHeaders = false;
+    let upstreamClosed = false;
+    const upstream = createServer((request, response) => {
+      if (request.url === '/v1/models') {
+        response.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ models: [{ slug: 'fixture-plan-model', visibility: 'list' }] }));
+        return;
+      }
+      request.resume();
+      request.once('end', () => {
+        waitingForHeaders = true;
+        response.once('close', () => { upstreamClosed = true; });
+      });
+    });
+    await new Promise<void>(resolve => upstream.listen(0, '127.0.0.1', resolve));
+    const upstreamAddress = upstream.address();
+    if (!upstreamAddress || typeof upstreamAddress === 'string') throw new Error('Missing upstream fixture port');
+    const plan = new ChatGPTPlanService(store, { ...fixture.config, resource: `http://127.0.0.1:${upstreamAddress.port}/v1` });
+    state.service = plan;
+    const inference = vi.spyOn(plan, 'infer');
+    const tokenPath = join(getDataDir(), 'ws-token');
+    const previousToken = await readFile(tokenPath).catch(() => undefined);
+    await writeFile(tokenPath, 'fixture-operator', { mode: 0o600 });
+    const { serveNativeHttp } = await import('@/lib/ws-server/native-http-owner');
+    const host = createServer((request, response) => { void serveNativeHttp(request, response); });
+    await new Promise<void>(resolve => host.listen(0, '127.0.0.1', resolve));
+    const address = host.address();
+    if (!address || typeof address === 'string') throw new Error('Missing owner fixture port');
+    const client = httpRequest({ hostname: '127.0.0.1', port: address.port, path: '/api/v2/proxy/llm', method: 'POST',
+      headers: { authorization: 'Bearer fixture-operator', 'x-clerk-session-token': token, 'Content-Type': 'application/json' } });
+    let clientStatus: number | undefined;
+    client.on('response', response => { clientStatus = response.statusCode; response.resume(); });
+    client.on('error', () => {});
+    client.end(JSON.stringify({ provider: 'chatgpt', model: 'fixture-plan-model', messages: [{ role: 'user', content: 'Fixture cancellation' }], disableTools: true }));
+    try {
+      await expect.poll(() => waitingForHeaders || clientStatus !== undefined, { timeout: 5_000 }).toBe(true);
+      expect(clientStatus).toBeUndefined();
+      expect(inference).toHaveBeenCalledOnce();
+      const signal = inference.mock.calls[0][3]!;
+      expect(signal.aborted).toBe(false); // A completed request body is not a disconnect.
+      client.destroy();
+      await expect.poll(() => signal.aborted, { timeout: 1_000 }).toBe(true);
+      await expect.poll(() => upstreamClosed, { timeout: 1_000 }).toBe(true);
+    } finally {
+      client.destroy();
+      await plan.disconnect(owner);
+      host.closeAllConnections(); upstream.closeAllConnections();
+      await Promise.all([host, upstream].map(server => new Promise<void>(resolve => server.close(() => resolve()))));
+      if (previousToken) await writeFile(tokenPath, previousToken); else await rm(tokenPath, { force: true });
+      inference.mockRestore();
+    }
   });
 
   it('denies worker and invalid o8 identity before creating an attempt or touching provider endpoints', async () => {

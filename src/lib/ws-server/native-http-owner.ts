@@ -44,7 +44,15 @@ async function streamEvents(response: Response, outgoing: ServerResponse) {
 }
 
 export async function serveNativeHttp(request: IncomingMessage, outgoing: ServerResponse): Promise<void> {
+  const controller = new AbortController();
+  const socket = request.socket;
+  const disconnected = () => { if (!outgoing.writableFinished) controller.abort(); };
+  socket.once('close', disconnected);
+  request.once('aborted', disconnected);
+  outgoing.once('close', disconnected);
+  if (request.aborted || socket.destroyed || outgoing.destroyed) disconnected();
   try {
+    controller.signal.throwIfAborted();
     const headers = new Headers();
     for (const [name, value] of Object.entries(request.headers)) {
       if (value !== undefined) headers.set(name, Array.isArray(value) ? value.join(', ') : value);
@@ -60,7 +68,7 @@ export async function serveNativeHttp(request: IncomingMessage, outgoing: Server
     }
     const url = `http://127.0.0.1:${request.socket.localPort}${request.url}`;
     // Authenticate before importing handlers or accepting a mutation body.
-    const gateRequest = new NextRequest(url, { method: request.method, headers });
+    const gateRequest = new NextRequest(url, { method: request.method, headers, signal: controller.signal });
     const denied = panelGateMiddleware(gateRequest);
     let response: Response = denied;
     if (denied.status === 200) {
@@ -76,9 +84,13 @@ export async function serveNativeHttp(request: IncomingMessage, outgoing: Server
       }
       const handler = await resolveNativeHttpHandler(gateRequest.nextUrl.pathname, request.method ?? 'GET');
       const body = Buffer.concat(chunks);
-      const nextRequest = new NextRequest(url, { method: request.method, headers,
+      const nextRequest = new NextRequest(url, { method: request.method, headers, signal: controller.signal,
         ...(body.length ? { body } : {}) });
       response = handler ? await handler(nextRequest) : Response.json({ error: 'Not found' }, { status: 404 });
+    }
+    if (controller.signal.aborted) {
+      await response.body?.cancel().catch(() => {});
+      return;
     }
     if (response.body && response.headers.get('content-type')?.toLowerCase().startsWith('text/event-stream')) {
       await streamEvents(response, outgoing);
@@ -91,7 +103,12 @@ export async function serveNativeHttp(request: IncomingMessage, outgoing: Server
     }
     outgoing.writeHead(response.status, Object.fromEntries(response.headers)).end(body);
   } catch {
+    if (controller.signal.aborted || outgoing.destroyed) return;
     if (!outgoing.headersSent) outgoing.writeHead(503, { 'content-type': 'application/json' });
     outgoing.end('{"error":"Native HTTP owner unavailable"}');
+  } finally {
+    socket.off('close', disconnected);
+    request.off('aborted', disconnected);
+    outgoing.off('close', disconnected);
   }
 }
