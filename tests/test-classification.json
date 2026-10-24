@@ -5851,7 +5851,9 @@
         "executable-fixture",
         "git-cli",
         "network-listener",
-        "real-path"
+        "process-signal",
+        "real-path",
+        "terminal-tool"
       ]
     },
     {

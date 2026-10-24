@@ -21,6 +21,8 @@ export interface StandingLaneState {
   stopped: boolean;
   removed: boolean;
   blockedReason: string | null;
+  /** Newest run whose complete process tree was proved absent before checkout reuse. */
+  processSettlement?: { runId: string; totalRuns: number };
   tasks: StandingTask[];
 }
 

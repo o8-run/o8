@@ -1,8 +1,8 @@
-import { execFile, execFileSync } from 'node:child_process';
+import { execFile, execFileSync, spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
-import { join, resolve } from 'node:path';
+import { join, relative, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { NextRequest } from 'next/server';
 import type { StandingTask } from '@/lib/lane/standing-store';
@@ -38,6 +38,7 @@ const git = (...args: string[]) => execFileSync('git', args, { cwd: repo, encodi
 git('init', '-qb', 'main');
 git('config', 'user.name', 'o8-test'); git('config', 'user.email', 'o8@example.test');
 writeFileSync(join(repo, 'base.txt'), 'base\n'); git('add', '.'); git('commit', '-qm', 'base');
+writeFileSync(join(repo, '.gitignore'), '.env.local\n.codex/\n'); git('add', '.gitignore'); git('commit', '-qm', 'ignore local task settings');
 git('remote', 'add', 'origin', repo);
 writeFileSync(join(bin, 'codex'), `#!/usr/bin/env node
 const fs = require('node:fs'); const cp = require('node:child_process'); const path = require('node:path');
@@ -51,10 +52,15 @@ fs.writeFileSync(path.join(${JSON.stringify(captures)}, task + '.json'), JSON.st
 console.log(JSON.stringify({type:'thread.started',thread_id:thread}));
 console.log(JSON.stringify({type:'item.completed',item:{id:task,type:'agent_message',text:'FIRST_OUTPUT ' + task}}));
 const finish = () => {
+ if (task === 'ignored') { fs.mkdirSync('.codex', {recursive:true}); fs.writeFileSync('.env.local','FIXTURE_MODE=previous-task'); fs.writeFileSync('.codex/config.toml','fixture_mode = true'); }
  if (task !== 'steer') { fs.writeFileSync(task + '.txt',task); if(task !== 'dirty') { git('add',task + '.txt'); git('-c','user.name=o8-test','-c','user.email=o8@example.test','commit','-qm','fix: lane task ' + task); } }
  console.log(JSON.stringify({type:'turn.completed',usage:{input_tokens:1,output_tokens:1}}));
 };
-if(task === 'blocking') { fs.writeFileSync('in-progress.txt','working'); setTimeout(() => {fs.unlinkSync('in-progress.txt');finish();},30000); } else finish();
+if (task === 'immediate') {
+ const port = fs.readFileSync(${JSON.stringify(join(root, 'api-port'))}, 'utf8');
+ fetch('http://127.0.0.1:' + port + '/api/panel/managed-runs', {method:'POST', headers:{'Content-Type':'application/json',authorization:'Bearer ' + process.env.O8_WORKER_TOKEN}, body:JSON.stringify({action:'register',id:'immediate' + process.pid,session:'cortex-run-immediate' + process.pid,command:'fixture command',cwd:process.cwd(),packetId:process.env.O8_WORKER_PACKET_ID,mode:'detach'})})
+ .then(async response => { fs.writeFileSync(${JSON.stringify(join(captures, 'immediate-registration.json'))}, JSON.stringify({status:response.status})); finish(); });
+} else if(task === 'blocking') { fs.writeFileSync('in-progress.txt','working'); setTimeout(() => {fs.unlinkSync('in-progress.txt');finish();},30000); } else finish();
 `);
 writeFileSync(join(bin, 'gh'), `#!/usr/bin/env node
 const fs = require('node:fs'); const path = require('node:path'); const cp = require('node:child_process');
@@ -66,6 +72,8 @@ else if(args[0] === 'pr' && args[1] === 'view') { const branch = cp.execFileSync
 else process.exit(8);
 `);
 chmodSync(join(bin, 'codex'), 0o755); chmodSync(join(bin, 'gh'), 0o755);
+// These fixtures have no tmux transport; real marker/process probes own their trees.
+writeFileSync(join(bin, 'tmux'), '#!/bin/sh\nexit 1\n'); chmodSync(join(bin, 'tmux'), 0o755);
 let server: Server;
 let base = '';
 let port = 0;
@@ -90,6 +98,8 @@ async function start() {
       if (incoming.url?.startsWith('/api/orchestrator/standing-lanes')) {
         const route = await import('@/app/api/orchestrator/standing-lanes/route');
         response = await route.POST(request);
+      } else if (incoming.url?.startsWith('/api/panel/managed-runs')) {
+        response = await (await import('@/app/api/panel/managed-runs/route')).POST(request);
       } else response = new Response('{}');
       outgoing.writeHead(response.status, Object.fromEntries(response.headers)); outgoing.end(await response.text());
     } catch (error) { outgoing.writeHead(500); outgoing.end(JSON.stringify({ error: String(error) })); }
@@ -119,7 +129,13 @@ async function idle(laneId: string) {
       const record = status.lane.sessionKey ? await (await import('@/lib/runtimes/shared/owned-session-index')).readOwnedSessionRecord(status.lane.sessionKey) : null;
       const run = record?.recentRuns[0];
       const detail = run && existsSync(run.stderrPath) ? readFileSync(run.stderrPath, 'utf8').replaceAll(root, '<fixture>') : '';
-      throw new Error(status.blockedReason + '\n' + detail);
+      const task = status.currentTask;
+      const exact = record?.recentRuns.find(run => run.id === task?.runId);
+      const proof = { tasks: status.tasks.length, packetMatches: record?.packetId === task?.id,
+        lanePacketMatches: status.lane.packetId === task?.id, branchMatches: status.lane.branch === task?.branch,
+        runFound: Boolean(exact), promptMatches: exact?.prompt.includes(`Standing worker task ${task?.id}.`),
+        timeOrdered: Boolean(exact && task?.startedAt && exact.startedAt >= task.startedAt) };
+      throw new Error(status.blockedReason + '\n' + JSON.stringify(proof) + '\n' + detail);
     }
     if (!status.currentTask) return status;
     await new Promise(resolve => setTimeout(resolve, 100));
@@ -290,3 +306,115 @@ it('keeps an idle standing worker in the real grid inventory after the ordinary 
   } finally { clock.mockRestore(); }
 
 }, 90000);
+
+it('settles detached packet-managed work before a CLI handoff reuses the checkout', async () => {
+  const { lane } = await tool('create', { repoPath: repo, runtime: 'codex', model: 'gpt-5.6-sol', effort: 'high' });
+  await tool('send', { laneId: lane.id, task: 'LANE_TASK=managed_parent' });
+  const first = await idle(lane.id);
+  const marker = `standing-managed-${lane.id}`;
+  const release = join(root, 'managed-release');
+  const ready = join(root, 'managed-ready');
+  const writer = spawn(process.execPath, ['-e', `
+    const fs = require('node:fs'); fs.writeFileSync(${JSON.stringify(ready)}, 'ready');
+    const timer = setInterval(() => { if (fs.existsSync(${JSON.stringify(release)})) {
+      fs.writeFileSync('previous-task-wrote.txt', 'cross-task write'); clearInterval(timer);
+    } }, 20);
+  `], { cwd: first.lane.worktreePath!, detached: true, stdio: 'ignore', env: { ...process.env, O8_MANAGED_RUN_MARKER: marker } });
+  const exited = once(writer, 'exit');
+  const { registerManagedRun, findManagedRun } = await import('@/lib/runtimes/managed-runs/registry');
+  try {
+    await vi.waitFor(() => expect(existsSync(ready)).toBe(true));
+    registerManagedRun({ id: marker, session: `cortex-run-${marker}`, command: 'fixture detached writer',
+      cwd: first.lane.worktreePath!, packetId: first.tasks[0].id, laneId: lane.id,
+      processMarker: marker, mode: 'detach', startedAt: new Date().toISOString(), status: 'running' });
+    await cli('send', lane.id, '--task', 'LANE_TASK=managed_successor');
+    await idle(lane.id);
+    expect(findManagedRun(marker)?.termination?.confirmedDead).toBe(true);
+    await exited;
+    writeFileSync(release, 'release');
+    expect(existsSync(join(first.lane.worktreePath!, 'previous-task-wrote.txt'))).toBe(false);
+  } finally {
+    writer.kill('SIGKILL'); await exited;
+  }
+}, 90000);
+
+it('admits a fixture worker managed command immediately after OS spawn', async () => {
+  const { lane } = await tool('create', { repoPath: repo, runtime: 'codex', model: 'gpt-5.6-sol', effort: 'high' });
+  await tool('send', { laneId: lane.id, task: 'LANE_TASK=immediate' });
+  await vi.waitFor(() => expect(existsSync(join(captures, 'immediate-registration.json'))).toBe(true), { timeout: 30000 });
+  expect(JSON.parse(readFileSync(join(captures, 'immediate-registration.json'), 'utf8')).status).toBe(200);
+  await idle(lane.id);
+}, 90000);
+
+it('refuses handoff while a completed worker still has a detached process in its checkout', async () => {
+  const { lane } = await tool('create', { repoPath: repo, runtime: 'codex', model: 'gpt-5.6-sol', effort: 'high' });
+  await tool('send', { laneId: lane.id, task: 'LANE_TASK=process_parent' });
+  const first = await idle(lane.id);
+  const { readOwnedSessionRecord } = await import('@/lib/runtimes/shared/owned-session-index');
+  const record = await readOwnedSessionRecord(first.lane.sessionKey!);
+  const writer = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {
+    cwd: first.lane.worktreePath!, detached: true, stdio: 'ignore',
+    env: { ...process.env, O8_OWNED_RUN_MARKER: record!.recentRuns[0].processMarker! },
+  });
+  const exited = once(writer, 'exit');
+  try {
+    await once(writer, 'spawn');
+    const result = await tool('send', { laneId: lane.id, task: 'LANE_TASK=process_successor' });
+    expect(result.blockedReason).toMatch(/process|quiescen|live/i);
+    expect(result.lane.branch).toBe(first.lane.branch);
+    expect(existsSync(join(captures, 'process_successor.json'))).toBe(false);
+  } finally { writer.kill('SIGKILL'); await exited; }
+}, 90000);
+
+it('refuses ignored task configuration before admitting the next task through the MCP entry point', async () => {
+  const { lane } = await tool('create', { repoPath: repo, runtime: 'codex', model: 'gpt-5.6-sol', effort: 'high' });
+  await tool('send', { laneId: lane.id, task: 'LANE_TASK=ignored' });
+  const { readOwnedSessionRecord } = await import('@/lib/runtimes/shared/owned-session-index');
+  await vi.waitFor(async () => {
+    expect(existsSync(join(captures, 'ignored.json'))).toBe(true);
+    expect((await readOwnedSessionRecord((await tool('list')).lanes.find((row: StandingStatus) => row.lane.id === lane.id).lane.sessionKey))?.activeRun).toBeFalsy();
+  }, { timeout: 30000 });
+  const before = await tool('status', { laneId: lane.id });
+  const refused = await tool('send', { laneId: lane.id, task: 'LANE_TASK=ignored_successor' }, true);
+  expect(refused).toContain('409');
+  expect((await tool('status', { laneId: lane.id })).lane.branch).toBe(before.lane.branch);
+  expect(existsSync(join(captures, 'ignored_successor.json'))).toBe(false);
+}, 90000);
+
+it('resumes a standing task when the durable lane and runtime binding use canonical path aliases', async () => {
+  const { lane } = await tool('create', { repoPath: repo, runtime: 'codex', model: 'gpt-5.6-sol', effort: 'high' });
+  await tool('send', { laneId: lane.id, task: 'LANE_TASK=alias_parent' });
+  const first = await idle(lane.id);
+  const alias = join(root, 'worktree-alias');
+  symlinkSync(join(root, 'worktrees'), alias, 'dir');
+  const { updateLane } = await import('@/lib/lane/registry');
+  updateLane(lane.id, { worktreePath: join(alias, relative(join(root, 'worktrees'), first.lane.worktreePath!)) });
+  await cli('send', lane.id, '--task', 'LANE_TASK=alias_successor');
+  const second = await idle(lane.id);
+  expect(second.lane.sessionKey).toBe(first.lane.sessionKey);
+  expect(second.tasks[1].phase).toBe('done');
+  expect(JSON.parse(readFileSync(join(captures, 'alias_successor.json'), 'utf8')).resumed).toBe(true);
+}, 90000);
+
+it('preserves process settlement across restart and more than sixteen sequential tasks', async () => {
+  const { lane } = await tool('create', { repoPath: repo, runtime: 'codex', model: 'gpt-5.6-sol', effort: 'high' });
+  let sessionKey: string | null = null;
+  for (let index = 0; index < 18; index++) {
+    await tool('send', { laneId: lane.id, task: `LANE_TASK=retained_${index}` });
+    const completed = await idle(lane.id);
+    sessionKey ??= completed.lane.sessionKey;
+    expect(completed.lane.sessionKey).toBe(sessionKey);
+    expect(completed.processSettlement?.totalRuns).toBe(index + 1);
+    expect(completed.processSettlement?.runId).toBeTruthy();
+    if (index === 16) {
+      await new Promise<void>(done => server.close(() => done())); stopServerTimers(); (await import('@/lib/db')).closeDb(); vi.resetModules(); await start();
+    }
+  }
+  const { readStandingLane, saveStandingLane } = await import('@/lib/lane/standing-store');
+  const state = readStandingLane(lane.id)!;
+  // A corrupt or evicted proof boundary must never grant reuse.
+  saveStandingLane(lane.id, { ...state, processSettlement: { runId: 'missing-run-proof', totalRuns: 18 } });
+  const refused = await tool('send', { laneId: lane.id, task: 'LANE_TASK=unproven_successor' });
+  expect(refused.blockedReason).toMatch(/process|settlement|ledger/i);
+  expect(existsSync(join(captures, 'unproven_successor.json'))).toBe(false);
+}, 180000);

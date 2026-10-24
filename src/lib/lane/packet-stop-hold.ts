@@ -15,6 +15,7 @@ import type { Lane } from './types';
 import type { OrchestratorMissionState, OrchestratorPacket } from '@/lib/orchestrator/types';
 import { hasCanonicalReleaseEvidence } from '@/lib/orchestrator/packet-release-truth';
 import { getSqlite } from '@/lib/db';
+import { readStandingLane } from './standing-store';
 import { findLaneByPacket } from './registry';
 
 export interface PacketManagedRunAdmission {
@@ -44,6 +45,26 @@ function managedRunAdmissionForPacket(packet: OrchestratorPacket | null): Packet
   if (!packet) return { allowed: false, reason: 'packet_not_found', status: null };
   if (packet.operatorStopped) {
     return { allowed: false, reason: 'packet_held', status: packet.status };
+  }
+  if (packet.standingLaneId) {
+    const standing = readStandingLane(packet.standingLaneId);
+    const lane = findLaneByPacket(packet.id);
+    const task = standing?.tasks.find(task => task.id === packet.id);
+    const dispatching = task?.phase === 'dispatching' && Boolean(task.startedAt);
+    // Initial materialization publishes the lane before launch returns its session binding.
+    // Only that exact, still-empty packet binding can admit its authenticated first worker.
+    const initialDispatch = dispatching && lane?.status === 'launching'
+      && packet.lane?.laneId === lane.id && !packet.lane.sessionKey && !packet.lane.worktreePath
+      && packet.lane.repoPath === lane.repoPath && packet.runtime === lane.runtime;
+    if (!standing || standing.stopped || standing.removed || standing.blockedReason
+      || (!dispatching && task?.phase !== 'running')
+      || !lane || lane.id !== packet.standingLaneId || task?.branch !== lane.branch || (!initialDispatch && !laneOwnsStop(packet, lane))
+      || (!lane.sessionKey && !(dispatching && lane.status === 'launching'))
+      || packet.status !== 'running' || !(dispatching ? ['idle', 'launching', 'running'].includes(lane.status) : lane.status === 'running')
+      || packet.releaseState === 'released') {
+      return { allowed: false, reason: 'packet_held', status: packet.status };
+    }
+    return { allowed: true, reason: 'active', status: 'running' };
   }
   const steeredRun = acceptedSteerRunState(packet.id);
   if (!packetSteerHoldReason(packet.id) && steeredRun === 'active') {

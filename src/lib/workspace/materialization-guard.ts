@@ -8,7 +8,7 @@ import type {
   OwnedWorkspaceSpawnDecision,
   OwnedWorkspaceSpawnGuardInput,
 } from '@/lib/runtimes/shared/owned-session/workspace-spawn-guard';
-import { isManagedPacketWorktreeId } from '@/lib/worktree/root-layout';
+import { canonicalRepoRoot, canonicalWorktreeNamespace, isManagedPacketWorktreeId } from '@/lib/worktree/root-layout';
 import { listWorkspaceSnapshotsByPacketId } from '@/lib/worktree/snapshot-state';
 import type { WorkspaceSnapshotRecord } from '@/lib/worktree/snapshot-state';
 import { materializeReplacementWorkspace } from './replacement-materialization';
@@ -58,8 +58,8 @@ export async function inspectOwnedWorkspaceMaterialization(
     return { status: 'unknown', note: 'Owned workspace snapshot truth could not be verified, so the run was refused.' };
   }
   if (snapshots.length === 0) {
-    const bindingPath = path.resolve(input.binding.cwd);
-    if (path.resolve(input.repoPath) !== bindingPath) {
+    const bindingPath = canonicalWorktreeNamespace(input.binding.cwd);
+    if (canonicalWorktreeNamespace(input.repoPath) !== bindingPath) {
       return { status: 'unknown', note: 'Owned workspace binding does not match its managed repository path.' };
     }
     try {
@@ -94,17 +94,17 @@ export async function inspectOwnedWorkspaceMaterialization(
             const standing = lane ? readStandingLane(lane.id) : null;
             return Boolean(lane && standing && !standing.stopped && !standing.removed
               && lane.packetId === packetId && lane.sessionKey === input.surfaceId
-              && lane.worktreePath && path.resolve(lane.worktreePath) === bindingPath
+              && lane.worktreePath && canonicalWorktreeNamespace(lane.worktreePath) === bindingPath
               && standing.tasks.some(task => task.id === packetId && ['dispatching', 'running', 'done'].includes(task.phase)));
           })())) {
         const lane = dependencies.findLaneByPacket(packetId);
-        const laneRepoPath = lane?.repoPath?.trim() ? path.resolve(lane.repoPath) : null;
+        const laneRepoPath = lane?.repoPath?.trim() ? canonicalRepoRoot(lane.repoPath) : null;
         // A packet-bound launch always carries its lane id, so a blank one is
         // missing launch identity rather than a permissible omission.
         const launchLaneId = input.laneId?.trim() || null;
         const laneIdentityHolds = launchLaneId !== null && launchLaneId === lane?.id;
         const alreadyConsulted = repositories.some((repo) => (
-          path.resolve(repo.localPath) === laneRepoPath
+          canonicalRepoRoot(repo.localPath) === laneRepoPath
         ));
         if (laneRepoPath && laneIdentityHolds && !alreadyConsulted) {
           try {
@@ -139,10 +139,10 @@ export async function inspectOwnedWorkspaceMaterialization(
   }
 
   let snapshot = snapshots[0]!;
-  const bindingPath = path.resolve(input.binding.cwd);
+  const bindingPath = canonicalWorktreeNamespace(input.binding.cwd);
   const retiredReplacementLaunch = input.mode === 'launch' && snapshot.state === 'retired';
-  if (path.resolve(input.repoPath) !== bindingPath
-    || (!retiredReplacementLaunch && path.resolve(snapshot.originalPath) !== bindingPath)
+  if (canonicalWorktreeNamespace(input.repoPath) !== bindingPath
+    || (!retiredReplacementLaunch && canonicalWorktreeNamespace(snapshot.originalPath) !== bindingPath)
     || (input.binding.repositoryUuid !== null
       && input.binding.repositoryUuid !== snapshot.repositoryUuid)) {
     return { status: 'unknown', note: 'Owned workspace snapshot identity does not match the durable session binding, so the run was refused.' };

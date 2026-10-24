@@ -88,6 +88,34 @@ beforeEach(() => perform.mockReset());
 afterAll(() => { closeDb(); rmSync(dataDir, { recursive: true, force: true }); });
 
 describe('steered-turn managed-run admission through production routes', () => {
+  it('admits the current standing worker but fences managed registration before settlement despite an accepted steer', async () => {
+    const { packet, lane } = fixture();
+    const { saveStandingLane } = await import('@/lib/lane/standing-store');
+    packet.standingLaneId = lane.id;
+    packet.status = 'running';
+    setLaneStatus(lane.id, 'running', 'system', 'standing_task');
+    writeOrchestratorControlPlaneState({ ...createEmptyOrchestratorMissionState(),
+      missionId: `mission-${packet.id}`, repoPath: packet.workspaceTargetPath, packets: [packet] });
+    const state = { model: 'fixture', effort: 'high' as const, stopped: false, removed: false, blockedReason: null,
+      tasks: [{ id: packet.id, prompt: 'standing task', branch: packet.branchTarget!, phase: 'running' as const }] };
+    saveStandingLane(lane.id, state);
+    const token = mintPacketWorkerToken(packet.id);
+    const admitted = await register(packet, 'standingActive', token);
+    expect(admitted.status, await admitted.clone().text()).toBe(200);
+    expect((await steer(packet.id)).status).toBe(200);
+    saveStandingLane(lane.id, { ...state, tasks: [{ ...state.tasks[0], phase: 'publishing' }] });
+    closeDb();
+    const refused = await register(packet, 'standingSettling', token);
+    expect(refused.status).toBe(409);
+    expect(findManagedRun(`run${sequence}standingSettling`)).toBeNull();
+    saveStandingLane(lane.id, { ...state, tasks: [{ ...state.tasks[0], phase: 'dispatching', startedAt: new Date().toISOString() }] });
+    setLaneStatus(lane.id, 'launching', 'system', 'standing_dispatch');
+    packet.lane = { ...packet.lane!, sessionKey: 'claude-code-owned:foreign-session', worktreePath: null };
+    writeOrchestratorControlPlaneState({ ...createEmptyOrchestratorMissionState(),
+      missionId: `mission-${packet.id}`, repoPath: packet.workspaceTargetPath, packets: [packet] });
+    expect((await register(packet, 'standingForeign', token)).status).toBe(409);
+  });
+
   it('admits the steered packet worker through durable credentials and closes admission on exit', async () => {
     const { packet, lane, sessionKey } = fixture();
     const token = mintPacketWorkerToken(packet.id);

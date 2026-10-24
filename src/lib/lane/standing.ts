@@ -21,6 +21,10 @@ import { getLane, listLanes, setLaneStatus, updateLane } from './registry';
 import { laneGit } from './lane-git';
 import { resolvePacketCreationBase } from './packet-creation-base';
 import { readStandingLane, saveStandingLane, holdStandingLane, type StandingLaneState, type StandingTask } from './standing-store';
+import { settleStandingTaskProcesses } from './standing-settlement';
+import { assertManagedWorkspaceMaterialization } from '@/lib/workspace/managed-materialization-identity';
+import { readPinnedWorkspaceFile } from '@/lib/worktree/materialization-leaf-io';
+import { MANAGED_WORKSPACE_SAFETY_SETTINGS, managedWorkspaceSafetyHooksContent, resolveManagedWorkspaceSafetyHookRuntime } from '@/lib/worktree/safety-hooks';
 
 function required(value: unknown, name: string): string {
   if (typeof value !== 'string' || !value.trim()) throw new Error(`${name} is required.`);
@@ -72,11 +76,22 @@ export async function createStandingLane(input: Record<string, unknown>) {
   return standingLaneStatus(opened.laneId);
 }
 
-async function clean(laneId: string): Promise<void> {
+async function clean(laneId: string, handoff = true): Promise<void> {
   const { lane } = stateFor(laneId);
   if (!lane.worktreePath) return;
-  const status = await laneGit(lane.worktreePath, lane.repoPath, ['status', '--porcelain', '--untracked-files=all']);
-  if (status.stdout.trim()) throw new Error('Previous task left uncommitted changes; commit or preserve them before sending another task.');
+  const status = await laneGit(lane.worktreePath, lane.repoPath, ['status', '--porcelain', '-z', '--untracked-files=all', ...(handoff ? ['--ignored=traditional'] : [])]);
+  const entries = status.stdout.split('\0').filter(Boolean);
+  const safetyEntry = `!! ${MANAGED_WORKSPACE_SAFETY_SETTINGS}`;
+  if (entries.some(entry => entry !== safetyEntry)) throw new Error('Previous task left uncommitted or ignored files; commit or preserve them before sending another task.');
+  if (entries.includes(safetyEntry)) {
+    // The only ignored base file permitted is the exact manager-injected safety policy.
+    // Task edits, extra local settings and dependency/cache artifacts never inherit this grant.
+    const identity = await assertManagedWorkspaceMaterialization(lane.repoPath, lane.worktreePath);
+    const expected = managedWorkspaceSafetyHooksContent(await resolveManagedWorkspaceSafetyHookRuntime());
+    if (await readPinnedWorkspaceFile(lane.worktreePath, identity, MANAGED_WORKSPACE_SAFETY_SETTINGS) !== expected) {
+      throw new Error('Previous task changed ignored runtime settings; preserve them before checkout reuse.');
+    }
+  }
 }
 
 async function persistPacket(laneId: string, task: StandingTask, phase: 'running' | 'done') {
@@ -121,6 +136,7 @@ async function startNext(laneId: string, state: StandingLaneState): Promise<void
   if (lane.worktreePath) {
     // No reset/clean: refuse dirty files and create an independent branch at the fetched base.
     await laneGit(lane.worktreePath, lane.repoPath, ['fetch', 'origin', lane.baseBranch]);
+    await settleStandingTaskProcesses(laneId, state);
     await clean(laneId);
     if (readStandingLane(laneId)?.stopped) return;
     await laneGit(lane.worktreePath, lane.repoPath, ['checkout', '-b', task.branch, authority.baseCommit]);
@@ -144,14 +160,17 @@ async function startNext(laneId: string, state: StandingLaneState): Promise<void
 }
 
 async function finishTask(laneId: string, state: StandingLaneState, task: StandingTask): Promise<void> {
-  await clean(laneId);
+  // Close managed-run admission durably before the packet settlement snapshot.
+  task.phase = 'publishing'; saveStandingLane(laneId, state);
+  await settleStandingTaskProcesses(laneId, state);
+  await clean(laneId, false);
   const { lane } = stateFor(laneId);
   if (!lane.worktreePath) throw new Error('Task has no managed checkout.');
   task.commit = (await laneGit(lane.worktreePath, lane.repoPath, ['rev-parse', 'HEAD'])).stdout.trim();
   if (task.commit === task.baseCommit) throw new Error('Task produced no commit; pull request requires committed work.');
   const verificationResult = await runCompletionVerification(lane.worktreePath, task.baseCommit!, lane.repoPath);
   if (!verificationResult.ok) throw new Error(`Task verification failed (${verificationResult.kind}): ${verificationResult.output}`);
-  await clean(laneId);
+  await clean(laneId, false);
   if ((await laneGit(lane.worktreePath, lane.repoPath, ['rev-parse', 'HEAD'])).stdout.trim() !== task.commit) {
     throw new Error('Task commit changed during verification; inspect before publication.');
   }
