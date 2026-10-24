@@ -9,8 +9,9 @@ const fixture = await vi.hoisted(async () => {
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'o8-knowledge-')));
   const data = path.join(root, 'data'); fs.mkdirSync(data);
   process.env.CORTEX_IDE_DATA_DIR = data; process.env.O8_DATA_DIR = data; process.env.O8_HYBRID_SCORER = '0';
-  return { root, data, distill: vi.fn(), compose: vi.fn() };
+  return { root, data, distill: vi.fn(), compose: vi.fn(), sendLead: vi.fn(async () => {}) };
 });
+vi.mock('@/lib/lane/orchestrator-send-entry', () => ({ sendOrchestratorBackendTurn: fixture.sendLead }));
 vi.mock('@/lib/cortex/indexer/doc-distill', () => ({ distillDocChunkBatch: fixture.distill }));
 vi.mock('@/lib/cortex/qa/classifier', () => ({ classifyQuestion: async () => ({ class: 'A', bm25Variants: ['Apricot'] }) }));
 vi.mock('@/lib/cortex/qa/composer', async original => ({ ...await original<typeof import('@/lib/cortex/qa/composer')>(),
@@ -231,3 +232,33 @@ it('reads persisted source settings in a fresh process after restart', async () 
   });
   expect(JSON.parse(output)).toEqual([expect.objectContaining({ id: source.id, path: folder, name: 'Restart notes' })]);
 }, 20_000);
+
+
+it('refuses lead admission into an unlisted Git knowledge vault before recording or launching a writable turn', async () => {
+  const { execFileSync } = await import('node:child_process');
+  execFileSync('git', ['init', folder], { stdio: 'ignore' });
+  await add(folder);
+  const { POST: leadPost } = await import('@/app/api/orchestrator/lead/route');
+  const { listRepos } = await import('@/lib/repos/registry');
+  expect(await listRepos()).toEqual([]);
+  const alias = path.join(fixture.root, `alias-${crypto.randomUUID()}`); symlinkSync(folder, alias, 'dir');
+  const child = path.join(folder, 'nested'); mkdirSync(child);
+  const before = getSqlite().prepare('SELECT count(*) AS n FROM orchestrator_leads').get();
+  const turnsBefore = getSqlite().prepare('SELECT count(*) AS n FROM orchestrator_lead_turns').get();
+  fixture.sendLead.mockClear();
+  for (const repoPath of [folder, child, alias]) {
+    const response = await leadPost(request({ action: 'start', repoPath, backend: 'codex', model: 'gpt-5.6-sol', effort: 'high', idempotencyKey: crypto.randomUUID(),
+      brief: { objective: 'Inspect knowledge', scope: ['notes'], doneTests: ['Read only'], nonGoals: [], budgets: [], escalationCriteria: ['Any write'] } }, true, '/api/orchestrator/lead'));
+    if (response.status === 202) {
+      const accepted = await response.clone().json();
+      await leadPost(request({ action: 'stop', leadId: accepted.lead.id }, true, '/api/orchestrator/lead'));
+      await new Promise(resolve => setTimeout(resolve, 0));
+    }
+    expect(response.status, await response.clone().text()).toBe(400);
+    expect((await response.json()).error).toMatchObject({ code: 'invalid_lead_repo', message: expect.stringContaining('read-only') });
+  }
+  expect(getSqlite().prepare('SELECT count(*) AS n FROM orchestrator_leads').get()).toEqual(before);
+  expect(getSqlite().prepare('SELECT count(*) AS n FROM orchestrator_lead_turns').get()).toEqual(turnsBefore);
+  expect(fixture.sendLead).not.toHaveBeenCalled();
+  expect(await listRepos()).toEqual([]);
+});

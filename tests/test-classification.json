@@ -3213,6 +3213,7 @@
       "path": "tests/knowledge-sources-real-path.test.ts",
       "reasons": [
         "child-process",
+        "git-cli",
         "network-listener",
         "real-path",
         "worktree-api"
