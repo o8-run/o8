@@ -67,8 +67,14 @@ describe('pull request selection', () => {
       fetchMock.mockResolvedValueOnce(Response.json({ pr: current })).mockResolvedValueOnce(Response.json({ error: 'GitHub refresh is paused.' }, { status: 429, headers: { 'retry-after': '120' } })).mockResolvedValue(Response.json({ pr: current }));
       await render(9801);
       await act(async () => vi.advanceTimersByTimeAsync(30_000));
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const checks = host.querySelector<HTMLButtonElement>('[role="tab"][id$="-checks"]')!;
+      await act(async () => checks.click());
+      expect(checks.getAttribute('aria-selected')).toBe('true');
+      await act(async () => vi.advanceTimersByTimeAsync(30_000));
       expect(fetchMock).toHaveBeenCalledTimes(2);
       expect(fetchMock.mock.calls[1][0]).toContain('&poll=1');
+      await settleTimeline();
       expect(host.textContent).toContain('Change 9801'); expect(host.textContent).toContain('GitHub refresh is paused.');
       await act(async () => vi.advanceTimersByTimeAsync(90_000)); expect(fetchMock).toHaveBeenCalledTimes(2);
       await act(async () => vi.advanceTimersByTimeAsync(31_000)); expect(fetchMock).toHaveBeenCalledTimes(3);

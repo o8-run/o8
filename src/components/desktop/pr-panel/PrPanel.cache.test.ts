@@ -63,7 +63,10 @@ describe('compact PR detail snapshots through PrPanel', () => {
 
   it('does not use the fast checks cadence while another PR view is selected', async () => {
     fetchMock.mockImplementation(async () => Response.json({ pr: { ...detail(), statusCheckRollup: [{ name: 'Tests', status: 'in_progress' }] } }));
-    await render(); await act(async () => vi.advanceTimersByTimeAsync(30_000)); await flush();
+    await render();
+    const summary = host.querySelector<HTMLButtonElement>('[role=tab][id$="-summary"]')!;
+    await act(async () => summary.click()); expect(summary.getAttribute('aria-selected')).toBe('true');
+    await act(async () => vi.advanceTimersByTimeAsync(30_000)); await flush();
     expect(reads()).toHaveLength(1);
   });
 
