@@ -260,10 +260,11 @@ the checkout. Run both arms sequentially without competing builds or tests:
 ```sh
 node -e "require('node:fs').cpSync('node_modules', '../work/launch-payload', { recursive: true, verbatimSymlinks: true, errorOnExist: true, force: false })"
 node scripts/speed/dispatch-fixture.mjs --payload=../work/launch-payload --cold --output=work/launch-cold
-node scripts/speed/dispatch-fixture.mjs --payload=../work/launch-payload --output=work/launch-warm
+node scripts/speed/dispatch-fixture.mjs --payload=../work/launch-payload --samples=5 --output=work/launch-warm
 ```
 
-Each arm runs three disposable fixture repositories. Large-payload timing uses
+Each arm defaults to three disposable fixture repositories; `--samples=5` checks
+five consecutive launches. Large-payload timing uses
 one configured entry, which the measured packet consumes. The small lifecycle
 variants use the default two entries and verify unused-entry shutdown retirement. The optional installed
 payload is copied privately; the fixture manifest is synthetic. A warm dispatch
@@ -291,3 +292,8 @@ Additional hermetic variants use the same test entry point:
 `O8_SPEED_INODE_SWAP=1`, `O8_SPEED_ABSOLUTE_LINK=1`,
 `O8_SPEED_REMOTE_MAIN=1`, `O8_SPEED_HOOKS_FAULT=inode` or `content`,
 `O8_SPEED_CONCURRENT=1`, and `O8_SPEED_COLD_DURING_REFILL=1`.
+`O8_SPEED_POLICY_CONTENTION=1` checks the moved Git/index/HEAD binding, bin and
+runtime paths, settings inode/environment and refill ordering, then holds the
+real credential-policy coordination lock for 200 ms during child startup.
+The child must acquire the lock and revalidate policy before producing output;
+the fixture's stdout deadline is unchanged.

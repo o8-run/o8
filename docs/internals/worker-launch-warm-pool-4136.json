@@ -1,113 +1,270 @@
 {
-  "schema": "o8/worker-launch-warm-pool-4136/v1",
-  "baseCommit": "4120a4f53",
+  "schema": "o8/worker-launch-warm-pool-4136/v2",
+  "correctionRound": 1,
+  "correctionBaseCommit": "774892790",
+  "mainControlCommit": "3660bcd4c",
+  "implementationBaseCommit": "4120a4f53",
   "environment": {
     "platform": "linux",
     "nodeMajor": 22
   },
+  "rootCause": "The generated child credential guard changed SQLite journal mode with timeout zero. A normal concurrent policy-lock holder made it exit with SQLITE_BUSY before exec and stdout. No warm rename or refill is required.",
+  "orderedChecks": [
+    "reciprocal Git directory/worktree paths, index and HEAD ref",
+    "relative dependency/bin links and actual runtime path",
+    "original settings inode/content and no stale warm paths in launch environment",
+    "preparation call count proves no refill at actual spawn"
+  ],
+  "fix": "Use the parent store boundary\u2019s bounded exclusive-lock acquisition and remove the unnecessary journal-mode mutation. Revalidate policy/credential hashes only after acquisition; retain the lock through actual synchronous process creation.",
   "fixture": {
     "test": "tests/packet-launch-budget-real-path.test.ts",
     "entryPoint": "runDispatchTick",
     "harness": "scripts/speed/dispatch-fixture.mjs",
-    "payload": "one immutable copy of installed node_modules, shared by all three measurement arms",
-    "manifest": "synthetic",
-    "runtime": "owned executable fixture, immediate stdout then real runtime interrupt",
+    "payload": "same immutable installed-dependency copy in all arms",
     "timedPoolCapacity": 1,
     "lifecyclePoolCapacity": 2,
-    "samplesPerArm": 3
+    "warmAttempts": 5,
+    "coldAttemptsPerArm": 3,
+    "contention": "independent holder releases the real SQLite coordination lock after 200 ms"
   },
   "beforeMain": {
+    "attempts": 3,
     "samples": [
       {
         "sample": 1,
-        "admissionMs": 376,
-        "otherWorkspaceMs": 1423,
-        "dependencyPreparationMs": 20659,
-        "bindingToRecordedStartMs": 197,
-        "recordedStartToOutputMs": 105,
-        "dispatchToOutputMs": 22760,
-        "dispatchToPersistedLaunchMs": 22968
+        "admissionMs": 315,
+        "otherWorkspaceMs": 1254,
+        "dependencyPreparationMs": 17755,
+        "bindingToRecordedStartMs": 146,
+        "recordedStartToOutputMs": 92,
+        "dispatchToOutputMs": 19562,
+        "dispatchToPersistedLaunchMs": 19724
       },
       {
         "sample": 2,
-        "admissionMs": 311,
-        "otherWorkspaceMs": 1296,
-        "dependencyPreparationMs": 13433,
-        "bindingToRecordedStartMs": 285,
-        "recordedStartToOutputMs": 94,
-        "dispatchToOutputMs": 15419,
-        "dispatchToPersistedLaunchMs": 15600
-      },
+        "admissionMs": 308,
+        "otherWorkspaceMs": 1224,
+        "dependencyPreparationMs": 10057,
+        "bindingToRecordedStartMs": 170,
+        "recordedStartToOutputMs": 87,
+        "dispatchToOutputMs": 11846,
+        "dispatchToPersistedLaunchMs": 12016
+      }
+    ],
+    "failures": [
       {
         "sample": 3,
-        "admissionMs": 351,
-        "otherWorkspaceMs": 1357,
-        "dependencyPreparationMs": 14322,
-        "bindingToRecordedStartMs": 154,
-        "recordedStartToOutputMs": 97,
-        "dispatchToOutputMs": 16281,
-        "dispatchToPersistedLaunchMs": 16461
+        "exitCode": 1,
+        "error": null
       }
     ],
     "medians": {
-      "admissionMs": 351,
-      "otherWorkspaceMs": 1357,
-      "dependencyPreparationMs": 14322,
-      "bindingToRecordedStartMs": 197,
-      "recordedStartToOutputMs": 97,
-      "dispatchToOutputMs": 16281,
-      "dispatchToPersistedLaunchMs": 16461
-    },
-    "failures": []
+      "admissionMs": 311.5,
+      "otherWorkspaceMs": 1239.0,
+      "dependencyPreparationMs": 13906.0,
+      "bindingToRecordedStartMs": 158.0,
+      "recordedStartToOutputMs": 89.5,
+      "dispatchToOutputMs": 15704.0,
+      "dispatchToPersistedLaunchMs": 15870.0
+    }
   },
   "afterColdFallback": {
+    "attempts": 3,
     "samples": [
       {
         "sample": 1,
-        "admissionMs": 305,
-        "otherWorkspaceMs": 1333,
-        "dependencyPreparationMs": 13083,
-        "bindingToRecordedStartMs": 175,
-        "recordedStartToOutputMs": 92,
-        "dispatchToOutputMs": 14988,
-        "dispatchToPersistedLaunchMs": 15148
+        "admissionMs": 343,
+        "otherWorkspaceMs": 1199,
+        "dependencyPreparationMs": 12298,
+        "bindingToRecordedStartMs": 160,
+        "recordedStartToOutputMs": 85,
+        "dispatchToOutputMs": 14085,
+        "dispatchToPersistedLaunchMs": 14233
       },
       {
         "sample": 2,
-        "admissionMs": 326,
-        "otherWorkspaceMs": 1414,
-        "dependencyPreparationMs": 11517,
-        "bindingToRecordedStartMs": 176,
-        "recordedStartToOutputMs": 92,
-        "dispatchToOutputMs": 13525,
-        "dispatchToPersistedLaunchMs": 13691
+        "admissionMs": 370,
+        "otherWorkspaceMs": 1219,
+        "dependencyPreparationMs": 12476,
+        "bindingToRecordedStartMs": 159,
+        "recordedStartToOutputMs": 89,
+        "dispatchToOutputMs": 14313,
+        "dispatchToPersistedLaunchMs": 14463
       },
       {
         "sample": 3,
-        "admissionMs": 337,
-        "otherWorkspaceMs": 1325,
-        "dependencyPreparationMs": 14537,
-        "bindingToRecordedStartMs": 167,
-        "recordedStartToOutputMs": 106,
-        "dispatchToOutputMs": 16472,
-        "dispatchToPersistedLaunchMs": 16599
+        "admissionMs": 307,
+        "otherWorkspaceMs": 1189,
+        "dependencyPreparationMs": 11975,
+        "bindingToRecordedStartMs": 152,
+        "recordedStartToOutputMs": 88,
+        "dispatchToOutputMs": 13711,
+        "dispatchToPersistedLaunchMs": 13862
       }
     ],
+    "failures": [],
     "medians": {
-      "admissionMs": 326,
-      "otherWorkspaceMs": 1333,
-      "dependencyPreparationMs": 13083,
-      "bindingToRecordedStartMs": 175,
-      "recordedStartToOutputMs": 92,
-      "dispatchToOutputMs": 14988,
-      "dispatchToPersistedLaunchMs": 15148
-    },
-    "failures": []
+      "admissionMs": 343,
+      "otherWorkspaceMs": 1199,
+      "dependencyPreparationMs": 12298,
+      "bindingToRecordedStartMs": 159,
+      "recordedStartToOutputMs": 88,
+      "dispatchToOutputMs": 14085,
+      "dispatchToPersistedLaunchMs": 14233
+    }
   },
   "afterWarm": {
+    "attempts": 5,
     "samples": [
       {
         "sample": 1,
+        "admissionMs": 174,
+        "otherWorkspaceMs": 776,
+        "dependencyPreparationMs": 0,
+        "bindingToRecordedStartMs": 146,
+        "recordedStartToOutputMs": 87,
+        "dispatchToOutputMs": 1183,
+        "dispatchToPersistedLaunchMs": 1335
+      },
+      {
+        "sample": 2,
+        "admissionMs": 166,
+        "otherWorkspaceMs": 789,
+        "dependencyPreparationMs": 0,
+        "bindingToRecordedStartMs": 175,
+        "recordedStartToOutputMs": 115,
+        "dispatchToOutputMs": 1245,
+        "dispatchToPersistedLaunchMs": 1378
+      },
+      {
+        "sample": 3,
+        "admissionMs": 212,
+        "otherWorkspaceMs": 916,
+        "dependencyPreparationMs": 0,
+        "bindingToRecordedStartMs": 148,
+        "recordedStartToOutputMs": 90,
+        "dispatchToOutputMs": 1366,
+        "dispatchToPersistedLaunchMs": 1552
+      },
+      {
+        "sample": 4,
+        "admissionMs": 161,
+        "otherWorkspaceMs": 784,
+        "dependencyPreparationMs": 0,
+        "bindingToRecordedStartMs": 142,
+        "recordedStartToOutputMs": 90,
+        "dispatchToOutputMs": 1177,
+        "dispatchToPersistedLaunchMs": 1313
+      },
+      {
+        "sample": 5,
+        "admissionMs": 172,
+        "otherWorkspaceMs": 919,
+        "dependencyPreparationMs": 0,
+        "bindingToRecordedStartMs": 195,
+        "recordedStartToOutputMs": 90,
+        "dispatchToOutputMs": 1376,
+        "dispatchToPersistedLaunchMs": 1534
+      }
+    ],
+    "failures": [],
+    "medians": {
+      "admissionMs": 172,
+      "otherWorkspaceMs": 789,
+      "dependencyPreparationMs": 0,
+      "bindingToRecordedStartMs": 148,
+      "recordedStartToOutputMs": 90,
+      "dispatchToOutputMs": 1245,
+      "dispatchToPersistedLaunchMs": 1378
+    }
+  },
+  "target": {
+    "allFiveWarmPassed": true,
+    "dispatchToOutputMsExclusive": 3000,
+    "coldMedianDeltaMs": -1619.0
+  },
+  "verification": {
+    "checks": {
+      "main-cold": 1,
+      "branch-cold": 0,
+      "branch-warm-five": 0,
+      "dispatch-lock": 0,
+      "dispatch-main": 0,
+      "dispatch-remote": 0,
+      "dispatch-rename": 0,
+      "dispatch-inode": 0,
+      "dispatch-absolute-link": 0,
+      "dispatch-hooks-inode": 0,
+      "dispatch-hooks-content": 0,
+      "dispatch-concurrent": 0,
+      "dispatch-refill": 0,
+      "dispatch-contention": 0,
+      "policy-tests": 0,
+      "tsc": 0,
+      "fast": 0,
+      "eslint": 0,
+      "rules": 0,
+      "classification": 0,
+      "full-test": 0
+    },
+    "dispatchVariants": {
+      "lock": 0,
+      "main": 0,
+      "remote": 0,
+      "rename": 0,
+      "inode": 0,
+      "absolute-link": 0,
+      "hooks-inode": 0,
+      "hooks-content": 0,
+      "concurrent": 0,
+      "refill": 0,
+      "contention": 0
+    },
+    "realDispatchRedTail": [
+      "[packet-binding-proof] git,index,head,links,runtime,settings,environment,refill passed",
+      "[packet-runtime-refusal] SQLITE_BUSY; embedded child policy=true",
+      "expected undefined to be defined",
+      "Test Files 1 failed (1)",
+      "Tests 1 failed (1)"
+    ],
+    "policyRedTail": [
+      "Test Files  1 failed (1)",
+      "Tests  2 failed | 8 passed (10)",
+      "Duration  1.27s (transform 197ms, setup 54ms, import 219ms, tests 761ms, environment 0ms)"
+    ],
+    "contentionGreenTail": [
+      "Test Files  2 passed (2)",
+      "Tests  11 passed (11)",
+      "Duration  23.00s (transform 7.83s, setup 87ms, import 151ms, tests 22.40s, environment 0ms)"
+    ],
+    "policyTestTail": [
+      "Test Files  1 passed (1)",
+      "Tests  10 passed (10)",
+      "Duration  3.07s (transform 299ms, setup 67ms, import 308ms, tests 2.40s, environment 1ms)"
+    ],
+    "fullNpmTestTail": [
+      "Test Files  1224 passed | 3 skipped (1227)",
+      "Tests  8724 passed | 4 skipped (8728)",
+      "Duration  423.46s (transform 23.90s, setup 36.46s, import 534.15s, tests 460.26s, environment 395.90s)"
+    ],
+    "mainControlFailure": "One of three cold controls failed before stdout with SQLITE_BUSY in withO8ChildPolicy; both successful observations and the failure are retained.",
+    "independentReview": "No security blocker in focused lock acquisition; fresh validation and fail-closed behavior preserved."
+  },
+  "initialAttempt": {
+    "afterWarm": {
+      "samples": [
+        {
+          "sample": 1,
+          "admissionMs": 186,
+          "otherWorkspaceMs": 858,
+          "dependencyPreparationMs": 0,
+          "bindingToRecordedStartMs": 175,
+          "recordedStartToOutputMs": 81,
+          "dispatchToOutputMs": 1300,
+          "dispatchToPersistedLaunchMs": 1497
+        }
+      ],
+      "medians": {
         "admissionMs": 186,
         "otherWorkspaceMs": 858,
         "dependencyPreparationMs": 0,
@@ -115,154 +272,52 @@
         "recordedStartToOutputMs": 81,
         "dispatchToOutputMs": 1300,
         "dispatchToPersistedLaunchMs": 1497
-      }
-    ],
-    "medians": {
-      "admissionMs": 186,
-      "otherWorkspaceMs": 858,
-      "dependencyPreparationMs": 0,
-      "bindingToRecordedStartMs": 175,
-      "recordedStartToOutputMs": 81,
-      "dispatchToOutputMs": 1300,
-      "dispatchToPersistedLaunchMs": 1497
+      },
+      "failures": [
+        {
+          "sample": 2,
+          "exitCode": 1,
+          "error": null
+        },
+        {
+          "sample": 3,
+          "exitCode": 1,
+          "error": null
+        }
+      ]
     },
-    "failures": [
+    "failedWarmAttempts": [
       {
         "sample": 2,
-        "exitCode": 1,
-        "error": null
+        "outputObserved": false,
+        "dispatchToPersistedLaunchMs": 1517,
+        "dispatchTickMs": 1525
       },
       {
         "sample": 3,
-        "exitCode": 1,
-        "error": null
+        "outputObserved": false,
+        "dispatchToPersistedLaunchMs": 1566,
+        "dispatchTickMs": 1575
       }
-    ]
-  },
-  "failedWarmAttempts": [
-    {
-      "sample": 2,
-      "outputObserved": false,
-      "dispatchToPersistedLaunchMs": 1517,
-      "dispatchTickMs": 1525
-    },
-    {
-      "sample": 3,
-      "outputObserved": false,
-      "dispatchToPersistedLaunchMs": 1566,
-      "dispatchTickMs": 1575
-    }
-  ],
-  "target": {
-    "dispatchToOutputMsExclusive": 3000,
-    "allWarmSamplesPassed": false,
-    "coldMedianDeltaMs": -1293
-  },
-  "verification": {
-    "finalChecks": {
-      "frozen-default": 0,
-      "frozen-main": 0,
-      "frozen-concurrent": 0,
-      "frozen-refill": 0,
-      "payload-snapshot": 0,
-      "frozen-before": 0,
-      "frozen-cold": 0,
-      "frozen-warm": 1,
-      "frozen-tsc": 0,
-      "frozen-eslint": 0,
-      "frozen-rules": 0,
-      "classification": 0,
-      "frozen-fast": 0
-    },
-    "dispatchVariants": {
-      "default": 0,
-      "main": 0,
-      "concurrent": 0,
-      "refill": 0,
-      "lock": 1,
-      "remote": 0,
-      "rename": 0,
-      "inode": 0,
-      "absolute-link": 0,
-      "hooks-inode": 0,
-      "hooks-content": 0
-    },
-    "typecheckFastExitCode": 0,
-    "fullNpmTestExitCode": 0,
-    "fullNpmTestTail": [
-      "Test Files  1224 passed | 3 skipped (1227)",
-      "Tests  8724 passed | 4 skipped (8728)",
-      "Duration  524.64s (transform 30.61s, setup 47.21s, import 715.64s, tests 533.28s, environment 451.08s)"
-    ],
-    "relatedTestFiles": [
-      "src/lib/workspace/dependency-install.test.ts",
-      "src/lib/worktree/materialization-leaf-io.test.ts",
-      "src/lib/worktree/create-auto-prune-serialization.test.ts",
-      "src/lib/worktree/prelaunch-dependency-link.test.ts",
-      "tests/dependency-directory-clone-real-path.test.ts"
-    ],
-    "relatedTestsTail": [
-      "Test Files  5 passed (5)",
-      "Tests  65 passed | 25 skipped (90)",
-      "Duration  49.16s (transform 3.09s, setup 168ms, import 5.51s, tests 42.63s, environment 0ms)"
-    ],
-    "installCleanupTest": "src/lib/worktree/dependency-install-manager-real-path.test.ts",
-    "installCleanupMainExitCode": 1,
-    "installCleanupBranchExitCode": 1,
-    "installCleanupMainTail": [
-      "Test Files  1 failed (1)",
-      "Tests  1 failed | 3 passed | 1 skipped (5)",
-      "Duration  31.19s (transform 2.60s, setup 60ms, import 3.55s, tests 27.35s, environment 0ms)"
-    ],
-    "installCleanupBranchTail": [
-      "Test Files  1 failed (1)",
-      "Tests  1 failed | 3 passed | 1 skipped (5)",
-      "Duration  38.74s (transform 3.60s, setup 60ms, import 4.76s, tests 33.70s, environment 0ms)"
     ],
     "redTail": [
       "expected 56410 to be less than 3000",
       "expected 51833 to be +0",
       "Test Files 1 failed (1)",
       "Tests 1 failed (1)"
-    ],
-    "finalWarmTails": {
-      "1": [
-        "Test Files  1 passed (1)",
-        "Tests  1 passed (1)",
-        "Duration  29.89s (transform 7.84s, setup 65ms, import 71ms, tests 29.52s, environment 0ms)"
-      ],
-      "2": [
-        "Test Files  1 failed (1)",
-        "Tests  1 failed (1)",
-        "Duration  272.41s (transform 6.72s, setup 50ms, import 65ms, tests 272.07s, environment 0ms)"
-      ],
-      "3": [
-        "Test Files  1 failed (1)",
-        "Tests  1 failed (1)",
-        "Duration  268.96s (transform 7.35s, setup 61ms, import 66ms, tests 268.58s, environment 0ms)"
-      ]
-    },
-    "earlierIteration": "Earlier warm/concurrent runs failed with missing output; an owned child reported SQLite contention in the existing credential-policy guard. The guard was preserved. Final runs use the held fixture lifetime and a five-second foreground refill quiet window.",
-    "twoEntryLargeLifecycle": {
-      "dispatchToOutputMs": 2383,
-      "wholeFixtureMs": 429860,
-      "passed": true
-    }
+    ]
   },
   "limits": [
-    "Fixture installer and runtime use no provider accounts or network.",
-    "Output uses an adjacent fixture timestamp, and its stdout presence is verified in persisted owned-run output.",
-    "Recorded runtime start is not a kernel spawn timestamp. Phase medians are independent.",
-    "Arms ran sequentially on one host; filesystem cache and host I/O affect cold-copy latency.",
-    "Final timing uses one consumed entry. Default two-entry lifecycle and concurrency are separate cases."
+    "Fixture installer/runtime use no provider accounts or network.",
+    "Output timestamp is adjacent to verified persisted stdout; recorded runtime start is not a kernel spawn timestamp.",
+    "Phase medians are independent. Arms ran sequentially; filesystem cache and host I/O affect cold-copy latency.",
+    "The main cold phase column has two observed outputs from three attempts; it excludes no failed attempt from failure accounting."
   ],
   "remaining": [
-    "The warm target did not pass in every final sample; the numeric evidence includes all samples and failures.",
-    "Some final dispatch variants failed: lock.",
-    "A strict peak disk quota during installation remains unimplemented. The four/eight GiB budgets apply before publication; oversized transient installer writes can exceed them.",
-    "Process-restart fault injection at each transfer boundary and shutdown-during-fill/bind fault cases remain unverified.",
-    "A real-entry live-process-at-binding fixture remains missing; preparation and retirement use the existing guards.",
-    "Large unused-tree retirement remains slow: the separate two-entry large-payload lifecycle fixture passed in 429.86 s overall, including preparation and cleanup.",
-    "The issue\u2019s reference macOS timing, less-than-100-MB second-packet volume growth, and mission CLI wait-window/phase-receipt acceptance remain unverified in this Linux environment."
+    "Strict peak installation disk quotas remain unimplemented; four/eight GiB limits apply before retained-entry publication.",
+    "Process-restart transfer-boundary and shutdown-during-fill/bind fault injection remain unverified.",
+    "A live-process-at-binding fixture remains missing; this correction verifies no refill race at actual worker spawn.",
+    "Large unused-tree retirement remains expensive; the earlier two-entry large lifecycle fixture took 429.86 s including preparation and cleanup.",
+    "The original issue\u2019s reference macOS timing, second-packet volume growth below 100 MB, and mission CLI wait-window/phase-receipt acceptance remain unverified."
   ]
 }

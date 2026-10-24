@@ -1,5 +1,6 @@
-import { execFileSync } from 'node:child_process';
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 import { afterAll, expect, it, vi } from 'vitest';
 
@@ -37,6 +38,7 @@ const concurrent = process.env.O8_SPEED_CONCURRENT === '1';
 const slowRefill = process.env.O8_SPEED_COLD_DURING_REFILL === '1';
 const oldEnv = { ...process.env };
 const npmCli = process.env.npm_execpath!;
+let policyHolder: ChildProcess | undefined;
 Object.assign(process.env, {
   CORTEX_IDE_DATA_DIR: root,
   O8_DATA_DIR: root,
@@ -77,6 +79,11 @@ function observeOutput(workspace: string): OutputObservation | undefined {
 }
 
 afterAll(async () => {
+  if (policyHolder && policyHolder.exitCode === null && policyHolder.signalCode === null) {
+    const exited = new Promise<void>(resolve => policyHolder!.once('close', () => resolve()));
+    policyHolder.kill();
+    await exited;
+  }
   const lanes = await import('@/lib/lane/registry');
   const { routeAction } = await import('@/lib/runtimes/registry');
   for (const id of ['pkt-launch-budget', 'pkt-launch-budget-two']) {
@@ -163,6 +170,7 @@ it('dispatches through a matching warm worktree without dependency preparation',
     "const isolatedConfig = process.env.npm_config_userconfig === path.join(path.dirname(process.env.HOME), 'config/user.rc') && process.env.npm_config_globalconfig === path.join(path.dirname(process.env.HOME), 'config/global.rc');",
     "fs.writeFileSync('installer-runtime.json', JSON.stringify({ contained, isolatedConfig }));",
     "fs.writeFileSync('node_modules/fixture/index.js', 'module.exports = 42;\\n');",
+    "fs.mkdirSync('node_modules/.bin', { recursive: true }); fs.writeFileSync('node_modules/fixture/bin.js', '#!/usr/bin/env node\\n'); fs.symlinkSync('../fixture/bin.js', 'node_modules/.bin/o8-fixture');",
     ...(process.env.O8_SPEED_ABSOLUTE_LINK ? ["fs.symlinkSync(require('node:path').resolve('node_modules/fixture/index.js'), 'node_modules/fixture/absolute');"] : []),
     "const result = cp.spawnSync(process.execPath, [npmCli, 'rebuild', '.', '--offline'], { stdio: 'inherit' }); process.exit(result.status ?? 1);",
   ].join('\n'));
@@ -210,6 +218,9 @@ it('dispatches through a matching warm worktree without dependency preparation',
   }
   const pool = await import('@/lib/worktree/launch');
   const prepare = pool.prepareWarmPacketWorktrees;
+  const { WorktreeManager } = await import('@/lib/worktree/manager');
+  const preparationCalls = process.env.O8_SPEED_POLICY_CONTENTION === '1'
+    ? vi.spyOn(WorktreeManager.prototype, 'prepareWarmWorktree') : undefined;
   const capacity = process.env.O8_SPEED_DEPENDENCY_PAYLOAD && !concurrent ? 1 as const : 2 as const;
   const warmOptions = { capacity, repoRoot: repo, agentType: 'qoder', baseBranch: 'main', repoSetup: { ...registration.setup, installCommand: 'npm ci --offline' } };
   let prepared: Promise<void> | undefined;
@@ -222,6 +233,10 @@ it('dispatches through a matching warm worktree without dependency preparation',
   else if (warm) await prepare(warmOptions);
   const { readWorktreeMetaSnapshot } = await import('@/lib/worktree/metadata-store');
   const unused = Object.values(await readWorktreeMetaSnapshot(repo)).filter(entry => entry.warmPool);
+  const settingsBefore = new Map(unused.map(entry => {
+    const file = path.join(entry.materializationIdentity!.canonicalPath, '.claude/settings.local.json');
+    return [entry.id, { inode: lstatSync(file).ino, content: readFileSync(file, 'utf8') }];
+  }));
   if (warm && !nonRelocatable && !slowRefill) {
     expect(unused).toHaveLength(capacity);
     for (const entry of unused) {
@@ -258,6 +273,59 @@ it('dispatches through a matching warm worktree without dependency preparation',
       writeFileSync(file, '{}');
       restoreHooks = () => writeFileSync(file, content);
     }
+  }
+  if (process.env.O8_SPEED_POLICY_CONTENTION === '1') {
+    // Check the requested rename seams before the real credential-checked spawn.
+    // A separate holder releases the real SQLite lock independently of this event loop.
+    const marker = path.join(root, 'policy-locked');
+    const sqlite = createRequire(import.meta.url).resolve('better-sqlite3');
+    policyHolder = spawn(process.execPath, ['-e', `
+      const fs = require('node:fs');
+      const Database = require(${JSON.stringify(sqlite)});
+      const lock = new Database(${JSON.stringify(path.join(root, '.provider-keys.lock'))});
+      process.stdin.once('data', () => {
+        lock.exec('BEGIN EXCLUSIVE');
+        fs.writeFileSync(${JSON.stringify(marker)}, 'locked');
+        setTimeout(() => { lock.close(); process.stdin.destroy(); }, 200);
+      });
+      process.stdout.write('ready');
+    `], { env: { NODE_ENV: 'test' }, stdio: ['pipe', 'pipe', 'pipe'] });
+    await new Promise<void>((resolve, reject) => {
+      policyHolder!.once('error', reject);
+      policyHolder!.stdout!.once('data', () => resolve());
+    });
+    const credentials = await import('@/lib/runtimes/shared/owned-session/credential-spawn');
+    const original = credentials.spawnCredentialCheckedChild;
+    vi.spyOn(credentials, 'spawnCredentialCheckedChild').mockImplementationOnce(input => {
+      const workspace = input.session.repoPath;
+      const atWorkspace = (...args: string[]) => execFileSync('git', ['-C', workspace, ...args], { encoding: 'utf8' }).trim();
+      // 1. Git directory, reciprocal worktree pointer, index and HEAD binding.
+      expect(realpathSync(atWorkspace('rev-parse', '--show-toplevel'))).toBe(realpathSync(workspace));
+      const gitdir = path.resolve(workspace, readFileSync(path.join(workspace, '.git'), 'utf8').trim().slice(8));
+      expect(realpathSync(readFileSync(path.join(gitdir, 'gitdir'), 'utf8').trim())).toBe(realpathSync(path.join(workspace, '.git')));
+      expect(existsSync(path.join(gitdir, 'index'))).toBe(true);
+      expect(atWorkspace('diff', '--cached', '--exit-code')).toBe('');
+      expect(atWorkspace('symbolic-ref', 'HEAD')).toBe('refs/heads/' + lanes.findLatestLaneByPacket(packet.id)!.branch);
+      expect(atWorkspace('rev-parse', 'HEAD')).toBe(git('rev-parse', 'main'));
+      // 2. Relative dependency/bin links and the actual runtime executable.
+      expect(readlinkSync(path.join(workspace, 'node_modules/.bin/o8-fixture'))).toBe('../fixture/bin.js');
+      expect(realpathSync(path.join(workspace, 'node_modules/.bin/o8-fixture'))).toBe(path.join(workspace, 'node_modules/fixture/bin.js'));
+      expect(realpathSync(input.binary)).toBe(realpathSync(path.join(bin, 'qodercli')));
+      // 3. The moved settings inode/content and launch environment remain valid.
+      const source = unused.find(entry => entry.materializationIdentity!.inode === lstatSync(workspace).ino)!;
+      expect(lstatSync(path.join(workspace, '.claude/settings.local.json')).ino).toBe(settingsBefore.get(source.id)!.inode);
+      expect(readFileSync(path.join(workspace, '.claude/settings.local.json'), 'utf8')).toBe(settingsBefore.get(source.id)!.content);
+      expect(Object.values(input.env).some(value => unused.some(entry => value.includes(entry.materializationIdentity!.canonicalPath)))).toBe(false);
+      // 4. Failure is induced before the scheduled refill's five-second window.
+      expect(preparationCalls).toHaveBeenCalledTimes(capacity);
+      process.stdout.write('[packet-binding-proof] git,index,head,links,runtime,settings,environment,refill passed\n');
+      const child = original(input);
+      policyHolder!.stdin!.end('lock');
+      const deadline = Date.now() + 1000;
+      while (!existsSync(marker) && Date.now() < deadline) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1);
+      expect(existsSync(marker)).toBe(true);
+      return child;
+    });
   }
   const hit = warm && !invalidation && !nonRelocatable && !slowRefill;
   const launchBudgetMs = hit ? 3_000 : 60_000;
@@ -324,7 +392,20 @@ it('dispatches through a matching warm worktree without dependency preparation',
   expect(readFileSync(path.join(repo, '.env'), 'utf8')).toBe('FIXTURE_SETTING=source-only\n');
   if (hit) expect(unused.map(entry => entry.materializationIdentity!.inode)).toContain(lstatSync(workspace).ino);
   if (invalidation) expect(unused.map(entry => entry.materializationIdentity!.inode)).not.toContain(lstatSync(workspace).ino);
-  await vi.waitFor(() => expect(observeOutput(workspace)).toBeDefined(), { timeout: 10_000 });
+  try {
+    await vi.waitFor(() => expect(observeOutput(workspace)).toBeDefined(), { timeout: 10_000 });
+  } catch (error) {
+    for (const name of readdirSync(path.join(root, 'owned-qoder'))) {
+      const file = path.join(root, 'owned-qoder', name, 'session.json');
+      if (!existsSync(file)) continue;
+      const saved = JSON.parse(readFileSync(file, 'utf8'));
+      for (const run of [saved.activeRun, ...(saved.recentRuns ?? [])].filter(Boolean)) {
+        const stderr = existsSync(run.stderrPath) ? readFileSync(run.stderrPath, 'utf8') : '';
+        if (stderr.includes('SQLITE_BUSY')) process.stdout.write('[packet-runtime-refusal] SQLITE_BUSY; embedded child policy=' + stderr.includes('withO8ChildPolicy') + '\n');
+      }
+    }
+    throw error;
+  }
   const output = observeOutput(workspace)!;
   expect(realpathSync(output.cwd)).toBe(realpathSync(workspace));
   expect(output.prepared).toBe(true);
