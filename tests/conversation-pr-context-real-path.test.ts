@@ -473,10 +473,14 @@ it('binds only the durable packet owner, including archived missions and multipl
   });
   // No current mission contains them: only the durable archived registry owns these packets.
   writeOrchestratorControlPlaneState(normalizeOrchestratorMissionState({ version: 2, packets: [] }));
+  provider.read.mockImplementation(async (repo: string) => {
+    const pr = getGitHubPullRequestByNumber(repo.toLowerCase(), 7)!;
+    return { response: Response.json({ id: pr.pullRequestId, number: 7, base: { repo: { id: pr.repositoryId } }, html_url: pr.url }) };
+  });
   for (let index = 0; index < lanes.length; index++) {
     const repo = index ? `fixture/other-${sequence}` : `fixture/repo-${sequence}`;
-    recordConversationPrDelivery(lanes[index].id, `https://github.com/${repo.toUpperCase()}/pull/7`);
-    recordConversationPrDelivery(lanes[index].id, `https://github.com/${repo.toUpperCase()}/pull/7`);
+    await recordConversationPrDelivery(lanes[index].id, `https://github.com/${repo.toUpperCase()}/pull/7`);
+    await recordConversationPrDelivery(lanes[index].id, `https://github.com/${repo.toUpperCase()}/pull/7`);
   }
   closeDb();
   const links = (await history(f.threadId)).pullRequestContext.links;
@@ -485,7 +489,7 @@ it('binds only the durable packet owner, including archived missions and multipl
   expect(links.every((link: { kind: string; source: string }) => link.kind === 'delivery' && link.source === 'packet')).toBe(true);
   expect((await history(f.otherThreadId)).pullRequestContext.links).toEqual([]);
   writeOrchestratorControlPlaneState(normalizeOrchestratorMissionState({ ...state, packets: [{ ...state.packets[0], orchestratorThreadId: f.otherThreadId }] }));
-  expect(() => recordConversationPrDelivery(lanes[0].id, `https://github.com/fixture/repo-${sequence}/pull/7`)).toThrow(/inconsistent/);
+  await expect(recordConversationPrDelivery(lanes[0].id, `https://github.com/fixture/repo-${sequence}/pull/7`)).rejects.toThrow(/inconsistent/);
   expect((await history(f.otherThreadId)).pullRequestContext.links).toEqual([]);
   expect((await linksApi.DELETE(request('DELETE', { threadId: f.threadId, ...f.first, kind: 'delivery' }))).status).toBe(400);
   // A display URL can be reused after rename. A resolved lane provenance is immutable.
@@ -498,6 +502,35 @@ it('binds only the durable packet owner, including archived missions and multipl
 
 });
 
+
+it.each(['offline', 'wrong-url', 'missing-id'] as const)('leaves a %s delivery unresolved instead of trusting a stale mirror', async failure => {
+  const f = fixture();
+  const { normalizeOrchestratorMissionState } = await import('@/lib/orchestrator/store');
+  const { recordMission } = await import('@/lib/db/missions-store');
+  const { recordConversationPrDelivery } = await import('@/lib/orchestrator/pull-request-delivery');
+  const packetId = `pkt-unverified-${sequence}`;
+  const state = normalizeOrchestratorMissionState({ version: 2, missionId: `mission-unverified-${sequence}`, repoPath: root, runtime: 'codex',
+    prompt: 'Delivery', packets: [{ id: packetId, title: 'Delivery', runtime: 'codex', orchestratorThreadId: f.threadId }] });
+  recordMission({ id: state.missionId!, repoPath: root, runtime: 'codex', prompt: '', summary: '', constraints: '', totalWaves: 1, packetMeta: [], missionState: state });
+  const lane = createLane({ repoPath: root, branch: 'shared-branch', runtime: 'codex', packetId });
+  updateLane(lane.id, { prNumber: 7 });
+  const url = `https://github.com/fixture/repo-${sequence}/pull/7`;
+  provider.read.mockImplementation(async () => {
+    if (failure === 'offline') throw new Error('Offline provider');
+    return { response: Response.json({ id: failure === 'missing-id' ? undefined : f.first.pullRequestId,
+      number: 7, base: { repo: { id: f.first.repositoryId } }, html_url: failure === 'wrong-url' ? `${url}0` : url }) };
+  });
+  await expect(Promise.resolve().then(() => recordConversationPrDelivery(lane.id, url))).rejects.toThrow();
+  const reads = provider.read.mock.calls.length;
+  closeDb();
+  expect((await history(f.threadId)).pullRequestContext.links).toEqual([]);
+  // Even a later populated mirror cannot authenticate a failed original publication receipt.
+  mirror(f.first.repositoryId, `fixture/repo-${sequence}`, f.first.pullRequestId);
+  expect((await history(f.threadId)).pullRequestContext.links).toEqual([]);
+  await expect(recordConversationPrDelivery(lane.id, url)).rejects.toThrow(/not verified at publication/);
+  expect(provider.read).toHaveBeenCalledTimes(reads);
+  expect(getSqlite().prepare('SELECT packet_id FROM conversation_pr_delivery_intents WHERE lane_id = ?').get(lane.id)).toEqual({ packet_id: packetId });
+});
 
 it('imports an accessible external PR from an empty mirror through the actual resolver and targeted broker read', async () => {
   const f = fixture();

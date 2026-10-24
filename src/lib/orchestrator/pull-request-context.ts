@@ -1,7 +1,6 @@
 import 'server-only';
 
 import { getSqlite } from '@/lib/db';
-import { reconcileConversationPrDeliveries } from './pull-request-delivery';
 import { readPersistedLlmChat } from '@/lib/llm/chat-history-store';
 
 export interface PullRequestContextIdentity {
@@ -108,7 +107,6 @@ export function listPullRequestContext(
   target: { threadId: string } | PullRequestContextIdentity,
   page: { after?: number; limit?: number } = {},
 ): { links: PullRequestContextLink[]; nextCursor: number | null } {
-  reconcileConversationPrDeliveries();
   const after = page.after ?? 0;
   const limit = page.limit ?? 50;
   if (!Number.isSafeInteger(after) || after < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 200) {

@@ -735,10 +735,10 @@ async function dispatchUnlocked(
         }, actor);
         let associationNote = '';
         if (prNumber !== null) {
-          try { (await import('@/lib/orchestrator/pull-request-delivery')).recordConversationPrDelivery(command.laneId, prUrl); }
+          try { await (await import('@/lib/orchestrator/pull-request-delivery')).recordConversationPrDelivery(command.laneId, prUrl); }
           catch {
             // Publication succeeded. Never turn a local provenance failure into a duplicate PR retry.
-            associationNote = ' Conversation link could not be recorded; inspect packet ownership before attaching it manually.';
+            associationNote = ' Conversation link could not be verified; inspect packet ownership and GitHub access before attaching it manually.';
             updateLane(command.laneId, { outcomeNote: `Pull request opened: ${prUrl}.${associationNote}` }, actor);
           }
         }
