@@ -202,6 +202,12 @@
       ]
     },
     {
+      "path": "src/app/api/voice/live/gpt-live-lifecycle-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "src/app/api/voice/live/personal-pilot-real-path.test.ts",
       "reasons": [
         "executable-fixture",

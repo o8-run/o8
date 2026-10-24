@@ -4,6 +4,7 @@ import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { currentWindowLabel } from '@/lib/tauri/bridge';
 import { subscribeTauriEvent } from '@/lib/tauri/events';
 import type { ManagedVoicePresentation } from '@/components/desktop/thoughts/chat-panel/useManagedVoicePresentation';
+import { formatGptLiveUsage } from '@/lib/voice/managed-live/usage';
 
 export default function ManagedChatVoicePage() {
   const [state, setState] = useState<ManagedVoicePresentation | null>(null);
@@ -20,7 +21,7 @@ export default function ManagedChatVoicePage() {
   const phase = state?.phase === 'live' ? 'Voice live' : state?.phase === 'connecting' ? 'Connecting'
     : state?.phase === 'closing' ? 'Disconnecting' : 'Closure unconfirmed';
   const seconds = state?.connectedSeconds;
-  const usage = typeof seconds === 'number' ? `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')} connected` : 'Usage pending';
+  const usage = typeof seconds === 'number' ? formatGptLiveUsage(seconds) : 'Usage pending';
   return <AnimatePresence>{visible ? <motion.div key={state.owner} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
     transition={{ duration: reducedMotion ? 0 : 0.2 }} style={{ position: 'fixed', inset: 0, pointerEvents: 'none', overflow: 'hidden' }}>
     <motion.div animate={{ opacity: state.phase === 'live' ? 0.55 + state.level * 0.35 : 0.45 }}

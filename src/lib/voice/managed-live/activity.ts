@@ -6,6 +6,7 @@ export interface LiveActivityUsage {
 }
 export class LiveActivity {
   private lastSpeech: number;
+  private lastNarration = -Infinity;
   private seen = new Set<string>();
   readonly idleMs: number;
   private inputEnd = 0;
@@ -24,6 +25,7 @@ export class LiveActivity {
   markReady(now: number) {
     if (!this.ready) { this.ready = true; this.lastSpeech = Math.max(this.lastSpeech, now); }
   }
+  narrationDelivered(now: number) { this.lastNarration = Math.max(this.lastNarration, now); }
   observe(event: Record<string, unknown>, now: number) {
     const usage = event.usage as { seconds?: unknown } | undefined;
     if (!this.providerFinal && (event.type === 'session.usage.updated' || event.type === 'session.closed')
@@ -61,7 +63,7 @@ export class LiveActivity {
   }
   shouldClose(now: number, inputEnergy: boolean, outputAudible: boolean): boolean {
     if (outputAudible) this.lastAudibleOutput = now;
-    if (now - this.lastSpeech < this.idleMs) return false;
+    if (now - Math.max(this.lastSpeech, this.lastNarration) < this.idleMs) return false;
     // Energy only corroborates recognized speech for a finite grace; noise never resets a clock.
     if (inputEnergy && now - this.lastInputSpeech < this.idleMs + 5_000) return false;
     if (now - this.lastAudibleOutput < 1_000 && now - this.lastOutputSpeech < this.idleMs + 15_000) return false;
