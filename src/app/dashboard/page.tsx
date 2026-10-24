@@ -1353,6 +1353,15 @@ function DashboardInner() {
     );
   }, []);
 
+  useEffect(() => {
+    const open = (event: Event) => {
+      const detail = (event as CustomEvent<{ threadId?: string; title?: string }>).detail;
+      if (detail?.threadId && /^thoughts-[A-Za-z0-9_-]{1,120}$/.test(detail.threadId)) handleOpenHistoryChatFromPanel(detail.threadId, detail.title || detail.threadId);
+    };
+    window.addEventListener('o8:open-pr-conversation', open);
+    return () => window.removeEventListener('o8:open-pr-conversation', open);
+  }, [handleOpenHistoryChatFromPanel]);
+
   const wsConnectionState = useWsConnectionState();
   const wsConnectedRef = useRef<typeof wsConnectionState>('disconnected');
   wsConnectedRef.current = wsConnectionState;

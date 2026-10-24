@@ -1,3 +1,4 @@
+import { CONVERSATION_PR_TOOLS, handleConversationPrs } from './operator-handlers/conversation-prs';
 import { safeErrorText } from '@/lib/mcp/api-error';
 import { discoverMcp, isModernMcpRequest, modernMcpCall, modernMcpError, modernMcpResult } from './operator-mcp-protocol';
 import { nativeReadGeneration } from '@/lib/mcp/native-read-publication';
@@ -270,6 +271,7 @@ async function handleUserContext(): Promise<McpToolResult> {
 }
 
 const TOOLS: McpTool[] = [
+  ...CONVERSATION_PR_TOOLS,
   ...STATUS_TOOLS.filter((tool) => tool.name === 'o8_send'),
   ...STATUS_TOOLS.filter((tool) => tool.name === 'o8_status'),
   ...USER_CONTEXT_TOOLS,
@@ -354,6 +356,7 @@ const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<M
   o8_approve: handleApprove,
   o8_reject: handleReject,
   o8_history: handleHistory,
+  o8_conversation_prs: handleConversationPrs,
   o8_lane_events: handleLaneEvents,
   o8_packet_transcript: handleTranscript,
   steer_packet: handleSteerPacket,

@@ -1164,6 +1164,11 @@ describe('requireApproval merge governance through the real command path', () =>
   it('pushes the exact packet and opens a PR after a current spoken review', async () => {
     await updateOperatorDefaults({ requireApproval: 'always' });
     const { lane, repo, reviewedHeadSha } = await createStandardLane('current-spoken-pr');
+    const threadId = `thoughts-delivery-${lane.id}`;
+    const { writePersistedLlmChat } = await import('@/lib/llm/chat-history-store');
+    writePersistedLlmChat(threadId, { title: 'Delivery owner', messages: [] });
+    persistDispatcherMission(lane.packetId!, repo, threadId);
+
     const result = await dispatch({ verb: 'create_pr', laneId: lane.id, actor: 'orchestrator' });
     const approval = listApprovalsForContext({ laneId: lane.id })
       .find((candidate) => candidate.id === result.approvalId)!;
@@ -1211,6 +1216,21 @@ describe('requireApproval merge governance through the real command path', () =>
 
     expect(git(repo, ['rev-parse', `origin/${lane.branch}`])).toBe(reviewedHeadSha);
     expect(getLane(lane.id)).toMatchObject({ status: 'reviewing', outcome: 'pr_opened' });
+    // The actual create_pr command journals ownership even before provider IDs arrive.
+    expect(getSqlite().prepare('SELECT thread_id, packet_id FROM conversation_pr_delivery_intents WHERE lane_id = ?').get(lane.id))
+      .toEqual({ thread_id: threadId, packet_id: lane.packetId });
+    const { listPullRequestContext } = await import('@/lib/orchestrator/pull-request-context');
+    expect(listPullRequestContext({ threadId }).links).toEqual([]);
+    const { upsertGitHubPullRequest } = await import('@/lib/github-broker/store');
+    upsertGitHubPullRequest({ repositoryId: 9002366, pullRequestId: 9001218, repoFullName: 'hurttlocker/o8', number: 1218,
+      title: 'Delivery', state: 'open', author: { login: 'fixture' }, body: '', headRefName: lane.branch, baseRefName: 'main',
+      additions: 1, deletions: 0, changedFiles: 1, reviewDecision: null, statusCheckRollup: [], url: 'https://github.com/hurttlocker/o8/pull/1218',
+      createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z', closedAt: null, mergedAt: null });
+    expect(listPullRequestContext({ threadId }).links).toEqual([expect.objectContaining({
+      kind: 'delivery', source: 'packet', packetId: lane.packetId, laneId: lane.id, repositoryId: 9002366, pullRequestId: 9001218, number: 1218,
+    })]);
+    expect(listPullRequestContext({ threadId }).links).toHaveLength(1);
+
   }, 30_000);
 
   it('keeps a receipted approval pending when the request changes merge strategy', async () => {

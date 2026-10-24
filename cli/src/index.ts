@@ -41,6 +41,7 @@ import {
   runVerify,
 } from './commands/harness.js';
 import { runInbox } from './commands/inbox.js';
+import { runConversationPrs } from './commands/conversation-prs.js';
 import { runHistory } from './commands/history.js';
 import { runLead } from './commands/lead.js';
 import { runLaneTouches } from './commands/lane.js';
@@ -223,6 +224,7 @@ commands:
   version              CLI version + connected server version
   doctor               verify port + token resolution, ping server; --repair reinstalls the o8 CLI symlink
   status               snapshot: running packets, lanes, merges, approvals
+  conversation-prs list|add|remove|reverse  durable conversation PR provenance
   history <thread-id>  continuous orchestrator transcript + audited handoff seams
   lead start           create a persistent lead (--repo --backend --model --effort --brief --idempotency-key)
   lead send            send a replay-safe turn to the same lead
@@ -413,6 +415,8 @@ async function dispatch(args: ParsedArgs): Promise<number> {
       return runDoctor(args.mode, args.rest);
     case 'status':
       return runStatus(args.mode);
+    case 'conversation-prs':
+      return runConversationPrs(args.mode, singleLevelArgs(secondary, args.rest, args.secondaryBeforeRest));
     case 'history':
       return runHistory(args.mode, singleLevelArgs(secondary, args.rest, args.secondaryBeforeRest));
     case 'lead':

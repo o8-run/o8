@@ -158,7 +158,7 @@ export function repairComposerPreamblePollution(): void {
   });
 }
 
-function readProjectedThread(tabId: string): MobileOrchestratorThread | null {
+export function readProjectedThread(tabId: string): MobileOrchestratorThread | null {
   const record = readHistoryRecord(tabId);
   if (!record) return null;
   try {

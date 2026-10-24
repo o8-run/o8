@@ -113,6 +113,7 @@ const ALLOWLIST_ANY_METHOD: RegExp[] = [
 ];
 
 const DEVICE_CAPABILITIES: Array<{ methods: ReadonlySet<string>; path: RegExp }> = [
+  { methods: new Set(['GET']), path: /^\/api\/mobile\/conversation-pr-context\/?$/ },
   { methods: new Set(['POST']), path: /^\/api\/mobile\/ripple\/resolve\/?$/ },
   // Phone-facing routes only. Keep internal desktop/ws-server routes out of
   // this list: devices*, push-url, symon/tool, and ws-token all require the

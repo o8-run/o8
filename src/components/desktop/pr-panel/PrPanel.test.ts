@@ -21,7 +21,7 @@ let client: QueryClient;
 const provide = (child: ReactNode) => createElement(QueryClientProvider, { client }, child);
 let host: HTMLDivElement;
 let root: Root;
-let fetchMock: ReturnType<typeof vi.fn>;
+let fetchMock: ReturnType<typeof vi.fn<(url: string, init?: RequestInit) => Promise<Response>>>;
 let onClose: ReturnType<typeof vi.fn<() => void>>;
 const settleTimeline = () => act(async () => {
   if (vi.isFakeTimers()) await vi.advanceTimersByTimeAsync(1);
@@ -33,7 +33,7 @@ beforeEach(() => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true }); vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener() {}, removeEventListener() {} }));
   client = getQueryClient(); client.clear();
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
-  onClose = vi.fn(); fetchMock = vi.fn(); vi.stubGlobal('fetch', fetchMock);
+  onClose = vi.fn(); fetchMock = vi.fn(); vi.stubGlobal('fetch', (url: string, init?: RequestInit) => String(url).startsWith('/api/orchestrator/pull-request-context') ? Promise.resolve(Response.json({ ok: true, result: { links: [], nextCursor: null } })) : fetchMock(url, init));
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
 });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); client.clear(); vi.unstubAllGlobals(); });

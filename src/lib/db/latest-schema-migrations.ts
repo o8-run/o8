@@ -1,3 +1,4 @@
+import { ensureV74ConversationPrProvenanceSchema } from '@/lib/db/v74-conversation-pr-provenance-migration';
 import type Database from 'better-sqlite3';
 import { ensureV36HarnessSchema } from '@/lib/db/v36-harness-migration';
 import { ensureV37WorkspaceSnapshotSchema } from '@/lib/db/v37-workspace-snapshot-migration';
@@ -89,4 +90,5 @@ export function ensurePostAutomationSchemas(sqlite: Database.Database): void {
   ensureV71ComposerQueueSchema(sqlite);
   ensureV72WorkerCorrectionsSchema(sqlite);
   ensureV73ConversationPrContextSchema(sqlite);
+  ensureV74ConversationPrProvenanceSchema(sqlite);
 }

@@ -54,6 +54,7 @@ import type {
   MobilePalette,
 } from '@/app/mobile/mobile-approvals-shared';
 import type { MobileRepoOption } from '@/app/mobile/mobile-chat-repos';
+import { ConversationPullRequests } from '@/components/conversation-prs/ConversationPullRequests';
 import { FirstConversationCard } from './orchestrator/FirstConversationCard';
 
 interface OrchestratorViewProps {
@@ -207,6 +208,17 @@ export function OrchestratorView({
   // in the orchestrator's file. The mobile-side persistence now writes
   // user + assistant entries under the local mint id (see useOrchestratorMobile),
   // so the local thread is the canonical record. Keep it.
+
+  // Direct PR navigation can target an archived or older conversation outside the recent list.
+  useEffect(() => {
+    if (!activeThreadId || visibleThreads.some(thread => thread.id === activeThreadId)) return;
+    const controller = new AbortController();
+    void fetch(`/api/mobile/conversation-pr-context?threadId=${encodeURIComponent(activeThreadId)}`, { signal: controller.signal })
+      .then(response => response.json()).then(body => {
+        if (!controller.signal.aborted && body.ok && body.result?.thread) setLocalThread(body.result.thread);
+      }).catch(() => {});
+    return () => controller.abort();
+  }, [activeThreadId, visibleThreads, setLocalThread]);
 
   const activeThread = useMemo(
     () => visibleThreads.find((thread) => thread.id === activeThreadId) ?? null,
@@ -674,6 +686,7 @@ export function OrchestratorView({
         {errorNote ? <p style={noteStyle}>{errorNote}</p> : null}
       </div>
 
+      {activeThread ? <ConversationPullRequests threadId={activeThread.id} readOnly /> : null}
       {activeThread ? (
         <div style={composerWrapStyle}>
           <div style={composerInputRowStyle}>

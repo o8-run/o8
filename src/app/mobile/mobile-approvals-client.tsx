@@ -33,7 +33,8 @@ import {
   type MobileView,
 } from './mobile-approvals-shared';
 import { MobileSettingsSheet } from '@/components/mobile/MobileSettingsSheet';
-import { MobileSearchSheet, useMobileSearchHotkey, type MobileSearchTarget } from '@/components/mobile/MobileSearchSheet';
+import { useMobileSearchNavigation } from '@/components/mobile/useMobileSearchNavigation';
+import { MobileSearchSheet, useMobileSearchHotkey } from '@/components/mobile/MobileSearchSheet';
 import {
   getMobileRepoLabel,
   normalizeMobileRepoList,
@@ -422,29 +423,7 @@ export function MobileApprovalsClient({
     setCurrentTabId(null);
   }, []);
 
-  const handleSearchSelect = useCallback((target: MobileSearchTarget) => {
-    if (target.category === 'chat') {
-      // Open the assistant chat for this saved tabId. Mobile chat uses the
-      // tabId directly (mobile-chat-*).
-      setActiveView('chat');
-      setCurrentTabId(target.id);
-      return;
-    }
-    if (target.category === 'thread') {
-      // Persist the active thread id so OrchestratorView reads it on mount,
-      // then route to the orchestrator surface.
-      try {
-        window.localStorage.setItem('o8:mobile:orchestrator-active-thread', target.id);
-      } catch {
-        // ignore — view falls back to recent thread list
-      }
-      setActiveView('orchestrator');
-      return;
-    }
-    if (target.category === 'activity') {
-      setActiveView('activity');
-    }
-  }, []);
+  const handleSearchSelect = useMobileSearchNavigation(setActiveView, setCurrentTabId);
 
   // Global "/" hardware-keyboard shortcut to open search.
   const openSearchSheet = useCallback(() => setSearchSheetOpen(true), []);

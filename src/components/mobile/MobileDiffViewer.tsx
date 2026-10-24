@@ -10,6 +10,7 @@
  * editing diffs lives on desktop.
  */
 
+import { PullRequestConversations } from '@/components/conversation-prs/PullRequestConversations';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { useTheme } from './ThemeContext';
@@ -364,6 +365,7 @@ export const MobileDiffViewer = memo(function MobileDiffViewer({
           </button>
         </div>
 
+        {source?.kind === 'pr' ? <PullRequestConversations repo={source.repo} number={source.number} active={open} mobile onOpen={onClose} /> : null}
         {parsedFiles.length > 1 ? (
           <div
             style={{

@@ -1,6 +1,7 @@
 'use client';
 
 import { memo, useCallback, useId, useLayoutEffect, useRef, useState } from 'react';
+import { PullRequestConversations } from '@/components/conversation-prs/PullRequestConversations';
 import { PrPanelHeader } from './PrPanelHeader';
 import { PrPanelTabs } from './PrPanelTabs';
 import { PrChangesToolbar } from './PrChangesToolbar';
@@ -130,6 +131,7 @@ export const PrPanel = memo(function PrPanel({ prNumber, repoSlug, repoPath, onC
       <PrPanelHeader detail={detail} repoSlug={repoSlug} repoPath={repoPath} showDiffStats={active && view.activeTab !== 'changes'} onRefresh={refresh} onComposerMode={changeComposerMode} onAsk={(prompt) => {
         if (repoPath) openComposerBrain({ repoPath, prompt, context: prBrainContext(detail, repoSlug) });
       }} />
+      <PullRequestConversations repo={detail.resolvedRepo || repoSlug || ''} number={detail.number} active={active} />
       {error ? <div role="alert" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 12, fontSize: 11, color: 'var(--t-danger)' }}>{error}<button type="button" onClick={refresh} style={{ border: 0, borderRadius: 6, padding: 6, background: 'var(--t-hover)', color: 'var(--t-text)', font: 'inherit', cursor: 'pointer' }}>Retry</button></div> : null}
       <GithubReadStatus error={error} updatedAt={updatedAt} />
       <PrPanelTabs

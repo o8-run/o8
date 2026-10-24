@@ -5,6 +5,13 @@ import { NextRequest } from 'next/server';
 import { createHmac } from 'node:crypto';
 import { afterAll, expect, it, vi } from 'vitest';
 
+const provider = vi.hoisted(() => ({ read: vi.fn() }));
+vi.mock('@/lib/github-broker/auth', async importOriginal => ({
+  ...await importOriginal<typeof import('@/lib/github-broker/auth')>(),
+  hasGitHubBrokerAccess: () => true,
+  githubInstallationFetch: provider.read,
+}));
+
 const root = mkdtempSync(path.join(tmpdir(), 'o8-conversation-pr-context-'));
 vi.stubEnv('O8_DATA_DIR', root);
 vi.stubEnv('CORTEX_IDE_DATA_DIR', root);
@@ -311,4 +318,201 @@ it('pins signed webhook repository identity before an operator attaches the PR',
   expect(getSqlite().prepare('SELECT repository_id FROM github_pull_requests WHERE pull_request_id = ?')
     .get(f.first.pullRequestId)).toEqual({ repository_id: f.first.repositoryId });
   expect((await linksApi.POST(request('POST', { threadId: f.threadId, ...f.first }))).status).toBe(201);
+});
+
+it('exposes conversation PR association parity in the actual operator MCP catalog', async () => {
+  const { handleOperatorMcpMessage } = await import('@/lib/mcp/operator-mcp-host');
+  const response = await handleOperatorMcpMessage({ jsonrpc: '2.0', id: 2366, method: 'tools/list' }, 'full');
+  expect((response?.result as { tools: Array<{ name: string }> }).tools.map(tool => tool.name)).toContain('o8_conversation_prs');
+});
+
+it('persists independent context, review and imported associations without changing primary delivery', async () => {
+  const f = fixture();
+  const lane = createLane({ repoPath: root, branch: 'shared-branch', runtime: 'codex' });
+  updateLane(lane.id, { prNumber: 99 });
+  const before = getLane(lane.id);
+  for (const kind of ['context', 'review', 'import']) {
+    const response = await linksApi.POST(request('POST', { threadId: f.threadId, ...f.first, kind }));
+    expect(response.status).toBe(201);
+    expect((await response.json()).result.link).toMatchObject({ kind, source: 'operator' });
+  }
+  expect((await linksApi.POST(request('POST', { threadId: f.threadId, ...f.first, kind: 'import' }))).status).toBe(200);
+  for (const override of [{ kind: 'delivery' }, { source: 'packet' }]) expect((await linksApi.POST(request('POST', { threadId: f.threadId, ...f.first, ...override }))).status).toBe(400);
+  await linksApi.DELETE(request('DELETE', { threadId: f.threadId, ...f.first, kind: 'review' }));
+  closeDb();
+  expect((await history(f.threadId)).pullRequestContext.links.map((link: { kind: string }) => link.kind)).toEqual(['context', 'import']);
+  expect((await history(f.otherThreadId)).pullRequestContext.links).toEqual([]);
+  expect(getLane(lane.id)).toEqual(before);
+});
+
+it('resolves provider identities and refuses mixed or wrong repository addresses', async () => {
+  const f = fixture();
+  const resolved = await linksApi.GET(request('GET', undefined, `?repo=fixture/repo-${sequence}&number=7&resolve=1`));
+  expect((await resolved.json()).result.identity).toEqual(f.first);
+  for (const query of [`?repo=fixture/missing&number=7`, `?repo=fixture/repo-${sequence}&number=7&repositoryId=${f.second.repositoryId}`, `?threadId=${f.threadId}&repo=fixture/repo-${sequence}`, '?threadId=../escape']) {
+    expect((await linksApi.GET(request('GET', undefined, query))).status).toBeGreaterThanOrEqual(400);
+  }
+  getSqlite().prepare('UPDATE github_pull_requests SET url = ? WHERE pull_request_id = ?').run('https://enterprise.example/fixture/pr/pull/7', f.first.pullRequestId);
+  expect((await linksApi.GET(request('GET', undefined, `?repo=fixture/repo-${sequence}&number=7&resolve=1`))).status).toBe(409);
+});
+
+it('gives a paired mobile read the same links and archived thread, but no mutation capability', async () => {
+  const { GET: mobileGet } = await import('@/app/api/mobile/conversation-pr-context/route');
+  const { createHash } = await import('node:crypto');
+  const f = fixture();
+  const token = 'fixture-device-context-read';
+  const { readActiveTokenHashes, writeActiveTokenHashes } = await import('@/lib/mobile/device-token-file');
+  writeActiveTokenHashes([createHash('sha256').update(token).digest('hex')]);
+  expect(readActiveTokenHashes().has(createHash('sha256').update(token).digest('hex'))).toBe(true);
+  persistCanonicalChatHistoryRecord(f.threadId, { ...JSON.parse(readFileSync(getCanonicalChatHistoryPath(f.threadId), 'utf8')), archivedAt: '2026-01-02T00:00:00Z' });
+  await linksApi.POST(request('POST', { threadId: f.threadId, ...f.first, kind: 'import' }));
+  const mobileRequest = (bearer: string, query = `?threadId=${f.threadId}`, method = 'GET') => new NextRequest(`http://localhost/api/mobile/conversation-pr-context${query}`, { method, headers: { authorization: `Bearer ${bearer}`, host: 'localhost' } });
+  const mobile = await mobileGet(mobileRequest(token));
+  expect(mobile.status).toBe(200);
+  const body = await mobile.json();
+  expect(body.result.links).toEqual((await history(f.threadId)).pullRequestContext.links);
+  expect(body.result.thread).toMatchObject({ id: f.threadId });
+  expect(panelGateMiddleware(mobileRequest(token)).headers.get('x-middleware-next')).toBe('1');
+  expect(panelGateMiddleware(mobileRequest(token, '', 'POST')).status).toBe(403);
+  expect((await linksApi.POST(request('POST', { threadId: f.threadId, ...f.second }, '', token))).status).toBe(403);
+  for (const bearer of ['', 'invalid', getOrCreateLocalWorkerToken()]) expect((await mobileGet(mobileRequest(bearer))).status).toBe(403);
+});
+
+it('roundtrips the built CLI and registered MCP tool through the real API and persisted reverse links', async () => {
+  const { createServer } = await import('node:http');
+  const { spawn } = await import('node:child_process');
+  const { build } = await import('esbuild');
+  const f = fixture();
+  provider.read.mockImplementation(async (repo: string, resource: string) => {
+    const current = getGitHubPullRequestByNumber(repo, 7)!;
+    expect(resource).toBe(`/repos/${repo}/pulls/7`);
+    return { installation: { id: 2366 }, response: Response.json({ id: current.pullRequestId, number: 7, title: current.title, state: 'open',
+      base: { repo: { id: current.repositoryId }, ref: 'main' }, head: { ref: 'shared-branch' }, html_url: current.url }) };
+  });
+  const calls: string[] = [];
+  const server = createServer(async (incoming, outgoing) => {
+    calls.push(`${incoming.method} ${incoming.url}`);
+    let body = ''; for await (const chunk of incoming) body += chunk;
+    if (!incoming.url?.startsWith('/api/orchestrator/pull-request-context')) { outgoing.writeHead(404).end(); return; }
+    const req = new NextRequest(`http://localhost${incoming.url}`, { method: incoming.method, headers: { host: 'localhost', authorization: incoming.headers.authorization ?? '' }, ...(body ? { body } : {}) });
+    const handler = incoming.method === 'POST' ? linksApi.POST : incoming.method === 'DELETE' ? linksApi.DELETE : linksApi.GET;
+    const response = await handler(req);
+    outgoing.writeHead(response.status, { 'content-type': 'application/json' }).end(await response.text());
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const port = (server.address() as import('node:net').AddressInfo).port;
+  try {
+    const bundle = path.join(root, 'o8-cli.mjs');
+    await build({ entryPoints: [path.join(process.cwd(), 'cli/src/index.ts')], outfile: bundle, bundle: true, platform: 'node', format: 'esm', target: 'node22',
+      define: { __O8_CLI_VERSION__: '"fixture"' }, banner: { js: "import { createRequire as fixtureRequire } from 'node:module'; const require = fixtureRequire(import.meta.url); globalThis.require = require;" } });
+    const run = async (args: string[], token = getOrCreateWsToken()) => {
+      const env: NodeJS.ProcessEnv = { ...process.env, O8_API_PORT: String(port), O8_API_TOKEN: token };
+      delete env.O8_WORKER_TOKEN; delete env.O8_WORKER_PACKET_ID; delete env.O8_SPECTATOR_TOKEN;
+      const child = spawn(process.execPath, [bundle, 'conversation-prs', ...args], { env, stdio: ['ignore', 'pipe', 'pipe'] });
+      let stdout = ''; let stderr = '';
+      child.stdout.on('data', chunk => { stdout += chunk; }); child.stderr.on('data', chunk => { stderr += chunk; });
+      const code = await new Promise<number | null>((resolve, reject) => { child.on('error', reject); child.on('close', resolve); });
+      return { code, stdout, stderr };
+    };
+    const address = ['--repo', `fixture/repo-${sequence}`, '--number', '7'];
+    const add = await run(['add', '--thread', f.threadId, ...address, '--kind', 'import']);
+    expect(add.code, add.stderr).toBe(0);
+    expect(JSON.parse(add.stdout).result.link).toMatchObject({ kind: 'import', source: 'operator' });
+    closeDb();
+    const cli = await run(['list', '--thread', f.threadId]);
+    expect(cli.code, cli.stderr).toBe(0);
+    const expected = JSON.parse(cli.stdout).result.links;
+    const { setApiBase } = await import('@/lib/mcp/operator-handlers/shared');
+    const { handleOperatorMcpMessage } = await import('@/lib/mcp/operator-mcp-host');
+    setApiBase(`http://127.0.0.1:${port}`);
+    const mcp = await handleOperatorMcpMessage({ jsonrpc: '2.0', id: 2366, method: 'tools/call', params: { name: 'o8_conversation_prs', arguments: { action: 'list', threadId: f.threadId } } }, 'full');
+    const result = mcp?.result as { content: Array<{ text: string }>; isError?: boolean };
+    expect(result.isError, result.content[0].text).not.toBe(true);
+    expect(JSON.parse(result.content[0].text).result.links).toEqual(expected);
+    const reverse = await run(['reverse', ...address]);
+    expect(JSON.parse(reverse.stdout).result.links).toEqual(expected);
+    const denied = await run(['add', '--thread', f.otherThreadId, ...address], getOrCreateLocalWorkerToken());
+    expect(denied.code).toBe(3);
+    expect((await history(f.otherThreadId)).pullRequestContext.links).toEqual([]);
+    const wrong = await run(['add', '--thread', f.threadId, '--repository-id', String(f.second.repositoryId), '--pr-id', String(f.first.pullRequestId), '--number', '7']);
+    expect(wrong.code).toBe(5);
+    const callMcp = async (args: Record<string, unknown>) => {
+      const response = await handleOperatorMcpMessage({ jsonrpc: '2.0', id: 2367, method: 'tools/call', params: { name: 'o8_conversation_prs', arguments: args } }, 'full');
+      const result = response?.result as { content: Array<{ text: string }>; isError?: boolean };
+      expect(result.isError, result.content[0].text).not.toBe(true);
+      return JSON.parse(result.content[0].text);
+    };
+    expect((await callMcp({ action: 'add', threadId: f.threadId, ...f.first, kind: 'review' })).result.created).toBe(true);
+    const providerReads = provider.read.mock.calls.length;
+    provider.read.mockRejectedValue(new Error('Offline provider'));
+    expect((await callMcp({ action: 'remove', threadId: f.threadId, repo: `fixture/repo-${sequence}`, number: 7, kind: 'review' })).result.removed).toBe(true);
+    const remove = await run(['remove', '--thread', f.threadId, ...address, '--kind', 'import']);
+    expect(provider.read).toHaveBeenCalledTimes(providerReads);
+    expect(remove.code, remove.stderr).toBe(0);
+    closeDb();
+    expect((await history(f.threadId)).pullRequestContext.links).toEqual([]);
+    expect(calls.every(call => /^(GET|POST|DELETE) \/api\/orchestrator\/pull-request-context/.test(call))).toBe(true);
+  } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }
+}, 30_000);
+
+
+it('binds only the durable packet owner, including archived missions and multiple primary deliveries', async () => {
+  const f = fixture();
+  const { normalizeOrchestratorMissionState } = await import('@/lib/orchestrator/store');
+  const { writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
+  const { recordMission } = await import('@/lib/db/missions-store');
+  const { recordConversationPrDelivery } = await import('@/lib/orchestrator/pull-request-delivery');
+  const packets = [1, 2].map(index => ({ id: `pkt-context-${sequence}-${index}`, title: 'Delivery', runtime: 'codex', orchestratorThreadId: f.threadId }));
+  const state = normalizeOrchestratorMissionState({ version: 2, missionId: `mission-context-${sequence}`, repoPath: root, runtime: 'codex', prompt: 'Delivery', packets });
+  recordMission({ id: state.missionId!, repoPath: root, runtime: 'codex', prompt: '', summary: '', constraints: '', totalWaves: 1, packetMeta: [], missionState: state });
+  getSqlite().prepare('UPDATE missions SET archived_at = ? WHERE id = ?').run(Date.now(), state.missionId);
+  const lanes = packets.map((packet, index) => {
+    const lane = createLane({ repoPath: root, branch: 'shared-branch', runtime: 'codex', packetId: packet.id });
+    updateLane(lane.id, { prNumber: [f.first, f.second][index].number });
+    return lane;
+  });
+  // No current mission contains them: only the durable archived registry owns these packets.
+  writeOrchestratorControlPlaneState(normalizeOrchestratorMissionState({ version: 2, packets: [] }));
+  for (let index = 0; index < lanes.length; index++) {
+    const repo = index ? `fixture/other-${sequence}` : `fixture/repo-${sequence}`;
+    recordConversationPrDelivery(lanes[index].id, `https://github.com/${repo.toUpperCase()}/pull/7`);
+    recordConversationPrDelivery(lanes[index].id, `https://github.com/${repo.toUpperCase()}/pull/7`);
+  }
+  closeDb();
+  const links = (await history(f.threadId)).pullRequestContext.links;
+  expect(links).toHaveLength(2);
+  expect(links.map((link: { packetId: string }) => link.packetId)).toEqual(packets.map(packet => packet.id));
+  expect(links.every((link: { kind: string; source: string }) => link.kind === 'delivery' && link.source === 'packet')).toBe(true);
+  expect((await history(f.otherThreadId)).pullRequestContext.links).toEqual([]);
+  writeOrchestratorControlPlaneState(normalizeOrchestratorMissionState({ ...state, packets: [{ ...state.packets[0], orchestratorThreadId: f.otherThreadId }] }));
+  expect(() => recordConversationPrDelivery(lanes[0].id, `https://github.com/fixture/repo-${sequence}/pull/7`)).toThrow(/inconsistent/);
+  expect((await history(f.otherThreadId)).pullRequestContext.links).toEqual([]);
+  expect((await linksApi.DELETE(request('DELETE', { threadId: f.threadId, ...f.first, kind: 'delivery' }))).status).toBe(400);
+  // A display URL can be reused after rename. A resolved lane provenance is immutable.
+  mirror(f.first.repositoryId, `fixture/renamed-delivery-${sequence}`, f.first.pullRequestId);
+  mirror(f.first.repositoryId + 10000, `fixture/repo-${sequence}`, f.first.pullRequestId + 100000);
+  closeDb();
+  const afterReuse = (await history(f.threadId)).pullRequestContext.links;
+  expect(afterReuse).toHaveLength(2);
+  expect(afterReuse[0]).toMatchObject({ repositoryId: f.first.repositoryId, pullRequestId: f.first.pullRequestId, repositoryFullName: `fixture/renamed-delivery-${sequence}` });
+
+});
+
+
+it('imports an accessible external PR from an empty mirror through the actual resolver and targeted broker read', async () => {
+  const f = fixture();
+  const repo = `external/import-${sequence}`;
+  const identity = { host: 'github.com', repositoryId: 82366, pullRequestId: 823660, number: 103 };
+  expect(getGitHubPullRequestByNumber(repo, 103)).toBeNull();
+  provider.read.mockImplementation(async (requested: string, resource: string, init?: RequestInit) => {
+    expect(requested).toBe(repo); expect(resource).toBe(`/repos/${repo}/pulls/103`); expect(init?.method ?? 'GET').toBe('GET');
+    return { installation: { id: 2366 }, response: Response.json({ id: identity.pullRequestId, number: 103, title: 'External PR', state: 'open',
+      base: { ref: 'main', repo: { id: identity.repositoryId } }, head: { ref: 'external-review' }, html_url: `https://github.com/${repo}/pull/103`, user: { login: 'fixture-author' } }) };
+  });
+  const resolved = await linksApi.GET(request('GET', undefined, `?repo=${repo}&number=103&resolve=1&refresh=1`));
+  expect(resolved.status).toBe(200); expect((await resolved.json()).result.identity).toEqual(identity);
+  expect((await linksApi.POST(request('POST', { threadId: f.threadId, ...identity, kind: 'import' }))).status).toBe(201);
+  closeDb();
+  expect((await history(f.threadId)).pullRequestContext.links).toEqual([expect.objectContaining({ ...identity, repositoryFullName: repo, kind: 'import', source: 'operator' })]);
+  expect(getGitHubPullRequestByNumber(repo, 103)).toMatchObject({ repositoryId: identity.repositoryId, pullRequestId: identity.pullRequestId });
 });

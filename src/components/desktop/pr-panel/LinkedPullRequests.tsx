@@ -12,6 +12,7 @@ import { repoSlugFromRemote } from '../canvas-utils';
 import { pullRequestStackRows } from '@/lib/github-broker/pull-request-stacks';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
 import { parsePullRequestLink, linkedPrIdentity } from './linked-pr-store';
+import { ConversationPullRequests } from '@/components/conversation-prs/ConversationPullRequests';
 import { useLinkedPullRequests } from './useLinkedPullRequests';
 
 export function LinkedPullRequests({ context, tabId, repoPath, repos, active, onOpen }: {
@@ -71,6 +72,7 @@ export function LinkedPullRequests({ context, tabId, repoPath, repos, active, on
     } catch (cause) { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : 'The pull request could not be linked.'); }
     finally { if (requestRef.current === controller) { requestRef.current = null; setBusy(false); } }
   };
+  if (/^thread:thoughts-[A-Za-z0-9_-]{1,120}$/.test(context)) return <ConversationPullRequests threadId={context.slice(7)} active={active} repo={slug} legacyLinks={links} onOpen={onOpen} />;
   return <section aria-label="Linked pull requests" style={{ paddingTop: 8, paddingRight: 12, paddingBottom: 8, paddingLeft: 12, borderBottom: '1px solid var(--t-divider-subtle)', flexShrink: 0 }}>
     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
       <button type="button" aria-expanded={expanded} onClick={() => setExpanded((value) => !value)} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: 0, border: 0, background: 'transparent', color: 'var(--t-text-muted)', fontFamily: 'inherit', fontSize: 11, fontWeight: 300, cursor: 'pointer' }}><GitPullRequest size={12} />Linked PRs{links.length ? ` · ${links.length}` : ''}</button>

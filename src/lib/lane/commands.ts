@@ -733,9 +733,18 @@ async function dispatchUnlocked(
           outcome: 'pr_opened',
           outcomeNote: `Pull request opened: ${prUrl}`,
         }, actor);
+        let associationNote = '';
+        if (prNumber !== null) {
+          try { (await import('@/lib/orchestrator/pull-request-delivery')).recordConversationPrDelivery(command.laneId, prUrl); }
+          catch {
+            // Publication succeeded. Never turn a local provenance failure into a duplicate PR retry.
+            associationNote = ' Conversation link could not be recorded; inspect packet ownership before attaching it manually.';
+            updateLane(command.laneId, { outcomeNote: `Pull request opened: ${prUrl}.${associationNote}` }, actor);
+          }
+        }
         setLaneStatus(command.laneId, 'reviewing', actor, 'pr_created');
         const updated = getLane(command.laneId);
-        return { ok: true, laneId: command.laneId, note: `PR created: ${prUrl}`, lane: updated ?? undefined };
+        return { ok: true, laneId: command.laneId, note: `PR created: ${prUrl}${associationNote}`, lane: updated ?? undefined };
         } catch (err) {
           setLaneStatus(command.laneId, 'reviewing', 'system', 'pr_failed');
           const message = err instanceof Error ? err.message : 'PR creation failed.';
