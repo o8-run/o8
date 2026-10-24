@@ -2,6 +2,7 @@
 
 
 import React from 'react';
+import { GithubReadStatus } from '@/components/github/GithubReadStatus';
 import { ExternalLink, RefreshCw } from '../lucide-shims';
 import { LIGHT_CANVAS_VARS } from '../canvas-utils';
 import type { PRViewerProps } from './types';
@@ -17,9 +18,10 @@ import { openExternalUrl } from '@/lib/desktop/open-external';
 export function PRViewer({
   prNumber,
   repo,
+  active = true,
   onInjectChatContext,
 }: PRViewerProps) {
-  const data = usePRData(prNumber, repo, onInjectChatContext);
+  const data = usePRData(prNumber, repo, onInjectChatContext, active);
 
   if (data.loading) {
     return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: 'var(--t-text-muted)' }}>Loading PR...</div>;
@@ -92,6 +94,7 @@ export function PRViewer({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#ffffff', ...LIGHT_CANVAS_VARS }}>
+      <GithubReadStatus error={data.refreshError} updatedAt={data.updatedAt} />
       <PRHeader
         pr={data.pr}
         activeSection={data.activeSection}

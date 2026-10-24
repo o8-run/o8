@@ -147,7 +147,7 @@ export const ActivityFeed = memo(function ActivityFeed({
     });
   }, [agentRepoById, events, isAllRepos, repo]);
 
-  const { extras, remoteScopeError, timelineOrigin } = useActivityExtras(repo, allRepos, isAllRepos, refreshKey);
+  const { extras, remoteScopeError, timelineOrigin, updatedAt } = useActivityExtras(repo, allRepos, isAllRepos, refreshKey);
 
   const fallbackCommitItems = useMemo<ActivityItem[]>(() => {
     if (repo || extras.repoCommits.length > 0) return [];
@@ -288,6 +288,7 @@ export const ActivityFeed = memo(function ActivityFeed({
         allRepos={allRepos}
         scopeHelp={scopeHelp}
         remoteScopeError={remoteScopeError}
+        remoteUpdatedAt={Number.isFinite(updatedAt) ? updatedAt : null}
         filter={filter}
         counts={counts}
         onSelectFilter={setFilter}

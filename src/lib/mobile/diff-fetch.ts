@@ -22,6 +22,8 @@ export interface MobileDiffPayload {
   error?: string;
 }
 
+import { getMobileGithubContext } from './github-cache';
+import { githubItemQuery } from '@/lib/github-client/item-query';
 import { getMobileWsToken } from '@/lib/mobile/ws-token-client';
 
 function getWsToken(): string {
@@ -94,22 +96,11 @@ async function fetchWorktreeDiff(
 async function fetchPrDiff(
   source: Extract<MobileDiffSource, { kind: 'pr' }>,
 ): Promise<MobileDiffPayload> {
-  const response = await fetch(
-    `/api/panel/prs/${source.number}?repo=${encodeURIComponent(source.repo)}`,
-    { cache: 'no-store', headers: authHeaders() },
-  );
-  if (!response.ok) {
-    return { rawDiff: '', additions: 0, deletions: 0, fileCount: 0, error: `HTTP ${response.status}` };
-  }
-  const data = await response.json() as {
-    pr?: {
-      additions?: number;
-      deletions?: number;
-      changedFiles?: number;
-      files?: PrFile[];
-    };
-    error?: string;
-  };
+  const context = getMobileGithubContext();
+  const data = await context.client.fetchQuery(githubItemQuery<{
+    pr?: { additions?: number; deletions?: number; changedFiles?: number; files?: PrFile[] }; error?: string;
+  }>(source.repo, 'pr-files', source.number,
+    `/api/panel/prs/${source.number}?repo=${encodeURIComponent(source.repo)}`, context));
   if (data.error) {
     return { rawDiff: '', additions: 0, deletions: 0, fileCount: 0, error: data.error };
   }

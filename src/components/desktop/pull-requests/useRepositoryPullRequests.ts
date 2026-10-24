@@ -1,10 +1,12 @@
+import { assertGithubRead, githubRefreshInterval } from '@/lib/github-client/refresh-policy';
+import { useGithubWindowHidden } from '@/lib/github-client/visibility';
 import { useCallback, useEffect, useMemo } from 'react';
 import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import type { PullRequestListPage, PullRequestListSort, PullRequestListState } from '@/lib/github-broker/pull-request-list.types';
 import { pullRequestListQuery } from '@/lib/github-client';
 import { ipcFetch } from '@/lib/tauri/ipc-fetch';
 
-function pageQuery(repoPath: string, state: PullRequestListState, sort: PullRequestListSort) {
+function pageQuery(repoPath: string, state: PullRequestListState, sort: PullRequestListSort, fresh = false) {
   return {
     // Inherit the common list policy, replacing its compact shape and request.
     ...pullRequestListQuery(''),
@@ -12,7 +14,9 @@ function pageQuery(repoPath: string, state: PullRequestListState, sort: PullRequ
     initialPageParam: 1,
     queryFn: async ({ pageParam, signal }: { pageParam: number; signal: AbortSignal }): Promise<PullRequestListPage> => {
       const params = new URLSearchParams({ repoPath, view: 'list', state, sort, page: String(pageParam) });
+      if (fresh) params.set('fresh', '1');
       const response = await ipcFetch(`/api/panel/prs?${params}`, { signal });
+      assertGithubRead(response);
       const result = await response.json() as PullRequestListPage;
       if (!response.ok || result.error || !Array.isArray(result.prs)) {
         throw new Error(result.error || 'Pull requests could not be loaded. Try again.');
@@ -25,9 +29,11 @@ function pageQuery(repoPath: string, state: PullRequestListState, sort: PullRequ
 
 export function useRepositoryPullRequests(repoPath: string | null, state: PullRequestListState, sort: PullRequestListSort, active: boolean) {
   const client = useQueryClient();
+  const hidden = useGithubWindowHidden();
   const options = useMemo(() => pageQuery(repoPath ?? '', state, sort), [repoPath, state, sort]);
   const query = useInfiniteQuery({
     ...options,
+    refetchInterval: githubRefreshInterval(() => hidden),
     enabled: Boolean(active && repoPath),
     // The final active observer releases its in-flight request on leaving.
     subscribed: Boolean(active && repoPath),
@@ -44,13 +50,15 @@ export function useRepositoryPullRequests(repoPath: string | null, state: PullRe
   }, [query.data]);
 
   const refresh = useCallback(async () => {
-    if (!repoPath) return;
+    if (!repoPath || !active) return;
     const queryKey = options.queryKey;
     await client.cancelQueries({ queryKey, exact: true });
     await client.invalidateQueries({ queryKey, exact: true, refetchType: 'none' });
     // Concurrent views share this read after the older request is canceled.
-    await client.refetchQueries({ queryKey, exact: true, type: 'active' }, { cancelRefetch: false });
-  }, [client, options.queryKey, repoPath]);
+    try {
+      await client.fetchInfiniteQuery({ ...pageQuery(repoPath, state, sort, true), staleTime: 0 });
+    } catch { /* The observer retains rows and exposes the failed refresh. */ }
+  }, [client, options.queryKey, repoPath, state, sort, active]);
 
   useEffect(() => {
     const onUpdated = (event: Event) => {

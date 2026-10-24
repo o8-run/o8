@@ -1,13 +1,20 @@
 'use client';
+import { assertGithubScope, githubSnapshotTime } from '@/lib/github-client/refresh-policy';
 
 /**
  * o8-activity-helpers — Icons, data-fetching, and render helpers for O8ActivityPane.
  * Extracted to keep the main component under 800 lines.
  */
 
+import type { CIRun } from '@/lib/github-client/ci-runs';
 import type React from 'react';
+import { useQueryClient, type QueryClient } from '@tanstack/react-query';
+import { activityPrHoverQuery } from './agent-panel/useActivityPrHoverDetail';
+import { getQueryClient } from '@/lib/query/client';
+import { activityListQuery, type ActivityListKind } from '@/lib/github-client/activity-queries';
+import { refreshGithubList } from '@/lib/github-client';
 import { useCallback, useState } from 'react';
-import type { ActivityItem, FeedFilter } from './agent-panel/types';
+import type { ActivityItem, FeedFilter, GHIssue, GHPullRequest } from './agent-panel/types';
 import { relativeAge } from './agent-panel/shared';
 import { O8ActivityCIDetail } from './O8ActivityCIDetail';
 
@@ -153,6 +160,7 @@ export interface RepoActivityData {
   ciRuns: ActivityItem[];
   workspaceError?: string;
   remoteError?: string;
+  remoteUpdatedAt?: number;
   /** Remote-only history: local fallback rows must never survive failed folder validation. */
   remoteCommits?: ActivityItem[];
 }
@@ -185,18 +193,24 @@ function mapCommitRow(c: CommitRow, repoSlug: string): ActivityItem {
 export const REMOTE_ACTIVITY_DELAYED = 'GitHub sync delayed. Showing last successful activity where available.';
 
 export async function fetchRepoActivity(repoSlug: string | null, repoPath?: string | null, options?: {
+  client?: QueryClient;
+  fresh?: boolean;
+  manual?: boolean;
   previous?: RepoActivityData;
   signal?: AbortSignal;
 }): Promise<RepoActivityData> {
-  const enc = encodeURIComponent(repoSlug ?? '');
   const localLabel = repoSlug ?? repoPath ?? 'local';
-  async function readRemote(endpoint: string, field: string) {
+  type Payload = { commits?: CommitRow[]; prs?: GHPullRequest[]; issues?: GHIssue[]; runs?: CIRun[] };
+  async function readRemote(endpoint: ActivityListKind, field: string): Promise<{ data: Payload | null; failed: boolean }> {
     if (!repoSlug) return { data: { [field]: [] }, failed: false };
     try {
-      const response = await fetch(`/api/panel/${endpoint}?repo=${enc}`, { signal: options?.signal });
-      const data = await response.json();
-      if (!response.ok || data?.error || !Array.isArray(data?.[field])) throw new Error('Activity stream unavailable');
-      return { data, failed: false };
+      const client = options?.client ?? getQueryClient();
+      assertGithubScope(client, repoSlug, options?.manual);
+      const config = activityListQuery(repoSlug || '', endpoint as ActivityListKind, { manual: options?.fresh });
+      const data = options?.fresh && (endpoint === 'issues' || endpoint === 'prs')
+        ? await refreshGithubList(client, repoSlug || '', endpoint)
+        : await client.fetchQuery({ ...config, ...(options?.fresh || client.getQueryState(config.queryKey)?.error ? { staleTime: 0 } : {}) });
+      return { data: data as Payload, failed: false };
     } catch {
       return { data: null, failed: true };
     }
@@ -214,7 +228,7 @@ export async function fetchRepoActivity(repoSlug: string | null, repoPath?: stri
     return previous ?? [];
   }
   const remoteCommits = retainOnFailure(commitsRead.failed, options?.previous?.remoteCommits,
-    () => (commitsRead.data.commits as CommitRow[]).slice(0, 12).map((c) => mapCommitRow(c, localLabel)));
+    () => (commitsRead.data!.commits as CommitRow[]).slice(0, 12).map((c) => mapCommitRow(c, localLabel)));
   let commits = remoteCommits;
   let workspaceError: string | undefined;
   // Validate the selected on-disk folder even when remote history exists.
@@ -235,7 +249,7 @@ export async function fetchRepoActivity(repoSlug: string | null, repoPath?: stri
 
   const prs = retainOnFailure(prsRead.failed, options?.previous?.prs, () => {
     const prs: ActivityItem[] = [];
-    const data = prsRead.data;
+    const data = prsRead.data!;
     for (const pr of (data.prs ?? []).slice(0, 8)) {
       const ts = pr.createdAt ? new Date(pr.createdAt).getTime() : 0;
       const checks = pr.statusCheckRollup ?? [];
@@ -265,7 +279,7 @@ export async function fetchRepoActivity(repoSlug: string | null, repoPath?: stri
 
   const issues = retainOnFailure(issuesRead.failed, options?.previous?.issues, () => {
     const issues: ActivityItem[] = [];
-    const data = issuesRead.data;
+    const data = issuesRead.data!;
     for (const issue of (data.issues ?? []).slice(0, 8)) {
       const ts = issue.createdAt ? new Date(issue.createdAt).getTime() : 0;
       issues.push({
@@ -288,7 +302,7 @@ export async function fetchRepoActivity(repoSlug: string | null, repoPath?: stri
 
   const ciRuns = retainOnFailure(ciRead.failed, options?.previous?.ciRuns, () => {
     const ciRuns: ActivityItem[] = [];
-    const data = ciRead.data;
+    const data = ciRead.data!;
     for (const run of (data.runs ?? []).slice(0, 6)) {
       const ts = run.createdAt ? new Date(run.createdAt).getTime() : 0;
       ciRuns.push({
@@ -308,7 +322,10 @@ export async function fetchRepoActivity(repoSlug: string | null, repoPath?: stri
     return ciRuns;
   });
 
-  return { commits, remoteCommits, prs, issues, ciRuns, ...(workspaceError ? { workspaceError } : {}), ...(remoteError ? { remoteError } : {}) };
+  const client = options?.client ?? getQueryClient();
+  const remoteUpdatedAt = Math.min(...(['issues', 'prs', 'ci', 'commits'] as ActivityListKind[])
+    .map(kind => { const state = client.getQueryState(activityListQuery(repoSlug ?? '', kind).queryKey); return state ? githubSnapshotTime(state.data, state.dataUpdatedAt) : 0; }).filter(Boolean));
+  return { commits, remoteCommits, prs, issues, ciRuns, remoteUpdatedAt, ...(workspaceError ? { workspaceError } : {}), ...(remoteError ? { remoteError } : {}) };
 }
 
 // ── Render helpers ──
@@ -455,14 +472,13 @@ export type ExpandDetails = {
 };
 
 export function useExpandDetails() {
+  const client = useQueryClient();
   const [prDetails, setPrDetails] = useState<Record<string, PRExpandDetail>>({});
 
   const fetchForItem = useCallback((item: ActivityItem, key: string) => {
     if (item.kind === 'pr' && !prDetails[key]) {
-      fetch(`/api/panel/pr?repo=${encodeURIComponent(item.repo)}&number=${item.number}`)
-        .then((r) => r.json())
+      client.fetchQuery(activityPrHoverQuery(item.repo.toLowerCase(), item.number))
         .then((d) => {
-          if (d?.error) return;
           setPrDetails((prev) => ({ ...prev, [key]: {
             mergeable: Boolean(d.mergeable),
             checksStatus: d.checksStatus ?? 'unknown',
@@ -472,7 +488,7 @@ export function useExpandDetails() {
         })
         .catch(() => {});
     }
-  }, [prDetails]);
+  }, [client, prDetails]);
 
   return { prDetails, fetchForItem };
 }

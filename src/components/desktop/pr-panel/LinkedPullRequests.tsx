@@ -2,6 +2,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ipcFetch } from '@/lib/tauri/ipc-fetch';
+import { useGithubWindowHidden } from '@/lib/github-client/visibility';
+import { githubRefreshInterval } from '@/lib/github-client/refresh-policy';
 import { linkedPullRequestListQuery } from '@/lib/github-client/linked-pr-list';
 import { FloatingDialog } from '../FloatingDialog';
 import { RamsButton } from '../settings/RamsButton';
@@ -27,8 +29,10 @@ export function LinkedPullRequests({ context, tabId, repoPath, repos, active, on
   const requestRef = useRef<AbortController | null>(null);
   const selectedRepo = repos.find((repo) => repo.localPath === repoPath);
   const slug = repoSlugFromRemote(selectedRepo?.remoteUrl)?.toLowerCase() ?? null;
+  const hidden = useGithubWindowHidden();
   const dependencies = useQuery({
     ...linkedPullRequestListQuery(slug ?? ''),
+    refetchInterval: githubRefreshInterval(() => hidden),
     enabled: Boolean(active && slug && links.some((entry) => entry.repo === slug)),
   });
   const snapshot = dependencies.data;

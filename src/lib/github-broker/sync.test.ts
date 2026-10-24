@@ -557,3 +557,18 @@ describe('GitHub outsider attention sync', () => {
     expect(mirrorNumbers('github_pull_requests', 'example/widgets')).toEqual([202, 203]);
   });
 });
+
+describe('shared repository refresh policy', () => {
+  it.each(['issues', 'prs'] as const)('reuses a fresh empty %s snapshot and gives explicit refresh interactive priority', async kind => {
+    installationFetchMock.mockImplementation(async () => fetched([]));
+    const ensure = kind === 'issues' ? ensureGitHubIssues : ensureGitHubPullRequests;
+    await ensure('example/widgets');
+    const reads = installationFetchMock.mock.calls.length;
+    expect(reads).toBeGreaterThan(0);
+    await ensure('example/widgets');
+    expect(installationFetchMock).toHaveBeenCalledTimes(reads);
+    await ensure('example/widgets', { fresh: true });
+    expect(installationFetchMock.mock.calls.length).toBeGreaterThan(reads);
+    for (const call of installationFetchMock.mock.calls.slice(reads)) expect(call[3]).toEqual({ priority: 'interactive' });
+  });
+});

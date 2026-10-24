@@ -105,6 +105,7 @@ export interface ReviewThreadTone {
 }
 
 export interface PRViewerProps {
+  active?: boolean;
   prNumber: number;
   repo?: string;
   onInjectChatContext?: (payload: AgentPanelChatInjectionPayload) => void;

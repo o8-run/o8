@@ -12,6 +12,7 @@ import { ChangesTab } from './tabs/ChangesTab';
 import { ChecksTab } from './tabs/ChecksTab';
 import { ReviewsTab } from './tabs/ReviewsTab';
 import { TimelineTab } from './tabs/TimelineTab';
+import { GithubReadStatus } from '@/components/github/GithubReadStatus';
 import { usePrDetail } from './usePrDetail';
 import { PrReviewGuide } from './PrReviewGuide';
 import { X } from '../lucide-shims';
@@ -20,10 +21,10 @@ import { useArtifacts } from '../artifacts/useArtifacts';
 import type { PrComposerMode, PrPanelProps, PrReviewAction } from './types';
 
 export const PrPanel = memo(function PrPanel({ prNumber, repoSlug, repoPath, onClose, active = true, id }: PrPanelProps) {
-  const { detail, loading, error, refresh } = usePrDetail(prNumber, repoSlug, active);
-  const hasDetail = Boolean(detail);
   const selectionKey = `${repoSlug || repoPath || ''}:${prNumber}`;
   const { view, update, recordScroll, scrollFor } = usePrViewState(selectionKey);
+  const { detail, loading, error, refresh, updatedAt } = usePrDetail(prNumber, repoSlug, active, view.activeTab === 'checks');
+  const hasDetail = Boolean(detail);
   const panelId = useId();
   const scrollRef = useRef<HTMLDivElement>(null);
   const [fileJump, setFileJump] = useState(0);
@@ -130,6 +131,7 @@ export const PrPanel = memo(function PrPanel({ prNumber, repoSlug, repoPath, onC
         if (repoPath) openComposerBrain({ repoPath, prompt, context: prBrainContext(detail, repoSlug) });
       }} />
       {error ? <div role="alert" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 12, fontSize: 11, color: 'var(--t-danger)' }}>{error}<button type="button" onClick={refresh} style={{ border: 0, borderRadius: 6, padding: 6, background: 'var(--t-hover)', color: 'var(--t-text)', font: 'inherit', cursor: 'pointer' }}>Retry</button></div> : null}
+      <GithubReadStatus error={error} updatedAt={updatedAt} />
       <PrPanelTabs
         activeTab={view.activeTab}
         onChange={(activeTab) => update({ activeTab })}

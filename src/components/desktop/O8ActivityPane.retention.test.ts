@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -35,6 +36,7 @@ type Failure = 'http' | 'json' | 'network' | 'api' | 'shape';
 const titles = { commits: 'Commit', prs: 'Pull', issues: 'Issue', ci: 'Check' };
 let host: HTMLDivElement;
 let root: Root;
+let queryClient: QueryClient;
 let revision: number;
 let failure: { stream: Stream; kind: Failure; repo?: string } | null;
 let empty: boolean;
@@ -53,7 +55,7 @@ function response(stream: Stream, repo: string, rev = revision) {
 }
 
 async function render(repo = first, allRepos = false) {
-  await act(async () => root.render(createElement(O8ActivityPane, { repoPath: repo.localPath, registeredRepos: allRepos ? [first, second] : registry, allRepos })));
+  await act(async () => root.render(createElement(QueryClientProvider, { client: queryClient }, createElement(O8ActivityPane, { repoPath: repo.localPath, registeredRepos: allRepos ? [first, second] : registry, allRepos }))));
 }
 async function refresh() {
   await act(async () => window.dispatchEvent(new Event('o8:lifecycle-reconcile')));
@@ -72,6 +74,7 @@ beforeEach(() => {
   host = document.createElement('div');
   document.body.append(host);
   root = createRoot(host);
+  queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   revision = 1;
   failure = null;
   empty = false;
@@ -104,6 +107,7 @@ beforeEach(() => {
 
 afterEach(async () => {
   await act(async () => root.unmount());
+  queryClient.clear();
   host.remove();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -159,17 +163,17 @@ describe('O8 Activity retained remote streams through the mounted pane', () => {
     expect(host.textContent).not.toContain('example/other v2');
   });
 
-  it('isolates separate local checkouts of the same repository', async () => {
+  it('shares remote snapshots across checkouts while keeping local folder reads isolated', async () => {
     await render();
     revision = 2;
     await render(checkout);
-    expectRevision('Example/Widgets', 2);
+    expectRevision('Example/Widgets', 1);
     failure = { stream: 'prs', kind: 'http' };
     revision = 3;
     await render();
     expect(host.textContent).toContain('Pull Example/Widgets v1');
     await render(checkout);
-    expect(host.textContent).toContain('Pull Example/Widgets v2');
+    expect(host.textContent).toContain('Pull Example/Widgets v1');
   });
 
   it('retains failures per repository in all-repository aggregation', async () => {
@@ -206,7 +210,7 @@ describe('O8 Activity retained remote streams through the mounted pane', () => {
     expect(host.textContent).toContain('GitHub sync delayed');
   });
 
-  it('aborts a superseded scope and ignores its late response even when transport ignores abort', async () => {
+  it('ignores a superseded shared read without cancelling it for other observers', async () => {
     let release!: (r: Response) => void;
     pending = url => url.includes('/prs?repo=Example%2FWidgets') ? new Promise(resolve => { release = resolve; }) : undefined;
     await render();
@@ -214,13 +218,13 @@ describe('O8 Activity retained remote streams through the mounted pane', () => {
     pending = undefined;
     revision = 2;
     await render(second);
-    expect(old.signal?.aborted).toBe(true);
+    expect(old.signal?.aborted).toBe(false);
     await act(async () => release(response('prs', 'Example/Widgets', 1)));
     expectRevision('example/other', 2);
     expect(host.textContent).not.toContain('Example/Widgets v1');
     failure = { stream: 'prs', kind: 'http' };
     await render();
-    expect(host.textContent).not.toContain('Pull Example/Widgets v1');
+    expect(host.textContent).toContain('Pull Example/Widgets v1');
   });
 
   it('collapses overlapping events into one trailing refresh', async () => {

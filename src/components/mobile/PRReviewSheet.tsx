@@ -1,6 +1,10 @@
 'use client';
 
-import { memo, useCallback, useEffect, useState } from 'react';
+import { memo, useCallback, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { useMobileGithubContext, type getMobileGithubContext } from '@/lib/mobile/github-cache';
+import { githubItemQuery } from '@/lib/github-client/item-query';
+import { GithubReadStatus } from '@/components/github/GithubReadStatus';
 import { useTheme } from './ThemeContext';
 
 type ThemeColors = ReturnType<typeof useTheme>['colors'];
@@ -105,40 +109,31 @@ function checkLabel(status: PRData['checksStatus']): { color: string; label: str
   }
 }
 
-export const PRReviewSheet = memo(function PRReviewSheet({
+export const PRReviewSheet = memo(function PRReviewSheet(props: PRReviewSheetProps) {
+  const context = useMobileGithubContext();
+  return <PRReviewSheetBody key={`${context.epoch}:${props.repoPath}:${props.prNumber}`} {...props} context={context} />;
+});
+function PRReviewSheetBody({
   open,
   repoPath,
   prNumber,
   onClose,
   onViewDiff,
-}: PRReviewSheetProps) {
+  context,
+}: PRReviewSheetProps & { context: ReturnType<typeof getMobileGithubContext> }) {
   const { colors } = useTheme();
-  const [pr, setPr] = useState<PRData | null>(null);
-  const [loading, setLoading] = useState(false);
+  const query = useQuery({
+    ...githubItemQuery<PRData>(repoPath, 'pr-summary', prNumber ?? 0,
+      `/api/panel/pr?repo=${encodeURIComponent(repoPath)}&number=${prNumber}`, context),
+    enabled: Boolean(open && prNumber && repoPath),
+  }, context.client);
+  const pr = query.data ?? null;
+  const loading = query.isPending;
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [comment, setComment] = useState('');
   const [showComment, setShowComment] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!open || !prNumber || !repoPath) return;
-    setLoading(true);
-    setError(null);
-    setPr(null);
-
-    fetch(`/api/panel/pr?repo=${encodeURIComponent(repoPath)}&number=${prNumber}`)
-      .then((response) => response.json())
-      .then((data) => {
-        if (data.error) {
-          setError(data.error);
-        } else {
-          setPr(data);
-        }
-      })
-      .catch(() => setError('Failed to load PR'))
-      .finally(() => setLoading(false));
-  }, [open, prNumber, repoPath]);
 
   const handleAction = useCallback(
     async (action: 'approve' | 'request_changes' | 'comment' | 'merge') => {
@@ -157,9 +152,10 @@ export const PRReviewSheet = memo(function PRReviewSheet({
           body.comment = comment;
         }
 
+        context.beforeRead();
         const response = await fetch('/api/panel/pr/review', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { ...context.headers, 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
         });
         const result = await response.json();
@@ -180,7 +176,7 @@ export const PRReviewSheet = memo(function PRReviewSheet({
         setActionLoading(null);
       }
     },
-    [pr, repoPath, comment, onClose]
+    [pr, repoPath, comment, onClose, context]
   );
 
   if (!open) return null;
@@ -268,6 +264,7 @@ export const PRReviewSheet = memo(function PRReviewSheet({
             <div style={{ textAlign: 'center', padding: '40px 0', color: colors.textSecondary }}>Loading...</div>
           ) : null}
 
+          <GithubReadStatus error={query.error} updatedAt={query.dataUpdatedAt} />
           {error && !loading ? (
             <div
               style={{
@@ -566,4 +563,4 @@ export const PRReviewSheet = memo(function PRReviewSheet({
       </div>
     </>
   );
-});
+}

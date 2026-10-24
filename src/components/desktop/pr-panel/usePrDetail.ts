@@ -2,15 +2,11 @@
 
 import { useCallback, useEffect, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import type { PrDetail } from './types';
 import { PrReadDeferredError } from './read-pr-json';
+import { GITHUB_CHECK_REFRESH_MS } from '@/lib/github-client/refresh-policy';
 import { prPanelDetailQuery, refreshPrPanelDetail } from './detail-query';
 
-function hasRunningChecks(detail: PrDetail | undefined): boolean {
-  return Boolean(detail?.statusCheckRollup.some(check => ['in_progress', 'queued', 'pending', 'waiting'].includes((check.status ?? '').toLowerCase())));
-}
-
-export function usePrDetail(prNumber: number | null, repoSlug?: string | null, visible = true) {
+export function usePrDetail(prNumber: number | null, repoSlug?: string | null, visible = true, checksOpen = false) {
   const client = useQueryClient();
   const options = useMemo(() => prPanelDetailQuery(repoSlug, prNumber ?? 0), [repoSlug, prNumber]);
   const query = useQuery({ ...options, enabled: Boolean(visible && prNumber) });
@@ -26,7 +22,8 @@ export function usePrDetail(prNumber: number | null, repoSlug?: string | null, v
     async function backgroundRead(scheduled = false) {
       if (!active || document.visibilityState === 'hidden' || Date.now() < retryAt()) return;
       const state = client.getQueryState(options.queryKey);
-      const cadence = state?.data?.state.toLowerCase() === 'open' && hasRunningChecks(state.data) ? 30_000 : 120_000;
+      if (state?.data && state.data.state.toLowerCase() !== 'open') return;
+      const cadence = checksOpen ? GITHUB_CHECK_REFRESH_MS : 120_000;
       // Staggered observers may fire after a sibling's read has already settled.
       if (scheduled && state && Date.now() - Math.max(state.dataUpdatedAt, state.errorUpdatedAt) < cadence) return;
       try {
@@ -37,7 +34,8 @@ export function usePrDetail(prNumber: number | null, repoSlug?: string | null, v
       if (!active) return;
       if (timeoutId) clearTimeout(timeoutId);
       const current = client.getQueryData(options.queryKey);
-      const fast = current?.state.toLowerCase() === 'open' && hasRunningChecks(current);
+      if (current && current.state.toLowerCase() !== 'open') return;
+      const fast = checksOpen;
       timeoutId = setTimeout(() => { void backgroundRead(true).finally(scheduleNext); }, Math.max(fast ? 30_000 : 120_000, retryAt() - Date.now()));
     }
     const cache = client.getQueryCache();
@@ -55,13 +53,14 @@ export function usePrDetail(prNumber: number | null, repoSlug?: string | null, v
       if (timeoutId) clearTimeout(timeoutId);
       document.removeEventListener('visibilitychange', onVisible);
     };
-  }, [client, options, prNumber, repoSlug, visible]);
+  }, [client, options, prNumber, repoSlug, visible, checksOpen]);
 
   const refresh = useCallback(() => {
     if (prNumber) void refreshPrPanelDetail(client, repoSlug, prNumber).catch(() => {});
   }, [client, prNumber, repoSlug]);
   return {
     detail: query.data ?? null,
+    updatedAt: query.dataUpdatedAt,
     loading: Boolean(prNumber && !query.data && (!query.error || query.isFetching)),
     error: query.isFetching ? null : query.error?.message ?? null,
     refresh,

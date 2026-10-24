@@ -1,3 +1,6 @@
+import { githubItemQuery } from '@/lib/github-client/item-query';
+import { GITHUB_CHECK_REFRESH_MS, GithubReadDeferredError } from '@/lib/github-client/refresh-policy';
+import { useGithubWindowHidden } from '@/lib/github-client/visibility';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { AgentPanelChatInjectionPayload } from '@/lib/chat/injection';
@@ -24,14 +27,19 @@ export function usePRData(
   prNumber: number,
   repo: string | undefined,
   onInjectChatContext: ((payload: AgentPanelChatInjectionPayload) => void) | undefined,
+  active = true,
 ) {
   const queryClient = useQueryClient();
-  const detailQuery = useQuery(prViewerDetailQuery(repo, prNumber));
+  const [activeSection, setActiveSection] = useState<PRSection>('overview');
+  const hidden = useGithubWindowHidden();
+  const detailQuery = useQuery({ ...prViewerDetailQuery(repo, prNumber), enabled: active,
+    refetchInterval: query => active && activeSection === 'checks' && !hidden && query.state.data?.state?.toUpperCase() === 'OPEN'
+      ? Math.max(GITHUB_CHECK_REFRESH_MS, query.state.error instanceof GithubReadDeferredError ? query.state.error.retryAt - Date.now() : 0) : false,
+  });
   const pr = detailQuery.data ?? null;
   const loading = detailQuery.isPending;
   const error = !pr && detailQuery.error ? detailQuery.error.message : null;
   const [reloadNonce, setReloadNonce] = useState(0);
-  const [activeSection, setActiveSection] = useState<PRSection>('overview');
   const [activeItemIndex, setActiveItemIndex] = useState(0);
   const [reviewThreads, setReviewThreads] = useState<ReviewThread[]>([]);
   const [reviewsLoading, setReviewsLoading] = useState(false);
@@ -50,6 +58,7 @@ export function usePRData(
   const [hoveredCommentKey, setHoveredCommentKey] = useState<string | null>(null);
   const commentInputRef = useRef<HTMLInputElement>(null);
   const [localRepo, setLocalRepo] = useState<Pick<RepoRegistryEntry, 'name' | 'localPath' | 'readiness'> | null>(null);
+  const reviewThreadKey = useMemo(() => ['gh', repo?.trim().toLowerCase() ?? null, 'pr-review-threads', prNumber], [repo, prNumber]);
   const reviewThreadStorageKey = useMemo(() => buildReviewThreadStorageKey(repo, prNumber), [repo, prNumber]);
 
   /* ---------------------------------------------------------------- */
@@ -155,9 +164,11 @@ export function usePRData(
     const repoParam = repo ? `&repo=${encodeURIComponent(repo)}` : '';
 
     try {
-      const data = await requestReviewThreadApi<{ threads?: ReviewThread[] }>(
-        `/api/panel/pr/review/threads?number=${prNumber}${repoParam}`,
-      );
+      const data = await queryClient.fetchQuery({
+        ...githubItemQuery<{ threads?: ReviewThread[] }>(repo ?? '', 'pr-review-threads', prNumber,
+          `/api/panel/pr/review/threads?number=${prNumber}${repoParam}`),
+        queryKey: reviewThreadKey,
+      });
       const normalizedThreads = normalizeReviewThreads(Array.isArray(data.threads) ? data.threads : []);
       setReviewThreads(normalizedThreads);
       setReviewThreadsLoaded(true);
@@ -169,17 +180,17 @@ export function usePRData(
     } finally {
       setReviewsLoading(false);
     }
-  }, [prNumber, repo]);
+  }, [prNumber, repo, queryClient, reviewThreadKey]);
 
   useEffect(() => {
-    if (activeSection !== 'reviews' || reviewThreadsLoaded) return;
+    if (!active || activeSection !== 'reviews' || reviewThreadsLoaded) return;
     let cancelled = false;
     void fetchReviewThreads().catch((fetchError) => {
       if (cancelled) return;
       setReviewThreadsError(fetchError instanceof Error ? fetchError.message : 'Failed to load review threads');
     });
     return () => { cancelled = true; };
-  }, [activeSection, fetchReviewThreads, reviewThreadsLoaded]);
+  }, [active, activeSection, fetchReviewThreads, reviewThreadsLoaded]);
 
   /* ---------------------------------------------------------------- */
   /*  Thread interaction callbacks                                     */
@@ -257,6 +268,7 @@ export function usePRData(
         const normalizedThread = normalizeReviewThread(data.thread);
         setReviewThreads((current) => current.map((candidate) => candidate.id === threadId ? normalizedThread : candidate));
       }
+      void queryClient.invalidateQueries({ queryKey: reviewThreadKey, exact: true });
       setActionResult({ type: 'success', message: 'Reply posted' });
     } catch (replyError) {
       setReviewThreads((current) => current.map((candidate) => candidate.id === threadId ? previousThread : candidate));
@@ -269,7 +281,7 @@ export function usePRData(
         return next;
       });
     }
-  }, [prNumber, replyDrafts, repo, reviewThreads]);
+  }, [prNumber, replyDrafts, repo, reviewThreads, queryClient, reviewThreadKey]);
 
   const submitThreadResolve = useCallback(async (threadId: string, resolved: boolean) => {
     const thread = reviewThreads.find((candidate) => candidate.id === threadId);
@@ -302,6 +314,7 @@ export function usePRData(
         const normalizedThread = normalizeReviewThread(data.thread);
         setReviewThreads((current) => current.map((candidate) => candidate.id === threadId ? normalizedThread : candidate));
       }
+      void queryClient.invalidateQueries({ queryKey: reviewThreadKey, exact: true });
       setActionResult({ type: 'success', message: resolved ? 'Thread resolved' : 'Thread reopened' });
     } catch (resolveError) {
       setReviewThreads((current) => current.map((candidate) => candidate.id === threadId ? previousThread : candidate));
@@ -313,7 +326,7 @@ export function usePRData(
         return next;
       });
     }
-  }, [prNumber, repo, reviewThreads]);
+  }, [prNumber, repo, reviewThreads, queryClient, reviewThreadKey]);
 
   /* ---------------------------------------------------------------- */
   /*  Chat injection + comment helpers                                 */
@@ -345,10 +358,11 @@ export function usePRData(
   const checkContextKey = useCallback((name?: string | null) => `check:${name ?? 'unknown'}`, []);
 
   const reload = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: reviewThreadKey, exact: true, refetchType: 'none' });
     setReloadNonce((current) => current + 1);
     // Query state reports a failed Retry; keep the event handler settled.
     void refreshPrViewerDetail(queryClient, repo, prNumber).catch(() => {});
-  }, [prNumber, queryClient, repo]);
+  }, [prNumber, queryClient, repo, reviewThreadKey]);
 
   /* ---------------------------------------------------------------- */
   /*  Derived data                                                     */
@@ -651,6 +665,8 @@ export function usePRData(
     pr,
     loading,
     error,
+    refreshError: detailQuery.error,
+    updatedAt: detailQuery.dataUpdatedAt,
     activeSection,
     setActiveSection,
     activeItemIndex,

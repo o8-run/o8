@@ -49,7 +49,7 @@ export async function GET(request: Request) {
     }
   }
 
-  const result = await ensureGitHubPullRequests(repo);
+  const result = searchParams.get('fresh') === '1' ? await ensureGitHubPullRequests(repo, { fresh: true }) : await ensureGitHubPullRequests(repo);
   return NextResponse.json({
     prs: result.prs.map((pr) => ({
       number: pr.number,
@@ -70,5 +70,7 @@ export async function GET(request: Request) {
     repo,
     error: result.error,
     stale: result.stale,
+    lastSuccessfulAt: result.lastSuccessfulAt,
+    retryAt: result.retryAt,
   });
 }

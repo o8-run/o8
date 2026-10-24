@@ -51,7 +51,7 @@ export async function GET(req: NextRequest) {
   }
 
   const cacheKey = `commits:${repo}:${limit}`;
-  const cached = getCached<unknown[]>(cacheKey);
+  const cached = req.nextUrl.searchParams.get('fresh') === '1' ? null : getCached<unknown[]>(cacheKey, 120_000);
   if (cached) {
     return NextResponse.json({ commits: cached, repo }, { headers: { 'Server-Timing': `total;dur=${Math.max(0, performance.now() - startedAt).toFixed(1)}` } });
   }

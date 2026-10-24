@@ -29,21 +29,22 @@ function validDetail(value: unknown, number: number, repo: string | null): value
   return true;
 }
 
-export function prPanelDetailQuery(repo: string | null | undefined, number: number, background = false) {
+export function prPanelDetailQuery(repo: string | null | undefined, number: number, background = false, manual = false) {
   const slug = repo?.trim() || null;
   return queryOptions({
     ...issueListQuery(slug ?? ''),
     // Compact panel detail includes discussion and watch state; viewer/list shapes stay separate.
     queryKey: prPanelDetailKey(slug, number),
-    queryFn: async ({ signal }): Promise<PrDetail> => {
+    queryFn: async ({ signal, client }): Promise<PrDetail> => {
       const search = new URLSearchParams();
       if (slug) search.set('repo', slug);
       if (background) search.set('poll', '1');
       const suffix = search.size ? `?${search}` : '';
-      const result = await readPrJson<unknown>(`/api/panel/prs/${number}${suffix}`, signal);
+      const result = await readPrJson<unknown>(`/api/panel/prs/${number}${suffix}`, signal, { client, repo: slug ?? '', manual });
       if (!record(result) || result.error || !validDetail(result.pr, number, slug)) throw new Error('Pull request could not be read. Retry.');
       return result.pr;
     },
+    staleTime: query => query.state.data && query.state.data.state.toLowerCase() !== 'open' ? Infinity : 120_000,
     // Preserve the panel's running-check scheduler rather than adding a second timer.
     refetchInterval: false,
     retry: false,
@@ -51,7 +52,7 @@ export function prPanelDetailQuery(repo: string | null | undefined, number: numb
 }
 
 export async function refreshPrPanelDetail(client: QueryClient, repo: string | null | undefined, number: number) {
-  const options = prPanelDetailQuery(repo, number);
+  const options = prPanelDetailQuery(repo, number, false, true);
   await client.cancelQueries({ queryKey: options.queryKey, exact: true });
   await client.invalidateQueries({ queryKey: options.queryKey, exact: true, refetchType: 'none' });
   return client.fetchQuery({ ...options, staleTime: 0 });

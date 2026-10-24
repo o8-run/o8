@@ -1,5 +1,6 @@
 'use client';
 
+import { GithubReadStatus } from '@/components/github/GithubReadStatus';
 import { memo, type CSSProperties, type ReactNode } from 'react';
 import { AlertCircle, CheckCircle2, ChevronDown, Folder, GitCommit, GitPullRequest, Globe, Zap } from '../lucide-shims';
 import { THEME_ACCENT, THEME_ACCENT_SOFT, shortRepoLabel } from './shared';
@@ -22,6 +23,7 @@ interface ActivityFeedControlsProps {
   allRepos: string[];
   scopeHelp: string;
   remoteScopeError: string | null;
+  remoteUpdatedAt?: number | null;
   filter: FeedFilter;
   counts: Record<FeedFilter, number>;
   onSelectFilter: (filter: FeedFilter) => void;
@@ -40,6 +42,7 @@ function ActivityFeedControlsBase({
   allRepos,
   scopeHelp,
   remoteScopeError,
+  remoteUpdatedAt,
   filter,
   counts,
   onSelectFilter,
@@ -258,6 +261,7 @@ function ActivityFeedControlsBase({
             }}
           >
             {remoteScopeError.includes('rate limit') ? 'GitHub API paused — will resume automatically' : 'GitHub sync delayed'}
+            <GithubReadStatus error={remoteScopeError} updatedAt={remoteUpdatedAt} />
           </div>
         ) : null}
 

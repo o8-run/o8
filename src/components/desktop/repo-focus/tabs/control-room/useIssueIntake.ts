@@ -1,3 +1,4 @@
+import { useGithubWindowHidden } from '@/lib/github-client/visibility';
 import { useCallback, useMemo } from 'react';
 import { useQueries, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { githubListQueryKey, issueListQuery, refreshGithubList, type GithubIssueList } from '@/lib/github-client';
@@ -13,6 +14,7 @@ interface IntakeScope {
 
 export function useIssueIntake(repos: RepoFocusRepo[], limit: number) {
   const client = useQueryClient();
+  const hidden = useGithubWindowHidden();
   const scopes = useMemo(() => {
     const grouped = new Map<string, IntakeScope>();
     for (const repo of repos) {
@@ -81,7 +83,7 @@ export function useIssueIntake(repos: RepoFocusRepo[], limit: number) {
   }, [limit, scopes]);
 
   const snapshot = useQueries({
-    queries: scopes.map(scope => issueListQuery(scope.repoParam, { repoPath: scope.repoPath })),
+    queries: scopes.map(scope => issueListQuery(scope.repoParam, { repoPath: scope.repoPath, isHidden: () => hidden })),
     combine,
   });
   const refresh = useCallback(async () => {

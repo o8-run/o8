@@ -480,7 +480,7 @@ const TabContent = memo(function TabContent({
           case 'commit':
             return <CommitViewer commitHash={tab.resourceId} workspace={tab.meta?.workspace} />;
           case 'pr':
-            return <PRViewer prNumber={parseInt(tab.resourceId, 10)} repo={tab.meta?.repo} onInjectChatContext={onInjectChatContext} />;
+            return <PRViewer active={active} prNumber={parseInt(tab.resourceId, 10)} repo={tab.meta?.repo} onInjectChatContext={onInjectChatContext} />;
           case 'pull-requests':
             return <RepositoryPullRequests active={active} repoPath={tab.meta?.workspace || tab.resourceId || null} />;
           case 'usage':

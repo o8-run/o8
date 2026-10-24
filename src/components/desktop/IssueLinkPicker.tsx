@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AlertCircle, Check, ExternalLink, Search } from './lucide-shims';
 import { openExternalUrl } from '@/lib/desktop/open-external';
+import { GithubReadStatus } from '@/components/github/GithubReadStatus';
 import { useRepoIssues } from '@/lib/github-client';
 
 export interface LinkedIssueRef {
@@ -292,6 +293,7 @@ export function IssueLinkPickerModal({
               paddingRight: 4,
             }}
           >
+            <GithubReadStatus error={listError} updatedAt={issuesQuery.dataUpdatedAt} />
             {reposLoading || issuesLoading ? (
               <div style={{ padding: '28px 14px', fontSize: 13, color: '#64748b', textAlign: 'center' }}>
                 Loading issues…

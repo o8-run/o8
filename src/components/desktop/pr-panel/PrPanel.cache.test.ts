@@ -61,6 +61,19 @@ describe('compact PR detail snapshots through PrPanel', () => {
     expect(panel?.textContent).toContain('Select failed checks');
   });
 
+  it('does not use the fast checks cadence while another PR view is selected', async () => {
+    fetchMock.mockImplementation(async () => Response.json({ pr: { ...detail(), statusCheckRollup: [{ name: 'Tests', status: 'in_progress' }] } }));
+    await render(); await act(async () => vi.advanceTimersByTimeAsync(30_000)); await flush();
+    expect(reads()).toHaveLength(1);
+  });
+
+  it.each(['closed', 'merged'])('loads a %s PR once while retained and mounted', async state => {
+    fetchMock.mockImplementation(async () => Response.json({ pr: { ...detail(), state } }));
+    await render(); await act(async () => vi.advanceTimersByTimeAsync(600_000)); await flush();
+    expect(reads()).toHaveLength(1);
+    await render([]); await render(); expect(reads()).toHaveLength(1);
+  });
+
   it('joins concurrent aliases while preserving the original request spelling', async () => {
     const held = deferred(); fetchMock.mockReturnValue(held.promise);
     await render([{ repo: 'Org/Sample' }, { repo: 'org/sample' }]); expect(reads()).toHaveLength(1);
@@ -131,12 +144,13 @@ describe('compact PR detail snapshots through PrPanel', () => {
   it('preserves fast running-check polling and background request labels without duplicate alias reads', async () => {
     fetchMock.mockImplementation(async () => Response.json({ pr: { ...detail(), statusCheckRollup: [{ name: 'test', status: 'in_progress' }] } }));
     await render([{ repo: 'Org/Sample' }, { repo: 'org/sample' }]);
+    await act(async () => { host.querySelector<HTMLButtonElement>('[role=tab][id$="-checks"]')!.click(); });
     await act(async () => vi.advanceTimersByTimeAsync(30_000)); await flush();
     expect(reads()).toHaveLength(2); expect(reads()[1][0]).toContain('&poll=1');
   });
 
-  it('keeps idle checks on the existing two-minute poll interval', async () => {
-    await render(); await act(async () => vi.advanceTimersByTimeAsync(30_000)); expect(reads()).toHaveLength(1);
+  it('keeps the summary on the two-minute poll interval', async () => {
+    await render(); await act(async () => host.querySelector<HTMLButtonElement>('[role=tab][id$="-summary"]')!.click()); await act(async () => vi.advanceTimersByTimeAsync(30_000)); expect(reads()).toHaveLength(1);
     await act(async () => vi.advanceTimersByTimeAsync(90_000)); await flush(); expect(reads()).toHaveLength(2); expect(reads()[1][0]).toContain('&poll=1');
   });
 
@@ -148,7 +162,7 @@ describe('compact PR detail snapshots through PrPanel', () => {
 
   it('retains known checks and respects quota backoff before the next scheduled read', async () => {
     fetchMock.mockImplementation(async () => Response.json({ pr: { ...detail(), statusCheckRollup: [{ name: 'test', status: 'in_progress' }] } }));
-    await render(); fetchMock.mockResolvedValueOnce(Response.json({ error: 'GitHub refresh is paused.' }, { status: 429, headers: { 'retry-after': '120' } }));
+    await render(); await act(async () => host.querySelector<HTMLButtonElement>('[role=tab][id$="-checks"]')!.click()); fetchMock.mockResolvedValueOnce(Response.json({ error: 'GitHub refresh is paused.' }, { status: 429, headers: { 'retry-after': '120' } }));
     await act(async () => vi.advanceTimersByTimeAsync(30_000)); await flush(); expect(reads()).toHaveLength(2);
     expect(host.textContent).toContain('Known change'); expect(host.textContent).toContain('GitHub refresh is paused.');
     await act(async () => vi.advanceTimersByTimeAsync(90_000)); expect(reads()).toHaveLength(2);
@@ -187,12 +201,14 @@ it('invalidates a default-scope snapshot only when its resolved repository match
   await render([{ repo: null }]); expect(host.textContent).toContain('Default after comment'); expect(reads()).toHaveLength(2);
 });
 
-it('rechooses the check cadence after manual refresh changes idle and running state', async () => {
+it('keeps checks polling fast through a refresh and slows it when leaving checks', async () => {
   await render();
+  await act(async () => host.querySelector<HTMLButtonElement>('[role=tab][id$="-checks"]')!.click());
   fetchMock.mockImplementation(async () => Response.json({ pr: { ...detail(), statusCheckRollup: [{ name: 'test', status: 'in_progress' }] } }));
   await refresh();
   await act(async () => vi.advanceTimersByTimeAsync(30_000)); await flush(); expect(reads()).toHaveLength(3);
   fetchMock.mockResolvedValue(response()); await refresh();
+  await act(async () => host.querySelector<HTMLButtonElement>('[role=tab][id$="-summary"]')!.click());
   await act(async () => vi.advanceTimersByTimeAsync(30_000)); expect(reads()).toHaveLength(4);
   await act(async () => vi.advanceTimersByTimeAsync(90_000)); await flush(); expect(reads()).toHaveLength(5);
 });

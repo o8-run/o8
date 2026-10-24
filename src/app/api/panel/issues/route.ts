@@ -59,5 +59,7 @@ export async function GET(request: Request) {
     repo,
     error: result.error,
     stale: result.stale,
+    lastSuccessfulAt: result.lastSuccessfulAt,
+    retryAt: result.retryAt,
   });
 }

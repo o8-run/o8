@@ -18,9 +18,9 @@ const snapshot = (title = 'Fixture change', state = 'OPEN', number = 7) => Respo
 const reads = () => fetchMock.mock.calls.filter(([url, init]) => String(url).startsWith('/api/panel/prs/') && init?.method !== 'POST');
 const writes = () => fetchMock.mock.calls.filter(([, init]) => init?.method === 'POST');
 async function settle(ms = 0) { await act(async () => vi.advanceTimersByTimeAsync(ms)); }
-async function render(count = 1, repo: string | undefined = 'org/sample', number = 7) {
+async function render(count = 1, repo: string | undefined = 'org/sample', number = 7, active = true) {
   await act(async () => root.render(createElement(QueryClientProvider, { client },
-    ...Array.from({ length: count }, (_, key) => createElement(PRViewer, { key, repo, prNumber: number })),
+    ...Array.from({ length: count }, (_, key) => createElement(PRViewer, { key, repo, prNumber: number, active })),
   ))); await settle(); await settle();
 }
 async function comment(text = 'Fixture comment') {
@@ -145,4 +145,44 @@ it('preserves the write acknowledgment when its refresh fails and retries on rem
   fetchMock.mockImplementation(async (url: string) => url === '/api/panel/repos' ? Response.json({ repos: [] }) : snapshot('Recovered after comment'));
   await render(0); await render(); expect(host.textContent).toContain('#7 Recovered after comment');
   expect(reads()).toHaveLength(3); expect(writes()).toHaveLength(1);
+});
+
+it('polls only the selected checks view and stops on hide, overview, or terminal state', async () => {
+  const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
+  await render(); await settle(30_000); expect(reads()).toHaveLength(1);
+  const select = async (label: string) => { await act(async () => [...host.querySelectorAll('button')].find(button => button.textContent?.includes(label))!.click()); await settle(); };
+  await select('Checks'); await settle(30_000); expect(reads()).toHaveLength(2);
+  hidden.mockReturnValue(true); await act(async () => document.dispatchEvent(new Event('visibilitychange')));
+  await settle(60_000); expect(reads()).toHaveLength(2);
+  hidden.mockReturnValue(false); await act(async () => document.dispatchEvent(new Event('visibilitychange')));
+  await select('Overview'); await settle(60_000); expect(reads()).toHaveLength(2);
+  fetchMock.mockImplementation(async (url: string) => url === '/api/panel/repos' ? Response.json({ repos: [] }) : snapshot('Merged change', 'MERGED'));
+  await select('Checks'); await settle(30_000); expect(reads()).toHaveLength(3);
+  await settle(180_000); expect(reads()).toHaveLength(3);
+});
+
+it('delivers the post-action refresh during a shared repository hold', async () => {
+  await render(); client.setQueryData(['gh-quota', 'org/sample'], Date.now() + 600_000);
+  fetchMock.mockImplementation(async (_url: string, init?: RequestInit) => init?.method === 'POST'
+    ? Response.json({ action: 'commented' }) : snapshot('Manual held refresh'));
+  await comment();
+  expect(reads()).toHaveLength(2); expect(host.textContent).toContain('Manual held refresh');
+});
+
+it('shares the selected review-thread read across simultaneous full viewers', async () => {
+  fetchMock.mockImplementation(async (url: string) => url.includes('/review/threads?') ? Response.json({ threads: [] })
+    : url === '/api/panel/repos' ? Response.json({ repos: [] }) : snapshot());
+  await render(2);
+  await act(async () => { for (const button of host.querySelectorAll('button')) if (button.textContent?.startsWith('Threads')) button.click(); });
+  await settle(); await settle();
+  expect(fetchMock.mock.calls.filter(([url]) => String(url).includes('/review/threads?'))).toHaveLength(1);
+});
+
+it('stops checks polling while the Canvas keeps the PR tab mounted but inactive', async () => {
+  await render();
+  await act(async () => [...host.querySelectorAll('button')].find(button => button.textContent?.startsWith('Checks'))!.click());
+  await settle(30_000); expect(reads()).toHaveLength(2);
+  await render(1, 'org/sample', 7, false); await settle(120_000); expect(reads()).toHaveLength(2);
+  await render(); await settle(); const before = reads().length;
+  await settle(30_000); expect(reads()).toHaveLength(before + 1);
 });
