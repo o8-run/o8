@@ -1,4 +1,5 @@
 use super::*;
+use crate::theme::current as theme;
 impl Render for Shell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.ensure(window, cx);
@@ -17,8 +18,9 @@ impl Render for Shell {
             .size_full()
             .flex()
             .flex_col()
-            .bg(rgb(0x1a1e24))
-            .text_color(rgb(0xe8ecf2))
+            .bg(theme().background)
+            .text_color(theme().text)
+            .font_family(theme().font_ui)
             .text_size(px(13.))
             .track_focus(&self.focus)
             .capture_key_down(cx.listener(Self::key_down))
@@ -45,11 +47,11 @@ impl Render for Shell {
                                 .debug_selector(move || format!("workspace-{i}"))
                                 .cursor_pointer()
                                 .p(px(6.))
-                                .bg(rgb(if self.state.selected.as_ref() == Some(&workspace) {
-                                    0x303744
+                                .bg(if self.state.selected.as_ref() == Some(&workspace) {
+                                    theme().selection
                                 } else {
-                                    0x282e38
-                                }))
+                                    theme().surface_raised
+                                })
                                 .child(label)
                                 .on_click(cx.listener(move |this, _, window, cx| {
                                     this.switch(workspace.clone(), window, cx)
@@ -95,14 +97,18 @@ impl Render for Shell {
                         .max_h(px(300.))
                         .overflow_y_scroll()
                         .p(px(12.))
-                        .bg(rgb(0x282e38))
+                        .bg(theme().surface_raised)
                         .child(format!("Commands: {}", self.query))
                         .children(self.commands().into_iter().enumerate().map(|(i, command)| {
                             div()
                                 .id(("command", i))
                                 .p(px(6.))
                                 .cursor_pointer()
-                                .bg(rgb(if i == self.choice { 0x40506a } else { 0x282e38 }))
+                                .bg(if i == self.choice {
+                                    theme().selection
+                                } else {
+                                    theme().surface_raised
+                                })
                                 .child(command.label(&self.sessions))
                                 .on_click(cx.listener(move |this, _, window, cx| {
                                     this.execute(command.clone(), window, cx)
@@ -129,11 +135,11 @@ impl Render for Shell {
                                     .id(("surface-tab", i))
                                     .cursor_pointer()
                                     .p(px(6.))
-                                    .bg(rgb(if active.as_ref() == Some(&t) {
-                                        0x40506a
+                                    .bg(if active.as_ref() == Some(&t) {
+                                        theme().selection
                                     } else {
-                                        0x282e38
-                                    }))
+                                        theme().surface_raised
+                                    })
                                     .child(t.label())
                                     .on_click(cx.listener(move |this, _, window, cx| {
                                         this.capture(window, cx);

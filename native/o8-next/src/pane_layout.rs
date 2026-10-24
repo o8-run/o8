@@ -94,6 +94,7 @@ impl Options {
         for layout in layouts.values() {
             if !SIZES.contains(&layout.size)
                 || layout.sessions.len() != 6
+                || layout.views.len() != 6
                 || layout.focus >= layout.size
             {
                 return Err("Invalid pane layout; original file retained".into());
@@ -122,6 +123,18 @@ pub struct Layout {
     pub size: usize,
     pub sessions: Vec<Option<String>>,
     pub focus: usize,
+    #[serde(default = "transcript_views")]
+    pub views: Vec<View>,
+}
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum View {
+    #[default]
+    Transcript,
+    Terminal,
+}
+fn transcript_views() -> Vec<View> {
+    vec![View::Transcript; 6]
 }
 impl Layout {
     pub fn new(size: usize, keys: impl Iterator<Item = String>) -> Self {
@@ -131,6 +144,7 @@ impl Layout {
             size,
             sessions,
             focus: 0,
+            views: transcript_views(),
         }
     }
     pub fn columns(&self) -> usize {

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { pullRequestListQuery } from '@/lib/github-client';
 import { githubQuotaDeadline } from '@/lib/github-client/quota-deadline';
+import { validPrStackObservation } from '@/lib/github-client/pr-stack';
 import type { PRHoverDetail } from './types';
 
 export interface ActivityPrHoverStatus {
@@ -21,6 +22,7 @@ function validDetail(value: unknown, repo: string, number: number): value is PRH
     && typeof value.mergeable === 'boolean'
     && typeof value.checksStatus === 'string' && ['success', 'failure', 'pending', 'unknown'].includes(value.checksStatus)
     && (value.reviewDecision == null || typeof value.reviewDecision === 'string')
+    && (value.stack === undefined || validPrStackObservation(value.stack, number))
     && Array.isArray(value.files) && value.files.every((file: unknown) => isObject(file)
       && typeof file.path === 'string' && typeof file.status === 'string'
       && typeof file.additions === 'number' && Number.isFinite(file.additions)
@@ -48,7 +50,7 @@ function hoverQuery(repo: string, number: number | null) {
       if (!validDetail(detail, repo, number)) throw new Error('Invalid PR detail response');
       return {
         mergeable: detail.mergeable, checksStatus: detail.checksStatus,
-        reviewDecision: detail.reviewDecision ?? null, files: detail.files,
+        reviewDecision: detail.reviewDecision ?? null, files: detail.files, stack: detail.stack,
       };
     },
     refetchInterval: false as const,

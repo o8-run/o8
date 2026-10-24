@@ -7,6 +7,7 @@ import type { RepoReadiness, RepoRegistryEntry } from '@/lib/repos/types';
 import type { WorktreeInfo } from '@/lib/worktree/types';
 import type { WorkflowStageBadge } from '@/lib/workflows/status';
 import type { LeftPanelProjectFocusState } from '../repo-focus/useLeftPanelProjectFocus';
+import type { PullRequestStackObservation } from '@/lib/github-client/pr-stack';
 
 export interface AgentDetail {
   id: string;
@@ -95,6 +96,7 @@ export interface PRHoverDetail {
   checksStatus: 'success' | 'failure' | 'pending' | 'unknown';
   reviewDecision: string | null;
   files: Array<{ path: string; status: string; additions: number; deletions: number }>;
+  stack?: PullRequestStackObservation;
 }
 
 export interface CIHoverDetail {

@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { NextRequest } from 'next/server';
+import { startTerminalFixture } from './terminal-fixture';
 import { attachPaneGridSocket, installPaneRuntime, seedPaneGrid } from './pane-fixture';
 
 async function main() {
@@ -41,7 +42,8 @@ async function main() {
   const { GET: inventory } = await import('../../src/app/api/runtime/inventory/route');
   const { getOrCreateWsToken } = await import('../../src/lib/ws-auth');
   const { panelGateMiddleware } = await import('../../src/middleware');
-  await installPaneRuntime(dataDir, repo);
+  const terminals = process.argv.includes('--terminals');
+  await installPaneRuntime(dataDir, repo, terminals);
   const routes: Record<string, (request: NextRequest) => Promise<Response>> = {
     '/api/mobile/orchestrator/threads': sessions, '/api/mobile/history': history,
     '/api/orchestrator/state': state, '/api/runtime/inventory': inventory, '/api/panel/ws-info': wsInfo,
@@ -51,10 +53,13 @@ async function main() {
     try {
       const url = new URL(req.url ?? '/', `http://${req.headers.host}`);
       requests.push(`${req.method} ${url.pathname}`);
+      if (terminals && req.method === 'GET' && url.pathname === '/api/panel/status') {
+        res.writeHead(200, { 'Content-Type': 'application/json' }).end('{}'); return;
+      }
       const route = req.method === 'GET' ? routes[url.pathname] : undefined;
       if (!route) { req.resume(); res.writeHead(404).end(); return; }
       const key = url.searchParams.get('sessionKey');
-      if (route === history && key !== 'pi-owned:grid-runtime'
+      if (route === history && !(terminals && /^pi-owned:grid-terminal-[0-5]$/.test(key ?? '')) && key !== 'pi-owned:grid-runtime'
         && !seeds.some(seed => `llm-chat:${seed.id}` === key)) { res.writeHead(404).end(); return; }
       const request = new NextRequest(url, { headers: { host: url.host, 'x-o8-client-addr': '127.0.0.1',
         ...(req.headers.authorization ? { authorization: req.headers.authorization } : {}) } });
@@ -64,15 +69,24 @@ async function main() {
       res.end(Buffer.from(await response.arrayBuffer()));
     } catch { res.writeHead(500).end('fixture route failed'); }
   });
-  const closeSockets = attachPaneGridSocket(server, getOrCreateWsToken(), requests);
-  server.listen(0, '127.0.0.1', () => {
+  const token = getOrCreateWsToken();
+  const closeSockets = terminals ? () => {} : attachPaneGridSocket(server, token, requests);
+  let closeTerminal = async () => {};
+  server.listen(0, '127.0.0.1', async () => {
     const address = server.address();
     if (!address || typeof address === 'string') throw new Error('Missing fixture port');
     Object.assign(process.env, { O8_WS_PORT: String(address.port), WS_PORT: String(address.port), O8_API_PORT: String(address.port) });
-    writeFileSync(join(dataDir, 'ws-port'), String(address.port));
+    const peer = terminals ? await startTerminalFixture(dataDir, repo, address.port, token,
+      Array.from({ length: 6 }, (_, index) => `cortex-next-grid-${index}`)) : null;
+    if (peer) {
+      closeTerminal = peer.close;
+      process.env.O8_WS_PORT = String(peer.port); process.env.WS_PORT = String(peer.port);
+    }
+    writeFileSync(join(dataDir, 'ws-port'), String(peer?.port ?? address.port));
     process.stdout.write(`${JSON.stringify({ origin: `http://127.0.0.1:${address.port}`, workspace: repo })}\n`);
   });
-  function close() {
+  async function close() {
+    await closeTerminal();
     closeSockets(); server.closeAllConnections(); server.close();
     realtime.closeAllConnections(); realtime.close();
     if (process.env.O8_NEXT_REQUEST_LOG) writeFileSync(process.env.O8_NEXT_REQUEST_LOG, JSON.stringify(requests));

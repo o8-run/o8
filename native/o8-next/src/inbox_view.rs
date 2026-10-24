@@ -1,14 +1,6 @@
 use super::*;
-use gpui::{FontWeight, IntoElement, KeyDownEvent, Render, div, prelude::*, px, rgb};
-
-// main has no theme.rs. Keep the existing native shell palette local to Inbox.
-const BG: u32 = 0x1a1e24;
-const CARD: u32 = 0x202630;
-const HOVER: u32 = 0x303744;
-const TEXT: u32 = 0xe8ecf2;
-const MUTED: u32 = 0x9aa7b8;
-const WARNING: u32 = 0xffb454;
-const ACCENT: u32 = 0xff5a1f;
+use crate::theme::current as palette;
+use gpui::{FontWeight, IntoElement, KeyDownEvent, Render, div, prelude::*, px};
 
 impl Inbox {
     fn key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
@@ -98,20 +90,20 @@ impl Inbox {
         );
         div().id(("inbox-card", index)).debug_selector(move || format!("inbox-card-{id}"))
             .flex().flex_col().gap(px(4.)).p(px(12.)).mb(px(8.)).rounded(px(8.))
-            .bg(rgb(if index == self.selected { HOVER } else { CARD }))
-            .child(div().flex().flex_wrap().gap(px(8.)).text_size(px(9.5)).text_color(rgb(MUTED))
+            .bg(if index == self.selected { palette().hover } else { palette().surface_raised })
+            .child(div().flex().flex_wrap().gap(px(8.)).text_size(px(9.5)).text_color(palette().text_muted)
                 .child(div().debug_selector(move || source_id.clone()).child(label(&card.source)))
-                .child(div().debug_selector(move || status_id.clone()).text_color(rgb(if card.status == "human_required" || card.unsettled { WARNING } else { MUTED })).child(status)))
+                .child(div().debug_selector(move || status_id.clone()).text_color(if card.status == "human_required" || card.unsettled { palette().warning } else { palette().text_muted }).child(status)))
             .child(div().text_size(px(13.5)).child(card.title.clone()))
-            .when(!card.detail.is_empty(), |v| v.child(div().text_size(px(11.5)).text_color(rgb(MUTED)).child(card.detail.clone())))
-            .child(div().text_size(px(9.5)).text_color(rgb(MUTED)).child(card.metadata.clone()))
-            .when(card.unsettled, |v| v.child(div().text_size(px(11.)).text_color(rgb(WARNING))
+            .when(!card.detail.is_empty(), |v| v.child(div().text_size(px(11.5)).text_color(palette().text_muted).child(card.detail.clone())))
+            .child(div().text_size(px(9.5)).text_color(palette().text_muted).child(card.metadata.clone()))
+            .when(card.unsettled, |v| v.child(div().text_size(px(11.)).text_color(palette().warning)
                 .child("Approval recorded; continuation unconfirmed. Inspect the target before another action.")))
             .child(div().flex().flex_wrap().gap(px(8.)).mt(px(4.))
                 .when(!card.session.is_empty() || github_url(&card.url).is_some(), |v| v.child(
                     div().id(("inbox-open", index)).debug_selector({ let id = card.id.clone(); move || format!("inbox-open-{id}") })
                         .cursor_pointer().p(px(6.)).rounded(px(7.)).text_size(px(11.))
-                        .hover(|s| s.bg(rgb(CARD)))
+                        .hover(|s| s.bg(palette().surface_raised))
                         .child(if card.session.is_empty() { "Open on GitHub" } else { "Open session" })
                         .on_click(cx.listener(move |this, _, _, cx| this.open(&open, cx)))))
                 .when(card.approval, |v| v.children([false, true].map(|approve| {
@@ -149,8 +141,16 @@ impl Inbox {
             .min_h(px(44.))
             .rounded(px(8.))
             .text_size(px(12.))
-            .bg(rgb(if approve && enabled { ACCENT } else { CARD }))
-            .text_color(rgb(if enabled { TEXT } else { MUTED }))
+            .bg(if approve && enabled {
+                palette().accent
+            } else {
+                palette().surface_raised
+            })
+            .text_color(if enabled {
+                palette().text
+            } else {
+                palette().text_muted
+            })
             .child(if self.busy.as_ref() == Some(&card.id) {
                 "Resolving…"
             } else if approve {
@@ -165,7 +165,7 @@ impl Inbox {
                         .inset_0()
                         .rounded(px(8.))
                         .border_2()
-                        .border_color(rgb(WARNING))
+                        .border_color(palette().warning)
                         .debug_selector({
                             let id = card.id.clone();
                             move || format!("inbox-focus-{action}-{id}")
@@ -174,7 +174,7 @@ impl Inbox {
             })
             .when(enabled, |v| {
                 v.cursor_pointer()
-                    .hover(|s| s.bg(rgb(HOVER)))
+                    .hover(|s| s.bg(palette().hover))
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.decide(clicked.clone(), approve, window, cx)
                     }))
@@ -196,8 +196,9 @@ impl Render for Inbox {
             .size_full()
             .flex()
             .flex_col()
-            .bg(rgb(BG))
-            .text_color(rgb(TEXT))
+            .bg(palette().background)
+            .text_color(palette().text)
+            .font_family(palette().font_ui)
             .font_weight(FontWeight::LIGHT)
             .text_size(px(13.))
             .track_focus(&self.focus)
@@ -234,7 +235,7 @@ impl Render for Inbox {
                                     })
                                     .when(self.lane != 2 && !self.workspace.is_empty(), |v| {
                                         v.cursor_pointer()
-                                            .hover(|s| s.bg(rgb(HOVER)))
+                                            .hover(|s| s.bg(palette().hover))
                                             .on_click(cx.listener(|this, _, _, cx| this.scope(cx)))
                                     }),
                             )
@@ -252,7 +253,7 @@ impl Render for Inbox {
                                     })
                                     .when(!self.loading, |v| {
                                         v.cursor_pointer()
-                                            .hover(|s| s.bg(rgb(HOVER)))
+                                            .hover(|s| s.bg(palette().hover))
                                             .on_click(cx.listener(|this, _, _, cx| this.load(cx)))
                                     }),
                             ),
@@ -260,7 +261,7 @@ impl Render for Inbox {
                     .child(
                         div()
                             .text_size(px(9.5))
-                            .text_color(rgb(MUTED))
+                            .text_color(palette().text_muted)
                             .child(self.freshness()),
                     )
                     .child(div().flex().flex_wrap().gap(px(4.)).mt(px(8.)).children(
@@ -275,7 +276,11 @@ impl Render for Inbox {
                                 .flex()
                                 .items_center()
                                 .gap(px(5.))
-                                .bg(rgb(if i == self.lane { HOVER } else { BG }))
+                                .bg(if i == self.lane {
+                                    palette().hover
+                                } else {
+                                    palette().background
+                                })
                                 .cursor_pointer()
                                 .text_size(px(11.))
                                 .child(*label)
@@ -285,7 +290,7 @@ impl Render for Inbox {
                                             format!("inbox-count-{lane}-{count}")
                                         })
                                         .text_size(px(9.5))
-                                        .text_color(rgb(MUTED))
+                                        .text_color(palette().text_muted)
                                         .child(count.to_string()),
                                 )
                                 .on_click(cx.listener(move |this, _, window, cx| {
@@ -300,7 +305,7 @@ impl Render for Inbox {
                     div()
                         .px(px(12.))
                         .text_size(px(11.))
-                        .text_color(rgb(MUTED))
+                        .text_color(palette().text_muted)
                         .child("Approvals across all workspaces"),
                 )
             })
@@ -317,7 +322,7 @@ impl Render for Inbox {
                         .debug_selector(|| "inbox-error".into())
                         .p(px(12.))
                         .text_size(px(11.))
-                        .text_color(rgb(WARNING))
+                        .text_color(palette().warning)
                         .child(error),
                 )
             })
@@ -335,7 +340,7 @@ impl Render for Inbox {
                     div()
                         .px(px(12.))
                         .text_size(px(11.))
-                        .text_color(rgb(MUTED))
+                        .text_color(palette().text_muted)
                         .child(if self.lane == 0 {
                             "Showing the 200 oldest unanswered conversations."
                         } else {
@@ -349,7 +354,7 @@ impl Render for Inbox {
                         .debug_selector(|| "inbox-empty".into())
                         .p(px(16.))
                         .text_size(px(12.))
-                        .text_color(rgb(MUTED))
+                        .text_color(palette().text_muted)
                         .child(match self.lane {
                             0 if self.feed.sources.is_empty() => {
                                 "Connect a GitHub repository to see conversations here."

@@ -179,8 +179,8 @@ refresh that short-lived identity; missing or expired sessions remain refused.
 The credential stays in process memory and is excluded from arguments, logs and
 saved shell state. The shell launcher drops it for workers or a different origin.
 
-There was no `theme.rs` on the starting main baseline. Inbox colors are local to
-`src/inbox_view.rs`, using the existing native shell palette and desktop type sizes.
+Inbox uses the shared semantic colors and platform fonts in `src/theme.rs`,
+which landed on main during review. Desktop type sizes remain unchanged.
 Headless verification uses production route handlers and persisted fixtures:
 
 ```sh
@@ -373,10 +373,9 @@ npx vitest run tests/o8-next-pane-grid-real-path.test.ts tests/next-render-parit
 cargo test --release --locked --manifest-path native/o8-next/Cargo.toml pane_grid_measurement -- --ignored --nocapture
 ```
 
-The grid currently contains read-only transcript panes. Per-slot terminals
-remain to be integrated with the separately reviewed terminal surface; this
-change does not import that branch. Measurement endpoints, raw samples and
-remaining acceptance are in [pane grid evidence](evidence/pane-grid/README.md).
+Initial transcript-grid measurement endpoints and raw samples are in
+[pane grid evidence](evidence/pane-grid/README.md). Per-slot terminal behavior
+and its measurements follow below.
 
 ## Opt-in diff and packet review (#4531)
 
@@ -472,3 +471,66 @@ including changes to an existing assistant id that the sync cursor omits. Older
 retained rows survive; sequence/boot and request revisions reject stale reads.
 Linux TestAppContext uses a no-op text system; these are neither GPU presentation
 nor physical keyboard timings. See [worker composer evidence](evidence/worker-composer.md).
+
+## Pane grid with per-slot terminals (#4530)
+
+Slots reuse the standalone terminal pane and transport from #4502. This adds
+grid attachment, visibility and focus handling to that shared implementation.
+
+The explicit grid uses 1, 2, 4 or 6 slots. Start the disposable fixture host:
+
+```sh
+node --import ./scripts/register-server-only-stub.mjs --import tsx scripts/next/grid-dev-server.ts --terminals
+```
+
+It prints an allocated loopback `origin` and a temporary `workspace`. Its six
+runtime workers have persisted transcripts and distinct real fixture PTYs, served
+by the production inventory/history routes and `src/ws-server.ts`. It uses no
+accounts. The ordinary grid fixture without `--terminals` retains its independent
+history replay streams. Both hosts stop after two minutes.
+
+Build the native binary, set `O8_NEXT_API_TOKEN` explicitly for the selected
+server, and substitute those exact values below. `LAYOUT_FILE` must be an explicit
+absolute file in an existing writable directory:
+
+```sh
+cargo build --release --locked --manifest-path native/o8-next/Cargo.toml
+native/o8-next/target/release/o8-next --enable-next --server ORIGIN --pane-grid 6 --workspace WORKSPACE --pane-layout LAYOUT_FILE
+```
+
+Ctrl+Alt+T switches the focused slot between its transcript and terminal. The
+header's Transcript/Terminal control does the same. Terminal attachment uses
+only the exact `tmuxSession` binding from the existing runtime inventory; a worker
+without one shows an unavailable message. No terminal is created by this UI.
+The standalone `--terminal SESSION_ID` mode uses the same terminal entity and
+transport; it cannot be combined with `--pane-grid`.
+
+Ctrl+Alt+arrows moves focus geometrically, adding Shift reorders a pane with its
+session and view. Ctrl+Alt+1/2/4/6 changes the layout, Ctrl+Alt+Enter zooms,
+Ctrl+Alt+W closes and Ctrl+Alt+P chooses the next unassigned session. In a focused
+terminal, ordinary Tab, Home/End, arrows, text, paste and IME go to that terminal;
+use the grid shortcuts to leave it. Titles stay within 40 characters and headers
+show static session state words.
+
+The selected view persists alongside ordered session keys, size and focus per
+workspace. Existing layout files default to transcript in every slot. Invalid
+view names or counts fail before opening a window and retain the original file.
+Changing a slot to transcript, reducing the grid, zooming another slot or clipping
+the slot leaves its terminal attached and parsing into bounded scrollback, while
+its glyph shaping and painting stop. Closing or replacing the session drops only
+that viewer attachment. Unrelated workspace layouts remain intact.
+
+Linux headless checks and optimized CPU scene measurements:
+
+```sh
+cargo test --locked --manifest-path native/o8-next/Cargo.toml
+cargo test --release --locked --manifest-path native/o8-next/Cargo.toml grid_terminal_measurement -- --ignored --nocapture
+npx vitest run tests/o8-next-grid-terminal-real-path.test.ts tests/o8-next-pane-grid-real-path.test.ts tests/next-terminal-real-path.test.ts tests/next-render-parity.test.ts tests/next-stream-parity.test.ts
+O8_NEXT_TARGET=x86_64-unknown-linux-gnu node scripts/next/license-audit.mjs
+```
+
+The terminal parser is the published Apache-2.0 `alacritty_terminal` crate; all UI
+uses GPUI. No GPL application crates are used. See
+[slot terminal verification](evidence/slot-terminals/verification.md) for retained
+red/green receipts, six-slot measurements and the remaining display acceptance.
+The shipped Tauri app is unchanged.

@@ -1,3 +1,4 @@
+use crate::theme::current as theme;
 #[path = "composer_bench.rs"]
 mod composer_bench;
 #[path = "conversation.rs"]
@@ -18,7 +19,7 @@ use crate::{
 use gpui::{
     App, Application, Bounds, Context, FocusHandle, KeyDownEvent, Keystroke, ListAlignment,
     ListOffset, ListState, Render, Window, WindowBounds, WindowHandle, WindowOptions, canvas, div,
-    list, point, prelude::*, px, rgb, size,
+    list, point, prelude::*, px, size,
 };
 use serde_json::{Value, json};
 use std::{
@@ -329,9 +330,9 @@ impl Render for Surface {
             .size_full()
             .flex()
             .flex_col()
-            .bg(rgb(0x1a1e24))
-            .text_color(rgb(0xe8ecf2))
-            .font_family(".AppleSystemUIFont")
+            .bg(theme().background)
+            .text_color(theme().text)
+            .font_family(theme().font_ui)
             .font_weight(gpui::FontWeight::LIGHT)
             .text_size(px(13.))
             .track_focus(&self.focus)
@@ -420,7 +421,7 @@ impl Render for Surface {
                             .py(px(4.))
                             .rounded(px(5.))
                             .cursor_pointer()
-                            .bg(rgb(0x282e38))
+                            .bg(theme().surface_raised)
                             .child("Refresh")
                             .on_click(cx.listener(|this, _, _, cx| this.load_sessions(cx))),
                     ),
@@ -448,7 +449,7 @@ impl Render for Surface {
                                                     .px(px(12.))
                                                     .mb(px(6.))
                                                     .text_size(px(10.))
-                                                    .text_color(rgb(0x8a93a0))
+                                                    .text_color(theme().text_muted)
                                                     .child(match group.kind {
                                                         "working" => "Working",
                                                         "review" => "Review",
@@ -463,11 +464,11 @@ impl Render for Surface {
                                                     .py(px(5.))
                                                     .rounded(px(8.))
                                                     .cursor_pointer()
-                                                    .bg(rgb(if session.selected {
-                                                        0x303744
+                                                    .bg(if session.selected {
+                                                        theme().selection
                                                     } else {
-                                                        0x1a1e24
-                                                    }))
+                                                        theme().background
+                                                    })
                                                     .child(
                                                         div()
                                                             .text_size(px(13.5))
@@ -477,7 +478,7 @@ impl Render for Surface {
                                                         div()
                                                             .mt(px(4.))
                                                             .text_size(px(9.5))
-                                                            .text_color(rgb(0x8a93a0))
+                                                            .text_color(theme().text_muted)
                                                             .child(format!(
                                                                 "{} · {}",
                                                                 self.sessions
@@ -506,7 +507,7 @@ impl Render for Surface {
                                     .px(px(24.))
                                     .py(px(8.))
                                     .text_size(px(11.))
-                                    .text_color(rgb(0x8a93a0))
+                                    .text_color(theme().text_muted)
                                     .child(self.notice.clone()),
                             )
                             .child(self.history_control(cx))

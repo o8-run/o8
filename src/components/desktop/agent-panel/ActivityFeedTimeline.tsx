@@ -1,6 +1,7 @@
 'use client';
 
 import { memo, type ReactNode } from 'react';
+import { PrStackSummary } from './PrStackSummary';
 import { openExternalUrl } from '@/lib/desktop/open-external';
 import {
   AlertCircle,
@@ -436,6 +437,8 @@ export const ActivityFeedTimeline = memo(function ActivityFeedTimeline({
                           <BlueGlassMetricPill label="Checks" value={`${item.checkSummary?.failed ?? 0} fail · ${item.checkSummary?.pending ?? 0} pending`} color={item.checkSummary?.failed ? '#dc2626' : item.checkSummary?.pending ? '#d97706' : '#1d4ed8'} />
                           <BlueGlassMetricPill label="Files" value={String(item.changedFiles)} color="var(--t-text)" />
                         </div>
+                        {prDetail?.stack ? <PrStackSummary observation={prDetail.stack} prNumber={item.number} retained={Boolean(prHoverStatus.error)}
+                          onSelect={onSelectPR ? number => onSelectPR(number, item.repo) : undefined} /> : null}
                         <div role="status" style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>
                           {prHoverStatus.isFetching ? (prDetail ? 'Refreshing PR details…' : 'Loading PR details…') : null}
                           {prHoverStatus.error ? `PR details delayed: ${prHoverStatus.error}. ` : null}

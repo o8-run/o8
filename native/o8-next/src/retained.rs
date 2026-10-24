@@ -1,5 +1,6 @@
 //! Retained transcript text layout. Only content or viewport-width changes reshape
 //! a row. Moving/repainting an unchanged row reuses its shaped lines and height.
+use crate::theme::current as theme;
 use crate::{
     model::Row,
     text::{Node, Run},
@@ -7,7 +8,7 @@ use crate::{
 use gpui::{
     App, AvailableSpace, Bounds, Element, ElementId, GlobalElementId, InspectorElementId,
     IntoElement, LayoutId, Pixels, Point, Size, Style, TextAlign, TextRun, Window, WrappedLine,
-    font, point, px, rgb, size,
+    font, point, px, size,
 };
 use std::{cell::RefCell, collections::BTreeSet, rc::Rc};
 
@@ -49,7 +50,7 @@ struct Line {
 }
 struct Backdrop {
     bounds: Bounds<Pixels>,
-    color: u32,
+    color: gpui::Rgba,
 }
 struct Layout {
     size: Size<Pixels>,
@@ -108,7 +109,7 @@ impl Builder {
                 self.y = bottom + px(8.);
                 self.backgrounds.push(Backdrop {
                     bounds: Bounds::new(point(px(24.), self.y), size(self.width - px(48.), px(1.))),
-                    color: 0x343b45,
+                    color: theme().border,
                 });
                 self.y += px(4.);
             }
@@ -177,7 +178,7 @@ impl Builder {
                 point(px(24.), top),
                 size(self.width - px(48.), self.y - top),
             ),
-            color: 0x242a33,
+            color: theme().surface,
         });
     }
     fn text(
@@ -234,7 +235,7 @@ impl Builder {
             self.y += px(12.);
             self.backgrounds.push(Backdrop {
                 bounds: Bounds::new(point(px(24.), self.y), size(self.width - px(48.), px(1.))),
-                color: 0x343b45,
+                color: theme().border,
             });
             self.y += px(13.);
             return;
@@ -313,7 +314,7 @@ impl Builder {
                     point(px(24.), top + px(8.)),
                     size(self.width - px(48.), self.y - top - px(16.)),
                 ),
-                color: 0x16191e,
+                color: theme().code_background,
             });
         }
     }
@@ -440,7 +441,7 @@ impl RetainedRow {
             .id(("system-event", index))
             .focusable()
             .cursor_pointer()
-            .focus(|style| style.bg(rgb(0x242a33)))
+            .focus(|style| style.bg(theme().hover))
             .on_click(move |_, window, cx| {
                 click(window);
                 cx.stop_propagation();
@@ -533,7 +534,7 @@ impl Element for RetainedRow {
                     bounds.origin + background.bounds.origin,
                     background.bounds.size,
                 ),
-                rgb(background.color),
+                background.color,
             ));
         }
         for line in &cache.lines {
@@ -564,9 +565,9 @@ impl Element for RetainedRow {
 
 fn text_run(run: &Run) -> TextRun {
     let mut face = font(if run.style == "code" || run.style.starts_with("diff-") {
-        "Menlo"
+        theme().font_mono
     } else {
-        ".AppleSystemUIFont"
+        theme().font_ui
     });
     face.weight = if run.style == "strong" {
         gpui::FontWeight::MEDIUM
@@ -579,18 +580,18 @@ fn text_run(run: &Run) -> TextRun {
     TextRun {
         len: run.text.len(),
         font: face,
-        color: rgb(if run.style == "diff-add" {
-            0x8bd49c
+        color: (if run.style == "diff-add" {
+            theme().success
         } else if run.style == "diff-remove" {
-            0xec9b9b
+            theme().danger
         } else if run.style == "link" {
-            0x8cb4e8
+            theme().accent
         } else {
-            0xe8ecf2
+            theme().text
         })
         .into(),
         background_color: if run.style == "code" {
-            Some(rgb(0x242a33).into())
+            Some(theme().surface.into())
         } else {
             None
         },

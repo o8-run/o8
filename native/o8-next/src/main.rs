@@ -23,6 +23,9 @@ mod terminal;
 mod terminal_grid;
 mod terminal_transport;
 mod text;
+mod theme;
+#[cfg(test)]
+mod theme_tests;
 mod transport;
 mod ui;
 use crate::{
@@ -156,6 +159,11 @@ fn run() -> Result<(), String> {
         }
     };
     if let Some(options) = grid {
+        if terminal.is_some() {
+            return Err(
+                "Use per-slot terminal selection in the pane grid, without --terminal".into(),
+            );
+        }
         if benchmark.is_some()
             || composer_benchmark.is_some()
             || stream_benchmark.is_some()

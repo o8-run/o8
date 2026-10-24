@@ -12,6 +12,16 @@ const body = (number = 7, path = 'known.ts') => ({
   number, mergeable: true, checksStatus: 'success', reviewDecision: null,
   files: [{ path, status: 'modified', additions: 5, deletions: 2 }],
 });
+const sha = (letter: string) => letter.repeat(40);
+const stack = (status = 'ready', snapshot = true) => ({
+  status, stale: status !== 'ready' && status !== 'none', source: 'github-native',
+  snapshot: snapshot ? { id: 31, number: 3, trunk: 'main', layers: [
+    { number: 7, title: 'Foundation layer', state: 'open', headRef: 'foundation', headSha: sha('b'), baseRef: 'main', baseSha: sha('a') },
+    { number: 8, title: 'Feature layer', state: 'open', headRef: 'feature', headSha: sha('c'), baseRef: 'foundation', baseSha: sha('b') },
+  ] } : null,
+  revision: snapshot ? 'fixture-revision' : null, fetchedAt: snapshot ? date : null, attemptedAt: date,
+});
+const stackRegion = () => document.querySelector<HTMLElement>('[aria-label="Pull request stack"]');
 let root: Root;
 let host: HTMLDivElement;
 let client: QueryClient;
@@ -212,6 +222,89 @@ it('preserves hover review, full-PR and launch actions', async () => {
   }
   expect(review).toHaveBeenCalledWith(7, repoA); expect(select).toHaveBeenCalledWith(7, repoA);
   expect(launch).toHaveBeenCalledWith(expect.objectContaining({ kind: 'pr', repo: repoA, number: 7 }));
+});
+
+it('shows ordered native stack layers, trunk, exact revisions and scoped layer navigation in the live hover', async () => {
+  reply = () => Response.json({ ...body(), stack: stack() });
+  await render(); await hover();
+  const region = stackRegion()!;
+  expect(region?.textContent).toContain('Native GitHub stack #3');
+  expect(region.textContent).toContain('Trunk: main');
+  expect([...region.querySelectorAll('[data-stack-layer]')].map(node => node.getAttribute('data-stack-layer'))).toEqual(['7', '8']);
+  expect(region.querySelector('[data-stack-layer="7"]')?.getAttribute('aria-current')).toBe('true');
+  for (const commit of [sha('a'), sha('b'), sha('c')]) expect(region.querySelector(`[title="${commit}"]`)).not.toBeNull();
+  expect(region.querySelector('time')?.getAttribute('dateTime')).toBe(date);
+  expect(select).not.toHaveBeenCalled(); expect(review).not.toHaveBeenCalled(); expect(launch).not.toHaveBeenCalled();
+  await act(async () => region.querySelector<HTMLButtonElement>('[data-stack-layer="8"]')!.click());
+  expect(select).toHaveBeenCalledWith(8, repoA);
+  expect(fetchMock.mock.calls.every(([, init]) => !init?.method || init.method === 'GET')).toBe(true);
+});
+
+it.each([
+  ['none', 'No native stack'],
+  ['unauthorized', 'Stack access unavailable'],
+  ['unsupported_or_not_found', 'Stack preview unsupported or not found'],
+  ['unsupported_cross_fork', 'Cross-fork stack unsupported'],
+  ['deferred', 'Stack read deferred'],
+  ['offline', 'Stack offline'],
+  ['unavailable', 'Stack unavailable'],
+])('distinguishes a %s stack read without inventing membership', async (status, label) => {
+  reply = () => Response.json({ ...body(), stack: stack(status, false) });
+  await render(); await hover();
+  expect(stackRegion()?.textContent).toContain(label);
+  expect(stackRegion()?.querySelectorAll('[data-stack-layer]')).toHaveLength(0);
+  expect(document.body.textContent).toContain('known.ts');
+});
+
+it('labels retained membership as stale and removes it after a confirmed no-stack refresh', async () => {
+  reply = () => Response.json({ ...body(), stack: stack('unavailable') });
+  await render(); await hover();
+  expect(stackRegion()?.textContent).toContain('Last known stack');
+  expect(stackRegion()?.textContent).toContain('Stack unavailable');
+  expect(stackRegion()?.querySelectorAll('[data-stack-layer]')).toHaveLength(2);
+  reply = () => Response.json({ ...body(), stack: stack('none', false) });
+  await act(async () => retry().click()); await settle();
+  expect(stackRegion()?.textContent).toContain('No native stack');
+  expect(stackRegion()?.querySelectorAll('[data-stack-layer]')).toHaveLength(0);
+});
+
+it('marks a retained stack as last known when the detail refresh itself fails', async () => {
+  reply = () => Response.json({ ...body(), stack: stack() });
+  await render(); await hover();
+  reply = () => new Response('unavailable', { status: 503 });
+  await act(async () => retry().click()); await settle();
+  expect(stackRegion()?.textContent).toContain('Last known stack');
+  expect(stackRegion()?.querySelectorAll('[data-stack-layer]')).toHaveLength(2);
+  expect(stackRegion()?.querySelector('time')?.getAttribute('dateTime')).toBe(date);
+});
+
+it('keeps stack context scoped when a delayed prior repository finishes', async () => {
+  const pending = deferred(); reply = repo => repo === repoA ? pending.promise
+    : Response.json({ ...body(), stack: stack('none', false) });
+  await render(); await hover(); await render([repoB]); await hover();
+  await act(async () => pending.resolve(Response.json({ ...body(), stack: stack() }))); await settle();
+  expect(stackRegion()?.textContent).toContain('No native stack');
+  expect(document.body.textContent).not.toContain('Foundation layer');
+});
+
+it.each([
+  ['unknown provenance', { ...stack(), source: 'inferred' }],
+  ['unknown status', { ...stack(), status: 'fresh' }],
+  ['invalid layers', { ...stack(), snapshot: { ...stack().snapshot, layers: [null] } }],
+  ['missing target', { ...stack(), snapshot: { ...stack().snapshot, layers: [stack().snapshot!.layers[1]] } }],
+  ['unauthorized membership', { ...stack(), status: 'unauthorized', stale: true }],
+])('refuses malformed %s before admitting stack context to the hover cache', async (_label, value) => {
+  reply = () => Response.json({ ...body(), stack: value });
+  await render(); await hover();
+  expect(document.body.textContent).toContain('PR details delayed'); expect(stackRegion()).toBeNull();
+  reply = () => Response.json({ ...body(), stack: stack() });
+  await act(async () => retry().click()); await settle();
+  expect(stackRegion()?.textContent).toContain('Native GitHub stack #3');
+});
+
+it('keeps legacy detail responses without stack context usable', async () => {
+  await render(); await hover(); expect(stackRegion()).toBeNull();
+  expect(document.body.textContent).toContain('known.ts');
 });
 
 const deadlineCases: Array<{ label: string; headers: HeadersInit }> = [

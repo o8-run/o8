@@ -1,4 +1,5 @@
 //! Transcript pane uses the production native stream merger and retained rows.
+use crate::theme::current as theme;
 use crate::{
     client::{Client, Session},
     model::History,
@@ -6,9 +7,7 @@ use crate::{
     stream::Transcript,
     transport::{self, Incoming, Subscription},
 };
-use gpui::{
-    AnyElement, ListAlignment, ListOffset, ListState, canvas, div, list, prelude::*, px, rgb,
-};
+use gpui::{AnyElement, ListAlignment, ListOffset, ListState, canvas, div, list, prelude::*, px};
 use std::{
     cell::{Cell, RefCell},
     collections::BTreeSet,
@@ -85,6 +84,8 @@ pub struct Pane {
     pub painted: Rc<Cell<u64>>,
     pub paints: Rc<Cell<usize>>,
     pub painted_rows: Rc<RefCell<BTreeSet<usize>>>,
+    pub terminal_session: Option<String>,
+    pub terminal: Option<gpui::Entity<crate::terminal::Pane>>,
 }
 impl Pane {
     pub fn new(key: Option<String>) -> Self {
@@ -101,11 +102,20 @@ impl Pane {
             painted: Rc::new(Cell::new(u64::MAX)),
             paints: Rc::new(Cell::new(0)),
             painted_rows: Rc::new(RefCell::new(BTreeSet::new())),
+            terminal_session: None,
+            terminal: None,
         }
     }
     pub fn metadata(&mut self, session: &Session) {
         self.title = title(&session.title);
         self.state = state(session);
+        let binding = session.tmux_session.clone().filter(|value| {
+            !value.trim().is_empty() && value.len() <= 200 && !value.chars().any(char::is_control)
+        });
+        if self.terminal_session != binding {
+            self.terminal = None;
+            self.terminal_session = binding;
+        }
     }
     pub fn install(&mut self, history: History, client: Client) {
         let key = history.session_key.clone();
@@ -211,7 +221,7 @@ impl Pane {
                             .h(px(18.))
                             .px(px(8.))
                             .text_size(px(9.5))
-                            .text_color(rgb(0x8a93a0))
+                            .text_color(theme().text_muted)
                             .child(notice),
                     )
                     .child(

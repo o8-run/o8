@@ -1,4 +1,5 @@
 //! Apache-2.0 Alacritty parser and bounded grid; no PTY, clipboard or app discovery.
+use crate::theme::current as theme;
 use alacritty_terminal::{
     Term,
     event::{Event, EventListener, WindowSize},
@@ -11,8 +12,6 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 
-pub const BACKGROUND: u32 = 0x16191e;
-pub const FOREGROUND: u32 = 0xe8ecf2;
 pub const HISTORY: usize = 10_000;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -217,19 +216,15 @@ fn color_rgb(c: Rgb) -> u32 {
     ((c.r as u32) << 16) | ((c.g as u32) << 8) | c.b as u32
 }
 pub fn palette(index: usize) -> u32 {
-    const ANSI: [u32; 16] = [
-        0x1d2027, 0xcd3131, 0x0dbc79, 0xe5e510, 0x2472c8, 0xbc3fbc, 0x11a8cd, 0xe5e5e5, 0x666666,
-        0xf14c4c, 0x23d18b, 0xf5f543, 0x3b8eea, 0xd670d6, 0x29b8db, 0xffffff,
-    ];
     match index {
-        0..16 => ANSI[index],
+        0..16 => theme().terminal_ansi[index],
         16..232 => {
             let n = index - 16;
             let level = |n: usize| if n == 0 { 0 } else { 55 + n as u32 * 40 };
             (level(n / 36) << 16) | (level((n / 6) % 6) << 8) | level(n % 6)
         }
         232..256 => (8 + (index as u32 - 232) * 10) * 0x010101,
-        n if n == NamedColor::Background as usize => BACKGROUND,
-        _ => FOREGROUND,
+        n if n == NamedColor::Background as usize => u32::from(theme().code_background) >> 8,
+        _ => u32::from(theme().text) >> 8,
     }
 }

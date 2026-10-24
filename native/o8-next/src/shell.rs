@@ -9,7 +9,7 @@ use crate::{
 };
 use gpui::{
     App, Application, Bounds, Context, Entity, FocusHandle, KeyDownEvent, Render, Window,
-    WindowBounds, WindowOptions, canvas, div, point, prelude::*, px, rgb, size,
+    WindowBounds, WindowOptions, canvas, div, point, prelude::*, px, size,
 };
 use std::{
     cell::Cell,

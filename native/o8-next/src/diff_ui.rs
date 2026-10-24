@@ -1,4 +1,5 @@
 //! Opt-in native diff surface, independent of the transcript/composer/terminal.
+use crate::theme::current as theme;
 use crate::{
     client::Client,
     diff::{self, Document, Kind, Line, Target},
@@ -6,8 +7,7 @@ use crate::{
 use gpui::{
     App, Application, Bounds, Context, FocusHandle, HighlightStyle, KeyDownEvent,
     ListHorizontalSizingBehavior, Render, ScrollStrategy, StyledText, UniformListScrollHandle,
-    Window, WindowBounds, WindowOptions, canvas, div, point, prelude::*, px, rgb, size,
-    uniform_list,
+    Window, WindowBounds, WindowOptions, canvas, div, point, prelude::*, px, size, uniform_list,
 };
 use serde_json::Value;
 use std::{cell::RefCell, collections::BTreeSet, rc::Rc};
@@ -206,7 +206,11 @@ fn button(id: &'static str, label: &'static str, selected: bool) -> gpui::Statef
         .py(px(4.))
         .rounded(px(5.))
         .text_size(px(12.))
-        .bg(rgb(if selected { 0x303744 } else { 0x282e38 }))
+        .bg(if selected {
+            theme().selection
+        } else {
+            theme().surface_raised
+        })
         .cursor_pointer()
         .child(label)
 }
@@ -226,16 +230,16 @@ fn cell(line: Option<&Line>, before: bool) -> gpui::Div {
         .min_w_0()
         .h(px(20.))
         .overflow_hidden()
-        .bg(rgb(match line.kind {
-            Kind::Added => 0x20352c,
-            Kind::Removed => 0x39272c,
-            _ => 0x1a1e24,
-        }))
+        .bg(match line.kind {
+            Kind::Added => theme().success_surface,
+            Kind::Removed => theme().danger_surface,
+            _ => theme().background,
+        })
         .child(
             div()
                 .w(px(56.))
                 .flex_shrink_0()
-                .text_color(rgb(0x8a93a0))
+                .text_color(theme().text_muted)
                 .child(format!(
                     "{} {mark}",
                     number.map(|n| n.to_string()).unwrap_or_default()
@@ -247,7 +251,7 @@ fn cell(line: Option<&Line>, before: bool) -> gpui::Div {
                     (
                         range.clone(),
                         HighlightStyle {
-                            color: Some(rgb(*color).into()),
+                            color: Some((*color).into()),
                             ..Default::default()
                         },
                     )
@@ -275,9 +279,9 @@ impl Render for DiffSurface {
             .size_full()
             .flex()
             .flex_col()
-            .bg(rgb(0x1a1e24))
-            .text_color(rgb(0xe8ecf2))
-            .font_family("system-ui")
+            .bg(theme().background)
+            .text_color(theme().text)
+            .font_family(theme().font_ui)
             .font_weight(gpui::FontWeight::LIGHT)
             .text_size(px(13.5))
             .track_focus(&self.focus)
@@ -343,7 +347,7 @@ impl Render for DiffSurface {
                     .px(px(16.))
                     .py(px(8.))
                     .text_size(px(11.))
-                    .text_color(rgb(0x8a93a0))
+                    .text_color(theme().text_muted)
                     .child(self.notice.clone()),
             )
             .child(
@@ -367,17 +371,17 @@ impl Render for DiffSurface {
                                             .h(px(58.))
                                             .overflow_hidden()
                                             .cursor_pointer()
-                                            .bg(rgb(if i == s.selected {
-                                                0x303744
+                                            .bg(if i == s.selected {
+                                                theme().selection
                                             } else {
-                                                0x1a1e24
-                                            }))
+                                                theme().background
+                                            })
                                             .child(div().text_size(px(13.5)).child(f.path.clone()))
                                             .child(
                                                 div()
                                                     .mt(px(4.))
                                                     .text_size(px(9.5))
-                                                    .text_color(rgb(0x8a93a0))
+                                                    .text_color(theme().text_muted)
                                                     .child(format!(
                                                         "{} · +{} −{}{}",
                                                         if f.status == "deleted" {
@@ -420,7 +424,7 @@ impl Render for DiffSurface {
                                             .h(px(20.))
                                             .min_w(px(content_width))
                                             .flex()
-                                            .font_family("monospace")
+                                            .font_family(theme().font_mono)
                                             .text_size(px(12.))
                                             .line_height(px(20.))
                                             .whitespace_nowrap()

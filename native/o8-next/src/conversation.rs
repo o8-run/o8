@@ -1,4 +1,5 @@
 use super::*;
+use crate::theme::current as theme;
 
 // The queue returns realpath(repoPath), while saved histories can retain a
 // symlink spelling (notably /var versus /private/var on macOS). Keep the frozen
@@ -247,11 +248,11 @@ impl Surface {
             .flex_col()
             .gap(px(8.))
             .child(self.composer.clone())
-            .child(div().text_size(px(9.5)).text_color(rgb(0x8a93a0)).child("Enter: send · Shift+Enter: new line · Ctrl+Shift+Enter: switch mode · F6: steer queued · F7: remove queued"))
+            .child(div().text_size(px(9.5)).text_color(theme().text_muted).child("Enter: send · Shift+Enter: new line · Ctrl+Shift+Enter: switch mode · F6: steer queued · F7: remove queued"))
             .child(
                 div()
                     .text_size(px(10.))
-                    .text_color(rgb(0x8a93a0))
+                    .text_color(theme().text_muted)
                     .child(routing),
             )
             .child(
@@ -279,7 +280,7 @@ impl Surface {
                             .px(px(10.))
                             .py(px(5.))
                             .rounded(px(7.))
-                            .bg(rgb(if enabled { 0x2563eb } else { 0x282e38 }))
+                            .bg(if enabled { theme().accent } else { theme().surface_raised })
                             .child(if self.saving { "Saving…" } else { "Send" })
                             .on_click(cx.listener(|this, _, _, cx| this.send(None, cx))),
                     ),

@@ -1,4 +1,5 @@
 //! Original Apache-2.0 editor using only GPUI's platform input contract.
+use crate::theme::current as theme;
 use gpui::{prelude::*, *};
 use std::ops::Range;
 use unicode_segmentation::UnicodeSegmentation;
@@ -393,7 +394,7 @@ impl Render for Composer {
             .overflow_y_scroll()
             .track_scroll(&self.scroll)
             .border_1()
-            .border_color(rgb(0x343b45))
+            .border_color(theme().border)
             .rounded(px(8.))
             .p(px(8.))
             .on_key_down(cx.listener(Self::key))
@@ -486,7 +487,7 @@ impl Render for Composer {
                                                         px(20.),
                                                     ),
                                                 ),
-                                                rgb(0x303744),
+                                                theme().selection,
                                             ));
                                         }
                                     }
@@ -506,7 +507,7 @@ impl Render for Composer {
                                     {
                                         window.paint_quad(fill(
                                             Bounds::new(origin + position, size(px(1.), px(20.))),
-                                            rgb(0x8cb4e8),
+                                            theme().accent,
                                         ));
                                     }
                                 }

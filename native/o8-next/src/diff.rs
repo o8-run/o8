@@ -1,5 +1,6 @@
 //! Read-only Git patch model. Parsing/highlighting happen off the GPUI thread.
 use crate::client::Client;
+use crate::theme::current as theme;
 use regex::Regex;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -40,7 +41,7 @@ pub struct Line {
     pub old: Option<usize>,
     pub new: Option<usize>,
     pub text: String,
-    pub highlights: Vec<(Range<usize>, u32)>,
+    pub highlights: Vec<(Range<usize>, gpui::Rgba)>,
 }
 #[derive(Default, Debug)]
 pub struct File {
@@ -358,24 +359,24 @@ fn language(path: &str) -> Option<Language> {
 }
 // Original palette mapping over the permissively licensed grammar trees. Source
 // bytes remain unchanged; style spans are clipped to each displayed UTF-8 line.
-fn color(node: Node) -> Option<u32> {
+fn color(node: Node) -> Option<gpui::Rgba> {
     let kind = node.kind();
     if kind.contains("comment") {
-        Some(0x8a93a0)
+        Some(theme().text_secondary)
     } else if kind.contains("string") || kind == "char_literal" {
-        Some(0xa7c6b0)
+        Some(theme().syntax_string)
     } else if kind.contains("heading") || kind.starts_with("atx_h") || kind.contains("link") {
-        Some(0xb8c8d8)
+        Some(theme().syntax_link)
     } else if kind.contains("emphasis")
         || kind.contains("code_span")
         || kind.contains("code_fence")
         || kind == "list_marker_minus"
     {
-        Some(0xd9bd95)
+        Some(theme().syntax_emphasis)
     } else if kind.contains("type") || kind == "type_identifier" {
-        Some(0xc2b6d7)
+        Some(theme().syntax_keyword)
     } else if kind.contains("integer") || kind.contains("float") || kind == "number" {
-        Some(0xd9bd95)
+        Some(theme().syntax_emphasis)
     } else if [
         "export", "const", "let", "var", "function", "return", "fn", "pub", "use", "impl",
         "struct", "enum", "if", "else", "match", "for", "while", "async", "await", "true", "false",
@@ -383,12 +384,12 @@ fn color(node: Node) -> Option<u32> {
     ]
     .contains(&kind)
     {
-        Some(0xc2b6d7)
+        Some(theme().syntax_keyword)
     } else {
         None
     }
 }
-fn visit(node: Node, source: &str, spans: &mut Vec<(Range<usize>, u32)>) {
+fn visit(node: Node, source: &str, spans: &mut Vec<(Range<usize>, gpui::Rgba)>) {
     if let Some(color) = color(node) {
         spans.push((node.byte_range(), color));
         return;

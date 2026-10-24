@@ -89,8 +89,8 @@ errors, and 900 x 700 / 1680 x 1050 geometry. Palette command through loaded
 CPU scene was **49.92 ms** in the full verification run, concurrent with npm
 checks. This is a test-context observation, not a performance target receipt.
 Native font shaping, GPU/compositor presentation and physical input latency are
-unmeasured. No `theme.rs` existed on the starting main baseline; colors remain
-local to `src/inbox_view.rs`.
+unmeasured. No `theme.rs` existed on the initial main baseline; colors were
+initially local. The review correction below adopts the shared theme that later landed.
 
 JavaScript completion gates: `npm test` finished with **1,230 files passed,
 3 skipped; 8,855 tests passed, 5 skipped**. The first full run hit `ENOBUFS`
@@ -184,3 +184,17 @@ formatting and the locked release build pass. An additional unchanged
 directory under the Cloud sandbox; no credential-store policy was changed to
 make it pass. The new native signed-session fixture uses isolated storage and
 passes the real authority and continuation paths above.
+
+### Current main integration
+
+Main subsequently landed shared theme tokens and per-slot terminals. Inbox now
+consumes `theme.rs` semantic colors and platform fonts. The existing theme gate
+first failed with seven Inbox palette literals; it passes after that integration.
+The upstream changes are retained without modifying release/version files in the
+PR diff. Against this combined tree, the final locked native suite passed
+**36 library tests and 7 CLI integration tests**, with three explicit measurement
+workloads ignored. Both Inbox correction tests and both theme checks pass.
+The complete npm gate passed **8,872 tests (5 skipped) across 1,230 files
+(3 skipped)**. Both type checks, touched-file ESLint and Rust formatting, the
+four-source-file rule check against current main, and the locked release build
+also passed. This remains Linux headless evidence; it does not claim a macOS run.
