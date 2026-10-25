@@ -28,6 +28,29 @@ pub(super) fn timestamp(value: &str) -> Option<u64> {
         .unwrap_or(0);
     u64::try_from(seconds - offset).ok()
 }
+fn timestamp_millis(value: &str) -> Option<u64> {
+    if let Ok(number) = value.parse::<u64>() {
+        return Some(if number > 10_000_000_000 {
+            number
+        } else {
+            number * 1000
+        });
+    }
+    let fraction = value
+        .get(19..)?
+        .strip_prefix('.')
+        .map(|suffix| {
+            let digits: String = suffix
+                .chars()
+                .take_while(char::is_ascii_digit)
+                .take(3)
+                .collect();
+            let padded = format!("{digits:0<3}");
+            padded.parse::<u64>().unwrap_or(0)
+        })
+        .unwrap_or(0);
+    Some(timestamp(value)? * 1000 + fraction)
+}
 pub(super) fn now() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -92,8 +115,8 @@ pub(super) fn rows(
         })
         .collect();
     visible.sort_by(|a, b| {
-        timestamp(&b.last_message_at)
-            .cmp(&timestamp(&a.last_message_at))
+        timestamp_millis(&b.last_message_at)
+            .cmp(&timestamp_millis(&a.last_message_at))
             .then_with(|| a.id.cmp(&b.id))
     });
     let header = |kind: &str, title: &str, status: &str| Row {

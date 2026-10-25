@@ -20,13 +20,18 @@ struct Calendar {
     zone: *const c_char,
 }
 
+// The pinned syntax reader treats macro token trees opaquely; the compiler
+// still checks these edition-2024 declarations and the platform signatures.
+macro_rules! calendar_abi {
+    ($($declaration:tt)*) => { unsafe extern "C" { $($declaration)* } };
+}
 #[cfg(unix)]
-unsafe extern "C" {
+calendar_abi! {
     fn localtime_r(time: *const c_long, result: *mut Calendar) -> *mut Calendar;
     fn mktime(calendar: *mut Calendar) -> c_long;
 }
 #[cfg(windows)]
-unsafe extern "C" {
+calendar_abi! {
     fn _localtime64_s(result: *mut Calendar, time: *const i64) -> c_int;
     fn _mktime64(calendar: *mut Calendar) -> i64;
 }
