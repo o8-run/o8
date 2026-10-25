@@ -514,10 +514,10 @@ impl Shell {
         }
     }
 }
-#[path = "shell_view.rs"]
-mod view;
 #[path = "shell_material.rs"]
 mod material;
+#[path = "shell_view.rs"]
+mod view;
 pub use view::try_launch;
 
 #[cfg(test)]

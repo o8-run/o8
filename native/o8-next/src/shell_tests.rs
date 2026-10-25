@@ -274,14 +274,25 @@ fn correction_palette_brain_resumes_the_session_draft(cx: &mut TestAppContext) {
     let cx = &mut visual;
     ready(&shell, cx);
     let active = shell.read_with(cx, |s, _| s.active());
+    cx.simulate_keystrokes("cmd-k");
+    draw(cx);
+    assert!(
+        shell.read_with(cx, |s, _| s.palette),
+        "Cmd+K opens the shell palette"
+    );
+    cx.simulate_keystrokes("escape");
     cx.simulate_keystrokes("cmd-e");
     draw(cx);
     cx.simulate_input("Retained Brain draft");
     cx.simulate_keystrokes("escape");
     draw(cx);
-    cx.simulate_keystrokes("cmd-k");
+    cx.simulate_keystrokes("cmd-shift-p");
+    draw(cx);
+    assert!(shell.read_with(cx, |s, _| s.palette));
+    assert!(cx.debug_bounds("command-palette").is_some());
     cx.simulate_keystrokes("b r a i n enter");
     draw(cx);
+    assert!(!shell.read_with(cx, |s, _| s.palette));
     assert_eq!(
         shell.read_with(cx, |s, _| s.active()),
         active,
@@ -297,9 +308,13 @@ fn correction_palette_brain_resumes_the_session_draft(cx: &mut TestAppContext) {
             "Retained Brain draft via palette"
         );
     });
-    cx.simulate_keystrokes("cmd-k");
+    cx.simulate_keystrokes("cmd-shift-p");
+    draw(cx);
+    assert!(shell.read_with(cx, |s, _| s.palette));
+    assert!(cx.debug_bounds("command-palette").is_some());
     cx.simulate_keystrokes("n e w enter");
     draw(cx);
+    assert!(!shell.read_with(cx, |s, _| s.palette));
     cx.simulate_input("Main draft");
     shell.read_with(cx, |s, cx| {
         let Content::Session(session) = s.content.get(&s.key(&s.active().unwrap())).unwrap() else {
@@ -371,6 +386,11 @@ fn chrome_switcher_cancel_restores_composer_with_platform_shortcut(cx: &mut Test
     let cx = &mut visual;
     ready(&shell, cx);
     cx.simulate_keystrokes("cmd-k");
+    draw(cx);
+    assert!(
+        shell.read_with(cx, |s, _| s.palette),
+        "Cmd+K opens the shell palette"
+    );
     cx.simulate_keystrokes("n e w enter");
     ready(&shell, cx);
     draw(cx);
@@ -381,10 +401,14 @@ fn chrome_switcher_cancel_restores_composer_with_platform_shortcut(cx: &mut Test
     cx.simulate_keystrokes("escape");
     draw(cx);
     cx.simulate_input(" retained");
-    cx.simulate_keystrokes("cmd-k");
+    cx.simulate_keystrokes("cmd-shift-p");
+    draw(cx);
+    assert!(shell.read_with(cx, |s, _| s.palette));
+    assert!(cx.debug_bounds("command-palette").is_some());
     cx.simulate_keystrokes("r e f r e s h enter");
     ready(&shell, cx);
     draw(cx);
+    assert!(!shell.read_with(cx, |s, _| s.palette));
     cx.simulate_input(" refreshed");
     shell.read_with(cx, |s, cx| {
         let Content::Session(session) = s.content.get(&s.key(&s.active().unwrap())).unwrap() else {
