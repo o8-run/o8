@@ -1,0 +1,35 @@
+[
+  {
+    "run": 1,
+    "paletteOpenToFrameMs": {
+      "p50": 16.897854,
+      "p95": 19.916835000000003
+    },
+    "keyboardWorkspaceSwitchMs": {
+      "p50": 14.010841,
+      "p95": 25.400814
+    }
+  },
+  {
+    "run": 2,
+    "paletteOpenToFrameMs": {
+      "p50": 17.664744,
+      "p95": 19.012148
+    },
+    "keyboardWorkspaceSwitchMs": {
+      "p50": 14.154998,
+      "p95": 20.094653
+    }
+  },
+  {
+    "run": 3,
+    "paletteOpenToFrameMs": {
+      "p50": 17.823021,
+      "p95": 19.014166
+    },
+    "keyboardWorkspaceSwitchMs": {
+      "p50": 14.451421000000002,
+      "p95": 18.879917
+    }
+  }
+]

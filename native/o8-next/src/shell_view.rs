@@ -111,7 +111,11 @@ impl Render for Shell {
                         .overflow_y_scroll()
                         .p(px(12.))
                         .bg(theme().surface_raised)
-                        .child(format!("Commands: {}", self.query))
+                        .child(if self.query.is_empty() {
+                            "Commands".into()
+                        } else {
+                            self.query.clone()
+                        })
                         .children(self.commands().into_iter().enumerate().map(|(i, command)| {
                             div()
                                 .id(("command", i))

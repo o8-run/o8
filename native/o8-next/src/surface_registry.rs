@@ -17,6 +17,15 @@ pub(super) struct WorkspaceLoad {
     pub active_project: Option<Vec<String>>,
 }
 
+pub(super) const WORKSPACE_COMMAND: Registration =
+    Registration::new("", "", |shell, command, window, cx| {
+        let Command::Workspace(path) = command else {
+            unreachable!()
+        };
+        shell.switch(path, window, cx);
+        None
+    });
+
 type OpenSurface = fn(&mut Shell, Command, &mut Window, &mut Context<Shell>) -> Option<(Tab, bool)>;
 
 pub(super) struct Registration {
@@ -97,6 +106,7 @@ macro_rules! register_surfaces {
             $( $(#[$tab_attr])* $variant $(($payload))?, )*
             $( $(#[$command_attr])* $command_variant, )*
             Message(String),
+            Workspace(String),
         }
         impl Command {
             fn registration(&self) -> &'static Registration {
@@ -104,12 +114,14 @@ macro_rules! register_surfaces {
                     $( $(#[$tab_attr])* Self::$variant { .. } => &$module::REGISTRATION, )*
                     $( $(#[$command_attr])* Self::$command_variant => &$command_module::REGISTRATION, )*
                     Self::Message(_) => &session::REGISTRATION,
+                    Self::Workspace(_) => &$crate::shell::registry::WORKSPACE_COMMAND,
                 }
             }
             fn label(&self, sessions: &[Session]) -> String {
                 match self {
                     Self::Session(id) => session::label(id, sessions),
-                    Self::Message(_) => "New message in selected session".into(),
+                    Self::Message(_) => "New message".into(),
+                    Self::Workspace(path) => format!("Switch workspace: {}", std::path::Path::new(path).file_name().unwrap_or_default().to_string_lossy()),
                     _ => self.registration().command_label.into(),
                 }
             }

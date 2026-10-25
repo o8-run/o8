@@ -31,17 +31,20 @@ register_surfaces! {
         pull_requests: PullRequests = "surfaces/pull_requests.rs";
         inbox: Inbox = "surfaces/inbox.rs";
         issues: Issues = "surfaces/issues.rs";
+        diff: Diff = "surfaces/diff.rs";
+        terminal: Terminal = "surfaces/terminal.rs";
         #[cfg(test)] fake: Fake = "surfaces/fake.rs";
     }
     commands {
         settings: Settings = "surfaces/settings.rs";
         projects: Projects = "surfaces/projects.rs";
-        diff: Diff = "surfaces/diff.rs";
-        terminal: Terminal = "surfaces/terminal.rs";
         customize: Customize = "surfaces/customize.rs";
         setup: Setup = "surfaces/setup.rs";
     }
 }
+
+#[path = "shell_target.rs"]
+mod target;
 
 pub struct Shell {
     client: Client,
@@ -289,6 +292,7 @@ impl Shell {
         } {
             commands.insert(0, Command::Message(id));
         }
+        commands.extend(self.workspaces.iter().cloned().map(Command::Workspace));
         commands.extend(
             self.workspace_sessions()
                 .iter()
@@ -455,3 +459,7 @@ mod tests;
 #[cfg(test)]
 #[path = "shell_test_support.rs"]
 mod test_support;
+
+#[cfg(test)]
+#[path = "shell_palette_tests.rs"]
+mod palette_tests;
