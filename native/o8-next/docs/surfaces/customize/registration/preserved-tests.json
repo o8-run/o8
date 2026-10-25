@@ -1,0 +1,16 @@
+{
+  "mainTestFunctions": 91,
+  "preservedSurfaceTestFunctions": [
+    "customize_inventory_and_prompt_crud",
+    "customize_auth_error_and_retry"
+  ],
+  "missingMainTestFunctions": [],
+  "newTestFunctions": [
+    "cached_prompt_copy_and_edit_reload_current_text",
+    "cached_prompt_edit_preserves_the_reloaded_repository",
+    "stale_prompt_save_preserves_desktop_edit_and_native_draft",
+    "stale_prompt_delete_preserves_desktop_edit",
+    "credential_metadata_never_reaches_customization_copy",
+    "agent_and_skill_bodies_contain_only_descriptions"
+  ]
+}

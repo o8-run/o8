@@ -43,6 +43,7 @@ export interface CreatePromptLibraryEntryInput {
 }
 
 export interface UpdatePromptLibraryEntryInput {
+  expectedUpdatedAt?: number;
   title?: string;
   body?: string;
   tags?: string[];
@@ -472,12 +473,22 @@ export function listPromptLibraryEntries(
   return rows.map(rowToEntry);
 }
 
+export class PromptLibraryRevisionError extends Error {
+  constructor() {
+    super('This saved prompt changed. Reload it before saving or deleting.');
+    this.name = 'PromptLibraryRevisionError';
+  }
+}
+
 export function updatePromptLibraryEntry(
   id: string,
   input: UpdatePromptLibraryEntryInput,
 ): PromptLibraryEntry | null {
   const existing = getPromptLibraryEntry(id);
   if (!existing) return null;
+  if (input.expectedUpdatedAt !== undefined && input.expectedUpdatedAt !== existing.updatedAt) {
+    throw new PromptLibraryRevisionError();
+  }
 
   const title = input.title === undefined ? existing.title : normalizeTitle(input.title);
   const body = input.body === undefined ? existing.body : normalizeBody(input.body);
@@ -491,12 +502,14 @@ export function updatePromptLibraryEntry(
   if (duplicate) throw new PromptLibraryDuplicateError(duplicate);
 
   try {
-    getSqlite().prepare(`
+    const result = getSqlite().prepare(`
       UPDATE prompt_library
       SET title = ?, body = ?, body_fingerprint = ?, tags_json = ?,
           scope = ?, repo_path = ?, updated_at = ?
-      WHERE id = ?
-    `).run(title, body, fingerprint, JSON.stringify(tags), scope, repoPath, Date.now(), id);
+      WHERE id = ? AND updated_at = ?
+    `).run(title, body, fingerprint, JSON.stringify(tags), scope, repoPath,
+      Math.max(Date.now(), existing.updatedAt + 1), id, existing.updatedAt);
+    if (result.changes === 0) throw new PromptLibraryRevisionError();
   } catch (error) {
     const concurrentDuplicate = findDuplicate(scope, repoPath, fingerprint, id);
     if (concurrentDuplicate) throw new PromptLibraryDuplicateError(concurrentDuplicate);
@@ -514,6 +527,11 @@ export function recordPromptLibraryUse(id: string, usedAt: number = Date.now()):
   return result.changes > 0 ? getPromptLibraryEntry(id) : null;
 }
 
-export function deletePromptLibraryEntry(id: string): boolean {
+export function deletePromptLibraryEntry(id: string, expectedUpdatedAt?: number): boolean {
+  if (expectedUpdatedAt !== undefined) {
+    const result = getSqlite().prepare('DELETE FROM prompt_library WHERE id = ? AND updated_at = ?').run(id, expectedUpdatedAt);
+    if (result.changes === 0 && getPromptLibraryEntry(id)) throw new PromptLibraryRevisionError();
+    return result.changes > 0;
+  }
   return getSqlite().prepare('DELETE FROM prompt_library WHERE id = ?').run(id).changes > 0;
 }

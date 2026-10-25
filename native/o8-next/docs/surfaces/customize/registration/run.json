@@ -1,0 +1,6 @@
+{
+  "endpoint": "headless GPUI CPU scene; no GPU/compositor",
+  "openToFirstFrameMs": 84.80417299999999,
+  "interactionToFrameMs": 122.246966,
+  "context": "Linux debug headless GPUI CPU scenes during concurrent verification; no GPU/compositor or macOS claim"
+}

@@ -1,0 +1,15 @@
+{
+  "base": "9f44b02ea35c7e3b29c8510a7ece1926606b948d",
+  "typecheckFast": "passed; NODE_OPTIONS=--max-old-space-size=8192",
+  "tscNoEmit": "passed; NODE_OPTIONS=--max-old-space-size=8192",
+  "eslint": "passed for applicable touched JavaScript/TypeScript; Rust checked with Clippy",
+  "ruleCheck": "passed against origin/main",
+  "testClassify": "passed, including isolated dated-fixture audit; manifest unchanged",
+  "cargoClippyAllTargets": "exit 0; see clippy-summary.json",
+  "fullNpmOn506": "1242 files, 9056 tests passed; 3 skipped files, 5 skipped tests; no second full run after final rebase",
+  "touchedTypeScriptTests": "2 files, 10 API/store tests passed",
+  "previousMainDeltaTypeScriptTests": "7 files, 190 tests passed",
+  "latestMainAndLauncherTypeScriptTests": "12 files, 110 tests passed",
+  "currentNativeReceipt": "native-9f.txt",
+  "currentSurfaceReceipt": "green-9f.txt; all 8 cases passed"
+}

@@ -33,6 +33,37 @@ function context(id: string) {
 }
 
 describe('prompt library API real path', () => {
+  it('refuses a stale saved-prompt update through the production route', async () => {
+    const made = await collectionRoute.POST(request('/api/prompt-library', 'POST', { title: 'Revision', body: 'Original text' }));
+    const { prompt } = await made.json();
+    const desktop = await entryRoute.PATCH(request(`/api/prompt-library/${prompt.id}`, 'PATCH', { body: 'Desktop text' }), context(prompt.id));
+    const newer = (await desktop.json()).prompt;
+    expect(newer.updatedAt).toBeGreaterThan(prompt.updatedAt);
+    const stale = await entryRoute.PATCH(request(`/api/prompt-library/${prompt.id}`, 'PATCH', {
+      body: 'Stale native text', expectedUpdatedAt: prompt.updatedAt,
+    }), context(prompt.id));
+    expect(stale.status).toBe(409);
+    const current = await entryRoute.GET(request(`/api/prompt-library/${prompt.id}`), context(prompt.id));
+    expect((await current.json()).prompt.body).toBe('Desktop text');
+    const fresh = await entryRoute.PATCH(request(`/api/prompt-library/${prompt.id}`, 'PATCH', {
+      body: 'Fresh native text', expectedUpdatedAt: newer.updatedAt,
+    }), context(prompt.id));
+    expect(fresh.status).toBe(200);
+  });
+
+  it('refuses a stale saved-prompt deletion through the production route', async () => {
+    const made = await collectionRoute.POST(request('/api/prompt-library', 'POST', { title: 'Revision', body: 'Original text' }));
+    const { prompt } = await made.json();
+    const desktop = await entryRoute.PATCH(request(`/api/prompt-library/${prompt.id}`, 'PATCH', { body: 'Desktop text' }), context(prompt.id));
+    const newer = (await desktop.json()).prompt;
+    const stale = await entryRoute.DELETE(request(`/api/prompt-library/${prompt.id}?expectedUpdatedAt=${prompt.updatedAt}`, 'DELETE'), context(prompt.id));
+    expect(stale.status).toBe(409);
+    const current = await entryRoute.GET(request(`/api/prompt-library/${prompt.id}`), context(prompt.id));
+    expect((await current.json()).prompt.body).toBe('Desktop text');
+    const fresh = await entryRoute.DELETE(request(`/api/prompt-library/${prompt.id}?expectedUpdatedAt=${newer.updatedAt}`, 'DELETE'), context(prompt.id));
+    expect(fresh.status).toBe(200);
+  });
+
   beforeEach(() => {
     getSqlite().exec('DELETE FROM prompt_library');
     getSqlite().exec("DELETE FROM automations WHERE id LIKE 'prompt-import-%'");

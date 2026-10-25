@@ -8,6 +8,8 @@ app defaults, packages, dependency licenses, versions or release configuration.
 | Desktop control | Native counterpart | Status |
 | --- | --- | --- |
 | Open / close Customize | Toolbar Customize / Close Customize | Ported |
+| Retain view when reopening | Cached view for the same repository | Ported |
+| Automatic inventory refresh after external changes | Manual Refresh | Missing automatic refresh |
 | Instructions tab | Instructions | Ported authored inventory |
 | Prompts tab | Prompts | Ported manual library actions below |
 | Skills tab | Skills | Ported metadata inventory only |
@@ -73,5 +75,23 @@ search input through its resulting scene. Before latency is unavailable because
 base has no native surface. Test text, debug CPU scenes and one sample do not
 establish GPU/compositor, physical input, macOS display latency or a production
 latency target. No speedup is claimed.
+
+
+## Current main integration
+
+Reconciled with the native Inbox already on main. The final [green run](green-main-tail.txt)
+passes **10 shell and Inbox cases**. The [second timing receipt](run-2.json)
+records **61.85 ms open-to-first-frame** and **40.61 ms interaction-to-frame**
+on the same debug/headless CPU endpoint. Earlier receipts remain in place.
+No GPU/compositor or macOS display claim is added.
+
+
+The [retention red](red-retain-tail.txt) caught view selection being reset on
+reopen. The view now stays cached for its repository, and shell focus capture
+pauses while Customize owns input. Prompt fields render immutable while requests
+are in flight; detailed pending-input timing coverage remains open. The final
+[green run](green-final-tail.txt) includes the complete CRUD and reopen story,
+plus existing shell/Inbox cases: 10/10. [Final timing](run-3.json): 41.64 ms open
+to CPU frame; 31.27 ms search to CPU frame, with the same endpoint limitations.
 
 Refs #4548

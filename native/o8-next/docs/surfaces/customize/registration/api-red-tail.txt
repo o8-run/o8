@@ -1,0 +1,49 @@
+ FAIL  tests/prompt-library-api-real-path.test.ts > prompt library API real path > refuses a stale saved-prompt update through the production route
+AssertionError: expected 200 to be 409 // Object.is equality
+
+- Expected
++ Received
+
+- 409
++ 200
+
+ ❯ tests/prompt-library-api-real-path.test.ts:45:26
+     43|       body: 'Stale native text', expectedUpdatedAt: prompt.updatedAt,
+     44|     }), context(prompt.id));
+     45|     expect(stale.status).toBe(409);
+       |                          ^
+     46|     const current = await entryRoute.GET(request(`/api/prompt-library/…
+     47|     expect((await current.json()).prompt.body).toBe('Desktop text');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  tests/prompt-library-api-real-path.test.ts > prompt library API real path > refuses a stale saved-prompt deletion through the production route
+AssertionError: expected 200 to be 409 // Object.is equality
+
+- Expected
++ Received
+
+- 409
++ 200
+
+ ❯ tests/prompt-library-api-real-path.test.ts:60:26
+     58|     const newer = (await desktop.json()).prompt;
+     59|     const stale = await entryRoute.DELETE(request(`/api/prompt-library…
+     60|     expect(stale.status).toBe(409);
+       |                          ^
+     61|     const current = await entryRoute.GET(request(`/api/prompt-library/…
+     62|     expect((await current.json()).prompt.body).toBe('Desktop text');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 3 passed (5)
+   Start at  07:07:19
+   Duration  4.87s (transform 3.25s, setup 81ms, import 4.18s, tests 248ms, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.9.0 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

@@ -1,0 +1,17 @@
+running 1 test
+test shell::customize::tests::review::cached_prompt_edit_preserves_the_reloaded_repository ...
+thread 'shell::customize::tests::review::cached_prompt_edit_preserves_the_reloaded_repository' (107905) panicked at src/surfaces/customize/review_tests.rs:73:5:
+assertion `left == right` failed: editing must preserve the reloaded repository
+  left: "/tmp/o8-next-dev-K4SCCx/fixture-repo"
+ right: "/tmp/o8-shell-107904-1792913318503366969/desktop-repository"
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    shell::customize::tests::review::cached_prompt_edit_preserves_the_reloaded_repository
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 89 filtered out; finished in 11.30s
+
+error: test failed, to rerun pass `--bin o8-next`

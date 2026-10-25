@@ -36,6 +36,7 @@ register_surfaces! {
         projects: Projects = "surfaces/projects.rs";
         diff: Diff = "surfaces/diff.rs";
         terminal: Terminal = "surfaces/terminal.rs";
+        customize: Customize = "surfaces/customize.rs";
     }
 }
 

@@ -21,6 +21,36 @@ struct Row {
     body: String,
     tags: Vec<String>,
     scope: String,
+    updated_at: Option<u64>,
+    repo_path: Option<String>,
+}
+impl Row {
+    fn prompt(item: &Value) -> Result<Self, String> {
+        let text = |key: &str| {
+            item[key]
+                .as_str()
+                .map(str::to_owned)
+                .ok_or_else(|| "Invalid saved prompt. Refresh before trying again.".to_owned())
+        };
+        let updated_at = item["updatedAt"]
+            .as_u64()
+            .filter(|v| *v > 0)
+            .ok_or("Invalid saved prompt revision. Refresh before trying again.")?;
+        Ok(Self {
+            id: text("id")?,
+            title: text("title")?,
+            body: text("body")?,
+            scope: text("scope")?,
+            tags: item["tags"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|v| v.as_str().map(str::to_owned))
+                .collect(),
+            updated_at: Some(updated_at),
+            repo_path: item["repoPath"].as_str().map(str::to_owned),
+        })
+    }
 }
 #[derive(Clone, Default)]
 struct Inventory {
@@ -74,9 +104,9 @@ impl Inventory {
                     .unwrap_or("")
                     .to_owned();
                 let body = if kind == "hooks" {
-                    item["command"].as_str().unwrap_or("").to_owned()
+                    "command".to_owned()
                 } else {
-                    format!("{title}\n{}", item["description"].as_str().unwrap_or(""))
+                    item["description"].as_str().unwrap_or("").to_owned()
                 };
                 result.rows.push((
                     kind.into(),
@@ -86,6 +116,8 @@ impl Inventory {
                         body,
                         tags: vec![],
                         scope: item["scope"].as_str().unwrap_or("").into(),
+                        updated_at: None,
+                        repo_path: None,
                     },
                 ));
             }
@@ -109,6 +141,8 @@ impl Inventory {
                     body: item["body"].as_str().unwrap_or("").into(),
                     tags: vec![],
                     scope: item["scope"].as_str().unwrap_or("").into(),
+                    updated_at: None,
+                    repo_path: None,
                 },
             ));
         }
@@ -121,6 +155,8 @@ impl Inventory {
                     body: String::new(),
                     tags: vec![],
                     scope: "global".into(),
+                    updated_at: None,
+                    repo_path: None,
                 },
             ));
         }
@@ -130,32 +166,26 @@ impl Inventory {
                 Row {
                     id: item["id"].as_str().unwrap_or("").into(),
                     title: item["name"].as_str().unwrap_or("").into(),
-                    body: item["command"]
-                        .as_str()
-                        .or(item["url"].as_str())
-                        .unwrap_or("")
-                        .into(),
+                    body: if item["transport"] == "http" {
+                        let host = item["url"]
+                            .as_str()
+                            .or(item["command"].as_str())
+                            .and_then(|s| url::Url::parse(s).ok())
+                            .and_then(|u| u.host_str().map(str::to_owned));
+                        host.map(|host| format!("http · {host}"))
+                            .unwrap_or_else(|| "http".into())
+                    } else {
+                        "stdio".into()
+                    },
                     tags: vec![],
                     scope: "global".into(),
+                    updated_at: None,
+                    repo_path: None,
                 },
             ));
         }
         for item in prompts["prompts"].as_array().into_iter().flatten() {
-            result.rows.push((
-                "prompts".into(),
-                Row {
-                    id: item["id"].as_str().unwrap_or("").into(),
-                    title: item["title"].as_str().unwrap_or("").into(),
-                    body: item["body"].as_str().unwrap_or("").into(),
-                    tags: item["tags"]
-                        .as_array()
-                        .into_iter()
-                        .flatten()
-                        .filter_map(|v| v.as_str().map(str::to_owned))
-                        .collect(),
-                    scope: item["scope"].as_str().unwrap_or("global").into(),
-                },
-            ));
+            result.rows.push(("prompts".into(), Row::prompt(item)?));
         }
         result.rows.sort_by(|(_, a), (_, b)| {
             (a.scope != "project")
@@ -168,6 +198,8 @@ impl Inventory {
 struct Editor {
     id: Option<String>,
     scope: String,
+    updated_at: Option<u64>,
+    repo_path: Option<String>,
     title: Entity<Composer>,
     body: Entity<Composer>,
     tags: Entity<Composer>,
@@ -180,7 +212,7 @@ pub struct Customize {
     inventory: Inventory,
     query: Entity<Composer>,
     editor: Option<Editor>,
-    deleting: Option<String>,
+    deleting: Option<Row>,
     loading: bool,
     error: Option<String>,
     revision: u64,
@@ -215,6 +247,9 @@ impl Customize {
     pub fn busy(&self) -> bool {
         self.loading
     }
+    pub fn belongs_to(&self, repo: Option<&str>) -> bool {
+        self.repo.as_deref() == repo
+    }
     fn load(&mut self, write: Option<(String, String, Value)>, cx: &mut Context<Self>) {
         if self.loading {
             return;
@@ -230,7 +265,7 @@ impl Customize {
         let saving = write.is_some();
         let task = cx.background_executor().spawn(async move {
             if let Some((method, path, body)) = write {
-                client.customize_write(&method, &path, &body)?;
+                client.customize_request(&method, &path, &body)?;
             }
             Inventory::load(&client, repo.as_deref())
         });
@@ -260,6 +295,67 @@ impl Customize {
         if self.loading {
             return;
         }
+        let Some(row) = row else {
+            self.begin_edit(None, window, cx);
+            return;
+        };
+        self.loading = true;
+        self.error = None;
+        let client = self.client.clone();
+        let task = cx.background_executor().spawn(async move {
+            let response: Value =
+                client.get(&format!("/api/prompt-library/{}", escape(&row.id)), &[])?;
+            Row::prompt(&response["prompt"])
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            let result = task.await;
+            let _ = this.update_in(cx, |this, window, cx| {
+                this.loading = false;
+                match result {
+                    Ok(row) => this.begin_edit(Some(row), window, cx),
+                    Err(error) => this.error = Some(error),
+                }
+                this.revision += 1;
+                cx.notify();
+            });
+        })
+        .detach();
+        self.revision += 1;
+        cx.notify();
+    }
+    fn copy(&mut self, row: Row, cx: &mut Context<Self>) {
+        if self.loading {
+            return;
+        }
+        if self.tab != "prompts" {
+            cx.write_to_clipboard(ClipboardItem::new_string(row.body));
+            return;
+        }
+        self.loading = true;
+        self.error = None;
+        let client = self.client.clone();
+        let task = cx.background_executor().spawn(async move {
+            let response: Value =
+                client.get(&format!("/api/prompt-library/{}", escape(&row.id)), &[])?;
+            Row::prompt(&response["prompt"])
+        });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            let _ = this.update(cx, |this, cx| {
+                this.loading = false;
+                match result {
+                    Ok(row) => cx.write_to_clipboard(ClipboardItem::new_string(row.body)),
+                    Err(error) => this.error = Some(error),
+                }
+                this.revision += 1;
+                cx.notify();
+            });
+        })
+        .detach();
+        self.revision += 1;
+        cx.notify();
+    }
+    fn begin_edit(&mut self, row: Option<Row>, window: &mut Window, cx: &mut Context<Self>) {
         let input = |text: String, cx: &mut Context<Self>| {
             cx.new(|cx| {
                 let mut input = Composer::new(cx);
@@ -278,6 +374,17 @@ impl Customize {
         );
         title.read(cx).focus.focus(window);
         self.editor = Some(Editor {
+            repo_path: row
+                .as_ref()
+                .map(|r| r.repo_path.clone())
+                .unwrap_or_else(|| {
+                    if self.personal {
+                        None
+                    } else {
+                        self.repo.clone()
+                    }
+                }),
+            updated_at: row.as_ref().and_then(|r| r.updated_at),
             id: row.as_ref().map(|r| r.id.clone()),
             scope: row
                 .map(|r| r.scope)
@@ -303,7 +410,10 @@ impl Customize {
             .filter(|t| !t.is_empty())
             .map(str::to_owned)
             .collect();
-        let body = json!({"title":editor.title.read(cx).text,"body":editor.body.read(cx).text,"tags":tags,"scope":editor.scope,"repoPath":if editor.scope=="repo"{self.repo.clone()}else{None}});
+        let mut body = json!({"title":editor.title.read(cx).text,"body":editor.body.read(cx).text,"tags":tags,"scope":editor.scope,"repoPath":editor.repo_path});
+        if let Some(revision) = editor.updated_at {
+            body["expectedUpdatedAt"] = json!(revision);
+        }
         let (method, path) = if let Some(id) = &editor.id {
             ("PATCH", format!("/api/prompt-library/{}", escape(id)))
         } else {
@@ -337,6 +447,20 @@ fn control(id: &str, label: impl Into<SharedString>, enabled: bool) -> gpui::Sta
         .opacity(if enabled { 1. } else { 0.45 })
         .when(enabled, |v| v.cursor_pointer())
         .child(label.into())
+}
+fn field(id: &'static str, input: &Entity<Composer>, busy: bool, cx: &gpui::App) -> gpui::Div {
+    div().debug_selector(move || id.into()).child(if busy {
+        // Removing the input entity from the frame also removes its platform
+        // input handler while the frozen request is in flight.
+        div()
+            .min_h(px(38.))
+            .p(px(9.))
+            .text_color(theme().text_secondary)
+            .child(input.read(cx).text.clone())
+            .into_any_element()
+    } else {
+        input.clone().into_any_element()
+    })
 }
 impl Render for Customize {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -478,23 +602,11 @@ impl Render for Customize {
                         .flex_col()
                         .gap(px(8.))
                         .child("Title")
-                        .child(
-                            div()
-                                .debug_selector(|| "custom-title".into())
-                                .child(editor.title.clone()),
-                        )
+                        .child(field("custom-title", &editor.title, busy, cx))
                         .child("Text")
-                        .child(
-                            div()
-                                .debug_selector(|| "custom-body".into())
-                                .child(editor.body.clone()),
-                        )
+                        .child(field("custom-body", &editor.body, busy, cx))
                         .child("Tags")
-                        .child(
-                            div()
-                                .debug_selector(|| "custom-tags".into())
-                                .child(editor.tags.clone()),
-                        )
+                        .child(field("custom-tags", &editor.tags, busy, cx))
                         .child(
                             div()
                                 .flex()
@@ -532,9 +644,9 @@ impl Render for Customize {
                     )
                 })
                 .children(rows.into_iter().enumerate().map(|(i, row)| {
-                    let copy = row.body.clone();
+                    let copy = row.clone();
                     let edit = row.clone();
-                    let delete = row.id.clone();
+                    let delete = row.clone();
                     div()
                         .debug_selector(move || format!("custom-row-{i}"))
                         .flex()
@@ -549,13 +661,13 @@ impl Render for Customize {
                             div()
                                 .flex()
                                 .gap(px(8.))
-                                .child(control(&format!("custom-copy-{i}"), "Copy", true).on_click(
-                                    cx.listener(move |_, _, _, cx| {
-                                        cx.write_to_clipboard(ClipboardItem::new_string(
-                                            copy.clone(),
-                                        ))
-                                    }),
-                                ))
+                                .child(
+                                    control(&format!("custom-copy-{i}"), "Copy", !busy).on_click(
+                                        cx.listener(move |this, _, _, cx| {
+                                            this.copy(copy.clone(), cx)
+                                        }),
+                                    ),
+                                )
                                 .when(self.tab == "prompts", |v| {
                                     v.child(
                                         control(&format!("custom-edit-{i}"), "Edit", !busy)
@@ -588,7 +700,11 @@ impl Render for Customize {
                                 this.load(
                                     Some((
                                         "DELETE".into(),
-                                        format!("/api/prompt-library/{}", escape(&id)),
+                                        format!(
+                                            "/api/prompt-library/{}?expectedUpdatedAt={}",
+                                            escape(&id.id),
+                                            id.updated_at.unwrap()
+                                        ),
                                         json!({}),
                                     )),
                                     cx,

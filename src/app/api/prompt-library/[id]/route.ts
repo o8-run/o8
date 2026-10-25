@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import {
   PromptLibraryDuplicateError,
+  PromptLibraryRevisionError,
   PromptLibraryValidationError,
   deletePromptLibraryEntry,
   getPromptLibraryEntry,
@@ -33,6 +34,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function mutationErrorResponse(error: unknown) {
+  if (error instanceof PromptLibraryRevisionError) {
+    return errorResponse('stale_revision', error.message, 409);
+  }
   if (error instanceof PromptLibraryValidationError) {
     return errorResponse(error.code, error.message, 400);
   }
@@ -63,6 +67,11 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   if (payload.title !== undefined && typeof payload.title !== 'string') {
     return errorResponse('invalid_title', 'title must be a string.', 400);
   }
+  if (payload.expectedUpdatedAt !== undefined && (
+    typeof payload.expectedUpdatedAt !== 'number' || !Number.isSafeInteger(payload.expectedUpdatedAt) || payload.expectedUpdatedAt <= 0
+  )) {
+    return errorResponse('invalid_revision', 'expectedUpdatedAt must be a positive integer.', 400);
+  }
   if (payload.body !== undefined && typeof payload.body !== 'string') {
     return errorResponse('invalid_body', 'body must be a string.', 400);
   }
@@ -81,6 +90,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   const { id } = await context.params;
   try {
     const prompt = updatePromptLibraryEntry(id, {
+      expectedUpdatedAt: payload.expectedUpdatedAt as number | undefined,
       title: payload.title as string | undefined,
       body: payload.body as string | undefined,
       tags: payload.tags as string[] | undefined,
@@ -99,8 +109,17 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
   if (denied) return denied;
 
   const { id } = await context.params;
-  if (!deletePromptLibraryEntry(id)) {
-    return errorResponse('prompt_not_found', 'Saved prompt not found.', 404);
+  const revision = request.nextUrl.searchParams.get('expectedUpdatedAt');
+  const expectedUpdatedAt = revision === null ? undefined : Number(revision);
+  if (expectedUpdatedAt !== undefined && (!Number.isSafeInteger(expectedUpdatedAt) || expectedUpdatedAt <= 0)) {
+    return errorResponse('invalid_revision', 'expectedUpdatedAt must be a positive integer.', 400);
   }
-  return response({ schema: 'o8/prompt-library.delete/v1', ok: true, deletedId: id });
+  try {
+    if (!deletePromptLibraryEntry(id, expectedUpdatedAt)) {
+      return errorResponse('prompt_not_found', 'Saved prompt not found.', 404);
+    }
+    return response({ schema: 'o8/prompt-library.delete/v1', ok: true, deletedId: id });
+  } catch (error) {
+    return mutationErrorResponse(error);
+  }
 }

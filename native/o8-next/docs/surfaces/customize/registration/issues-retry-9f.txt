@@ -1,0 +1,15 @@
+running 1 test
+test shell::issues::tests::issues_errors_retry_stale_and_account_switch ...
+thread 'shell::issues::tests::issues_errors_retry_stale_and_account_switch' (252329) panicked at src/surfaces/../issue_tests.rs:168:5:
+real control did not reach CPU paint: issue-view-17
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    shell::issues::tests::issues_errors_retry_stale_and_account_switch
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 89 filtered out; finished in 4.19s
+
+error: test failed, to rerun pass `--bin o8-next`

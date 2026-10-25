@@ -1,0 +1,43 @@
+running 5 tests
+test shell::customize::tests::review::agent_and_skill_bodies_contain_only_descriptions ...
+thread 'shell::customize::tests::review::agent_and_skill_bodies_contain_only_descriptions' (82342) panicked at src/surfaces/customize/review_tests.rs:121:5:
+assertion `left == right` failed
+  left: "Fixture agent\nFixture guidance"
+ right: "Fixture guidance"
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+test shell::customize::tests::review::cached_prompt_copy_and_edit_reload_current_text ...
+thread 'shell::customize::tests::review::cached_prompt_copy_and_edit_reload_current_text' (82392) panicked at src/surfaces/customize/review_tests.rs:43:5:
+assertion `left == right` failed: Copy must reload the saved prompt
+  left: "Original body"
+ right: "Desktop copy"
+FAILED
+test shell::customize::tests::review::credential_metadata_never_reaches_customization_copy ...
+thread 'shell::customize::tests::review::credential_metadata_never_reaches_customization_copy' (82425) panicked at src/surfaces/customize/review_tests.rs:106:5:
+assertion `left == right` failed: hook rows expose only safe metadata
+  left: "fixture-hook --token fixture-sensitive-value"
+ right: "command"
+FAILED
+test shell::customize::tests::review::stale_prompt_delete_preserves_desktop_edit ...
+thread 'shell::customize::tests::review::stale_prompt_delete_preserves_desktop_edit' (82455) panicked at src/surfaces/customize/review_tests.rs:89:5:
+stale Delete must refuse to delete a newer revision
+FAILED
+test shell::customize::tests::review::stale_prompt_save_preserves_desktop_edit_and_native_draft ...
+thread 'shell::customize::tests::review::stale_prompt_save_preserves_desktop_edit_and_native_draft' (82485) panicked at src/surfaces/customize/review_tests.rs:73:5:
+assertion `left == right` failed: stale Save must refuse to overwrite a newer revision
+  left: String("Native draft")
+ right: "Newer desktop edit"
+FAILED
+
+failures:
+
+failures:
+    shell::customize::tests::review::agent_and_skill_bodies_contain_only_descriptions
+    shell::customize::tests::review::cached_prompt_copy_and_edit_reload_current_text
+    shell::customize::tests::review::credential_metadata_never_reaches_customization_copy
+    shell::customize::tests::review::stale_prompt_delete_preserves_desktop_edit
+    shell::customize::tests::review::stale_prompt_save_preserves_desktop_edit_and_native_draft
+
+test result: FAILED. 0 passed; 5 failed; 0 ignored; 0 measured; 84 filtered out; finished in 14.04s
+
+error: test failed, to rerun pass `--bin o8-next`

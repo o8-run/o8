@@ -1,0 +1,10 @@
+Base: 9f44b02ea
+test shell::customize::tests::customize_auth_error_and_retry ... ok
+test shell::customize::tests::customize_inventory_and_prompt_crud ... O8_NEXT_CUSTOMIZE_EVIDENCE {"endpoint":"headless GPUI CPU scene; no GPU/compositor","openToFirstFrameMs":84.80417299999999,"interactionToFrameMs":122.246966}
+ok
+test shell::customize::tests::review::agent_and_skill_bodies_contain_only_descriptions ... ok
+test shell::customize::tests::review::cached_prompt_copy_and_edit_reload_current_text ... ok
+test shell::customize::tests::review::cached_prompt_edit_preserves_the_reloaded_repository ... ok
+test shell::customize::tests::review::credential_metadata_never_reaches_customization_copy ... ok
+test shell::customize::tests::review::stale_prompt_delete_preserves_desktop_edit ... ok
+test shell::customize::tests::review::stale_prompt_save_preserves_desktop_edit_and_native_draft ... ok
