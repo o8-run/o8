@@ -38,6 +38,13 @@ export function validateKnowledgeSourceRoots(value: unknown) {
   return sources;
 }
 /** Defense at writable entry points, including direct-path callers that bypass repository pickers. */
+export class KnowledgeSourceWriteError extends Error {
+  constructor() {
+    super('Knowledge sources are read-only and cannot be used as workspaces.');
+    this.name = 'KnowledgeSourceWriteError';
+  }
+}
+
 export function assertNotKnowledgeSource(candidate: string | null | undefined): void {
   if (!candidate) return;
   const lexical = path.resolve(candidate);
@@ -47,5 +54,5 @@ export function assertNotKnowledgeSource(candidate: string | null | undefined): 
     try { physical = path.resolve(realpathSync(ancestor), path.relative(ancestor, lexical)); break; }
     catch { const parent = path.dirname(ancestor); if (parent === ancestor) break; ancestor = parent; }
   }
-  if (configuredKnowledgeSources().some(s => containsPath(s.path, lexical) || containsPath(s.path, physical) || containsPath(lexical, s.path) || containsPath(physical, s.path))) throw new Error('Knowledge sources are read-only and cannot be used as workspaces.');
+  if (configuredKnowledgeSources().some(s => containsPath(s.path, lexical) || containsPath(s.path, physical) || containsPath(lexical, s.path) || containsPath(physical, s.path))) throw new KnowledgeSourceWriteError();
 }

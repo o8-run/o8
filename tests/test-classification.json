@@ -3210,6 +3210,15 @@
       ]
     },
     {
+      "path": "tests/knowledge-source-write-boundaries-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/knowledge-sources-real-path.test.ts",
       "reasons": [
         "child-process",

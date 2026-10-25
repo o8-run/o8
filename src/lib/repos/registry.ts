@@ -629,12 +629,14 @@ export async function updateRepo(
     storagePressureParkingDisabled?: boolean;
   },
 ) {
+  assertNotKnowledgeSource(updates.localPath);
   const candidate = updates.localPath === undefined ? null : await inspectLocalRepo(updates.localPath);
   const manifest = candidate ? await loadWorkspaceManifestCache(candidate.localPath) : undefined;
   const next = await withRegistryMutation(async () => {
     const store = await readStoreFresh();
     const existing = store.repos.find((repo) => repo.id === id);
     if (!existing) throw new Error('Repository not found.');
+    assertNotKnowledgeSource(candidate?.localPath ?? existing.localPath);
     if (candidate && store.repos.some((repo) => repo.id !== id && repo.localPath === candidate.localPath)) {
       throw new Error('Another registered repository already uses that folder.');
     }

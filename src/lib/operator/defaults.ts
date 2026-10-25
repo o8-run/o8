@@ -109,7 +109,8 @@ import {
   persistOperatorDefaults,
   readLegacyOperatorDefaults,
   readOperatorDefaultsTomlForUpdate,
-  withOperatorDefaultsUpdateRetry, withOperatorDefaultsWriteLock, SettingsTomlConflictError,
+  withOperatorDefaultsUpdateRetry,
+  SettingsTomlConflictError,
   type OperatorDefaultsTomlState,
 } from '@/lib/settings/operator-defaults-store';
 export { getOperatorDefaultsTomlPath } from '@/lib/settings/operator-defaults-store';

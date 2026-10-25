@@ -15,6 +15,7 @@ import {
   validateRepo,
 } from '@/lib/repos/registry';
 import { cloneRepoToDefaultLocation, RepoCloneError } from '@/lib/repos/clone';
+import { KnowledgeSourceWriteError } from '@/lib/cortex/knowledge/sources';
 import { removeRepoPathFromProjects, repointRepoPathInProjects } from '@/lib/repos/project-path-mutations';
 import { removeRepoFromPool } from '@/lib/repos/remove';
 import {
@@ -470,6 +471,9 @@ async function handlePOST(request: Request) {
     }
   } catch (error) {
     console.error('[api] panel/repos failed:', error);
+    if (error instanceof KnowledgeSourceWriteError) {
+      return NextResponse.json({ error: error.message, code: 'knowledge_source_read_only' }, { status: 400 });
+    }
     return NextResponse.json(
       { error: 'Unable to update repository registry.' },
       { status: 500 },
