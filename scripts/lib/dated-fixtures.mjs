@@ -139,95 +139,8 @@ function expiryRecords(source, file) {
   return records;
 }
 
-function callName(node) {
-  let expression = node.expression;
-  while (ts.isCallExpression(expression) || ts.isPropertyAccessExpression(expression)) {
-    expression = expression.expression;
-  }
-  return ts.isIdentifier(expression) ? expression.text : '';
-}
-
-function callback(call) {
-  return call.arguments.find(arg => ts.isArrowFunction(arg) || ts.isFunctionExpression(arg))?.body;
-}
-
-function restoresDate(body) {
-  let restores = false;
-  function scan(node) {
-    if (node !== body && ts.isFunctionLike(node)) return;
-    if (ts.isCallExpression(node) && /^(?:vi|vitest)\.useRealTimers$/.test(node.expression.getText())) restores = true;
-    ts.forEachChild(node, scan);
-  }
-  scan(body);
-  return restores;
-}
-
-function pinsDate(body, constants) {
-  if (restoresDate(body)) return false;
-  let fakeDate = false;
-  let fixedTime = false;
-  let workBeforePin = false;
-  function scan(node) {
-    // A declaration of a helper or a nested test does not execute its clock setup.
-    if (node !== body && ts.isFunctionLike(node)) return;
-    if (ts.isIfStatement(node) || ts.isConditionalExpression(node) || ts.isIterationStatement(node, false)
-      || ts.isSwitchStatement(node) || ts.isTryStatement(node)) {
-      if (!(fakeDate && fixedTime)) workBeforePin = true;
-      return;
-    }
-    if (ts.isCallExpression(node)) {
-      const name = node.expression.getText();
-      if (!/^(?:vi|vitest)\.|^Date\.(?:UTC|parse)$/.test(name) && !(fakeDate && fixedTime)) workBeforePin = true;
-      if (/^(?:vi|vitest)\.useFakeTimers$/.test(name)) {
-        const options = node.arguments[0];
-        fakeDate = !options;
-        if (options && ts.isObjectLiteralExpression(options)) {
-          const fields = new Map(options.properties.filter(ts.isPropertyAssignment)
-            .map(p => [p.name.getText().replaceAll(/['"]/g, ''), p.initializer]));
-          const toFake = fields.get('toFake');
-          fakeDate = !toFake || (ts.isArrayLiteralExpression(toFake)
-            && toFake.elements.some(item => ts.isStringLiteral(item) && item.text === 'Date'));
-          fixedTime = literalValue(fields.get('now'), constants) !== undefined;
-        }
-      }
-      if (/^(?:vi|vitest)\.setSystemTime$/.test(name)) {
-        fixedTime = literalValue(node.arguments[0], constants) !== undefined;
-      }
-      if (/^(?:vi|vitest)\.useRealTimers$/.test(name)) { fakeDate = false; fixedTime = false; }
-    }
-    ts.forEachChild(node, scan);
-  }
-  scan(body);
-  return fakeDate && fixedTime && !workBeforePin;
-}
-
-function hasUnpinnedTest(source, file) {
-  const { tree, constants } = parse(source, file);
-  const tests = [];
-  visit(tree, node => {
-    if (ts.isCallExpression(node) && ['it', 'test'].includes(callName(node)) && callback(node)) tests.push(node);
-  });
-  if (!tests.length) return true;
-  return tests.some(test => {
-    if (restoresDate(callback(test))) return true;
-    if (pinsDate(callback(test), constants)) return false;
-    for (let scope = test.parent; scope; scope = scope.parent) {
-      if (!(ts.isSourceFile(scope) || ts.isBlock(scope))) continue;
-      const hooks = scope.statements.flatMap(statement => {
-        const call = ts.isExpressionStatement(statement) ? statement.expression : undefined;
-        return call && ts.isCallExpression(call) && callName(call) === 'beforeEach' && callback(call)
-          ? [callback(call)] : [];
-      });
-      if (hooks.some(restoresDate)) return true;
-      if (hooks.some(body => pinsDate(body, constants))) return false;
-    }
-    return true;
-  });
-}
-
-/** Conservative policy: every hermetic test reaching a fixed expiry must pin
- * Date, even if a particular assertion only serializes the fixture. This avoids
- * depending on a list of validator names or on whether the fixture expires today.
+/** Discover dated fixtures and select a future clock for each referencing test.
+ * Execution under that clock, rather than hook syntax, proves independence.
  */
 export function auditDatedFixtures(root, hermeticFiles, now = Date.now()) {
   root = realpathSync(root);
@@ -265,24 +178,22 @@ export function auditDatedFixtures(root, hermeticFiles, now = Date.now()) {
       importers.get(dependency).add(file);
     }
   }
-  const datedFiles = new Map([...metadata].filter(([, info]) => info.expiries.length).map(([file]) => [file, file]));
+  const datedFiles = new Map([...metadata].filter(([, info]) => info.expiries.length)
+    .map(([file, info]) => [file, { file, at: Math.max(...info.expiries.map(expiry => expiry.at)) }]));
   const queue = [...datedFiles.keys()];
   for (let index = 0; index < queue.length; index++) {
     const dependency = queue[index];
     for (const importer of importers.get(dependency) ?? []) {
-      if (datedFiles.has(importer)) continue;
-      datedFiles.set(importer, datedFiles.get(dependency));
+      const expiry = datedFiles.get(dependency);
+      if ((datedFiles.get(importer)?.at ?? -Infinity) >= expiry.at) continue;
+      datedFiles.set(importer, expiry);
       queue.push(importer);
     }
   }
-  const errors = [];
-  for (const path of hermeticFiles) {
-    const file = join(root, path);
-    const dated = datedFiles.get(file);
-    if (dated && hasUnpinnedTest(inspect(file).source, file)) {
-      errors.push(`${path}: pin Date in beforeEach (useFakeTimers + a fixed setSystemTime/now); fixed expiry in ${display(dated)}`);
-    }
-  }
+  const probes = hermeticFiles.flatMap(path => {
+    const dated = datedFiles.get(join(root, path));
+    return dated ? [{ path, now: dated.at + DAY, fixture: display(dated.file) }] : [];
+  });
   const warnings = [];
   for (const [file, info] of [...metadata].sort(([a], [b]) => a.localeCompare(b))) {
     for (const { at, line } of info.expiries) {
@@ -292,5 +203,5 @@ export function auditDatedFixtures(root, hermeticFiles, now = Date.now()) {
       }
     }
   }
-  return { errors, warnings };
+  return { probes, warnings };
 }

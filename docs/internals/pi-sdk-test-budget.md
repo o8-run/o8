@@ -78,13 +78,18 @@ already runs on every PR. Dates within the next seven days produce a warning,
 including the file, line, and UTC expiry; the warning does not fail the command
 or alter the manifest.
 
-Every hermetic test reaching a fixed expiry fixture through local imports or
-static JSON fixture paths must
-pin Date before running assertions. Use `beforeEach` with
-`vi.useFakeTimers({ toFake: ['Date'] })` and a fixed `vi.setSystemTime(...)`, then
-restore timers in `afterEach`. An explicit `now` in `useFakeTimers` also works.
-Relative expiries such as `Date.now() + 60_000` do not require this policy.
-The static gate deliberately applies even to serialization-only assertions so
-adding validation later cannot quietly introduce a calendar-dependent failure.
-Do not restore the wall clock inside a dated-fixture test or hide clock setup
-in conditional code or helper declarations.
+The audit follows local imports and static JSON fixture paths, then runs each
+referencing hermetic test file through Vitest with Date past its latest fixed
+expiry. The probe installs an advancing future clock at worker startup, before
+Vitest captures Date, so restoring timers also restores the probe clock. It uses
+the regular isolated-data setup and requires a successful report for exactly
+that file. A failed import, hook, assertion, timeout, or missing report fails
+classification. A later clock-pinning hook cannot hide earlier validation.
+
+Pin Date before the validation executes. For validation inside tests or hooks,
+place `vi.useFakeTimers({ toFake: ['Date'] })` and a fixed
+`vi.setSystemTime(...)` before the validating hook. For import-time validation,
+pin the clock in `vi.hoisted` before importing the module. Restore timers in
+`afterEach`. An explicit `now` in `useFakeTimers` also works. Relative expiries
+such as `Date.now() + 60_000` do not select a future-clock probe. The seven-day
+warning still uses the classification command's actual clock.
