@@ -282,6 +282,23 @@ export async function persistMissionRegistryState(state: OrchestratorMissionStat
   return withRegistryMutationLock(missionId, async () => writeMissionRegistryStateUnlocked(state, true));
 }
 
+/** Cost capture cannot rearm, unarchive, or replace a concurrent operator stop. */
+export async function updateMissionRegistryPacketSpend(
+  missionId: string,
+  packetId: string,
+  update: (packet: OrchestratorPacket) => NonNullable<OrchestratorPacket['spendTelemetry']>,
+): Promise<boolean> {
+  return withRegistryMutationLock(missionId, async () => getSqlite().transaction(() => {
+    const entry = readMissionRegistryEntry(missionId, { includeArchived: true });
+    const packet = entry?.mission.packets.find(candidate => candidate.id === packetId);
+    if (!entry || !packet) return false;
+    packet.spendTelemetry = update(packet);
+    getSqlite().prepare('UPDATE missions SET mission_state_json = ?, updated_at = ? WHERE id = ?')
+      .run(JSON.stringify(entry.mission), nextRegistryVersion(missionId), missionId);
+    return true;
+  }).immediate());
+}
+
 /** Publish a current mission only when its captured registry version has not advanced. */
 export async function persistMissionRegistryStateIfVersion(
   state: OrchestratorMissionState,

@@ -330,48 +330,35 @@ export async function persistRuntimeSessionCost(input: {
       return false;
     }
 
-    const persisted = await persistSessionCost({
+    const { persistPacketSessionSpend } = await import('./packet-spend-persistence');
+    const packetSpend = await persistPacketSessionSpend({ ...input, telemetry });
+    // Numeric usage receipts cannot represent an unknown total. Preserve its
+    // packet/token evidence without inventing a zero-dollar billing record.
+    if (packetSpend.telemetry.costUsd === null) return packetSpend.persisted;
+    return await persistSessionCost({
       sessionKey: input.sessionKey,
       runtime: input.runtime,
       model: telemetry.model,
-      inputTokens: telemetry.inputTokens,
-      outputTokens: telemetry.outputTokens,
-      costUsd: finiteNumber(telemetry.estimatedCostUsd),
+      inputTokens: packetSpend.telemetry.inputTokens,
+      outputTokens: packetSpend.telemetry.outputTokens,
+      costUsd: packetSpend.telemetry.costUsd,
       repoPath: input.repoPath,
       cacheReadTokens: telemetry.cacheReadTokens,
       cacheWriteTokens: telemetry.cacheWriteTokens,
-      costSource: telemetry.costSource,
+      costSource: packetSpend.telemetry.costSource,
       laneId: input.laneId,
       packetId: input.packetId,
       missionId: input.missionId,
       role: input.role ?? 'worker',
       runId: input.runId,
-      metadata: telemetry.costSource === 'gateway'
+      metadata: packetSpend.telemetry.costSource === 'gateway'
         ? { costSource: 'gateway' }
-        : telemetry.costSource === 'estimate'
+        : packetSpend.telemetry.costSource === 'estimate'
           ? { costSource: 'estimate', rateTableVersion: modelRateTable.rateTableVersion }
-          : telemetry.costSource === 'unknown'
+          : packetSpend.telemetry.costSource === 'unknown'
             ? { costSource: 'unknown' }
             : undefined,
     });
-    if (persisted) {
-      const { getLaneEvents, listLanes } = await import('@/lib/lane/registry');
-      const lane = listLanes().find((candidate) => candidate.sessionKey === input.sessionKey && candidate.packetId);
-      if (lane?.packetId) {
-        const { patchMissionPacket } = await import('@/lib/orchestrator/operator-mission-service/packet-patch');
-        await patchMissionPacket(lane.packetId, {
-          spendTelemetry: {
-            costUsd: finiteNumber(telemetry.estimatedCostUsd),
-            inputTokens: normalizeTokenCount(telemetry.inputTokens),
-            outputTokens: normalizeTokenCount(telemetry.outputTokens),
-            costSource: telemetry.costSource ?? 'estimate',
-            capHit: getLaneEvents(lane.id, 200).some((event) => event.verb === 'spend_cap_hit'),
-            updatedAt: new Date().toISOString(),
-          },
-        });
-      }
-    }
-    return persisted;
   } catch (error) {
     console.error(`${LOG_PREFIX} Failed to persist runtime session cost for ${input.sessionKey}.`, error);
     return false;

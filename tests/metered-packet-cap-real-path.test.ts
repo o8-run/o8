@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, IncomingMessage, request as httpRequest } from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
@@ -7,6 +7,21 @@ import { fileURLToPath } from 'node:url';
 
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import { retainTestRunAfterTimeout } from './test-fixture-lifecycle';
+import { defineRecoverySpendMatrix } from './fixtures/recovery-spend-matrix';
+
+const metadataRace = vi.hoisted(() => ({ file: null as string | null, replacements: 0 }));
+vi.mock('node:fs/promises', async original => {
+  const actual = await original<typeof import('node:fs/promises')>();
+  return { ...actual, lstat: async (file: string) => {
+    if (file === metadataRace.file) {
+      metadataRace.file = null;
+      const replacement = `${file}.fixture-replacement`;
+      writeFileSync(replacement, readFileSync(file)); renameSync(replacement, file);
+      metadataRace.replacements++;
+    }
+    return actual.lstat(file);
+  } };
+});
 
 // Unrelated capacity discovery must not launch a real provider CLI.
 vi.mock('@/lib/codex/live-capacity', () => ({ readLiveCodexRuntimeCapacity: vi.fn(async () => ({ runtime: 'codex', identityId: null, status: 'unavailable',
@@ -268,6 +283,7 @@ async function waitUntilGone(pids: number[]): Promise<void> {
 }
 
 afterEach(async (context) => {
+  metadataRace.file = null;
   delete process.env.O8_TEST_FINISH_METERED_WORKER;
   releaseResponseGate?.();
   responseGate = null;
@@ -325,6 +341,9 @@ async function waitForConfirmedKillEvent(laneId: string) {
   }
   throw new Error('Timed out waiting for a confirmed kill_escalated event.');
 }
+
+defineRecoverySpendMatrix({ root, repoPath, io: ownedIo, starts, requests: () => upstreamCalls,
+  waitForPids: waitForFixturePids, refresh: () => claudeOwned.getOwnedClaudeCodeFleetAdditions({ fresh: true }), action: automaticAction });
 
 describe('metered packet cap real path', () => {
   it('rechecks a disk cap latch after reading a delayed request body', async () => {
@@ -436,7 +455,16 @@ describe('metered packet cap real path', () => {
       expect((await ownedIo.findSession(surfaceId))?.activeRun).toBeUndefined();
       expect((await ownedIo.findSession(surfaceId))?.recentRuns[0].outcome).toBe('finished');
     }, { timeout: 15_000, interval: 50 });
-    const saved = (await ownedIo.findSession(surfaceId))!;
+    if (reason === 'telemetry-cap-hit') metadataRace.file = path.join(ownedRoot, surfaceId.slice('claude-code-owned:'.length), 'session.json');
+    let saved!: NonNullable<Awaited<ReturnType<typeof ownedIo.findSession>>>;
+    const replacementsBefore = metadataRace.replacements;
+    await vi.waitFor(async () => {
+      const candidate = (await ownedIo.findSession(surfaceId))!;
+      expect(candidate.activeRun).toBeUndefined();
+      expect(candidate.recentRuns[0].outcome).toBe('finished');
+      saved = candidate;
+    }, { timeout: 15_000, interval: 50 });
+    if (reason === 'telemetry-cap-hit') expect(metadataRace.replacements).toBe(replacementsBefore + 1);
     const runId = saved.recentRuns[0].id;
     // Simulate a server exit after the gateway persisted its cap/stop decision,
     // before interruption or archival could mark the owned generation.
@@ -512,6 +540,7 @@ describe('metered packet cap real path', () => {
     Object.assign(authorized.packets[0], { operatorStopped: false, status: 'running', queueState: 'running', blockedReason: undefined,
       spendCap: { carrier: 'openrouter', costUsd: 1, inputTokens: 7_000_000 }, spendTelemetry: { ...authorized.packets[0].spendTelemetry, capHit: false } });
     writeOrchestratorControlPlaneState(authorized);
+    if (reason === 'registry-stop') await (await import('@/lib/orchestrator/mission-registry')).persistMissionRegistryState(authorized);
     const current = (await ownedIo.findSession(surfaceId))!.recentRuns[0].id;
     expect(await automaticAction(surfaceId, current)).toMatchObject({ ok: true });
     await vi.waitFor(() => expect(upstreamCalls).toBe(beforeRequests + 1), { timeout: 15_000, interval: 50 });
@@ -639,6 +668,12 @@ describe('metered packet cap real path', () => {
     for (const pid of [workerPids.interpreterPid, workerPids.workerPid]) {
       expect(() => process.kill(pid, 0)).toThrow(expect.objectContaining({ code: 'ESRCH' }));
     }
+    // Recovery can settle the exit journal before background Stop acquires its
+    // lock. Drive idempotent settlement through Stop, retaining its kill proof.
+    const { stopPacket } = await import('@/lib/orchestrator/stop-packet');
+    await vi.waitFor(async () => {
+      expect(await stopPacket(packetId)).toMatchObject({ ok: true, killConfirmed: true });
+    }, { timeout: 15_000, interval: 50 });
 
     const mission = await getMissionStatus({ includeCost: true });
     if (!('cost' in mission) || !mission.cost) throw new Error('Expected mission cost telemetry.');
