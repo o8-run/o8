@@ -64,13 +64,18 @@ async function until(predicate, child, name, timeoutMs = 15_000) {
   }
   throw new VerificationError(`${name} timed out`);
 }
-function capture(file, env) {
+function capture(file, env, sampled = false) {
   // Root of a dedicated display: independent of focus, window-manager decoration or window ids.
   execFileSync('import', ['-window', 'root', `png:${file}`], { env, stdio: 'pipe', timeout: 3000 });
   const bytes = readFileSync(file);
   if (bytes.subarray(0, 8).toString('hex') !== '89504e470d0a1a0a'
     || bytes.readUInt32BE(16) < 600 || bytes.readUInt32BE(20) < 400) throw new VerificationError('Invalid display screenshot');
-  const colors = Number(execFileSync('identify', ['-format', '%k', file], { env, encoding: 'utf8', timeout: 3000 }));
+  // Poll a subset of original pixels, without interpolation or new colors.
+  // A full-frame histogram can take seconds and delay observing an already
+  // painted frame. Keep full-image checks before launch and after idle.
+  const colors = Number(execFileSync(sampled ? 'convert' : 'identify',
+    sampled ? [file, '-sample', '25%', '-format', '%k', 'info:'] : ['-format', '%k', file],
+    { env, encoding: 'utf8', timeout: 3000 }));
   return Number.isFinite(colors) && colors > 32;
 }
 async function measure(index, options, progress) {
@@ -111,7 +116,7 @@ async function measure(index, options, progress) {
     await until(() => {
       // Bare Xvfb has no window manager to expose a newly mapped inactive window.
       execFileSync('xrefresh', ['-none'], { env, stdio: 'pipe', timeout: 3000 });
-      return capture(image, env);
+      return capture(image, env, true);
     }, app, 'first frame');
     const launchToFirstFrameMs = Math.round((performance.now() - started) * 100) / 100;
     progress.stage = 'fixture-state';

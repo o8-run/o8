@@ -2,6 +2,7 @@
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import { pathToFileURL } from 'node:url';
+import { createInterface } from 'node:readline';
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync, existsSync } from 'node:fs';
@@ -62,9 +63,10 @@ function alive(pid: number) {
 function stageBinary() {
   writeFileSync(binary, `#!/usr/bin/env node
 const fs = require('node:fs');
-fs.writeFileSync(${JSON.stringify(receipt)}, JSON.stringify({ pid: process.pid, argv: process.argv.slice(2),
+fs.writeFileSync(${JSON.stringify(receipt + '.tmp')}, JSON.stringify({ pid: process.pid, argv: process.argv.slice(2),
   authorized: process.env.O8_NEXT_API_TOKEN === ${JSON.stringify(token)}, cwd: fs.realpathSync(process.cwd()),
   inherited: ['O8_WORKER_TOKEN', 'O8_API_TOKEN', 'O8_NEXT_CLERK_SESSION_TOKEN', 'NODE_OPTIONS', 'O8_MASTER_KEY'].some(k => !!process.env[k]) }));
+fs.renameSync(${JSON.stringify(receipt + '.tmp')}, ${JSON.stringify(receipt)});
 console.log(process.env.O8_NEXT_API_TOKEN); console.error(process.env.O8_NEXT_API_TOKEN);
 if (process.env.O8_NEXT_PARENT_PIPE === '1') { process.stdin.resume(); process.stdin.on('end', () => process.exit(0)); }
 setInterval(() => {}, 1000);
@@ -247,3 +249,66 @@ it('refuses a missing-sidecar TOML opt-in before persisting the choice', async (
   expect(response.status).toBe(400);
   expect((await getOperatorDefaults()).values.experimentalNext).toBe(false);
 });
+
+// Opt-in local acceptance: a compiled development bundle, never the installed app.
+// Only the display edge adds --offscreen. The settings route, spawn policy,
+// native executable, parent pipe and persisted preference remain production paths.
+it.skipIf(process.platform !== 'darwin' || !process.env.O8_NEXT_MACOS_TEST_BUNDLE)(
+  'launches the compiled Mac bundle through the settings API and disables it without a hard kill', async () => {
+    const nativeBinary = realpathSync(join(process.env.O8_NEXT_MACOS_TEST_BUNDLE!, 'Contents/MacOS/o8-next'));
+    expect(readFileSync(join(dirname(nativeBinary), '../Info.plist'), 'utf8'))
+      .toContain('<string>run.o8.next.localcheck</string>');
+    expect(execFileSync('/usr/bin/file', ['--brief', nativeBinary], { encoding: 'utf8' })).toContain('Mach-O');
+    const requestLog = join(root, 'native-requests.json');
+    const host = spawn(process.execPath, ['--import', './scripts/register-server-only-stub.mjs', '--import', 'tsx',
+      'scripts/next/dev-server.ts', '--shell'], {
+      env: { ...process.env, O8_NEXT_API_TOKEN: token, O8_NEXT_REQUEST_LOG: requestLog },
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    let origin: string | undefined;
+    const lines = createInterface({ input: host.stdout! });
+    lines.on('line', line => {
+      try { origin = JSON.parse(line).origin || origin; } catch { /* Fixture diagnostics are not receipts. */ }
+    });
+    const providers = await import('@/lib/providers/child-process');
+    const productionSpawn = providers.spawn;
+    let native: ChildProcess | undefined;
+    let exited: Promise<[number | null, NodeJS.Signals | null]> | undefined;
+    const display = vi.spyOn(providers, 'spawn').mockImplementation((command, args, options) => {
+      const child = productionSpawn(command, command === nativeBinary ? [...(args ?? []), '--offscreen'] : (args ?? []), options);
+      if (command === nativeBinary) {
+        native = child;
+        exited = once(child, 'exit') as Promise<[number | null, NodeJS.Signals | null]>;
+      }
+      return child;
+    });
+    try {
+      await vi.waitFor(() => { expect(host.exitCode).toBeNull(); expect(origin).toBeTruthy(); }, { timeout: 30_000 });
+      vi.stubEnv('O8_API_PORT', new URL(origin!).port);
+      vi.stubEnv('O8_NEXT_BIN', nativeBinary);
+      expect((await post(true)).status).toBe(200);
+      expect(native?.pid).toBeTruthy();
+      await vi.waitFor(() => expect(existsSync(join(dataDir, 'next-shell.json'))).toBe(true), { timeout: 10_000 });
+      expect(alive(native!.pid!)).toBe(true);
+      expect(JSON.parse(readFileSync(join(dataDir, 'next-shell.json'), 'utf8')).selected).toBeTruthy();
+      expect((await getOperatorDefaults()).values.experimentalNext).toBe(true);
+      expect(readFileSync(join(dataDir, 'settings.toml'), 'utf8')).toContain('next_enabled = true');
+      expect((await post(false)).status).toBe(200);
+      const [code, signal] = await exited!;
+      expect(code === 0 || signal === 'SIGTERM').toBe(true);
+      expect(alive(native!.pid!)).toBe(false);
+      expect((await getOperatorDefaults()).values.experimentalNext).toBe(false);
+      const hostExit = once(host, 'exit'); host.kill('SIGTERM'); await hostExit;
+      expect(JSON.parse(readFileSync(requestLog, 'utf8'))).toContain('GET /api/mobile/orchestrator/threads');
+      const result = { developmentBundle: true, nativeMachO: true, offscreen: true, settingsApi: true,
+        persistedEnabled: true, fixtureRoutesRead: true, persistedDisabled: true,
+        exited: true, exitCode: code, exitSignal: signal, hardKill: false };
+      if (process.env.O8_NEXT_MACOS_TEST_RECEIPT) writeFileSync(process.env.O8_NEXT_MACOS_TEST_RECEIPT, JSON.stringify(result, null, 2) + '\n');
+      console.info('Native Mac bundle acceptance:', JSON.stringify(result));
+    } finally {
+      display.mockRestore(); lines.close();
+      if (native?.pid && alive(native.pid)) native.kill('SIGKILL');
+      if (host.exitCode === null && host.signalCode === null) { const done = once(host, 'exit'); host.kill('SIGTERM'); await done; }
+    }
+  }, 60_000,
+);

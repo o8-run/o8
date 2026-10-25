@@ -44,7 +44,7 @@ it('accepts the recorded limit and fails either budget one unit beyond it throug
 });
 
 // Probe the runner's process seams; the release smoke separately exercises actual GPUI/Vulkan.
-function harness(mode: 'ready' | 'exit' = 'ready') {
+function harness(mode: 'ready' | 'exit' = 'ready', slowFullHistogram = false) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'o8-next-harness-')));
   roots.push(root);
   const bin = join(root, 'bin');
@@ -60,6 +60,7 @@ function harness(mode: 'ready' | 'exit' = 'ready') {
   const exposed = join(root, 'exposed');
   const stopped = join(root, 'stopped');
   const captureLog = join(root, 'capture.jsonl');
+  const sampleLog = join(root, 'sample.jsonl');
   script('import', `const fs = require('node:fs');
     fs.appendFileSync(${JSON.stringify(captureLog)}, JSON.stringify(process.argv.slice(2)) + '\\n');
     const png = Buffer.alloc(24); Buffer.from('89504e470d0a1a0a', 'hex').copy(png);
@@ -67,6 +68,12 @@ function harness(mode: 'ready' | 'exit' = 'ready') {
     fs.writeFileSync(process.argv.at(-1).slice(4), png);`);
   script('xrefresh', `require('node:fs').writeFileSync(${JSON.stringify(exposed)}, 'exposed');`);
   script('identify', `const fs = require('node:fs');
+    if (${slowFullHistogram}) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2000);
+    if (fs.existsSync(${JSON.stringify(running)}) && !fs.existsSync(${JSON.stringify(exposed)})) process.exit(4);
+    console.log(fs.existsSync(${JSON.stringify(running)}) ? 100 : 1);`);
+  script('convert', `const fs = require('node:fs'); const args = process.argv.slice(2);
+    if (JSON.stringify(args.slice(1)) !== JSON.stringify(['-sample', '25%', '-format', '%k', 'info:'])) process.exit(5);
+    fs.appendFileSync(${JSON.stringify(sampleLog)}, JSON.stringify(args) + '\\n');
     if (fs.existsSync(${JSON.stringify(running)}) && !fs.existsSync(${JSON.stringify(exposed)})) process.exit(4);
     console.log(fs.existsSync(${JSON.stringify(running)}) ? 100 : 1);`);
   script('ps', 'console.log(65536);');
@@ -83,11 +90,22 @@ function harness(mode: 'ready' | 'exit' = 'ready') {
       JSON.stringify(['GET /api/mobile/orchestrator/threads', 'GET /api/mobile/history'])); process.exit(0); });
     setInterval(() => {}, 1000);`);
   const budget = join(root, 'budget.json');
-  const run = () => spawnSync(process.execPath, [cli, '--host', host, '--binary', app,
-    '--output', output, '--budget', budget, '--record'], { encoding: 'utf8', timeout: 25_000,
+  const run = (record = true) => spawnSync(process.execPath, [cli, '--host', host, '--binary', app,
+    '--output', output, '--budget', budget, ...(record ? ['--record'] : [])], { encoding: 'utf8', timeout: record ? 25_000 : 50_000,
     env: { ...process.env, DISPLAY: ':fixture', PATH: `${bin}:${process.env.PATH}` } });
-  return { root, output, budget, run, captureLog, stopped, running };
+  return { root, output, budget, run, captureLog, sampleLog, stopped, running };
 }
+
+it('observes first frames within the unchanged budget without a slow full-image histogram', () => {
+  const f = harness('ready', true);
+  const committed = readFileSync('native/o8-next/linux-budgets.json', 'utf8');
+  writeFileSync(f.budget, committed);
+  const result = f.run(false);
+  expect(result.status, result.stderr).toBe(0);
+  expect(result.stdout).toContain('Three runs within launch and idle RSS budgets');
+  expect(readFileSync(f.budget, 'utf8')).toBe(committed);
+  expect(readFileSync(f.sampleLog, 'utf8').trim().split('\n').length).toBeGreaterThanOrEqual(3);
+}, 60_000);
 
 it('handles chunked/reordered host readiness, captures background windows and reaps every run', () => {
   const f = harness();
