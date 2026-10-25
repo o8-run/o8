@@ -29,7 +29,7 @@ fn shell_restart_reads_geometry_surfaces_and_focus_from_the_same_file(cx: &mut T
         .simulate_window_resize(handle, size(px(900.), px(700.)));
     assert!(cx.simulate_close());
     let saved = State::load(&file).unwrap();
-    assert_eq!(saved.bounds, [-320., -40., 900., 700.]);
+    assert_eq!(saved.bounds, [0., 0., 900., 700.]);
     assert_eq!(saved.selected, selected);
     assert_eq!(
         saved
@@ -60,7 +60,7 @@ fn shell_restart_reads_geometry_surfaces_and_focus_from_the_same_file(cx: &mut T
     cx.update(|window, cx| {
         assert_eq!(
             window.window_bounds().get_bounds(),
-            Bounds::new(point(px(-320.), px(-40.)), size(px(900.), px(700.)))
+            Bounds::new(point(px(0.), px(0.)), size(px(900.), px(700.)))
         );
         assert!(view.read(cx).shell_selection(window, cx).1);
     });
@@ -142,4 +142,64 @@ fn shell_restart_keeps_surface_focus_when_palette_is_open_at_quit(cx: &mut TestA
         });
         assert!(visual.simulate_close());
     }
+}
+
+#[gpui::test]
+#[cfg(unix)]
+fn correction_unreadable_state_opens_defaults_and_preserves_the_input(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    let directory = fixture.root.join("unreadable-state");
+    fs::create_dir(&directory).unwrap();
+    let sentinel = directory.join("retained");
+    fs::write(&sentinel, b"original state source").unwrap();
+    for (name, target) in [
+        ("directory", directory.clone()),
+        ("dangling", directory.join("missing")),
+    ] {
+        let file = fixture.root.join(format!("state-{name}.json"));
+        std::os::unix::fs::symlink(&target, &file).unwrap();
+        let state = State::load(&file).expect("unreadable state must fall back to defaults");
+        assert_eq!(state.bounds, State::default().bounds);
+        let (shell, mut visual) = open(fixture.client.clone(), file.clone(), state, cx);
+        ready(&shell, &mut visual);
+        assert!(visual.simulate_close());
+        assert!(
+            fs::symlink_metadata(&file)
+                .unwrap()
+                .file_type()
+                .is_symlink(),
+            "startup and close must not replace an unreadable input: {name}"
+        );
+        assert_eq!(fs::read_link(&file).unwrap(), target);
+        assert_eq!(fs::read(&sentinel).unwrap(), b"original state source");
+    }
+}
+
+#[gpui::test]
+fn correction_offscreen_geometry_is_clamped_before_the_window_opens(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    let file = fixture.root.join("removed-display.json");
+    let mut state = State::default();
+    state.bounds = [3560., 100., 900., 700.];
+    state.save(&file).unwrap();
+    let (shell, mut visual) = open(
+        fixture.client.clone(),
+        file.clone(),
+        State::load(&file).unwrap(),
+        cx,
+    );
+    ready(&shell, &mut visual);
+    visual.update(|window, cx| {
+        let bounds = window.window_bounds().get_bounds();
+        assert!(
+            cx.displays()
+                .iter()
+                .any(|display| display.bounds().contains(&bounds.origin)
+                    && display.bounds().contains(&bounds.bottom_right())),
+            "a removed display must not leave the restored window off screen"
+        );
+    });
+    assert!(visual.simulate_close());
+    let saved = State::load(&file).unwrap();
+    assert!(saved.bounds[0] < 1920.);
 }

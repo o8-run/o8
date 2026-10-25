@@ -96,3 +96,88 @@ Remaining for #4548: complete native-process launch-to-interactive and standalon
 idle-memory measurement on a supported display. Palette/workspace CPU frame
 percentiles are in the separate palette PR. These measurement gaps keep the
 issue open. The separate server-link and palette PRs must also land.
+
+## Correction round 1
+
+Rebased on `417586b6b`. Linux, Node 22, stable Rust. The three reported
+regressions were reproduced before their fixes through the native CLI, the
+production GPUI shell window factory, and its platform geometry adapter.
+
+Red tails:
+
+```text
+correction_unreadable_state_opens_defaults_and_preserves_the_input
+unreadable state must fall back to defaults: "Cannot read shell state"
+correction_offscreen_geometry_is_clamped_before_the_window_opens
+a removed display must not leave the restored window off screen
+test result: FAILED. 0 passed; 2 failed
+
+unreadable_shell_state_does_not_abort_native_startup
+an unreadable state must reach normal server validation:
+{"error":"Cannot read shell state"}
+test result: FAILED. 0 passed; 1 failed
+
+correction_restores_saved_outer_height_without_adding_the_titlebar
+left: Size { 900px × 732px }
+right: Size { 900px × 700px }
+test result: FAILED. 0 passed; 1 failed
+```
+
+A further hostile-review regression was written red before fixing it:
+
+```text
+correction_unreadable_state_opens_defaults_and_preserves_the_input
+startup and close must not replace an unreadable input: dangling
+test result: FAILED. 0 passed; 1 failed
+```
+
+Unreadable input now starts with defaults and marks that session's state as
+in-memory only. Startup, normal persistence and close do not replace the unreadable
+source or its symlink. The marker is not serialized. Missing ordinary files and
+malformed state retain their existing recovery and persistence behavior.
+
+Window state continues to store outer bounds. Before opening, saved geometry is
+clamped onto the active display with the greatest overlap, or the nearest display
+when there is no overlap. The native geometry adapter measures the outer/content
+difference and passes a content size to GPUI's resize API. It does not assume a
+fixed titlebar height or multiply logical coordinates by display scale.
+
+Green tails:
+
+```text
+GPUI shell_window_tests: 5 passed; 0 failed
+Platform geometry adapter tests: 2 passed; 0 failed
+Native shell_cli: 3 passed; 0 failed
+Existing shell restart/server-down smoke: 1 passed; 0 failed
+```
+
+Files: `src/shell_window_tests.rs`, `src/shell_geometry.rs` (its test module),
+`tests/shell_cli.rs`, and the retained `src/shell_tests.rs`.
+Before/after: **3 review regressions failing -> 0**; the CLI unreadable-state
+regression and the dangling-link regression also pass. In the 2560-wide display
+fixture, x **3560 -> 1660** for a 900-wide window. The decorated-frame fixture
+restores outer height **732 -> 700**, retaining 700 over repeated restores.
+
+The three likeliest macOS/race failures have tests:
+
+1. An unreadable path is a directory-backed or dangling symlink. The real shell
+   opens, loads content, and closes without replacing the link or its sentinel.
+   The native executable also reaches normal URL validation after a read error.
+2. A saved display disappears, a display has negative coordinates, or the window
+   is larger than a screen. The real window factory clamps offscreen geometry;
+   display fixtures cover the exact 2560-wide case, a negative display, an
+   oversized window and selection of the overlapping second display.
+3. Native decorations change size or resize races with close. The platform
+   adapter fixture uses zero insets, a 32-pixel titlebar and 12-by-28 insets over
+   three restores. The real GPUI resize-then-close test retains the final size,
+   open surfaces and composer focus from the same state file.
+
+The decorated fixture exercises the same resize adapter used by open_window;
+headless GPUI itself has no titlebar. No physical macOS window/compositor result
+is claimed in this Linux environment.
+
+The 8192 MiB `tsc --noEmit`, `typecheck:fast`, touched-file ESLint, rule-check,
+explicit Rust formatting and diff checks pass. ESLint has no eligible Rust files;
+rule-check reports zero eligible TypeScript files. Classification was rerun after
+adding the geometry test module. Full `npm test` ran once for this correction
+batch: **1242 files passed, 3 skipped; 9057 tests passed, 5 skipped** (474.79 s).

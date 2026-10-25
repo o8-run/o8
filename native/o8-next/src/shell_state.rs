@@ -33,6 +33,8 @@ pub struct State {
     pub bounds: [f32; 4],
     pub selected: Option<String>,
     pub workspaces: BTreeMap<String, Workspace>,
+    #[serde(skip)]
+    pub(crate) retain_file: bool,
 }
 impl Default for State {
     fn default() -> Self {
@@ -41,6 +43,7 @@ impl Default for State {
             bounds: [100., 100., 1200., 816.],
             selected: None,
             workspaces: BTreeMap::new(),
+            retain_file: false,
         }
     }
 }
@@ -67,15 +70,25 @@ impl State {
         let input = match fs::File::open(file) {
             Ok(input) => input,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                return Ok(Self::default());
+                return Ok(Self {
+                    retain_file: fs::symlink_metadata(file).is_ok(),
+                    ..Self::default()
+                });
             }
-            Err(_) => return Err("Cannot read shell state".into()),
+            Err(_) => {
+                return Ok(Self {
+                    retain_file: true,
+                    ..Self::default()
+                });
+            }
         };
         let mut bytes = vec![];
-        input
-            .take(1024 * 1024 + 1)
-            .read_to_end(&mut bytes)
-            .map_err(|_| "Cannot read shell state")?;
+        if input.take(1024 * 1024 + 1).read_to_end(&mut bytes).is_err() {
+            return Ok(Self {
+                retain_file: true,
+                ..Self::default()
+            });
+        }
         if bytes.len() > 1024 * 1024 {
             return Ok(Self::default());
         }
@@ -86,6 +99,11 @@ impl State {
         Ok(state)
     }
     pub fn save(&self, file: &Path) -> Result<(), String> {
+        // An unreadable source may contain valid state. Keep this session in
+        // memory rather than replacing bytes we could not inspect.
+        if self.retain_file {
+            return Ok(());
+        }
         self.validate()?;
         let bytes = serde_json::to_vec_pretty(self).map_err(|_| "Cannot encode shell state")?;
         if bytes.len() > 1024 * 1024 {
