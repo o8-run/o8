@@ -9,7 +9,7 @@
  * uses and cached on first call (getOrCreateWsToken does a file read each time).
  */
 
-import { getApiBase } from '@/lib/panel/api-port';
+import { getApiBase, getWsBase } from '@/lib/panel/api-port';
 import type {
   RuntimeActionRequest,
   RuntimeActionResult,
@@ -39,6 +39,7 @@ function wsToken(): string {
 }
 
 function getNextOrigin(): string {
+  if (process.env.O8_NEXT_O8D === '1') return getWsBase().replace(/^ws:/, 'http:');
   return process.env.NEXT_ORIGIN ?? getApiBase();
 }
 

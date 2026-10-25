@@ -1,9 +1,10 @@
-import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import { execFile, spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
+import { promisify } from 'node:util';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { bundleServers, SERVER_ENTRIES } from '../scripts/lib/server-bundles.mjs';
 import { stagePackagedNativeAddons } from './helpers/packaged-native-addons';
@@ -88,6 +89,35 @@ afterAll(async () => {
 });
 
 describe('shared server bundles in the packaged layout', () => {
+  it('serves native surface handlers through packaged o8d with no Next listener', async () => {
+    const binary = resolve(process.env.O8D_TEST_BINARY ?? join('crates/o8d/target/debug', process.platform === 'win32' ? 'o8d.exe' : 'o8d'));
+    if (!process.env.O8D_TEST_BINARY) await promisify(execFile)('cargo', ['build', '--locked', '--manifest-path', 'crates/o8d/Cargo.toml', '--features', 'experimental-ws']);
+    const wsPort = await freePort();
+    const absentNextPort = await freePort();
+    const token = 'packaged-native-fixture-credential';
+    writeFileSync(join(state, 'ws-token'), token);
+    const { child } = launch('ws-server', { O8_NEXT_O8D: '1', O8_WS_O8D: '1', O8D_BINARY: binary,
+      O8_WS_PORT: String(wsPort), NEXT_ORIGIN: `http://127.0.0.1:${absentNextPort}` });
+    const origin = `http://127.0.0.1:${wsPort}`;
+    try {
+      await waitFor(async () => {
+        try { return (await (await fetch(origin + '/health')).json()).delivery?.transport === 'o8d'; }
+        catch { return false; }
+      });
+      for (const path of ['/api/panel/operator-defaults?include=native', '/api/panel/projects', '/api/panel/repos',
+        '/api/panel/approvals', '/api/prompt-library', '/api/customize/inventory']) {
+        const response = await fetch(origin + path, { headers: { authorization: `Bearer ${token}` } });
+        expect(response.status, path).toBe(200);
+        expect(response.headers.get('content-type')).toContain('application/json');
+        await response.arrayBuffer();
+      }
+      const brain = await fetch(origin + '/api/cortex/ask', { method: 'POST',
+        headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: '{}' });
+      expect(brain.status).toBe(400);
+      expect(await brain.json()).toEqual({ ok: false, error: 'question is required' });
+    } finally { await stop(child); }
+  }, 180_000);
+
   it('keeps all launcher and implementation paths, sibling chunks, names, and no maps', () => {
     const files = readdirSync(serverDir);
     for (const label of Object.keys(SERVER_ENTRIES)) {
