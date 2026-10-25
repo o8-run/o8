@@ -12,7 +12,7 @@ const inventory = () => [
 Module._load = function(request, parent, isMain) {
   if (parent?.filename.endsWith('/setup/runtime-setup-server.ts') && request.endsWith('/opencode-readiness')) return {
     readOpencodeConfig: async () => ({}),
-    opencodeCliModels: async () => new Set(['fixture/selected-model']),
+    opencodeCliModels: async () => new Set(['fixture/selected-model', require('../../../../src/lib/models').MODEL_IDS.opencodeDefault]),
   };
   if (request.endsWith('/runtimes/shared/auth-detect') || request.endsWith('/runtimes/shared/auth-detect.ts')) return {
     getRuntimeAuthSnapshot: async () => ({ statuses: {}, suggestedSubscriptionProfile: { profile: null, detail: null } }),

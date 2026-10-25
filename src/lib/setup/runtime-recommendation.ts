@@ -121,7 +121,9 @@ export function recommendRuntimeSetup({ inventory, activity, values = {}, source
   const leadModel = backend === 'claude'
     ? explicit('orchestratorModel') && values.orchestratorModel?.startsWith('claude-')
       ? values.orchestratorModel : localLeadModels.claude ?? leadModelPreset(backend)
-    : backend === 'opencode' ? values.opencodeOrchestratorModel ?? '' : leadModelPreset(backend);
+    : backend === 'opencode'
+      ? values.opencodeOrchestratorModel?.trim() || opencodeModel || MODEL_IDS.opencodeDefault
+      : leadModelPreset(backend);
   return {
     backend, leadModel, workerRuntimes,
     opencodeModel: values.opencodeWorkerModel ?? opencodeModel,

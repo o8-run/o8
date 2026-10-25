@@ -9,14 +9,14 @@ pub(super) struct Runtime {
     pub view: Option<Entity<view::Setup>>,
 }
 pub(super) const REGISTRATION: Registration = Registration {
-    loaded: |s, cx| {
+    loaded: Some(|s, cx| {
         if !s.sessions.iter().any(|session| session.repo_path.is_some())
             && s.surfaces.setup.view.is_none()
         {
             s.open_setup(cx);
         }
-    },
-    allow_open: |s, cx| {
+    }),
+    allow_open: Some(|s, cx| {
         if s.surfaces
             .setup
             .view
@@ -29,7 +29,7 @@ pub(super) const REGISTRATION: Registration = Registration {
         } else {
             true
         }
-    },
+    }),
     overlay_command: true,
     overlay: |s| {
         s.surfaces

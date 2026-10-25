@@ -1,0 +1,4 @@
+running 1 test
+test shell::setup::tests::correction_2::onboarding_registry_hooks_are_optional_for_other_surfaces ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 97 filtered out; finished in 2.40s

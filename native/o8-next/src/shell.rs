@@ -157,7 +157,9 @@ impl Shell {
                         this.notice = if this.workspaces.is_empty() { "Connected. No saved workspace sessions." } else { "Connected · Ctrl+K / Cmd+K: commands · Ctrl+Tab: next surface" }.into();
                         this.persist();
                         for registration in registrations() {
-                            (registration.loaded)(this, cx);
+                            if let Some(loaded) = registration.loaded {
+                                loaded(this, cx);
+                            }
                         }
                     }
                     Err(error) => {
@@ -305,7 +307,7 @@ impl Shell {
             .collect()
     }
     fn execute(&mut self, command: Command, window: &mut Window, cx: &mut Context<Self>) {
-        if registrations().iter().any(|r| !(r.allow_open)(self, cx)) {
+        if registrations().iter().filter_map(|r| r.allow_open).any(|allow_open| !allow_open(self, cx)) {
             return;
         }
         let registration = command.registration();

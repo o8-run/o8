@@ -26,7 +26,18 @@ export default async function register({ dataDir, repo, seeds }: SurfaceContext)
   const { GET: sessions } = await import('../../../src/app/api/mobile/orchestrator/threads/route');
   const { GET: state } = await import('../../../src/app/api/orchestrator/state/route');
   const { GET: inventory } = await import('../../../src/app/api/runtime/inventory/route');
-  return { priority: 5, admit: () => 200, routes: {
+  return { priority: 5, admit: () => 200,
+    run: async (route, request) => {
+      const response = await route(request);
+      if (process.argv.includes('--onboarding-empty-model') && response.ok
+        && request.method === 'GET' && request.nextUrl.pathname === '/api/panel/operator-defaults'
+        && request.nextUrl.searchParams.get('include') === 'setup') {
+        const payload = await response.json();
+        payload.setupRecommendation.leadModel = '';
+        return Response.json(payload, { status: response.status, headers: response.headers });
+      }
+      return response;
+    }, routes: {
     'GET /api/panel/repos': repos.GET, 'POST /api/panel/repos': repos.POST,
     'GET /api/panel/projects': projects.GET,
     'GET /api/panel/operator-defaults': defaults.GET, 'POST /api/panel/operator-defaults': defaults.POST,

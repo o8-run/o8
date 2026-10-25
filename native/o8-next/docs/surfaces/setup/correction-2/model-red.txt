@@ -1,0 +1,22 @@
+running 2 tests
+test shell::setup::tests::correction_2::onboarding_fresh_opencode_uses_its_own_default ...
+thread 'shell::setup::tests::correction_2::onboarding_fresh_opencode_uses_its_own_default' (261013) panicked at src/surfaces/setup/correction_2_tests.rs:62:5:
+assertion `left == right` failed: fresh OpenCode setup must use its own runtime default, independently of the worker pool
+  left: String("claude-code")
+ right: "opencode/deepseek-v4-flash-free"
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+test shell::setup::tests::correction_2::onboarding_opencode_default_is_independent_of_codex_workers ...
+thread 'shell::setup::tests::correction_2::onboarding_opencode_default_is_independent_of_codex_workers' (261059) panicked at src/surfaces/setup/correction_2_tests.rs:46:5:
+assertion failed: shell.read_with(cx, |s, _| s.surfaces.setup.view.is_none())
+FAILED
+
+failures:
+
+failures:
+    shell::setup::tests::correction_2::onboarding_fresh_opencode_uses_its_own_default
+    shell::setup::tests::correction_2::onboarding_opencode_default_is_independent_of_codex_workers
+
+test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 95 filtered out; finished in 5.44s
+
+error: test failed, to rerun pass `--bin o8-next`

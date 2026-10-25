@@ -1,0 +1,5 @@
+thread 'ui::tests::worker_tests::worker_send_steer_queue_promote_remove_and_streaming_latency' (272758) panicked at src/worker_tests.rs:33:9:
+fixture timed out: first worker transcript; ("Live", Some(1), 1, Some([]))
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test ui::tests::worker_tests::worker_send_steer_queue_promote_remove_and_streaming_latency ... FAILED
+test result: FAILED. 95 passed; 1 failed; 3 ignored; 0 measured; 0 filtered out; finished in 453.02s

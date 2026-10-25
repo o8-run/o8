@@ -11,6 +11,24 @@ const inventory = [
 const activity = { codex: 3, claude: 8, complete: true };
 
 describe('detected runtime recommendation', () => {
+  it.each([null, '', '   '])('uses OpenCode defaults with no saved lead model (%j), independently of Codex workers', (saved) => {
+    const setup = recommendRuntimeSetup({ inventory, activity, values: {
+      orchestratorBackend: 'opencode', opencodeOrchestratorModel: saved,
+      orchestratorModel: MODEL_IDS.orchestratorDefault, workerRuntimes: ['codex'],
+    }, sources: { orchestratorBackend: 'file', workerRuntimes: 'file' } });
+    expect(setup.leadModel).toBe(MODEL_IDS.opencodeDefault);
+    expect(setup.workerModel).toBe(MODEL_IDS.codexWorkerDefault);
+  });
+
+  it('prefers OpenCode configuration, then a saved OpenCode lead model', () => {
+    const input = { inventory, activity, opencodeModel: 'fixture/cli-model',
+      values: { orchestratorBackend: 'opencode' as const }, sources: { orchestratorBackend: 'file' } };
+    expect(recommendRuntimeSetup(input).leadModel).toBe('fixture/cli-model');
+    expect(recommendRuntimeSetup({ ...input, values: {
+      ...input.values, opencodeOrchestratorModel: 'fixture/saved-model',
+    } }).leadModel).toBe('fixture/saved-model');
+  });
+
   it('uses seven-day activity for a fresh install and economical workers', () => {
     const setup = recommendRuntimeSetup({ inventory, activity });
     expect(setup.backend).toBe('claude');

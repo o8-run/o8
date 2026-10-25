@@ -1,0 +1,64 @@
+ FAIL  src/lib/setup/runtime-recommendation.test.ts > detected runtime recommendation > uses OpenCode defaults with no saved lead model (null), independently of Codex workers
+ FAIL  src/lib/setup/runtime-recommendation.test.ts > detected runtime recommendation > uses OpenCode defaults with no saved lead model (""), independently of Codex workers
+AssertionError: expected '' to be 'opencode/deepseek-v4-flash-free' // Object.is equality
+
+- Expected
++ Received
+
+- opencode/deepseek-v4-flash-free
+
+ ❯ src/lib/setup/runtime-recommendation.test.ts:19:29
+     17|       orchestratorModel: MODEL_IDS.orchestratorDefault, workerRuntimes…
+     18|     }, sources: { orchestratorBackend: 'file', workerRuntimes: 'file' …
+     19|     expect(setup.leadModel).toBe(MODEL_IDS.opencodeDefault);
+       |                             ^
+     20|     expect(setup.workerModel).toBe(MODEL_IDS.codexWorkerDefault);
+     21|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  src/lib/setup/runtime-recommendation.test.ts > detected runtime recommendation > uses OpenCode defaults with no saved lead model ("   "), independently of Codex workers
+AssertionError: expected '   ' to be 'opencode/deepseek-v4-flash-free' // Object.is equality
+
+Expected: "opencode/deepseek-v4-flash-free"
+Received: "   "
+
+ ❯ src/lib/setup/runtime-recommendation.test.ts:19:29
+     17|       orchestratorModel: MODEL_IDS.orchestratorDefault, workerRuntimes…
+     18|     }, sources: { orchestratorBackend: 'file', workerRuntimes: 'file' …
+     19|     expect(setup.leadModel).toBe(MODEL_IDS.opencodeDefault);
+       |                             ^
+     20|     expect(setup.workerModel).toBe(MODEL_IDS.codexWorkerDefault);
+     21|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  src/lib/setup/runtime-recommendation.test.ts > detected runtime recommendation > prefers OpenCode configuration, then a saved OpenCode lead model
+AssertionError: expected '' to be 'fixture/cli-model' // Object.is equality
+
+- Expected
++ Received
+
+- fixture/cli-model
+
+ ❯ src/lib/setup/runtime-recommendation.test.ts:26:52
+     24|     const input = { inventory, activity, opencodeModel: 'fixture/cli-m…
+     25|       values: { orchestratorBackend: 'opencode' as const }, sources: {…
+     26|     expect(recommendRuntimeSetup(input).leadModel).toBe('fixture/cli-m…
+       |                                                    ^
+     27|     expect(recommendRuntimeSetup({ ...input, values: {
+     28|       ...input.values, opencodeOrchestratorModel: 'fixture/saved-model…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  4 failed | 7 passed (11)
+   Start at  10:28:19
+   Duration  404ms (transform 86ms, setup 66ms, import 53ms, tests 25ms, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.9.0 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

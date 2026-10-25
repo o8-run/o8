@@ -296,7 +296,10 @@ impl Setup {
         let mut session = None;
         if let Some(project) = project {
             let (backend, workers) = snapshot.recommendation();
-            let model = &snapshot.setup["setupRecommendation"]["leadModel"];
+            let model = snapshot.setup["setupRecommendation"]["leadModel"]
+                .as_str()
+                .filter(|model| !model.trim().is_empty())
+                .ok_or("Choose a model for this runtime in desktop setup, then check again.")?;
             if !current.ready(&backend, &workers) {
                 return Err("Connect a coding tool before opening this project.".into());
             }

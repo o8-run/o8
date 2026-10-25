@@ -1,6 +1,9 @@
 use crate::shell::test_support::*;
 use crate::shell::*;
 
+#[path = "correction_2_tests.rs"]
+mod correction_2;
+
 fn click(cx: &mut VisualTestContext, selector: &'static str) {
     draw(cx);
     let bounds = cx

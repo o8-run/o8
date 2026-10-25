@@ -38,8 +38,8 @@ pub(super) struct Registration {
     pub before_tab: fn(&mut Shell),
     pub after_tab: fn(&mut Shell),
     pub workspaces: fn(&Client, &mut WorkspaceLoad),
-    pub loaded: fn(&mut Shell, &mut Context<Shell>),
-    pub allow_open: fn(&mut Shell, &mut Context<Shell>) -> bool,
+    pub loaded: Option<fn(&mut Shell, &mut Context<Shell>)>,
+    pub allow_open: Option<fn(&mut Shell, &mut Context<Shell>) -> bool>,
 }
 impl Registration {
     pub const fn new(
@@ -66,8 +66,8 @@ impl Registration {
             before_tab: |_| {},
             after_tab: |_| {},
             workspaces: |_, _| {},
-            loaded: |_, _| {},
-            allow_open: |_, _| true,
+            loaded: None,
+            allow_open: None,
         }
     }
 }
