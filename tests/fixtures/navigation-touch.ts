@@ -3,6 +3,17 @@ import type { Page } from 'playwright-core';
 type TouchInput = { send(method: string, params: object): Promise<unknown>; detach?(): Promise<void> };
 type ScrollBox = { x: number; y: number; width: number; height: number };
 
+export async function panNavigation(page: Page, box: ScrollBox, down: boolean) {
+  await page.mouse.move(Math.round(box.x + box.width / 2), Math.round(box.y + box.height / 2));
+  // Desktop WebKit delivers trackpad pans as pixel wheel deltas through its
+  // native scrolling path, not as touchscreen TouchEvents. Ramp each stroke
+  // up and down rather than jumping directly to the scroll endpoint.
+  for (const delta of [24, 48, 72, 96, 96, 72, 48, 24]) {
+    await page.mouse.wheel(0, down ? delta : -delta);
+    await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => resolve())));
+  }
+}
+
 export async function navigationTouchInput(page: Page, webkit: boolean): Promise<TouchInput> {
   if (!webkit) return page.context().newCDPSession(page);
   // Playwright 1.60 has no public WebKit protocol session. Its local bridge

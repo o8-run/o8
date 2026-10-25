@@ -5,13 +5,16 @@ import { chromium, webkit, type Browser, type Page } from 'playwright-core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { resolveBrowserPath } from '../scripts/bench/measure-browser-boot.mjs';
 import { getPalette, resolveTheme } from '../src/lib/theme/registry';
-import { navigationTouchInput, swipeNavigation } from './fixtures/navigation-touch';
+import { navigationTouchInput, panNavigation, swipeNavigation } from './fixtures/navigation-touch';
 
 const proofDir = process.env.O8_NAVIGATION_PROOF_DIR;
 const proofState = process.env.O8_NAVIGATION_PROOF_STATE ?? 'after';
 const sourceRoot = path.resolve(process.env.O8_NAVIGATION_SOURCE_ROOT ?? '.');
 const executablePath = resolveBrowserPath();
 const useWebKit = process.env.O8_NAVIGATION_BROWSER === 'webkit';
+// macOS WebKit uses Option-Tab to include buttons without changing OS settings.
+const tab = useWebKit && process.platform === 'darwin' ? 'Alt+Tab' : 'Tab';
+const backTab = useWebKit && process.platform === 'darwin' ? 'Alt+Shift+Tab' : 'Shift+Tab';
 const sizes = [{ width: 1280, height: 720 }, { width: 1366, height: 768 }, { width: 1920, height: 1080 }];
 const rows = '[data-o8-agent-panel] [role="button"][aria-label]';
 const scroll = '[data-o8-agent-panel] .hide-scrollbar';
@@ -108,6 +111,23 @@ describe.skipIf(!useWebKit && !executablePath)('navigation density through the r
       await settle(control);
       controlScrollTop = await control.locator('#control').evaluate(node => node.scrollTop);
       console.info('[navigation-touch-control]', JSON.stringify({ browser: useWebKit ? 'webkit' : 'chromium', top: controlScrollTop }));
+      // Calibrate the declared engine, never infer a fallback from a failed
+      // panel assertion. macOS WebKit's raw touch protocol has no pan recognizer.
+      if (useWebKit) expect(controlScrollTop).toBe(0);
+      else expect(controlScrollTop).toBeGreaterThan(0);
+      await control.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await control.mouse.wheel(0, -20_000);
+      await control.waitForFunction(() => document.querySelector('#control')!.scrollTop === 0);
+      for (const down of [true, false]) {
+        for (let stroke = 0; stroke < 12; stroke++) {
+          await panNavigation(control, box, down);
+          if (await control.locator('#control').evaluate((node, direction) => direction
+            ? node.scrollTop + node.clientHeight >= node.scrollHeight - 1 : node.scrollTop === 0, down)) break;
+        }
+        const result = await control.locator('#control').evaluate(node => ({ top: node.scrollTop, max: node.scrollHeight - node.clientHeight }));
+        console.info('[navigation-trackpad-control]', JSON.stringify({ down, ...result }));
+        expect(result.top).toBe(down ? result.max : 0);
+      }
       await input.detach?.();
     } finally { await control.close(); }
     if (proofDir) fs.mkdirSync(proofDir, { recursive: true });
@@ -165,10 +185,10 @@ describe.skipIf(!useWebKit && !executablePath)('navigation density through the r
         // Collapsed main currently hides all chats; retain this honest measurement.
         expect(collapsed.visibleChats).toBe(0);
         expect(collapsed.horizontalOverflow).toBe(false);
-        await page.keyboard.press('Tab');
+        await page.keyboard.press(tab);
         await page.getByRole('button', { name: 'Home', exact: true }).focus();
         const railButtons = page.locator('[data-rail-action]');
-        for (let index = 1; index < await railButtons.count(); index++) await page.keyboard.press('Tab');
+        for (let index = 1; index < await railButtons.count(); index++) await page.keyboard.press(tab);
         expect(await railButtons.last().evaluate(node => node === document.activeElement)).toBe(true);
         await page.evaluate(() => (window as unknown as { setChatsVisible(value: boolean): void }).setChatsVisible(true));
         await page.locator('#o8-chat-list').waitFor();
@@ -176,7 +196,7 @@ describe.skipIf(!useWebKit && !executablePath)('navigation density through the r
         await first.focus();
         await first.press('Enter');
         expect(await page.evaluate(() => (window as unknown as { selectedChat: string }).selectedChat)).toBe('fixture-chat-0');
-        for (let index = 1; index < 72; index++) await page.keyboard.press('Tab');
+        for (let index = 1; index < 72; index++) await page.keyboard.press(tab);
         expect(await last.evaluate(node => node === document.activeElement)).toBe(true);
         await last.press('Enter');
         expect(await page.evaluate(() => (window as unknown as { selectedChat: string }).selectedChat)).toBe('fixture-chat-71');
@@ -186,7 +206,7 @@ describe.skipIf(!useWebKit && !executablePath)('navigation density through the r
         });
         expect(focused.outline).toBe('solid'); expect(focused.width).toBe('2px');
         expect(focused.top).toBeGreaterThanOrEqual(0); expect(focused.bottom).toBeLessThanOrEqual(size.height);
-        for (let index = 1; index < 72; index++) await page.keyboard.press('Shift+Tab');
+        for (let index = 1; index < 72; index++) await page.keyboard.press(backTab);
         expect(await first.evaluate(node => node === document.activeElement)).toBe(true);
         const box = (await page.locator(scroll).boundingBox())!;
         await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
@@ -225,7 +245,10 @@ describe.skipIf(!useWebKit && !executablePath)('navigation density through the r
         });
         const input = await navigationTouchInput(page, useWebKit);
         for (const yDistance of [-20_000, 20_000]) {
-          for (let swipe = 0; swipe < 20; swipe++) {
+          // WebKit still checks trusted touch delivery and drag interference.
+          // Touchscreen pan endpoints remain covered by Chromium; WebKit's
+          // desktop scroll endpoints use the trackpad stream below.
+          for (let swipe = 0; swipe < (useWebKit ? 1 : 20); swipe++) {
             await swipeNavigation(page, input, box, yDistance < 0, useWebKit);
             await settle(page);
             if (await page.locator(scroll).evaluate((node, down) => down
@@ -243,14 +266,52 @@ describe.skipIf(!useWebKit && !executablePath)('navigation density through the r
           expect(trace.starts, 'gesture must deliver trusted touch input').toBeGreaterThan(0);
           expect(trace.moves).toBeGreaterThan(0);
           expect(trace.prevented).toBe(0);
+          expect(trace.target).toEqual(expect.arrayContaining([expect.objectContaining({ scroller: true })]));
           expect(touchState, 'touch panning must not activate pane dragging or cancel pointer moves')
             .toEqual({ dragStarts: 0, preventedMoves: 0 });
-          await expect.poll(() => page.locator(scroll).evaluate((node, down) => down
-            ? node.scrollTop + node.clientHeight >= node.scrollHeight - 1 : node.scrollTop === 0, yDistance < 0)).toBe(true);
-          expect(trace.owners, `native pan control scrollTop=${controlScrollTop}; touched panel must own scrolling`)
-            .toEqual(['agent-panel']);
+          if (!useWebKit) {
+            await expect.poll(() => page.locator(scroll).evaluate((node, down) => down
+              ? node.scrollTop + node.clientHeight >= node.scrollHeight - 1 : node.scrollTop === 0, yDistance < 0)).toBe(true);
+            expect(trace.owners, `native pan control scrollTop=${controlScrollTop}; touched panel must own scrolling`)
+              .toEqual(['agent-panel']);
+          }
         }
         await input.detach?.();
+        await page.evaluate(() => {
+          const state = { events: 0, prevented: 0, nonPixel: 0 };
+          const target = window as unknown as { touchNavigationTrace: { owners: string[] } };
+          target.touchNavigationTrace.owners = [];
+          Object.assign(window, { trackpadNavigationState: state });
+          window.addEventListener('wheel', event => {
+            if (!event.isTrusted) return;
+            state.events++;
+            if (event.defaultPrevented) state.prevented++;
+            if (event.deltaMode !== WheelEvent.DOM_DELTA_PIXEL) state.nonPixel++;
+          }, { passive: true });
+        });
+        for (const down of [true, false]) {
+          for (let stroke = 0; stroke < 16; stroke++) {
+            await panNavigation(page, box, down);
+            if (await page.locator(scroll).evaluate((node, direction) => direction
+              ? node.scrollTop + node.clientHeight >= node.scrollHeight - 1 : node.scrollTop === 0, down)) break;
+          }
+          await expect.poll(() => page.locator(scroll).evaluate((node, direction) => direction
+            ? node.scrollTop + node.clientHeight >= node.scrollHeight - 1 : node.scrollTop === 0, down)).toBe(true);
+          const result = await page.locator(scroll).evaluate(node => ({ top: node.scrollTop, max: node.scrollHeight - node.clientHeight }));
+          const state = await page.evaluate(() => {
+            const target = window as unknown as {
+              trackpadNavigationState: { events: number; prevented: number; nonPixel: number };
+              touchNavigationTrace: { owners: string[] };
+            };
+            return { input: target.trackpadNavigationState, owners: target.touchNavigationTrace.owners };
+          });
+          console.info('[navigation-trackpad]', JSON.stringify({ size, theme, down, ...result,
+            ...state }));
+          expect(state.input.events).toBeGreaterThan(0);
+          expect(state.input.prevented).toBe(0);
+          expect(state.input.nonPixel).toBe(0);
+          expect(state.owners).toEqual(['agent-panel']);
+        }
         // A cancelled mouse drag must not leave click suppression armed for
         // the next touch tap on the same row on a hybrid laptop.
         await last.press('Enter');
