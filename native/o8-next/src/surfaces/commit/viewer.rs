@@ -1,9 +1,8 @@
 //! Original Apache-2.0 commit/workspace viewer. Mutations stay on desktop routes.
+use super::patch::{DiffSurface, Target};
 use crate::{
     client::Client,
     composer::{Composer, Submit},
-    diff::Target,
-    diff_ui::DiffSurface,
     theme::current as theme,
 };
 use gpui::{prelude::*, *};
@@ -31,6 +30,26 @@ pub(crate) struct Commit {
     subscriptions: Vec<Subscription>,
 }
 impl Commit {
+    #[cfg(test)]
+    pub(crate) fn test_hidden_source(&self, cx: &App) -> bool {
+        self.compare["sensitive"] == true
+            && self.baseline.is_empty()
+            && self.editor.read(cx).text.is_empty()
+    }
+    #[cfg(test)]
+    pub(crate) fn test_comparison_bound(&self, hash: &str) -> bool {
+        self.hash == hash
+            && self.data["hash"] == hash
+            && self.compare["commitSource"] == "parent"
+            && self.compare["commitContent"] == "restore me\n"
+    }
+    #[cfg(test)]
+    pub(crate) fn test_patch_head(&self, cx: &App) -> Option<String> {
+        self.patch
+            .as_ref()
+            .filter(|patch| patch.read(cx).ready)
+            .map(|patch| patch.read(cx).document.head.clone())
+    }
     pub(crate) fn new(
         client: Client,
         workspace: String,
@@ -38,7 +57,7 @@ impl Commit {
         cx: &mut Context<Self>,
     ) -> Self {
         let hash_input = cx.new(Composer::new);
-        let editor = cx.new(Composer::source);
+        let editor = cx.new(Composer::new);
         let message = cx.new(Composer::new);
         hash_input.read(cx).focus.focus(window);
         let subscriptions = vec![
@@ -147,6 +166,19 @@ impl Commit {
                 s.loading = false;
                 match result {
                     Ok(mut data) if data["commit"].is_object() => {
+                        let Some(resolved) = data["commit"]["hash"]
+                            .as_str()
+                            .filter(|hash| {
+                                hash.len() == 40
+                                    && hash.bytes().all(|byte| byte.is_ascii_hexdigit())
+                            })
+                            .map(str::to_owned)
+                        else {
+                            s.notice = "Commit identity unavailable. Retry Open.".into();
+                            cx.notify();
+                            return;
+                        };
+                        s.hash = resolved;
                         let sensitive = crate::shell::commit::guard::contains(&data);
                         crate::shell::commit::guard::scrub(&mut data);
                         s.data = data["commit"].clone();
@@ -368,6 +400,16 @@ impl Render for Commit {
             .font_family(theme().font_ui)
             .text_size(px(13.))
             .capture_key_down(cx.listener(|s, event: &KeyDownEvent, window, cx| {
+                if event.keystroke.key == "enter"
+                    && s.editor.read(cx).focus.is_focused(window)
+                    && !s.editor.read(cx).composing()
+                {
+                    s.editor.update(cx, |editor, cx| {
+                        EntityInputHandler::replace_text_in_range(editor, None, "\n", window, cx);
+                    });
+                    cx.stop_propagation();
+                    return;
+                }
                 if (event.keystroke.modifiers.control || event.keystroke.modifiers.platform)
                     && event.keystroke.key == "s"
                     && s.editor.read(cx).focus.is_focused(window)
@@ -412,7 +454,7 @@ impl Render for Commit {
                                 s.patch = Some(cx.new(|cx| {
                                     DiffSurface::new(
                                         s.client.clone(),
-                                        Target::Commit {
+                                        Target {
                                             workspace: s.workspace.clone(),
                                             hash: s.hash.clone(),
                                         },

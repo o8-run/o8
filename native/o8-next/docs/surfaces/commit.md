@@ -1,13 +1,17 @@
 # Commit viewer
 
-The opt-in viewer registers in `src/surfaces/commit.rs`. Its source, actions, refusal states and regression test function names are retained from the preceding port head.
+The opt-in viewer registers in `src/surfaces/commit.rs`. Its component, request adapter, privacy guard, draft lifetime policy, Patch view and tests live inside `src/surfaces/commit/`.
 
 The disposable host discovers its fixture entry without shared dispatcher edits. Existing authenticated production routes remain authoritative.
 
-The shared `main.rs`, `client.rs`, workspace state, shell view/test dispatchers and development host match main. The shell inventory has one entry for this surface. `commit/requests.rs` owns mutations and commit-patch reads, using the shared transport helpers with the same operator authentication, status decoding, error scrubbing and revision payloads.
+The shared composer, registry, Projects, client, diff parser/renderer, workspace state and development host match main. The shell inventory has one registration line for this surface. `commit/requests.rs` owns mutations and commit-patch reads through the existing authenticated transport, retaining captured HEAD/file revisions and scrubbed diagnostics.
 
-Window-close and Projects draft refusal remain enforced. The six-line generic draft query in `surface_registry.rs` lets shared lifecycle actions ask registered views whether they have unsaved changes. The five-line check in `surfaces/projects.rs` must run before Projects refreshes repository membership: removing it fails the real-shell regression after desktop unregisters an owned repository and refresh destroys its editor entity. The current registry has no refusal hook at that entry point. The surface owns its window-close callback.
+Open resolves the requested ref once to a full commit ID. Header, comparison selection, Patch and Patch Refresh all use that same ID, even if a tag with a hex-looking name is retargeted afterward. Patch also verifies the returned commit identity.
 
-The five added lines in `diff.rs` supply the immutable commit target and delegate its load to this surface. The existing renderer requires that target to keep Patch and Refresh reading the selected commit. Its request, privacy check and long-line bounding live in `commit/requests.rs`; the shared parser and renderer stay in use. Existing source-input and production-route safety fixes remain intact.
+`commit/patch.rs` adapts the existing Apache-2.0 GPUI diff UI's virtualized unified/split presentation into a read-only commit view with a frozen target. It reuses the shared parser, line model and theme. The current shared renderer has no surface-owned loader hook; this adaptation avoids changing its target enum or standalone review behavior. Privacy checks and long-line limits remain inside the commit request adapter.
 
-Regression test function names are unchanged; fixtures extend `shell::test_support`.
+`commit/lifecycle.rs` retains dirty entities across navigation and registry refreshes, including desktop unregister followed by Projects refresh. Projects keeps main's behavior. Explicit discard releases the retained draft. Window close broadcasts a private query through existing registered callbacks so independently registered editors can veto it. Recovery does not steal focus from overlays. Source editing uses the unchanged shared Composer, including selection, clipboard, undo and its scrolling viewport; the surface handles source Enter only while that editor is focused and outside IME composition.
+
+The private guard rejects credential-bearing assignments independently of value quoting, length or punctuation before assigning source to the editor. Ordinary code references remain editable, including in committed patch lines. Canonical containment, stale Save/Commit refusals and bounded binary/large comparisons remain enforced by the existing production routes.
+
+Tests extend `shell::test_support`. `round2.rs` covers punctuated passwords, a retargeted hex-looking ref and ordinary committed code references through the real shell. `verify-module.mjs` creates an owned canonical temporary checkout of main and compiles only this module plus its registration line; run it with the normal Rust environment and an external Cargo target directory.

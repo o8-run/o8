@@ -87,11 +87,6 @@ pub(super) const REGISTRATION: Registration = Registration {
 };
 impl Shell {
     fn open_projects(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.content.values().any(|content| content.has_draft(cx)) {
-            self.notice = "Unsaved changes. Save or discard in the editor.".into();
-            cx.notify();
-            return;
-        }
         self.capture(window, cx);
         self.surfaces.settings.view = None;
         self.surfaces.settings.subscription = None;

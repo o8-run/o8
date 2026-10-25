@@ -86,7 +86,7 @@ fn commit_projects_refresh_retains_unregistered_draft(cx: &mut TestAppContext) {
         "Projects refresh must not discard a draft after desktop unregisters its repository"
     );
 }
-fn workspace(fixture: &Fixture) -> PathBuf {
+pub(super) fn workspace(fixture: &Fixture) -> PathBuf {
     fs::canonicalize(
         fixture.client.sessions().unwrap()[0]
             .repo_path
@@ -95,7 +95,7 @@ fn workspace(fixture: &Fixture) -> PathBuf {
     )
     .unwrap()
 }
-fn git(root: &std::path::Path, args: &[&str]) -> String {
+pub(super) fn git(root: &std::path::Path, args: &[&str]) -> String {
     let output = Process::new("git")
         .arg("-C")
         .arg(root)
@@ -105,7 +105,10 @@ fn git(root: &std::path::Path, args: &[&str]) -> String {
     assert!(output.status.success());
     String::from_utf8(output.stdout).unwrap().trim().into()
 }
-fn open_commit(fixture: &Fixture, cx: &mut TestAppContext) -> (Entity<Shell>, VisualTestContext) {
+pub(super) fn open_commit(
+    fixture: &Fixture,
+    cx: &mut TestAppContext,
+) -> (Entity<Shell>, VisualTestContext) {
     let hash = git(&workspace(fixture), &["rev-parse", "HEAD"]);
     let (shell, mut visual) = open(
         fixture.client.clone(),
@@ -123,11 +126,11 @@ fn open_commit(fixture: &Fixture, cx: &mut TestAppContext) -> (Entity<Shell>, Vi
     wait_commit(&shell, &mut visual);
     (shell, visual)
 }
-fn click(cx: &mut VisualTestContext, selector: &'static str) {
+pub(super) fn click(cx: &mut VisualTestContext, selector: &'static str) {
     let bounds = cx.debug_bounds(selector).unwrap();
     cx.simulate_click(bounds.center(), gpui::Modifiers::default());
 }
-fn edit(cx: &mut VisualTestContext, text: &str) {
+pub(super) fn edit(cx: &mut VisualTestContext, text: &str) {
     click(cx, "commit-editor");
     cx.simulate_keystrokes("ctrl-a");
     cx.simulate_input(text);

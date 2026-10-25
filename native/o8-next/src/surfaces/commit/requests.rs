@@ -37,6 +37,9 @@ impl Client {
         if !data["commit"].is_object() {
             return Err("Commit unavailable".into());
         }
+        if data["commit"]["hash"].as_str() != Some(hash) {
+            return Err("Commit identity changed. Reopen the commit.".into());
+        }
         let response: Response = serde_json::from_value(
             json!({"diff":data["commit"]["diff"],"headSha":data["commit"]["hash"]}),
         )

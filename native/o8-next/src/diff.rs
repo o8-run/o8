@@ -10,10 +10,6 @@ use tree_sitter::{Language, Node, Parser};
 #[derive(Clone, Debug, PartialEq)]
 pub enum Target {
     Packet(String),
-    Commit {
-        workspace: String,
-        hash: String,
-    },
     Worktree {
         path: String,
         base: Option<String>,
@@ -70,7 +66,6 @@ pub struct Document {
 impl Target {
     pub fn read(&self, client: &Client) -> Result<(Document, Value), String> {
         let response: Response = match self {
-            Self::Commit { workspace, hash } => return client.commit_diff(workspace, hash),
             Self::Packet(packet) => {
                 // Packet ids occupy exactly one path segment.
                 let id: String = url::form_urlencoded::byte_serialize(packet.as_bytes()).collect();
