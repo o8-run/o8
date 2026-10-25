@@ -9,7 +9,8 @@ impl Surface {
     }
     #[cfg(test)]
     pub(crate) fn shell_issue_state(&self, cx: &App) -> Value {
-        json!({"notice":self.notice,"ready":self.queue_ready,"canSteer":self.queue["canSteer"],"saving":self.saving,"draft":self.composer.read(cx).text,"selected":self.selected})
+        let brain = self.selected.as_ref().and_then(|id| self.brains.get(id));
+        json!({"notice":self.notice,"ready":self.queue_ready,"canSteer":self.queue["canSteer"],"saving":self.saving,"draft":self.composer.read(cx).text,"selected":self.selected,"brainDraft":brain.map(|brain| brain.read(cx).composer.read(cx).text.clone())})
     }
     pub(crate) fn shell_link_issue(
         &mut self,
@@ -77,6 +78,25 @@ impl Surface {
             self.reconcile(cx);
         }
     }
+    pub(crate) fn shell_refresh(&mut self, cx: &mut Context<Self>) {
+        self.load_sessions(cx);
+    }
+    #[cfg(test)]
+    pub(crate) fn shell_brain_view(&self) -> Option<gpui::Entity<crate::brain::Brain>> {
+        self.selected
+            .as_ref()
+            .and_then(|id| self.brains.get(id))
+            .cloned()
+    }
+    pub(crate) fn shell_open_brain(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(brain) = self.selected.as_ref().and_then(|id| self.brains.get(id))
+            && brain.read(cx).expanded
+        {
+            brain.read(cx).focus(window, cx);
+        } else {
+            self.toggle_brain(window, cx);
+        }
+    }
     pub(crate) fn shell_open(&mut self, id: String, cx: &mut Context<Self>) {
         if self.selected.as_ref() != Some(&id) {
             self.select(id, cx);
@@ -85,9 +105,15 @@ impl Surface {
     pub(crate) fn shell_focus(&self, composer: bool, window: &mut Window, cx: &App) {
         if composer {
             self.composer.read(cx).focus.focus(window);
-        } else {
-            self.focus.focus(window);
+            return;
         }
+        if let Some(brain) = self.selected.as_ref().and_then(|id| self.brains.get(id))
+            && brain.read(cx).expanded
+        {
+            brain.read(cx).focus(window, cx);
+            return;
+        }
+        self.focus.focus(window);
     }
     /// Reading focus is distinct from any nested editor or terminal control.
     pub(crate) fn shell_reading_focused(&self, window: &Window) -> bool {

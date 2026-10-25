@@ -57,6 +57,7 @@ pub struct Shell {
     shortcuts: bool,
     query: String,
     choice: usize,
+    palette_scroll: gpui::ScrollHandle,
     notice: String,
     loading: bool,
     connected: bool,
@@ -88,6 +89,7 @@ impl Shell {
             shortcuts: false,
             query: String::new(),
             choice: 0,
+            palette_scroll: gpui::ScrollHandle::new(),
             notice: "Connecting to local o8 server…".into(),
             loading: false,
             connected: false,
@@ -336,7 +338,13 @@ impl Shell {
                 return;
             }
             Command::Refresh => {
-                self.tick(true, window, cx);
+                self.capture(window, cx);
+                if let Some(content) = self
+                    .active()
+                    .and_then(|tab| self.content.get(&self.key(&tab)))
+                {
+                    content.refresh(cx);
+                }
                 self.palette = false;
                 self.load(cx);
                 self.restore_focus(window, cx);
@@ -492,6 +500,10 @@ impl Shell {
             }
         } else {
             return;
+        }
+        if self.palette {
+            // The palette header is the first child of the scrolling container.
+            self.palette_scroll.scroll_to_item(self.choice + 1);
         }
         self.revision += 1;
         cx.notify();

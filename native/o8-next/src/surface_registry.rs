@@ -129,6 +129,9 @@ impl Registration {
 pub(super) trait ShellView: Render {
     fn focus(view: &Entity<Self>, composer: bool, window: &mut Window, cx: &mut Context<Shell>);
     fn tick(_view: &Entity<Self>, _refresh: bool, _cx: &mut Context<Shell>) {}
+    fn refresh(view: &Entity<Self>, cx: &mut Context<Shell>) {
+        Self::tick(view, true, cx);
+    }
     #[cfg(test)]
     fn ready(view: &Entity<Self>, cx: &App) -> bool;
 }
@@ -189,6 +192,9 @@ macro_rules! register_surfaces {
             }
             fn tick(&self, refresh: bool, cx: &mut Context<Shell>) {
                 match self { $( $(#[$tab_attr])* Self::$variant(view) => <$module::View as ShellView>::tick(view, refresh, cx), )* }
+            }
+            fn refresh(&self, cx: &mut Context<Shell>) {
+                match self { $( $(#[$tab_attr])* Self::$variant(view) => <$module::View as ShellView>::refresh(view, cx), )* }
             }
             #[cfg(test)]
             fn ready(&self, cx: &App) -> bool {

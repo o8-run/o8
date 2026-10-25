@@ -77,6 +77,7 @@ impl Render for Shell {
                                 this.shortcuts = false;
                                 this.query.clear();
                                 this.choice = 0;
+                                this.palette_scroll.scroll_to_item(1);
                                 this.focus.focus(window);
                                 cx.notify();
                             })),
@@ -95,6 +96,7 @@ impl Render for Shell {
                                 this.shortcuts = false;
                                 this.query.clear();
                                 this.choice = 0;
+                                this.palette_scroll.scroll_to_item(1);
                                 this.focus.focus(window);
                                 this.revision += 1;
                                 cx.notify();
@@ -153,6 +155,7 @@ impl Render for Shell {
                         .debug_selector(|| "command-palette".into())
                         .max_h(px(300.))
                         .overflow_y_scroll()
+                        .track_scroll(&self.palette_scroll)
                         .p(px(12.))
                         .bg(theme().surface_raised)
                         .child(format!("Commands: {}", self.query))

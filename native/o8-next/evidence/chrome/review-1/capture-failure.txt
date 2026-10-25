@@ -1,0 +1,16 @@
+
+running 1 test
+test shell::tests::correction_native_screenshots ...
+thread 'shell::tests::correction_native_screenshots' (88337) panicked at src/shell_tests.rs:31:5:
+native CLI must paint text pixels before capture on the owned display
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    shell::tests::correction_native_screenshots
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 140 filtered out; finished in 15.45s
+
+error: test failed, to rerun pass `--bin o8-next`

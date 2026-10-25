@@ -17,7 +17,7 @@ impl Surface {
             cx.stop_propagation();
         }
     }
-    fn toggle_brain(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn toggle_brain(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(session) = self
             .sessions
             .iter()

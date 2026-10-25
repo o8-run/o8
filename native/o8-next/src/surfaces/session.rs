@@ -59,6 +59,9 @@ impl ShellView for Surface {
     fn tick(view: &Entity<Self>, refresh: bool, cx: &mut Context<Shell>) {
         view.update(cx, |s, cx| s.shell_tick(refresh, cx));
     }
+    fn refresh(view: &Entity<Self>, cx: &mut Context<Shell>) {
+        view.update(cx, |session, cx| session.shell_refresh(cx));
+    }
     #[cfg(test)]
     fn ready(view: &Entity<Self>, cx: &App) -> bool {
         view.read(cx).shell_ready()
