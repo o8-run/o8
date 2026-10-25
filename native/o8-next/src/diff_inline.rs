@@ -148,6 +148,9 @@ fn packet_target(client: &Client, workspace: &str, id: &str) -> Result<Target, S
         .as_str()
         .filter(|base| !base.trim().is_empty())
         .ok_or("Packet lane has no base branch")?;
+    if crate::viewer_guard::sensitive(base) || crate::viewer_guard::sensitive(path) {
+        return Err("Sensitive packet metadata hidden".into());
+    }
     Ok(Target::Worktree {
         path: path.into(),
         base: Some(base.into()),

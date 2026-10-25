@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
-import { realpathSync } from 'node:fs';
+import { realpathSync, writeFileSync, symlinkSync, unlinkSync } from 'node:fs';
+import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 let host: ChildProcess;
@@ -36,4 +37,20 @@ it('uses the production merge route and its body/idempotency refusals', async ()
   expect((await request('/api/orchestrator/merge', {})).status).toBe(400);
   expect((await request('/api/orchestrator/merge', { packetId: 'next-inline' })).status).toBe(400);
   expect((await request('/api/orchestrator/merge', { packetId: 'next-inline', idempotencyKey: 'fixture-inline-decision' }, 'fixture-invalid')).status).toBe(401);
+});
+
+it('bounds binary/large diffs and refuses selected-path escapes without reading a symlink target', async () => {
+  const canary = ['owned', 'inline-boundary', 'canary'].join('-');
+  const outside = join(workspace, '..', 'outside-diff.txt'); writeFileSync(outside, canary);
+  const link = join(workspace, 'outside-link.txt'); symlinkSync(outside, link);
+  const base = '/api/worktrees/diff?' + new URLSearchParams({ worktreePath: workspace, baseBranch: 'main' });
+  for (const file of ['../outside-diff.txt', outside]) expect((await request(base + '&' + new URLSearchParams({ file }))).ok).toBe(false);
+  const linked = await request(base + '&file=outside-link.txt'); expect(await linked.text()).not.toContain(canary);
+  unlinkSync(link);
+  writeFileSync(join(workspace, 'binary.dat'), Buffer.from([0, 0xff, 0xfe]));
+  const binary = await (await request(base + '&file=binary.dat')).json() as { diff: string };
+  expect(binary.diff).toContain('Binary');
+  writeFileSync(join(workspace, 'large.txt'), 'x'.repeat(2 * 1024 * 1024));
+  const large = await (await request(base + '&file=large.txt')).json() as { diff: string; truncated: boolean };
+  expect(large.truncated).toBe(true); expect(large.diff.length).toBeLessThanOrEqual(2 * 1024 * 1024);
 });

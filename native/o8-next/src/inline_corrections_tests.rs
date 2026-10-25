@@ -57,6 +57,18 @@ fn committed_packet_uses_lane_base_and_enables_merge(cx: &mut TestAppContext) {
     fixture.server.wait().unwrap();
     let requests = fs::read_to_string(fixture.root.join("requests.json")).unwrap();
     assert!(requests.contains("POST /api/orchestrator/merge"));
+    let mutation: Value =
+        serde_json::from_slice(&fs::read(fixture.root.join("mutation.json")).unwrap()).unwrap();
+    assert_eq!(mutation["packetId"], "next-inline");
+    let head = shell.read_with(&visual, |s, cx| match s.content.get(&s.key(&Tab::Diff)) {
+        Some(Content::Diff(v)) => v.read(cx).document.head.clone(),
+        _ => panic!("Diff"),
+    });
+    assert_eq!(
+        mutation["expectedHeadSha"], head,
+        "Merge carries the exact revision read and stable packet ID"
+    );
+
     println!(
         "O8_NEXT_PACKET_EVIDENCE {}",
         json!({"openToFirstFrameMs":elapsed,"committedFiles":2,"baseBranch":"fixture-base"})
