@@ -1,5 +1,9 @@
 # Parity capture verification
 
+For the rebased review correction and clean full native run, see
+[review round 1](review-1/verification.md). The results below preserve the
+original submission history.
+
 The recorded run produced 28 capture pairs for 14 registrations at 1024×720 and
 1440×900, with zero harness crashes. The images come from the real X11 native
 window and the current Next `/dashboard` route. Both clients use the same

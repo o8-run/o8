@@ -8,6 +8,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { chromium } from 'playwright-core';
 import { environment, launch, stop, until } from './processes.mjs';
 import { captureWeb } from './web.mjs';
+import { CaptureError, nativeErrorText } from './health.mjs';
 
 function receipt(child) {
   const value = {};
@@ -17,7 +18,7 @@ function receipt(child) {
   });
   return { value, close: () => lines.close() };
 }
-const run = (file, args, env) => execFileSync(file, args, { env, encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'pipe'] });
+const run = (file, args, env, timeout = 5000) => execFileSync(file, args, { env, encoding: 'utf8', timeout, stdio: ['ignore', 'pipe', 'pipe'] });
 function screenshot(id, file, env, size) {
   run('xrefresh', ['-none'], env);
   run('import', ['-window', id, `png:${file}`], env);
@@ -45,7 +46,10 @@ async function nativePixels(options, scenario, state, fixture, env, output, size
       run('xdotool', ['key', '--window', id, 'Return'], env);
     }
     await delay(700);
-    screenshot(id, output, env, size);
+    if (!screenshot(id, output, env, size)) throw new CaptureError('native capture is blank');
+    const text = run('tesseract', [output, 'stdout', '--psm', '11'], { ...env, OMP_THREAD_LIMIT: '1' }, 15_000);
+    if (!text.trim()) throw new CaptureError('native capture is blank');
+    if (nativeErrorText(text)) throw new CaptureError('native capture is an error frame', text);
     if (app.exitCode !== null || app.signalCode !== null) throw new Error('Native process exited');
   } finally { await stop(app); }
 }
@@ -70,13 +74,20 @@ export async function capture(manifest, options) {
   const env = environment(root, token);
   const data = join(root, 'web-data');
   mkdirSync(data);
-  const web = launch(process.execPath, ['--import', 'tsx', 'scripts/parity/web-server.ts'], {
+  const web = launch(process.execPath, ['--import', 'tsx', options.webHost], {
     ...env, NODE_ENV: 'development', NEXT_PHASE: 'phase-production-build', O8_DATA_DIR: data,
     CORTEX_IDE_DATA_DIR: data, CORTEX_IDE_DB_PATH: join(data, 'web.db'),
   }, join(logs, 'web.log'), true);
   const webReceipt = receipt(web);
   let browser;
   const captures = [];
+  const selected = options.only ? manifest.surfaces.filter(row => row.id === options.only) : manifest.surfaces;
+  if (!selected.length) throw new Error('Unknown surface');
+  const failed = (scenario, size, error) => {
+    const reason = `${scenario.id} ${size.join('x')}: ${error instanceof CaptureError ? error.reason : 'capture process, route or measurement failed'}`;
+    console.error(reason);
+    return reason;
+  };
   try {
     const binary = testBinary(options);
     await until(web, () => webReceipt.value.webOrigin, 120_000);
@@ -84,10 +95,11 @@ export async function capture(manifest, options) {
       args: ['--no-sandbox', '--disable-background-networking'] });
     // Compile the real route before starting two-minute fixture hosts.
     const warm = await fetch(webReceipt.value.webOrigin + '/dashboard', { signal: AbortSignal.timeout(240_000) });
-    if (!warm.ok) throw new Error('Current UI route compilation failed');
+    if (!warm.ok) {
+      return selected.flatMap(scenario => manifest.sizes.map(size => ({ surface: scenario.id, size,
+        crash: failed(scenario, size, new CaptureError(`surface route HTTP ${warm.status}`)) })));
+    }
     await warm.arrayBuffer();
-    const selected = options.only ? manifest.surfaces.filter(row => row.id === options.only) : manifest.surfaces;
-    if (!selected.length) throw new Error('Unknown surface');
     for (const scenario of selected) {
       const host = launch(process.execPath, ['--import', './scripts/register-server-only-stub.mjs', '--import', 'tsx',
         'scripts/next/dev-server.ts', '--shell', '--parity', ...scenario.flags], env, join(logs, `${scenario.id}-host.log`), true);
@@ -118,7 +130,9 @@ export async function capture(manifest, options) {
             });
             writeFileSync(join(logs, `${name}-gpui.log`), metrics.stdout + metrics.stderr);
             if (metrics.status !== 0) throw new Error('GPUI measurement test failed');
-            entry.native = JSON.parse(readFileSync(join(root, 'native-metrics.json'), 'utf8')).metrics;
+            const receipt = JSON.parse(readFileSync(join(root, 'native-metrics.json'), 'utf8'));
+            if (receipt.errors?.length) throw new CaptureError('native capture is an error frame', JSON.stringify(receipt.errors));
+            entry.native = receipt.metrics;
             const webResult = await captureWeb(browser, webReceipt.value.webOrigin, fixture, scenario, size, manifest.elements, join(directory, 'web.png'));
             entry.web = webResult.measured;
             entry.notes = [...webResult.missing, ...(scenario.remaining ? [scenario.remaining] : [])];
@@ -129,17 +143,21 @@ export async function capture(manifest, options) {
             entry.images.pair = `${name}/pair.png`;
           } catch (error) {
             writeFileSync(join(logs, `${name}-error.log`), String(error.stack ?? error));
-            entry.crash = 'Capture process, route, measurement test or renderer failed';
+            entry.crash = failed(scenario, size, error);
           }
           captures.push(entry);
           writeFileSync(join(options.output, 'captures.json'), JSON.stringify(captures, null, 2) + '\n');
         }
       } catch (error) {
         writeFileSync(join(logs, `${scenario.id}-error.log`), String(error.stack ?? error));
-        for (const size of manifest.sizes) captures.push({ surface: scenario.id, size, crash: 'Fixture host failed before capture' });
+        for (const size of manifest.sizes) captures.push({ surface: scenario.id, size, crash: failed(scenario, size, error) });
       } finally { hostReceipt.close(); await stop(host); }
     }
     return captures;
+  } catch (error) {
+    writeFileSync(join(logs, 'capture-error.log'), String(error.stack ?? error));
+    return selected.flatMap(scenario => manifest.sizes.map(size => ({ surface: scenario.id, size,
+      crash: failed(scenario, size, error) })));
   } finally {
     webReceipt.close();
     if (browser) await browser.close();

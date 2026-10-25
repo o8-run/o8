@@ -15,13 +15,13 @@ async function main() {
   validateManifest();
   const args = process.argv.slice(2);
   const options = { output: resolve('work/next-parity'), binary: resolve('native/o8-next/target/debug/o8-next'),
-    browser: process.env.O8_PARITY_BROWSER || '', only: '', nativeTest: '' };
+    browser: process.env.O8_PARITY_BROWSER || '', only: '', nativeTest: '', webHost: resolve('scripts/parity/web-server.ts') };
   let comparison;
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--list') { console.log(JSON.stringify(manifest)); return; }
     if (args[i] === '--compare' && args[i + 1]) comparison = args[++i];
     else if (Object.hasOwn(options, args[i].slice(2)) && args[i + 1]) options[args[i].slice(2)] = args[++i];
-    else throw new Error('Use --list | --compare FILE | [--output DIR --binary FILE --browser FILE --only SURFACE --nativeTest FILE]');
+    else throw new Error('Use --list | --compare FILE | [--output DIR --binary FILE --browser FILE --only SURFACE --nativeTest FILE --webHost FILE]');
   }
   options.output = resolve(options.output);
   options.binary = resolve(options.binary);

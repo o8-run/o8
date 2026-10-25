@@ -1,11 +1,14 @@
 /** Browser measurements always come from DOM geometry and computed styles. */
 import { setTimeout as delay } from 'node:timers/promises';
+import { CaptureError, isAppBundle } from './health.mjs';
 
 export async function captureWeb(browser, origin, fixture, scenario, size, elements, output) {
   const context = await browser.newContext({ viewport: { width: size[0], height: size[1] }, deviceScaleFactor: 1,
     locale: 'en-US', timezoneId: 'UTC', reducedMotion: 'reduce', serviceWorkers: 'block' });
   const missing = [];
   const routes = new Map();
+  const errors = [];
+  const surfacePath = new URL(scenario.webRoute, origin).pathname;
   try {
     await context.route('**/api/**', async route => {
       const request = route.request();
@@ -31,23 +34,58 @@ export async function captureWeb(browser, origin, fixture, scenario, size, eleme
       { headers: { authorization: `Bearer ${fixture.token}` } });
     const repos = repoResponse.ok() ? await repoResponse.json() : {};
     const selectedRepo = repos.repos?.find(repo => repo.localPath === fixture.parityWorkspace);
+    await context.exposeBinding('__o8ParityReportBoundary', () => errors.push(new CaptureError('browser error boundary')));
     await context.addInitScript(repoId => {
       if (repoId) sessionStorage.setItem('cortex-global-repo-id', repoId);
       localStorage.setItem('cortex-theme-palette', 'dark');
       localStorage.setItem('cortex-reduce-transparency', 'off');
       localStorage.setItem('cortex-workspace-glass', 'true');
+      // Latch caught render failures, including a boundary that is later reset.
+      window.__o8ParityBoundaryError = false;
+      const inspect = records => {
+        if (records.some(record => record.attributeName === 'data-o8-mount-error' && record.oldValue === '1')
+          || document.querySelector('[data-o8-mount-error="1"], [data-error-boundary], [data-nextjs-error]')
+          || !document.querySelector('[data-o8-workspace]') && [...document.querySelectorAll('h1, h2, strong')].some(node => /^(?:(?:Dashboard|o8) failed to mount|Something went wrong|Application error: a client-side exception)/.test(node.textContent?.trim() ?? ''))) {
+          if (!window.__o8ParityBoundaryError) void window.__o8ParityReportBoundary().catch(() => {});
+          window.__o8ParityBoundaryError = true;
+        }
+      };
+      new MutationObserver(inspect).observe(document, { subtree: true, childList: true,
+        attributes: true, attributeFilter: ['data-o8-mount-error', 'data-error-boundary', 'data-nextjs-error'], attributeOldValue: true });
     }, selectedRepo?.id ?? null);
     const page = await context.newPage();
-    const errors = [];
-    page.on('pageerror', error => errors.push(error.message));
+    page.on('pageerror', error => errors.push(new CaptureError('uncaught browser page error', error.stack ?? error.message)));
+    page.on('console', message => {
+      if (message.type() === 'error' && isAppBundle(message.location().url, origin)) {
+        errors.push(new CaptureError('application console error', message.text()));
+      }
+    });
+    page.on('response', response => {
+      const url = new URL(response.url());
+      if (response.status() >= 400 && (response.request().isNavigationRequest() && response.frame() === page.mainFrame()
+        || url.origin === origin && url.pathname === surfacePath)) {
+        errors.push(new CaptureError(`surface route HTTP ${response.status()}`));
+      }
+    });
     let crashed = false;
     page.on('crash', () => { crashed = true; });
+    const healthy = async () => {
+      if (crashed) throw new CaptureError('browser renderer crashed');
+      if (errors.length) throw errors[0];
+      const boundary = await page.evaluate(() => window.__o8ParityBoundaryError
+        || Boolean(document.querySelector('[data-o8-mount-error="1"], [data-error-boundary], [data-nextjs-error]')));
+      if (crashed) throw new CaptureError('browser renderer crashed');
+      if (errors.length) throw errors[0];
+      if (boundary) throw new CaptureError('browser error boundary');
+    };
     const response = await page.goto(origin + scenario.webRoute, { waitUntil: 'domcontentloaded', timeout: 120_000 });
-    if (!response?.ok()) throw new Error('Current UI route failed');
+    if (!response?.ok()) throw new CaptureError(`surface route HTTP ${response?.status() ?? 'unavailable'}`);
+    await healthy();
     await page.waitForFunction(() => document.documentElement.dataset.o8DashboardHydrated === '1', null, { timeout: 30_000 }).catch(async error => {
       await page.screenshot({ path: output });
       const text = await page.locator('body').innerText();
-      throw new Error(`${error.message}\nBrowser errors: ${errors.join('; ')}\nVisible: ${text.slice(0, 2000)}`);
+      await healthy();
+      throw new CaptureError('workspace did not hydrate', `${error.message}\nVisible: ${text.slice(0, 2000)}`);
     });
     if (scenario.webKeys) await page.keyboard.press(scenario.webKeys);
     if (scenario.webEvent) {
@@ -71,6 +109,7 @@ export async function captureWeb(browser, origin, fixture, scenario, size, eleme
     if (scenario.id === 'session' && ![...routes.keys()].some(path => path === '/api/v2/chat-history' || path === '/api/mobile/history')) {
       missing.push('Current UI did not read the selected history; equivalent transcript state remains unverified');
     }
+    await healthy();
     const measured = await page.evaluate(spec => {
       const result = {};
       for (const [name, selector] of Object.entries(spec)) {
@@ -92,7 +131,10 @@ export async function captureWeb(browser, origin, fixture, scenario, size, eleme
     const theme = await page.locator('html').evaluate(node => ({ palette: node.dataset.palette, surface: node.dataset.surface }));
     if (theme.palette !== 'dark' || theme.surface !== 'glass') missing.push('Current UI did not resolve to dark All Glass');
     await page.screenshot({ path: output, animations: 'disabled' });
-    if (crashed) throw new Error('Current UI renderer crashed');
+    await healthy();
     return { measured, missing, routes: [...routes].map(([path, status]) => ({ path, status })), theme };
-  } finally { await context.close(); }
+  } finally {
+    await context.close();
+    if (errors.length) throw errors[0];
+  }
 }

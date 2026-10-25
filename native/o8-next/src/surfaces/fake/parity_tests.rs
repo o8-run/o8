@@ -2,6 +2,21 @@
 use crate::shell::test_support::*;
 use crate::shell::*;
 
+fn render_errors(cx: &mut VisualTestContext) -> Vec<&'static str> {
+    [
+        "settings-error",
+        "brain-error",
+        "projects-error",
+        "inbox-error",
+        "issue-error",
+        "custom-error",
+        "setup-error",
+    ]
+    .into_iter()
+    .filter(|selector| cx.debug_bounds(selector).is_some())
+    .collect()
+}
+
 #[gpui::test]
 fn parity_capture_real_shell(cx: &mut TestAppContext) {
     let manifest: Value = serde_json::from_slice(
@@ -104,11 +119,51 @@ fn parity_capture_real_shell(cx: &mut TestAppContext) {
                     .map(|_| text)
             })
             .collect::<Vec<_>>();
+        let mut errors = render_errors(&mut visual);
+        shell.read_with(&visual, |s, cx| {
+            if let Some(Content::PullRequests(view)) =
+                s.active().and_then(|tab| s.content.get(&s.key(&tab)))
+            {
+                let view = view.read(cx);
+                if !view.error.is_empty()
+                    || !view.detail_error.is_empty()
+                    || view.page["unavailable"] == true
+                {
+                    errors.push("pull-requests-error");
+                }
+            }
+        });
         fs::write(root.join("native-metrics.json"), serde_json::to_vec_pretty(&json!({
             "metrics": metrics, "present": present,
+            "errors": errors,
             "provenance": "GPUI TestAppContext bounds; test text system, separate from pixel capture",
         })).unwrap()).unwrap();
     } else {
         assert!(visual.debug_bounds("workspace-0").is_some());
     }
+}
+
+#[gpui::test]
+fn parity_native_error_receipt_follows_real_surface_error(cx: &mut TestAppContext) {
+    let fixture = Fixture::start(true);
+    let (shell, mut visual) = open(
+        fixture.client.clone(),
+        fixture.root.join("error-frame.json"),
+        State::default(),
+        cx,
+    );
+    ready(&shell, &mut visual);
+    fixture
+        .client
+        .settings_request::<Value>("POST", "/__fixture/settings", json!({"nextStatus": 503}))
+        .unwrap();
+    visual.simulate_keystrokes("ctrl-,");
+    for _ in 0..40 {
+        visual.run_until_parked();
+        draw(&mut visual);
+    }
+    assert!(
+        render_errors(&mut visual).contains(&"settings-error"),
+        "The actual native error frame must enter the fatal capture receipt"
+    );
 }

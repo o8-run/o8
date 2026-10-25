@@ -36,8 +36,19 @@ logical-pixel bounds, computed browser type and padding, colors, glass styles,
 route statuses and signed metric differences. JSON null means unmeasured, never
 zero. Missing controls and visual differences remain informational. A child
 crash, timeout, failed route render or failed GPUI measurement test fails the job.
+The browser latches uncaught page errors, app-bundle console errors and render
+boundaries through capture, including boundaries reset after hydration. Surface
+route HTTP 4xx/5xx responses also fail. The final native frame must contain
+nonblank pixels and readable text, with no fatal error text; the GPUI receipt
+also rejects visible surface error states. Native text recognition uses the
+shared Linux setup's OCR tool with one thread and a 15-second limit. Each failure
+names the surface and viewport and makes the CLI exit 1. Visual differences
+remain informational.
+
 The PR workflow uploads only images and bounded reports; raw child diagnostics
-stay in a local temporary directory printed by the runner.
+stay in a local temporary directory printed by the runner. The
+[review regression receipts](../../native/o8-next/evidence/parity/review-1/verification.md)
+record injected render failures and a successful capture of all 28 cases.
 
 ## Measurement limits and remaining acceptance
 

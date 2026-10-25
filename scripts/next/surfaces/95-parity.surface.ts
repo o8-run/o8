@@ -17,7 +17,7 @@ export default async function register({ repo, dataDir, seeds, transcriptFixture
   }
   const reads = [
     'panel/repos', 'panel/projects', 'panel/workspaces', 'panel/operator-defaults',
-    'setup/config', 'v2/keys', 'tasks', 'v2/chat-history/list', 'panel/terminal-state', 'panel/branches',
+    'setup/config', 'v2/keys', 'tasks', 'v2/chat-history/list', 'panel/terminal-state', 'panel/branches', 'panel/entitlement',
   ];
   const routes: Record<string, Route> = {};
   for (const path of reads) {

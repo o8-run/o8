@@ -4138,6 +4138,16 @@
       "path": "tests/next-parity-harness-real-path.test.ts",
       "reasons": [
         "child-process",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/next-parity-render-failure-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "network-listener",
         "real-path"
       ]
     },

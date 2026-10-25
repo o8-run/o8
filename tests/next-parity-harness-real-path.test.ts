@@ -45,6 +45,26 @@ it('reports signed numeric gaps, preserves missing measurements and never gates 
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+it('recomputes all 52 recorded numeric gaps without changing the accepted measurements', () => {
+  const root = mkdtempSync(join(tmpdir(), 'o8-parity-gaps-'));
+  try {
+    const snapshot = JSON.parse(readFileSync('native/o8-next/evidence/parity/report.json', 'utf8'));
+    const input = join(root, 'captures.json');
+    writeFileSync(input, JSON.stringify(snapshot.cases));
+    const result = run('--compare', input, '--output', root);
+    expect(result.status, result.stderr).toBe(0);
+    const report = JSON.parse(readFileSync(join(root, 'report.json'), 'utf8'));
+    let measured = 0;
+    for (const [index, row] of report.cases.entries()) {
+      for (const [name, element] of Object.entries(row.elements) as Array<[string, { gap: Record<string, number | null> }]>) {
+        expect(element.gap).toEqual(snapshot.cases[index].elements[name].gap);
+        measured += Object.values(element.gap).filter(value => value !== null).length;
+      }
+    }
+    expect(measured).toBe(52);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 it('serves the same persisted history and selected desktop tab through production fixture routes', async () => {
   const token = 'fixture-parity-test';
   const host = spawn(process.execPath, ['--import', './scripts/register-server-only-stub.mjs', '--import', 'tsx',
