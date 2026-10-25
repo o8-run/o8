@@ -4986,6 +4986,15 @@
       ]
     },
     {
+      "path": "tests/provider-key-refresh-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/provider-key-review-regressions-real-path.test.ts",
       "reasons": [
         "child-process",
