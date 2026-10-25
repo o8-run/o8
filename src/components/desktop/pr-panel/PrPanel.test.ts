@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { type QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { act, createElement, type ReactNode } from 'react';
+import { act, createElement, useState, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getQueryClient } from '@/lib/query/client';
@@ -39,6 +39,47 @@ beforeEach(() => {
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); client.clear(); vi.unstubAllGlobals(); });
 
 describe('pull request selection', () => {
+  it('keeps stack layers read-only through controlled selection and a missing layer snapshot', async () => {
+    const stack = { status: 'ready', stale: false, source: 'github-native', revision: 'readonly-stack', fetchedAt: '2026-01-01T00:00:00Z', attemptedAt: '2026-01-01T00:00:00Z',
+      snapshot: { id: 70, number: 7, trunk: 'main', layers: [9811, 9812, 9813].map(number => ({ number, title: `Layer ${number}`, state: 'open', headRef: 'work', baseRef: 'main', headSha: 'a'.repeat(40), baseSha: 'b'.repeat(40) })) } };
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return Response.json({ action: 'merged' });
+      const number = Number(url.match(/prs\/(\d+)/)?.[1]);
+      return Response.json({ pr: { ...detail(number), statusCheckRollup: [{ name: 'failed-fixture', status: 'COMPLETED', conclusion: 'FAILURE' }], headSha: 'a'.repeat(40), mergeable: true, ...(number === 9811 ? { stack } : {}) } });
+    });
+    function Controlled({ number, repoSlug }: { number: number; repoSlug: string }) {
+      const origin = `${repoSlug}:${number}`;
+      const [selected, select] = useState({ origin, number });
+      const current = selected.origin === origin ? selected.number : number;
+      if (selected.origin !== origin) select({ origin, number });
+      return createElement(PrPanel, { prNumber: current, repoSlug, onClose, onSelectLayer: next => select({ origin, number: next }) });
+    }
+    const show = async (number: number, repoSlug = 'example/repo') => { await act(async () => root.render(provide(createElement(Controlled, { number, repoSlug })))); await settleTimeline(); };
+    await show(9811);
+    await act(async () => host.querySelector<HTMLButtonElement>('[data-stack-layer="9812"]')!.click());
+    await settleTimeline();
+    const merge = host.querySelector<HTMLButtonElement>('[aria-label="Merge pull request"]');
+    if (merge) {
+      await act(async () => merge.click());
+      await act(async () => [...host.querySelectorAll<HTMLButtonElement>('[role=menu] button')].find(button => button.textContent === 'Squash and merge')!.click());
+      await act(async () => [...host.querySelectorAll<HTMLButtonElement>('[role=dialog] button')].find(button => button.textContent === 'Squash and merge')!.click());
+    }
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'POST')).toEqual([]);
+    expect(host.querySelector('[aria-label="Merge pull request"]')).toBeNull();
+    expect(host.querySelector('[data-pr-actions]')).toBeNull();
+    expect(host.querySelector('[data-pr-brain-chat]')).toBeNull();
+    expect(host.textContent).toContain('Read-only stack');
+    await show(9812, 'example/other');
+    expect(host.querySelector('[aria-label="Merge pull request"]')).not.toBeNull();
+    await show(9811);
+    await act(async () => host.querySelector<HTMLButtonElement>('[data-stack-layer="9812"]')!.click());
+    await settleTimeline();
+    await act(async () => host.querySelector<HTMLButtonElement>('[role="tab"][id$="-checks"]')!.click());
+    expect([...host.querySelectorAll('button')].find(button => button.textContent === 'Fix failing checks')).toBeUndefined();
+    await show(9813); // Unrelated direct selection still has the ordinary writer.
+    expect(host.querySelector('[aria-label="Merge pull request"]')).not.toBeNull();
+  });
+
   it('focuses each native stack layer on its own diff and dependency view', async () => {
     const stack = { status: 'ready', stale: false, source: 'github-native', revision: 'revision', fetchedAt: '2026-01-01T00:00:00Z', attemptedAt: '2026-01-01T00:00:00Z',
       snapshot: { id: 70, number: 7, trunk: 'main', layers: [11, 12, 13].map((number, index) => ({ number, title: `Layer ${number}`, state: 'open', headRef: `layer-${number}`, baseRef: index ? `layer-${number - 1}` : 'main', headSha: String(index + 1).repeat(40), baseSha: String(index).repeat(40) })) } };

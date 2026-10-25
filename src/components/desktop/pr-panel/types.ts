@@ -106,6 +106,7 @@ export interface PrDetailResponse {
 export type CheckBucket = 'failing' | 'running' | 'passed' | 'neutral' | 'skipped';
 
 export interface PrPanelProps {
+  readOnly?: boolean;
   onSelectLayer?: (number: number) => void;
   active?: boolean;
   id?: string;

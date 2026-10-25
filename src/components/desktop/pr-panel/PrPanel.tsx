@@ -1,6 +1,7 @@
 'use client';
 
 import { PrStackSummary } from '../agent-panel/PrStackSummary';
+import { usePrStackSelection } from './usePrStackSelection';
 
 import { memo, useCallback, useId, useLayoutEffect, useRef, useState } from 'react';
 import { PullRequestConversations } from '@/components/conversation-prs/PullRequestConversations';
@@ -24,21 +25,19 @@ import { useArtifacts } from '../artifacts/useArtifacts';
 import type { PrComposerMode, PrPanelProps, PrReviewAction } from './types';
 
 export const PrPanel = memo(function PrPanel(props: PrPanelProps) {
-  const owner = `${props.repoSlug || props.repoPath || ''}:${props.prNumber}`;
-  const [selection, setSelection] = useState({ owner, number: props.prNumber });
-  const number = selection.owner === owner ? selection.number : props.prNumber;
-  if (selection.owner !== owner) setSelection({ owner, number: props.prNumber });
-  return <PrPanelContent {...props} prNumber={number} onSelectStack={next => {
+  const selection = usePrStackSelection(props.repoSlug || props.repoPath || '', props.prNumber, props.readOnly);
+  return <PrPanelContent {...props} prNumber={selection.number} readOnly={selection.readOnly} onSelectStack={next => {
     openPrChangesView(`${props.repoSlug || props.repoPath || ''}:${next}`);
-    setSelection({ owner, number: next });
+    selection.select(next);
     props.onSelectLayer?.(next);
   }} />;
 });
 
-const PrPanelContent = memo(function PrPanelContent({ prNumber, repoSlug, repoPath, onClose, active = true, id, onSelectStack }: PrPanelProps & { onSelectStack: (number: number) => void }) {
+const PrPanelContent = memo(function PrPanelContent({ prNumber, repoSlug, repoPath, onClose, active = true, id, readOnly = false, onSelectStack }: PrPanelProps & { onSelectStack: (number: number) => void }) {
   const selectionKey = `${repoSlug || repoPath || ''}:${prNumber}`;
   const { view, update, recordScroll, scrollFor } = usePrViewState(selectionKey);
   const { detail, loading, error, refresh, updatedAt } = usePrDetail(prNumber, repoSlug, active, view.activeTab === 'checks');
+  const stackReadOnly = readOnly || Boolean(detail?.stack?.snapshot);
   const hasDetail = Boolean(detail);
   const panelId = useId();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -142,7 +141,7 @@ const PrPanelContent = memo(function PrPanelContent({ prNumber, repoSlug, repoPa
 
   return (
     <div id={id || panelId} data-pr-detail={detail.number} style={containerStyle} onKeyDown={onKeyDown}>
-      <PrPanelHeader detail={detail} repoSlug={repoSlug} repoPath={repoPath} showDiffStats={active && view.activeTab !== 'changes'} onRefresh={refresh} onComposerMode={changeComposerMode} onAsk={(prompt) => {
+      <PrPanelHeader readOnly={stackReadOnly} detail={detail} repoSlug={repoSlug} repoPath={repoPath} showDiffStats={active && view.activeTab !== 'changes'} onRefresh={refresh} onComposerMode={changeComposerMode} onAsk={(prompt) => {
         if (repoPath) openComposerBrain({ repoPath, prompt, context: prBrainContext(detail, repoSlug) });
       }} />
       <PullRequestConversations repo={detail.resolvedRepo || repoSlug || ''} number={detail.number} active={active} />
@@ -181,7 +180,7 @@ const PrPanelContent = memo(function PrPanelContent({ prNumber, repoSlug, repoPa
             />
           </>
         ) : null}
-        {tab === 'checks' ? <ChecksTab checks={detail.statusCheckRollup} repo={repoSlug || detail.resolvedRepo} number={prNumber} /> : null}
+        {tab === 'checks' ? <ChecksTab readOnly={stackReadOnly} checks={detail.statusCheckRollup} repo={repoSlug || detail.resolvedRepo} number={prNumber} /> : null}
         {tab === 'reviews' ? (
           <ReviewsTab
             reviewComments={detail.reviewComments}
@@ -193,7 +192,7 @@ const PrPanelContent = memo(function PrPanelContent({ prNumber, repoSlug, repoPa
         ) : null}
         </div>
       </div>)}
-      {view.composerMode !== 'brain' ? <PrBrainComposer allowBrain={false} key={`${selectionKey}:${repoPath || ''}`} detail={detail} repoSlug={repoSlug} repoPath={repoPath} draft={view.questionDraft} onDraftChange={() => {}} mode={view.composerMode} onModeChange={changeComposerMode} commentDraft={view.commentDraft} onCommentDraftChange={changeCommentDraft} reviewDraft={view.reviewDraft} onReviewDraftChange={changeReviewDraft} reviewAction={view.reviewAction} onReviewActionChange={changeReviewAction} reviewHeadSha={view.reviewHeadSha} onReviewHeadChange={changeReviewHead} onCommentPosted={refresh} /> : null}
+      {!stackReadOnly && view.composerMode !== 'brain' ? <PrBrainComposer allowBrain={false} key={`${selectionKey}:${repoPath || ''}`} detail={detail} repoSlug={repoSlug} repoPath={repoPath} draft={view.questionDraft} onDraftChange={() => {}} mode={view.composerMode} onModeChange={changeComposerMode} commentDraft={view.commentDraft} onCommentDraftChange={changeCommentDraft} reviewDraft={view.reviewDraft} onReviewDraftChange={changeReviewDraft} reviewAction={view.reviewAction} onReviewActionChange={changeReviewAction} reviewHeadSha={view.reviewHeadSha} onReviewHeadChange={changeReviewHead} onCommentPosted={refresh} /> : null}
     </div>
   );
 });

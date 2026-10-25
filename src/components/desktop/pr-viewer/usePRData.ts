@@ -28,6 +28,7 @@ export function usePRData(
   repo: string | undefined,
   onInjectChatContext: ((payload: AgentPanelChatInjectionPayload) => void) | undefined,
   active = true,
+  stackReadOnly = false,
 ) {
   const queryClient = useQueryClient();
   const [activeSection, setActiveSection] = useState<PRSection>('overview');
@@ -37,6 +38,9 @@ export function usePRData(
       ? Math.max(GITHUB_CHECK_REFRESH_MS, query.state.error instanceof GithubReadDeferredError ? query.state.error.retryAt - Date.now() : 0) : false,
   });
   const pr = detailQuery.data ?? null;
+  const readOnly = stackReadOnly || Boolean(pr?.stack?.snapshot);
+  const readOnlyRef = useRef(readOnly);
+  readOnlyRef.current = readOnly;
   const loading = detailQuery.isPending;
   const error = !pr && detailQuery.error ? detailQuery.error.message : null;
   const [reloadNonce, setReloadNonce] = useState(0);
@@ -66,6 +70,7 @@ export function usePRData(
   /* ---------------------------------------------------------------- */
 
   const submitAction = useCallback(async (action: string, comment?: string) => {
+    if (readOnlyRef.current) return;
     setActionLoading(action);
     setActionResult(null);
     try {
@@ -219,6 +224,7 @@ export function usePRData(
   }, []);
 
   const submitThreadReply = useCallback(async (threadId: string) => {
+    if (readOnlyRef.current) return;
     const thread = reviewThreads.find((candidate) => candidate.id === threadId);
     const draft = replyDrafts[threadId]?.trim() ?? '';
 
@@ -284,6 +290,7 @@ export function usePRData(
   }, [prNumber, replyDrafts, repo, reviewThreads, queryClient, reviewThreadKey]);
 
   const submitThreadResolve = useCallback(async (threadId: string, resolved: boolean) => {
+    if (readOnlyRef.current) return;
     const thread = reviewThreads.find((candidate) => candidate.id === threadId);
     if (!thread) return;
 
@@ -662,6 +669,7 @@ export function usePRData(
   ]);
 
   return {
+    readOnly,
     retainedStack: Boolean(pr && detailQuery.error),
     pr,
     loading,

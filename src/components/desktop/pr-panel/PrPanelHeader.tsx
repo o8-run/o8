@@ -7,8 +7,8 @@ import { PrPanelTitle } from './PrPanelTitle';
 import { PrPanelActions } from './PrPanelActions';
 import type { PrComposerMode, PrDetail } from './types';
 
-export const PrPanelHeader = memo(function PrPanelHeader({ detail, repoSlug, repoPath, showDiffStats, onRefresh, onAsk, onComposerMode }: {
-  detail: PrDetail; repoSlug?: string | null; repoPath?: string | null; showDiffStats: boolean; onRefresh: () => void; onAsk: (prompt?: string) => void; onComposerMode: (mode: PrComposerMode) => void;
+export const PrPanelHeader = memo(function PrPanelHeader({ detail, repoSlug, repoPath, showDiffStats, onRefresh, onAsk, onComposerMode, readOnly = false }: {
+  readOnly?: boolean; detail: PrDetail; repoSlug?: string | null; repoPath?: string | null; showDiffStats: boolean; onRefresh: () => void; onAsk: (prompt?: string) => void; onComposerMode: (mode: PrComposerMode) => void;
 }) {
   const state = detail.mergedAt ? 'Merged' : detail.state.toLowerCase() === 'closed' ? 'Closed' : detail.draft ? 'Draft' : 'Open';
   const stateColor = state === 'Open' ? 'var(--t-success)' : state === 'Closed' ? 'var(--t-danger)' : state === 'Draft' ? 'var(--t-text-muted)' : 'var(--t-accent)';
@@ -21,7 +21,7 @@ export const PrPanelHeader = memo(function PrPanelHeader({ detail, repoSlug, rep
         </a>
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: stateColor, fontSize: 10, flexShrink: 0 }}><GitPullRequest size={12} aria-hidden="true" />{state}</span>
       </div>
-      <PrPanelActions key={`${repo}:${detail.number}:${repoPath || ''}`} detail={detail} repoSlug={repoSlug} repoPath={repoPath} onRefresh={onRefresh} onAsk={onAsk} onComposerMode={onComposerMode} />
+      {readOnly ? <span style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>Read-only stack</span> : <PrPanelActions key={`${repo}:${detail.number}:${repoPath || ''}`} detail={detail} repoSlug={repoSlug} repoPath={repoPath} onRefresh={onRefresh} onAsk={onAsk} onComposerMode={onComposerMode} />}
     </div>
     <PrPanelTitle title={detail.title} author={detail.author} avatarUrl={detail.avatarUrl} updatedAt={detail.updatedAt} />
     {detail.watch?.changes.length ? <span role="status" style={{ fontSize: 11, color: 'var(--t-text-secondary)' }}>Updated: {detail.watch.changes.map(change => change === 'head' ? 'new commit' : change).join(', ')}</span> : null}

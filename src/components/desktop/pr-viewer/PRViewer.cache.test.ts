@@ -194,7 +194,7 @@ it('focuses a native stack layer in the full viewer with its own files', async (
     if (url === '/api/panel/repos') return Response.json({ repos: [] });
     const number = Number(url.match(/prs\/(\d+)/)?.[1]);
     const body = await snapshot(`Layer ${number}`, 'OPEN', number).json();
-    return Response.json({ pr: { ...body.pr, stack, files: [{ path: `layer-${number}.ts`, additions: 1, deletions: 0 }] } });
+    return Response.json({ pr: { ...body.pr, stack, statusCheckRollup: [{ name: 'failed-fixture', status: 'COMPLETED', conclusion: 'FAILURE' }], files: [{ path: `layer-${number}.ts`, additions: 1, deletions: 0 }] } });
   });
   await render();
   expect(host.textContent).toContain('Native GitHub stack #7');
@@ -203,6 +203,17 @@ it('focuses a native stack layer in the full viewer with its own files', async (
   expect(host.textContent).toContain('layer-8.ts');
   expect(host.querySelector('[data-stack-layer="8"]')?.getAttribute('aria-current')).toBe('true');
   expect(reads().at(-1)?.[0]).toContain('/prs/8?repo=org%2Fsample');
+  await act(async () => {
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'm', bubbles: true }));
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true }));
+  });
+  await settle();
+  expect(writes()).toEqual([]);
+  expect(host.querySelector('input[name="reviewComment"]')).toBeNull();
+  expect(host.textContent).toContain('Read-only stack');
+  await act(async () => [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.startsWith('Checks'))!.click());
+  await settle();
+  expect([...host.querySelectorAll('button')].find(button => button.textContent === 'Fix failing checks')).toBeUndefined();
   await render(1, 'org/sample', 9); await render();
   expect(host.textContent).toContain('#7 Layer 7');
 });

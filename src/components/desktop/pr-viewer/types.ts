@@ -106,6 +106,7 @@ export interface ReviewThreadTone {
 }
 
 export interface PRViewerProps {
+  readOnly?: boolean;
   active?: boolean;
   prNumber: number;
   repo?: string;
