@@ -5620,6 +5620,25 @@
         "network-listener",
         "process-signal",
         "real-path",
+        "terminal-host",
+        "terminal-tool"
+      ]
+    },
+    {
+      "path": "tests/server-bundle-size-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path",
+        "terminal-host"
+      ]
+    },
+    {
+      "path": "tests/server-bundles-packaged-layout-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener",
+        "process-signal",
+        "real-path",
         "terminal-host"
       ]
     },
