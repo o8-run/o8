@@ -5403,6 +5403,14 @@
       ]
     },
     {
+      "path": "tests/repo-remote-refresh-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/repo-repoint-contract.test.ts",
       "reasons": [
         "child-process",

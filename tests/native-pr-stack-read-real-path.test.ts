@@ -10,7 +10,7 @@ import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const fixture = vi.hoisted(() => ({ fetch: vi.fn(), scope: 'synthetic-scope-a', installation: 5, available: true }));
 vi.mock('@/lib/github-broker/env', () => ({ getGitHubAppConfig: () => null, requireGitHubAppConfig: () => ({ webhookSecret: 'fixture-webhook-only' }) }));
-vi.mock('@/lib/github-broker/managed', () => ({ readManagedGithubToken: () => fixture.available ? ({ token: fixture.scope, installationId: fixture.installation }) : null }));
+vi.mock('@/lib/github-broker/managed', () => ({ readManagedGithubToken: () => fixture.available ? ({ token: fixture.scope, installationId: fixture.installation, accountLogin: 'example' }) : null }));
 const originalFetch = globalThis.fetch;
 const root = mkdtempSync(join(tmpdir(), 'o8-native-stack-read-'));
 process.env.O8_DATA_DIR = root;

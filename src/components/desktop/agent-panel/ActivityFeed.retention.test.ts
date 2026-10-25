@@ -137,6 +137,17 @@ describe('ActivityFeed retained stream snapshots', () => {
     expect(host.textContent).toContain('fresh commit');
     expect(host.textContent).toContain('GitHub sync delayed');
   });
+  it('hides retained CI rows when organization access is uncovered', async () => {
+    await render(); expectRows(repoA);
+    reply = stream => stream === 'ci'
+      ? Response.json({ code: 'github_org_not_covered', error: "GitHub sign-in doesn't cover organization repos yet" }, { status: 422 })
+      : Response.json(payload(stream, 'fresh'));
+    await refresh();
+    expect(host.textContent).not.toContain(`${repoA} check`);
+    expect(host.textContent).toContain('fresh issue');
+    expect(host.textContent).toContain('fresh pull');
+    expect(host.textContent).toContain('fresh commit');
+  });
 
   it.each(['network', 'json', 'payload'] as const)('isolates a %s failure to its stream', async (failure) => {
     await render();

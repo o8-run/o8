@@ -7,6 +7,8 @@ import { readActiveIdentity, readManagedGithubToken, readSignInEpoch } from './m
 import { assertGitHubRequestBudget, githubCredentialScope, observeGitHubRequestBudget, type GitHubReadPriority } from './request-budget';
 import { sharedConditionalGitHubRead } from './conditional-read';
 import { isSecondaryGitHubLimit } from './rate-limit-response';
+import { GitHubOrgNotCoveredError, githubRepoAccessKey, managedGitHubOwnerMatches, publicGitHubDecision } from './repo-access';
+import { publicGitHubRead } from './public-read';
 
 const INSTALLATION_TOKEN_TTL_SKEW_MS = 60_000;
 const installationTokenCache = new Map<number, { token: string; expiresAtMs: number }>();
@@ -112,14 +114,11 @@ function buildGitHubError(response: Response, bodyText: string) {
 }
 
 export async function getInstallationForRepo(repoFullName: string, signal?: AbortSignal) {
-  // Managed mode: no BYO app key on this machine — there is exactly ONE
-  // installation (the signed-in user's, minted by the license server). We
-  // can't call /repos/:repo/installation without an app JWT; a repo outside
-  // the user's installation just 404s downstream with the token, which the
-  // existing error surface already reports.
+  // Managed mode holds one installation. Never authorize a different owner.
   if (!getGitHubAppConfig()) {
     const managed = readManagedGithubToken();
     if (managed) {
+      if (!managedGitHubOwnerMatches(repoFullName, managed.accountLogin)) throw new GitHubOrgNotCoveredError();
       return {
         id: managed.installationId,
         account: managed.accountLogin ? { login: managed.accountLogin } : undefined,
@@ -178,12 +177,35 @@ export async function getInstallationToken(installationId: number, signal?: Abor
 export async function githubInstallationFetch(repoFullName: string, path: string, init?: RequestInit,
   readOptions: { priority?: GitHubReadPriority; share?: boolean; authorization?: GitHubInstallationAuthorization } = {}) {
   const authorization = readOptions.authorization;
+  const isRead = !init?.method || init.method === 'GET';
+  const config = getGitHubAppConfig();
+  const managed = config ? null : readManagedGithubToken();
+  const decisionKey = githubRepoAccessKey(repoFullName);
+  const decision = publicGitHubDecision(decisionKey);
+  const outsideManagedOwner = !config && !managedGitHubOwnerMatches(repoFullName, managed?.accountLogin);
+  const apiBaseUrl = authorization?.account.apiBaseUrl ?? config?.apiBaseUrl ?? 'https://api.github.com';
+  if (!path.startsWith('/') || path.startsWith('//') || path.includes('\\')) throw new Error('GitHub request does not match the repository.');
+  const repoPath = `/repos/${repoFullName.toLowerCase()}`;
+  const targetPath = new URL(`${apiBaseUrl}${path}`).pathname.toLowerCase();
+  const basePath = new URL(apiBaseUrl).pathname.replace(/\/$/, '').toLowerCase();
+  const withinRepo = targetPath === `${basePath}${repoPath}` || targetPath.startsWith(`${basePath}${repoPath}/`);
+  if (!withinRepo && path !== '/graphql') throw new Error('GitHub request does not match the repository.');
+  const anonymousRead = async () => {
+    // Anonymous transport is restricted to this repository's REST reads.
+    if (!isRead || !withinRepo) throw new GitHubOrgNotCoveredError();
+    const { response, scope } = await publicGitHubRead(repoFullName, path, apiBaseUrl, decisionKey, init, readOptions.priority,
+      readOptions.share === false || init?.cache === 'reload' ? 0 : 120_000);
+    return { response, installation: { id: 0, account: { login: repoFullName.split('/')[0] } } as Awaited<ReturnType<typeof getInstallationForRepo>>, scope, anonymous: true };
+  };
+  if (outsideManagedOwner || isRead && decision && !authorization) {
+    if (!isRead || authorization) throw new GitHubOrgNotCoveredError();
+    return anonymousRead();
+  }
   const installation = authorization ? authorization.installation : await getInstallationForRepo(repoFullName, init?.signal ?? undefined);
   const token = authorization ? authorization.token : await getInstallationToken(installation.id, init?.signal ?? undefined);
   // Managed mode has NO BYO config — requireGitHubAppConfig() would throw here
   // even though we hold a valid token (audit #1, the bug that made every managed
   // GitHub call fail). The API base is always public GitHub in managed mode.
-  const apiBaseUrl = authorization?.account.apiBaseUrl ?? getGitHubAppConfig()?.apiBaseUrl ?? 'https://api.github.com';
   const scope = githubCredentialScope(apiBaseUrl, installation.id, token);
   const budgetScope = githubCredentialScope(apiBaseUrl, installation.id, 'installation-budget');
   const resource = path === '/graphql' ? 'graphql' : path.startsWith('/search/') ? 'search' : 'core';
@@ -193,14 +215,21 @@ export async function githubInstallationFetch(repoFullName: string, path: string
     // No await between this guard and dispatch. Never resolve another account's
     // token after a creation has been reserved for the captured account.
     if (authorization) requireGitHubAccount(authorization.account);
-    const response = await fetch(`${apiBaseUrl}${path}`, { ...init, headers, cache: 'no-store' });
+    const response = await fetch(`${apiBaseUrl}${path}`, { ...init, headers, cache: 'no-store', redirect: 'manual' });
     observeGitHubRequestBudget(budgetScope, resource, response, Date.now(), await isSecondaryGitHubLimit(response));
     if (response.status === 403 || response.status === 429) assertGitHubRequestBudget(budgetScope, resource, 'interactive');
+    // Retry only reads. Never use public fallback to authorize a mutation.
+    if (isRead && !authorization && (response.status === 404 || response.status === 301 || response.status === 308)) {
+      await response.body?.cancel().catch(() => {});
+      return (await anonymousRead()).response;
+    }
     return response;
   };
   const response = readOptions.share && (!init?.method || init.method === 'GET')
     ? await sharedConditionalGitHubRead(JSON.stringify([scope, repoFullName.toLowerCase(), path]), read) : await read();
-  return { response, installation, scope };
+  const anonymous = isRead && !authorization && Boolean(publicGitHubDecision(decisionKey));
+  return { response, installation: anonymous ? { ...installation, id: 0 } : installation,
+    scope: anonymous ? githubCredentialScope(apiBaseUrl, 0, 'anonymous') : scope, anonymous };
 }
 
 export function verifyGitHubWebhookSignature(rawBody: string, signatureHeader: string | null) {

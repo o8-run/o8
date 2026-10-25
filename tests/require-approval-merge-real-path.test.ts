@@ -1181,7 +1181,7 @@ describe('requireApproval merge governance through the real command path', () =>
       createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z', closedAt: null, mergedAt: null };
     upsertGitHubPullRequest(stale);
     const broker = await import('@/lib/github-broker/auth');
-    const identityProbe = vi.spyOn(broker, 'githubInstallationFetch').mockResolvedValue({ installation: { id: 2366 }, scope: 'fixture-delivery',
+    const identityProbe = vi.spyOn(broker, 'githubInstallationFetch').mockResolvedValue({ installation: { id: 2366 }, scope: 'fixture-delivery', anonymous: false,
       response: Response.json({ id: 9001218, number: 1218, base: { repo: { id: 9002366 } }, html_url: stale.url }) });
 
     const result = await dispatch({ verb: 'create_pr', laneId: lane.id, actor: 'orchestrator' });

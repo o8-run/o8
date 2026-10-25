@@ -1,3 +1,4 @@
+vi.mock('./repo-access', async (importOriginal) => ({ ...await importOriginal<typeof import('./repo-access')>(), canReadGitHubSnapshot: () => true, usesAnonymousGitHubReads: () => false }));
 import { mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import { join } from 'node:path';
