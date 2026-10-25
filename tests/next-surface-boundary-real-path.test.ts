@@ -3,8 +3,11 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSy
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { parse } from 'yaml';
 
 const check = join(process.cwd(), 'scripts/next/check-surface-boundary.mjs');
+const checkerPath = 'scripts/next/check-surface-boundary.mjs';
+const workflowPath = '.github/workflows/next-surface-boundary.yml';
 const roots: string[] = [];
 const shell = 'native/o8-next/src/shell.rs';
 const registration = '        probe: Probe = "surfaces/probe.rs";\n';
@@ -59,6 +62,8 @@ function fixture() {
     put(root, `native/o8-next/src/${path}`, '// shared baseline\n');
   }
   put(root, 'scripts/next/dev-server.ts', '// shared routes\n');
+  put(root, checkerPath, readFileSync(check, 'utf8'));
+  put(root, workflowPath, readFileSync(join(process.cwd(), workflowPath), 'utf8'));
   commit(root);
   git(root, 'switch', '-qc', 'surface');
   put(root, shell, baseline.replace('    tabs {\n', `    tabs {\n${registration}`));
@@ -81,6 +86,55 @@ function expectClean(root: string) {
   expect(git(root, 'status', '--porcelain')).toBe('');
   const paths = git(root, 'worktree', 'list', '--porcelain').split('\n').filter(line => line.startsWith('worktree '));
   expect(paths).toEqual([`worktree ${realpathSync(root)}`]);
+}
+
+function runBaseWorkflow(root: string, labels: string[] = []) {
+  const workflow = parse(git(root, 'show', `main:${workflowPath}`));
+  expect(workflow.on.pull_request_target).toBeDefined();
+  const head = git(root, 'rev-parse', 'surface');
+  const base = git(root, 'rev-parse', 'main');
+  const event = join(root, '.git/target-event.json');
+  writeFileSync(event, JSON.stringify({ pull_request: { base: { sha: base }, head: { sha: head }, labels: labels.map(name => ({ name })) } }));
+  git(root, 'update-ref', 'refs/remotes/origin/main', 'main');
+  const checkout = workflow.jobs.boundary.steps.find((step: { uses?: string }) => step.uses?.startsWith('actions/checkout@'));
+  expect(checkout.with.ref).toBe('${{ github.event.pull_request.base.sha }}');
+  expect(checkout.with['persist-credentials']).toBe(false);
+  git(root, 'checkout', '--quiet', '--detach', 'main');
+  const replacements: Record<string, string> = {
+    '${{ github.workspace }}': root,
+    '${{ github.event.pull_request.base.sha }}': base,
+    '${{ github.event.pull_request.head.sha }}': head,
+  };
+  const declared = Object.fromEntries(Object.entries(workflow.jobs.boundary.env).map(([name, value]) => [name,
+    Object.entries(replacements).reduce((text, [expression, replacement]) => text.replaceAll(expression, replacement), String(value)),
+  ]));
+  const output = join(root, '.git/workflow-output');
+  const env: NodeJS.ProcessEnv = { ...process.env, ...declared,
+    GITHUB_EVENT_PATH: event, GITHUB_EVENT_NAME: 'pull_request_target', GITHUB_OUTPUT: output,
+    GITHUB_STEP_SUMMARY: join(root, '.git/workflow-summary'), RUNNER_TEMP: join(root, '.git'),
+    GITHUB_WORKSPACE: root, CARGO_NET_OFFLINE: 'true',
+  };
+  let logs = '';
+  for (const step of workflow.jobs.boundary.steps) {
+    if (!step.run) continue;
+    if (step.if && !readFileSync(output, 'utf8').includes('run=true')) continue;
+    const result = spawnSync('bash', ['-e', '-o', 'pipefail', '-c', step.run], { cwd: root, env, encoding: 'utf8' });
+    logs += result.stdout + result.stderr;
+    if (result.status !== 0) return { status: result.status, logs };
+  }
+  return { status: 0, logs };
+}
+
+function importPinnedPolicy(root: string, ref: string) {
+  // Import just the immutable commit and the tree path to its checker. Fetching
+  // the entire repository history would dominate this tiny offline fixture.
+  for (const spec of [ref, `${ref}^{tree}`, `${ref}:scripts`, `${ref}:scripts/next`, `${ref}:${checkerPath}`]) {
+    const type = git(process.cwd(), 'cat-file', '-t', spec);
+    const object = spawnSync('git', ['cat-file', type, spec], { cwd: process.cwd() });
+    expect(object.status).toBe(0);
+    const imported = spawnSync('git', ['hash-object', '-w', '-t', type, '--stdin'], { cwd: root, input: object.stdout, encoding: 'utf8' });
+    expect(imported.status, imported.stderr).toBe(0);
+  }
 }
 
 describe('o8 next surface boundary CLI', () => {
@@ -166,14 +220,102 @@ describe('o8 next surface boundary CLI', () => {
     commit(root);
     git(root, 'switch', '-q', 'surface');
     expect(run(root).status).toBe(0);
-    // Cargo.toml is deliberately outside the surface-only patch.
-    put(root, 'native/o8-next/Cargo.toml', readFileSync(join(root, 'native/o8-next/Cargo.toml'), 'utf8') + '\n[features]\nsecret_support = []\ndefault = ["secret_support"]\n');
-    put(root, 'native/o8-next/src/surfaces/probe.rs', '#[cfg(not(feature = "secret_support"))]\ncompile_error!("surface needs excluded shared support");\npub fn run() {}\n');
+    // Support outside the native boundary can be part of a wider PR, but never
+    // enters the surface-only patch. Its full HEAD compiles; isolation must fail.
+    put(root, 'tests/boundary-support.rs', 'pub fn value() {}\n');
+    put(root, 'native/o8-next/src/surfaces/probe.rs', '#[path = "../../../../tests/boundary-support.rs"]\nmod support;\npub fn run() { support::value(); }\n');
     commit(root);
     const result = run(root);
     expect(result.status, result.stdout).toBe(1);
-    expect(result.stderr).toContain('surface needs excluded shared support');
+    expect(result.stderr).toContain('boundary-support.rs');
     expectClean(root);
+  });
+
+  it.each(['transport.rs', 'macros.rs', '../build.rs', '../Cargo.toml'])('rejects shared support outside a surface module: %s', path => {
+    const root = fixture();
+    const file = join('native/o8-next/src', path).split('\\').join('/');
+    const previous = path === '../Cargo.toml' ? readFileSync(join(root, file), 'utf8') : '';
+    put(root, file, previous + '// shared support\n');
+    // Cargo manifests accept # comments; the checker must reject before Cargo.
+    if (path === '../Cargo.toml') put(root, file, previous + '# shared support\n');
+    commit(root);
+    const result = run(root);
+    expect(result.status, result.stderr).toBe(1);
+    expect(result.stderr).toContain(`${file}: 1 changed lines (+1/-0)`);
+  });
+
+  it('keeps fixture helpers inside their surface module allowed', () => {
+    const root = fixture();
+    put(root, 'native/o8-next/src/surfaces/probe/fixtures/keys.py', '# owned fixture\n');
+    commit(root);
+    const result = run(root);
+    expect(result.status, result.stderr).toBe(0);
+  });
+
+  it('accepts an identical surface already squash-merged onto newer main', () => {
+    const root = fixture();
+    git(root, 'switch', '--quiet', 'main');
+    put(root, shell, git(root, 'show', `surface:${shell}`) + '\n');
+    put(root, 'native/o8-next/src/surfaces/probe.rs', git(root, 'show', 'surface:native/o8-next/src/surfaces/probe.rs') + '\n');
+    put(root, 'landed-only.txt', 'main advanced\n');
+    commit(root);
+    git(root, 'switch', '--quiet', 'surface');
+    const result = run(root);
+    expect(result.status, result.stderr).toBe(0);
+    expectClean(root);
+  });
+
+  it.each([checkerPath, workflowPath])('requires shell-work for changes to the guard itself: %s', path => {
+    const root = fixture();
+    git(root, 'switch', '--quiet', 'main');
+    git(root, 'branch', '-D', 'surface');
+    git(root, 'switch', '--quiet', '-c', 'surface');
+    put(root, path, path === checkerPath ? 'process.exit(0);\n' : 'name: bypass\n');
+    commit(root);
+    expect(run(root, [], ['--select-only']).status).toBe(1);
+    expect(run(root, ['shell-work'], ['--select-only']).status).toBe(0);
+  });
+
+  it('loads a base-owned workflow and executes its checker despite a malicious PR checker and workflow', () => {
+    const root = fixture();
+    // Read the workflow from base, as pull_request_target does. The actual run
+    // blocks below then drive Git and Cargo; no copied policy implementation.
+    put(root, checkerPath, 'console.log("MALICIOUS_CHECKER_EXECUTED");\nprocess.exit(0);\n');
+    put(root, workflowPath, 'name: bypass\non: pull_request\njobs:\n  bypass:\n    runs-on: ubuntu-latest\n    steps:\n      - run: exit 0\n');
+    put(root, 'native/o8-next/src/client.rs', 'pub fn value() -> u8 { 9 }\n');
+    commit(root);
+    const result = runBaseWorkflow(root);
+    expect(result.status, result.logs).toBe(1);
+    expect(result.logs).not.toContain('MALICIOUS_CHECKER_EXECUTED');
+    expect(result.logs).toContain('native/o8-next/src/client.rs: 2 changed lines (+1/-1)');
+    expect(result.logs).toContain(checkerPath);
+    expect(result.logs).toContain(workflowPath);
+  });
+
+  it('parses and runs the base workflow through selection and an actual isolated Cargo check', () => {
+    const result = runBaseWorkflow(fixture());
+    expect(result.status, result.logs).toBe(0);
+    expect(result.logs).toContain('isolated cargo check passed');
+    expect(result.logs).toMatch(/wall=\d+\.\d+ s/);
+  });
+
+  it('uses the immutable bootstrap policy when base has no checker, never the PR copy', () => {
+    const root = fixture();
+    git(root, 'switch', '--quiet', 'main');
+    git(root, 'rm', checkerPath);
+    commit(root);
+    git(root, 'switch', '--quiet', 'surface');
+    put(root, checkerPath, 'console.log("MALICIOUS_CHECKER_EXECUTED");\nprocess.exit(0);\n');
+    put(root, 'native/o8-next/src/transport.rs', '// shared macro\n');
+    commit(root);
+    const workflow = parse(git(root, 'show', `main:${workflowPath}`));
+    const pin = workflow.jobs.boundary.env.POLICY_BOOTSTRAP_REF as string;
+    expect(pin).toMatch(/^[a-f0-9]{40}$/);
+    importPinnedPolicy(root, pin);
+    const result = runBaseWorkflow(root);
+    expect(result.status, result.logs).toBe(1);
+    expect(result.logs).toContain('native/o8-next/src/transport.rs: 1 changed lines (+1/-0)');
+    expect(result.logs).not.toContain('MALICIOUS_CHECKER_EXECUTED');
   });
 
   it('skips unrelated PRs before cargo and signals selection for CI setup', () => {
