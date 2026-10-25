@@ -6,7 +6,7 @@ use std::{sync::Arc, time::Duration};
 use tokio::{
     io::AsyncWriteExt,
     net::{TcpListener, TcpStream},
-    time::timeout,
+    time::{timeout, timeout_at, Instant},
 };
 use tokio_tungstenite::{
     accept_async, connect_async,
@@ -27,16 +27,21 @@ pub async fn serve(
     mut shutdown: tokio::sync::watch::Receiver<bool>,
 ) -> std::io::Result<()> {
     let mut connections = tokio::task::JoinSet::new();
+    let mut writers = tokio::task::JoinSet::new();
+    let (reports, mut reports_rx) = tokio::sync::mpsc::unbounded_channel::<input::Report>();
     loop {
         tokio::select! {
             _ = shutdown.changed() => break,
             _ = connections.join_next(), if !connections.is_empty() => {},
+            _ = writers.join_next(), if !writers.is_empty() => {},
+            Some(report) = reports_rx.recv() => { writers.spawn(report.finish()); }
             accepted = listener.accept() => {
                 let (socket, peer) = accepted?;
                 let (upstream, key, bus) = (upstream.clone(), key.clone(), bus.clone());
                 let shutdown = shutdown.clone();
+                let reports = reports.clone();
                 connections.spawn(async move {
-                    let _ = connection(socket, peer.ip().to_string(), upstream, key, bus, shutdown).await;
+                    let _ = connection(socket, peer.ip().to_string(), upstream, key, bus, shutdown, reports).await;
                 });
             }
         }
@@ -45,11 +50,27 @@ pub async fn serve(
     // remain alive until their HTTP responses complete; WS tasks observe shutdown.
     drop(listener);
     println!("{}", json!({"draining":true}));
-    let _ = timeout(Duration::from_secs(5), async {
-        while connections.join_next().await.is_some() {}
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let _ = timeout_at(deadline, async {
+        while !connections.is_empty() {
+            tokio::select! {
+                _ = connections.join_next() => {},
+                Some(report) = reports_rx.recv() => { writers.spawn(report.finish()); }
+            }
+        }
     })
     .await;
-    // JoinSet aborts remaining connections at the bounded shutdown deadline.
+    // Expire HTTP at five seconds. Aborted WS collectors synchronously hand
+    // off their ledger; their reporting owners are outside this JoinSet.
+    connections.abort_all();
+    while connections.join_next().await.is_some() {}
+    while let Ok(report) = reports_rx.try_recv() {
+        writers.spawn(report.finish());
+    }
+    let _ = timeout_at(deadline + Duration::from_millis(250), async {
+        while writers.join_next().await.is_some() {}
+    })
+    .await;
     Ok(())
 }
 
@@ -60,6 +81,7 @@ async fn connection(
     key: String,
     bus: Arc<EventBus>,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
+    reports: input::Reports,
 ) -> Result<(), ()> {
     // Peek leaves the handshake available to tungstenite. HTTP remains a bounded
     // streaming proxy to the original handlers, including authenticated ingress.
@@ -176,20 +198,20 @@ async fn connection(
     loop {
         tokio::select! {
             _ = shutdown.changed() => {
-                return input::drain(&mut socket, &mut backend, inputs, true, delegated,
-                    Message::Close(Some(CloseFrame { code: CloseCode::Away, reason: "server shutting down".into() }))).await;
+                return input::drain(socket, &mut backend, inputs, true, delegated,
+                    Message::Close(Some(CloseFrame { code: CloseCode::Away, reason: "server shutting down".into() })), reports).await;
             }
             _ = heartbeat.tick() => {
                 if !alive {
-                    return input::drain(&mut socket, &mut backend, inputs, false, delegated,
-                        Message::Close(Some(CloseFrame { code: CloseCode::Away, reason: "heartbeat expired".into() }))).await;
+                    return input::drain(socket, &mut backend, inputs, false, delegated,
+                        Message::Close(Some(CloseFrame { code: CloseCode::Away, reason: "heartbeat expired".into() })), reports).await;
                 }
                 alive = false;
                 send(&mut socket, Message::Ping(vec![].into())).await?;
             }
             message = backend.next() => {
                 let Some(Ok(message)) = message else {
-                    return input::drain(&mut socket, &mut backend, inputs, false, delegated, Message::Close(None)).await;
+                    return input::drain(socket, &mut backend, inputs, false, delegated, Message::Close(None), reports).await;
                 };
                 if let Message::Text(raw) = &message {
                     if let Ok(frame) = serde_json::from_str::<Value>(raw) {
@@ -206,8 +228,8 @@ async fn connection(
                                 let Some((events, latest)) = bus.crossover(&stream, since).await else {
                                     // TS remains the replay authority. Never advance
                                     // over an evicted crossover and claim delivery.
-                                    return input::drain(&mut socket, &mut backend, inputs, true, delegated,
-                                        Message::Close(Some(CloseFrame { code: CloseCode::Again, reason: "reconnect for replay".into() }))).await;
+                                    return input::drain(socket, &mut backend, inputs, true, delegated,
+                                        Message::Close(Some(CloseFrame { code: CloseCode::Again, reason: "reconnect for replay".into() })), reports).await;
                                 };
                                 let events = events.into_iter().filter(|event| visible(event, &selected)).collect::<Vec<_>>();
                                 if !events.is_empty() {
@@ -222,11 +244,11 @@ async fn connection(
                 match message {
                     Message::Ping(data) => {
                         if send(&mut backend, Message::Pong(data)).await.is_err() {
-                            return input::drain(&mut socket, &mut backend, inputs, false, delegated, Message::Close(None)).await;
+                            return input::drain(socket, &mut backend, inputs, false, delegated, Message::Close(None), reports).await;
                         }
                     }
                     Message::Pong(data) => inputs.confirm(&data),
-                    Message::Close(frame) => return input::drain(&mut socket, &mut backend, inputs, false, delegated, Message::Close(frame)).await,
+                    Message::Close(frame) => return input::drain(socket, &mut backend, inputs, false, delegated, Message::Close(frame), reports).await,
                     other => send(&mut socket, other).await?,
                 }
             }
@@ -234,8 +256,8 @@ async fn connection(
                 let events = match publication {
                     Ok(events) => events,
                     Err(_) => {
-                        return input::drain(&mut socket, &mut backend, inputs, true, delegated,
-                            Message::Close(Some(CloseFrame { code: CloseCode::Again, reason: "reconnect for replay".into() }))).await;
+                        return input::drain(socket, &mut backend, inputs, true, delegated,
+                            Message::Close(Some(CloseFrame { code: CloseCode::Again, reason: "reconnect for replay".into() })), reports).await;
                     }
                 };
                 for subscription in &mut subscriptions {
@@ -261,7 +283,7 @@ async fn connection(
                     }
                     other => {
                         if inputs.forward(&mut backend, other).await.is_err() {
-                            return input::drain(&mut socket, &mut backend, inputs, false, delegated, Message::Close(None)).await;
+                            return input::drain(socket, &mut backend, inputs, false, delegated, Message::Close(None), reports).await;
                         }
                     }
                 }

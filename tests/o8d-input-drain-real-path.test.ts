@@ -20,13 +20,18 @@ beforeAll(async () => {
 }, 120_000);
 
 run.each([
-  { upstreamExits: false, plaintext: true, withheld: false, policy: 0 },
-  { upstreamExits: true, plaintext: true, withheld: false, policy: 0 },
-  { upstreamExits: true, plaintext: false, withheld: false, policy: 0 },
-  { upstreamExits: false, plaintext: true, withheld: true, policy: 0 },
-  { upstreamExits: false, plaintext: false, withheld: false, policy: 4403 },
-  { upstreamExits: false, plaintext: false, withheld: false, policy: 1008 },
-])('accounts for queued inputs (exits=$upstreamExits plaintext=$plaintext withheld=$withheld policy=$policy)', async ({ upstreamExits, plaintext, withheld, policy }) => {
+  { upstreamExits: false, plaintext: true, withheld: false, policy: 0, count: 500 },
+  { upstreamExits: true, plaintext: true, withheld: false, policy: 0, count: 500 },
+  { upstreamExits: true, plaintext: false, withheld: false, policy: 0, count: 500 },
+  { upstreamExits: false, plaintext: true, withheld: true, policy: 0, count: 500 },
+  { upstreamExits: false, plaintext: false, withheld: false, policy: 4403, count: 500 },
+  { upstreamExits: false, plaintext: false, withheld: false, policy: 1008, count: 500 },
+  { upstreamExits: false, plaintext: true, withheld: false, policy: 0, count: 5_000 },
+  { upstreamExits: true, plaintext: true, withheld: false, policy: 0, count: 5_000 },
+  { upstreamExits: false, plaintext: true, withheld: true, policy: 0, count: 5_000, empty: false },
+  { upstreamExits: false, plaintext: true, withheld: true, policy: 0, count: 5_000, empty: false, pauseReporting: true },
+  { upstreamExits: false, plaintext: true, withheld: true, policy: 0, count: 9_000, limited: true },
+])('accounts for queued inputs (exits=$upstreamExits plaintext=$plaintext withheld=$withheld policy=$policy count=$count pauseReporting=$pauseReporting)', async ({ upstreamExits, plaintext, withheld, policy, count, empty = withheld, pauseReporting = false, limited = false }) => {
   const directory = realpathSync(mkdtempSync(join(tmpdir(), 'o8-input-drain-')));
   const receipt = join(directory, 'received.json');
   const delivered: string[] = [];
@@ -46,9 +51,9 @@ run.each([
     if (plaintext) socket.send(JSON.stringify({ __o8d: { capabilities: [], subscriptions: [] } }));
     socket.send(JSON.stringify({ channel: 'control', event: 'fixture-ready' }));
     socket.on('message', (raw) => {
-      const message = withheld ? null : JSON.parse(String(raw));
-      if (!withheld && message.type !== 'terminal-input') return;
-      delivered.push(withheld ? String(delivered.length) : message.requestId);
+      const message = empty ? null : JSON.parse(String(raw));
+      if (!empty && message.type !== 'terminal-input') return;
+      delivered.push(empty ? String(delivered.length) : message.requestId);
       writeFileSync(receipt, JSON.stringify(delivered));
       firstInput();
     });
@@ -70,6 +75,7 @@ run.each([
   const sender = new WebSocket(endpoint.replace('http:', 'ws:'));
   const failed: string[] = [];
   const applicationFrames: unknown[] = [];
+  let reportingPause: ReturnType<typeof setTimeout> | undefined;
   let upstreamReady!: () => void;
   const greeted = new Promise<void>((resolve) => { upstreamReady = resolve; });
   sender.on('message', (raw) => {
@@ -78,6 +84,15 @@ run.each([
     if (frame.event === 'fixture-ready') upstreamReady();
     if (frame.data?.code === 'input_not_delivered') {
       failed.push(frame.data.requestId);
+      if (pauseReporting && failed.length === 1) {
+        // Consume the old 500 ms reporting window after reporting has begun.
+        // This makes the deadline race reproducible on fast Linux hosts too.
+        process.kill(child.pid!, 'SIGSTOP');
+        reportingPause = setTimeout(() => {
+          reportingPause = undefined;
+          process.kill(child.pid!, 'SIGCONT');
+        }, 650);
+      }
     }
   });
   sender.on('error', () => {});
@@ -111,8 +126,8 @@ run.each([
       await new Promise((resolve) => setTimeout(resolve, 5));
     }
     if (upstreamExits) backend!.terminate();
-    await Promise.all(Array.from({ length: 500 }, (_, index) => new Promise<void>((resolve, reject) => {
-      const message = withheld ? '' : JSON.stringify(plaintext
+    await Promise.all(Array.from({ length: count }, (_, index) => new Promise<void>((resolve, reject) => {
+      const message = empty ? '' : JSON.stringify(plaintext
         ? { type: 'terminal-input', sessionName: 'fixture-terminal', requestId: String(index), data: `input-${index}` }
         : { e2ee: 1, n: `fixture-nonce-${index}`, c: 'opaque-fixture-ciphertext' });
       sender.send(message, (error) => error ? reject(error) : resolve());
@@ -140,7 +155,7 @@ run.each([
     const [code, reason] = await closed;
     const received = JSON.parse(readFileSync(receipt, 'utf8')) as string[];
     const accounted = [...received, ...failed];
-    process.stdout.write(`INPUT_DRAIN plaintext=${plaintext} withheld=${withheld} policy=${policy} delivered=${received.length} failed=${failed.length} exitMs=${elapsed.toFixed(1)}\n`);
+    process.stdout.write(`INPUT_DRAIN plaintext=${plaintext} withheld=${withheld} policy=${policy} count=${count} pauseReporting=${pauseReporting} delivered=${received.length} failed=${failed.length} accounted=${new Set(accounted).size} exitMs=${elapsed.toFixed(1)}\n`);
     if (!plaintext) {
       expect(failed).toHaveLength(0);
       expect(applicationFrames).toEqual([{ channel: 'control', event: 'fixture-ready' }]);
@@ -149,19 +164,32 @@ run.each([
         expect(policyDuringDrain).toBe(true);
         expect(String(reason)).toBe('fixture policy refusal');
       } else { expect(String(reason)).toContain('unconfirmed'); }
+    } else if (limited) {
+      expect(failed.length).toBeGreaterThan(0);
+      expect(failed.length).toBeLessThan(count);
+      expect(code).toBe(1011);
+      expect(String(reason)).toContain('unconfirmed');
     } else if (withheld) {
-      expect(failed).toHaveLength(500);
+      expect(failed).toHaveLength(count);
+      if (!empty) {
+        expect(new Set(failed).size).toBe(count);
+        expect(new Set(accounted)).toEqual(new Set(Array.from({ length: count }, (_, index) => String(index))));
+      }
     } else {
-      expect(accounted).toHaveLength(500);
-      expect(new Set(accounted).size).toBe(500);
-      expect(accounted.sort((left, right) => Number(left) - Number(right))).toEqual(Array.from({ length: 500 }, (_, index) => String(index)));
-      expect(received).toHaveLength(upstreamExits ? 0 : 500);
-      expect(failed).toHaveLength(upstreamExits ? 500 : 0);
+      expect(accounted).toHaveLength(count);
+      expect(new Set(accounted).size).toBe(count);
+      expect(accounted.sort((left, right) => Number(left) - Number(right))).toEqual(Array.from({ length: count }, (_, index) => String(index)));
+      expect(received).toHaveLength(upstreamExits ? 0 : count);
+      expect(failed).toHaveLength(upstreamExits ? count : 0);
     }
     expect(elapsed).toBeGreaterThanOrEqual(4_800);
-    expect(elapsed).toBeLessThan(6_000);
+    expect(elapsed).toBeLessThan(count >= 5_000 ? 5_250 : 6_000);
     expect(child.exitCode).toBe(0);
   } finally {
+    if (reportingPause) {
+      clearTimeout(reportingPause);
+      if (child.exitCode === null && child.signalCode === null) process.kill(child.pid!, 'SIGCONT');
+    }
     if (paused) process.kill(child.pid!, 'SIGCONT');
     if (child.exitCode === null && child.signalCode === null) { child.kill('SIGKILL'); await exit; }
     sender.terminate();

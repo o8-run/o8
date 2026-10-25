@@ -54,8 +54,17 @@ This confirms receipt, not command execution. Tracking is bounded by 256 frames
 and 1 MiB plus one existing protocol-bounded frame. Shutdown fences a sender's
 already-written frames with a public ping/pong, forwards them, and waits for
 upstream receipt before closing. A four-second receipt window and a 4.5-second
-WebSocket drain reserve time inside the existing five-second process deadline
-for individual failures. These fences cover completed socket-send callbacks;
+input collection deadline leave time for individual failures. Cancellation
+hands the socket and every retained original to a separate reporting owner
+through a local queue, without serialization or a network wait. It prepares all
+correlated errors before its first network yield, then batches writes with one
+final flush instead of flushing each failure separately. Failed input awaiting
+reporting is capped at 8,192 frames and 1 MiB plus one protocol-bounded frame;
+the upstream in-flight bound remains 256 frames and 1 MiB.
+
+HTTP connections still expire at five seconds. Reporting owners survive the
+connection-task abort and have at most 250 ms of additional transport grace;
+completed reporting adds no delay. These fences cover completed socket-send callbacks;
 they do not promise delivery of arbitrary application-buffered data.
 
 Unconfirmed delegated plaintext input gets one correlated error with its original
@@ -64,10 +73,16 @@ not an execution guarantee, and input is never replayed automatically. Opaque or
 encrypted clients retain authoritative TypeScript policy closes, or receive an
 explicit protocol close indicating unconfirmed delivery; Rust cannot synthesize
 application errors with TypeScript's E2EE key.
-The real executable regression pauses o8d, queues 500 locally successful sends,
-queues producer EOF, resumes it, and requires either 500 upstream deliveries or
-500 individual failures. The same test holds HTTP ingress unfinished and checks
-that the process still exits within its five-second drain budget.
+If collection cannot reach the public fence within its bounds, plaintext clients
+also receive an explicit unconfirmed-delivery close. Local handoff preserves
+the retained outcomes; transport writes must finish within the reporting bound.
+The real executable regression pauses o8d, queues 500 or 5,000 locally successful
+sends, queues producer EOF, and resumes it. Live or exited upstreams require
+every input to be delivered or individually failed. With 5,000 inputs and an
+upstream withholding pongs, every unconfirmed request id must be failed, including
+when the process pauses for 650 ms during reporting to cross the old cancellation
+deadline. The same test holds HTTP ingress unfinished and checks exit before
+the five-second drain deadline plus the 250 ms reporting bound.
 
 ## Acceptance audit for #4533
 
