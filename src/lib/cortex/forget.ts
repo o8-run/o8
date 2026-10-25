@@ -84,12 +84,12 @@ function forgetDirective(id: string) {
   }
   try { unlinkSync(staged); } catch { console.warn('[cortex-forget] Deleted instruction has retained staging data.'); }
 }
-function forgetOutcome(id: string, repoPath: string, projectId: string) {
+function forgetOutcome(id: string, repoPath: string, projectId: string | null) {
   const db = getSqlite();
   db.transaction(() => {
-    const found = db.prepare('SELECT id FROM session_outcomes WHERE id = ? AND repo_path = ? AND project_id = ?').get(id, repoPath, projectId);
+    const found = db.prepare('SELECT id FROM session_outcomes WHERE id = ? AND repo_path = ? AND project_id IS ?').get(id, repoPath, projectId);
     if (!found) throw new ForgetError('Outcome not found in this repository and project.', 404);
-    db.prepare('DELETE FROM session_outcomes WHERE id = ? AND repo_path = ? AND project_id = ?').run(id, repoPath, projectId);
+    db.prepare('DELETE FROM session_outcomes WHERE id = ? AND repo_path = ? AND project_id IS ?').run(id, repoPath, projectId);
     deleteDerived('outcome', id);
     advanceMemoryRevision(db);
   })();
@@ -103,9 +103,9 @@ export async function deleteRetainedMemory(request: NextRequest, kind: Kind) {
     let repoPath: string | undefined;
     if (kind === 'directive') forgetDirective(body.id);
     else {
-      if (typeof body.repoPath !== 'string' || !body.repoPath.trim()) return NextResponse.json({ ok: false, error: 'repoPath is required.' }, { status: 400 });
+      if (typeof body.repoPath !== 'string' || (!body.repoPath.trim() && !Object.hasOwn(body, 'projectId'))) return NextResponse.json({ ok: false, error: 'repoPath is required.' }, { status: 400 });
       repoPath = body.repoPath.trim();
-      const projectId = typeof body.projectId === 'string' && body.projectId.trim()
+      const projectId = body.projectId === null ? null : typeof body.projectId === 'string' && body.projectId.trim()
         ? body.projectId.trim() : (await getActiveProjectScopeForRepo(repoPath)).projectId;
       forgetOutcome(body.id, repoPath, projectId);
     }

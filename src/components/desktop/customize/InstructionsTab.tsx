@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { RetainedMemory } from './RetainedMemory';
 import { ForgetMemoryButton } from '../ForgetMemoryButton';
 import { RamsButton } from '../settings/shared';
 import { indexedDocumentationSource, isIndexedDocumentation, type DirectiveSummary } from './inventory';
@@ -77,7 +78,7 @@ function IndexedDocumentation({ directives, ...rowProps }: InstructionRowsProps)
   );
 }
 
-export function InstructionsTab({ directives, query, ...rowProps }: InstructionRowsProps & { query: string }) {
+export function InstructionsTab({ directives, query, correctionRepoPaths, ...rowProps }: InstructionRowsProps & { query: string; correctionRepoPaths?: string[] }) {
   const q = query.toLowerCase();
   const references = directives.filter(isIndexedDocumentation);
   const authored = directives.filter((d) => !isIndexedDocumentation(d));
@@ -106,6 +107,7 @@ export function InstructionsTab({ directives, query, ...rowProps }: InstructionR
         </div>
       ) : null)}
       {visibleReferences.length ? <IndexedDocumentation key={q} directives={visibleReferences} {...rowProps} /> : null}
+      {(['correction', 'outcome'] as const).map(kind => <RetainedMemory key={JSON.stringify([kind, correctionRepoPaths, q])} kind={kind} query={query} repoPaths={correctionRepoPaths} />)}
     </div>
   );
 }

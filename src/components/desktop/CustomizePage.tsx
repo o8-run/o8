@@ -183,7 +183,7 @@ export function CustomizePage({ onClose, project = null, registeredRepos = [], o
         ) : inventoryError ? (
           <div role="alert" style={{ paddingTop: 24, color: 'var(--t-text-secondary)', fontSize: 13 }}>{inventoryError} <RamsButton variant="ghost" onClick={() => setRefreshCount((value) => value + 1)}>Retry</RamsButton></div>
         ) : tab === 'rules' ? (
-          <InstructionsTab key={requestKey} query={query.trim()} directives={directives} expandedRow={expandedRow} onToggleRow={setExpandedRow} onOpenFile={openFile} />
+          <InstructionsTab key={requestKey} query={query.trim()} correctionRepoPaths={project ? selectedRepos.map(repo => repo.localPath) : undefined} directives={directives} expandedRow={expandedRow} onToggleRow={setExpandedRow} onOpenFile={openFile} />
         ) : tab === 'connections' ? (
           <ConnectionsTab servers={servers.filter((s) => matches(s.name, s.command, s.url))} query={q} expandedRow={expandedRow} onToggleRow={setExpandedRow} />
         ) : tab === 'commands' ? (

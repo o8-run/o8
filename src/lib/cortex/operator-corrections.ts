@@ -50,6 +50,10 @@ export interface ReadOperatorCorrectionsOptions {
   /** Packet whose own corrections should be left out (already shown per-packet). */
   excludePacketId?: string;
   limit?: number;
+  /** Exact inventory selection; applied before the contextual scan limit. */
+  ids?: string[];
+  /** Inventory errors must remain visible rather than becoming an empty list. */
+  throwOnError?: boolean;
 }
 
 const DEFAULT_LIMIT = 5;
@@ -93,7 +97,14 @@ function parsePayload(json: string): Record<string, unknown> {
   }
 }
 
-function readRejections(packetId: string | undefined, scan: number): OperatorCorrection[] {
+/** Older databases acquire the exclusion ledger on the first confirmed forget. */
+export function retainedCorrectionPredicate(idSql: string): string {
+  return getSqlite().prepare("SELECT 1 FROM sqlite_master WHERE name = 'forgotten_operator_corrections'").get()
+    ? `NOT EXISTS (SELECT 1 FROM forgotten_operator_corrections f WHERE f.id = ${idSql})`
+    : '1';
+}
+
+function readRejections(packetId: string | undefined, scan: number, ids?: string[]): OperatorCorrection[] {
   const packetClause = packetId
     ? `AND (a.packet_id = @packetId
          OR a.lane_id IN (SELECT id FROM lanes WHERE packet_id = @packetId)
@@ -113,9 +124,11 @@ function readRejections(packetId: string | undefined, scan: number): OperatorCor
       AND json_valid(a.resolution_json)
       AND TRIM(COALESCE(json_extract(a.resolution_json, '$.note'), '')) != ''
       ${packetClause}
+      AND ${retainedCorrectionPredicate("'approval:' || a.id")}
+      AND (@ids IS NULL OR 'approval:' || a.id IN (SELECT value FROM json_each(@ids)))
     ORDER BY COALESCE(a.resolved_at, a.updated_at) DESC
     LIMIT @scan
-  `).all({ packetId: packetId ?? null, scan }) as RejectionRow[];
+  `).all({ packetId: packetId ?? null, scan, ids: ids ? JSON.stringify(ids) : null }) as RejectionRow[];
 
   return rows.map((row) => ({
     id: `approval:${row.id}`,
@@ -132,7 +145,7 @@ function readRejections(packetId: string | undefined, scan: number): OperatorCor
   }));
 }
 
-function readSteers(packetId: string | undefined, scan: number): OperatorCorrection[] {
+function readSteers(packetId: string | undefined, scan: number, ids?: string[]): OperatorCorrection[] {
   const packetClause = packetId
     ? `AND (l.packet_id = @packetId OR json_extract(e.payload_json, '$.packetId') = @packetId)`
     : '';
@@ -143,9 +156,11 @@ function readSteers(packetId: string | undefined, scan: number): OperatorCorrect
     WHERE e.verb = 'steered_packet'
       AND json_valid(e.payload_json)
       ${packetClause}
+      AND ${retainedCorrectionPredicate("'steer:' || e.id")}
+      AND (@ids IS NULL OR 'steer:' || e.id IN (SELECT value FROM json_each(@ids)))
     ORDER BY e.timestamp DESC
     LIMIT @scan
-  `).all({ packetId: packetId ?? null, scan }) as SteerRow[];
+  `).all({ packetId: packetId ?? null, scan, ids: ids ? JSON.stringify(ids) : null }) as SteerRow[];
 
   return rows.flatMap((row) => {
     const payload = parsePayload(row.payload_json);
@@ -185,7 +200,7 @@ export function readOperatorCorrections(options: ReadOperatorCorrectionsOptions 
     : null;
   const scan = Math.min(MAX_SCAN, Math.max(limit * 5, 20));
   try {
-    return [...readRejections(packetId, scan), ...readSteers(packetId, scan)]
+    return [...readRejections(packetId, scan, options.ids), ...readSteers(packetId, scan, options.ids)]
       .filter((correction) => !options.excludePacketId || correction.packetId !== options.excludePacketId)
       .filter((correction) => {
         if (!scopedPaths) return true;
@@ -197,6 +212,7 @@ export function readOperatorCorrections(options: ReadOperatorCorrectionsOptions 
       .sort((a, b) => standingRank(a) - standingRank(b) || b.at.localeCompare(a.at))
       .slice(0, limit);
   } catch (error) {
+    if (options.throwOnError) throw error;
     console.warn('[operator-corrections] read failed:', error instanceof Error ? error.message : error);
     return [];
   }
