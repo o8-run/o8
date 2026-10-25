@@ -1226,6 +1226,12 @@
       ]
     },
     {
+      "path": "src/lib/workspace/manifest/service-process-recovery.test.ts",
+      "reasons": [
+        "process-signal"
+      ]
+    },
+    {
       "path": "src/lib/workspace/mutation-materialization-guard.test.ts",
       "reasons": [
         "apfs-tool",

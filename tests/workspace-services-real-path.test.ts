@@ -25,7 +25,7 @@ const running: Array<{ worktreePath: string; packetId: string; laneId: string }>
 const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 const node = quote(process.execPath);
 
-async function stopInFreshProcess(id: string, onSpawn?: (child: ChildProcess) => void) {
+async function stopInFreshProcess(id: string, onSpawn?: (child: ChildProcess) => void, environment: Partial<NodeJS.ProcessEnv> = {}) {
   const script = `void (async () => {
     const imported = await import('./src/lib/runtimes/managed-runs/termination.ts');
     const { terminateManagedRun } = imported.default ?? imported;
@@ -40,7 +40,7 @@ async function stopInFreshProcess(id: string, onSpawn?: (child: ChildProcess) =>
   // Launch the actual interpreter directly: killing a tsx CLI parent would
   // leave its interpreter child running and let it race the recovery assertion.
   const pending = promisify(execFile)(process.execPath, ['--import', import.meta.resolve('tsx'), '--eval', script], {
-    cwd: process.cwd(), timeout: 35_000, env: { ...process.env,
+    cwd: process.cwd(), timeout: 35_000, env: { ...process.env, ...environment,
       NODE_OPTIONS: [process.env.NODE_OPTIONS, '--conditions=react-server'].filter(Boolean).join(' ') },
   });
   onSpawn?.(pending.child);
@@ -110,6 +110,7 @@ async function provision(repoPath: string, name: string) {
   const { readWorkspaceManifestReceipt } = await import('@/lib/workspace/manifest/lifecycle');
   return { identity, receipt: await readWorkspaceManifestReceipt(prepared.cwd) };
 }
+
 
 const services = [
   { name: 'api', command: `${node} server.cjs`, env: { NAME: 'api' }, port: { preferred: 43520, env: 'API_PORT' },
@@ -235,29 +236,60 @@ describe.sequential('workspace lifecycle failure and recovery boundaries', () =>
     expect((await readWorkspaceServiceState(result.identity))?.teardown?.state).toBe('failed');
   }, 60_000);
 
-  it('recovers detached teardown groups after the supervisor is killed without replaying teardown or stopping a sibling', async () => {
+  it.each(['reaped', 'zombie'] as const)('recovers detached teardown groups after the supervisor is %s without replaying teardown or stopping a sibling', async mode => {
     const command = `${node} -e ${quote("const fs=require('node:fs'); fs.appendFileSync('teardown-attempts','1'); fs.writeFileSync('orphan.pid',String(process.pid)); process.on('SIGTERM',()=>{}); setInterval(()=>{},1000)")}`;
-    const repo = await fixture('killed-supervisor', { version: 1, services: [services[0]], teardown: [command], limits: { timeoutMs: 1000, shutdownGraceMs: 25 } });
-    const result = await provision(repo, 'killed-supervisor');
-    const sibling = await provision(await fixture('surviving-sibling', { version: 1, services: [services[0]], teardown: [teardown] }), 'surviving-sibling');
+    const name = `killed-supervisor-${mode}`;
+    const repo = await fixture(name, { version: 1, services: [services[0]], teardown: [command], limits: { timeoutMs: 1000, shutdownGraceMs: 25 } });
+    const privateTmux = path.join(root, 'zombie-tmux');
+    const environment = mode === 'zombie' ? { TMUX_TMPDIR: privateTmux, TMUX: '' } : {};
+    const previousTmux = { TMUX_TMPDIR: process.env.TMUX_TMPDIR, TMUX: process.env.TMUX };
+    if (mode === 'zombie') { mkdirSync(privateTmux, { mode: 0o700 }); Object.assign(process.env, environment); }
+    let result: Awaited<ReturnType<typeof provision>>;
+    try { result = await provision(repo, name); }
+    finally {
+      for (const [key, value] of Object.entries(previousTmux)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
+    }
+    const sibling = await provision(await fixture(`surviving-sibling-${mode}`, { version: 1, services: [services[0]], teardown: [teardown] }), `surviving-sibling-${mode}`);
     const { listManagedRuns } = await import('@/lib/runtimes/managed-runs/registry');
-    const run = (await listManagedRuns()).find(run => run.packetId === 'killed-supervisor')!;
+    const run = (await listManagedRuns()).find(run => run.packetId === name)!;
     const { stopWorkspaceServices } = await import('@/lib/workspace/manifest/services');
     let stopper: ChildProcess | undefined;
-    const firstStop = stopInFreshProcess(run.id, child => { stopper = child; }).catch(error => error);
+    const firstStop = stopInFreshProcess(run.id, child => { stopper = child; }, environment).catch(error => error);
     const key = createHash('sha256').update(JSON.stringify([result.identity.worktreePath, result.identity.packetId, result.identity.laneId])).digest('hex');
     const handle = JSON.parse(readFileSync(path.join(root, 'data', 'workspace-services', key, 'handle.json'), 'utf8'));
     let group: number | undefined;
+    let serverPid: number | undefined;
     try {
       await vi.waitFor(() => expect(existsSync(path.join(result.identity.worktreePath, 'orphan.pid'))).toBe(true), { timeout: 10_000 });
       const state = JSON.parse(readFileSync(path.join(handle.directory, 'state.json'), 'utf8'));
       group = state.teardown.commands[0].pid;
       const orphan = Number(readFileSync(path.join(result.identity.worktreePath, 'orphan.pid'), 'utf8'));
       stopper!.kill('SIGKILL');
+      if (mode === 'zombie') {
+        const server = Number(execFileSync('tmux', ['display-message', '-p', '#{pid}'], { encoding: 'utf8', env: { ...process.env, ...environment } }).trim());
+        const actualParent = Number(execFileSync('ps', ['-p', String(run.panePid), '-o', 'ppid='], { encoding: 'utf8' }).trim());
+        expect(server).toBe(actualParent);
+        expect(server).toBeGreaterThan(1);
+        serverPid = server;
+        process.kill(serverPid, 'SIGSTOP');
+      }
       process.kill(run.panePid!, 'SIGKILL');
       await firstStop;
+      if (serverPid) {
+        await vi.waitFor(() => expect(execFileSync('ps', ['-p', String(run.panePid), '-o', 'stat='], { encoding: 'utf8' }).trim()).toMatch(/^Z/), { timeout: 3000 });
+        const { probeOwnedSignalIdentity } = await import('@/lib/runtimes/shared/owned-session/process-identity');
+        expect(await probeOwnedSignalIdentity(state.supervisor)).toMatchObject({ state: 'match' });
+      }
       expect(() => process.kill(orphan, 0)).not.toThrow();
-      const stopped = await stopInFreshProcess(run.id);
+      const nextStop = stopInFreshProcess(run.id, undefined, environment);
+      if (serverPid) {
+        try {
+          await vi.waitFor(() => expect(JSON.parse(readFileSync(path.join(handle.directory, 'state.json'), 'utf8')))
+            .toMatchObject({ state: 'failed', cleanupUnconfirmed: false }), { timeout: 15_000 });
+          expect(execFileSync('ps', ['-p', String(run.panePid), '-o', 'stat='], { encoding: 'utf8' }).trim()).toMatch(/^Z/);
+        } finally { process.kill(serverPid, 'SIGCONT'); }
+      }
+      const stopped = await nextStop;
       expect(stopped).toMatchObject({ confirmedDead: true });
       await vi.waitFor(() => {
         const rows = execFileSync('ps', ['ax', '-o', 'pid=,pgid=,stat='], { encoding: 'utf8' });
@@ -272,6 +304,8 @@ describe.sequential('workspace lifecycle failure and recovery boundaries', () =>
       // Red runs must also stop their fixture-owned orphan group.
       if (group) { try { process.kill(-group, 'SIGKILL'); } catch { /* Already settled. */ } }
       stopper?.kill('SIGKILL');
+      if (serverPid) { try { process.kill(serverPid, 'SIGCONT'); } catch { /* Private server already exited. */ } }
+      if (mode === 'zombie') { try { execFileSync('tmux', ['kill-server'], { env: { ...process.env, ...environment }, stdio: 'ignore', timeout: 3000 }); } catch { /* Private server already exited. */ } }
       running.splice(running.indexOf(result.identity), 1); // Interrupted teardown remains held.
       await firstStop;
     }

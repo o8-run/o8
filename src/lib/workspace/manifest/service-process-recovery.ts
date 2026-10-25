@@ -39,6 +39,16 @@ async function ownedRows(group: WorkspaceServiceGroup) {
   throw held(); // An occupied reused group without a surviving cookie grants no signal authority.
 }
 
+async function supervisorRunning(supervisor: OwnedProcessEvidence): Promise<boolean> {
+  const identity = await probeOwnedSignalIdentity(supervisor);
+  if (identity.state === 'unknown') throw held();
+  if (identity.state !== 'match') return false;
+  // Birth cookies can outlive execution: a zombie still matches until its
+  // parent reaps it. processRows excludes zombies and also catches a process
+  // reaped after the cookie probe, before deciding recovery is unnecessary.
+  return (await processRows()).some(row => row.pid === supervisor.pid);
+}
+
 /** Recover only a dead exact supervisor; never replay repository teardown commands. */
 export async function recoverWorkspaceServiceGroups<T extends WorkspaceServiceProcessState>(
   directory: string,
@@ -47,17 +57,13 @@ export async function recoverWorkspaceServiceGroups<T extends WorkspaceServicePr
 ): Promise<void> {
   const initial = await read();
   if (!initial?.supervisor) return; // Legacy receipts stay held by normal stop timeout.
-  const supervisor = await probeOwnedSignalIdentity(initial.supervisor);
-  if (supervisor.state === 'match') return;
-  if (supervisor.state === 'unknown') throw held();
+  if (await supervisorRunning(initial.supervisor)) return;
   // SQLite identity leases serialize fresh processes and recover a killed stopper's claim.
   const lease = await acquireMetadataTransactionLease(directory);
   try {
     const state = await read();
     if (!state?.supervisor || !Array.isArray(state.groups)) throw held();
-    const again = await probeOwnedSignalIdentity(state.supervisor);
-    if (again.state === 'match') return;
-    if (again.state === 'unknown') throw held();
+    if (await supervisorRunning(state.supervisor)) return;
     for (const group of state.groups) {
       if (!Number.isSafeInteger(group.group) || group.group <= 1 || !Array.isArray(group.members) || !group.members.length
         || !Number.isSafeInteger(group.shutdownGraceMs) || group.shutdownGraceMs < 0 || group.shutdownGraceMs > 60_000) throw held();

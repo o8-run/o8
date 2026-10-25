@@ -63,3 +63,20 @@ it('holds an unknown supervisor probe without taking recovery ownership', async 
   expect(signals).not.toHaveBeenCalled();
   expect(write).not.toHaveBeenCalled();
 });
+
+it.each(['Z', 'reaped'])('recovers owned groups when a matching supervisor cookie is %s', async status => {
+  boundary.rows = `${status === 'Z' ? '11 11 Z\n' : ''}42 42 S\n43 42 S\n`;
+  boundary.signalIdentity.mockResolvedValue({ state: 'match' });
+  signals.mockImplementation(() => { boundary.rows = status === 'Z' ? '11 11 Z\n' : ''; return true; });
+  await recoverWorkspaceServiceGroups('/fixture', async () => state, write);
+  expect(signals).toHaveBeenCalledWith(-42, 'SIGTERM');
+  expect(state).toMatchObject({ state: 'failed', groups: [], cleanupUnconfirmed: false, teardown: { state: 'failed' } });
+});
+
+it('does not recover a live matching supervisor', async () => {
+  boundary.rows = '11 11 S\n42 42 S\n';
+  boundary.signalIdentity.mockResolvedValue({ state: 'match' });
+  await recoverWorkspaceServiceGroups('/fixture', async () => state, write);
+  expect(boundary.acquire).not.toHaveBeenCalled();
+  expect(signals).not.toHaveBeenCalled();
+});
