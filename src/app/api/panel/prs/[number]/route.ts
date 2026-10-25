@@ -1,3 +1,4 @@
+import { viewerJson } from '@/lib/viewers/response';
 import { readPullRequestStack } from '@/lib/github-broker/pull-request-stack';
 export const dynamic = 'force-dynamic';
 
@@ -40,11 +41,11 @@ export async function GET(
   const repo = await resolveRepoSlug(searchParams.get('repo'), DEFAULT_GITHUB_REPO);
 
   if (isNaN(prNum) || prNum < 1) {
-    return NextResponse.json({ error: 'Invalid PR number' }, { status: 400 });
+    return viewerJson({ error: 'Invalid PR number' }, { status: 400 });
   }
 
   if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) {
-    return NextResponse.json({ error: 'Invalid repo format' }, { status: 400 });
+    return viewerJson({ error: 'Invalid repo format' }, { status: 400 });
   }
 
   try {
@@ -66,7 +67,7 @@ export async function GET(
       comments: [...commentsData.comments.map(comment => ({ ...comment, kind: 'inline' as const })), ...commentsData.issueComments.map(comment => ({ id: comment.id, author: comment.user, body: comment.body })),
         ...commentsData.reviews.filter(review => review.state === 'COMMENTED').map(review => ({ ...review, kind: 'reviews' as const }))],
       reviews: commentsData.reviews.filter(review => review.state !== 'COMMENTED'), discussionIncomplete: commentsData.discussionIncomplete, repoPath: localRepo?.localPath, readOrder }) : undefined;
-    if (watch?.superseded) return NextResponse.json({ error: 'A newer pull request read completed. Refresh to see it.' }, { status: 409 });
+    if (watch?.superseded) return viewerJson({ error: 'A newer pull request read completed. Refresh to see it.' }, { status: 409 });
     // Reading a PR must not start workspace setup/Git probes. Safety-sensitive
     // workspace actions still obtain exact readiness at their own entry point.
     const readiness = localRepo ? getCachedRepoReadiness(localRepo) ?? null : null;
@@ -86,7 +87,7 @@ export async function GET(
       .map((file) => `${file.path} | +${file.additions} -${file.deletions}`)
       .join('\n');
 
-    return NextResponse.json({
+    return viewerJson({
       pr: {
         ...publicPr,
         mergeGate,
@@ -102,8 +103,8 @@ export async function GET(
       },
     });
   } catch (error) {
-    if (error instanceof GitHubRequestDeferredError) return NextResponse.json({ error: error.message }, { status: 429, headers: { 'Retry-After': String(Math.max(1, Math.ceil((error.retryAt - Date.now()) / 1000))) } });
-    return NextResponse.json({ error: 'Pull request could not be read. Check the connection or GitHub access and retry.' }, { status: 502 });
+    if (error instanceof GitHubRequestDeferredError) return viewerJson({ error: error.message }, { status: 429, headers: { 'Retry-After': String(Math.max(1, Math.ceil((error.retryAt - Date.now()) / 1000))) } });
+    return viewerJson({ error: 'Pull request could not be read. Check the connection or GitHub access and retry.' }, { status: 502 });
   }
 }
 

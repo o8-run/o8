@@ -1,4 +1,5 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { viewerJson } from '@/lib/viewers/response';
+import { NextRequest } from 'next/server';
 import { getReviewFileDetail } from '@/lib/review/workspace';
 
 export const runtime = 'nodejs';
@@ -21,7 +22,7 @@ export async function GET(request: NextRequest) {
   const reviewPath = request.nextUrl.searchParams.get('path')?.trim();
 
   if (!reviewPath) {
-    return NextResponse.json(
+    return viewerJson(
       {
         error: 'Review file path is required.',
       },
@@ -32,7 +33,7 @@ export async function GET(request: NextRequest) {
   try {
     const cached = reviewFileCache.get(reviewPath);
     if (cached && Date.now() - cached.timestamp < REVIEW_FILE_CACHE_TTL) {
-      return NextResponse.json(
+      return viewerJson(
         { file: cached.data },
         {
           headers: {
@@ -48,7 +49,7 @@ export async function GET(request: NextRequest) {
     // Only update cache if content actually changed
     reviewFileCache.set(reviewPath, { data: file, timestamp: Date.now(), hash });
 
-    return NextResponse.json(
+    return viewerJson(
       { file },
       {
         headers: {
@@ -60,7 +61,7 @@ export async function GET(request: NextRequest) {
     const message = error instanceof Error ? error.message : 'Unable to load mobile review file detail';
     const status = message.includes('no longer part of the live review surface') ? 404 : 500;
 
-    return NextResponse.json(
+    return viewerJson(
       {
         error: message,
       },

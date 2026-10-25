@@ -121,9 +121,9 @@ describe('bounded worktree diff transport', () => {
     const absolute = await getDiff(request('diff', { worktreePath: cwd, file: '/etc/passwd' }));
 
     expect(traversal.status).toBe(400);
-    await expect(traversal.json()).resolves.toEqual({ error: 'invalid_file_path' });
+    await expect(traversal.json()).resolves.toEqual({ error: 'invalid_file_path', redaction: { version: 1, offsetEncoding: 'utf-8', spans: [] } });
     expect(absolute.status).toBe(400);
-    await expect(absolute.json()).resolves.toEqual({ error: 'invalid_file_path' });
+    await expect(absolute.json()).resolves.toEqual({ error: 'invalid_file_path', redaction: { version: 1, offsetEncoding: 'utf-8', spans: [] } });
   });
 
   it('returns a typed 409 when a selected diff is pinned to a stale HEAD', async () => {

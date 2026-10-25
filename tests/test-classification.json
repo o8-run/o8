@@ -6606,6 +6606,22 @@
       ]
     },
     {
+      "path": "tests/viewer-redaction-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/viewer-remote-redaction-real-path.test.ts",
+      "reasons": [
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/visual-inspection-real-path.test.ts",
       "reasons": [
         "real-path"

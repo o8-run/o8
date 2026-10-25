@@ -1,3 +1,4 @@
+import { viewerJson } from '@/lib/viewers/response';
 /**
  * #796 — Compact git log endpoint for the in-app Loop Status widget.
  *
@@ -72,7 +73,7 @@ export async function GET(request: Request): Promise<NextResponse<CompactGitLogR
 
   const repoPath = await resolveRepoPath(explicit);
   if (!repoPath) {
-    return NextResponse.json({
+    return viewerJson({
       commits: [],
       total: 0,
       repoPath: null,
@@ -109,14 +110,14 @@ export async function GET(request: Request): Promise<NextResponse<CompactGitLogR
       })
       .filter((entry): entry is CompactCommit => entry !== null);
 
-    return NextResponse.json({
+    return viewerJson({
       commits,
       total: commits.length,
       repoPath,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'git log failed';
-    return NextResponse.json({
+    return viewerJson({
       commits: [],
       total: 0,
       repoPath,

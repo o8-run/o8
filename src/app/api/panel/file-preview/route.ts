@@ -1,6 +1,6 @@
+import { viewerJson } from '@/lib/viewers/response';
 export const dynamic = 'force-dynamic';
 
-import { NextResponse } from 'next/server';
 import { extname } from 'node:path';
 import { expandHome } from '@/lib/fs/safe-path';
 import { isWorkspaceFileError, openWorkspaceFile } from '@/lib/fs/workspace-file';
@@ -25,7 +25,7 @@ export async function GET(request: Request) {
   const workspaceParam = searchParams.get('workspace');
 
   if (!filePath) {
-    return NextResponse.json({ error: 'path param required' }, { status: 400 });
+    return viewerJson({ error: 'path param required' }, { status: 400 });
   }
 
   let root: string | null = getDefaultLlmRepoRoot();
@@ -34,12 +34,12 @@ export async function GET(request: Request) {
     root = scope.repoRoot;
   }
   if (!root) {
-    return NextResponse.json({ error: 'Workspace is not a registered repository' }, { status: 400 });
+    return viewerJson({ error: 'Workspace is not a registered repository' }, { status: 400 });
   }
 
   const ext = extname(filePath).toLowerCase();
   if (!IMAGE_EXTENSIONS.has(ext)) {
-    return NextResponse.json({ error: 'Not an image file' }, { status: 400 });
+    return viewerJson({ error: 'Not an image file' }, { status: 400 });
   }
 
   let opened: Awaited<ReturnType<typeof openWorkspaceFile>> | null = null;
@@ -47,7 +47,7 @@ export async function GET(request: Request) {
     opened = await openWorkspaceFile(root, filePath, 'read');
     // Limit to 10MB
     if (opened.stat.size > 10 * 1024 * 1024) {
-      return NextResponse.json({ error: 'File too large (>10MB)' }, { status: 400 });
+      return viewerJson({ error: 'File too large (>10MB)' }, { status: 400 });
     }
 
     const buffer = await opened.handle.readFile();
@@ -55,7 +55,7 @@ export async function GET(request: Request) {
 
     // For SVGs, return as text
     if (ext === '.svg') {
-      return NextResponse.json({
+      return viewerJson({
         type: 'svg',
         content: buffer.toString('utf-8'),
         mimeType,
@@ -66,7 +66,7 @@ export async function GET(request: Request) {
 
     // For raster images, return as base64 data URL
     const base64 = buffer.toString('base64');
-    return NextResponse.json({
+    return viewerJson({
       type: 'image',
       dataUrl: `data:${mimeType};base64,${base64}`,
       mimeType,
@@ -75,9 +75,9 @@ export async function GET(request: Request) {
     });
   } catch (error) {
     if (isWorkspaceFileError(error)) {
-      return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
+      return viewerJson({ error: error.message, code: error.code }, { status: error.status });
     }
-    return NextResponse.json({ error: 'Could not read file', code: 'workspace_file_operation_failed' }, { status: 500 });
+    return viewerJson({ error: 'Could not read file', code: 'workspace_file_operation_failed' }, { status: 500 });
   } finally {
     await opened?.handle.close().catch(() => {});
   }

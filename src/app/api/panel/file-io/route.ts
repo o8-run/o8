@@ -1,3 +1,5 @@
+import { isMaskedViewerReplay } from '@/lib/viewers/copy-safety';
+import { viewerJson } from '@/lib/viewers/response';
 export const dynamic = 'force-dynamic';
 
 /**
@@ -35,11 +37,11 @@ import { isPathInRegisteredRepo } from '@/lib/llm/repo-scope';
 async function authorizeFileAccess(request: Request, absPath: string): Promise<NextResponse | null> {
   const principal = resolveRequestPrincipal(request);
   if (principal !== 'operator' && principal !== 'worker') {
-    return NextResponse.json({ error: 'File access requires an operator or dispatched-worker credential.' }, { status: 403 });
+    return viewerJson({ error: 'File access requires an operator or dispatched-worker credential.' }, { status: 403 });
   }
   if (principal === 'operator') return null;
   if (await isPathInRegisteredRepo(absPath)) return null;
-  return NextResponse.json(
+  return viewerJson(
     { error: 'Workers may only access files inside a registered repository.' },
     { status: 403 },
   );
@@ -66,32 +68,32 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const rawPath = searchParams.get('path');
   if (!rawPath) {
-    return NextResponse.json({ error: 'path param required' }, { status: 400 });
+    return viewerJson({ error: 'path param required' }, { status: 400 });
   }
   const path = resolveAbsolute(rawPath);
   if (!path) {
-    return NextResponse.json({ error: 'Absolute path required' }, { status: 400 });
+    return viewerJson({ error: 'Absolute path required' }, { status: 400 });
   }
   const workerDenied = await authorizeFileAccess(request, path);
   if (workerDenied) return workerDenied;
   try {
     const info = await stat(path);
     if (!info.isFile()) {
-      return NextResponse.json({ error: 'Not a file' }, { status: 400 });
+      return viewerJson({ error: 'Not a file' }, { status: 400 });
     }
     if (info.size > MAX_EDIT_BYTES) {
-      return NextResponse.json({ error: `Too large to edit (${Math.round(info.size / 1024)} KB — cap ${Math.round(MAX_EDIT_BYTES / 1024)} KB)` }, { status: 413 });
+      return viewerJson({ error: `Too large to edit (${Math.round(info.size / 1024)} KB — cap ${Math.round(MAX_EDIT_BYTES / 1024)} KB)` }, { status: 413 });
     }
     const buffer = await readFile(path);
     if (looksBinary(buffer)) {
-      return NextResponse.json({ error: 'Binary file — nothing readable to show' }, { status: 415 });
+      return viewerJson({ error: 'Binary file — nothing readable to show' }, { status: 415 });
     }
-    return NextResponse.json({ content: buffer.toString('utf-8'), mtimeMs: info.mtimeMs, size: info.size, path });
+    return viewerJson({ content: buffer.toString('utf-8'), mtimeMs: info.mtimeMs, size: info.size, path });
   } catch (error) {
     const code = (error as NodeJS.ErrnoException)?.code;
-    if (code === 'ENOENT') return NextResponse.json({ error: 'File not found' }, { status: 404 });
-    if (code === 'EACCES') return NextResponse.json({ error: 'Permission denied' }, { status: 403 });
-    return NextResponse.json({ error: 'Could not read file' }, { status: 500 });
+    if (code === 'ENOENT') return viewerJson({ error: 'File not found' }, { status: 404 });
+    if (code === 'EACCES') return viewerJson({ error: 'Permission denied' }, { status: 403 });
+    return viewerJson({ error: 'Could not read file' }, { status: 500 });
   }
 }
 
@@ -100,14 +102,14 @@ export async function PUT(request: Request) {
   try {
     body = await request.json();
   } catch {
-    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+    return viewerJson({ error: 'Invalid JSON body' }, { status: 400 });
   }
   if (typeof body.path !== 'string' || typeof body.content !== 'string') {
-    return NextResponse.json({ error: 'path and content required' }, { status: 400 });
+    return viewerJson({ error: 'path and content required' }, { status: 400 });
   }
   const path = resolveAbsolute(body.path);
   if (!path) {
-    return NextResponse.json({ error: 'Absolute path required' }, { status: 400 });
+    return viewerJson({ error: 'Absolute path required' }, { status: 400 });
   }
   const workerDenied = await authorizeFileAccess(request, path);
   if (workerDenied) return workerDenied;
@@ -117,24 +119,27 @@ export async function PUT(request: Request) {
     // Edit-existing-files only — the card opens what's already on disk.
     const before = await stat(path);
     if (!before.isFile()) {
-      return NextResponse.json({ error: 'Not a file' }, { status: 400 });
+      return viewerJson({ error: 'Not a file' }, { status: 400 });
     }
     if (
       typeof body.expectedMtimeMs === 'number'
       && !body.force
       && Math.abs(before.mtimeMs - body.expectedMtimeMs) > 0.5
     ) {
-      return NextResponse.json({ error: 'changed-on-disk', mtimeMs: before.mtimeMs }, { status: 409 });
+      return viewerJson({ error: 'changed-on-disk', mtimeMs: before.mtimeMs }, { status: 409 });
+    }
+    if (isMaskedViewerReplay((await readFile(path)).toString('utf8'), body.content)) {
+      return viewerJson({ error: 'Masked viewer content is read-only', code: 'redacted_content_read_only' }, { status: 409 });
     }
     await writeWorkspaceFile(dirname(path), basename(path), body.content);
     const after = await stat(path);
-    return NextResponse.json({ ok: true, mtimeMs: after.mtimeMs });
+    return viewerJson({ ok: true, mtimeMs: after.mtimeMs });
   } catch (error) {
-    if (isWorkspaceFileError(error)) return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
+    if (isWorkspaceFileError(error)) return viewerJson({ error: error.message, code: error.code }, { status: error.status });
     const code = (error as NodeJS.ErrnoException)?.code;
-    if (code === 'ENOENT') return NextResponse.json({ error: 'File not found' }, { status: 404 });
-    if (code === 'EACCES') return NextResponse.json({ error: 'Permission denied' }, { status: 403 });
-    return NextResponse.json({ error: 'Could not write file' }, { status: 500 });
+    if (code === 'ENOENT') return viewerJson({ error: 'File not found' }, { status: 404 });
+    if (code === 'EACCES') return viewerJson({ error: 'Permission denied' }, { status: 403 });
+    return viewerJson({ error: 'Could not write file' }, { status: 500 });
   }
 }
 
@@ -142,7 +147,7 @@ export async function PUT(request: Request) {
  *  browse-folder pattern). Returns { path } or { path: null } on cancel. */
 export async function POST(request: Request) {
   if (resolveRequestPrincipal(request) !== 'operator') {
-    return NextResponse.json({ error: 'Choosing arbitrary local files is operator-only.' }, { status: 403 });
+    return viewerJson({ error: 'Choosing arbitrary local files is operator-only.' }, { status: 403 });
   }
   let body: { action?: string };
   try {
@@ -151,7 +156,7 @@ export async function POST(request: Request) {
     body = {};
   }
   if (body.action !== 'pick') {
-    return NextResponse.json({ error: 'Unknown action' }, { status: 400 });
+    return viewerJson({ error: 'Unknown action' }, { status: 400 });
   }
   try {
     const script = [
@@ -160,9 +165,9 @@ export async function POST(request: Request) {
     ].join('\n');
     const { stdout } = await execFileAsync('osascript', ['-e', script], { windowsHide: true, timeout: 120000 });
     const path = stdout.trim();
-    return NextResponse.json({ path: path || null });
+    return viewerJson({ path: path || null });
   } catch {
     // Cancelled (osascript exits non-zero) or dialog unavailable.
-    return NextResponse.json({ path: null });
+    return viewerJson({ path: null });
   }
 }

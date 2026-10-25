@@ -1,4 +1,5 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { viewerJson } from '@/lib/viewers/response';
+import { NextRequest } from 'next/server';
 import { getReviewFileDetail } from '@/lib/review/workspace';
 
 export const runtime = 'nodejs';
@@ -8,12 +9,12 @@ export async function GET(request: NextRequest) {
   const reviewPath = request.nextUrl.searchParams.get('path')?.trim();
 
   if (!reviewPath) {
-    return NextResponse.json({ error: 'Review file path is required.' }, { status: 400 });
+    return viewerJson({ error: 'Review file path is required.' }, { status: 400 });
   }
 
   try {
     const file = await getReviewFileDetail(reviewPath);
-    return NextResponse.json(
+    return viewerJson(
       { file },
       {
         headers: {
@@ -25,6 +26,6 @@ export async function GET(request: NextRequest) {
     const message = error instanceof Error ? error.message : 'Unable to load review file detail';
     const status = message.includes('no longer part of the live review surface') ? 404 : 500;
 
-    return NextResponse.json({ error: message }, { status });
+    return viewerJson({ error: message }, { status });
   }
 }

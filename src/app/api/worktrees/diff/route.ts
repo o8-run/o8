@@ -1,3 +1,4 @@
+import { viewerJson } from '@/lib/viewers/response';
 /**
  * GET /api/worktrees/diff?sessionKey=<sessionKey>
  *                        [&worktreePath=<path>]
@@ -14,7 +15,7 @@ export const runtime = 'nodejs';
 
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { NextResponse, type NextRequest } from 'next/server';
+import { type NextRequest } from 'next/server';
 
 import { findLaneBySession } from '@/lib/lane/registry';
 import { resolveRequestPrincipal } from '@/lib/auth/principal';
@@ -64,10 +65,10 @@ export async function GET(req: NextRequest) {
   // no need for phone-review payloads.
   const principal = resolveRequestPrincipal(req);
   if (principal === 'worker') {
-    return NextResponse.json({ error: 'A dispatched worker cannot read review diffs.' }, { status: 403 });
+    return viewerJson({ error: 'A dispatched worker cannot read review diffs.' }, { status: 403 });
   }
   if (principal !== 'operator' && principal !== 'device') {
-    return NextResponse.json({ error: 'Unauthorized.' }, { status: 401 });
+    return viewerJson({ error: 'Unauthorized.' }, { status: 401 });
   }
 
   const sessionKey = req.nextUrl.searchParams.get('sessionKey');
@@ -81,7 +82,7 @@ export async function GET(req: NextRequest) {
     try {
       filePath = validateRepoRelativePath(requestedFilePath);
     } catch {
-      return NextResponse.json({ error: 'invalid_file_path' }, { status: 400 });
+      return viewerJson({ error: 'invalid_file_path' }, { status: 400 });
     }
   }
 
@@ -121,8 +122,8 @@ export async function GET(req: NextRequest) {
     error,
   });
 
-  if (!worktreePath) return NextResponse.json(empty('worktree_not_found'));
-  if (!existsSync(worktreePath)) return NextResponse.json(empty('worktree_path_missing'));
+  if (!worktreePath) return viewerJson(empty('worktree_not_found'));
+  if (!existsSync(worktreePath)) return viewerJson(empty('worktree_path_missing'));
 
   try {
     const snapshot = await collectWorktreeDiffSnapshot(worktreePath, baseBranch, expectedHeadSha);
@@ -150,15 +151,15 @@ export async function GET(req: NextRequest) {
       truncated: body.truncated,
       ...(body.truncated ? { truncationReason: 'max_bytes' as const } : {}),
     };
-    return NextResponse.json(value, { headers: { 'Cache-Control': 'no-store, max-age=0' } });
+    return viewerJson(value, { headers: { 'Cache-Control': 'no-store, max-age=0' } });
   } catch (error) {
     if (error instanceof WorktreeHeadChangedError) {
-      return NextResponse.json({
+      return viewerJson({
         error: 'head_changed',
         expectedHeadSha: error.expectedHeadSha,
         currentHeadSha: error.currentHeadSha,
       }, { status: 409, headers: { 'Cache-Control': 'no-store, max-age=0' } });
     }
-    return NextResponse.json(empty(worktreeDiffErrorMessage(error)));
+    return viewerJson(empty(worktreeDiffErrorMessage(error)));
   }
 }
