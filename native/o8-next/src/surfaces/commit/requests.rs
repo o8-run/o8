@@ -44,7 +44,7 @@ impl Client {
             json!({"diff":data["commit"]["diff"],"headSha":data["commit"]["hash"]}),
         )
         .map_err(|_| "Invalid commit diff")?;
-        if crate::shell::commit::guard::sensitive(&response.diff) {
+        if crate::shell::commit::guard::sensitive_patch(&response.diff) {
             return Err("Sensitive patch hidden. Read-only.".into());
         }
         if response.error.is_some() {

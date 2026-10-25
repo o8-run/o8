@@ -6,7 +6,7 @@ export default async function register({ repo }: SurfaceContext): Promise<Surfac
   const commit = await import('../../../src/app/api/review/commit/route');
   const push = await import('../../../src/app/api/review/push/route');
   const files = await import('../../../src/app/api/v2/files/route');
-  await (await import('../commit-fixture')).seedCommitFixture(repo);
+  await (await import('./commit/fixture')).seedCommitFixture(repo);
   await (await import('../../../src/lib/repos/registry')).addRepo(repo);
   return {
     routes: { 'POST /api/review/commit': commit.POST, 'POST /api/review/push': push.POST, 'POST /api/v2/files': files.POST },

@@ -54,6 +54,13 @@ fn commit_projects_refresh_retains_unregistered_draft(cx: &mut TestAppContext) {
         visual.run_until_parked();
         draw(&mut visual);
     }
+    // This intentionally empty-session fixture can open main's Setup overlay.
+    // Close it through its real control before exercising Projects retention.
+    if let Some(close) = visual.debug_bounds("setup-close") {
+        visual.simulate_click(close.center(), gpui::Modifiers::default());
+        visual.run_until_parked();
+        draw(&mut visual);
+    }
     let projects = visual.debug_bounds("shell-projects").unwrap();
     visual.simulate_click(projects.center(), gpui::Modifiers::default());
     for _ in 0..6 {

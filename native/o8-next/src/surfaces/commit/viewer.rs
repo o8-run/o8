@@ -35,6 +35,8 @@ impl Commit {
         self.compare["sensitive"] == true
             && self.baseline.is_empty()
             && self.editor.read(cx).text.is_empty()
+            && !super::guard::contains(&self.data)
+            && !super::guard::contains(&self.compare)
     }
     #[cfg(test)]
     pub(crate) fn test_comparison_bound(&self, hash: &str) -> bool {
@@ -147,6 +149,8 @@ impl Commit {
         }
         self.hash = hash.clone();
         self.loading = true;
+        self.baseline.clear();
+        self.editor.update(cx, |editor, cx| editor.clear(cx));
         self.data = Value::Null;
         self.compare = Value::Null;
         self.patch = None;

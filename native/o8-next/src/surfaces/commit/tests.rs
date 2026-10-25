@@ -202,3 +202,6 @@ mod corrections;
 
 #[path = "round2.rs"]
 mod round2;
+
+#[path = "privacy_matrix.rs"]
+mod privacy_matrix;
