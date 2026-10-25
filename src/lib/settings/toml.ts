@@ -313,6 +313,7 @@ export const OPERATOR_DEFAULTS_TOML_MAPPING = {
   experimentalGemini: booleanField('experimental', 'gemini_enabled'),
   experimentalChat: booleanField('experimental', 'chat_enabled'),
   experimentalCanvas: booleanField('experimental', 'canvas_enabled'),
+  experimentalNext: booleanField('experimental', 'next_enabled'),
   nativeBrowserView: booleanField('experimental', 'native_browser_view'),
   classAComposer: enumField('brain', 'class_a_composer', 'one of "auto", "haiku-cli", "sonnet-cli", or "fastest"', isClassAComposer),
   brainRoutingMode: enumField('brain', 'routing_mode', 'one of "auto" or "subscription"', isBrainRoutingMode),

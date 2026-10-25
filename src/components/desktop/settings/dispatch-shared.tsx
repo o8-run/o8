@@ -107,6 +107,7 @@ export interface OperatorDefaults {
   experimentalGemini: boolean;
   experimentalChat: boolean;
   experimentalCanvas: boolean;
+  experimentalNext: boolean;
   nativeBrowserView: boolean;
   classAComposer: ClassAComposer;
   inAppOrchestratorEnabled: boolean;
@@ -167,6 +168,7 @@ export interface OperatorDefaultsResponse {
     revision: string;
     error: string | null;
   };
+  nextWindowError?: string | null;
   cliAuth?: {
     statuses: Record<RuntimeAuthHouse, {
       installed: boolean;

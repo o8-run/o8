@@ -407,7 +407,7 @@ describe('native release cache real entry points', { timeout: 120_000 }, () => {
         writeFileSync('src-tauri/helpers/speech-local' + suffix, 'speech executable');
       appendFileSync('.fixture/speech-calls', 'compile\\n');
     `);
-    for (const name of ['build-pi-write.mjs', 'bust-stale-patch-cache.mjs', 'packaged-server-smoke.mjs'])
+    for (const name of ['build-pi-write.mjs', 'next/build-sidecar.mjs', 'bust-stale-patch-cache.mjs', 'packaged-server-smoke.mjs'])
       put(f.root, 'scripts/' + name, 'process.exit(0);');
     put(f.root, 'scripts/tauri-export.mjs', `
       import { mkdirSync, writeFileSync } from 'node:fs';

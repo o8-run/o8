@@ -21,6 +21,8 @@ const RECIPE_FILES = [
   'scripts/build.mjs',
   'scripts/build-speech-local.mjs',
   'scripts/build-pi-write.mjs',
+  'scripts/next/build-sidecar.mjs',
+  'native/o8-next/Cargo.lock',
   'src-tauri/sidecars/pi-write/Cargo.lock',
   'scripts/tauri-export.mjs',
   'scripts/tauri-prebuild.mjs',
@@ -46,6 +48,9 @@ const SPEECH_ARTIFACTS = [
   'src-tauri/helpers/speech-local-universal-apple-darwin',
   'src-tauri/helpers/speech-local-x86_64-apple-darwin',
 ];
+
+const NEXT_ARTIFACTS = ['', '-aarch64-apple-darwin', '-x86_64-apple-darwin', '-universal-apple-darwin']
+  .map(suffix => `src-tauri/helpers/o8-next${suffix}`);
 
 const PI_WRITE_ARTIFACTS = [
   'src-tauri/helpers/o8-pi-write',
@@ -82,7 +87,7 @@ function commandVersion(root, command, args) {
 function outputRoots(root) {
   return [
     { absolute: join(root, 'out'), relative: 'out' },
-    ...[...SPEECH_ARTIFACTS, ...PI_WRITE_ARTIFACTS].map((path) => ({ absolute: join(root, path), relative: path })),
+    ...[...SPEECH_ARTIFACTS, ...PI_WRITE_ARTIFACTS, ...NEXT_ARTIFACTS].map((path) => ({ absolute: join(root, path), relative: path })),
   ];
 }
 

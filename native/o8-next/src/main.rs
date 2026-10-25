@@ -1,5 +1,6 @@
 // Original Apache-2.0 native surface. All UI comes from the published gpui crate.
 mod activity;
+mod app_parent;
 mod brain;
 mod client;
 mod composer;
@@ -89,6 +90,9 @@ fn run() -> Result<(), String> {
             serde_json::to_string(&sidebar::tree(&sessions, Some(&args[2]))).unwrap()
         );
         return Ok(());
+    }
+    if args.iter().any(|arg| arg == "--app-shell") {
+        app_parent::watch();
     }
     if shell::try_launch(&args)? {
         return Ok(());

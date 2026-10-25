@@ -6,7 +6,7 @@
 
 [Brain conversation and memory retrieval](BRAIN.md): reading, search, sources and a native composer.
 
-[Opt-in app shell](APP-SHELL.md): local connection, workspace switching and persisted session/grid surfaces. The explicit fixture modes below remain available.
+[Opt-in app shell](APP-SHELL.md): available in the installed macOS app under Settings > Experimental > o8 next, off by default. Local connection, workspace switching and persisted session/grid surfaces. The explicit fixture modes below remain available.
 
 Opt-in Rust GPUI surface for #4405, stacked on the static history slice in #4410.
 Lists saved orchestrator sessions beside runtime workers, bootstraps the selected
@@ -41,9 +41,9 @@ Pass `--terminal SESSION_ID` to open a native terminal pane for an existing
 terminal session. This requires the normal `--enable-next`, explicit `--server`
 and `O8_NEXT_API_TOKEN`. The CLI launcher forwards the option. It uses the same
 published GPUI crate as the other native surfaces and `alacritty_terminal =
-0.26.0` (Apache-2.0), with no GPL application crates. The shipped Tauri app is
-unchanged. See [terminal protocol](TERMINAL-PROTOCOL.md) for attach, input, resize,
-replay and reconnection details.
+0.26.0` (Apache-2.0), with no GPL application crates. The shipped entry point
+remains Tauri; the native window is opt-in. See [terminal protocol](TERMINAL-PROTOCOL.md)
+for attach, input, resize, replay and reconnection details.
 
 The pane paints ANSI/indexed/truecolor cells, combining/wide characters and
 cursor shapes, preserves alternate screen state, and retains 10,000 lines.
@@ -106,8 +106,8 @@ node cli/dist/o8.mjs next --enable-next --binary "$PWD/native/o8-next/target/rel
 
 The normal window is created without activation. Automated verification always
 adds `--offscreen`, which uses `Application::headless()` and a hidden window.
-Do not run visible checks at an occupied desk. The shipped Tauri binary, its
-startup/defaults, and its data directory are not part of this feature.
+Do not run visible checks at an occupied desk. With the Experimental switch off,
+Tauri startup/defaults and its data directory are unchanged. The standalone fixture launcher does not change that preference.
 
 The launcher requires both the opt-in flag and an explicit absolute executable
 path. The native client requires an explicit numeric loopback HTTP origin with a

@@ -62,6 +62,11 @@ export const SHIPPED_DARK_FLAG_MANIFEST: Readonly<
     lifecycle: 'deliberate-default-off',
     rationale: 'Alpha-only fleet-canvas tab; the New-tab row stays hidden while the surface is in alpha.',
   },
+  experimentalNext: {
+    landedRelease: '0.1.808',
+    lifecycle: 'deliberate-default-off',
+    rationale: 'Opt-in native app shell; the existing desktop window remains the default.',
+  },
   nativeBrowserView: {
     landedRelease: '0.1.681',
     lifecycle: 'promoted',

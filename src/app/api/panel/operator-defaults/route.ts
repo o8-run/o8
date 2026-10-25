@@ -1,6 +1,7 @@
 import { resolveRequestPrincipalContext } from '@/lib/auth/principal';
 import { parseKnowledgeSources } from '@/lib/operator/knowledge-source-defaults';
 import { NextResponse } from 'next/server';
+import { changeNextWindowPreference, nextWindowError } from '@/lib/next/app-window';
 
 import {
   CODEX_MODEL_IDS,
@@ -104,6 +105,7 @@ function operatorDefaultsValuesPayload(
 ) {
   return {
     ...data,
+    nextWindowError: nextWindowError(),
     judgmentPath: resolveJudgmentPath(data.values.judgmentProvider),
     effectiveOverride: effectiveOverride(),
     settingsToml,
@@ -448,7 +450,7 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
     update.localChatModel = body.localChatModel.trim();
   }
 
-  for (const field of ['experimentalOpencode', 'experimentalGemini', 'experimentalChat', 'experimentalCanvas', 'nativeBrowserView'] as const) {
+  for (const field of ['experimentalOpencode', 'experimentalGemini', 'experimentalChat', 'experimentalCanvas', 'experimentalNext', 'nativeBrowserView'] as const) {
     const value = body[field];
     if (value === undefined) continue;
     if (typeof value !== 'boolean') throw new Error(`${field} must be boolean.`);
@@ -759,8 +761,8 @@ export async function POST(request: Request) {
         await assertThreecodeWorkerModelAvailable(tomlModel);
       }
       const [updated, cliAuth] = await Promise.all([
-        withStoragePressurePolicyLock(() => (
-          applyOperatorDefaultsToml(body.settingsToml as string, body.settingsTomlRevision as string)
+        changeNextWindowPreference(parseOperatorDefaultsToml(body.settingsToml as string).experimentalNext ?? false, () => (
+          withStoragePressurePolicyLock(() => applyOperatorDefaultsToml(body.settingsToml as string, body.settingsTomlRevision as string))
         )),
         getRuntimeAuthSnapshot(),
       ]);
@@ -782,7 +784,7 @@ export async function POST(request: Request) {
     }
     if (update.threecodeWorkerModel) await assertThreecodeWorkerModelAvailable(update.threecodeWorkerModel);
     const [updated, cliAuth] = await Promise.all([
-      withStoragePressurePolicyLock(() => native ? updateNativeSettings(update, body.settingsTomlRevision) : updateOperatorDefaults(update)),
+      changeNextWindowPreference(update.experimentalNext, () => withStoragePressurePolicyLock(() => native ? updateNativeSettings(update, body.settingsTomlRevision) : updateOperatorDefaults(update))),
       getRuntimeAuthSnapshot(),
     ]);
     const [settingsToml, dispatchableRuntimes] = await Promise.all([
