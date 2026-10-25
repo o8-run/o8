@@ -1,5 +1,5 @@
 //! Palette rendering, filtering, workspace routing and keyboard ownership.
-use super::registry::{KeyResult, ShellExtension};
+use super::registry::ShellExtension;
 use super::*;
 use crate::theme::current as theme;
 #[path = "palette_target.rs"]
@@ -74,100 +74,61 @@ fn toggle(shell: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
     shell.workspace_picker = false;
     shell.shortcuts = false;
     shell.query.clear();
+    shell.palette_input.update(cx, |input, cx| input.clear(cx));
     shell.choice = 0;
     shell.palette_scroll.scroll_to_item(1);
     shell.restore_focus(window, cx);
 }
-fn focused_control_owns_keys(shell: &Shell, window: &Window, cx: &App) -> bool {
-    if shell.focus.is_focused(window) {
-        return false;
-    }
-    match shell
-        .active()
-        .and_then(|tab| shell.content.get(&shell.key(&tab)))
-    {
-        Some(Content::Session(view)) => !view.read(cx).shell_reading_focused(window),
-        Some(Content::Grid(view)) => !view.read(cx).shell_reading_focused(window),
-        _ => true,
-    }
-}
 impl ShellExtension for Palette {
-    fn key(
+    fn action(
         &self,
         s: &mut Shell,
-        event: &KeyDownEvent,
+        action: &crate::keymap::Shortcut,
         window: &mut Window,
         cx: &mut Context<Shell>,
-    ) -> KeyResult {
-        let key = event.keystroke.key.as_str();
-        let modifiers = event.keystroke.modifiers;
-        let command = modifiers.control || modifiers.platform;
-        let global = command && modifiers.shift && !modifiers.alt && key == "p";
-        if command
-            && key == "k"
-            && (modifiers.shift
-                || modifiers.alt
-                || (!s.palette && focused_control_owns_keys(s, window, cx)))
-        {
-            return KeyResult::Propagate;
-        }
-        if (global || (command && key == "k") || s.palette)
-            && registrations()
-                .iter()
-                .any(|registration| (registration.key_down)(s, event, window, cx))
-        {
-            return KeyResult::Handled;
-        }
-        if global || (command && key == "k") {
-            toggle(s, window, cx);
-        } else if s.palette {
-            match key {
-                "escape" => {
-                    s.palette = false;
-                    s.restore_focus(window, cx);
-                }
-                "up" => s.choice = s.choice.saturating_sub(1),
-                "down" => s.choice = (s.choice + 1).min(entries(s).len().saturating_sub(1)),
-                "enter" => {
-                    if let Some(entry) = entries(s).get(s.choice).cloned() {
-                        entry.run(s, window, cx);
-                    }
-                }
-                "backspace" => {
-                    s.query.pop();
-                    s.choice = 0;
-                }
-                _ if !command && !modifiers.alt => {
-                    if let Some(text) = &event.keystroke.key_char {
-                        s.query.push_str(text);
-                        s.choice = 0;
-                    }
-                }
-                _ => return KeyResult::Propagate,
+    ) -> bool {
+        use crate::keymap::Shortcut;
+        match *action {
+            Shortcut::Palette | Shortcut::PaletteGlobal => toggle(s, window, cx),
+            Shortcut::PaletteCancel => {
+                s.palette = false;
+                s.restore_focus(window, cx);
             }
-        } else {
-            return KeyResult::Unhandled;
+            Shortcut::PaletteMove(next) => {
+                s.choice = if next {
+                    (s.choice + 1).min(entries(s).len().saturating_sub(1))
+                } else {
+                    s.choice.saturating_sub(1)
+                };
+            }
+            Shortcut::PaletteAccept => {
+                if let Some(entry) = entries(s).get(s.choice).cloned() {
+                    entry.run(s, window, cx);
+                }
+            }
+            _ => return false,
         }
         if s.palette {
             s.palette_scroll.scroll_to_item(s.choice + 1);
         }
-        KeyResult::Handled
+        true
     }
     fn palette(&self, shell: &Shell, cx: &mut Context<Shell>) -> Option<gpui::AnyElement> {
         Some(
             div()
                 .id("command-palette")
+                .occlude()
+                .absolute()
+                .top(px(54.))
+                .left(px(12.))
+                .right(px(12.))
                 .debug_selector(|| "command-palette".into())
                 .max_h(px(300.))
                 .overflow_y_scroll()
                 .track_scroll(&shell.palette_scroll)
                 .p(px(12.))
                 .bg(theme().surface_raised)
-                .child(if shell.query.is_empty() {
-                    "Commands".into()
-                } else {
-                    shell.query.clone()
-                })
+                .child(shell.palette_input.clone())
                 .children(entries(shell).into_iter().enumerate().map(|(row, entry)| {
                     div()
                         .id(gpui::SharedString::from(entry.identity()))

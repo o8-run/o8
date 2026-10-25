@@ -167,3 +167,52 @@ fn review_palette_does_not_resize_the_retained_surface(cx: &mut TestAppContext) 
         "palette must not resize and reflow the retained transcript"
     );
 }
+
+#[gpui::test]
+fn review_reference_dismissal_restores_selected_surface_focus(cx: &mut TestAppContext) {
+    let (_fixture, shell, mut cx) = fixture_shell(cx);
+    two_tabs(&shell, &mut cx);
+    let first = shell.read_with(&cx, |s, _| s.active());
+    cx.simulate_keystrokes("cmd-/");
+    draw(&mut cx);
+    assert!(shell.read_with(&cx, |s, _| s.shortcuts));
+    let grid = cx.debug_bounds("surface-tab-1").unwrap();
+    cx.simulate_click(grid.center(), gpui::Modifiers::default());
+    draw(&mut cx);
+    assert_eq!(shell.read_with(&cx, |s, _| s.active()), Some(Tab::Grid));
+    cx.simulate_keystrokes("escape");
+    draw(&mut cx);
+    assert!(!shell.read_with(&cx, |s, _| s.shortcuts));
+    cx.simulate_keystrokes("cmd-1");
+    ready(&shell, &mut cx);
+    assert_eq!(
+        shell.read_with(&cx, |s, _| s.active()),
+        first,
+        "Cmd+/ → click Grid → Escape → Cmd+1 must return to the first surface"
+    );
+}
+
+#[test]
+fn review_surfaces_attach_shortcuts_only_through_the_keymap() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let raw_listener = regex::Regex::new(r"\.(?:on|capture)_key_down\s*\(").unwrap();
+    let mut pending = vec![root.clone()];
+    let mut offenders = vec![];
+    while let Some(directory) = pending.pop() {
+        for entry in std::fs::read_dir(directory).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                pending.push(path);
+            } else if path.extension().is_some_and(|extension| extension == "rs")
+                && path != root.join("keymap.rs")
+                && raw_listener.is_match(&std::fs::read_to_string(&path).unwrap())
+            {
+                offenders.push(path.strip_prefix(&root).unwrap().to_path_buf());
+            }
+        }
+    }
+    assert!(
+        offenders.is_empty(),
+        "surface raw shortcut listeners: {offenders:?}"
+    );
+}

@@ -18,7 +18,8 @@ existing state schema. Hidden rename inputs leave the active dispatch path when
 their view is detached. Reconnect tests observe the owned replay peer's actual
 socket interruption and successful reconnect, as well as the shell Retry action.
 
-Current review corrections and updated counts are in [round 1](round1/verification.md).
+Current review corrections and updated counts are in [round 2](round2/verification.md);
+[round 1](round1/verification.md) preserves its earlier receipts.
 The measurements below preserve the initial verification snapshot.
 
 ## Measurements and entry points

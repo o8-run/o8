@@ -27,7 +27,7 @@ impl Render for ThreadList {
             .text_color(theme().text)
             .font_weight(gpui::FontWeight::LIGHT)
             .track_focus(&self.focus)
-            .capture_key_down(cx.listener(Self::key))
+            .map(|view| crate::keymap::sidebar_input(view, cx.listener(Self::key)))
             .child(
                 div()
                     .id("thread-search")

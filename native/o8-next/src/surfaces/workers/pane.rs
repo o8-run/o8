@@ -292,7 +292,7 @@ impl Render for Workers {
             .debug_selector(|| "workers-pane".into())
             .size_full()
             .track_focus(&self.focus)
-            .on_key_down(cx.listener(Self::key_down))
+            .map(|view| crate::keymap::legacy_registration_input(view, cx.listener(Self::key_down)))
             .font_family(theme().font_ui)
             .font_weight(gpui::FontWeight::LIGHT)
             .text_color(theme().text)

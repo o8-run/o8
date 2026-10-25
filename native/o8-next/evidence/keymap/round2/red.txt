@@ -1,0 +1,74 @@
+Exact reference, tab click and numbered shortcut sequence
+running 1 test
+test shell::keymap_review_tests::review_reference_dismissal_restores_selected_surface_focus ...
+thread 'shell::keymap_review_tests::review_reference_dismissal_restores_selected_surface_focus' (147076) panicked at src/keymap_review_tests.rs:188:5:
+assertion `left == right` failed: Cmd+/ → click Grid → Escape → Cmd+1 must return to the first surface
+  left: Some(Grid)
+ right: Some(Session("thoughts-long"))
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    shell::keymap_review_tests::review_reference_dismissal_restores_selected_surface_focus
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 184 filtered out; finished in 1.62s
+
+error: test failed, to rerun pass `--bin o8-next`
+
+Incoming palette module before action integration
+failures:
+
+failures:
+    shell::palette::tests::palette_and_keyboard_workspace_frame_measurements
+    shell::palette::tests::palette_keyboard_opens_all_surfaces_and_switches_workspaces
+    shell::palette::tests::palette_keyboard_workspace_command_is_filtered_and_cancel_keeps_focus
+    shell::palette::tests::round1_focused_pty_receives_ctrl_k
+    shell::palette::tests::round1_focused_text_field_keeps_ctrl_and_cmd_k
+    shell::palette::tests::round1_palette_owns_workspace_commands_and_renderer
+
+test result: FAILED. 1 passed; 6 failed; 0 ignored; 0 measured; 178 filtered out; finished in 11.12s
+
+error: test failed, to rerun pass `--bin o8-next`
+
+Incoming setup navigation guard before action integration
+running 1 test
+test shell::setup::view::lifecycle_tests::onboarding_module_owns_busy_navigation_and_does_not_reopen_after_close ...
+thread 'shell::setup::view::lifecycle_tests::onboarding_module_owns_busy_navigation_and_does_not_reopen_after_close' (152536) panicked at src/surfaces/setup/view_lifecycle_tests.rs:36:9:
+busy setup must block palette navigation: ctrl-k
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    shell::setup::view::lifecycle_tests::onboarding_module_owns_busy_navigation_and_does_not_reopen_after_close
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 185 filtered out; finished in 1.48s
+
+error: test failed, to rerun pass `--bin o8-next`
+
+Incoming picker before moving its listener into the shared keymap
+running 1 test
+
+thread 'shell::keymap_review_tests::review_surfaces_attach_shortcuts_only_through_the_keymap' (152462) panicked at src/keymap_review_tests.rs:214:5:
+surface raw shortcut listeners: ["surfaces/palette_target.rs"]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test shell::keymap_review_tests::review_surfaces_attach_shortcuts_only_through_the_keymap ... FAILED
+
+failures:
+
+failures:
+    shell::keymap_review_tests::review_surfaces_attach_shortcuts_only_through_the_keymap
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 185 filtered out; finished in 0.02s
+
+error: test failed, to rerun pass `--bin o8-next`
+
+Incoming global palette chord from the Settings modal, before narrowing its exclusion
+test shell::setup::view::lifecycle_tests::onboarding_module_owns_busy_navigation_and_does_not_reopen_after_close ...
+thread 'shell::setup::view::lifecycle_tests::onboarding_module_owns_busy_navigation_and_does_not_reopen_after_close' (180275) panicked at src/surfaces/setup/view_lifecycle_tests.rs:50:5:
+idle global palette navigation remains available
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED

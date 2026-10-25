@@ -3,9 +3,6 @@ use crate::theme::current as theme;
 mod brain_dock;
 #[path = "composer_bench.rs"]
 mod composer_bench;
-#[cfg(test)]
-#[path = "speed_receipt.rs"]
-mod speed_receipt;
 #[path = "conversation.rs"]
 mod conversation;
 #[path = "history.rs"]
@@ -14,6 +11,9 @@ mod history;
 mod session_sidebar;
 #[path = "shell_session.rs"]
 mod shell_session;
+#[cfg(test)]
+#[path = "speed_receipt.rs"]
+mod speed_receipt;
 use crate::{
     client::{Client, Session},
     composer::{Composer, Submit},

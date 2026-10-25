@@ -1,0 +1,18 @@
+native-final.log
+thread 'ui::tests::worker_tests::worker_send_steer_queue_promote_remove_and_streaming_latency' (189802) panicked at src/worker_tests.rs:33:9:
+fixture timed out: promoted receipt; ("Queue rejected the request (HTTP 400). Draft retained.", Some(12), 4, Some([(String("dispatching"), String("Steer declined; queued for the next turn.")), (String("applied"), Null), (String("queued"), Null)]))
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+test result: FAILED. 180 passed; 1 failed; 4 ignored; 0 measured; 1 filtered out; finished in 462.51s
+
+known-baseline.log
+thread 'shell::activity::tests::activity_palette_reaches_native_pane' (179471) panicked at src/surfaces/activity/tests.rs:27:5:
+assertion `left == right` failed
+  left: "Open pull requests"
+ right: "Open diff for a packet"
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 185 filtered out; finished in 1.16s
+
+Isolated worker rerun
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 185 filtered out; finished in 57.00s

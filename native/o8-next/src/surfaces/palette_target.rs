@@ -27,7 +27,8 @@ pub(in crate::shell) struct Picker<P: Port> {
     pub selected: Option<String>,
     pub child: Option<Entity<P::View>>,
     choices: Vec<Choice>,
-    focus: FocusHandle,
+    input: Entity<crate::composer::Composer>,
+    _input_subscription: gpui::Subscription,
     child_focus: Option<FocusHandle>,
     query: String,
     choice: usize,
@@ -42,13 +43,24 @@ impl<P: Port> Picker<P> {
         selected: Option<String>,
         cx: &mut Context<Self>,
     ) -> Self {
+        let input = cx.new(|cx| {
+            let mut input = crate::composer::Composer::new(cx);
+            input.context = "TextInput TargetPicker";
+            input
+        });
+        let subscription = cx.observe(&input, |view: &mut Self, input, cx| {
+            view.query = input.read(cx).text.clone();
+            view.choice = 0;
+            cx.notify();
+        });
         let mut view = Self {
             client,
             workspace,
             selected: selected.clone(),
             child: None,
             choices: vec![],
-            focus: cx.focus_handle(),
+            input,
+            _input_subscription: subscription,
             child_focus: None,
             query: String::new(),
             choice: 0,
@@ -110,53 +122,54 @@ impl<P: Port> Picker<P> {
         self.selected = Some(id);
         cx.notify();
     }
-    fn key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        let key = event.keystroke.key.as_str();
-        let modifiers = event.keystroke.modifiers;
-        if (modifiers.control || modifiers.platform) && modifiers.alt && key == "o" {
-            self.child = None;
-            self.requested = None;
-            self.child_focus = None;
-            self.selected = None;
-            self.query.clear();
-            self.choice = 0;
-            self.focus.focus(window);
-            self.load(cx);
-        } else if self.child.is_some() {
-            return;
-        } else if key == "f5" {
-            self.load(cx);
-        } else if !modifiers.control && !modifiers.platform && !modifiers.alt {
-            match key {
-                "up" => self.choice = self.choice.saturating_sub(1),
-                "down" => {
-                    self.choice = (self.choice + 1).min(self.filtered().len().saturating_sub(1))
-                }
-                "backspace" => {
-                    self.query.pop();
-                    self.choice = 0;
-                }
-                "escape" => {
-                    self.query.clear();
-                    self.choice = 0;
-                }
-                "enter" if !self.loading && !self.failed => {
-                    if let Some(&index) = self.filtered().get(self.choice) {
-                        self.attach(self.choices[index].id.clone(), window, cx);
-                    }
-                }
-                _ => {
-                    if let Some(text) = &event.keystroke.key_char {
-                        self.query.push_str(text);
-                        self.choice = 0;
-                    }
+    fn action(
+        &mut self,
+        action: &crate::keymap::Shortcut,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use crate::keymap::Shortcut;
+        match *action {
+            Shortcut::TargetReopen => {
+                self.child = None;
+                self.requested = None;
+                self.child_focus = None;
+                self.selected = None;
+                self.query.clear();
+                self.input.update(cx, |input, cx| input.clear(cx));
+                self.choice = 0;
+                self.input.read(cx).focus.focus(window);
+                self.load(cx);
+            }
+            _ if self.child.is_some() => {
+                cx.propagate();
+                return;
+            }
+            Shortcut::TargetRefresh => self.load(cx),
+            Shortcut::TargetMove(next) => {
+                self.choice = if next {
+                    (self.choice + 1).min(self.filtered().len().saturating_sub(1))
+                } else {
+                    self.choice.saturating_sub(1)
+                };
+            }
+            Shortcut::TargetCancel => {
+                self.query.clear();
+                self.input.update(cx, |input, cx| input.clear(cx));
+                self.choice = 0;
+            }
+            Shortcut::TargetAccept if !self.loading && !self.failed => {
+                if let Some(&index) = self.filtered().get(self.choice) {
+                    self.attach(self.choices[index].id.clone(), window, cx);
                 }
             }
-        } else {
-            return;
+            Shortcut::TargetAccept => {}
+            _ => {
+                cx.propagate();
+                return;
+            }
         }
         cx.notify();
-        cx.stop_propagation();
     }
 }
 impl<P: Port> Render for Picker<P> {
@@ -177,8 +190,12 @@ impl<P: Port> Render for Picker<P> {
             .font_family(theme().font_ui)
             .text_size(px(13.5))
             .font_weight(gpui::FontWeight::LIGHT)
-            .track_focus(&self.focus)
-            .capture_key_down(cx.listener(Self::key))
+            .key_context(if self.child.is_none() {
+                "TargetHost TargetPicker"
+            } else {
+                "TargetHost"
+            })
+            .on_action(cx.listener(Self::action))
             .when_some(self.child.clone(), |view, child| view.child(child))
             .when(self.child.is_none(), |view| {
                 view.child(
@@ -188,11 +205,8 @@ impl<P: Port> Render for Picker<P> {
                         .size_full()
                         .overflow_y_scroll()
                         .p(px(16.))
-                        .child(if self.query.is_empty() {
-                            P::TITLE.to_string()
-                        } else {
-                            self.query.clone()
-                        })
+                        .child(P::TITLE)
+                        .child(self.input.clone())
                         .when(self.loading, |view| view.child("Loading…"))
                         .when(self.failed, |view| {
                             view.child(
@@ -234,10 +248,11 @@ impl<P: Port> Render for Picker<P> {
 impl<P: Port> ShellView for Picker<P> {
     fn focus(view: &Entity<Self>, _: bool, window: &mut Window, cx: &mut Context<Shell>) {
         let view = view.read(cx);
-        view.child_focus
-            .as_ref()
-            .unwrap_or(&view.focus)
-            .focus(window);
+        if let Some(focus) = &view.child_focus {
+            focus.focus(window);
+        } else {
+            view.input.read(cx).focus.focus(window);
+        }
     }
     fn tick(view: &Entity<Self>, _: bool, cx: &mut Context<Shell>) {
         if let Some(child) = view.read(cx).child.clone() {
@@ -324,17 +339,10 @@ mod tests {
                 Content::Diff(v) => v.clone(),
                 _ => panic!("diff"),
             };
-            // Dispatch the production key listener before the background response
+            // Invoke the production action listener before the background response
             // can update the view; the shell and HTTP entry point are unchanged.
             view.update(cx, |view, cx| {
-                view.key(
-                    &KeyDownEvent {
-                        keystroke: gpui::Keystroke::parse("ctrl-alt-o").unwrap(),
-                        is_held: false,
-                    },
-                    window,
-                    cx,
-                )
+                view.action(&crate::keymap::Shortcut::TargetReopen, window, cx)
             });
         });
         settled(&shell, cx);

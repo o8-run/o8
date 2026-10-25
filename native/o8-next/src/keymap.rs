@@ -25,6 +25,12 @@ pub enum Edit {
 #[action(no_json)]
 pub enum Shortcut {
     Palette,
+    PaletteGlobal,
+    TargetReopen,
+    TargetRefresh,
+    TargetMove(bool),
+    TargetAccept,
+    TargetCancel,
     NextSurface,
     PreviousSurface,
     SurfaceIndex(usize),
@@ -88,7 +94,17 @@ impl Shortcut {
     fn label(&self) -> String {
         use Shortcut::*;
         match self {
-            Palette => "Open commands".into(),
+            Palette | PaletteGlobal => "Open commands".into(),
+            TargetReopen => "Choose another target".into(),
+            TargetRefresh => "Refresh targets".into(),
+            TargetMove(next) => if *next {
+                "Next target"
+            } else {
+                "Previous target"
+            }
+            .into(),
+            TargetAccept => "Open selected target".into(),
+            TargetCancel => "Clear target filter".into(),
             NextSurface => "Next surface".into(),
             PreviousSurface => "Previous surface".into(),
             SurfaceIndex(index) => format!("Select surface {}", index + 1),
@@ -219,6 +235,11 @@ pub fn bindings() -> Vec<Binding> {
             ReferenceCancel,
         );
         bind(&format!("{prefix}k"), GLOBAL, Palette);
+        bind(
+            &format!("{prefix}shift-p"),
+            "Global && !Shortcuts",
+            PaletteGlobal,
+        );
         bind(&format!("{prefix}k"), "Palette && !Terminal", PaletteCancel);
         bind(
             &format!("{prefix}w"),
@@ -254,6 +275,18 @@ pub fn bindings() -> Vec<Binding> {
     );
     bind("?", "Shortcuts && !TextInput && !Terminal", ReferenceCancel);
     bind("?", GLOBAL, Reference);
+    for prefix in ["ctrl-", "cmd-"] {
+        bind(&format!("{prefix}alt-o"), "TargetHost", TargetReopen);
+    }
+    for (key, action) in [
+        ("f5", TargetRefresh),
+        ("up", TargetMove(false)),
+        ("down", TargetMove(true)),
+        ("enter", TargetAccept),
+        ("escape", TargetCancel),
+    ] {
+        bind(key, "TargetPicker && !Terminal", action);
+    }
     bind("escape", "Palette && !Terminal", PaletteCancel);
     bind("up", "Palette && !Terminal", PaletteMove(false));
     bind("down", "Palette && !Terminal", PaletteMove(true));
@@ -272,7 +305,7 @@ pub fn bindings() -> Vec<Binding> {
     ] {
         bind(
             key,
-            "TextInput && !Palette",
+            "TextInput && !Palette && !TargetPicker",
             Shortcut::Edit {
                 operation,
                 select: false,
@@ -316,7 +349,7 @@ pub fn bindings() -> Vec<Binding> {
                 if matches!(operation, EditorOp::Backspace) {
                     "TextInput && !IssueLabel"
                 } else if matches!(operation, EditorOp::Up | EditorOp::Down) {
-                    "TextInput && !Palette"
+                    "TextInput && !Palette && !TargetPicker"
                 } else {
                     "TextInput"
                 },
@@ -525,7 +558,11 @@ pub fn bindings() -> Vec<Binding> {
             } else {
                 key.to_string()
             });
-            let context = if prefix == "ctrl-alt-"
+            let context = if prefix == "ctrl-shift-" && key == "p" {
+                "Terminal && !Global"
+            } else if prefix == "ctrl-alt-" && key == "o" {
+                "Terminal && !TargetHost"
+            } else if prefix == "ctrl-alt-"
                 && ["w", "p", "t", "1", "2", "4", "6"].contains(&key.as_str())
             {
                 "Terminal && !Grid"
@@ -565,11 +602,10 @@ pub fn terminal_protocol_input(element: gpui::Div) -> gpui::Div {
 
 /// Compatibility for registered raw-key hooks. Named actions have already had
 /// their focused dispatch opportunity before this unbound-event fallback runs.
-pub fn legacy_registration_input(
-    element: gpui::Div,
+pub fn legacy_registration_input<E: gpui::InteractiveElement>(
+    element: E,
     listener: impl Fn(&gpui::KeyDownEvent, &mut gpui::Window, &mut App) + 'static,
-) -> gpui::Div {
-    use gpui::prelude::*;
+) -> E {
     element.on_key_down(move |event, window, cx| {
         if window
             .context_stack()
@@ -579,5 +615,35 @@ pub fn legacy_registration_input(
             return;
         }
         listener(event, window, cx);
+    })
+}
+
+/// Keep the sidebar's existing rename/search capture scoped to its own subtree.
+/// Its editor needs Escape/F2 before text dispatch; shell shortcuts still use
+/// the focused action map and the unbound registration fallback.
+pub fn sidebar_input<E: gpui::InteractiveElement>(
+    element: E,
+    listener: impl Fn(&gpui::KeyDownEvent, &mut gpui::Window, &mut App) + 'static,
+) -> E {
+    element.capture_key_down(listener)
+}
+
+/// The shell sidebar's existing search/focus controls remain reachable from an
+/// editor after focused actions. Other registered hooks never receive text keys.
+pub fn sidebar_navigation_input<E: gpui::InteractiveElement>(
+    element: E,
+    listener: impl Fn(&gpui::KeyDownEvent, &mut gpui::Window, &mut App) + 'static,
+) -> E {
+    element.on_key_down(move |event, window, cx| {
+        let contexts = window.context_stack();
+        if !contexts.iter().any(|context| context.contains("TextInput"))
+            || contexts.iter().any(|context| context.contains("Terminal"))
+        {
+            return;
+        }
+        let key = &event.keystroke;
+        if key.key == "f8" || key.key == "f" && (key.modifiers.control || key.modifiers.platform) {
+            listener(event, window, cx);
+        }
     })
 }

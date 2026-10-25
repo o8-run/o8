@@ -51,6 +51,9 @@ impl Render for Shell {
             .map(|view| {
                 crate::keymap::legacy_registration_input(view, cx.listener(Self::legacy_key_down))
             })
+            .map(|view| {
+                crate::keymap::sidebar_navigation_input(view, cx.listener(Self::sidebar_key_down))
+            })
             .on_action(cx.listener(Self::action))
             .when(self.system_glass, |view| view.child(material::veil()))
             .child(
@@ -94,7 +97,8 @@ impl Render for Shell {
                                 this.query.clear();
                                 this.choice = 0;
                                 this.palette_scroll.scroll_to_item(1);
-                                this.focus.focus(window);
+                                this.palette_input.update(cx, |input, cx| input.clear(cx));
+                                this.palette_input.read(cx).focus.focus(window);
                                 cx.notify();
                             })),
                     )
@@ -135,7 +139,6 @@ impl Render for Shell {
                                 .on_click(cx.listener(|this, _, _, cx| this.load(cx))),
                         )
                     }),
-
             )
             .when(frame.status, |view| {
                 view.child(
@@ -145,7 +148,6 @@ impl Render for Shell {
                         .child(self.notice.clone()),
                 )
             })
-
             .child(
                 div()
                     .flex()
@@ -244,7 +246,9 @@ impl Render for Shell {
                 ),
             )
             .when(self.palette, |view| {
-                view.children(registry::extensions().find_map(|extension| extension.palette(self, cx)))
+                view.children(
+                    registry::extensions().find_map(|extension| extension.palette(self, cx)),
+                )
             })
             .child(canvas(|_, _, _| (), move |_, _, _, _| painted.set(revision)).size(px(1.)))
     }

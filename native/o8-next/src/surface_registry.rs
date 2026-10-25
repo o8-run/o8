@@ -59,6 +59,15 @@ pub(super) trait ShellExtension: Sync {
     ) -> KeyResult {
         KeyResult::Unhandled
     }
+    fn action(
+        &self,
+        _s: &mut Shell,
+        _action: &crate::keymap::Shortcut,
+        _w: &mut Window,
+        _cx: &mut Context<Shell>,
+    ) -> bool {
+        false
+    }
     fn frame(&self, _s: &Shell) -> Option<Frame> {
         None
     }

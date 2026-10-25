@@ -10,20 +10,8 @@ pub(super) struct Runtime {
     first_run_checked: Cell<bool>,
 }
 pub(super) const REGISTRATION: Registration = Registration {
-    key_down: |s, _, _, cx| {
-        if s.surfaces
-            .setup
-            .view
-            .as_ref()
-            .is_some_and(|v| v.read(cx).busy())
-        {
-            s.notice = "Wait for setup to finish before opening another surface.".into();
-            cx.notify();
-            true
-        } else {
-            false
-        }
-    },
+    extension: Some(&SetupPolicy),
+    key_down: |s, _, _, cx| block_navigation(s, cx),
     overlay_command: true,
     overlay: |s| {
         s.surfaces
@@ -94,6 +82,32 @@ pub(super) const REGISTRATION: Registration = Registration {
         None
     })
 };
+fn block_navigation(s: &mut Shell, cx: &mut Context<Shell>) -> bool {
+    if s.surfaces
+        .setup
+        .view
+        .as_ref()
+        .is_some_and(|v| v.read(cx).busy())
+    {
+        s.notice = "Wait for setup to finish before opening another surface.".into();
+        cx.notify();
+        true
+    } else {
+        false
+    }
+}
+struct SetupPolicy;
+impl registry::ShellExtension for SetupPolicy {
+    fn action(
+        &self,
+        s: &mut Shell,
+        _: &crate::keymap::Shortcut,
+        _: &mut Window,
+        cx: &mut Context<Shell>,
+    ) -> bool {
+        block_navigation(s, cx)
+    }
+}
 impl Shell {
     fn open_setup(&mut self, cx: &mut Context<Self>) {
         if self.surfaces.setup.view.is_some() {

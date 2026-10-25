@@ -1,0 +1,42 @@
+Final-head focus, prior regression, integration and architecture checks:
+test shell::keymap_review_tests::review_reference_command_alias ... ok
+test shell::keymap_review_tests::review_reference_escape_closes ... ok
+test shell::keymap_review_tests::review_numbered_surface_binding ... ok
+test shell::keymap_review_tests::review_directional_surface_binding ... ok
+test shell::keymap_review_tests::review_pattern_documentation_avoids_product_attribution ... ok
+test shell::keymap_review_tests::review_palette_does_not_resize_the_retained_surface ... ok
+test shell::fake::review_registered_raw_hook_composes_and_respects_focus ... ok
+test shell::keymap_review_tests::review_reference_dismissal_restores_selected_surface_focus ... ok
+test shell::keymap_review_tests::review_surfaces_attach_shortcuts_only_through_the_keymap ... ok
+test shell::setup::view::lifecycle_tests::onboarding_module_owns_busy_navigation_and_does_not_reopen_after_close ... ok
+keymap focus matrix: 6424 dispatch cases
+
+Broad native run: 180 passed, 1 failed, 4 ignored, 1 filtered (#4717).
+The failed worker queue-promotion case passed alone; see residuals.txt.
+
+Isolated worker rerun:
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 185 filtered out; finished in 57.00s
+
+All CLI entry points:
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+Release CPU measurement:
+PALETTE_CPU_FRAME {"profile":"release","endpoint":"hidden production shell key dispatch to first CPU scene","samples":80,"medianMs":0.584599,"p95Ms":0.700932,"medianDispatchMs":0.400896,"medianPaintMs":0.18186000000000002}
+
+Complete JavaScript suite:
+
+ Test Files  1243 passed | 3 skipped (1246)
+      Tests  9084 passed | 5 skipped (9089)
+   Duration  276.26s (transform 19.76s, setup 29.91s, import 362.73s, tests 329.98s, environment 217.53s)
+
+Registry composition: actual reference surface + registration, cargo check --all-targets: passed.
+NODE_OPTIONS=--max-old-space-size=8192 npx tsc --noEmit: exit 0.
+npm run typecheck:fast: exit 0.
+npm run test:classify: exit 0; four dated-fixture audits pass.
+Touched-file ESLint: exit 0 (no applicable Rust/Python rules).
+npm run rule-check -- --base=origin/main: exit 0; zero eligible TypeScript files.
+Rust formatting and all-target Clippy: exit 0; Clippy emits warnings.
+Surface boundary check: exempt (label shell-work).

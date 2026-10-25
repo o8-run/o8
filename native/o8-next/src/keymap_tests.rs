@@ -22,6 +22,11 @@ fn origin(row: &Binding) -> &'static str {
     use Shortcut::*;
     match row.action {
         ReferenceCancel => "Global Shortcuts Modal",
+        Terminal(_) if row.context.contains("!Global") => "Standalone",
+        TargetReopen => "Global TargetHost",
+        TargetRefresh | TargetMove(_) | TargetAccept | TargetCancel => {
+            "Global TargetHost TargetPicker"
+        }
         PaletteCancel | PaletteMove(_) | PaletteAccept => "Global Palette",
         ToggleBrain | BrainCancel | BrainFind => "Global Session Brain",
         SessionFocus | SessionSelect(_) | SessionSteer | SessionRemove => "Global Session",
@@ -51,6 +56,8 @@ fn allowed(action: &Shortcut, focus: &str) -> bool {
         return false;
     }
     match action {
+        PaletteGlobal | TargetReopen => true,
+        TargetRefresh | TargetMove(_) | TargetAccept | TargetCancel => focus != "terminal",
         Edit { .. } | IssueRemoveLabel => focus == "text",
         Terminal(_) | TerminalText(_) | TerminalScroll(_) | TerminalPaste => focus == "terminal",
         GridNeighbor { .. } | GridSize(_) | GridClose | GridChoose | GridToggle | GridZoom => {
@@ -88,6 +95,9 @@ fn keymap_every_binding_dispatches_only_on_its_focus_path(cx: &mut TestAppContex
                     view.root = origin(&row);
                     view.leaf = match focus {
                         "text" if row.context.starts_with("Palette") => "TextInput Palette",
+                        "text" if row.context.starts_with("TargetPicker") => {
+                            "TextInput TargetPicker"
+                        }
                         "text" if row.context.starts_with("IssueLabel") => "TextInput IssueLabel",
                         "text" => "TextInput",
                         "terminal" => "Terminal",

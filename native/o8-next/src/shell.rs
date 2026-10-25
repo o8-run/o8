@@ -61,7 +61,6 @@ pub struct Shell {
     palette_input: Entity<crate::composer::Composer>,
     shortcuts: bool,
     shortcuts_focus: FocusHandle,
-    shortcuts_return: Option<FocusHandle>,
     query: String,
     choice: usize,
     palette_scroll: gpui::ScrollHandle,
@@ -109,7 +108,6 @@ impl Shell {
             palette_input,
             shortcuts: false,
             shortcuts_focus: cx.focus_handle(),
-            shortcuts_return: None,
             query: String::new(),
             choice: 0,
             palette_scroll: gpui::ScrollHandle::new(),
@@ -387,7 +385,7 @@ impl Shell {
             Command::Shortcuts => {
                 self.palette = false;
                 self.shortcuts = true;
-                self.focus.focus(window);
+                self.shortcuts_focus.focus(window);
                 cx.notify();
                 return;
             }
@@ -443,46 +441,20 @@ impl Shell {
         cx: &mut Context<Self>,
     ) {
         use crate::keymap::Shortcut;
+        if registry::extensions().any(|extension| extension.action(self, action, window, cx)) {
+            self.revision += 1;
+            cx.notify();
+            return;
+        }
         match *action {
-            Shortcut::Palette => {
-                if !self.palette {
-                    self.capture(window, cx);
-                }
-                self.palette = !self.palette;
-                self.query.clear();
-                self.palette_input.update(cx, |input, cx| input.clear(cx));
-                self.choice = 0;
-                self.restore_focus(window, cx);
-            }
-            Shortcut::PaletteCancel => {
-                self.palette = false;
-                self.restore_focus(window, cx);
-            }
-            Shortcut::PaletteMove(next) => {
-                self.choice = if next {
-                    (self.choice + 1).min(self.commands().len().saturating_sub(1))
-                } else {
-                    self.choice.saturating_sub(1)
-                };
-            }
-            Shortcut::PaletteAccept => {
-                if let Some(command) = self.commands().get(self.choice).cloned() {
-                    self.execute(command, window, cx);
-                }
-            }
             Shortcut::Reference => {
                 self.capture(window, cx);
-                self.shortcuts_return = window.focused(cx);
                 self.shortcuts = true;
                 self.shortcuts_focus.focus(window);
             }
             Shortcut::ReferenceCancel => {
                 self.shortcuts = false;
-                if let Some(focus) = self.shortcuts_return.take() {
-                    focus.focus(window);
-                } else {
-                    self.restore_focus(window, cx);
-                }
+                self.restore_focus(window, cx);
             }
             Shortcut::Settings => {
                 if self.surfaces.settings.view.is_some() {
@@ -551,6 +523,18 @@ impl Shell {
         self.revision += 1;
         cx.notify();
     }
+    fn sidebar_key_down(
+        &mut self,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if (sidebar::REGISTRATION.key_down)(self, event, window, cx) {
+            self.revision += 1;
+            cx.notify();
+            cx.stop_propagation();
+        }
+    }
     fn legacy_key_down(
         &mut self,
         event: &KeyDownEvent,
@@ -583,10 +567,10 @@ impl Shell {
         }
     }
 }
-#[path = "shell_view.rs"]
-mod view;
 #[path = "shell_material.rs"]
 mod material;
+#[path = "shell_view.rs"]
+mod view;
 pub use view::try_launch;
 
 #[cfg(test)]
