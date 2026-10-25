@@ -46,8 +46,8 @@ fn shell_palette_switch_restart_and_server_down(cx: &mut TestAppContext) {
     cx.simulate_keystrokes("n e w enter");
     ready(&shell, cx);
     assert!(shell.read_with(cx, |s, _| s.current().unwrap().composer));
-    // Palette captures commands even while the existing editor has focus.
-    cx.simulate_keystrokes("ctrl-k");
+    // The explicit global palette chord works while the editor has focus.
+    cx.simulate_keystrokes("ctrl-shift-p");
     assert!(shell.read_with(cx, |s, _| s.palette));
     cx.simulate_keystrokes("escape");
     let other = shell.read_with(cx, |s, _| {
@@ -182,7 +182,7 @@ fn shell_palette_switch_restart_and_server_down(cx: &mut TestAppContext) {
         Some(Tab::Session(_))
     ));
     for (query, label) in [("d i f f", "Diff"), ("t e r m i n a l", "Terminal")] {
-        restart_cx.simulate_keystrokes("ctrl-k");
+        restart_cx.simulate_keystrokes("ctrl-shift-p");
         restart_cx.simulate_keystrokes(query);
         restart_cx.simulate_keystrokes("enter");
         ready(&restarted, restart_cx);

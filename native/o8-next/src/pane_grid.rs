@@ -28,6 +28,9 @@ pub struct Grid {
     focus_pending: bool,
 }
 impl Grid {
+    pub(crate) fn shell_reading_focused(&self, window: &Window) -> bool {
+        self.focus.is_focused(window)
+    }
     pub(crate) fn shell_focus(&self, window: &mut Window, _: &mut Context<Self>) {
         self.focus.focus(window);
     }

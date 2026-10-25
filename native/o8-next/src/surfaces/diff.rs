@@ -1,4 +1,4 @@
-use super::target::{Choice, Picker, Port};
+use super::palette::target::{Choice, Picker, Port};
 use super::*;
 use serde_json::Value;
 

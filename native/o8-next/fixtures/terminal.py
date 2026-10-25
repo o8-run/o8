@@ -29,7 +29,9 @@ while True:
     while b"\r" in pending or b"\n" in pending:
         end = min(i for i, value in enumerate(pending) if value in (10, 13))
         command, pending = pending[:end].decode(errors="replace"), pending[end + 1:]
-        if command == "size":
+        if command == "\x0b":
+            emit("CTRL-K\r\n")
+        elif command == "size":
             rows, cols, _, _ = struct.unpack("HHHH", fcntl.ioctl(0, termios.TIOCGWINSZ, b"\0" * 8))
             emit(f"SIZE {cols} {rows}\r\n")
         elif command == "alt":

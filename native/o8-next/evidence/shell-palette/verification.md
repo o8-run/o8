@@ -112,3 +112,82 @@ in `run-1.json`, `run-2.json`, `run-3.json`; percentiles are in `summary.json`.
 Remaining for #4548: tolerant window-state recovery (item 3), complete native
 process launch-to-interactive and standalone idle-memory measurement on a
 supported display. The server-link PR is separate and must also land.
+
+
+## Correction round 1
+
+Rebased on `417586b6b`. The new real-window tests were written and run red before
+changing dispatch or ownership:
+
+```text
+round1_focused_pty_receives_ctrl_k: a focused PTY owns Ctrl+K
+round1_focused_text_field_keeps_ctrl_and_cmd_k: a focused text field owns its shortcut
+round1_palette_owns_workspace_commands_and_renderer: workspace commands belong to their registered module
+test result: FAILED. 0 passed; 3 failed
+```
+
+Read-only compatibility was also tested red before its fix for both session and
+grid focus. Ctrl/Cmd+K now reaches a focused editor/terminal, including a real
+PTY acknowledgement of byte 0x0b. Cmd/Ctrl+Shift+P is the explicit global palette
+chord. A keystroke observer after dispatch verifies both Ctrl+K and Cmd+K traverse
+the real focused composer without opening the palette or dropping its draft.
+
+`surfaces/palette.rs` owns rendering, dynamic workspace commands, key handling,
+filtering and selection. Its target widget and tests are in the same directory.
+One registration line loads it. Shared lifecycle/chrome dispatch is an optional
+ShellExtension with defaults; there is no Workspace variant or workspace routing
+in the shared registry. Session/grid only expose narrow reading-focus queries.
+Shared client.rs is unchanged. Palette invocations from focused controls use
+the explicit chord; existing reading-focus shortcuts retain Ctrl/Cmd+K.
+
+The rebased native suite exposed an unchanged Activity adjacency assertion:
+current main inserts Pull Requests between Activity and Diff, but the assertion
+still expects them to be adjacent. That unrelated test is left unchanged. The
+final compatibility run excludes this known baseline failure and unrelated
+Pull Requests model/registration tests; those model tests passed in the earlier
+full native run.
+
+The original timing table above is **Linux** headless debug CPU data from the
+original head. macOS review p50 values supplied with the correction request are
+**26.1 ms palette** and **43.0 ms workspace switch**; no macOS p95 was supplied.
+Current Linux correction samples and the final gate results follow below.
+
+
+Correction gates: the final scoped shell compatibility run is **84 passed, 0
+failed** (112.81 s), including **7 palette tests** and **4 target tests**. Only
+four palette invocations across `shell_tests.rs` and `projects_tests.rs` changed
+to the global chord; eight other existing test files match the rebased head
+byte-for-byte. The optional extension also compiles the unchanged surface probe.
+The broader native probe additionally failed to start the absent o8d test binary
+for `saved_history_surface_with_only_o8d`; no change to that unrelated test or
+its environment is included. Full
+`npm test` ran once: **1242 files passed, 3 skipped; 9057 tests passed, 5 skipped**
+(767.87 s). The 8192 MiB TypeScript check, fast typecheck, classification,
+touched-file ESLint/rule-check and native formatting/diff checks pass.
+
+Three fresh sequential Linux debug CPU runs after verification, with all samples
+retained (30 palette and 20 workspace samples per run):
+
+| Platform and endpoint | p50 (ms) | p95 (ms) |
+| --- | ---: | ---: |
+| Linux palette CPU frame | 18.335 | 21.089 |
+| Linux workspace CPU frame | 14.840 | 21.479 |
+| macOS review palette (provided) | 26.1 | not supplied |
+| macOS review workspace (provided) | 43.0 | not supplied |
+
+Current Linux raw arrays and nearest-rank summaries are in `correction-round-1/`.
+The timer boundaries and headless/debug limitations remain as documented above;
+the global opening chord is now Cmd/Ctrl+Shift+P.
+
+
+Final correction green tail:
+
+```text
+test result: ok. 84 passed; 0 failed; 0 ignored; 0 measured; 60 filtered out
+```
+
+Before/after: **3 review regressions failing -> 0**, plus the session/grid
+reading-focus compatibility regression green. Final native test files are
+`src/surfaces/palette_tests.rs`, `src/surfaces/palette_target.rs`,
+`src/shell_tests.rs` and `src/projects_tests.rs`. The source and test moves
+retain existing function names; `npm run test:classify` passes.

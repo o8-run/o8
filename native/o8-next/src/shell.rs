@@ -40,11 +40,9 @@ register_surfaces! {
         projects: Projects = "surfaces/projects.rs";
         customize: Customize = "surfaces/customize.rs";
         setup: Setup = "surfaces/setup.rs";
+        palette: Palette = "surfaces/palette.rs";
     }
 }
-
-#[path = "shell_target.rs"]
-mod target;
 
 pub struct Shell {
     client: Client,
@@ -123,6 +121,9 @@ impl Shell {
         }
     }
     fn load(&mut self, cx: &mut Context<Self>) {
+        if registry::extensions().any(|extension| extension.load(self, cx)) {
+            return;
+        }
         if self.loading {
             return;
         }
@@ -248,7 +249,9 @@ impl Shell {
         }
     }
     fn switch(&mut self, workspace: String, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.workspaces.contains(&workspace) {
+        if !registry::extensions().all(|extension| extension.allow_switch(self))
+            || !self.workspaces.contains(&workspace)
+        {
             return;
         }
         self.capture(window, cx);
@@ -292,7 +295,6 @@ impl Shell {
         } {
             commands.insert(0, Command::Message(id));
         }
-        commands.extend(self.workspaces.iter().cloned().map(Command::Workspace));
         commands.extend(
             self.workspace_sessions()
                 .iter()
@@ -301,13 +303,17 @@ impl Shell {
         commands
             .into_iter()
             .filter(|c| {
-                c.label(&self.sessions)
-                    .to_lowercase()
-                    .contains(&self.query.to_lowercase())
+                registry::extensions().all(|extension| extension.allow_command(self, c))
+                    && c.label(&self.sessions)
+                        .to_lowercase()
+                        .contains(&self.query.to_lowercase())
             })
             .collect()
     }
     fn execute(&mut self, command: Command, window: &mut Window, cx: &mut Context<Self>) {
+        if !registry::extensions().all(|extension| extension.allow_command(self, &command)) {
+            return;
+        }
         let registration = command.registration();
         if registration.overlay_command {
             (registration.open)(self, command, window, cx);
@@ -349,6 +355,18 @@ impl Shell {
         cx.notify();
     }
     fn key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        for extension in registry::extensions() {
+            match extension.key(self, event, window, cx) {
+                registry::KeyResult::Unhandled => {}
+                registry::KeyResult::Propagate => return,
+                registry::KeyResult::Handled => {
+                    self.revision += 1;
+                    cx.notify();
+                    cx.stop_propagation();
+                    return;
+                }
+            }
+        }
         let key = event.keystroke.key.as_str();
         let modifiers = event.keystroke.modifiers;
         if registrations()
@@ -438,6 +456,9 @@ impl Shell {
         cx.stop_propagation();
     }
     fn tick(&mut self, refresh: bool, window: &mut Window, cx: &mut Context<Self>) {
+        for extension in registry::extensions() {
+            extension.tick(self, refresh, window, cx);
+        }
         let before = serde_json::to_vec(&self.state).unwrap();
         self.capture(window, cx);
         if before != serde_json::to_vec(&self.state).unwrap() {
@@ -459,7 +480,3 @@ mod tests;
 #[cfg(test)]
 #[path = "shell_test_support.rs"]
 mod test_support;
-
-#[cfg(test)]
-#[path = "shell_palette_tests.rs"]
-mod palette_tests;

@@ -88,6 +88,10 @@ impl Surface {
             self.focus.focus(window);
         }
     }
+    /// Reading focus is distinct from any nested editor or terminal control.
+    pub(crate) fn shell_reading_focused(&self, window: &Window) -> bool {
+        self.focus.is_focused(window)
+    }
     pub(crate) fn shell_selection(&self, window: &Window, cx: &App) -> (Option<String>, bool) {
         (
             self.selected.clone(),

@@ -2,11 +2,11 @@
 use super::*;
 use crate::theme::current as theme;
 
-pub(super) struct Choice {
+pub(in crate::shell) struct Choice {
     pub id: String,
     pub label: String,
 }
-pub(super) trait Port: 'static {
+pub(in crate::shell) trait Port: 'static {
     type View: Render;
     const TITLE: &'static str;
     const EMPTY: &'static str;
@@ -21,7 +21,7 @@ pub(super) trait Port: 'static {
     #[cfg(test)]
     fn ready(view: &Entity<Self::View>, cx: &App) -> bool;
 }
-pub(super) struct Picker<P: Port> {
+pub(in crate::shell) struct Picker<P: Port> {
     client: Client,
     workspace: String,
     pub selected: Option<String>,
@@ -254,7 +254,7 @@ impl<P: Port> ShellView for Picker<P> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shell::palette_tests::{run, settled};
+    use crate::shell::palette::tests::{run, settled};
     use crate::shell::test_support::*;
 
     #[gpui::test]

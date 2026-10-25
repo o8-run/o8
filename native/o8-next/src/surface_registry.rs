@@ -17,18 +17,66 @@ pub(super) struct WorkspaceLoad {
     pub active_project: Option<Vec<String>>,
 }
 
-pub(super) const WORKSPACE_COMMAND: Registration =
-    Registration::new("", "", |shell, command, window, cx| {
-        let Command::Workspace(path) = command else {
-            unreachable!()
-        };
-        shell.switch(path, window, cx);
-        None
-    });
-
 type OpenSurface = fn(&mut Shell, Command, &mut Window, &mut Context<Shell>) -> Option<(Tab, bool)>;
 
+/// Optional lifecycle and chrome extension; existing registrations retain defaults.
+#[derive(Clone, Copy, PartialEq)]
+pub(super) enum KeyResult {
+    Unhandled,
+    Handled,
+    Propagate,
+}
+pub(super) struct Frame {
+    pub brand: Option<&'static str>,
+    pub commands: &'static str,
+    pub status: bool,
+    pub retry: bool,
+    pub empty: &'static str,
+}
+impl Default for Frame {
+    fn default() -> Self {
+        Self {
+            brand: Some("o8 next alpha"),
+            commands: "Commands (Ctrl+K / Cmd+K)",
+            status: true,
+            retry: true,
+            empty: "Open a saved session or grid from Commands.",
+        }
+    }
+}
+pub(super) trait ShellExtension: Sync {
+    fn load(&self, _s: &mut Shell, _cx: &mut Context<Shell>) -> bool {
+        false
+    }
+    fn prepare(&self, _s: &mut Shell, _w: &mut Window, _cx: &mut Context<Shell>) {}
+    fn tick(&self, _s: &mut Shell, _refresh: bool, _w: &mut Window, _cx: &mut Context<Shell>) {}
+    fn key(
+        &self,
+        _s: &mut Shell,
+        _e: &KeyDownEvent,
+        _w: &mut Window,
+        _cx: &mut Context<Shell>,
+    ) -> KeyResult {
+        KeyResult::Unhandled
+    }
+    fn frame(&self, _s: &Shell) -> Option<Frame> {
+        None
+    }
+    fn palette(&self, _s: &Shell, _cx: &mut Context<Shell>) -> Option<AnyElement> {
+        None
+    }
+    fn allow_command(&self, _s: &Shell, _c: &Command) -> bool {
+        true
+    }
+    fn allow_switch(&self, _s: &Shell) -> bool {
+        true
+    }
+}
+pub(super) fn extensions() -> impl Iterator<Item = &'static dyn ShellExtension> {
+    registrations().iter().filter_map(|r| r.extension)
+}
 pub(super) struct Registration {
+    pub extension: Option<&'static dyn ShellExtension>,
     pub tab_label: &'static str,
     pub command_label: &'static str,
     pub command: Option<(usize, fn() -> Command)>,
@@ -55,6 +103,7 @@ impl Registration {
         open: OpenSurface,
     ) -> Self {
         Self {
+            extension: None,
             tab_label,
             command_label,
             open,
@@ -106,7 +155,6 @@ macro_rules! register_surfaces {
             $( $(#[$tab_attr])* $variant $(($payload))?, )*
             $( $(#[$command_attr])* $command_variant, )*
             Message(String),
-            Workspace(String),
         }
         impl Command {
             fn registration(&self) -> &'static Registration {
@@ -114,14 +162,12 @@ macro_rules! register_surfaces {
                     $( $(#[$tab_attr])* Self::$variant { .. } => &$module::REGISTRATION, )*
                     $( $(#[$command_attr])* Self::$command_variant => &$command_module::REGISTRATION, )*
                     Self::Message(_) => &session::REGISTRATION,
-                    Self::Workspace(_) => &$crate::shell::registry::WORKSPACE_COMMAND,
                 }
             }
             fn label(&self, sessions: &[Session]) -> String {
                 match self {
                     Self::Session(id) => session::label(id, sessions),
-                    Self::Message(_) => "New message".into(),
-                    Self::Workspace(path) => format!("Switch workspace: {}", std::path::Path::new(path).file_name().unwrap_or_default().to_string_lossy()),
+                    Self::Message(_) => "New message in selected session".into(),
                     _ => self.registration().command_label.into(),
                 }
             }

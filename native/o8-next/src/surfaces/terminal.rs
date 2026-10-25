@@ -1,4 +1,4 @@
-use super::target::{Choice, Picker, Port};
+use super::palette::target::{Choice, Picker, Port};
 use super::*;
 
 #[derive(Clone, Default, serde::Serialize, serde::Deserialize)]

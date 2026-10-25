@@ -517,7 +517,7 @@ fn projects_preserve_session_focus_and_allow_inbox_navigation(cx: &mut TestAppCo
         shell.read_with(cx, |s, _| s.current().unwrap().composer),
         "Projects must retain the hidden session's saved composer focus"
     );
-    cx.simulate_keystrokes("ctrl-k i n b o x enter");
+    cx.simulate_keystrokes("ctrl-shift-p i n b o x enter");
     settle(cx);
     assert!(
         !shell.read_with(cx, |s, _| s.surfaces.projects.open),
@@ -525,7 +525,7 @@ fn projects_preserve_session_focus_and_allow_inbox_navigation(cx: &mut TestAppCo
     );
     assert_eq!(shell.read_with(cx, |s, _| s.active()), Some(Tab::Inbox));
     assert!(cx.debug_bounds("inbox-view-replies").is_some());
-    cx.simulate_keystrokes("ctrl-k p r o j e c t s enter");
+    cx.simulate_keystrokes("ctrl-shift-p p r o j e c t s enter");
     settle(cx);
     assert!(shell.read_with(cx, |s, _| s.surfaces.projects.open));
     cx.simulate_keystrokes("ctrl-tab");

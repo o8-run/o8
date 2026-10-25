@@ -2,6 +2,12 @@ use super::*;
 use crate::theme::current as theme;
 impl Render for Shell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        for extension in registry::extensions() {
+            extension.prepare(self, window, cx);
+        }
+        let frame = registry::extensions()
+            .find_map(|extension| extension.frame(self))
+            .unwrap_or_default();
         if !registrations().iter().any(|r| (r.block_ensure)(self)) {
             self.ensure(window, cx);
         }
@@ -45,7 +51,7 @@ impl Render for Shell {
                         gpui::MouseButton::Left,
                         cx.listener(|_, _, window, _| window.prevent_default()),
                     )
-                    .child("o8 next alpha")
+                    .children(frame.brand)
                     .children(before_workspaces)
                     .children(self.workspaces.clone().into_iter().enumerate().map(
                         |(i, workspace)| {
@@ -76,7 +82,7 @@ impl Render for Shell {
                             .id("shell-palette")
                             .cursor_pointer()
                             .p(px(6.))
-                            .child("Commands (Ctrl+K / Cmd+K)")
+                            .child(frame.commands)
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.capture(window, cx);
                                 this.palette = true;
@@ -87,22 +93,31 @@ impl Render for Shell {
                                 cx.notify();
                             })),
                     )
-                    .child(
-                        div()
-                            .id("shell-retry")
-                            .cursor_pointer()
-                            .p(px(6.))
-                            .child("Retry")
-                            .on_click(cx.listener(|this, _, _, cx| this.load(cx))),
-                    ),
+                    .when(frame.retry, |view| {
+                        view.child(
+                            div()
+                                .id("shell-retry")
+                                .cursor_pointer()
+                                .p(px(6.))
+                                .child("Retry")
+                                .on_click(cx.listener(|this, _, _, cx| this.load(cx))),
+                        )
+                    }),
             )
-            .child(
-                div()
-                    .debug_selector(|| "shell-status".into())
-                    .p(px(8.))
-                    .child(self.notice.clone()),
-            )
+            .when(frame.status, |view| {
+                view.child(
+                    div()
+                        .debug_selector(|| "shell-status".into())
+                        .p(px(8.))
+                        .child(self.notice.clone()),
+                )
+            })
             .when(self.palette, |view| {
+                if let Some(palette) =
+                    registry::extensions().find_map(|extension| extension.palette(self, cx))
+                {
+                    return view.child(palette);
+                }
                 view.child(
                     div()
                         .id("command-palette")
@@ -111,11 +126,7 @@ impl Render for Shell {
                         .overflow_y_scroll()
                         .p(px(12.))
                         .bg(theme().surface_raised)
-                        .child(if self.query.is_empty() {
-                            "Commands".into()
-                        } else {
-                            self.query.clone()
-                        })
+                        .child(format!("Commands: {}", self.query))
                         .children(self.commands().into_iter().enumerate().map(|(i, command)| {
                             div()
                                 .id(("command", i))
@@ -176,12 +187,9 @@ impl Render for Shell {
                             }),
                     ),
             )
-            .child(div().flex_1().min_h_0().child(content.unwrap_or_else(|| {
-                div()
-                    .p(px(24.))
-                    .child("Open a saved session or grid from Commands.")
-                    .into_any_element()
-            })))
+            .child(div().flex_1().min_h_0().child(
+                content.unwrap_or_else(|| div().p(px(24.)).child(frame.empty).into_any_element()),
+            ))
             .child(canvas(|_, _, _| (), move |_, _, _, _| painted.set(revision)).size(px(1.)))
     }
 }

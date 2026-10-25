@@ -6,7 +6,9 @@ The shared target picker contains no routes or request policy. `client.rs` is
 unchanged. Each surface moves its existing single registration from commands to
 tabs; no second inventory is required.
 
-Use Ctrl+K or Cmd+K, filter Open diff for a packet or Open terminal, and Enter.
+Use Cmd/Ctrl+Shift+P, filter Open diff for a packet or Open terminal, and Enter.
+Ctrl/Cmd+K remains available from reading/chrome focus; editors and terminals
+retain that key.
 Filter the resulting packet or terminal list and use Up/Down and Enter. Packet
 and terminal choices are scoped to the selected canonical workspace. Only
 existing terminals are attached; opening a picker does not spawn a shell.
