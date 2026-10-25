@@ -78,6 +78,14 @@ impl Card {
             }
         };
         self.pending = Some(body.clone());
+        if let Err(error) = self
+            .draft_slot
+            .save(self.composer.read(cx).text.clone(), self.pending.clone())
+        {
+            self.notice = error;
+            cx.notify();
+            return;
+        }
         self.busy = true;
         self.notice.clear();
         cx.notify();
@@ -98,16 +106,33 @@ impl Card {
                             && value["result"]["inProgress"] != true
                             && !unknown =>
                     {
-                        this.pending = None;
-                        if this.composer.read(cx).text.trim()
-                            == body["message"].as_str().unwrap_or_default()
-                        {
-                            this.composer.update(cx, |composer, cx| composer.clear(cx));
+                        let draft = this.composer.read(cx).text.clone();
+                        let unchanged =
+                            draft.trim() == body["message"].as_str().unwrap_or_default();
+                        let remaining = if unchanged { String::new() } else { draft };
+                        match this.draft_slot.save(remaining, None) {
+                            Ok(()) => {
+                                this.pending = None;
+                                if unchanged {
+                                    this.composer.update(cx, |composer, cx| composer.clear(cx));
+                                }
+                            }
+                            Err(error) => this.notice = error,
                         }
                     }
                     Ok((status, value, unknown)) => {
                         if !unknown && (value["ok"] == false || (400..500).contains(&status)) {
-                            this.pending = None;
+                            match this
+                                .draft_slot
+                                .save(this.composer.read(cx).text.clone(), None)
+                            {
+                                Ok(()) => this.pending = None,
+                                Err(error) => {
+                                    this.notice = error;
+                                    cx.notify();
+                                    return;
+                                }
+                            }
                         }
                         this.notice = value["error"]["message"]
                             .as_str()

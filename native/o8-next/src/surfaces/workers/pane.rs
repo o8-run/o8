@@ -11,6 +11,7 @@ use std::time::Instant;
 pub struct Workers {
     client: Client,
     workspace: String,
+    drafts: std::path::PathBuf,
     pub cards: HashMap<String, Entity<Card>>,
     order: Vec<String>,
     pub filter: usize,
@@ -25,10 +26,16 @@ pub struct Workers {
     pub notice: String,
 }
 impl Workers {
-    pub fn new(client: Client, workspace: String, cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        client: Client,
+        workspace: String,
+        drafts: std::path::PathBuf,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let mut this = Self {
             client,
             workspace,
+            drafts,
             cards: HashMap::new(),
             order: vec![],
             filter: 0,
@@ -181,7 +188,12 @@ impl Workers {
                                 this.cards.insert(
                                     task.id.clone(),
                                     cx.new(|cx| {
-                                        Card::new(this.client.clone(), task, this.compact, cx)
+                                        let slot = super::drafts::Slot::new(
+                                            this.drafts.clone(),
+                                            &this.workspace,
+                                            &task.id,
+                                        );
+                                        Card::new(this.client.clone(), task, this.compact, slot, cx)
                                     }),
                                 );
                             }

@@ -2,6 +2,8 @@
 use super::*;
 #[path = "workers/card.rs"]
 mod card;
+#[path = "workers/drafts.rs"]
+mod drafts;
 #[path = "workers/model.rs"]
 mod model;
 #[path = "workers/pane.rs"]
@@ -13,8 +15,9 @@ pub(super) const REGISTRATION: Registration = Registration {
     command: Some((9, || Command::Workers)),
     create: |shell, _, workspace, _, cx| {
         let client = shell.client.in_workspace(&workspace);
+        let drafts = shell.file.with_extension("workers.json");
         Some(Content::Workers(
-            cx.new(|cx| View::new(client, workspace, cx)),
+            cx.new(|cx| View::new(client, workspace, drafts, cx)),
         ))
     },
     ..Registration::new("Workers", "Open Workers", |_, _, _, _| {

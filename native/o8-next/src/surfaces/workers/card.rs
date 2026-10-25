@@ -23,6 +23,7 @@ pub struct Card {
     error: String,
     pub(super) composer: Entity<Composer>,
     pub(super) pending: Option<Value>,
+    draft_slot: super::drafts::Slot,
     busy: bool,
     notice: String,
     diff: Option<Entity<DiffSurface>>,
@@ -30,19 +31,39 @@ pub struct Card {
     action_focus: [FocusHandle; 4],
 }
 impl Card {
-    pub fn new(client: Client, task: Task, compact: bool, cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        client: Client,
+        task: Task,
+        compact: bool,
+        draft_slot: super::drafts::Slot,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let (draft, notice) = match draft_slot.load() {
+            Ok(draft) => (draft, String::new()),
+            Err(error) => (super::drafts::Draft::default(), error),
+        };
         let composer = cx.new(|cx| {
             let mut editor = Composer::new(cx);
+            editor.set_text(&draft.text, cx);
             editor.focus = editor.focus.tab_index(2).tab_stop(true);
             editor
         });
         let submit = cx.subscribe(&composer, |this, _, _: &Submit, cx| this.send(cx));
-        let observe = cx.observe(&composer, |_, _, cx| cx.notify());
+        let observe = cx.observe(&composer, |this, _, cx| {
+            if let Err(error) = this
+                .draft_slot
+                .save(this.composer.read(cx).text.clone(), this.pending.clone())
+            {
+                this.notice = error;
+            }
+            cx.notify();
+        });
         Self {
             composer,
-            pending: None,
+            pending: draft.pending,
+            draft_slot,
             busy: false,
-            notice: String::new(),
+            notice,
             diff: None,
             _subscriptions: vec![submit, observe],
             action_focus: std::array::from_fn(|_| cx.focus_handle()),

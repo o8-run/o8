@@ -35,3 +35,7 @@ Keep waiting reads `/api/lanes/:id?events=0` to check the current lane and leave
 Tab and Shift+Tab traverse enabled actions and the editor; Enter or Space activates an action. Controls are disabled during a request. Each action has a GPUI test that asserts the actual server call. The lost-response fixture runs the production route and persisted idempotency service twice while replacing only the external runtime discovery/resume leaf: it records two identical HTTP bodies and one delivery.
 
 The item-3 screenshots show the native actions and draft beside the current desktop worker components in All Glass. macOS material, exact type shaping and shared shell chrome still require the visual parity work in #4711.
+
+## Action review round 1
+
+Unconfirmed requests and composer drafts are saved per workspace and packet in a surface-owned `workers.json` sibling of the shell state. The owner-only file is atomically replaced and synced before Send can call the server. Closing Workers or opening a fresh shell restores the frozen request, including its original idempotency key. A confirmed response removes that pending entry and clears only an unchanged draft; drafts on other cards remain. Unavailable local storage prevents delivery until saving succeeds. The GPUI regression drops a successful real-route response, destroys the original Workers view, opens a fresh shell, and verifies identical request bodies with one runtime delivery after retry.
