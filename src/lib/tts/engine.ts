@@ -19,6 +19,7 @@
  */
 
 import { isTauri } from '@/lib/tauri/bridge';
+import { isEdgeVoiceError, type EdgeVoiceError } from '@/lib/tts/edge-voice-error';
 
 export type PlaybackState = 'idle' | 'loading' | 'playing' | 'paused' | 'error';
 
@@ -29,6 +30,7 @@ export interface TTSEngineState {
   playbackRate: number;
   activeMessageId: string | null;
   usingFallback: boolean;
+  voiceError: EdgeVoiceError | null;
   /** The source block currently being spoken, for voice-playback line
    *  highlighting (desktop native path only — mirrors the Rust `o8:tts-chunk`
    *  event). `null` when idle or on the web fallback (no boundary signal). */
@@ -55,6 +57,7 @@ class TTSEngineImpl {
     playbackRate: 1,
     activeMessageId: null,
     usingFallback: false,
+    voiceError: null,
     activeChunk: null,
   };
   private animFrameId: number | null = null;
@@ -125,6 +128,7 @@ class TTSEngineImpl {
       currentTime: 0,
       duration: 0,
       usingFallback: false,
+      voiceError: null,
     });
     try {
       const { invoke } = await import('@tauri-apps/api/core');
@@ -205,6 +209,7 @@ class TTSEngineImpl {
       currentTime: 0,
       duration: 0,
       usingFallback: false,
+      voiceError: null,
     });
 
     const cleanText = stripMarkdown(text);
@@ -220,6 +225,11 @@ class TTSEngineImpl {
 
       if (!resp.ok) {
         const errText = await resp.text();
+        if (this._state.activeMessageId !== messageId) return;
+        try {
+          const { code } = JSON.parse(errText);
+          if (isEdgeVoiceError(code)) this.updateState({ voiceError: code });
+        } catch { /* Older servers may return a plain-text error. */ }
         throw new Error(`TTS API ${resp.status}: ${errText}`);
       }
 

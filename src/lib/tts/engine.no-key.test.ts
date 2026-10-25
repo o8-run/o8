@@ -42,6 +42,21 @@ it('falls back to system speech only when Edge fails and never invokes paid nati
   expect(fixture.speak).toHaveBeenCalledOnce(); expect(engine.state.usingFallback).toBe(true);
   expect(fixture.invoke).not.toHaveBeenCalled();
 });
+it.each(['edge_voice_update_required', 'edge_voice_unavailable'])('publishes %s before system speech and clears it on retry', async code => {
+  vi.mocked(fetch).mockResolvedValueOnce(Response.json({ code, error: 'Steffan unavailable' }, { status: 503 }));
+  const states: unknown[] = [];
+  const unsubscribe = engine.subscribe(state => states.push({ ...state }));
+  fixture.speak.mockImplementationOnce(() => {
+    expect(engine.state).toMatchObject({ voiceError: code, usingFallback: true });
+    expect(states).toContainEqual(expect.objectContaining({ voiceError: code, state: 'loading' }));
+  });
+  await engine.playNoKey('Confirmed reply', 'turn-voice:chat:turn');
+  expect(fixture.speak).toHaveBeenCalledOnce();
+  expect(engine.state).toMatchObject({ voiceError: code });
+  await engine.playNoKey('Retry', 'retry');
+  expect(engine.state).toMatchObject({ voiceError: null, usingFallback: false });
+  unsubscribe();
+});
 it('ignores late Edge rejection after the owned playback was stopped', async () => {
   let reject!: (error: Error) => void;
   vi.mocked(fetch).mockImplementation(() => new Promise((_resolve, fail) => { reject = fail; }));

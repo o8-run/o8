@@ -8,6 +8,7 @@
 //! constraint), so o8 can speak with no focused webview.
 
 pub mod edge_local;
+mod edge_voice_error;
 mod elevenlabs;
 pub mod google;
 pub mod native_say;
@@ -61,9 +62,7 @@ pub fn load_config() -> TtsConfig {
         Some("elevenlabs") if crate::stt::keys::get_elevenlabs_key().is_some() => {
             TtsProvider::ElevenLabs
         }
-        Some("google") if crate::stt::keys::get_google_tts_key().is_some() => {
-            TtsProvider::Google
-        }
+        Some("google") if crate::stt::keys::get_google_tts_key().is_some() => TtsProvider::Google,
         _ => TtsProvider::EdgeFree,
     };
 
@@ -119,10 +118,19 @@ pub async fn speak(text: &str, config: &TtsConfig) -> Result<Vec<u8>, String> {
             }
             match edge_local::synthesize(text).await {
                 Ok(bytes) => {
-                    log::info!("[tts] cloud synth unavailable ({primary_err}); using local Steffan voice");
+                    log::info!(
+                        "[tts] cloud synth unavailable ({primary_err}); using local Steffan voice"
+                    );
                     Ok(bytes)
                 }
-                Err(local_err) => Err(format!("{primary_err}; edge-local: {local_err}")),
+                Err(local_err) => {
+                    crate::record_console_error(
+                        format!("[tts] Steffan (edge) failed, falling to macOS say: {local_err}"),
+                        "rust-tts".to_string(),
+                        0,
+                    );
+                    Err(format!("{primary_err}; edge-local: {local_err}"))
+                }
             }
         }
     }
