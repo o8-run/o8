@@ -1,5 +1,10 @@
 # Native issues evidence
 
+Review correction round 2 binds creation receipts and sends to their owning
+account, and keeps definite 429 refusals retryable. See the latest
+[correction evidence](round-2/verification.md) for the red/green receipts and
+current completion results.
+
 Review correction round 1 adds per-repository drafts, idempotent creation retries,
 canonical-path refresh and a frame-gap repository-switch regression. See the
 [correction evidence](round-1/verification.md) for current verification counts and

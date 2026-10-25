@@ -1,0 +1,52 @@
+Node 22 / stable Rust / Linux.
+
+Passed checks (exit 0):
+NODE_OPTIONS=--max-old-space-size=8192 npx tsc --noEmit
+npm run typecheck:fast
+tsrs has no linux-x64 build; using tsc 5.8.2
+
+npx eslint src/app/api/panel/issues/create/route.ts src/lib/github-broker/auth.ts src/lib/github-broker/actions.ts scripts/next/issues-fixture.ts scripts/next/dev-server.ts tests/next-issues-account-real-path.test.ts
+npm run rule-check -- --base=origin/main
+[rule-check] OK — scanned 7 file(s), zero violations vs origin/main
+
+npm run test:classify
+[test-classification] 1233 hermetic, 888 resource-owning
+node scripts/classify-tests.mjs --check
+[test-classification] manifest matches resource-owning source markers
+
+rustfmt --edition 2024 --config skip_children=true,reorder_modules=false --check native/o8-next/src/issue_review_tests.rs native/o8-next/src/shell.rs native/o8-next/src/shell_view.rs
+
+npx vitest run tests/next-issues-account-real-path.test.ts tests/next-issues-real-path.test.ts tests/managed-github-app.test.ts tests/composer-next-worker-real-path.test.ts tests/o8-next-shell-real-path.test.ts
+Test Files  5 passed (5)
+Tests  23 passed (23)
+Duration  53.68s
+
+cargo test --release --locked --manifest-path native/o8-next/Cargo.toml round2_ -- --test-threads=1
+test shell::issue_tests::review_tests::round2_account_cannot_retry_another_accounts_timed_out_creation ... ok
+test shell::issue_tests::review_tests::round2_definite_429_leaves_native_draft_editable_and_retryable ... ok
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 63 filtered out; finished in 13.52s
+
+Supplemental polling test, unchanged main comparison (exit 1 on both):
+tests/workspace-github-polling-real-path.test.ts
+origin/main: Tests 22 failed | 1 passed (23)
+correction branch: the same 22 failures, REVIEW_GIT_UNAVAILABLE
+
+First complete native run: 61 passed; 1 failed; 3 ignored.
+Failure: existing worker_send_steer_queue_promote_remove_and_streaming_latency
+fixture timed out: steer receipt; Queue rejected the request (HTTP 400). Draft retained.
+A temporary main checkout was picked up by the broad TypeScript include.
+It was removed, fast typecheck completed, and the full native suite was rerun alone.
+
+Final complete native run (exit 0):
+cargo test --release --locked --manifest-path native/o8-next/Cargo.toml -- --test-threads=1
+test result: ok. 62 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 245.02s
+CLI test files: diff_cli.rs (1), pane_grid_cli.rs (3), shell_cli.rs (2), terminal_cli.rs (1); all 7 passed.
+
+cargo build --release --locked --manifest-path native/o8-next/Cargo.toml
+Finished release profile [optimized] target(s) in 36.33s
+
+Final full npm gate (exit 0):
+npm test
+Test Files  1237 passed | 3 skipped (1240)
+Tests  8953 passed | 5 skipped (8958)
+Duration  401.09s

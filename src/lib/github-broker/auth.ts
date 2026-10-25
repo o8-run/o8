@@ -3,13 +3,46 @@ import 'server-only';
 import { createHmac, createPrivateKey, timingSafeEqual } from 'node:crypto';
 import { SignJWT } from 'jose';
 import { getGitHubAppConfig, requireGitHubAppConfig } from './env';
-import { readManagedGithubToken } from './managed';
+import { readActiveIdentity, readManagedGithubToken, readSignInEpoch } from './managed';
 import { assertGitHubRequestBudget, githubCredentialScope, observeGitHubRequestBudget, type GitHubReadPriority } from './request-budget';
 import { sharedConditionalGitHubRead } from './conditional-read';
 import { isSecondaryGitHubLimit } from './rate-limit-response';
 
 const INSTALLATION_TOKEN_TTL_SKEW_MS = 60_000;
 const installationTokenCache = new Map<number, { token: string; expiresAtMs: number }>();
+
+/** Capture before any request await; installation ids alone do not identify an o8 account. */
+export function captureGitHubAccount() {
+  const config = getGitHubAppConfig();
+  return { owner: readActiveIdentity(), epoch: readSignInEpoch(), appId: config?.appId ?? null,
+    apiBaseUrl: config?.apiBaseUrl ?? 'https://api.github.com' };
+}
+type GitHubAccount = ReturnType<typeof captureGitHubAccount>;
+
+export class GitHubAccountChangedError extends Error {
+  constructor() { super('The GitHub account changed. Retry from the account that owns this draft.'); }
+}
+
+export function requireGitHubAccount(account: GitHubAccount): void {
+  const current = captureGitHubAccount();
+  if (current.owner !== account.owner || current.epoch !== account.epoch
+    || current.appId !== account.appId || current.apiBaseUrl !== account.apiBaseUrl) throw new GitHubAccountChangedError();
+}
+
+export interface GitHubInstallationAuthorization {
+  account: GitHubAccount;
+  installation: Awaited<ReturnType<typeof getInstallationForRepo>>;
+  token: string;
+}
+
+export async function captureGitHubInstallationAuthorization(repo: string, account: GitHubAccount): Promise<GitHubInstallationAuthorization> {
+  requireGitHubAccount(account);
+  const installation = await getInstallationForRepo(repo);
+  requireGitHubAccount(account);
+  const token = await getInstallationToken(installation.id);
+  requireGitHubAccount(account);
+  return { account, installation, token };
+}
 
 /**
  * Whether the broker can reach GitHub at all — BYO App config OR a live managed
@@ -142,19 +175,24 @@ export async function getInstallationToken(installationId: number, signal?: Abor
   return data.token;
 }
 
-export async function githubInstallationFetch(repoFullName: string, path: string, init?: RequestInit, readOptions: { priority?: GitHubReadPriority; share?: boolean } = {}) {
-  const installation = await getInstallationForRepo(repoFullName, init?.signal ?? undefined);
-  const token = await getInstallationToken(installation.id, init?.signal ?? undefined);
+export async function githubInstallationFetch(repoFullName: string, path: string, init?: RequestInit,
+  readOptions: { priority?: GitHubReadPriority; share?: boolean; authorization?: GitHubInstallationAuthorization } = {}) {
+  const authorization = readOptions.authorization;
+  const installation = authorization ? authorization.installation : await getInstallationForRepo(repoFullName, init?.signal ?? undefined);
+  const token = authorization ? authorization.token : await getInstallationToken(installation.id, init?.signal ?? undefined);
   // Managed mode has NO BYO config — requireGitHubAppConfig() would throw here
   // even though we hold a valid token (audit #1, the bug that made every managed
   // GitHub call fail). The API base is always public GitHub in managed mode.
-  const apiBaseUrl = getGitHubAppConfig()?.apiBaseUrl ?? 'https://api.github.com';
+  const apiBaseUrl = authorization?.account.apiBaseUrl ?? getGitHubAppConfig()?.apiBaseUrl ?? 'https://api.github.com';
   const scope = githubCredentialScope(apiBaseUrl, installation.id, token);
   const budgetScope = githubCredentialScope(apiBaseUrl, installation.id, 'installation-budget');
   const resource = path === '/graphql' ? 'graphql' : path.startsWith('/search/') ? 'search' : 'core';
   const read = async (etag?: string) => {
     assertGitHubRequestBudget(budgetScope, resource, readOptions.priority ?? 'interactive');
     const headers = new Headers(githubHeaders(token, init?.headers)); if (etag) headers.set('If-None-Match', etag);
+    // No await between this guard and dispatch. Never resolve another account's
+    // token after a creation has been reserved for the captured account.
+    if (authorization) requireGitHubAccount(authorization.account);
     const response = await fetch(`${apiBaseUrl}${path}`, { ...init, headers, cache: 'no-store' });
     observeGitHubRequestBudget(budgetScope, resource, response, Date.now(), await isSecondaryGitHubLimit(response));
     if (response.status === 403 || response.status === 429) assertGitHubRequestBudget(budgetScope, resource, 'interactive');

@@ -1,6 +1,69 @@
 //! Correction-round regressions through the actual shell, editors and HTTP host.
 use super::*;
 
+#[gpui::test]
+fn round2_account_cannot_retry_another_accounts_timed_out_creation(cx: &mut TestAppContext) {
+    let fixture = Fixture::with_flags(false, &["--issues-managed", "--issues-delay-create"]);
+    let (_, mut visual, _) = open(&fixture, cx);
+    let cx = &mut visual;
+    click(cx, "issue-new");
+    input(cx, "issue-title", "Owned delayed native creation");
+    click(cx, "issue-create");
+    wait(cx, "issue-error");
+    fixture
+        .client
+        .issue_request(
+            "POST",
+            "/__fixture/issues",
+            &[],
+            Some(json!({"account":"b"})),
+        )
+        .unwrap();
+    click(cx, "issue-create");
+    wait(cx, "issue-error");
+    assert!(scene(cx)["error"].as_str().unwrap().contains("409"));
+    fixture
+        .client
+        .issue_request(
+            "POST",
+            "/__fixture/issues",
+            &[],
+            Some(json!({"account":"a"})),
+        )
+        .unwrap();
+    click(cx, "issue-create");
+    wait(cx, "issue-created-9");
+    let posts = fixture
+        .client
+        .issue_request("POST", "/__fixture/issues", &[], Some(json!({})))
+        .unwrap();
+    assert_eq!(
+        posts["postsSeen"],
+        json!([{"title":"Owned delayed native creation","account":"a"}])
+    );
+}
+
+#[gpui::test]
+fn round2_definite_429_leaves_native_draft_editable_and_retryable(cx: &mut TestAppContext) {
+    let fixture = Fixture::with_flags(false, &["--issues-rate-limit-once"]);
+    let (_, mut visual, _) = open(&fixture, cx);
+    let cx = &mut visual;
+    click(cx, "issue-new");
+    input(cx, "issue-title", "Before cooldown");
+    click(cx, "issue-create");
+    wait(cx, "issue-error");
+    assert!(scene(cx)["error"].as_str().unwrap().contains("429"));
+    input(cx, "issue-title", "Edited after definite 429");
+    std::thread::sleep(Duration::from_millis(2200));
+    click(cx, "issue-create");
+    wait(cx, "issue-created-9");
+    let detail: Value = fixture
+        .client
+        .get("/api/panel/issues/9", &[("repo", "fixture/alpha")])
+        .unwrap();
+    assert_eq!(detail["issue"]["title"], "Edited after definite 429");
+}
+
 fn worker_state(shell: &Entity<Shell>, cx: &mut VisualTestContext) -> Value {
     shell.read_with(cx, |s, cx| {
         match s.content.get(&s.key(&s.active().unwrap())).unwrap() {

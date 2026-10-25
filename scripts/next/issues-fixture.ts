@@ -42,6 +42,27 @@ export async function issueFixture(dataDir: string, root: string, repoPath: stri
     ? [issue(slug, 17, 'Separate installation')]
     : [issue(slug, 7, 'Repair fixture'), issue(slug, 8, 'Closed fixture', 'closed')]]));
   const creations = new Map<string, number>();
+  const managedMode = process.argv.includes('--issues-managed');
+  const { writeActiveIdentity, writeManagedGithubState, bumpSignInEpoch } = await import('../../src/lib/github-broker/managed');
+  const setAccount = (account: 'a' | 'b') => {
+    writeActiveIdentity(`fixture-issue-owner-${account}`);
+    bumpSignInEpoch();
+    writeManagedGithubState({ installed: true, ownerClerkUserId: `fixture-issue-owner-${account}`,
+      token: `fixture-managed-${account}`, installationId: 101, expiresAt: '2099-01-01T00:00:00Z' });
+  };
+  let switchOnReserve = false;
+  const postsSeen: Array<{ title: string; account: string }> = [];
+  if (managedMode) {
+    delete process.env.GITHUB_APP_PRIVATE_KEY;
+    setAccount('a');
+    const { getSqlite } = await import('../../src/lib/db');
+    getSqlite().function('fixture_issue_reservation', () => { if (switchOnReserve) { switchOnReserve = false; setAccount('b'); } return 0; });
+    getSqlite().exec(`CREATE TRIGGER fixture_issue_reservation AFTER INSERT ON idempotency_keys
+      WHEN NEW.verb = 'github_issue_create' BEGIN SELECT fixture_issue_reservation(); END`);
+  }
+  let rateLimitNext = process.argv.includes('--issues-rate-limit-once');
+  let holdReplyNext = false;
+  let releaseReply: (() => void) | undefined;
   const upstream = createServer(async (req, res) => {
     const url = new URL(req.url ?? '/', 'http://fixture.invalid');
     const send = (status: number, body: unknown) => res.writeHead(status, { 'Content-Type': 'application/json' }).end(JSON.stringify(body));
@@ -56,7 +77,10 @@ export async function issueFixture(dataDir: string, root: string, repoPath: stri
     const target = url.pathname.match(/^\/repos\/([^/]+\/[^/]+)\/(issues|labels)(?:\/(\d+))?$/);
     if (!target || !records.has(target[1])) { send(404, { message: 'Outside fixture installation' }); return; }
     const [, slug, resource, number] = target;
-    if (req.headers.authorization !== `Bearer fixture-installation-${101 + slugs.indexOf(slug)}`) {
+    const account = managedMode ? req.headers.authorization === 'Bearer fixture-managed-a' ? 'a'
+      : req.headers.authorization === 'Bearer fixture-managed-b' ? 'b' : null : 'app';
+    if (managedMode ? !account || slug !== slugs[0]
+      : req.headers.authorization !== `Bearer fixture-installation-${101 + slugs.indexOf(slug)}`) {
       send(403, { message: 'Wrong installation credential' }); return;
     }
     if ((mode === 'detail-error' && number) || (mode === 'mutation-error' && req.method === 'POST')) {
@@ -67,11 +91,24 @@ export async function issueFixture(dataDir: string, root: string, repoPath: stri
     if (req.method === 'POST') {
       let body = ''; for await (const chunk of req) body += String(chunk);
       const input = JSON.parse(body);
+      postsSeen.push({ title: input.title, account: account! });
+      if (rateLimitNext) {
+        rateLimitNext = false;
+        res.writeHead(429, { 'Content-Type': 'application/json', 'Retry-After': '1',
+          'x-ratelimit-remaining': '0', 'x-ratelimit-reset': String(Math.ceil(Date.now() / 1000) + 1) })
+          .end(JSON.stringify({ message: 'Fixture cooldown' })); return;
+      }
       const count = creations.get(slug) ?? 0;
       creations.set(slug, count + 1);
       const created = { ...issue(slug, 9 + count, input.title), body: input.body,
         labels: input.labels.map((name: string) => ({ name, color: 'ff0000' })) };
+      if (managedMode) created.user = { login: `fixture-owner-${account}` };
       rows.push(created);
+      if (holdReplyNext) {
+        holdReplyNext = false;
+        await new Promise<void>(resolve => { releaseReply = resolve; });
+        releaseReply = undefined;
+      }
       if (input.title === 'Commit then disconnect') { res.destroy(); return; }
       if (process.argv.includes('--issues-delay-create') && count === 0) await delay(6500);
       send(201, created); return;
@@ -83,11 +120,14 @@ export async function issueFixture(dataDir: string, root: string, repoPath: stri
   const address = upstream.address();
   if (!address || typeof address === 'string') throw new Error('Missing GitHub fixture origin');
   process.env.GITHUB_APP_ID = '1';
-  process.env.GITHUB_APP_PRIVATE_KEY = generateKeyPairSync('rsa', { modulusLength: 2048 }).privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
+  if (!managedMode) process.env.GITHUB_APP_PRIVATE_KEY = generateKeyPairSync('rsa', { modulusLength: 2048 }).privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
   process.env.GITHUB_API_BASE_URL = `http://127.0.0.1:${address.port}`;
   process.env.GEMINI_API_KEY = 'fixture-enhancement-only';
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (input, init) => {
+    if (managedMode && String(input).startsWith('https://api.github.com/')) {
+      return originalFetch(String(input).replace('https://api.github.com', process.env.GITHUB_API_BASE_URL!), init);
+    }
     if (String(input).startsWith('https://generativelanguage.googleapis.com/')) {
       return Response.json(mode === 'mutation-error' ? { error: 'Enhancement refused' } : { candidates: [{ content: { parts: [{ text: JSON.stringify({
         title: 'Enhanced fixture', body: '## Description\nEnhanced details', labels: ['bug'],
@@ -107,6 +147,15 @@ export async function issueFixture(dataDir: string, root: string, repoPath: stri
   };
   const posts: Record<string, (request: NextRequest) => Promise<Response>> = {
     '/api/panel/issues/create': create.POST, '/api/panel/issues/enhance': enhance.POST,
+    '/__fixture/issues': async request => {
+      const command = await request.json();
+      if (command.account && managedMode) setAccount(command.account);
+      if (command.switchOnReserve && managedMode) switchOnReserve = true;
+      if (command.rateLimitNext) rateLimitNext = true;
+      if (command.holdReplyNext) holdReplyNext = true;
+      if (command.releaseReply) releaseReply?.();
+      return Response.json({ postsSeen, held: Boolean(releaseReply) });
+    },
   };
   return { gets, posts, close() { globalThis.fetch = originalFetch; upstream.closeAllConnections(); upstream.close(); } };
 }

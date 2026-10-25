@@ -1,0 +1,25 @@
+running 2 tests
+test shell::issue_tests::review_tests::round2_account_cannot_retry_another_accounts_timed_out_creation ... FAILED
+test shell::issue_tests::review_tests::round2_definite_429_leaves_native_draft_editable_and_retryable ... FAILED
+
+failures:
+
+---- shell::issue_tests::review_tests::round2_account_cannot_retry_another_accounts_timed_out_creation stdout ----
+
+thread 'shell::issue_tests::review_tests::round2_account_cannot_retry_another_accounts_timed_out_creation' panicked at src/issue_tests.rs:168:5:
+real control did not reach CPU paint: issue-error
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- shell::issue_tests::review_tests::round2_definite_429_leaves_native_draft_editable_and_retryable stdout ----
+
+thread 'shell::issue_tests::review_tests::round2_definite_429_leaves_native_draft_editable_and_retryable' panicked at src/issue_review_tests.rs:55:5:
+assertion failed: scene(cx)["error"].as_str().unwrap().contains("429")
+
+
+failures:
+    shell::issue_tests::review_tests::round2_account_cannot_retry_another_accounts_timed_out_creation
+    shell::issue_tests::review_tests::round2_definite_429_leaves_native_draft_editable_and_retryable
+
+test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 63 filtered out; finished in 11.94s
+
+error: test failed, to rerun pass `--bin o8-next`
