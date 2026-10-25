@@ -15,7 +15,7 @@ import {
   validateRepo,
 } from '@/lib/repos/registry';
 import { cloneRepoToDefaultLocation, RepoCloneError } from '@/lib/repos/clone';
-import { KnowledgeSourceWriteError } from '@/lib/cortex/knowledge/sources';
+import { assertNotKnowledgeSource, KnowledgeSourceWriteError, normalizeKnowledgeWritePath } from '@/lib/cortex/knowledge/sources';
 import { removeRepoPathFromProjects, repointRepoPathInProjects } from '@/lib/repos/project-path-mutations';
 import { removeRepoFromPool } from '@/lib/repos/remove';
 import {
@@ -379,7 +379,8 @@ async function handlePOST(request: Request) {
         if (!('localPath' in body) || !body.localPath?.trim()) {
           return NextResponse.json({ error: 'localPath is required.' }, { status: 400 });
         }
-        if (isOrchestratorHomePath(body.localPath)) {
+        assertNotKnowledgeSource(body.localPath);
+        if (isOrchestratorHomePath(normalizeKnowledgeWritePath(body.localPath))) {
           return NextResponse.json({ error: 'Home mode is not a registered repository.' }, { status: 400 });
         }
         // Registration is durable once addRepo resolves. A cold readiness probe
@@ -419,11 +420,12 @@ async function handlePOST(request: Request) {
           return NextResponse.json({ error: 'localPath must be a Git repository folder.' }, { status: 400 });
         }
         if ('localPath' in body && body.localPath !== undefined) {
-          if (isOrchestratorHomePath(body.localPath)) {
+          assertNotKnowledgeSource(body.localPath);
+          if (isOrchestratorHomePath(normalizeKnowledgeWritePath(body.localPath))) {
             return NextResponse.json({ error: 'Home mode is not a registered repository.' }, { status: 400 });
           }
           try {
-            assertOrchestratorRepoPath(body.localPath);
+            assertOrchestratorRepoPath(normalizeKnowledgeWritePath(body.localPath));
           } catch (error) {
             return NextResponse.json({ error: error instanceof Error ? error.message : 'Invalid repository folder.' }, { status: 400 });
           }

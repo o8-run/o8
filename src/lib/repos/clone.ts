@@ -23,7 +23,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { remoteRepositoryIdentity } from './remote-identity';
-import { assertNotKnowledgeSource } from '@/lib/cortex/knowledge/sources';
+import { assertNotKnowledgeSource, normalizeKnowledgeWritePath } from '@/lib/cortex/knowledge/sources';
 
 const execFileAsync = promisify(execFile);
 
@@ -62,7 +62,7 @@ async function pathExists(target: string) {
 }
 
 export function getDefaultCloneRoot() {
-  return path.join(os.homedir(), 'Developer');
+  return normalizeKnowledgeWritePath(path.join(os.homedir(), 'Developer'));
 }
 
 /**

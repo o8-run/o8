@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { chmodSync, existsSync, linkSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, linkSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { NextRequest } from 'next/server';
 import { afterAll, beforeEach, expect, it, vi } from 'vitest';
@@ -77,6 +77,65 @@ beforeEach(async () => {
 });
 afterAll(() => { closeDb(); vi.unstubAllEnvs(); rmSync(f.root, { recursive: true, force: true }); });
 
+const spellings = ['tilde', 'padded tilde', 'relative', 'symlink', 'symlink parent traversal', 'trailing separators', 'case alias'] as const;
+const entries = ['send', 'registry add', 'registry update', 'clone', 'workspace save'] as const;
+it.each(spellings.flatMap(spelling => entries.map(entry => [spelling, entry] as const)))(
+  'excludes a source spelled with %s through %s', async (spelling, entry) => {
+    const original = repo();
+    const registered = await addRepo(original);
+    const vault = repo();
+    await source(vault);
+    let input: string = vault;
+    if (spelling === 'tilde') input = `~/${path.relative(f.root, vault)}`;
+    if (spelling === 'padded tilde') input = `  ~/${path.relative(f.root, vault)}  `;
+    if (spelling === 'relative') input = path.relative(process.cwd(), vault);
+    if (spelling === 'symlink') { input = path.join(f.root, `alias-${++seq}`); symlinkSync(vault, input, 'dir'); }
+    if (spelling === 'symlink parent traversal') {
+      const nested = path.join(vault, 'nested'); mkdirSync(nested);
+      const alias = path.join(f.root, `alias-${++seq}`); symlinkSync(nested, alias, 'dir');
+      input = `${alias}/..`;
+    }
+    if (spelling === 'trailing separators') input = `${vault}///`;
+    if (spelling === 'case alias') {
+      const alias = path.join(path.dirname(vault), path.basename(vault).toUpperCase());
+      if (existsSync(alias) && statSync(alias).ino === statSync(vault).ino) input = alias;
+      else {
+        // On case-sensitive volumes this is a distinct, writable sibling, not an alias.
+        mkdirSync(alias);
+        const writable = await addRepo(alias);
+        expect(writable.localPath).toBe(alias);
+        await removeRepo(writable.id);
+      }
+    }
+    let response: Response;
+    if (entry === 'send') response = await send(request('/api/codex/send', { cwd: input, message: 'fixture' }));
+    else if (entry === 'registry add') response = await reposPost(request('/api/panel/repos', { action: 'add', localPath: input }));
+    else if (entry === 'registry update') response = await reposPost(request('/api/panel/repos', { action: 'update', id: registered.id, localPath: input }));
+    else if (entry === 'clone') {
+      // Clone has no caller-supplied destination. Its fixed ~/Developer root
+      // reaches this same source via a linked parent, including a missing child.
+      const developer = path.join(f.root, 'Developer');
+      rmSync(developer, { recursive: true, force: true });
+      symlinkSync(vault, developer, 'dir');
+      response = await reposPost(request('/api/panel/repos', { action: 'clone', cloneUrl: original, name: 'must-not-exist' }));
+      expect(existsSync(path.join(vault, 'must-not-exist'))).toBe(false);
+      rmSync(developer);
+    } else {
+      const registryPath = path.join(f.data, 'repos.json');
+      const store = JSON.parse(readFileSync(registryPath, 'utf8'));
+      store.repos.find((row: { id: string }) => row.id === registered.id).localPath = vault;
+      writeFileSync(registryPath, JSON.stringify(store)); await listReposFresh();
+      response = await save(request('/api/v2/files', { workspace: input, path: 'note.md', content: 'must not write' }));
+    }
+    const body = await response.text();
+    expect(response.status, body).toBe(entry === 'workspace save' ? 403 : 400);
+    expect(body).toContain('read-only');
+    expect(readFileSync(path.join(vault, 'note.md'), 'utf8')).toBe('# Preserved notes\n');
+    if (entry === 'registry add') expect((await listReposFresh()).map(row => row.id)).toEqual([registered.id]);
+    if (entry === 'registry update') expect((await listReposFresh()).find(row => row.id === registered.id)?.localPath).toBe(original);
+  },
+);
+
 it.each(['root', 'descendant', 'alias', 'resume'] as const)('refuses a direct %s send before an offline CLI can modify the source', async mode => {
   const folder = repo(); await source(folder);
   let cwd = folder;
@@ -140,6 +199,22 @@ it.each(['note.md', 'new.md'])('refuses workspace save of %s even when a stale r
   expect(existsSync(path.join(vault, 'new.md'))).toBe(false);
   const readable = await read(new NextRequest(`http://localhost/api/v2/files?workspace=${encodeURIComponent(vault)}&path=note.md`));
   expect(readable.status).toBe(200);
+});
+
+it('preserves literal whitespace in configured roots when guarding a default-workspace save', async () => {
+  const folder = repo(); const vault = `${folder} `; renameSync(folder, vault); await source(vault);
+  const nested = path.join(vault, 'nested'); mkdirSync(nested);
+  writeFileSync(path.join(nested, 'note.md'), '# Preserved notes\n');
+  const previous = process.env.CORTEX_IDE_REVIEW_REPO_ROOT;
+  process.env.CORTEX_IDE_REVIEW_REPO_ROOT = nested;
+  try {
+    const response = await save(request('/api/v2/files', { path: 'note.md', content: 'must not write' }));
+    expect(readFileSync(path.join(nested, 'note.md'), 'utf8')).toBe('# Preserved notes\n');
+    expect(response.status, await response.text()).toBe(403);
+  } finally {
+    if (previous === undefined) delete process.env.CORTEX_IDE_REVIEW_REPO_ROOT;
+    else process.env.CORTEX_IDE_REVIEW_REPO_ROOT = previous;
+  }
 });
 
 it('retains normal writable repository sends, updates and file saves', async () => {

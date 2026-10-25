@@ -1,14 +1,13 @@
 import { childEnvironment } from '@/lib/providers/spawn-environment';
 import { NextRequest } from 'next/server';
 import { spawn } from '@/lib/providers/child-process';
-import os from 'os';
 
 import { assertOrchestratorRepoPath } from '@/lib/lane/repo-preflight';
 import { formatMissingCliError } from '@/lib/runtimes/shared/cli-unavailable';
 import { CliNotFoundError, resolveCli } from '@/lib/runtimes/shared/cli-resolver';
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 import { providerSpawnEnvironment } from '@/lib/providers/spawn-environment';
-import { assertNotKnowledgeSource } from '@/lib/cortex/knowledge/sources';
+import { assertNotKnowledgeSource, normalizeKnowledgeWritePath } from '@/lib/cortex/knowledge/sources';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -89,7 +88,7 @@ export async function POST(req: NextRequest) {
   }
 
   // Expand tilde in workspace paths
-  const expandedCwd = cwd?.replace(/^~/, os.homedir());
+  const expandedCwd = cwd?.trim() ? normalizeKnowledgeWritePath(cwd) : undefined;
   const workingDir = expandedCwd || process.cwd();
   try {
     assertNotKnowledgeSource(workingDir);

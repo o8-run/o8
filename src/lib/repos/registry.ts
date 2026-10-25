@@ -1,4 +1,4 @@
-import { assertNotKnowledgeSource } from '@/lib/cortex/knowledge/sources';
+import { assertNotKnowledgeSource, normalizeKnowledgeWritePath } from '@/lib/cortex/knowledge/sources';
 import 'server-only';
 
 import { execFile } from '@/lib/providers/child-process';
@@ -306,7 +306,7 @@ async function resolveRepoRoot(inputPath: string) {
     throw new Error('Repository path is required.');
   }
 
-  const resolved = path.resolve(expanded);
+  const resolved = normalizeKnowledgeWritePath(expanded);
   const stats = await stat(resolved).catch(() => null);
   if (!stats) {
     throw new Error('Path not found.');
@@ -527,8 +527,10 @@ export async function validateRepo(localPath: string) {
 export async function addRepo(localPath: string) {
   assertNotKnowledgeSource(localPath);
   const candidate = await inspectLocalRepo(localPath);
+  assertNotKnowledgeSource(candidate.localPath);
   const manifest = await loadWorkspaceManifestCache(candidate.localPath);
   const { entry, created } = await withRegistryMutation(async () => {
+    assertNotKnowledgeSource(candidate.localPath);
     const store = await readStoreFresh();
     const now = nowIso();
     const existing = store.repos.find((repo) => repo.localPath === candidate.localPath);
