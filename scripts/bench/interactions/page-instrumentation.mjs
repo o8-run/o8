@@ -138,7 +138,8 @@ export function instrumentationInitScript({ injectedDelayMs = 0, selectedRepoId 
 // Runs inside the page. The caller starts this evaluate, then dispatches a
 // trusted key press through the browser protocol, then awaits the result: a
 // script-synthesized event would not exercise the real input path.
-export async function observeComposerKeystroke(selector) {
+export async function observeComposerKeystroke(input) {
+  const selector = typeof input === 'string' ? input : input.selector;
   // Inlined because page.evaluate cannot see module scope.
   const phaseSplit = (entry, fallback) => ({
     serverWaitMs: { value: null, note: 'no network request participates in this input path' },
@@ -172,6 +173,7 @@ export async function observeComposerKeystroke(selector) {
     const onInput = () => { inputAt = performance.now(); };
     target.addEventListener('keydown', onKeydown, true);
     target.addEventListener('input', onInput, true);
+    if (typeof input === 'object' && input.readySignal) globalThis[input.readySignal] = true;
     const finish = (paintedAt, note) => {
       target.removeEventListener('keydown', onKeydown, true);
       target.removeEventListener('input', onInput, true);

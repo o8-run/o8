@@ -4112,6 +4112,14 @@
       ]
     },
     {
+      "path": "tests/next-speed-receipt-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/next-startup-route-loading-real-path.test.ts",
       "reasons": [
         "child-process",
