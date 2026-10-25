@@ -1,5 +1,5 @@
 //! Opt-in native terminal pane. Original GPUI rendering over the published
-//! Apache-2.0 Alacritty grid; no Zed application crates or WebView changes.
+//! Apache-2.0 terminal grid and native rendering.
 use crate::theme::current as theme;
 use crate::{
     client::Client,

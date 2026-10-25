@@ -4,8 +4,8 @@ use crate::{
     shell_state::{State, Workspace},
 };
 use gpui::{
-    App, Application, Bounds, Context, Entity, FocusHandle, Render, Window, WindowBounds,
-    WindowOptions, canvas, div, point, prelude::*, px, size,
+    App, Application, Bounds, Context, Entity, FocusHandle, KeyDownEvent, Render, Window,
+    WindowBounds, WindowOptions, canvas, div, point, prelude::*, px, size,
 };
 use std::{
     cell::Cell,
@@ -60,6 +60,8 @@ pub struct Shell {
     workspace_picker: bool,
     palette_input: Entity<crate::composer::Composer>,
     shortcuts: bool,
+    shortcuts_focus: FocusHandle,
+    shortcuts_return: Option<FocusHandle>,
     query: String,
     choice: usize,
     palette_scroll: gpui::ScrollHandle,
@@ -106,6 +108,8 @@ impl Shell {
             workspace_picker: false,
             palette_input,
             shortcuts: false,
+            shortcuts_focus: cx.focus_handle(),
+            shortcuts_return: None,
             query: String::new(),
             choice: 0,
             palette_scroll: gpui::ScrollHandle::new(),
@@ -263,6 +267,10 @@ impl Shell {
         self.restore_focus(window, cx);
     }
     fn restore_focus(&self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.shortcuts {
+            self.shortcuts_focus.focus(window);
+            return;
+        }
         if self.palette {
             self.palette_input.read(cx).focus.focus(window);
             return;
@@ -308,7 +316,8 @@ impl Shell {
         cx.notify();
     }
     fn capture(&mut self, window: &Window, cx: &App) {
-        if self.palette || registrations().iter().any(|r| (r.overlay_open)(self)) {
+        if self.palette || self.shortcuts || registrations().iter().any(|r| (r.overlay_open)(self))
+        {
             return;
         }
         if let Some(tab) = self.active()
@@ -462,7 +471,18 @@ impl Shell {
                 }
             }
             Shortcut::Reference => {
-                self.shortcuts = !self.shortcuts;
+                self.capture(window, cx);
+                self.shortcuts_return = window.focused(cx);
+                self.shortcuts = true;
+                self.shortcuts_focus.focus(window);
+            }
+            Shortcut::ReferenceCancel => {
+                self.shortcuts = false;
+                if let Some(focus) = self.shortcuts_return.take() {
+                    focus.focus(window);
+                } else {
+                    self.restore_focus(window, cx);
+                }
             }
             Shortcut::Settings => {
                 if self.surfaces.settings.view.is_some() {
@@ -471,7 +491,18 @@ impl Shell {
                     self.open_settings(window, cx);
                 }
             }
-            Shortcut::NextSurface => {
+            Shortcut::NextSurface | Shortcut::PreviousSurface | Shortcut::SurfaceIndex(_) => {
+                let Some(saved) = self.current().filter(|saved| !saved.tabs.is_empty()) else {
+                    return;
+                };
+                let index = match *action {
+                    Shortcut::PreviousSurface => {
+                        (saved.active + saved.tabs.len() - 1) % saved.tabs.len()
+                    }
+                    Shortcut::SurfaceIndex(index) if index < saved.tabs.len() => index,
+                    Shortcut::SurfaceIndex(_) => return,
+                    _ => (saved.active + 1) % saved.tabs.len(),
+                };
                 self.capture(window, cx);
                 for registration in registrations() {
                     (registration.after_tab)(self);
@@ -483,7 +514,7 @@ impl Shell {
                     .and_then(|w| self.state.workspaces.get_mut(w))
                     && !saved.tabs.is_empty()
                 {
-                    saved.active = (saved.active + 1) % saved.tabs.len();
+                    saved.active = index;
                 }
                 self.ensure(window, cx);
                 self.restore_focus(window, cx);
@@ -520,6 +551,21 @@ impl Shell {
         self.revision += 1;
         cx.notify();
     }
+    fn legacy_key_down(
+        &mut self,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if registrations()
+            .iter()
+            .any(|registration| (registration.key_down)(self, event, window, cx))
+        {
+            self.revision += 1;
+            cx.notify();
+            cx.stop_propagation();
+        }
+    }
     fn tick(&mut self, refresh: bool, window: &mut Window, cx: &mut Context<Self>) {
         for extension in registry::extensions() {
             extension.tick(self, refresh, window, cx);
@@ -550,3 +596,7 @@ mod tests;
 #[cfg(test)]
 #[path = "shell_test_support.rs"]
 mod test_support;
+
+#[cfg(test)]
+#[path = "keymap_review_tests.rs"]
+mod keymap_review_tests;

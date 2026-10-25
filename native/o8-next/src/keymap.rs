@@ -1,5 +1,4 @@
-//! Original Apache-2.0 keymap. See Zed's public key-binding design (contexts and
-//! precedence); no application crate or application implementation is used.
+//! Actions bound to predicates on the focused view context path.
 use gpui::{App, Global, KeyBinding, Keystroke};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -27,9 +26,12 @@ pub enum Edit {
 pub enum Shortcut {
     Palette,
     NextSurface,
+    PreviousSurface,
+    SurfaceIndex(usize),
     CloseSurface,
     Settings,
     Reference,
+    ReferenceCancel,
     PaletteCancel,
     PaletteMove(bool),
     PaletteAccept,
@@ -88,9 +90,12 @@ impl Shortcut {
         match self {
             Palette => "Open commands".into(),
             NextSurface => "Next surface".into(),
+            PreviousSurface => "Previous surface".into(),
+            SurfaceIndex(index) => format!("Select surface {}", index + 1),
             CloseSurface => "Close surface".into(),
             Settings => "Open settings".into(),
             Reference => "Toggle shortcuts reference".into(),
+            ReferenceCancel => "Close shortcuts reference".into(),
             PaletteCancel => "Close commands".into(),
             PaletteMove(next) => if *next {
                 "Next command"
@@ -207,6 +212,12 @@ pub fn bindings() -> Vec<Binding> {
     };
     const GLOBAL: &str = "Global && !TextInput && !Terminal && !Modal";
     for prefix in ["ctrl-", "cmd-"] {
+        bind(&format!("{prefix}/"), GLOBAL, Reference);
+        bind(
+            &format!("{prefix}/"),
+            "Shortcuts && !TextInput && !Terminal",
+            ReferenceCancel,
+        );
         bind(&format!("{prefix}k"), GLOBAL, Palette);
         bind(&format!("{prefix}k"), "Palette && !Terminal", PaletteCancel);
         bind(
@@ -230,6 +241,18 @@ pub fn bindings() -> Vec<Binding> {
         bind(&format!("{prefix}f"), "Settings && !Terminal", SettingsFind);
     }
     bind("ctrl-tab", GLOBAL, NextSurface);
+    bind("ctrl-shift-tab", GLOBAL, PreviousSurface);
+    bind("cmd-alt-right", GLOBAL, NextSurface);
+    bind("cmd-alt-left", GLOBAL, PreviousSurface);
+    for index in 0..9 {
+        bind(&format!("cmd-{}", index + 1), GLOBAL, SurfaceIndex(index));
+    }
+    bind(
+        "escape",
+        "Shortcuts && !TextInput && !Terminal",
+        ReferenceCancel,
+    );
+    bind("?", "Shortcuts && !TextInput && !Terminal", ReferenceCancel);
     bind("?", GLOBAL, Reference);
     bind("escape", "Palette && !Terminal", PaletteCancel);
     bind("up", "Palette && !Terminal", PaletteMove(false));
@@ -537,5 +560,24 @@ pub fn terminal_protocol_input(element: gpui::Div) -> gpui::Div {
             window.dispatch_action(Box::new(Shortcut::TerminalText(format!("\x1b{text}"))), cx);
             cx.stop_propagation();
         }
+    })
+}
+
+/// Compatibility for registered raw-key hooks. Named actions have already had
+/// their focused dispatch opportunity before this unbound-event fallback runs.
+pub fn legacy_registration_input(
+    element: gpui::Div,
+    listener: impl Fn(&gpui::KeyDownEvent, &mut gpui::Window, &mut App) + 'static,
+) -> gpui::Div {
+    use gpui::prelude::*;
+    element.on_key_down(move |event, window, cx| {
+        if window
+            .context_stack()
+            .iter()
+            .any(|context| context.contains("TextInput") || context.contains("Terminal"))
+        {
+            return;
+        }
+        listener(event, window, cx);
     })
 }

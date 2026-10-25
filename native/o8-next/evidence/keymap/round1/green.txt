@@ -1,0 +1,27 @@
+final-keymap:
+test keymap::tests::keymap_every_binding_dispatches_only_on_its_focus_path ... keymap focus matrix: 6352 dispatch cases
+test result: ok. 16 passed; 0 failed; 1 ignored; 0 measured; 134 filtered out; finished in 21.66s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+final-registry:
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 150 filtered out; finished in 1.28s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+native:
+test keymap::tests::keymap_every_binding_dispatches_only_on_its_focus_path ... keymap focus matrix: 6352 dispatch cases
+test result: ok. 146 passed; 0 failed; 4 ignored; 0 measured; 1 filtered out; finished in 513.92s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+composition: cargo check --all-targets passed with the actual reference surface and its registration.
+tsc, typecheck:fast, classification, ESLint, rules, formatting and Clippy: exit 0.
+Rebased npm test: 9058 passed, 5 skipped; 1242 files passed; 222.70 s.
+Rebased keymap: 16 passed, 1 release benchmark ignored; 6352 dispatch cases.
+Rebased registered hook: 1 passed.
+Rebased tsc, fast typecheck, classification and rules: exit 0.
+New surface-boundary policy: exempt using actual PR shell-work label.

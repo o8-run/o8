@@ -33,6 +33,7 @@ impl Render for Shell {
             .collect::<Vec<_>>();
         div()
             .size_full()
+            .relative()
             .flex()
             .flex_col()
             .bg(if self.system_glass {
@@ -47,6 +48,9 @@ impl Render for Shell {
             .line_height(gpui::relative(crate::theme::TYPE.chrome_line))
             .track_focus(&self.focus)
             .key_context("Global")
+            .map(|view| {
+                crate::keymap::legacy_registration_input(view, cx.listener(Self::legacy_key_down))
+            })
             .on_action(cx.listener(Self::action))
             .when(self.system_glass, |view| view.child(material::veil()))
             .child(
@@ -141,62 +145,7 @@ impl Render for Shell {
                         .child(self.notice.clone()),
                 )
             })
-            .when(self.shortcuts, |view| {
-                view.child(
-                    div()
-                        .debug_selector(|| "shortcut-reference".into())
-                        .p(px(12.))
-                        .children(
-                            [
-                                "Ctrl+K / Cmd+K: Commands",
-                                "Ctrl+Tab: Next surface",
-                                "Ctrl+W: Close surface",
-                                "Enter: Send",
-                                "Shift+Enter: New line",
-                                "Ctrl+Shift+Enter: Switch send mode",
-                                "F6: Steer queued",
-                                "F7: Remove queued",
-                                "Escape: Close",
-                            ]
-                            .into_iter()
-                            .map(|key| div().p(px(6.)).child(key)),
-                        ),
-                )
-            })
-            .when(self.palette, |view| {
-                if let Some(palette) =
-                    registry::extensions().find_map(|extension| extension.palette(self, cx))
-                {
-                    return view.child(palette);
-                }
-                view.child(
-                    div()
-                        .id("command-palette")
-                        .debug_selector(|| "command-palette".into())
-                        .max_h(px(300.))
-                        .overflow_y_scroll()
-                        .track_scroll(&self.palette_scroll)
-                        .p(px(12.))
-                        .bg(theme().surface_raised)
-                        .child(self.palette_input.clone())
-                        .children(self.commands().into_iter().enumerate().map(|(i, command)| {
-                            div()
-                                .id(("command", i))
-                                .debug_selector(move || format!("command-{i}"))
-                                .p(px(6.))
-                                .cursor_pointer()
-                                .bg(if i == self.choice {
-                                    theme().selection
-                                } else {
-                                    theme().surface_raised
-                                })
-                                .child(command.label(&self.sessions))
-                                .on_click(cx.listener(move |this, _, window, cx| {
-                                    this.execute(command.clone(), window, cx)
-                                }))
-                        })),
-                )
-            })
+
             .child(
                 div()
                     .flex()
@@ -267,6 +216,8 @@ impl Render for Shell {
                 view.child(
                     div()
                         .id("shortcut-reference")
+                        .track_focus(&self.shortcuts_focus)
+                        .key_context("Shortcuts Modal")
                         .debug_selector(|| "shortcut-reference".into())
                         .max_h(px(300.))
                         .overflow_y_scroll()
@@ -282,6 +233,7 @@ impl Render for Shell {
             .child(
                 registrations().iter().fold(
                     div()
+                        .debug_selector(|| "shell-content".into())
                         .flex_1()
                         .min_h_0()
                         .child(content.unwrap_or_else(|| {
@@ -291,6 +243,9 @@ impl Render for Shell {
                     |content, registration| (registration.decorate)(self, content),
                 ),
             )
+            .when(self.palette, |view| {
+                view.children(registry::extensions().find_map(|extension| extension.palette(self, cx)))
+            })
             .child(canvas(|_, _, _| (), move |_, _, _, _| painted.set(revision)).size(px(1.)))
     }
 }

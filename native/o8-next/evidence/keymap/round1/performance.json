@@ -1,0 +1,36 @@
+{
+  "before": {
+    "profile": "release",
+    "endpoint": "hidden production shell key dispatch to first CPU scene",
+    "samples": 80,
+    "medianMs": 0.785147,
+    "p95Ms": 0.862171,
+    "medianDispatchMs": 0.409739,
+    "medianPaintMs": 0.3841510000000001,
+    "existingTest": {
+      "samples": 20,
+      "medianMs": 1.1895035,
+      "p95Ms": 1.294685
+    }
+  },
+  "after": {
+    "profile": "release",
+    "endpoint": "hidden production shell key dispatch to first CPU scene",
+    "samples": 80,
+    "medianMs": 0.561564,
+    "p95Ms": 0.7248680000000001,
+    "medianDispatchMs": 0.390741,
+    "medianPaintMs": 0.169933,
+    "existingTest": {
+      "samples": 20,
+      "medianMs": 1.153605,
+      "p95Ms": 1.6015409999999999
+    }
+  },
+  "reviewReported": {
+    "medianMs": 6.44,
+    "p95Ms": 36.5,
+    "priorBaselineMedianMs": 1.5,
+    "comparison": "Separate desktop observations; no local after desktop measurement available."
+  }
+}

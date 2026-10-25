@@ -89,6 +89,9 @@ pub(super) struct Registration {
     pub block_ensure: fn(&Shell) -> bool,
     pub focus_overlay: fn(&Shell, &mut Window, &mut Context<Shell>) -> bool,
     pub nav: fn(&Shell, NavPosition, &mut Context<Shell>) -> Vec<AnyElement>,
+    /// Compatibility fallback for registered surfaces with unbound keys.
+    /// The shell invokes this after focused actions, outside input contexts.
+    pub key_down: fn(&mut Shell, &KeyDownEvent, &mut Window, &mut Context<Shell>) -> bool,
     pub capture: fn(&mut Shell, &Window, &App),
     pub remove: fn(&mut Workspace, &Tab),
     pub before_tab: fn(&mut Shell),
@@ -120,6 +123,7 @@ impl Registration {
             block_ensure: |_| false,
             focus_overlay: |_, _, _| false,
             nav: |_, _, _| vec![],
+            key_down: |_, _, _, _| false,
             capture: |_, _, _| {},
             remove: |_, _| {},
             before_tab: |_| {},
@@ -191,7 +195,7 @@ macro_rules! register_surfaces {
         enum Content { $( $(#[$tab_attr])* $variant(Entity<$module::View>), )* }
         impl Content {
             fn element(&self) -> gpui::AnyElement {
-                match self { $( $(#[$tab_attr])* Self::$variant(view) => view.clone().into_any_element(), )* }
+                match self { $( $(#[$tab_attr])* Self::$variant(view) => gpui::AnyView::from(view.clone()).cached(gpui::StyleRefinement::default().size_full()).into_any_element(), )* }
             }
             fn focus(&self, composer: bool, window: &mut Window, cx: &mut Context<Shell>) {
                 match self { $( $(#[$tab_attr])* Self::$variant(view) => <$module::View as ShellView>::focus(view, composer, window, cx), )* }

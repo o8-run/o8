@@ -21,6 +21,7 @@ impl Render for Dispatch {
 fn origin(row: &Binding) -> &'static str {
     use Shortcut::*;
     match row.action {
+        ReferenceCancel => "Global Shortcuts Modal",
         PaletteCancel | PaletteMove(_) | PaletteAccept => "Global Palette",
         ToggleBrain | BrainCancel | BrainFind => "Global Session Brain",
         SessionFocus | SessionSelect(_) | SessionSteer | SessionRemove => "Global Session",

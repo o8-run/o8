@@ -1,9 +1,9 @@
 # Focus-aware native keymap
 
 Issue #4710, shell work; Refs #4548. The keymap uses the published Apache-2.0
-GPUI crate already in the dependency graph. The design reference was
-[Zed's public key-binding documentation](https://zed.dev/docs/key-bindings#contexts).
-No application implementation, GPL crate, AGPL project, or new dependency was used.
+GPUI crate already in the dependency graph. The pattern binds actions to context
+predicates and dispatches along the focused view path. No external application
+implementation or new dependency was used.
 
 The production `keymap.rs` registers actions once per GPUI app. Views attach
 contexts to their tracked focus nodes and handle actions during bubbling. The
@@ -17,6 +17,9 @@ message still selects the composer. Saved restart focus continues to use the
 existing state schema. Hidden rename inputs leave the active dispatch path when
 their view is detached. Reconnect tests observe the owned replay peer's actual
 socket interruption and successful reconnect, as well as the shell Retry action.
+
+Current review corrections and updated counts are in [round 1](round1/verification.md).
+The measurements below preserve the initial verification snapshot.
 
 ## Measurements and entry points
 

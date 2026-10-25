@@ -1,0 +1,56 @@
+red-functional:
+test shell::keymap_review_tests::review_directional_surface_binding ...
+thread 'shell::keymap_review_tests::review_directional_surface_binding' (89315) panicked at src/keymap_review_tests.rs:48:5:
+assertion `left == right` failed: Cmd+Alt+Right must select the next surface
+  left: Some(Session("thoughts-long"))
+ right: Some(Grid)
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+test shell::keymap_review_tests::review_numbered_surface_binding ...
+thread 'shell::keymap_review_tests::review_numbered_surface_binding' (89472) panicked at src/keymap_review_tests.rs:38:5:
+assertion `left == right` failed: Cmd+2 must select surface two
+  left: Some(Session("thoughts-long"))
+ right: Some(Grid)
+FAILED
+test shell::keymap_review_tests::review_palette_release_cpu_frame_budget ... ignored, release CPU measurement; run explicitly without competing workloads
+test shell::keymap_review_tests::review_pattern_documentation_avoids_product_attribution ...
+thread 'shell::keymap_review_tests::review_pattern_documentation_avoids_product_attribution' (89604) panicked at src/keymap_review_tests.rs:60:9:
+keymap.rs must describe the context pattern without naming an external product
+FAILED
+test shell::keymap_review_tests::review_reference_command_alias ...
+thread 'shell::keymap_review_tests::review_reference_command_alias' (89605) panicked at src/keymap_review_tests.rs:23:5:
+Cmd+/ must open the reference from the focused list
+FAILED
+test shell::keymap_review_tests::review_reference_escape_closes ...
+thread 'shell::keymap_review_tests::review_reference_escape_closes' (89841) panicked at src/keymap_review_tests.rs:30:5:
+Escape must close the visible reference
+FAILED
+test result: FAILED. 19 passed; 5 failed; 1 ignored; 0 measured; 124 filtered out; finished in 88.44s
+
+red-reflow:
+test shell::keymap_review_tests::review_palette_does_not_resize_the_retained_surface ...
+thread 'shell::keymap_review_tests::review_palette_does_not_resize_the_retained_surface' (95962) panicked at src/keymap_review_tests.rs:102:5:
+assertion `left == right` failed: palette must not resize and reflow the retained transcript
+  left: Bounds { origin: Point { x: 0px, y: 419px }, size: Size { 1200px × 396px } }
+ right: Bounds { origin: Point { x: 0px, y: 119px }, size: Size { 1200px × 696px } }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 149 filtered out; finished in 1.43s
+
+red-registry:
+error[E0560]: struct `registry::Registration` has no field named `key_down`
+  --> src/surfaces/fake.rs:21:5
+   |
+21 |     key_down: |shell, event, window, cx| {
+   |     ^^^^^^^^ `registry::Registration` does not have this field
+   |
+   = note: available fields are: `tab_label`, `command_label`, `open`, `global`, `overlay_command` ... and 9 others
+
+
+red-terminal-attribution:
+test shell::keymap_review_tests::review_pattern_documentation_avoids_product_attribution ...
+thread 'shell::keymap_review_tests::review_pattern_documentation_avoids_product_attribution' (121362) panicked at src/keymap_review_tests.rs:90:9:
+terminal.rs must describe the context pattern without naming an external product
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 150 filtered out; finished in 0.02s

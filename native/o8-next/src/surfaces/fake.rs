@@ -18,6 +18,14 @@ pub(super) struct View {
 }
 pub(super) const REGISTRATION: Registration = Registration {
     command: Some((8, || Command::Fake)),
+    key_down: |shell, event, window, cx| {
+        if event.keystroke == gpui::Keystroke::parse("ctrl-alt-f10").unwrap() {
+            shell.execute(Command::Fake, window, cx);
+            true
+        } else {
+            false
+        }
+    },
     create: |shell, _, workspace, _, cx| {
         shell
             .state
@@ -179,5 +187,31 @@ fn new_surface_routes_renders_and_gets_navigation(cx: &mut gpui::TestAppContext)
             .workspaces
             .values()
             .any(|w| w.tabs.contains(&Tab::Fake) && w.surfaces.fake.probe_visits == 3)
+    );
+}
+
+#[gpui::test]
+fn review_registered_raw_hook_composes_and_respects_focus(cx: &mut gpui::TestAppContext) {
+    use crate::shell::test_support::*;
+    let fixture = Fixture::new();
+    let (shell, mut visual) = open(
+        fixture.client.clone(),
+        fixture.root.join("hook.json"),
+        State::default(),
+        cx,
+    );
+    ready(&shell, &mut visual);
+    visual.simulate_keystrokes("ctrl-alt-f10");
+    draw(&mut visual);
+    assert_eq!(shell.read_with(&visual, |s, _| s.active()), Some(Tab::Fake));
+    visual.simulate_keystrokes("ctrl-k n e w enter");
+    ready(&shell, &mut visual);
+    visual.simulate_keystrokes("ctrl-alt-f10");
+    assert!(
+        matches!(
+            shell.read_with(&visual, |s, _| s.active()),
+            Some(Tab::Session(_))
+        ),
+        "legacy hooks cannot preempt a field"
     );
 }
