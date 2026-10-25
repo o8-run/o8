@@ -1,0 +1,16 @@
+test shell::inbox_tests::inbox_cards_counts_statuses_and_approval_match_desktop_routes ... Inbox parity counts before=[1, 2, 5, 4, 3] after=[1, 2, 2, 4, 3]; native approved=1 rejected=1; desktop approved=1; durable decision/audit match
+ok
+test shell::inbox_tests::inbox_empty_and_server_error_never_claim_a_false_clean_state ... ok
+test shell::inbox_tests::inbox_keyboard_buttons_activate_enter_space_and_skip_disabled ... ok
+test shell::inbox_tests::inbox_opens_related_session_and_pull_request_and_restores ... Inbox palette to loaded CPU scene: 150.69 ms; compact=900x700 wide=1680x1050; restored Inbox surfaces=1
+ok
+test shell::inbox_tests::inbox_plan_session_header_preserves_desktop_authority_and_continuation ... ok
+test shell::tests::inbox_is_reachable_from_the_real_shell_palette ... ok
+test shell::tests::onboarding_folder_registration_error_and_cancel ... ok
+test shell::tests::onboarding_operator_auth_error_retry ... ok
+test shell::tests::onboarding_project_tools_privacy_and_workspace ... O8_NEXT_ONBOARDING_EVIDENCE {"endpoint":"headless GPUI CPU scene; no GPU/compositor","openToFirstFrameMs":64.036018,"interactionToFrameMs":28.139085}
+ok
+test shell::tests::shell_palette_switch_restart_and_server_down ... O8_NEXT_SHELL_EVIDENCE {"endpoint":"GPUI TestAppContext CPU scene paint; test text system; no GPU/compositor","platform":"linux","launchToInteractiveMs":282.357804,"paletteOpenToFrameMs":[19.799527,17.984889,17.792333,22.436304,18.765835000000003,18.661071,17.552451,19.067646,18.862433000000003,17.687030999999998,17.149284,17.214065,18.016898,17.911607,17.420123,17.628122,19.455911999999998,18.971483,17.286246000000002,17.213906],"workspaceSwitchMs":[40.092466,19.320963,17.069846,19.837667,15.755974999999998,19.401183,16.866501999999997,28.457316,18.965974,20.349646],"idleMemoryMiB":38.7109375,"workspaces":2,"restoredSurfaces":3}
+ok
+test shell::tests::shell_retains_sidebar_selection_and_view_identity ... ok
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 31 filtered out; finished in 124.07s

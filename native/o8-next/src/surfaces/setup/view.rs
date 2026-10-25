@@ -188,7 +188,7 @@ impl Setup {
             match action {
                 Action::Load(refresh) => { next = Some(Snapshot::load(&client, refresh)?); }
                 Action::Add(path) => {
-                    let added = client.setup_post("/api/panel/repos", &json!({"action":"add", "localPath":path.trim()}))?;
+                    let added = client.setup_request("POST", "/api/panel/repos", &json!({"action":"add", "localPath":path.trim()}))?;
                     selected = Some(serde_json::from_value::<Project>(added["repo"].clone()).map_err(|_| "Invalid project response")?);
                     next = Some(Snapshot::load(&client, true)?); target = Step::Tools;
                 }
@@ -200,7 +200,7 @@ impl Setup {
                     if selected.is_some() && !loaded.ready(&lead, &pool) { target = Step::Tools; }
                     else {
                         if loaded.ready(&lead, &pool) && loaded.setup["setupRecommendation"]["preserved"] != true {
-                            client.setup_post("/api/panel/operator-defaults", &Self::selection(&loaded, &lead, &pool))?;
+                            client.setup_request("POST", "/api/panel/operator-defaults", &Self::selection(&loaded, &lead, &pool))?;
                         }
                         if loaded.setup["values"]["telemetryConsentAnswered"] != true { target = Step::Privacy; }
                         else { finish = true; }
@@ -210,7 +210,7 @@ impl Setup {
                 Action::Use => {
                     let current = Snapshot::load(&client, true)?;
                     if !current.ready(&backend, &workers) { return Err("Your tools changed. Refresh tools before continuing.".into()); }
-                    client.setup_post("/api/panel/operator-defaults", &Self::selection(&current, &backend, &workers))?;
+                    client.setup_request("POST", "/api/panel/operator-defaults", &Self::selection(&current, &backend, &workers))?;
                     next = Some(Snapshot::load(&client, false)?);
                     if selected.is_some() {
                         if next.as_ref().unwrap().setup["values"]["telemetryConsentAnswered"] == true { finish = true; }
@@ -218,7 +218,7 @@ impl Setup {
                     } else { target = Step::Projects; }
                 }
                 Action::Consent => {
-                    let response = client.setup_post("/api/panel/operator-defaults", &json!({"productTelemetryEnabled":telemetry,"crashReportsEnabled":crashes,"telemetryConsentAnswered":true}))?;
+                    let response = client.setup_request("POST", "/api/panel/operator-defaults", &json!({"productTelemetryEnabled":telemetry,"crashReportsEnabled":crashes,"telemetryConsentAnswered":true}))?;
                     if response["values"]["telemetryConsentAnswered"] != true { return Err("Privacy choices could not be confirmed. Try again.".into()); }
                     finish = true;
                 }
@@ -300,7 +300,7 @@ impl Setup {
             if !current.ready(&backend, &workers) {
                 return Err("Connect a coding tool before opening this project.".into());
             }
-            client.setup_post("/api/v2/chat-history", &json!({"tabId":id,"messages":[],"backend":backend,"model":model,"repoPath":project.local_path,"repoName":project.name,"title":"New conversation"}))?;
+            client.setup_request("POST", "/api/v2/chat-history", &json!({"tabId":id,"messages":[],"backend":backend,"model":model,"repoPath":project.local_path,"repoName":project.name,"title":"New conversation"}))?;
             let history: Value = client.get("/api/v2/chat-history", &[("tabId", id)])?;
             completion["repoPath"] = json!(project.local_path);
             completion["completedAt"] = history["savedAt"].clone();
@@ -309,7 +309,7 @@ impl Setup {
                 return Err("The conversation could not be reopened. Try again.".into());
             }
         }
-        client.setup_post("/api/setup/config", &completion)?;
+        client.setup_request("POST", "/api/setup/config", &completion)?;
         Ok(session)
     }
     fn navigate(&mut self, step: Step, cx: &mut Context<Self>) {

@@ -1,0 +1,16 @@
+test shell::inbox_tests::inbox_cards_counts_statuses_and_approval_match_desktop_routes ... Inbox parity counts before=[1, 2, 5, 4, 3] after=[1, 2, 2, 4, 3]; native approved=1 rejected=1; desktop approved=1; durable decision/audit match
+ok
+test shell::inbox_tests::inbox_empty_and_server_error_never_claim_a_false_clean_state ... ok
+test shell::inbox_tests::inbox_keyboard_buttons_activate_enter_space_and_skip_disabled ... ok
+test shell::inbox_tests::inbox_opens_related_session_and_pull_request_and_restores ... Inbox palette to loaded CPU scene: 67.95 ms; compact=900x700 wide=1680x1050; restored Inbox surfaces=1
+ok
+test shell::inbox_tests::inbox_plan_session_header_preserves_desktop_authority_and_continuation ... ok
+test shell::tests::inbox_is_reachable_from_the_real_shell_palette ... ok
+test shell::tests::onboarding_folder_registration_error_and_cancel ... ok
+test shell::tests::onboarding_operator_auth_error_retry ... ok
+test shell::tests::onboarding_project_tools_privacy_and_workspace ... O8_NEXT_ONBOARDING_EVIDENCE {"endpoint":"headless GPUI CPU scene; no GPU/compositor","openToFirstFrameMs":108.02223699999999,"interactionToFrameMs":55.546456}
+ok
+test shell::tests::shell_palette_switch_restart_and_server_down ... O8_NEXT_SHELL_EVIDENCE {"endpoint":"GPUI TestAppContext CPU scene paint; test text system; no GPU/compositor","platform":"linux","launchToInteractiveMs":1479.903703,"paletteOpenToFrameMs":[52.162875,57.745881,34.520970999999996,21.881202,26.971531,21.558201999999998,18.721593000000002,17.937160000000002,19.067263,19.453613,32.435217,43.543819,23.69211,19.46816,23.328505,18.521604,18.993001,18.289467000000002,22.146528,18.420575000000003],"workspaceSwitchMs":[105.063959,38.852651,27.54589,69.523457,30.768145,55.849409,25.620274,39.393646999999994,71.317563,58.681703],"idleMemoryMiB":39.22265625,"workspaces":2,"restoredSurfaces":3}
+ok
+test shell::tests::shell_retains_sidebar_selection_and_view_identity ... ok
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 31 filtered out; finished in 96.28s

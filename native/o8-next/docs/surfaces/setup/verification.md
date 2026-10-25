@@ -67,4 +67,26 @@ paint, debug build and one sample do not establish real font shaping, GPU,
 compositor latency or a production latency target. macOS execution and display
 measurement remain open.
 
+
+## Current main integration
+
+Reconciled with the native Inbox already on main. The final [green run](green-main-tail.txt)
+passes **11 shell and Inbox cases**. The [second timing receipt](run-2.json)
+records **108.02 ms open-to-first-frame** and **55.55 ms interaction-to-frame**
+on the same debug/headless CPU endpoint. Earlier receipts remain in place.
+No GPU/compositor or macOS display claim is added.
+
+The [integration red](red-inbox-tail.txt) caught first-run setup obscuring the
+explicitly opened empty Inbox. Explicit navigation now dismisses idle setup and
+retains the busy-operation refusal. The existing real-path Inbox case passes.
+
+
+The [queue red](red-queue-tail.txt) requires the newly opened workspace's first
+message to persist through the production queue POST. The fixture now exposes
+that existing handler and owns its publication sink and WebSocket ports. It
+starts no queue heartbeat or provider. The [final green](green-final-tail.txt)
+passes all 11 cases, including that first message. [Final timing](run-3.json):
+64.04 ms open-to-first-frame; 28.14 ms interaction-to-frame, on the same limited
+debug/headless CPU endpoint.
+
 Refs #4548
