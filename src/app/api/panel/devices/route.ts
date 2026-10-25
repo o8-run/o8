@@ -3,6 +3,7 @@ import { headersIndicateLoopback, isLoopbackHostname, isTauriShellOrigin } from 
 import { getDeviceManager } from '@/lib/devices/service';
 import { DeviceError } from '@/lib/devices/types';
 import { DeviceControllers } from '@/lib/devices/controllers';
+import { controllerStream } from '@/lib/devices/controller-stream';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -37,7 +38,12 @@ function failure(error: unknown): Response {
 }
 
 export async function GET(request: Request): Promise<Response> {
-  try { authorize(request); return json(await getDeviceManager().state()); } catch (error) { return failure(error); }
+  try {
+    authorize(request);
+    const manager = getDeviceManager();
+    if (new URL(request.url).searchParams.get('stream') === 'controllers') return controllerStream(manager.root, request.signal);
+    return json(await manager.state());
+  } catch (error) { return failure(error); }
 }
 
 export async function POST(request: Request): Promise<Response> {

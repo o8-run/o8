@@ -1,7 +1,7 @@
 import 'server-only';
 
 import { randomUUID } from 'node:crypto';
-import { controllerAlive, controllerFor, operationIdentity, publicController, updateControllers, type ControllerRow, type DeviceControllerContext, type StoredController } from './controller-store';
+import { controllerAlive, controllerFor, controllerSnapshot, operationIdentity, updateControllers, type ControllerRow, type DeviceControllerContext, type StoredController } from './controller-store';
 import { runControllerHelper } from './controller-helper';
 import { DeviceError, type DeviceControllerRoster } from './types';
 
@@ -26,8 +26,8 @@ export class DeviceControllers {
     });
   }
 
-  private async operation<T>(deviceId: string, prepare: (value: ControllerRow) => void, work: (value: ControllerRow) => Promise<T>): Promise<T> {
-    const operation = { id: randomUUID(), ...await operationIdentity() };
+  private async operation<T>(deviceId: string, prepare: (value: ControllerRow) => void, work: (value: ControllerRow) => Promise<T>, kind?: 'operator-input'): Promise<T> {
+    const operation = { id: randomUUID(), ...await operationIdentity(), ...(kind ? { kind } : {}) };
     const captured = updateControllers(this.root, state => {
       const value = state.devices[deviceId] ??= row();
       if (value.operation) busy();
@@ -78,10 +78,19 @@ export class DeviceControllers {
         });
       } catch { /* Failed recovery retains ownership and exposes a safe recovery state. */ }
     }
-    return updateControllers(this.root, state => Object.entries(state.devices).map(([deviceId, value]) => ({ deviceId,
-      active: value.active ? publicController(value.active) : null, waiting: value.waiting.map(publicController),
-      busy: Boolean(value.operation), ...(value.error ? { error: value.error } : {}), ...(value.lastInput ? { lastInput: value.lastInput } : {}),
-    })));
+    return this.snapshot().controllers;
+  }
+
+  snapshot() { return updateControllers(this.root, controllerSnapshot); }
+
+  /** Called at the native input boundary, never inferred from a panel's cached grant. */
+  async operatorInput<T>(deviceId: string, work: () => Promise<T>, helper?: NonNullable<ControllerRow['operation']>['helper']): Promise<T> {
+    return this.operation(deviceId, value => {
+      if (value.active?.kind !== 'operator' || value.error) refused();
+    }, async () => {
+      if (helper) updateControllers(this.root, state => { state.devices[deviceId].operation!.helper = helper; });
+      return work();
+    }, 'operator-input');
   }
 
   async acquire(deviceId: string, context: DeviceControllerContext): Promise<void> {

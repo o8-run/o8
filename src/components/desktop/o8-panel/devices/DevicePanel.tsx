@@ -6,6 +6,8 @@ import { openExternalUrl } from '@/lib/desktop/open-external';
 import { PanelToolIcon } from '../panel-tools';
 import { DeviceAgentControls } from './DeviceAgentControls';
 import { DeviceControllerRoster, type DeviceControlAction } from './DeviceControllerRoster';
+import { useDeviceControllerStream } from './useDeviceControllerStream';
+import type { ControllerSnapshot } from '@/lib/devices/controller-events';
 
 const button: CSSProperties = { border: '1px solid var(--t-border)', borderRadius: 8, background: 'var(--t-glass-muted)', color: 'var(--t-text)', paddingTop: 8, paddingRight: 12, paddingBottom: 8, paddingLeft: 12, fontSize: 11.5, fontWeight: 300, cursor: 'pointer' };
 const muted: CSSProperties = { color: 'var(--t-text-muted)', fontSize: 11.5, lineHeight: 1.6, margin: 0 };
@@ -36,7 +38,11 @@ export function DevicePanel({ active }: { active: boolean }) {
       const response = await fetch('/api/panel/devices', action ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(typeof action === 'object' ? action : { action, ...(tool ? { tool } : {}) }), signal: controller.signal } : { signal: controller.signal });
       const value = await response.json();
       if (!response.ok) throw new Error(value.error?.message ?? 'Device tools could not be reached.');
-      if (!controller.signal.aborted && live.current) { setState(value as DeviceState); setError(null); }
+      if (!controller.signal.aborted && live.current) {
+        setState(current => current && (current.controllerRevision ?? 0) > (value.controllerRevision ?? 0)
+          ? { ...value, controllers: current.controllers, controllerRevision: current.controllerRevision } : value as DeviceState);
+        setError(null);
+      }
     } catch (failure) {
       if (!controller.signal.aborted && live.current) setError(failure instanceof Error ? failure.message : 'Device tools could not be reached.');
     } finally { if (request.current === controller) request.current = null; window.clearTimeout(deadline); if (!controller.signal.aborted && live.current) { setPending(false); setMutating(false); } }
@@ -60,8 +66,13 @@ export function DevicePanel({ active }: { active: boolean }) {
   }, [active, read]);
   const busy = mutating || (pending && !state) || state?.phase === 'installing' || state?.phase === 'starting';
   const running = state?.phase === 'running' && state.embedUrl;
+  const receive = useCallback((snapshot: ControllerSnapshot) => {
+    setState(current => current && snapshot.revision >= (current.controllerRevision ?? 0)
+      ? { ...current, controllers: snapshot.controllers, controllerRevision: snapshot.revision } : current);
+  }, []);
+  const ownershipLive = useDeviceControllerStream(active && state?.phase === 'running', receive);
   const openDevices = state?.devices?.filter(device => device.state === 'running') ?? [];
-  const manualControl = !mutating && !error && openDevices.length > 0 && openDevices.every(device => device.platform === 'ios' && state?.controllers?.some(row => row.deviceId === device.id && row.active?.kind === 'operator' && !row.busy && !row.error));
+  const manualControl = ownershipLive && !mutating && !error && openDevices.length > 0 && openDevices.every(device => device.platform === 'ios' && state?.controllers?.some(row => row.deviceId === device.id && row.active?.kind === 'operator' && (!row.busy || row.operatorInput) && !row.error));
   return <section aria-label="Device workspace" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, minWidth: 0 }}>
     <header style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 12, paddingRight: 16, paddingBottom: 12, paddingLeft: 16, borderBottom: '1px solid var(--t-divider-subtle)', flexShrink: 0 }}>
       <PanelToolIcon tool="device" size={16} />

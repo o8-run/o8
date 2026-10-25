@@ -1,7 +1,9 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createServer } from 'node:http';
 import { createInterface } from 'node:readline';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { WebSocket } from 'ws';
+import { stageDeviceViewerHelper } from './fixtures/device-viewer-helper';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -10,6 +12,7 @@ const root = realpathSync(mkdtempSync(join(tmpdir(), 'o8-device-controllers-')))
 const data = join(root, 'data');
 const receipts = join(root, 'receipts.jsonl');
 const control = join(root, 'control.json');
+const manualReceipts = join(root, 'manual-receipts.jsonl');
 const previous = { O8_DATA_DIR: process.env.O8_DATA_DIR, CORTEX_IDE_DATA_DIR: process.env.CORTEX_IDE_DATA_DIR, WS_TOKEN: process.env.WS_TOKEN };
 process.env.O8_DATA_DIR = data;
 process.env.CORTEX_IDE_DATA_DIR = data;
@@ -43,7 +46,8 @@ async function state() { return (await devices.GET(request())).json(); }
 async function panel(body: unknown) { return devices.POST(request(body)); }
 
 beforeAll(async () => {
-  mkdirSync(data, { recursive: true });
+  const physicalData = join(root, 'physical-data'); mkdirSync(physicalData, { recursive: true });
+  symlinkSync(physicalData, data, process.platform === 'win32' ? 'junction' : 'dir');
   writeFileSync(control, '{}');
   for (const spec of [
     { name: 'expo-device-hub', version: '0.15.3', entry: 'dist/server/cli.mjs' },
@@ -53,19 +57,46 @@ beforeAll(async () => {
     const pkg = join(dir, 'node_modules', spec.name);
     mkdirSync(dirname(join(pkg, spec.entry)), { recursive: true });
     writeFileSync(join(dir, '.install-complete'), spec.version);
-    writeFileSync(join(pkg, 'package.json'), JSON.stringify({ name: spec.name, version: spec.version }));
+    writeFileSync(join(pkg, 'package.json'), JSON.stringify({ name: spec.name, version: spec.version, type: 'module' }));
+    if (spec.name === 'expo-device-hub') stageDeviceViewerHelper(pkg, manualReceipts, control);
     writeFileSync(join(pkg, spec.entry), spec.name === 'expo-device-hub' ? `
 import { createServer } from 'node:http';
+import { WebSocketServer } from ${JSON.stringify(join(process.cwd(), 'node_modules/ws/wrapper.mjs'))};
+import handler, { FixtureHid, fixtureExec, fixtureUi, fixtureAxType, fixtureHardwareKeyboard, webSocketHandlers } from './index.mjs';
 const args = process.argv.slice(2); const port = Number(args[args.indexOf('--port') + 1]);
 const token = 'fixture-controller-hub-01234567890123456789';
-const server = createServer((req, res) => {
+const server = createServer(async (req, res) => {
   if (req.url === '/readyz') return res.end('ready');
   if (req.headers.authorization !== 'Bearer ' + token) { res.writeHead(401); return res.end(); }
+  if (req.method === 'POST') {
+    const chunks = []; for await (const chunk of req) chunks.push(chunk);
+    const result = await handler(new Request('http://' + req.headers.host + req.url, { method: 'POST', body: Buffer.concat(chunks) }));
+    res.writeHead(result.status, { 'content-type': 'application/json' }); res.end(await result.text()); return;
+  }
   res.setHeader('content-type', 'application/json');
   res.end(JSON.stringify({ simulators: [1, 2].map(n => ({ id: 'ios-' + n, name: 'Fixture phone ' + n, platform: 'ios', booted: true })), emulators: [] }));
 });
+const wss = new WebSocketServer({ noServer: true });
+server.on('upgrade', (req, socket, head) => {
+  wss.handleUpgrade(req, socket, head, ws => {
+    const route = new URL(req.url, 'http://' + req.headers.host).pathname;
+    if (webSocketHandlers[route]) { webSocketHandlers[route](ws); return; }
+    const hid = new FixtureHid('ios-1');
+    ws.on('message', async bytes => {
+      try {
+        const input = JSON.parse(bytes.toString());
+        const result = input.action === 'exec' ? await fixtureExec({ action: 'appearance.set', params: { udid: 'ios-1', value: 'dark' } })
+          : input.action === 'ui' ? await fixtureUi({ ui: { device: 'ios-1', option: 'appearance', value: 'dark' } })
+            : input.action === 'ax-type' ? await fixtureAxType('ios-1')
+              : input.action === 'hardware-keyboard' ? await fixtureHardwareKeyboard('ios-1')
+                : input.action === 'touch' ? await hid.touch(input.type) : await hid.button();
+        ws.send(JSON.stringify(result));
+      } catch { ws.send(JSON.stringify({ applied: false })); }
+    });
+  });
+});
 server.listen(port, '127.0.0.1', () => console.log('http://localhost:' + port + '/?token=' + token));
-process.on('SIGTERM', () => server.close(() => process.exit(0)));
+process.on('SIGTERM', () => { for (const client of wss.clients) client.terminate(); server.close(() => process.exit(0)); });
 ` : `
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -301,5 +332,106 @@ describe.sequential('Devices controller handoff through panel routes and MCP too
     expect(result.error).toBe(true);
     expect((await state()).controllers.find((entry: { deviceId: string }) => entry.deviceId === 'ios-1').active).not.toBeNull();
     expect((await tool(2, { action: 'release', deviceId: 'ios-1' })).error).toBe(false);
+  });
+
+  it('rejects a stale panel on the actual native input path after another panel hands control to a worker', async () => {
+    await expect.poll(async () => (await state()).phase).toBe('running');
+    expect((await panel({ action: 'take-control', deviceId: 'ios-1', expectedSession: null })).status).toBe(200);
+    const operatorState = await state();
+    const operator = operatorState.controllers.find((entry: { deviceId: string }) => entry.deviceId === 'ios-1').active.session;
+    const url = new URL(operatorState.embedUrl);
+    url.protocol = 'ws:'; url.pathname = '/vendor/serve-sim/helper/ws';
+    const stalePanel = new WebSocket(url);
+    await new Promise<void>(resolve => stalePanel.once('open', resolve));
+    const input = (action: string) => new Promise<{ applied: boolean }>(resolve => {
+      stalePanel.once('message', value => resolve(JSON.parse(value.toString())));
+      stalePanel.send(JSON.stringify({ action }));
+    });
+    try {
+      for (const action of ['button', 'exec', 'ui', 'ax-type', 'hardware-keyboard']) expect((await input(action)).applied).toBe(true);
+      expect((await tool(2, { action: 'acquire', deviceId: 'ios-1' })).error).toBe(true);
+      const waiting = (await state()).controllers.find((entry: { deviceId: string }) => entry.deviceId === 'ios-1').waiting[0].session;
+      expect((await panel({ action: 'handoff', deviceId: 'ios-1', expectedSession: operator, targetSession: waiting })).status).toBe(200);
+      const before = readFileSync(manualReceipts, 'utf8');
+      for (const action of ['button', 'exec', 'ui', 'ax-type', 'hardware-keyboard']) expect((await input(action)).applied).toBe(false);
+      const rejected = await fetch(new URL('/api/devices/boot', operatorState.embedUrl), {
+        method: 'POST', headers: { authorization: 'Bearer fixture-controller-hub-01234567890123456789' }, body: JSON.stringify({ platform: 'ios', id: 'ios-1' }),
+      });
+      expect(rejected.status).toBe(409);
+      expect(readFileSync(manualReceipts, 'utf8')).toBe(before);
+    } finally { stalePanel.terminate(); await tool(2, { action: 'release', deviceId: 'ios-1' }); }
+  });
+
+  it('pushes ownership changes to both open panels before their next poll', async () => {
+    const makeStreamRequest = (signal: AbortSignal) => new Request(request().url + '?stream=controllers', { headers: request().headers, signal });
+    const a = new AbortController(); const b = new AbortController();
+    const responses = await Promise.all([devices.GET(makeStreamRequest(a.signal)), devices.GET(makeStreamRequest(b.signal))]);
+    try {
+      expect(responses.map(response => response.headers.get('content-type'))).toEqual(['text/event-stream', 'text/event-stream']);
+      const readers = responses.map(response => response.body!.getReader());
+      await Promise.all(readers.map(reader => reader.read()));
+      expect((await panel({ action: 'take-control', deviceId: 'ios-1', expectedSession: null })).status).toBe(200);
+      for (const reader of readers) {
+        let update = '';
+        for (let count = 0; count < 4 && !update.includes('Operator'); count++) update += new TextDecoder().decode((await reader.read()).value);
+        expect(update).toContain('Operator');
+      }
+    } finally { a.abort(); b.abort(); }
+  });
+
+  it('rejects conflicting device aliases before a lifecycle request can drive another worker device', async () => {
+    const current = await state();
+    const before = readFileSync(manualReceipts, 'utf8');
+    const response = await fetch(new URL('/api/devices/boot', current.embedUrl), {
+      method: 'POST', headers: { authorization: 'Bearer fixture-controller-hub-01234567890123456789' },
+      body: JSON.stringify({ platform: 'ios', id: 'ios-2', device: 'ios-1' }),
+    });
+    expect(response.status).toBe(409);
+    expect(readFileSync(manualReceipts, 'utf8')).toBe(before);
+  });
+
+  it('refuses the uncoordinated emulator WebSocket instead of exposing another input path', async () => {
+    const current = await state(); const url = new URL(current.embedUrl);
+    url.protocol = 'ws:'; url.pathname = '/vendor/serve-emu/ws';
+    const socket = new WebSocket(url);
+    try {
+      const result = await new Promise<boolean>(resolve => {
+        socket.once('message', () => resolve(true)); socket.once('close', () => resolve(false));
+      });
+      expect(result).toBe(false);
+    } finally { socket.terminate(); }
+  });
+
+  it('holds authority through native completion and a complete touch gesture before handing off', async () => {
+    const current = await state(); const operator = current.controllers.find((entry: { deviceId: string }) => entry.deviceId === 'ios-1').active.session;
+    expect((await tool(2, { action: 'acquire', deviceId: 'ios-1' })).error).toBe(true);
+    const waiting = (await state()).controllers.find((entry: { deviceId: string }) => entry.deviceId === 'ios-1').waiting[0].session;
+    const url = new URL(current.embedUrl); url.protocol = 'ws:'; url.pathname = '/vendor/serve-sim/helper/ws';
+    const socket = new WebSocket(url); await new Promise<void>(resolve => socket.once('open', resolve));
+    const input = (action: string, type?: string) => new Promise<{ applied: boolean }>(resolve => {
+      socket.once('message', value => resolve(JSON.parse(value.toString()))); socket.send(JSON.stringify({ action, type }));
+    });
+    const transfer = () => panel({ action: 'handoff', deviceId: 'ios-1', expectedSession: operator, targetSession: waiting });
+    try {
+      writeFileSync(control, JSON.stringify({ manualDelay: 200 }));
+      const pressing = input('button');
+      await expect.poll(async () => (await state()).controllers.find((entry: { deviceId: string }) => entry.deviceId === 'ios-1').operatorInput).toBe(true);
+      expect((await transfer()).status).toBe(409);
+      expect((await pressing).applied).toBe(true); writeFileSync(control, '{}');
+      expect((await input('touch', 'begin')).applied).toBe(true);
+      expect((await transfer()).status).toBe(409);
+      expect((await input('touch', 'end')).applied).toBe(true);
+      expect((await transfer()).status).toBe(200);
+      expect((await input('button')).applied).toBe(false);
+    } finally { writeFileSync(control, '{}'); socket.terminate(); await tool(2, { action: 'release', deviceId: 'ios-1' }); }
+  });
+
+  it('fails closed when the installed helper no longer matches the pinned native input boundary', async () => {
+    await panel({ action: 'stop' });
+    const native = join(data, 'devices/tools/expo-device-hub/0.15.3/node_modules/expo-device-hub/vendor/serve-sim/dist/middleware.js');
+    writeFileSync(native, readFileSync(native, 'utf8').replace('this.handle=new(e6()).SimHID($)', 'this.handle = new (e6()).SimHID($)'));
+    expect((await panel({ action: 'start' })).status).toBe(202);
+    await expect.poll(async () => (await state()).phase).toBe('error');
+    expect((await state()).embedUrl).toBeUndefined();
   });
 });

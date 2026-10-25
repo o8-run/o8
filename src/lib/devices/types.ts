@@ -12,6 +12,7 @@ export interface DeviceControllerRoster {
   active: DeviceController | null;
   waiting: DeviceController[];
   busy: boolean;
+  operatorInput?: boolean;
   error?: string;
   lastInput?: { action: string; label: string; at: number; x?: number; y?: number };
 }
@@ -25,6 +26,7 @@ export interface DeviceState {
   embedUrl?: string;
   agentCommand?: string[];
   controllers?: DeviceControllerRoster[];
+  controllerRevision?: number;
   devices?: Array<{ id: string; name: string; platform: 'ios' | 'android'; state: string; version?: string }>;
 }
 

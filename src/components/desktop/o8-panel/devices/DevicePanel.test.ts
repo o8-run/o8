@@ -86,10 +86,16 @@ it('keeps shared-device instructions available while the viewer is live', async 
 it('backs off after a live status timeout and recovers without remounting the viewer', async () => {
   vi.useFakeTimers();
   const running = { ...base, phase: 'running', embedUrl: 'http://127.0.0.1:3333/' };
-  vi.mocked(fetch).mockResolvedValueOnce(Response.json(running))
-    .mockImplementationOnce((_url, options) => new Promise((_resolve, reject) => {
+  let reads = 0;
+  vi.mocked(fetch).mockImplementation(async (url, options) => {
+    if (String(url).includes('stream=controllers')) return new Response(new ReadableStream({ start(controller) {
+      controller.enqueue(new TextEncoder().encode('data: {"revision":0,"controllers":[]}\n\n'));
+    } }), { headers: { 'Content-Type': 'text/event-stream' } });
+    if (++reads === 2) return new Promise((_resolve, reject) => {
       options?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
-    })).mockImplementation(async () => Response.json(running));
+    });
+    return Response.json(running);
+  });
   await act(async () => root.render(createElement(DevicePanel, { active: true })));
   const frame = host.querySelector('iframe');
   await act(async () => vi.advanceTimersByTimeAsync(5_000));
@@ -99,7 +105,7 @@ it('backs off after a live status timeout and recovers without remounting the vi
   expect(host.querySelector('summary')?.textContent).toContain('Connection delayed');
   expect(host.querySelector('[role="alert"]')).toBeNull();
   await act(async () => vi.advanceTimersByTimeAsync(29_999));
-  expect(fetch).toHaveBeenCalledTimes(2);
+  expect(reads).toBe(2);
   await act(async () => vi.advanceTimersByTimeAsync(1));
   expect(host.querySelector('summary')?.textContent).toContain('Shared device');
   expect(host.querySelector('iframe')).toBe(frame);
@@ -119,4 +125,29 @@ it('keeps viewing passive and shows attributed controllers with an explicit oper
   expect(host.querySelector('[aria-label="Last agent input"]')?.textContent).toContain('press');
   await act(async () => findButton('Take operator control').click());
   expect(fetch).toHaveBeenLastCalledWith('/api/panel/devices', expect.objectContaining({ body: JSON.stringify({ action: 'take-control', deviceId: 'ios-1', expectedSession: 'worker-a' }) }));
+});
+it('revokes both operator panels on a pushed handoff without waiting for polling', async () => {
+  vi.useFakeTimers();
+  const streams: ReadableStreamDefaultController<Uint8Array>[] = [];
+  const operator = { session: 'operator-fixture', label: 'Operator', kind: 'operator' };
+  const running = { ...base, phase: 'running', embedUrl: 'http://127.0.0.1:3333/', controllerRevision: 1,
+    devices: [{ id: 'ios-1', name: 'Fixture phone', platform: 'ios', state: 'running' }],
+    controllers: [{ deviceId: 'ios-1', active: operator, waiting: [], busy: false }],
+  };
+  vi.mocked(fetch).mockImplementation(async url => String(url).includes('stream=controllers')
+    ? new Response(new ReadableStream({ start(controller) {
+      streams.push(controller);
+      controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({ revision: 1, controllers: running.controllers })}\n\n`));
+    } }), { headers: { 'Content-Type': 'text/event-stream' } }) : Response.json(running));
+  await act(async () => root.render(createElement('div', null, createElement(DevicePanel, { active: true }), createElement(DevicePanel, { active: true }))));
+  expect(streams).toHaveLength(2);
+  expect([...host.querySelectorAll('iframe')].every(frame => !frame.closest('[inert]'))).toBe(true);
+  await act(async () => {
+    for (const stream of streams) stream.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({ revision: 2,
+      controllers: [{ ...running.controllers[0], active: { session: 'worker-fixture', kind: 'worker', label: 'Worker fixture' } }] })}\n\n`));
+  });
+  expect([...host.querySelectorAll('iframe')].every(frame => Boolean(frame.closest('[inert]')))).toBe(true);
+  expect(host.textContent).toContain('Worker fixture');
+  await act(async () => vi.advanceTimersByTimeAsync(5_000));
+  expect([...host.querySelectorAll('iframe')].every(frame => Boolean(frame.closest('[inert]')))).toBe(true);
 });
