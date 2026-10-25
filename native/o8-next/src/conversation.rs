@@ -204,20 +204,29 @@ impl Surface {
                 if generation != this.generation || revision != this.reconcile_revision {
                     return;
                 }
+                let mut changed;
                 match result {
                     Ok((sessions, queue, history)) => {
+                        changed = this.sessions != sessions || this.queue != queue;
                         this.sessions = sessions;
                         this.queue = queue;
                         if let Some(transcript) = &mut this.transcript {
                             if captured.is_some_and(|stamp| transcript.saved_tail(history, stamp)) {
+                                changed = true;
                                 let rows = transcript.rows.clone();
                                 this.install_rows(rows);
                             }
                         }
                     }
-                    Err(error) => this.notice = format!("{error}. Refresh to retry."),
+                    Err(error) => {
+                        let notice = format!("{error}. Refresh to retry.");
+                        changed = this.notice != notice;
+                        this.notice = notice;
+                    }
                 }
-                cx.notify();
+                if changed {
+                    cx.notify();
+                }
             });
         })
         .detach();

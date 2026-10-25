@@ -240,23 +240,10 @@ fn launch(client: Client, file: PathBuf, state: State, offscreen: bool) {
         Application::new()
     })
     .run(move |cx: &mut App| {
+        let (sender, receiver) = async_channel::bounded(1);
+        let client = client.with_wakeup(sender);
         let handle = open_window(client, file, state, offscreen, cx);
-        cx.spawn(async move |cx| {
-            let mut ticks = 0;
-            loop {
-                cx.background_executor()
-                    .timer(Duration::from_millis(20))
-                    .await;
-                ticks += 1;
-                if handle
-                    .update(cx, |s, window, cx| s.tick(ticks % 50 == 0, window, cx))
-                    .is_err()
-                {
-                    break;
-                }
-            }
-        })
-        .detach();
+        start_pump(handle, receiver, cx);
         cx.on_window_closed(|cx| {
             if cx.windows().is_empty() {
                 cx.quit();
@@ -264,6 +251,29 @@ fn launch(client: Client, file: PathBuf, state: State, offscreen: bool) {
         })
         .detach();
     });
+}
+
+pub(super) fn start_pump(
+    handle: gpui::WindowHandle<Shell>,
+    receiver: async_channel::Receiver<()>,
+    cx: &mut App,
+) {
+    cx.spawn(async move |cx| {
+        let mut timer = cx.background_executor().timer(Duration::from_secs(1));
+        loop {
+            let refresh = crate::wake::next(&receiver, &mut timer).await;
+            if refresh {
+                timer = cx.background_executor().timer(Duration::from_secs(1));
+            }
+            if handle
+                .update(cx, |s, window, cx| s.tick(refresh, window, cx))
+                .is_err()
+            {
+                break;
+            }
+        }
+    })
+    .detach();
 }
 
 pub(super) fn open_window(

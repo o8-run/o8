@@ -95,7 +95,7 @@ impl Shell {
 }
 
 // Request adapters compile with this surface through its existing shell entry.
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Session {
     pub id: String,

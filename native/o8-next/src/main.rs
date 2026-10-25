@@ -35,6 +35,7 @@ mod theme;
 mod theme_tests;
 mod transport;
 mod ui;
+mod wake;
 use crate::{
     client::Client,
     model::{History, render_tree},

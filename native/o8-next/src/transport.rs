@@ -3,11 +3,11 @@ use crate::client::Client;
 use serde_json::{Value, json};
 use std::{
     io::ErrorKind,
-    net::TcpStream,
+    net::{Shutdown, TcpStream},
     sync::{
-        Arc,
+        Arc, Condvar, Mutex,
         atomic::{AtomicBool, Ordering},
-        mpsc::{self, Receiver, SyncSender, TrySendError},
+        mpsc::{self, Receiver, SyncSender},
     },
     thread,
     time::{Duration, Instant},
@@ -20,49 +20,83 @@ pub enum Incoming {
 }
 pub struct Subscription {
     pub receiver: Receiver<Incoming>,
-    cancel: Arc<AtomicBool>,
+    cancel: Arc<Cancel>,
 }
 impl Drop for Subscription {
     fn drop(&mut self) {
-        self.cancel.store(true, Ordering::Relaxed);
+        self.cancel.stop();
     }
 }
 
-fn pause(cancel: &AtomicBool, duration: Duration) {
-    let start = Instant::now();
-    while !cancel.load(Ordering::Relaxed) && start.elapsed() < duration {
-        thread::sleep(Duration::from_millis(25));
+#[derive(Default)]
+struct Cancel {
+    stopped: AtomicBool,
+    gate: Mutex<()>,
+    changed: Condvar,
+    socket: Mutex<Option<TcpStream>>,
+}
+impl Cancel {
+    fn is_stopped(&self) -> bool {
+        self.stopped.load(Ordering::Acquire)
+    }
+    fn stop(&self) {
+        let gate = self.gate.lock().unwrap();
+        self.stopped.store(true, Ordering::Release);
+        self.changed.notify_all();
+        drop(gate);
+        if let Some(socket) = self.socket.lock().unwrap().take() {
+            let _ = socket.shutdown(Shutdown::Both);
+        }
+    }
+    fn bind(&self, socket: &TcpStream) -> Result<BoundSocket<'_>, ()> {
+        let mut owned = self.socket.lock().unwrap();
+        if self.is_stopped() {
+            return Err(());
+        }
+        *owned = Some(socket.try_clone().map_err(|_| ())?);
+        Ok(BoundSocket(&self.socket))
     }
 }
-fn emit(sender: &SyncSender<Incoming>, cancel: &AtomicBool, mut message: Incoming) -> bool {
-    loop {
-        if cancel.load(Ordering::Relaxed) {
-            return false;
-        }
-        match sender.try_send(message) {
-            Ok(()) => return true,
-            Err(TrySendError::Disconnected(_)) => return false,
-            Err(TrySendError::Full(value)) => {
-                message = value;
-                pause(cancel, Duration::from_millis(10));
-            }
-        }
+struct BoundSocket<'a>(&'a Mutex<Option<TcpStream>>);
+impl Drop for BoundSocket<'_> {
+    fn drop(&mut self) {
+        self.0.lock().unwrap().take();
     }
+}
+fn pause(cancel: &Cancel, duration: Duration) {
+    let gate = cancel.gate.lock().unwrap();
+    let _ = cancel
+        .changed
+        .wait_timeout_while(gate, duration, |_| !cancel.is_stopped())
+        .unwrap();
+}
+fn emit(
+    sender: &SyncSender<Incoming>,
+    cancel: &Cancel,
+    client: &Client,
+    message: Incoming,
+) -> bool {
+    if cancel.is_stopped() || sender.send(message).is_err() {
+        return false;
+    }
+    client.wake();
+    true
 }
 fn run(
     client: &Client,
     key: &str,
     sender: &SyncSender<Incoming>,
-    cancel: &AtomicBool,
+    cancel: &Cancel,
     backoff: &mut u64,
 ) -> Result<(), ()> {
     let (url, address) = client.websocket().map_err(|_| ())?;
-    if cancel.load(Ordering::Relaxed) {
+    if cancel.is_stopped() {
         return Ok(());
     }
     // A numeric address is derived from the validated explicit HTTP origin.
     // Direct TCP avoids proxies; the handshake follows no redirects.
     let tcp = TcpStream::connect_timeout(&address, Duration::from_secs(2)).map_err(|_| ())?;
+    let _owned_socket = cancel.bind(&tcp)?;
     tcp.set_read_timeout(Some(Duration::from_secs(2)))
         .map_err(|_| ())?;
     tcp.set_write_timeout(Some(Duration::from_secs(2)))
@@ -75,16 +109,16 @@ fn run(
         tungstenite::client::client_with_config(request, tcp, Some(config)).map_err(|_| ())?;
     socket
         .get_mut()
-        .set_read_timeout(Some(Duration::from_millis(100)))
+        .set_read_timeout(Some(Duration::from_secs(20)))
         .map_err(|_| ())?;
     // Omitting since, including after reconnect, requests a fresh checkpoint,
     // exactly as DesktopWebSocketContext does for a reopened transport.
     socket.send(Message::Text(json!({"type":"realtime-subscribe","subscriptions":[{"stream":format!("session:{key}")}]}).to_string().into())).map_err(|_| ())?;
-    if !emit(sender, cancel, Incoming::Status("Live · read-only")) {
+    if !emit(sender, cancel, client, Incoming::Status("Live · read-only")) {
         return Ok(());
     }
     let mut ping = Instant::now();
-    while !cancel.load(Ordering::Relaxed) {
+    while !cancel.is_stopped() {
         match socket.read() {
             Ok(Message::Text(text)) => {
                 if let Ok(frame) = serde_json::from_str::<Value>(&text) {
@@ -94,7 +128,7 @@ fn run(
                     if frame["channel"] == "realtime" && frame["event"] == "incompatible" {
                         return Err(());
                     }
-                    if !emit(sender, cancel, Incoming::Frame(frame)) {
+                    if !emit(sender, cancel, client, Incoming::Frame(frame)) {
                         break;
                     }
                 }
@@ -117,18 +151,19 @@ fn run(
 }
 pub fn subscribe(client: Client, key: String) -> Subscription {
     let (sender, receiver) = mpsc::sync_channel(64);
-    let cancel = Arc::new(AtomicBool::new(false));
+    let cancel = Arc::new(Cancel::default());
     let stopped = cancel.clone();
     thread::spawn(move || {
         let mut backoff = 1;
-        while !stopped.load(Ordering::Relaxed) {
+        while !stopped.is_stopped() {
             let _ = run(&client, &key, &sender, &stopped, &mut backoff);
-            if stopped.load(Ordering::Relaxed) {
+            if stopped.is_stopped() {
                 break;
             }
             if !emit(
                 &sender,
                 &stopped,
+                &client,
                 Incoming::Status("Reconnecting · saved history retained"),
             ) {
                 break;

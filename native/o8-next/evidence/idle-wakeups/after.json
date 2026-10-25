@@ -1,0 +1,25 @@
+{
+  "os": "26.6",
+  "profile": "release",
+  "show": false,
+  "fixture": "production-route host and selected saved session",
+  "frozenBeforeSessionAttach": false,
+  "binarySha256": "e00a379611ef628e1d5e31acfbc5a7c564720fb42dd68510bbb61e146ded2a78",
+  "method": "proc_pid_rusage RUSAGE_INFO_V2 interrupt and package idle counter deltas",
+  "settleSeconds": 15,
+  "seconds": 60.005208385000515,
+  "before": {
+    "idle": 0,
+    "interrupt": 153,
+    "cpuNs": 1120711651
+  },
+  "after": {
+    "idle": 0,
+    "interrupt": 212,
+    "cpuNs": 1226631313
+  },
+  "wakeupsPerSecond": 0.9832479810993909,
+  "packageIdleWakeupsPerSecond": 0.0,
+  "cpuPercent": 0.176517447152932,
+  "sessionSubscriptions": 2
+}
