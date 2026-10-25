@@ -60,6 +60,7 @@ With saved secrets present, session text, thinking and intervening notifications
 are retained until the prompt completes or the process closes. Text is normalized
 across notification boundaries, then emitted in its original notification order;
 a tool notification does not discard progress or expose a partial encoded tail.
-Stderr is retained until EOF. Large benign output is preserved, including the
-4 MiB real-path performance fixture. Connections without saved secrets keep
-immediate streaming. Offset maps are built once, only when a match needs them.
+Stderr is retained until EOF. A 1 MiB real-path fixture checks byte-exact benign
+output across three chunks within an 8-second budget; separate matcher guards
+cover 4 MiB output. Connections without saved secrets keep immediate streaming.
+Offset maps are built once, only when a match needs them.

@@ -1,8 +1,9 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
+import { format } from 'node:util';
 import Database from 'better-sqlite3';
 import { NextRequest } from 'next/server';
 import { afterAll, expect, it, vi } from 'vitest';
@@ -438,6 +439,44 @@ it('never creates a replacement key for cache-cold ACP credentials with a missin
   } finally { Object.defineProperty(process, 'platform', originalPlatform); }
 });
 
+
+it('keeps a secret legacy profile selector out of Check connection responses and server logs', async () => {
+  expect((await POST(request({ connection }))).status).toBe(200);
+  const profile = join(fixture.dir, 'synthetic-private-legacy-selector');
+  mkdirSync(profile, { recursive: true });
+  const secret = realpathSync(profile);
+  expect((await save([{ name: 'HERMES_HOME', secret: true, value: secret }])).status).toBe(200);
+  const { mutateProviderKey } = await import('@/lib/providers/key-store');
+  const { encryptValueSync } = await import('@/lib/db/master-key');
+  const providerValue = 'synthetic-contaminating-provider-material';
+  mutateProviderKey('OPENAI_API_KEY', { key: providerValue });
+  const file = join(secret, 'auth.json');
+  writeFileSync(file, JSON.stringify({ OPENAI_API_KEY: providerValue }));
+  const payload = encryptValueSync(JSON.stringify({ owner: 'o8', runtime: 'hermes', path: file, contents: '{}' }));
+  const ledger = join(fixture.dir, 'owned-credential-artifacts.json');
+  writeFileSync(ledger, JSON.stringify([{ owner: 'o8', runtime: 'hermes', path: file, replacement: `enc:${payload.iv}:${payload.ciphertext}` }]));
+  const logs: string[] = [];
+  const spies = (['warn', 'error', 'info', 'log', 'debug'] as const).map(method => vi.spyOn(console, method).mockImplementation((...args: unknown[]) => { logs.push(format(...args)); }));
+  try {
+    const { GET: checkConnection } = await import('@/app/api/orchestrator/backend-models/route');
+    const response = await checkConnection(new NextRequest(`http://fixture.invalid/api/orchestrator/backend-models?backend=acp&refresh=1&repoPath=${encodeURIComponent(fixture.dir)}`, {
+      headers: { authorization: `Bearer ${getOrCreateWsToken()}` },
+    }));
+    expect(response.status).toBe(200);
+    const body = await response.text();
+    expect(body).toContain('Legacy o8 file');
+    expect(body).toContain('#4340');
+    expect.soft(body).not.toContain(secret);
+    expect.soft(body).not.toContain(providerValue);
+    expect(logs.some(line => line.includes('Legacy o8 runtime config'))).toBe(true);
+    expect.soft(logs.join('\n')).not.toContain(secret);
+    expect.soft(logs.join('\n')).not.toContain(providerValue);
+    expect(readFileSync(file, 'utf8')).toContain(providerValue);
+  } finally {
+    spies.forEach(spy => spy.mockRestore());
+    rmSync(ledger);
+  }
+});
 
 it.each(['HERMES_HOME', 'OPENCLAW_STATE_DIR', 'OPENCLAW_CONFIG_PATH'])('keeps secret-bearing %s out of a silent ACP child receipt', async name => {
   const silent = join(fixture.dir, 'silent-profile.cjs');
