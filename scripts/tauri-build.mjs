@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import process from 'node:process';
 import { parse as parseToml } from 'smol-toml';
 import { releaseCargoTarget } from './lib/release-cargo-target.mjs';
 import { resolveReleaseBuildEnvironment } from './lib/release-config.mjs';
-import { nativeCacheRestoreGuard } from './lib/release-native-inputs.mjs';
+import { compilerEnvironment } from './lib/release-native-inputs.mjs';
 import {
   captureReleaseBuildCache,
   collectReleaseBuildCacheIdentity,
@@ -42,18 +42,24 @@ const nativeBuildOptions = { cargoTauriArgs, ...(nativeArtifact ? {
   },
 } : {}) };
 const prebuildMarker = join(cacheRoot, 'runs', runId, 'prebuild-completed-at');
+const nativeContext = join(cacheRoot, 'runs', runId, '.native-context');
+const nativeState = join(cacheRoot, 'runs', runId, '.native-state');
 let nativeIdentity;
 let nativeRestore;
 
 try {
-  nativeIdentity = collectReleaseBuildCacheIdentity(root, 'native', { env: buildEnv, buildOptions: nativeBuildOptions });
-  nativeRestore = await restoreReleaseBuildCache(root, 'native', {
-    cacheRoot,
-    runId,
-    identity: nativeIdentity,
-    buildOptions: nativeBuildOptions,
-    env: buildEnv,
-  });
+  if (nativeArtifact) {
+    nativeRestore = { phase: 'native', status: 'bypass', reason: 'deferred_until_after_prebuild', durationMs: 0 };
+  } else {
+    nativeIdentity = collectReleaseBuildCacheIdentity(root, 'native', { env: buildEnv, buildOptions: nativeBuildOptions });
+    nativeRestore = await restoreReleaseBuildCache(root, 'native', {
+      cacheRoot,
+      runId,
+      identity: nativeIdentity,
+      buildOptions: nativeBuildOptions,
+      env: buildEnv,
+    });
+  }
 } catch (error) {
   if (isReleaseBuildCacheSafetyError(error)) throw error;
   nativeRestore = {
@@ -69,6 +75,10 @@ console.log(
 );
 writeReleaseBuildCachePhaseReceipt(cacheRoot, runId, { phase: 'native', restore: nativeRestore });
 
+if (nativeArtifact) writeFileSync(nativeContext, JSON.stringify({ buildOptions: nativeBuildOptions,
+  compilerEnvironment: compilerEnvironment(root, 'native', buildEnv),
+  configEnvironment: { TAURI_CONFIG: buildEnv.TAURI_CONFIG },
+}), { mode: 0o600 });
 const env = {
   ...buildEnv,
   O8_RELEASE_BUILD_CACHE_DIR: cacheRoot,
@@ -76,8 +86,8 @@ const env = {
   O8_RELEASE_CACHE_PREBUILD_MARKER: prebuildMarker,
   ...(nativeArtifact ? {
     O8_RELEASE_NATIVE_ROOT: root,
-    O8_RELEASE_NATIVE_CACHE_HIT: nativeRestore.status.startsWith('hit_') ? '1' : '0',
-    O8_RELEASE_NATIVE_CACHE_GUARD: nativeIdentity ? nativeCacheRestoreGuard(nativeIdentity) : '',
+    O8_RELEASE_NATIVE_CONTEXT: nativeContext,
+    O8_RELEASE_NATIVE_STATE: nativeState,
     O8_RELEASE_CARGO_TARGET_DIR: persistentTarget,
     CARGO_TARGET_DIR: join(root, 'src-tauri/target'),
   } : {}),
@@ -100,8 +110,11 @@ const nativeBuildDurationMs = Number.isFinite(prebuildCompletedAt)
 let nativeCapture;
 if (!build.error && build.status === 0) {
   try {
-    const builtIdentity = collectReleaseBuildCacheIdentity(root, 'native', { env: buildEnv, buildOptions: nativeBuildOptions });
-    nativeCapture = !nativeIdentity || nativeIdentity.entrySha256 !== builtIdentity.entrySha256 ? {
+    const state = nativeArtifact && existsSync(nativeState) ? JSON.parse(readFileSync(nativeState, 'utf8')) : null;
+    if (state) { nativeIdentity = state.identity; nativeRestore = state.restore; }
+    const context = nativeArtifact ? JSON.parse(readFileSync(nativeContext, 'utf8')) : {};
+    const builtIdentity = collectReleaseBuildCacheIdentity(root, 'native', { ...context, env: buildEnv, buildOptions: nativeBuildOptions });
+    nativeCapture = state?.invalidated || !nativeIdentity || nativeIdentity.entrySha256 !== builtIdentity.entrySha256 ? {
       phase: 'native',
       status: 'bypass',
       reason: nativeIdentity ? 'source_changed_during_build' : 'source_identity_unavailable',

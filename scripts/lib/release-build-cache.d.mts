@@ -32,7 +32,7 @@ export function isReleaseBuildCacheSafetyError(error: unknown): boolean;
 export function collectReleaseBuildCacheIdentity(
   root: string,
   phase: ReleaseBuildCachePhase,
-  options?: { env?: NodeJS.ProcessEnv; buildOptions?: Record<string, unknown> },
+  options?: { env?: NodeJS.ProcessEnv; buildOptions?: Record<string, unknown>; compilerEnvironment?: Record<string, string> },
 ): ReleaseBuildCacheIdentity;
 export function restoreReleaseBuildCache(
   root: string,

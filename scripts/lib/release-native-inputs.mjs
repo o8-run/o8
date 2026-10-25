@@ -55,15 +55,6 @@ export function nativeSourceInputs(root) {
 const hash = value => createHash('sha256').update(value).digest('hex');
 const COMPILER_ENV = /^(CARGO_|RUST|CC($|_)|CXX($|_)|AR($|_)|CFLAGS|CXXFLAGS|CPPFLAGS|LDFLAGS|LIBRARY_PATH$|PKG_CONFIG|CMAKE|BINDGEN_|SDKROOT$|DEVELOPER_DIR$|MACOSX_DEPLOYMENT_TARGET$|IPHONEOS_DEPLOYMENT_TARGET$|SWIFT|TAURI_|O8_SENTRY_DSN$|SENTRY_DSN$|NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY$)/;
 
-export function nativeCacheRestoreGuard(identity) {
-  const { inputs, toolchains, environment, buildOptions } = identity.compatibility;
-  // Tauri adds its target/config environment after the wrapper collects identity.
-  // Effective config assets are checked separately; Cargo options already chose
-  // the verified cache entry and each architecture's executable within it.
-  const compiler = Object.fromEntries(Object.entries(environment)
-    .filter(([key]) => key !== 'TAURI_CONFIG' && !key.startsWith('TAURI_ENV_')));
-  return hash(JSON.stringify({ source: identity.sourceSha256, inputs, toolchains, compiler, embedded: buildOptions.embedded }));
-}
 
 function parseConfig(contents, toml = false) {
   try { return toml ? parseToml(contents) : JSON.parse(contents); }
@@ -82,10 +73,16 @@ function embeddedInput(path) {
 export function nativeBuildSettings(root, buildOptions = {}, env = process.env) {
   const args = buildOptions.cargoTauriArgs ?? [];
   const configs = [];
-  let frontendDist;
+  let effective = {};
+  const merge = (base, override) => {
+    for (const [key, value] of Object.entries(override)) {
+      base[key] = value && typeof value === 'object' && !Array.isArray(value)
+        ? merge(base[key] && typeof base[key] === 'object' && !Array.isArray(base[key]) ? base[key] : {}, value) : value;
+    }
+    return base;
+  };
   function apply(config) {
-    if (config.build === null) frontendDist = undefined;
-    else if (config.build && Object.hasOwn(config.build, 'frontendDist')) frontendDist = config.build.frontendDist;
+    effective = merge(effective, config);
   }
   function readConfig(path) {
     const contents = readFileSync(path, 'utf8');
@@ -115,10 +112,18 @@ export function nativeBuildSettings(root, buildOptions = {}, env = process.env) 
     }
   }
   if (!hasOverrides && env.TAURI_CONFIG) apply(parseConfig(env.TAURI_CONFIG));
+  if (!buildOptions.nativeArtifact) delete effective.version;
+  const frontendDist = effective.build?.frontendDist;
   const files = Array.isArray(frontendDist);
   const embedded = (files ? frontendDist : frontendDist ? [frontendDist] : [])
     .map(path => !files && /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(path) ? 'url' : embeddedInput(resolve(tauri, path)));
-  return { optionsSha256: hash(JSON.stringify(buildOptions)), configs, embedded };
+  const icons = [...(effective.bundle?.icon ?? []), ...(effective.app?.trayIcon?.iconPath ? [effective.app.trayIcon.iconPath] : [])]
+    .map(path => embeddedInput(resolve(tauri, path)));
+  const canonical = value => value && typeof value === 'object' && !Array.isArray(value)
+    ? Object.fromEntries(Object.keys(value).sort().map(key => [key, canonical(value[key])]))
+    : Array.isArray(value) ? value.map(canonical) : value;
+  return { optionsSha256: hash(JSON.stringify(buildOptions)), configs, embedded, icons,
+    effectiveConfigSha256: hash(JSON.stringify(canonical(effective))) };
 }
 
 export function compilerEnvironment(root, phase, env) {

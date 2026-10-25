@@ -172,10 +172,11 @@ async function sha256File(path) {
   return hash.digest('hex');
 }
 
-function commandVersion(root, command, args) {
+function commandVersion(root, command, args, env) {
   try {
     return execFileSync(command, args, {
       cwd: root,
+      env,
       encoding: 'utf8',
       timeout: 10_000,
       windowsHide: true,
@@ -310,7 +311,7 @@ export function collectReleaseBuildCacheIdentity(root, phase, options = {}) {
       .filter((key) => WEB_ENVIRONMENT_PATTERNS.some((pattern) => pattern.test(key)))
       .sort()
       .map((key) => [key, sha256Text(String((options.env ?? process.env)[key] ?? ''))]))
-    : compilerEnvironment(root, phase, options.env ?? process.env);
+    : options.compilerEnvironment ?? compilerEnvironment(root, phase, options.env ?? process.env);
   const compatibility = {
     schema: 'o8/release-build-cache-compatibility/v1',
     phase,
@@ -322,7 +323,7 @@ export function collectReleaseBuildCacheIdentity(root, phase, options = {}) {
     excludes: config.excludes,
     toolchains: Object.fromEntries(config.toolchains.map(([name, command, args]) => [
       name,
-      commandVersion(root, command, args),
+      commandVersion(root, command, args, options.env ?? process.env),
     ])),
     inputs,
     environment,

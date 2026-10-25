@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -85,6 +85,8 @@ function compile(values) {
   const changedSource = fs.readFileSync(path.join(root, 'src-tauri/src/lib.rs'), 'utf8').includes('source B during compilation')
     ? 'source B during compilation' : '';
   fs.writeFileSync(path.join(release, 'o8'), 'compiled native executable' + (process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY || '') + embedded + changedSource);
+  const symbols = path.join(release, 'o8.dSYM/Contents/Resources/DWARF/o8');
+  fs.mkdirSync(path.dirname(symbols), { recursive: true }); fs.copyFileSync(path.join(release, 'o8'), symbols);
   const helper = path.join(release, 'speech_recognizer');
   if (!fs.existsSync(helper)) fs.writeFileSync(helper, 'native helper' + (process.env.MACOSX_DEPLOYMENT_TARGET || ''));
   fs.mkdirSync(path.join(root, 'src-tauri/helpers'), { recursive: true });
@@ -94,8 +96,10 @@ function compile(values) {
 }
 if (args[0] === 'tauri' && args[1] === 'build') {
   event({ phase: 'prebuild' });
-  if (process.env.O8_FIXTURE_FRONTEND_DURING_PREBUILD)
+  if (process.env.O8_FIXTURE_FRONTEND_DURING_PREBUILD) {
+    fs.mkdirSync(path.join(root, 'frontend'), { recursive: true });
     fs.writeFileSync(path.join(root, 'frontend/app.js'), 'frontend B from prebuild');
+  }
   const configArgument = args.includes('--config') ? value('--config') : args.find(a => a.startsWith('--config='))?.slice(9);
   if (configArgument) process.env.TAURI_CONFIG = configArgument.startsWith('{')
     ? configArgument : fs.readFileSync(path.resolve(root, configArgument), 'utf8');
@@ -136,6 +140,61 @@ else throw new Error('Unexpected Cargo invocation');
 }
 
 describe('native release cache real entry points', { timeout: 120_000 }, () => {
+  it('hits on the second unchanged run when prebuild creates embedded assets', () => {
+    const f = compilerFixture();
+    put(f.root, '.gitignore', readFileSync(join(f.root, '.gitignore'), 'utf8') + 'frontend/\n');
+    put(f.root, 'src-tauri/tauri.conf.json', '{"version":"0.1.0","build":{"frontendDist":"../frontend"}}');
+    commit(f.root);
+    const env = { O8_FIXTURE_FRONTEND_DURING_PREBUILD: '1' };
+    expect(f.run(env)).toContain('native capture=captured');
+    rmSync(join(f.root, 'src-tauri/target'), { recursive: true, force: true });
+    rmSync(join(f.root, 'frontend'), { recursive: true, force: true });
+    expect(f.run(env)).toContain('native compiler skipped');
+    expect(f.events().filter(row => row.phase === 'compile')).toHaveLength(2);
+    for (const target of ['x86_64-apple-darwin', 'aarch64-apple-darwin']) {
+      const release = join(f.root, 'src-tauri/target', target, 'release');
+      expect(readFileSync(join(release, 'o8.dSYM/Contents/Resources/DWARF/o8'), 'utf8'))
+        .toBe(readFileSync(join(release, 'o8'), 'utf8'));
+    }
+  });
+
+  it.each(['Rust sources', 'Cargo.lock', 'speech source', 'bundle icon', 'tray icon', 'Tauri config', 'features', 'target'])(
+    'native input matrix misses after changing only %s', input => {
+      const f = compilerFixture();
+      put(f.root, '.gitignore', readFileSync(join(f.root, '.gitignore'), 'utf8') + 'assets/\n');
+      put(f.root, 'assets/app.png', 'icon A');
+      put(f.root, 'assets/tray.png', 'tray A');
+      put(f.root, 'src-tauri/tauri.conf.json', JSON.stringify({ version: '0.1.0',
+        bundle: { icon: ['../assets/app.png'] }, app: { trayIcon: { iconPath: '../assets/tray.png' } } }));
+      commit(f.root);
+      expect(f.run()).toContain('native capture=captured');
+      const paths: Record<string, string> = { 'Rust sources': 'src-tauri/src/lib.rs',
+        'Cargo.lock': 'src-tauri/Cargo.lock', 'speech source': 'src-tauri/helpers/speech_recognizer.swift',
+        'bundle icon': 'assets/app.png', 'tray icon': 'assets/tray.png' };
+      let args = buildOptions.cargoTauriArgs;
+      if (paths[input]) put(f.root, paths[input], '// changed input');
+      else if (input === 'Tauri config') put(f.root, 'src-tauri/tauri.conf.json', '{"version":"0.1.0","app":{"macOSPrivateApi":true}}');
+      else if (input === 'features') args = [...args, '--features', 'dev-mcp-plugin'];
+      else args = ['--target', 'aarch64-apple-darwin'];
+      if (!['bundle icon', 'tray icon', 'features', 'target'].includes(input)) commit(f.root);
+      rmSync(join(f.root, 'src-tauri/target'), { recursive: true, force: true });
+      const output = f.run({}, args);
+      expect(output).not.toContain('native compiler skipped');
+      expect(f.events().filter(row => row.phase === 'compile')).toHaveLength(4);
+    });
+
+  it('compiles normally when an icon cannot be safely identified for caching', () => {
+    const f = compilerFixture();
+    put(f.root, '.gitignore', readFileSync(join(f.root, '.gitignore'), 'utf8') + 'assets/\n');
+    put(f.root, 'src-tauri/tauri.conf.json', '{"version":"0.1.0","bundle":{"icon":["../assets/icon.png"]}}');
+    put(f.base, 'icon.png', 'icon bytes');
+    mkdirSync(join(f.root, 'assets'));
+    symlinkSync(join(f.base, 'icon.png'), join(f.root, 'assets/icon.png'));
+    commit(f.root);
+    expect(f.run()).toContain('cache_unavailable:');
+    expect(f.events().filter(row => row.phase === 'compile')).toHaveLength(2);
+  });
+
   it.each(['dirty', 'committed'])('refuses capture when source becomes %s during compilation', kind => {
     const f = compilerFixture();
     const original = readFileSync(join(f.root, 'src-tauri/src/lib.rs'), 'utf8');
@@ -177,7 +236,7 @@ describe('native release cache real entry points', { timeout: 120_000 }, () => {
     const output = f.run({ O8_FIXTURE_FRONTEND_DURING_PREBUILD: '1' }, args);
     expect(readFileSync(join(f.root, 'src-tauri/target/x86_64-apple-darwin/release/o8'), 'utf8')).toContain('frontend B from prebuild');
     expect(f.events().filter(row => row.phase === 'compile')).toHaveLength(4);
-    expect(output).toContain('native capture=bypass reason=source_changed_during_build');
+    expect(output).toContain('native capture=captured');
   });
 
   it('hashes scheme-looking frontend file-array entries as local files', async () => {
@@ -331,6 +390,13 @@ describe('native release cache real entry points', { timeout: 120_000 }, () => {
     const f = fixture();
     put(f.root, 'scripts/build-speech-local.mjs', `
       import { mkdirSync, writeFileSync, appendFileSync } from 'node:fs';
+      import { execFileSync } from 'node:child_process';
+      if (process.env.O8_FIXTURE_SPEECH_MUTATE) {
+        writeFileSync('src-tauri/sidecars/speech-local/Sources/main.swift', '// speech B during compilation');
+        execFileSync('git', ['add', '.']);
+        execFileSync('git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
+          '-c', 'commit.gpgsign=false', '-c', 'core.hooksPath=/dev/null', 'commit', '--quiet', '-m', 'speech mutation']);
+      }
       mkdirSync('src-tauri/sidecars/speech-local/.build', { recursive: true });
       mkdirSync('src-tauri/helpers', { recursive: true });
       writeFileSync('src-tauri/sidecars/speech-local/.build/proof', 'speech compiler state');
@@ -352,14 +418,14 @@ describe('native release cache real entry points', { timeout: 120_000 }, () => {
     const script = `
       import { spawnSync } from 'node:child_process';
       import { runPrebuild } from ${JSON.stringify(new URL('../scripts/lib/prebuild-continuation.mjs', import.meta.url).href)};
-      await runPrebuild({ canReuse: false, runBuild: operation => operation(async (command, args, env) => {
+      await runPrebuild({ canReuse: process.env.O8_FIXTURE_CAN_REUSE === '1', runBuild: operation => operation(async (command, args, env) => {
         const result = spawnSync(command, args, { env, stdio: 'inherit' });
         if (result.error) throw result.error; return result.status ?? 1;
       }) });
     `;
-    const run = () => {
+    const run = (extra: Partial<NodeJS.ProcessEnv> = {}) => {
       const result = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
-        cwd: f.root, env: f.env, encoding: 'utf8', timeout: 90_000,
+        cwd: f.root, env: { ...f.env, ...extra }, encoding: 'utf8', timeout: 90_000,
       });
       expect(result.status, result.stdout + result.stderr).toBe(0);
       return result.stdout;
@@ -376,5 +442,10 @@ describe('native release cache real entry points', { timeout: 120_000 }, () => {
     put(f.root, 'src-tauri/sidecars/speech-local/Sources/main.swift', '// changed speech source\n'); commit(f.root);
     expect(run()).toContain('speech restore=miss');
     expect(readFileSync(join(f.root, '.fixture/speech-calls'), 'utf8').trim().split('\n')).toHaveLength(2);
+    put(f.root, 'src-tauri/sidecars/speech-local/Sources/main.swift', '// uncached speech A'); commit(f.root);
+    const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: f.root, encoding: 'utf8' }).trim();
+    expect(run({ O8_FIXTURE_SPEECH_MUTATE: '1' })).toContain('speech capture=bypass reason=source_changed_during_build');
+    execFileSync('git', ['switch', '--detach', head], { cwd: f.root, stdio: 'pipe' });
+    expect(run({ O8_FIXTURE_CAN_REUSE: '1' })).toContain('speech restore=miss');
   });
 });
