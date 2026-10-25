@@ -1,4 +1,6 @@
 // Compile the production command without starting the desktop app or sidecars.
+#[path = "../../../../src-tauri/src/child_environment.rs"]
+mod child_environment;
 #[path = "../../../../src-tauri/src/launch_updater.rs"]
 mod launch_updater;
 #[path = "../../../../src-tauri/src/restart_job_drain.rs"]

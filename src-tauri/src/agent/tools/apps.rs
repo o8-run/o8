@@ -97,7 +97,7 @@ fn match_app<'a>(query: &str, apps: &'a [String]) -> Vec<&'a String> {
 /// Run `open -a <name>`. The name goes through argv (no shell) so it can't inject.
 async fn open_dash_a(app: String) -> Result<(), String> {
     let result = tokio::task::spawn_blocking(move || {
-        std::process::Command::new("open").arg("-a").arg(&app).output()
+        crate::child_environment::command("open").arg("-a").arg(&app).output()
     })
     .await
     .map_err(|e| format!("spawn_blocking error: {e}"))?;

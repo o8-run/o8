@@ -1,15 +1,20 @@
+import { AMBIENT_NAMES } from './ambient-environment';
 import { PROVIDER_ENV_KEYS, PROVIDER_KEY_ALIASES } from './key-store';
 /** Shared by generated Node helpers that can create a child after asynchronous work. */
 export const EMBEDDED_CHILD_POLICY_SCRIPT = String.raw`
 // o8 embedded child credential boundary
+function o8AmbientEnvironment() {
+  const names = ${JSON.stringify([...AMBIENT_NAMES, 'O8_CHILD_CREDENTIAL_POLICY', 'O8_WORKER_TOKEN', 'O8_API_TOKEN', 'O8_WS_TOKEN', 'O8_OWNED_RUN_MARKER', 'O8_MANAGED_RUN_MARKER', 'LLM_API_KEY', 'GOOSE_API_KEY', 'COPILOT_PROVIDER_API_KEY', 'COPILOT_PROVIDER_BEARER_TOKEN', 'O8_FABLE_ANTHROPIC_API_KEY', ...PROVIDER_ENV_KEYS, ...Object.values(PROVIDER_KEY_ALIASES).flat()])};
+  return Object.fromEntries(names.filter(name => process.env[name] !== undefined).map(name => [name, process.env[name]]));
+}
 function withO8ChildPolicy(create, options = {}) {
   const policyFs = require('node:fs');
   const policyPath = require('node:path');
   const rawPolicy = process.env.O8_CHILD_CREDENTIAL_POLICY;
-  const env = { ...(options.env || process.env) };
+  const env = { ...(options.env || o8AmbientEnvironment()) };
   const credentialNames = ${JSON.stringify([...PROVIDER_ENV_KEYS, ...Object.values(PROVIDER_KEY_ALIASES).flat(), 'LLM_API_KEY', 'GOOSE_API_KEY', 'COPILOT_PROVIDER_API_KEY', 'COPILOT_PROVIDER_BEARER_TOKEN', 'O8_FABLE_ANTHROPIC_API_KEY'])};
   const credentialName = name => credentialNames.includes(name);
-  const carriesCredentials = Object.entries({ ...process.env, ...env })
+  const carriesCredentials = Object.entries({ ...o8AmbientEnvironment(), ...env })
     .some(([name, value]) => credentialName(name) && typeof value === 'string' && value.trim());
   delete env.O8_CHILD_CREDENTIAL_POLICY;
   delete env.O8_MASTER_KEY;
@@ -38,7 +43,7 @@ function withO8ChildPolicy(create, options = {}) {
   try {
     lock.exec('BEGIN EXCLUSIVE');
     if (hashFile(policy.policyFile) !== policy.policyHash) throw new Error('Child credential policy changed. Retry the launch.');
-    for (const [name, value] of Object.entries({ ...process.env, ...env })) {
+    for (const [name, value] of Object.entries({ ...o8AmbientEnvironment(), ...env })) {
       if (credentialName(name) && typeof value === 'string' && value.trim()
         && require('node:crypto').createHash('sha256').update(value).digest('hex') !== policy.approvedCredentials[name]) {
         throw new Error('Child credential policy does not authorize this credential.');

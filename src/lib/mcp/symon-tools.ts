@@ -1,6 +1,10 @@
+import { childDiagnostic } from '@/lib/providers/child-diagnostics';
+import { credentialPolicyFingerprint } from '@/lib/providers/credential-policy';
+import { onCredentialPolicyChange } from '@/lib/providers/policy-events';
+import { configuredRuntimeId, configuredMcpEnvironment } from '@/lib/providers/spawn-environment';
 import 'server-only';
 
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { spawn, type ChildProcessWithoutNullStreams } from '@/lib/providers/child-process';
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 import {
   listEnabledExternalMcpServers,
@@ -73,9 +77,7 @@ function errorMessage(error: unknown): string {
 
 function rpcError(method: string, response: JsonRpcResponse): Error | null {
   if (!response.error) return null;
-  const message = typeof response.error.message === 'string'
-    ? response.error.message
-    : 'Unknown MCP error';
+  const message = childDiagnostic(typeof response.error.message === 'string' ? response.error.message : 'Unknown MCP error');
   return new Error(`${method} failed: ${message}`);
 }
 
@@ -128,7 +130,7 @@ class StdioSession implements McpSession {
     this.child = spawn(launch.command, launch.args, {
       windowsHide: true,
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, ...(server.env ?? {}) },
+      env: configuredMcpEnvironment(server.command, server.env ?? {}, true, server.args),
     });
     this.child.stdout.on('data', (chunk: Buffer) => this.onStdout(chunk));
     this.child.stderr.on('data', () => {
@@ -418,6 +420,14 @@ function invalidateAll(): void {
 }
 
 registerSymonMcpCacheInvalidator(invalidateAll);
+onCredentialPolicyChange(invalidateAll);
+let payerFingerprint: string | undefined;
+function refreshPayerPolicy(): void {
+  const current = listEnabledExternalMcpServers().filter(server => server.symonInjection)
+    .map(server => credentialPolicyFingerprint(configuredRuntimeId(server.command) ?? 'unknown')).join(':');
+  if (payerFingerprint !== undefined && payerFingerprint !== current) invalidateAll();
+  payerFingerprint = current;
+}
 process.once('exit', closeSessions);
 
 function sanitizeNamePart(value: string, maxLength: number): string {
@@ -471,6 +481,7 @@ async function buildCatalog(): Promise<CatalogEntry[]> {
 }
 
 async function entries(force = false): Promise<CatalogEntry[]> {
+  refreshPayerPolicy();
   if (!force && catalogEntries) return catalogEntries;
   if (catalogPromise) return catalogPromise;
   const generation = catalogGeneration;

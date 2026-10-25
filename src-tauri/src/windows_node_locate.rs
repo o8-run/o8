@@ -15,8 +15,6 @@
 //! only compiles on Windows targets or under `cfg(test)`, so it never ships
 //! dead code on the macOS builds this repo is actually developed on.
 
-#[cfg(target_os = "windows")]
-use std::process::Command;
 use std::path::PathBuf;
 
 /// `where node` — the Windows equivalent of `command -v node` / `which node`.
@@ -30,7 +28,7 @@ use std::path::PathBuf;
 #[cfg(target_os = "windows")]
 pub(crate) fn resolve_node_via_where() -> Option<String> {
     use crate::no_window::NoWindow;
-    let out = Command::new("where").arg("node").no_window().output().ok()?;
+    let out = crate::child_environment::command("where").arg("node").no_window().output().ok()?;
     if !out.status.success() {
         return None;
     }

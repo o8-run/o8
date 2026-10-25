@@ -61,7 +61,7 @@ function verifyRoot() {
 }
 function git(args) {
   verifyRoot();
-  const env = { ...process.env, GIT_OPTIONAL_LOCKS: '0', GIT_WORK_TREE: '.' };
+  const env = { ...o8AmbientEnvironment(), GIT_OPTIONAL_LOCKS: '0', GIT_WORK_TREE: '.' };
   for (const key of ['GIT_DIR', 'GIT_INDEX_FILE', 'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES']) delete env[key];
   return withO8ChildPolicy(freshEnv => execFileSync(process.argv[3], args, { encoding: 'utf8', env: freshEnv, timeout: 10000, maxBuffer: 8 * 1024 * 1024 }), { env });
 }

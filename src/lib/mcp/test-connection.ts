@@ -1,3 +1,5 @@
+import { childDiagnostic } from '@/lib/providers/child-diagnostics';
+import { configuredMcpEnvironment } from '@/lib/providers/spawn-environment';
 /**
  * Exercises a stdio or HTTP MCP server enough to answer:
  *
@@ -14,7 +16,7 @@
  * actionable diagnostics.
  */
 
-import { spawn } from 'node:child_process';
+import { spawn } from '@/lib/providers/child-process';
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 import { isNpxFamily } from './npx-detection';
 
@@ -78,8 +80,8 @@ interface ToolsListResult {
   tools?: Array<{ name?: unknown; description?: unknown }>;
 }
 
-function shortenStderr(text: string): string {
-  const trimmed = text.trim();
+function shortenStderr(text: string, env?: Record<string, string>): string {
+  const trimmed = childDiagnostic(text, env).trim();
   if (trimmed.length <= STDERR_CAP) return trimmed;
   return `${trimmed.slice(0, STDERR_CAP)}… (${trimmed.length - STDERR_CAP} more bytes)`;
 }
@@ -106,7 +108,6 @@ async function testStdio(input: StdioTestInput, timeoutMs: number, npxFamily: bo
 
   return new Promise<McpTestResult>((resolve) => {
     let child: ReturnType<typeof spawn> | null = null;
-    const childEnv: NodeJS.ProcessEnv = { ...process.env, ...(input.env ?? {}) };
     try {
       // Most stdio MCP servers are configured as `npx …`, which on Windows is
       // `npx.cmd` — spawning it directly throws EINVAL and the user sees
@@ -115,10 +116,10 @@ async function testStdio(input: StdioTestInput, timeoutMs: number, npxFamily: bo
       child = spawn(launch.command, launch.args, {
         windowsHide: true,
         stdio: ['pipe', 'pipe', 'pipe'],
-        env: childEnv,
+        env: configuredMcpEnvironment(input.command, input.env ?? {}, true, input.args),
       });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+    } catch {
+      const message = 'MCP operation failed';
       resolve({
         ok: false,
         transport: 'stdio',
@@ -149,19 +150,19 @@ async function testStdio(input: StdioTestInput, timeoutMs: number, npxFamily: bo
         ok: false,
         transport: 'stdio',
         error: `Timed out after ${timeoutMs}ms waiting for tools/list`,
-        stderr: shortenStderr(stderrBuf) || undefined,
+        stderr: shortenStderr(stderrBuf, input.env) || undefined,
         durationMs: Date.now() - started,
         ...(npxFamily ? { npxFamily: true } : {}),
       });
     }, timeoutMs);
 
-    child.on('error', (err) => {
+    child.on('error', () => {
       clearTimeout(timeout);
       finish({
         ok: false,
         transport: 'stdio',
-        error: `Process error — ${err.message}`,
-        stderr: shortenStderr(stderrBuf) || undefined,
+        error: `Process error — MCP process failed`,
+        stderr: shortenStderr(stderrBuf, input.env) || undefined,
         durationMs: Date.now() - started,
         ...(npxFamily ? { npxFamily: true } : {}),
       });
@@ -182,7 +183,7 @@ async function testStdio(input: StdioTestInput, timeoutMs: number, npxFamily: bo
         ok: false,
         transport: 'stdio',
         error: `Process exited before tools/list completed (${hint})`,
-        stderr: shortenStderr(stderrBuf) || undefined,
+        stderr: shortenStderr(stderrBuf, input.env) || undefined,
         durationMs: Date.now() - started,
         ...(npxFamily ? { npxFamily: true } : {}),
       });
@@ -219,7 +220,7 @@ async function testStdio(input: StdioTestInput, timeoutMs: number, npxFamily: bo
           ok: false,
           transport: 'stdio',
           error: 'Child stdin closed before request was sent',
-          stderr: shortenStderr(stderrBuf) || undefined,
+          stderr: shortenStderr(stderrBuf, input.env) || undefined,
           durationMs: Date.now() - started,
           ...(npxFamily ? { npxFamily: true } : {}),
         });
@@ -228,13 +229,13 @@ async function testStdio(input: StdioTestInput, timeoutMs: number, npxFamily: bo
       try {
         child.stdin.write(JSON.stringify(req) + '\n');
         return true;
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
+      } catch {
+        const message = 'MCP operation failed';
         finish({
           ok: false,
           transport: 'stdio',
           error: `Failed to write request — ${message}`,
-          stderr: shortenStderr(stderrBuf) || undefined,
+          stderr: shortenStderr(stderrBuf, input.env) || undefined,
           durationMs: Date.now() - started,
           ...(npxFamily ? { npxFamily: true } : {}),
         });
@@ -266,8 +267,8 @@ async function testStdio(input: StdioTestInput, timeoutMs: number, npxFamily: bo
         finish({
           ok: false,
           transport: 'stdio',
-          error: `initialize failed — ${initResp.error.message}`,
-          stderr: shortenStderr(stderrBuf) || undefined,
+          error: `initialize failed — MCP initialize rejected`,
+          stderr: shortenStderr(stderrBuf, input.env) || undefined,
           durationMs: Date.now() - started,
           ...(npxFamily ? { npxFamily: true } : {}),
         });
@@ -286,8 +287,8 @@ async function testStdio(input: StdioTestInput, timeoutMs: number, npxFamily: bo
           finish({
             ok: false,
             transport: 'stdio',
-            error: `tools/list failed — ${listResp.error.message}`,
-            stderr: shortenStderr(stderrBuf) || undefined,
+            error: `tools/list failed — MCP tools/list rejected`,
+            stderr: shortenStderr(stderrBuf, input.env) || undefined,
             durationMs: Date.now() - started,
             ...(npxFamily ? { npxFamily: true } : {}),
           });
@@ -301,7 +302,7 @@ async function testStdio(input: StdioTestInput, timeoutMs: number, npxFamily: bo
           tools,
           toolCount: tools.length,
           durationMs: Date.now() - started,
-          stderr: shortenStderr(stderrBuf) || undefined,
+          stderr: shortenStderr(stderrBuf, input.env) || undefined,
           ...(npxFamily ? { npxFamily: true } : {}),
         });
       });
@@ -378,7 +379,7 @@ async function testHttp(input: HttpTestInput, timeoutMs: number): Promise<McpTes
       return {
         ok: false,
         transport: 'http',
-        error: `tools/list failed — ${payload.error.message}`,
+        error: `tools/list failed — MCP tools/list rejected`,
         durationMs: Date.now() - started,
       };
     }
@@ -391,10 +392,10 @@ async function testHttp(input: HttpTestInput, timeoutMs: number): Promise<McpTes
       toolCount: tools.length,
       durationMs: Date.now() - started,
     };
-  } catch (error) {
+  } catch {
     clearTimeout(timeout);
     const aborted = controller.signal.aborted;
-    const message = error instanceof Error ? error.message : String(error);
+    const message = 'MCP operation failed';
     return {
       ok: false,
       transport: 'http',

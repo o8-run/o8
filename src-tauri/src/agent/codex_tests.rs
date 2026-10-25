@@ -11,6 +11,8 @@ use std::os::unix::fs::PermissionsExt;
 /// the app-server branch also records each request line — so a test can count
 /// process starts and read back what was actually sent.
 const CODEX_FIXTURE: &str = r#"#!/bin/sh
+FIXTURE_CAPTURE="$(dirname "$0")/capture.txt"
+FIXTURE_APP_SERVER="$(cat "$(dirname "$0")/app-server.txt")"
 printf '%s\n' '__SPAWN__' >> "$FIXTURE_CAPTURE"
 for arg in "$@"; do printf 'argv %s\n' "$arg" >> "$FIXTURE_CAPTURE"; done
 if [ "$1" = "app-server" ]; then
@@ -98,6 +100,7 @@ impl CodexFixture {
         .unwrap();
         let binary = dir.join("codex-fixture");
         let capture = dir.join("capture.txt");
+        std::fs::write(dir.join("app-server.txt"), if app_server { "1" } else { "0" }).unwrap();
         std::fs::write(&binary, CODEX_FIXTURE).unwrap();
         std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
 

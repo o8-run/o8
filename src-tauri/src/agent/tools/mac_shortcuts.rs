@@ -5,7 +5,7 @@ use serde_json::{json, Value};
 
 pub async fn list(_args: Value) -> Result<Value, String> {
     let output = tokio::task::spawn_blocking(|| {
-        std::process::Command::new("shortcuts").args(["list"]).output()
+        crate::child_environment::command("shortcuts").args(["list"]).output()
     })
     .await
     .map_err(|e| format!("spawn_blocking error: {e}"))?
@@ -35,7 +35,7 @@ pub async fn run(args: Value) -> Result<Value, String> {
 
     let name_c = name.clone();
     let output = tokio::task::spawn_blocking(move || {
-        let mut cmd = std::process::Command::new("shortcuts");
+        let mut cmd = crate::child_environment::command("shortcuts");
         // `run <name>` takes name as a separate argv (no shell), so it can't inject.
         cmd.args(["run", &name_c]);
         if !input.is_empty() {

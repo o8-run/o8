@@ -51,7 +51,7 @@ pub fn initialize_at<R: Runtime>(app: &AppHandle<R>, path: &Path) -> Result<(), 
 fn macos_version() -> Option<String> {
     #[cfg(target_os = "macos")]
     {
-        let output = std::process::Command::new("/usr/bin/sw_vers")
+        let output = crate::child_environment::command("/usr/bin/sw_vers")
             .arg("-productVersion")
             .output()
             .ok()?;

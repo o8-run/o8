@@ -53,7 +53,7 @@ it('rejects historical credential values retained in prepared arguments after a 
 it('preserves API mode at the actual process boundary', () => {
   saveRuntimeBillingMode('gemini', 'api');
   cp.execFileSync(process.execPath, [script], { env: childEnvironment({ runtimeId: 'gemini' }) });
-  expect(JSON.parse(readFileSync(output, 'utf8'))).toEqual(['fixture-boundary-key', 'fixture-boundary-key']);
+  expect(JSON.parse(readFileSync(output, 'utf8'))).toEqual(['fixture-boundary-key', null]);
 });
 it.each(['api', 'subscription'] as const)('preserves work admission and credential policy in %s', async mode => {
   saveRuntimeBillingMode('gemini', mode);
@@ -67,7 +67,7 @@ it.each(['api', 'subscription'] as const)('preserves work admission and credenti
   await new Promise<void>((resolve, reject) => {
     child.once('error', reject); child.once('exit', code => code === 0 ? resolve() : reject(new Error(`exit ${code}`)));
   });
-  expect(JSON.parse(readFileSync(output, 'utf8'))).toEqual(mode === 'api' ? ['fixture-boundary-key', 'fixture-boundary-key'] : [null, null]);
+  expect(JSON.parse(readFileSync(output, 'utf8'))).toEqual(mode === 'api' ? ['fixture-boundary-key', null] : [null, null]);
   expect(readdirSync(leases)).toEqual([]);
 });
 
@@ -163,13 +163,12 @@ it('rejects a shell command disguised as a deferred Codex MCP environment', () =
   expect(readdirSync(state.dir)).not.toContain('shell-extracted');
 });
 
-it.each(['original', 'command', 'arguments', 'copied environment', 'shell option'] as const)('binds deferred MCP compatibility to the exact worker invocation: %s', form => {
+it.each(['original', 'command', 'arguments', 'copied environment', 'shell option'] as const)('refuses deferred provider credentials without a child runtime identity: %s', form => {
   const env = childEnvironment({ runtimeId: 'codex' });
   const args = ['-e', 'process.stdout.write(JSON.stringify([process.env.OPENAI_API_KEY??null,process.argv.at(-1)]))', '--', '-c', 'mcp_servers.fixture.env={KEY="fixture-boundary-key"}'];
   const invocation = bindDeferredCodexMcpLaunch(env, args, [{ name: 'fixture', env: { KEY: 'fixture-boundary-key' } }], checked => ({ command: process.execPath, args: checked }));
   const launch = () => cp.execFileSync(form === 'command' ? '/bin/sh' : invocation.command,
     form === 'arguments' ? [...invocation.args, 'changed'] : invocation.args,
     { env: form === 'copied environment' ? { ...env } : env, shell: form === 'shell option', encoding: 'utf8' });
-  if (form === 'original') expect(JSON.parse(launch())).toEqual([null, args.at(-1)]);
-  else expect(launch).toThrow(/arguments contain/);
+  expect(launch).toThrow(/arguments contain/);
 });

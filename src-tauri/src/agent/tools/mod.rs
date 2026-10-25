@@ -1582,7 +1582,7 @@ const OSASCRIPT_TIMEOUT_SECS: u64 = 30;
 /// Spawn `osascript` with the given args, enforcing the timeout. Output pipes
 /// are tiny for every script we run, so poll-then-read is deadlock-safe.
 fn run_osascript_capped(args: &[&str], label: &str) -> Result<String, String> {
-    let mut child = std::process::Command::new("osascript")
+    let mut child = crate::child_environment::command("osascript")
         .args(args)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())

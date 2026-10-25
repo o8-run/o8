@@ -1,7 +1,5 @@
 //! A pre-window recovery prompt. No backend or profile mutation is allowed here.
 
-use std::process::Command;
-
 pub(crate) fn prompt_retry() -> bool {
     let title = "Reconnect to o8";
     let body = "A background o8 server is still running, but it could not be verified yet. Retry to reconnect. Your running work stays open.\n\nIf the server uses a different version, update it before reconnecting.";
@@ -12,7 +10,7 @@ pub(crate) fn prompt_retry() -> bool {
             "display dialog {:?} with title {:?} buttons {{\"Quit\", \"Retry\"}} default button \"Retry\" cancel button \"Quit\"",
             body, title
         );
-        Command::new("osascript")
+        crate::child_environment::command("osascript")
             .args(["-e", &script])
             .output()
             .map(|output| {
@@ -28,7 +26,7 @@ pub(crate) fn prompt_retry() -> bool {
             "Add-Type -AssemblyName System.Windows.Forms; if ([System.Windows.Forms.MessageBox]::Show('{}','{}','RetryCancel','Warning') -eq 'Retry') {{ exit 0 }} else {{ exit 1 }}",
             body.replace('\'', "''"), title.replace('\'', "''")
         );
-        Command::new("powershell")
+        crate::child_environment::command("powershell")
             .args(["-NoProfile", "-NonInteractive", "-Command", &script])
             .no_window()
             .status()
@@ -37,7 +35,7 @@ pub(crate) fn prompt_retry() -> bool {
     }
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
-        let result = Command::new("zenity")
+        let result = crate::child_environment::command("zenity")
             .args([
                 "--question",
                 "--title",
@@ -51,7 +49,7 @@ pub(crate) fn prompt_retry() -> bool {
             ])
             .status()
             .or_else(|_| {
-                Command::new("kdialog")
+                crate::child_environment::command("kdialog")
                     .args([
                         "--yesno",
                         body,

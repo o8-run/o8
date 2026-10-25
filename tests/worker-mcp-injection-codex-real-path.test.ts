@@ -1,3 +1,5 @@
+import { parse as parseToml } from 'smol-toml';
+import { providerCredentialName } from '@/lib/providers/spawn-environment';
 import { execFileSync } from 'node:child_process';
 import {
   mkdirSync,
@@ -277,11 +279,14 @@ describe.sequential('Codex worker MCP injection real path', () => {
     const expectedOverrides = [
       `mcp_servers.packet-observer.command=${JSON.stringify(process.execPath)}`,
       'mcp_servers.packet-observer.args=["fixture-server.mjs"]',
-      `mcp_servers.packet-observer.env={"PACKET_ID"=${JSON.stringify(launchPacket.id)}, "WORKTREE"=${JSON.stringify(launchLane.worktreePath)}, "BRANCH"=${JSON.stringify(launchPacket.branchTarget)}, "LANE_ID"=${JSON.stringify(launchLane.id)}}`,
+      expect.stringContaining(`mcp_servers.packet-observer.env={"PACKET_ID"=${JSON.stringify(launchPacket.id)}, "WORKTREE"=${JSON.stringify(launchLane.worktreePath)}, "BRANCH"=${JSON.stringify(launchPacket.branchTarget)}, "LANE_ID"=${JSON.stringify(launchLane.id)}`),
     ];
     expect(configOverrides(launchArgs).filter((value) => (
       value.startsWith('mcp_servers.packet-observer.')
     ))).toEqual(expectedOverrides);
+    const parsed = parseToml(configOverrides(launchArgs).filter(value => value.startsWith('mcp_servers.packet-observer.')).join('\n'));
+    const env = ((parsed.mcp_servers as Record<string, { env: Record<string, string> }>)['packet-observer']).env;
+    expect(Object.entries(env).filter(([name]) => providerCredentialName(name)).every(([, value]) => value === '')).toBe(true);
     expect(launchArgs).not.toContain('--mcp-config');
     const surfaceId = getLane(launchLane.id)?.sessionKey;
     expect(surfaceId).toMatch(/^codex-owned:/);

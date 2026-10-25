@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { renameSync, chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { spawn, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -13,7 +13,7 @@ const generated = { summary: 'Find work and updates more easily.', entries: [
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'o8-release-summary-test-')); roots.push(root);
   const input = join(root, 'ship.json'); const output = join(root, 'notes.md'); const cli = join(root, 'codex');
-  const cache = join(root, 'cache'); const effects = join(root, 'calls.jsonl');
+  const cache = join(root, 'cache'); const effects = join(root, 'calls.jsonl'); const control = join(root, 'control.json');
   writeFileSync(input, JSON.stringify({ version: '0.1.904', summary: 'Clearer navigation and updates.',
     sourceCommits: ['private-source-id'], sections: [{ title: 'Changes', items: [
       'Clearer chat sections', 'One place for connected updates',
@@ -21,18 +21,22 @@ function fixture() {
     ] }] }));
   writeFileSync(cli, `#!${process.execPath}
 const fs = require('node:fs');
+const control = JSON.parse(fs.readFileSync(${JSON.stringify(control)}, 'utf8'));
 const args = process.argv.slice(2);
 const prompt = fs.readFileSync(0, 'utf8');
-fs.appendFileSync(process.env.O8_SUMMARY_TEST_EFFECTS, JSON.stringify({ args, prompt, cwd: process.cwd(), schema: JSON.parse(fs.readFileSync(args[args.indexOf('--output-schema') + 1], 'utf8')) }) + '\\n');
-if (process.env.O8_SUMMARY_TEST_DELAY) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 300);
-if (process.env.O8_SUMMARY_TEST_FAIL) { console.error('private provider error'); process.exit(1); }
-fs.writeFileSync(args[args.indexOf('--output-last-message') + 1], process.env.O8_SUMMARY_TEST_OUTPUT);
+fs.appendFileSync(${JSON.stringify(effects)}, JSON.stringify({ args, prompt, cwd: process.cwd(), schema: JSON.parse(fs.readFileSync(args[args.indexOf('--output-schema') + 1], 'utf8')) }) + '\\n');
+if (control.O8_SUMMARY_TEST_DELAY) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 300);
+if (control.O8_SUMMARY_TEST_FAIL) { console.error('private provider error'); process.exit(1); }
+fs.writeFileSync(args[args.indexOf('--output-last-message') + 1], control.O8_SUMMARY_TEST_OUTPUT);
 `); chmodSync(cli, 0o755);
-  return { root, input, output, cli, cache, effects };
+  return { root, input, output, cli, cache, effects, control };
 }
 function options(f: ReturnType<typeof fixture>, extra: Record<string, string> = {}) {
-  return { cwd: f.root, env: { ...process.env, O8_SUMMARY_TEST_EFFECTS: f.effects,
-    O8_SUMMARY_TEST_OUTPUT: JSON.stringify(generated), ...extra } };
+  // Fixture controls are private files, not ambient variables inherited by the
+  // production CLI launch. The payer allowlist intentionally excludes them.
+  writeFileSync(`${f.control}.tmp`, JSON.stringify({ O8_SUMMARY_TEST_OUTPUT: JSON.stringify(generated), ...extra }));
+  renameSync(`${f.control}.tmp`, f.control);
+  return { cwd: f.root, env: { ...process.env } };
 }
 function args(f: ReturnType<typeof fixture>, extra: string[] = []) {
   return [script, '--input', f.input, '--out', f.output, '--cache-dir', f.cache, '--codex', f.cli, ...extra];

@@ -1,3 +1,4 @@
+import { unprivilegedChildEnvironment } from '../../src/lib/providers/ambient-environment';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { resolveCodexReasoningEffort } from '../../src/lib/codex/reasoning-effort';
 import type { ThinkingEffort } from '../../src/lib/orchestrator/thinking-effort';
@@ -42,7 +43,9 @@ export async function startCodex(opts: RunCodexOptions): Promise<RunningCodex> {
   }
   codexArgs.push('-');
 
-  const childEnv = { ...process.env };
+  // Codex API billing is unavailable (#4334). The standalone worker uses
+  // the shared no-provider policy without depending on the server's SQLite.
+  const childEnv = unprivilegedChildEnvironment();
   delete childEnv.O8_CLOUD_WORKER_KEY;
   const child = spawn('codex', codexArgs, { cwd: opts.cwd, env: childEnv, stdio: ['pipe', 'pipe', 'pipe'], detached: process.platform !== 'win32' });
   child.stdin.on('error', () => { /* The child exit/error handler reports a failed invocation. */ });

@@ -25,7 +25,7 @@ fn preferred_male_voice() -> Option<&'static str> {
         // If no candidate is installed, return None so the caller omits -v and
         // `say` uses the user's system-default voice.
         const CANDIDATES: &[&str] = &["Alex", "Aaron", "Tom", "Daniel", "Arthur", "Oliver", "Evan", "Nathan"];
-        let listing = std::process::Command::new("say")
+        let listing = crate::child_environment::command("say")
             .args(["-v", "?"])
             .output()
             .ok()
@@ -56,7 +56,7 @@ pub fn speak_with_say_cancellable(
 ) -> bool {
     use std::time::Duration;
     let rate = (175.0 * speed.max(0.1)) as u32;
-    let mut command = std::process::Command::new("say");
+    let mut command = crate::child_environment::command("say");
     command.args(["-r", &rate.to_string()]);
     if let Some(voice) = preferred_male_voice() {
         command.args(["-v", voice]);

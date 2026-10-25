@@ -1,3 +1,4 @@
+import { unprivilegedChildEnvironment } from '../../../src/lib/providers/ambient-environment.js';
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
@@ -112,7 +113,7 @@ function runCheck(check: CiCheck, cwd: string): CheckResult {
     encoding: 'utf8',
     timeout,
     maxBuffer: 4 * 1024 * 1024,
-    env: { ...process.env, ...(check.env ?? {}) },
+    env: unprivilegedChildEnvironment(check.env),
     shell: false,
   });
   const output = [result.stdout ?? '', result.stderr ?? '', result.error?.message ?? '']

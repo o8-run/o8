@@ -245,6 +245,8 @@ async fn escalate_hands_off_and_the_planner_loop_serves_a_lookup_and_continues()
     std::fs::write(
         &planner,
         r#"#!/bin/sh
+SEAT_CAPTURE="$(dirname "$0")/capture"
+SEAT_COUNT="$(dirname "$0")/count"
 n=$(cat "$SEAT_COUNT" 2>/dev/null || echo 0)
 n=$((n+1))
 printf '%s' "$n" > "$SEAT_COUNT"

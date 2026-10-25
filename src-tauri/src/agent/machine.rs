@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::io::{Read, Write};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::sync::{mpsc, Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -432,7 +432,7 @@ impl ProcessSpawner for SystemProcessSpawner {
         args: &[String],
         stdin: &[u8],
     ) -> Result<ProcessOutput, String> {
-        let mut child = Command::new(program)
+        let mut child = crate::child_environment::command(program)
             .args(args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())

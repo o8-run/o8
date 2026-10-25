@@ -98,6 +98,7 @@ impl SeatFixture {
         // Records argv, then holds stdin open the way the real CLIs do so the
         // spawned session stays alive until it is dropped.
         let script = "#!/bin/sh\n\
+             SEAT_CAPTURE=\"$(dirname \"$0\")/capture.txt\"\n\
                       for arg in \"$@\"; do printf 'argv %s\\n' \"$arg\" >> \"$SEAT_CAPTURE\"; done\n\
                       printf '%s\\n' '__END__' >> \"$SEAT_CAPTURE\"\n\
                       cat > /dev/null\n";
@@ -114,6 +115,7 @@ impl SeatFixture {
         std::fs::write(
             &opencode_fixture,
             "#!/bin/sh\n\
+             SEAT_CAPTURE=\"$(dirname \"$0\")/capture.txt\"\n\
              for arg in \"$@\"; do printf 'argv %s\\n' \"$arg\" >> \"$SEAT_CAPTURE\"; done\n\
              printf '%s\\n' '__END__' >> \"$SEAT_CAPTURE\"\n\
              printf '%s\\n' '{\"type\":\"text\",\"sessionID\":\"ses_fixture\",\"part\":{\"type\":\"text\",\"text\":\"{\\\"done\\\":true,\\\"say\\\":\\\"All set.\\\"}\"}}'\n",
@@ -562,6 +564,7 @@ fn the_bound_surface_names_the_seat_the_way_settings_does() {
 async fn text_default_reports_fallback_and_old_bindings_stay_fixed() {
     let fixture = SeatFixture::new("codex");
     std::fs::write(fixture.dir.join("codex-fixture"), r#"#!/bin/sh
+SEAT_CAPTURE="$(dirname "$0")/capture.txt"
 for arg in "$@"; do printf 'argv %s\n' "$arg" >> "$SEAT_CAPTURE"; done
 printf '%s\n' '__END__' >> "$SEAT_CAPTURE"
 if [ "$1" = app-server ]; then exit 1; fi
@@ -605,6 +608,7 @@ async fn bound_text_terminal_failure_and_interrupt_keep_fallback_selection() {
         let ready = fixture.dir.join("fallback-ready");
         let release = fixture.dir.join("fallback-release");
         let script = format!(r#"#!/bin/sh
+SEAT_CAPTURE="$(dirname "$0")/capture.txt"
 if [ "$1" = app-server ]; then exit 1; fi
 for arg in "$@"; do
   if [ "$arg" = model=gpt-6.1-sol ]; then

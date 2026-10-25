@@ -58,6 +58,6 @@ process.stdout.write(JSON.stringify({version:1,platform:'darwin',bootId:'fixture
     Object.defineProperty(process, 'platform', { value: 'darwin' });
     const { probeOwnedProcessIdentity } = await import('@/lib/runtimes/shared/owned-session/process-identity');
     expect(await probeOwnedProcessIdentity(process.pid, 'native-helper')).toMatchObject({ state: 'live', source: 'native-helper' });
-    expect(JSON.parse(readFileSync(state.record, 'utf8'))).toEqual({ key: false, alias: false, copy: false, master: false, service: 'fixture-search-service' });
+    expect(JSON.parse(readFileSync(state.record, 'utf8'))).toEqual({ key: false, alias: false, copy: false, master: false, service: undefined });
   } finally { Object.defineProperty(process, 'platform', platform); }
 });

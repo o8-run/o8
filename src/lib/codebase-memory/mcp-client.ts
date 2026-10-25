@@ -1,3 +1,5 @@
+import { childDiagnostic } from '@/lib/providers/child-diagnostics';
+import { childEnvironment } from '@/lib/providers/spawn-environment';
 /**
  * Minimal MCP-stdio JSON-RPC client for codebase-memory tool calls.
  *
@@ -12,7 +14,7 @@
 
 import 'server-only';
 
-import { spawn } from 'node:child_process';
+import { spawn } from '@/lib/providers/child-process';
 
 const INIT_TIMEOUT_MS = 10_000;
 const DEFAULT_CALL_TIMEOUT_MS = 5 * 60_000; // 5 min — large repos take time to index
@@ -92,10 +94,10 @@ export async function withCodebaseMemoryToolSession<T>(
       windowsHide: true,
       stdio: ['pipe', 'pipe', 'pipe'],
       cwd: input.cwd,
-      env: { ...process.env },
+      env: childEnvironment(),
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = childDiagnostic(error instanceof Error ? error.message : String(error));
     return {
       ok: false,
       error: `Spawn failed — ${message}`,
@@ -218,8 +220,8 @@ export async function withCodebaseMemoryToolSession<T>(
       if (response.error) {
         return {
           ok: false,
-          error: `${callInput.toolName} failed — ${response.error.message}`,
-          stderr: stderrBuf || undefined,
+          error: childDiagnostic(`${callInput.toolName} failed — ${response.error.message}`),
+          stderr: childDiagnostic(stderrBuf) || undefined,
           durationMs: Date.now() - callStarted,
         };
       }
@@ -234,8 +236,8 @@ export async function withCodebaseMemoryToolSession<T>(
           .trim();
         return {
           ok: false,
-          error: `${callInput.toolName} reported isError${text ? ` — ${text}` : ''}`,
-          stderr: stderrBuf || undefined,
+          error: childDiagnostic(`${callInput.toolName} reported isError${text ? ` — ${text}` : ''}`),
+          stderr: childDiagnostic(stderrBuf) || undefined,
           durationMs: Date.now() - callStarted,
         };
       }
@@ -247,8 +249,8 @@ export async function withCodebaseMemoryToolSession<T>(
     } catch (error) {
       return {
         ok: false,
-        error: error instanceof Error ? error.message : String(error),
-        stderr: stderrBuf || undefined,
+        error: childDiagnostic(error instanceof Error ? error.message : String(error)),
+        stderr: childDiagnostic(stderrBuf) || undefined,
         durationMs: Date.now() - callStarted,
       };
     }
@@ -266,8 +268,8 @@ export async function withCodebaseMemoryToolSession<T>(
     if (initialize.error) {
       return {
         ok: false,
-        error: `initialize failed — ${initialize.error.message}`,
-        stderr: stderrBuf || undefined,
+        error: childDiagnostic(`initialize failed — ${initialize.error.message}`),
+        stderr: childDiagnostic(stderrBuf) || undefined,
         durationMs: Date.now() - started,
       };
     }
@@ -277,8 +279,8 @@ export async function withCodebaseMemoryToolSession<T>(
   } catch (error) {
     return {
       ok: false,
-      error: error instanceof Error ? error.message : String(error),
-      stderr: stderrBuf || undefined,
+      error: childDiagnostic(error instanceof Error ? error.message : String(error)),
+      stderr: childDiagnostic(stderrBuf) || undefined,
       durationMs: Date.now() - started,
     };
   } finally {

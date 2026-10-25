@@ -35,7 +35,7 @@ try {
 
 function spawnPty(spec: PtySpawnSpec): ChildPty {
   if (!ptyMod) throw new Error('node-pty not available in terminal-host');
-  return withChildEnvironment(spec.env, spec.args, env => ptyMod!.spawn(spec.file, spec.args, {
+  return withChildEnvironment(spec.env, [spec.file, ...spec.args], env => ptyMod!.spawn(spec.file, spec.args, {
     name: spec.name ?? 'xterm-256color',
     cols: spec.cols,
     rows: spec.rows,

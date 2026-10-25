@@ -1,6 +1,10 @@
 //! Bounded native harness: production transport, planner control flow and terminal serialization.
 //! Desktop tools, prompt construction and machine identity are stubbed; no model calls.
 #![allow(dead_code)]
+#[path = "../../../src-tauri/src/child_environment.rs"]
+mod child_environment;
+#[path = "../../../src-tauri/src/agent/subscription_child.rs"]
+mod subscription_child;
 static DATA_DIR_ENV_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 #[path = "../../../src-tauri/src/models.rs"]
 mod models;

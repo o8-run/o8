@@ -25,7 +25,7 @@ pub fn run(
     }
     let binary = helper(directory, mode)?;
     let output = directory.join(format!("{mode}-result.json"));
-    let mut child = std::process::Command::new(&binary)
+    let mut child = crate::child_environment::command(&binary)
         .arg(mode)
         .arg(source)
         .arg(&output)
@@ -83,7 +83,7 @@ mod tests {
     #[test]
     fn cancellation_kills_and_reaps_the_media_child() {
         let cancelled = AtomicBool::new(true);
-        let mut child = std::process::Command::new("/bin/sleep")
+        let mut child = crate::child_environment::command("/bin/sleep")
             .arg("30")
             .spawn()
             .unwrap();

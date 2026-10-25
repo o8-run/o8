@@ -1,4 +1,3 @@
-use std::process::Command;
 use std::sync::{Mutex, OnceLock};
 
 #[cfg(windows)]
@@ -249,7 +248,7 @@ pub(crate) fn kill_tracked_children() {
 #[cfg(unix)]
 fn kill_tracked_children_unix(pids: &[u32]) {
     for pid in pids {
-        let _ = Command::new("kill")
+        let _ = crate::child_environment::command("kill")
             .args(["-TERM", &pid.to_string()])
             .status();
     }
@@ -257,14 +256,14 @@ fn kill_tracked_children_unix(pids: &[u32]) {
     std::thread::sleep(std::time::Duration::from_millis(1000));
 
     for pid in pids {
-        let alive = Command::new("kill")
+        let alive = crate::child_environment::command("kill")
             .args(["-0", &pid.to_string()])
             .status()
             .map(|s| s.success())
             .unwrap_or(false);
         if alive {
             log::info!("[shutdown] PID {} survived TERM — sending KILL", pid);
-            let _ = Command::new("kill")
+            let _ = crate::child_environment::command("kill")
                 .args(["-KILL", &pid.to_string()])
                 .status();
         }
@@ -277,7 +276,7 @@ fn kill_tracked_children_unix(pids: &[u32]) {
 #[cfg(windows)]
 fn kill_tracked_children_windows(pids: &[u32]) {
     for pid in pids {
-        match Command::new("taskkill")
+        match crate::child_environment::command("taskkill")
             .args(taskkill_tree_args(*pid))
             .no_window()
             .status()
@@ -463,7 +462,7 @@ fn kill_o8_orphans_on_port_unix(port: u16) {
 
 #[cfg(unix)]
 fn listening_pids(port: u16) -> Vec<u32> {
-    match Command::new("lsof")
+    match crate::child_environment::command("lsof")
         .args(["-ti", &format!(":{}", port), "-sTCP:LISTEN"])
         .output()
     {
@@ -580,7 +579,7 @@ fn reap_o8_orphan_processes_unix() {
 /// empty Vec if pgrep is missing or finds nothing (both are non-fatal).
 #[cfg(unix)]
 fn pgrep_pids(pattern: &str) -> Vec<u32> {
-    let out = match Command::new("pgrep").args(["-f", pattern]).output() {
+    let out = match crate::child_environment::command("pgrep").args(["-f", pattern]).output() {
         Ok(o) => o,
         Err(_) => return Vec::new(),
     };
@@ -607,7 +606,7 @@ fn pgrep_pids(pattern: &str) -> Vec<u32> {
 /// is rejected by the ownership filter (safer than a false-positive kill).
 #[cfg(unix)]
 pub(crate) fn process_cwd(pid: u32) -> String {
-    let out = match Command::new("lsof")
+    let out = match crate::child_environment::command("lsof")
         .args(["-p", &pid.to_string(), "-a", "-d", "cwd", "-F", "n"])
         .output()
     {
@@ -626,7 +625,7 @@ pub(crate) fn process_cwd(pid: u32) -> String {
 /// parent" — unsafe to assume orphan, so caller skips).
 #[cfg(unix)]
 pub(crate) fn process_ppid(pid: u32) -> u32 {
-    Command::new("ps")
+    crate::child_environment::command("ps")
         .args(["-p", &pid.to_string(), "-o", "ppid="])
         .output()
         .ok()
@@ -645,7 +644,7 @@ pub(crate) fn process_ppid(pid: u32) -> u32 {
 /// empty and callers fall back to cwd ownership checks.
 #[cfg(unix)]
 fn process_command_with_env(pid: u32) -> String {
-    Command::new("ps")
+    crate::child_environment::command("ps")
         .args(["-p", &pid.to_string(), "-wwE", "-o", "command="])
         .output()
         .ok()
@@ -677,12 +676,12 @@ pub(crate) fn cwd_looks_o8_owned(cwd: &str) -> bool {
 /// still alive. `kill -0` is the standard "is this process alive" probe.
 #[cfg(unix)]
 pub(crate) fn term_then_kill(pid: u32) {
-    let _ = Command::new("kill")
+    let _ = crate::child_environment::command("kill")
         .args(["-TERM", &pid.to_string()])
         .status();
     let deadline = std::time::Instant::now() + std::time::Duration::from_millis(2000);
     while std::time::Instant::now() < deadline {
-        let alive = Command::new("kill")
+        let alive = crate::child_environment::command("kill")
             .args(["-0", &pid.to_string()])
             .status()
             .map(|s| s.success())
@@ -697,7 +696,7 @@ pub(crate) fn term_then_kill(pid: u32) {
         "[orphan-reap] pid={} did not exit after 2s — sending KILL",
         pid
     );
-    let _ = Command::new("kill")
+    let _ = crate::child_environment::command("kill")
         .args(["-KILL", &pid.to_string()])
         .status();
 }
@@ -709,7 +708,7 @@ pub(crate) fn term_then_kill(pid: u32) {
 #[cfg(unix)]
 pub(crate) fn kill_orphan_and_wait(pid: u32, port: u16) -> bool {
     log::info!("[orphan-check] Killing orphan pid={} on :{}", pid, port);
-    let out = Command::new("kill").args(["-9", &pid.to_string()]).output();
+    let out = crate::child_environment::command("kill").args(["-9", &pid.to_string()]).output();
     match out {
         Ok(o) if o.status.success() => {
             log::info!("[orphan-check] kill -9 {} succeeded", pid);
@@ -815,7 +814,7 @@ mod tests {
         let port = probe.local_addr().expect("read listener address").port();
         drop(probe);
 
-        let mut child = std::process::Command::new(
+        let mut child = crate::child_environment::command(
             std::env::current_exe().expect("resolve current test executable"),
         )
         .args([

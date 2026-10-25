@@ -1,3 +1,5 @@
+import { PROVIDER_ENV_KEYS, PROVIDER_KEY_ALIASES } from './credential-names';
+export { PROVIDER_ENV_KEYS, PROVIDER_KEY_ALIASES } from './credential-names';
 import { invalidateLaunchPolicy } from './launch-policy';
 import { credentialPolicyChanged } from './policy-events';
 import { warnLegacyRuntimeConfigs } from './legacy-runtime-config';
@@ -11,12 +13,6 @@ import { parseKeyEnv } from './env-format';
 export { parseKeyEnv } from './env-format';
 import { assertMasterKeyAvailableForMutation, decryptValueSync, encryptValueSync } from '@/lib/db/master-key';
 
-export const PROVIDER_ENV_KEYS = ['OPENROUTER_API_KEY', 'OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'DEEPSEEK_API_KEY', 'GEMINI_API_KEY', 'GROQ_API_KEY', 'ELEVENLABS_API_KEY', 'GOOGLE_TTS_API_KEY'] as const;
-export const PROVIDER_KEY_ALIASES: Readonly<Record<string, readonly string[]>> = {
-  GEMINI_API_KEY: ['GOOGLE_AI_API_KEY', 'GOOGLE_GENERATIVE_AI_API_KEY', 'GOOGLE_API_KEY'],
-  OPENAI_API_KEY: ['CODEX_API_KEY'],
-  ANTHROPIC_API_KEY: ['ANTHROPIC_AUTH_TOKEN'],
-};
 const managedName = (name: string) => `O8_KEY_MANAGED_${name}`;
 const disabledName = (name: string) => `O8_KEY_DISABLED_${name}`;
 function textFile(path: string): string {

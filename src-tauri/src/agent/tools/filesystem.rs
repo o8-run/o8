@@ -256,7 +256,7 @@ pub async fn spotlight(args: Value) -> Result<Value, String> {
 
     let q = query.clone();
     let output = tokio::task::spawn_blocking(move || {
-        std::process::Command::new("mdfind").arg(&q).output()
+        crate::child_environment::command("mdfind").arg(&q).output()
     })
     .await
     .map_err(|e| format!("spawn_blocking error: {e}"))?

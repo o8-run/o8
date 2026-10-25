@@ -1,3 +1,4 @@
+import { terminalToolEnv } from '@/lib/llm/terminal-tool-env';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { sanitizePtyEnv } from './pty-support';
 import { createChildTerminalHost } from './terminal-host-client';
@@ -12,18 +13,21 @@ import { createChildTerminalHost } from './terminal-host-client';
 describe('sanitizePtyEnv through a real PTY', () => {
   afterEach(() => { vi.unstubAllEnvs(); });
 
-  it('does not pass the server terminal identity to a PTY child', async () => {
+  it.each([{name:'panel', env:sanitizePtyEnv}, {name:'tool', env:() => terminalToolEnv() as Record<string,string>}])('does not pass server identity or ambient hooks to a $name PTY child', async source => {
     vi.stubEnv('TERM_PROGRAM', 'tern');
     vi.stubEnv('TERM_PROGRAM_VERSION', '0.6.2');
+    vi.stubEnv('O8_UNAPPROVED_AMBIENT', 'fixture-unapproved');
+    vi.stubEnv('NODE_OPTIONS', '--no-warnings');
+    vi.stubEnv('BASH_ENV', '/fixture-startup-hook');
     const host = createChildTerminalHost();
     try {
       const handle = host.spawn({
         file: '/bin/sh',
-        args: ['-c', 'printf "[%s|%s|%s]" "${TERM_PROGRAM-unset}" "${TERM_PROGRAM_VERSION-unset}" "$TERM"'],
+        args: ['-c', 'printf "[%s|%s|%s]" "${TERM_PROGRAM-unset}" "${TERM_PROGRAM_VERSION-unset}" "$TERM"; printf "[%s|%s|%s]" "${O8_UNAPPROVED_AMBIENT-unset}" "${NODE_OPTIONS-unset}" "${BASH_ENV-unset}"'],
         cols: 80,
         rows: 24,
         cwd: '/tmp',
-        env: sanitizePtyEnv(),
+        env: source.env(),
       });
       let buffer = '';
       await new Promise<void>((resolve, reject) => {
@@ -32,6 +36,7 @@ describe('sanitizePtyEnv through a real PTY', () => {
         handle.onExit(() => { clearTimeout(timer); resolve(); });
       });
       expect(buffer).toContain('[unset|unset|xterm-256color]');
+      expect(buffer).toContain('[unset|unset|unset]');
     } finally {
       host.dispose();
     }

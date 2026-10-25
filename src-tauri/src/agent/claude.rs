@@ -195,7 +195,6 @@ impl ClaudeSession {
     /// the warm pool). stdin stays OPEN for the proc's life — closing at EOF
     /// makes the CLI run its SessionStart hooks and exit without processing.
     pub(crate) fn spawn(bin: &str, model: &str, mcp_cfg: &str) -> Result<Self, String> {
-        use std::process::{Command, Stdio};
         let mut args: Vec<&str> = vec![
             "--input-format",
             "stream-json",
@@ -228,25 +227,7 @@ impl ClaudeSession {
         if let Some(effort) = super::planner_route::claude_effort_flag(model) {
             args.extend_from_slice(&["--effort", effort]);
         }
-        let mut child = Command::new(bin)
-            .args(&args)
-            .env("FORCE_COLOR", "0")
-            .env("NO_COLOR", "1")
-            // npm-installed claude is a node shim — see path_with_node_runtime.
-            .env("PATH", path_with_node_runtime())
-            // No `--print` → draws the user's Claude subscription pool, not the
-            // metered SDK pool. Scrub ANTHROPIC_API_KEY so an env key can't flip
-            // billing to the API pool (it takes precedence over the sub).
-            .env_remove("ANTHROPIC_API_KEY")
-            .env("O8_MANAGED_SESSION", "1")
-            // Neutral cwd — a project `.claude/` / `.mcp.json` would otherwise
-            // bleed tools back in, defeating `--strict-mcp-config`.
-            .current_dir(std::env::temp_dir())
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            // Drop stderr — keeps the pipe from filling and deadlocking the read;
-            // the `result` event carries success/error.
-            .stderr(Stdio::null())
+        let mut child = super::subscription_child::claude(bin, &path_with_node_runtime(), &args)
             .spawn()
             .map_err(|e| format!("claude spawn failed: {e}"))?;
         let stdin = child.stdin.take().ok_or("claude: no stdin handle")?;

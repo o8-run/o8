@@ -45,7 +45,7 @@ export function createInlineTerminalHost(ptyModule: InlinePtyModule): TerminalHo
       let p: ChildPty | undefined;
       try {
         lease.started(process.pid);
-        p = withChildEnvironment(spec.env, spec.args, env => ptyModule.spawn(spec.file, spec.args, {
+        p = withChildEnvironment(spec.env, [spec.file, ...spec.args], env => ptyModule.spawn(spec.file, spec.args, {
           name: spec.name ?? 'xterm-256color',
           cols: spec.cols,
           rows: spec.rows,

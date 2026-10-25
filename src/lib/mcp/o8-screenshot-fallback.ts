@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { execFile } from '@/lib/providers/child-process';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';

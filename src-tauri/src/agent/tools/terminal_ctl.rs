@@ -27,7 +27,6 @@
 use super::run_osascript_jxa;
 use serde_json::{json, Value};
 use std::path::PathBuf;
-use std::process::Command;
 
 /// Embed a Rust string as a safe JS string literal.
 fn js_str(s: &str) -> String {
@@ -392,7 +391,7 @@ pub(crate) async fn send_prompt(id: &str, prompt: &str) -> Result<String, String
 
 fn claude_cwd_for_tty(tty: &str) -> Result<PathBuf, String> {
     let tty_name = tty.trim_start_matches("/dev/");
-    let output = Command::new("/bin/ps")
+    let output = crate::child_environment::command("/bin/ps")
         .args(["-t", tty_name, "-o", "pid=,pgid=,stat=,comm="])
         .output()
         .map_err(|error| format!("couldn't inspect that terminal's processes: {error}"))?;
@@ -403,7 +402,7 @@ fn claude_cwd_for_tty(tty: &str) -> Result<PathBuf, String> {
     let Some(pid) = claude_pid_from_ps(&stdout) else {
         return Err("That terminal is not running a Claude Code session.".into());
     };
-    let output = Command::new("/usr/sbin/lsof")
+    let output = crate::child_environment::command("/usr/sbin/lsof")
         .args(["-a", "-p", &pid.to_string(), "-d", "cwd", "-Fn"])
         .output()
         .map_err(|error| format!("couldn't resolve Claude's working directory: {error}"))?;

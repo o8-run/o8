@@ -29,7 +29,7 @@ pub mod whisper;
 use serde::Deserialize;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Stdio};
 use std::sync::mpsc;
 
 fn process_command_runs_helper(command: &str, helper: &std::path::Path) -> bool {
@@ -536,7 +536,7 @@ impl LiveRecognizer {
         {
             static DEFAULT: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
             return *DEFAULT.get_or_init(|| {
-                let major = std::process::Command::new("sysctl")
+                let major = crate::child_environment::command("sysctl")
                     .args(["-n", "kern.osproductversion"])
                     .output()
                     .ok()
@@ -576,7 +576,7 @@ impl LiveRecognizer {
             // -x match on the full 17-char name silently finds nothing. The
             // anchor also covers the dev build's target-triple-suffixed helper
             // while excluding unrelated argv mentions of the word.
-            let Ok(out) = Command::new("pgrep")
+            let Ok(out) = crate::child_environment::command("pgrep")
                 .args(["-f", r"[/]speech_recognizer(-[a-z0-9_-]+)?( |$)"])
                 .output()
             else {
@@ -586,7 +586,7 @@ impl LiveRecognizer {
                 let Ok(pid) = line.trim().parse::<i32>() else {
                     continue;
                 };
-                let command = Command::new("ps")
+                let command = crate::child_environment::command("ps")
                     .args(["-o", "command=", "-p", &pid.to_string()])
                     .output()
                     .ok()
@@ -668,11 +668,11 @@ impl LiveRecognizer {
         let prefer_arm64 = false;
         let mut command = if prefer_arm64 {
             log::info!("[stt] fallback spawn via /usr/bin/arch -arm64 (Apple Silicon hardware)");
-            let mut c = Command::new("/usr/bin/arch");
+            let mut c = crate::child_environment::command("/usr/bin/arch");
             c.arg("-arm64").arg(helper);
             c
         } else {
-            Command::new(helper)
+            crate::child_environment::command(helper)
         };
         if let Some(fifo) = audio_fifo {
             command.arg("--audio-fifo").arg(fifo);
@@ -688,7 +688,7 @@ impl LiveRecognizer {
             Ok(c) => c,
             Err(e) if prefer_arm64 => {
                 log::warn!("[stt] arch-wrapped spawn failed ({e}); retrying direct spawn");
-                let mut c = Command::new(helper);
+                let mut c = crate::child_environment::command(helper);
                 if let Some(fifo) = audio_fifo {
                     c.arg("--audio-fifo").arg(fifo);
                 }
@@ -763,7 +763,6 @@ impl LiveRecognizer {
                 attr: *mut libc::posix_spawnattr_t,
                 disclaim: libc::c_int,
             ) -> libc::c_int;
-            fn _NSGetEnviron() -> *mut *mut *mut libc::c_char;
             // Public since macOS 11 — the ONLY way a process controls which
             // slice of a fat child runs. The 63c217b7 fat-helper fix rested on
             // "children don't inherit the parent's Rosetta mode", which is
@@ -861,10 +860,19 @@ impl LiveRecognizer {
                 argv.push(fifo_c.as_ptr() as *mut _);
             }
             argv.push(std::ptr::null_mut());
-            let envp = *_NSGetEnviron();
+            // Keep owned strings alive through posix_spawn; no ambient envp.
+            let environment: Vec<std::ffi::CString> = crate::child_environment::environment()
+                .into_iter().map(|(mut name, value)| {
+                    name.push("=");
+                    name.push(value);
+                    std::ffi::CString::new(name.as_bytes()).expect("OS environment contains no NUL")
+                }).collect();
+            let mut envp: Vec<*mut libc::c_char> = environment.iter()
+                .map(|entry| entry.as_ptr() as *mut libc::c_char).collect();
+            envp.push(std::ptr::null_mut());
 
             let mut pid: libc::pid_t = 0;
-            let rc = libc::posix_spawn(&mut pid, path.as_ptr(), &fa, &attr, argv.as_ptr(), envp);
+            let rc = libc::posix_spawn(&mut pid, path.as_ptr(), &fa, &attr, argv.as_ptr(), envp.as_ptr());
 
             libc::posix_spawn_file_actions_destroy(&mut fa);
             libc::posix_spawnattr_destroy(&mut attr);

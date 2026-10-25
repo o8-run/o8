@@ -3636,6 +3636,13 @@
       ]
     },
     {
+      "path": "tests/mcp-bootstrap-payer-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/mcp-deferred-tools-real-path.test.ts",
       "reasons": [
         "network-listener",
@@ -3659,6 +3666,15 @@
         "network-listener",
         "real-path",
         "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/mcp-payer-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "network-listener",
+        "real-path"
       ]
     },
     {

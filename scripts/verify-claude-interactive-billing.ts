@@ -1,3 +1,4 @@
+import { childEnvironment } from '../src/lib/providers/spawn-environment';
 /**
  * One-shot smoke for Claude Code interactive billing routing.
  *
@@ -5,7 +6,7 @@
  *   npx tsx scripts/verify-claude-interactive-billing.ts
  */
 
-import { spawn } from 'node:child_process';
+import { spawn } from '../src/lib/providers/child-process';
 import { createInterface } from 'node:readline';
 import os from 'node:os';
 import path from 'node:path';
@@ -190,7 +191,7 @@ async function runClaudeInteractive(): Promise<Observations> {
   return await new Promise<Observations>((resolve, reject) => {
     const child = spawn(binary, args, {
       cwd: process.cwd(),
-      env: process.env,
+      env: childEnvironment({ runtimeId: 'claude-code' }),
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     const stdout = createInterface({ input: child.stdout, crlfDelay: Infinity });

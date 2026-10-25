@@ -9,7 +9,6 @@
 use super::o8_bridge::resolve_repo_path;
 use serde_json::{json, Value};
 use std::path::{Component, Path, PathBuf};
-use std::process::Command;
 
 const COMMIT_DIFF_OUTPUT_CAP_BYTES: usize = 16 * 1024;
 const COMMIT_DIFF_BODY_CAP_BYTES: usize = 15 * 1024;
@@ -31,7 +30,7 @@ fn bin(name: &str) -> String {
 /// Run a read-only command in `cwd`, returning trimmed stdout. Errors fold in
 /// stderr so the model can speak a useful reason.
 pub(super) fn run(cmd: &str, args: &[&str], cwd: &str) -> Result<String, String> {
-    let out = Command::new(bin(cmd))
+    let out = crate::child_environment::command(bin(cmd))
         .args(args)
         .current_dir(cwd)
         .output()
@@ -45,7 +44,7 @@ pub(super) fn run(cmd: &str, args: &[&str], cwd: &str) -> Result<String, String>
 }
 
 fn run_bytes(cmd: &str, args: &[&str], cwd: &str) -> Result<Vec<u8>, String> {
-    let out = Command::new(bin(cmd))
+    let out = crate::child_environment::command(bin(cmd))
         .args(args)
         .current_dir(cwd)
         .output()
@@ -480,7 +479,7 @@ mod tests {
     }
 
     fn git(repo: &Path, args: &[&str]) -> String {
-        let output = Command::new("git")
+        let output = crate::child_environment::command("git")
             .args(args)
             .current_dir(repo)
             .output()

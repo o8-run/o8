@@ -1,3 +1,4 @@
+import { assertMcpConfigArguments } from './mcp-config-policy';
 /** All application child processes cross this environment and artifact boundary. */
 import * as processApi from 'node:child_process';
 import { promisify } from 'node:util';
@@ -43,6 +44,7 @@ export function withChildEnvironment<T>(input: Record<string, string | undefined
     }
     const env = refreshChildEnvironment(input);
     assertChildArguments(args, input, env, allowDeferredMcp);
+    assertMcpConfigArguments(args, env, context?.runtimeId);
     const profiles = context?.runtimeId || context?.runtimeLaunch ? assertLegacyRuntimeConfigSelection(context.runtimeId, env, args, cwd) : [];
     stampChildPolicy(env);
     const result = create(env);

@@ -1,3 +1,4 @@
+import { ambientChildEnvironment } from '../../../src/lib/providers/ambient-environment.js';
 import { spawn } from 'node:child_process';
 import { isAbsolute, join } from 'node:path';
 import { CliError, EXIT } from '../api.js';
@@ -20,7 +21,13 @@ export async function runNext(args: string[]): Promise<number> {
     throw new CliError('invalid_args', 'Pass --enable-next, --binary with an absolute executable path, and --server.', EXIT.INVALID_ARGS);
   }
   const forwarded = [...args.slice(0, at), ...args.slice(at + 2)];
-  const env = { ...process.env };
+  const env: NodeJS.ProcessEnv = ambientChildEnvironment();
+  // Only explicit native server transport and evidence settings cross this seam.
+  for (const name of ['O8_NEXT_API_TOKEN', 'O8_NEXT_CLERK_SESSION_TOKEN', 'O8_NEXT_BRAIN_EVIDENCE',
+    'O8_NEXT_BRAIN_REQUEST_LOG', 'O8_NEXT_DIFF_EVIDENCE', 'O8_NEXT_INBOX_ORACLE', 'O8_NEXT_INBOX_PLAN_FIXTURE',
+    'O8_NEXT_SETTINGS_DIAGNOSTICS', 'O8_NEXT_SETTINGS_RESULTS', 'O8_NEXT_TERMINAL_RESULTS', 'O8_NEXT_WORKER_RESULTS']) {
+    if (process.env[name] !== undefined) env[name] = process.env[name];
+  }
   if (shell) {
     const config = resolveConfig();
     const serverAt = forwarded.indexOf('--server');

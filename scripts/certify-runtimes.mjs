@@ -10,7 +10,7 @@
 
 import './register-server-only-stub.mjs';
 
-import { execFile, spawnSync } from 'node:child_process';
+import { execFile, spawnSync, childEnvironment, configuredMcpEnvironment } from './lib/runtime-payer.mjs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -23,7 +23,7 @@ if (process.env[TSX_MARKER] !== '1') {
     process.execPath,
     ['--import', 'tsx', fileURLToPath(import.meta.url), ...process.argv.slice(2)],
     {
-      env: { ...process.env, [TSX_MARKER]: '1' },
+      env: childEnvironment({ env: { [TSX_MARKER]: '1' } }),
       stdio: 'inherit',
     },
   );
@@ -124,14 +124,13 @@ function runCli(binaryPath, args, timeoutMs = 8_000) {
     execFile(binaryPath, args, {
       timeout: timeoutMs,
       maxBuffer: 2 * 1024 * 1024,
-      env: {
-        ...process.env,
+      env: configuredMcpEnvironment(binaryPath, {
         CI: '1',
         FORCE_COLOR: '0',
         NO_COLOR: '1',
         PAGER: 'cat',
         TERM: 'dumb',
-      },
+      }, true, args),
     }, (error, stdout, stderr) => {
       const output = `${stdout ?? ''}\n${stderr ?? ''}`.trim();
       resolve({

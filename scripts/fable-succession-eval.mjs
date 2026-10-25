@@ -22,7 +22,7 @@
  *   node scripts/fable-succession-eval.mjs --transport api --limit 30
  */
 
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync, spawn, childEnvironment } from './lib/runtime-payer.mjs';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
@@ -130,7 +130,7 @@ function askViaCli(prompt, model) {
   return new Promise((resolve, reject) => {
     const child = spawn(bin, args, {
       cwd: tmpdir(), // NOT the repo — avoids loading .mcp.json / repo settings
-      env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1', O8_MANAGED_SESSION: '1' },
+      env: childEnvironment({ runtimeId: 'claude-code', env: { FORCE_COLOR: '0', NO_COLOR: '1', O8_MANAGED_SESSION: '1' } }),
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     let buffer = '';
@@ -140,7 +140,8 @@ function askViaCli(prompt, model) {
       settled = true;
       clearTimeout(timer);
       try { child.kill(); } catch { /* dead */ }
-      err ? reject(err) : resolve(val);
+      if (err) reject(err);
+      else resolve(val);
     };
     const timer = setTimeout(() => finish(new Error(`cli timeout (${model})`)), 180_000);
     child.stdout.on('data', (chunk) => {

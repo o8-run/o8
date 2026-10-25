@@ -41,7 +41,6 @@ use base64::Engine;
 use serde_json::{json, Value};
 use std::io::{BufRead, Write};
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
 
 const APP_SERVER_CLIENT_NAME: &str = "o8-symon-planner";
 
@@ -249,13 +248,9 @@ impl CodexSession {
         }
         args.extend(["--".to_string(), prompt.to_string()]);
 
-        let output = Command::new(&self.binary)
-            .args(&args)
-            .current_dir(std::env::temp_dir())
-            .env("PATH", super::claude::path_with_node_runtime())
-            .env("FORCE_COLOR", "0")
-            .env("NO_COLOR", "1")
-            .env("O8_MANAGED_SESSION", "1")
+        let output = super::subscription_child::codex_exec(
+            &self.binary, &super::claude::path_with_node_runtime(), &args,
+        )
             .output()
             .map_err(|error| format!("codex planner spawn failed: {error}"))?;
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -402,18 +397,9 @@ impl AppServerSession {
     }
 
     fn start(binary: &str, model: &str, effort: &str) -> Result<Self, String> {
-        let mut child = Command::new(binary)
-            .args(Self::override_args(model, effort))
-            .current_dir(std::env::temp_dir())
-            .env("PATH", super::claude::path_with_node_runtime())
-            .env("FORCE_COLOR", "0")
-            .env("NO_COLOR", "1")
-            .env("O8_MANAGED_SESSION", "1")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            // Drop stderr — an unread pipe fills and deadlocks the read loop;
-            // JSON-RPC errors come back on stdout.
-            .stderr(Stdio::null())
+        let mut child = super::subscription_child::codex_app_server(
+            binary, &super::claude::path_with_node_runtime(), &Self::override_args(model, effort),
+        )
             .spawn()
             .map_err(|error| format!("codex app-server spawn failed: {error}"))?;
         let stdin = child

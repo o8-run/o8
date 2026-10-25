@@ -1,3 +1,4 @@
+import { childEnvironment } from '@/lib/providers/spawn-environment';
 /**
  * PTY / tmux / shell support helpers for the ws-server terminal subsystem.
  *
@@ -10,14 +11,9 @@
 import { existsSync } from 'node:fs';
 import { execSync, execFileSync } from '@/lib/providers/child-process';
 
-/** A clean env for spawned PTYs: inherits process.env, pins TERM/locale/PATH, drops the parent terminal identity. */
+/** PTYs use the shared no-provider ambient allowlist and panel terminal identity. */
 export function sanitizePtyEnv(): Record<string, string> {
-  const env: Record<string, string> = {};
-  for (const [key, value] of Object.entries(process.env)) {
-    if (typeof value === 'string') {
-      env[key] = value;
-    }
-  }
+  const env = childEnvironment({ inject: false });
   env.TERM = 'xterm-256color';
   // The panel is o8's xterm.js, not the terminal that started the server.
   delete env.TERM_PROGRAM;

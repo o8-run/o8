@@ -25,7 +25,6 @@
 //! the probe (the node binary path and its verified major version) is cached.
 
 use std::path::Path;
-use std::process::Command;
 use std::time::UNIX_EPOCH;
 
 use crate::no_window::NoWindow;
@@ -86,7 +85,7 @@ pub fn probe_login_shell() -> LoginShellEnv {
         // `.no_window()` matters here even though these are POSIX shells: a
         // Windows box with Git Bash installed DOES resolve `sh`, and a console
         // window the user can click into would suspend the probe mid-boot.
-        let Ok(out) = Command::new(shell)
+        let Ok(out) = crate::child_environment::command(shell)
             .args(["-l", "-c", &script])
             .no_window()
             .output()
@@ -223,7 +222,7 @@ pub fn check_node_version_cached(node_bin: &str) -> Option<(u32, String)> {
     if let Some(hit) = cached_node_version(node_bin) {
         return Some(hit);
     }
-    let out = Command::new(node_bin)
+    let out = crate::child_environment::command(node_bin)
         .arg("--version")
         .no_window()
         .output()
@@ -283,7 +282,7 @@ mod tests {
     fn node_version_check_matches_the_real_binary() {
         // Whatever node ran the test suite's toolchain — just prove the parse
         // path works end to end and that a second call is served from cache.
-        if let Ok(out) = Command::new("node").arg("--version").output() {
+        if let Ok(out) = crate::child_environment::command("node").arg("--version").output() {
             if out.status.success() {
                 let node = String::from_utf8_lossy(&out.stdout).trim().to_string();
                 let expected_major: u32 = node
@@ -293,7 +292,7 @@ mod tests {
                     .unwrap()
                     .parse()
                     .unwrap();
-                if let Ok(which) = Command::new("sh").args(["-c", "command -v node"]).output() {
+                if let Ok(which) = crate::child_environment::command("sh").args(["-c", "command -v node"]).output() {
                     let bin = String::from_utf8_lossy(&which.stdout).trim().to_string();
                     if !bin.is_empty() {
                         let (major, _) = check_node_version_cached(&bin).unwrap();

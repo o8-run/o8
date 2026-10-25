@@ -499,7 +499,7 @@ mod public_read_tests {
             br#"{"gemini_api_key":" fixture-secret ","groq_api_key":"  ","tts_provider":"google","language":"en"}"#,
         ).unwrap();
         let module = module_path!().split_once("::").unwrap().1;
-        let output = std::process::Command::new(std::env::current_exe().unwrap())
+        let output = crate::child_environment::command(std::env::current_exe().unwrap())
             .args(["--exact", &format!("{module}::public_read_preserves_persisted_legacy_keys_and_non_secret_preferences"), "--nocapture"])
             .env(CHILD, "1")
             .env("O8_DATA_DIR", &dir)
@@ -563,7 +563,7 @@ mod public_recovery_tests {
             std::fs::write(dir.join("dictation.json"), raw).unwrap();
         }
         let module = module_path!().split_once("::").unwrap().1;
-        let output = std::process::Command::new(std::env::current_exe().unwrap())
+        let output = crate::child_environment::command(std::env::current_exe().unwrap())
             .args(["--exact", &format!("{module}::public_read_recovers_{case}_preferences"), "--nocapture"])
             .env(CHILD, case)
             .env("O8_DATA_DIR", &dir)

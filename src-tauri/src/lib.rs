@@ -42,6 +42,7 @@ mod live_dictation;
 mod macos_webview_scale;
 mod mac_perms;
 mod models;
+mod child_environment;
 // Child processes must not open console windows on Windows — a console the
 // user can click into suspends the process (see the module doc).
 mod no_window;
@@ -88,7 +89,6 @@ use rusqlite::{Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::path::Path;
-use std::process::Command;
 #[cfg(any(target_os = "windows", target_os = "linux"))]
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
@@ -159,7 +159,7 @@ fn base64_encode_url(data: &[u8]) -> String {
 
 #[cfg(target_os = "macos")]
 fn keychain_find_password() -> Option<String> {
-    let out = Command::new("security")
+    let out = crate::child_environment::command("security")
         .args([
             "find-generic-password",
             "-s",
@@ -184,7 +184,7 @@ fn keychain_find_password() -> Option<String> {
 #[cfg(target_os = "macos")]
 fn keychain_add_password(password: &str) -> bool {
     // -U updates an existing entry if one already exists.
-    Command::new("security")
+    crate::child_environment::command("security")
         .args([
             "add-generic-password",
             "-s",
@@ -666,7 +666,7 @@ fn ensure_codebase_memory_binary(app: AppHandle) {
             let archive_str = archive_path.to_string_lossy();
             let tmp_str = tmp_root.to_string_lossy();
             if is_zip && cfg!(windows) {
-                let status = Command::new("tar")
+                let status = crate::child_environment::command("tar")
                     .args(["-xf", &archive_str, "-C", &tmp_str])
                     .no_window()
                     .status()
@@ -675,7 +675,7 @@ fn ensure_codebase_memory_binary(app: AppHandle) {
                     return Err(format!("tar(zip) exit {}", status));
                 }
             } else if is_zip {
-                let status = Command::new("unzip")
+                let status = crate::child_environment::command("unzip")
                     .args(["-o", &archive_str, "-d", &tmp_str])
                     .status()
                     .map_err(|e| format!("unzip spawn: {}", e))?;
@@ -683,7 +683,7 @@ fn ensure_codebase_memory_binary(app: AppHandle) {
                     return Err(format!("unzip exit {}", status));
                 }
             } else {
-                let status = Command::new("tar")
+                let status = crate::child_environment::command("tar")
                     .args(["-xzf", &archive_str, "-C", &tmp_str])
                     .no_window()
                     .status()
@@ -1038,7 +1038,7 @@ fn daemon_pid_is_alive(pid: u32) -> bool {
 
 #[cfg(windows)]
 fn daemon_pid_is_alive(pid: u32) -> bool {
-    let output = Command::new("tasklist")
+    let output = crate::child_environment::command("tasklist")
         .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
         .no_window()
         .output();
@@ -1609,11 +1609,11 @@ mod desktop_attach_tests {
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let fixture = DataDirFixture::new();
         #[cfg(unix)]
-        let mut child = std::process::Command::new("/usr/bin/true")
+        let mut child = crate::child_environment::command("/usr/bin/true")
             .spawn()
             .expect("spawn short-lived child");
         #[cfg(windows)]
-        let mut child = std::process::Command::new("cmd")
+        let mut child = crate::child_environment::command("cmd")
             .args(["/C", "exit", "0"])
             .spawn()
             .expect("spawn short-lived child");
@@ -1773,7 +1773,7 @@ fn classify_port_listener(port: u16) -> PortListener {
 
     // Find the owning PID via lsof. `-t` prints only the pid, `-sTCP:LISTEN`
     // filters to listeners, and we scope to the port to keep output tiny.
-    let lsof = Command::new("lsof")
+    let lsof = crate::child_environment::command("lsof")
         .args(["-nP", &format!("-iTCP:{}", port), "-sTCP:LISTEN", "-t"])
         .output();
     let pid = match lsof {
@@ -1804,7 +1804,7 @@ fn classify_port_listener(port: u16) -> PortListener {
 
     // Grab the owner's ppid + command line with `ps`. `-o` fields are comma
     // separated in BSD ps; `command` gives the full argv.
-    let ps = Command::new("ps")
+    let ps = crate::child_environment::command("ps")
         .args(["-p", &pid.to_string(), "-o", "ppid=,command="])
         .output();
     let (ppid, command) = match ps {
@@ -2283,7 +2283,7 @@ fn resolve_node_via_login_shell() -> Option<String> {
         // node pre-flight that gates the whole boot. An unflagged spawn pops a
         // console, and a console the user CLICKS suspends the process — the
         // same splash-screen deadlock the flag was introduced to kill.
-        if let Ok(out) = Command::new(shell).args(args).no_window().output() {
+        if let Ok(out) = crate::child_environment::command(shell).args(args).no_window().output() {
             if out.status.success() {
                 let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
                 if !path.is_empty() && std::path::Path::new(&path).exists() {
@@ -2294,7 +2294,7 @@ fn resolve_node_via_login_shell() -> Option<String> {
     }
     // Last resort: raw PATH lookup (in case the user really has it in
     // /usr/local/bin and Finder's PATH is fine).
-    if let Ok(out) = Command::new("which").arg("node").no_window().output() {
+    if let Ok(out) = crate::child_environment::command("which").arg("node").no_window().output() {
         if out.status.success() {
             let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
             if !path.is_empty() && std::path::Path::new(&path).exists() {
@@ -2632,14 +2632,14 @@ fn show_node_error_and_exit(err: NodePreflightError) -> ! {
             escape(&body),
             escape(title)
         );
-        let out = Command::new("osascript").args(["-e", &script]).output();
+        let out = crate::child_environment::command("osascript").args(["-e", &script]).output();
         let clicked_download = out
             .ok()
             .and_then(|o| String::from_utf8(o.stdout).ok())
             .map(|s| s.contains("Download Node.js"))
             .unwrap_or(false);
         if clicked_download {
-            let _ = Command::new("open").arg("https://nodejs.org").spawn();
+            let _ = crate::child_environment::command("open").arg("https://nodejs.org").spawn();
         }
     }
 
@@ -2651,17 +2651,17 @@ fn show_node_error_and_exit(err: NodePreflightError) -> ! {
             r#"javascript:var r=confirm("{}\n\nClick OK to open nodejs.org.");if(r)new ActiveXObject("WScript.Shell").Run("cmd /c start https://nodejs.org",1,false);window.close();"#,
             escape(&format!("{}: {}", title, body))
         );
-        let _ = Command::new("mshta").arg(script).spawn();
+        let _ = crate::child_environment::command("mshta").arg(script).spawn();
     }
 
     #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
     {
         // Linux fallback — try zenity / kdialog, otherwise just stderr.
         let full = format!("{}\n\n{}", title, body);
-        let _ = Command::new("zenity")
+        let _ = crate::child_environment::command("zenity")
             .args(["--error", "--title", title, "--text", &full])
             .status()
-            .or_else(|_| Command::new("kdialog").args(["--error", &full]).status());
+            .or_else(|_| crate::child_environment::command("kdialog").args(["--error", &full]).status());
         eprintln!("{}: {}", title, body);
     }
 
@@ -2737,10 +2737,18 @@ fn cancel_app_restart(app: tauri::AppHandle, reservation_id: String) -> Result<(
     app.state::<o8_restart_safety::RestartSafety>().cancel(&reservation_id)
 }
 
+// Only the trusted server/broker inherits direct API credentials and a store
+// master override. Its runtime children apply their own payer decision.
+fn server_command(binary: impl AsRef<std::ffi::OsStr>) -> std::process::Command {
+    let mut names = shell_env::AI_KEYS.to_vec();
+    names.push("O8_MASTER_KEY");
+    child_environment::server_command(binary, &names)
+}
+
 /// Start the WebSocket server as a background process
 #[tauri::command]
 fn start_ws_server(project_dir: String) -> SidecarResult {
-    match Command::new("npx")
+    match server_command("npx")
         .args(["tsx", "src/ws-server.ts"])
         .current_dir(&project_dir)
         .no_window()
@@ -2799,7 +2807,7 @@ fn read_repos() -> Result<serde_json::Value, String> {
 #[tauri::command]
 fn read_local_commits(repo: String, limit: Option<u32>) -> Result<serde_json::Value, String> {
     let limit = limit.unwrap_or(10).min(50);
-    let output = Command::new("git")
+    let output = crate::child_environment::command("git")
         .no_window()
         .args([
             "log",
@@ -2838,7 +2846,7 @@ fn read_local_commits(repo: String, limit: Option<u32>) -> Result<serde_json::Va
 /// Equivalent to GET /api/worktrees?repo=<path>
 #[tauri::command]
 fn read_worktrees(repo: String) -> Result<serde_json::Value, String> {
-    let output = Command::new("git")
+    let output = crate::child_environment::command("git")
         .no_window()
         .args(["worktree", "list", "--porcelain"])
         .current_dir(&repo)
@@ -2895,7 +2903,7 @@ fn read_worktrees(repo: String) -> Result<serde_json::Value, String> {
 /// Read the current git branch for a repo.
 #[tauri::command]
 fn read_current_branch(repo: String) -> Result<serde_json::Value, String> {
-    let output = Command::new("git")
+    let output = crate::child_environment::command("git")
         .no_window()
         .args(["rev-parse", "--abbrev-ref", "HEAD"])
         .current_dir(&repo)
@@ -2909,7 +2917,7 @@ fn read_current_branch(repo: String) -> Result<serde_json::Value, String> {
 /// Read git status (changed files count) for a repo.
 #[tauri::command]
 fn read_git_status(repo: String) -> Result<serde_json::Value, String> {
-    let output = Command::new("git")
+    let output = crate::child_environment::command("git")
         .no_window()
         .args(["status", "--porcelain"])
         .current_dir(&repo)
@@ -5302,7 +5310,7 @@ mod stt_engine {
     /// line and exits). Each device → `{id,name,is_default}` for the mic picker.
     pub fn list_input_devices() -> Result<Vec<crate::InputDeviceDto>, String> {
         let helper = crate::stt::LiveRecognizer::helper_path();
-        let output = std::process::Command::new(&helper)
+        let output = crate::child_environment::command(&helper)
             .arg("--input-devices-json")
             .output()
             .map_err(|e| format!("spawn speech_recognizer: {e}"))?;
@@ -6469,7 +6477,7 @@ fn chrome_vibrancy_material() -> window_vibrancy::NSVisualEffectMaterial {
     static MATERIAL: std::sync::OnceLock<window_vibrancy::NSVisualEffectMaterial> =
         std::sync::OnceLock::new();
     *MATERIAL.get_or_init(|| {
-        let version = std::process::Command::new("sysctl")
+        let version = crate::child_environment::command("sysctl")
             .args(["-n", "kern.osproductversion"])
             .output()
             .ok()
@@ -6932,7 +6940,7 @@ struct BundledNextSpawn {
 
 impl BundledNextSpawn {
     fn spawn(&self, log_file: Option<&std::fs::File>) -> std::io::Result<std::process::Child> {
-        let mut command = Command::new(&self.node_bin);
+        let mut command = server_command(&self.node_bin);
         command
             .arg(&self.server_js)
             .current_dir(&self.server_dir)
@@ -7003,7 +7011,7 @@ struct BundledWsSpawn {
 
 impl BundledWsSpawn {
     fn spawn(&self, log_file: Option<&std::fs::File>) -> std::io::Result<std::process::Child> {
-        let mut command = Command::new(&self.node_bin);
+        let mut command = server_command(&self.node_bin);
         command
             .arg(&self.server_js)
             .current_dir(&self.server_dir)
@@ -7082,7 +7090,7 @@ fn show_backend_failure_and_exit(app: &AppHandle, reason: &str) {
             escape(&body),
             escape(title)
         );
-        let _ = Command::new("osascript").args(["-e", &script]).status();
+        let _ = crate::child_environment::command("osascript").args(["-e", &script]).status();
     }
     #[cfg(target_os = "windows")]
     {
@@ -7092,15 +7100,15 @@ fn show_backend_failure_and_exit(app: &AppHandle, reason: &str) {
             .replace('\r', "")
             .replace('\n', "\\n");
         let script = format!(r#"javascript:alert("{}");window.close();"#, message);
-        let _ = Command::new("mshta").arg(script).no_window().spawn();
+        let _ = crate::child_environment::command("mshta").arg(script).no_window().spawn();
     }
     #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
     {
         let full = format!("{title}\n\n{body}");
-        let _ = Command::new("zenity")
+        let _ = crate::child_environment::command("zenity")
             .args(["--error", "--title", title, "--text", &full])
             .status()
-            .or_else(|_| Command::new("kdialog").args(["--error", &full]).status());
+            .or_else(|_| crate::child_environment::command("kdialog").args(["--error", &full]).status());
         eprintln!("{full}");
     }
     app.exit(1);
@@ -7122,7 +7130,7 @@ fn show_ws_backend_failure_and_exit(app: &AppHandle, reason: &str) {
             escape(&body),
             escape(title)
         );
-        let _ = Command::new("osascript").args(["-e", &script]).status();
+        let _ = crate::child_environment::command("osascript").args(["-e", &script]).status();
     }
     #[cfg(target_os = "windows")]
     {
@@ -7132,15 +7140,15 @@ fn show_ws_backend_failure_and_exit(app: &AppHandle, reason: &str) {
             .replace('\r', "")
             .replace('\n', "\\n");
         let script = format!(r#"javascript:alert("{}");window.close();"#, message);
-        let _ = Command::new("mshta").arg(script).no_window().spawn();
+        let _ = crate::child_environment::command("mshta").arg(script).no_window().spawn();
     }
     #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
     {
         let full = format!("{title}\n\n{body}");
-        let _ = Command::new("zenity")
+        let _ = crate::child_environment::command("zenity")
             .args(["--error", "--title", title, "--text", &full])
             .status()
-            .or_else(|_| Command::new("kdialog").args(["--error", &full]).status());
+            .or_else(|_| crate::child_environment::command("kdialog").args(["--error", &full]).status());
     }
 
     app.exit(1);
@@ -7156,7 +7164,7 @@ mod next_sidecar_supervisor_tests {
     #[cfg(windows)]
     use crate::no_window::NoWindow;
     use std::cell::{Cell, RefCell};
-    use std::process::{Child, Command};
+    use std::process::Child;
     use std::rc::Rc;
     use std::time::{Duration, Instant};
 
@@ -7177,14 +7185,14 @@ mod next_sidecar_supervisor_tests {
     fn real_exit_child(code: i32) -> std::io::Result<Child> {
         #[cfg(unix)]
         {
-            Command::new("sh")
+            crate::child_environment::command("sh")
                 .arg("-c")
                 .arg(format!("exit {code}"))
                 .spawn()
         }
         #[cfg(windows)]
         {
-            let mut command = Command::new("cmd");
+            let mut command = crate::child_environment::command("cmd");
             command.arg("/C").arg(format!("exit {code}")).no_window();
             command.spawn()
         }
@@ -7245,7 +7253,7 @@ mod next_sidecar_supervisor_tests {
     #[cfg(unix)]
     #[test]
     fn real_child_wait_captures_signal() {
-        let mut child = Command::new("sh")
+        let mut child = crate::child_environment::command("sh")
             .args(["-c", "kill -TERM $$"])
             .spawn()
             .expect("spawn signal fixture");

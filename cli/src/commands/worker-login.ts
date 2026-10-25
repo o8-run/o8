@@ -1,3 +1,4 @@
+import { ambientChildEnvironment } from '../../../src/lib/providers/ambient-environment.js';
 import { spawn } from 'node:child_process';
 import { existsSync, realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -22,7 +23,11 @@ export async function runWorkerLogin(mode: OutputMode, rest: string[]): Promise<
   const code = await new Promise<number>((resolve) => {
     const child = spawn(process.execPath, [helper], {
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, NODE_OPTIONS: '' },
+      env: { ...ambientChildEnvironment(), NODE_OPTIONS: '',
+        // Only this trusted key-storage broker gets the master key. Its provider
+        // PTY has a separate allowlist and never receives broker credentials.
+        O8_MASTER_KEY: process.env.O8_MASTER_KEY,
+        O8_CLAUDE_CODE_BIN: process.env.O8_CLAUDE_CODE_BIN },
     });
     // Only the helper's fixed progress and bounded diagnostic messages are forwarded.
     child.stdout.on('data', (chunk: Buffer) => process.stderr.write(chunk));

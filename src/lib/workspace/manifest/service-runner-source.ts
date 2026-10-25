@@ -118,9 +118,9 @@ function start(command, cwd, env, record, timeoutMs, limits = {}) {
       "if(cwd.dev!==expected.dev || cwd.ino!==expected.ino || held.dev!==cwd.dev || held.ino!==cwd.ino || fs.realpathSync('.')!==expected.canonical) process.exit(78); fs.closeSync(4);",
       "const byte=Buffer.alloc(1); let gate=''; while(fs.readSync(0,byte,0,1,null)>0) { if(byte[0]===10) break; gate+=byte.toString(); if(gate.length>2) process.exit(125); } if(gate!=='go') process.exit(125);",
       "setInterval(()=>{},60000); let done=false; const finish=code=>{if(done)return;done=true;try{fs.writeSync(3,String(code)+String.fromCharCode(10));}catch(error){if(error.code!=='EPIPE')throw error;}};",
-      "const child=spawn('/bin/sh',['-c',process.argv[2]],{env:process.env,stdio:['ignore','inherit','inherit']}); child.once('error',()=>finish(127)); child.once('close',(code,signal)=>finish(code===null?128+(require('node:os').constants.signals[signal]||0):code));"
+      "const child=spawn('/bin/sh',['-c',process.argv[2]],{env:Object.fromEntries(JSON.parse(process.argv[3]).flatMap(name=>process.env[name]===undefined?[]:[[name,process.env[name]]])),stdio:['ignore','inherit','inherit']}); child.once('error',()=>finish(127)); child.once('close',(code,signal)=>finish(code===null?128+(require('node:os').constants.signals[signal]||0):code));"
     ].join('');
-    child = spawn(process.execPath, ['-e', guard, JSON.stringify({ dev: pinned.dev, ino: pinned.ino, canonical }), command], { cwd: canonical, env, detached: true, stdio: ['pipe', 'pipe', 'pipe', 'pipe', descriptor] });
+    child = spawn(process.execPath, ['-e', guard, JSON.stringify({ dev: pinned.dev, ino: pinned.ino, canonical }), command, JSON.stringify(Object.keys(env))], { cwd: canonical, env, detached: true, stdio: ['pipe', 'pipe', 'pipe', 'pipe', descriptor] });
   } finally { fs.closeSync(descriptor); }
   child.stdin.on('error', () => { record.error = 'Workspace command gate closed before activation.'; requestStop(record.error); });
   child.once('error', () => { record.error = 'Command could not be started.'; requestStop(record.error); });

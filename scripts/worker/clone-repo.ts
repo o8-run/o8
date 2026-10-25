@@ -1,3 +1,4 @@
+import { ambientChildEnvironment } from '../../src/lib/providers/ambient-environment';
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
@@ -6,7 +7,7 @@ import { promisify } from 'node:util';
 import { preserveRepositoryObjects, restoreRepositoryObjects } from './repository-cache';
 
 const execFileAsync = promisify(execFile);
-const EXEC_OPTIONS = { maxBuffer: 10 * 1024 * 1024, timeout: 120_000 };
+const EXEC_OPTIONS = { maxBuffer: 10 * 1024 * 1024, timeout: 120_000, get env() { return ambientChildEnvironment(); } };
 
 export interface CloneOptions {
   repoUrl: string;
@@ -49,7 +50,7 @@ function killGitTree(child: ChildProcess, signal: NodeJS.Signals): void {
 async function runGit(args: string[], cwd?: string, signal?: AbortSignal): Promise<{ stdout: string }> {
   if (signal?.aborted) throw new Error('[worker/clone-repo] operation aborted');
   return new Promise((resolve, reject) => {
-    const child = spawn('git', args, { cwd, stdio: ['ignore', 'pipe', 'pipe'], detached: process.platform !== 'win32' });
+    const child = spawn('git', args, { cwd, env: ambientChildEnvironment(), stdio: ['ignore', 'pipe', 'pipe'], detached: process.platform !== 'win32' });
     let stdout = '';
     let failure: Error | null = null;
     let forceKill: ReturnType<typeof setTimeout> | null = null;

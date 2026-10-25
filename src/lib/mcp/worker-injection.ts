@@ -1,3 +1,4 @@
+import { configuredMcpEnvironment } from '@/lib/providers/spawn-environment';
 import { access, constants as fsConstants, realpath } from 'node:fs/promises';
 import path from 'node:path';
 
@@ -74,7 +75,7 @@ function templateServer(
     name: server.name,
     command: server.command,
     args: [...server.args],
-    env,
+    env: configuredMcpEnvironment(server.command, env ?? {}, false, server.args),
   };
 }
 

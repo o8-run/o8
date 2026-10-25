@@ -88,7 +88,7 @@ pub(crate) fn input_monitoring_granted(_prompt: bool) -> bool {
 /// unreadable (treat unset as `3` — the OS default).
 #[cfg(target_os = "macos")]
 pub(crate) fn fn_key_usage_type() -> Option<u32> {
-    let output = std::process::Command::new("defaults")
+    let output = crate::child_environment::command("defaults")
         .args(["read", "com.apple.HIToolbox", "AppleFnUsageType"])
         .output()
         .ok()?;
@@ -210,7 +210,7 @@ pub(crate) fn request_apple_events_self_access_once() {
         }
         std::thread::spawn(|| {
             let script = r#"tell application id "ai.o8.desktop" to get name"#;
-            match std::process::Command::new("osascript").args(["-e", script]).output() {
+            match crate::child_environment::command("osascript").args(["-e", script]).output() {
                 Ok(output) if output.status.success() => {
                     log::info!("[voice] AppleEvents self-authorization warmup completed");
                 }

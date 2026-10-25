@@ -41,6 +41,7 @@ pub mod safety;
 pub mod screen;
 pub mod skills;
 pub mod store;
+mod subscription_child;
 pub mod symon_task_bridge;
 pub mod term_watch;
 pub mod tools;

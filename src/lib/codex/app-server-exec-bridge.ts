@@ -1,3 +1,6 @@
+import { childDiagnostic } from '@/lib/providers/child-diagnostics';
+import { assertMcpServers } from '@/lib/providers/mcp-config-policy';
+import { withProviderStoreLock } from '@/lib/providers/store-lock';
 import { childEnvironment } from '@/lib/providers/spawn-environment';
 /**
  * Codex app-server bridge (#3573). Runs one orchestrator turn through
@@ -25,7 +28,7 @@ function out(line: Json): void {
 }
 
 function fail(message: string): never {
-  process.stderr.write(`${message}\n`);
+  process.stderr.write(`${childDiagnostic(message)}\n`);
   process.exit(1);
 }
 
@@ -92,6 +95,7 @@ async function main(): Promise<void> {
     fail('Codex app bridge: malformed spec');
   }
 
+  withProviderStoreLock(() => assertMcpServers(spec.config?.mcp_servers));
   const child = spawn(spec.codexBin, ['app-server'], { cwd: spec.cwd, env: childEnvironment({ runtimeId: 'codex' }), stdio: ['pipe', 'pipe', 'pipe'] });
   let childStderr = '';
   child.stderr.on('data', (chunk: Buffer) => { childStderr = (childStderr + chunk.toString('utf8')).slice(-2_000); });
@@ -183,9 +187,9 @@ async function main(): Promise<void> {
       } else if (status === 'interrupted') {
         finish(130);
       } else {
-        const message = text(asObject(turn.error)?.message) || `Codex turn ${status || 'failed'}`;
+        const message = childDiagnostic(text(asObject(turn.error)?.message) || `Codex turn ${status || 'failed'}`);
         out({ type: 'turn.failed', error: { message } });
-        process.stderr.write(`${message}\n`);
+        process.stderr.write(`${childDiagnostic(message)}\n`);
         finish(1);
       }
     }
@@ -204,7 +208,7 @@ async function main(): Promise<void> {
   child.on('exit', (code, signal) => {
     for (const waiter of pending.values()) waiter.reject(new Error('codex app-server exited'));
     pending.clear();
-    const tail = childStderr.trim().split(/\r?\n/).slice(-3).join('\n');
+    const tail = childDiagnostic(childStderr.trim().split(/\r?\n/).slice(-3).join('\n'));
     process.stderr.write(`codex app-server exited (${signal ?? code})${tail ? `: ${tail}` : ''}\n`);
     finish(1);
   });
@@ -237,12 +241,12 @@ async function main(): Promise<void> {
     let started: Json;
     if (spec.threadId) {
       try {
-        started = await call('thread/resume', { threadId: spec.threadId, excludeTurns: true, ...threadParams });
+        started = await withProviderStoreLock(() => { assertMcpServers(spec.config?.mcp_servers); return call('thread/resume', { threadId: spec.threadId, excludeTurns: true, ...threadParams }); });
       } catch (error) {
         throw new Error(`thread/resume: ${error instanceof Error ? error.message : String(error)}`);
       }
     } else {
-      started = await call('thread/start', threadParams);
+      started = await withProviderStoreLock(() => { assertMcpServers(spec.config?.mcp_servers); return call('thread/start', threadParams); });
     }
     threadId = text(asObject(started.thread)?.id) || null;
     if (!threadId) throw new Error('codex app-server did not return a thread id');
@@ -265,9 +269,9 @@ async function main(): Promise<void> {
     if (stopping && turnId) send({ id: ++nextId, method: 'turn/interrupt', params: { threadId, turnId } });
   };
   run().catch((error: unknown) => {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = childDiagnostic(error instanceof Error ? error.message : String(error));
     out({ type: 'error', message });
-    process.stderr.write(`${message}\n`);
+    process.stderr.write(`${childDiagnostic(message)}\n`);
     finish(1);
   });
 

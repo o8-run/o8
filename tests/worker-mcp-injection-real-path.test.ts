@@ -1,3 +1,4 @@
+import { providerCredentialName } from '@/lib/providers/spawn-environment';
 import { execFileSync } from 'node:child_process';
 import {
   existsSync,
@@ -281,7 +282,9 @@ describe.sequential('worker MCP injection real path', () => {
     const config = JSON.parse(readFileSync(configPath, 'utf8')) as {
       mcpServers: Record<string, { command: string; args: string[]; env: Record<string, string> }>;
     };
-    expect(config.mcpServers['packet-observer']).toEqual({
+    const observed = config.mcpServers['packet-observer'];
+    expect(Object.entries(observed.env).filter(([name]) => providerCredentialName(name)).every(([, value]) => value === '')).toBe(true);
+    expect({ ...observed, env: Object.fromEntries(Object.entries(observed.env).filter(([name]) => !providerCredentialName(name))) }).toEqual({
       command: process.execPath,
       args: ['fixture-server.mjs'],
       env: {

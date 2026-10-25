@@ -205,7 +205,7 @@ struct LocalTranscriptionOut {
 
 /// Run the sidecar with a hard timeout (std Command has none; poll try_wait).
 fn run_sidecar(path: &std::path::Path, args: &[&str], timeout_ms: u64) -> Option<String> {
-    let mut child = std::process::Command::new(path)
+    let mut child = crate::child_environment::command(path)
         .args(args)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())

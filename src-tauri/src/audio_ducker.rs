@@ -26,7 +26,7 @@ static SAVED_VOLUME: Mutex<Option<u32>> = Mutex::new(None);
 /// Read the current macOS output volume as an integer 0-100.
 #[cfg(target_os = "macos")]
 fn read_output_volume() -> Option<u32> {
-    let out = std::process::Command::new("osascript")
+    let out = crate::child_environment::command("osascript")
         .args(["-e", "output volume of (get volume settings)"])
         .output()
         .ok()?;
@@ -42,7 +42,7 @@ fn read_output_volume() -> Option<u32> {
 fn set_output_volume(v: u32) {
     let clamped = v.min(100);
     let cmd = format!("set volume output volume {clamped}");
-    let _ = std::process::Command::new("osascript")
+    let _ = crate::child_environment::command("osascript")
         .args(["-e", &cmd])
         .output();
 }

@@ -3,7 +3,6 @@ pub(crate) mod scheduler;
 use serde::Serialize;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 use tauri::{AppHandle, Emitter, Runtime};
@@ -143,7 +142,7 @@ fn run_verification_command(
     args: &[&str],
     bundle_path: &Path,
 ) -> Result<(), String> {
-    let output = Command::new(program)
+    let output = crate::child_environment::command(program)
         .args(args)
         .arg(bundle_path)
         .output()

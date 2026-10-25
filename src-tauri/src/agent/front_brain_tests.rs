@@ -54,6 +54,9 @@ impl FrontFixture {
         // Holds stdin open the way the resident CLIs do, so a spawned session
         // stays alive until it is dropped.
         let resident = "#!/bin/sh\n\
+             FRONT_CAPTURE=\"$(dirname \"$0\")/capture.txt\"\n\
+             FRONT_TURNS=\"$(dirname \"$0\")/turns.txt\"\n\
+             FRONT_SCRIPT=\"$(dirname \"$0\")/script.txt\"\n\
                         for arg in \"$@\"; do printf 'argv %s\\n' \"$arg\" >> \"$FRONT_CAPTURE\"; done\n\
                         printf '%s\\n' '__END__' >> \"$FRONT_CAPTURE\"\n\
                         cat > /dev/null\n";
@@ -69,6 +72,9 @@ impl FrontFixture {
         std::fs::write(
             &opencode,
             "#!/bin/sh\n\
+             FRONT_CAPTURE=\"$(dirname \"$0\")/capture.txt\"\n\
+             FRONT_TURNS=\"$(dirname \"$0\")/turns.txt\"\n\
+             FRONT_SCRIPT=\"$(dirname \"$0\")/script.txt\"\n\
              for arg in \"$@\"; do printf 'argv %s\\n' \"$arg\" >> \"$FRONT_CAPTURE\"; done\n\
              printf '%s\\n' '__END__' >> \"$FRONT_CAPTURE\"\n\
              turn=0\n\

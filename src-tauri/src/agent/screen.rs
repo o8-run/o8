@@ -168,7 +168,7 @@ pub fn capture(app: &tauri::AppHandle) -> Option<ScreenContext> {
         .map(|i| tmp.join(format!("o8-screen-{stamp}-{i}.png")))
         .collect();
 
-    let mut cmd = std::process::Command::new("screencapture");
+    let mut cmd = crate::child_environment::command("screencapture");
     cmd.arg("-x"); // no shutter sound
     for f in &files {
         cmd.arg(f);
@@ -214,7 +214,7 @@ pub fn capture(app: &tauri::AppHandle) -> Option<ScreenContext> {
 
     // Downscale in place if wider than the ceiling (sips preserves aspect).
     if png_dimensions(&path).is_some_and(|(w, _)| w > MAX_IMG_WIDTH) {
-        let _ = std::process::Command::new("sips")
+        let _ = crate::child_environment::command("sips")
             .arg("--resampleWidth")
             .arg(MAX_IMG_WIDTH.to_string())
             .arg(&path)
@@ -296,7 +296,7 @@ pub fn capture_window(app: &tauri::AppHandle, label: &str) -> Option<String> {
     }
 
     let path = std::env::temp_dir().join(format!("o8-feedback-{}.png", std::process::id()));
-    let output = std::process::Command::new("screencapture")
+    let output = crate::child_environment::command("screencapture")
         .arg("-x") // no shutter sound
         .arg(format!("-R{x:.0},{y:.0},{w:.0},{h:.0}"))
         .arg(&path)
@@ -315,7 +315,7 @@ pub fn capture_window(app: &tauri::AppHandle, label: &str) -> Option<String> {
     }
 
     if png_dimensions(&path).is_some_and(|(w, _)| w > MAX_IMG_WIDTH) {
-        let _ = std::process::Command::new("sips")
+        let _ = crate::child_environment::command("sips")
             .arg("--resampleWidth")
             .arg(MAX_IMG_WIDTH.to_string())
             .arg(&path)
@@ -430,7 +430,7 @@ pub fn capture_full(
         .map(|i| tmp.join(format!("o8-spatial-{stamp}-{trace_id}-{i}.png")))
         .collect();
 
-    let mut cmd = std::process::Command::new("screencapture");
+    let mut cmd = crate::child_environment::command("screencapture");
     cmd.arg("-x");
     for f in &files {
         cmd.arg(f);
@@ -473,7 +473,7 @@ pub fn capture_full(
     };
 
     if png_dimensions(&path).is_some_and(|(w, _)| w > SPATIAL_CAPTURE_MAX_WIDTH) {
-        let _ = std::process::Command::new("sips")
+        let _ = crate::child_environment::command("sips")
             .arg("--resampleWidth")
             .arg(SPATIAL_CAPTURE_MAX_WIDTH.to_string())
             .arg(&path)

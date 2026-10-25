@@ -1,5 +1,4 @@
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 const DEST_APP: &str = "/Applications/o8.app";
 
@@ -27,7 +26,7 @@ fn user_wants_move(source_app: &Path) -> bool {
         r#"display dialog "{}" with title "Move o8 to Applications" buttons {{"Quit", "Move to Applications"}} default button "Move to Applications" cancel button "Quit" with icon caution"#,
         escape_applescript(&body)
     );
-    Command::new("osascript")
+    crate::child_environment::command("osascript")
         .args(["-e", &script])
         .output()
         .ok()
@@ -45,7 +44,7 @@ rm -rf "$O8_DEST_APP"
 /usr/bin/xattr -dr com.apple.quarantine "$O8_DEST_APP" 2>/dev/null || true
 /usr/bin/open "$O8_DEST_APP"
 "#;
-    Command::new("/bin/sh")
+    crate::child_environment::command("/bin/sh")
         .arg("-c")
         .arg(script)
         .env("O8_SOURCE_APP", source_app)

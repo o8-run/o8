@@ -1,3 +1,7 @@
+import { SCOPED_ALIASES, GENERIC_ALIASES, providerCredentialName } from './credential-names';
+export { providerCredentialName } from './credential-names';
+import { ambientChildEnvironment } from './ambient-environment';
+import { basename } from 'node:path';
 import { deferredMcpArgumentsForCheck } from './deferred-mcp-arguments';
 import { createHash } from 'node:crypto';
 import { realpathSync } from 'node:fs';
@@ -13,12 +17,6 @@ import { ORCHESTRATOR_RUNTIMES } from '@/lib/orchestrator/runtime-capabilities';
 const permitsApiCredentials = (runtimeId: string | undefined): boolean => Boolean(runtimeId && runtimeId !== 'codex'
   && (Object.hasOwn(ORCHESTRATOR_RUNTIMES, runtimeId) || runtimeId === 'openclaw') && runtimeBillingMode(runtimeId) === 'api');
 
-// These aliases have no provider identity. Resolve the selected provider; never trust their literal value.
-const SCOPED_ALIASES: Record<string, string> = { O8_FABLE_ANTHROPIC_API_KEY: 'ANTHROPIC_API_KEY' };
-const GENERIC_ALIASES = ['LLM_API_KEY', 'GOOSE_API_KEY', 'COPILOT_PROVIDER_API_KEY', 'COPILOT_PROVIDER_BEARER_TOKEN'];
-export function providerCredentialName(name: string): boolean {
-  return Object.hasOwn(SCOPED_ALIASES, name) || GENERIC_ALIASES.includes(name) || (PROVIDER_ENV_KEYS as readonly string[]).includes(name) || Object.values(PROVIDER_KEY_ALIASES).some(aliases => aliases.includes(name));
-}
 function genericProvider(input: Record<string, string | undefined>, alias: string): string | null {
   const selected = alias === 'GOOSE_API_KEY' ? input.GOOSE_PROVIDER
     : alias.startsWith('COPILOT_PROVIDER_') ? input.COPILOT_PROVIDER_TYPE : input.LLM_PROVIDER;
@@ -90,6 +88,26 @@ export function providerSpawnEnvironment(input: Record<string, string | undefine
   return childEnvironment({ ...options, env: input, inherit: false });
 }
 
+/** Only the configured executable can select its payer. Generic interpreters,
+ * package runners and shell strings have no runtime identity and fail closed.
+ */
+export function configuredRuntimeId(command: string): string | undefined {
+  const binary = basename(command.replaceAll('\\', '/')).replace(/\.(?:exe|com|cmd|bat)$/i, '');
+  return Object.entries(ORCHESTRATOR_RUNTIMES).find(([id, runtime]) => id !== 'cloud' && runtime.binaryName === binary)?.[0];
+}
+
+/** Configured MCP env never inherits a parent worker's payer identity. */
+export function configuredMcpEnvironment(command: string, env: Record<string, string | undefined> = {}, inherit = true, args: readonly string[] = []): ReturnType<typeof resolvedEnvironment> {
+  const runtimeId = configuredRuntimeId(command);
+  const base = inherit ? payerAmbientEnvironment({ runtimeId }) : {};
+  // Arbitrary MCP servers do not acquire account or source-control credentials.
+  for (const name of ['GH_TOKEN', 'GITHUB_TOKEN', 'SSH_AUTH_SOCK', ...(runtimeId === 'claude-code' ? [] : ['CLAUDE_CODE_OAUTH_TOKEN'])]) delete base[name];
+  const result = childEnvironment({ runtimeId, env: { ...base, ...env }, inherit: false, clearInherited: !inherit });
+  assertChildArguments([command, ...args], env, result);
+  if (!inherit && !('NODE_ENV' in env)) delete (result as Record<string, string>).NODE_ENV;
+  return result;
+}
+
 /** MCP provider slots follow the billing policy of their owning runtime. */
 export function providerMcpEnvironment(input: Record<string, string | undefined>, runtimeId?: string): ReturnType<typeof resolvedEnvironment> {
   return providerSpawnEnvironment(input, { onlyExisting: true, runtimeId: runtimeId ?? contexts.get(input)?.runtimeId });
@@ -102,9 +120,19 @@ export function providerConfigEnvironment(input: Record<string, string>, runtime
   return env;
 }
 
+function payerAmbientEnvironment(options: SpawnOptions): Record<string, string> {
+  const env = ambientChildEnvironment();
+  if (options.inject !== false && permitsApiCredentials(options.runtimeId)) {
+    const names = [...PROVIDER_ENV_KEYS, ...Object.values(PROVIDER_KEY_ALIASES).flat(), ...GENERIC_ALIASES,
+      ...Object.keys(SCOPED_ALIASES), 'LLM_PROVIDER', 'GOOSE_PROVIDER', 'COPILOT_PROVIDER_TYPE'];
+    for (const name of names) if (process.env[name] !== undefined) env[name] = process.env[name]!;
+  }
+  return env;
+}
+
 /** The only ambient inheritance point. Runtime identity and persisted API opt-in are required. */
 export function childEnvironment(options: SpawnOptions & { env?: Record<string, string | undefined>; inherit?: boolean } = {}): ReturnType<typeof resolvedEnvironment> {
-  const input = options.inherit === false ? options.env ?? {} : { ...process.env, ...options.env };
+  const input = options.inherit === false ? options.env ?? {} : { ...payerAmbientEnvironment(options), ...options.env };
   return resolvedEnvironment(input, options.inject !== false && permitsApiCredentials(options.runtimeId), { ...options, deniedValues: [...((options as Context).deniedValues ?? []), ...(options.env ? contexts.get(options.env)?.deniedValues ?? [] : [])] });
 }
 

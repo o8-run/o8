@@ -195,7 +195,7 @@ pub fn background_mode_set<R: Runtime>(app: AppHandle<R>, enabled: bool) -> bool
 pub fn open_system_settings(target: String) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
-        std::process::Command::new("open")
+        crate::child_environment::command("open")
             .arg(&target)
             .spawn()
             .map(|_| ())

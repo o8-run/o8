@@ -1,3 +1,4 @@
+import { ambientChildEnvironment } from '@/lib/providers/ambient-environment';
 import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -36,6 +37,7 @@ function defaultReadVersion(candidate: string): string | null {
   try {
     return execFileSync(candidate, ['--version'], {
       windowsHide: true,
+      env: ambientChildEnvironment(),
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
       timeout: 3000,

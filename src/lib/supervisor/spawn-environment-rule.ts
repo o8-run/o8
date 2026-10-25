@@ -32,26 +32,17 @@ function unwrap(node: ts.Expression): ts.Expression {
 
 /** Security invariants scan the complete changed file, independently of diff lines. */
 const DEFERRED_BOUNDARIES: ReadonlyMap<string, string> = new Map([
-  // payer policy part b: native subscription launch and MCP consumers retain their existing behavior.
-  ['src-tauri/src/agent/codex.rs', 'payer policy part b'],
-  ['src/lib/mcp/external-servers.ts', 'payer policy part b'],
-  ['src/lib/mcp/o8-screenshot-fallback.ts', 'payer policy part b'],
-  ['src/lib/mcp/operator-mcp-server.ts', 'payer policy part b'],
-  ['src/lib/mcp/operator-mission-tools.ts', 'payer policy part b'],
-  ['src/lib/mcp/operator-node22-locator.ts', 'payer policy part b'],
-  ['src/lib/mcp/symon-tools.ts', 'payer policy part b'],
-  ['src/lib/mcp/task-draft-git.ts', 'payer policy part b'],
-  ['src/lib/mcp/tool-spine/build.ts', 'payer policy part b'],
+  // These run before a compatible Node can load SQLite. They use the shared
+  // dependency-free ambient allowlist, with no provider credential injection.
+  ['src/lib/mcp/operator-node22-locator.ts', 'pre-native-addon bootstrap'],
+  ['src/lib/mcp/operator-node22-reexec.ts', 'pre-native-addon bootstrap'],
+  // Serialized MCP artifacts are revalidated by the final process boundary.
   ['src/lib/mcp/tool-spine/emit-claude.ts', 'payer policy part b'],
   ['src/lib/mcp/tool-spine/emit-codex.ts', 'payer policy part b'],
-  ['src/lib/mcp/test-connection.ts', 'payer policy part b'],
-  ['src/lib/mcp/operator-node22-reexec.ts', 'payer policy part b'],
-  ['src/lib/codebase-memory/mcp-client.ts', 'payer policy part b'],
   ['src/lib/providers/deferred-mcp-arguments.ts', 'payer policy part b'],
   ['src/lib/runtimes/shared/owned-session/worker-mcp-config.ts', 'payer policy part b'],
   // payer policy part c: keep the detached Solo supervisor and durable output until key-by-reference launch exists.
   ['src/lib/lane/single-orchestrator-policy.ts', 'payer policy part c'],
-  ['src/lib/lane/solo-deferred-launch.ts', 'payer policy part c'],
 ]);
 
 export function scanSpawnEnvironment(relPath: string, content: string): RuleViolation[] {

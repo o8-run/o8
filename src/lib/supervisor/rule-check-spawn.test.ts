@@ -90,9 +90,9 @@ describe('child-process rule through the real git-backed entry point', () => {
     expect(result.violations.some(v => v.rule === 'spawn-environment')).toBe(true);
   });
 
-  it.each(['src/lib/mcp/test-connection.ts', 'src/lib/lane/solo-deferred-launch.ts'])('keeps the named follow-up boundary %s unchanged', async path => {
+  it.each(['src/lib/mcp/test-connection.ts', 'src/lib/lane/solo-deferred-launch.ts'])('guards the former deferred boundary %s', async path => {
     const result = await runRepositoryRuleCheck(fixture({ [path]: "import { spawn } from 'node:child_process'; spawn('tool', [], { env: process.env });" }), 'HEAD');
-    expect(result.violations).toEqual([]);
+    expect(result.violations.map(violation => violation.rule)).toEqual(expect.arrayContaining(['child-process-boundary', 'spawn-environment']));
   });
 
   it('accepts the builder, typed wrapper, type-only imports, and unrelated spawn methods', async () => {

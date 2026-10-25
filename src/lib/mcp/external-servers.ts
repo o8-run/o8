@@ -1,3 +1,4 @@
+import { configuredMcpEnvironment } from '@/lib/providers/spawn-environment';
 import { randomUUID } from 'node:crypto';
 import { asc, eq } from 'drizzle-orm';
 import { externalMcpServers, getDb } from '@/lib/db';
@@ -311,7 +312,7 @@ export function externalServerToMcpConfig(server: ExternalMcpServerRecord): Orch
     return { type: 'http', url };
   }
 
-  const env = server.env ?? undefined;
+  const env = configuredMcpEnvironment(server.command, server.env ?? {}, false, server.args);
   return {
     type: 'stdio',
     command: server.command,

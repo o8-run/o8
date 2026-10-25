@@ -1,3 +1,6 @@
+import { ambientChildEnvironment } from '@/lib/providers/ambient-environment';
+import { childEnvironment } from '@/lib/providers/spawn-environment';
+import { EMBEDDED_CHILD_POLICY_SCRIPT } from '@/lib/providers/embedded-child-policy';
 import { randomUUID } from 'node:crypto';
 import {
   accessSync,
@@ -34,7 +37,7 @@ export function singleOrchestratorEnvironment(
   base: NodeJS.ProcessEnv,
   codexHome: string,
 ): NodeJS.ProcessEnv {
-  const env = { ...base };
+  const env = childEnvironment({ runtimeId: 'codex', inherit: false, env: ambientChildEnvironment(base) });
   for (const key of CONTROL_ENV_KEYS) delete env[key];
   return {
     ...env,
@@ -328,11 +331,14 @@ export async function prepareSingleOrchestratorLaunch(input: {
     writeFileSync(guardPath, '#!/bin/sh\necho "Single mode blocks recursive Codex launches" >&2\nexit 126\n', { mode: 0o700 });
     chmodSync(guardPath, 0o700);
     writeFileSync(supervisorPath, [
+      "import { createRequire } from 'node:module';",
+      'const require = createRequire(import.meta.url);',
+      EMBEDDED_CHILD_POLICY_SCRIPT,
       "import { spawn } from 'node:child_process';",
       "import { chmodSync, rmSync } from 'node:fs';",
       "import { Transform } from 'node:stream';",
       'const [, , launchBinary, cleanupRoot, sandboxBinary, ...sandboxArgs] = process.argv;',
-      "const child = spawn(sandboxBinary, sandboxArgs, { stdio: ['ignore', 'pipe', 'pipe'], env: process.env });",
+      "const child = withO8ChildPolicy(env => spawn(sandboxBinary, sandboxArgs, { stdio: ['ignore', 'pipe', 'pipe'], env }));",
       'let sealed = false;',
       'let sealFailed = false;',
       'const relay = new Transform({ transform(chunk, _encoding, callback) {',

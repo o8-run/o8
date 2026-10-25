@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, childEnvironment } from './runtime-payer.mjs';
 import { closeSync, fsyncSync, mkdirSync, mkdtempSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -129,7 +129,7 @@ export function prepareReleaseSummary(ship, {
         '-c', 'tools.view_image=false', '-c', 'agents.enabled=false', '-c', 'project_doc_max_bytes=0',
         '-c', 'skills.include_instructions=false',
         '--output-schema', schemaPath, '--output-last-message', outputPath, '-'], {
-        cwd: working, input: prompt, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 90_000,
+        cwd: working, env: childEnvironment({ runtimeId: 'codex' }), input: prompt, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 90_000,
         killSignal: 'SIGKILL', maxBuffer: 1_000_000,
       });
       const output = readFileSync(outputPath, 'utf8');

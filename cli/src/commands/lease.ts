@@ -1,3 +1,4 @@
+import { ambientChildEnvironment } from '../../../src/lib/providers/ambient-environment.js';
 import { spawnSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
@@ -126,7 +127,7 @@ function readProcessRow(pid: number): ProcessRow | null {
     String(pid),
   ], {
     encoding: 'utf8',
-    env: { ...process.env, LANG: 'C', LC_ALL: 'C' },
+    env: { ...ambientChildEnvironment(), LANG: 'C', LC_ALL: 'C' },
     timeout: 2_000,
     windowsHide: true,
   });

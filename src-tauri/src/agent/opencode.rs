@@ -36,7 +36,6 @@ use super::{claude::TextPlannerSession, ConfirmCorrelation, LoopResult, TaskCtx}
 use base64::Engine;
 use serde_json::Value;
 use std::path::PathBuf;
-use std::process::Command;
 
 /// opencode's read-only primary agent.
 const PLANNER_AGENT: &str = "plan";
@@ -173,13 +172,9 @@ impl OpencodeSession {
         prompt: &str,
         image_path: Option<&std::path::Path>,
     ) -> Result<String, String> {
-        let output = Command::new(&self.binary)
-            .args(self.turn_args(prompt, image_path))
-            .current_dir(std::env::temp_dir())
-            .env("PATH", super::claude::path_with_node_runtime())
-            .env("FORCE_COLOR", "0")
-            .env("NO_COLOR", "1")
-            .env("O8_MANAGED_SESSION", "1")
+        let output = super::subscription_child::opencode(
+            &self.binary, &super::claude::path_with_node_runtime(), &self.turn_args(prompt, image_path),
+        )
             .output()
             .map_err(|error| format!("opencode planner spawn failed: {error}"))?;
         if !output.status.success() {

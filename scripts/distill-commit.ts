@@ -1,3 +1,4 @@
+import { childEnvironment } from '../src/lib/providers/spawn-environment';
 /**
  * Engineering Brain — post-commit fact distiller (#963).
  *
@@ -25,8 +26,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
-import { execFile } from 'node:child_process';
+import { spawn } from '../src/lib/providers/child-process';
+import { execFile } from '../src/lib/providers/child-process';
 import { promisify } from 'node:util';
 import { buildCommitFactExtractionPromptV1 } from '../src/lib/prompts/v1/fact-extraction';
 
@@ -92,7 +93,7 @@ async function resolveCodexBin(): Promise<string | null> {
     try {
       const { stdout } = await execFileAsync(sh, ['-l', '-c', 'command -v codex'], {
         timeout: 10_000,
-        env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
+        env: childEnvironment({ runtimeId: 'codex', env: { FORCE_COLOR: '0', NO_COLOR: '1' } }),
       });
       const found = stdout.trim();
       if (found) return found;
@@ -114,7 +115,7 @@ async function callCodexCli(codexBin: string, prompt: string): Promise<string> {
   ];
 
   const cwd = os.tmpdir();
-  const env = { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' };
+  const env = childEnvironment({ runtimeId: 'codex', env: { FORCE_COLOR: '0', NO_COLOR: '1' } });
 
   return new Promise<string>((resolve, reject) => {
     const child = spawn(codexBin, cliArgs, {

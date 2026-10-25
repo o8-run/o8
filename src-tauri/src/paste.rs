@@ -11,7 +11,6 @@
 // deleting it.
 #![allow(dead_code)]
 
-use std::process::Command;
 use std::sync::Mutex;
 
 /// o8's own bundle ID — used to exclude ourselves from "current frontmost" checks.
@@ -917,7 +916,7 @@ fn reactivate_previous_app() -> ActivationOutcome {
         }
 
         let fallback = format!(r#"tell application id "{}" to activate"#, app.bundle_id);
-        match Command::new("osascript").args(["-e", &fallback]).output() {
+        match crate::child_environment::command("osascript").args(["-e", &fallback]).output() {
             Ok(out) if out.status.success() => {
                 tracing::debug!(
                     "paste: reactivated {} via AppleScript fallback",

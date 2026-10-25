@@ -298,7 +298,7 @@ describe('Codex orchestrator home model config', () => {
       '  echo "codex-cli 0.150.0"',
       '  exit 0',
       'fi',
-      'printf "%s\\n" "$@" > "$O8_TEST_CODEX_ARGS_PATH"',
+      `printf "%s\\n" "$@" > '${argsPath.replaceAll("'", "'\"'\"'")}'`,
     ].join('\n'), { mode: 0o700 });
     chmodSync(codexBin, 0o700);
     process.env.O8_CODEX_BIN = codexBin;
