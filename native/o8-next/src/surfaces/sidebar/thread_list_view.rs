@@ -119,7 +119,7 @@ impl Render for ThreadList {
                                                     } else {
                                                         theme().text_muted
                                                     })
-                                                    .child(row.title),
+                                                    .child(crate::text::sanitize(&row.title)),
                                             )
                                             .when(thread, |view| {
                                                 view.child(
@@ -173,7 +173,19 @@ impl Render for ThreadList {
                                             if this.rows.iter().any(|r| r.id.as_ref() == Some(&id))
                                             {
                                                 this.focus.focus(window);
-                                                this.choose(id, cx);
+                                                this.choose(id.clone(), cx);
+                                                let generation = this.edit_generation;
+                                                // Opening another workspace can restore its content
+                                                // focus while handling Selected. Keep row navigation
+                                                // focused after that event, unless a newer edit won.
+                                                cx.defer_in(window, move |this, window, _| {
+                                                    if this.edit_generation == generation
+                                                        && this.choice.as_ref() == Some(&id)
+                                                        && !this.editing
+                                                    {
+                                                        this.focus.focus(window);
+                                                    }
+                                                });
                                             }
                                         }))
                                     })

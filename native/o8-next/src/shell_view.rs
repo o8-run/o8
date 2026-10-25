@@ -264,10 +264,7 @@ impl Render for Shell {
                         .flex_1()
                         .min_h_0()
                         .child(content.unwrap_or_else(|| {
-                            div()
-                                .p(px(24.))
-                                .child(frame.empty)
-                                .into_any_element()
+                            div().p(px(24.)).child(frame.empty).into_any_element()
                         }))
                         .into_any_element(),
                     |content, registration| (registration.decorate)(self, content),

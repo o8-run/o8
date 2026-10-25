@@ -243,3 +243,6 @@ fn sidebar_save_result_preserves_new_search(cx: &mut TestAppContext) {
 fn sidebar_save_result_preserves_same_threads_new_draft(cx: &mut TestAppContext) {
     pending_save(cx, "same");
 }
+
+#[path = "final_tests.rs"]
+mod final_round;

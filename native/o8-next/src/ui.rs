@@ -24,9 +24,9 @@ use crate::{
     transport::{self, Incoming, Subscription},
 };
 use gpui::{
-    App, Application, Bounds, Context, FocusHandle, KeyDownEvent, Keystroke,
-    ListAlignment, ListOffset, ListState, Render, Window, WindowBounds, WindowHandle,
-    WindowOptions, canvas, div, list, point, prelude::*, px, size,
+    App, Application, Bounds, Context, FocusHandle, KeyDownEvent, Keystroke, ListAlignment,
+    ListOffset, ListState, Render, Window, WindowBounds, WindowHandle, WindowOptions, canvas, div,
+    list, point, prelude::*, px, size,
 };
 use serde_json::{Value, json};
 use std::{

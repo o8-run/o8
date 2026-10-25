@@ -60,6 +60,7 @@ impl Client {
         }
         let state: Value = self.get("/api/orchestrator/state", &[])?;
         for session in &mut sessions {
+            session.title = crate::text::sanitize(&session.title);
             if session.status == "busy" {
                 session.status = "running".into();
             }
@@ -110,7 +111,7 @@ impl Client {
             sessions.push(Session {
                 tmux_session: agent["tmuxSession"].as_str().map(str::to_owned),
                 id: key.into(),
-                title: agent["name"].as_str().unwrap_or(key).into(),
+                title: crate::text::sanitize(agent["name"].as_str().unwrap_or(key)),
                 runtime: agent["runtime"].as_str().unwrap_or("").into(),
                 status: agent["status"].as_str().unwrap_or("idle").into(),
                 message_count: 0,
@@ -159,7 +160,7 @@ impl Client {
         let inventory: Value = self.get("/api/runtime/inventory", &[("fresh", "1")])?;
         inventory["agents"].as_array().into_iter().flatten().filter_map(|agent| {
             let key = agent["sessionKey"].as_str().filter(|key| key.contains(':'))?;
-            Some(serde_json::from_value(json!({"id":key,"title":agent["name"].as_str().unwrap_or("Worker"),
+            Some(serde_json::from_value(json!({"id":key,"title":crate::text::sanitize(agent["name"].as_str().unwrap_or("Worker")),
                 "status":agent["status"].as_str().unwrap_or("idle"),"runtime":agent["runtime"],
                 "repoPath":agent["workspace"],"lastMessageAt":agent["lastActivityAt"].as_i64().map(|t| format!("{t:020}")).unwrap_or_default()
             })).map_err(|_| "Invalid worker inventory".to_string()))
@@ -178,15 +179,15 @@ impl Client {
             if sessions.iter().any(|s| s.id == id) {
                 continue;
             }
-            sessions.push(
-                serde_json::from_value(json!({
-                    "id": id, "title": record["title"], "status": "archived",
-                    "runtime": record["backend"].as_str().unwrap_or(""),
-                    "repoPath": record["repoPath"], "backend": record["backend"],
-                    "lastMessageAt": record["modifiedAt"], "messageCount": record["messageCount"]
-                }))
-                .map_err(|_| "Invalid archived thread")?,
-            );
+            let mut session: Session = serde_json::from_value(json!({
+                "id": id, "title": record["title"], "status": "archived",
+                "runtime": record["backend"].as_str().unwrap_or(""),
+                "repoPath": record["repoPath"], "backend": record["backend"],
+                "lastMessageAt": record["modifiedAt"], "messageCount": record["messageCount"]
+            }))
+            .map_err(|_| "Invalid archived thread")?;
+            session.title = crate::text::sanitize(&session.title);
+            sessions.push(session);
         }
         Ok(sessions)
     }

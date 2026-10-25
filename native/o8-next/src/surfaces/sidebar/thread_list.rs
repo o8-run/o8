@@ -132,6 +132,7 @@ pub struct ThreadList {
     search_matches: HashSet<String>,
     search_error: String,
     rename: Option<String>,
+    rename_drafts: HashMap<String, String>,
     editing: bool,
     choice: Option<String>,
     edit_generation: u64,
@@ -187,6 +188,7 @@ impl ThreadList {
             search_matches: HashSet::new(),
             search_error: String::new(),
             rename: None,
+            rename_drafts: HashMap::new(),
             editing: false,
             choice: None,
             edit_generation: 0,
@@ -288,6 +290,7 @@ impl ThreadList {
                     && let Ok(mut incoming) =
                         serde_json::from_value::<Session>(frame["data"]["thread"].clone())
                 {
+                    incoming.title = crate::text::sanitize(&incoming.title);
                     if incoming.status == "busy" {
                         incoming.status = "running".into();
                     }
@@ -441,11 +444,23 @@ impl ThreadList {
             .detach();
         }
     }
+    fn suspend_rename(&mut self, cx: &mut Context<Self>) {
+        let Some(id) = self.rename.take() else {
+            return;
+        };
+        self.edit_generation += 1;
+        self.rename_drafts
+            .insert(id, self.editor.read(cx).text.clone());
+        self.editing = false;
+        let query = self.query.clone();
+        self.editor.update(cx, |editor, cx| {
+            editor.clear(cx);
+            editor.set_text(&query, cx);
+        });
+    }
     pub fn focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.edit_generation += 1;
-        if self.rename.take().is_some() {
-            self.editor.update(cx, |editor, cx| editor.clear(cx));
-        }
+        self.suspend_rename(cx);
         self.editing = false;
         self.focus.focus(window);
         cx.notify();
@@ -453,6 +468,9 @@ impl ThreadList {
     pub fn sync_selection(&mut self, id: String, cx: &mut Context<Self>) {
         if self.selected.as_ref() == Some(&id) {
             return;
+        }
+        if self.rename.as_ref().is_some_and(|owner| owner != &id) {
+            self.suspend_rename(cx);
         }
         self.selected = Some(id.clone());
         if let Some(session) = self.sessions.iter_mut().find(|s| s.id == id) {
@@ -466,9 +484,7 @@ impl ThreadList {
     }
     pub fn search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.edit_generation += 1;
-        if self.rename.take().is_some() {
-            self.editor.update(cx, |editor, cx| editor.clear(cx));
-        }
+        self.suspend_rename(cx);
         self.editing = true;
         self.editor.read(cx).focus.focus(window);
         cx.notify();
@@ -478,6 +494,7 @@ impl ThreadList {
             return;
         }
         self.edit_generation += 1;
+        self.suspend_rename(cx);
         self.choice = Some(id.clone());
         self.editing = false;
         self.selected = Some(id.clone());
@@ -503,10 +520,15 @@ impl ThreadList {
         let Some(id) = self.choice.clone().filter(|id| !id.contains(':')) else {
             return;
         };
+        self.suspend_rename(cx);
+        let draft = self.rename_drafts.remove(&id).unwrap_or_default();
         self.rename = Some(id);
         self.search_pending = None;
         self.editing = true;
-        self.editor.update(cx, |e, cx| e.clear(cx));
+        self.editor.update(cx, |e, cx| {
+            e.clear(cx);
+            e.set_text(&draft, cx);
+        });
         self.editor.read(cx).focus.focus(window);
         cx.notify();
     }
@@ -572,7 +594,9 @@ impl ThreadList {
                     Ok(()) => {
                         if renaming && current_draft {
                             this.edit_generation += 1;
-                            this.rename = None;
+                            if let Some(id) = this.rename.take() {
+                                this.rename_drafts.remove(&id);
+                            }
                             this.editing = false;
                             this.editor.update(cx, |e, cx| e.clear(cx));
                         }
@@ -591,7 +615,9 @@ impl ThreadList {
         match key {
             "escape" => {
                 self.edit_generation += 1;
-                self.rename = None;
+                if let Some(id) = self.rename.take() {
+                    self.rename_drafts.remove(&id);
+                }
                 self.editing = false;
                 self.editor.update(cx, |e, cx| e.clear(cx));
                 self.focus.focus(window);
