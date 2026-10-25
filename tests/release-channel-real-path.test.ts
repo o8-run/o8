@@ -91,10 +91,10 @@ function fixture(version = '0.1.741-preview.1') {
   mkdirSync(join(bundle, 'dmg'), { recursive: true });
   writeFileSync(join(root, 'package.json'), JSON.stringify({ version }));
   writeFileSync(join(bundle, 'dmg', `o8_${version}_universal.dmg`), 'fixture');
-  for (const name of ['o8', 'speech_recognizer', 'speech-local', 'o8-pi-write']) {
+  for (const name of ['o8', 'speech_recognizer', 'speech-local', 'o8-pi-write', 'o8-next']) {
     const path = join(bundle, 'macos', 'o8.app', 'Contents', 'MacOS', name);
     mkdirSync(join(path, '..'), { recursive: true });
-    writeFileSync(path, universalMachO());
+    writeFileSync(path, universalMachO(), { mode: 0o755 });
   }
   writeFileSync(join(bundle, 'macos', 'o8.app', 'Contents', 'Info.plist'), infoPlist(version));
   const archive = spawnSync('tar', ['czf', join(bundle, 'macos', 'o8.app.tar.gz'), '-C', join(bundle, 'macos'), 'o8.app']);
@@ -226,7 +226,7 @@ function addCpuFixtures(f: ReturnType<typeof fixture>, architectures: Array<'x86
     const cpu = resolveMacosCpuArtifacts(f.root, f.version, architecture);
     mkdirSync(join(cpu.app, '..'), { recursive: true });
     cpSync(source, cpu.app, { recursive: true, preserveTimestamps: true });
-    for (const name of ['o8', 'speech_recognizer', 'speech-local', 'o8-pi-write']) {
+    for (const name of ['o8', 'speech_recognizer', 'speech-local', 'o8-pi-write', 'o8-next']) {
       writeFileSync(join(cpu.app, 'Contents/MacOS', name), thinMachO(architecture === 'x86_64' ? CPU_TYPE_X86_64 : CPU_TYPE_ARM64));
     }
     const archive = spawnSync('tar', ['czf', cpu.updaterArchive, '-C', join(cpu.app, '..'), 'o8.app']);
@@ -257,6 +257,23 @@ afterEach(() => {
 });
 
 describe('release channels through the publication entry point', () => {
+  it.each(['app', 'updater', 'installer'] as const)('refuses publication when the required o8 next binary is missing from the %s', (distribution) => {
+    const f = fixture('0.1.741');
+    if (distribution === 'updater') {
+      const archive = spawnSync('tar', ['czf', join(f.bundle, 'macos/o8.app.tar.gz'),
+        '--exclude=o8.app/Contents/MacOS/o8-next', '-C', join(f.bundle, 'macos'), 'o8.app']);
+      expect(archive.status, String(archive.stderr)).toBe(0);
+    } else {
+      const app = distribution === 'app' ? join(f.bundle, 'macos/o8.app') : f.dmgApp;
+      rmSync(join(app, 'Contents/MacOS/o8-next'), { force: true });
+    }
+    const result = run(f, 'stable');
+    expect(result.status).toBe(1);
+    const prefix = distribution === 'updater' ? 'archived ' : distribution === 'installer' ? 'DMG ' : '';
+    expect(result.stderr).toContain(`${prefix}Contents/MacOS/o8-next is missing from the macOS app bundle`);
+    expectNoPublicationMutation(f);
+  });
+
   it.each([
     { channel: 'stable', version: '0.1.741', manifest: 'latest.json' },
     { channel: 'preview', version: '0.1.741-preview.1', manifest: 'preview.json' },

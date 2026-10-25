@@ -33,6 +33,7 @@ export const MACOS_REQUIRED_BINARIES = Object.freeze([
   'Contents/MacOS/speech_recognizer',
   'Contents/MacOS/speech-local',
   'Contents/MacOS/o8-pi-write',
+  'Contents/MacOS/o8-next',
 ]);
 
 function architectureForCpuType(cpuType) {
@@ -287,7 +288,7 @@ export function bundleContentSha256(appPath, excludedPaths = []) {
   return digest.digest('hex');
 }
 
-// Only the four native slices and the outer signature/notarization metadata
+// Only the required native slices and the outer signature/notarization metadata
 // may differ. All runtime resources, modes and internal links stay identical.
 export function macosSharedResourcesSha256(appPath) {
   return bundleContentSha256(appPath, [

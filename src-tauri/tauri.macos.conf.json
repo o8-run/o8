@@ -4,7 +4,8 @@
     "externalBin": [
       "helpers/speech_recognizer",
       "helpers/speech-local",
-      "helpers/o8-pi-write"
+      "helpers/o8-pi-write",
+      "helpers/o8-next"
     ]
   }
 }
