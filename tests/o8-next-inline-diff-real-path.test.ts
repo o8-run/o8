@@ -54,3 +54,35 @@ it('bounds binary/large diffs and refuses selected-path escapes without reading 
   const large = await (await request(base + '&file=large.txt')).json() as { diff: string; truncated: boolean };
   expect(large.truncated).toBe(true); expect(large.diff.length).toBeLessThanOrEqual(2 * 1024 * 1024);
 });
+
+it('keeps held-approval confirmation behind the production operator-token gate', async () => {
+  const held = spawn(process.execPath, ['--import', './scripts/register-server-only-stub.mjs', '--import', 'tsx',
+    'scripts/next/dev-server.ts', '--inline', '--inline-held'], {
+    env: { ...process.env, O8_NEXT_API_TOKEN: token }, stdio: ['ignore', 'pipe', 'ignore'],
+  });
+  try {
+    let heldOrigin = '';
+    for await (const line of createInterface({ input: held.stdout! })) {
+      try { heldOrigin = (JSON.parse(line) as { origin?: string }).origin || heldOrigin; } catch { continue; }
+      if (heldOrigin) break;
+    }
+    held.stdout!.resume();
+    expect(heldOrigin).toBeTruthy();
+    const send = (path: string, body?: object, credential = token) => fetch(heldOrigin + path, {
+      method: body ? 'POST' : 'GET', headers: { authorization: `Bearer ${credential}`, 'content-type': 'application/json' },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+    });
+    const before = await (await send('/api/orchestrator/inline-fixture-log')).json() as { held: { head: string; baseHead: string } };
+    const merge = await send('/api/orchestrator/merge', { packetId: 'next-inline', expectedHeadSha: before.held.head,
+      idempotencyKey: 'fixture-held-auth' });
+    const receipt = await merge.json() as { result: { approvalId: string } };
+    expect(receipt.result.approvalId).toBeTruthy();
+    const denied = await send('/api/panel/approvals', { action: 'approve', id: receipt.result.approvalId }, 'fixture-invalid');
+    expect(denied.status).toBe(401);
+    expect(await (await send('/api/orchestrator/inline-fixture-log')).json()).toMatchObject({
+      confirmation: null, held: { currentBase: before.held.baseHead, approval: { id: receipt.result.approvalId, status: 'pending' } },
+    });
+  } finally {
+    if (held.exitCode === null) { held.kill('SIGTERM'); await once(held, 'exit'); }
+  }
+}, 60_000);

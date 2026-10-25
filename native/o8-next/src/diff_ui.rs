@@ -39,9 +39,14 @@ impl DiffSurface {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        let mut surface = Self::empty(client, target, window, cx);
+        surface.load(cx);
+        surface
+    }
+    fn empty(client: Client, target: Target, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let focus = cx.focus_handle();
         focus.focus(window);
-        let mut surface = Self {
+        Self {
             inline: None,
             client,
             target,
@@ -57,9 +62,7 @@ impl DiffSurface {
             focus,
             scroll: UniformListScrollHandle::new(),
             painted: Rc::new(RefCell::new(BTreeSet::new())),
-        };
-        surface.load(cx);
-        surface
+        }
     }
     pub(crate) fn load(&mut self, cx: &mut Context<Self>) {
         if self.busy {
@@ -76,9 +79,14 @@ impl DiffSurface {
         self.notice = "Reading diff…".into();
         let client = self.client.clone();
         let target = self.target.clone();
-        let task = cx
-            .background_executor()
-            .spawn(async move { target.read(&client) });
+        let inline = self.inline.is_some();
+        let task = cx.background_executor().spawn(async move {
+            if inline {
+                inline::read(&target, &client)
+            } else {
+                target.read(&client)
+            }
+        });
         cx.spawn(async move |this, cx| {
             let result = task.await;
             let _ = this.update(cx, |this, cx| {

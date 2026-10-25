@@ -5,14 +5,27 @@ use gpui::{AnyElement, Entity};
 use serde_json::json;
 use std::time::{SystemTime, UNIX_EPOCH};
 type Key = (String, usize);
+#[derive(Clone)]
+struct HeldApproval {
+    id: String,
+    packet: String,
+    head: String,
+    source: String,
+    target: Target,
+    evidence: Option<Value>,
+}
+#[path = "surfaces/diff/confirmation.rs"]
+mod confirmation;
 pub(super) struct State {
     workspace: String,
     packet: Entity<Composer>,
     base: Entity<Composer>,
     selected_packet: Option<String>,
+    base_packet: Option<String>,
     skipped: BTreeSet<Key>,
     collapsed: BTreeSet<Key>,
     pending: Option<Value>,
+    approval: Option<HeldApproval>,
 }
 impl State {
     pub(super) fn label(&self, doc: &Document) -> String {
@@ -29,9 +42,11 @@ impl State {
             packet: cx.new(Composer::new),
             base: cx.new(Composer::new),
             selected_packet: None,
+            base_packet: None,
             skipped: BTreeSet::new(),
             collapsed: BTreeSet::new(),
             pending: None,
+            approval: None,
         }
     }
     fn key(file: &File, row: usize) -> Key {
@@ -111,6 +126,33 @@ impl State {
         })
     }
 }
+pub(super) fn read(target: &Target, client: &Client) -> Result<(Document, Value), String> {
+    let (mut document, state) = target.read(client)?;
+    if crate::shell::diff::guard::sensitive(&document.source) {
+        return Err("Sensitive patch hidden. Read-only.".into());
+    }
+    if document.source.lines().any(|line| line.len() > 16384) {
+        let preview = document
+            .source
+            .lines()
+            .map(|line| {
+                if line.len() > 16384 {
+                    line.chars().take(4096).collect::<String>() + " …"
+                } else {
+                    line.to_owned()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let mut bounded = diff::parse(&preview);
+        bounded.head = document.head;
+        bounded.truncated = true;
+        bounded.revision = document.revision;
+        bounded.source = document.source;
+        document = bounded;
+    }
+    Ok((document, state))
+}
 fn packet_target(client: &Client, workspace: &str, id: &str) -> Result<Target, String> {
     let state: Value = client.get("/api/orchestrator/state", &[])?;
     let packet = state["mission"]["packets"]
@@ -162,6 +204,15 @@ impl DiffSurface {
     pub(crate) fn inline_idle(&self) -> bool {
         self.ready && !self.busy
     }
+    #[cfg(test)]
+    pub(crate) fn inline_review_offered(&self) -> bool {
+        self.inline.as_ref().is_some_and(|state| {
+            state
+                .approval
+                .as_ref()
+                .is_some_and(|approval| approval.evidence.is_none())
+        })
+    }
     pub(crate) fn inline(
         client: Client,
         target: Target,
@@ -172,8 +223,9 @@ impl DiffSurface {
             Target::Worktree { path, .. } => path.clone(),
             _ => String::new(),
         };
-        let mut view = Self::new(client, target, window, cx);
+        let mut view = Self::empty(client, target, window, cx);
         view.inline = Some(State::new(workspace, cx));
+        view.load(cx);
         view
     }
     pub(crate) fn shell_focus(&self, window: &mut Window) {
@@ -280,13 +332,26 @@ impl DiffSurface {
             .when(state.selected_packet.is_some(), |v| {
                 v.child(
                     button(
-                        "inline-merge",
-                        if self.busy && state.pending.is_some() {
-                            "Merging…"
-                        } else if state.pending.is_some() {
-                            "Retry merge"
-                        } else {
-                            "Merge lane"
+                        match state.approval.as_ref() {
+                            Some(approval) if approval.evidence.is_none() => {
+                                "inline-review-approval"
+                            }
+                            Some(_) => "inline-confirm",
+                            None => "inline-merge",
+                        },
+                        match state.approval.as_ref() {
+                            Some(approval) if approval.evidence.is_none() => {
+                                if self.busy {
+                                    "Reading approval…"
+                                } else {
+                                    "Review approval"
+                                }
+                            }
+                            Some(_) if self.busy => "Confirming…",
+                            Some(_) => "Confirm",
+                            None if self.busy && state.pending.is_some() => "Merging…",
+                            None if state.pending.is_some() => "Retry merge",
+                            None => "Merge lane",
                         },
                         false,
                     )
@@ -294,7 +359,25 @@ impl DiffSurface {
                         v.text_color(theme().text_muted)
                             .cursor(gpui::CursorStyle::Arrow)
                     })
-                    .on_click(cx.listener(|s, _, _, cx| s.inline_merge(cx))),
+                    .on_click(cx.listener(|s, _, _, cx| {
+                        if s.inline.as_ref().unwrap().approval.is_some() {
+                            if s.inline
+                                .as_ref()
+                                .unwrap()
+                                .approval
+                                .as_ref()
+                                .unwrap()
+                                .evidence
+                                .is_none()
+                            {
+                                s.inline_review_approval(cx);
+                            } else {
+                                s.inline_confirm(cx);
+                            }
+                        } else {
+                            s.inline_merge(cx);
+                        }
+                    })),
                 )
             })
             .into_any_element()
@@ -303,13 +386,20 @@ impl DiffSurface {
         if self.busy {
             return;
         }
-        let state = self.inline.as_ref().unwrap();
-        if state.pending.is_some() {
+        let state = self.inline.as_mut().unwrap();
+        if state.pending.is_some() || state.approval.is_some() {
             self.notice = "Resolve the pending merge first".into();
             cx.notify();
             return;
         }
         let id = state.packet.read(cx).text.trim().to_owned();
+        let base = if state.base_packet.as_deref() == Some(id.as_str()) {
+            state.base.read(cx).text.trim().to_owned()
+        } else {
+            state.base.update(cx, |input, cx| input.clear(cx));
+            state.base_packet = Some(id.clone());
+            String::new()
+        };
         let workspace = state.workspace.clone();
         let client = self.client.clone();
         self.busy = true;
@@ -323,22 +413,14 @@ impl DiffSurface {
                 s.busy = false;
                 match result {
                     Ok((id, mut target)) => {
-                        let base = s
-                            .inline
-                            .as_ref()
-                            .unwrap()
-                            .base
-                            .read(cx)
-                            .text
-                            .trim()
-                            .to_owned();
                         if let Target::Worktree {
                             base: comparison, ..
                         } = &mut target
                         {
                             if !base.is_empty() {
-                                *comparison = Some(base);
-                            } else if let Some(base) = comparison.as_ref() {
+                                *comparison = Some(base.clone());
+                            }
+                            if let Some(base) = comparison.as_ref() {
                                 s.inline.as_ref().unwrap().base.update(cx, |input, cx| {
                                     input.clear(cx);
                                     input.text = base.clone();
@@ -411,6 +493,9 @@ impl DiffSurface {
             return;
         }
         let state = self.inline.as_mut().unwrap();
+        if state.approval.is_some() {
+            return;
+        }
         if !state.has_selection(&self.document) {
             return;
         }
@@ -425,12 +510,25 @@ impl DiffSurface {
         let target = self.target.clone();
         let client = self.client.clone();
         let body=state.pending.get_or_insert_with(||json!({"packetId":packet,"expectedHeadSha":self.document.head,"idempotencyKey":format!("o8-next-inline-{}-{}",std::process::id(),SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos())})).clone();
+        let approval = HeldApproval {
+            id: String::new(),
+            packet: packet.clone(),
+            head: body["expectedHeadSha"].as_str().unwrap_or_default().into(),
+            source: self.document.source.clone(),
+            target: target.clone(),
+            evidence: None,
+        };
+        let evidence_context = approval.clone();
         self.busy = true;
         self.notice = "Merging lane…".into();
         let task=cx.background_executor().spawn(async move {
             let current=packet_target(&client,&workspace,&packet)?;
             if !matches!((&current,&target),(Target::Worktree{path:a,..},Target::Worktree{path:b,..}) if a==b){return Err("Packet worktree changed. Reopen the packet.".to_owned());}
-            Ok(client.inline_merge_receipt(&body))
+            let receipt = client.inline_merge_receipt(&body);
+            let evidence = receipt.as_ref().ok().and_then(|(_, data)| data["result"]["approvalId"].as_str())
+                .and_then(|id| confirmation::evidence(&client, &HeldApproval { id: id.into(), ..evidence_context }).ok())
+                .map(|(evidence, _)| evidence);
+            Ok((receipt, evidence))
         });
         cx.spawn(async move |this, cx| {
             let result = task.await;
@@ -441,9 +539,26 @@ impl DiffSurface {
                         s.inline.as_mut().unwrap().pending = None;
                         s.notice = error;
                     }
-                    Ok(Err(error)) => s.notice = error,
-                    Ok(Ok((status, data))) => {
+                    Ok((Err(error), _)) => s.notice = error,
+                    Ok((Ok((status, data)), evidence)) => {
                         s.inline.as_mut().unwrap().pending = None;
+                        if (200..300).contains(&status)
+                            && data["ok"] == true
+                            && data["result"]["merged"] != true
+                            && let Some(id) = data["result"]["approvalId"].as_str().filter(|id| {
+                                !id.is_empty()
+                                    && id.len() <= 200
+                                    && id.bytes().all(|b| {
+                                        b.is_ascii_alphanumeric() || b == b'-' || b == b'_'
+                                    })
+                            })
+                        {
+                            s.inline.as_mut().unwrap().approval = Some(HeldApproval {
+                                id: id.into(),
+                                evidence,
+                                ..approval
+                            });
+                        }
                         s.notice = if !(200..300).contains(&status) || data["ok"] != true {
                             data["error"]
                                 .as_str()
@@ -452,6 +567,15 @@ impl DiffSurface {
                                 .into()
                         } else if data["result"]["merged"] == true {
                             "Merged".into()
+                        } else if s
+                            .inline
+                            .as_ref()
+                            .unwrap()
+                            .approval
+                            .as_ref()
+                            .is_some_and(|a| a.evidence.is_none())
+                        {
+                            "Approval evidence unavailable. Review approval before Confirm.".into()
                         } else {
                             data["result"]["note"]
                                 .as_str()

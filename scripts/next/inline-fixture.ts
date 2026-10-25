@@ -25,3 +25,16 @@ export async function seedInlineFixture(repo: string, committed = false) {
     status: 'awaiting_review', blockedReason: null, lane: null, review: null, attemptCount: 1 } as OrchestratorPacket;
   writeOrchestratorControlPlaneState({ ...createEmptyOrchestratorMissionState(), missionId: 'inline-fixture', repoPath: repo, runtime: 'codex', packets: [packet], updatedAt: new Date().toISOString() });
 }
+
+export async function seedInlineSwitchFixture(repo: string) {
+  execFileSync('git', ['-C', repo, 'branch', 'fixture-base-b', 'HEAD'], { stdio: 'pipe' });
+  const { createLane, setLaneStatus } = await import('../../src/lib/lane/registry');
+  const lane = createLane({ repoPath: repo, worktreePath: repo, branch: 'fixture-inline', baseBranch: 'fixture-base-b',
+    runtime: 'codex', packetId: 'next-inline-b', label: 'Second inline fixture' });
+  setLaneStatus(lane.id, 'reviewing', 'system', 'review_requested');
+  const { readOrchestratorControlPlaneState, writeOrchestratorControlPlaneState } = await import('../../src/lib/orchestrator/control-plane');
+  const state = readOrchestratorControlPlaneState();
+  writeOrchestratorControlPlaneState({ ...state, packets: [...state.packets,
+    { ...state.packets[0], id: 'next-inline-b', referenceLabel: 'next-inline-b', title: 'Second inline fixture' }],
+  updatedAt: new Date().toISOString() });
+}
