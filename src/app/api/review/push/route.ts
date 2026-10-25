@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { spawnSync } from '@/lib/providers/child-process';
+import { guardViewerRevision } from '@/lib/files/viewer-revision';
 import { homedir } from 'node:os';
 
 export const runtime = 'nodejs';
@@ -29,7 +30,7 @@ function runGit(root: string, args: string[]) {
 }
 
 export async function POST(request: Request) {
-  let body: { workspace?: string };
+  let body: { workspace?: string } & Record<string, unknown>;
   try {
     body = await request.json();
   } catch {
@@ -39,6 +40,8 @@ export async function POST(request: Request) {
   const root = resolveRoot(body.workspace);
 
   try {
+    const refusal = await guardViewerRevision(root, body);
+    if (refusal) return refusal;
     const branch = runGit(root, ['rev-parse', '--abbrev-ref', 'HEAD']);
     if (!branch || branch === 'HEAD') {
       return NextResponse.json({ error: 'Cannot push from detached HEAD' }, { status: 400 });

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { execFileSync } from '@/lib/providers/child-process';
+import { guardViewerRevision, readViewerRevision } from '@/lib/files/viewer-revision';
 import { homedir } from 'node:os';
 import { knowledgeSourceWriteRefusal } from '@/lib/cortex/knowledge/sources';
 
@@ -16,7 +17,7 @@ function resolveRoot(workspace?: string | null) {
 }
 
 export async function POST(request: Request) {
-  let body: { message?: string; workspace?: string };
+  let body: { message?: string; workspace?: string; path?: string; expectedHeadSha?: string } & Record<string, unknown>;
   try {
     body = await request.json();
   } catch {
@@ -37,8 +38,11 @@ export async function POST(request: Request) {
   }
 
   try {
+    const refusal = await guardViewerRevision(root, body);
+    if (refusal) return refusal;
     // Check if there are changes to commit
     const status = execFileSync('git', ['status', '--porcelain'], {
+      stdio: 'pipe',
       windowsHide: true,
       encoding: 'utf-8',
       timeout: 5000,
@@ -50,11 +54,12 @@ export async function POST(request: Request) {
     }
 
     // Stage all changes
-    execFileSync('git', ['add', '-A'], { windowsHide: true, encoding: 'utf-8', timeout: 10000, cwd: root });
+    execFileSync('git', ['add', '-A'], { stdio: 'pipe', windowsHide: true, encoding: 'utf-8', timeout: 10000, cwd: root });
 
     // Commit with the provided message — argv form (no shell), so backticks/$()
     // in the message are passed literally, never interpreted by a shell.
     execFileSync('git', ['commit', '-m', message], {
+      stdio: 'pipe',
       windowsHide: true,
       encoding: 'utf-8',
       timeout: 15000,
@@ -63,13 +68,15 @@ export async function POST(request: Request) {
 
     // Get the commit hash
     const hash = execFileSync('git', ['rev-parse', '--short', 'HEAD'], {
+      stdio: 'pipe',
       windowsHide: true,
       encoding: 'utf-8',
       timeout: 5000,
       cwd: root,
     }).trim();
 
-    return NextResponse.json({ ok: true, hash, message });
+    const revision = body.expectedHeadSha === undefined ? undefined : await readViewerRevision(root, body.path).then(({ bytes: _bytes, ...value }) => value);
+    return NextResponse.json({ ok: true, hash, message, revision });
   } catch (err) {
     const errMessage = err instanceof Error ? err.message : 'Failed to commit';
     return NextResponse.json({ error: errMessage }, { status: 500 });

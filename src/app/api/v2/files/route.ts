@@ -9,6 +9,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { isAbsolute, relative } from 'node:path';
+import { guardViewerRevision, readViewerRevision } from '@/lib/files/viewer-revision';
 import { homedir } from 'node:os';
 import { getDefaultLlmRepoRoot, resolveRegisteredRepoScope } from '@/lib/llm/repo-scope';
 import {
@@ -136,6 +137,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: target.error, code: target.code }, { status: target.status });
     }
 
+    const refusal = await guardViewerRevision(target.root, body ?? {});
+    if (refusal) return refusal;
+
     if (expectedHash !== undefined && !force) {
       let currentContent: string | null = null;
       try {
@@ -158,6 +162,7 @@ export async function POST(request: NextRequest) {
     const oldContent = result.previousBytes?.toString('utf-8') ?? null;
 
     return NextResponse.json({
+      ...(body?.expectedHeadSha !== undefined ? { revision: await readViewerRevision(target.root, target.relativePath).then(({ bytes: _bytes, ...revision }) => revision) } : {}),
       success: true,
       path,
       isNew: result.created,

@@ -2,9 +2,11 @@ export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
 import { execFileSync } from '@/lib/providers/child-process';
-import { existsSync, readFileSync } from 'node:fs';
+import { isUtf8 } from 'node:buffer';
+import { readViewerRevision } from '@/lib/files/viewer-revision';
+import { isWorkspaceFileError, readWorkspaceFile } from '@/lib/fs/workspace-file';
 import { homedir } from 'node:os';
-import { relative, resolve } from 'node:path';
+import { isAbsolute, relative, resolve } from 'node:path';
 
 const REPO_ROOT = process.env.CORTEX_IDE_REPO || process.env.CORTEX_IDE_REVIEW_REPO_ROOT || process.cwd();
 
@@ -18,7 +20,7 @@ function resolveRoot(workspace?: string | null) {
 function safeRepoPath(root: string, filePath: string) {
   const resolved = resolve(root, filePath);
   const rel = relative(root, resolved);
-  if (rel.startsWith('..') || rel.startsWith('/')) {
+  if (isAbsolute(filePath) || filePath.split(/[\\/]/).includes('..') || rel.startsWith('..') || isAbsolute(rel)) {
     return null;
   }
   return resolved;
@@ -48,6 +50,7 @@ export async function GET(
   const { searchParams } = new URL(request.url);
   const filePath = searchParams.get('path');
   const root = resolveRoot(searchParams.get('workspace'));
+  const preview = searchParams.get('preview') === '1';
 
   if (!/^[a-f0-9]{7,40}$/i.test(hash)) {
     return NextResponse.json({ error: 'Invalid commit hash' }, { status: 400 });
@@ -63,6 +66,18 @@ export async function GET(
   }
 
   try {
+    let bytes: Buffer | null = null;
+    let large = false;
+    let revision = {};
+    if (preview) {
+      const loaded = await readViewerRevision(root, filePath, true);
+      ({ bytes, large } = loaded);
+      revision = { headSha: loaded.headSha, branch: loaded.branch,
+        workspaceHash: loaded.workspaceHash, workspaceRevision: loaded.workspaceRevision };
+    } else {
+      try { bytes = (await readWorkspaceFile(root, filePath)).bytes; }
+      catch (error) { if (!isWorkspaceFileError(error) || error.code !== 'workspace_file_not_found') throw error; }
+    }
     let status = 'unknown';
     try {
       const nameStatus = execFileSync(
@@ -77,34 +92,29 @@ export async function GET(
       status = 'unknown';
     }
 
-    let commitContent: string | null = null;
+    let commitBytes: Buffer | null = null;
+    let snapshotLarge = false;
     let commitSource: 'commit' | 'parent' | null = null;
-
-    try {
-      commitContent = execFileSync(
-        'git',
-        ['show', `${hash}:${filePath}`],
-        { windowsHide: true, cwd: root, encoding: 'utf-8', timeout: 5000, maxBuffer: 1024 * 1024 },
-      );
-      commitSource = 'commit';
-    } catch {
+    for (const [spec, source] of [[`${hash}:${filePath}`, 'commit'], [`${hash}^:${filePath}`, 'parent']] as const) {
       try {
-        commitContent = execFileSync(
-          'git',
-          ['show', `${hash}^:${filePath}`],
-          { windowsHide: true, cwd: root, encoding: 'utf-8', timeout: 5000, maxBuffer: 1024 * 1024 },
-        );
-        commitSource = 'parent';
-      } catch {
-        commitContent = null;
-        commitSource = null;
-      }
+        const size = Number(execFileSync('git', ['cat-file', '-s', spec], {
+          cwd: root, encoding: 'utf8', windowsHide: true, timeout: 5000, stdio: 'pipe',
+        }).trim());
+        if (preview && size > 100000) snapshotLarge = true;
+        else commitBytes = execFileSync('git', ['show', spec], {
+          cwd: root, windowsHide: true, timeout: 5000, maxBuffer: 1024 * 1024, stdio: 'pipe',
+        });
+        commitSource = source;
+        break;
+      } catch { /* Deleted paths use their parent snapshot. */ }
     }
+    const commitContent = commitBytes?.toString('utf8') ?? null;
 
-    const workspaceExists = existsSync(absoluteFilePath);
-    const workspaceContent = workspaceExists
-      ? readFileSync(absoluteFilePath, 'utf-8')
-      : null;
+    const workspaceExists = bytes !== null;
+    const binary = bytes !== null && (bytes.includes(0) || !isUtf8(bytes));
+    const workspaceContent = bytes?.toString('utf8') ?? null;
+    const truncated = preview && (large || snapshotLarge || (workspaceContent?.length ?? 0) > 100000);
+    const commitBinary = commitBytes !== null && (commitBytes.includes(0) || !isUtf8(commitBytes));
 
     let note = '';
     if (status === 'deleted') {
@@ -123,15 +133,15 @@ export async function GET(
       file: {
         path: filePath,
         status,
-        commitContent,
+        ...revision, binary: binary || commitBinary, truncated,
+        commitContent: preview ? commitContent?.slice(0, 100000) ?? null : commitContent,
         commitSource,
-        workspaceContent,
+        workspaceContent: preview ? workspaceContent?.slice(0, 100000) ?? null : workspaceContent,
         workspaceExists,
         note,
       },
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Unknown error';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: 'Workspace comparison refused' }, { status: isWorkspaceFileError(err) ? err.status : 500 });
   }
 }

@@ -78,8 +78,18 @@ impl Commit {
     pub(crate) fn focus(&self, window: &mut Window, cx: &App) {
         self.hash_input.read(cx).focus.focus(window);
     }
+    fn editable(&self) -> bool {
+        !self.compare.is_null()
+            && self.compare["binary"] != true
+            && self.compare["truncated"] != true
+            && self.compare["sensitive"] != true
+            && self.compare["headSha"].is_string()
+    }
+    pub(crate) fn has_draft(&self, cx: &App) -> bool {
+        self.dirty(cx) || !self.message.read(cx).text.is_empty() || self.busy
+    }
     fn dirty(&self, cx: &App) -> bool {
-        !self.compare.is_null() && self.editor.read(cx).text != self.baseline
+        self.editable() && self.editor.read(cx).text != self.baseline
     }
     fn path(&self) -> Option<&str> {
         self.data["files"]
@@ -136,9 +146,16 @@ impl Commit {
             let _ = this.update(cx, |s, cx| {
                 s.loading = false;
                 match result {
-                    Ok(data) if data["commit"].is_object() => {
+                    Ok(mut data) if data["commit"].is_object() => {
+                        let sensitive = crate::viewer_guard::contains(&data);
+                        crate::viewer_guard::scrub(&mut data);
                         s.data = data["commit"].clone();
-                        s.select(0, cx);
+                        if sensitive {
+                            s.compare = json!({"sensitive":true});
+                            s.notice = "Sensitive commit hidden. Read-only.".into();
+                        } else {
+                            s.select(0, cx);
+                        }
                     }
                     Ok(_) => s.notice = "Commit unavailable".into(),
                     Err(error) => s.notice = format!("{error}. Retry Open."),
@@ -174,7 +191,7 @@ impl Commit {
         let task = cx.background_executor().spawn(async move {
             client.get::<Value>(
                 &format!("/api/panel/commits/{hash}/file"),
-                &[("workspace", &workspace), ("path", &path)],
+                &[("workspace", &workspace), ("path", &path), ("preview", "1")],
             )
         });
         cx.spawn(async move |this, cx| {
@@ -182,25 +199,33 @@ impl Commit {
             let _ = this.update(cx, |s, cx| {
                 s.loading = false;
                 match result {
-                    Ok(data) if data["file"].is_object() => {
+                    Ok(mut data) if data["file"].is_object() => {
+                        let sensitive = crate::viewer_guard::contains(&data);
+                        crate::viewer_guard::scrub(&mut data);
                         s.compare = data["file"].clone();
+                        s.compare["sensitive"] = json!(sensitive);
                         s.baseline = s.compare["workspaceContent"]
                             .as_str()
                             .or(s.compare["commitContent"].as_str())
                             .unwrap_or("")
                             .into();
+                        if !s.editable() {
+                            s.baseline.clear();
+                        }
                         s.editor.update(cx, |editor, cx| {
                             editor.clear(cx);
                             editor.text = s.baseline.clone();
                             cx.notify();
                         });
-                        s.notice = if s.compare["workspaceExists"] == false {
+                        s.notice = if !s.editable() {
+                            "Read-only comparison"
+                        } else if s.compare["workspaceExists"] == false {
                             "Workspace file missing"
                         } else {
                             ""
                         }
                         .into();
-                        s.focus_editor = true;
+                        s.focus_editor = s.editable();
                     }
                     Ok(_) => s.notice = "Comparison unavailable".into(),
                     Err(error) => s.notice = format!("{error}. Retry the file."),
@@ -216,6 +241,9 @@ impl Commit {
         if self.loading || self.busy || self.data.is_null() {
             return;
         }
+        if !self.editable() {
+            return;
+        }
         let dirty = self.dirty(cx);
         let message = self.message.read(cx).text.trim().to_owned();
         if action == "save" && (!dirty || self.path().is_none())
@@ -224,6 +252,14 @@ impl Commit {
         {
             return;
         }
+        if crate::viewer_guard::sensitive(&message)
+            || crate::viewer_guard::sensitive(&self.editor.read(cx).text)
+        {
+            self.notice = "Sensitive content hidden. Action refused.".into();
+            cx.notify();
+            return;
+        }
+        let guard = self.compare.clone();
         let content = self.editor.read(cx).text.clone();
         let path = self.path().unwrap_or("").to_owned();
         let workspace = self.workspace.clone();
@@ -237,27 +273,46 @@ impl Commit {
         .into();
         let saved = content.clone();
         let task = cx.background_executor().spawn(async move {
+            let mut body = json!({"workspace":workspace,"path":path,
+                "expectedHeadSha":guard["headSha"],"expectedBranch":guard["branch"],
+                "expectedHash":guard["workspaceHash"],"expectedWorkspaceRevision":guard["workspaceRevision"]});
+            let mut result = json!({"message":"Saved"});
+            let mut save_receipt = None;
             if action == "save" || action == "commit" && dirty {
-                client.viewer_post(
-                    "/api/v2/files",
-                    &json!({"workspace":workspace,"path":path,"content":saved}),
-                )?;
+                body["content"] = json!(saved);
+                result = match client.viewer_post("/api/v2/files", &body) {
+                    Ok(data) => data, Err(error) => return (None, Err(error)),
+                };
+                save_receipt = Some(result.clone());
+                body["expectedHash"] = result["revision"]["workspaceHash"].clone();
+                body["expectedWorkspaceRevision"] = result["revision"]["workspaceRevision"].clone();
             }
-            match action {
-                "commit" => client.viewer_post(
-                    "/api/review/commit",
-                    &json!({"workspace":workspace,"message":message}),
-                ),
-                "push" => client.viewer_post("/api/review/push", &json!({"workspace":workspace})),
-                _ => Ok(json!({"message":"Saved"})),
-            }
+            let outcome = match action {
+                "commit" => { body["message"] = json!(message); client.viewer_post("/api/review/commit", &body) },
+                "push" => client.viewer_post("/api/review/push", &body),
+                _ => Ok(result),
+            };
+            (save_receipt, outcome)
         });
         cx.spawn(async move |this, cx| {
-            let result = task.await;
+            let (save_receipt, result) = task.await;
             let _ = this.update(cx, |s, cx| {
                 s.busy = false;
+                if let Some(data) = save_receipt {
+                    s.baseline = content.clone();
+                    if let Some(revision) = data["revision"].as_object() {
+                        for (key, value) in revision {
+                            s.compare[key] = value.clone();
+                        }
+                    }
+                }
                 match result {
                     Ok(data) => {
+                        if let Some(revision) = data["revision"].as_object() {
+                            for (key, value) in revision {
+                                s.compare[key] = value.clone();
+                            }
+                        }
                         if action != "push" {
                             s.baseline = content;
                         }
@@ -312,9 +367,10 @@ impl Render for Commit {
             .text_color(theme().text)
             .font_family(theme().font_ui)
             .text_size(px(13.))
-            .capture_key_down(cx.listener(|s, event: &KeyDownEvent, _, cx| {
+            .capture_key_down(cx.listener(|s, event: &KeyDownEvent, window, cx| {
                 if (event.keystroke.modifiers.control || event.keystroke.modifiers.platform)
                     && event.keystroke.key == "s"
+                    && s.editor.read(cx).focus.is_focused(window)
                 {
                     s.action("save", cx);
                     cx.stop_propagation();
@@ -443,25 +499,36 @@ impl Render for Commit {
                                         self.compare["commitContent"]
                                             .as_str()
                                             .unwrap_or("No commit snapshot")
-                                            .to_owned(),
+                                            .chars()
+                                            .take(4096)
+                                            .collect::<String>(),
                                     ),
                             )
-                            .child(
-                                div()
-                                    .debug_selector(|| "commit-editor".into())
-                                    .flex_1()
-                                    .min_w_0()
-                                    .font_family(theme().font_mono)
-                                    .on_mouse_down(
-                                        MouseButton::Left,
-                                        cx.listener(|s, _, window, cx| {
-                                            window.prevent_default();
-                                            s.editor.read(cx).focus.focus(window);
-                                        }),
-                                    )
-                                    .child(self.editor.clone()),
-                            )
+                            .when(self.editable(), |v| {
+                                v.child(
+                                    div()
+                                        .debug_selector(|| "commit-editor".into())
+                                        .flex_1()
+                                        .min_w_0()
+                                        .font_family(theme().font_mono)
+                                        .on_mouse_down(
+                                            MouseButton::Left,
+                                            cx.listener(|s, _, window, cx| {
+                                                window.prevent_default();
+                                                s.editor.read(cx).focus.focus(window);
+                                            }),
+                                        )
+                                        .child(self.editor.clone()),
+                                )
+                            })
                         }),
+                )
+            })
+            .when(!self.compare.is_null() && !self.editable(), |v| {
+                v.child(
+                    div()
+                        .debug_selector(|| "commit-readonly".into())
+                        .child("Read-only comparison"),
                 )
             })
             .when(self.show_patch, |v| {
