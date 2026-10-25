@@ -1,0 +1,22 @@
+test result: ok. 88 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 625.96s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+Test Files  10 passed (10)
+Tests  27 passed (27)
+
+Test Files  1242 passed | 3 skipped (1245)
+Tests  9056 passed | 5 skipped (9061)
+
+Clippy: exit 0; no Activity diagnostics. Existing Client::decorate lint at src/client.rs:53 is unchanged.
+Typecheck fast, tsc (8 GiB heap), ESLint, rule-check, Rust formatting, classification and classification check passed.
+Classification: 1238 hermetic; 899 resource-owning.
+
+Final base: c9acfe4b2; native and fixture-host source trees match the full-suite run.
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 82 filtered out; finished in 34.26s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 90 filtered out; finished in 1.55s
+Final TypeScript batch: 26 passed, 1 transient worker 400; isolated worker rerun: 1 passed, 0 failed.
+The same unchanged worker transient and recovery are documented in main surface-registration evidence.
+Final typecheck fast, tsc (8 GiB heap) and Clippy passed; Activity Clippy diagnostics: 0.

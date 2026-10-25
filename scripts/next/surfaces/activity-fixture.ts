@@ -13,7 +13,7 @@ export async function installActivityFixture(repo: string) {
   execFileSync('git', ['-C', repo, 'add', '.']);
   execFileSync('git', ['-C', repo, 'commit', '-qm', 'Fixture local commit']);
   execFileSync('git', ['-C', repo, 'remote', 'add', 'origin', 'https://github.com/example/activity.git']);
-  const { addRepo, touchRepo } = await import('../../src/lib/repos/registry');
+  const { addRepo, touchRepo } = await import('../../../src/lib/repos/registry');
   const activityRepo = await addRepo(repo);
   const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
   Object.assign(process.env, { GITHUB_APP_ID: '1', GITHUB_APP_PRIVATE_KEY: privateKey.export({ type: 'pkcs8', format: 'pem' }),
@@ -61,24 +61,24 @@ export async function installActivityFixture(repo: string) {
     if (path.endsWith('/check-runs')) return Response.json({ check_runs: [] });
     return Response.json([]);
   };
-  const { createLane, setLaneStatus, updateLane } = await import('../../src/lib/lane/registry');
-  const { createEmptyOrchestratorMissionState } = await import('../../src/lib/orchestrator/store');
-  const { writeOrchestratorControlPlaneState } = await import('../../src/lib/orchestrator/control-plane');
+  const { createLane, setLaneStatus, updateLane } = await import('../../../src/lib/lane/registry');
+  const { createEmptyOrchestratorMissionState } = await import('../../../src/lib/orchestrator/store');
+  const { writeOrchestratorControlPlaneState } = await import('../../../src/lib/orchestrator/control-plane');
   const { id: laneId } = createLane({ repoPath: repo, branch: 'fixture', runtime: 'codex', packetId: 'activity-packet', sessionKey: 'llm-chat:thoughts-review' });
   setLaneStatus(laneId, 'reviewing', 'system', 'fixture_ready');
   writeOrchestratorControlPlaneState({ ...createEmptyOrchestratorMissionState(), missionId: 'activity-mission', repoPath: repo,
     packets: [{ id: 'activity-queued', referenceLabel: 'A0', title: 'Queued fixture', summary: 'Queued fixture summary', workspaceTargetPath: repo, branchTarget: 'fixture', runtime: 'codex', dependencyLabels: [], dependencyPacketIds: [], queueState: 'queued', releaseState: 'pending', status: 'idle', blockedReason: null, lane: null, review: null, attemptCount: 0 }, { id: 'activity-packet', referenceLabel: 'A1', title: 'Fixture packet', summary: 'Fixture packet summary',
       workspaceTargetPath: repo, branchTarget: 'fixture', runtime: 'codex', dependencyLabels: [], dependencyPacketIds: [],
       queueState: 'held', releaseState: 'pending', status: 'awaiting_review', blockedReason: null, lane: null, review: null, attemptCount: 1 }], updatedAt: date });
-  const commits = await import('../../src/app/api/panel/commits/route');
-  const prs = await import('../../src/app/api/panel/prs/route');
-  const issues = await import('../../src/app/api/panel/issues/route');
-  const ci = await import('../../src/app/api/panel/ci/route');
-  const detail = await import('../../src/app/api/panel/ci/[id]/route');
-  const pr = await import('../../src/app/api/panel/pr/route');
-  const repos = await import('../../src/app/api/panel/repos/route');
-  const state = await import('../../src/app/api/orchestrator/state/route');
-  const stop = await import('../../src/app/api/orchestrator/stop-mission/route');
+  const commits = await import('../../../src/app/api/panel/commits/route');
+  const prs = await import('../../../src/app/api/panel/prs/route');
+  const issues = await import('../../../src/app/api/panel/issues/route');
+  const ci = await import('../../../src/app/api/panel/ci/route');
+  const detail = await import('../../../src/app/api/panel/ci/[id]/route');
+  const pr = await import('../../../src/app/api/panel/pr/route');
+  const repos = await import('../../../src/app/api/panel/repos/route');
+  const state = await import('../../../src/app/api/orchestrator/state/route');
+  const stop = await import('../../../src/app/api/orchestrator/stop-mission/route');
   const routes: Record<string, (request: NextRequest) => Promise<Response>> = {
     'GET /api/panel/commits': commits.GET, 'GET /api/panel/prs': prs.GET, 'GET /api/panel/issues': issues.GET,
     'GET /api/panel/ci': ci.GET, 'GET /api/panel/pr': pr.GET, 'GET /api/panel/repos': repos.GET,
@@ -88,8 +88,8 @@ export async function installActivityFixture(repo: string) {
       mode = request.nextUrl.searchParams.get('mode') ?? mode;
       if (mode === 'drop-stop' || mode === 'stop-ready') updateLane(laneId, { sessionKey: null });
       if (request.nextUrl.searchParams.has('mode')) {
-        const { invalidate } = await import('../../src/lib/github/cache'); invalidate('');
-        const { invalidateGitHubSync } = await import('../../src/lib/github-broker/store');
+        const { invalidate } = await import('../../../src/lib/github/cache'); invalidate('');
+        const { invalidateGitHubSync } = await import('../../../src/lib/github-broker/store');
         invalidateGitHubSync('example/activity', 'issues'); invalidateGitHubSync('example/activity', 'pull_requests');
       }
       return Response.json({ mode, calls, repo, laneId, mutations });

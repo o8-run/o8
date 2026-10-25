@@ -27,6 +27,7 @@ register_surfaces! {
         session: Session(String) = "surfaces/session.rs";
         brain: Brain = "surfaces/brain.rs";
         grid: Grid = "surfaces/grid.rs";
+        activity: Activity = "surfaces/activity.rs";
         inbox: Inbox = "surfaces/inbox.rs";
         issues: Issues = "surfaces/issues.rs";
         #[cfg(test)] fake: Fake = "surfaces/fake.rs";

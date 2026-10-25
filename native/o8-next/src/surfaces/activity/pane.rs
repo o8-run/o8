@@ -1,8 +1,6 @@
 //! Activity entity hosted by the opt-in shell. HTTP work stays off the UI thread.
-use crate::{
-    activity_feed::{self as feed, CiDetail, ReadError, Repo, Row, Streams},
-    client::Client,
-};
+use super::feed::{self, CiDetail, ReadError, Repo, Row, Streams};
+use crate::client::Client;
 use gpui::{Context, EventEmitter, FocusHandle, KeyDownEvent, Window};
 use serde_json::{Value, json};
 use std::{
@@ -396,5 +394,5 @@ impl ActivityPane {
         cx.stop_propagation();
     }
 }
-#[path = "activity_view.rs"]
+#[path = "view.rs"]
 mod view;

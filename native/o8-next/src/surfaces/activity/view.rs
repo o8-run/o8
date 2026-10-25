@@ -1,5 +1,6 @@
+use super::feed::text;
 use super::*;
-use crate::{activity_feed::text, theme::current as theme};
+use crate::theme::current as theme;
 use gpui::{IntoElement, Render, SharedString, canvas, div, prelude::*, px};
 
 impl ActivityPane {

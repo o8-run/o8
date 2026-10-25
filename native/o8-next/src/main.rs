@@ -1,7 +1,5 @@
 // Original Apache-2.0 native surface. All UI comes from the published gpui crate.
 mod activity;
-mod activity_feed;
-mod activity_pane;
 mod brain;
 mod client;
 mod composer;

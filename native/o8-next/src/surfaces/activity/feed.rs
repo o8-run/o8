@@ -291,19 +291,19 @@ pub fn load(client: &Client, targets: &[Repo], previous: HashMap<String, Streams
     for row in &out.rows {
         if row.kind == "ci" {
             let sha = text(&row.data, "headSha").to_lowercase();
-            if !sha.is_empty() {
-                if let Some(commit) = grouped.iter_mut().find(|c: &&mut Row| {
+            if !sha.is_empty()
+                && let Some(commit) = grouped.iter_mut().find(|c: &&mut Row| {
                     c.kind == "commit"
                         && row.repo.is_some()
                         && c.repo == row.repo
                         && sha == c.id.to_lowercase()
-                }) {
-                    commit.ci = Some(Box::new(row.clone()));
-                    if row.date > commit.date {
-                        commit.date = row.date.clone();
-                    }
-                    continue;
+                })
+            {
+                commit.ci = Some(Box::new(row.clone()));
+                if row.date > commit.date {
+                    commit.date = row.date.clone();
                 }
+                continue;
             }
         }
         if row.kind != "commit"

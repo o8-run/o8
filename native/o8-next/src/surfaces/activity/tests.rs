@@ -1,4 +1,5 @@
 use super::*;
+use crate::shell::test_support::*;
 
 #[gpui::test]
 fn activity_palette_reaches_native_pane(cx: &mut TestAppContext) {
@@ -11,6 +12,20 @@ fn activity_palette_reaches_native_pane(cx: &mut TestAppContext) {
     );
     let cx = &mut visual;
     ready(&shell, cx);
+    let labels = shell.read_with(cx, |shell, _| {
+        shell
+            .commands()
+            .iter()
+            .map(|command| command.label(&shell.sessions))
+            .collect::<Vec<_>>()
+    });
+    let activity = labels
+        .iter()
+        .position(|label| label == "Open Activity")
+        .unwrap();
+    assert_eq!(labels[activity - 1], "Open grid");
+    assert_eq!(labels[activity + 1], "Open diff for a packet");
+
     cx.simulate_keystrokes("ctrl-k");
     cx.simulate_keystrokes("a c t i v i t y enter");
     cx.run_until_parked();
@@ -62,7 +77,7 @@ fn activity_click(cx: &mut VisualTestContext, selector: &'static str) -> f64 {
 
 #[gpui::test]
 fn activity_feed_details_filters_and_links(cx: &mut TestAppContext) {
-    let fixture = Fixture::activity();
+    let fixture = Fixture::start_mode(false, "--activity");
     let (shell, mut visual, opened) = activity_open(&fixture, cx);
     let cx = &mut visual;
     let mut interactions = vec![
@@ -150,7 +165,7 @@ fn activity_feed_details_filters_and_links(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn activity_ci_refusal_retains_details_and_manual_retry(cx: &mut TestAppContext) {
-    let fixture = Fixture::activity();
+    let fixture = Fixture::start_mode(false, "--activity");
     let (shell, mut visual, _) = activity_open(&fixture, cx);
     let cx = &mut visual;
     activity_click(cx, "activity-filter-ci");
@@ -209,7 +224,7 @@ fn activity_ci_refusal_retains_details_and_manual_retry(cx: &mut TestAppContext)
 
 #[gpui::test]
 fn activity_packet_hold_release_and_stop_mission(cx: &mut TestAppContext) {
-    let fixture = Fixture::activity();
+    let fixture = Fixture::start_mode(false, "--activity");
     let (_, mut visual, _) = activity_open(&fixture, cx);
     let cx = &mut visual;
     activity_click(cx, "activity-filter-packet");
@@ -245,7 +260,7 @@ fn activity_view(shell: &Entity<Shell>, cx: &mut VisualTestContext) -> Entity<Ac
 
 #[gpui::test]
 fn activity_stop_replays_lost_response_with_one_identity(cx: &mut TestAppContext) {
-    let fixture = Fixture::activity();
+    let fixture = Fixture::start_mode(false, "--activity");
     let (shell, mut visual, _) = activity_open(&fixture, cx);
     let cx = &mut visual;
     let view = activity_view(&shell, cx);
@@ -276,7 +291,7 @@ fn activity_stop_replays_lost_response_with_one_identity(cx: &mut TestAppContext
 
 #[gpui::test]
 fn activity_empty_local_auth_and_scoped_retention(cx: &mut TestAppContext) {
-    let fixture = Fixture::activity();
+    let fixture = Fixture::start_mode(false, "--activity");
     let (shell, mut visual, _) = activity_open(&fixture, cx);
     let cx = &mut visual;
     let view = activity_view(&shell, cx);
@@ -346,7 +361,7 @@ fn activity_empty_local_auth_and_scoped_retention(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn activity_loading_error_and_keyboard_controls(cx: &mut TestAppContext) {
-    let fixture = Fixture::activity();
+    let fixture = Fixture::start_mode(false, "--activity");
     let unauthorized =
         Client::authenticated(&fixture.origin, Some("fixture-invalid-operator".into())).unwrap();
     let handle = cx.add_window(|window, cx| {
@@ -378,7 +393,7 @@ fn activity_loading_error_and_keyboard_controls(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn activity_short_commit_prefix_keeps_ci_detail_reachable(cx: &mut TestAppContext) {
-    let fixture = Fixture::activity();
+    let fixture = Fixture::start_mode(false, "--activity");
     let (_, mut visual, _) = activity_open(&fixture, cx);
     let cx = &mut visual;
     let _: Value = fixture
@@ -395,7 +410,7 @@ fn activity_short_commit_prefix_keeps_ci_detail_reachable(cx: &mut TestAppContex
 
 #[gpui::test]
 fn activity_fork_commits_keep_their_own_ci_badges(cx: &mut TestAppContext) {
-    let fixture = Fixture::activity_forks();
+    let fixture = Fixture::start_mode(false, "--activity --activity-forks");
     let (shell, mut visual, _) = activity_open(&fixture, cx);
     let cx = &mut visual;
     let _: Value = fixture

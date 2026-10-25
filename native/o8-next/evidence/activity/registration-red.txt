@@ -1,0 +1,13 @@
+running 1 test
+test shell::activity::tests::activity_packet_hold_release_and_stop_mission ...
+thread 'shell::activity::tests::activity_packet_hold_release_and_stop_mission' (92824) panicked at src/surfaces/activity/tests.rs:56:28:
+Missing control: activity-row-packet-activity-queued
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    shell::activity::tests::activity_packet_hold_release_and_stop_mission
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 90 filtered out; finished in 2.87s
