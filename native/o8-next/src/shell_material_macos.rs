@@ -20,7 +20,13 @@ pub(super) fn install(window: &gpui::Window) -> bool {
     // addSubview retains the effect; its parent releases it at window teardown.
     unsafe {
         let content = handle.ns_view.as_ptr() as id;
-        let frame = NSView::bounds(content);
+        // The GPUI content view owns its Metal backing layer. A subview paints
+        // above that layer even when ordered below its other subviews.
+        let parent = NSView::superview(content);
+        if parent == nil {
+            return false;
+        }
+        let frame = NSView::frame(content);
         let effect: id = msg_send![class!(NSVisualEffectView), alloc];
         let effect = NSView::initWithFrame_(effect, frame);
         if effect == nil {
@@ -30,8 +36,17 @@ pub(super) fn install(window: &gpui::Window) -> bool {
         NSVisualEffectView::setBlendingMode_(effect, NSVisualEffectBlendingMode::BehindWindow);
         NSVisualEffectView::setState_(effect, NSVisualEffectState::Active);
         NSView::setAutoresizingMask_(effect, NSViewWidthSizable | NSViewHeightSizable);
-        let _: () = msg_send![content, addSubview:effect positioned:NSWindowOrderingMode::NSWindowBelow relativeTo:nil];
+        let _: () = msg_send![parent, addSubview:effect positioned:NSWindowOrderingMode::NSWindowBelow relativeTo:content];
         let _: () = msg_send![effect, release];
     }
     true
+}
+
+pub(super) fn reduced_transparency() -> bool {
+    unsafe {
+        let workspace: id = msg_send![class!(NSWorkspace), sharedWorkspace];
+        let reduced: cocoa::base::BOOL =
+            msg_send![workspace, accessibilityDisplayShouldReduceTransparency];
+        reduced != cocoa::base::NO
+    }
 }

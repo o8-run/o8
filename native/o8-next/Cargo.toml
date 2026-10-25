@@ -33,6 +33,10 @@ raw-window-handle = "=0.6.2"
 
 [workspace]
 
+[[example]]
+name = "window-occlusion"
+path = "test-support/window_occlusion.rs"
+
 # Published GPUI pins Taffy exactly; backport its internal Grid security update.
 [patch.crates-io]
 taffy = { path = "vendor/taffy" }

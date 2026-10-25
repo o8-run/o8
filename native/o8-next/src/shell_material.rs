@@ -10,7 +10,15 @@ use gpui::{
 mod macos;
 
 pub(super) fn background(offscreen: bool) -> WindowBackgroundAppearance {
-    if cfg!(target_os = "macos") && theme::glass() && !offscreen {
+    #[cfg(target_os = "macos")]
+    let reduced = !offscreen && theme::glass() && macos::reduced_transparency();
+    #[cfg(not(target_os = "macos"))]
+    let reduced = false;
+    background_for(offscreen, reduced)
+}
+
+pub(super) fn background_for(offscreen: bool, reduced: bool) -> WindowBackgroundAppearance {
+    if cfg!(target_os = "macos") && theme::glass() && !offscreen && !reduced {
         WindowBackgroundAppearance::Transparent
     } else {
         WindowBackgroundAppearance::Opaque
@@ -18,7 +26,17 @@ pub(super) fn background(offscreen: bool) -> WindowBackgroundAppearance {
 }
 
 pub(super) fn apply(window: &mut Window, offscreen: bool) -> bool {
-    if background(offscreen) == WindowBackgroundAppearance::Opaque {
+    #[cfg(target_os = "macos")]
+    let reduced = !offscreen && theme::glass() && macos::reduced_transparency();
+    #[cfg(not(target_os = "macos"))]
+    let reduced = false;
+    apply_for(window, offscreen, reduced)
+}
+
+pub(super) fn apply_for(window: &mut Window, offscreen: bool, reduced: bool) -> bool {
+    let background = background_for(offscreen, reduced);
+    window.set_background_appearance(background);
+    if background == WindowBackgroundAppearance::Opaque {
         return false;
     }
     #[cfg(target_os = "macos")]
