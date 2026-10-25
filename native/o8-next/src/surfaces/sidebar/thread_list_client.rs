@@ -11,6 +11,10 @@ struct Sessions {
 }
 impl Client {
     pub(crate) fn sidebar_threads(&self) -> Result<Vec<Session>, String> {
+        self.sidebar_threads_with_state()
+            .map(|(sessions, _)| sessions)
+    }
+    fn sidebar_threads_with_state(&self) -> Result<(Vec<Session>, Value), String> {
         let mut sessions = Vec::new();
         let mut seen = HashSet::new();
         let mut offset = 0;
@@ -136,7 +140,7 @@ impl Client {
                     .is_some_and(|path| same_workspace(path, workspace))
             });
         }
-        Ok(sessions)
+        Ok((sessions, state))
     }
 
     pub(crate) fn search_thread_ids(&self, query: &str) -> Result<HashSet<String>, String> {
@@ -167,7 +171,13 @@ impl Client {
         }).collect()
     }
     pub(crate) fn sidebar_sessions(&self) -> Result<Vec<Session>, String> {
-        let mut sessions = self.sessions()?;
+        self.sidebar_sessions_with_branches()
+            .map(|(sessions, _)| sessions)
+    }
+    pub(crate) fn sidebar_sessions_with_branches(
+        &self,
+    ) -> Result<(Vec<Session>, HashSet<String>), String> {
+        let (mut sessions, state) = self.sidebar_threads_with_state()?;
         let archived: Value = self.get(
             "/api/v2/chat-history/list",
             &[("include", "orchestrator"), ("archived", "only")],
@@ -189,7 +199,24 @@ impl Client {
             session.title = crate::text::sanitize(&session.title);
             sessions.push(session);
         }
-        Ok(sessions)
+        let branches = state["mission"]["packets"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|p| {
+                p["status"] != "archived"
+                    && p["branchTarget"].as_str().is_some_and(|b| !b.is_empty())
+            })
+            .flat_map(|p| {
+                [
+                    p["orchestratorThreadId"].as_str(),
+                    p["lane"]["sessionKey"].as_str(),
+                ]
+            })
+            .flatten()
+            .map(|id| id.strip_prefix("llm-chat:").unwrap_or(id).to_owned())
+            .collect();
+        Ok((sessions, branches))
     }
     pub(crate) fn patch_thread(&self, id: &str, patch: Value) -> Result<(), String> {
         let mut body = patch;

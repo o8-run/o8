@@ -16,7 +16,7 @@ use serde::Serialize;
 use serde_json::json;
 use std::{
     cell::Cell,
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{HashMap, HashSet},
     rc::Rc,
     time::{Duration, Instant},
 };
@@ -38,79 +38,9 @@ pub struct Row {
     pub status: String,
     pub unread: bool,
     pub running: bool,
-}
-pub fn section(s: &Session) -> &'static str {
-    if s.status == "archived" {
-        "Archived"
-    } else if s.id.contains(':') {
-        "Workers"
-    } else if sidebar::rank(s) > 0 {
-        "Review"
-    } else if sidebar::working(s) {
-        "Working"
-    } else {
-        "Recent"
-    }
-}
-pub fn rows(sessions: &[Session], query: &str, message_matches: &HashSet<String>) -> Vec<Row> {
-    let query = query.trim().to_lowercase();
-    let mut workspaces: BTreeMap<String, Vec<&Session>> = BTreeMap::new();
-    for s in sessions {
-        let workspace = s.repo_path.as_deref().unwrap_or("Unassigned");
-        if !query.is_empty()
-            && !format!("{} {} {}", s.title, s.status, workspace)
-                .to_lowercase()
-                .contains(&query)
-            && !message_matches.contains(&s.id)
-        {
-            continue;
-        }
-        workspaces.entry(workspace.into()).or_default().push(s);
-    }
-    let mut groups: Vec<_> = workspaces.into_iter().collect();
-    groups.sort_by_key(|(path, _)| (label(path).to_lowercase(), path.clone()));
-    let mut result = vec![];
-    for (workspace, sessions) in groups {
-        let header = |kind: &str, title: String| Row {
-            kind: kind.into(),
-            workspace: workspace.clone(),
-            id: None,
-            title,
-            status: String::new(),
-            unread: false,
-            running: false,
-        };
-        result.push(header("workspace", label(&workspace)));
-        for name in ["Working", "Review", "Recent", "Workers", "Archived"] {
-            let mut selected: Vec<_> = sessions
-                .iter()
-                .copied()
-                .filter(|s| section(s) == name)
-                .collect();
-            selected.sort_by(|a, b| {
-                (if name == "Review" {
-                    sidebar::rank(b).cmp(&sidebar::rank(a))
-                } else {
-                    std::cmp::Ordering::Equal
-                })
-                .then_with(|| b.last_message_at.cmp(&a.last_message_at))
-            });
-            if selected.is_empty() {
-                continue;
-            }
-            result.push(header("section", name.into()));
-            result.extend(selected.into_iter().map(|s| Row {
-                kind: "thread".into(),
-                workspace: workspace.clone(),
-                id: Some(s.id.clone()),
-                title: s.title.clone(),
-                status: s.status.clone(),
-                unread: s.unread,
-                running: sidebar::working(s),
-            }));
-        }
-    }
-    result
+    pub age: String,
+    pub branch: bool,
+    pub attention: bool,
 }
 fn label(path: &str) -> String {
     path.rsplit('/')
@@ -132,6 +62,9 @@ pub struct ThreadList {
     focus: FocusHandle,
     editor: Entity<Composer>,
     query: String,
+    expanded: HashSet<String>,
+    branch_ids: HashSet<String>,
+    last_age: Instant,
     search_pending: Option<Instant>,
     search_running: bool,
     search_matches: HashSet<String>,
@@ -192,6 +125,9 @@ impl ThreadList {
             focus: cx.focus_handle(),
             editor,
             query: String::new(),
+            expanded: HashSet::new(),
+            branch_ids: HashSet::new(),
+            last_age: Instant::now(),
             search_pending: None,
             search_running: false,
             search_matches: HashSet::new(),
@@ -221,7 +157,21 @@ impl ThreadList {
             .and_then(|id| self.rows.iter().find(|r| r.id.as_ref() == Some(id)))
     }
     fn rebuild(&mut self) {
-        self.rows = Rc::new(rows(&self.sessions, &self.query, &self.search_matches));
+        if let Some(session) = self
+            .sessions
+            .iter()
+            .find(|s| self.selected.as_ref() == Some(&s.id))
+        {
+            self.expanded
+                .insert(recents::group(session, recents::now()).into());
+        }
+        self.rows = Rc::new(recents::rows(
+            &self.sessions,
+            &self.query,
+            &self.search_matches,
+            &self.expanded,
+            &self.branch_ids,
+        ));
         if !self
             .rows
             .iter()
@@ -243,10 +193,10 @@ impl ThreadList {
         let generation = self.generation;
         let client = self.client.clone();
         let task = cx.background_executor().spawn(async move {
-            let sessions = client.sidebar_sessions()?;
+            let (sessions, branches) = client.sidebar_sessions_with_branches()?;
             let header = project_header::HeaderSnapshot::load(&client).ok();
             let ledger = header.as_ref().map(|header| header.ledger.clone());
-            Ok::<_, String>((sessions, ledger, header))
+            Ok::<_, String>((sessions, ledger, header, branches))
         });
         cx.spawn(async move |this, cx| {
             let result = task.await;
@@ -259,7 +209,8 @@ impl ThreadList {
                 this.last_load = Instant::now();
                 this.last_inventory = Instant::now();
                 match result {
-                    Ok((mut sessions, ledger, header)) => {
+                    Ok((mut sessions, ledger, header, branches)) => {
+                        this.branch_ids = branches;
                         if let Some(header) = header {
                             this.header = header;
                         }
@@ -291,6 +242,11 @@ impl ThreadList {
         cx.notify();
     }
     pub fn tick(&mut self, cx: &mut Context<Self>) {
+        if self.last_age.elapsed() >= Duration::from_secs(60) {
+            self.last_age = Instant::now();
+            self.rebuild();
+            cx.notify();
+        }
         let messages: Vec<_> = self.subscription.receiver.try_iter().take(64).collect();
         let mut changed = false;
         for message in messages {
@@ -643,6 +599,29 @@ impl ThreadList {
             "delete" if !self.editing => self.archive(cx),
             "enter" if !self.editing => self.submit(cx),
             "up" | "down" | "home" | "end" if !self.editing => {
+                if key == "end" {
+                    self.expanded.extend(
+                        [
+                            "Today",
+                            "Previous 7 days",
+                            "Previous 30 days",
+                            "Older",
+                            "Archived",
+                        ]
+                        .map(str::to_owned),
+                    );
+                    self.rebuild();
+                }
+                if key == "down"
+                    && let Some(index) = self
+                        .rows
+                        .iter()
+                        .position(|r| r.id.as_ref() == self.choice.as_ref() && r.id.is_some())
+                    && let Some(more) = self.rows.get(index + 1).filter(|r| r.kind == "more")
+                {
+                    self.expanded.insert(more.status.clone());
+                    self.rebuild();
+                }
                 let ids: Vec<_> = self
                     .rows
                     .iter()
@@ -699,3 +678,6 @@ mod races;
 
 #[path = "project_header.rs"]
 mod project_header;
+
+#[path = "recents.rs"]
+mod recents;

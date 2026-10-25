@@ -15,25 +15,31 @@ fn sidebar_2000_thread_first_paint_and_scroll_measurement(cx: &mut TestAppContex
             cx,
         );
         let cx = &mut visual;
-        for _ in 0..30 {
+        loop {
             cx.run_until_parked();
             cx.update(|window, cx| {
                 window.refresh();
                 window.draw(cx).clear();
             });
             if shell.read_with(cx, |s, cx| {
-                s.surfaces
-                    .sidebar
-                    .view
-                    .as_ref()
-                    .unwrap()
-                    .read(cx)
-                    .painted
-                    .get()
-                    != usize::MAX
+                s.connected
+                    && s.surfaces
+                        .sidebar
+                        .view
+                        .as_ref()
+                        .unwrap()
+                        .read(cx)
+                        .painted
+                        .get()
+                        != usize::MAX
             }) {
                 break;
             }
+            assert!(
+                start.elapsed() < std::time::Duration::from_secs(20),
+                "HTTP bootstrap must reach a painted thread"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(5));
         }
         first_paint.push(start.elapsed().as_secs_f64() * 1000.);
         shell.read_with(cx, |s, cx| {
