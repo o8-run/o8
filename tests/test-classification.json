@@ -4488,6 +4488,7 @@
     {
       "path": "tests/packet-launch-budget-real-path.test.ts",
       "reasons": [
+        "apfs-tool",
         "child-process",
         "executable-fixture",
         "git-cli",
@@ -6428,6 +6429,23 @@
         "executable-fixture",
         "git-cli",
         "real-path",
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/warm-packet-receipts-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "process-signal",
+        "real-path",
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/warm-packet-refill-timing.test.ts",
+      "reasons": [
         "worktree-api"
       ]
     },

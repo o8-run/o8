@@ -87,7 +87,7 @@ import {
 } from './root-layout';
 import { withManagedWorktreeRegistryQueue, withManagedWorktreeStorageAdmission } from './launch-storage-admission';
 import { bindWarmPacketWorktree } from './warm-packet-pool';
-import { assertWarmFilesystemBudget } from './warm-packet-budget';
+import { assertWarmFilesystemBudget, assertWarmPacketSlot, markWarmPacketMaterializationStarted, releaseWarmPacketSlot } from './warm-packet-budget';
 import { assertWarmPacketSeal, captureWarmPacketSeal } from './warm-packet-integrity';
 import { settlePinnedWorkspaceReadSession } from './materialization-read-session';
 import {
@@ -334,6 +334,7 @@ export class WorktreeManager {
   async create(opts: CreateWorktreeOptions): Promise<WorktreeInfo> {
     if (opts.warmBaseCommit) {
       await assertWarmFilesystemBudget(this.repoRoot);
+      assertWarmPacketSlot(this.repoRoot, opts.warmReservationToken, deriveWorktreeId(opts));
     }
     if (opts.materializationOnly) assertReviewMaterializationOptions(opts);
     if (opts.agentType === 'claude-code' && !opts.managed) {
@@ -376,6 +377,7 @@ export class WorktreeManager {
   /** Prepare dependencies after releasing the short Git-creation admission queue. */
   async prepareWarmWorktree(opts: CreateWorktreeOptions, onCreated: (info: WorktreeInfo) => void): Promise<{ worktree: WorktreeInfo; hooks: NonNullable<Awaited<ReturnType<typeof readPinnedWorkspaceFileReceipt>>> }> {
     await assertWarmFilesystemBudget(this.repoRoot);
+    assertWarmPacketSlot(this.repoRoot, opts.warmReservationToken);
     const info = await this.create({ ...opts, isolationPreference: 'git-worktree', skipSetup: true, envMode: 'skip', envFiles: [], managed: true });
     onCreated(info);
     const identity = await captureWorktreeMaterializationIdentity(info.path);
@@ -442,6 +444,7 @@ export class WorktreeManager {
       });
       await this.removeMeta(id);
       completeExactManagedDirectoryRetirement(this.repoRoot, id);
+      releaseWarmPacketSlot(entry.warmPool!.slotToken);
     });
   }
 
@@ -481,6 +484,9 @@ export class WorktreeManager {
     // hard — see #TBD). We probe all three and bump the suffix until we
     // find a free slot.
     const existingMeta = await this.loadAllMeta();
+    if (opts.warmBaseCommit && Object.values(existingMeta).filter(entry => entry.warmPool).length >= 2) {
+      throw new Error('Warm worktree durable count budget is full.');
+    }
     const desiredBranch = sanitizeBranchName(opts.branchName?.trim() || `worktree/${opts.agentType}/${taskId}`);
     const pinnedLaneBranch = opts.packetId ? opts.branchName?.trim() : undefined;
     if (pinnedLaneBranch && desiredBranch !== pinnedLaneBranch) {
@@ -538,6 +544,7 @@ export class WorktreeManager {
         || (!branchPinned && (await branchExists(attemptBranch)));
     }
     const branchName = attemptBranch;
+    if (opts.warmBaseCommit) assertWarmPacketSlot(this.repoRoot, opts.warmReservationToken, taskId);
 
     if (opts.agentType === 'claude-code' && !opts.managed) {
       // Claude manages its own worktree — we just track it
@@ -605,14 +612,20 @@ export class WorktreeManager {
       const warmSeal = (await this.loadAllMeta())[warm.id]?.warmTransfer?.seal;
       try {
         return await withWorktreeMaterializationExecution(warm.path, identity, async () => {
+          // This is the last pristine boundary. Packet initialization below may
+          // intentionally create environment bindings and a manifest receipt.
+          // Keep the original seal; never capture a new baseline over those writes.
+          await assertWarmPacketSeal(warm.path, identity, warmSeal, true, warm.branch);
           await this.bootstrapEnvFiles(warm.path, identity, opts);
-          // The pool already prepared hooks; binding verified the exact settings receipt.
+          // The pool already prepared hooks; binding verified their exact identity.
           // Packet-specific manifests and ownership validation still run at dispatch.
           await this.runSetupWithMaterialization(warm.path, identity, opts.repoSetup, { ...opts, skipSetup: true });
           opts.beforeReady?.(warm);
           await settlePinnedWorkspaceReadSession();
-          await assertWarmPacketSeal(warm.path, identity, warmSeal, true, warm.branch);
           if (!await allowWorktreeRemoval(warm.path, { logPrefix: 'warm-handoff' })) throw new Error('Warm worktree acquired a live process before handoff.');
+          // Initialization may write approved receipts, but must never replace
+          // the exact warm directory whose seal authorized this handoff.
+          await assertWorktreeMaterializationIdentity(warm.path, identity);
           await this.updateMetaStatus(warm.id, 'ready');
           return { ...warm, status: 'ready' };
         });
@@ -626,6 +639,7 @@ export class WorktreeManager {
       }
     }
 
+    if (opts.warmBaseCommit) markWarmPacketMaterializationStarted(this.repoRoot, opts.warmReservationToken);
     const isolationKind = await this.resolveIsolationKind(resolveIsolationPreference(opts));
     if (isolationKind === 'apfs-cow-clone') {
       return this.createApfsCowClone({
@@ -666,7 +680,7 @@ export class WorktreeManager {
       materializationIdentity: preparedExecutionIdentity,
       materializationParentIdentity: baseExecutionIdentity,
       creationOwner,
-      ...(opts.warmBaseCommit ? { warmPool: { head: opts.warmBaseCommit } } : {}),
+      ...(opts.warmBaseCommit ? { warmPool: { head: opts.warmBaseCommit, slotToken: opts.warmReservationToken } } : {}),
     });
 
     try {
@@ -884,7 +898,7 @@ export class WorktreeManager {
       materializationIdentity: preparedExecutionIdentity,
       materializationParentIdentity: baseExecutionIdentity,
       creationOwner,
-      ...(opts.warmBaseCommit ? { warmPool: { head: opts.warmBaseCommit } } : {}),
+      ...(opts.warmBaseCommit ? { warmPool: { head: opts.warmBaseCommit, slotToken: opts.warmReservationToken } } : {}),
     });
 
     let createdExecutionIdentity: Awaited<ReturnType<typeof captureWorktreeMaterializationIdentity>> | null = preparedExecutionIdentity;
@@ -2875,16 +2889,19 @@ export class WorktreeManager {
   }
 
   private async updateMetaStatus(id: string, status: WorktreeStatus): Promise<void> {
+    let releasedSlot: string | undefined;
     await withWorktreeMetaTransaction(this.repoRoot, async (transaction) => {
       const entry = (await transaction.readAll())[id];
       if (!entry) return;
       entry.status = status;
       if (status !== 'creating' && status !== 'setup') {
+        if (status === 'ready') releasedSlot = entry.warmTransfer?.slotToken;
         delete entry.creationOwner;
         delete entry.warmTransfer;
       }
       await transaction.save(id, entry);
     });
+    releaseWarmPacketSlot(releasedSlot);
   }
 
   private async updateMetaHydrationPaths(id: string, hydrationPaths: string[]): Promise<void> {

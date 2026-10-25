@@ -56,7 +56,7 @@ export async function recoverWarmPacketTransfers(repoRoot: string, manager: Work
         }
         await withWorktreeMetaTransaction(repoRoot, async transaction => {
           await transaction.save(target.id, {
-            ...target, branchName: branch, warmPool: { head, seal: transfer.seal },
+            ...target, branchName: branch, warmPool: { head, slotToken: transfer.slotToken, seal: transfer.seal },
             warmTransfer: undefined, packetId: undefined, laneId: undefined
           });
         });

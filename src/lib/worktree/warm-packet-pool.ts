@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 
@@ -10,7 +10,7 @@ import { isDependencyMaterializationIncomplete, verifyDependencyMaterialization 
 import { assertWorktreeMaterializationIdentity, captureWorktreeMaterializationIdentity, type WorktreeMaterializationIdentity } from './materialization-identity';
 import { materializationAwareExecFile, withWorktreeMaterializationExecution } from './materialization-execution';
 import { inspectPinnedWorkspaceEntry, readPinnedWorkspaceFile, readPinnedWorkspaceFileReceipt } from './materialization-leaf-io';
-import { assertWarmFilesystemBudget } from './warm-packet-budget';
+import { assertWarmFilesystemBudget, assertWarmPacketSlot, reserveWarmPacketSlot, releaseUnmaterializedWarmPacketSlot, supportsWarmPacketWorktrees } from './warm-packet-budget';
 import { assertWarmPacketSeal, type WarmPacketSeal } from './warm-packet-integrity';
 import { allowWorktreeRemoval } from './live-process-guard';
 import { settlePinnedWorkspaceReadSession } from './materialization-read-session';
@@ -130,13 +130,14 @@ async function fill(): Promise<void> {
       && entries.filter(entry => entry.request.opts.repoRoot === request.opts.repoRoot).length < Math.min(MAX_ENTRIES, Math.max(1, request.opts.capacity ?? MAX_ENTRIES))
       && entries.reduce((n, entry) => n + entry.bytes, 0) + MAX_ENTRY_BYTES <= MAX_BYTES) {
       if (!await currentRequest(request)) break;
-      const token = randomUUID();
+      const token = reserveWarmPacketSlot(request.opts.repoRoot);
+      if (!token) break;
       const reservation: { request: Request; token: string; info?: WorktreeInfo; } = { request, token };
       pending.push(reservation);
       try {
         const { worktree: info, hooks } = await request.manager.prepareWarmWorktree({
           agentType: request.opts.agentType, taskName: `warm-${token}`, baseBranch: 'main',
-          warmBaseCommit: current.head, repoSetup: request.opts.repoSetup, isolationPreference: request.opts.isolationPreference,
+          warmBaseCommit: current.head, warmReservationToken: token, repoSetup: request.opts.repoSetup, isolationPreference: request.opts.isolationPreference,
         }, created => { reservation.info = created; });
         const identity = await captureWorktreeMaterializationIdentity(info.path);
         if ((await inspectPinnedWorkspaceEntry(info.path, identity, '.git'))?.kind !== 'file') throw new Error('Warm pool requires a linked Git worktree, not a private Git clone.');
@@ -162,10 +163,15 @@ async function fill(): Promise<void> {
           if (entry) entry.state = 'held';
           await withWorktreeMetaTransaction(request.opts.repoRoot, async transaction => {
             const meta = (await transaction.readAll())[reservation.info!.id];
-            if (meta?.warmPool) await transaction.save(meta.id, { ...meta, warmPool: { ...meta.warmPool, held: true } });
+            if (meta?.warmPool?.slotToken === token) await transaction.save(meta.id, { ...meta, warmPool: { ...meta.warmPool, held: true } });
           });
+        } else {
+          releaseUnmaterializedWarmPacketSlot(request.opts.repoRoot, token);
         }
         throw error;
+      } finally {
+        const index = pending.indexOf(reservation);
+        if (index >= 0) pending.splice(index, 1);
       }
     }
   }
@@ -173,7 +179,7 @@ async function fill(): Promise<void> {
 
 /** Awaitable for lifecycle tests and idle startup; dispatch never awaits a refill. */
 export async function prepareWarmPacketWorktrees(opts: WarmPacketOptions, manager: WorktreeManager): Promise<void> {
-  if (stopped || process.platform !== 'linux') return;
+  if (stopped || !supportsWarmPacketWorktrees()) return;
   if (!opts.repoSetup?.installOnCreateWorkspace || !opts.repoSetup.installCommand) { requests.delete(opts.repoRoot); return; }
   requests.set(opts.repoRoot, { opts, manager });
   startRefresh();
@@ -184,7 +190,7 @@ export async function prepareWarmPacketWorktrees(opts: WarmPacketOptions, manage
 }
 
 export function scheduleWarmPacketWorktrees(opts: WarmPacketOptions, manager: WorktreeManager): void {
-  if (stopped || process.platform !== 'linux') return;
+  if (stopped || !supportsWarmPacketWorktrees()) return;
   // Credential-policy validation also runs in generated child helpers. Keep
   // new background spawns outside every foreground worker's startup window.
   foregroundQuietUntil = Math.max(foregroundQuietUntil, performance.now() + FOREGROUND_QUIET_MS);
@@ -260,6 +266,7 @@ export async function bindWarmPacketWorktree(input: {
     if (!meta || meta.status !== 'setup' || meta.sessionKey || meta.packetId || meta.environmentReferences
       || !meta.warmPool || meta.warmPool.held || meta.dependencyMaterialization?.mode !== 'native') throw new Error('Warm worktree lost its unused native ownership.');
     if (JSON.stringify(meta.warmPool.seal) !== JSON.stringify(entry.seal)) throw new Error('Warm worktree lost its original durable seal.');
+    assertWarmPacketSlot(repoRoot, meta.warmPool.slotToken, entry.info.id);
     if (!await allowWorktreeRemoval(entry.info.path, { logPrefix: 'warm-binding' })) throw new Error('Warm worktree has a live or unknown process.');
     await assertWarmPacketSeal(entry.info.path, entry.identity, entry.seal);
     await withWorktreeMaterializationExecution(entry.info.path, entry.identity, async () => {
@@ -284,7 +291,7 @@ export async function bindWarmPacketWorktree(input: {
           ...packetMeta, id: taskId, packetId: opts.packetId, laneId: opts.laneId,
           agentType: opts.agentType, branchName, baseBranch, taskName: opts.taskName, status: 'creating',
           warmTransfer: { sourceId: entry.info.id, sourceBranch: entry.info.branch, head: current.head,
-            seal: entry.seal },
+            seal: entry.seal, slotToken: meta.warmPool!.slotToken },
           materializationIdentity: nextIdentity, materializationParentIdentity: baseExecutionIdentity, creationOwner: input.creationOwner
         });
         targetPublished = true;

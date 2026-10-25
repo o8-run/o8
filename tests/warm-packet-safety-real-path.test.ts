@@ -76,7 +76,9 @@ it.each(['notes', 'dependencies', 'git-administration', 'live-process', 'unseale
     const { addRepo } = await import('@/lib/repos/registry');
     const registration = await addRepo(repo);
     const manager = new WorktreeManager(repo);
-    const { worktree } = await manager.prepareWarmWorktree({ agentType: 'codex', taskName: 'warm-safety',
+    const { reserveWarmPacketSlot } = await import('@/lib/worktree/warm-packet-budget');
+    const token = reserveWarmPacketSlot(repo)!;
+    const { worktree } = await manager.prepareWarmWorktree({ agentType: 'codex', taskName: `warm-${token}`, warmReservationToken: token,
       warmBaseCommit: git('rev-parse', 'HEAD'), baseBranch: 'main', isolationPreference: 'git-worktree',
       repoSetup: { ...registration.setup, installOnCreateWorkspace: true, installCommand: 'npm ci --offline' } }, () => {});
     const meta = (await readWorktreeMetaSnapshot(repo))[worktree.id]!;
@@ -100,5 +102,7 @@ it.each(['notes', 'dependencies', 'git-administration', 'live-process', 'unseale
     expect(existsSync(worktree.path)).toBe(true);
     expect(readFileSync(retained, 'utf8')).toBe(content);
     expect((await readWorktreeMetaSnapshot(repo))[worktree.id]).toBeDefined();
+    const { getSqlite } = await import('@/lib/db');
+    expect(getSqlite().prepare('SELECT count(*) FROM warm_packet_slots').pluck().get()).toBe(1);
   },
 );
