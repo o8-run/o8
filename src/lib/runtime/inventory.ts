@@ -43,7 +43,8 @@ const RUNTIME_INVENTORY_BACKGROUND_DELAY_MS = 5_000;
 // the background. When the local codex sessions directory has hundreds of
 // stale entries, discoverSessions balloons past 10s and the client fetch
 // surfaces as a 'Load failed' TypeError in the Next.js dev overlay.
-const RUNTIME_INVENTORY_BUILD_TIMEOUT_MS = 3_500;
+// Env override for hermetic suites on loaded machines; the production default stays 3,500 ms.
+const RUNTIME_INVENTORY_BUILD_TIMEOUT_MS = Number(process.env.O8_RUNTIME_INVENTORY_BUILD_TIMEOUT_MS) || 3_500;
 const runtimeInventoryCache = new Map<string, { snapshot: FleetSnapshot; cachedAt: number; idle: boolean }>();
 interface RuntimeInventoryBuild {
   generation: number;

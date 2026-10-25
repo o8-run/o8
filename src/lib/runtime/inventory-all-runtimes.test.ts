@@ -72,6 +72,9 @@ vi.mock('@/lib/lane/sweep-orphan-sessions', () => ({
   sweepOrphanedOwnedSessions: async () => {},
 }));
 
+// Default for this suite (read once at import): a loaded machine must not lose the 3.5s production deadline race.
+process.env.O8_RUNTIME_INVENTORY_BUILD_TIMEOUT_MS ??= '1200000';
+
 const {
   getRuntimeInventorySnapshot,
   invalidateRuntimeInventoryCache,
