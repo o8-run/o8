@@ -110,19 +110,33 @@ it('keeps default startup, all existing defaults, environment and the data direc
   expect(existsSync(receipt)).toBe(false);
 });
 
-async function mountSettings() {
+async function mountSettings(beforeGet: () => Promise<void> = async () => {}) {
   vi.stubGlobal('fetch', async (input: string, init?: RequestInit) => {
     const request = new Request(new URL(input, endpoint), init);
+    if (request.method === 'GET') await beforeGet();
     return request.method === 'POST' ? route.POST(request) : route.GET(request);
   });
   container = document.createElement('div'); document.body.appendChild(container); ui = createRoot(container);
   await act(async () => { ui!.render(createElement(OperatorDefaultsTab)); });
-  await vi.waitFor(async () => { await act(async () => {}); expect(container.textContent).toContain('o8 next'); });
-  const label = Array.from(container.querySelectorAll('span')).find(el => el.textContent === 'o8 next' && el.children.length === 0);
-  const rowContainer = label?.parentElement?.parentElement;
-  const row = rowContainer?.querySelector('[role="switch"]');
-  return { row, rowContainer };
+  return vi.waitFor(async () => {
+    await act(async () => {});
+    const label = Array.from(container.querySelectorAll('span')).find(el => el.textContent === 'o8 next' && el.children.length === 0);
+    const rowContainer = label?.parentElement?.parentElement;
+    const row = rowContainer?.querySelector('[role="switch"]');
+    expect(row).toBeTruthy();
+    return { row, rowContainer };
+  }, { timeout: 10_000 });
 }
+
+it('waits for settings readiness when a cold response takes longer than one second', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  try {
+    // Inject cold-route latency; mountSettings must still wait for the rendered switch.
+    const { row } = await mountSettings(() => new Promise(resolve => { setTimeout(resolve, 1_500); }));
+    expect(row!.getAttribute('aria-checked')).toBe('false');
+    expect(existsSync(receipt)).toBe(false);
+  } finally { vi.useRealTimers(); }
+});
 
 it('drives the single short switch through the real settings route and real spawn, then off kills it', async () => {
   const { row, rowContainer } = await mountSettings();
@@ -227,7 +241,7 @@ it('boots with a missing sidecar and no bearer while disabled without adding any
 it('refuses a missing-sidecar TOML opt-in before persisting the choice', async () => {
   rmSync(binary);
   const settings = await (await route.GET(new Request(`${endpoint}?include=values`))).json();
-  const response = await route.POST(new Request(endpoint, { method: 'POST', headers: { 'content-type': 'application/json' },
+  const response = await route.POST(new Request(endpoint, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
     body: JSON.stringify({ settingsToml: settings.settingsToml.text.replace('next_enabled = false', 'next_enabled = true'),
       settingsTomlRevision: settings.settingsToml.revision }) }));
   expect(response.status).toBe(400);
