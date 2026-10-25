@@ -37,10 +37,12 @@ export const fixtureHardwareKeyboard = device => TY(device, true);
 `);
   const emuMapping = '[`${EMU_PREFIX}/ws`]: gatedSocket(emuWebSocketHandler)';
   writeFileSync(index, `
+import { readFileSync } from 'node:fs';
 import { FixtureHid, fixtureExec, fixtureUi, fixtureLifecycle, fixtureAxType, fixtureHardwareKeyboard } from '../../vendor/serve-sim/dist/middleware.js';
 export { FixtureHid, fixtureExec, fixtureUi, fixtureAxType, fixtureHardwareKeyboard };
 const withFramePolicy = response => response;
 async function routeRequest(request) {
+  if (new URL(request.url).pathname === '/readyz') return new Response('ready', { status: JSON.parse(readFileSync(${JSON.stringify(control)}, 'utf8')).healthStatus ?? 200 });
   if (new URL(request.url).pathname !== '/api/devices/boot') return null;
   const input = await request.json(); return Response.json(await fixtureLifecycle(input));
 }

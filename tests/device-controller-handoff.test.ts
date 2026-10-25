@@ -14,11 +14,15 @@ const receipts = join(root, 'receipts.jsonl');
 const control = join(root, 'control.json');
 const manualReceipts = join(root, 'manual-receipts.jsonl');
 const previous = { O8_DATA_DIR: process.env.O8_DATA_DIR, CORTEX_IDE_DATA_DIR: process.env.CORTEX_IDE_DATA_DIR, WS_TOKEN: process.env.WS_TOKEN };
+const physicalData = join(root, 'physical-data'); mkdirSync(physicalData, { recursive: true });
+symlinkSync(physicalData, data, process.platform === 'win32' ? 'junction' : 'dir');
 process.env.O8_DATA_DIR = data;
 process.env.CORTEX_IDE_DATA_DIR = data;
 process.env.WS_TOKEN = 'fixture-controller-operator-01234567890123456789';
-let devices: typeof import('@/app/api/panel/devices/route');
-let mcp: typeof import('@/app/api/mcp/route');
+// Collect the real route graph before the hook clock starts, as other MCP route
+// suites do. Cold transforms on macOS must not exhaust fixture setup's budget.
+const devices = await import('@/app/api/panel/devices/route');
+const mcp = await import('@/app/api/mcp/route');
 const workers: ChildProcess[] = [];
 const identity = (worker: number) => ({ conversation: `fixture-conversation-${worker}`, worker: `fixture-worker-${worker}`, pid: workers[worker].pid! });
 
@@ -46,8 +50,6 @@ async function state() { return (await devices.GET(request())).json(); }
 async function panel(body: unknown) { return devices.POST(request(body)); }
 
 beforeAll(async () => {
-  const physicalData = join(root, 'physical-data'); mkdirSync(physicalData, { recursive: true });
-  symlinkSync(physicalData, data, process.platform === 'win32' ? 'junction' : 'dir');
   writeFileSync(control, '{}');
   for (const spec of [
     { name: 'expo-device-hub', version: '0.15.3', entry: 'dist/server/cli.mjs' },
@@ -66,7 +68,10 @@ import handler, { FixtureHid, fixtureExec, fixtureUi, fixtureAxType, fixtureHard
 const args = process.argv.slice(2); const port = Number(args[args.indexOf('--port') + 1]);
 const token = 'fixture-controller-hub-01234567890123456789';
 const server = createServer(async (req, res) => {
-  if (req.url === '/readyz') return res.end('ready');
+  if (new URL(req.url, 'http://' + req.headers.host).pathname === '/readyz') {
+    const result = await handler(new Request('http://' + req.headers.host + req.url, { method: req.method }));
+    res.writeHead(result.status); return res.end(await result.text());
+  }
   if (req.headers.authorization !== 'Bearer ' + token) { res.writeHead(401); return res.end(); }
   if (req.method === 'POST') {
     const chunks = []; for await (const chunk of req) chunks.push(chunk);
@@ -123,8 +128,6 @@ console.log(JSON.stringify(config.unconfirmed ? { data: { fixture: true } } : { 
     workers.push(child);
     await new Promise<void>(resolve => child.once('spawn', resolve));
   }
-  devices = await import('@/app/api/panel/devices/route');
-  mcp = await import('@/app/api/mcp/route');
   expect((await panel({ action: 'start' })).status).toBe(202);
 });
 afterAll(async () => {
@@ -142,6 +145,31 @@ afterAll(async () => {
 });
 
 describe.sequential('Devices controller handoff through panel routes and MCP tools', () => {
+  it('starts the fenced helper through DeviceManager and keeps readiness independent of input ownership', async () => {
+    await expect.poll(async () => (await state()).phase, { timeout: 8_000, interval: 50 }).toBe('running');
+    const ready = await state();
+    expect(ready.controllers).toEqual([]);
+    const health = new URL('/readyz', ready.embedUrl);
+    expect((await fetch(health)).status).toBe(200);
+    expect((await tool(2, { action: 'acquire', deviceId: 'ios-1' })).error).toBe(false);
+    const owned = (await state()).controllers;
+    const before = records().length;
+    try {
+      for (const method of ['GET', 'HEAD']) expect((await fetch(health, { method })).status).toBe(200);
+      writeFileSync(control, JSON.stringify({ healthStatus: 503 }));
+      expect((await fetch(health)).status).toBe(503);
+      writeFileSync(control, '{}');
+      expect((await fetch(health, { method: 'POST' })).status).toBe(409);
+      expect((await fetch(new URL('/api/devices/boot', ready.embedUrl), { method: 'POST',
+        headers: { authorization: 'Bearer fixture-controller-hub-01234567890123456789' },
+        body: JSON.stringify({ platform: 'ios', id: 'ios-1' }),
+      })).status).toBe(409);
+      expect((await state()).controllers).toEqual(owned);
+      expect(records()).toHaveLength(before);
+      expect(existsSync(manualReceipts)).toBe(false);
+    } finally { writeFileSync(control, '{}'); expect((await tool(2, { action: 'release', deviceId: 'ios-1' })).error).toBe(false); }
+  });
+
   it('assigns distinct sessions automatically, refuses a second worker and shows its waiting identity', async () => {
     await expect.poll(async () => (await state()).phase).toBe('running');
     expect((await tool(0, { action: 'acquire', deviceId: 'ios-1' })).error).toBe(false);

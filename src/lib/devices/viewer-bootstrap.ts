@@ -131,6 +131,8 @@ globalThis.__o8DeviceGate = {
     const url = new URL(request.url); const path = url.pathname;
     if (path.includes('/devtools') || path.startsWith('/vendor/serve-emu')) return Response.json({ error: 'Device control unavailable' }, { status: 403 });
     const read = request.method === 'GET' || request.method === 'HEAD';
+    // Startup health must work before a controller can acquire the device.
+    if (read && path === '/readyz') return work();
     const root = ['/', '/index.html', '/api/devices', '/api/new-device-options', '/vendor/serve-sim', '/vendor/serve-sim/', '/vendor/serve-sim/grid', '/vendor/serve-sim/grid/'].includes(path);
     const asset = /\.(?:js|css|svg|png|jpg|woff2?)$/.test(path);
     const grid = /^\/vendor\/serve-sim\/grid\/api\/(?:catalog|status(?:\/events)?|memory|devicekit-chrome|device-placeholder-asset|devicekit-model)$/.test(path);

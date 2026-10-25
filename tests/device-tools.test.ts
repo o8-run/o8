@@ -54,7 +54,7 @@ beforeAll(async () => {
   configure();
   stageDeviceViewerHelper(hubPackage, join(root, 'manual.jsonl'), control);
   writeFileSync(source, `import { createServer } from 'node:http';
-import './index.mjs';
+import handler from './index.mjs';
 import { appendFileSync, readFileSync } from 'node:fs';
 const args = process.argv.slice(2);
 const config = JSON.parse(readFileSync(${JSON.stringify(control)}, 'utf8'));
@@ -64,8 +64,11 @@ const token = ${JSON.stringify(token)};
 if (config.fail) { console.error('secret=' + token); process.exit(4); }
 const port = Number(args[args.indexOf('--port') + 1]);
 const host = args[args.indexOf('--host') + 1];
-const server = createServer((req, res) => {
-  if (req.url === '/readyz') { res.end('ready'); return; }
+const server = createServer(async (req, res) => {
+  if (new URL(req.url, 'http://' + req.headers.host).pathname === '/readyz') {
+    const result = await handler(new Request('http://' + req.headers.host + req.url, { method: req.method }));
+    res.writeHead(result.status); res.end(await result.text()); return;
+  }
   const url = new URL(req.url, 'http://' + req.headers.host);
   if (url.pathname === '/' && url.searchParams.get('token') === token) {
     res.writeHead(302, { Location: '/', 'Set-Cookie': 'fixture_hub_access=' + token + '; HttpOnly; SameSite=Lax; Path=/' }); res.end(); return;
