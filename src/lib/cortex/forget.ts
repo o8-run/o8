@@ -9,6 +9,7 @@ import { parseDirectiveFile } from '@/lib/cortex/directives/parse';
 import { invalidateAnswerCache } from '@/lib/cortex/qa/ask';
 import { getActiveProjectScopeForRepo } from '@/lib/repos/projects';
 import { publishCortexChange } from '@/lib/realtime/publisher';
+import { excludeOutcomeFromMemory } from '@/lib/cortex/outcome-exclusion';
 
 type Kind = 'directive' | 'outcome';
 class ForgetError extends Error {
@@ -89,6 +90,7 @@ function forgetOutcome(id: string, repoPath: string, projectId: string | null) {
   db.transaction(() => {
     const found = db.prepare('SELECT id FROM session_outcomes WHERE id = ? AND repo_path = ? AND project_id IS ?').get(id, repoPath, projectId);
     if (!found) throw new ForgetError('Outcome not found in this repository and project.', 404);
+    excludeOutcomeFromMemory(db, id);
     db.prepare('DELETE FROM session_outcomes WHERE id = ? AND repo_path = ? AND project_id IS ?').run(id, repoPath, projectId);
     deleteDerived('outcome', id);
     advanceMemoryRevision(db);

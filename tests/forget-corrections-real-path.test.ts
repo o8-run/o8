@@ -10,6 +10,12 @@ vi.mock('@/lib/realtime/publisher', async importOriginal => ({
   ...await importOriginal<typeof import('@/lib/realtime/publisher')>(),
   publishCortexChange: vi.fn(async () => {}), publishRealtimeMutation: vi.fn(async () => {}),
 }));
+vi.mock('@/lib/runtime/inventory', async importOriginal => ({
+  ...await importOriginal<typeof import('@/lib/runtime/inventory')>(),
+  getRuntimeInventorySnapshot: async () => ({ agents: [] }),
+}));
+vi.mock('@/lib/orchestrator/capacity-snapshots', () => ({ capturePacketCapacitySnapshot: async () => {} }));
+vi.mock('@/lib/lane/report-claim-check', () => ({ startReportClaimCheck: () => {} }));
 const operator = 'fixture-forget-corrections-operator';
 const device = 'fixture-forget-corrections-device';
 const root = mkdtempSync(join(tmpdir(), 'o8-forget-corrections-'));
@@ -68,6 +74,47 @@ async function brainReasons() {
 }
 
 describe('selective correction recall through operator routes and persisted consumers', () => {
+  it('keeps an identical completion forgotten through recapture, reindex and restart, including fresh worker prompts', async () => {
+    const { registerRuntime } = await import('@/lib/runtimes/registry');
+    const { capturePacketCompletionContext } = await import('@/lib/orchestrator/context-relay');
+    const outcomes = await import('@/app/api/cortex/recent-outcomes/route');
+    const summary = 'recapturecanary durable parser outcome';
+    const completedAt = new Date();
+    const runtime: import('@/lib/runtimes/types').AgentRuntime = {
+      id: 'codex', displayName: 'Fixture completion',
+      capabilities: { discover: false, readTranscript: true, launch: false, resume: false,
+        interrupt: false, reviewDiffs: true, costTelemetry: false, streaming: false },
+      discoverSessions: async () => [], readTranscript: async () => [{ id: 'completion', role: 'assistant', text: summary, timestamp: completedAt }],
+      getChangedFiles: async () => [], launch: async () => ({ ok: false, note: 'fixture' }),
+      resume: async () => ({ ok: false, note: 'fixture' }), interrupt: async () => ({ ok: false, note: 'fixture' }),
+    };
+    const packetId = 'forget-recapture'; const sessionKey = 'codex:forget-recapture';
+    lanes.createLane({ repoPath: repo, branch: 'fixture', runtime: 'codex', packetId });
+    const capture = async () => {
+      registerRuntime(runtime);
+      await capturePacketCompletionContext(packetId, sessionKey);
+      await new Promise<void>(resolve => setImmediate(resolve));
+    };
+    await capture();
+    const selected = db.getSqlite().prepare('SELECT id, repo_path AS repoPath, project_id AS projectId FROM session_outcomes WHERE packet_id = ?').get(packetId) as { id: string; repoPath: string; projectId: string };
+    expect(selected).toBeDefined();
+    expect(await prompt.buildPacketPrompt(packet('fresh-before-forget'), [])).toContain(summary);
+    const inventory = () => outcomes.GET(new NextRequest('http://localhost/api/cortex/recent-outcomes?inventory=true&query=recapturecanary', { headers: { authorization: `Bearer ${operator}` } }));
+    expect((await (await inventory()).json()).outcomes.map((row: { id: string }) => row.id)).toContain(selected.id);
+    expect((await outcomes.DELETE(new NextRequest('http://localhost/api/cortex/recent-outcomes', { method: 'DELETE', body: JSON.stringify(selected) }))).status).toBe(200);
+    // Auto-review re-pulls this exact transcript and therefore computes the same outcome ID.
+    await capture();
+    db.closeDb(); db.getSqlite();
+    await capture();
+    // Rebuild the outcome FTS mirror from the durable ledger after the reopen.
+    db.getSqlite().exec("DELETE FROM outcomes_fts; INSERT INTO outcomes_fts(outcome_id, summary, plan_text) SELECT id, summary, COALESCE(plan_text, '') FROM session_outcomes");
+    expect.soft((await (await inventory()).json()).outcomes).toEqual([]);
+    expect.soft(db.getSqlite().prepare('SELECT id FROM session_outcomes WHERE id = ?').get(selected.id)).toBeUndefined();
+    const retrieved = await retrieve.retrieveAll({ question: 'recapturecanary', repoPath: repo });
+    expect.soft(JSON.stringify(retrieved.flatMap(result => result.rows))).not.toContain(summary);
+    expect.soft(await prompt.buildPacketPrompt(packet('fresh-after-forget'), [])).not.toContain(summary);
+  });
+
   it('inspects and forgets a route-recorded rejection, invalidating recall while retaining its audit and neighbors after reopen', async () => {
     const removed = await rejection('remove-feedback'); const kept = await rejection('keep-feedback');
     expect(await brainReasons()).toContain(removed.reason);
