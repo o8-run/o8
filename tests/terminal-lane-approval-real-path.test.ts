@@ -99,6 +99,17 @@ beforeEach(() => {
 afterAll(() => { closeDb(); rmSync(root, { recursive: true, force: true }); });
 
 describe('terminal lane approval through the shared route and persisted state', () => {
+  it.each(['codex', 'claude-code'] as const)('refuses a %s owned-session rebind at the atomic decision claim', async runtime => {
+    const f = fixture(runtime);
+    const adapter = await projection(f);
+    h.beforeClaim = () => { f.record.recentRuns[0].tmuxSession = 'replacement-terminal'; f.save(); };
+    expect((await resolve(f, adapter, 'reject')).status).toBe(409);
+    closeDb();
+    expect(getApproval(f.approval.id)?.status).toBe('pending');
+    expect(listApprovalEvents(f.approval.id).some(event => event.type === 'rejected')).toBe(false);
+    expect(h.perform).not.toHaveBeenCalled();
+    expect(h.launch).not.toHaveBeenCalled();
+  });
   it('refuses a replacement approval with the same timestamp at the atomic claim seam', async () => {
     const f = fixture();
     const adapter = await projection(f);

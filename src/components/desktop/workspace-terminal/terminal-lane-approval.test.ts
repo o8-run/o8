@@ -13,7 +13,7 @@ vi.mock('./XtermPanel', () => ({ XtermPanel: () => createElement('textarea', { '
 const adapter: TerminalApprovalAdapter = {
   version: 1, authority: 'lane-state', runtime: 'codex', sessionKey: 'codex-owned:one',
   terminalSession: 'terminal-one', laneId: 'lane-one', approvalId: 'approval-one', approvalUpdatedAt: 1, approvalRevision: 'approval-revision',
-  revision: 'revision-one', subjectRevision: 'subject-one', laneRevision: 'lane-revision', headSha: 'a'.repeat(40),
+  revision: 'revision-one', subjectRevision: 'subject-one', sessionRevision: 'session-one', laneRevision: 'lane-revision', headSha: 'a'.repeat(40),
   runId: 'run-one', title: 'Resume lane', summary: 'Continue after checkpoint',
 };
 let root: ReturnType<typeof createRoot> | undefined;

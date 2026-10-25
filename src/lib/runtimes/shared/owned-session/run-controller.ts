@@ -1,6 +1,6 @@
 import { createWorkerFailureHandler } from './worker-failure';
 import { assertRuntimeEffortPin } from '@/lib/orchestrator/effort-pin';
-import { assertOwnedActionFence } from './action-fence';
+import { assertOwnedActionFence, hasOwnedActionFence } from './action-fence';
 import { createCapacityRecovery } from './capacity-wait';
 import { packetCargoEnvironment } from '@/lib/worktree/cargo-target-cache';
 import { controlledProviderSandbox } from './controlled-provider-sandbox';
@@ -670,7 +670,7 @@ export function createOwnedRunController({
           const bridgeEnv = ownedSpawnEnvironment(session, spawnEnv, true);
           const hasProviderCredentials = Object.entries(bridgeEnv).some(([name, value]) => value && providerCredentialName(name));
           // Credential-bearing launches require policy validation at OS spawn.
-          if (!useSupervisor && !hasProviderCredentials && !workerMcp.configPath && workerMcp.servers.length === 0 && process.platform !== 'win32' && session.executionPolicy === undefined && !carrierLaunch.carried && !crashSurvivableWorkersEnabled()) {
+          if (!hasOwnedActionFence() && !useSupervisor && !hasProviderCredentials && !workerMcp.configPath && workerMcp.servers.length === 0 && process.platform !== 'win32' && session.executionPolicy === undefined && !carrierLaunch.carried && !crashSurvivableWorkersEnabled()) {
             try {
               const result = await spawnBridgeTerminalSession({
                 sessionName: bridgeSessionName,

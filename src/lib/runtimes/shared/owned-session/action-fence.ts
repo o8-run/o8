@@ -8,6 +8,9 @@ const fence = new AsyncLocalStorage<{
   validate: (session: OwnedSessionRecord | null) => Promise<void>;
 }>();
 
+/** Bridge transport cannot carry this process-local reviewed-subject predicate. */
+export function hasOwnedActionFence(): boolean { return fence.getStore()?.active === true; }
+
 export function withOwnedActionFence<T>(surfaceId: string, validate: (session: OwnedSessionRecord | null) => Promise<void>, operation: () => Promise<T>): Promise<T> {
   const context = { active: true, surfaceId, validate };
   return fence.run(context, async () => {

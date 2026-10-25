@@ -11,6 +11,7 @@ export interface TerminalApprovalAdapter {
   approvalRevision: string;
   revision: string;
   subjectRevision: string;
+  sessionRevision: string;
   laneRevision: string;
   headSha: string;
   runId: string;
@@ -24,6 +25,6 @@ export function isTerminalApprovalAdapter(value: unknown): value is TerminalAppr
   return item.version === 1 && item.authority === 'lane-state'
     && (item.runtime === 'codex' || item.runtime === 'claude-code')
     && typeof item.approvalUpdatedAt === 'number' && Number.isSafeInteger(item.approvalUpdatedAt)
-    && ['sessionKey', 'terminalSession', 'laneId', 'approvalId', 'approvalRevision', 'revision', 'subjectRevision', 'laneRevision', 'headSha', 'runId', 'title', 'summary']
+    && ['sessionKey', 'terminalSession', 'laneId', 'approvalId', 'approvalRevision', 'revision', 'subjectRevision', 'sessionRevision', 'laneRevision', 'headSha', 'runId', 'title', 'summary']
       .every(key => typeof item[key] === 'string' && Boolean((item[key] as string).trim()));
 }

@@ -35,8 +35,9 @@ import { requireDesktopAccount } from '@/lib/auth/desktop-account';
 import { getChatGPTPlanService } from '@/lib/chatgpt-plan/service';
 import { ChatGPTPlanError } from '@/lib/chatgpt-plan/types';
 import { isTerminalApprovalAdapter } from '@/lib/terminal-status/approval-adapter';
-import { assertTerminalApprovalSubject, readTerminalApprovalAdapter, terminalApprovalClaimMatches, terminalApprovalLaneMatches } from '@/lib/terminal-status/approval-adapter-server';
+import { TerminalApprovalChangedError, assertTerminalApprovalSpawnClaim, assertTerminalApprovalSubject, readTerminalApprovalAdapter, terminalApprovalClaimMatches, terminalApprovalLaneMatches } from '@/lib/terminal-status/approval-adapter-server';
 import { withOwnedActionFence } from '@/lib/runtimes/shared/owned-session/action-fence';
+import { withOwnedActionGuard } from '@/lib/runtimes/shared/owned-session/action-admission';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -463,7 +464,9 @@ export async function POST(request: NextRequest) {
       const target = terminalAdapter;
       const result = await withOwnedActionFence(target.sessionKey,
         session => assertTerminalApprovalSubject(target, session),
-        () => performRuntimeAction({ action: 'steer', surfaceId: target.sessionKey, message: 'Continue the previous task. Check what was done and what remains.', steerSource: 'operator' }));
+        () => withOwnedActionGuard((_session, preparedRunId) => assertTerminalApprovalSpawnClaim(target, preparedRunId),
+          () => performRuntimeAction({ action: 'steer', surfaceId: target.sessionKey, message: 'Continue the previous task. Check what was done and what remains.', steerSource: 'operator' })))
+        .catch(error => { if (error instanceof TerminalApprovalChangedError) return { ok: false, note: error.message }; throw error; });
       decisionNote = result.note;
       continuationOutcome = result.ok ? 'completed' : 'failed';
       if (result.ok && terminalApprovalLaneMatches(target)) {
