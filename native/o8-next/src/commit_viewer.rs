@@ -48,6 +48,10 @@ impl Commit {
                 s.revision += 1;
                 cx.notify();
             }),
+            cx.observe(&message, |s, _, cx| {
+                s.revision += 1;
+                cx.notify();
+            }),
         ];
         Self {
             client,
@@ -104,6 +108,10 @@ impl Commit {
         }
         let hash = self.hash_input.read(cx).text.trim().to_owned();
         if !(7..=40).contains(&hash.len()) || !hash.bytes().all(|b| b.is_ascii_hexdigit()) {
+            self.data = Value::Null;
+            self.compare = Value::Null;
+            self.patch = None;
+            self.show_patch = false;
             self.notice = "Invalid commit hash".into();
             cx.notify();
             return;
