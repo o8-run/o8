@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, mkdir, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -36,10 +36,14 @@ async function collect(transport: ReturnType<typeof createBudgetedPiTestTranspor
 describe('managed Pi live-test budget boundary', () => {
   it('refuses any model other than the verified live contract before any route or request', async () => {
     const f = await fixture(); let calls = 0;
-    initializePiTestBudget(f.ledgerPath, 1_000_000, O8_MANAGED_FLASH_LITE_CONTRACT);
-    const transport = createBudgetedPiTestTransport({ model, ledgerPath: f.ledgerPath, workspace: f.workspace,
-      resolveRoute: async () => { calls++; return route(); }, fetch: async () => { calls++; return answer(); } });
-    await expect(collect(transport)).rejects.toThrow('does not match the trusted billing contract'); expect(calls).toBe(0);
+    // Stay inside the verified contract window so the model check is what refuses.
+    vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(O8_MANAGED_FLASH_LITE_CONTRACT.expiresAt - 86_400_000);
+    try {
+      initializePiTestBudget(f.ledgerPath, 1_000_000, O8_MANAGED_FLASH_LITE_CONTRACT);
+      const transport = createBudgetedPiTestTransport({ model, ledgerPath: f.ledgerPath, workspace: f.workspace,
+        resolveRoute: async () => { calls++; return route(); }, fetch: async () => { calls++; return answer(); } });
+      await expect(collect(transport)).rejects.toThrow('does not match the trusted billing contract'); expect(calls).toBe(0);
+    } finally { vi.useRealTimers(); }
   });
   it('reserves conservative complete-request cost before real SDK worker fetch and persists across sessions', async () => {
     const f = await fixture(); const c = contract(); initializePiTestBudget(f.ledgerPath, 40_000, c);
