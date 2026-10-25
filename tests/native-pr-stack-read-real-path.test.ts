@@ -243,10 +243,19 @@ describe('target PR native stack read through the real route and SQLite', () => 
     expect(await context()).toMatchObject({ status: 'offline', stale: true, snapshot: null });
   });
 
-  it.each([401, 403, 404, 429, 503, 'offline'] as const)('keeps %s distinct from no stack and labels retained data stale', async (reason) => {
+  it('fences retained installation data when a child 404 establishes public access, then reports the anonymous 404', async () => {
+    expect(await context()).toMatchObject({ status: 'ready', snapshot: { number: 7 } });
+    closeDb(); failure = 404;
+    // Public metadata changes the scope mid-read. Keep the existing fence;
+    // the next refresh establishes anonymous authority before reading stacks.
+    expect(await context()).toMatchObject({ status: 'unauthorized', stale: true, snapshot: null });
+    expect(await context()).toMatchObject({ status: 'unsupported_or_not_found', stale: true, snapshot: null });
+  });
+
+  it.each([401, 403, 429, 503, 'offline'] as const)('keeps %s distinct from no stack and labels retained data stale', async (reason) => {
     await context(); closeDb(); failure = reason;
     const expected = reason === 'offline' ? 'offline' : reason === 401 || reason === 403 ? 'unauthorized'
-      : reason === 404 ? 'unsupported_or_not_found' : reason === 429 ? 'deferred' : 'unavailable';
+      : reason === 429 ? 'deferred' : 'unavailable';
     expect(await context()).toMatchObject({ status: expected, stale: true, snapshot: reason === 401 || reason === 403 || reason === 429 || reason === 'offline' ? null : { number: 7 } });
   });
 
