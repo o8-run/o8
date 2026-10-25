@@ -5,6 +5,7 @@ import path from 'node:path';
 
 import { getDataDir } from '@/lib/data-dir-migration';
 import { getSqlite } from '@/lib/db';
+import { refreshCloseProcessObservation } from '@/lib/runtime/close-process-observation';
 import { captureWorktreeMaterializationIdentity, assertWorktreeMaterializationIdentity,
   type WorktreeMaterializationIdentity } from '@/lib/worktree/materialization-identity';
 import { probeMetadataLockProcessIdentity } from '@/lib/worktree/metadata-lock-process-identity';
@@ -261,6 +262,8 @@ export async function retireGeneratedOutput(resourceId: string,
       await purgeExactDirectory(claim.claimPath, resource.output!, undefined,
         async (candidatePath, captured) => {
           if (!captured) throw new Error('Generated-output purge requires a captured process witness.');
+          // The paused native helper did not exist in the earlier owner observation.
+          refreshCloseProcessObservation();
           await verifyAuthority(resource, candidatePath, claim!, captured);
         }, async candidatePath => {
           assertExactManagedFinalizationClaim(claim!);

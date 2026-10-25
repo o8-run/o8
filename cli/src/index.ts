@@ -1,4 +1,5 @@
 import { runPrStack } from './commands/pr-stack.js';
+import { runWorkspaceCleanup } from './commands/workspace-cleanup.js';
 import { runNext } from './commands/next.js';
 import { runSetup } from './commands/setup.js';
 /**
@@ -312,6 +313,8 @@ commands:
   project remove-repo <project> <repo>  detach it while preserving registration and disk
   project delete <target>               remove a project and exclusive repo registrations; disk is preserved
   pr-stack --repo owner/repo --number N  read native PR layers, revisions and provenance
+  workspace-cleanup preview --repo <path>  review completed owned work and retained recovery
+  workspace-cleanup execute --plan <id> --approve <fingerprint> --entry <id>  execute that exact selection; status --plan <id> reads its receipt
   problem list         recurring problems detected across independent work (--all includes suppressed)
   problem show <id>    full evidence, remedy, and closure state for one problem dossier
   plugin list          list reviewed executable actions [--plugin ID]
@@ -503,6 +506,8 @@ async function dispatch(args: ParsedArgs): Promise<number> {
       return runProject(args.mode, secondary, args.rest);
     case 'pr-stack':
       return runPrStack(args.mode, singleLevelArgs(secondary, args.rest, args.secondaryBeforeRest));
+    case 'workspace-cleanup':
+      return runWorkspaceCleanup(args.mode, secondary, args.rest);
     case 'problem':
       return runProblem(args.mode, secondary, args.rest);
     case 'plugin':
