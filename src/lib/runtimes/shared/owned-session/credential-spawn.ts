@@ -8,6 +8,7 @@ import { guardedWorkspaceInvocation } from '@/lib/worktree/materialization-execu
 import { assertControlledLaunchGrantCurrent } from '@/lib/mcp/task-execution-admission';
 import { ownedSpawnEnvironment } from './restricted-spawn-env';
 import { assertOwnedActionAdmission } from './action-admission';
+import { assertPacketRecoveryAdmission } from './packet-recovery-admission';
 import type { OwnedSessionRecord } from './types';
 import { withChildEnvironment } from '@/lib/providers/child-process';
 import { reserveWorkLaunch } from '@/lib/app-update/work-launch-admission';
@@ -42,6 +43,7 @@ function withCheckedLaunch<T>(input: LaunchInput, create: (launch: { command: st
       ? bindDeferredCodexMcpLaunch(env, input.args, input.mcpServers ?? [], build) : build(input.args);
     assertControlledLaunchGrantCurrent(input.session);
     assertOwnedActionAdmission(input.session, input.runId);
+    assertPacketRecoveryAdmission(input.session);
     return create(launch, env);
   });
 }

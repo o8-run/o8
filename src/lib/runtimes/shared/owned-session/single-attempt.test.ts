@@ -180,6 +180,40 @@ describe('durable single-attempt owned workers', () => {
     expect(saved().executionPolicy).toBeUndefined();
   }, 10_000);
 
+  it.each(['failure', 'compatibility'] as const)('holds %s recovery of a stopped packet without a provider thread', async (kind) => {
+    const { createOwnedSessionStore } = await import('./store');
+    const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
+    const { writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
+    const runtime = adapter();
+    const fallback = runtime.modelCompatibilityFallback;
+    runtime.modelCompatibilityFallback = undefined;
+    runtime.parseRunLog = () => ({ entries: [], outcome: 'failed', completedTurn: false });
+    // Workspace ownership has its own real materialization test above this
+    // layer; this fixture isolates retry admission and real Node execution.
+    const store = createOwnedSessionStore(runtime, { workspaceSpawnGuard: async () => ({ status: 'available', source: 'no-snapshot' }) });
+    const result = await store.launch({ ...request(), executionPolicy: undefined });
+    await settled();
+    const held = saved();
+    held.packetId = `packet-no-thread-${kind}`; delete held.threadId;
+    held.autoRetry = kind === 'failure';
+    writeFileSync(sessionFile(), JSON.stringify(held));
+    writeOrchestratorControlPlaneState({ ...createEmptyOrchestratorMissionState(), missionId: held.packetId, repoPath: repo,
+      packets: [{ id: held.packetId, referenceLabel: 'P1', title: 'Stopped packet', summary: 'Synthetic recovery.',
+        workspaceTargetPath: repo, branchTarget: 'main',
+        dependencyLabels: [], dependencyPacketIds: [], runtime: 'codex', status: 'blocked', queueState: 'held',
+        releaseState: 'pending', operatorStopped: true, blockedReason: 'operator_stopped', lane: null }] });
+    if (kind === 'compatibility') runtime.modelCompatibilityFallback = fallback;
+    const before = readFileSync(counter, 'utf8');
+    await store.getReviewPacket(result.surfaceId);
+    // Observe the delayed retry as well as synchronous compatibility recovery.
+    await new Promise(resolve => setTimeout(resolve, 100));
+    expect(readFileSync(counter, 'utf8')).toBe(before);
+    expect(saved()).toMatchObject({ model: held.model, recentRuns: held.recentRuns });
+    expect(saved().retryCount).toBe(held.retryCount);
+    expect(runtime.chooseRetryModel).not.toHaveBeenCalled();
+    if (runtime.modelCompatibilityFallback) expect(runtime.modelCompatibilityFallback).not.toHaveBeenCalled();
+  }, 10_000);
+
   it('holds an uncertain published attempt after sync failure without spawning or replenishing it', async () => {
     const { createOwnedSessionStore } = await import('./store');
     const actual = await vi.importActual<typeof import('node:fs')>('node:fs');

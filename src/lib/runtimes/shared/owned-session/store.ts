@@ -13,7 +13,8 @@ import { ownedSupervisorClient } from '@/lib/runtime/o8d-supervisor';
 import path from 'node:path';
 import { registerOwnedSessionLifecycle } from '../owned-session-lifecycle';
 import { assertAutomaticRecoveryGeneration, requestedAutomaticRecoveryRun, registerOwnedRecoveryStore } from './automatic-recovery';
-import { assertOwnedActionAdmission, holdPendingOwnedCorrections } from './action-admission';
+import { assertPacketRecoveryAdmission, PacketRecoveryRefusedError } from './packet-recovery-admission';
+import { assertOwnedActionAdmission, holdPendingOwnedCorrections, withAdditionalOwnedActionGuard } from './action-admission';
 import { randomUUID } from 'node:crypto';
 import { OwnedArtifactAdmissionError, withOwnedArtifactAdmission } from './artifact-admission';
 
@@ -294,15 +295,21 @@ export function createOwnedSessionStore(
 
   async function resume(surfaceId: string, prompt: string) {
     try {
-      return await withSurfaceLock(surfaceId, () => withOwnedArtifactAdmission(root, () => resumeInner(surfaceId, prompt)));
+      return await withSurfaceLock(surfaceId, () => withOwnedArtifactAdmission(root, async () => {
+        const current = await io.findSession(surfaceId) ?? await io.findArchivedSession(surfaceId);
+        return current?.packetId || current?.workspaceBinding?.packetId
+          ? withAdditionalOwnedActionGuard(() => assertPacketRecoveryAdmission(current), () => resumeInner(surfaceId, prompt))
+          : resumeInner(surfaceId, prompt);
+      }));
     } catch (error) {
-      if (error instanceof OwnedArtifactAdmissionError) return { ok: false, note: error.message, sideEffect: error.sideEffect };
+      if (error instanceof OwnedArtifactAdmissionError || error instanceof PacketRecoveryRefusedError) return { ok: false, note: error.message, sideEffect: error.sideEffect };
       throw error;
     }
   }
 
   async function resumeInner(surfaceId: string, prompt: string) {
     let session = await io.findSession(surfaceId);
+    assertPacketRecoveryAdmission(session);
     await assertOwnedActionFence(surfaceId, session);
     if (session) assertRuntimeEffortPin(runtimeId, session.model, session.effort);
     assertOwnedActionAdmission(session);
@@ -319,6 +326,7 @@ export function createOwnedSessionStore(
 
     if (!session) {
       const archived = await io.findArchivedSession(surfaceId);
+      assertPacketRecoveryAdmission(archived);
       if (archived) assertRuntimeEffortPin(runtimeId, archived.model, archived.effort);
       refuseOwnedSingleAttemptResume(archived);
       if (archived?.threadId) {

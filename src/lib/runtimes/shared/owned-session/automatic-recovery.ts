@@ -3,6 +3,8 @@ import { ownedRoots, readOwnedSessionRecord } from '../owned-session-index';
 import { createOwnedSessionIo, type OwnedSessionIo } from './session-io';
 import type { OwnedSessionRecord } from './types';
 import { refuseOwnedSingleAttemptResume } from './execution-policy';
+import { withAdditionalOwnedActionGuard } from './action-admission';
+import { packetRecoveryRefusal } from './packet-recovery-admission';
 
 export class AutomaticRecoveryRefusedError extends Error {}
 
@@ -31,10 +33,12 @@ export async function readOwnedRecoveryState(surfaceId: string, options?: { incl
   const io = store?.io ?? createOwnedSessionIo({ root: root.root, surfacePrefix: root.marker, invalidateFleetCache: () => {} });
   const live = await io.findSession(surfaceId).catch(() => null);
   const session = live ?? (options?.includeArchived ? await readOwnedSessionRecord(surfaceId) : null);
+  const heldReason = packetRecoveryRefusal(session);
   return { owned: true as const, runId: session ? currentRecoveryRun(session)?.id : undefined,
     startedAt: session ? currentRecoveryRun(session)?.startedAt : undefined,
     finishedAt: session ? currentRecoveryRun(session)?.finishedAt : undefined,
-    automaticRecoveryAllowed: Boolean(live && live.executionPolicy === undefined),
+    automaticRecoveryAllowed: Boolean(live && live.executionPolicy === undefined && !heldReason),
+    heldReason,
     outcome: session ? currentRecoveryRun(session)?.outcome : undefined,
     interrupted: session ? recoveryInterrupted(session) : false };
 }
@@ -47,6 +51,12 @@ export function assertAutomaticRecoveryGeneration(session: OwnedSessionRecord | 
     || currentRecoveryRun(session)?.id !== runId || recoveryInterrupted(session)) {
     throw new AutomaticRecoveryRefusedError('Automatic recovery refused: the current run changed or was interrupted. Use an explicit resume.');
   }
+  assertPacketRecovery(session);
+}
+
+function assertPacketRecovery(session: OwnedSessionRecord | null): void {
+  const reason = packetRecoveryRefusal(session);
+  if (reason) throw new AutomaticRecoveryRefusedError(reason);
 }
 
 export function requestedAutomaticRecoveryRun(surfaceId: string): string | undefined {
@@ -56,10 +66,15 @@ export function requestedAutomaticRecoveryRun(surfaceId: string): string | undef
 }
 
 export function withAutomaticRecoveryRequest<T>(surfaceId: string, runId: string, operation: () => Promise<T>): Promise<T> {
-  if (![...stores.keys()].some(prefix => surfaceId.startsWith(prefix))) {
+  const store = [...stores.entries()].find(([prefix]) => surfaceId.startsWith(prefix))?.[1];
+  if (!store) {
     throw new AutomaticRecoveryRefusedError('Automatic recovery refused: the owned session lock is unavailable.');
   }
-  return recoveryRequest.run({ surfaceId, runId }, operation);
+  return recoveryRequest.run({ surfaceId, runId }, async () => {
+    const session = await store.io.findSession(surfaceId);
+    assertAutomaticRecoveryGeneration(session, runId);
+    return withAdditionalOwnedActionGuard(() => assertPacketRecovery(session), operation);
+  });
 }
 
 /** A restrictive generation fence, never an authorization or an explicit resume. */
@@ -70,6 +85,8 @@ export async function withOwnedAutomaticRecovery<T>(surfaceId: string, runId: st
     const current = await store.io.findSession(surfaceId);
     refuseOwnedSingleAttemptResume(current);
     assertAutomaticRecoveryGeneration(current, runId);
-    return operation();
+    // A fresh-session retry still belongs to the original packet. Carry its
+    // admission through preparation and the final synchronous spawn check.
+    return withAdditionalOwnedActionGuard(() => assertPacketRecovery(current), operation);
   });
 }

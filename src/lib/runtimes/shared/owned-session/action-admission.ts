@@ -9,9 +9,20 @@ const admission = new AsyncLocalStorage<Admission>();
 type ActionGuard = (session: OwnedSessionRecord | null, preparedRunId?: string) => void;
 const actionGuard = new AsyncLocalStorage<ActionGuard>();
 
+export function hasOwnedActionGuard(): boolean { return Boolean(actionGuard.getStore()); }
+
 /** Keep a queued operator intent fenced through asynchronous spawn preparation. */
 export function withOwnedActionGuard<T>(check: ActionGuard, action: () => Promise<T>): Promise<T> {
   return actionGuard.run(check, action);
+}
+
+/** Add a restriction while preserving the caller's subject/launch admission. */
+export function withAdditionalOwnedActionGuard<T>(check: ActionGuard, action: () => Promise<T>): Promise<T> {
+  const parent = actionGuard.getStore();
+  return actionGuard.run((session, preparedRunId) => {
+    parent?.(session, preparedRunId);
+    check(session, preparedRunId);
+  }, action);
 }
 
 /** Assert only the surrounding action guard, including before lane attachment. */

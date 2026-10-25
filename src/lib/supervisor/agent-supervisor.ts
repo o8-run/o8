@@ -282,7 +282,7 @@ export async function ingestAgentCompletionSignal(surfaceId: string, runId?: str
   const watched = watchedAgents.get(surfaceId);
   if (!watched || !callbacks) return false;
   const current = await readOwnedRecoveryState(surfaceId);
-  if (current.owned && (current.interrupted || current.outcome !== 'finished' || (runId && runId !== current.runId))) return true;
+  if (current.owned && (current.heldReason || current.interrupted || current.outcome !== 'finished' || (runId && runId !== current.runId))) return true;
   await handleStatusChange(watched, 'finished', Date.now());
   return true;
 }
@@ -444,7 +444,7 @@ async function pollWatchedAgent(
 
   const recovery = await readOwnedRecoveryState(watched.surfaceId);
   const currentStatus = recovery.owned
-    ? recovery.interrupted ? 'interrupted' : !recovery.runId ? 'unavailable' : resolveStatus(runtimeAgent, watched, now)
+    ? recovery.interrupted ? 'interrupted' : recovery.heldReason ? 'held' : !recovery.runId ? 'unavailable' : resolveStatus(runtimeAgent, watched, now)
     : resolveStatus(runtimeAgent, watched, now);
 
   if (currentStatus === 'finished' && !watched.completionReported) {

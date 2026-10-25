@@ -13,7 +13,8 @@ import { revokeControlledGateway } from '@/lib/claude-code/controlled-gateway';
 import { mintReadOnlyWorkerToken, revokeReadOnlyWorkerToken } from '@/lib/auth/read-only-worker-token';
 import { ownedSpawnEnvironment } from './restricted-spawn-env';
 import { withControlledTaskSpawn } from '@/lib/mcp/task-execution-admission';
-import { assertOwnedActionAdmission } from './action-admission';
+import { assertOwnedActionAdmission, hasOwnedActionGuard } from './action-admission';
+import { assertPacketRecoveryAdmission } from './packet-recovery-admission';
 import { withOwnedArtifactAdmission } from './artifact-admission';
 import { createFailureRetry } from './failure-retry';
 import { assertOwnedSingleAttemptSpawn, assertDurableOwnedSpawn } from './execution-policy';
@@ -460,6 +461,7 @@ export function createOwnedRunController({
   }
 
   async function spawnOwnedRunInner(session: OwnedSessionRecord, prompt: string, mode: OwnedRunMode) {
+    assertPacketRecoveryAdmission(session);
     assertRuntimeEffortPin(runtimeId, session.model, session.effort);
     assertOwnedSingleAttemptSpawn(session, runtimeId, mode);
     await ensureDir(path.join(session.sessionDir, RUNS_DIR));
@@ -670,7 +672,7 @@ export function createOwnedRunController({
           const bridgeEnv = ownedSpawnEnvironment(session, spawnEnv, true);
           const hasProviderCredentials = Object.entries(bridgeEnv).some(([name, value]) => value && providerCredentialName(name));
           // Credential-bearing launches require policy validation at OS spawn.
-          if (!hasOwnedActionFence() && !useSupervisor && !hasProviderCredentials && !workerMcp.configPath && workerMcp.servers.length === 0 && process.platform !== 'win32' && session.executionPolicy === undefined && !carrierLaunch.carried && !crashSurvivableWorkersEnabled()) {
+          if (!hasOwnedActionFence() && !hasOwnedActionGuard() && !session.packetId && !session.workspaceBinding?.packetId && !useSupervisor && !hasProviderCredentials && !workerMcp.configPath && workerMcp.servers.length === 0 && process.platform !== 'win32' && session.executionPolicy === undefined && !carrierLaunch.carried && !crashSurvivableWorkersEnabled()) {
             try {
               const result = await spawnBridgeTerminalSession({
                 sessionName: bridgeSessionName,
