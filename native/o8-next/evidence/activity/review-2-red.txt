@@ -1,0 +1,23 @@
+running 3 tests
+test shell::activity::tests::activity_fork_commit_clicks_expand_the_selected_repository ...
+thread 'shell::activity::tests::activity_fork_commit_clicks_expand_the_selected_repository' (119223) panicked at src/surfaces/activity/tests.rs:477:5:
+assertion `left == right` failed: Both forks must have independently addressable GPUI row controls
+  left: 1
+ right: 2
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+test shell::activity::tests::activity_fork_commits_keep_their_own_ci_badges ... ok
+test shell::activity::tests::activity_fork_keyboard_focus_stays_on_the_selected_row ...
+thread 'shell::activity::tests::activity_fork_keyboard_focus_stays_on_the_selected_row' (119325) panicked at src/surfaces/activity/tests.rs:523:5:
+assertion `left == right` failed: Opening another fork must keep keyboard focus on its repository-qualified row
+  left: Some("commit-example/activity-fork-ddddddd")
+ right: None
+FAILED
+
+failures:
+
+failures:
+    shell::activity::tests::activity_fork_commit_clicks_expand_the_selected_repository
+    shell::activity::tests::activity_fork_keyboard_focus_stays_on_the_selected_row
+
+test result: FAILED. 1 passed; 2 failed; 0 ignored; 0 measured; 90 filtered out; finished in 8.54s

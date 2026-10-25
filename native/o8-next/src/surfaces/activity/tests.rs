@@ -104,7 +104,7 @@ fn activity_feed_details_filters_and_links(cx: &mut TestAppContext) {
             .any(|p| p == "/repos/example/activity/actions/runs/91"),
         "CI details must stay lazy"
     );
-    interactions.push(activity_click(cx, "activity-row-ci-91"));
+    interactions.push(activity_click(cx, "activity-row-ci-example/activity-91"));
     assert!(cx.debug_bounds("activity-ci-job-0").is_some());
     activity_click(cx, "activity-ci-retry");
     activity_click(cx, "activity-open-run");
@@ -118,7 +118,7 @@ fn activity_feed_details_filters_and_links(cx: &mut TestAppContext) {
         Some("https://github.com/example/activity/pull/7")
     );
     activity_click(cx, "activity-filter-pr");
-    activity_click(cx, "activity-row-pr-7");
+    activity_click(cx, "activity-row-pr-example/activity-7");
     assert!(cx.debug_bounds("activity-pr-file-0").is_some());
     activity_click(cx, "activity-open-pr");
     assert_eq!(
@@ -126,17 +126,17 @@ fn activity_feed_details_filters_and_links(cx: &mut TestAppContext) {
         Some("https://github.com/example/activity/pull/7")
     );
     activity_click(cx, "activity-filter-issue");
-    activity_click(cx, "activity-row-issue-8");
+    activity_click(cx, "activity-row-issue-example/activity-8");
     activity_click(cx, "activity-open-issue");
     assert_eq!(
         cx.opened_url().as_deref(),
         Some("https://github.com/example/activity/issues/8")
     );
     activity_click(cx, "activity-filter-commit");
-    activity_click(cx, "activity-row-commit-ddddddd");
+    activity_click(cx, "activity-row-commit-example/activity-ddddddd");
     activity_click(cx, "activity-open-commit");
     activity_click(cx, "activity-filter-packet");
-    activity_click(cx, "activity-row-packet-activity-packet");
+    activity_click(cx, "activity-row-packet-local-activity-packet");
     activity_click(cx, "activity-open-worker");
     ready(&shell, cx);
     assert!(matches!(
@@ -169,7 +169,7 @@ fn activity_ci_refusal_retains_details_and_manual_retry(cx: &mut TestAppContext)
     let (shell, mut visual, _) = activity_open(&fixture, cx);
     let cx = &mut visual;
     activity_click(cx, "activity-filter-ci");
-    activity_click(cx, "activity-row-ci-91");
+    activity_click(cx, "activity-row-ci-example/activity-91");
     let _: Value = fixture
         .client
         .get("/api/activity-fixture", &[("mode", "refused")])
@@ -181,8 +181,8 @@ fn activity_ci_refusal_retains_details_and_manual_retry(cx: &mut TestAppContext)
         "A refused refresh retains last known CI details"
     );
     let before: Value = fixture.client.get("/api/activity-fixture", &[]).unwrap();
-    activity_click(cx, "activity-row-ci-91");
-    activity_click(cx, "activity-row-ci-91");
+    activity_click(cx, "activity-row-ci-example/activity-91");
+    activity_click(cx, "activity-row-ci-example/activity-91");
     let after: Value = fixture.client.get("/api/activity-fixture", &[]).unwrap();
     assert_eq!(
         before["calls"], after["calls"],
@@ -228,7 +228,7 @@ fn activity_packet_hold_release_and_stop_mission(cx: &mut TestAppContext) {
     let (_, mut visual, _) = activity_open(&fixture, cx);
     let cx = &mut visual;
     activity_click(cx, "activity-filter-packet");
-    activity_click(cx, "activity-row-packet-activity-queued");
+    activity_click(cx, "activity-row-packet-local-activity-queued");
     activity_click(cx, "activity-hold");
     let state: Value = fixture.client.get("/api/orchestrator/state", &[]).unwrap();
     assert_eq!(state["mission"]["packets"][0]["queueState"], "held");
@@ -265,7 +265,7 @@ fn activity_stop_replays_lost_response_with_one_identity(cx: &mut TestAppContext
     let cx = &mut visual;
     let view = activity_view(&shell, cx);
     activity_click(cx, "activity-filter-packet");
-    activity_click(cx, "activity-row-packet-activity-queued");
+    activity_click(cx, "activity-row-packet-local-activity-queued");
     activity_click(cx, "activity-hold");
     activity_click(cx, "activity-release");
     let _: Value = fixture
@@ -326,7 +326,7 @@ fn activity_empty_local_auth_and_scoped_retention(cx: &mut TestAppContext) {
         Client::authenticated(&fixture.origin, Some("fixture-invalid-operator".into())).unwrap();
     view.update(cx, |v, _| v.client = unauthorized);
     activity_click(cx, "activity-filter-packet");
-    activity_click(cx, "activity-row-packet-activity-queued");
+    activity_click(cx, "activity-row-packet-local-activity-queued");
     activity_click(cx, "activity-hold");
     assert!(view.read_with(cx, |v, _| v.notice.contains("HTTP 401")));
     let state: Value = fixture.client.get("/api/orchestrator/state", &[]).unwrap();
@@ -404,7 +404,7 @@ fn activity_short_commit_prefix_keeps_ci_detail_reachable(cx: &mut TestAppContex
     activity_click(cx, "activity-filter-ci");
     // Desktop groups equal normalized SHAs. A seven-character commit prefix
     // must not absorb a forty-character CI identity and hide its detail action.
-    activity_click(cx, "activity-row-ci-91");
+    activity_click(cx, "activity-row-ci-example/activity-91");
     assert!(cx.debug_bounds("activity-ci-job-0").is_some());
 }
 
@@ -444,5 +444,106 @@ fn activity_fork_commits_keep_their_own_ci_badges(cx: &mut TestAppContext) {
             ),
         ]),
         "Forks sharing a SHA must retain separate commit rows and repository-owned CI badges"
+    );
+}
+
+fn activity_open_fork_commits(
+    cx: &mut TestAppContext,
+) -> (Fixture, Entity<Shell>, VisualTestContext, Vec<feed::Row>) {
+    let fixture = Fixture::start_mode(false, "--activity --activity-forks");
+    let (shell, mut visual, _) = activity_open(&fixture, cx);
+    activity_click(&mut visual, "activity-scope-all");
+    activity_click(&mut visual, "activity-filter-commit");
+    let view = activity_view(&shell, &mut visual);
+    let rows = view.read_with(&visual, |view, _| {
+        view.rows
+            .iter()
+            .filter(|row| row.kind == "commit" && row.id == "ddddddd")
+            .cloned()
+            .collect::<Vec<_>>()
+    });
+    assert_eq!(rows.len(), 2);
+    assert_ne!(rows[0].repo, rows[1].repo);
+    (fixture, shell, visual, rows)
+}
+
+#[gpui::test]
+fn activity_fork_commit_clicks_expand_the_selected_repository(cx: &mut TestAppContext) {
+    let (_fixture, shell, mut visual, rows) = activity_open_fork_commits(cx);
+    let view = activity_view(&shell, &mut visual);
+    let row_ids = view.read_with(&visual, |view, _| {
+        view.controls.iter().filter_map(|(id, action)| {
+            matches!(action, pane::Action::Expand(row) if row.kind == "commit" && row.id == "ddddddd")
+                .then_some(id.clone())
+        }).collect::<std::collections::BTreeSet<_>>()
+    });
+    assert_eq!(
+        row_ids.len(),
+        2,
+        "Both forks must have independently addressable GPUI row controls"
+    );
+    for row in &rows {
+        let selector = match row.repo.as_deref() {
+            Some("example/activity") => "activity-row-commit-example/activity-ddddddd",
+            Some("example/activity-fork") => "activity-row-commit-example/activity-fork-ddddddd",
+            _ => panic!("unexpected fixture repository"),
+        };
+        draw(&mut visual);
+        let bounds = visual.debug_bounds(selector).expect("fork commit control");
+        visual.simulate_click(bounds.center(), gpui::Modifiers::default());
+        visual.run_until_parked();
+        draw(&mut visual);
+        assert_eq!(
+            view.read_with(&visual, |view, _| view.expanded.clone()),
+            Some(row.key()),
+            "Clicking a fork must expand that repository's commit"
+        );
+        let url = row.url().unwrap();
+        assert!(view.read_with(&visual, |view, _| view.controls.iter().any(
+            |(_, action)| { matches!(action, pane::Action::Link(target) if target == &url) }
+        )));
+    }
+    visual.simulate_keystrokes("space");
+    draw(&mut visual);
+    assert_eq!(
+        view.read_with(&visual, |view, _| view.expanded.clone()),
+        None,
+        "A clicked fork must also own the keyboard selection"
+    );
+}
+
+#[gpui::test]
+fn activity_fork_keyboard_focus_stays_on_the_selected_row(cx: &mut TestAppContext) {
+    let (_fixture, shell, mut visual, rows) = activity_open_fork_commits(cx);
+    let view = activity_view(&shell, &mut visual);
+    let first = view.read_with(&visual, |view, _| {
+        view.controls.iter().position(|(_, action)| {
+            matches!(action, pane::Action::Expand(row) if row.key() == rows[0].key())
+        }).unwrap()
+    });
+    visual.simulate_keystrokes("escape");
+    for _ in 0..=first {
+        visual.simulate_keystrokes("tab");
+    }
+    visual.simulate_keystrokes("enter");
+    draw(&mut visual);
+    assert_eq!(
+        view.read_with(&visual, |view, _| view.expanded.clone()),
+        Some(rows[0].key())
+    );
+    // Skip the first commit's link, then open the second row. Its position moves
+    // when the first detail closes; the next Space must still act on that row.
+    visual.simulate_keystrokes("tab tab enter");
+    draw(&mut visual);
+    assert_eq!(
+        view.read_with(&visual, |view, _| view.expanded.clone()),
+        Some(rows[1].key())
+    );
+    visual.simulate_keystrokes("space");
+    draw(&mut visual);
+    assert_eq!(
+        view.read_with(&visual, |view, _| view.expanded.clone()),
+        None,
+        "Opening another fork must keep keyboard focus on its repository-qualified row"
     );
 }

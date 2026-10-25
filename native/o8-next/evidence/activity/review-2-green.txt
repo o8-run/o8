@@ -1,0 +1,42 @@
+test shell::activity::tests::activity_ci_refusal_retains_details_and_manual_retry ... ok
+test shell::activity::tests::activity_empty_local_auth_and_scoped_retention ... ok
+test shell::activity::tests::activity_fork_commit_clicks_expand_the_selected_repository ... ok
+test shell::activity::tests::activity_fork_commits_keep_their_own_ci_badges ... ok
+test shell::activity::tests::activity_fork_keyboard_focus_stays_on_the_selected_row ... ok
+test shell::activity::tests::activity_loading_error_and_keyboard_controls ... ok
+test shell::activity::tests::activity_packet_hold_release_and_stop_mission ... ok
+test shell::activity::tests::activity_palette_reaches_native_pane ... ok
+test shell::activity::tests::activity_short_commit_prefix_keeps_ci_detail_reachable ... ok
+test shell::activity::tests::activity_stop_replays_lost_response_with_one_identity ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 82 filtered out; finished in 31.59s
+
+Full native suite:
+test result: ok. 90 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 656.30s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+Full npm test:
+Test Files  1242 passed | 3 skipped (1245)
+Tests  9056 passed | 5 skipped (9061)
+
+Typecheck fast and tsc with 8 GiB heap, Clippy (0 Activity diagnostics), Rust formatting, ESLint, classification and rule-check passed.
+Classification: 1238 hermetic; 899 resource-owning.
+
+Final rebase: eb715fd1c. All 11 Activity tests passed again.
+Latest full native run (unchanged Issues paint-wait test failed once):
+test result: FAILED. 89 passed; 1 failed; 3 ignored; 0 measured; 0 filtered out; finished in 770.61s
+Isolated Issues test rerun, without source changes:
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 92 filtered out; finished in 2.90s
+Native CLI tests:
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+Latest full npm test:
+Test Files  1242 passed | 3 skipped (1245)
+Tests  9057 passed | 5 skipped (9062)
+Typecheck fast, tsc (8 GiB heap), Clippy, ESLint, rule-check and classification passed again after rebasing.
+Classification: 1238 hermetic; 899 resource-owning; 78 isolated dated-fixture tests passed.

@@ -72,7 +72,7 @@ impl Row {
         )
     }
     pub fn selector(&self) -> String {
-        format!("activity-row-{}-{}", self.kind, self.id)
+        format!("activity-row-{}", self.key())
     }
     pub fn url(&self) -> Option<String> {
         let repo = self.repo.as_deref().filter(|s| valid_slug(s))?;

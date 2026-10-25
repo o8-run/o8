@@ -12,7 +12,8 @@ impl ActivityPane {
         cx: &mut Context<Self>,
     ) -> gpui::Stateful<gpui::Div> {
         let id = id.into();
-        let selected = self.keyboard == Some(self.controls.len());
+        let selected = self.keyboard.as_ref() == Some(&id);
+        let control_id = id.clone();
         self.controls.push((id.clone(), action.clone()));
         div()
             .id(SharedString::from(id.clone()))
@@ -33,6 +34,7 @@ impl ActivityPane {
             .child(label.into())
             .on_click(cx.listener(move |this, _, window, cx| {
                 this.focus(window);
+                this.keyboard = Some(control_id.clone());
                 this.act(action.clone(), cx);
             }))
     }

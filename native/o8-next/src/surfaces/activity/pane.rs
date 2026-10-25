@@ -57,7 +57,7 @@ pub struct ActivityPane {
     stop_identity: Option<(String, String)>,
     pub(super) focus: FocusHandle,
     pub(super) controls: Vec<(String, Action)>,
-    pub(super) keyboard: Option<usize>,
+    pub(super) keyboard: Option<String>,
     pub(super) revision: u64,
     pub(super) painted: std::rc::Rc<std::cell::Cell<u64>>,
 }
@@ -366,20 +366,25 @@ impl ActivityPane {
             return;
         }
         match event.keystroke.key.as_str() {
-            "tab" | "down" => {
+            "tab" | "down" | "up" => {
                 let length = self.controls.len().max(1);
-                self.keyboard = Some(if event.keystroke.modifiers.shift {
-                    self.keyboard.unwrap_or(0).wrapping_add(length - 1) % length
+                let current = self
+                    .keyboard
+                    .as_ref()
+                    .and_then(|id| self.controls.iter().position(|(control, _)| control == id));
+                let index = if event.keystroke.key == "up" || event.keystroke.modifiers.shift {
+                    current.unwrap_or(0).wrapping_add(length - 1) % length
                 } else {
-                    self.keyboard.map(|i| (i + 1) % length).unwrap_or(0)
-                });
-            }
-            "up" => {
-                let length = self.controls.len().max(1);
-                self.keyboard = Some((self.keyboard.unwrap_or(0) + length - 1) % length);
+                    current.map(|index| (index + 1) % length).unwrap_or(0)
+                };
+                self.keyboard = self.controls.get(index).map(|(id, _)| id.clone());
             }
             "enter" | "space" => {
-                if let Some((_, action)) = self.keyboard.and_then(|i| self.controls.get(i)).cloned()
+                if let Some((_, action)) = self
+                    .keyboard
+                    .as_ref()
+                    .and_then(|id| self.controls.iter().find(|(control, _)| control == id))
+                    .cloned()
                 {
                     self.act(action, cx);
                 }

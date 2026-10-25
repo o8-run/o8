@@ -54,3 +54,38 @@ batch passes 26 tests and hits one transient 400 in the unchanged composer worke
 test; its isolated rerun passes. The same failure and isolated recovery are
 recorded in [main's registration evidence](../../evidence/surface-registration/verification.md).
 The worker host returns before surface discovery; its source is unchanged.
+
+## Correction round 2: repository-qualified row controls
+
+GPUI row IDs and selectors now use the existing repository-qualified row key.
+Expansion, selected controls and keyboard focus therefore address the same
+repository/row pair. Keyboard focus stores a control ID and resolves its current
+position when moving, so closing the first fork's detail cannot move focus onto
+the second fork's commit link. Clicking a row also selects its control ID.
+
+Two new fixture-server GPUI regressions cover independent fork controls, clicking
+each fork's commit and link, and Tab/Enter/Space navigation while details change
+the control order. Red: one distinct control for two repositories, and Space
+leaves the second fork expanded. Green: all 11 Activity tests pass, including the
+existing repository-owned CI badge regression. Captured tails are in
+[review-2-red.txt](../../evidence/activity/review-2-red.txt) and
+[review-2-green.txt](../../evidence/activity/review-2-green.txt).
+
+The `Client::activity_request` dependency through `client.rs` remains in its
+existing location, with implementation in `surfaces/activity/transport.rs`.
+Removing that shared-client exception is tracked separately in #4695; this
+correction leaves the request transport unchanged.
+
+Completion gates for correction round 2 pass: full native 90 unit/GPUI and 7 CLI
+tests (3 existing measurement workloads ignored); full npm 1,242 files and 9,056
+tests (3 files and 5 tests skipped); typecheck fast and tsc with an 8 GiB heap;
+Clippy with no Activity diagnostics; touched-file ESLint, rule-check, Rust
+formatting and classification (1,238 hermetic / 899 resource-owning).
+
+After rebasing onto `eb715fd1c`, all 11 Activity tests pass again. The latest full
+native run has 89 passed and one failure in the unchanged Issues paint-wait test
+`round1_repository_switch_survives_a_frame_between_mouse_events`; its isolated
+rerun passes without source changes. All 7 CLI tests pass separately. The latest
+full npm suite passes 1,242 files and 9,057 tests, with 3 files / 5 tests skipped.
+Both typechecks, Clippy, ESLint, rule-check and classification pass again;
+classification also passes all 78 isolated date-fixture tests introduced by main.
