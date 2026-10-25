@@ -1,29 +1,32 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parse } from 'smol-toml';
 import { expect, it } from 'vitest';
+import { cleanupPostshipOutputs } from '../scripts/postship-cleanup.mjs';
 
-it.runIf(process.platform === 'darwin')('keeps matching crash symbols outside stripped universal release executables', () => {
+it.runIf(process.platform === 'darwin')('keeps matching crash symbols outside stripped universal release executables and after cleanup', async () => {
   const manifest = readFileSync('src-tauri/Cargo.toml', 'utf8');
   const profile = (parse(manifest).profile as Record<string, Record<string, unknown>>).release;
   expect(profile).toMatchObject({ strip: 'symbols', 'codegen-units': 1, debug: 1, 'split-debuginfo': 'packed' });
-  expect(['thin', 'fat']).toContain(profile.lto);
+  expect(profile.lto).toBe('thin');
   expect(profile.panic).not.toBe('abort');
   const root = mkdtempSync(join(tmpdir(), 'o8-release-symbols-'));
+  const retained = mkdtempSync(join(tmpdir(), 'o8-retained-symbols-'));
   try {
     mkdirSync(join(root, 'src'));
     writeFileSync(join(root, 'src/main.rs'), '#[inline(never)]\nfn crash_symbol_marker(value: u64) -> u64 { std::hint::black_box(value) }\nfn main() { std::hint::black_box(crash_symbol_marker(42)); }\n');
     const release = manifest.match(/\[profile\.release\][\s\S]*?(?=\n\[|$)/)?.[0];
-    writeFileSync(join(root, 'Cargo.toml'), `[package]\nname = "symbol-fixture"\nversion = "0.0.0"\nedition = "2021"\n${release}\n`);
+    writeFileSync(join(root, 'Cargo.toml'), `[package]\nname = "o8"\nversion = "0.0.0"\nedition = "2021"\n${release}\n`);
     const slices: string[] = [];
     const uuids: string[] = [];
+    const addresses: Array<{ architecture: string; uuid: string; address: string; dwarfName: string }> = [];
     for (const triple of ['aarch64-apple-darwin', 'x86_64-apple-darwin']) {
       execFileSync('cargo', ['build', '--release', '--offline', '--target', triple, '--target-dir', join(root, 'target')], {
         cwd: root, stdio: 'pipe',
       });
-      const binary = join(root, 'target', triple, 'release', 'symbol-fixture');
+      const binary = join(root, 'target', triple, 'release', 'o8');
       const uuid = execFileSync('dwarfdump', ['--uuid', binary], { encoding: 'utf8' }).split(' ')[1];
       uuids.push(uuid);
       const dsym = `${binary}.dSYM`;
@@ -38,16 +41,32 @@ it.runIf(process.platform === 'darwin')('keeps matching crash symbols outside st
       const address = symbols.split('\n').find(line => line.includes('crash_symbol_marker'))?.trim().split(/\s+/)[0];
       expect(address).toMatch(/^[a-f0-9]+$/i);
       const architecture = triple.startsWith('aarch64') ? 'arm64' : 'x86_64';
+      addresses.push({ architecture, uuid, address: address!, dwarfName });
       expect(execFileSync('atos', ['-o', dwarf, '-arch', architecture, `0x${address}`], { encoding: 'utf8' }))
         .toContain('crash_symbol_marker');
       slices.push(binary);
     }
-    const universal = join(root, 'o8');
+    const universal = join(root, 'target/universal-apple-darwin/release/o8');
+    mkdirSync(join(root, 'target/universal-apple-darwin/release'), { recursive: true });
     execFileSync('lipo', ['-create', ...slices, '-output', universal]);
     const universalUuids = execFileSync('dwarfdump', ['--uuid', universal], { encoding: 'utf8' });
     expect(universalUuids.trim().split('\n')).toHaveLength(2);
     for (const uuid of uuids) expect(universalUuids).toContain(uuid);
+    mkdirSync(join(root, 'src-tauri'));
+    renameSync(join(root, 'target'), join(root, 'src-tauri/target'));
+    writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 'o8', version: '0.0.0' }));
+    expect((await cleanupPostshipOutputs(root, { symbolsRoot: retained })).refused).toEqual([]);
+    expect(readdirSync(join(root, 'src-tauri'))).not.toContain('target');
+    for (const { architecture, uuid, address, dwarfName } of addresses) {
+      const directory = join(retained, '0.0.0', architecture, uuid);
+      const [digest] = readdirSync(directory);
+      const dsym = join(directory, digest, 'o8.dSYM');
+      expect(execFileSync('dwarfdump', ['--uuid', dsym], { encoding: 'utf8' })).toContain(uuid);
+      expect(execFileSync('atos', ['-o', join(dsym, 'Contents/Resources/DWARF', dwarfName), '-arch', architecture, `0x${address}`], { encoding: 'utf8' }))
+        .toContain('crash_symbol_marker');
+    }
   } finally {
     rmSync(root, { recursive: true, force: true });
+    rmSync(retained, { recursive: true, force: true });
   }
 }, 120_000);

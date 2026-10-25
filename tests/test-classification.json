@@ -4726,7 +4726,8 @@
     {
       "path": "tests/postship-cleanup.test.ts",
       "reasons": [
-        "child-process"
+        "child-process",
+        "executable-fixture"
       ]
     },
     {
