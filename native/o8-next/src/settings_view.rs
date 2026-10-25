@@ -333,11 +333,12 @@ impl Settings {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let title = match &editor.target {
-            Target::Field(field) => field.label,
+            Target::Field(field, _) => field.label,
             Target::Key(_) => "Enter a new provider key",
             Target::File(_) => "Edit settings.toml",
         };
         let file = matches!(editor.target, Target::File(_));
+        let field = matches!(editor.target, Target::Field(_, _));
         let mut actions = div()
             .flex()
             .flex_wrap()
@@ -360,23 +361,40 @@ impl Settings {
                 cx,
                 |this, window, cx| this.cancel(window, cx),
             ));
-        if file {
-            actions = actions.child(self.button(
-                "settings-file-reload".into(),
-                "Reload file".into(),
-                !self.busy,
-                false,
-                window,
-                cx,
-                |this, _, cx| this.load(true, cx),
-            ));
+        if file || field {
+            actions = actions.child(
+                self.button(
+                    "settings-file-reload".into(),
+                    if file {
+                        "Reload file"
+                    } else {
+                        "Reload setting"
+                    }
+                    .into(),
+                    !self.busy,
+                    false,
+                    window,
+                    cx,
+                    |this, window, cx| {
+                        if let Some(Editor {
+                            target: Target::Field(field, _),
+                            ..
+                        }) = this.editor.clone()
+                        {
+                            this.edit(field, window, cx);
+                        } else {
+                            this.load(true, cx);
+                        }
+                    },
+                ),
+            );
         }
         let input = match editor.input {
             Input::Text(input) => input.into_any_element(),
             Input::Secret(input) => input.into_any_element(),
         };
         div().flex().flex_col().gap(px(16.)).child(title).child(actions)
-            .when(file, |v| v.child(div().text_size(px(11.)).text_color(theme().text_muted).child("Shift+Enter inserts a line. Save checks for edits made by another app. Reload replaces this draft.")))
+            .when(file, |v| v.child(div().text_size(px(11.)).text_color(theme().text_muted).child("Only declared settings are shown. Additional entries stay on the server and are preserved on save. Shift+Enter inserts a line. Reload replaces this draft.")))
             .when(matches!(editor.target, Target::Key(_)), |v| v.child(div().text_size(px(11.)).text_color(theme().text_muted).child("Saved keys are never displayed. The new key leaves this input on Save.")))
             .child(div().id("settings-editor").debug_selector(|| "settings-editor".into())
                 .on_mouse_down(gpui::MouseButton::Left, cx.listener(|this, _, window, cx| {
@@ -389,9 +407,30 @@ impl Render for Settings {
         if self.open_file && !self.busy {
             self.open_file = false;
             if let Some(toml) = self.snapshot.as_ref().and_then(|s| s.toml.as_ref()) {
-                let text = toml.text.clone();
-                let revision = toml.revision.clone();
-                self.begin(Target::File(revision), &text, window, cx);
+                if toml.error.is_none() {
+                    let text = toml.text.clone();
+                    let revision = toml.revision.clone();
+                    self.begin(Target::File(revision), &text, window, cx);
+                }
+            }
+        }
+        if !self.busy {
+            if let Some(field) = self.open_field.take() {
+                if !self.locked(field) {
+                    if let Some(snapshot) = &self.snapshot {
+                        if let Some(toml) = &snapshot.toml {
+                            let revision = toml.revision.clone();
+                            let value = &snapshot.values[field.id];
+                            let text = match field.kind {
+                                Kind::Number(scale, _) => {
+                                    (value.as_f64().unwrap_or(0.) * scale).to_string()
+                                }
+                                _ => value.as_str().unwrap_or("").into(),
+                            };
+                            self.begin(Target::Field(field, revision), &text, window, cx);
+                        }
+                    }
+                }
             }
         }
         let revision = self.revision;
@@ -423,6 +462,13 @@ impl Render for Settings {
             cx,
             |this, _, cx| this.load(true, cx),
         );
+        let additional = match self.snapshot.as_ref().and_then(|s| s.toml.as_ref()) {
+            Some(t) if t.error.is_none() && t.additional_settings_set => {
+                "Additional TOML entries: set"
+            }
+            Some(t) if t.error.is_none() => "Additional TOML entries: not set",
+            _ => "Additional TOML entries: unavailable",
+        };
         let mut navigation = div()
             .w(px(200.))
             .flex_shrink_0()
@@ -513,6 +559,12 @@ impl Render for Settings {
                     .items_center()
                     .child(div().flex_1().child("Settings"))
                     .child(file)
+                    .child(
+                        div()
+                            .text_size(px(11.))
+                            .text_color(theme().text_muted)
+                            .child(additional),
+                    )
                     .child(refresh)
                     .child(close),
             )

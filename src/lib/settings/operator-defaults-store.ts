@@ -93,13 +93,14 @@ export async function loadOperatorDefaultsFiles(
     return withExplicitRuntime(parseOperatorDefaultsToml(await readFile(getOperatorDefaultsTomlPath(), 'utf8')));
   } catch (error) {
     if (!isMissingFile(error)) {
-      console.error('[operator-defaults] Invalid settings.toml; using last-good defaults:', error);
+      // Parser errors can quote source lines containing saved credentials.
+      console.error('[operator-defaults] Invalid settings.toml; using last-good defaults.');
     }
     try {
       return parseLegacy(await readFile(getLegacyOperatorDefaultsPath(), 'utf8'));
     } catch (fallbackError) {
       if (!isMissingFile(fallbackError)) {
-        console.error('[operator-defaults] Failed to read last-good operator defaults:', fallbackError);
+        console.error('[operator-defaults] Failed to read last-good operator defaults.');
       }
       return {};
     }
@@ -113,13 +114,13 @@ export function loadOperatorDefaultsFilesSync(
     return withExplicitRuntime(parseOperatorDefaultsToml(readFileSync(getOperatorDefaultsTomlPath(), 'utf8')));
   } catch (error) {
     if (!isMissingFile(error)) {
-      console.error('[operator-defaults] Invalid settings.toml during sync read; using last-good defaults:', error);
+      console.error('[operator-defaults] Invalid settings.toml during sync read; using last-good defaults.');
     }
     try {
       return parseLegacy(readFileSync(getLegacyOperatorDefaultsPath(), 'utf8'));
     } catch (fallbackError) {
       if (!isMissingFile(fallbackError)) {
-        console.error('[operator-defaults] Failed to read last-good operator defaults during sync read:', fallbackError);
+        console.error('[operator-defaults] Failed to read last-good operator defaults during sync read.');
       }
       return {};
     }
@@ -167,7 +168,7 @@ export async function readLegacyOperatorDefaults(): Promise<string | null> {
     return await readFile(getLegacyOperatorDefaultsPath(), 'utf8');
   } catch (error) {
     if (!isMissingFile(error)) {
-      console.error('[operator-defaults] Failed to read existing operator defaults:', error);
+      console.error('[operator-defaults] Failed to read existing operator defaults.');
     }
     return null;
   }

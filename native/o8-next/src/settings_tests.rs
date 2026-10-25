@@ -529,3 +529,6 @@ fn settings_fixture_toml_save_reload_conflict_and_cancel(cx: &mut TestAppContext
     click(cx, "settings-cancel");
     assert_eq!(values(&fixture)["parallelCap"], 6);
 }
+
+#[path = "settings_review_tests.rs"]
+mod review;

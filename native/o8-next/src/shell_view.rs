@@ -11,12 +11,15 @@ impl Render for Shell {
             .as_ref()
             .map(|s| s.clone().into_any_element())
             .or_else(|| {
-                active.as_ref().and_then(|t| self.content.get(&self.key(t))).map(|c| match c {
-                    Content::Brain(brain) => brain.clone().into_any_element(),
-                    Content::Session(s) => s.clone().into_any_element(),
-                    Content::Grid(g) => g.clone().into_any_element(),
-                    Content::Inbox(inbox) => inbox.clone().into_any_element(),
-                })
+                active
+                    .as_ref()
+                    .and_then(|t| self.content.get(&self.key(t)))
+                    .map(|c| match c {
+                        Content::Brain(brain) => brain.clone().into_any_element(),
+                        Content::Session(s) => s.clone().into_any_element(),
+                        Content::Grid(g) => g.clone().into_any_element(),
+                        Content::Inbox(inbox) => inbox.clone().into_any_element(),
+                    })
             });
         div()
             .size_full()

@@ -14,9 +14,15 @@ struct Fixture {
     origin: String,
 }
 impl Fixture {
-    fn new() -> Self { Self::mode(false, false) }
-    fn brain() -> Self { Self::mode(true, false) }
-    fn start(settings: bool) -> Self { Self::mode(false, settings) }
+    fn new() -> Self {
+        Self::mode(false, false)
+    }
+    fn brain() -> Self {
+        Self::mode(true, false)
+    }
+    fn start(settings: bool) -> Self {
+        Self::mode(false, settings)
+    }
     fn mode(brain: bool, settings: bool) -> Self {
         let root = std::env::temp_dir().join(format!(
             "o8-shell-{}-{}",
@@ -40,10 +46,17 @@ impl Fixture {
                 "--composer",
                 "--shell",
             ]);
-        if brain { process.arg("--brain"); }
-        if settings { process.arg("--settings"); }
+        if brain {
+            process.arg("--brain");
+        }
+        if settings {
+            process.arg("--settings");
+        }
         let mut server = process
-            .env("O8_NEXT_BRAIN_REQUEST_LOG", root.join("brain-requests.json"))
+            .env(
+                "O8_NEXT_BRAIN_REQUEST_LOG",
+                root.join("brain-requests.json"),
+            )
             .env("O8_NEXT_API_TOKEN", "fixture-shell-bearer")
             .stdout(Stdio::piped())
             .stderr(Stdio::from(
@@ -52,7 +65,8 @@ impl Fixture {
             .spawn()
             .unwrap();
         let mut lines = BufReader::new(server.stdout.take().unwrap()).lines();
-        let origin = lines.by_ref()
+        let origin = lines
+            .by_ref()
             .find_map(|line| {
                 serde_json::from_str::<Value>(&line.ok()?).ok()?["origin"]
                     .as_str()

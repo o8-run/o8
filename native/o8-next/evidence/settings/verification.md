@@ -1,6 +1,8 @@
 # Settings fixture verification
 
-This partial Settings port is opt-in through the existing app shell. The installed Tauri client and its startup are unchanged. See [the full control parity table](parity.md) for every ported row and the missing desktop controls.
+This partial Settings port is opt-in through the existing app shell. The shipped entry point and startup selection remain Tauri. The desktop presentation watcher also reconciles shared quiet-mode and notification changes. See [the full control parity table](parity.md) for every ported row and the missing desktop controls.
+
+See [correction round 1](review-round-1.md) for the security, live-presentation, stale-edit regressions and verification after rebasing onto current main. The receipts below describe the initial implementation.
 
 ## Real entry points and red/green evidence
 

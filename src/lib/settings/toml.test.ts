@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { parse } from 'smol-toml';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const dataDir = mkdtempSync(join(tmpdir(), 'o8-settings-toml-'));
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
@@ -354,4 +354,26 @@ mode = "keep-me"
       error: expect.stringContaining('use an environment variable or keychain for authenticated endpoints'),
     });
   });
+});
+
+
+it('keeps stored TOML credentials out of native error responses and recovery logs', async () => {
+  const canary = ['fixture-private', 'parse-canary'].join('-');
+  await applyToml(`[operator]\nparallel_cap = 3\n[accepted_table]\ntoken = "${canary}"\n`);
+  // A direct file edit can leave valid stored credentials beside broken syntax.
+  writeFileSync(tomlPath, `[accepted_table]\ntoken = "${canary}" trailing-invalid-text\n`);
+  const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+  try {
+    const response = await GET(new Request('http://127.0.0.1/api/panel/operator-defaults?include=native'));
+    expect(response.status).toBe(200);
+    const payload = await response.json();
+    expect(JSON.stringify(payload).includes(canary)).toBe(false);
+    expect(payload.settingsToml.text).toBe('');
+    expect(payload.settingsToml.error).toBeTruthy();
+    const { getOperatorDefaultsSync } = await import('@/lib/operator/defaults');
+    expect(getOperatorDefaultsSync().values.parallelCap).toBe(3);
+    expect(log.mock.calls.flat().map(String).join(' ').includes(canary)).toBe(false);
+  } finally {
+    log.mockRestore();
+  }
 });

@@ -48,7 +48,7 @@ async function invokeQuietMode(command: string, args?: Record<string, unknown>):
   if (!isTauriRuntime()) return null;
   try {
     const { invoke } = await import('@tauri-apps/api/core');
-    return await invoke<{ active?: boolean }>(command, args);
+    return await invoke<{ active?: boolean } | void>(command, args) ?? {};
   } catch (error) {
     console.warn(`[quiet-mode] ${command} failed`, error);
     return null;
@@ -90,7 +90,7 @@ interface PresentationValues {
 
 async function readPersistedPresentation(): Promise<PresentationValues | null> {
   try {
-    const response = await fetch('/api/panel/operator-defaults', { cache: 'no-store' });
+    const response = await fetch('/api/panel/operator-defaults?include=presentation', { cache: 'no-store' });
     if (!response.ok) return null;
     const payload = await response.json() as { values?: PresentationValues };
     return payload.values ?? null;
@@ -191,11 +191,46 @@ export function watchQuietMode(): () => void {
       .catch((error) => console.warn('[quiet-mode] listen failed', error));
   }
 
-  void loadQuietMode();
+  // Other clients write the same settings route. Hydration alone leaves Rust
+  // flags and React presentation stale for the rest of this app's lifetime.
+  // Reconcile the presentation values route while the dashboard is mounted;
+  // serialize reads so an older response cannot undo a newer one.
+  let reading: Promise<void> | null = null;
+  // Native recording controls may temporarily override quiet mode. Apply only
+  // changes to the persisted preference after the initial hydration.
+  let previous: PresentationValues | null = null;
+  const reconcile = (): Promise<void> => {
+    if (disposed) return Promise.resolve();
+    if (reading) return reading;
+    reading = (async () => {
+      const values = await readPersistedPresentation();
+      if (!values || disposed) return;
+      const quiet = values.presentationQuietMode === true;
+      const notifications = values.notificationsReviewReady !== 'off';
+      if (!previous || previous.notificationsReviewReady !== values.notificationsReviewReady) {
+        if (!await syncReviewNotificationSetting(notifications)) return;
+      }
+      if (disposed) return;
+      if (!previous || previous.presentationQuietMode !== values.presentationQuietMode) {
+        const native = await invokeQuietMode('presentation_quiet_mode_set', { active: quiet });
+        if (disposed || isTauriRuntime() && !native) return;
+        primeQuietMode(typeof native?.active === 'boolean' ? native.active : quiet);
+        emitToDocument(active);
+      }
+      previous = values;
+    })().finally(() => { reading = null; });
+    return reading;
+  };
+  const onFocus = () => reconcile();
+  window.addEventListener('focus', onFocus);
+  const timer = window.setInterval(onFocus, 1000);
+  void reconcile();
 
   return () => {
     disposed = true;
     window.removeEventListener(DOM_EVENT, onDom);
+    window.removeEventListener('focus', onFocus);
+    window.clearInterval(timer);
     disposeTauri?.();
   };
 }
@@ -205,8 +240,9 @@ export function watchQuietMode(): () => void {
  * `notify_review_ready` can honour it (#2150). Safe to call on every settings
  * load; the Rust side just stores the last value it was told.
  */
-export async function syncReviewNotificationSetting(enabled: boolean): Promise<void> {
-  await invokeQuietMode('set_review_notifications_enabled', { enabled });
+export async function syncReviewNotificationSetting(enabled: boolean): Promise<boolean> {
+  const native = await invokeQuietMode('set_review_notifications_enabled', { enabled });
+  return !isTauriRuntime() || native !== null;
 }
 
 /** Test seam: forget hydration so a suite can drive the store from scratch. */

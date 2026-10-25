@@ -10,7 +10,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{cell::Cell, collections::BTreeMap, rc::Rc};
 
-const DEFAULTS: &str = "/api/panel/operator-defaults";
+const DEFAULTS: &str = "/api/panel/operator-defaults?include=native";
 const KEYS: &str = "/api/v2/keys";
 #[derive(Debug)]
 pub(crate) struct RequestError {
@@ -29,6 +29,9 @@ pub(crate) struct Toml {
     text: String,
     revision: String,
     error: Option<String>,
+    // Required: an older server returning raw TOML must fail closed.
+    #[serde(rename = "additionalSettingsSet")]
+    additional_settings_set: bool,
 }
 // Deliberately no maskedKey, key, token, label, environment, or credential fields.
 #[derive(Debug, Deserialize)]
@@ -88,7 +91,7 @@ enum Data {
 }
 #[derive(Clone)]
 enum Target {
-    Field(&'static Field),
+    Field(&'static Field, String),
     Key(String),
     File(String),
 }
@@ -117,6 +120,7 @@ pub(crate) struct Settings {
     note: String,
     conflict: bool,
     open_file: bool,
+    open_field: Option<&'static Field>,
     focus: FocusHandle,
     controls: BTreeMap<String, FocusHandle>,
     subscriptions: Vec<gpui::Subscription>,
@@ -146,6 +150,7 @@ impl Settings {
             note: String::new(),
             conflict: false,
             open_file: false,
+            open_field: None,
             focus,
             controls: BTreeMap::new(),
             subscriptions: vec![subscription],
@@ -206,12 +211,13 @@ impl Settings {
                     && self
                         .editor
                         .as_ref()
-                        .is_some_and(|e| matches!(e.target, Target::File(_)));
+                        .is_some_and(|e| matches!(e.target, Target::File(_) | Target::Field(_, _)));
                 if mutation {
                     self.uncertain = error.status.is_none();
                 }
                 self.error = Some(error.message);
                 self.open_file = false;
+                self.open_field = None;
             }
         }
         self.changed(cx);
@@ -227,11 +233,7 @@ impl Settings {
             });
             Ok(Data::Keys(inventory, false))
         } else {
-            let data: Snapshot = client.settings_request(
-                "GET",
-                "/api/panel/operator-defaults?include=values",
-                Value::Null,
-            )?;
+            let data: Snapshot = client.settings_request("GET", DEFAULTS, Value::Null)?;
             if data.values.is_empty() {
                 return Err(RequestError {
                     status: Some(502),
@@ -325,13 +327,11 @@ impl Settings {
         if self.locked(field) {
             return;
         }
-        let value = &self.snapshot.as_ref().unwrap().values[field.id];
-        let text = match field.kind {
-            Kind::Number(scale, _) => (value.as_f64().unwrap_or(0.) * scale).to_string(),
-            _ => value.as_str().unwrap_or("").into(),
-        };
-        self.begin(Target::Field(field), &text, window, cx);
+        let _ = window;
+        self.open_field = Some(field);
+        self.load(false, cx);
     }
+
     fn write(&mut self, method: &'static str, keys: bool, body: Value, cx: &mut Context<Self>) {
         if self.busy || self.uncertain {
             return;
@@ -350,7 +350,12 @@ impl Settings {
                 })?;
                 if let Data::Keys(_, warning) = &mut result { *warning = receipt.warning.is_some(); }
                 Ok(result)
-            } else { client.settings_request(method, DEFAULTS, body).map(Data::Defaults) }
+            } else {
+                let _: serde::de::IgnoredAny = client.settings_request(method, DEFAULTS, body)?;
+                Self::read(&client, false).map_err(|_| RequestError {
+                    status: None, message: "The change was accepted, but current settings are unavailable. Refresh before trying again.".into(),
+                })
+            }
         });
         cx.spawn(async move |this, cx| {
             let result = task.await;
@@ -361,7 +366,17 @@ impl Settings {
     }
     fn set(&mut self, field: &'static Field, value: Value, cx: &mut Context<Self>) {
         if !self.locked(field) {
-            self.write("POST", false, json!({field.id:value}), cx);
+            let revision = self
+                .snapshot
+                .as_ref()
+                .and_then(|s| s.toml.as_ref())
+                .map(|t| t.revision.clone());
+            self.write(
+                "POST",
+                false,
+                json!({field.id:value,"settingsTomlRevision":revision}),
+                cx,
+            );
         }
     }
     fn save(&mut self, cx: &mut Context<Self>) {
@@ -376,8 +391,17 @@ impl Settings {
             Input::Secret(input) => input.update(cx, |s, cx| s.take(cx)),
         };
         match editor.target {
-            Target::Field(field) => match field.parse(&text) {
-                Ok(value) => self.set(field, value, cx),
+            Target::Field(field, revision) => match field.parse(&text) {
+                Ok(value) => {
+                    if !self.locked(field) {
+                        self.write(
+                            "POST",
+                            false,
+                            json!({field.id:value,"settingsTomlRevision":revision}),
+                            cx,
+                        );
+                    }
+                }
                 Err(error) => {
                     self.error = Some(error);
                     self.changed(cx);
@@ -409,6 +433,7 @@ impl Settings {
             return;
         }
         self.editor = None;
+        self.open_field = None;
         self.confirm = None;
         self.conflict = false;
         self.error = None;

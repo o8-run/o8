@@ -37,6 +37,9 @@ it('uses operator auth for both existing routes and rejects worker or missing au
   for (const authorization of ['', 'Bearer fixture-invalid-worker']) {
     for (const [path, method, body] of [
       ['/api/panel/operator-defaults?include=values', 'GET', undefined],
+      ['/api/panel/operator-defaults?include=native', 'GET', undefined],
+      ['/api/panel/operator-defaults?include=presentation', 'GET', undefined],
+      ['/api/panel/operator-defaults?include=native', 'POST', { branchPrefix: 'unauthorized' }],
       ['/api/panel/operator-defaults', 'POST', { branchPrefix: 'unauthorized' }],
       ['/api/v2/keys', 'GET', undefined],
       ['/api/v2/keys', 'POST', { provider: 'openai', key: 'fixture-unauthorized' }],
@@ -86,4 +89,54 @@ it('persists encrypted fixture keys, reports presence, and uses the existing ena
     const removed = await (await call('/api/v2/keys')).json();
     expect(removed.providers.find((p: { id: string }) => p.id === provider).configured).toBe(false);
   }
+});
+
+it('projects native TOML at the server boundary and preserves hidden credentials across both kinds of saves', async () => {
+  const previous = await (await call('/api/panel/operator-defaults?include=values')).json();
+  const canary = ['fixture-private', 'canary-value'].join('-');
+  const raw = `[operator]\nparallel_cap = 3\n# ${canary}\n[accepted_table]\ntoken = "${canary}"\n[targeting.triage]\nruntime = "codex"\nmodel = ""\neffort = "medium"\ntoken = "${canary}"\n`;
+  expect((await call('/api/panel/operator-defaults', 'POST', { settingsToml: raw, settingsTomlRevision: previous.settingsToml.revision })).status).toBe(200);
+  const native = await (await call('/api/panel/operator-defaults?include=native')).json();
+  expect(JSON.stringify(native).includes(canary)).toBe(false);
+  expect(native.settingsToml.additionalSettingsSet).toBe(true);
+  expect(native.settingsToml.text).toContain('parallel_cap = 3');
+  expect(native.values.targetingTriage).toEqual({ runtime: 'codex', model: '', effort: 'medium' });
+  const saved = await call('/api/panel/operator-defaults?include=native', 'POST', {
+    parallelCap: 5, settingsTomlRevision: native.settingsToml.revision,
+  });
+  expect(saved.status).toBe(200);
+  expect(await saved.json()).toEqual({ ok: true });
+  const refreshed = await (await call('/api/panel/operator-defaults?include=native')).json();
+  expect(JSON.stringify(refreshed).includes(canary)).toBe(false);
+  const replaced = await call('/api/panel/operator-defaults?include=native', 'POST', {
+    settingsToml: '[operator]\nparallel_cap = 6\n', settingsTomlRevision: refreshed.settingsToml.revision,
+  });
+  expect(replaced.status).toBe(200);
+  expect(await replaced.json()).toEqual({ ok: true });
+  const ordinary = await (await call('/api/panel/operator-defaults?include=values')).json();
+  expect(ordinary.values.parallelCap).toBe(6);
+  expect(ordinary.settingsToml.text.includes(canary)).toBe(true);
+  const refused = await call('/api/panel/operator-defaults?include=native', 'POST', {
+    settingsToml: raw, settingsTomlRevision: ordinary.settingsToml.revision,
+  });
+  expect(refused.status).toBe(400);
+  expect((await refused.text()).includes(canary)).toBe(false);
+  const presentation = await (await call('/api/panel/operator-defaults?include=presentation')).json();
+  expect(Object.keys(presentation.values).sort()).toEqual(['notificationsReviewReady', 'presentationQuietMode']);
+  expect(JSON.stringify(presentation).includes(canary)).toBe(false);
+});
+
+it('serializes competing native field saves at their original revision instead of retrying over a newer setting', async () => {
+  const before = await (await call('/api/panel/operator-defaults?include=native')).json();
+  const responses = await Promise.all(['native-first', 'native-second'].map(branchPrefix => call(
+    '/api/panel/operator-defaults?include=native', 'POST', { branchPrefix, settingsTomlRevision: before.settingsToml.revision },
+  )));
+  expect(responses.map(response => response.status).sort()).toEqual([200, 409]);
+  const after = await (await call('/api/panel/operator-defaults?include=native')).json();
+  const winner = responses[0].status === 200 ? 'native-first' : 'native-second';
+  expect(after.values.branchPrefix).toBe(winner);
+  expect(readFileSync(join(configDir, 'settings.toml'), 'utf8')).toContain(`branch_prefix = "${winner}"`);
+  const missingRevision = await call('/api/panel/operator-defaults?include=native', 'POST', { branchPrefix: 'unguarded' });
+  expect(missingRevision.status).toBe(400);
+  expect((await (await call('/api/panel/operator-defaults?include=native')).json()).values.branchPrefix).toBe(winner);
 });

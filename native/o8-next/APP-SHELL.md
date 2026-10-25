@@ -28,7 +28,11 @@ Settings opens from the shell's Settings button, the Open settings command, or
 Ctrl+, / Cmd+,. This partial port edits shared server defaults, provider keys and
 revision-checked settings.toml. It works without a saved workspace. Values are
 read from the existing routes; credentials are write-only and never enter shell
-state. See the [control parity table](evidence/settings/parity.md) and
+state. TOML reads expose declared settings only; additional entries stay on the
+server and survive native saves. Text fields reload before Edit and reject a
+Save against an older file revision. The running desktop reconciles quiet mode
+and notification settings through its existing native commands on focus and a
+one-second interval. See the [control parity table](evidence/settings/parity.md) and
 [fixture verification](evidence/settings/verification.md) for the remaining
 desktop controls and the headless CPU frame measurements.
 
@@ -56,4 +60,4 @@ Terminal and packet diff surfaces are not on this branch's main baseline. Their
 palette commands report that the surface is unavailable; they do not create
 placeholder tabs or claim an attach. Their integration remains open. See
 [app shell evidence](evidence/shell/verification.md) for measurements and exact
-remaining acceptance. The shipped Tauri app is unchanged.
+remaining acceptance. The shipped entry point remains Tauri; the separate client requires explicit opt-in.

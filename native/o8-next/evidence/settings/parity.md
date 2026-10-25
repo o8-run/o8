@@ -9,8 +9,8 @@ This is a partial port of the desktop Settings surface. Ported rows share the ex
 | Settings section navigation | General, Dispatch, Models & providers, Git & PRs, Worktrees & storage, API keys | Ported for those sections |
 | Settings back / forward history and search across other sections | None | Missing |
 | General: Model-generated titles | Model-generated titles (`autoTitleInferenceEnabled`) | Ported |
-| General: Quiet mode | Quiet mode (`presentationQuietMode`) | Ported |
-| General: Review notifications | Review notifications (`notificationsReviewReady`) | Ported |
+| General: Quiet mode | Quiet mode (`presentationQuietMode`); running desktop reconciles its native overlay flags | Ported |
+| General: Review notifications | Review notifications (`notificationsReviewReady`); running desktop reconciles its native notification gate | Ported |
 | General: Share usage data | Share usage data (`productTelemetryEnabled`) | Ported |
 | General: Share crash reports | Share crash reports (`crashReportsEnabled`) | Ported |
 | General: Automatically upload local crash logs | Automatically upload local crash logs (`telemetryOptIn`) | Ported |
@@ -41,7 +41,7 @@ This is a partial port of the desktop Settings surface. Ported rows share the ex
 | Providers / model defaults: Brain uses Claude CLI | Brain uses Claude CLI (`brainUseClaudeCli`) | Ported |
 | Providers / model defaults: Pre-warm Brain runtimes | Pre-warm Brain runtimes (`brainWarmupEnabled`) | Ported |
 | Providers / model defaults: Workers use the Brain | Workers use the Brain (`workersUseBrain`) | Ported |
-| Git & PRs: Branch prefix | Branch prefix (`branchPrefix`) | Ported |
+| Git & PRs: Branch prefix | Branch prefix (`branchPrefix`); reload before Edit, revision-checked Save and Reload setting | Ported |
 | Git & PRs: Tag commits created by agents | Tag commits created by agents (`commitAttributionEnabled`) | Ported |
 | Git & PRs: Open pull requests | Open pull requests (`prLinkDestination`) | Ported |
 | Worktrees & storage: Workspace count per repository | Workspace count per repository (`worktreeMaxCount`) | Ported |
@@ -49,7 +49,7 @@ This is a partial port of the desktop Settings surface. Ported rows share the ex
 | Worktrees & storage: Parking mode | Parking mode (`workspaceParkingMode`) | Ported |
 | Worktrees & storage: Volume reserve | Volume reserve (`storageReserveRatio`) | Ported |
 | Worktrees & storage: Absolute floor | Absolute floor (`storageReserveFloorGb`) | Ported |
-| Dispatch: Edit in settings.toml, Save, Reload, Back to form | Edit settings.toml, Save, Reload file, Cancel; revision conflict refusal | Ported |
+| Dispatch: Edit in settings.toml, Save, Reload, Back to form | Declared-settings TOML projection, Save, Reload file, Cancel; hidden entries remain on server and survive saves; revision conflict refusal | Ported (safe projection) |
 | Provider keys: OpenRouter, DeepSeek, Anthropic, OpenAI add / replace / cancel / confirm removal | API keys: Add / Replace, Save / Cancel, Remove / Confirm / Cancel; presence only | Ported |
 | OpenRouter connection: enable / disable / recheck | Turn on / off, Recheck connection, connection state and server refusals | Ported |
 | Quick drawer: Settings | Shell Settings button and shortcut | Ported as shell entry |

@@ -1,0 +1,7 @@
+running 4 tests
+test shell::tests::settings::review::settings_review_edit_reloads_the_desktop_value ... ok
+test shell::tests::settings::review::settings_review_stale_save_preserves_the_desktop_value ... ok
+test shell::tests::settings::review::settings_review_toml_never_reads_or_copies_saved_secrets ... ok
+test shell::tests::settings::review::settings_review_updates_the_running_desktop_presentation ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 49 filtered out; finished in 31.17s

@@ -1,0 +1,22 @@
+ FAIL  src/lib/settings/toml.test.ts > keeps stored TOML credentials out of native error responses and recovery logs
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ src/lib/settings/toml.test.ts:375:74
+    373|     const { getOperatorDefaultsSync } = await import('@/lib/operator/d…
+    374|     expect(getOperatorDefaultsSync().values.parallelCap).toBe(3);
+    375|     expect(log.mock.calls.flat().map(String).join(' ').includes(canary…
+       |                                                                          ^
+    376|   } finally {
+    377|     log.mockRestore();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 23 skipped (24)

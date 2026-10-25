@@ -40,9 +40,13 @@ export async function settingsFixture(root: string) {
   process.env.O8_MASTER_KEY = randomBytes(32).toString('base64url');
   // One deliberate environment lock; all other defaults come from owned files.
   process.env.O8_HEAL_BOT_ENABLED = '0';
+  let desktopOrigin = '';
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (input, init) => {
     const url = String(input);
+    if (desktopOrigin && url.startsWith('/api/panel/operator-defaults')) return originalFetch(desktopOrigin + url, {
+      ...init, headers: { authorization: `Bearer ${process.env.O8_NEXT_API_TOKEN}` },
+    });
     if (url.startsWith('https://openrouter.ai/') || url.startsWith('https://api.anthropic.com/')
       || url.startsWith('https://api.openai.com/') || url.startsWith('https://api.deepseek.com/')) {
       const headers = new Headers(init?.headers);
@@ -60,6 +64,7 @@ export async function settingsFixture(root: string) {
     'GET /api/v2/keys': keys.GET, 'POST /api/v2/keys': keys.POST,
     'DELETE /api/v2/keys': keys.DELETE, 'PATCH /api/v2/keys': keys.PATCH,
   };
+  let presentation: ((transientQuiet?: boolean) => Promise<{ quiet: boolean; notifications: boolean }>) | undefined;
   let nextStatus = 0;
   let delayMs = 0;
   let emptyKeys = false;
@@ -70,7 +75,12 @@ export async function settingsFixture(root: string) {
       const { requirePanelAuth } = await import('../../src/lib/panel/auth');
       const denied = requirePanelAuth(request);
       if (denied) return denied;
-      const body = await request.json() as { nextStatus?: number; delayMs?: number; emptyKeys?: boolean; loseResponse?: boolean; healLocked?: boolean };
+      const body = await request.json() as { nextStatus?: number; delayMs?: number; emptyKeys?: boolean; loseResponse?: boolean; healLocked?: boolean; presentation?: boolean; transientQuiet?: boolean };
+      if (body.presentation) {
+        desktopOrigin = new URL(request.url).origin;
+        presentation ??= (await import('./settings-presentation-fixture')).presentationFixture();
+        return Response.json({ presentation: await presentation(body.transientQuiet) });
+      }
       nextStatus = body.nextStatus ?? 0; delayMs = body.delayMs ?? 0;
       emptyKeys = body.emptyKeys ?? false; loseResponse = body.loseResponse ?? false;
       if (body.healLocked === false) delete process.env.O8_HEAL_BOT_ENABLED;
