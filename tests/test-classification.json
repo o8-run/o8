@@ -6054,6 +6054,14 @@
       ]
     },
     {
+      "path": "tests/terminal-lane-approval-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/terminal-output-wait-real-path.test.ts",
       "reasons": [
         "child-process",

@@ -76,6 +76,28 @@ afterAll(() => {
 });
 
 describe.skipIf(process.platform === 'win32')('owned Codex persisted resume pins through a real process', () => {
+  it.each([1, 2, 3])('refuses a terminal action fence at validation %s before spawning', async failAt => {
+    const { withOwnedActionFence } = await import('@/lib/runtimes/shared/owned-session/action-fence');
+    const repoPath = join(root, `repo-terminal-fence-${failAt}`);
+    mkdirSync(repoPath);
+    execFileSync('git', ['init', '-q', repoPath]);
+    const launched = await launchOwnedCodexSession({ cwd: repoPath, prompt: 'initial fixture turn', model: 'gpt-5.6-sol', effort: 'high' });
+    await settledSession(launched.surfaceId, 1);
+    let checks = 0;
+    const attempt = withOwnedActionFence(launched.surfaceId, async session => {
+      expect(session?.surfaceId).toBe(launched.surfaceId);
+      if (++checks === failAt) throw new Error('reviewed terminal changed');
+    }, () => continueOwnedCodexSession(launched.surfaceId, 'must not spawn'));
+    const error = await attempt.then(async () => {
+      await settledSession(launched.surfaceId, 2);
+      return null;
+    }, failure => failure as Error);
+    expect(error?.message).toBe('reviewed terminal changed');
+    expect(checks).toBe(failAt);
+    expect(readSession(launched.surfaceId).recentRuns).toHaveLength(1);
+    expect(readFileSync(join(repoPath, 'argv-receipts.jsonl'), 'utf8').trim().split('\n')).toHaveLength(1);
+  });
+
   it.each([
     ['warm-high', 'gpt-5.6-sol', 'high', false],
     ['warm-max', 'gpt-5.6-terra', 'max', false],
@@ -97,7 +119,12 @@ describe.skipIf(process.platform === 'win32')('owned Codex persisted resume pins
 
     // The caller supplies only the session address and prompt. Pins must be
     // loaded from disk, including after the archived directory is restored.
-    const resumed = await continueOwnedCodexSession(launched.surfaceId, 'follow-up fixture turn');
+    const { withOwnedActionFence } = await import('@/lib/runtimes/shared/owned-session/action-fence');
+    const resume = () => continueOwnedCodexSession(launched.surfaceId, 'follow-up fixture turn');
+    const resumed = archived ? await resume() : await withOwnedActionFence(launched.surfaceId, async session => {
+      expect(session?.surfaceId).toBe(launched.surfaceId);
+      expect(session?.threadId).toBe(original.threadId);
+    }, resume);
     expect(resumed.ok).toBe(true);
     const saved = await settledSession(launched.surfaceId, 2);
     expect(saved).toMatchObject({ model: original.model, effort: original.effort, threadId: original.threadId });

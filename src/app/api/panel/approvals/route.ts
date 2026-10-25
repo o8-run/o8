@@ -23,17 +23,20 @@ import {
   listUnsettledApprovalContinuations,
 } from '@/lib/approvals/store';
 import type { CreateApprovalInput } from '@/lib/approvals/types';
-import { launchRuntimeSurface } from '@/lib/runtime/actions';
+import { launchRuntimeSurface, performRuntimeAction } from '@/lib/runtime/actions';
 import type { RuntimeId } from '@/lib/runtimes';
 import { getRuntime } from '@/lib/runtimes/registry';
 import { invalidateInboxCache } from '@/lib/mobile/inbox';
 import { approvedFromCardFact } from '@/lib/mobile/inbox-referee-chips';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
-import { findLaneBySession, getLane } from '@/lib/lane/registry';
+import { findLaneBySession, getLane, setLaneStatus } from '@/lib/lane/registry';
 import { isDiscoveredCliSessionKey } from '@/lib/runtime/discovered-cli-session';
 import { requireDesktopAccount } from '@/lib/auth/desktop-account';
 import { getChatGPTPlanService } from '@/lib/chatgpt-plan/service';
 import { ChatGPTPlanError } from '@/lib/chatgpt-plan/types';
+import { isTerminalApprovalAdapter } from '@/lib/terminal-status/approval-adapter';
+import { assertTerminalApprovalSubject, readTerminalApprovalAdapter, terminalApprovalClaimMatches, terminalApprovalLaneMatches } from '@/lib/terminal-status/approval-adapter-server';
+import { withOwnedActionFence } from '@/lib/runtimes/shared/owned-session/action-fence';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -76,6 +79,7 @@ export async function GET(request: NextRequest) {
   const projectId = request.nextUrl.searchParams.get('scope') === 'all' ? null : undefined;
   const isContextQuery = Boolean(packetId || laneId);
   const includeDiff = request.nextUrl.searchParams.get('include')?.trim() === 'diff';
+  const terminalSession = request.nextUrl.searchParams.get('terminalSession');
   const ownershipRefusal = workerPacketRefusal(
     resolveRequestPrincipalContext(request),
     packetId || (laneId ? getLane(laneId)?.packetId : null) || (sessionKey ? findLaneBySession(sessionKey)?.packetId : null),
@@ -95,6 +99,9 @@ export async function GET(request: NextRequest) {
 
   return NextResponse.json({
     approvals: (isContextQuery || includeDiff) ? approvals : stripDiffPreviews(approvals),
+    ...(terminalSession !== null ? {
+      terminalAdapter: sessionKey ? await readTerminalApprovalAdapter(sessionKey, terminalSession) : null,
+    } : {}),
   }, {
     headers: { 'Cache-Control': 'no-store, max-age=0' },
   });
@@ -242,6 +249,19 @@ export async function POST(request: NextRequest) {
   if (!current) {
     return NextResponse.json({ ok: false, error: 'Approval not found' }, { status: 404 });
   }
+  let terminalAdapter;
+  if (body.terminalAdapter !== undefined) {
+    const requested = body.terminalAdapter;
+    const fresh = isTerminalApprovalAdapter(requested)
+      ? await readTerminalApprovalAdapter(requested.sessionKey, requested.terminalSession) : null;
+    if (!fresh || !isTerminalApprovalAdapter(requested) || fresh.approvalId !== id
+      || fresh.revision !== requested.revision || fresh.version !== requested.version
+      || fresh.laneId !== requested.laneId || fresh.runId !== requested.runId
+      || fresh.approvalUpdatedAt !== current.updatedAt) {
+      return NextResponse.json({ ok: false, code: 'terminal_approval_changed', error: 'Terminal approval changed. Read the current lane decision again.' }, { status: 409 });
+    }
+    terminalAdapter = fresh;
+  }
   if (action === 'approve' && current.continuation?.kind === 'llm-chat' && current.continuation.provider === 'chatgpt') {
     try {
       const owner = await requireDesktopAccount(request);
@@ -311,6 +331,13 @@ export async function POST(request: NextRequest) {
     const reviewedLaneStatus = current.continuation?.kind === 'lane'
       ? getLane(current.continuation.laneId)?.status
       : undefined;
+    // Evidence validation above can await. Re-read the exact terminal projection afterward.
+    if (terminalAdapter) {
+      const fresh = await readTerminalApprovalAdapter(terminalAdapter.sessionKey, terminalAdapter.terminalSession);
+      if (!fresh || fresh.revision !== terminalAdapter.revision) {
+        return NextResponse.json({ ok: false, code: 'terminal_approval_changed', error: 'Terminal approval changed. Read the current lane decision again.' }, { status: 409 });
+      }
+    }
 
     // resolveApproval is atomic in SQLite and guards against double-resolve.
     // Call it first so a concurrent request loses the race and short-circuits
@@ -322,6 +349,8 @@ export async function POST(request: NextRequest) {
       rejectReason,
       current.updatedAt,
       action === 'approve' ? approvedFromCardFact(body.via, current) : undefined,
+      terminalAdapter,
+      terminalAdapter ? () => terminalApprovalClaimMatches(terminalAdapter) : undefined,
     );
     const approval = resolutionClaim.approval;
     if (!approval) {
@@ -430,6 +459,19 @@ export async function POST(request: NextRequest) {
       decisionNote = mergeDecisionNotes(appliedEdit?.message, decision.note);
       assistantMessage = decision.assistantMessage;
       nextApproval = decision.nextApproval;
+    } else if (terminalAdapter && continuation?.kind === 'lane' && action === 'approve') {
+      const target = terminalAdapter;
+      const result = await withOwnedActionFence(target.sessionKey,
+        session => assertTerminalApprovalSubject(target, session),
+        () => performRuntimeAction({ action: 'steer', surfaceId: target.sessionKey, message: 'Continue the previous task. Check what was done and what remains.', steerSource: 'operator' }));
+      decisionNote = result.note;
+      continuationOutcome = result.ok ? 'completed' : 'failed';
+      if (result.ok && terminalApprovalLaneMatches(target)) {
+        setLaneStatus(target.laneId, 'running', 'user', 'terminal_approval_resumed');
+      } else if (result.ok) {
+        continuationOutcome = 'outcome_unknown';
+        decisionNote = 'The reviewed session was resumed, but the lane changed before confirmation. Inspect the original terminal.';
+      }
     } else if (continuation?.kind === 'lane' && action === 'approve') {
       // Lane continuation — re-dispatch the lane command
       // Accept optional merge strategy from the operator's approval action

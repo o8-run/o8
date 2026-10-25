@@ -1,5 +1,6 @@
 import { createWorkerFailureHandler } from './worker-failure';
 import { assertRuntimeEffortPin } from '@/lib/orchestrator/effort-pin';
+import { assertOwnedActionFence } from './action-fence';
 import { createCapacityRecovery } from './capacity-wait';
 import { packetCargoEnvironment } from '@/lib/worktree/cargo-target-cache';
 import { controlledProviderSandbox } from './controlled-provider-sandbox';
@@ -634,6 +635,7 @@ export function createOwnedRunController({
         }, workspaceSpawnGuard);
         const materializationIdentity = spawnDecision.materializationIdentity ?? null;
         assertOwnedActionAdmission(await io.findSession(session.surfaceId));
+        await assertOwnedActionFence(session.surfaceId, await io.findSession(session.surfaceId));
         const bridgeLaunch = guardedWorkspaceInvocation(spawnBinary, spawnArgs, materializationIdentity);
         const cliCmd = [bridgeLaunch.command, ...bridgeLaunch.args].map(quoteShellArg).join(' ');
         const shellCmd = `${stdinPayload ? `printf %s ${quoteShellArg(stdinPayload)} | ` : ''}${cliCmd} | tee '${stdoutPath}' 2>'${stderrPath}'`;

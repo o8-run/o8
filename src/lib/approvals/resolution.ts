@@ -83,7 +83,10 @@ function insertResolutionEvent(
     eventType: event.type,
     actor: event.actor,
     note: event.note ?? null,
-    detailsJson: event.approvedFromCard ? JSON.stringify({ approvedFromCard: event.approvedFromCard }) : '{}',
+    detailsJson: JSON.stringify({
+      ...(event.approvedFromCard ? { approvedFromCard: event.approvedFromCard } : {}),
+      ...(event.terminalAdapter ? { terminalAdapter: event.terminalAdapter } : {}),
+    }),
     timestamp: event.timestamp,
   }).run();
 }
@@ -102,6 +105,8 @@ export function claimApprovalResolution(
   note?: string,
   expectedUpdatedAt?: number,
   approvedFromCard?: ApprovalAuditEvent['approvedFromCard'],
+  terminalAdapter?: ApprovalAuditEvent['terminalAdapter'],
+  subjectStillCurrent?: () => boolean,
 ): ApprovalResolutionClaim {
   const existing = readApproval(id);
   if (!existing || existing.status !== 'pending') {
@@ -123,6 +128,7 @@ export function claimApprovalResolution(
     resolvedAt,
   );
   if (approvedFromCard && action === 'approve') event.approvedFromCard = approvedFromCard;
+  if (terminalAdapter) event.terminalAdapter = terminalAdapter;
   const resolution: NonNullable<ApprovalRecord['resolution']> = {
     action: nextStatus,
     actor,
@@ -141,6 +147,7 @@ export function claimApprovalResolution(
     audit: [...existing.audit, event],
   };
   const claimed = db.transaction((tx) => {
+    if (subjectStillCurrent && !subjectStillCurrent()) return false;
     const result = tx
       .update(approvalsTable)
       .set({

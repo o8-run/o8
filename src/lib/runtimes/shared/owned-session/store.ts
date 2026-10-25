@@ -1,4 +1,5 @@
 import { providerFromConfig } from './controlled-provider';
+import { assertOwnedActionFence } from './action-fence';
 import { assertRuntimeEffortPin } from '@/lib/orchestrator/effort-pin';
 import { ownedSupervisorClient } from '@/lib/runtime/o8d-supervisor';
 /**
@@ -302,6 +303,7 @@ export function createOwnedSessionStore(
 
   async function resumeInner(surfaceId: string, prompt: string) {
     let session = await io.findSession(surfaceId);
+    await assertOwnedActionFence(surfaceId, session);
     if (session) assertRuntimeEffortPin(runtimeId, session.model, session.effort);
     assertOwnedActionAdmission(session);
     refuseOwnedSingleAttemptResume(session);
@@ -362,6 +364,7 @@ export function createOwnedSessionStore(
 
       if (automaticRunId) assertAutomaticRecoveryGeneration(await io.findSession(surfaceId), automaticRunId);
       assertOwnedActionAdmission(await io.findSession(surfaceId));
+      await assertOwnedActionFence(surfaceId, await io.findSession(surfaceId));
       const run = await runController.spawnOwnedRun(session, prompt.trim(), 'resume');
       if (run.outcome === 'failed' && coldRestored) {
         await rollbackColdRestore();

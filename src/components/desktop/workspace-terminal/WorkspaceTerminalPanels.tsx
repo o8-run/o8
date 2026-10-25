@@ -4,6 +4,7 @@ import { MutableRefObject, Suspense, memo, useEffect, useMemo, useState } from '
 import { Terminal as TerminalIcon } from '../lucide-shims';
 import type { CanvasTab } from '@/components/desktop/Canvas';
 import { TerminalStatusEvidenceDisclosure } from '@/components/desktop/TerminalStatusEvidenceRows';
+import { TerminalLaneApproval } from './TerminalLaneApproval';
 import type { WorkspaceAttachedTerminalSession } from '@/components/desktop/workspace-terminal/terminal-mode';
 import { WorkspaceChatPane } from '@/components/desktop/workspace-terminal/WorkspaceChatPane';
 import type { RegisteredRepo, TerminalTab } from '@/components/desktop/workspace-terminal/types';
@@ -549,7 +550,7 @@ const FleetCanvasResidentPanel = memo(function FleetCanvasResidentPanel({ active
   );
 });
 
-const TerminalResidentPanel = memo(function TerminalResidentPanel({
+export const TerminalResidentPanel = memo(function TerminalResidentPanel({
   tabId,
   tmuxSession,
   readOnly,
@@ -618,6 +619,7 @@ const TerminalResidentPanel = memo(function TerminalResidentPanel({
       }}
     >
       {statusEvidence ? <TerminalStatusEvidenceDisclosure evidence={statusEvidence} /> : null}
+      <TerminalLaneApproval terminalSession={tmuxSession} evidence={statusEvidence} active={active} readOnly={readOnly || inputLocked} />
       <div style={{ flex: 1, minWidth: 0, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column', paddingTop: 12, paddingRight: 12, paddingBottom: 12, paddingLeft: 12 }}>
         <XtermPanel
           ref={(handle) => {
