@@ -4239,6 +4239,16 @@
       ]
     },
     {
+      "path": "tests/o8d-input-drain-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "native-build",
+        "network-listener",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-mcp-parity-real-path.test.ts",
       "reasons": [
         "child-process",

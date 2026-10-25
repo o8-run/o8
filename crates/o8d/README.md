@@ -41,12 +41,33 @@ all transitions beyond that retention window is still outstanding for #4533.
 During orderly producer shutdown, Rust stops accepting and releases the public
 listener before notifying the bridge to start TypeScript fallback. Existing
 HTTP connections drain until they finish, with a five-second shutdown deadline;
-WebSocket clients close and reconnect for replay. A real accepted ingress test
+WebSocket input is drained before clients close and reconnect for replay. A real accepted ingress test
 holds a request body across fallback for 400 ms and verifies its 202 response
 and exactly one replayed mutation. Abrupt exit or ingress exceeding the deadline
 can still lose an acknowledgment after TypeScript accepts it; idempotent ingress
 remains outstanding. The Rust frontend does not negotiate permessage-deflate; device
 traffic and legacy channel fan-out still use their TS owners.
+
+Input frames retain their original bytes and are tracked until a backhaul
+ping/pong read barrier confirms receipt by the upstream WebSocket endpoint.
+This confirms receipt, not command execution. Tracking is bounded by 256 frames
+and 1 MiB plus one existing protocol-bounded frame. Shutdown fences a sender's
+already-written frames with a public ping/pong, forwards them, and waits for
+upstream receipt before closing. A four-second receipt window and a 4.5-second
+WebSocket drain reserve time inside the existing five-second process deadline
+for individual failures. These fences cover completed socket-send callbacks;
+they do not promise delivery of arbitrary application-buffered data.
+
+Unconfirmed delegated plaintext input gets one correlated error with its original
+input and request id. Errors advise checking state before retrying: receipt is
+not an execution guarantee, and input is never replayed automatically. Opaque or
+encrypted clients retain authoritative TypeScript policy closes, or receive an
+explicit protocol close indicating unconfirmed delivery; Rust cannot synthesize
+application errors with TypeScript's E2EE key.
+The real executable regression pauses o8d, queues 500 locally successful sends,
+queues producer EOF, resumes it, and requires either 500 upstream deliveries or
+500 individual failures. The same test holds HTTP ingress unfinished and checks
+that the process still exits within its five-second drain budget.
 
 ## Acceptance audit for #4533
 
