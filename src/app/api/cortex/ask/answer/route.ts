@@ -21,6 +21,11 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { performance } from 'node:perf_hooks';
+import { realpathSync } from 'node:fs';
+import { isAbsolute, relative, sep } from 'node:path';
+import { isBrainReadWorkerBearer } from '@/lib/auth/brain-read-worker-token';
+import { getProjectsLedger, type ProjectRecord } from '@/lib/repos/projects';
+import { listReposFresh } from '@/lib/repos/registry';
 
 import { askCortex, type AskCortexResult } from '@/lib/cortex/qa/ask';
 import { ManagedBrainUnavailableError } from '@/lib/cortex/qa/compose-class-a';
@@ -77,13 +82,44 @@ export async function POST(request: NextRequest) {
 
   let repoPath =
     typeof body?.repoPath === 'string' && body.repoPath.trim() ? body.repoPath.trim() : undefined;
-  const projectId =
+  let projectId =
     typeof body?.projectId === 'string' && body.projectId.trim() ? body.projectId.trim() : null;
   const bypassCache = body?.bypassCache === true;
   const terse = body?.terse === true;
   const packetId =
     typeof body?.packetId === 'string' && body.packetId.trim() ? body.packetId.trim() : null;
-  const ownershipRefusal = workerPacketRefusal(resolveRequestPrincipalContext(request), packetId);
+  const principal = resolveRequestPrincipalContext(request);
+  const bearer = request.headers.get('authorization')?.replace(/^Bearer /, '').trim() ?? '';
+  if (isBrainReadWorkerBearer(bearer) && (principal.role !== 'worker' || !principal.brainRepoPath)) {
+    return NextResponse.json({ ok: false, error: 'Invalid or expired Brain read credential.' }, { status: 401 });
+  }
+  if (principal.role === 'worker' && principal.brainRepoPath) {
+    // Retrieval can expand a repository into every linked project. Refuse
+    // ambiguous membership rather than giving a read grant that wider scope.
+    let memberships: ProjectRecord[] = [];
+    try {
+      await listReposFresh();
+      memberships = (await getProjectsLedger()).projects.filter(project => project.repoPaths.some(candidate => {
+        try { return realpathSync(candidate) === principal.brainRepoPath; } catch { return false; }
+      }));
+    } catch { /* Missing membership evidence keeps the grant refused. */ }
+    let scoped = !repoPath;
+    if (repoPath) {
+      try {
+        const child = relative(principal.brainRepoPath, realpathSync(repoPath));
+        scoped = child === '' || (!isAbsolute(child) && child !== '..' && !child.startsWith(`..${sep}`));
+      } catch { scoped = false; }
+    }
+    if (!scoped || packetId || projectId || !principal.brainProjectId
+      || memberships.length !== 1 || memberships[0].id !== principal.brainProjectId) {
+      return NextResponse.json({ ok: false, error: { code: 'worker_brain_scope_mismatch',
+        message: 'Brain read credential cannot address another project or packet.' } }, { status: 403 });
+    }
+    repoPath = principal.brainRepoPath;
+    projectId = principal.brainProjectId;
+  }
+  const ownershipRefusal = principal.role === 'worker' && principal.brainRepoPath
+    ? null : workerPacketRefusal(principal, packetId);
   if (ownershipRefusal) {
     return NextResponse.json({ ok: false, error: ownershipRefusal }, { status: 403 });
   }

@@ -38,6 +38,7 @@ import { getDataDir, migrateDataDirOnce } from '@/lib/data-dir-migration';
 // this does NOT pull better-sqlite3 into the middleware bundle — it is pure fs.
 import { readActiveTokenHashes } from '@/lib/mobile/device-token-file';
 import { isLocalWorkerToken } from '@/lib/auth/worker-token';
+import { isBrainReadWorkerBearer, resolveBrainReadWorkerToken } from '@/lib/auth/brain-read-worker-token';
 import { readActiveSpectatorTokenHashes } from '@/lib/broadcast/spectator-token-file';
 import { O8_BROADCAST_SURFACE_HEADER } from '@/lib/broadcast/surface';
 import { resolvePluginToken } from '@/lib/auth/plugin-token';
@@ -402,6 +403,13 @@ export function panelGateMiddleware(req: NextRequest): NextResponse {
   // credential handshake there.
   const auth = req.headers.get('authorization');
   const bearer = auth?.startsWith('Bearer ') ? auth.slice(7).trim() : '';
+  if (isBrainReadWorkerBearer(bearer)) {
+    if (!resolveBrainReadWorkerToken(bearer)) {
+      return NextResponse.json({ error: 'Invalid or expired Brain read credential.' }, { status: 401 });
+    }
+    if (pathname === '/api/cortex/ask/answer' && method === 'POST') return NextResponse.next();
+    return NextResponse.json({ error: 'Brain read credential is not authorized for this endpoint.' }, { status: 403 });
+  }
   if (bearer.startsWith('o8ro_')) {
     return NextResponse.json({ error: 'Read-only worker has no API capability.' }, { status: 403 });
   }
