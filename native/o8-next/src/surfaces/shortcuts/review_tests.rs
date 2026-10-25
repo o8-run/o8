@@ -78,7 +78,7 @@ fn terminal_shell_with_peer(
     ));
     fs::create_dir(&root).unwrap();
     let root = fs::canonicalize(root).unwrap();
-    let mut child = Process::new("node")
+    let child = Process::new("node")
         .current_dir(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.."))
         .args([
             "--import",
@@ -89,11 +89,16 @@ fn terminal_shell_with_peer(
             "--terminals",
         ])
         .env("O8_NEXT_API_TOKEN", "fixture-grid-bearer")
+        // Keep the host's inventory paths canonical across macOS /var aliases.
+        .env("TMPDIR", &root)
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::from(
+            fs::File::create(root.join("fixture.log")).unwrap(),
+        ))
         .spawn()
         .unwrap();
-    let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
+    let mut host = GridHost { child, root };
+    let mut lines = BufReader::new(host.child.stdout.take().unwrap()).lines();
     let receipt = lines
         .by_ref()
         .find_map(|line| {
@@ -101,7 +106,12 @@ fn terminal_shell_with_peer(
             v["origin"].as_str()?;
             Some(v)
         })
-        .unwrap();
+        .unwrap_or_else(|| {
+            panic!(
+                "owned grid fixture exited before readiness: {}",
+                fs::read_to_string(host.root.join("fixture.log")).unwrap_or_default()
+            )
+        });
     std::thread::spawn(move || for _ in lines {});
     let client = Client::authenticated(
         receipt["origin"].as_str().unwrap(),
@@ -115,7 +125,7 @@ fn terminal_shell_with_peer(
     if report_input {
         correction_2::install_key_peer(&client, &workspace);
     }
-    let file = root.join("terminal.json");
+    let file = host.root.join("terminal.json");
     let options = crate::pane_layout::Options {
         size: 6,
         workspace: workspace.clone(),
@@ -144,7 +154,7 @@ fn terminal_shell_with_peer(
     );
     visual.run_until_parked();
     draw(&mut visual);
-    visual.simulate_keystrokes("cmd-k");
+    visual.simulate_keystrokes("cmd-shift-p");
     visual.simulate_keystrokes("g r i d enter");
     let deadline = Instant::now() + std::time::Duration::from_secs(15);
     loop {
@@ -161,7 +171,26 @@ fn terminal_shell_with_peer(
         if ready {
             break;
         }
-        assert!(Instant::now() < deadline, "fixture terminal must connect");
+        assert!(
+            Instant::now() < deadline,
+            "fixture terminal must connect: {}",
+            shell.read_with(&visual, |s, cx| {
+                let pane = match s.content.get(&s.key(&Tab::Grid)) {
+                    Some(Content::Grid(g)) => g.read(cx).panes[0]
+                        .terminal
+                        .as_ref()
+                        .map(|t| t.read(cx).notice),
+                    _ => None,
+                };
+                format!(
+                    "active={:?}, palette={}, query={:?}, terminal={pane:?}, shell={}",
+                    s.active(),
+                    s.palette,
+                    s.query,
+                    s.notice
+                )
+            })
+        );
         std::thread::sleep(std::time::Duration::from_millis(2));
     }
     let focus = shell.read_with(&visual, |s, cx| {
@@ -177,7 +206,7 @@ fn terminal_shell_with_peer(
     });
     visual.update(|window, _| focus.focus(window));
     draw(&mut visual);
-    (GridHost { child, root }, shell, visual)
+    (host, shell, visual)
 }
 #[gpui::test]
 fn shortcuts_focused_grid_terminal_keeps_question_and_close_keys(cx: &mut TestAppContext) {

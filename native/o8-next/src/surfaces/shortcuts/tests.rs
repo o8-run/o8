@@ -2,6 +2,8 @@ use crate::shell::test_support::*;
 #[path = "review_tests.rs"]
 mod review;
 use crate::shell::*;
+#[path = "binding_tests.rs"]
+mod bindings;
 
 fn shortcuts_draw(cx: &mut VisualTestContext) {
     cx.run_until_parked();

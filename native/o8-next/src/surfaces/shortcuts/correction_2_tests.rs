@@ -64,7 +64,6 @@ fn field_shell(
 }
 #[gpui::test]
 fn shortcuts_every_binding_respects_the_focused_secret_field(cx: &mut TestAppContext) {
-    let fixture = Fixture::start(true);
     let mut bindings = vec![
         "?".to_owned(),
         "shift-/".into(),
@@ -72,6 +71,8 @@ fn shortcuts_every_binding_respects_the_focused_secret_field(cx: &mut TestAppCon
         "ctrl-/".into(),
         "cmd-w".into(),
         "ctrl-w".into(),
+        "cmd-k".into(),
+        "ctrl-k".into(),
         "cmd-alt-left".into(),
         "cmd-alt-right".into(),
         "ctrl-shift-w".into(),
@@ -82,27 +83,33 @@ fn shortcuts_every_binding_respects_the_focused_secret_field(cx: &mut TestAppCon
         }
     }
     let mut failures = vec![];
-    for (case, binding) in bindings.iter().enumerate() {
-        let (shell, mut visual) = field_shell(&fixture, case, cx);
-        let before = shell.read_with(&visual, |s, _| {
-            (s.active(), s.current().unwrap().tabs.clone())
-        });
-        let focus = visual.update(|window, cx| window.focused(cx));
-        visual.simulate_keystrokes(binding);
-        shortcuts_draw(&mut visual);
-        let unchanged = shell.read_with(&visual, |s, _| {
-            s.surfaces.shortcuts.view.is_none()
-                && s.surfaces.settings.view.is_some()
-                && !s.palette
-                && (s.active(), s.current().unwrap().tabs.clone()) == before
-        });
-        let same_focus = visual.update(|window, cx| window.focused(cx)) == focus;
-        let typed = !["?", "shift-/"].contains(&binding.as_str())
-            || visual.debug_bounds("settings-secret-masked").is_some();
-        if !unchanged || !same_focus || !typed {
-            failures.push(binding.clone());
+    // The fixture host retires after two minutes. Use disposable batches so
+    // a loaded machine cannot expire the host midway through the matrix.
+    for (batch, bindings) in bindings.chunks(4).enumerate() {
+        let fixture = Fixture::start(true);
+        for (offset, binding) in bindings.iter().enumerate() {
+            let case = batch * 4 + offset;
+            let (shell, mut visual) = field_shell(&fixture, case, cx);
+            let before = shell.read_with(&visual, |s, _| {
+                (s.active(), s.current().unwrap().tabs.clone())
+            });
+            let focus = visual.update(|window, cx| window.focused(cx));
+            visual.simulate_keystrokes(binding);
+            shortcuts_draw(&mut visual);
+            let unchanged = shell.read_with(&visual, |s, _| {
+                s.surfaces.shortcuts.view.is_none()
+                    && s.surfaces.settings.view.is_some()
+                    && !s.palette
+                    && (s.active(), s.current().unwrap().tabs.clone()) == before
+            });
+            let same_focus = visual.update(|window, cx| window.focused(cx)) == focus;
+            let typed = !["?", "shift-/"].contains(&binding.as_str())
+                || visual.debug_bounds("settings-secret-masked").is_some();
+            if !unchanged || !same_focus || !typed {
+                failures.push(binding.clone());
+            }
+            visual.update(|window, _| window.remove_window());
         }
-        visual.update(|window, _| window.remove_window());
     }
     assert!(
         failures.is_empty(),
@@ -113,8 +120,8 @@ fn shortcuts_every_binding_respects_the_focused_secret_field(cx: &mut TestAppCon
 fn shortcuts_text_fields_pass_palette_chords(cx: &mut TestAppContext) {
     let fixture = Fixture::start(true);
     for (case, binding) in [
-        "cmd-k",
-        "ctrl-k",
+        "cmd-shift-p",
+        "ctrl-shift-p",
         "cmd-,",
         "ctrl-,",
         "ctrl-tab",

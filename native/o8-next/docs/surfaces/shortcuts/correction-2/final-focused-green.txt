@@ -16,4 +16,3 @@ test shell::tests::shell_palette_switch_restart_and_server_down ... O8_NEXT_SHEL
 ok
 
 test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 88 filtered out; finished in 94.89s
-
