@@ -1,7 +1,7 @@
 {
   "outputs": {
-    "codex-app-bridge-impl.mjs": 67883,
-    "codex-app-bridge.mjs": 86,
+    "codex-app-bridge-impl.mjs": 7251,
+    "codex-app-bridge.mjs": 399,
     "cortex-mcp-server-impl.mjs": 70891,
     "cortex-mcp-server.mjs": 401,
     "operator-mcp-proxy-impl.mjs": 10053,

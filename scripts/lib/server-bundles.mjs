@@ -12,7 +12,7 @@ export const SERVER_ENTRIES = {
   'codex-app-bridge': 'src/lib/codex/app-server-exec-bridge.ts',
   'cortex-mcp-server': 'src/lib/mcp/cortex-mcp-server.ts',
 };
-const PURE_NODE_ENTRIES = new Set(['operator-mcp-proxy', 'codex-app-bridge']);
+const PURE_NODE_ENTRIES = new Set(['operator-mcp-proxy']);
 // CJS dependencies need these globals in entries AND shared chunks. Chunks stay
 // beside the entries so import.meta.url based prompts, forks and addons resolve.
 const ESM_BANNER = [
@@ -86,8 +86,8 @@ export function bundleServers({ root, outDir }) {
     external: ['node-pty', 'better-sqlite3', 'bindings'],
   });
   // Sharing can hoist an otherwise-unused native import into a common chunk.
-  // Keep the dependency-light launchers standalone, as before: neither runs the
-  // native-addon selector, and both must work without native modules installed.
+  // Keep the dependency-light proxy standalone: it does not run the native-addon
+  // selector and must work without native modules installed.
   for (const label of PURE_NODE_ENTRIES) {
     const result = buildSync({ ...options,
       entryPoints: [{ in: SERVER_ENTRIES[label], out: `${label}-impl` }],
