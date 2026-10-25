@@ -71,6 +71,8 @@ export async function callTaskDraftTool(principal: PluginPrincipal, tool: string
       const choices = await taskDraftChoices();
       await requireTaskDraftAccount(principal, account);
       return { ok: true, choices, selectionRequired: true, executionEnabled: false,
+        nextAction: 'ask_user', clarification: { required: ['project', 'objective'],
+          question: 'Which registered project do you mean, and what would you like checked?' },
         selectionGuidance: 'Use the repository and project labels to ask which workspace the user means. Mentioning the o8 app does not select a repository named o8. Keep routing IDs internal. Ask for the current objective before selecting a workspace.' };
     }
     const repoId = normalizedText(args.repoId);

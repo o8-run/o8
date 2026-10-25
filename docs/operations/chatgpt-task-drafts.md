@@ -25,6 +25,16 @@ verification.
 
 ## Snapshot and contract
 
+Before selecting a workspace, ask for any missing project and objective. Use only
+scope supplied or confirmed in the current conversation; personal context cannot
+choose the project or revive an older task. A choice list returns
+`nextAction: ask_user`, a question and the required project/objective details,
+without creating a snapshot or task. Ask using readable labels and keep routing
+IDs internal. A refused selected workspace also returns `nextAction: ask_user`;
+report its error and await explicit direction instead of trying another
+registration. Preserve exact files, requirements and runtime/model/effort pins.
+Preparation remains held, with native review and Launch as separate actions.
+
 First call `o8_task_options` with the selected machine to list registered
 repository and canonical project IDs. Then supply both IDs to capture a
 five-minute snapshot. The server resolves the local path; callers cannot provide
