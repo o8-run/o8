@@ -11,8 +11,7 @@ impl Render for ThreadList {
         }
         let _keep_subscriptions = &self.subscriptions;
         let saved_chat = self
-            .rows
-            .get(self.choice)
+            .choice_row()
             .and_then(|r| r.id.as_ref())
             .is_some_and(|id| !id.contains(':'));
         div()
@@ -81,14 +80,21 @@ impl Render for ThreadList {
                                 let thread = row.id.is_some();
                                 let selected = row.id.as_ref() == this.selected.as_ref() && thread;
                                 let painted = this.painted.clone();
+                                let identity = row
+                                    .id
+                                    .as_ref()
+                                    .map(|id| format!("thread:{id}"))
+                                    .unwrap_or_else(|| {
+                                        format!("{}:{}:{}", row.kind, row.workspace, row.title)
+                                    });
                                 div()
-                                    .id(("thread-row", i))
+                                    .id(gpui::ElementId::Name(identity.into()))
                                     .debug_selector(move || format!("thread-row-{i}"))
                                     .h(px(28.))
                                     .px(px(12.))
                                     .rounded(px(8.))
                                     .overflow_hidden()
-                                    .bg(if selected || i == this.choice {
+                                    .bg(if selected || thread && row.id == this.choice {
                                         theme().selection
                                     } else {
                                         theme().surface
@@ -163,9 +169,12 @@ impl Render for ThreadList {
                                     )
                                     .when(thread, |view| {
                                         view.on_click(cx.listener(move |this, _, window, cx| {
-                                            this.choice = i;
-                                            this.focus.focus(window);
-                                            this.choose(row.id.clone().unwrap(), cx);
+                                            let id = row.id.clone().unwrap();
+                                            if this.rows.iter().any(|r| r.id.as_ref() == Some(&id))
+                                            {
+                                                this.focus.focus(window);
+                                                this.choose(id, cx);
+                                            }
                                         }))
                                     })
                                     .child(

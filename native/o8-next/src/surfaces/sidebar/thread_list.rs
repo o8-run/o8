@@ -133,7 +133,8 @@ pub struct ThreadList {
     search_error: String,
     rename: Option<String>,
     editing: bool,
-    choice: usize,
+    choice: Option<String>,
+    edit_generation: u64,
     loading: bool,
     saving: bool,
     pending_archives: HashMap<String, String>,
@@ -152,7 +153,7 @@ impl EventEmitter<Event> for ThreadList {}
 impl ThreadList {
     #[cfg(test)]
     pub(crate) fn diagnostic(&self) -> serde_json::Value {
-        json!({"notice":self.notice,"rename":self.rename,"editing":self.editing,"saving":self.saving,"loading":self.loading,"selected":self.selected,"choice":self.rows.get(self.choice)})
+        json!({"notice":self.notice,"rename":self.rename,"editing":self.editing,"saving":self.saving,"loading":self.loading,"selected":self.selected,"choice":self.choice_row()})
     }
     pub fn new(client: Client, cx: &mut Context<Self>) -> Self {
         let editor = cx.new(Composer::new);
@@ -187,7 +188,8 @@ impl ThreadList {
             search_error: String::new(),
             rename: None,
             editing: false,
-            choice: 0,
+            choice: None,
+            edit_generation: 0,
             loading: false,
             saving: false,
             pending_archives: HashMap::new(),
@@ -202,17 +204,20 @@ impl ThreadList {
             materialized: Rc::new(Cell::new(0)),
         }
     }
+    fn choice_row(&self) -> Option<&Row> {
+        self.choice
+            .as_ref()
+            .and_then(|id| self.rows.iter().find(|r| r.id.as_ref() == Some(id)))
+    }
     fn rebuild(&mut self) {
-        let selected = self
-            .rows
-            .get(self.choice)
-            .and_then(|r| r.id.as_deref())
-            .map(str::to_owned);
         self.rows = Rc::new(rows(&self.sessions, &self.query, &self.search_matches));
-        self.choice = selected
-            .and_then(|id| self.rows.iter().position(|r| r.id.as_deref() == Some(&id)))
-            .or_else(|| self.rows.iter().position(|r| r.id.is_some()))
-            .unwrap_or(0);
+        if !self
+            .rows
+            .iter()
+            .any(|r| r.id.is_some() && r.id == self.choice)
+        {
+            self.choice = self.rows.iter().find_map(|r| r.id.clone());
+        }
     }
     pub fn catalog_changed(&mut self) {
         self.generation += 1;
@@ -437,6 +442,7 @@ impl ThreadList {
         }
     }
     pub fn focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.edit_generation += 1;
         if self.rename.take().is_some() {
             self.editor.update(cx, |editor, cx| editor.clear(cx));
         }
@@ -453,12 +459,13 @@ impl ThreadList {
             session.unread = false;
         }
         self.rebuild();
-        if let Some(index) = self.rows.iter().position(|r| r.id.as_deref() == Some(&id)) {
-            self.choice = index;
+        if self.rows.iter().any(|r| r.id.as_deref() == Some(&id)) {
+            self.choice = Some(id);
         }
         cx.notify();
     }
     pub fn search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.edit_generation += 1;
         if self.rename.take().is_some() {
             self.editor.update(cx, |editor, cx| editor.clear(cx));
         }
@@ -467,6 +474,11 @@ impl ThreadList {
         cx.notify();
     }
     pub fn choose(&mut self, id: String, cx: &mut Context<Self>) {
+        if !self.rows.iter().any(|r| r.id.as_ref() == Some(&id)) {
+            return;
+        }
+        self.edit_generation += 1;
+        self.choice = Some(id.clone());
         self.editing = false;
         self.selected = Some(id.clone());
         if let Some(s) = self.sessions.iter_mut().find(|s| s.id == id) {
@@ -482,17 +494,13 @@ impl ThreadList {
             if !title.is_empty() {
                 self.mutate(id, json!({"title":title}), cx);
             }
-        } else if let Some(id) = self.rows.get(self.choice).and_then(|r| r.id.clone()) {
+        } else if let Some(id) = self.choice.clone() {
             self.choose(id, cx);
         }
     }
     fn start_rename(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(id) = self
-            .rows
-            .get(self.choice)
-            .and_then(|r| r.id.clone())
-            .filter(|id| !id.contains(':'))
-        else {
+        self.edit_generation += 1;
+        let Some(id) = self.choice.clone().filter(|id| !id.contains(':')) else {
             return;
         };
         self.rename = Some(id);
@@ -503,7 +511,7 @@ impl ThreadList {
         cx.notify();
     }
     fn archive(&mut self, cx: &mut Context<Self>) {
-        let Some(row) = self.rows.get(self.choice).filter(|r| r.id.is_some()) else {
+        let Some(row) = self.choice_row().cloned() else {
             return;
         };
         if let Some(id) = row.id.as_ref().filter(|id| id.contains(':')).cloned() {
@@ -541,6 +549,10 @@ impl ThreadList {
         }
         self.saving = true;
         self.generation += 1;
+        let edit_generation = self.edit_generation;
+        let editor_revision = self.editor.read(cx).revision;
+        let draft_owner = self.rename.clone();
+        let renaming = draft_owner.as_ref() == Some(&id) && patch["title"].is_string();
         let client = self.client.clone();
         let task = cx.background_executor().spawn(async move {
             if id.contains(':') {
@@ -553,14 +565,21 @@ impl ThreadList {
             let result = task.await;
             let _ = this.update(cx, |this, cx| {
                 this.saving = false;
+                let current_draft = this.edit_generation == edit_generation
+                    && this.editor.read(cx).revision == editor_revision
+                    && this.rename == draft_owner;
                 match result {
                     Ok(()) => {
-                        this.rename = None;
-                        this.editing = false;
-                        this.editor.update(cx, |e, cx| e.clear(cx));
+                        if renaming && current_draft {
+                            this.edit_generation += 1;
+                            this.rename = None;
+                            this.editing = false;
+                            this.editor.update(cx, |e, cx| e.clear(cx));
+                        }
                         this.load(cx);
                     }
-                    Err(error) => this.notice = error,
+                    Err(error) if current_draft => this.notice = error,
+                    Err(_) => {}
                 }
                 cx.notify();
             });
@@ -571,6 +590,7 @@ impl ThreadList {
         let key = event.keystroke.key.as_str();
         match key {
             "escape" => {
+                self.edit_generation += 1;
                 self.rename = None;
                 self.editing = false;
                 self.editor.update(cx, |e, cx| e.clear(cx));
@@ -584,20 +604,23 @@ impl ThreadList {
                     .rows
                     .iter()
                     .enumerate()
-                    .filter(|(_, r)| r.id.is_some())
-                    .map(|(i, _)| i)
+                    .filter_map(|(i, row)| row.id.as_ref().map(|id| (i, id.clone())))
                     .collect();
                 if ids.is_empty() {
                     return;
                 }
-                let current = ids.iter().position(|i| *i == self.choice).unwrap_or(0);
-                self.choice = ids[match key {
+                let current = ids
+                    .iter()
+                    .position(|(_, id)| Some(id) == self.choice.as_ref())
+                    .unwrap_or(0);
+                let next = match key {
                     "up" => current.saturating_sub(1),
                     "down" => (current + 1).min(ids.len() - 1),
                     "home" => 0,
                     _ => ids.len() - 1,
-                }];
-                self.scroll.scroll_to_item(self.choice, ScrollStrategy::Top);
+                };
+                self.choice = Some(ids[next].1.clone());
+                self.scroll.scroll_to_item(ids[next].0, ScrollStrategy::Top);
             }
             _ => return,
         }
@@ -626,3 +649,7 @@ fn iso_timestamp(seconds: u64) -> String {
 }
 #[path = "thread_list_view.rs"]
 mod view;
+
+#[cfg(test)]
+#[path = "race_tests.rs"]
+mod races;
