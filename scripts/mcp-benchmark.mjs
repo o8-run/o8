@@ -9,7 +9,10 @@ async function main() {
   const output = option('output');
   const token = process.env.O8_MCP_PARITY_TOKEN;
   if (!reference || !candidate || !output || !token) throw new Error('reference, candidate, output and O8_MCP_PARITY_TOKEN required');
-  const names = ['tools/list', 'o8_status', 'get_mission_status', 'o8_task_list', 'o8_list_repos', 'o8_list_projects', 'o8_lease_list'];
+  const supported = ['tools/list', 'o8_status', 'get_mission_status', 'o8_task_list', 'o8_list_repos', 'o8_list_projects', 'o8_lease_list'];
+  const names = option('tools')?.split(',') ?? supported;
+  if (!names.includes('o8_status') || new Set(names).size !== names.length
+    || names.some(name => !supported.includes(name))) throw new Error('Unique supported tools including o8_status required');
   const targets = [{ server: 'TypeScript', base: reference, token }, { server: 'Rust', base: candidate, token }];
   const samples = 100;
   const rows = targets.flatMap(target => names.map(name => ({ server: target.server, name, values: [] })));
@@ -41,7 +44,7 @@ async function main() {
       .map(row => ({ name: row.name, median: row.ms.median, p95: row.ms.p95 })) };
   writeFileSync(evidencePath(output), `${JSON.stringify({ schema: 'o8/mcp/paired-benchmark/v2',
     warmups: 10, samples, results, comparisons, acceptance, baseline: baselineContext }, null, 2)}\n`);
-  console.log('MCP benchmark passed: 7 operations, 100 samples per server');
+  console.log(`MCP benchmark measured: ${names.length} operations, 100 samples per server`);
 }
 main().catch(error => {
   console.error(`MCP benchmark failed: ${error instanceof Error ? error.message : 'unknown error'}`);

@@ -357,7 +357,8 @@ async fn handle(
         // No partial native result is returned on an unsupported source or error.
         let mut result = reader.read(&server.upstream, &headers, &messages);
         if result.is_err() {
-            if let Some(generation) = reader.pending_generation() {
+            if let Err(Some(pending)) = result.as_ref() {
+                let pending = pending.clone();
                 // Bind the live publisher to this upstream once per generation,
                 // using the caller's credential, never an ambient operator token.
                 let context =
@@ -378,8 +379,9 @@ async fn handle(
                     return relay(upstream).await;
                 }
                 if let Ok(context) = upstream.json::<Value>().await {
-                    if context["result"]["nativeGeneration"] == generation {
-                        reader.verify_generation(generation);
+                    if context["result"]["nativeGeneration"] == pending.generation
+                        && reader.verify_generation(pending).is_ok()
+                    {
                         result = reader.read(&server.upstream, &headers, &messages);
                     }
                 }
@@ -400,7 +402,7 @@ async fn handle(
                     )
                 }
             }
-            Err(()) => return server.proxy(method, &headers, body).await,
+            Err(_) => return server.proxy(method, &headers, body).await,
         }
     }
     let status_requests: Vec<Value> = messages.iter().enumerate().filter(|(_, message)| message["method"] == "tools/call" && message["params"]["name"] == "o8_status" && !message["id"].is_null() && !batch)

@@ -64,8 +64,13 @@ SQLite lanes; detailed/brief and explicit project-filter requests retain the
 existing context resolver. Unsupported collation or source shapes also fall
 back. Native publisher and lease identities follow the app's metadata-lock
 contract on Linux and macOS: boot-session identity plus process start identity.
-macOS probes use the same C-locale system commands as the app. Unsupported
-platforms and uncertain probes retain TypeScript reads. The real-entry suite
+macOS reads use `proc_pidinfo` and `sysctlbyname` directly, retaining the app's
+C-locale legacy timestamp format. Publisher generation binding also pins the
+kernel's full microsecond start time before and after the authenticated handshake.
+Every read rechecks that witness; a reused PID cannot rebind the same generation.
+Lease rows retain their existing metadata-lock identity format and reconciliation
+rules. Unsupported platforms and uncertain probes retain TypeScript reads. The
+real-entry suite
 runs native assertions on both Linux and macOS; Linux execution does not prove
 macOS runtime behavior.
 
@@ -131,9 +136,13 @@ field paths, without state values or credentials.
 
 For reproducible latency numbers, build the optimized binary, set
 `O8D_MCP_TEST_BINARY` to its absolute path and `O8_MCP_BENCH_REPORT` to a workspace
-JSON output path, then run the real fixture suite. It interleaves both servers,
-alternates their order, uses 10 warmups and 100 samples per tool, and calls the
-same `rpc` client and `distribution` helper as `scripts/speed/mcp.mjs`. Reports
+JSON output path, then run the real fixture suite's test named
+`measures both servers with the existing speed MCP client`. This status-only gate
+requires native p50 and p95 at most TypeScript / 5 and zero forwarded candidate
+calls. It interleaves both servers, alternates their order, uses 10 warmups and
+100 measured samples per path (110 calls each), and calls the same `rpc` client
+and `distribution` helper as `scripts/speed/mcp.mjs`. The benchmark CLI's default
+still measures all tools; `--tools=o8_status` selects the paired status gate. Reports
 contain sample counts, p50 (`median`) and p95 milliseconds. The native candidate
 is explicitly enabled and warmed, including publisher
 generation binding. Fallback requests remain included. These numbers include

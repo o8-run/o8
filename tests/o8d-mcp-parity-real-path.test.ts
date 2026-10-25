@@ -754,17 +754,20 @@ describe('o8d MCP through the real HTTP JSON-RPC entry point', () => {
     expect(result.stdout).toContain('MCP parity passed');
   });
   it.runIf(Boolean(process.env.O8_MCP_BENCH_REPORT))('measures both servers with the existing speed MCP client', async () => {
+    await call(base, 'o8_status', { fresh: true });
+    await call(nativeRust, 'o8_status');
     seen.length = 0;
-    await promisify(execFile)(process.execPath, ['scripts/mcp-benchmark.mjs', `--reference=${base}`,
+    await promisify(execFile)(process.execPath, ['scripts/mcp-benchmark.mjs', '--tools=o8_status', `--reference=${base}`,
       `--candidate=${nativeRust}`, `--output=${process.env.O8_MCP_BENCH_REPORT}`], {
       env: { ...process.env, O8_MCP_PARITY_TOKEN: token },
     });
     const report = JSON.parse(readFileSync(process.env.O8_MCP_BENCH_REPORT!, 'utf8'));
-    expect(report.results).toHaveLength(14);
+    expect(report.results).toHaveLength(2);
     expect(report.samples).toBe(100);
+    expect(report.warmups).toBe(10);
     expect(report.acceptance).toMatchObject({ statusP50Under10Ms: expect.any(Boolean),
       everyNativeToolAtLeast5xLower: expect.any(Boolean) });
-    expect(report.comparisons).toHaveLength(6);
+    expect(report.comparisons).toHaveLength(1);
     for (const comparison of report.comparisons) {
       expect(comparison).toMatchObject({ name: expect.any(String), p50Speedup: expect.any(Number),
         p95Speedup: expect.any(Number), p50AtLeast5xLower: expect.any(Boolean), p95AtLeast5xLower: expect.any(Boolean) });
@@ -776,6 +779,13 @@ describe('o8d MCP through the real HTTP JSON-RPC entry point', () => {
     expect(report.baseline).toMatchObject({ source: '#4374', comparable: false,
       results: expect.arrayContaining([expect.objectContaining({ name: 'o8_status', median: 35.5, p95: 1667.03 })]) });
     writeFileSync(process.env.O8_MCP_BENCH_REPORT!, `${JSON.stringify(report, null, 2)}\n`);
+    const statusComparison = report.comparisons.find((row: { name: string }) => row.name === 'o8_status');
+    expect(statusComparison, 'native status p50 and p95 must be at least 5x faster than TypeScript').toMatchObject({
+      p50AtLeast5xLower: true, p95AtLeast5xLower: true,
+    });
+    expect(statusComparison, 'native status must serve every measured call without forwarding').toMatchObject({
+      candidateForwardedCalls: 0,
+    });
   }, 180_000);
 
   it.runIf(Boolean(process.env.O8_MCP_SCALE_BENCH_REPORT_DIR))('measures realistic state with idle and CPU-loaded TypeScript', async () => {
