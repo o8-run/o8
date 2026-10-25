@@ -1,3 +1,5 @@
+import { assertMcpConfiguration } from './mcp-config-policy';
+import { withProviderStoreLock } from './store-lock';
 import { providerCredentialMaterials } from './key-store';
 import { matchesProviderCredential } from './credential-materials';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
@@ -11,7 +13,8 @@ const credentialHeader = /^(authorization|proxy-authorization|x-api-key|api-key|
 
 /** Owned files never contain provider secrets. Account OAuth and service auth stay intact. */
 export function filterRuntimeConfig(value: unknown, runtimeId: string, provider = runtimeId, location: string[] = [], materials = providerCredentialMaterials()): unknown {
-  // payer policy part b: explicit MCP server credentials retain their current behavior.
+  if (location.length === 0 && value && typeof value === 'object' && !Array.isArray(value)) assertMcpConfiguration(value, runtimeId);
+  // Preserve approved MCP entries without applying provider-file sanitization.
   if (location.some(part => part === 'mcp_servers' || part === 'mcpServers')) return value;
   if (typeof value === 'string') return matchesProviderCredential(value, materials) ? undefined : value;
   if (Array.isArray(value)) return value.map(item => filterRuntimeConfig(item, runtimeId, provider, location, materials)).filter(item => item !== undefined);
@@ -73,6 +76,10 @@ export function sanitizeRuntimeConfigText(file: string, raw: string, runtimeId: 
 }
 
 export function copyRuntimeConfigFile(source: string, destination: string, runtimeId: string): void {
+  withProviderStoreLock(() => copyConfig(source, destination, runtimeId));
+}
+
+function copyConfig(source: string, destination: string, runtimeId: string): void {
   if (existsSync(destination)) return;
   const raw = readFileSync(source);
   const text = raw.toString('utf8');

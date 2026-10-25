@@ -95,7 +95,7 @@ async function main(): Promise<void> {
     fail('Codex app bridge: malformed spec');
   }
 
-  withProviderStoreLock(() => assertMcpServers(spec.config?.mcp_servers));
+  withProviderStoreLock(() => assertMcpServers(spec.config?.mcp_servers, 'codex'));
   const child = spawn(spec.codexBin, ['app-server'], { cwd: spec.cwd, env: childEnvironment({ runtimeId: 'codex' }), stdio: ['pipe', 'pipe', 'pipe'] });
   let childStderr = '';
   child.stderr.on('data', (chunk: Buffer) => { childStderr = (childStderr + chunk.toString('utf8')).slice(-2_000); });
@@ -241,12 +241,12 @@ async function main(): Promise<void> {
     let started: Json;
     if (spec.threadId) {
       try {
-        started = await withProviderStoreLock(() => { assertMcpServers(spec.config?.mcp_servers); return call('thread/resume', { threadId: spec.threadId, excludeTurns: true, ...threadParams }); });
+        started = await withProviderStoreLock(() => { assertMcpServers(spec.config?.mcp_servers, 'codex'); return call('thread/resume', { threadId: spec.threadId, excludeTurns: true, ...threadParams }); });
       } catch (error) {
         throw new Error(`thread/resume: ${error instanceof Error ? error.message : String(error)}`);
       }
     } else {
-      started = await withProviderStoreLock(() => { assertMcpServers(spec.config?.mcp_servers); return call('thread/start', threadParams); });
+      started = await withProviderStoreLock(() => { assertMcpServers(spec.config?.mcp_servers, 'codex'); return call('thread/start', threadParams); });
     }
     threadId = text(asObject(started.thread)?.id) || null;
     if (!threadId) throw new Error('codex app-server did not return a thread id');

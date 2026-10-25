@@ -1,3 +1,4 @@
+import { withMcpConfigPolicy } from '@/lib/providers/mcp-config-policy';
 import { childDiagnostic } from '@/lib/providers/child-diagnostics';
 import { configuredMcpEnvironment } from '@/lib/providers/spawn-environment';
 /**
@@ -328,12 +329,12 @@ async function testHttp(input: HttpTestInput, timeoutMs: number): Promise<McpTes
       method: 'tools/list',
     };
 
-    const res = await fetch(input.url, {
+    const res = await withMcpConfigPolicy({ mcpServers: { remote: { type: 'http', url: input.url, headers } } }, undefined, () => fetch(input.url, {
       method: 'POST',
       headers,
       body: JSON.stringify(requestBody),
       signal: controller.signal,
-    });
+    }));
 
     clearTimeout(timeout);
 

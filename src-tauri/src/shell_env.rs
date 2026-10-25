@@ -40,6 +40,13 @@ pub const AI_KEYS: &[&str] = &[
     "ANTHROPIC_API_KEY",
     "OPENAI_API_KEY",
     "OPENROUTER_API_KEY",
+    "DEEPSEEK_API_KEY",
+    "GROQ_API_KEY",
+    "ELEVENLABS_API_KEY",
+    "GOOGLE_TTS_API_KEY",
+    "GOOGLE_API_KEY",
+    "CODEX_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
     "XAI_API_KEY",
     // Read-only token for the founder usage-analytics dashboard (epic #1249).
     // Only present in the founder's login shell — a normal user's shell has

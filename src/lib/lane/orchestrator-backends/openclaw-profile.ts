@@ -1,3 +1,4 @@
+import { withProviderStoreLock } from '@/lib/providers/store-lock';
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { isAbsolute, join, relative, sep } from 'node:path';
@@ -183,7 +184,7 @@ export function prepareOpenclawProfile(gatewayPort: number): void {
     toOpenclawJson(buildToolRegistry(process.cwd())).servers.o8, gatewayPort,
   );
 
-  writeFileSync(OPENCLAW_O8_CONFIG, sanitizeRuntimeConfigText(OPENCLAW_O8_CONFIG, JSON.stringify(o8Config), 'openclaw'), { flag: 'wx', mode: 0o600 });
+  withProviderStoreLock(() => writeFileSync(OPENCLAW_O8_CONFIG, sanitizeRuntimeConfigText(OPENCLAW_O8_CONFIG, JSON.stringify(o8Config), 'openclaw'), { flag: 'wx', mode: 0o600 }));
   // Schema marker — sidecar in ~/.o8, NOT in the config (openclaw rejects
   // unrecognized keys inside its own config).
   mkdirSync(getDataDir(), { recursive: true });

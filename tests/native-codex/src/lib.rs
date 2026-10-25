@@ -1,6 +1,10 @@
 //! Bounded native harness: production transport, planner control flow and terminal serialization.
 //! Desktop tools, prompt construction and machine identity are stubbed; no model calls.
 #![allow(dead_code)]
+#[path = "../../../src-tauri/src/no_window.rs"]
+mod no_window;
+#[path = "../../../src-tauri/src/shell_env.rs"]
+mod shell_env;
 #[path = "../../../src-tauri/src/child_environment.rs"]
 mod child_environment;
 #[path = "../../../src-tauri/src/agent/subscription_child.rs"]

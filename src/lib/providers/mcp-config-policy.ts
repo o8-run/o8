@@ -1,27 +1,90 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { parse as parseToml } from 'smol-toml';
-import { configuredMcpEnvironment, configuredRuntimeId } from './spawn-environment';
+import { childEnvironment, configuredMcpEnvironment, configuredRuntimeId, providerCredentialName } from './spawn-environment';
+import { containsProviderCredential } from './credential-materials';
+import { withProviderStoreLock } from './store-lock';
 
 const failure = () => new Error('MCP config is invalid or its credential policy changed. Rebuild it and retry.');
+const record = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value));
+const permittedValues = (env: Record<string, string | undefined>) => new Set(Object.entries(env)
+  .filter(([name, value]) => providerCredentialName(name) && value).map(([, value]) => value!));
 
-/** Applies equally to JSON files, Codex TOML and app-server thread overrides. */
-export function assertMcpServers(servers: unknown): void {
+/** Inspect every field, including remote headers, encoded URL values and Basic
+ * authorization. Historical fingerprints reject removed/rotated saved keys.
+ */
+function assertValues(value: unknown, allowed: ReadonlySet<string>, depth = 0): void {
+  if (depth > 64) throw failure();
+  if (typeof value === 'string') {
+    const candidates = [value];
+    try { candidates.push(decodeURIComponent(value)); } catch { /* Ordinary non-URL text. */ }
+    try {
+      const url = new URL(value);
+      // Decode each component independently: a malformed escape elsewhere in
+      // the URL must not hide an encoded provider key in a query parameter.
+      for (const part of [url.username, url.password, url.pathname, url.hash, ...Array.from(url.searchParams).flat()]) {
+        candidates.push(part);
+        try { candidates.push(decodeURIComponent(part)); } catch { /* Check the remaining components. */ }
+      }
+    } catch { /* Ordinary non-URL text. */ }
+    const basic = /^Basic\s+([\s\S]+)$/i.exec(value.trim());
+    if (basic) candidates.push(Buffer.from(basic[1], 'base64').toString('utf8'));
+    if (candidates.some(candidate => containsProviderCredential(candidate, allowed))) throw failure();
+  } else if (Array.isArray(value)) {
+    for (const item of value) assertValues(item, allowed, depth + 1);
+  } else if (record(value)) {
+    for (const [name, item] of Object.entries(value)) {
+      assertValues(name, allowed, depth + 1);
+      assertValues(item, allowed, depth + 1);
+    }
+  }
+}
+
+/** Stdio belongs to its configured child CLI; HTTP/SSE belongs to the CLI
+ * consuming the configuration. Missing runtime authority always denies keys.
+ */
+export function assertMcpServers(servers: unknown, runtimeId?: string): void {
   if (servers === undefined) return;
   try {
-    if (!servers || typeof servers !== 'object' || Array.isArray(servers)) throw failure();
-    for (const server of Object.values(servers) as Array<Record<string, unknown>>) {
-      if (!server || typeof server !== 'object') throw failure();
-      if (server.enabled === false || server.type === 'http' || server.type === 'sse' || (!server.command && server.url)) continue;
-      if (typeof server.command !== 'string') throw failure();
-      const env = server.env ?? {};
-      const args = server.args ?? [];
-      if (!env || typeof env !== 'object' || Array.isArray(env) || Object.values(env).some(value => typeof value !== 'string')
-        || !Array.isArray(args) || args.some(value => typeof value !== 'string')) throw failure();
-      const current = configuredMcpEnvironment(server.command, env as Record<string, string>, false, args);
-      if (Object.entries(env).some(([name, value]) => value && current[name] !== value)) throw failure();
+    if (!record(servers)) throw failure();
+    for (const [name, value] of Object.entries(servers)) {
+      if (!record(value)) throw failure();
+      const command = Array.isArray(value.command) ? value.command[0] : value.command;
+      const remote = ['http', 'sse', 'remote'].includes(String(value.type)) || !command && (value.url || value.httpUrl);
+      if (remote || !command) {
+        const allowed = permittedValues(childEnvironment({ runtimeId, inherit: false }));
+        assertValues(name, allowed);
+        assertValues(value, allowed);
+        continue;
+      }
+      if (typeof command !== 'string') throw failure();
+      const env = value.env ?? value.environment ?? {};
+      const args = Array.isArray(value.command) ? value.command.slice(1) : value.args ?? [];
+      if (!record(env) || Object.values(env).some(item => typeof item !== 'string')
+        || !Array.isArray(args) || args.some(item => typeof item !== 'string')) throw failure();
+      const current = configuredMcpEnvironment(command, env as Record<string, string>, false, args);
+      if (Object.entries(env).some(([name, item]) => item && current[name] !== item)) throw failure();
+      const allowed = permittedValues(current);
+      assertValues(name, allowed);
+      assertValues(value, allowed);
     }
   } catch { throw failure(); }
+}
+
+/** Read-only validation also accepts inert entries used during profile setup. */
+export function assertMcpConfiguration(config: unknown, runtimeId: string | undefined): void {
+  if (!record(config)) throw failure();
+  assertMcpServers(config.mcpServers, runtimeId);
+  assertMcpServers(config.mcp_servers, runtimeId);
+  if (record(config.mcp)) assertMcpServers(config.mcp.servers ?? config.mcp, runtimeId);
+}
+
+/** File writes, process launches and HTTP request creation share the same OS store lock. */
+export function withMcpConfigPolicy<T>(config: unknown, runtimeId: string | undefined, write: () => T): T {
+  return withProviderStoreLock(() => {
+    assertMcpConfiguration(config, runtimeId);
+    return write();
+  });
 }
 
 function readConfig(file: string): string {
@@ -34,9 +97,10 @@ function readConfig(file: string): string {
  */
 export function assertMcpConfigArguments(args: readonly string[], env: NodeJS.ProcessEnv, runtimeId?: string): void {
   try {
-    if ((runtimeId === 'codex' || configuredRuntimeId(args[0] ?? '') === 'codex') && env.CODEX_HOME) {
+    const owner = runtimeId ?? configuredRuntimeId(args[0] ?? '');
+    if (owner === 'codex' && env.CODEX_HOME) {
       const file = join(env.CODEX_HOME, 'config.toml');
-      if (existsSync(file)) assertMcpServers(parseToml(readConfig(file)).mcp_servers);
+      if (existsSync(file)) assertMcpServers(parseToml(readConfig(file)).mcp_servers, owner);
     }
     for (let index = 0; index < args.length; index += 1) {
       const arg = args[index];
@@ -44,8 +108,8 @@ export function assertMcpConfigArguments(args: readonly string[], env: NodeJS.Pr
         : arg.startsWith('--mcp-config=') ? arg.slice('--mcp-config='.length) : undefined;
       if (source === undefined) continue;
       const config = JSON.parse(source.startsWith('{') ? source : readConfig(source));
-      if (!config || typeof config !== 'object' || !config.mcpServers) throw failure();
-      assertMcpServers(config.mcpServers);
+      if (!record(config) || !config.mcpServers) throw failure();
+      assertMcpServers(config.mcpServers, owner);
     }
   } catch { throw failure(); }
 }

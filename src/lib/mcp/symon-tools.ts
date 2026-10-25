@@ -1,3 +1,4 @@
+import { withMcpConfigPolicy } from '@/lib/providers/mcp-config-policy';
 import { childDiagnostic } from '@/lib/providers/child-diagnostics';
 import { credentialPolicyFingerprint } from '@/lib/providers/credential-policy';
 import { onCredentialPolicyChange } from '@/lib/providers/policy-events';
@@ -337,12 +338,12 @@ class HttpSession implements McpSession {
       ...(this.sessionId ? { 'mcp-session-id': this.sessionId } : {}),
     };
     try {
-      const response = await fetch(url, {
+      const response = await withMcpConfigPolicy({ mcpServers: { remote: { type: 'http', url, headers } } }, undefined, () => fetch(url, {
         method: 'POST',
         headers,
         body: JSON.stringify(body),
         signal: controller.signal,
-      });
+      }));
       if (!response.ok) throw new Error(`MCP HTTP request failed with status ${response.status}`);
       this.sessionId = response.headers.get('mcp-session-id') || this.sessionId;
       if (!expectResponse || response.status === 202) return {};

@@ -1,3 +1,4 @@
+import { withMcpConfigPolicy } from '@/lib/providers/mcp-config-policy';
 /**
  * Claude Desktop / Claude Code config file I/O — tolerant read + atomic,
  * backup-preserving write.
@@ -29,7 +30,11 @@ export function readClaudeConfig(path: string): ClaudeDesktopConfig {
   }
 }
 
-export function atomicWriteConfig(path: string, config: ClaudeDesktopConfig): void {
+export function atomicWriteConfig(path: string, config: ClaudeDesktopConfig, runtimeId = 'claude-code'): void {
+  withMcpConfigPolicy(config, runtimeId, () => writeConfig(path, config));
+}
+
+function writeConfig(path: string, config: ClaudeDesktopConfig): void {
   const dir = dirname(path);
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });

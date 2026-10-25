@@ -1,3 +1,4 @@
+import { withMcpConfigPolicy } from '@/lib/providers/mcp-config-policy';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
@@ -24,7 +25,7 @@ export function ensureMcpConfig(repoPath: string, profile: ToolProfile, config: 
   // The caller fingerprints this exact object. Keeping construction out of the
   // writer prevents transient resolver state from making the stored hash differ
   // from the config the CLI actually reads.
-  writeFileSync(configPath, JSON.stringify(config, null, 2));
+  withMcpConfigPolicy(config, 'claude-code', () => writeFileSync(configPath, JSON.stringify(config, null, 2)));
   console.log(`[orchestrator-session] MCP config written to ${configPath}`);
   return configPath;
 }

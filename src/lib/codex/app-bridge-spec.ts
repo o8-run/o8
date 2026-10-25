@@ -1,3 +1,4 @@
+import { withMcpConfigPolicy } from '@/lib/providers/mcp-config-policy';
 import { randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -43,6 +44,6 @@ export function splitCodexOrchestratorPrompt(prompt: string, rawMessage?: string
 /** The spec carries the prompt, so it goes to a private file that the bridge deletes on read. */
 export function writeCodexAppBridgeSpec(spec: CodexAppBridgeSpec, dir = tmpdir()): string {
   const file = join(dir, `o8-codex-app-${randomUUID()}.json`);
-  writeFileSync(file, JSON.stringify(spec), { encoding: 'utf8', mode: 0o600 });
+  withMcpConfigPolicy(spec.config, 'codex', () => writeFileSync(file, JSON.stringify(spec), { encoding: 'utf8', mode: 0o600 }));
   return file;
 }

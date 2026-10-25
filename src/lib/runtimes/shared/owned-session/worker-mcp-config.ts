@@ -1,3 +1,5 @@
+import { writeFileSync } from 'node:fs';
+import { withMcpConfigPolicy } from '@/lib/providers/mcp-config-policy';
 import { readdir, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
@@ -115,11 +117,11 @@ export async function prepareOwnedWorkerMcpConfig({
         env: server.env ?? {},
       },
     ]));
-    await writeFile(
+    withMcpConfigPolicy({ mcpServers }, adapter.runtimeId, () => writeFileSync(
       configPath,
       `${JSON.stringify({ mcpServers }, null, 2)}\n`,
       { encoding: 'utf8', mode: 0o600 },
-    );
+    ));
     recordWorkerMcpEvent(session, 'mcp_injected', {
       servers: injectableServers.map((server) => server.name),
       configPath,

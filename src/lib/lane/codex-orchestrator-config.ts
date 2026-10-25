@@ -1,3 +1,4 @@
+import { withMcpConfigPolicy } from '@/lib/providers/mcp-config-policy';
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { createHash } from 'node:crypto';
@@ -146,7 +147,7 @@ export function prepareCodexHome(
     resolved.note,
   );
   const configPath = join(codexHome, 'config.toml');
-  writeFileSync(configPath, mergedConfig, { encoding: 'utf8', mode: 0o600 });
+  withMcpConfigPolicy(parse(mergedConfig), 'codex', () => writeFileSync(configPath, mergedConfig, { encoding: 'utf8', mode: 0o600 }));
   chmodSync(configPath, 0o600);
   syncCodexAuthFiles(codexHome);
   return { codexHome, ...resolved };

@@ -95,14 +95,14 @@ export async function POST(request: Request) {
         }
       }
       if (removed.length > 0) {
-        atomicWriteConfig(path, config);
+        atomicWriteConfig(path, config, 'opencode');
         return NextResponse.json({ ok: true, action: 'removed', path, removed });
       }
       return NextResponse.json({ ok: true, action: 'no-op', path, detail: 'o8 was not registered' });
     }
 
     const merged = toOpencodeJsonMerged(registry, config);
-    atomicWriteConfig(path, merged);
+    atomicWriteConfig(path, merged, 'opencode');
 
     return NextResponse.json({
       ok: true,

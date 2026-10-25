@@ -3678,6 +3678,13 @@
       ]
     },
     {
+      "path": "tests/mcp-private-registry-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/mcp-project-install.test.ts",
       "reasons": [
         "child-process",
@@ -3702,6 +3709,13 @@
       "reasons": [
         "child-process",
         "native-build",
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/mcp-transport-payer-real-path.test.ts",
+      "reasons": [
         "network-listener",
         "real-path"
       ]

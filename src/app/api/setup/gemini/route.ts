@@ -89,14 +89,14 @@ export async function POST(request: Request) {
         }
       }
       if (removed.length > 0) {
-        atomicWriteConfig(path, config);
+        atomicWriteConfig(path, config, 'gemini');
         return NextResponse.json({ ok: true, action: 'removed', path, removed });
       }
       return NextResponse.json({ ok: true, action: 'no-op', path, detail: 'o8 was not registered' });
     }
 
     const merged = toGeminiSettingsMerged(registry, config);
-    atomicWriteConfig(path, merged);
+    atomicWriteConfig(path, merged, 'gemini');
 
     return NextResponse.json({
       ok: true,
