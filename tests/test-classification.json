@@ -4059,6 +4059,13 @@
       ]
     },
     {
+      "path": "tests/next-monaco-build-failure-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/next-monaco-chunk-real-path.test.ts",
       "reasons": [
         "child-process",
