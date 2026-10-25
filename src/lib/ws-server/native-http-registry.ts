@@ -33,7 +33,8 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/orchestrator/merge-preview', 'GET', () => import('./native-http-handlers').then(handlers => handlers.api_orchestrator_merge_preview)),
   ],
   grid: [],
-  terminal: [],
+  terminal: [route('/api/mobile/terminal-sessions', 'GET', () => import('./native-http-handlers').then(handlers => handlers.api_mobile_terminal_sessions))],
+  palette: [], // Local commands and workspace navigation reuse the selected surface's transport.
   settings: [
     route('/api/panel/operator-defaults', 'GET POST', () => import('./native-http-handlers').then(handlers => handlers.api_panel_operator_defaults)),
     route('/api/v2/keys', 'GET POST PATCH DELETE', () => import('./native-http-handlers').then(handlers => handlers.api_v2_keys)),

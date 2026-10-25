@@ -55,7 +55,8 @@ fetcher select routes from that same registry:
 | Diff | GET review-state, lane diff and worktree diff; POST review | Existing packet/workspace query and decision receipt. |
 | Activity | GET commits, CI/list/detail, PR details, issues and state; PATCH state; POST stop-mission | Existing activity projections and mission mutation receipts. |
 | Pull Requests | GET PR list/detail, GitHub status and merge-preview; POST PR detail | Existing pagination, review/merge gates and action receipts. |
-| Terminal | Existing WebSocket transport | No separate native terminal HTTP route. |
+| Terminal | GET mobile/terminal-sessions; existing WebSocket transport | Existing terminal picker inventory and live PTY transport. |
+| Palette | Local commands and workspace navigation | Reuses the selected surface's transport. |
 
 `tests/o8d-next-surfaces-real-path.test.ts` walks `register_surfaces!`, requires
 a transport entry for every surface, checks production handler methods and
@@ -68,6 +69,11 @@ WS entry with the packaged platform-specific addon layout and no Next listener.
 The [review round 1 receipt](evidence/next-surfaces-review-round-1.txt) records
 the origin-selection and packet-worker regressions, their fixes, and the
 first-run Setup registrations required after rebasing on current main.
+The [review round 2 receipt](evidence/next-surfaces-review-round-2.txt) records
+the bundle trim, the minimal total-ceiling increase for required handler
+dependencies, lazy implementation boundaries and the Terminal/Palette
+registrations added on main. Standalone exports use the original framework
+request/response classes without its unused rendering and user-agent barrel.
 
 The [fixture measurement receipt](evidence/next-surfaces-metrics.json) records
 252.29 MiB / 1.50% CPU with Next stopped and 969.18 MiB / 1.50% with a warmed

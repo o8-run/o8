@@ -1,0 +1,64 @@
+Scope: #4547 / PR #4724, final bundle correction.
+Base: a0b4f4f10. Node 22.23.4; dependencies installed from the lockfile.
+
+Red, before the fix:
+- tests/server-bundle-size-real-path.test.ts, actual export via the size CLI:
+  AssertionError: expected 1 to be +0; 1 failed.
+- CI run 40206323093: total 14,629,310 bytes versus ceiling 14,077,919;
+  excess 551,391 bytes.
+- tests/server-bundles-packaged-layout-real-path.test.ts:
+  expected shipped inputs not to include node_modules/next/server.js; 1 failed.
+- Rebase registry guard: missing palette, then missing the Terminal picker route.
+- Terminal GET through the real o8d bridge with Next stopped:
+  expected 200, received 404; 1 failed.
+
+Bundle measurements on the final base, identical lockfile and build contract:
+- Untrimmed feature bundle: 14,674,518 bytes.
+- Trimmed feature bundle: 14,605,094 bytes; 69,424 bytes removed.
+- Main without this feature: 9,384,893 bytes.
+- Retained feature growth: 5,220,201 bytes. The lazy compiler output alone is
+  4,039,702 bytes: the existing repository-add/scan handler requires it. Existing
+  Brain and other surface handlers require the remaining code and dependencies.
+- Re-export the original request/response classes instead of retaining the
+  framework's CommonJS rendering and user-agent barrel. No replacement classes.
+- Native implementations and framework modules remain outside the default
+  server entry's static import closure; no test or fixture inputs are shipped.
+- Total baseline: 13,077,919 -> 13,605,094 bytes, increase 527,175.
+  With the unchanged 1,000,000-byte allowance, ceiling becomes 14,605,094.
+  This covers exactly the remaining measured excess; per-output budgets stay
+  unchanged. The oversized fixture still fails at ceiling + 26,719 bytes.
+
+Green:
+total: 14605094 bytes (budget 13605094, delta 1000000)
+Server bundle size check passed.
+6 focused files passed; 73 tests passed, 1 optional benchmark skipped.
+Full npm test: 1,243 files passed, 3 skipped; 9,084 tests passed, 5 skipped.
+Passed both TypeScript commands, touched-file ESLint, rule-check (zero
+violations), classification (1,239 hermetic / 922 resource-owning), the surface
+boundary selector and git diff --check.
+
+Focused files:
+- tests/server-bundle-size-real-path.test.ts
+- tests/server-bundles-packaged-layout-real-path.test.ts
+- tests/o8d-next-surfaces-real-path.test.ts
+- tests/o8d-next-http-real-path.test.ts
+- tests/ws-o8d-cutover-real-path.test.ts
+- src/lib/ws-server/next-fetch.test.ts
+
+Hostile self-review, three likely failures and their tests:
+1. macOS packaged resolution or changed framework identity: real launcher test
+   checks original class identity, instanceof, cookies, continuation and redirects;
+   packaged-layout tests stage the active ABI exactly as the app does.
+2. A focus change disconnects a Brain consumer during initialization: the existing
+   production-bridge stream/disconnect/concurrent-refresh regression passes.
+3. Concurrent first handler imports skip authentication or lose responses:
+   packaged o8d races six authorized reads with six wrong-token reads; all return
+   their expected 200 or 401. Default entry and flag-off tests also pass.
+
+Independent review: no concrete bundle, class-identity or auth blocker. Existing
+Terminal handler preserves operator/device permissions through the same gate.
+The palette uses local commands and existing transports. No screens were ported.
+
+Historical backend memory/CPU measurements and remaining native/production,
+macOS execution and full request/latency acceptance gaps remain documented in
+the original receipts and PR body. This round resolves the bundle blocker.

@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { bundleServers, SERVER_ENTRIES } from '../scripts/lib/server-bundles.mjs';
@@ -52,19 +52,46 @@ describe('server size check CLI', () => {
     const committedBudget = join(process.cwd(), 'scripts/server-bundle-budget.json');
     const originalBudget = readFileSync(committedBudget, 'utf8');
     const budget = JSON.parse(originalBudget);
-    expect(budget.totalBytes + 1_000_000).toBe(14_077_919);
+    const ceiling = budget.totalBytes + 1_000_000;
+    const oversizedBytes = ceiling + 26_719;
     const entry = join(root, entries[0]);
     writeFileSync(entry, 'console.log("");\n');
     const initial = bundleServers({ root, outDir: join(root, 'sizing') }).outputs
       .reduce((sum, output) => sum + output.bytes, 0);
-    writeFileSync(entry, `console.log(${JSON.stringify('x'.repeat(14_104_638 - initial))});\n`);
+    writeFileSync(entry, `console.log(${JSON.stringify('x'.repeat(oversizedBytes - initial))});\n`);
     const red = run(root, committedBudget);
     expect(red.status, red.stdout + red.stderr).toBe(1);
-    expect(red.stdout).toContain('total: 14104638 bytes (budget 13077919, delta 1026719)');
+    expect(red.stdout).toContain(`total: ${oversizedBytes} bytes (budget ${budget.totalBytes}, delta 1026719)`);
     expect(red.stderr).toContain('total exceeds budget by 1026719 bytes (allowed growth: 1 MB).');
     expect(readFileSync(committedBudget, 'utf8')).toBe(originalBudget);
     console.info(red.stdout.split('\n').filter(line => line.startsWith('total:')).join('\n'));
     console.info(red.stderr.trim());
+  });
+
+  it('preserves original framework class identity and HTTP semantics through the packaged launcher', () => {
+    const { root } = fixture();
+    mkdirSync(join(root, 'scripts/lib'));
+    cpSync('scripts/lib/next-server-exports.mjs', join(root, 'scripts/lib/next-server-exports.mjs'));
+    symlinkSync(join(process.cwd(), 'node_modules'), join(root, 'node_modules'), 'junction');
+    writeFileSync(join(root, entries[0]), `
+      import { NextRequest, NextResponse } from 'next/server';
+      import { NextRequest as OriginalRequest } from 'next/dist/server/web/spec-extension/request.js';
+      import { NextResponse as OriginalResponse } from 'next/dist/server/web/spec-extension/response.js';
+      const request = new NextRequest('http://localhost/api/fixture?value=one', { headers: { cookie: 'fixture=two' } });
+      const response = NextResponse.json({ value: request.nextUrl.searchParams.get('value') });
+      response.cookies.set('fixture', 'three');
+      console.log(JSON.stringify({ sameRequest: NextRequest === OriginalRequest, sameResponse: NextResponse === OriginalResponse,
+        instance: response instanceof OriginalResponse, body: await response.json(), cookie: request.cookies.get('fixture').value,
+        setCookie: response.cookies.get('fixture').value, continuation: NextResponse.next().headers.get('x-middleware-next'),
+        redirect: NextResponse.redirect(new URL('/target', request.url)).status }));
+    `);
+    const outDir = join(root, 'built');
+    bundleServers({ root, outDir });
+    writeFileSync(join(outDir, 'native-addon-runtime.cjs'), 'exports.prepareNativeAddons = () => {};');
+    const executed = spawnSync(process.execPath, [join(outDir, 'ws-server.mjs')], { encoding: 'utf8', timeout: 10_000 });
+    expect(executed.status, executed.stderr).toBe(0);
+    expect(JSON.parse(executed.stdout)).toEqual({ sameRequest: true, sameResponse: true, instance: true, body: { value: 'one' },
+      cookie: 'two', setCookie: 'three', continuation: '1', redirect: 307 });
   });
 
   it('excludes orphan lazy chunks and executes retained lazy imports', () => {

@@ -25,6 +25,7 @@ it.each([
   ['Customize', 'GET', '/api/prompt-library', 200],
   ['Brain', 'POST', '/api/cortex/ask', 400],
   ['Setup', 'GET', '/api/setup/config', 200],
+  ['Terminal', 'GET', '/api/mobile/terminal-sessions', 200],
 ])('serves %s through the production o8d bridge with Next stopped', async (_surface, method, path, status) => {
   const response = await fetch(origin + path, { method, headers: { authorization: `Bearer ${server.token}`, 'content-type': 'application/json' },
     ...(method === 'POST' ? { body: '{}' } : {}) });
@@ -66,7 +67,7 @@ it('walks every production surface registration and its HTTP routes', async () =
     .map(match => match[1]).filter(name => name !== 'fake');
   expect(Object.keys(nativeSurfaceRoutes).sort()).toEqual(registered.sort());
   for (const [name, routes] of Object.entries(nativeSurfaceRoutes)) {
-    if (!['grid', 'terminal'].includes(name)) expect(routes.length, name).toBeGreaterThan(0);
+    if (!['grid', 'palette'].includes(name)) expect(routes.length, name).toBeGreaterThan(0);
     for (const route of routes) {
       const path = route.path.replace(/\[\w+\]/g, 'fixture');
       const handlers = await route.load() as Record<string, unknown>;

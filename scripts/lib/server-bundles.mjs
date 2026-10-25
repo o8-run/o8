@@ -73,7 +73,12 @@ export function bundleServers({ root, outDir }) {
     platform: 'node',
     format: 'esm',
     target: 'node22',
-    alias: { 'server-only': join(root, 'scripts/server-only-stub.js') },
+    alias: {
+      'server-only': join(root, 'scripts/server-only-stub.js'),
+      // The native bridge needs the original request/response classes, without
+      // the CommonJS barrel's unused image, user-agent and rendering APIs.
+      'next/server': join(root, 'scripts/lib/next-server-exports.mjs'),
+    },
     banner: { js: ESM_BANNER },
     metafile: true,
     logLevel: 'warning',

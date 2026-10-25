@@ -89,6 +89,28 @@ afterAll(async () => {
 });
 
 describe('shared server bundles in the packaged layout', () => {
+  it('excludes the unused Next server barrel and test fixtures from the shipped graph', () => {
+    const outputs = Object.values(report.metafile.outputs);
+    const shippedInputs = outputs.flatMap(output => Object.keys(output.inputs));
+    expect(shippedInputs).not.toContain('node_modules/next/server.js');
+    expect(shippedInputs).not.toContain('node_modules/next/dist/compiled/ua-parser-js/ua-parser.js');
+    expect(shippedInputs.filter(input => /(^|\/)(tests|fixtures)\/|\.test\.[cm]?[jt]sx?$/.test(input))).toEqual([]);
+  });
+
+  it('keeps native implementations outside the default server entry import closure', () => {
+    const outputs = report.metafile.outputs;
+    const pending = Object.keys(outputs).filter(file => file.endsWith('/ws-server-impl.mjs'));
+    expect(pending).toHaveLength(1);
+    const visited = new Set<string>();
+    while (pending.length) {
+      const file = pending.pop()!;
+      if (visited.has(file)) continue;
+      visited.add(file);
+      expect(Object.keys(outputs[file].inputs).filter(input => /^src\/app\/api\/|native-http-(?:handlers|routes)\.ts$/.test(input))).toEqual([]);
+      pending.push(...outputs[file].imports.filter(imported => !imported.external && imported.kind !== 'dynamic-import').map(imported => imported.path));
+    }
+  });
+
   it('serves native surface handlers through packaged o8d with no Next listener', async () => {
     const binary = resolve(process.env.O8D_TEST_BINARY ?? join('crates/o8d/target/debug', process.platform === 'win32' ? 'o8d.exe' : 'o8d'));
     if (!process.env.O8D_TEST_BINARY) await promisify(execFile)('cargo', ['build', '--locked', '--manifest-path', 'crates/o8d/Cargo.toml', '--features', 'experimental-ws']);
@@ -104,13 +126,16 @@ describe('shared server bundles in the packaged layout', () => {
         try { return (await (await fetch(origin + '/health')).json()).delivery?.transport === 'o8d'; }
         catch { return false; }
       });
-      for (const path of ['/api/panel/operator-defaults?include=native', '/api/panel/projects', '/api/panel/repos',
-        '/api/panel/approvals', '/api/prompt-library', '/api/customize/inventory']) {
-        const response = await fetch(origin + path, { headers: { authorization: `Bearer ${token}` } });
-        expect(response.status, path).toBe(200);
+      const paths = ['/api/panel/operator-defaults?include=native', '/api/panel/projects', '/api/panel/repos',
+        '/api/panel/approvals', '/api/prompt-library', '/api/customize/inventory'];
+      // Race the first lazy handler load with rejected requests. A concurrent
+      // import must neither skip the gate nor lose a response during startup.
+      await Promise.all(paths.flatMap(path => [true, false].map(async authorized => {
+        const response = await fetch(origin + path, { headers: { authorization: `Bearer ${authorized ? token : 'wrong-fixture-credential'}` } });
+        expect(response.status, path).toBe(authorized ? 200 : 401);
         expect(response.headers.get('content-type')).toContain('application/json');
         await response.arrayBuffer();
-      }
+      })));
       const brain = await fetch(origin + '/api/cortex/ask', { method: 'POST',
         headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: '{}' });
       expect(brain.status).toBe(400);
