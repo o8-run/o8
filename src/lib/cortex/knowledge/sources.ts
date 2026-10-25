@@ -71,7 +71,7 @@ export function normalizeKnowledgeWritePath(candidate: string): string {
 }
 
 /** Read-only probe on an existing parent; never create a case-detection file. */
-function parentIsCaseSensitive(candidate: string): boolean | null {
+function parentIsSpellingSensitive(candidate: string, alternateName: (name: string) => string): boolean | null {
   let directory = candidate;
   for (let depth = 0; depth < 64; depth += 1) {
     try {
@@ -80,7 +80,7 @@ function parentIsCaseSensitive(candidate: string): boolean | null {
         const parent = path.dirname(directory);
         if (parent === directory || lstatSync(parent).dev !== current.dev) return null;
         const name = path.basename(directory);
-        const alternate = name.replace(/[a-zA-Z]/, letter => letter === letter.toUpperCase() ? letter.toLowerCase() : letter.toUpperCase());
+        const alternate = alternateName(name);
         if (alternate !== name) {
           try {
             const alias = lstatSync(path.join(parent, alternate));
@@ -93,6 +93,13 @@ function parentIsCaseSensitive(candidate: string): boolean | null {
       }
     } catch (error) {
       if (!['ENOENT', 'ENOTDIR'].includes((error as NodeJS.ErrnoException).code ?? '')) return null;
+      const alternate = alternateName(path.basename(directory));
+      if (alternate !== path.basename(directory)) {
+        // A missing spelling beside an existing alternative proves that the
+        // volume distinguishes them, without creating a sensitivity probe.
+        try { lstatSync(path.join(path.dirname(directory), alternate)); return true; }
+        catch (alternateError) { if (!['ENOENT', 'ENOTDIR'].includes((alternateError as NodeJS.ErrnoException).code ?? '')) return null; }
+      }
     }
     const parent = path.dirname(directory);
     if (parent === directory) return null;
@@ -101,15 +108,28 @@ function parentIsCaseSensitive(candidate: string): boolean | null {
   return null;
 }
 
+const caseAlternative = (name: string) => name.replace(/[a-zA-Z]/, letter => letter === letter.toUpperCase() ? letter.toLowerCase() : letter.toUpperCase());
+const normalizationAlternative = (name: string) => name.normalize('NFC') === name ? name.normalize('NFD') : name.normalize('NFC');
+
 function overlapsSource(root: string, target: string): boolean {
   if (containsPath(root, target) || containsPath(target, root)) return true;
-  const foldedRoot = root.normalize('NFC').toLowerCase();
-  const foldedTarget = target.normalize('NFC').toLowerCase();
+  // Reserve canonical Unicode spellings even while a source is offline. Do
+  // not create probe files to learn normalization behavior on an unknown volume.
+  const normalizedRoot = root.normalize('NFD');
+  const normalizedTarget = target.normalize('NFD');
+  if (containsPath(normalizedRoot, normalizedTarget) || containsPath(normalizedTarget, normalizedRoot)) {
+    return parentIsSpellingSensitive(root, normalizationAlternative) !== true || parentIsSpellingSensitive(target, normalizationAlternative) !== true;
+  }
+  // Uppercase expansion catches caseless aliases that lowercase alone misses
+  // (long s -> s, sharp s -> ss). Decompose again after case conversion.
+  const fold = (value: string) => value.toUpperCase().toLowerCase().normalize('NFD');
+  const foldedRoot = fold(normalizedRoot);
+  const foldedTarget = fold(normalizedTarget);
   if (!containsPath(foldedRoot, foldedTarget) && !containsPath(foldedTarget, foldedRoot)) return false;
   // Missing descendants cannot be canonicalized by realpath. Keep their
   // reservation on insensitive (or unverified) volumes, while allowing
   // genuinely distinct siblings on a proven case-sensitive volume.
-  return parentIsCaseSensitive(root) !== true || parentIsCaseSensitive(target) !== true;
+  return parentIsSpellingSensitive(root, caseAlternative) !== true || parentIsSpellingSensitive(target, caseAlternative) !== true;
 }
 
 export function assertNotKnowledgeSource(candidate: string | null | undefined): void {

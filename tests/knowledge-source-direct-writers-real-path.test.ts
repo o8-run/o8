@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { NextRequest } from 'next/server';
 import { afterAll, beforeEach, expect, it, vi } from 'vitest';
@@ -167,4 +167,85 @@ it('guards default-cwd discard through a fresh server process running inside the
   const result = JSON.parse(/^O8_DISCARD_RESULT (.+)$/m.exec(output)![1]);
   expect(readFileSync(path.join(vault, 'note.md'), 'utf8')).toBe('uncommitted retained');
   expect(result.status, result.body).toBe(403);
+});
+
+it.each(['gitfile', 'relative core.worktree', 'GIT_DIR', 'GIT_WORK_TREE', 'both environment roots'] as const)(
+  'refuses checkout redirected into protected notes by %s without changing any bytes', async mode => {
+    const writable = repo();
+    git(writable, 'checkout', 'other'); writeFileSync(path.join(writable, 'note.md'), 'replacement from other branch');
+    git(writable, 'add', '.'); git(writable, 'commit', '-m', 'other branch'); git(writable, 'checkout', 'main');
+    const vault = path.join(f.root, `worktree-notes-${++sequence}`); mkdirSync(vault);
+    writeFileSync(path.join(vault, 'note.md'), 'retained'); writeFileSync(path.join(vault, 'o8.md'), '# Retained\n');
+    await protect(vault);
+    const alias = path.join(f.root, `git-alias-${sequence}`); mkdirSync(alias);
+    const admin = path.join(writable, '.git');
+    const oldGitDir = process.env.GIT_DIR, oldWorkTree = process.env.GIT_WORK_TREE;
+    let cwd = alias;
+    if (mode !== 'GIT_WORK_TREE') git(writable, 'config', 'core.worktree', mode === 'relative core.worktree' ? path.relative(admin, vault) : vault);
+    if (mode === 'gitfile' || mode === 'relative core.worktree') writeFileSync(path.join(alias, '.git'), `gitdir: ${admin}\n`);
+    if (mode === 'GIT_DIR' || mode === 'both environment roots') process.env.GIT_DIR = admin;
+    if (mode === 'GIT_WORK_TREE' || mode === 'both environment roots') { process.env.GIT_WORK_TREE = vault; cwd = mode === 'GIT_WORK_TREE' ? writable : alias; }
+    const retained = ['note.md', 'o8.md'].map(file => readFileSync(path.join(vault, file)));
+    const head = readFileSync(path.join(admin, 'HEAD')), index = readFileSync(path.join(admin, 'index'));
+    try {
+      const response = await checkout.POST(req('/api/panel/branches/checkout', { repoPath: cwd, branch: 'other', force: true }));
+      expect.soft(readFileSync(path.join(vault, 'note.md'))).toEqual(retained[0]);
+      expect.soft(readFileSync(path.join(vault, 'o8.md'))).toEqual(retained[1]);
+      expect.soft(readFileSync(path.join(admin, 'HEAD'))).toEqual(head);
+      expect.soft(readFileSync(path.join(admin, 'index'))).toEqual(index);
+      expect(response.status, await response.text()).toBe(403);
+    } finally {
+      if (oldGitDir === undefined) delete process.env.GIT_DIR; else process.env.GIT_DIR = oldGitDir;
+      if (oldWorkTree === undefined) delete process.env.GIT_WORK_TREE; else process.env.GIT_WORK_TREE = oldWorkTree;
+    }
+  },
+);
+
+it('allows an external gitfile checkout whose effective worktree is separate from the source', async () => {
+  const writable = repo();
+  git(writable, 'checkout', 'other'); writeFileSync(path.join(writable, 'note.md'), 'permitted replacement');
+  git(writable, 'add', '.'); git(writable, 'commit', '-m', 'other branch'); git(writable, 'checkout', 'main');
+  const worktree = path.join(f.root, `allowed-worktree-${++sequence}`); mkdirSync(worktree);
+  writeFileSync(path.join(worktree, 'note.md'), 'retained'); writeFileSync(path.join(worktree, 'o8.md'), '# Retained\n');
+  const vault = repo(); await protect(vault);
+  git(writable, 'config', 'core.worktree', worktree);
+  const alias = path.join(f.root, `allowed-alias-${sequence}`); mkdirSync(alias);
+  writeFileSync(path.join(alias, '.git'), `gitdir: ${path.join(writable, '.git')}\n`);
+  const response = await checkout.POST(req('/api/panel/branches/checkout', { repoPath: alias, branch: 'other', force: true }));
+  expect(response.status, await response.text()).toBe(200);
+  expect(readFileSync(path.join(worktree, 'note.md'), 'utf8')).toBe('permitted replacement');
+  expect(readFileSync(path.join(vault, 'note.md'), 'utf8')).toBe('retained');
+});
+
+it('refuses a commit whose environment redirects Git objects into protected notes', async () => {
+  const writable = repo(), vault = repo();
+  const objects = path.join(vault, 'objects'); mkdirSync(objects); await protect(vault);
+  writeFileSync(path.join(writable, 'note.md'), 'new object bytes');
+  const note = readFileSync(path.join(vault, 'note.md'));
+  const oldObjects = process.env.GIT_OBJECT_DIRECTORY, oldAlternates = process.env.GIT_ALTERNATE_OBJECT_DIRECTORIES;
+  process.env.GIT_OBJECT_DIRECTORY = objects;
+  process.env.GIT_ALTERNATE_OBJECT_DIRECTORIES = path.join(writable, '.git', 'objects');
+  try {
+    const response = await commit.POST(req('/api/review/commit', { workspace: writable, message: 'must not write objects' }));
+    expect.soft(readFileSync(path.join(vault, 'note.md'))).toEqual(note);
+    expect.soft(readdirSync(objects)).toEqual([]);
+    expect(response.status, await response.text()).toBe(403);
+  } finally {
+    if (oldObjects === undefined) delete process.env.GIT_OBJECT_DIRECTORY; else process.env.GIT_OBJECT_DIRECTORY = oldObjects;
+    if (oldAlternates === undefined) delete process.env.GIT_ALTERNATE_OBJECT_DIRECTORIES; else process.env.GIT_ALTERNATE_OBJECT_DIRECTORIES = oldAlternates;
+  }
+});
+
+it('keeps an unrelated editor file writable with a benign Git object override', async () => {
+  const writable = repo(), vault = repo(); await protect(vault);
+  const original = process.env.GIT_OBJECT_DIRECTORY;
+  process.env.GIT_OBJECT_DIRECTORY = path.join(writable, '.git', 'objects');
+  try {
+    const response = await editor.PUT(req('/api/panel/file-io', { path: path.join(writable, 'note.md'), content: 'permitted editor update' }, 'PUT'));
+    expect(response.status, await response.text()).toBe(200);
+    expect(readFileSync(path.join(writable, 'note.md'), 'utf8')).toBe('permitted editor update');
+    expect(readFileSync(path.join(vault, 'note.md'), 'utf8')).toBe('retained');
+  } finally {
+    if (original === undefined) delete process.env.GIT_OBJECT_DIRECTORY; else process.env.GIT_OBJECT_DIRECTORY = original;
+  }
 });

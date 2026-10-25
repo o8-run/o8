@@ -281,3 +281,33 @@ it('retains normal writable repository sends, updates and file saves', async () 
   expect((await save(request('/api/v2/files', { workspace: second, path: 'note.md', content: 'permitted' }))).status).toBe(200);
   expect(readFileSync(path.join(second, 'note.md'), 'utf8')).toBe('permitted');
 });
+
+it.each([['long s', 'ſ', 's'], ['sharp s', 'ß', 'ss'], ['normalization', 'Café', 'Cafe\u0301']] as const)(
+  'refuses registration of a missing %s source alias before creating any directory or Git metadata', async (_label, reserved, alias) => {
+    const parent = path.join(f.root, `unicode-${++seq}`); mkdirSync(parent);
+    const probe = path.join(parent, 'CaseProbe'); mkdirSync(probe);
+    const insensitive = existsSync(path.join(parent, 'caseprobe'));
+    const vault = path.join(parent, reserved); mkdirSync(vault);
+    const note = Buffer.from('# Retained Unicode notes\n'); writeFileSync(path.join(vault, 'note.md'), note);
+    const aliasesOnVolume = existsSync(path.join(parent, alias)) && statSync(path.join(parent, alias)).ino === statSync(vault).ino;
+    await source(vault);
+    // Keep a proven distinct normalization spelling present as a control on
+    // sensitive volumes. Once both spellings disappear, sensitivity is unknown.
+    const offline = _label === 'normalization' && !aliasesOnVolume ? vault : path.join(parent, 'offline');
+    if (offline !== vault) renameSync(vault, offline);
+    const target = path.join(parent, alias);
+    expect(existsSync(target)).toBe(false);
+    const response = await reposPost(request('/api/panel/repos', { action: 'add', localPath: target }));
+    expect(readFileSync(path.join(offline, 'note.md'))).toEqual(note);
+    if (aliasesOnVolume || insensitive && _label !== 'normalization') {
+      expect.soft(response.status, await response.clone().text()).toBe(400);
+      expect.soft(existsSync(target), 'registration must not create the source alias').toBe(false);
+      expect.soft(existsSync(path.join(target, '.git'))).toBe(false);
+      expect(await listReposFresh()).toEqual([]);
+    } else {
+      // Proven distinct spellings must stay writable on sensitive volumes.
+      expect(response.status, await response.text()).toBe(201);
+      expect(existsSync(path.join(target, '.git'))).toBe(true);
+    }
+  },
+);
