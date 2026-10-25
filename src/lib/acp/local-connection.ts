@@ -66,7 +66,8 @@ export function assertLocalAcpEnvironmentCurrent(binding: AcpEnvironmentBinding)
 /** Call under the spawn lock after validating the exact saved environment revision. */
 export function localAcpOutputRedactor(binding: AcpEnvironmentBinding | undefined, env: Record<string, string> = {}) {
   const variables = binding ? readAcpEnvironment(binding.connectionId).variables : [];
-  return createAcpOutputRedactor(variables.filter(variable => variable.secret).map(variable => env[variable.name] ?? ''));
+  const names = variables.filter(variable => variable.secret).map(variable => variable.name);
+  return { ...createAcpOutputRedactor(names.map(name => env[name] ?? '')), secretNames: names };
 }
 
 export function acpLaunchFingerprint(launch: { command: string; args: string[]; env?: Record<string, string>; omitEnv?: string[]; localEnvironment?: AcpEnvironmentBinding }): string {

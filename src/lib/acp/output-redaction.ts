@@ -1,4 +1,4 @@
-import { escapePrefix, visitRedactionViews } from './output-normalization';
+import { escapePrefix, foldAcpSecret, minimumAcpSecretLength, visitRedactionViews } from './output-normalization';
 
 interface CharacterChoice { value: string; end: number }
 /** Local spelling choices retain literal escape syntax without whole-view states
@@ -78,17 +78,19 @@ function chainMatcher(secret: string) {
 /** Per-process snapshot: rotating a saved credential cannot unmask a resident agent. */
 export function createAcpOutputRedactor(values: string[]) {
   const secrets = [...new Set(values.filter(Boolean).flatMap(value => [value, Buffer.from(value, 'utf8').toString('utf8')]))];
+  const foldedSecrets = [...new Set(secrets.map(foldAcpSecret).filter(Boolean))];
   const encoded = [...new Set(secrets.map(secret => Buffer.from(secret).toString('base64url')))];
   const chainMatchers = secrets.map(chainMatcher);
-  const marker = ['[redacted]', '[hidden]', '•••', ''].find(value => !secrets.some(secret => value.includes(secret)))!;
-  const minimum = Math.min(...secrets.map(secret => secret.length));
+  const foldedMatchers = foldedSecrets.map(chainMatcher);
+  const marker = ['[redacted]', '[hidden]', '•••', ''].find(value => ![...secrets, ...foldedSecrets].some(secret => value.includes(secret)))!;
+  const minimum = Math.min(...secrets.map(minimumAcpSecretLength));
   const ranges = (value: string): Array<[number, number]> => {
     if (!value || !secrets.length) return [];
     const spans: Array<[number, number]> = [];
     const covered = new Set<string>();
     visitRedactionViews(value, minimum, view => {
       const matches: Array<[number, number]> = [];
-      for (const secret of view.base64 ? encoded : secrets) {
+      for (const secret of view.base64 ? encoded : view.folded ? foldedSecrets : secrets) {
         let start = view.value.indexOf(secret);
         while (start >= 0) {
           const end = start + secret.length;
@@ -97,7 +99,7 @@ export function createAcpOutputRedactor(values: string[]) {
           matches.push([start, end]); start = view.value.indexOf(secret, start + 1);
         }
       }
-      for (const match of view.base64 ? [] : chainMatchers.flatMap(find => find(view.value))) {
+      for (const match of view.base64 ? [] : (view.folded ? foldedMatchers : chainMatchers).flatMap(find => find(view.value))) {
         const span = view.span(...match);
         matches.push(match); spans.push(span); covered.add(String(span));
       }

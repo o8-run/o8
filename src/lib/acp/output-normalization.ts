@@ -5,13 +5,14 @@ export interface RedactionView {
   value: string;
   skipBase64?: boolean;
   base64?: boolean;
+  folded?: boolean;
   /** Half-open original UTF-16 span; maps are evaluated only for actual matches. */
   span(start: number, end: number, padding?: number): [number, number];
 }
 interface Replacement { start: number; end: number; value: string }
 
 function sliceView(view: RedactionView, start: number, end: number): RedactionView {
-  return { value: view.value.slice(start, end), skipBase64: view.skipBase64, base64: view.base64, span: (a, b, padding) => view.span(start + a, start + b, padding) };
+  return { value: view.value.slice(start, end), skipBase64: view.skipBase64, base64: view.base64, folded: view.folded, span: (a, b, padding) => view.span(start + a, start + b, padding) };
 }
 function replaceView(view: RedactionView, replacements: Replacement[]): RedactionView {
   const parts: string[] = [];
@@ -95,6 +96,71 @@ function compactView(view: RedactionView, pattern: RegExp): RedactionView {
   };
   return { value, span(start, end) {
     return view.span(position(start), position(end - 1) + 1);
+  } };
+}
+
+/** Canonical/compatibility spellings and inserted accents cannot disguise a credential. */
+export function foldAcpSecret(value: string): string {
+  return value.normalize('NFKD').replace(/\p{Mn}/gu, '');
+}
+let compatibilitySpellings: Map<string, Array<{ value: string; units: number }>> | undefined;
+/** A short compatibility glyph can encode several secret units (for example ffi).
+ * Derive the pruning bound from this runtime's Unicode tables and this secret,
+ * rather than lowering every stream's bound to a one-character worst case. */
+export function minimumAcpSecretLength(secret: string): number {
+  const value = foldAcpSecret(secret);
+  if (!value) return 1;
+  if (!compatibilitySpellings) {
+    compatibilitySpellings = new Map();
+    const expansions = new Map<string, number>();
+    for (let point = 128; point <= 0x10ffff; point++) {
+      const char = String.fromCodePoint(point); const folded = foldAcpSecret(char);
+      // Matches can start or end inside one glyph's expansion. Include those
+      // partial spellings too; treating them as complete choices is conservative.
+      for (let start = 0; start < folded.length - char.length; start++) {
+        for (let end = start + char.length + 1; end <= folded.length; end++) {
+          const part = folded.slice(start, end);
+          expansions.set(part, Math.min(expansions.get(part) ?? Infinity, char.length));
+        }
+      }
+    }
+    for (const [value, units] of expansions) {
+      const choices = compatibilitySpellings.get(value[0]) ?? [];
+      choices.push({ value, units }); compatibilitySpellings.set(value[0], choices);
+    }
+  }
+  const units = new Uint32Array(value.length + 1);
+  for (let index = value.length - 1; index >= 0; index--) {
+    units[index] = 1 + units[index + 1];
+    for (const choice of compatibilitySpellings.get(value[index]) ?? []) {
+      if (value.startsWith(choice.value, index)) units[index] = Math.min(units[index], choice.units + units[index + choice.value.length]);
+    }
+  }
+  return Math.max(1, units[0]);
+}
+
+function foldedView(view: RedactionView): RedactionView {
+  if (view.folded) return view;
+  const value = /[\u0080-\uffff]/.test(view.value) ? foldAcpSecret(view.value) : view.value;
+  if (value === view.value) return { ...view, folded: true };
+  let starts: Uint32Array | undefined; let ends: Uint32Array | undefined; let exact = true;
+  const map = () => {
+    starts = new Uint32Array(value.length); ends = new Uint32Array(value.length);
+    let source = 0; let target = 0;
+    for (const char of view.value) {
+      const folded = foldAcpSecret(char);
+      if (!value.startsWith(folded, target)) exact = false;
+      for (let index = 0; index < folded.length; index++) {
+        starts[target] = source; ends[target++] = source + char.length;
+      }
+      if (!folded.length && target) ends[target - 1] = source + char.length;
+      source += char.length;
+    }
+  };
+  return { value, skipBase64: view.skipBase64, folded: true, span(start, end) {
+    if (!starts) map();
+    // Canonical reordering across source characters makes a narrow span ambiguous.
+    return exact ? view.span(starts![start], ends![end - 1]) : view.span(0, view.value.length);
   } };
 }
 
@@ -238,7 +304,7 @@ export function visitRedactionViews(value: string, minimum: number,
   let skipped = 0;
   const schedule = (view: RedactionView) => stack.push(() => {
     if (!view.value) return;
-    const content = createHash('sha256').update(view.value).update(String(!!view.base64)).update(String(!!view.skipBase64)).digest('hex');
+    const content = createHash('sha256').update(view.value).update(String(!!view.base64)).update(String(!!view.skipBase64)).update(String(!!view.folded)).digest('hex');
     if (empty.has(content)) return;
     if (matchCount() && covered(...view.span(0, view.value.length))) { skipped++; return; }
     const count = matchCount(); const skippedBefore = skipped;
@@ -261,6 +327,9 @@ export function visitRedactionViews(value: string, minimum: number,
       stack.push(() => {
         const stripped = compactView(part, /[\p{White_Space}\p{Separator}\p{Cc}\p{Cf}]+/gu);
         if (stripped.value !== part.value && stripped.value.length >= minimum) schedule({ ...stripped, skipBase64: true });
+      });
+      stack.push(() => {
+        const folded = foldedView(part); if (folded !== part) schedule(folded);
       });
       for (const kind of ['form', 'percent', 'json'] as const) stack.push(() => {
         const decoded = escapes(part, kind, chains); if (decoded.value !== part.value) schedule(decoded);

@@ -155,3 +155,17 @@ it('keeps normalization exploration modes separate in match-free caches', () => 
   const output = createAcpOutputRedactor(['abc', 'STOP']).redact('%59%57%4A%6ASTOPY W J j');
   expect(output).not.toContain('%59%57%4A%6A');
 });
+
+
+it.each(recipes)('matches short compatibility spellings before pruning $name', recipe => {
+  for (const [secret, emitted] of [['office', 'o\ufb03ce'], ['صلى الله عليه وسلم', '\ufdfa'], ['式会社', '\u337f'], ['الله عليه', '\ufdfa']]) {
+    const encoded = encode(emitted, recipe.steps);
+    const redactor = createAcpOutputRedactor([secret]);
+    expect(redactor.redact(encoded), recipe.name).not.toBe(encoded);
+    for (const count of [1, 2, 3]) {
+      let output = ''; const stream = redactor.stream(value => { output += value; });
+      for (let index = 0; index < count; index++) stream(encoded.slice(Math.floor(index * encoded.length / count), Math.floor((index + 1) * encoded.length / count)), index === count - 1);
+      expect(output, `${recipe.name} / ${count}`).not.toBe(encoded);
+    }
+  }
+});

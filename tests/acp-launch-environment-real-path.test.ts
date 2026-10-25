@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
@@ -436,4 +436,44 @@ it('never creates a replacement key for cache-cold ACP credentials with a missin
   vi.stubEnv('O8_MASTER_KEY', Buffer.alloc(32, 7).toString('base64url'));
   expect(launch.localAcpProcessLaunch()?.env?.ACP_TOKEN).toBe('synthetic-key-recovery');
   } finally { Object.defineProperty(process, 'platform', originalPlatform); }
+});
+
+
+it.each(['HERMES_HOME', 'OPENCLAW_STATE_DIR', 'OPENCLAW_CONFIG_PATH'])('keeps secret-bearing %s out of a silent ACP child receipt', async name => {
+  const silent = join(fixture.dir, 'silent-profile.cjs');
+  writeFileSync(silent, 'process.stdin.resume();');
+  expect((await POST(request({ connection: { ...connection, args: [silent] } }))).status).toBe(200);
+  const value = join(fixture.dir, `synthetic-profile-canary-${name}`);
+  expect((await save([{ name, secret: true, value }])).status).toBe(200);
+  const client = new AcpClient({runtimeId:'acp',cwd:fixture.dir,...localAcpProcessLaunch()!});
+  try {
+    const directory = join(fixture.dir, 'runtime-profile-processes');
+    const records = readdirSync(directory).map(file => readFileSync(join(directory,file),'utf8'));
+    const selected = records.map(raw=>JSON.parse(raw)).find(record=>record.pid===client.pid);
+    expect(selected).toBeDefined();
+    expect.soft(JSON.stringify(selected).includes(value)).toBe(false);
+    expect(selected.redactedEnvironment).toContainEqual({name,value:'[redacted]'});
+  } finally { client.kill(); }
+});
+
+it('scrubs a legacy secret-bearing profile receipt at real child admission, even for a silent child', async () => {
+  expect((await POST(request({connection}))).status).toBe(200);
+  const value = join(fixture.dir,'synthetic-legacy-profile-canary');
+  expect((await save([{name:'HERMES_HOME',secret:true,value}])).status).toBe(200);
+  const directory=join(fixture.dir,'runtime-profile-processes');mkdirSync(directory,{recursive:true});
+  const file=join(directory,'legacy-profile-canary.json');
+  const {probeMetadataLockProcessIdentitySync}=await import('@/lib/worktree/metadata-lock-process-identity');
+  const probe=probeMetadataLockProcessIdentitySync(process.pid);expect(probe.state).toBe('live');
+  writeFileSync(file,JSON.stringify({version:1,owner:'o8',runtimeId:'acp',pid:process.pid,processIdentity:probe.state==='live'?probe.identity:null,profiles:[value],apiAllowedAtLaunch:true}));
+  let client:InstanceType<typeof AcpClient>|undefined;let failure:unknown;
+  try { client=new AcpClient({runtimeId:'acp',cwd:fixture.dir,...localAcpProcessLaunch()!}); } catch(error){failure=error;}
+  finally {client?.kill();}
+  expect.soft(String(failure)).not.toContain(value);
+  expect.soft(readFileSync(file,'utf8')).not.toContain(value);
+  expect(failure).toBeInstanceOf(Error);
+  vi.resetModules();
+  const {assertNoRecordedApiProfileChild:cacheColdAdmission}=await import('@/lib/providers/runtime-profile-processes');
+  expect(()=>cacheColdAdmission([fixture.dir])).toThrow(/API.*still running/i);
+  expect(readFileSync(file,'utf8')).not.toContain(value);
+  rmSync(file);
 });

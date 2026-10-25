@@ -6,6 +6,7 @@ import { decryptValueSync } from '@/lib/db/master-key';
 import { providerCredentialMaterials } from './key-store';
 import { matchesProviderCredential } from './credential-materials';
 import { canonicalProfilePath, profileContains, selectedRuntimeProfiles } from './runtime-profile-paths';
+import type { ChildMetadataRedaction } from './spawn-environment';
 import { assertNoRecordedApiProfileChild } from './runtime-profile-processes';
 
 const warned = new Set<string>();
@@ -48,8 +49,8 @@ export function warnLegacyRuntimeConfigs(): void {
 }
 
 /** Read only authenticated o8 destinations; operator-owned files are not inspected. */
-export function assertRuntimeProfilesAvailable(profiles: readonly string[], checkApiSurvivors = true): void {
-  if (checkApiSurvivors) assertNoRecordedApiProfileChild(profiles);
+export function assertRuntimeProfilesAvailable(profiles: readonly string[], checkApiSurvivors = true, metadata?: ChildMetadataRedaction): void {
+  if (checkApiSurvivors) assertNoRecordedApiProfileChild(profiles, metadata);
   const materials = providerCredentialMaterials();
   for (const file of records()) {
     if (!profiles.some(profile => profileContains(profile, file)) || !existsSync(file)) continue;
@@ -62,8 +63,8 @@ export function assertRuntimeProfilesAvailable(profiles: readonly string[], chec
   }
 }
 
-export function assertLegacyRuntimeConfigSelection(runtimeId: string | undefined, env: Record<string, string | undefined>, args: readonly string[], cwd?: string): string[] {
+export function assertLegacyRuntimeConfigSelection(runtimeId: string | undefined, env: Record<string, string | undefined>, args: readonly string[], cwd?: string, metadata?: ChildMetadataRedaction): string[] {
   const profiles = selectedRuntimeProfiles(runtimeId, env, args, cwd);
-  assertRuntimeProfilesAvailable(profiles, !runtimeId || ['acp', 'hermes', 'openclaw'].includes(runtimeId));
+  assertRuntimeProfilesAvailable(profiles, !runtimeId || ['acp', 'hermes', 'openclaw'].includes(runtimeId), metadata);
   return profiles;
 }

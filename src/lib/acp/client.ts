@@ -2,7 +2,7 @@ import { credentialPolicyFingerprint } from '@/lib/providers/credential-policy';
 import { withProviderStoreLock } from '@/lib/providers/store-lock';
 import { assertLocalAcpEnvironmentCurrent, localAcpOutputRedactor } from './local-connection';
 import type { AcpEnvironmentBinding } from './connection-environment';
-import { childEnvironment, childEnvironmentContext } from '@/lib/providers/spawn-environment';
+import { childEnvironment, childEnvironmentContext, retainChildMetadataRedaction } from '@/lib/providers/spawn-environment';
 /**
  * Agent Client Protocol (ACP) stdio client.
  *
@@ -261,6 +261,7 @@ export class AcpClient {
       if (opts.localEnvironment) assertLocalAcpEnvironmentCurrent(opts.localEnvironment);
       const outputRedactor = localAcpOutputRedactor(opts.localEnvironment, opts.env);
       const env = childEnvironment({ runtimeId: opts.runtimeId, runtimeLaunch: true, omitEnv: opts.omitEnv, env: { ...(opts.cwd ? { PWD: opts.cwd } : {}), ...opts.env } });
+      retainChildMetadataRedaction(env, { names: outputRedactor.secretNames, redact: value => outputRedactor.redact(value) });
       const policy = childEnvironmentContext(env)?.policy;
       return { policy, outputRedactor, proc: spawn(launch.command, launch.args, {
         windowsHide: true,
