@@ -296,10 +296,11 @@ impl Setup {
         let mut session = None;
         if let Some(project) = project {
             let (backend, workers) = snapshot.recommendation();
+            let model = &snapshot.setup["setupRecommendation"]["leadModel"];
             if !current.ready(&backend, &workers) {
                 return Err("Connect a coding tool before opening this project.".into());
             }
-            client.setup_post("/api/v2/chat-history", &json!({"tabId":id,"messages":[],"backend":backend,"repoPath":project.local_path,"repoName":project.name,"title":"New conversation"}))?;
+            client.setup_post("/api/v2/chat-history", &json!({"tabId":id,"messages":[],"backend":backend,"model":model,"repoPath":project.local_path,"repoName":project.name,"title":"New conversation"}))?;
             let history: Value = client.get("/api/v2/chat-history", &[("tabId", id)])?;
             completion["repoPath"] = json!(project.local_path);
             completion["completedAt"] = history["savedAt"].clone();

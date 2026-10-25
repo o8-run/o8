@@ -1,0 +1,4 @@
+running 1 test
+test ui::o8d_read_tests::saved_history_surface_with_only_o8d ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 46 filtered out; finished in 2.18s

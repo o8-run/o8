@@ -1,0 +1,5 @@
+test shell::tests::onboarding_opencode_keeps_selected_model_for_first_send ... ok
+test ui::o8d_read_tests::saved_history_surface_with_only_o8d ...
+thread 'ui::o8d_read_tests::saved_history_surface_with_only_o8d' (67903) panicked at src/o8d_read_tests.rs:56:10:
+called `Result::unwrap()` on an `Err` value: Os { code: 2, kind: NotFound, message: "No such file or directory" }
+test result: FAILED. 43 passed; 1 failed; 3 ignored; 0 measured; 0 filtered out; finished in 488.50s
