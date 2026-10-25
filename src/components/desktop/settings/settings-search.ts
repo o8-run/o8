@@ -144,6 +144,7 @@ export const SETTINGS_SEARCH_REGISTRY: SettingsSearchEntry[] = [
   { tab: 'models', tabLabel: 'Providers', group: "Codex connection", label: "Codex worker effort", description: "Fallback effort for spawned Codex workers" },
   { tab: 'models', tabLabel: 'Providers', group: "Workers", label: "Default worker", description: "Codex by default \u2014 pick any installed dispatchable runtime to override (may be profile-pinned)" },
   { tab: 'models', tabLabel: 'Providers', group: "Workers", label: "Subscription profile", description: "Use both houses by default \u00b7 Codex/Claude auth status \u00b7 optional profile hint" },
+  { tab: 'operator-defaults', tabLabel: 'Dispatch', group: "Experimental", label: "o8 next", description: "", keywords: ['native', 'GPUI'] },
   { tab: 'operator-defaults', tabLabel: 'Dispatch', group: "Experimental", label: "Canvas mode", description: "The glass canvas, a voice-first fleet surface." },
   { tab: 'models', tabLabel: 'Providers', group: "Antigravity connection", label: "Antigravity", description: "Google account connection for agent tasks", keywords: ['google', 'gemini', 'agy'] },
   { tab: 'operator-defaults', tabLabel: 'Dispatch', group: "Experimental", label: "Native browser-view", description: "Host-owned native window for the Browser pane (macOS)" },
