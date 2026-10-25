@@ -11,6 +11,9 @@ import { useOrchestratorData } from '../orchestrator-data-context';
 import { usePendingThreadSteer } from './thread-steer-state';
 import { ThreadActionButton } from './ThreadActions';
 import { useWorkspaceChatDraftRetention } from '../workspace-terminal/workspace-chat-drafts';
+import { useThreadEvidence } from './useThreadEvidence';
+import { ThreadEvidenceView } from './ThreadEvidenceView';
+import { redactThreadText } from '@/lib/threads/redaction';
 
 interface Evidence {
   jobId: string;
@@ -38,6 +41,7 @@ export function ThreadDetail({ task, active, evidenceRevision, onBack, actions, 
   showHeader?: boolean;
 }) {
   const context = useOrchestratorData();
+  const threadEvidence = useThreadEvidence(task, active, evidenceRevision);
   const [evidence, setEvidence] = useState<Evidence | null>(null);
   const [error, setError] = useState<{ key: string; message: string } | null>(null);
   const pending = usePendingThreadSteer(task.packetId);
@@ -110,11 +114,11 @@ export function ThreadDetail({ task, active, evidenceRevision, onBack, actions, 
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
       {showHeader ? <div style={{ display: 'flex', gap: 8, alignItems: 'center', paddingTop: 12, paddingRight: 12, paddingBottom: 12, paddingLeft: 12, borderBottom: '1px solid var(--t-divider-subtle)' }}>
         <ActionButton label="Threads" onClick={onBack} />
-        <span style={{ flex: 1, minWidth: 0, fontSize: 12, fontWeight: 300, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{task.title}</span>
+        <span style={{ flex: 1, minWidth: 0, fontSize: 12, fontWeight: 300, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{redactThreadText(task.title)}</span>
       </div> : null}
       <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', scrollbarWidth: 'none', paddingTop: 16, paddingRight: 16, paddingBottom: 16, paddingLeft: 16 }}>
         <div style={{ fontSize: 10, fontWeight: 260, color: 'var(--t-text-faint)', overflowWrap: 'anywhere' }}>{THREAD_GROUPS.find((group) => group.id === task.group)?.label ?? task.status} · {threadModelLabel(task)} · {task.execution || (task.workerRouting?.selectedRuntime ?? task.runtime) === 'cloud' ? 'Remote worker' : 'Local worker'}{task.branch ? ` · ${task.branch}` : ''}</div>
-        <p style={{ fontSize: 13.5, fontWeight: 300, lineHeight: 1.5, overflowWrap: 'anywhere' }}>{threadStatusLine(task)}</p>
+        <p style={{ fontSize: 13.5, fontWeight: 300, lineHeight: 1.5, overflowWrap: 'anywhere' }}>{redactThreadText(threadStatusLine(task))}</p>
         {actions}
         {/* Only the visible current attempt owns this entry. Hiding the panel
             unmounts its resource and returns to an explicit open on re-entry. */}
@@ -122,12 +126,14 @@ export function ThreadDetail({ task, active, evidenceRevision, onBack, actions, 
           ? <ThreadPreview key={evidenceKey} taskId={task.id} jobId={jobId} attempt={attempt} /> : null}
         {task.summary && task.summary !== threadStatusLine(task) ? <details style={{ marginBottom: 16 }}>
           <summary style={{ fontSize: 12, color: 'var(--t-text-muted)', cursor: 'pointer' }}>Task brief</summary>
-          <p style={{ fontSize: 13, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{task.summary}</p>
+          <p style={{ fontSize: 13, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{redactThreadText(task.summary)}</p>
         </details> : null}
-        {packet?.taskContract ? (
+        {threadEvidence.error ? <p role="alert" style={{ fontSize: 12 }}>{threadEvidence.error}</p> : null}
+        {threadEvidence.evidence ? <ThreadEvidenceView task={task} evidence={threadEvidence.evidence} /> : null}
+        {!threadEvidence.evidence && packet?.taskContract ? (
           <section aria-label="Thread requirements" style={{ borderTop: '1px solid var(--t-divider-subtle)', paddingTop: 12 }}>
             <div style={{ fontSize: 10, color: 'var(--t-text-faint)' }}>Requirements</div>
-            {packet.taskContract.requirements.map((requirement) => <p key={requirement.id} style={{ fontSize: 13, lineHeight: 1.5 }}>{requirement.expectedBehavior}</p>)}
+            {packet.taskContract.requirements.map((requirement) => <p key={requirement.id} style={{ fontSize: 13, lineHeight: 1.5 }}>{redactThreadText(requirement.expectedBehavior)}</p>)}
           </section>
         ) : null}
         {jobId ? (
@@ -135,8 +141,8 @@ export function ThreadDetail({ task, active, evidenceRevision, onBack, actions, 
             <div style={{ fontSize: 10, color: 'var(--t-text-faint)' }}>Attempt {attempt} · logs and files</div>
             {currentError ? <p role="alert">{currentError}</p> : !currentEvidence ? <p style={{ fontSize: 12, color: 'var(--t-text-muted)' }}>Reading this attempt…</p> : null}
             {currentEvidence ? <>
-              {currentEvidence.files.map((file) => <div key={file.path} style={{ paddingTop: 8, fontSize: 12, overflowWrap: 'anywhere' }}>{file.path} <span style={{ color: 'var(--t-text-faint)' }}>+{file.additions} −{file.deletions}</span></div>)}
-              <pre style={{ fontFamily: 'var(--font-mono)', fontSize: 11.5, lineHeight: 1.6, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', color: 'var(--t-text-secondary)' }}>{currentEvidence.logs.map((log) => log.text).join('\n')}</pre>
+              {currentEvidence.files.map((file) => <div key={file.path} style={{ paddingTop: 8, fontSize: 12, overflowWrap: 'anywhere' }}>{redactThreadText(file.path)} <span style={{ color: 'var(--t-text-faint)' }}>+{file.additions} −{file.deletions}</span></div>)}
+              <pre style={{ fontFamily: 'var(--font-mono)', fontSize: 11.5, lineHeight: 1.6, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', color: 'var(--t-text-secondary)' }}>{redactThreadText(currentEvidence.logs.map((log) => log.text).join('\n'))}</pre>
               {!currentEvidence.logs.length && !currentEvidence.files.length ? <p style={{ fontSize: 12 }}>No output recorded for this attempt yet.</p> : null}
               {currentEvidence.logsTruncated || currentEvidence.filesTruncated ? <p style={{ fontSize: 11, color: 'var(--t-text-faint)' }}>Showing the bounded output saved for this attempt.</p> : null}
             </> : null}

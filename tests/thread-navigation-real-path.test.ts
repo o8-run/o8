@@ -7,9 +7,10 @@ import { NextRequest } from 'next/server';
 import { act, createElement, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterAll, expect, it, vi } from 'vitest';
+import { readThreadPages } from '@/components/desktop/o8-panel/readThreadPages';
 import { O8ThreadsPane } from '@/components/desktop/o8-panel/O8ThreadsPane';
 import { useThreadWorkspaceNavigation } from '@/components/desktop/o8-panel/useThreadNavigation';
-import { threadPanelAvailability } from '@/components/desktop/o8-panel/thread-navigation';
+import { openCurrentThread, threadPanelAvailability } from '@/components/desktop/o8-panel/thread-navigation';
 import { createO8WebviewToolHandlers } from '@/lib/mcp/o8-webview-tools';
 import type { O8WebviewClient } from '@/lib/mcp/o8-webview-client';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
@@ -24,6 +25,8 @@ vi.mock('@/lib/tauri/ipc-fetch', () => ({ ipcFetch: (...args: Parameters<typeof 
 const dataDir = mkdtempSync(join(tmpdir(), 'o8-thread-navigation-'));
 process.env.O8_DATA_DIR = dataDir;
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
+vi.mock('@/lib/runtime/inventory', () => ({ getRuntimeInventorySnapshot: async () => ({ agents: [] }) }));
+const threadsRoute = await import('@/app/api/panel/threads/route');
 const route = await import('@/app/api/tasks/route');
 const panelRoute = await import('@/app/api/panel/projects/route');
 const { addRepo } = await import('@/lib/repos/registry');
@@ -54,9 +57,13 @@ it('MCP product navigation mounts the persisted task without synthetic input or 
   }));
   expect(created.status).toBe(201);
   const { taskId } = await created.json();
+  const { currentMissionState } = await import('@/lib/orchestrator/operator-mission-service/shared');
+  const historical = { ...currentMissionState(), missionId: 'historical-navigation-fixture' };
+  (await import('@/lib/db/missions-store')).recordMission({ id: historical.missionId, repoPath: state.repoPath, runtime: 'codex', prompt: historical.prompt, summary: historical.summary, constraints: '', packetMeta: [], totalWaves: 1, missionState: historical });
+  (await import('@/lib/orchestrator/control-plane')).writeOrchestratorControlPlaneState((await import('@/lib/orchestrator/store')).createEmptyOrchestratorMissionState());
   closeDb();
   const readTasks = async () => {
-    const response = await route.GET(new NextRequest('http://localhost/api/tasks?includeDone=true', {
+    const response = await threadsRoute.GET(new NextRequest('http://localhost/api/panel/threads?repoPath=' + encodeURIComponent(state.repoPath), {
       headers: { Authorization: `Bearer ${getOrCreateWsToken()}` },
     }));
     expect(response.status).toBe(200);
@@ -72,7 +79,7 @@ it('MCP product navigation mounts the persisted task without synthetic input or 
     project: { id: project.id, panelProjectId: 'default' },
   });
   const fetchMock = vi.fn(async (url: string) => {
-    if (url.startsWith('/api/tasks?')) return new Response(JSON.stringify({ tasks: await readTasks() }));
+    if (url.startsWith('/api/panel/threads?')) return threadsRoute.GET(new NextRequest(`http://localhost${url}`, { headers: { Authorization: `Bearer ${getOrCreateWsToken()}` } }));
     return new Response(JSON.stringify({ repos: [], logs: [], files: [] }));
   });
   vi.stubGlobal('fetch', fetchMock);
@@ -83,13 +90,14 @@ it('MCP product navigation mounts the persisted task without synthetic input or 
   const selection = { workspace: 'other', tile: 'original', commit: 'original-commit', repo: '/original', panel: 'activity' };
   const originalSelection = { ...selection };
   const readNavigationTasks = vi.fn(async () => {
-    const tasks = await readTasks();
+    const tasks = await readThreadPages({ projectId: null, repoPaths: [state.repoPath] }, AbortSignal.timeout(5000));
     if (narrowDuringRead) viewportWidth = 800;
     return tasks;
   });
   function Harness() {
     const [workspace, setWorkspace] = useState('other');
     useThreadWorkspaceNavigation({
+      currentWorkspaceId: () => 'workspace',
       availability: () => threadPanelAvailability(viewportWidth, 1180),
       resolve: (target) => target.workspaceId === 'workspace' && target.repoPath === state.repoPath ? {
         projectId: state.projectId, activate: () => {
@@ -132,6 +140,9 @@ it('MCP product navigation mounts the persisted task without synthetic input or 
     expect(receipt.isError, JSON.stringify({ receipt, tasks: await readTasks() })).toBe(false);
     expect(JSON.parse((receipt.content[0] as { text: string }).text)).toMatchObject({ ok: true, status: 'mounted', taskId, repoPath: state.repoPath });
     expect(container.querySelector('[aria-label="Steer this thread"]')).not.toBeNull();
+    let cardResult!: ReturnType<typeof openCurrentThread>;
+    await act(async () => { cardResult = openCurrentThread(state.repoPath, taskId); await new Promise(resolve => setTimeout(resolve, 20)); });
+    expect(await cardResult).toMatchObject({ ok: true, status: 'mounted', taskId, repoPath: state.repoPath });
     expect((await readTasks()).find((task: { id: string }) => task.id === taskId)).toMatchObject({ queueState: 'queued', lane: null, execution: null });
     expect((fetchMock.mock.calls as unknown[][]).every((call) => !call[1] || !(call[1] as RequestInit).method || (call[1] as RequestInit).method === 'GET')).toBe(true);
     const refused = await handlers.o8_view_open_thread({ workspaceId: 'workspace', repoPath: state.repoPath, taskId: 'missing' });

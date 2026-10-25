@@ -1,8 +1,9 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ipcFetch } from '@/lib/tauri/ipc-fetch';
-import type { TaskPoolPayload, TaskPoolTask } from '../repo-focus/tabs/control-room/types';
+import { readThreadPages } from './readThreadPages';
+import type { TaskPoolTask } from '../repo-focus/tabs/control-room/types';
+import { redactThreadDisplay } from '@/lib/threads/redaction';
 
 export function useThreadsTasks(active: boolean, scopeKey: string) {
   const [snapshot, setSnapshot] = useState<{ scopeKey: string; tasks: TaskPoolTask[]; evidenceRevision: number } | null>(null);
@@ -22,11 +23,10 @@ export function useThreadsTasks(active: boolean, scopeKey: string) {
       inFlight = true;
       setStatus({ scopeKey, loading: true, error: null });
       try {
-        const response = await ipcFetch('/api/tasks?includeBrief=false&includeDone=true', { cache: 'no-store', signal: controller.signal });
-        const payload = await response.json() as TaskPoolPayload & { error?: string };
-        if (!response.ok) throw new Error(payload.error || 'Unable to load threads.');
+        const scope = JSON.parse(scopeKey) as { projectId: string | null; repoPaths: string[] };
+        const tasks = (await readThreadPages(scope, controller.signal)).map(redactThreadDisplay);
         if (!controller.signal.aborted && generation.current === current) {
-          setSnapshot({ scopeKey, tasks: payload.tasks ?? [], evidenceRevision: ++evidenceRevision.current });
+          setSnapshot({ scopeKey, tasks, evidenceRevision: ++evidenceRevision.current });
           setStatus({ scopeKey, loading: false, error: null });
         }
       } catch (err) {

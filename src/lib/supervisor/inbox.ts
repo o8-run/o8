@@ -678,14 +678,24 @@ export function listActiveOutsideHumanWaitingThreadNumbers(
   return [...numbers];
 }
 
-export function listInboxItems(options: {
+interface InboxReadOptions {
   includeDismissed?: boolean;
   includeAllProjects?: boolean;
   projectId?: string | null;
-} = {}): SupervisorInboxItem[] {
+}
+export function listInboxItems(options: InboxReadOptions = {}): SupervisorInboxItem[] {
+  return readInboxItems(options, true);
+}
+/** Recorded projection without incident reconciliation or dismissal. */
+export function listRecordedInboxItems(options: InboxReadOptions = {}): SupervisorInboxItem[] {
+  return readInboxItems(options, false);
+}
+function readInboxItems(options: InboxReadOptions, reconcile: boolean): SupervisorInboxItem[] {
   ensureSupervisorInboxTable();
-  buildOutsideHumanWaitingInbox();
-  collapseActiveInboxIncidents();
+  if (reconcile) {
+    buildOutsideHumanWaitingInbox();
+    collapseActiveInboxIncidents();
+  }
   const projectId = options.projectId ?? getActiveProjectScopeForRepoSync().projectId;
 
   const rows = options.includeAllProjects

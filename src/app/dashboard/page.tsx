@@ -56,6 +56,7 @@ import { RightPrTabs } from '@/components/desktop/pr-panel/RightPrTabs';
 import { rightPrTabId, useRightPrTabs, type RightPrTab } from '@/components/desktop/pr-panel/useRightPrTabs';
 import { DesktopCloseCoordinator } from '@/components/desktop/DesktopCloseCoordinator';
 import { TerminalCloseDialog } from '@/components/desktop/workspace-terminal/TerminalCloseDialog';
+import { readThreadPages } from '@/components/desktop/o8-panel/readThreadPages';
 import { useThreadWorkspaceNavigation } from '@/components/desktop/o8-panel/useThreadNavigation';
 import { threadPanelAvailability } from '@/components/desktop/o8-panel/thread-navigation';
 import { resolveThreadProject } from '@/components/desktop/o8-panel/threads-model';
@@ -2135,6 +2136,7 @@ function DashboardInner() {
   }, [openRightPanelFromUser]);
 
   useThreadWorkspaceNavigation({
+    currentWorkspaceId: () => workspaceHeaderActive.workspaceId,
     availability: () => threadPanelAvailability(
       typeof window !== 'undefined' ? window.innerWidth : getResponsiveViewportWidth(),
       RESPONSIVE_RIGHT_PANEL_COLLAPSE_WIDTH,
@@ -2157,12 +2159,7 @@ function DashboardInner() {
         isActive: () => workspaceHeaderActive.workspaceId === target.workspaceId,
       };
     },
-    readTasks: async () => {
-      const response = await fetch('/api/tasks?includeBrief=false&includeDone=true', { cache: 'no-store', signal: AbortSignal.timeout(5000) });
-      if (!response.ok) throw new Error('Unable to read threads.');
-      const body = await response.json();
-      return body.tasks ?? [];
-    },
+    readTasks: () => readThreadPages({ projectId: null, repoPaths: globalRepoEntries.map(repo => repo.localPath) }, AbortSignal.timeout(5000)),
   });
 
   const handleToggleWorkspacePip = useCallback((surface: 'browser' | 'spec', repoPath?: string | null) => {

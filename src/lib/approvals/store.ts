@@ -271,9 +271,14 @@ export function listApprovals(options: { status?: ApprovalRecord['status'] | 'al
   return listInboxApprovals(options);
 }
 
+export function listRecordedApprovals() {
+  return listInboxApprovals({ status: 'pending', projectId: null }, undefined, false);
+}
+
 function listInboxApprovals(
   options: { status?: ApprovalRecord['status'] | 'all'; sessionKey?: string; projectId?: string | null },
   predicate?: SQL,
+  expire = true,
 ) {
   const { status = 'pending', sessionKey } = options;
   const projectId = options.projectId === undefined
@@ -281,7 +286,7 @@ function listInboxApprovals(
     : options.projectId?.trim() || null;
 
   // Auto-expire stale pending approvals before querying
-  if (status === 'pending' || status === 'all') {
+  if (expire && (status === 'pending' || status === 'all')) {
     try {
       expireStaleApprovals();
     } catch {

@@ -8,6 +8,7 @@ import { completedServiceResultSha } from '@/lib/cloud/review-service-authority'
 import { getLatestPacketJob } from '@/lib/cloud/job-queue';
 import type { CloudJob, CloudJobStatus } from '@/lib/cloud/job-store';
 import { DEFAULT_CLOUD_TEAM_ID } from '@/lib/cloud/team';
+import { listMissionRegistryEntries } from '@/lib/orchestrator/mission-registry';
 
 import { listLanes } from '@/lib/lane/registry';
 import type { Lane, LaneStatus } from '@/lib/lane/types';
@@ -107,6 +108,7 @@ export interface TaskPool {
 }
 
 export interface TaskPoolOptions {
+  includeMissionHistory?: boolean;
   projectId?: string | null;
   repoPath?: string | null;
   includeDone?: boolean;
@@ -277,16 +279,19 @@ async function resolveProjectContext(
 export async function getTaskPool(options: TaskPoolOptions = {}): Promise<TaskPool> {
   const panelProjects = (await getProjectsLedger()).projects;
   const mission = currentMissionState();
+  const packets = options.includeMissionHistory
+    ? [...new Map([...listMissionRegistryEntries({ includeArchived: true }).flatMap(entry => entry.mission.packets), ...mission.packets].map(packet => [packet.id, packet])).values()]
+    : mission.packets;
   const lanes = listLanes();
   const lanesByPacketId = new Map(lanes.flatMap((lane) => (
     lane.packetId ? [[lane.packetId, lane] as const] : []
   )));
-  const packetIds = new Set(mission.packets.map((packet) => packet.id));
+  const packetIds = new Set(packets.map((packet) => packet.id));
   const projectCache = new Map<string, ProjectContext | null>();
   const tasks: TaskPoolTask[] = [];
   const nowMs = Date.now();
 
-  for (const packet of mission.packets) {
+  for (const packet of packets) {
     const lane = lanesByPacketId.get(packet.id) ?? null;
     const remoteJob = lane?.runtime === 'cloud'
       ? getLatestPacketJob(DEFAULT_CLOUD_TEAM_ID, packet.id)
