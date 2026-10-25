@@ -6,7 +6,7 @@ import { laneGit } from '@/lib/lane/lane-git';
 import { WORKTREE_MAINTENANCE_POLICY } from './maintenance-budget';
 
 /** Ignored data is still operator data. Never follow links or accept a partial inventory. */
-export async function cleanupIgnoredFingerprint(repositoryPath: string, workspacePath: string, generated = false): Promise<string> {
+export async function cleanupIgnoredFingerprint(repositoryPath: string, workspacePath: string, generated = false, omitDependencyMount = false): Promise<string> {
   const rootBefore = await lstat(workspacePath);
   const list = () => laneGit(workspacePath, repositoryPath,
     ['ls-files', '--others', '--ignored', '--exclude-standard', '--directory', '-z'],
@@ -42,6 +42,7 @@ export async function cleanupIgnoredFingerprint(repositoryPath: string, workspac
     }
   }
   for (const name of roots) {
+    if (omitDependencyMount && (name === 'node_modules' || name.startsWith('node_modules/'))) continue;
     // .next has its own separately selected generated-output lifecycle. Removing that
     // approved dependency must not invalidate the containing workspace's other data.
     if ((name === '.next' || name.startsWith('.next/')) === generated) await visit(name);

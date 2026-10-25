@@ -27,7 +27,7 @@ export const readCleanupMetadata = (repositoryPath: string) => withWorktreeMaint
 
 /** Reads current manager ownership, never infers removal authority from a directory name. */
 export async function inspectCleanupWorkspace(repositoryPath: string, worktreeId: string,
-  entry: WorktreeMetaEntry | undefined): Promise<CleanupPlanEntry> {
+  entry: WorktreeMetaEntry | undefined, options: { allowedClaimOperationId?: string; omitDependencyMount?: boolean } = {}): Promise<CleanupPlanEntry> {
   const identity = entry?.materializationIdentity ?? null;
   const result: CleanupPlanEntry = { id: `workspace:${worktreeId}`, kind: 'workspace', worktreeId,
     workspacePath: identity?.canonicalPath ?? '', identity, eligible: false, reason: null, fingerprint: '',
@@ -55,7 +55,8 @@ export async function inspectCleanupWorkspace(repositoryPath: string, worktreeId
     const hold = getWorkspaceRetentionHold(managed, identity);
     if (hold) throw new Error(`Retention hold: ${hold.reason}`);
     const claim = getSqlite().prepare(`SELECT operation_id FROM workspace_exact_claims
-      WHERE expected_path = ? OR source_path = ? OR parent_canonical_path = ? LIMIT 1`).get(managed, managed, managed);
+      WHERE operation_id != ? AND (expected_path = ? OR source_path = ? OR parent_canonical_path = ?) LIMIT 1`)
+      .get(options.allowedClaimOperationId ?? '', managed, managed, managed);
     if (claim) throw new Error('An existing exact lifecycle operation must be resolved before a new preview.');
     const probe = await probeLiveProcessInside(managed);
     if (probe.status !== 'clear') throw new Error('A live or unverified process still uses this workspace.');
@@ -68,7 +69,7 @@ export async function inspectCleanupWorkspace(repositoryPath: string, worktreeId
     const refHead = (await laneGit(repositoryPath, repositoryPath, ['rev-parse', '--verify', `refs/heads/${branch}`], { timeout: 5_000 })).stdout.trim();
     if (refHead !== result.head) throw new Error('Source branch does not retain the selected HEAD.');
     result.recovery = { ref: `refs/heads/${branch}` };
-    ignored = await cleanupIgnoredFingerprint(repositoryPath, managed);
+    ignored = await cleanupIgnoredFingerprint(repositoryPath, managed, false, options.omitDependencyMount);
     result.eligible = true;
   } catch (error) { result.reason = error instanceof Error ? error.message : 'Ownership or recovery could not be verified.'; }
   result.fingerprint = cleanupFingerprint({ entry, completion: result.completion, head: result.head, reason: result.reason, ignored });

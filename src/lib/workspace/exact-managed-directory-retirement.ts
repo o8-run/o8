@@ -34,6 +34,7 @@ export interface ExactManagedDirectoryRetirementInput {
   parentIdentity?: WorktreeMaterializationIdentity;
   retirementReason?: ManagedRetirementReason;
   beforeRetirementRename?: () => Promise<void>;
+  beforeSourceRemoval?: () => Promise<void>;
   afterRetirementRename?: () => Promise<void>;
   beforeRetirementPurge?: (candidatePath: string) => Promise<void>;
 }
@@ -137,6 +138,9 @@ async function prepareRetirement(
     const manifest = await captureExactDirectoryManifest(directoryPath, input.identity);
     if (manifest.entries.length !== 1) throw new Error('Unowned nonempty workspace contents must be retained.');
   }
+  // Recovery capture must not publish replay authority for an unreviewed source.
+  // Existing/moved claims returned above keep their original exact replay path.
+  await input.beforeSourceRemoval?.();
   const operationId = randomUUID();
   const claimPath = path.join(parentIdentity.canonicalPath, `.o8-retired-managed-${operationId}`);
   const contentDigest = createHash('sha256').update(JSON.stringify({
@@ -164,9 +168,10 @@ async function finishClaim(
   beforeRetirementRename?: () => Promise<void>,
   afterRetirementRename?: () => Promise<void>,
   beforeRetirementPurge?: (candidatePath: string) => Promise<void>,
+  beforeSourceRemoval?: () => Promise<void>,
 ): Promise<void> {
   return withRetirementAuthorityLock(initial.authority, () => finishClaimUnlocked(
-    initial, beforeRetirementRename, afterRetirementRename, beforeRetirementPurge,
+    initial, beforeRetirementRename, afterRetirementRename, beforeRetirementPurge, beforeSourceRemoval,
   ));
 }
 
@@ -195,6 +200,7 @@ async function finishClaimUnlocked(
   beforeRetirementRename?: () => Promise<void>,
   afterRetirementRename?: () => Promise<void>,
   beforeRetirementPurge?: (candidatePath: string) => Promise<void>,
+  beforeSourceRemoval?: () => Promise<void>,
 ): Promise<void> {
   let claim = initial;
   await assertWorktreeMaterializationIdentity(
@@ -215,11 +221,13 @@ async function finishClaimUnlocked(
   if (claim.state === 'prepared') {
     if (original) {
       await beforeRetirementRename?.();
+      await beforeSourceRemoval?.();
       refreshCloseProcessObservation();
       await verifyRetirementAuthority({
         authority: claim.authority, sourcePath: claim.sourcePath, candidatePath: claim.sourcePath,
         identity: expected, verifyContents: true,
       });
+      await beforeSourceRemoval?.();
       await renameExactChildDirectory(
         path.dirname(claim.sourcePath), claim.parentIdentity,
         claim.sourcePath, claim.claimPath, expected,
@@ -338,7 +346,7 @@ async function retireExactManagedDirectoryNative(
 ): Promise<void> {
   const claim = await prepareRetirement(input);
   if (!claim) return;
-  await finishClaim(claim, input.beforeRetirementRename, input.afterRetirementRename, input.beforeRetirementPurge);
+  await finishClaim(claim, input.beforeRetirementRename, input.afterRetirementRename, input.beforeRetirementPurge, input.beforeSourceRemoval);
 }
 
 /** Remove durable authority only after the caller has removed managed metadata. */

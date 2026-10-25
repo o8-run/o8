@@ -8,7 +8,43 @@ import path from 'node:path';
 import { NextRequest } from 'next/server';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 
-const seams = vi.hoisted(() => ({ failAfterRename: false, failAfterReturn: false, failAfterOwnership: false, ownershipDepth: 0 }));
+const seams = vi.hoisted(() => ({ failAfterRename: false, failAfterReturn: false, failAfterOwnership: false, ownershipDepth: 0,
+  addDuringRecovery: null as string | null, addAtRename: null as string | null,
+  addAtGeneratedRename: null as string | null, generatedReviewCount: 0, recoveryId: null as string | null,
+  imageWorkspace: null as string | null, imageDetachCount: 0 }));
+vi.mock('@/lib/workspace/dependency-materializer', async original => {
+  const actual = await original<typeof import('@/lib/workspace/dependency-materializer')>();
+  return { ...actual, detachDependencyMaterialization: async (...args: Parameters<typeof actual.detachDependencyMaterialization>) => {
+    if (args[0] !== seams.imageWorkspace) return actual.detachDependencyMaterialization(...args);
+    // Fixture provider boundary: an owned image unmount reveals an empty host mountpoint.
+    rmSync(path.join(args[0], 'node_modules'), { recursive: true });
+    mkdirSync(path.join(args[0], 'node_modules')); seams.imageDetachCount += 1;
+  } };
+});
+vi.mock('@/lib/workspace/exact-managed-directory-retirement', async original => {
+  const actual = await original<typeof import('@/lib/workspace/exact-managed-directory-retirement')>();
+  return { ...actual, retireExactManagedDirectory: async (input: Parameters<typeof actual.retireExactManagedDirectory>[0]) =>
+    actual.retireExactManagedDirectory({ ...input, beforeRetirementRename: async () => {
+      await input.beforeRetirementRename?.();
+      if (seams.addAtRename === input.directoryPath) {
+        seams.addAtRename = null;
+        writeFileSync(path.join(input.directoryPath, 'late-rename-receipt.log'), 'unreviewed final-boundary evidence');
+      }
+    } }),
+  };
+});
+vi.mock('@/lib/workspace/preservation-store', async original => {
+  const actual = await original<typeof import('@/lib/workspace/preservation-store')>();
+  return { ...actual, preserveWorkspaceArtifacts: async (...args: Parameters<typeof actual.preserveWorkspaceArtifacts>) => {
+    if (seams.addDuringRecovery === args[0].originalPath) {
+      seams.addDuringRecovery = null;
+      writeFileSync(path.join(args[0].originalPath, 'late-recovery-receipt.log'), 'unreviewed recovery-window evidence');
+    }
+    const receipt = await actual.preserveWorkspaceArtifacts(...args);
+    seams.recoveryId = receipt.preservationId;
+    return receipt;
+  } };
+});
 vi.mock('@/lib/workspace/retirement-process-authority', async original => {
   const actual = await original<typeof import('@/lib/workspace/retirement-process-authority')>();
   return { ...actual, withManagedRetirementOwnership: async (...args: Parameters<typeof actual.withManagedRetirementOwnership>) => {
@@ -22,7 +58,15 @@ vi.mock('@/lib/workspace/retirement-process-authority', async original => {
 });
 vi.mock('@/lib/workspace/generated-output-retirement', async original => {
   const actual = await original<typeof import('@/lib/workspace/generated-output-retirement')>();
-  return { ...actual, retireGeneratedOutput: async (id: string) => { const result = await actual.retireGeneratedOutput(id, {
+  return { ...actual, retireGeneratedOutput: async (id: string, hooks: Parameters<typeof actual.retireGeneratedOutput>[1] = {}) => { const result = await actual.retireGeneratedOutput(id, {
+    ...hooks,
+    beforeSourceRemoval: async () => {
+      if (seams.addAtGeneratedRename && ++seams.generatedReviewCount === 2) {
+        const workspace = seams.addAtGeneratedRename; seams.addAtGeneratedRename = null;
+        writeFileSync(path.join(workspace, '.next', 'late-generated-receipt.log'), 'unreviewed generated-boundary evidence');
+      }
+      await hooks.beforeSourceRemoval?.();
+    },
     afterRename: async () => { if (seams.failAfterRename) { seams.failAfterRename = false; throw new Error('fixture interrupted after exact rename'); } },
   }); if (seams.failAfterReturn) { seams.failAfterReturn = false; throw new Error('fixture lost native completion reply'); } return result; } };
 });
@@ -163,6 +207,69 @@ it.each(['addition', 'rename', 'symlink swap', 'size', 'mtime', 'deletion'])('re
   expect(renewed.entries[0].fingerprint).not.toBe(entry.fingerprint);
 });
 
+it('requires renewed review when recovery preparation banks an ignored file added after validation', async () => {
+  const f = await fixture(); const done = await f.workspace(); const plan = await preview(f.repoPath);
+  const entry = plan.entries.find((entry: { worktreeId: string }) => entry.worktreeId === done.id);
+  expect(entry.eligible, entry.reason).toBe(true);
+  seams.addDuringRecovery = done.path; seams.recoveryId = null;
+  const body = { action: 'execute', planId: plan.id, selection: [entry.id], fingerprint: plan.fingerprint };
+  const response = await post(body);
+  expect(response.status, await response.clone().text()).toBe(200);
+  const result = (await response.json()).result.plan;
+  expect(seams.addDuringRecovery).toBeNull();
+  expect(seams.recoveryId).toBeTruthy();
+  const bank = await (await import('@/lib/workspace/preservation-store')).readWorkspacePreservation(seams.recoveryId!);
+  expect(bank.payload.capture.entries.some(artifact => artifact.path === 'late-recovery-receipt.log')).toBe(true);
+  expect(result.outcomes).toEqual([expect.objectContaining({ state: 'held', reason: expect.stringMatching(/changed|review/i) })]);
+  expect(getSqlite().prepare('SELECT operation_id FROM workspace_exact_claims WHERE source_path = ?').all(done.path)).toEqual([]);
+  expect(readFileSync(path.join(done.path, 'late-recovery-receipt.log'), 'utf8')).toBe('unreviewed recovery-window evidence');
+  expect((await (await post(body)).json()).result.plan.outcomes[0].state).toBe('held');
+  const renewed = await preview(f.repoPath);
+  expect(renewed.entries[0].eligible, renewed.entries[0].reason).toBe(true);
+  expect(renewed.entries[0].fingerprint).not.toBe(entry.fingerprint);
+  const approved = await post({ action: 'execute', planId: renewed.id, selection: [entry.id], fingerprint: renewed.fingerprint });
+  expect((await approved.json()).result.plan.outcomes[0].state).toBe('removed');
+});
+
+it('requires renewed review at the final workspace rename boundary and cancels only its unrenamed claim', async () => {
+  const f = await fixture(); const done = await f.workspace(); const plan = await preview(f.repoPath);
+  const entry = plan.entries.find((entry: { worktreeId: string }) => entry.worktreeId === done.id);
+  seams.addAtRename = done.path;
+  const response = await post({ action: 'execute', planId: plan.id, selection: [entry.id], fingerprint: plan.fingerprint });
+  expect(response.status).toBe(200);
+  expect(seams.addAtRename).toBeNull();
+  expect((await response.json()).result.plan.outcomes[0]).toMatchObject({ state: 'held', reason: expect.stringMatching(/review/i) });
+  expect(readFileSync(path.join(done.path, 'late-rename-receipt.log'), 'utf8')).toBe('unreviewed final-boundary evidence');
+  expect(getSqlite().prepare('SELECT operation_id FROM workspace_exact_claims WHERE source_path = ?').all(done.path)).toEqual([]);
+  const renewed = await preview(f.repoPath);
+  expect(renewed.entries[0].eligible, renewed.entries[0].reason).toBe(true);
+});
+
+it('retains the approved source binding across an owned dependency image detach', async () => {
+  const f = await fixture(); const done = await f.workspace();
+  const modules = path.join(done.path, 'node_modules'); mkdirSync(modules);
+  writeFileSync(path.join(modules, 'immutable.js'), 'reviewed image contents');
+  await withWorktreeMetaTransaction(f.repoPath, async tx => {
+    const entry = (await tx.readAll())[done.id]!;
+    await tx.save(done.id, { ...entry, dependencyRecipeKey: 'f'.repeat(64), dependencyMaterialization: {
+      mode: 'image', status: 'mounted', installCommand: 'npm ci', recipeKey: 'f'.repeat(64),
+      leaseId: 'fixture-owned-lease', generation: 'fixture-owned-generation',
+      workspaceDevice: entry.materializationIdentity!.device, workspaceInode: entry.materializationIdentity!.inode,
+    } });
+  });
+  const plan = await preview(f.repoPath);
+  const entry = plan.entries.find((entry: { worktreeId: string }) => entry.worktreeId === done.id);
+  expect(entry.eligible, entry.reason).toBe(true);
+  seams.imageWorkspace = done.path; seams.imageDetachCount = 0;
+  try {
+    const response = await post({ action: 'execute', planId: plan.id, selection: [entry.id], fingerprint: plan.fingerprint });
+    const result = (await response.json()).result.plan;
+    expect(seams.imageDetachCount).toBe(1);
+    expect(result.outcomes[0], JSON.stringify(result.outcomes)).toMatchObject({ state: 'removed' });
+    expect(existsSync(done.path)).toBe(false);
+  } finally { seams.imageWorkspace = null; }
+});
+
 it('refuses a wrong fingerprint, foreign selection, and worker authority before any cleanup', async () => {
   const f = await fixture(); const done = await f.workspace(); const plan = await preview(f.repoPath);
   const entry = plan.entries.find((entry: { worktreeId: string; kind: string }) => entry.worktreeId === done.id && entry.kind === 'workspace');
@@ -250,6 +357,24 @@ it('requires renewed review for ignored output inside a separately selected gene
     expect.objectContaining({ entryId: `workspace:${done.id}`, state: 'held' }),
   ]);
   expect(readFileSync(path.join(next, 'new-unique-receipt.log'), 'utf8')).toBe('unreviewed build evidence');
+});
+
+it('requires renewed review when generated output changes at its final rename boundary', async () => {
+  const f = await fixture(); const done = await f.workspace();
+  const next = path.join(done.path, '.next'); mkdirSync(next); writeFileSync(path.join(next, 'receipt.txt'), 'reviewed build');
+  const evidence = [path.join(root, `source-${++sequence}.txt`), path.join(root, `stop-${++sequence}.txt`)];
+  evidence.forEach(file => writeFileSync(file, 'fixture completion evidence'));
+  await adoptGeneratedOutput({ workspacePath: done.path, owner: { repositoryPath: f.repoPath, worktreeId: done.id },
+    intent: 'Retain the reviewed build', evidencePaths: evidence }).then(resource => recoverGeneratedOutput(resource.resourceId));
+  const plan = await preview(f.repoPath);
+  expect(plan.entries.every((entry: { eligible: boolean }) => entry.eligible), JSON.stringify(plan.entries)).toBe(true);
+  seams.addAtGeneratedRename = done.path; seams.generatedReviewCount = 0;
+  const response = await post({ action: 'execute', planId: plan.id, fingerprint: plan.fingerprint,
+    selection: plan.entries.map((entry: { id: string }) => entry.id) });
+  expect(seams.addAtGeneratedRename).toBeNull();
+  expect((await response.json()).result.plan.outcomes.map((entry: { state: string }) => entry.state)).toEqual(['held', 'held']);
+  expect(readFileSync(path.join(next, 'late-generated-receipt.log'), 'utf8')).toBe('unreviewed generated-boundary evidence');
+  expect(getSqlite().prepare('SELECT operation_id FROM workspace_exact_claims WHERE source_path = ?').all(next)).toEqual([]);
 });
 
 it('retains a pending generated-output claim after an interrupted rename and resumes consumer before workspace', async () => {

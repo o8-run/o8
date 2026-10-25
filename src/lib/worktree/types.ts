@@ -127,6 +127,8 @@ export interface CreateWorktreeOptions {
  * Options for cleaning up a worktree.
  */
 export interface CleanupOptions {
+  /** Revalidate a reviewed selection after recovery capture and before exact source removal. */
+  beforeSourceRemoval?: (phase?: 'before-dependency-detach' | 'dependency-detached') => Promise<void>;
   /** A delayed creator may retire only the generation it actually returned. */
   expectedCreation?: Pick<WorktreeInfo, 'createdAt' | 'path' | 'branch'>;
   /** Force removal even with uncommitted changes */

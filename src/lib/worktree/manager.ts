@@ -2134,14 +2134,17 @@ export class WorktreeManager {
         return false;
       }
       let dependencyDetachStarted = false;
+      let dependencyDetached = false;
       try {
         if (retirementTruth?.state !== 'retired') {
           if (entry.dependencyMaterialization?.mode === 'image') {
+            await opts?.beforeSourceRemoval?.('before-dependency-detach');
             dependencyDetachStarted = true;
             await this.detachDependencyMaterializationForWorkspace(
               worktreePath,
               entry.dependencyMaterialization,
             );
+            dependencyDetached = true;
           }
           await retireExactManagedDirectory({
             repositoryPath: this.repoRoot,
@@ -2149,6 +2152,8 @@ export class WorktreeManager {
             directoryPath: worktreePath,
             identity: cleanupIdentity,
             parentIdentity: entry.materializationParentIdentity,
+            beforeSourceRemoval: opts?.beforeSourceRemoval
+              ? () => opts.beforeSourceRemoval!(dependencyDetached ? 'dependency-detached' : undefined) : undefined,
           });
         }
       } catch (error) {

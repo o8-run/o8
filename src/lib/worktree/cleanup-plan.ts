@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import { lstat, statfs } from 'node:fs/promises';
+import { lstat, readdir, statfs } from 'node:fs/promises';
 import path from 'node:path';
 
 import { findRepoByLocalPath } from '@/lib/repos/registry';
 import { withResourceLease } from '@/lib/leases/resource-lease-guard';
 import { withManagedRetirementOwnership } from '@/lib/workspace/retirement-process-authority';
-import { readExactWorkspaceClaim } from '@/lib/workspace/exact-workspace-claim-state';
+import { readExactWorkspaceClaim, removeExactWorkspaceClaim } from '@/lib/workspace/exact-workspace-claim-state';
 import { currentGeneratedOutputResource, readGeneratedOutputResource } from '@/lib/workspace/generated-output-state';
 import { retireGeneratedOutput } from '@/lib/workspace/generated-output-retirement';
 import { verifyGeneratedOutputBank } from '@/lib/workspace/generated-output-bank';
@@ -99,6 +99,9 @@ async function executeEntry(plan: WorkspaceCleanupPlan, entry: CleanupPlanEntry,
     const startedAt = previous?.startedAt ?? Date.now();
     const outcome: CleanupPlanOutcome = { entryId: entry.id, state: 'started', startedAt };
     let mutationStarted = false;
+    let reviewRefusal: string | null = null;
+    let detachedFingerprint: string | null = null;
+    let detachedMountpoint: string | null = null;
     const removedPath = entry.kind === 'workspace' ? entry.workspacePath : path.join(entry.workspacePath, '.next');
     const absent = () => lstat(removedPath).then(() => false, error => { if (error.code === 'ENOENT') return true; throw error; });
     const record = () => {
@@ -123,32 +126,85 @@ async function executeEntry(plan: WorkspaceCleanupPlan, entry: CleanupPlanEntry,
       }
       const resumingExactClaim = previous?.state === 'started' ? pendingClaim(plan, entry, startedAt) : null;
       if (Date.now() > plan.expiresAt && !resumingExactClaim) throw new Error('The preview expired before this lifecycle operation started.');
-      if (!resumingExactClaim) {
+      const verifySelection = async (omitDependencyMount = false, expectedFingerprint = entry.fingerprint) => {
         const metadata = (await readCleanupMetadata(plan.repositoryPath))[entry.worktreeId];
-        const workspace = await inspectCleanupWorkspace(plan.repositoryPath, entry.worktreeId, metadata);
+        const workspace = await inspectCleanupWorkspace(plan.repositoryPath, entry.worktreeId, metadata, {
+          allowedClaimOperationId: pendingClaim(plan, entry, startedAt)?.operationId, omitDependencyMount,
+        });
         const current = entry.kind === 'workspace' ? workspace : await inspectCleanupGenerated(workspace, plan.repositoryPath);
-        if (!current?.eligible || current.fingerprint !== entry.fingerprint) throw new Error(current?.reason || 'Selected generation, source or completion evidence changed.');
+        if (!current?.eligible || current.fingerprint !== expectedFingerprint) throw new Error(current?.reason || 'Selected generation, source or completion evidence changed.');
         if (entry.kind === 'workspace') {
           if (currentGeneratedOutputResource(entry.workspacePath)
             || await lstat(path.join(entry.workspacePath, '.next')).then(() => true, error => { if (error.code === 'ENOENT') return false; throw error; })) {
             throw new Error('A new, unregistered or held generated-output generation is not in the approved selection.');
           }
         }
-      }
+      };
+      if (!resumingExactClaim) await verifySelection();
+      const beforeSourceRemoval = async (phase?: 'before-dependency-detach' | 'dependency-detached') => {
+        try {
+          await assertWorktreeMaterializationIdentity(plan.repositoryPath, plan.repositoryIdentity);
+          if ((await findRepoByLocalPath(plan.repositoryPath))?.id !== plan.repositoryId) throw new Error('Registered repository identity changed.');
+          if (Date.now() > plan.expiresAt) throw new Error('Reviewed preview expired.');
+          if (phase === 'before-dependency-detach') {
+            await verifySelection();
+            const metadata = (await readCleanupMetadata(plan.repositoryPath))[entry.worktreeId];
+            const withoutMount = await inspectCleanupWorkspace(plan.repositoryPath, entry.worktreeId, metadata, {
+              allowedClaimOperationId: pendingClaim(plan, entry, startedAt)?.operationId, omitDependencyMount: true,
+            });
+            if (!withoutMount.eligible) throw new Error(withoutMount.reason ?? 'Dependency detach selection is unavailable.');
+            // Bind the reduced view only while the full approved view is still unchanged.
+            await verifySelection();
+            detachedFingerprint = withoutMount.fingerprint;
+          } else if (phase === 'dependency-detached') {
+            if (!detachedFingerprint) throw new Error('Dependency detach has no approved source view.');
+            const mountpoint = path.join(entry.workspacePath, 'node_modules');
+            const observe = async () => {
+              const stat = await lstat(mountpoint).catch(error => { if (error.code === 'ENOENT') return null; throw error; });
+              if (!stat) return 'absent';
+              if (!stat.isDirectory() || stat.isSymbolicLink() || (await readdir(mountpoint)).length) throw new Error('Detached dependency mountpoint contains unreviewed data.');
+              return cleanupFingerprint([stat.dev, stat.ino, stat.mode, stat.size, stat.mtimeMs, stat.ctimeMs]);
+            };
+            const before = await observe();
+            detachedMountpoint ??= before;
+            if (before !== detachedMountpoint) throw new Error('Detached dependency mountpoint changed.');
+            await verifySelection(true, detachedFingerprint);
+            if (await observe() !== before) throw new Error('Detached dependency mountpoint changed during review.');
+          } else await verifySelection();
+        } catch (error) {
+          reviewRefusal = `Reviewed selection changed; preview and approve again. ${error instanceof Error ? error.message : 'Selection cannot be verified.'}`;
+          // Only an unrenamed prepared claim may be cancelled. A moved namespace
+          // retains its exact recovery journal and cannot become fresh deletion authority.
+          const claim = pendingClaim(plan, entry, startedAt);
+          if (claim?.state === 'prepared' && !await lstat(claim.claimPath).then(() => true, error => {
+            if (error.code === 'ENOENT') return false; throw error;
+          })) {
+            const identity = entry.kind === 'workspace' ? entry.identity : entry.outputIdentity;
+            if (identity) {
+              await assertWorktreeMaterializationIdentity(removedPath, identity);
+              removeExactWorkspaceClaim(claim.kind, claim.repositoryPath, claim.worktreeId, claim.operationId);
+            }
+          }
+          throw new Error(reviewRefusal);
+        }
+      };
       for (const dependency of entry.dependencies) {
         if (!plan.outcomes.some(item => item.entryId === dependency && item.state === 'removed')) throw new Error('Selected generated-output consumer has not retired.');
       }
       record(); // Intent precedes the existing lifecycle operation, including every uncertain reply.
       mutationStarted = true;
-      if (entry.kind === 'generated-output') await retireGeneratedOutput(entry.resourceId!);
+      if (entry.kind === 'generated-output') await retireGeneratedOutput(entry.resourceId!, { beforeSourceRemoval });
       else {
         const lane = getLane(entry.completion!.laneId);
         if (!lane || !['completed', 'archived'].includes(lane.status) || lane.packetId !== entry.completion!.packetId) throw new Error('Terminal owner changed.');
         const removed = resumingExactClaim
-          ? await getWorktreeManager(plan.repositoryPath).cleanup(entry.worktreeId, { deleteBranch: false,
+          ? await getWorktreeManager(plan.repositoryPath).cleanup(entry.worktreeId, { deleteBranch: false, beforeSourceRemoval,
             expectedCreation: { path: entry.workspacePath, branch: entry.branch!, createdAt: entry.createdAt } })
-          : await cleanupLaneWorktree(lane, { terminal: true, deleteBranch: false });
-        if (!removed) throw new Error('Existing lifecycle retained the workspace: ownership, consumers, preservation or process checks refused.');
+          : await cleanupLaneWorktree(lane, { terminal: true, deleteBranch: false, beforeSourceRemoval });
+        if (!removed) {
+          if (!await absent()) await beforeSourceRemoval();
+          throw new Error(reviewRefusal ?? 'Existing lifecycle retained the workspace: ownership, consumers, preservation or process checks refused.');
+        }
       }
       if (await lstat(removedPath).then(() => true, error => { if (error.code === 'ENOENT') return false; throw error; })) throw new Error('Selected path still exists after retirement.');
       const recovery = await completedRecovery(plan, entry);
@@ -159,7 +215,7 @@ async function executeEntry(plan: WorkspaceCleanupPlan, entry: CleanupPlanEntry,
       // A lost native reply is reconciled from retained lifecycle truth, never retried as a new deletion.
       const recovery = mutationStarted ? await completedRecovery(plan, entry).catch(() => null) : null;
       if (recovery) { outcome.state = 'removed'; outcome.recovery = recovery; outcome.removedPaths = [removedPath]; }
-      else outcome.state = pendingClaim(plan, entry, startedAt)
+      else outcome.state = reviewRefusal && !await absent().catch(() => true) ? 'held' : pendingClaim(plan, entry, startedAt)
         || (mutationStarted && await absent().catch(() => true)) ? 'started' : 'held';
     }
     if (outcome.state !== 'started') outcome.finishedAt = Date.now();

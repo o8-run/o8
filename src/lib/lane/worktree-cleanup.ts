@@ -72,7 +72,7 @@ async function preserveHeadBeforeRemoval(lane: CleanupLane, worktreePath: string
 
 export async function cleanupLaneWorktree(
   lane: CleanupLane,
-  opts: { deleteBranch?: boolean; terminal?: boolean; force?: boolean; overrideLiveGuard?: true } = {},
+  opts: { deleteBranch?: boolean; terminal?: boolean; force?: boolean; overrideLiveGuard?: true; beforeSourceRemoval?: (phase?: 'before-dependency-detach' | 'dependency-detached') => Promise<void> } = {},
 ): Promise<boolean> {
   const worktreePath = lane.worktreePath?.trim();
   if (!worktreePath) {
@@ -136,6 +136,7 @@ export async function cleanupLaneWorktree(
         force: true,
         deleteBranch: opts.deleteBranch ?? true,
         overrideLiveGuard: opts.overrideLiveGuard,
+        beforeSourceRemoval: opts.beforeSourceRemoval,
       });
       return settleRemovedWorktreeReservation(lane, removed);
     }

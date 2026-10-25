@@ -27,6 +27,7 @@ import { generatedOutputOwner, generatedOutputRevision, readGeneratedOutputResou
 type Owner = NonNullable<GeneratedOutputResource['owner']>;
 
 export interface GeneratedOutputRetirementHooks {
+  beforeSourceRemoval?: () => Promise<void>;
   afterRename?: () => Promise<void>;
   beforePurge?: () => Promise<void>;
   afterFinalAdmission?: () => Promise<void>;
@@ -206,6 +207,7 @@ export async function retireGeneratedOutput(resourceId: string,
     const sourcePath = path.join(resource.workspace.canonicalPath, '.next');
     if (!claim) {
       await verifyAuthority(resource, sourcePath);
+      await hooks.beforeSourceRemoval?.();
       const operationId = randomUUID();
       claim = prepareExactWorkspaceClaim({ kind: 'generated-output-retirement', repositoryPath: resource.owner!.repositoryPath,
         worktreeId: resourceId, operationId, expectedPath: sourcePath, sourcePath,
@@ -232,7 +234,9 @@ export async function retireGeneratedOutput(resourceId: string,
     if (claim.state === 'prepared') {
       if (!original && !moved) throw new Error('Generated-output prepared namespaces are missing.');
       if (original) {
+        await hooks.beforeSourceRemoval?.();
         await verifyAuthority(resource, sourcePath, claim);
+        await hooks.beforeSourceRemoval?.();
         await renameExactChildDirectory(resource.workspace.canonicalPath, resource.workspace,
           sourcePath, claim.claimPath, resource.output!);
         await hooks.afterRename?.();
