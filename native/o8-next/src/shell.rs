@@ -82,22 +82,16 @@ impl Shell {
         let sidebar_subscription = cx.subscribe_in(&sidebar, window, |this, _, event, window, cx| {
             match event {
                 ThreadEvent::Loaded(sessions) => {
-                    this.loading = false;
-                    this.sessions = sessions.clone();
-                    this.workspaces = this.sessions.iter().map(|s| s.repo_path.clone().unwrap_or_else(|| "Unassigned".into())).collect::<BTreeSet<_>>().into_iter().collect();
-                    this.connected = true;
-                    if !this.state.selected.as_ref().is_some_and(|w| this.workspaces.contains(w)) {
-                        this.state.selected = this.workspaces.first().cloned();
-                    }
-                    this.notice = "Connected · Ctrl+F: search threads · F8: sidebar · Ctrl+K: commands".into();
-                    for content in this.content.values() {
-                        if let Content::Grid(grid) = content { grid.update(cx, |g, cx| g.load(cx)); }
-                    }
-                    this.persist();
+                    this.install_sessions(sessions.clone(), false, cx);
+                }
+                ThreadEvent::Refreshed(sessions, ledger) => {
+                    this.workspace_ledger = ledger.clone();
+                    this.install_sessions(sessions.clone(), true, cx);
                 }
                 ThreadEvent::Selected(id) => this.open_thread(id.clone(), window, cx),
                 ThreadEvent::Error(error) => {
                     this.loading = false;
+                    this.connected = false;
                     this.notice = format!("Local server unavailable: {error}. Start the local o8 server, then Retry.");
                 }
             }
@@ -148,6 +142,72 @@ impl Shell {
         });
         shell.load(cx);
         shell
+    }
+    fn install_sessions(
+        &mut self,
+        sessions: Vec<Session>,
+        refreshed: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let bootstrap = self.loading || !self.connected;
+        self.sessions = sessions;
+        let mut workspaces = self
+            .sessions
+            .iter()
+            .map(|s| s.repo_path.clone().unwrap_or_else(|| "Unassigned".into()))
+            .collect::<BTreeSet<_>>();
+        if let Some(ledger) = &self.workspace_ledger {
+            workspaces.extend(ledger.projects.iter().flat_map(|p| p.repo_paths.clone()));
+        }
+        self.workspaces = workspaces.into_iter().collect();
+        if refreshed {
+            self.loading = false;
+            self.connected = true;
+            let missing = self
+                .state
+                .selected
+                .as_ref()
+                .is_some_and(|w| !self.workspaces.contains(w));
+            if bootstrap || missing {
+                let active = self.workspace_ledger.as_ref().and_then(|ledger| {
+                    ledger
+                        .projects
+                        .iter()
+                        .find(|p| p.id == ledger.active_project_id && p.id != "default")
+                });
+                if let Some(active) = active {
+                    if !self
+                        .state
+                        .selected
+                        .as_ref()
+                        .is_some_and(|w| active.repo_paths.contains(w))
+                    {
+                        self.state.selected = active.repo_paths.first().cloned();
+                    }
+                } else if !self
+                    .state
+                    .selected
+                    .as_ref()
+                    .is_some_and(|w| self.workspaces.contains(w))
+                {
+                    self.state.selected = self.workspaces.first().cloned();
+                }
+            }
+        }
+        if self.connected {
+            self.notice = if self.workspaces.is_empty() {
+                "Connected. No saved workspace sessions."
+            } else {
+                "Connected · Ctrl+F: search threads · F8: sidebar · Ctrl+K: commands"
+            }
+            .into();
+        }
+        for content in self.content.values() {
+            if let Content::Grid(grid) = content {
+                grid.update(cx, |g, cx| g.load(cx));
+            }
+        }
+        self.persist();
     }
     fn persist(&mut self) {
         if let Err(error) = self.state.save(&self.file) {
@@ -216,6 +276,9 @@ impl Shell {
         else {
             return;
         };
+        self.projects_open = false;
+        self.settings = None;
+        self.settings_subscription = None;
         if self.state.selected.as_ref() != Some(&workspace) {
             self.switch(workspace, window, cx);
         }

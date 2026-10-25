@@ -4,6 +4,7 @@
 use crate::{
     client::{Client, Session},
     composer::{Composer, Submit},
+    projects_model::Ledger,
     sidebar,
     transport::{self, Incoming, Subscription},
 };
@@ -23,6 +24,7 @@ use std::{
 #[derive(Clone)]
 pub enum Event {
     Loaded(Vec<Session>),
+    Refreshed(Vec<Session>, Option<Ledger>),
     Selected(String),
     Error(String),
 }
@@ -212,6 +214,10 @@ impl ThreadList {
             .or_else(|| self.rows.iter().position(|r| r.id.is_some()))
             .unwrap_or(0);
     }
+    pub fn catalog_changed(&mut self) {
+        self.generation += 1;
+        self.dirty.get_or_insert_with(Instant::now);
+    }
     pub fn load(&mut self, cx: &mut Context<Self>) {
         if self.loading || self.saving {
             return;
@@ -220,9 +226,11 @@ impl ThreadList {
         self.dirty = None;
         let generation = self.generation;
         let client = self.client.clone();
-        let task = cx
-            .background_executor()
-            .spawn(async move { client.sidebar_sessions() });
+        let task = cx.background_executor().spawn(async move {
+            let sessions = client.sidebar_sessions()?;
+            let ledger = client.get::<Ledger>("/api/panel/projects", &[]).ok();
+            Ok::<_, String>((sessions, ledger))
+        });
         cx.spawn(async move |this, cx| {
             let result = task.await;
             let _ = this.update(cx, |this, cx| {
@@ -234,7 +242,7 @@ impl ThreadList {
                 this.last_load = Instant::now();
                 this.last_inventory = Instant::now();
                 match result {
-                    Ok(mut sessions) => {
+                    Ok((mut sessions, ledger)) => {
                         let previous: HashMap<_, _> =
                             this.sessions.iter().map(|s| (s.id.as_str(), s)).collect();
                         for s in &mut sessions {
@@ -249,7 +257,7 @@ impl ThreadList {
                         }
                         this.rebuild();
                         this.notice.clear();
-                        cx.emit(Event::Loaded(this.sessions.clone()));
+                        cx.emit(Event::Refreshed(this.sessions.clone(), ledger));
                     }
                     Err(error) => {
                         this.notice = error.clone();

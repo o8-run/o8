@@ -3,6 +3,108 @@ use super::*;
 use gpui::{ScrollDelta, ScrollStrategy, ScrollWheelEvent};
 use std::io::Write;
 
+#[gpui::test]
+fn sidebar_bootstrap_keeps_registered_active_workspace(cx: &mut TestAppContext) {
+    let fixture = Fixture::start_mode(true, "--shell --composer");
+    fixture
+        .client
+        .project_request(
+            "POST",
+            "/api/projects",
+            &json!({"name":"Active fixture","slug":"active-fixture"}),
+        )
+        .unwrap();
+    let projects: Value = fixture.client.get("/api/projects", &[]).unwrap();
+    let project = projects["projects"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["slug"] == "active-fixture")
+        .unwrap();
+    let repo = fixture
+        .client
+        .project_request(
+            "POST",
+            "/api/panel/repos",
+            &json!({"action":"add","localPath":fixture.folders[0]}),
+        )
+        .unwrap();
+    fixture
+        .client
+        .project_request(
+            "POST",
+            &format!("/api/projects/{}/repos", project["id"].as_str().unwrap()),
+            &json!({"repoId":repo["repo"]["id"]}),
+        )
+        .unwrap();
+    fixture
+        .client
+        .project_request(
+            "POST",
+            "/api/panel/projects/active",
+            &json!({"projectId":project["id"]}),
+        )
+        .unwrap();
+    let (shell, mut visual) = open(
+        fixture.client.clone(),
+        fixture.root.join("catalog.json"),
+        State::default(),
+        cx,
+    );
+    wait_for(&shell, &mut visual, |s, _| s.connected);
+    shell.read_with(&visual, |s, _| {
+        assert!(
+            s.workspaces
+                .iter()
+                .any(|path| crate::client::same_workspace(path, &fixture.folders[0])),
+            "sidebar bootstrap must retain registered repositories without chats"
+        );
+        assert!(
+            s.state
+                .selected
+                .as_ref()
+                .is_some_and(|path| crate::client::same_workspace(path, &fixture.folders[0])),
+            "the active project must retain its workspace at startup"
+        );
+        assert!(
+            s.sessions
+                .iter()
+                .any(|session| session.id == "thoughts-composer-first"),
+            "saved chats in other workspaces remain available"
+        );
+    });
+}
+
+#[gpui::test]
+fn sidebar_selection_leaves_projects_and_settings(cx: &mut TestAppContext) {
+    let fixture = Fixture::with_options(&["--sidebar", "--settings"]);
+    let (shell, mut visual) = open(
+        fixture.client.clone(),
+        fixture.root.join("panels.json"),
+        State::default(),
+        cx,
+    );
+    let cx = &mut visual;
+    ready(&shell, cx);
+    settle(&shell, cx);
+    let selected = shell.read_with(cx, |s, cx| s.sidebar.read(cx).rows[2].id.clone().unwrap());
+    for (button, panel) in [
+        ("shell-settings", "settings-page"),
+        ("shell-projects", "project-new"),
+    ] {
+        click(cx, button);
+        settle(&shell, cx);
+        assert!(cx.debug_bounds(panel).is_some());
+        click(cx, "thread-row-2");
+        settle(&shell, cx);
+        assert!(
+            shell.read_with(cx, |s, _| s.settings.is_none() && !s.projects_open),
+            "selecting a thread must display its session surface"
+        );
+        assert_eq!(active_id(&shell, cx), selected);
+    }
+}
+
 #[test]
 fn sidebar_message_between_pages_keeps_every_thread() {
     let fixture = Fixture::with_options(&["--sidebar", "--sidebar-paging-message"]);

@@ -94,3 +94,6 @@ terminal changes without editing release, version, deployment or publishing file
 
 [Correction round 1](correction-1/README.md) records the test-first fix for a live
 message shifting a chat across offset pages, plus the repeated-page fallback.
+
+[Current-main rebase verification](rebase-verification.txt) covers the combined
+Projects, Settings, Brain, Inbox, Issues and sidebar behavior.

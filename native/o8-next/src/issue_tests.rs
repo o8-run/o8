@@ -159,7 +159,8 @@ fn scene(cx: &mut VisualTestContext) -> Value {
     })
 }
 fn wait(cx: &mut VisualTestContext, selector: &'static str) {
-    for _ in 0..40 {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
         draw(cx);
         if scene(cx)["controls"]
             .as_array()
@@ -167,8 +168,12 @@ fn wait(cx: &mut VisualTestContext, selector: &'static str) {
         {
             return;
         }
+        assert!(
+            Instant::now() < deadline,
+            "real control did not reach CPU paint: {selector}"
+        );
+        std::thread::sleep(Duration::from_millis(10));
     }
-    panic!("real control did not reach CPU paint: {selector}");
 }
 fn click(cx: &mut VisualTestContext, selector: &'static str) {
     wait(cx, selector);

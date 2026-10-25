@@ -32,8 +32,8 @@ The global event stream updates thread summaries and invalidates metadata on
 snapshots and lifecycle events. A short snapshot never replaces the full list.
 Broad fallback refresh is five minutes; runtime-only discovery is ten seconds,
 matching the desktop rail. Session-history and composer reconciliation remain
-independent of sidebar discovery. Main had no native `theme.rs` at the start of
-this change; the new sidebar keeps its colors local to its own view file.
+independent of sidebar discovery. The sidebar uses the shared semantic tokens
+from `theme.rs` alongside the other native surfaces.
 
 The fixture host accepts `--sidebar` alongside `--composer --shell`. It authors
 2,000 chats across two workspaces plus the baseline fixture sessions and one
