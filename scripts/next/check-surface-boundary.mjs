@@ -16,7 +16,7 @@ const legacySurfaceFiles = new Set([
   'scripts/next/pull-request-gates-fixture.ts',
 ]);
 const isSurface = path => path !== checker && !path.endsWith('/build.rs') && (
-  /^native\/o8-next\/src\/surfaces\/.*\.rs$/.test(path)
+  path.startsWith('native/o8-next/src/surfaces/')
   || path.startsWith('scripts/next/surfaces/') || legacySurfaceFiles.has(path)
 );
 const isDocumentation = path => /^native\/o8-next\/(?:docs|evidence)\/.+\.(?:md|txt|json|csv|png|svg)$/.test(path);
@@ -124,7 +124,11 @@ function main() {
   try {
     git(['worktree', 'add', '--quiet', '--detach', worktree, base]);
     attached = true;
-    const paths = stats.map(stat => stat.path).filter(isSurface);
+    // A squash-merged port has a different commit identity but may already be
+    // byte-for-byte on main. Skip only identical paths from the PR's own delta.
+    const candidates = stats.map(stat => stat.path).filter(isSurface);
+    const different = new Set(candidates.length ? diff(base, head, ['--name-only', '-z', '--', ...candidates.map(path => `:(literal)${path}`)]).split('\0') : []);
+    const paths = candidates.filter(path => different.has(path));
     if (paths.length) {
       const patch = diff(ancestor, head, ['--binary', '--', ...paths.map(path => `:(literal)${path}`)]);
       git(['apply', '--3way', '--index', '-'], worktree, patch);
@@ -136,9 +140,11 @@ function main() {
       // Insert into main's inventory, preserving registrations landed since the PR forked.
       const opening = content.indexOf('register_surfaces! {\n');
       const insertion = content.indexOf(anchor, opening);
-      if (opening < 0 || insertion < 0 || content.includes(entry.line)) throw new Error(`${shell}: cannot apply registration to current main; rebase the surface`);
-      const offset = insertion + anchor.length;
-      writeFileSync(file, content.slice(0, offset) + entry.line + '\n' + content.slice(offset));
+      if (opening < 0 || insertion < 0) throw new Error(`${shell}: cannot apply registration to current main; rebase the surface`);
+      if (!inventory(content).some(current => current.line === entry.line)) {
+        const offset = insertion + anchor.length;
+        writeFileSync(file, content.slice(0, offset) + entry.line + '\n' + content.slice(offset));
+      }
     }
     console.log(`o8 next surface boundary: ${paths.length} surface files on main; cargo check --all-targets --locked`);
     // No PR manifests, build scripts, vendor changes or other shared edits enter this worktree.
