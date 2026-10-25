@@ -1,10 +1,10 @@
 # Diff viewer
 
-The opt-in viewer registers in `src/surfaces/diff.rs`. Its source, actions, refusal states and regression test function names are retained from the preceding port head.
+The opt-in inline viewer registers in `src/surfaces/inline_diff.rs`, with its view, actions and regression tests under `src/surfaces/diff/`. Its refusal states and regression test function names are retained from the preceding port head.
 
 The disposable host discovers its fixture entry without shared dispatcher edits. Existing authenticated production routes remain authoritative.
 
-The shared `main.rs`, `client.rs`, `diff.rs`, workspace state, shell view and development host match main. The shell inventory has one entry for this surface. Its Merge and Confirm request adapters use the shared authenticated transport. The shared palette test follows registered tab availability, so the enabled Diff surface opens while unavailable commands still refuse.
+The shared `main.rs`, `client.rs`, `diff.rs`, `diff_ui.rs`, workspace state, shell view, shell tests and development host match main. The shell inventory adds one InlineDiff entry. Its Merge and Confirm request adapters compile with that entry and use the shared authenticated transport. Use **Open inline diff** in the palette. Inline palette and restart assertions belong to the surface's existing reachability test.
 
 Base belongs to the selected packet: opening another packet resets it to that lane's base, while reopening the same packet retains its explicit override. Inline privacy and long-line bounding run in the inline background loader. Standalone parsing and review retain main's behavior.
 

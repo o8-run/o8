@@ -1,4 +1,4 @@
-//! Inline controls for the existing diff surface; no separate parser or renderer.
+//! Inline hunk and approval controls for the registered surface-owned view.
 use super::*;
 use crate::{composer::Composer, diff::File};
 use gpui::{AnyElement, Entity};
@@ -14,7 +14,7 @@ struct HeldApproval {
     target: Target,
     evidence: Option<Value>,
 }
-#[path = "surfaces/diff/confirmation.rs"]
+#[path = "confirmation.rs"]
 mod confirmation;
 pub(super) struct State {
     workspace: String,
@@ -128,7 +128,7 @@ impl State {
 }
 pub(super) fn read(target: &Target, client: &Client) -> Result<(Document, Value), String> {
     let (mut document, state) = target.read(client)?;
-    if crate::shell::diff::guard::sensitive(&document.source) {
+    if crate::shell::inline_diff::guard::sensitive(&document.source) {
         return Err("Sensitive patch hidden. Read-only.".into());
     }
     if document.source.lines().any(|line| line.len() > 16384) {
@@ -190,7 +190,9 @@ fn packet_target(client: &Client, workspace: &str, id: &str) -> Result<Target, S
         .as_str()
         .filter(|base| !base.trim().is_empty())
         .ok_or("Packet lane has no base branch")?;
-    if crate::shell::diff::guard::sensitive(base) || crate::shell::diff::guard::sensitive(path) {
+    if crate::shell::inline_diff::guard::sensitive(base)
+        || crate::shell::inline_diff::guard::sensitive(path)
+    {
         return Err("Sensitive packet metadata hidden".into());
     }
     Ok(Target::Worktree {

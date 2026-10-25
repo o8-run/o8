@@ -1,31 +1,44 @@
-import { spawn, type ChildProcess } from 'node:child_process';
-import { once } from 'node:events';
 import { realpathSync, writeFileSync, symlinkSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
-import { createInterface } from 'node:readline';
 import { afterAll, beforeAll, expect, it } from 'vitest';
-let host: ChildProcess;
+import { closeInlineHost, startInlineHost } from '../scripts/next/surfaces/inline-host-fixture';
+let fixture: Awaited<ReturnType<typeof startInlineHost>>;
+let heldFixture: Promise<Awaited<ReturnType<typeof startInlineHost>>> | undefined;
 let origin = '';
 let workspace = '';
 const token = 'fixture-inline-operator';
 beforeAll(async () => {
-  host = spawn(process.execPath, ['--import', './scripts/register-server-only-stub.mjs', '--import', 'tsx', 'scripts/next/dev-server.ts', '--inline'], {
-    env: { ...process.env, O8_NEXT_API_TOKEN: token }, stdio: ['ignore', 'pipe', 'ignore'],
-  });
-  for await (const line of createInterface({ input: host.stdout! })) {
-    try { origin = (JSON.parse(line) as { origin?: string }).origin || origin; } catch { continue; }
-    if (origin) break;
-  }
+  fixture = await startInlineHost(['--inline', '--inline-ready-fail-first'], token);
+  origin = fixture.origin;
   const data = await (await request('/api/mobile/orchestrator/threads')).json() as { threads: Array<{ repoPath: string }> };
   workspace = realpathSync(data.threads[0].repoPath);
-}, 30_000);
-afterAll(async () => { if (host?.exitCode === null) { host.kill('SIGTERM'); await once(host, 'exit'); } });
+}, 210_000);
+afterAll(async () => {
+  if (fixture) await closeInlineHost(fixture.host);
+  if (heldFixture) await closeInlineHost((await heldFixture).host);
+});
+function heldHost() { return heldFixture ??= startInlineHost(['--inline', '--inline-held'], token); }
+async function heldRequest(path: string, body?: object, credential = token) {
+  const held = await heldHost();
+  return fetch(held.origin + path, { method: body ? 'POST' : 'GET', headers: {
+    authorization: `Bearer ${credential}`, 'content-type': 'application/json',
+  }, ...(body ? { body: JSON.stringify(body) } : {}) });
+}
+async function heldApproval() {
+  const before = await (await heldRequest('/api/orchestrator/inline-fixture-log')).json() as { held: { head: string; baseHead: string } };
+  const merge = await heldRequest('/api/orchestrator/merge', { packetId: 'next-inline', expectedHeadSha: before.held.head,
+    idempotencyKey: 'fixture-held-auth' });
+  const receipt = await merge.json() as { result: { approvalId: string } };
+  expect(receipt.result.approvalId).toBeTruthy();
+  return { before, id: receipt.result.approvalId };
+}
 function request(path: string, body?: object, credential = token) {
   return fetch(origin + path, { method: body ? 'POST' : 'GET', headers: {
     authorization: `Bearer ${credential}`, 'content-type': 'application/json',
   }, ...(body ? { body: JSON.stringify(body) } : {}) });
 }
 it('reads real worktree hunks and preserves authentication and revision refusals', async () => {
+  expect(await (await request('/api/orchestrator/inline-fixture-log')).json()).toMatchObject({ readinessAttempts: 2 });
   const path = '/api/worktrees/diff?' + new URLSearchParams({ worktreePath: workspace, baseBranch: 'main' });
   const response = await request(path); expect(response.status).toBe(200);
   const data = await response.json() as { diff: string; headSha: string; truncated: boolean };
@@ -56,33 +69,27 @@ it('bounds binary/large diffs and refuses selected-path escapes without reading 
 });
 
 it('keeps held-approval confirmation behind the production operator-token gate', async () => {
-  const held = spawn(process.execPath, ['--import', './scripts/register-server-only-stub.mjs', '--import', 'tsx',
-    'scripts/next/dev-server.ts', '--inline', '--inline-held'], {
-    env: { ...process.env, O8_NEXT_API_TOKEN: token }, stdio: ['ignore', 'pipe', 'ignore'],
+  const { before, id } = await heldApproval();
+  const denied = await heldRequest('/api/panel/approvals', { action: 'approve', id }, 'fixture-invalid');
+  expect(denied.status).toBe(401);
+  expect(await (await heldRequest('/api/orchestrator/inline-fixture-log')).json()).toMatchObject({
+    confirmation: null, held: { currentBase: before.held.baseHead, approval: { id, status: 'pending' } },
   });
-  try {
-    let heldOrigin = '';
-    for await (const line of createInterface({ input: held.stdout! })) {
-      try { heldOrigin = (JSON.parse(line) as { origin?: string }).origin || heldOrigin; } catch { continue; }
-      if (heldOrigin) break;
-    }
-    held.stdout!.resume();
-    expect(heldOrigin).toBeTruthy();
-    const send = (path: string, body?: object, credential = token) => fetch(heldOrigin + path, {
-      method: body ? 'POST' : 'GET', headers: { authorization: `Bearer ${credential}`, 'content-type': 'application/json' },
-      ...(body ? { body: JSON.stringify(body) } : {}),
-    });
-    const before = await (await send('/api/orchestrator/inline-fixture-log')).json() as { held: { head: string; baseHead: string } };
-    const merge = await send('/api/orchestrator/merge', { packetId: 'next-inline', expectedHeadSha: before.held.head,
-      idempotencyKey: 'fixture-held-auth' });
-    const receipt = await merge.json() as { result: { approvalId: string } };
-    expect(receipt.result.approvalId).toBeTruthy();
-    const denied = await send('/api/panel/approvals', { action: 'approve', id: receipt.result.approvalId }, 'fixture-invalid');
-    expect(denied.status).toBe(401);
-    expect(await (await send('/api/orchestrator/inline-fixture-log')).json()).toMatchObject({
-      confirmation: null, held: { currentBase: before.held.baseHead, approval: { id: receipt.result.approvalId, status: 'pending' } },
-    });
-  } finally {
-    if (held.exitCode === null) { held.kill('SIGTERM'); await once(held, 'exit'); }
-  }
-}, 60_000);
+}, 210_000);
+
+it('posts an ordinary held Confirm exactly once for its original approval through the production route', async () => {
+  const { before, id } = await heldApproval();
+  const review = await (await heldRequest('/api/orchestrator/review-state?' + new URLSearchParams({
+    packetId: 'next-inline', spoken: '1', approvalId: id,
+  }))).json() as { spokenReview: { evidence: { headSha: string; fingerprint: string; governanceFingerprint: string } } };
+  const evidence = review.spokenReview.evidence;
+  const response = await heldRequest('/api/panel/approvals', { action: 'approve', id, spokenReviewEvidence: {
+    approvalId: id, packetId: 'next-inline', reviewedHeadSha: evidence.headSha,
+    reviewedDiffFingerprint: evidence.fingerprint, reviewedGovernanceFingerprint: evidence.governanceFingerprint,
+  } });
+  expect(response.status).toBe(200);
+  const log = await (await heldRequest('/api/orchestrator/inline-fixture-log')).json() as { requests: string[] };
+  expect(log.requests.filter(path => path === 'POST /api/panel/approvals')).toHaveLength(1);
+  expect(log).toMatchObject({ confirmation: id, held: { currentBase: before.held.head,
+    approval: { id, status: 'approved', continuationStatus: 'completed' } } });
+}, 210_000);

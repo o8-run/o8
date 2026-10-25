@@ -11,10 +11,10 @@ fn committed_packet_uses_lane_base_and_enables_merge(cx: &mut TestAppContext) {
     );
     ready(&shell, &mut visual);
     visual.simulate_keystrokes("ctrl-k");
-    visual.simulate_keystrokes("d i f f enter");
+    visual.simulate_keystrokes("i n l i n e space d i f f enter");
     wait_inline(&shell, &mut visual);
     // A clean committed worktree has no uncommitted changes before packet selection.
-    assert!(shell.read_with(&visual, |s,cx| matches!(s.content.get(&s.key(&Tab::Diff)),Some(Content::Diff(v)) if v.read(cx).document.files.is_empty())));
+    assert!(shell.read_with(&visual, |s,cx| matches!(s.content.get(&s.key(&Tab::InlineDiff)),Some(Content::InlineDiff(v)) if v.read(cx).document.files.is_empty())));
     let input = visual.debug_bounds("inline-packet").unwrap();
     visual.simulate_click(input.center(), gpui::Modifiers::default());
     visual.simulate_input("next-inline");
@@ -25,7 +25,7 @@ fn committed_packet_uses_lane_base_and_enables_merge(cx: &mut TestAppContext) {
     wait_inline(&shell, &mut visual);
     let elapsed = started.elapsed().as_secs_f64() * 1000.;
     shell.read_with(&visual, |s,cx| {
-        let Some(Content::Diff(view)) = s.content.get(&s.key(&Tab::Diff)) else {panic!("Diff tab")};
+        let Some(Content::InlineDiff(view)) = s.content.get(&s.key(&Tab::InlineDiff)) else {panic!("Diff tab")};
         let view = view.read(cx);
         assert_eq!(view.document.files.len(), 2, "committed packet must show changes against its lane base");
         assert!(matches!(&view.target, crate::diff::Target::Worktree {base:Some(base),..} if base=="fixture-base"));
@@ -44,11 +44,11 @@ fn committed_packet_uses_lane_base_and_enables_merge(cx: &mut TestAppContext) {
     let compare = visual.debug_bounds("inline-compare").unwrap();
     visual.simulate_click(compare.center(), gpui::Modifiers::default());
     wait_inline(&shell, &mut visual);
-    assert!(shell.read_with(&visual, |s,cx| matches!(s.content.get(&s.key(&Tab::Diff)),Some(Content::Diff(v)) if v.read(cx).document.files.len()==2)));
+    assert!(shell.read_with(&visual, |s,cx| matches!(s.content.get(&s.key(&Tab::InlineDiff)),Some(Content::InlineDiff(v)) if v.read(cx).document.files.len()==2)));
     let merge = visual.debug_bounds("inline-merge").unwrap();
     visual.simulate_click(merge.center(), gpui::Modifiers::default());
     wait_inline(&shell, &mut visual);
-    assert!(shell.read_with(&visual, |s,cx| matches!(s.content.get(&s.key(&Tab::Diff)),Some(Content::Diff(v)) if !v.read(cx).notice.contains("No changes"))));
+    assert!(shell.read_with(&visual, |s,cx| matches!(s.content.get(&s.key(&Tab::InlineDiff)),Some(Content::InlineDiff(v)) if !v.read(cx).notice.contains("No changes"))));
     // Flush the fixture's request log and prove the enabled control reached the real merge gate.
     let receipt = fixture
         .client
@@ -68,9 +68,11 @@ fn committed_packet_uses_lane_base_and_enables_merge(cx: &mut TestAppContext) {
     );
     let mutation = &receipt["mutation"];
     assert_eq!(mutation["packetId"], "next-inline");
-    let head = shell.read_with(&visual, |s, cx| match s.content.get(&s.key(&Tab::Diff)) {
-        Some(Content::Diff(v)) => v.read(cx).document.head.clone(),
-        _ => panic!("Diff"),
+    let head = shell.read_with(&visual, |s, cx| {
+        match s.content.get(&s.key(&Tab::InlineDiff)) {
+            Some(Content::InlineDiff(v)) => v.read(cx).document.head.clone(),
+            _ => panic!("Diff"),
+        }
     });
     assert_eq!(
         mutation["expectedHeadSha"], head,
@@ -83,7 +85,7 @@ fn committed_packet_uses_lane_base_and_enables_merge(cx: &mut TestAppContext) {
     );
 }
 #[gpui::test]
-fn inline_diff_omits_redundant_title_but_standalone_keeps_it(cx: &mut TestAppContext) {
+fn inline_diff_omits_standalone_title_and_mode_controls(cx: &mut TestAppContext) {
     let fixture = Fixture::new();
     let (shell, mut visual) = open(
         fixture.client.clone(),
@@ -93,7 +95,7 @@ fn inline_diff_omits_redundant_title_but_standalone_keeps_it(cx: &mut TestAppCon
     );
     ready(&shell, &mut visual);
     visual.simulate_keystrokes("ctrl-k");
-    visual.simulate_keystrokes("d i f f enter");
+    visual.simulate_keystrokes("i n l i n e space d i f f enter");
     wait_inline(&shell, &mut visual);
     assert!(
         visual.debug_bounds("diff-title").is_none(),
@@ -103,6 +105,8 @@ fn inline_diff_omits_redundant_title_but_standalone_keeps_it(cx: &mut TestAppCon
         visual.debug_bounds("diff-refresh").is_some(),
         "Refresh remains reachable"
     );
+    assert!(visual.debug_bounds("diff-unified").is_none());
+    assert!(visual.debug_bounds("diff-split").is_none());
     let path = fs::canonicalize(
         fixture.client.sessions().unwrap()[0]
             .repo_path
@@ -122,5 +126,7 @@ fn inline_diff_omits_redundant_title_but_standalone_keeps_it(cx: &mut TestAppCon
             cx,
         )
     });
-    assert!(standalone.debug_bounds("diff-title").is_some());
+    draw(standalone);
+    assert!(standalone.debug_bounds("diff-unified").is_some());
+    assert!(standalone.debug_bounds("diff-split").is_some());
 }

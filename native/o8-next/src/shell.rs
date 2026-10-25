@@ -24,6 +24,7 @@ use registry::{
 
 register_surfaces! {
     tabs {
+        inline_diff: InlineDiff = "surfaces/inline_diff.rs";
         session: Session(String) = "surfaces/session.rs";
         brain: Brain = "surfaces/brain.rs";
         grid: Grid = "surfaces/grid.rs";

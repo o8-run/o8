@@ -1,53 +1,16 @@
 use super::*;
 use crate::shell::test_support::*;
-struct Fixture(crate::shell::test_support::Fixture);
-impl std::ops::DerefMut for Fixture {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
-impl std::ops::Deref for Fixture {
-    type Target = crate::shell::test_support::Fixture;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-impl Fixture {
-    fn new() -> Self {
-        Self::start_mode(false, "")
-    }
-    fn start_mode(projects: bool, option: &str) -> Self {
-        Self(crate::shell::test_support::Fixture::start_mode(
-            projects,
-            &format!("{option} --inline"),
-        ))
-    }
-    fn mode(brain: bool, settings: bool, committed: bool) -> Self {
-        let mut args = Vec::new();
-        if brain {
-            args.push("--brain");
-        }
-        if settings {
-            args.push("--settings");
-        }
-        if committed {
-            args.push("--inline-committed");
-        }
-        Self::start_mode(false, &args.join(" "))
-    }
-}
+#[path = "fixture.rs"]
+mod fixture;
+use fixture::Fixture;
 #[gpui::test]
 fn inline_diff_is_reachable_from_shell(cx: &mut TestAppContext) {
     let fixture = Fixture::new();
-    let (shell, mut visual) = open(
-        fixture.client.clone(),
-        fixture.root.join("inline.json"),
-        State::default(),
-        cx,
-    );
+    let file = fixture.root.join("inline.json");
+    let (shell, mut visual) = open(fixture.client.clone(), file.clone(), State::default(), cx);
     ready(&shell, &mut visual);
     visual.simulate_keystrokes("ctrl-k");
-    visual.simulate_keystrokes("d i f f enter");
+    visual.simulate_keystrokes("i n l i n e space d i f f enter");
     draw(&mut visual);
     assert_eq!(
         shell.read_with(&visual, |s, _| s.active().unwrap().label()),
@@ -55,13 +18,25 @@ fn inline_diff_is_reachable_from_shell(cx: &mut TestAppContext) {
         "inline diff must be reachable through the real shell palette"
     );
     assert!(visual.debug_bounds("inline-copy").is_some());
+    assert_eq!(
+        shell.read_with(&visual, |s, _| s.active()),
+        Some(Tab::InlineDiff)
+    );
+    assert!(visual.simulate_close());
+    let saved = State::load(&file).unwrap();
+    let (restored, mut restarted) = open(fixture.client.clone(), file, saved, &mut visual.cx);
+    ready(&restored, &mut restarted);
+    assert_eq!(
+        restored.read_with(&restarted, |s, _| s.active()),
+        Some(Tab::InlineDiff)
+    );
 }
 
 fn wait_inline(shell: &Entity<Shell>, cx: &mut VisualTestContext) {
     for _ in 0..30 {
         cx.run_until_parked();
         draw(cx);
-        if shell.read_with(cx,|s,cx|matches!(s.content.get(&s.key(&Tab::Diff)),Some(Content::Diff(view)) if view.read(cx).inline_idle())) {return;}
+        if shell.read_with(cx,|s,cx|matches!(s.content.get(&s.key(&Tab::InlineDiff)),Some(Content::InlineDiff(view)) if view.read(cx).inline_idle())) {return;}
     }
     panic!("inline diff action must settle and paint");
 }
@@ -85,13 +60,13 @@ fn inline_diff_hunks_copy_refresh_and_merge_refusal(cx: &mut TestAppContext) {
     let cx = &mut visual;
     let started = Instant::now();
     cx.simulate_keystrokes("ctrl-k");
-    cx.simulate_keystrokes("d i f f enter");
+    cx.simulate_keystrokes("i n l i n e space d i f f enter");
     wait_inline(&shell, cx);
     let open_ms = started.elapsed().as_secs_f64() * 1000.;
     let rows = |shell: &Entity<Shell>, cx: &VisualTestContext| {
         shell.read_with(cx, |s, cx| {
-            match s.content.get(&s.key(&Tab::Diff)).unwrap() {
-                Content::Diff(view) => view.read(cx).row_count(),
+            match s.content.get(&s.key(&Tab::InlineDiff)).unwrap() {
+                Content::InlineDiff(view) => view.read(cx).row_count(),
                 _ => 0,
             }
         })
@@ -192,7 +167,7 @@ fn inline_diff_hunks_copy_refresh_and_merge_refusal(cx: &mut TestAppContext) {
     cx.simulate_click(other.center(), gpui::Modifiers::default());
     draw(cx);
     shell.read_with(cx, |s, cx| {
-        if let Content::Diff(view) = s.content.get(&s.key(&Tab::Diff)).unwrap() {
+        if let Content::InlineDiff(view) = s.content.get(&s.key(&Tab::InlineDiff)).unwrap() {
             assert_eq!(
                 view.read(cx).document.files[view.read(cx).selected].path,
                 "other.txt"
@@ -213,7 +188,7 @@ fn inline_diff_hunks_copy_refresh_and_merge_refusal(cx: &mut TestAppContext) {
     cx.simulate_click(refresh.center(), gpui::Modifiers::default());
     wait_inline(&shell, cx);
     shell.read_with(cx, |s, cx| {
-        if let Content::Diff(view) = s.content.get(&s.key(&Tab::Diff)).unwrap() {
+        if let Content::InlineDiff(view) = s.content.get(&s.key(&Tab::InlineDiff)).unwrap() {
             assert!(view.read(cx).document.files.is_empty());
             assert_eq!(view.read(cx).notice, "No changes");
         }
@@ -228,7 +203,7 @@ fn inline_diff_hunks_copy_refresh_and_merge_refusal(cx: &mut TestAppContext) {
     cx.simulate_click(compare.center(), gpui::Modifiers::default());
     cx.run_until_parked();
     draw(cx);
-    shell.read_with(cx, |s, cx| if let Content::Diff(view) = s.content.get(&s.key(&Tab::Diff)).unwrap() {
+    shell.read_with(cx, |s, cx| if let Content::InlineDiff(view) = s.content.get(&s.key(&Tab::InlineDiff)).unwrap() {
         assert!(view.read(cx).ready, "the production route retains its missing-base dirty-tree fallback");
         assert_eq!(view.read(cx).document.files.len(), 2);
         assert!(matches!(&view.read(cx).target, crate::diff::Target::Worktree { base: Some(base), .. } if base == "fixture-missing"), "diff shortcuts must not consume text input");
@@ -251,7 +226,7 @@ fn inline_diff_hunks_copy_refresh_and_merge_refusal(cx: &mut TestAppContext) {
     cx.simulate_click(merge.center(), gpui::Modifiers::default());
     wait_inline(&shell, cx);
     shell.read_with(cx, |s, cx| {
-        if let Content::Diff(view) = s.content.get(&s.key(&Tab::Diff)).unwrap() {
+        if let Content::InlineDiff(view) = s.content.get(&s.key(&Tab::InlineDiff)).unwrap() {
             assert!(!view.read(cx).notice.is_empty());
             assert_ne!(view.read(cx).notice, "Merged");
             println!("INLINE_MERGE_REFUSAL {}", view.read(cx).notice);
@@ -276,7 +251,7 @@ fn inline_diff_hunks_copy_refresh_and_merge_refusal(cx: &mut TestAppContext) {
     cx.run_until_parked();
     draw(cx);
     shell.read_with(cx, |s, cx| {
-        if let Content::Diff(view) = s.content.get(&s.key(&Tab::Diff)).unwrap() {
+        if let Content::InlineDiff(view) = s.content.get(&s.key(&Tab::InlineDiff)).unwrap() {
             assert!(!view.read(cx).ready);
             assert!(view.read(cx).notice.contains("Could not reach"));
         }

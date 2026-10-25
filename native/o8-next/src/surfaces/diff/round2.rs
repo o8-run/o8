@@ -21,7 +21,7 @@ fn review_approval_if_offered(
     // Check the current offered action before clicking its rendered bounds.
     let offered = |cx: &VisualTestContext| {
         shell.read_with(cx, |s, cx| {
-            matches!(s.content.get(&s.key(&Tab::Diff)), Some(Content::Diff(view))
+            matches!(s.content.get(&s.key(&Tab::InlineDiff)), Some(Content::InlineDiff(view))
                 if view.read(cx).inline_review_offered())
         })
     };
@@ -54,8 +54,8 @@ fn review_approval_if_offered(
     assert!(
         !offered(cx),
         "read-only review must load current approval evidence: {}",
-        shell.read_with(cx, |s, cx| match s.content.get(&s.key(&Tab::Diff)) {
-            Some(Content::Diff(view)) => view.read(cx).notice.clone(),
+        shell.read_with(cx, |s, cx| match s.content.get(&s.key(&Tab::InlineDiff)) {
+            Some(Content::InlineDiff(view)) => view.read(cx).notice.clone(),
             _ => "Diff unavailable".into(),
         })
     );
@@ -74,12 +74,12 @@ fn packet_switch_resets_the_previous_packets_base(cx: &mut TestAppContext) {
     );
     ready(&shell, &mut visual);
     visual.simulate_keystrokes("ctrl-k");
-    visual.simulate_keystrokes("d i f f enter");
+    visual.simulate_keystrokes("i n l i n e space d i f f enter");
     wait_inline(&shell, &mut visual);
     open_packet(&shell, &mut visual, "next-inline");
     open_packet(&shell, &mut visual, "next-inline-b");
     shell.read_with(&visual, |s, cx| {
-        let Some(Content::Diff(v)) = s.content.get(&s.key(&Tab::Diff)) else { panic!("Diff") };
+        let Some(Content::InlineDiff(v)) = s.content.get(&s.key(&Tab::InlineDiff)) else { panic!("Diff") };
         assert!(matches!(&v.read(cx).target, crate::diff::Target::Worktree { base: Some(base), .. } if base == "fixture-base-b"),
             "packet B must use its own lane base after packet A auto-filled Base");
         assert!(v.read(cx).document.files.is_empty(), "B's base is its HEAD");
@@ -102,7 +102,7 @@ fn packet_switch_resets_the_previous_packets_base(cx: &mut TestAppContext) {
     wait_inline(&shell, &mut visual);
     open_packet(&shell, &mut visual, "next-inline-b");
     shell.read_with(&visual, |s, cx| {
-        let Some(Content::Diff(v)) = s.content.get(&s.key(&Tab::Diff)) else {
+        let Some(Content::InlineDiff(v)) = s.content.get(&s.key(&Tab::InlineDiff)) else {
             panic!("Diff")
         };
         assert_eq!(
@@ -113,7 +113,7 @@ fn packet_switch_resets_the_previous_packets_base(cx: &mut TestAppContext) {
     });
     open_packet(&shell, &mut visual, "next-inline");
     shell.read_with(&visual, |s, cx| {
-        let Some(Content::Diff(v)) = s.content.get(&s.key(&Tab::Diff)) else { panic!("Diff") };
+        let Some(Content::InlineDiff(v)) = s.content.get(&s.key(&Tab::InlineDiff)) else { panic!("Diff") };
         assert!(matches!(&v.read(cx).target, crate::diff::Target::Worktree { base: Some(base), .. } if base == "fixture-base"));
     });
 }
@@ -215,7 +215,7 @@ fn held_confirmation_mode(cx: &mut TestAppContext, change: Option<&str>, mode: &
     );
     ready(&shell, &mut visual);
     visual.simulate_keystrokes("ctrl-k");
-    visual.simulate_keystrokes("d i f f enter");
+    visual.simulate_keystrokes("i n l i n e space d i f f enter");
     wait_inline(&shell, &mut visual);
     open_packet(&shell, &mut visual, "next-inline");
     let merge = visual.debug_bounds("inline-merge").unwrap();
@@ -281,12 +281,14 @@ fn held_confirmation_mode(cx: &mut TestAppContext, change: Option<&str>, mode: &
         .get::<Value>("/api/orchestrator/inline-fixture-log", &[])
         .unwrap();
     if change.is_none() && after["confirmation"].is_null() {
-        let changed = shell.read_with(&visual, |s, cx| match s.content.get(&s.key(&Tab::Diff)) {
-            Some(Content::Diff(v)) => v
-                .read(cx)
-                .notice
-                .starts_with("Approval governance changed."),
-            _ => false,
+        let changed = shell.read_with(&visual, |s, cx| {
+            match s.content.get(&s.key(&Tab::InlineDiff)) {
+                Some(Content::InlineDiff(v)) => v
+                    .read(cx)
+                    .notice
+                    .starts_with("Approval governance changed."),
+                _ => false,
+            }
         });
         if changed {
             // An asynchronous annotation can invalidate the original receipt.
@@ -325,7 +327,7 @@ fn held_confirmation_mode(cx: &mut TestAppContext, change: Option<&str>, mode: &
             );
         }
         shell.read_with(&visual, |s, cx| {
-            let Some(Content::Diff(v)) = s.content.get(&s.key(&Tab::Diff)) else {
+            let Some(Content::InlineDiff(v)) = s.content.get(&s.key(&Tab::InlineDiff)) else {
                 panic!("Diff")
             };
             assert_ne!(v.read(cx).notice, "Merged");
@@ -392,9 +394,21 @@ fn held_confirmation_mode(cx: &mut TestAppContext, change: Option<&str>, mode: &
             assert_eq!(completed["held"]["currentBase"], before["held"]["head"]);
         }
     } else {
-        let notice = shell.read_with(&visual, |s, cx| match s.content.get(&s.key(&Tab::Diff)) {
-            Some(Content::Diff(v)) => v.read(cx).notice.clone(),
-            _ => panic!("Diff"),
+        assert_eq!(
+            after["requests"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|request| *request == "POST /api/panel/approvals")
+                .count(),
+            1,
+            "ordinary held Confirm must POST its original approval exactly once"
+        );
+        let notice = shell.read_with(&visual, |s, cx| {
+            match s.content.get(&s.key(&Tab::InlineDiff)) {
+                Some(Content::InlineDiff(v)) => v.read(cx).notice.clone(),
+                _ => panic!("Diff"),
+            }
         });
         assert_eq!(
             after["confirmation"], approval,
@@ -424,7 +438,7 @@ fn held_confirmation_mode(cx: &mut TestAppContext, change: Option<&str>, mode: &
             "real continuation must advance the owned base ref"
         );
         shell.read_with(&visual, |s, cx| {
-            let Some(Content::Diff(v)) = s.content.get(&s.key(&Tab::Diff)) else {
+            let Some(Content::InlineDiff(v)) = s.content.get(&s.key(&Tab::InlineDiff)) else {
                 panic!("Diff")
             };
             assert_eq!(

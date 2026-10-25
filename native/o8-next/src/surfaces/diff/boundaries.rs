@@ -23,13 +23,13 @@ fn inline_boundary_canary_never_reaches_cells_clipboard_or_logs(cx: &mut TestApp
     );
     ready(&shell, &mut visual);
     visual.simulate_keystrokes("ctrl-k");
-    visual.simulate_keystrokes("d i f f enter");
+    visual.simulate_keystrokes("i n l i n e space d i f f enter");
     for _ in 0..30 {
         visual.run_until_parked();
         draw(&mut visual);
     }
     shell.read_with(&visual, |s, cx| {
-        let Some(Content::Diff(v)) = s.content.get(&s.key(&Tab::Diff)) else {
+        let Some(Content::InlineDiff(v)) = s.content.get(&s.key(&Tab::InlineDiff)) else {
             panic!("Diff")
         };
         assert!(
@@ -72,7 +72,7 @@ fn inline_boundary_very_long_line_is_read_only_before_paint(cx: &mut TestAppCont
     );
     ready(&shell, &mut visual);
     visual.simulate_keystrokes("ctrl-k");
-    visual.simulate_keystrokes("d i f f enter");
+    visual.simulate_keystrokes("i n l i n e space d i f f enter");
     wait_inline(&shell, &mut visual);
     let paint_started = Instant::now();
     draw(&mut visual);
@@ -81,7 +81,7 @@ fn inline_boundary_very_long_line_is_read_only_before_paint(cx: &mut TestAppCont
         json!({"sourceBytes":300000,"loadedPaintMs":paint_started.elapsed().as_secs_f64()*1000.})
     );
     shell.read_with(&visual, |s, cx| {
-        let Some(Content::Diff(v)) = s.content.get(&s.key(&Tab::Diff)) else {
+        let Some(Content::InlineDiff(v)) = s.content.get(&s.key(&Tab::InlineDiff)) else {
             panic!("Diff")
         };
         assert!(

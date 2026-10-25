@@ -12,11 +12,7 @@ use gpui::{
 use serde_json::Value;
 use std::{cell::RefCell, collections::BTreeSet, rc::Rc};
 
-#[path = "diff_inline.rs"]
-mod inline;
-
 pub(crate) struct DiffSurface {
-    inline: Option<inline::State>,
     client: Client,
     pub(crate) target: Target,
     pub(crate) document: Rc<Document>,
@@ -39,15 +35,9 @@ impl DiffSurface {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let mut surface = Self::empty(client, target, window, cx);
-        surface.load(cx);
-        surface
-    }
-    fn empty(client: Client, target: Target, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let focus = cx.focus_handle();
         focus.focus(window);
-        Self {
-            inline: None,
+        let mut surface = Self {
             client,
             target,
             document: Rc::new(Document::default()),
@@ -62,7 +52,9 @@ impl DiffSurface {
             focus,
             scroll: UniformListScrollHandle::new(),
             painted: Rc::new(RefCell::new(BTreeSet::new())),
-        }
+        };
+        surface.load(cx);
+        surface
     }
     pub(crate) fn load(&mut self, cx: &mut Context<Self>) {
         if self.busy {
@@ -71,22 +63,13 @@ impl DiffSurface {
         self.generation += 1;
         let generation = self.generation;
         self.ready = false;
-        if self.inline.is_some() {
-            self.document = Rc::new(Document::default());
-            self.painted.borrow_mut().clear();
-        }
         self.pending = None;
         self.notice = "Reading diff…".into();
         let client = self.client.clone();
         let target = self.target.clone();
-        let inline = self.inline.is_some();
-        let task = cx.background_executor().spawn(async move {
-            if inline {
-                inline::read(&target, &client)
-            } else {
-                target.read(&client)
-            }
-        });
+        let task = cx
+            .background_executor()
+            .spawn(async move { target.read(&client) });
         cx.spawn(async move |this, cx| {
             let result = task.await;
             let _ = this.update(cx, |this, cx| {
@@ -101,7 +84,7 @@ impl DiffSurface {
                             "Diff truncated by server. Approval disabled; inspect a smaller worktree diff.".into()
                         } else if this.document.unsupported {
                             "Unsupported patch format. Review disabled; use a plain unified Git diff.".into()
-                        } else if this.inline.is_some() && this.document.files.is_empty() { "No changes".into() } else { this.state_label() };
+                        } else { this.state_label() };
                     }
                     Err(error) => this.notice = error,
                 }
@@ -111,9 +94,6 @@ impl DiffSurface {
         cx.notify();
     }
     fn state_label(&self) -> String {
-        if let Some(inline) = &self.inline {
-            return inline.label(&self.document);
-        }
         let verdict = self.state["orchestratorReview"]["verdict"]
             .as_str()
             .unwrap_or("unreviewed");
@@ -132,9 +112,7 @@ impl DiffSurface {
     }
     pub(crate) fn row_count(&self) -> usize {
         self.document.files.get(self.selected).map_or(0, |f| {
-            if let Some(inline) = &self.inline {
-                inline.rows(f).len()
-            } else if self.split {
+            if self.split {
                 f.split.len()
             } else {
                 f.lines.len()
@@ -284,21 +262,13 @@ fn cell(line: Option<&Line>, before: bool) -> gpui::Div {
 impl Render for DiffSurface {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let doc = self.document.clone();
-        let inline = self.inline.is_some();
-        let rows = self
-            .document
-            .files
-            .get(self.selected)
-            .and_then(|file| self.inline.as_ref().map(|state| state.rows(file)));
         let painted = self.painted.clone();
         let selected = self.selected;
         let split = self.split;
         let content_width = doc.files.get(selected).map_or(0., |f| {
-            (f.width_chars as f32 * 8. + 64. + if inline { 160. } else { 0. })
-                * if split { 2. } else { 1. }
+            (f.width_chars as f32 * 8. + 64.) * if split { 2. } else { 1. }
         });
-        let can_review = !inline
-            && self.ready
+        let can_review = self.ready
             && !self.busy
             && self.pending.is_none()
             && !doc.truncated
@@ -315,10 +285,7 @@ impl Render for DiffSurface {
             .font_weight(gpui::FontWeight::LIGHT)
             .text_size(px(13.5))
             .track_focus(&self.focus)
-            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                if !this.focus.is_focused(window) {
-                    return;
-                }
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
                 match event.keystroke.key.as_str() {
                     "home" => this.scroll_to(0, cx),
                     "end" => this.scroll_to(this.row_count().saturating_sub(1), cx),
@@ -331,13 +298,12 @@ impl Render for DiffSurface {
                         this.select_file(index, cx);
                     }
                     "u" => this.mode(false, cx),
-                    "s" if this.inline.is_none() => this.mode(true, cx),
+                    "s" => this.mode(true, cx),
                     "r" => this.load(cx),
                     _ => return,
                 }
                 cx.stop_propagation();
             }))
-            .when(inline, |view| view.child(self.inline_header(cx)))
             .child(
                 div()
                     .h(px(40.))
@@ -346,28 +312,15 @@ impl Render for DiffSurface {
                     .items_center()
                     .px(px(16.))
                     .gap(px(8.))
-                    .when(!inline, |bar| {
-                        bar.child(
-                            div()
-                                .debug_selector(|| "diff-title".into())
-                                .child("o8 next · Diff"),
-                        )
-                    })
-                    .when(!inline, |bar| {
-                        bar.child(
-                            button("diff-unified", "Unified", !split)
-                                .on_click(cx.listener(|s, _, _, cx| s.mode(false, cx))),
-                        )
-                    })
-                    .when(!inline, |bar| {
-                        bar.child(button("diff-split", "Split", split).on_click(cx.listener(
-                            |s, _, _, cx| {
-                                if s.inline.is_none() {
-                                    s.mode(true, cx);
-                                }
-                            },
-                        )))
-                    })
+                    .child("o8 next · Diff")
+                    .child(
+                        button("diff-unified", "Unified", !split)
+                            .on_click(cx.listener(|s, _, _, cx| s.mode(false, cx))),
+                    )
+                    .child(
+                        button("diff-split", "Split", split)
+                            .on_click(cx.listener(|s, _, _, cx| s.mode(true, cx))),
+                    )
                     .child(
                         button("diff-refresh", "Refresh", false)
                             .on_click(cx.listener(|s, _, _, cx| s.load(cx))),
@@ -460,72 +413,42 @@ impl Render for DiffSurface {
                     )
                     .child(
                         div().flex_1().min_w_0().h_full().child(
-                            uniform_list(
-                                "diff-rows",
-                                self.row_count(),
-                                cx.processor(
-                                    move |surface, range: std::ops::Range<usize>, _, cx| {
-                                        range
-                                            .map(|i| {
-                                                let f = &doc.files[selected];
-                                                let (left, right) = if split {
-                                                    f.split[i]
-                                                } else {
-                                                    (
-                                                        Some(
-                                                            rows.as_ref().map_or(i, |rows| rows[i]),
-                                                        ),
-                                                        None,
-                                                    )
-                                                };
-                                                let painted = painted.clone();
-                                                div()
-                                                    .h(px(20.))
-                                                    .min_w(px(content_width))
-                                                    .flex()
-                                                    .font_family(theme().font_mono)
-                                                    .text_size(px(12.))
-                                                    .line_height(px(20.))
-                                                    .whitespace_nowrap()
-                                                    .when(
-                                                        inline
-                                                            && left.is_some_and(|index| {
-                                                                f.lines[index].kind == Kind::Hunk
-                                                            }),
-                                                        |row| {
-                                                            row.child(
-                                                                surface
-                                                                    .inline_hunk(left.unwrap(), cx),
-                                                            )
-                                                        },
-                                                    )
-                                                    .child(cell(
-                                                        left.map(|i| &f.lines[i]),
-                                                        split
-                                                            || left.is_some_and(|i| {
-                                                                f.lines[i].new.is_none()
-                                                            }),
-                                                    ))
-                                                    .when(split, |row| {
-                                                        row.child(cell(
-                                                            right.map(|i| &f.lines[i]),
-                                                            false,
-                                                        ))
-                                                    })
-                                                    .child(
-                                                        canvas(
-                                                            |_, _, _| (),
-                                                            move |_, _, _, _| {
-                                                                painted.borrow_mut().insert(i);
-                                                            },
-                                                        )
-                                                        .size(px(1.)),
-                                                    )
+                            uniform_list("diff-rows", self.row_count(), move |range, _, _| {
+                                range
+                                    .map(|i| {
+                                        let f = &doc.files[selected];
+                                        let (left, right) =
+                                            if split { f.split[i] } else { (Some(i), None) };
+                                        let painted = painted.clone();
+                                        div()
+                                            .h(px(20.))
+                                            .min_w(px(content_width))
+                                            .flex()
+                                            .font_family(theme().font_mono)
+                                            .text_size(px(12.))
+                                            .line_height(px(20.))
+                                            .whitespace_nowrap()
+                                            .child(cell(
+                                                left.map(|i| &f.lines[i]),
+                                                split
+                                                    || left
+                                                        .is_some_and(|i| f.lines[i].new.is_none()),
+                                            ))
+                                            .when(split, |row| {
+                                                row.child(cell(right.map(|i| &f.lines[i]), false))
                                             })
-                                            .collect::<Vec<_>>()
-                                    },
-                                ),
-                            )
+                                            .child(
+                                                canvas(
+                                                    |_, _, _| (),
+                                                    move |_, _, _, _| {
+                                                        painted.borrow_mut().insert(i);
+                                                    },
+                                                )
+                                                .size(px(1.)),
+                                            )
+                                    })
+                                    .collect::<Vec<_>>()
+                            })
                             .debug_selector(|| "diff-viewport".into())
                             .with_horizontal_sizing_behavior(
                                 ListHorizontalSizingBehavior::Unconstrained,

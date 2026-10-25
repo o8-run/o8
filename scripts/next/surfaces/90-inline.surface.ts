@@ -1,12 +1,13 @@
 import { writeFileSync } from 'node:fs';
+import { NextRequest } from 'next/server';
 import type { SurfaceContext, SurfaceRoutes } from '../surface-routes';
-export default async function register({ repo }: SurfaceContext): Promise<SurfaceRoutes> {
+export default async function register({ repo, fixtureToken }: SurfaceContext): Promise<SurfaceRoutes> {
   if (!process.argv.includes('--inline') || process.argv.includes('--settings')) return {};
   const policyHeld = process.argv.includes('--inline-policy-held');
   const held = process.argv.includes('--inline-held') || policyHeld
-    ? await (await import('../inline-held-fixture')).seedInlineHeldFixture(repo, policyHeld) : null;
-  if (!held) await (await import('../inline-fixture')).seedInlineFixture(repo, process.argv.includes('--inline-committed'));
-  if (process.argv.includes('--inline-switch')) await (await import('../inline-fixture')).seedInlineSwitchFixture(repo);
+    ? await (await import('./inline-held-fixture')).seedInlineHeldFixture(repo, policyHeld) : null;
+  if (!held) await (await import('./inline-fixture')).seedInlineFixture(repo, process.argv.includes('--inline-committed'));
+  if (process.argv.includes('--inline-switch')) await (await import('./inline-fixture')).seedInlineSwitchFixture(repo);
   const merge = await import('../../../src/app/api/orchestrator/merge/route');
   const lane = await import('../../../src/app/api/lanes/[id]/route');
   const diff = await import('../../../src/app/api/lanes/[id]/diff/route');
@@ -14,6 +15,28 @@ export default async function register({ repo }: SurfaceContext): Promise<Surfac
   const review = await import('../../../src/app/api/orchestrator/review-state/route');
   const approvals = await import('../../../src/app/api/panel/approvals/route');
   const preview = await import('../../../src/app/api/orchestrator/merge-preview/route');
+  const state = await import('../../../src/app/api/orchestrator/state/route');
+  let readiness: Promise<void> | undefined;
+  let readinessAttempts = 0;
+  const ready = () => readiness ??= (async () => {
+    readinessAttempts++;
+    if (process.argv.includes('--inline-ready-fail-first') && readinessAttempts === 1) {
+      throw new Error('Fixture readiness temporarily unavailable');
+    }
+    // Exercise production read paths before the five-second native transport is
+    // used. Coalesce retries so a slow cold import cannot multiply this work.
+    for (const [route, path] of [
+      [state.GET, '/api/orchestrator/state'],
+      [approvals.GET, '/api/panel/approvals?packetId=next-inline&status=all'],
+      [review.GET, '/api/orchestrator/review-state?packetId=next-inline'],
+      ...(held ? [[preview.GET, '/api/orchestrator/merge-preview?packetId=next-inline']] as const : []),
+    ] as const) {
+      const response = await route(new NextRequest('http://localhost' + path, {
+        headers: { host: 'localhost', authorization: `Bearer ${fixtureToken}` },
+      }));
+      if (!response.ok) throw new Error(`Inline readiness ${path}: HTTP ${response.status}`);
+    }
+  })().catch(error => { readiness = undefined; throw error; });
   let mutation: Record<string, unknown> | null = null;
   let confirmation: string | null = null;
   let confirmationLost = false;
@@ -26,12 +49,15 @@ export default async function register({ repo }: SurfaceContext): Promise<Surfac
   return {
     priority: 90,
     routes: {
+      'GET /api/orchestrator/inline-fixture-ready': async () => {
+        await ready(); return Response.json({ ready: true });
+      },
       'POST /api/orchestrator/merge': merge.POST, 'GET /api/worktrees/diff': worktree.GET,
       'GET /api/orchestrator/review-state': review.GET,
       'GET /api/panel/approvals': approvals.GET, 'POST /api/panel/approvals': approvals.POST,
       'GET /api/orchestrator/merge-preview': preview.GET,
       ...(held ? { 'POST /api/orchestrator/inline-fixture-control': control } : {}),
-      'GET /api/orchestrator/inline-fixture-log': async () => Response.json({ mutation, confirmation, requests, held: held?.snapshot() }),
+      'GET /api/orchestrator/inline-fixture-log': async () => Response.json({ mutation, confirmation, requests, readinessAttempts, held: held?.snapshot() }),
       ...Object.fromEntries(['next-review-approve', 'next-review-reject'].map(id => [
         `GET /api/lanes/${id}/diff`, request => diff.GET(request, { params: Promise.resolve({ id }) }),
       ])),
