@@ -46,3 +46,16 @@ Provider credential revocation retains its existing behavior. Provider-pane
 switches keep environment drafts in memory. Failures preserve drafts for retry;
 a connection change freezes the old draft until an explicit reload. A late
 response cannot clear that warning or display an obsolete inventory as current.
+
+Saved secret values are masked in Check connection diagnostics, turn output and
+errors, lifecycle errors and stderr. Matching normalizes JSON string escapes,
+percent escapes, Base64 and Base64url, including mixed and nested text encodings.
+Replacements apply to the original text spans. Ambiguous decoding or exceeded
+normalization bounds replace the complete value.
+
+With saved secrets present, text and thinking chunks are retained until a logical
+output boundary; stderr is retained until EOF. A partial encoded tail at an
+intermediate boundary is masked as a complete value. Each buffered value is capped
+at 256 Ki UTF-16 code units; excess data is discarded after one redaction marker.
+Normalization also bounds decoding depth, candidate views and matching work.
+Connections without saved secrets retain their existing streaming behavior.
