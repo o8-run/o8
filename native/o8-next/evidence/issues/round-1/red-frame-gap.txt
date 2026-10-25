@@ -1,0 +1,5 @@
+test shell::issue_tests::review_tests::round1_repository_switch_survives_a_frame_between_mouse_events ...
+thread 'shell::issue_tests::review_tests::round1_repository_switch_survives_a_frame_between_mouse_events' panicked at src/issue_tests.rs:168:5:
+real control did not reach CPU paint: issue-view-17
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED

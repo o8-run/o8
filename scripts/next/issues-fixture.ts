@@ -2,9 +2,10 @@
 import { generateKeyPairSync } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { once } from 'node:events';
-import { writeFileSync } from 'node:fs';
+import { symlinkSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { join } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import { NextRequest } from 'next/server';
 
 export async function issueFixture(dataDir: string, root: string, repoPath: string) {
@@ -15,6 +16,11 @@ export async function issueFixture(dataDir: string, root: string, repoPath: stri
     localPath: index === 0 ? repoPath : join(root, index === 1 ? 'second-repo' : 'missing-repo'),
     remoteUrl: `https://github.com/${slug}.git`, defaultBranch: 'main', isGitRepo: true,
     addedAt: new Date().toISOString(), lastOpenedAt: null, setup }));
+  if (process.argv.includes('--issues-symlink')) {
+    const alias = join(root, 'issue-repo-alias');
+    symlinkSync(repoPath, alias, 'dir');
+    repos[0].localPath = alias;
+  }
   execFileSync('git', ['-C', repoPath, 'remote', 'add', 'origin', repos[0].remoteUrl]);
   writeFileSync(join(dataDir, 'repos.json'), JSON.stringify({ version: 1, repos }));
   let mode = '';
@@ -35,6 +41,7 @@ export async function issueFixture(dataDir: string, root: string, repoPath: stri
   const records = new Map(slugs.map(slug => [slug, slug.endsWith('beta')
     ? [issue(slug, 17, 'Separate installation')]
     : [issue(slug, 7, 'Repair fixture'), issue(slug, 8, 'Closed fixture', 'closed')]]));
+  const creations = new Map<string, number>();
   const upstream = createServer(async (req, res) => {
     const url = new URL(req.url ?? '/', 'http://fixture.invalid');
     const send = (status: number, body: unknown) => res.writeHead(status, { 'Content-Type': 'application/json' }).end(JSON.stringify(body));
@@ -53,16 +60,21 @@ export async function issueFixture(dataDir: string, root: string, repoPath: stri
       send(403, { message: 'Wrong installation credential' }); return;
     }
     if ((mode === 'detail-error' && number) || (mode === 'mutation-error' && req.method === 'POST')) {
-      send(503, { message: 'Fixture request refused' }); return;
+      send(mode === 'mutation-error' ? 422 : 503, { message: 'Fixture request refused' }); return;
     }
     if (resource === 'labels') { send(200, [{ name: 'bug' }]); return; }
     const rows = records.get(slug)!;
     if (req.method === 'POST') {
       let body = ''; for await (const chunk of req) body += String(chunk);
       const input = JSON.parse(body);
-      const created = { ...issue(slug, 9, input.title), body: input.body,
+      const count = creations.get(slug) ?? 0;
+      creations.set(slug, count + 1);
+      const created = { ...issue(slug, 9 + count, input.title), body: input.body,
         labels: input.labels.map((name: string) => ({ name, color: 'ff0000' })) };
-      rows.push(created); send(201, created); return;
+      rows.push(created);
+      if (input.title === 'Commit then disconnect') { res.destroy(); return; }
+      if (process.argv.includes('--issues-delay-create') && count === 0) await delay(6500);
+      send(201, created); return;
     }
     if (number) { const found = rows.find(row => row.number === Number(number)); send(found ? 200 : 404, found ?? {}); return; }
     send(200, rows.filter(row => row.state === url.searchParams.get('state')));
@@ -90,7 +102,7 @@ export async function issueFixture(dataDir: string, root: string, repoPath: stri
   const registry = await import('../../src/app/api/panel/repos/route');
   const gets: Record<string, (request: NextRequest) => Promise<Response>> = {
     '/api/panel/repos': registry.GET, '/api/panel/issues': list.GET,
-    ...Object.fromEntries([7, 8, 9, 17].map(number => [`/api/panel/issues/${number}`,
+    ...Object.fromEntries([7, 8, 9, 10, 17].map(number => [`/api/panel/issues/${number}`,
       (request: NextRequest) => detail.GET(request, { params: Promise.resolve({ number: String(number) }) })])),
   };
   const posts: Record<string, (request: NextRequest) => Promise<Response>> = {

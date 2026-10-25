@@ -1,5 +1,10 @@
 # Native issues evidence
 
+Review correction round 1 adds per-repository drafts, idempotent creation retries,
+canonical-path refresh and a frame-gap repository-switch regression. See the
+[correction evidence](round-1/verification.md) for current verification counts and
+red/green receipts; the original port evidence and measurements follow below.
+
 The opt-in app shell opens an Issues tab using the shared native theme, editors,
 Markdown renderer, session sidebar and durable composer. It calls the existing
 panel repository/issue/detail/enhance/create routes with the selected server's

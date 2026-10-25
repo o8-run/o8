@@ -29,6 +29,8 @@ afterAll(async () => {
   }
 });
 
+
+
 it('uses production issue routes, operator admission and installation boundaries, and persists creation', async () => {
   const list = '/api/panel/issues?repo=fixture/alpha';
   expect((await api(list, undefined, false)).status).toBe(401);
@@ -50,4 +52,31 @@ it('uses production issue routes, operator admission and installation boundaries
   const created = await api('/api/panel/issues/create', { repo: 'fixture/alpha', title: 'Created from native', description: 'Retained body', labels: ['bug'] });
   expect(await created.json()).toMatchObject({ ok: true, number: 9, repo: 'fixture/alpha' });
   expect(await (await api('/api/panel/issues/9?repo=fixture/alpha')).json()).toMatchObject({ issue: { title: 'Created from native', body: 'Retained body', labels: [{ name: 'bug' }] } });
+});
+
+it('deduplicates concurrent keyed creation and replays its persisted receipt', async () => {
+  const body = { repo: 'fixture/alpha', title: 'Keyed creation', description: 'One logical request', clientMutationId: 'round1-create-key' };
+  const replies = await Promise.all([api('/api/panel/issues/create', body), api('/api/panel/issues/create', body)]);
+  expect(replies.map(reply => reply.status)).toEqual([200, 200]);
+  const [first, second] = await Promise.all(replies.map(reply => reply.json()));
+  expect(second.number).toBe(first.number);
+  const replay = await api('/api/panel/issues/create', body);
+  expect(await replay.json()).toMatchObject({ ok: true, number: first.number });
+  const changed = await api('/api/panel/issues/create', { ...body, title: 'Changed request' });
+  expect(changed.status).toBe(409);
+  expect((await api('/api/panel/issues/create', body, false)).status).toBe(401);
+  const otherInstallation = await api('/api/panel/issues/create', { ...body, repo: 'fixture/beta' });
+  expect(await otherInstallation.json()).toMatchObject({ ok: true, repo: 'fixture/beta', number: 9 });
+  const issues = await api('/api/panel/issues?repo=fixture/alpha&fresh=1');
+  expect((await issues.json()).issues.filter((issue: { title: string }) => issue.title === body.title)).toHaveLength(1);
+});
+
+it('does not repeat a keyed creation when GitHub commits but its reply is lost', async () => {
+  const body = { repo: 'fixture/alpha', title: 'Commit then disconnect', clientMutationId: 'round1-unknown-key' };
+  const first = await api('/api/panel/issues/create', body);
+  const retry = await api('/api/panel/issues/create', body);
+  const issues = await api('/api/panel/issues?repo=fixture/alpha&fresh=1');
+  expect((await issues.json()).issues.filter((issue: { title: string }) => issue.title === body.title)).toHaveLength(1);
+  expect(first.status).toBe(409); expect(retry.status).toBe(409);
+  expect(await retry.json()).toMatchObject({ ok: false, creationOutcomeUnknown: true });
 });

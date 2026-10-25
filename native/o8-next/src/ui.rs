@@ -433,6 +433,7 @@ impl Render for Surface {
                     .child(
                         div()
                             .id("refresh")
+                            .debug_selector(|| "session-refresh".into())
                             .px(px(8.))
                             .py(px(4.))
                             .rounded(px(5.))

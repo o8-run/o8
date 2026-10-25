@@ -5,6 +5,9 @@ import { upsertGitHubIssue } from './store';
 import { recordOwnPrRemark } from './pr-watch';
 import { beginPrRemarkWrite } from './pr-watch-writes';
 
+/** A definitive issue POST refusal; unlike a lost response, no issue was admitted. */
+export class GitHubIssueCreationRefusedError extends Error {}
+
 function buildGitHubError(response: Response, bodyText: string) {
   const reset = response.headers.get('x-ratelimit-reset');
   const retryAfter = response.headers.get('retry-after');
@@ -65,6 +68,9 @@ export async function createGitHubIssue(
       labels: input.labels ?? [],
     }),
   });
+  if (response.status >= 400 && response.status < 500) {
+    throw new GitHubIssueCreationRefusedError(buildGitHubError(response, await response.text().catch(() => '')).message);
+  }
 
   const issue = await parseGitHubJson<{
     id: number;

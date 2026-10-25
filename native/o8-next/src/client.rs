@@ -5,6 +5,11 @@ use std::net::{IpAddr, SocketAddr};
 use std::{io::Read, time::Duration};
 use url::{Host, Url};
 
+pub(crate) fn same_workspace(a: &str, b: &str) -> bool {
+    a == b
+        || matches!((std::fs::canonicalize(a), std::fs::canonicalize(b)), (Ok(a), Ok(b)) if a == b)
+}
+
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Session {
@@ -110,6 +115,7 @@ impl Client {
                         value["error"].as_str().unwrap_or("Issue request refused")
                     ),
                     retry_after,
+                    creation_refused: value["creationRefused"] == true,
                 });
             }
             Err(_) => {
@@ -345,7 +351,12 @@ impl Client {
             });
         }
         if let Some(workspace) = &self.workspace {
-            sessions.retain(|session| session.repo_path.as_ref() == Some(workspace));
+            sessions.retain(|session| {
+                session
+                    .repo_path
+                    .as_deref()
+                    .is_some_and(|path| same_workspace(path, workspace))
+            });
         }
         Ok(sessions)
     }

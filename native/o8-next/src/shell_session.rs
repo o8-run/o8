@@ -9,7 +9,7 @@ impl Surface {
     }
     #[cfg(test)]
     pub(crate) fn shell_issue_state(&self, cx: &App) -> Value {
-        json!({"notice":self.notice,"ready":self.queue_ready,"canSteer":self.queue["canSteer"],"saving":self.saving,"draft":self.composer.read(cx).text})
+        json!({"notice":self.notice,"ready":self.queue_ready,"canSteer":self.queue["canSteer"],"saving":self.saving,"draft":self.composer.read(cx).text,"selected":self.selected})
     }
     pub(crate) fn shell_link_issue(
         &mut self,

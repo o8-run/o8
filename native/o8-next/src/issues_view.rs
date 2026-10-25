@@ -468,7 +468,13 @@ impl Render for Issues {
                         } else {
                             theme().surface_raised
                         })
-                        .on_click(cx.listener(move |s, _, _, cx| s.select_repo(index, cx)))
+                        .on_mouse_down(
+                            gpui::MouseButton::Left,
+                            cx.listener(move |s, _, window, cx| {
+                                window.prevent_default();
+                                s.select_repo(index, cx);
+                            }),
+                        )
                     }))
                     .child(self.control("issue-new", "New issue").on_click(cx.listener(
                         |s, _, _, cx| {

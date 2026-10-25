@@ -1,6 +1,6 @@
 //! Original Apache-2.0 issue surface, using the desktop's server contracts.
 use crate::{
-    client::{Client, Session},
+    client::{Client, Session, same_workspace},
     composer::{Composer, Submit},
     ui::Surface,
 };
@@ -9,7 +9,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{
     cell::{Cell, RefCell},
-    collections::BTreeSet,
+    collections::{BTreeSet, HashMap},
     rc::Rc,
     time::{Duration, Instant},
 };
@@ -113,12 +113,24 @@ enum Action {
 pub struct IssueError {
     pub message: String,
     pub retry_after: u64,
+    pub creation_refused: bool,
+}
+struct Draft {
+    title: Entity<Composer>,
+    body: Entity<Composer>,
+    label: Entity<Composer>,
+    labels: Vec<String>,
+    preview: bool,
+    enhanced: bool,
+    created: Option<u64>,
+    pending_creation: Option<Value>,
 }
 impl From<String> for IssueError {
     fn from(message: String) -> Self {
         Self {
             message,
             retry_after: 0,
+            creation_refused: false,
         }
     }
 }
@@ -138,6 +150,8 @@ pub struct Issues {
     title: Entity<Composer>,
     body: Entity<Composer>,
     label: Entity<Composer>,
+    drafts: HashMap<String, Draft>,
+    pending_creation: Option<Value>,
     search: Entity<Composer>,
     labels: Vec<String>,
     preview: bool,
@@ -191,6 +205,8 @@ impl Issues {
             title,
             body,
             label: label.clone(),
+            drafts: HashMap::new(),
+            pending_creation: None,
             search: search.clone(),
             labels: vec![],
             preview: false,
@@ -207,8 +223,7 @@ impl Issues {
             painted: Rc::new(Cell::new(u64::MAX)),
             painted_controls: Rc::new(RefCell::new(BTreeSet::new())),
         };
-        this.subscriptions
-            .push(cx.subscribe(&label, |s, _, _: &Submit, cx| s.add_label(cx)));
+        this.watch_label(cx);
         this.subscriptions
             .push(cx.observe(&search, |s, _, cx| s.changed(cx)));
         this.focus.focus(window);
@@ -218,6 +233,14 @@ impl Issues {
     fn changed(&mut self, cx: &mut Context<Self>) {
         self.revision += 1;
         cx.notify();
+    }
+    fn watch_label(&mut self, cx: &mut Context<Self>) {
+        self.subscriptions
+            .push(cx.subscribe(&self.label, |s, editor, _: &Submit, cx| {
+                if s.label.entity_id() == editor.entity_id() {
+                    s.add_label(cx);
+                }
+            }));
     }
     pub fn focus(&self, window: &mut Window, cx: &App) {
         self.focus.focus(window);
@@ -263,7 +286,7 @@ impl Issues {
                             .and_then(|path| {
                                 this.repos
                                     .iter()
-                                    .position(|r| same_path(&r.local_path, path))
+                                    .position(|r| same_workspace(&r.local_path, path))
                             })
                             .unwrap_or(0);
                         this.request(Action::List, cx);
@@ -285,23 +308,55 @@ impl Issues {
         if index >= self.repos.len() || index == self.selected {
             return;
         }
+        if let Some(repo) = self.slug() {
+            self.drafts.insert(
+                repo,
+                Draft {
+                    title: self.title.clone(),
+                    body: self.body.clone(),
+                    label: self.label.clone(),
+                    labels: self.labels.clone(),
+                    preview: self.preview,
+                    enhanced: self.enhanced,
+                    created: self.created,
+                    pending_creation: self.pending_creation.clone(),
+                },
+            );
+        }
         self.generation += 1;
         self.busy = false;
         self.selected = index;
+        let saved = self.drafts.remove(&self.slug().unwrap());
+        let fresh = saved.is_none();
+        let draft = saved.unwrap_or_else(|| Draft {
+            title: cx.new(Composer::new),
+            body: cx.new(Composer::new),
+            label: cx.new(Composer::new),
+            labels: vec![],
+            preview: false,
+            enhanced: false,
+            created: None,
+            pending_creation: None,
+        });
+        self.title = draft.title;
+        self.body = draft.body;
+        self.label = draft.label;
+        self.labels = draft.labels;
+        self.preview = draft.preview;
+        self.enhanced = draft.enhanced;
+        self.created = draft.created;
+        self.pending_creation = draft.pending_creation;
+        if fresh {
+            self.watch_label(cx);
+        }
         self.issues.clear();
         self.detail = None;
         self.detail_number = None;
         self.mode = Mode::List;
         self.worker = None;
         self.linked = None;
-        self.created = None;
         self.error.clear();
         self.retry_at = None;
-        self.title.update(cx, |i, cx| i.clear(cx));
-        self.body.update(cx, |i, cx| i.clear(cx));
-        self.labels.clear();
-        self.enhanced = false;
-        self.preview = false;
         self.request(Action::List, cx);
     }
     fn request(&mut self, action: Action, cx: &mut Context<Self>) {
@@ -322,6 +377,33 @@ impl Issues {
             self.changed(cx);
             return;
         }
+        let mut creation = json!({"repo":repo,"title":title});
+        if !body.is_empty() {
+            creation["description"] = json!(body);
+        }
+        if !self.labels.is_empty() {
+            creation["labels"] = json!(self.labels);
+        }
+        if matches!(action, Action::Create) {
+            if let Some(pending) = &self.pending_creation {
+                let mut original = pending.clone();
+                original.as_object_mut().unwrap().remove("clientMutationId");
+                if original != creation {
+                    self.error = "Creation is unconfirmed. Restore the original draft to retry its saved request, or inspect GitHub before creating another issue.".into();
+                    self.changed(cx);
+                    return;
+                }
+                creation = pending.clone();
+            } else {
+                let nonce = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos();
+                creation["clientMutationId"] =
+                    json!(format!("next-issue-{nonce:x}-{:x}", std::process::id()));
+                self.pending_creation = Some(creation.clone());
+            }
+        }
         if let Action::Detail(number) = action {
             self.mode = Mode::Detail;
             self.detail_number = Some(number);
@@ -335,7 +417,6 @@ impl Issues {
         };
         self.error.clear();
         self.retry_at = None;
-        let labels = self.labels.clone();
         let client = self.client.clone();
         let generation = self.generation;
         let task = cx.background_executor().spawn(async move {
@@ -356,14 +437,7 @@ impl Issues {
                     Some(json!({"repo":repo,"title":title,"description":body})),
                 ),
                 Action::Create => {
-                    let mut input = json!({"repo":repo,"title":title});
-                    if !body.is_empty() {
-                        input["description"] = json!(body);
-                    }
-                    if !labels.is_empty() {
-                        input["labels"] = json!(labels);
-                    }
-                    client.issue_request("POST", "/api/panel/issues/create", &[], Some(input))
+                    client.issue_request("POST", "/api/panel/issues/create", &[], Some(creation))
                 }
             }
         });
@@ -376,6 +450,9 @@ impl Issues {
                 this.busy = false;
                 let result = result.and_then(|value| this.accept(action, value, cx));
                 if let Err(error) = result {
+                    if matches!(action, Action::Create) && error.creation_refused {
+                        this.pending_creation = None;
+                    }
                     this.fail(error);
                 }
                 this.changed(cx);
@@ -442,6 +519,7 @@ impl Issues {
                         .filter(|n| *n > 0)
                         .ok_or_else(invalid)?,
                 );
+                self.pending_creation = None;
             }
         }
         Ok(())
@@ -481,7 +559,7 @@ impl Issues {
             .filter(|s| {
                 s.repo_path
                     .as_ref()
-                    .is_some_and(|path| same_path(path, &repo.local_path))
+                    .is_some_and(|path| same_workspace(path, &repo.local_path))
             })
             .cloned()
             .collect();
@@ -530,12 +608,6 @@ impl Issues {
         }
         self.changed(cx);
     }
-}
-fn same_path(a: &str, b: &str) -> bool {
-    if a == b {
-        return true;
-    }
-    matches!((std::fs::canonicalize(a), std::fs::canonicalize(b)), (Ok(a), Ok(b)) if a == b)
 }
 #[path = "issues_view.rs"]
 mod view;

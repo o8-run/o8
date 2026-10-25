@@ -19,6 +19,9 @@ impl Fixture {
         Self::start(false)
     }
     fn start(worker: bool) -> Self {
+        Self::with_flags(worker, &[])
+    }
+    fn with_flags(worker: bool, flags: &[&str]) -> Self {
         let root = std::env::temp_dir().join(format!(
             "o8-issues-{}-{}",
             std::process::id(),
@@ -45,6 +48,7 @@ impl Fixture {
         if worker {
             command.arg("--worker");
         }
+        command.args(flags);
         let mut server = command
             .env("O8_NEXT_API_TOKEN", "fixture-next-issues-operator")
             .stdin(Stdio::piped())
@@ -71,6 +75,9 @@ impl Fixture {
         writeln!(self.server.stdin.as_mut().unwrap(), "{command}").unwrap();
     }
 }
+
+#[path = "issue_review_tests.rs"]
+mod review_tests;
 
 #[gpui::test]
 fn issues_worker_receives_linked_context_through_stream(cx: &mut TestAppContext) {
@@ -351,7 +358,7 @@ fn issues_errors_retry_stale_and_account_switch(cx: &mut TestAppContext) {
     wait(cx, "issue-ready");
     click(cx, "issue-back");
     click(cx, "issue-repo-1");
-    wait(cx, "issue-ready");
+    wait(cx, "issue-view-17");
     let snapshot = shell.read_with(cx, |s, cx| {
         match s.content.get(&s.key(&s.active().unwrap())).unwrap() {
             Content::Issues(i) => i.read(cx).snapshot(),
@@ -376,6 +383,7 @@ fn issues_errors_retry_stale_and_account_switch(cx: &mut TestAppContext) {
     click(cx, "issue-create");
     wait(cx, "issue-error");
     wait(cx, "issue-title"); // Draft stays editable after a server refusal.
+    input(cx, "issue-title", "Corrected after confirmed refusal");
     fixture.command("recover");
     click(cx, "issue-create");
     wait(cx, "issue-created-9");
@@ -383,7 +391,10 @@ fn issues_errors_retry_stale_and_account_switch(cx: &mut TestAppContext) {
         .client
         .get("/api/panel/issues/9", &[("repo", "fixture/beta")])
         .unwrap();
-    assert_eq!(detail["issue"]["title"], "Refused");
+    assert_eq!(
+        detail["issue"]["title"],
+        "Corrected after confirmed refusal"
+    );
 }
 
 #[gpui::test]
