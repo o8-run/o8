@@ -33,6 +33,9 @@ impl Fixture {
         fs::create_dir(&root).unwrap();
         let root = fs::canonicalize(root).unwrap();
         let mut command = Process::new("node");
+        if flags.contains(&"--issues-advancing-clock") {
+            command.args(["--import", "./scripts/next/surfaces/issues/advancing-clock.mjs"]);
+        }
         command
             .current_dir(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.."))
             .args([
@@ -399,7 +402,7 @@ fn issues_errors_retry_stale_and_account_switch(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn issues_interaction_frames_and_missing_checkout_refusal(cx: &mut TestAppContext) {
-    let fixture = Fixture::new();
+    let fixture = Fixture::with_flags(false, &["--issues-advancing-clock"]);
     let (_, mut visual, open_ms) = open(&fixture, cx);
     let cx = &mut visual;
     let mut frames = vec![];

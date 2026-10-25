@@ -11,6 +11,7 @@ import { contractHash, readTaskDraft, readTaskDraftSnapshot, taskDraftKey, withT
   writeTaskDraft, writeTaskDraftSnapshot, type TaskDraftRecord } from './task-draft-store';
 import { captureTaskDraftWorkspace, taskDraftChoices, verifyFiles } from './task-draft-workspace';
 import { readTaskExecution } from './task-execution-store';
+import { pluginCatalogRevision } from './plugin-catalog';
 
 async function catalog() {
   const { resolveClaudeCodeWorkerGatewayKey } = await import('@/lib/claude-code/worker-profile');
@@ -71,6 +72,8 @@ export async function callTaskDraftTool(principal: PluginPrincipal, tool: string
       const choices = await taskDraftChoices();
       await requireTaskDraftAccount(principal, account);
       return { ok: true, choices, selectionRequired: true, executionEnabled: false,
+        nextAction: 'ask_user', clarification: { required: ['project', 'objective'],
+          question: 'Which registered project do you mean, and what would you like checked?' },
         selectionGuidance: 'Use the repository and project labels to ask which workspace the user means. Mentioning the o8 app does not select a repository named o8. Keep routing IDs internal. Ask for the current objective before selecting a workspace.' };
     }
     const repoId = normalizedText(args.repoId);
@@ -79,7 +82,8 @@ export async function callTaskDraftTool(principal: PluginPrincipal, tool: string
     await requireTaskDraftAccount(principal, account);
     const runtimes = await catalog();
     const snapshot = { ...workspace, ...account, snapshotId: randomUUID(),
-      machineId: principal.machineId, clientId: principal.clientId, expiresAt: Date.now() + 300_000 };
+      machineId: principal.machineId, clientId: principal.clientId, expiresAt: Date.now() + 300_000,
+      catalogRevision: pluginCatalogRevision() };
     return withTaskDraftAccountAdmission(principal, account, () => {
       writeTaskDraftSnapshot(snapshot);
       return { ok: true, repoId, projectId, snapshotId: snapshot.snapshotId, revision: snapshot.revision,
@@ -109,6 +113,7 @@ export async function callTaskDraftTool(principal: PluginPrincipal, tool: string
     if (snapshot.accountId !== account.accountId || snapshot.epoch !== account.epoch
       || snapshot.clientId !== principal.clientId || snapshot.machineId !== principal.machineId
       || snapshot.repoId !== contract.repoId || snapshot.projectId !== contract.projectId
+      || snapshot.catalogRevision !== pluginCatalogRevision()
       || snapshot.expiresAt <= Date.now()) throw new TaskDraftError('snapshot_unavailable', 409);
     const fresh = await captureTaskDraftWorkspace(contract.repoId, contract.projectId);
     if (canonical(fresh) !== canonical({ repoId: snapshot.repoId, projectId: snapshot.projectId,

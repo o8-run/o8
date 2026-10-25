@@ -161,7 +161,7 @@ describe('server size check CLI', () => {
       const answer = JSON.parse(result.stdout);
       expect(answer.name).toBe('namedBundleFixture');
       expect(answer.stack).toContain('at namedBundleFixture');
-      expect(answer.selected).toBe(!['operator-mcp-proxy', 'codex-app-bridge'].includes(label));
+      expect(answer.selected).toBe(label !== 'operator-mcp-proxy');
       expect(realpathSync(answer.adjacent)).toBe(realpathSync(join(outDir, 'adjacent.txt')));
     }
   });

@@ -12,10 +12,12 @@ export async function issueFixture(dataDir: string, root: string, repoPath: stri
   const slugs = ['fixture/alpha', 'fixture/beta', 'fixture/missing'];
   const setup = { envMode: 'skip', envFiles: [], installCommand: null, installOnCreateWorkspace: false,
     buildCommand: null, runBuildOnCreateWorkspace: false, devCommand: null, defaultPort: null };
+  // Equal recency keeps the seeded alphabetical order across clock ticks.
+  const addedAt = new Date().toISOString();
   const repos = slugs.map((slug, index) => ({ id: `issues-${index}`, name: slug.split('/')[1],
     localPath: index === 0 ? repoPath : join(root, index === 1 ? 'second-repo' : 'missing-repo'),
     remoteUrl: `https://github.com/${slug}.git`, defaultBranch: 'main', isGitRepo: true,
-    addedAt: new Date().toISOString(), lastOpenedAt: null, setup }));
+    addedAt, lastOpenedAt: null, setup }));
   if (process.argv.includes('--issues-symlink')) {
     const alias = join(root, 'issue-repo-alias');
     symlinkSync(repoPath, alias, 'dir');

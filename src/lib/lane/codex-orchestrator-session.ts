@@ -655,9 +655,11 @@ async function sendToCodexOrchestratorAttempt(
       // Keep that diagnostic visible to the one-time missing-thread recovery.
       const resumeDiagnostic = diagnostic.split(/\r?\n/).find((line) => isMissingCodexRolloutResumeError(line)
         || isCodexSolUnsupported(model, line));
+      // Node prints a bundle URL and potentially huge code frame before the error.
+      const errorDiagnostic = diagnostic.split(/\r?\n/).find((line) => /^\s*\w*Error(?: \[[^\]]+\])?:/.test(line));
       const error = code === 0
         ? undefined
-        : (resumeDiagnostic || diagnostic).slice(0, 500) || `codex exited with code ${code}`;
+        : (resumeDiagnostic || errorDiagnostic?.trim() || diagnostic).slice(0, 500) || `codex exited with code ${code}`;
       settle(code === 0 ? 'ready' : 'dead', error, true);
     });
 

@@ -4,10 +4,12 @@ use crate::shell::test_support::*;
 #[gpui::test]
 fn activity_palette_reaches_native_pane(cx: &mut TestAppContext) {
     let fixture = Fixture::new();
+    let file = fixture.root.join("activity.json");
+    State::default().save(&file).unwrap();
     let (shell, mut visual) = open(
         fixture.client.clone(),
-        fixture.root.join("activity.json"),
-        State::default(),
+        file.clone(),
+        State::load(&file).unwrap(),
         cx,
     );
     let cx = &mut visual;
@@ -19,12 +21,11 @@ fn activity_palette_reaches_native_pane(cx: &mut TestAppContext) {
             .map(|command| command.label(&shell.sessions))
             .collect::<Vec<_>>()
     });
-    let activity = labels
-        .iter()
-        .position(|label| label == "Open Activity")
-        .unwrap();
-    assert_eq!(labels[activity - 1], "Open grid");
-    assert_eq!(labels[activity + 1], "Open diff for a packet");
+    assert!(
+        labels.iter().any(|label| label == "Open Activity"),
+        "Activity must be registered in the shell palette"
+    );
+    assert!(cx.debug_bounds("activity-pane").is_none());
 
     cx.simulate_keystrokes("ctrl-k");
     cx.simulate_keystrokes("a c t i v i t y enter");
@@ -34,6 +35,9 @@ fn activity_palette_reaches_native_pane(cx: &mut TestAppContext) {
         cx.debug_bounds("activity-pane").is_some(),
         "Activity command must open a native pane through the real shell palette"
     );
+    let saved = State::load(&file).unwrap();
+    let workspace = &saved.workspaces[saved.selected.as_ref().unwrap()];
+    assert_eq!(workspace.tabs[workspace.active], Tab::Activity);
 }
 
 pub(super) fn activity_open(

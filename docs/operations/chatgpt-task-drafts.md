@@ -11,10 +11,25 @@ separate `o8:prepare-task` scope and a relay-verified account subject carried in
 the signed one-minute local capability. Its expiry cannot exceed the original
 OAuth grant expiry. Existing read and follow-up grants gain no permission.
 
-The production relay manifest, Clerk scopes and public directory package are
-unchanged. `TASK_DRAFT_TOOLS` is a dormant local schema export, deliberately
-separate from the production `PLUGIN_TOOLS` listing. Provisioning this scope,
-updating the relay and activating production are later operator gates.
+The local catalog is separate from hosted app import and deployment.
+`TASK_DRAFT_TOOLS` remains separate from the base `PLUGIN_TOOLS` export.
+Provisioning scopes, updating the relay and activating hosted discovery require
+separate operator work.
+
+The authenticated local `/api/plugins/mcp` endpoint also accepts `tools/list`.
+It returns current reviewed schemas and descriptions, filtered by the connection's
+existing scopes, with a catalog revision and `Cache-Control: no-store`. Preparation
+discovery verifies the current account before removing snapshots whose catalog
+revision or sign-in epoch is obsolete for that same account, app client and
+machine. Legacy snapshots without a revision require a fresh snapshot. Other
+connections and immutable held task receipts remain intact; exact task retries
+retain their original contract. Preparation independently refuses an obsolete
+snapshot even when discovery has not run.
+
+This local refresh path does not replace an upstream imported tool catalog.
+Hosted discovery, action metadata and a fresh connected-app projection still need
+comparison against the same app revision. Catalog refresh conveys no consent,
+permission change or worker launch.
 
 Preparation verifies an unexpired, signed desktop license against the relay
 account, the current active identity and a durable sign-in epoch. Any persisted
@@ -24,6 +39,16 @@ decoded identity, CLI profile or caller-supplied account substitutes for this
 verification.
 
 ## Snapshot and contract
+
+Before selecting a workspace, ask for any missing project and objective. Use only
+scope supplied or confirmed in the current conversation; personal context cannot
+choose the project or revive an older task. A choice list returns
+`nextAction: ask_user`, a question and the required project/objective details,
+without creating a snapshot or task. Ask using readable labels and keep routing
+IDs internal. A refused selected workspace also returns `nextAction: ask_user`;
+report its error and await explicit direction instead of trying another
+registration. Preserve exact files, requirements and runtime/model/effort pins.
+Preparation remains held, with native review and Launch as separate actions.
 
 First call `o8_task_options` with the selected machine to list registered
 repository and canonical project IDs. Then supply both IDs to capture a

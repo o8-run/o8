@@ -83,6 +83,22 @@ async function waitForSpawn(): Promise<void> {
 }
 
 describe('Codex orchestrator process lifecycle', () => {
+  it.each(['Error', 'TypeError', 'SyntaxError', 'RangeError', 'ReferenceError', 'AggregateError', 'Error [ERR_MODULE_NOT_FOUND]'])('surfaces the first %s line after a packaged bridge code frame', async (name) => {
+    const session = ensureCodexOrchestratorSession(process.cwd(), `bridge-error-${name}-${Date.now()}`);
+    const proc = useFakeProc();
+    const events: OrchestratorEvent[] = [];
+    const turn = sendToCodexOrchestrator(session, 'startup failure', event => events.push(event));
+    await waitForSpawn();
+    const error = `${name}: Could not locate the bindings file. Tried:`;
+    proc.stderr.emit('data', Buffer.from('file:///bundle/Contents/Resources/server/codex-app-bridge-impl.mjs:2\n'
+      + 'const bundledSource = 1;'.repeat(100) + '\n  ^\n\n' + error + '\nError: secondary failure\n    at main (bridge.mjs:2:1)\n'));
+    proc.exitCode = 1;
+    proc.emit('close', 1);
+    await turn;
+    expect(events).toContainEqual({ type: 'error', error });
+    expect(events.at(-1)?.type).toBe('done');
+  });
+
   it.each([false, true])('passes an explicit tier to the actual CLI launch (resume=%s)', async (resume) => {
     const session = ensureCodexOrchestratorSession(process.cwd(), `speed-${resume}-${Date.now()}`);
     if (resume) session.threadId = 'saved-speed-thread';
