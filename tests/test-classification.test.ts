@@ -10,7 +10,7 @@ import { classifyTestSource } from '../scripts/lib/test-classification.mjs';
 const classificationScript = fileURLToPath(new URL('../scripts/classify-tests.mjs', import.meta.url));
 const vitestPackage = dirname(createRequire(import.meta.url).resolve('vitest/package.json'));
 
-function runClassification(root: string, mode: '--check' | '--write', preload?: string) {
+function runClassification(root: string, mode: '--check' | '--check-manifest' | '--write', preload?: string) {
   return spawnSync(process.execPath, [...(preload ? ['--import', pathToFileURL(preload).href] : []), classificationScript, mode], {
     cwd: root,
     encoding: 'utf8',
@@ -128,6 +128,20 @@ describe('dated fixture PR gate', () => {
       expect(result.status, result.stderr).toBe(1);
       expect(result.stderr).toContain('[dated-fixtures] tests/clock.test.ts');
       expect(result.stderr).toContain('validates without its own pin');
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it('leaves the dated-fixture probe to the PR gate when only the manifest is checked', () => {
+    const root = datedFixture("it('valid', () => { vi.setSystemTime(0); check(); });", undefined, false);
+    try {
+      const gate = runClassification(root, '--check');
+      expect(gate.status, gate.stderr).toBe(1);
+      expect(gate.stderr).toContain('[dated-fixtures] tests/clock.test.ts');
+
+      const manifest = runClassification(root, '--check-manifest');
+      expect(manifest.status).toBe(1);
+      expect(manifest.stderr).not.toContain('[dated-fixtures]');
+      expect(manifest.stderr).toContain('manifest drifted; run npm run test:classify');
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 

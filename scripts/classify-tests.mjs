@@ -11,19 +11,23 @@ const classification = buildTestClassificationReport(root);
 const next = `${JSON.stringify(classification.manifest, null, 2)}\n`;
 const mode = process.argv[2] || '--check';
 
-const dated = auditDatedFixtures(root, classification.hermeticFiles);
-for (const warning of dated.warnings) console.warn(`[dated-fixtures] WARNING ${warning}`);
-const errors = probeDatedFixtures(root, dated.probes);
-for (const error of errors) console.error(`[dated-fixtures] ${error}`);
-if (errors.length) process.exit(1);
+// The dated-fixture probe starts one vitest process per test, so it takes
+// minutes. The ship preflight only asks whether the manifest drifted.
+if (mode !== '--check-manifest') {
+  const dated = auditDatedFixtures(root, classification.hermeticFiles);
+  for (const warning of dated.warnings) console.warn(`[dated-fixtures] WARNING ${warning}`);
+  const errors = probeDatedFixtures(root, dated.probes);
+  for (const error of errors) console.error(`[dated-fixtures] ${error}`);
+  if (errors.length) process.exit(1);
+}
 
 if (mode === '--write') {
   writeFileSync(manifestPath, next);
   console.log(`[test-classification] ${classification.hermeticTests} hermetic, ${classification.resourceOwningTests} resource-owning`);
   process.exit(0);
 }
-if (mode !== '--check') {
-  console.error('usage: node scripts/classify-tests.mjs --check|--write');
+if (mode !== '--check' && mode !== '--check-manifest') {
+  console.error('usage: node scripts/classify-tests.mjs --check|--check-manifest|--write');
   process.exit(1);
 }
 const current = existsSync(manifestPath) ? readFileSync(manifestPath, 'utf8') : '';
