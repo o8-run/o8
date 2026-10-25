@@ -364,6 +364,12 @@
       ]
     },
     {
+      "path": "src/lib/acp/output-redaction.performance.test.ts",
+      "reasons": [
+        "child-process"
+      ]
+    },
+    {
       "path": "src/lib/broadcast/hourly-cap.integration.test.ts",
       "reasons": [
         "child-process",

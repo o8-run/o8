@@ -132,4 +132,18 @@ export function defineAcpRedactionMatrix(h: Harness): void {
   expect(events.filter(e=>e.type==='text').map(e=>e.text).join('')==='Working on it\n'+rows[0]).toBe(true);
   process.stdout.write(`[acp-redaction] ACP_1MIB_CPU_MS=${elapsed.toFixed(2)} ACP_1MIB_WALL_MS=${(performance.now()-wall).toFixed(2)}\n`);expect(performance.now()-wall).toBeLessThan(8000);
  },15_000);
+ it('preserves 1 MiB escaped real turn output with literal-escape secrets within 8 seconds',async()=>{
+  const size=1024*1024;const unit=String.raw`\u0062\n`;
+  const rows=[unit.repeat(Math.ceil(size/unit.length)).slice(0,size)];
+  const payload=join(h.dir,'matrix-escaped-large.json');
+  writeFileSync(payload,JSON.stringify({rows,text:'Escaped fixture completed.',parts:3,success:true}));
+  await h.configure([peer,'turn',payload],[String.raw`synthetic-\u0061-credential`,String.raw`synthetic-\n-credential`]);
+  const cpu=process.cpuUsage();const wall=performance.now();const {events}=await h.turn('matrix-escaped-large');
+  const used=process.cpuUsage(cpu);const wallMs=performance.now()-wall;
+  expect(events.filter(event=>event.type==='error')).toEqual([]);
+  expect(events.filter(event=>event.type==='text').map(event=>event.text).join('')==='Working on it\n'+rows[0]).toBe(true);
+  process.stdout.write(`[acp-redaction] ACP_ESCAPED_1MIB_CPU_MS=${((used.user+used.system)/1000).toFixed(2)} ACP_ESCAPED_1MIB_WALL_MS=${wallMs.toFixed(2)}\n`);
+  expect(wallMs).toBeLessThan(8000);
+ },15_000);
+
 }
