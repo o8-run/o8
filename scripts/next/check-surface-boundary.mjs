@@ -6,20 +6,21 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const shell = 'native/o8-next/src/shell.rs';
-// Shell additions with these prefixes are shared too (including new shell tests/helpers).
-const sharedPrefixes = ['native/o8-next/src/shell', 'native/o8-next/src/render', 'native/o8-next/src/composer'];
-const sharedFiles = new Set([
-  shell, 'native/o8-next/src/shell_state.rs', 'native/o8-next/src/shell_view.rs',
-  'native/o8-next/src/surface_registry.rs', 'native/o8-next/src/client.rs',
-  'native/o8-next/src/main.rs', 'native/o8-next/src/ui.rs',
-  'native/o8-next/src/model.rs', 'native/o8-next/src/retained.rs',
-  'native/o8-next/src/rich.rs', 'native/o8-next/src/text.rs', 'native/o8-next/src/theme.rs',
-  'scripts/next/dev-server.ts', 'scripts/next/surface-routes.ts',
+const checker = 'scripts/next/check-surface-boundary.mjs';
+const workflow = '.github/workflows/next-surface-boundary.yml';
+const isScoped = path => path.startsWith('native/o8-next/') || path.startsWith('scripts/next/') || path === workflow;
+// These two existing fixtures belong to the already-reviewed pull-request port.
+// Everything else outside a surface module is shared unless listed here.
+const legacySurfaceFiles = new Set([
+  'scripts/next/pull-request-desktop-probe.ts',
+  'scripts/next/pull-request-gates-fixture.ts',
 ]);
-const isShared = path => sharedFiles.has(path) || sharedPrefixes.some(prefix => path.startsWith(prefix));
-const isSurface = path => !isShared(path) && (
-  /^native\/o8-next\/src\/.*\.rs$/.test(path) || path.startsWith('scripts/next/surfaces/')
+const isSurface = path => path !== checker && !path.endsWith('/build.rs') && (
+  /^native\/o8-next\/src\/surfaces\/.*\.rs$/.test(path)
+  || path.startsWith('scripts/next/surfaces/') || legacySurfaceFiles.has(path)
 );
+const isDocumentation = path => /^native\/o8-next\/(?:docs|evidence)\/.+\.(?:md|txt|json|csv|png|svg)$/.test(path);
+const isShared = path => isScoped(path) && !isSurface(path) && !isDocumentation(path);
 
 function command(executable, args, cwd, input) {
   const result = spawnSync(executable, args, {
@@ -92,7 +93,7 @@ function main() {
     const [added, deleted, ...path] = record.split('\t');
     return { path: path.join('\t'), added: Number(added), deleted: Number(deleted) };
   });
-  const relevant = stats.some(({ path }) => path.startsWith('native/o8-next/') || path.startsWith('scripts/next/'));
+  const relevant = stats.some(({ path }) => isScoped(path));
   const eventPath = args.includes('--event') ? value('--event') : process.env.GITHUB_EVENT_PATH;
   const event = eventPath ? JSON.parse(readFileSync(eventPath, 'utf8')) : {};
   const exempt = event.pull_request?.labels?.some(label => label.name === 'shell-work') === true;
