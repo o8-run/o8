@@ -1,7 +1,7 @@
 /** Disposable Activity transport. Production handlers own auth, mapping and writes;
  * only the upstream GitHub transport is authored. No account or network access. */
 import { generateKeyPairSync, randomBytes } from 'node:crypto';
-import { writeFileSync } from 'node:fs';
+import { symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import type { NextRequest } from 'next/server';
@@ -13,8 +13,31 @@ export async function installActivityFixture(repo: string) {
   execFileSync('git', ['-C', repo, 'add', '.']);
   execFileSync('git', ['-C', repo, 'commit', '-qm', 'Fixture local commit']);
   execFileSync('git', ['-C', repo, 'remote', 'add', 'origin', 'https://github.com/example/activity.git']);
+  const localClones = process.argv.includes('--activity-local-clones');
+  const worktrees = process.argv.includes('--activity-worktrees');
+  const sameRepo = process.argv.includes('--activity-same-repo');
+  if (localClones || worktrees || sameRepo) {
+    execFileSync('git', ['-C', repo, 'remote', 'remove', 'origin']);
+  }
   const { addRepo, touchRepo } = await import('../../../src/lib/repos/registry');
   const activityRepo = await addRepo(repo);
+  const identityRepos = [activityRepo];
+  if (localClones || worktrees) {
+    const second = join(dirname(repo), 'activity-identity-repo');
+    if (worktrees) {
+      execFileSync('git', ['-C', repo, 'worktree', 'add', '--quiet', '--detach', second, 'HEAD']);
+    } else {
+      execFileSync('git', ['clone', '--quiet', '--no-hardlinks', repo, second]);
+      execFileSync('git', ['-C', second, 'remote', 'remove', 'origin']);
+    }
+    identityRepos.push(await addRepo(second));
+    await touchRepo(activityRepo.id, new Date(Date.now() + 1000).toISOString());
+  }
+  if (sameRepo) {
+    const alias = join(dirname(repo), 'same-repo-alias');
+    symlinkSync(repo, alias, 'dir');
+    identityRepos.push(await addRepo(alias));
+  }
   const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
   Object.assign(process.env, { GITHUB_APP_ID: '1', GITHUB_APP_PRIVATE_KEY: privateKey.export({ type: 'pkcs8', format: 'pem' }),
     GITHUB_API_BASE_URL: 'http://activity-upstream.invalid' });
@@ -25,7 +48,7 @@ export async function installActivityFixture(repo: string) {
     const forkRepo = join(dirname(repo), 'fork-repo');
     execFileSync('git', ['clone', '--quiet', '--no-hardlinks', repo, forkRepo]);
     execFileSync('git', ['-C', forkRepo, 'remote', 'set-url', 'origin', 'https://github.com/example/activity-fork.git']);
-    await addRepo(forkRepo);
+    identityRepos.push(await addRepo(forkRepo));
     await touchRepo(activityRepo.id, new Date(Date.now() + 1000).toISOString());
   }
   let dropped = false;
@@ -92,7 +115,11 @@ export async function installActivityFixture(repo: string) {
         const { invalidateGitHubSync } = await import('../../../src/lib/github-broker/store');
         invalidateGitHubSync('example/activity', 'issues'); invalidateGitHubSync('example/activity', 'pull_requests');
       }
-      return Response.json({ mode, calls, repo, laneId, mutations });
+      return Response.json({ mode, calls, repo, laneId, mutations, identityRepos: identityRepos.map(entry => ({
+        id: entry.id, localPath: entry.localPath, remoteUrl: entry.remoteUrl,
+        sha: execFileSync('git', ['-C', entry.localPath, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
+        commonDir: execFileSync('git', ['-C', entry.localPath, 'rev-parse', '--path-format=absolute', '--git-common-dir'], { encoding: 'utf8' }).trim(),
+      })) });
     },
   };
   // The operator token is still required by the host middleware for every route.

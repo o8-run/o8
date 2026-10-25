@@ -27,6 +27,15 @@ pub struct Repo {
     pub remote_url: Option<String>,
 }
 impl Repo {
+    /// Local-only repositories still need a stable identity. Use the registered
+    /// canonical root, so clones/worktrees differ and aliases of one root agree.
+    fn identity(&self) -> String {
+        self.slug().unwrap_or_else(|| {
+            let root = std::fs::canonicalize(&self.local_path)
+                .unwrap_or_else(|_| self.local_path.clone().into());
+            format!("local:{}", root.to_string_lossy())
+        })
+    }
     pub fn slug(&self) -> Option<String> {
         let raw = self
             .remote_url
@@ -56,6 +65,7 @@ pub struct Row {
     pub kind: &'static str,
     pub id: String,
     pub repo: Option<String>,
+    pub repo_identity: String,
     pub title: String,
     pub meta: String,
     pub date: String,
@@ -64,12 +74,7 @@ pub struct Row {
 }
 impl Row {
     pub fn key(&self) -> String {
-        format!(
-            "{}-{}-{}",
-            self.kind,
-            self.repo.as_deref().unwrap_or("local"),
-            self.id
-        )
+        format!("{}-{}-{}", self.kind, self.repo_identity, self.id)
     }
     pub fn selector(&self) -> String {
         format!("activity-row-{}", self.key())
@@ -103,6 +108,7 @@ fn rows(
     field: &str,
     kind: &'static str,
     repo: Option<String>,
+    repo_identity: &str,
     limit: usize,
 ) -> Result<Vec<Row>, ReadError> {
     let array = value[field].as_array().ok_or_else(ReadError::invalid)?;
@@ -169,6 +175,7 @@ fn rows(
                 kind,
                 id: identity,
                 repo: repo.clone(),
+                repo_identity: repo_identity.into(),
                 title,
                 meta,
                 date,
@@ -197,6 +204,7 @@ pub fn load(client: &Client, targets: &[Repo], previous: HashMap<String, Streams
     };
     for target in targets {
         let slug = target.slug();
+        let identity = target.identity();
         let key = format!("{}|{}", target.local_path, slug.as_deref().unwrap_or(""));
         let cache = out.cache.entry(key).or_default();
         for (endpoint, field, kind, limit) in [
@@ -213,7 +221,7 @@ pub fn load(client: &Client, targets: &[Repo], previous: HashMap<String, Streams
                         &[("repo", slug)],
                         None,
                     )
-                    .and_then(|v| rows(&v, field, kind, Some(slug.clone()), limit))
+                    .and_then(|v| rows(&v, field, kind, Some(slug.clone()), &identity, limit))
             });
             match read {
                 Some(Ok(rows)) => {
@@ -238,7 +246,7 @@ pub fn load(client: &Client, targets: &[Repo], previous: HashMap<String, Streams
                     &[("workspace", &target.local_path), ("limit", "50")],
                     None,
                 )
-                .and_then(|v| rows(&v, "commits", "commit", slug.clone(), 50));
+                .and_then(|v| rows(&v, "commits", "commit", slug.clone(), &identity, 50));
             match local {
                 Ok(local) if commits.is_empty() => commits = local,
                 Err(_) => out.errors.push(
@@ -267,6 +275,7 @@ pub fn load(client: &Client, targets: &[Repo], previous: HashMap<String, Streams
                     kind: "packet",
                     id: text(packet, "id"),
                     repo: None,
+                    repo_identity: "local".into(),
                     title: text(packet, "title"),
                     meta: format!(
                         "{} · {} · {}",
@@ -286,7 +295,7 @@ pub fn load(client: &Client, targets: &[Repo], previous: HashMap<String, Streams
         }
         Err(error) => out.errors.push(error.message),
     }
-    // Group repository/SHA pairs; unknown local identities must stay separate.
+    // Group only matching stable repository/SHA pairs, including local roots.
     let mut grouped = vec![];
     for row in &out.rows {
         if row.kind == "ci" {
@@ -295,7 +304,7 @@ pub fn load(client: &Client, targets: &[Repo], previous: HashMap<String, Streams
                 && let Some(commit) = grouped.iter_mut().find(|c: &&mut Row| {
                     c.kind == "commit"
                         && row.repo.is_some()
-                        && c.repo == row.repo
+                        && c.repo_identity == row.repo_identity
                         && sha == c.id.to_lowercase()
                 })
             {
@@ -307,10 +316,9 @@ pub fn load(client: &Client, targets: &[Repo], previous: HashMap<String, Streams
             }
         }
         if row.kind != "commit"
-            || row.repo.is_none()
             || !grouped
                 .iter()
-                .any(|c: &Row| c.kind == "commit" && c.repo == row.repo && c.id == row.id)
+                .any(|c: &Row| c.kind == "commit" && c.key() == row.key())
         {
             grouped.push(row.clone());
         }

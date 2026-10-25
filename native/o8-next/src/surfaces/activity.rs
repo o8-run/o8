@@ -6,6 +6,8 @@ use pane::{ActivityEvent, ActivityPane};
 pub(crate) mod feed;
 #[path = "activity/pane.rs"]
 mod pane;
+#[path = "activity/transport.rs"]
+mod transport;
 
 pub(super) type Slice = EmptyState;
 pub(super) type Runtime = ();
@@ -76,6 +78,9 @@ impl ShellView for ActivityPane {
     }
 }
 
+#[cfg(test)]
+#[path = "activity/identity_tests.rs"]
+mod identity_tests;
 #[cfg(test)]
 #[path = "activity/tests.rs"]
 mod tests;

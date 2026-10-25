@@ -1,0 +1,7 @@
+First full native run, --test-threads=2:
+---- shell::issues::tests::issues_interaction_frames_and_missing_checkout_refusal stdout ----
+real control did not reach CPU paint: issue-checkout-missing
+test result: FAILED. 95 passed; 1 failed; 3 ignored; 0 measured; 0 filtered out; finished in 654.33s
+
+Isolated rerun of that unchanged test, --nocapture --test-threads=1:
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 98 filtered out; finished in 15.03s

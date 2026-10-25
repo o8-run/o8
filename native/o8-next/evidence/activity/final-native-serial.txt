@@ -1,0 +1,20 @@
+Serial full native run, --test-threads=1:
+---- terminal::tests::production_pty_to_gpui_terminal stdout ----
+src/terminal_tests.rs:284:5:
+assertion `left == right` failed: no silent terminal transport loss during flood
+  left: 41450556
+ right: 50000012
+test result: FAILED. 95 passed; 1 failed; 3 ignored; 0 measured; 0 filtered out; finished in 1993.06s
+
+The unchanged Issues paint-wait test and all 15 Activity tests pass in this run.
+The terminal test passed in the earlier two-thread full run.
+
+Isolated terminal rerun, --nocapture --test-threads=1:
+src/terminal_tests.rs:284:5:
+assertion `left == right` failed: no silent terminal transport loss during flood
+  left: 46945612
+ right: 50000012
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 98 filtered out; finished in 61.62s
+
+No terminal source, transport, fixture or test files changed in this PR.
+The complete native gate remains red; this is not a clean full-suite receipt.

@@ -7,10 +7,10 @@ transport and tests. The stateless workspace slice preserves the existing
 Grid and before Diff. Worker links reuse the selected workspace's session view.
 Polling and CI cooldown recovery run only for the active Activity view.
 
-The transport is a child of `Client` so it can use the existing private operator
-credential, loopback agent and bounded response reader. `client.rs` contains only
-its module include; request handling lives in `surfaces/activity/transport.rs`.
-Routes, auth, HTTP refusals, receipt replay and row grouping are unchanged.
+The surface includes `activity/transport.rs`, whose inherent `impl Client` uses
+the shared URL, authenticated-request and bounded-response helpers. The shell's
+single Activity registration compiles the adapter; `client.rs` matches main.
+Routes, auth, HTTP refusals and receipt replay retain their existing behavior.
 
 The development host discovers `scripts/next/surfaces/90-activity.surface.ts`.
 It supplies Activity's production routes, body admission and lost mission-stop
@@ -44,8 +44,8 @@ lint at `src/client.rs:53` remains unchanged from main. Classification reports
 Captured tails: [red](../../evidence/activity/registration-red.txt) and
 [green](../../evidence/activity/registration-green.txt). Shared shell state, view,
 tests and test support, the root module list, and the development dispatcher match
-main exactly. The only shared-file exception beyond the shell inventory line is
-the private transport module include in `client.rs`.
+main exactly. The historical extraction also included the private transport module
+from `client.rs`; the final round removes that shared-file exception.
 
 The final rebase onto `c9acfe4b2` changes no native or fixture-host source trees.
 Activity passes all 9 tests again; the native saved-history test passes against a
@@ -71,10 +71,8 @@ existing repository-owned CI badge regression. Captured tails are in
 [review-2-red.txt](../../evidence/activity/review-2-red.txt) and
 [review-2-green.txt](../../evidence/activity/review-2-green.txt).
 
-The `Client::activity_request` dependency through `client.rs` remains in its
-existing location, with implementation in `surfaces/activity/transport.rs`.
-Removing that shared-client exception is tracked separately in #4695; this
-correction leaves the request transport unchanged.
+Correction round 2 retained the `Client::activity_request` include in `client.rs`.
+The final round moves it into Activity after rebasing onto #4696.
 
 Completion gates for correction round 2 pass: full native 90 unit/GPUI and 7 CLI
 tests (3 existing measurement workloads ignored); full npm 1,242 files and 9,056
@@ -89,3 +87,39 @@ rerun passes without source changes. All 7 CLI tests pass separately. The latest
 full npm suite passes 1,242 files and 9,057 tests, with 3 files / 5 tests skipped.
 Both typechecks, Clippy, ESLint, rule-check and classification pass again;
 classification also passes all 78 isolated date-fixture tests introduced by main.
+
+## Final local identity correction
+
+Remote rows retain their normalized GitHub repository identity. Local-only rows
+use `local:` plus the canonical registered root instead of the shared `local`
+placeholder. Row controls, expansion, details, click selection and keyboard focus
+all derive from the same key. Commit deduplication uses that identity too.
+Separate clones and registered local worktrees remain separate; aliases and
+repeated registrations of the same root yield one row.
+
+The four-case [matrix](../../evidence/activity/final-matrix.md) was written first
+in `activity/identity_tests.rs`. It uses real Git topology and the production
+registry/commit handlers through the headless shell. The saved
+[red output](../../evidence/activity/final-red.txt) has two passing cases and two
+failures: local clones and linked worktrees reproduce ignored clicks, shared
+expansion and trapped Tab focus. This is macOS headless GPUI evidence, not an
+installed-app, GPU or compositor measurement.
+
+The same [green matrix](../../evidence/activity/final-green.txt) passes all four
+cases. All 15 Activity tests also pass in both complete native runs. The 7 native
+CLI tests and 7 related TypeScript tests pass. Typecheck fast with an 8 GiB heap,
+Clippy (zero touched-file diagnostics), touched-file ESLint, rule-check, formatting
+and classification pass, including all 78 isolated date-fixture checks.
+
+The complete native gate remains red outside Activity. The first full run has
+95 passed, 1 failed and 3 ignored: an unchanged Issues paint wait fails, then
+passes in isolation. The serial run also has 95 passed, 1 failed and 3 ignored:
+Issues passes, but the unchanged terminal flood test receives 41,450,556 of
+50,000,012 bytes. Its isolated rerun also fails at 46,945,612 bytes. The terminal
+test passed in the first full run. Both failures and rerun results are retained
+in [first-run evidence](../../evidence/activity/final-native-first.txt) and
+[serial-run evidence](../../evidence/activity/final-native-serial.txt).
+
+After rebasing onto #4696, Activity loads its request adapter through its own
+module using the shared transport helpers. Outside Activity's source, fixture,
+documentation and evidence files, the PR adds only one shell registration line.

@@ -1,0 +1,22 @@
+running 4 tests
+test shell::activity::identity_tests::activity_identity_matrix_linked_worktrees ... identity matrix: --activity --activity-worktrees: 2 row(s); click/select, expand, Tab cycle, Enter/Space and refresh PASS
+ok
+test shell::activity::identity_tests::activity_identity_matrix_local_clones ... identity matrix: --activity --activity-local-clones: 2 row(s); click/select, expand, Tab cycle, Enter/Space and refresh PASS
+ok
+test shell::activity::identity_tests::activity_identity_matrix_remote_forks ... identity matrix: --activity --activity-forks: 2 row(s); click/select, expand, Tab cycle, Enter/Space and refresh PASS
+ok
+test shell::activity::identity_tests::activity_identity_matrix_same_repository_twice ... identity matrix: --activity --activity-same-repo: 1 row(s); click/select, expand, Tab cycle, Enter/Space and refresh PASS
+ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 95 filtered out; finished in 40.89s
+
+All 15 Activity tests pass in both full native runs.
+Native CLI tests: 7 passed; 0 failed.
+Related TypeScript tests: 2 files passed; 7 tests passed.
+NODE_OPTIONS=--max-old-space-size=8192 npm run typecheck:fast: exit 0.
+Clippy --all-targets: exit 0; zero diagnostics in touched files.
+Touched TypeScript ESLint, rule-check (2 files), Rust formatting: exit 0.
+Classification: 1238 hermetic; 908 resource-owning; 78 isolated date-fixture checks passed.
+
+Full native verification remains red outside Activity. See final-native-first.txt
+and final-native-serial.txt; neither full run is a clean full-suite receipt.

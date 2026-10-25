@@ -1,4 +1,5 @@
-use super::Client;
+use super::feed::ReadError;
+use crate::client::Client;
 use serde_json::Value;
 
 impl Client {
@@ -10,17 +11,14 @@ impl Client {
         path: &str,
         query: &[(&str, &str)],
         body: Option<&Value>,
-    ) -> Result<Value, crate::shell::activity::feed::ReadError> {
-        use crate::shell::activity::feed::ReadError;
-        let mut url = self.origin.join(path).map_err(|_| ReadError::invalid())?;
-        if url.origin() != self.origin.origin() || !path.starts_with("/api/") {
+    ) -> Result<Value, ReadError> {
+        let mut url = self.url(path).map_err(|_| ReadError::invalid())?;
+        let origin = self.url("/").map_err(|_| ReadError::invalid())?;
+        if url.origin() != origin.origin() || !path.starts_with("/api/") {
             return Err(ReadError::invalid());
         }
         url.query_pairs_mut().extend_pairs(query.iter().copied());
-        let mut request = self.agent.request(method, url.as_str());
-        if let Some(token) = &self.token {
-            request = request.set("Authorization", &format!("Bearer {token}"));
-        }
+        let request = self.request(method, &url);
         let response = match body {
             Some(body) => request.send_json(body.clone()),
             None => request.call(),

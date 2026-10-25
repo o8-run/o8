@@ -1,0 +1,44 @@
+running 4 tests
+test shell::activity::identity_tests::activity_identity_matrix_linked_worktrees ...
+thread 'shell::activity::identity_tests::activity_identity_matrix_linked_worktrees' (382179727) panicked at src/surfaces/activity/identity_tests.rs:79:5:
+--activity --activity-worktrees:
+row control IDs collide
+row 0: click did not expand selected row
+row 0: click did not select its keyboard control
+row 0: click expanded more than one row
+row 1: click did not expand selected row
+row 1: click did not select its keyboard control
+row 1: click expanded more than one row
+row 11: Tab/Enter did not expand exactly one row
+row 12: Tab/Enter did not expand exactly one row
+Tab focus is trapped instead of wrapping to the first control
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+test shell::activity::identity_tests::activity_identity_matrix_local_clones ...
+thread 'shell::activity::identity_tests::activity_identity_matrix_local_clones' (382185600) panicked at src/surfaces/activity/identity_tests.rs:79:5:
+--activity --activity-local-clones:
+row control IDs collide
+row 0: click did not expand selected row
+row 0: click did not select its keyboard control
+row 0: click expanded more than one row
+row 1: click did not expand selected row
+row 1: click did not select its keyboard control
+row 1: click expanded more than one row
+row 11: Tab/Enter did not expand exactly one row
+row 12: Tab/Enter did not expand exactly one row
+Tab focus is trapped instead of wrapping to the first control
+FAILED
+test shell::activity::identity_tests::activity_identity_matrix_remote_forks ... identity matrix: --activity --activity-forks: 2 row(s); click/select, expand, Tab cycle, Enter/Space and refresh PASS
+ok
+test shell::activity::identity_tests::activity_identity_matrix_same_repository_twice ... identity matrix: --activity --activity-same-repo: 1 row(s); click/select, expand, Tab cycle, Enter/Space and refresh PASS
+ok
+
+failures:
+
+failures:
+    shell::activity::identity_tests::activity_identity_matrix_linked_worktrees
+    shell::activity::identity_tests::activity_identity_matrix_local_clones
+
+test result: FAILED. 2 passed; 2 failed; 0 ignored; 0 measured; 95 filtered out; finished in 38.86s
+
+error: test failed, to rerun pass `--bin o8-next`

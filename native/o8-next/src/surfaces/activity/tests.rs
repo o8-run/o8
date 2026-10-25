@@ -36,7 +36,7 @@ fn activity_palette_reaches_native_pane(cx: &mut TestAppContext) {
     );
 }
 
-fn activity_open(
+pub(super) fn activity_open(
     fixture: &Fixture,
     cx: &mut TestAppContext,
 ) -> (Entity<Shell>, VisualTestContext, (f64, f64)) {
@@ -63,7 +63,7 @@ fn activity_open(
     let content_frame = started.elapsed().as_secs_f64() * 1000.;
     (shell, visual, (first_frame, content_frame))
 }
-fn activity_click(cx: &mut VisualTestContext, selector: &'static str) -> f64 {
+pub(super) fn activity_click(cx: &mut VisualTestContext, selector: &'static str) -> f64 {
     draw(cx);
     let bounds = cx
         .debug_bounds(selector)
@@ -249,7 +249,7 @@ fn activity_packet_hold_release_and_stop_mission(cx: &mut TestAppContext) {
     assert!(origin["repo"].is_string());
 }
 
-fn activity_view(shell: &Entity<Shell>, cx: &mut VisualTestContext) -> Entity<ActivityPane> {
+pub(super) fn activity_view(shell: &Entity<Shell>, cx: &mut VisualTestContext) -> Entity<ActivityPane> {
     shell.read_with(cx, |s, _| {
         match s.content.get(&s.key(&Tab::Activity)).unwrap() {
             Content::Activity(a) => a.clone(),

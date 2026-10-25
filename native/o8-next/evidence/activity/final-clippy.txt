@@ -1,0 +1,4 @@
+cargo +1.97.1 clippy --locked --manifest-path native/o8-next/Cargo.toml --all-targets --message-format=json
+Exit status: 0
+Diagnostics in touched files: 0
+Diagnostics in unchanged files: 61
