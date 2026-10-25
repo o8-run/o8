@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import React, { act } from 'react';
+import React, { act, type ComponentProps } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
@@ -8,6 +8,14 @@ import type { VisualInstructionDraft } from '@/lib/composer/visual-draft-store';
 import { claimVisualCapture, releaseVisualCapture } from '@/lib/composer/visual-capture-state';
 import { DictationHost } from '@/components/desktop/dictation/DictationHost';
 import type { DictationStartOptions, DictationState } from '@/components/desktop/dictation/types';
+import type { LiveBackend } from '@/lib/voice/managed-live/session';
+import { ManagedChatVoiceEntry } from '@/components/desktop/thoughts/chat-panel/ManagedChatVoiceEntry';
+const live = vi.hoisted(() => ({ backend: null as LiveBackend | null }));
+vi.mock('@/lib/mobile/ws-token-client', () => ({ getMobileWsToken: () => 'fixture' }));
+vi.mock('@/lib/voice/managed-live/session', () => ({ startManagedLive: async (backend: LiveBackend, onState: (state: string) => void) => {
+  await backend.ready?.(); live.backend = backend; let state = 'live'; onState(state);
+  return { get state() { return state; }, close: async () => { state = 'closed'; onState(state); }, activity() {} };
+} }));
 const test = vi.hoisted(() => ({ principal: 'a', rows: new Map<string, VisualInstructionDraft>(), listeners: new Set<() => void>(), hold: null as Promise<void> | null,
   removal: null as Promise<void> | null, remove: vi.fn(), receipt: null as Promise<void> | null, receiptEdit: null as (() => void) | null,
   dictation: 'idle' as DictationState, words: null as DictationStartOptions | null, cancel: vi.fn() }));
@@ -52,6 +60,7 @@ const sample = (): VisualInstructionDraft => ({ principal: 'a', status: 'draft',
   request: { version: 1, id: 'request-a', createdAt: '2026-10-19T12:00:00Z', target, utterance: 'Keep this button.',
     frames: [{ id: 'frame-a', atMs: 0, width: 80, height: 60, transcript: '', strokes: [], pins: [], image: { name: 'frame.png', dataUri: 'data:image/png;base64,iVBORw0KGgo=' } }] } });
 let root: Root; let node: HTMLDivElement;
+let withLive = false;
 const fetcher = vi.fn<typeof fetch>();
 const ordinarySend = vi.fn();
 const ordinaryChange = vi.fn();
@@ -61,7 +70,12 @@ async function dictate() {
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true }));
   });
 }
-function mount(scope = 'chat-a') { root.render(React.createElement(DictationHost, null, React.createElement(VisualComposerArea, {
+function mount(scope = 'chat-a') { root.render(React.createElement(DictationHost, null,
+  withLive ? React.createElement(ManagedChatVoiceEntry, {
+    identity: [target.threadId], visualTarget: target,
+    queue: { items: [], ready: true, error: null } as unknown as ComponentProps<typeof ManagedChatVoiceEntry>['queue'],
+    capture: () => sample().template, messages: [], terminals: {}, busy: false, send: ordinarySend, interrupt: () => {},
+  }) : null, React.createElement(VisualComposerArea, {
   visual: { active: true, target, label: 'current chat', capture: () => sample().template },
   activeComposer: true, dictationScopeKey: scope, showBrain: false, input: 'Unsent ordinary message', onInputChange: ordinaryChange, isOrchestratorMode: true,
   displayWaiting: false, chatMessages: [], activeTargetLabel: 'Codex', targetAgentExists: true, thoughtsBodyBackground: 'var(--t-chat-surface-bg)',
@@ -73,9 +87,11 @@ beforeEach(async () => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   test.principal = 'a'; test.rows.clear(); test.rows.set('a', sample()); test.hold = null; test.removal = null; test.receipt = null; test.receiptEdit = null; test.remove.mockClear(); test.listeners.clear(); fetcher.mockReset();
   inference.route.mockReset(); inference.provider.mockReset();
+  withLive = false; live.backend = null;
   inference.route.mockResolvedValue({ url: 'https://model.example.test/resolve', headers: {}, via: 'direct' });
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
   vi.stubGlobal('fetch', (url: RequestInfo | URL, options?: RequestInit) => {
+    if (url === '/api/voice/live') return Promise.resolve(Response.json({ enabled: true, entitled: true }));
     if (url === '/api/mobile/ripple/resolve') return resolveRipple(new NextRequest('http://localhost/api/mobile/ripple/resolve', { ...options, signal: options?.signal ?? undefined }));
     if (url === 'https://model.example.test/resolve') return inference.provider(url, options);
     if (url === '/api/orchestrator/visual-inspection') return Promise.resolve(Response.json({ status: 'unavailable' }));
@@ -85,7 +101,7 @@ beforeEach(async () => {
   ordinaryChange.mockClear(); test.cancel.mockClear(); test.dictation = 'idle'; test.words = null;
   await act(async () => mount());
 });
-afterEach(async () => { await act(async () => { releaseVisualCapture('capture'); root.unmount(); }); node.remove(); vi.useRealTimers(); vi.unstubAllGlobals(); });
+afterEach(async () => { await act(async () => { releaseVisualCapture('capture'); root.unmount(); }); node.remove(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 it('does not dispatch the old principal after a pending durable save', async () => {
   let release!: () => void; test.hold = new Promise<void>(done => { release = done; });
   await act(async () => send().click()); test.principal = 'b'; await act(async () => mount());
@@ -424,3 +440,99 @@ it('retains a newer draft edit arriving between advisory receipt publication and
   expect(fetcher).not.toHaveBeenCalled();
   expect(test.rows.get('a')).toMatchObject({ status: 'draft', request: { utterance: 'Keep these newer words unsent.' } });
 });
+
+// The 30 cells in docs/internals/visual-clarification-transitions.md.
+const questionStates = ['none', 'target open', 'target dismissed', 'target confirmed', 'meaning open', 'meaning answered'] as const;
+type QuestionState = typeof questionStates[number];
+const questionInputs = ['typed answer', 'Live answer', 'Send', 'Dismiss', 'timeout'] as const;
+async function startQuestionState(state: QuestionState) {
+  withLive = true;
+  vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue([{}] as unknown as DOMRectList);
+  await act(async () => mount());
+  inference.provider.mockImplementation(async () => providerResult(state === 'none' ? { kind: 'none' } : meaningChoice));
+  await meaningDraft('Make it bigger.', state === 'none' ? 1 : 2);
+  if (state !== 'none') await act(async () => send().click());
+  if (state === 'target dismissed') await act(async () => optionButton('Skip').click());
+  if (['target confirmed', 'meaning open', 'meaning answered'].includes(state)) {
+    await act(async () => optionButton('Left: Save').click());
+  }
+  if (['meaning open', 'meaning answered'].includes(state)) await act(async () => send().click());
+  if (state === 'meaning answered') await act(async () => optionButton('Button size').click());
+  expect(fetcher).not.toHaveBeenCalled();
+  await act(async () => node.querySelector<HTMLButtonElement>('[aria-label="Start managed voice for this conversation"]')!.click());
+  expect(live.backend).not.toBeNull();
+}
+async function liveAnswer(text: string) {
+  await act(async () => { void live.backend!.delegate(text, crypto.randomUUID(), async () => {}).catch(() => {}); });
+}
+function typeWords(words: string) {
+  const textarea = node.querySelector('textarea')!;
+  Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(textarea, words);
+  textarea.dispatchEvent(new Event('input', { bubbles: true }));
+}
+it.each(questionStates.flatMap(state => questionInputs.map(input => ({ state, input }))))(
+  'transition cell: $state / $input', async ({ state, input }) => {
+    await startQuestionState(state);
+    const before = structuredClone(test.rows.get('a')!);
+    const open = state === 'target open' || state === 'meaning open';
+    if (input === 'typed answer') {
+      await act(async () => {
+        if (open) questionSurface()!.dispatchEvent(new KeyboardEvent('keydown', { key: '1', bubbles: true, cancelable: true }));
+        else typeWords('Make it bigger. first');
+      });
+    } else if (input === 'Live answer') await liveAnswer('first');
+    else if (input === 'Send') await act(async () => send().click());
+    else if (input === 'Dismiss') await act(async () => (questionSurface() ?? node.querySelector('textarea')!)
+      .dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
+    else {
+      vi.useFakeTimers();
+      await act(async () => vi.advanceTimersByTimeAsync(1500));
+    }
+    const after = test.rows.get('a')!;
+    const sends = input === 'Send' && ['none', 'target dismissed', 'meaning answered'].includes(state) ? 1 : 0;
+    expect(fetcher).toHaveBeenCalledTimes(sends);
+    expect(ordinarySend).not.toHaveBeenCalled();
+    if (sends) {
+      expect(after.status).toBe('saved');
+      expect(sentInstruction().text).toBe(before.request.utterance);
+      if (state === 'meaning answered') expect(sentInstruction().wireMessage).toContain('intent.size = "button-size"');
+    } else if (input === 'typed answer' || input === 'Live answer') {
+      if (state === 'target open') expect(after.request.clarification?.value).toBe('button-0');
+      else if (state === 'meaning open') expect(after.meaningCheck).toMatchObject({ status: 'accepted', selectedValue: 'button-size' });
+      else if (input === 'typed answer') expect(after.request.utterance).toBe('Make it bigger. first');
+      else expect(after).toEqual(before);
+    } else if (input === 'Send' && state === 'target confirmed') {
+      expect(questionSurface()?.textContent).toContain('What should be bigger?');
+      expect(after.meaningCheck?.status).toBe('choice');
+    } else if (input === 'Dismiss' && open) {
+      if (state === 'target open') expect(after.visualQuestion?.dismissed).toBe(true);
+      else expect(after.meaningCheck?.status).toBe('dismissed');
+      expect(questionSurface()).toBeNull();
+    } else expect(after).toEqual(before);
+  },
+);
+
+it.each(['target dismissed', 'target confirmed', 'meaning answered'] as const)(
+  'consumes skip after an actual composer Send closes %s', async state => {
+    await startQuestionState(state);
+    inference.provider.mockImplementation(async () => providerResult({ kind: 'none' }));
+    await act(async () => send().click());
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    const before = structuredClone(test.rows.get('a')!);
+    fetcher.mockClear();
+    await liveAnswer('skip');
+    expect(fetcher).not.toHaveBeenCalled(); expect(ordinarySend).not.toHaveBeenCalled();
+    expect(test.rows.get('a')).toEqual(before);
+  },
+);
+
+it.each(['first', '1', 'Button size', 'button-size', 'skip'])(
+  'routes the current meaning answer before the closed target vocabulary: %s', async answer => {
+    await startQuestionState('meaning open');
+    await liveAnswer(answer);
+    expect(test.rows.get('a')?.meaningCheck).toMatchObject(answer === 'skip'
+      ? { status: 'dismissed' } : { status: 'accepted', selectedValue: 'button-size' });
+    expect(test.rows.get('a')?.request.clarification?.value).toBe('button-0');
+    expect(fetcher).not.toHaveBeenCalled(); expect(ordinarySend).not.toHaveBeenCalled();
+  },
+);

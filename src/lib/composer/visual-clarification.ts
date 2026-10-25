@@ -5,26 +5,43 @@ import type { RippleChoiceResolution } from '@/lib/mobile/ripple-contract';
 import { currentMeaningCheck } from './visual-meaning';
 
 const questions = new Map<string, { key: string; resolution: RippleChoiceResolution }>();
-const remembered = (draft: VisualInstructionDraft) => draft.visualQuestion ?? questions.get(scope(draft));
-const scope = (draft: VisualInstructionDraft) => JSON.stringify([draft.principal, draft.request.id]);
+const remembered = (draft: VisualInstructionDraft) => draft.visualQuestion ?? questions.get(draftScope(draft));
+const draftScope = (draft: VisualInstructionDraft) => JSON.stringify([draft.principal, draft.request.id]);
 const key = (draft: VisualInstructionDraft) => {
   const frame = draft.request.frames.at(-1);
   return frame?.observation ? inspectionKey({ principal: draft.principal, requestId: draft.request.id, observation: frame.observation,
     candidates: frame.candidates ?? [], utterance: draft.request.utterance }) : null;
 };
-export function currentVisualQuestion(draft: VisualInstructionDraft): RippleChoiceResolution | null {
+type QuestionState =
+  | { kind: 'none' }
+  | { kind: 'target open' | 'target dismissed' | 'target confirmed' | 'meaning open' | 'meaning answered'; question: RippleChoiceResolution };
+
+/** One active question owns answers. Delivery closes questions without erasing their vocabulary. */
+function questionState(draft: VisualInstructionDraft): QuestionState {
   const meaning = currentMeaningCheck(draft);
-  if (draft.status === 'draft' && meaning?.status === 'choice') return meaning.resolution ?? null;
-  const item = remembered(draft);
-  return draft.status === 'draft' && !draft.request.clarification && !draft.visualQuestion?.dismissed
-    && item?.key === key(draft) ? item.resolution : null;
+  if (meaning?.resolution) {
+    return { kind: draft.status === 'draft' && meaning.status === 'choice' ? 'meaning open' : 'meaning answered', question: meaning.resolution };
+  }
+  const target = remembered(draft);
+  if (!target || target.key !== key(draft)) return { kind: 'none' };
+  const kind = draft.visualQuestion?.dismissed ? 'target dismissed' : draft.request.clarification ? 'target confirmed'
+    : draft.status === 'draft' ? 'target open' : 'target dismissed';
+  return { kind, question: target.resolution };
+}
+export function currentVisualQuestion(draft: VisualInstructionDraft): RippleChoiceResolution | null {
+  const state = questionState(draft);
+  return state.kind === 'target open' || state.kind === 'meaning open' ? state.question : null;
 }
 /** Explicit optional clarification uses local evidence. Uncalibrated image judgments stay observational. */
 export function openVisualQuestion(draft: VisualInstructionDraft): RippleChoiceResolution | null {
-  const existing = currentVisualQuestion(draft); if (existing) return existing;
-  if (draft.visualQuestion?.dismissed && draft.visualQuestion.key === key(draft)) return null;
+  const state = questionState(draft);
+  switch (state.kind) {
+    case 'target open': case 'meaning open': return state.question;
+    case 'target dismissed': case 'target confirmed': case 'meaning answered': return null;
+    case 'none': break;
+  }
   const frame = draft.request.frames.at(-1); const inputKey = key(draft);
-  if (!inputKey || draft.request.clarification || !frame?.candidates || frame.candidates.length < 2 || frame.candidates.length > 4) return null;
+  if (draft.status !== 'draft' || !inputKey || draft.request.clarification || !frame?.candidates || frame.candidates.length < 2 || frame.candidates.length > 4) return null;
   const question: RippleChoiceResolution = { id: `question-${crypto.randomUUID()}`, kind: 'choice', aodlPath: 'intent.target',
     question: 'Which marked component should change?', options: frame.candidates.map((candidate, index, candidates) => {
       const other = candidates.length === 2 ? candidates[1 - index] : null;
@@ -34,7 +51,7 @@ export function openVisualQuestion(draft: VisualInstructionDraft): RippleChoiceR
       return { label: `${position}: ${candidate.name}`.slice(0, 64), value: candidate.id };
     }) };
   const pendingQuestion = { key: inputKey, resolution: question };
-  questions.set(scope(draft), pendingQuestion);
+  questions.set(draftScope(draft), pendingQuestion);
   void saveVisualDraft({ ...draft, visualQuestion: pendingQuestion }).catch(() => {});
   if (questions.size > 32) questions.delete(questions.keys().next().value!);
   return question;
@@ -42,7 +59,7 @@ export function openVisualQuestion(draft: VisualInstructionDraft): RippleChoiceR
 export async function confirmVisualQuestion(draft: VisualInstructionDraft, value: string) {
   const current = readVisualDraft(draft.principal, draft.request.target);
   const question = current && currentVisualQuestion(current);
-  if (!current || !question?.options.some(option => option.value === value)) return false;
+  if (!current || !question || currentVisualQuestion(draft)?.id !== question.id || !question.options.some(option => option.value === value)) return false;
   const meaning = currentMeaningCheck(current);
   if (meaning?.status === 'choice') {
     if (currentMeaningCheck(draft)?.key !== meaning.key) return false;
@@ -55,11 +72,13 @@ export async function confirmVisualQuestion(draft: VisualInstructionDraft, value
 }
 export async function dismissVisualQuestion(draft: VisualInstructionDraft) {
   const current = readVisualDraft(draft.principal, draft.request.target);
-  if (!current || current.status !== 'draft') return;
+  const question = current && currentVisualQuestion(current);
+  if (!current || !question || currentVisualQuestion(draft)?.id !== question.id) return;
+  const state = questionState(current);
   const meaning = currentMeaningCheck(current);
-  if (meaning?.status === 'choice' && currentMeaningCheck(draft)?.key === meaning.key) {
+  if (state.kind === 'meaning open' && meaning) {
     await saveVisualDraft({ ...current, meaningCheck: { ...meaning, status: 'dismissed' } }, { advisory: true });
-  } else if (key(current) === key(draft) && current.visualQuestion) {
+  } else if (state.kind === 'target open' && current.visualQuestion) {
     await saveVisualDraft({ ...current, visualQuestion: { ...current.visualQuestion, dismissed: true } });
   }
 }
@@ -70,41 +89,44 @@ export function visualQuestionContext(scope: VisualLiveScope) {
 }
 export async function answerVisualQuestion(scope: VisualLiveScope, text: string): Promise<string | null> {
   const draft = readVisualDraft(scope.principal, scope.target);
-  const prior = draft && remembered(draft);
+  if (!draft) return null;
+  const state = questionState(draft);
   const answer = text.trim().replace(/[.!?]+$/, '').toLowerCase();
-  const targetMatches = draft && prior ? prior.resolution.options.filter((option, index) => [option.value, option.label, draft.request.frames.at(-1)?.candidates?.[index]?.name, String(index + 1), ['first', 'second', 'third', 'fourth'][index], option.label.split(':')[0], `the ${option.label.split(':')[0].toLowerCase()} one`].some(value => value?.toLowerCase() === answer)) : [];
-  // Closed target answers must be consumed before status checks or a newer
-  // meaning question can let them fall through to ordinary Live submission.
-  if (draft && prior && targetMatches.length && (draft.status !== 'draft'
-    || prior.key === key(draft) && (draft.visualQuestion?.dismissed || draft.request.clarification))) {
-    return draft.status === 'draft' && draft.request.clarification && !draft.visualQuestion?.dismissed
-      ? 'That target is already confirmed. The marked draft has not been sent.'
-      : 'That clarification is closed. No new instruction has been sent.';
-  }
-  const meaning = draft && currentMeaningCheck(draft);
-  if (draft && meaning?.resolution) {
-    const matches = meaning.resolution.options.filter((option, index) => [option.value, option.label, String(index + 1), ['first', 'second', 'third', 'fourth'][index]].some(value => value.toLowerCase() === answer));
-    if (matches.length === 1 && draft.status !== 'draft' && ['accepted', 'dismissed'].includes(meaning.status)) return 'That clarification is closed. No new instruction has been sent.';
-    if (draft.status !== 'draft') return null;
-    if (meaning.status === 'choice' && answer === 'skip') { await dismissVisualQuestion(draft); return 'Clarification skipped. The marked draft has not been sent.'; }
-    if (matches.length === 1 && meaning.status === 'accepted') return 'That meaning is already confirmed. The marked draft has not been sent.';
-    if (matches.length === 1 && meaning.status === 'dismissed') return 'That clarification was dismissed. The marked draft has not been sent. Use Send in the composer when ready.';
-    if (meaning.status === 'choice') {
-      if (matches.length === 1 && await confirmVisualQuestion(draft, matches[0].value)) return 'That meaning is confirmed in the marked draft. It has not been sent.';
-      return `${meaning.resolution.question} ${meaning.resolution.options.map(option => option.label).join('; ')}. The draft has not been sent.`;
+  switch (state.kind) {
+    case 'target open': case 'meaning open': {
+      if (answer === 'skip') { await dismissVisualQuestion(draft); return 'Clarification skipped. The marked draft has not been sent.'; }
+      const matches = matchingOptions(draft, state.question, answer);
+      if (matches.length === 1 && await confirmVisualQuestion(draft, matches[0].value)) {
+        return `That ${state.kind === 'target open' ? 'target' : 'meaning'} is confirmed in the marked draft. It has not been sent.`;
+      }
+      return `${state.question.question} ${state.question.options.map(option => option.label).join('; ')}. The draft has not been sent.`;
     }
-    return null;
+    case 'none': case 'target dismissed': case 'target confirmed': case 'meaning answered': {
+      const prior = remembered(draft);
+      if (state.kind === 'none' && draft.status === 'draft' && prior && prior.key !== key(draft)) {
+        questions.delete(draftScope(draft));
+        await saveVisualDraft({ ...draft, visualQuestion: undefined });
+        return 'The marked target or instruction changed. Review the current draft before answering or sending.';
+      }
+      const closed = [prior?.resolution, draft.meaningCheck?.resolution];
+      const isAnswer = /^(skip|[1-4]|first|second|third|fourth)$/.test(answer)
+        || closed.some(question => question && matchingOptions(draft, question, answer).length > 0);
+      if (!isAnswer) return null;
+      if (draft.status !== 'draft' || state.kind === 'target dismissed') return 'That clarification is closed. No new instruction has been sent.';
+      if (state.kind === 'target confirmed') return 'That target is already confirmed. The marked draft has not been sent.';
+      if (state.kind === 'meaning answered' && draft.meaningCheck?.status === 'accepted') return 'That meaning is already confirmed. The marked draft has not been sent.';
+      return 'No clarification is open. The marked draft has not been sent. Use Send in the composer when ready.';
+    }
   }
-  if (draft && draft.status !== 'draft') return null;
-  if (!draft || !prior) return null;
-  if (prior.key !== key(draft)) { questions.delete(JSON.stringify([draft.principal, draft.request.id])); await saveVisualDraft({ ...draft, visualQuestion: undefined }); return 'The marked target or instruction changed. Review the current draft before answering or sending.'; }
-  const question = prior.resolution;
-  if (draft.visualQuestion?.dismissed) return null;
-  if (answer === 'skip') { await dismissVisualQuestion(draft); return 'Clarification skipped. The marked draft has not been sent.'; }
-  const matches = targetMatches;
-  if (draft.request.clarification) return matches.length === 1 ? 'That target is already confirmed. The marked draft has not been sent.' : null;
-  if (matches.length !== 1) return `${question.question} ${question.options.map((option, index) => `${index + 1}: ${option.label}`).join('. ')}. The draft has not been sent.`;
-  return await confirmVisualQuestion(draft, matches[0].value) ? 'That target is confirmed in the marked draft. It has not been sent.' : 'The marked draft changed. Review the current target in the composer.';
+}
+
+function matchingOptions(draft: VisualInstructionDraft, question: RippleChoiceResolution, answer: string) {
+  return question.options.filter((option, index) => {
+    const aliases = [option.value, option.label, String(index + 1), ['first', 'second', 'third', 'fourth'][index]];
+    if (question.id === remembered(draft)?.resolution.id) aliases.push(draft.request.frames.at(-1)?.candidates?.[index]?.name ?? '',
+      option.label.split(':')[0], `the ${option.label.split(':')[0].toLowerCase()} one`);
+    return aliases.some(value => value.toLowerCase() === answer);
+  });
 }
 
 export function visualQuestionEvidence(draft: VisualInstructionDraft) {
