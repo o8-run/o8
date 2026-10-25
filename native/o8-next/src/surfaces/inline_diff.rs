@@ -45,6 +45,24 @@ mod tests;
 
 // Request adapters compile with this surface through its existing shell entry.
 impl Client {
+    pub(crate) fn inline_approval_evidence(&self, packet: &str, id: &str) -> Result<Value, String> {
+        let mut url = self.url("/api/orchestrator/review-state").unwrap();
+        url.query_pairs_mut().extend_pairs([
+            ("packetId", packet),
+            ("spoken", "1"),
+            ("approvalId", id),
+        ]);
+        // Spoken proof rebuilds the Git and governance gates on the server.
+        let response = self
+            .request("GET", &url)
+            .timeout(Duration::from_secs(180))
+            .call()
+            .map_err(|error| match error {
+                ureq::Error::Status(code, _) => format!("Server returned HTTP {code}"),
+                _ => "Approval evidence is not ready. Retry Review approval.".into(),
+            })?;
+        Self::read(response)
+    }
     pub(crate) fn inline_confirm_receipt(
         &self,
         packet: &str,

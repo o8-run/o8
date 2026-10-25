@@ -6,6 +6,8 @@ The disposable host discovers its fixture entry without shared dispatcher edits.
 
 Inline fixtures publish readiness only after production read paths finish. Held fixtures also read spoken diff evidence and verify its HEAD and fingerprint before starting native transport requests. Once the card exists, tests wait for its approval-bound read paths before clicking Review or Confirm. These probes preserve injected UI evidence outages for native requests and never resolve an approval.
 
+Spoken approval evidence has a bounded read-only request window for rebuilding server-side Git and governance checks. The ordinary held regression delays its first two native evidence reads beyond the shared five-second transport window, then requires exactly one approval POST. Supervised inline fixtures retain their server through the shared development host's deadline and release it through normal owner cleanup.
+
 The shared `main.rs`, `client.rs`, `diff.rs`, `diff_ui.rs`, workspace state, shell view, shell tests and development host match main. The shell inventory adds one InlineDiff entry. Its Merge and Confirm request adapters compile with that entry and use the shared authenticated transport. Use **Open inline diff** in the palette. Inline palette and restart assertions belong to the surface's existing reachability test.
 
 Base belongs to the selected packet: opening another packet resets it to that lane's base, while reopening the same packet retains its explicit override. Inline privacy and long-line bounding run in the inline background loader. Standalone parsing and review retain main's behavior.

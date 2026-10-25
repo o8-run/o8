@@ -10,7 +10,7 @@ Written before the final-round changes for #4665. All repositories, approvals an
 | Committed packet and packet A → B → A | Native Open packet and Compare | Each packet uses its own base; same-packet explicit override survives |
 | Standalone diff and long lines | Existing standalone viewer | Main's parser, renderer and approval behavior remain intact |
 | Private, binary, traversal, truncated and very long input | Production routes and native cells/clipboard | No canary disclosure; bounded read-only previews and mutation refusal |
-| Ordinary held Confirm | Native Confirm and production approval POST | Exactly one POST for the original approval; durable completion advances the owned base |
+| Ordinary held Confirm | Native Confirm and production approval POST, with two evidence reads delayed beyond five seconds | Exactly one POST for the original approval; durable completion advances the owned base |
 | Policy-held Confirm | Native Confirm with normal and unavailable initial proof | Same approval, one approval POST; read-only proof recovery sends zero POSTs |
 | HEAD, review, contract, runtime, stop, restriction and dirty changes | Native Confirm and production gates | No unsafe merge; held approval remains pending; repaired state requires explicit review/Confirm |
 | Late governance change | Production approval claim/publication fence | Refusal after the POST retains the card and base |

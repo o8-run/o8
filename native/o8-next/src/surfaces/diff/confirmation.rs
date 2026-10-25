@@ -2,14 +2,7 @@
 use super::*;
 
 pub(super) fn evidence(client: &Client, held: &HeldApproval) -> Result<(Value, Value), String> {
-    let receipt: Value = client.get(
-        "/api/orchestrator/review-state",
-        &[
-            ("packetId", &held.packet),
-            ("spoken", "1"),
-            ("approvalId", &held.id),
-        ],
-    )?;
+    let receipt = client.inline_approval_evidence(&held.packet, &held.id)?;
     let facts = &receipt["spokenReview"]["evidence"];
     let fingerprint = |name: &str| {
         facts[name]

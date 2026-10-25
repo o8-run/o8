@@ -1,6 +1,24 @@
 import { writeFileSync } from 'node:fs';
+import { setTimeout as delay } from 'node:timers/promises';
 import { NextRequest } from 'next/server';
 import type { SurfaceContext, SurfaceRoutes } from '../surface-routes';
+export async function prepare(): Promise<SurfaceRoutes> {
+  const owner = Number(process.env.O8_NEXT_INLINE_OWNER_PID);
+  if (!process.argv.includes('--inline') || !Number.isSafeInteger(owner) || owner <= 1 || owner !== process.ppid) return {};
+  let stopping = false;
+  let closing = false;
+  for (const signal of ['SIGTERM', 'SIGINT'] as const) process.once(signal, () => { stopping = true; });
+  return { priority: -1, close: async () => {
+    // The shared host's deadline reaches this hook first. Keep serving the owned
+    // fixture until its supervisor stops it, then let one close sequence finish.
+    if (closing) return new Promise<void>(() => {});
+    closing = true;
+    while (!stopping) {
+      try { process.kill(owner, 0); } catch { break; }
+      await delay(100);
+    }
+  } };
+}
 export default async function register({ repo, fixtureToken }: SurfaceContext): Promise<SurfaceRoutes> {
   if (!process.argv.includes('--inline') || process.argv.includes('--settings')) return {};
   const policyHeld = process.argv.includes('--inline-policy-held');
@@ -57,6 +75,7 @@ export default async function register({ repo, fixtureToken }: SurfaceContext): 
   let confirmation: string | null = null;
   let confirmationLost = false;
   let evidenceUnavailable = false;
+  let delayedEvidenceReads = 0;
   const requests: string[] = [];
   const control = async (request: import('next/server').NextRequest) => {
     try { await held!.change((await request.json()).change); return Response.json({ ok: true }); }
@@ -75,7 +94,7 @@ export default async function register({ repo, fixtureToken }: SurfaceContext): 
       'GET /api/panel/approvals': approvals.GET, 'POST /api/panel/approvals': approvals.POST,
       'GET /api/orchestrator/merge-preview': preview.GET,
       ...(held ? { 'POST /api/orchestrator/inline-fixture-control': control } : {}),
-      'GET /api/orchestrator/inline-fixture-log': async () => Response.json({ mutation, confirmation, requests, readinessAttempts, readinessSpoken, readinessApproval, held: held?.snapshot() }),
+      'GET /api/orchestrator/inline-fixture-log': async () => Response.json({ mutation, confirmation, requests, readinessAttempts, readinessSpoken, readinessApproval, delayedEvidenceReads, held: held?.snapshot() }),
       ...Object.fromEntries(['next-review-approve', 'next-review-reject'].map(id => [
         `GET /api/lanes/${id}/diff`, request => diff.GET(request, { params: Promise.resolve({ id }) }),
       ])),
@@ -108,6 +127,11 @@ export default async function register({ repo, fixtureToken }: SurfaceContext): 
       return false;
     },
     run: async (route, request) => {
+      if (process.argv.includes('--inline-evidence-slow-first') && route === review.GET
+        && request.nextUrl.searchParams.get('spoken') === '1' && delayedEvidenceReads < 2) {
+        delayedEvidenceReads++;
+        await delay(6_000);
+      }
       if (process.argv.includes('--inline-evidence-fail-first') && route === review.GET
         && request.nextUrl.searchParams.get('spoken') === '1' && !evidenceUnavailable) {
         evidenceUnavailable = true; return Response.json({ error: 'Fixture evidence temporarily unavailable' }, { status: 503 });

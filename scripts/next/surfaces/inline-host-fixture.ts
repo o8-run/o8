@@ -8,7 +8,8 @@ type Receipt = Record<string, unknown> & { origin: string };
 
 export async function startInlineHost(options = ['--inline'], token = process.env.O8_NEXT_API_TOKEN ?? 'fixture-inline-operator') {
   const host = spawn(process.execPath, ['--import', './scripts/register-server-only-stub.mjs', '--import', 'tsx',
-    'scripts/next/dev-server.ts', ...options], { env: { ...process.env, O8_NEXT_API_TOKEN: token }, stdio: ['ignore', 'pipe', 'pipe'] });
+    'scripts/next/dev-server.ts', ...options], { env: { ...process.env, O8_NEXT_API_TOKEN: token,
+      O8_NEXT_INLINE_OWNER_PID: String(process.pid) }, stdio: ['ignore', 'pipe', 'pipe'] });
   let diagnostic = '';
   host.stderr.on('data', chunk => {
     diagnostic = (diagnostic + String(chunk)).slice(-8192);

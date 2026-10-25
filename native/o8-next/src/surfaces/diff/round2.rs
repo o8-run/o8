@@ -399,6 +399,12 @@ fn held_confirmation_mode(cx: &mut TestAppContext, change: Option<&str>, mode: &
             assert_eq!(completed["held"]["currentBase"], before["held"]["head"]);
         }
     } else {
+        if mode.contains("--inline-evidence-slow-first") {
+            assert_eq!(
+                after["delayedEvidenceReads"], 2,
+                "initial proof and Confirm must wait for slow production evidence"
+            );
+        }
         assert_eq!(
             after["requests"]
                 .as_array()
@@ -457,7 +463,7 @@ fn held_confirmation_mode(cx: &mut TestAppContext, change: Option<&str>, mode: &
 
 #[gpui::test]
 fn held_merge_offers_confirm_and_completes_its_approval(cx: &mut TestAppContext) {
-    held_confirmation(cx, None, false);
+    held_confirmation_mode(cx, None, "--inline-held --inline-evidence-slow-first");
 }
 
 #[gpui::test]
