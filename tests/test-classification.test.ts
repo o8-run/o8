@@ -88,7 +88,7 @@ describe('test factory classification', () => {
   });
 });
 
-function datedFixture(testSource: string, contractSource = 'export const contract = { expiresAt: Date.UTC(2030, 0, 9) };') {
+function datedFixture(testSource: string, contractSource = 'export const contract = { expiresAt: Date.UTC(2030, 0, 9) };', restoreClock = true) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'o8-dated-fixture-')));
   mkdirSync(join(root, 'tests/fixtures'), { recursive: true });
   mkdirSync(join(root, 'src'));
@@ -103,15 +103,81 @@ function datedFixture(testSource: string, contractSource = 'export const contrac
     }
   `);
   writeFileSync(join(root, 'tests/clock.test.ts'), `
-    import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+    import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
     import { check } from './fixtures/check';
     ${testSource}
-    afterEach(() => vi.useRealTimers());
+    ${restoreClock ? 'afterEach(() => vi.useRealTimers());' : ''}
   `);
   return root;
 }
 
 describe('dated fixture PR gate', () => {
+  it('rejects a fixture validation masked by a leaking pin in an unrelated suite', () => {
+    const root = datedFixture(`
+      describe('unrelated suite', () => {
+        beforeAll(() => vi.setSystemTime(Date.UTC(2029, 0, 1)));
+        it('uses its own clock', () => expect(Date.now()).toBe(Date.UTC(2029, 0, 1)));
+      });
+      describe('fixture validation', () => {
+        it('validates without its own pin', () => check());
+      });
+      afterAll(() => vi.useRealTimers());
+    `, undefined, false);
+    try {
+      const result = runClassification(root, '--write');
+      expect(result.status, result.stderr).toBe(1);
+      expect(result.stderr).toContain('[dated-fixtures] tests/clock.test.ts');
+      expect(result.stderr).toContain('validates without its own pin');
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it('requires a fixture clock pin to be restored after the isolated test', () => {
+    const root = datedFixture("it('valid', () => { vi.setSystemTime(0); check(); });", undefined, false);
+    try {
+      const result = runClassification(root, '--write');
+      expect(result.status, result.stderr).toBe(1);
+      expect(result.stderr).toContain('restore');
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it('does not borrow a pin installed while an unrelated describe is collected', () => {
+    const root = datedFixture(`
+      describe('unrelated suite', () => {
+        vi.setSystemTime(Date.UTC(2029, 0, 1));
+        it('does not validate a fixture', () => expect(Date.now()).toBeGreaterThan(0));
+      });
+      describe('fixture validation', () => {
+        it('validates without its own pin', () => check());
+      });
+      afterAll(() => vi.useRealTimers());
+    `, undefined, false);
+    try {
+      const result = runClassification(root, '--write');
+      expect(result.status, result.stderr).toBe(1);
+      expect(result.stderr).toContain('validates without its own pin');
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it('accepts legitimate Date.now use and a pin owned and restored by its describe', () => {
+    const root = datedFixture(`
+      describe('elapsed time', () => {
+        it('uses the advancing real clock', () => {
+          const start = Date.now();
+          expect(Date.now() - start).toBeGreaterThanOrEqual(0);
+        });
+      });
+      describe('fixture validation', () => {
+        beforeAll(() => vi.setSystemTime(Date.UTC(2029, 0, 1)));
+        afterAll(() => vi.useRealTimers());
+        it('uses its own pin', () => check());
+      });
+    `, undefined, false);
+    try {
+      const result = runClassification(root, '--write');
+      expect(result.status, result.stderr).toBe(0);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
   it.each(['earlier hook', 'import evaluation'])('rejects wall-time validation during %s despite a later clock pin', (stage) => {
     const root = datedFixture(`
       ${stage === 'earlier hook' ? 'beforeEach(() => check());' : ''}
@@ -152,6 +218,7 @@ describe('dated fixture PR gate', () => {
       vi.hoisted(() => {
         vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(Date.UTC(2029, 0, 1));
       });
+      beforeEach(() => vi.setSystemTime(Date.UTC(2029, 0, 1)));
       it('valid', () => check());
     `);
     try {
@@ -174,6 +241,17 @@ describe('dated fixture PR gate', () => {
       const result = runClassification(root, '--write');
       expect(result.status, result.stderr).toBe(0);
       expect(result.stdout).toContain('passed with Date after');
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it('isolates parameterized cases even when their test names are identical', () => {
+    const root = datedFixture(`
+      it.each([1, 2])('same title', () => { vi.setSystemTime(0); check(); });
+    `);
+    try {
+      const result = runClassification(root, '--write');
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout).toContain('2 isolated tests passed');
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 

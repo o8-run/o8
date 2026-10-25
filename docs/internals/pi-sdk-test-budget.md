@@ -79,17 +79,26 @@ including the file, line, and UTC expiry; the warning does not fail the command
 or alter the manifest.
 
 The audit follows local imports and static JSON fixture paths, then runs each
-referencing hermetic test file through Vitest with Date past its latest fixed
-expiry. The probe installs an advancing future clock at worker startup, before
-Vitest captures Date, so restoring timers also restores the probe clock. It uses
-the regular isolated-data setup and requires a successful report for exactly
-that file. A failed import, hook, assertion, timeout, or missing report fails
-classification. A later clock-pinning hook cannot hide earlier validation.
+referencing hermetic test through Vitest with Date past its latest fixed expiry.
+After collection, each test ID runs in a fresh process with only its ancestor
+hooks, including parameterized cases with identical names. The probe installs
+an advancing future clock at worker startup, before Vitest captures Date, so
+restoring timers also restores the probe clock. It clears collection-time pins
+before the selected test's hooks and verifies Date is restored after cleanup.
+An unrelated suite cannot lend a later test its clock. Ordinary Date.now() use
+continues to work under the advancing clock.
+
+The probe uses the regular isolated-data setup and requires a successful report
+for exactly one passing test in the expected canonical file. A failed import,
+hook, assertion, timeout, clock restoration, or missing report fails classification.
+A later clock-pinning hook cannot hide earlier validation.
 
 Pin Date before the validation executes. For validation inside tests or hooks,
 place `vi.useFakeTimers({ toFake: ['Date'] })` and a fixed
 `vi.setSystemTime(...)` before the validating hook. For import-time validation,
-pin the clock in `vi.hoisted` before importing the module. Restore timers in
-`afterEach`. An explicit `now` in `useFakeTimers` also works. Relative expiries
+pin the clock in `vi.hoisted` before importing the module, and pin it again in
+the test's hook when the test also validates the fixture. Restore timers in
+`afterEach` or the owning describe's `afterAll`. An explicit `now` in
+`useFakeTimers` also works. Relative expiries
 such as `Date.now() + 60_000` do not select a future-clock probe. The seven-day
 warning still uses the classification command's actual clock.

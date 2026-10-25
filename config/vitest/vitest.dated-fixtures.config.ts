@@ -16,6 +16,8 @@ export default defineConfig({
   test: {
     ...sharedVitestConfig.test,
     name: 'dated-fixture-probe',
+    runner: path.join(repoRoot, 'config/vitest/dated-fixture-runner.ts'),
+    allowOnly: false,
     // Escape literal route segments such as [taskId] rather than globbing them.
     include: [file.replace(/[\\[\]{}()*?!]/g, '\\$&')],
     globalSetup: sharedVitestConfig.test.globalSetup.map(file => path.join(repoRoot, file)),
