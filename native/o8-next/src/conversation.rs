@@ -234,42 +234,54 @@ impl Surface {
         let queue = queue
             .into_iter()
             .filter(|item| item["status"] != "applied" && item["status"] != "cancelled");
-        let routing = self
+        let routing: Vec<String> = self
             .routing
             .as_ref()
             .map(|r| {
-                format!(
-                    "Solo · {} · {} · {}",
+                [
+                    "Solo",
                     r["backend"].as_str().unwrap_or(""),
                     r["model"].as_str().unwrap_or(""),
-                    r["permissionMode"].as_str().unwrap_or("")
-                )
+                    r["permissionMode"].as_str().unwrap_or(""),
+                ]
+                .into_iter()
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned)
+                .collect()
             })
-            .unwrap_or_else(|| "Waiting for saved session routing…".into());
+            .unwrap_or_default();
         div()
-            .px(px(24.))
-            .py(px(8.))
+            .id("composer-card").debug_selector(|| "composer-card".into())
+            .w_full().max_w(px(crate::theme::GEOMETRY.composer_width)).mx_auto()
+            .rounded(px(crate::theme::GEOMETRY.composer_radius))
+            .border_1().border_color(theme().border)
+            .p(px(crate::theme::GEOMETRY.gap))
             .flex()
             .flex_col()
             .gap(px(8.))
             .child(self.composer.clone())
             .child(
                 div()
-                    .text_size(px(10.))
-                    .text_color(theme().text_muted)
-                    .child(routing),
-            )
-            .child(
-                div()
                     .flex()
-                    .gap(px(8.))
+                    .flex_wrap()
+                    .justify_end()
+                    .text_size(px(crate::theme::TYPE.chrome))
+                    .gap(px(crate::theme::GEOMETRY.gap))
+                    .children(routing.into_iter().map(|label| div()
+                        .h(px(crate::theme::GEOMETRY.tab_height))
+                        .px(px(crate::theme::GEOMETRY.gap))
+                        .rounded(px(crate::theme::GEOMETRY.tab_radius))
+                        .text_size(px(crate::theme::TYPE.chrome))
+                        .font_weight(crate::theme::TYPE.weight)
+                        .flex().items_center().child(label)))
                     .child(
                         div()
                             .id("send-mode")
                             .debug_selector(|| "send-mode".into())
                             .px(px(10.))
-                            .py(px(5.))
-                            .rounded(px(7.))
+                            .h(px(crate::theme::GEOMETRY.tab_height))
+                            .flex().items_center()
+                            .rounded(px(crate::theme::GEOMETRY.tab_radius))
                             .cursor_pointer()
                             .child("⌄")
                             .on_click(cx.listener(|this, _, _, cx| {
@@ -283,13 +295,10 @@ impl Surface {
                         div()
                             .id("send")
                             .px(px(10.))
-                            .py(px(5.))
-                            .rounded(px(7.))
-                            .bg(if enabled {
-                                theme().accent
-                            } else {
-                                theme().surface_raised
-                            })
+                            .h(px(crate::theme::GEOMETRY.tab_height))
+                            .flex().items_center()
+                            .rounded(px(crate::theme::GEOMETRY.tab_radius))
+                            .bg(if enabled { theme().accent } else { theme().surface_raised })
                             .debug_selector(move || mode.into())
                             .child(if self.saving { "Saving…" } else { mode })
                             .on_click(cx.listener(|this, _, _, cx| this.send(None, cx))),

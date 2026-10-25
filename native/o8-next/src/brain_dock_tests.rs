@@ -13,9 +13,15 @@ fn brain_dock_returns_focus_and_keeps_each_session_draft(cx: &mut TestAppContext
     let open = cx.debug_bounds("open-brain").unwrap();
     cx.simulate_click(open.center(), gpui::Modifiers::default());
     cx.simulate_input("first Brain draft");
+    cx.simulate_resize(size(px(900.), px(700.)));
+    cx.update(|window, cx| {
+        window.refresh();
+        window.draw(cx).clear();
+    });
+    cx.simulate_input(" after resize");
     let first = surface.read_with(cx, |s, _| s.brains["thoughts-composer-first"].clone());
     first.read_with(cx, |b, cx| {
-        assert_eq!(b.composer.read(cx).text, "first Brain draft")
+        assert_eq!(b.composer.read(cx).text, "first Brain draft after resize")
     });
     cx.simulate_keystrokes("escape");
     cx.run_until_parked();
@@ -41,6 +47,6 @@ fn brain_dock_returns_focus_and_keeps_each_session_draft(cx: &mut TestAppContext
     cx.run_until_parked();
     cx.simulate_keystrokes("ctrl-e");
     first.read_with(cx, |b, cx| {
-        assert_eq!(b.composer.read(cx).text, "first Brain draft")
+        assert_eq!(b.composer.read(cx).text, "first Brain draft after resize")
     });
 }

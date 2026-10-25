@@ -1,0 +1,20 @@
+running 2 tests
+test shell::tests::placement_shell_tabs_use_compact_rows ... 
+thread 'shell::tests::placement_shell_tabs_use_compact_rows' (34483) panicked at src/shell_tests.rs:12:52:
+top tab geometry
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+test ui::tests::placement_empty_state_composer_and_right_panel ... 
+thread 'ui::tests::placement_empty_state_composer_and_right_panel' (34542) panicked at src/surface_tests.rs:93:54:
+empty history must render the centred build prompt
+FAILED
+
+failures:
+
+failures:
+    shell::tests::placement_shell_tabs_use_compact_rows
+    ui::tests::placement_empty_state_composer_and_right_panel
+
+test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 133 filtered out; finished in 2.23s
+
+error: test failed, to rerun pass `--bin o8-next`

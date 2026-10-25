@@ -7,6 +7,8 @@ mod composer_bench;
 mod conversation;
 #[path = "history.rs"]
 mod history;
+#[path = "session_sidebar.rs"]
+mod session_sidebar;
 #[path = "shell_session.rs"]
 mod shell_session;
 use crate::{
@@ -341,11 +343,25 @@ impl Surface {
 }
 
 impl Render for Surface {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let rows = self.rows.clone();
         let painted_rows = self.painted_rows.clone();
         let painted = self.painted.clone();
         let revision = self.key_revision;
+        let geometry = &crate::theme::GEOMETRY;
+        let typography = &crate::theme::TYPE;
+        let viewport = f32::from(window.viewport_size().width);
+        let sidebar_width = (viewport * 0.25).min(geometry.sidebar_width);
+        let right_width = (viewport * 0.30).min(geometry.right_width);
+        let empty = self.transcript.is_some() && self.rows.is_empty();
+        let repository = self
+            .sessions
+            .iter()
+            .find(|session| Some(&session.id) == self.selected.as_ref())
+            .and_then(|session| session.repo_path.as_deref())
+            .and_then(|path| std::path::Path::new(path).file_name())
+            .map(|name| name.to_string_lossy().to_string())
+            .unwrap_or_else(|| "this workspace".into());
         div()
             .size_full()
             .flex()
@@ -353,8 +369,9 @@ impl Render for Surface {
             .bg(theme().background)
             .text_color(theme().text)
             .font_family(theme().font_ui)
-            .font_weight(gpui::FontWeight::LIGHT)
-            .text_size(px(13.))
+            .font_weight(typography.weight)
+            .text_size(px(typography.body))
+            .line_height(gpui::relative(typography.chrome_line))
             .track_focus(&self.focus)
             .capture_key_down(cx.listener(Self::brain_key))
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
@@ -430,7 +447,7 @@ impl Render for Surface {
             .when(!self.embedded, |view| {
                 view.child(
                     div()
-                        .h(px(40.))
+                        .h(px(geometry.header))
                         .px(px(16.))
                         .flex()
                         .items_center()
@@ -456,78 +473,9 @@ impl Render for Surface {
                     .flex()
                     .flex_1()
                     .min_h_0()
-                    .child(
-                        div()
-                            .id("sessions")
-                            .w(px(250.))
-                            .flex_shrink_0()
-                            .overflow_y_scroll()
-                            .px(px(8.))
-                            .children(
-                                sidebar::tree(&self.sessions, self.selected.as_deref())
-                                    .into_iter()
-                                    .map(|group| {
-                                        div()
-                                            .mt(px(16.))
-                                            .child(
-                                                div()
-                                                    .px(px(12.))
-                                                    .mb(px(6.))
-                                                    .text_size(px(10.))
-                                                    .text_color(theme().text_muted)
-                                                    .child(match group.kind {
-                                                        "working" => "Working",
-                                                        "review" => "Review",
-                                                        _ => "Recent",
-                                                    }),
-                                            )
-                                            .children(group.rows.into_iter().map(|session| {
-                                                let id = session.id.clone();
-                                                let selector = id.clone();
-                                                div()
-                                                    .id(gpui::ElementId::Name(id.clone().into()))
-                                                    .debug_selector(move || {
-                                                        format!("session-{selector}")
-                                                    })
-                                                    .px(px(12.))
-                                                    .py(px(5.))
-                                                    .rounded(px(8.))
-                                                    .cursor_pointer()
-                                                    .bg(if session.selected {
-                                                        theme().selection
-                                                    } else {
-                                                        theme().background
-                                                    })
-                                                    .child(
-                                                        div()
-                                                            .text_size(px(13.5))
-                                                            .child(session.title),
-                                                    )
-                                                    .child(
-                                                        div()
-                                                            .mt(px(4.))
-                                                            .text_size(px(9.5))
-                                                            .text_color(theme().text_muted)
-                                                            .child(format!(
-                                                                "{} · {}",
-                                                                self.sessions
-                                                                    .iter()
-                                                                    .find(|s| s.id == session.id)
-                                                                    .map(|s| s.runtime.as_str())
-                                                                    .unwrap_or(""),
-                                                                session.status
-                                                            )),
-                                                    )
-                                                    .on_click(cx.listener(
-                                                        move |this, _, window, cx| {
-                                                            this.select(id.clone(), cx);
-                                                            this.focus.focus(window);
-                                                        },
-                                                    ))
-                                            }))
-                                    }),
-                            ),
-                    )
+                    .p(px(geometry.inset))
+                    .gap(px(geometry.gap))
+                    .child(self.session_sidebar(px(sidebar_width), cx))
                     .child(
                         div()
                             .flex()
@@ -545,24 +493,55 @@ impl Render for Surface {
                                 )
                             })
                             .child(self.history_control(cx))
-                            .child(
-                                list(self.list.clone(), {
-                                    let list_state = self.list.clone();
-                                    move |index, _, _| {
-                                        RetainedRow {
-                                            state: rows[index].clone(),
-                                            index,
-                                            painted: painted_rows.clone(),
+                            .when(!empty, |view| {
+                                view.child(
+                                    list(self.list.clone(), {
+                                        let list_state = self.list.clone();
+                                        move |index, _, _| {
+                                            RetainedRow {
+                                                state: rows[index].clone(),
+                                                index,
+                                                painted: painted_rows.clone(),
+                                            }
+                                            .interactive(&list_state)
                                         }
-                                        .interactive(&list_state)
-                                    }
-                                })
-                                .flex_1()
-                                .min_h_0(),
-                            )
-                            .child(self.brain_panel(cx))
-                            .child(self.composer_panel(cx)),
-                    ),
+                                    })
+                                    .flex_1()
+                                    .min_h_0(),
+                                )
+                            })
+                            .when(empty, |view| {
+                                view.child(
+                                    div()
+                                        .flex_1()
+                                        .min_h_0()
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .px(px(geometry.content_inset))
+                                        .child(
+                                            div()
+                                                .debug_selector(|| "session-empty".into())
+                                                .w_full()
+                                                .text_center()
+                                                .text_size(px(typography.empty))
+                                                .font_weight(typography.weight)
+                                                .line_height(gpui::relative(1.2))
+                                                .child(format!(
+                                                    "What should we build in {repository}?"
+                                                )),
+                                        ),
+                                )
+                            })
+                            .child(
+                                div()
+                                    .flex_shrink_0()
+                                    .px(px(geometry.content_inset))
+                                    .pb(px(geometry.gap * 2.))
+                                    .child(self.composer_panel(cx)),
+                            ),
+                    )
+                    .child(self.brain_panel(px(right_width), cx)),
             )
             .child(
                 canvas(

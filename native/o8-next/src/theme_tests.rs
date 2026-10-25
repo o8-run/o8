@@ -108,6 +108,71 @@ fn native_styles_use_theme_tokens() {
     );
 }
 
+#[test]
+fn chrome_metrics_follow_the_locked_desktop_sources() {
+    use crate::theme::{GEOMETRY, TYPE};
+    let spec = include_str!("../../../docs/design/hurttlocker.md");
+    let number = Regex::new(r"\d+(?:\.\d+)?").unwrap();
+    for (role, size, weight) in [
+        ("Row title", TYPE.row_title, TYPE.weight.0),
+        ("Row meta", TYPE.row_meta, TYPE.meta_weight.0),
+        ("Tab pill", TYPE.chrome, TYPE.weight.0),
+    ] {
+        let row = spec
+            .lines()
+            .find(|line| line.starts_with(&format!("| **{role}**")))
+            .unwrap();
+        let cells: Vec<_> = row.split('|').collect();
+        let value = |cell: &str| number.find(cell).unwrap().as_str().parse::<f32>().unwrap();
+        assert_eq!(size, value(cells[2]), "{role} size");
+        assert_eq!(weight, value(cells[3]), "{role} weight");
+    }
+    for (source, key, native) in [
+        (
+            include_str!("../../../src/components/desktop/shell/shell-geometry.ts"),
+            "SHELL_HEADER_HEIGHT",
+            GEOMETRY.header,
+        ),
+        (
+            include_str!("../../../src/components/desktop/shell/shell-geometry.ts"),
+            "SHELL_EDGE_INSET",
+            GEOMETRY.inset,
+        ),
+        (
+            include_str!("../../../src/components/desktop/repo-focus/tabs/chats/constants.ts"),
+            "COMPACT_CHAT_ROW_HEIGHT",
+            GEOMETRY.row_height,
+        ),
+        (
+            include_str!("../../../src/components/desktop/repo-focus/tabs/chats/constants.ts"),
+            "CHAT_ROW_RADIUS",
+            GEOMETRY.row_radius,
+        ),
+    ] {
+        let pattern = Regex::new(&format!(r"export const {key} = ([\d.]+);")).unwrap();
+        assert_eq!(
+            native,
+            pattern.captures(source).unwrap()[1].parse::<f32>().unwrap(),
+            "{key}"
+        );
+    }
+    let composer = include_str!("../../../src/components/desktop/llm-chat/Composer.tsx");
+    let card = composer
+        .lines()
+        .find(|line| line.contains("transition: 'border-color"))
+        .unwrap();
+    for (key, native) in [
+        ("maxWidth", GEOMETRY.composer_width),
+        ("borderRadius", GEOMETRY.composer_radius),
+    ] {
+        let pattern = Regex::new(&format!(r"{key}: ([\d.]+)")).unwrap();
+        assert_eq!(
+            native,
+            pattern.captures(card).unwrap()[1].parse::<f32>().unwrap()
+        );
+    }
+}
+
 fn css_color(block: &str, variable: &str) -> gpui::Rgba {
     let value = block
         .split(&format!("{variable}:"))

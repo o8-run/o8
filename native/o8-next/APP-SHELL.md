@@ -31,6 +31,16 @@ Session tabs use their conversation titles. The embedded session shares the
 shell header. The composer action says Send next or Steer now; its adjacent
 disclosure switches the mode, as does Ctrl+Shift+Enter.
 
+Existing session surfaces use the shared typography and geometry in
+`src/theme.rs`: compact sidebar rows, top tab pills, and a composer card up to
+720 px wide. An empty saved conversation centres its build prompt above that
+card. The existing per-session Brain dock occupies the right panel slot, with
+its draft and focus retained while resizing and switching sessions. Compact
+windows reduce the sidebar and right-slot widths without cropping the composer.
+The sidebar renderer lives in `src/session_sidebar.rs` to keep the session module
+within the repository file limit. Native tracking and raster/compositor
+comparison remain unverified; the pinned GPUI API exposes no letter spacing.
+
 Settings opens from the shell's Settings button, the Open settings command, or
 Ctrl+, / Cmd+,. This partial port edits shared server defaults, provider keys and
 revision-checked settings.toml. It works without a saved workspace. Values are

@@ -44,6 +44,63 @@ pub fn current() -> &'static Theme {
     &CURRENT
 }
 
+// Locked chrome roles from docs/design/hurttlocker.md. GPUI's text API does
+// not expose CSS letter spacing; native tracking remains a verification gap.
+pub struct Typography {
+    pub chrome: f32,
+    pub row_title: f32,
+    pub row_meta: f32,
+    pub section: f32,
+    pub body: f32,
+    pub body_line: f32,
+    pub empty: f32,
+    pub chrome_line: f32,
+    pub weight: gpui::FontWeight,
+    pub meta_weight: gpui::FontWeight,
+}
+pub const TYPE: Typography = Typography {
+    chrome: 12.,
+    row_title: 13.5,
+    row_meta: 9.5,
+    section: 10.,
+    body: 13.,
+    body_line: 20.,
+    empty: 28.,
+    chrome_line: 1.25,
+    weight: gpui::FontWeight(300.),
+    meta_weight: gpui::FontWeight(260.),
+};
+pub struct Geometry {
+    pub header: f32,
+    pub tab_height: f32,
+    pub tab_radius: f32,
+    pub row_height: f32,
+    pub row_radius: f32,
+    pub card_radius: f32,
+    pub composer_radius: f32,
+    pub composer_width: f32,
+    pub sidebar_width: f32,
+    pub right_width: f32,
+    pub inset: f32,
+    pub gap: f32,
+    pub content_inset: f32,
+}
+pub const GEOMETRY: Geometry = Geometry {
+    header: 40.,
+    tab_height: 26.,
+    tab_radius: 7.,
+    row_height: 28.,
+    row_radius: 8.,
+    card_radius: 14.,
+    composer_radius: 18.,
+    composer_width: 720.,
+    sidebar_width: 250.,
+    right_width: 440.,
+    inset: 4.,
+    gap: 8.,
+    content_inset: 24.,
+};
+
 // GPUI takes one native family, not a CSS fallback stack. These are members of
 // --font-sans-system / --font-mono-system; .AppleSystemUIFont is -apple-system.
 const UI_FONT: &str = if cfg!(target_os = "macos") {

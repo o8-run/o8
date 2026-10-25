@@ -38,7 +38,9 @@ impl Render for Shell {
             .bg(theme().background)
             .text_color(theme().text)
             .font_family(theme().font_ui)
-            .text_size(px(13.))
+            .font_weight(crate::theme::TYPE.weight)
+            .text_size(px(crate::theme::TYPE.chrome))
+            .line_height(gpui::relative(crate::theme::TYPE.chrome_line))
             .track_focus(&self.focus)
             .capture_key_down(cx.listener(Self::key_down))
             .child(
@@ -180,7 +182,11 @@ impl Render for Shell {
             .child(
                 div()
                     .flex()
-                    .gap(px(8.))
+                    .h(px(crate::theme::GEOMETRY.header))
+                    .items_center()
+                    .gap(px(crate::theme::GEOMETRY.gap))
+                    .id("surface-tabs")
+                    .overflow_x_scroll()
                     .on_mouse_down(
                         gpui::MouseButton::Left,
                         cx.listener(|_, _, window, _| window.prevent_default()),
@@ -194,8 +200,14 @@ impl Render for Shell {
                             .map(|(i, t)| {
                                 div()
                                     .id(("surface-tab", i))
+                                    .debug_selector(move || format!("surface-tab-{i}"))
                                     .cursor_pointer()
-                                    .p(px(6.))
+                                    .h(px(crate::theme::GEOMETRY.tab_height))
+                                    .px(px(crate::theme::GEOMETRY.gap))
+                                    .flex()
+                                    .items_center()
+                                    .flex_shrink_0()
+                                    .rounded(px(crate::theme::GEOMETRY.tab_radius))
                                     .bg(if active.as_ref() == Some(&t) {
                                         theme().selection
                                     } else {

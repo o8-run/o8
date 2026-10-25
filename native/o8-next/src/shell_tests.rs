@@ -324,6 +324,26 @@ fn chrome_refresh_keeps_workspace_selected_during_load(cx: &mut TestAppContext) 
 }
 
 #[gpui::test]
+fn placement_shell_tabs_use_compact_rows(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    let (shell, mut visual) = open(
+        fixture.client.clone(),
+        fixture.root.join("tabs.json"),
+        State::default(),
+        cx,
+    );
+    ready(&shell, &mut visual);
+    let tab = visual
+        .debug_bounds("surface-tab-0")
+        .expect("top tab geometry");
+    assert_eq!(tab.size.height, px(26.));
+    let row = visual
+        .debug_bounds("session-thoughts-composer-first")
+        .unwrap();
+    assert_eq!(row.size.height, px(28.));
+}
+
+#[gpui::test]
 fn shell_palette_switch_restart_and_server_down(cx: &mut TestAppContext) {
     let fixture = Fixture::new();
     let file = fixture.root.join("shell.json");

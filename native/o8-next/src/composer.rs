@@ -43,7 +43,7 @@ impl Composer {
             selecting: false,
             revision: 0,
             painted: 0,
-            height: px(20.),
+            height: px(crate::theme::TYPE.body_line),
             scroll: ScrollHandle::new(),
             reveal_cursor: true,
         }
@@ -143,11 +143,15 @@ impl Composer {
     }
     fn index_at(&self, point: Point<Pixels>) -> usize {
         for (offset, line, origin) in &self.layout {
-            let height = px(20.) * line.wrap_boundaries.len().saturating_add(1) as f32;
+            let height = px(crate::theme::TYPE.body_line)
+                * line.wrap_boundaries.len().saturating_add(1) as f32;
             if point.y < origin.y + height {
                 return (offset
                     + line
-                        .closest_index_for_position(point - *origin, px(20.))
+                        .closest_index_for_position(
+                            point - *origin,
+                            px(crate::theme::TYPE.body_line),
+                        )
                         .unwrap_or_else(|i| i))
                 .min(offset + line.len())
                 .min(self.text.len());
@@ -244,7 +248,12 @@ impl Composer {
             "up" | "down" => {
                 let position = self.layout.iter().find_map(|(offset, line, origin)| {
                     (cursor >= *offset && cursor <= offset + line.len())
-                        .then(|| line.position_for_index(cursor - offset, px(20.)))
+                        .then(|| {
+                            line.position_for_index(
+                                cursor - offset,
+                                px(crate::theme::TYPE.body_line),
+                            )
+                        })
                         .flatten()
                         .map(|p| *origin + p)
                 });
@@ -377,9 +386,14 @@ impl EntityInputHandler for Composer {
         let index = self.range(range).start;
         self.layout.iter().find_map(|(offset, line, origin)| {
             (index >= *offset && index <= offset + line.len())
-                .then(|| line.position_for_index(index - offset, px(20.)))
+                .then(|| line.position_for_index(index - offset, px(crate::theme::TYPE.body_line)))
                 .flatten()
-                .map(|position| Bounds::new(*origin + position, size(px(1.), px(20.))))
+                .map(|position| {
+                    Bounds::new(
+                        *origin + position,
+                        size(px(1.), px(crate::theme::TYPE.body_line)),
+                    )
+                })
         })
     }
     fn character_index_for_point(
@@ -405,7 +419,7 @@ impl Render for Composer {
             .track_scroll(&self.scroll)
             .border_1()
             .border_color(theme().border)
-            .rounded(px(8.))
+            .rounded(px(crate::theme::GEOMETRY.row_radius))
             .p(px(8.))
             .on_key_down(cx.listener(Self::key))
             .on_mouse_down(
@@ -469,7 +483,13 @@ impl Render for Composer {
                             };
                             let lines = window
                                 .text_system()
-                                .shape_text(display, px(13.), &[run], Some(bounds.size.width), None)
+                                .shape_text(
+                                    display,
+                                    px(crate::theme::TYPE.body),
+                                    &[run],
+                                    Some(bounds.size.width),
+                                    None,
+                                )
                                 .expect("shape input");
                             for line in lines {
                                 let origin = point(bounds.left(), y);
@@ -478,23 +498,27 @@ impl Render for Composer {
                                     if selection.contains(&index)
                                         || marked.as_ref().is_some_and(|r| r.contains(&index))
                                     {
-                                        if let Some(position) =
-                                            line.position_for_index(index - offset, px(20.))
-                                        {
+                                        if let Some(position) = line.position_for_index(
+                                            index - offset,
+                                            px(crate::theme::TYPE.body_line),
+                                        ) {
                                             let next = text[index..]
                                                 .chars()
                                                 .next()
                                                 .map(char::len_utf8)
                                                 .unwrap_or(0);
                                             let right = line
-                                                .position_for_index(index + next - offset, px(20.))
+                                                .position_for_index(
+                                                    index + next - offset,
+                                                    px(crate::theme::TYPE.body_line),
+                                                )
                                                 .unwrap_or(position + point(px(8.), px(0.)));
                                             window.paint_quad(fill(
                                                 Bounds::new(
                                                     origin + position,
                                                     size(
                                                         (right.x - position.x).max(px(2.)),
-                                                        px(20.),
+                                                        px(crate::theme::TYPE.body_line),
                                                     ),
                                                 ),
                                                 theme().selection,
@@ -504,7 +528,7 @@ impl Render for Composer {
                                 }
                                 line.paint(
                                     origin,
-                                    px(20.),
+                                    px(crate::theme::TYPE.body_line),
                                     TextAlign::Left,
                                     Some(bounds),
                                     window,
@@ -512,22 +536,27 @@ impl Render for Composer {
                                 )
                                 .expect("paint input");
                                 if focus.is_focused(window) && cursor >= offset && cursor <= end {
-                                    if let Some(position) =
-                                        line.position_for_index(cursor - offset, px(20.))
-                                    {
+                                    if let Some(position) = line.position_for_index(
+                                        cursor - offset,
+                                        px(crate::theme::TYPE.body_line),
+                                    ) {
                                         window.paint_quad(fill(
-                                            Bounds::new(origin + position, size(px(1.), px(20.))),
+                                            Bounds::new(
+                                                origin + position,
+                                                size(px(1.), px(crate::theme::TYPE.body_line)),
+                                            ),
                                             theme().accent,
                                         ));
                                     }
                                 }
-                                y += px(20.) * (line.wrap_boundaries.len() + 1) as f32;
+                                y += px(crate::theme::TYPE.body_line)
+                                    * (line.wrap_boundaries.len() + 1) as f32;
                                 layouts.push((offset, line, origin));
                             }
                             offset += part.len() + 1;
                         }
                         input.update(cx, |input, cx| {
-                            let height = (y - bounds.top()).max(px(20.));
+                            let height = (y - bounds.top()).max(px(crate::theme::TYPE.body_line));
                             if input.height != height {
                                 input.height = height;
                                 cx.notify();
@@ -537,7 +566,10 @@ impl Render for Composer {
                                     layouts.iter().find_map(|(offset, line, origin)| {
                                         (cursor >= *offset && cursor <= offset + line.len())
                                             .then(|| {
-                                                line.position_for_index(cursor - offset, px(20.))
+                                                line.position_for_index(
+                                                    cursor - offset,
+                                                    px(crate::theme::TYPE.body_line),
+                                                )
                                             })
                                             .flatten()
                                             .map(|p| *origin + p)
@@ -551,8 +583,8 @@ impl Render for Composer {
                                     let bottom = top + visible;
                                     let next = if cursor_y < top {
                                         -cursor_y
-                                    } else if cursor_y + px(20.) > bottom {
-                                        visible - px(20.) - cursor_y
+                                    } else if cursor_y + px(crate::theme::TYPE.body_line) > bottom {
+                                        visible - px(crate::theme::TYPE.body_line) - cursor_y
                                     } else {
                                         scroll.y
                                     };
