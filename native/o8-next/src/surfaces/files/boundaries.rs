@@ -46,6 +46,12 @@ fn file_boundary_projects_refresh_retains_unregistered_draft(cx: &mut TestAppCon
         visual.run_until_parked();
         draw(&mut visual);
     }
+    // This projects-only fixture has no sessions. Current main opens first-run
+    // Setup; dismiss it through the UI before testing the file draft lifecycle.
+    if let Some(setup) = visual.debug_bounds("setup-close") {
+        visual.simulate_click(setup.center(), gpui::Modifiers::default());
+        draw(&mut visual);
+    }
     let projects = visual.debug_bounds("shell-projects").unwrap();
     visual.simulate_click(projects.center(), gpui::Modifiers::default());
     for _ in 0..6 {
