@@ -25,7 +25,8 @@ async function heldRequest(path: string, body?: object, credential = token) {
   }, ...(body ? { body: JSON.stringify(body) } : {}) });
 }
 async function heldApproval() {
-  const before = await (await heldRequest('/api/orchestrator/inline-fixture-log')).json() as { held: { head: string; baseHead: string } };
+  const before = await (await heldRequest('/api/orchestrator/inline-fixture-log')).json() as { readinessSpoken: boolean; held: { head: string; baseHead: string } };
+  expect(before.readinessSpoken).toBe(true);
   const merge = await heldRequest('/api/orchestrator/merge', { packetId: 'next-inline', expectedHeadSha: before.held.head,
     idempotencyKey: 'fixture-held-auth' });
   const receipt = await merge.json() as { result: { approvalId: string } };
@@ -79,6 +80,10 @@ it('keeps held-approval confirmation behind the production operator-token gate',
 
 it('posts an ordinary held Confirm exactly once for its original approval through the production route', async () => {
   const { before, id } = await heldApproval();
+  expect((await heldRequest('/api/orchestrator/inline-fixture-ready?phase=approval')).status).toBe(200);
+  expect(await (await heldRequest('/api/orchestrator/inline-fixture-log')).json()).toMatchObject({
+    confirmation: null, readinessApproval: id, held: { approval: { id, status: 'pending' } },
+  });
   const review = await (await heldRequest('/api/orchestrator/review-state?' + new URLSearchParams({
     packetId: 'next-inline', spoken: '1', approvalId: id,
   }))).json() as { spokenReview: { evidence: { headSha: string; fingerprint: string; governanceFingerprint: string } } };

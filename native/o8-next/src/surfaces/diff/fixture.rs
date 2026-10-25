@@ -12,6 +12,22 @@ impl std::ops::Deref for Fixture {
     }
 }
 impl Fixture {
+    pub(super) fn wait_approval_ready(&self) {
+        let mut url = self
+            .client
+            .url("/api/orchestrator/inline-fixture-ready")
+            .unwrap();
+        url.query_pairs_mut().append_pair("phase", "approval");
+        let receipt = self
+            .client
+            .request("GET", &url)
+            .timeout(std::time::Duration::from_secs(180))
+            .call()
+            .unwrap_or_else(|error| panic!("held fixture readiness: {error}"))
+            .into_json::<Value>()
+            .unwrap();
+        assert_eq!(receipt["ready"], true, "held fixture readiness: {receipt}");
+    }
     pub(super) fn new() -> Self {
         Self::start_mode(false, "")
     }

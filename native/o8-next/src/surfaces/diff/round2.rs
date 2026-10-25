@@ -28,6 +28,7 @@ fn review_approval_if_offered(
     if !offered(cx) {
         return false;
     }
+    fixture.wait_approval_ready();
     let review = cx
         .debug_bounds("inline-review-approval")
         .expect("offered review control");
@@ -231,6 +232,7 @@ fn held_confirmation_mode(cx: &mut TestAppContext, change: Option<&str>, mode: &
     );
     let approval = before["held"]["approval"]["id"].clone();
     if mode.contains("--inline-evidence-fail-first") {
+        fixture.wait_approval_ready();
         let review = visual
             .debug_bounds("inline-review-approval")
             .expect("missing evidence must offer read-only review recovery");
@@ -250,6 +252,7 @@ fn held_confirmation_mode(cx: &mut TestAppContext, change: Option<&str>, mode: &
     // The initial evidence request may also be unavailable without fault injection.
     // Follow the same explicit, non-mutating recovery before introducing gate changes.
     review_approval_if_offered(&fixture, &shell, &mut visual);
+    fixture.wait_approval_ready();
     let confirm = visual
         .debug_bounds("inline-confirm")
         .expect("a held merge must retain its approval and offer Confirm");
@@ -294,6 +297,7 @@ fn held_confirmation_mode(cx: &mut TestAppContext, change: Option<&str>, mode: &
             // An asynchronous annotation can invalidate the original receipt.
             // Require an explicit read-only review and a separate Confirm.
             assert_eq!(after["held"]["approval"]["status"], "pending");
+            fixture.wait_approval_ready();
             let review = visual.debug_bounds("inline-review-approval").unwrap();
             visual.simulate_click(review.center(), gpui::Modifiers::default());
             wait_inline(&shell, &mut visual);
@@ -370,6 +374,7 @@ fn held_confirmation_mode(cx: &mut TestAppContext, change: Option<&str>, mode: &
             assert_eq!(repaired["held"]["currentBase"], before["held"]["head"]);
         }
         if change == Some("governance") {
+            fixture.wait_approval_ready();
             let review = visual
                 .debug_bounds("inline-review-approval")
                 .expect("changed approval evidence requires explicit read-only review");

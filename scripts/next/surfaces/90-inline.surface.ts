@@ -18,25 +18,41 @@ export default async function register({ repo, fixtureToken }: SurfaceContext): 
   const state = await import('../../../src/app/api/orchestrator/state/route');
   let readiness: Promise<void> | undefined;
   let readinessAttempts = 0;
-  const ready = () => readiness ??= (async () => {
+  let readinessSpoken = false;
+  let readinessApproval: string | null = null;
+  const probe = async (approvalPhase = false) => {
     readinessAttempts++;
     if (process.argv.includes('--inline-ready-fail-first') && readinessAttempts === 1) {
       throw new Error('Fixture readiness temporarily unavailable');
     }
-    // Exercise production read paths before the five-second native transport is
-    // used. Coalesce retries so a slow cold import cannot multiply this work.
+    // Exercise production read paths, including spoken diff facts, before the
+    // five-second native transport is used. Coalesce slow cold-import retries.
+    // Direct probes leave injected UI evidence outages for the native request.
+    const approvalId = approvalPhase ? held?.snapshot().approval?.id : undefined;
+    if (approvalPhase && !approvalId) throw new Error('Held approval is not ready');
     for (const [route, path] of [
       [state.GET, '/api/orchestrator/state'],
       [approvals.GET, '/api/panel/approvals?packetId=next-inline&status=all'],
-      [review.GET, '/api/orchestrator/review-state?packetId=next-inline'],
+      [review.GET, '/api/orchestrator/review-state?packetId=next-inline' + (held ? '&spoken=1' : '')
+        + (approvalId ? '&approvalId=' + encodeURIComponent(approvalId) : '')],
       ...(held ? [[preview.GET, '/api/orchestrator/merge-preview?packetId=next-inline']] as const : []),
     ] as const) {
       const response = await route(new NextRequest('http://localhost' + path, {
         headers: { host: 'localhost', authorization: `Bearer ${fixtureToken}` },
       }));
       if (!response.ok) throw new Error(`Inline readiness ${path}: HTTP ${response.status}`);
+      if (held && route === review.GET) {
+        const data = await response.json();
+        if (data.spokenReview?.evidence?.headSha !== held.snapshot().head
+          || !/^[a-f0-9]{64}$/i.test(data.spokenReview?.evidence?.fingerprint ?? '')) {
+          throw new Error('Inline spoken evidence is not ready');
+        }
+        readinessSpoken = true;
+        if (approvalId) readinessApproval = approvalId;
+      }
     }
-  })().catch(error => { readiness = undefined; throw error; });
+  };
+  const ready = () => readiness ??= probe().catch(error => { readiness = undefined; throw error; });
   let mutation: Record<string, unknown> | null = null;
   let confirmation: string | null = null;
   let confirmationLost = false;
@@ -49,15 +65,17 @@ export default async function register({ repo, fixtureToken }: SurfaceContext): 
   return {
     priority: 90,
     routes: {
-      'GET /api/orchestrator/inline-fixture-ready': async () => {
-        await ready(); return Response.json({ ready: true });
+      'GET /api/orchestrator/inline-fixture-ready': async request => {
+        if (request.nextUrl.searchParams.get('phase') === 'approval') await probe(true);
+        else await ready();
+        return Response.json({ ready: true });
       },
       'POST /api/orchestrator/merge': merge.POST, 'GET /api/worktrees/diff': worktree.GET,
       'GET /api/orchestrator/review-state': review.GET,
       'GET /api/panel/approvals': approvals.GET, 'POST /api/panel/approvals': approvals.POST,
       'GET /api/orchestrator/merge-preview': preview.GET,
       ...(held ? { 'POST /api/orchestrator/inline-fixture-control': control } : {}),
-      'GET /api/orchestrator/inline-fixture-log': async () => Response.json({ mutation, confirmation, requests, readinessAttempts, held: held?.snapshot() }),
+      'GET /api/orchestrator/inline-fixture-log': async () => Response.json({ mutation, confirmation, requests, readinessAttempts, readinessSpoken, readinessApproval, held: held?.snapshot() }),
       ...Object.fromEntries(['next-review-approve', 'next-review-reject'].map(id => [
         `GET /api/lanes/${id}/diff`, request => diff.GET(request, { params: Promise.resolve({ id }) }),
       ])),

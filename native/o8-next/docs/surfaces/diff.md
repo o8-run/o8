@@ -4,6 +4,8 @@ The opt-in inline viewer registers in `src/surfaces/inline_diff.rs`, with its vi
 
 The disposable host discovers its fixture entry without shared dispatcher edits. Existing authenticated production routes remain authoritative.
 
+Inline fixtures publish readiness only after production read paths finish. Held fixtures also read spoken diff evidence and verify its HEAD and fingerprint before starting native transport requests. Once the card exists, tests wait for its approval-bound read paths before clicking Review or Confirm. These probes preserve injected UI evidence outages for native requests and never resolve an approval.
+
 The shared `main.rs`, `client.rs`, `diff.rs`, `diff_ui.rs`, workspace state, shell view, shell tests and development host match main. The shell inventory adds one InlineDiff entry. Its Merge and Confirm request adapters compile with that entry and use the shared authenticated transport. Use **Open inline diff** in the palette. Inline palette and restart assertions belong to the surface's existing reachability test.
 
 Base belongs to the selected packet: opening another packet resets it to that lane's base, while reopening the same packet retains its explicit override. Inline privacy and long-line bounding run in the inline background loader. Standalone parsing and review retain main's behavior.
