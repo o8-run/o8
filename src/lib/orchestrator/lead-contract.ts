@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { realpathSync } from 'node:fs';
+import { assertNotKnowledgeSource } from '@/lib/cortex/knowledge/sources';
 
 import type { OrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
 import { modelBelongsToRuntime } from '@/lib/lane/orchestrator-model-guard';
@@ -231,6 +232,7 @@ export function digestLeadRequest(value: unknown): string {
 
 export function resolveLeadRepoPath(value: string, field = 'repoPath'): string {
   try {
+    assertNotKnowledgeSource(value);
     assertOrchestratorRepoPath(value);
     return realpathSync(value);
   } catch (error) {

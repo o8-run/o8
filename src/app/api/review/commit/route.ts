@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { execFileSync } from '@/lib/providers/child-process';
 import { homedir } from 'node:os';
+import { knowledgeSourceWriteRefusal } from '@/lib/cortex/knowledge/sources';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -24,6 +25,8 @@ export async function POST(request: Request) {
 
   const message = body.message?.trim();
   const root = resolveRoot(body.workspace);
+  const sourceRefusal = knowledgeSourceWriteRefusal(body.workspace, root);
+  if (sourceRefusal) return sourceRefusal;
   if (!message) {
     return NextResponse.json({ error: 'Commit message is required' }, { status: 400 });
   }

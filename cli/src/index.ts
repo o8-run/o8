@@ -1,4 +1,5 @@
 import { runPrStack } from './commands/pr-stack.js';
+import { runBrainSources } from './commands/brain-sources.js';
 import { runNext } from './commands/next.js';
 import { runSetup } from './commands/setup.js';
 /**
@@ -281,6 +282,7 @@ commands:
   broadcast say|automation-say|focus|post|token   speak on demand or from an automation, set focus, post narration, or manage spectator bearers
   msg send|inbox       send a bounded agent message (--reply-to ID, --close) or read this session's inbox
   presence list|join   list live sessions or register an explicit external name
+  brain sources        manage read-only markdown knowledge folders
   cortex observe       propose a worker observation for the orchestrator
   lane touches         active lanes touching a path or packet diff
   artifact create      attach an interactive task artifact to this packet or a thread (--title --html <file> --actions <file.json>)
@@ -475,6 +477,9 @@ async function dispatch(args: ParsedArgs): Promise<number> {
       return runMsg(args.mode, secondary, args.rest);
     case 'presence':
       return runPresence(args.mode, secondary, args.rest);
+    case 'brain':
+      if (secondary === 'sources') return runBrainSources(args.mode, args.rest);
+      throw unknownSubcommandError('brain', secondary);
     case 'cortex': {
       if (secondary === 'observe') return runCortexObserve(args.mode, args.rest);
       throw unknownSubcommandError('cortex', secondary);

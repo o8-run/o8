@@ -1,3 +1,7 @@
+import { reconcileKnowledgeSources } from '@/lib/cortex/knowledge/reconcile';
+import { parseKnowledgeSources, type KnowledgeSourceDefaults } from './knowledge-source-defaults';
+import { parseOperatorDefaultsToml } from '@/lib/settings/toml';
+import { validateKnowledgeSourceRoots } from '@/lib/cortex/knowledge/sources';
 import 'server-only';
 import { isSupportedModelId, MODEL_IDS, SUPPORTED_MODEL_IDS } from '@/lib/models';
 import { isThinkingEffort, type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
@@ -97,14 +101,16 @@ import { applySymonVoiceUpdate, resolveStoredSymonVoice, resolveSymonVoiceSettin
 import { applyJudgmentProviderUpdate, JUDGMENT_PROVIDER_FALLBACK, resolveJudgmentProviderSettings, resolveStoredJudgmentProvider, type JudgmentProviderDefault } from './judgment-default';
 import { applyJudgmentAllowanceUpdate, JUDGMENT_ALLOWANCE_FALLBACK, resolveJudgmentAllowanceSettings, resolveStoredJudgmentAllowance, type JudgmentAllowanceDefaults } from './judgment-allowance-default';
 import {
-  applyOperatorDefaultsTomlWithLock,
+  applyOperatorDefaultsTomlFile,
+  withOperatorDefaultsWriteLock,
   getOperatorDefaultsTomlState as readOperatorDefaultsTomlState,
   loadOperatorDefaultsFiles,
   loadOperatorDefaultsFilesSync,
   persistOperatorDefaults,
   readLegacyOperatorDefaults,
   readOperatorDefaultsTomlForUpdate,
-  withOperatorDefaultsUpdateRetry, withOperatorDefaultsWriteLock, SettingsTomlConflictError,
+  withOperatorDefaultsUpdateRetry,
+  SettingsTomlConflictError,
   type OperatorDefaultsTomlState,
 } from '@/lib/settings/operator-defaults-store';
 export { getOperatorDefaultsTomlPath } from '@/lib/settings/operator-defaults-store';
@@ -126,7 +132,7 @@ export type SettingSource = 'env' | 'file' | 'profile' | 'default';
 export type RequireApproval = 'high-risk' | 'surface' | 'always' | 'never';
 export function isRequireApproval(value: unknown): value is RequireApproval { return value === 'high-risk' || value === 'surface' || value === 'always' || value === 'never'; }
 
-export interface OperatorDefaults extends StorageReserveDefaults, WorkspaceParkingDefaults, ApfsDependencyImagesDefaults, MeteredPacketCapDefaults, UiLoopDefaults, BroadcastCommentaryDefaults, PresentationDefaults, ReviewContinuationDefault, CodexAppThreadsDefault, WorkspaceManifestPolicyDefault, SymonVoiceDefault, JudgmentProviderDefault, JudgmentAllowanceDefaults, BrainDefaults {
+export interface OperatorDefaults extends KnowledgeSourceDefaults, StorageReserveDefaults, WorkspaceParkingDefaults, ApfsDependencyImagesDefaults, MeteredPacketCapDefaults, UiLoopDefaults, BroadcastCommentaryDefaults, PresentationDefaults, ReviewContinuationDefault, CodexAppThreadsDefault, WorkspaceManifestPolicyDefault, SymonVoiceDefault, JudgmentProviderDefault, JudgmentAllowanceDefaults, BrainDefaults {
   subscriptionProfile: SubscriptionProfile;
   parallelCap: number;
   overlapGate: OverlapGateMode;
@@ -323,6 +329,7 @@ export interface OperatorDefaultsWithSources {
 
 // ── Hardcoded fallbacks (the "locked defaults") ──
 export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
+  knowledgeSources: [],
   subscriptionProfile: 'both',
   parallelCap: 5,
   overlapGate: 'strict',
@@ -396,63 +403,10 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   worktreeMaxTotalGb: 20,
   ...STORAGE_RESERVE_FALLBACK, ...WORKSPACE_PARKING_FALLBACK, ...METERED_PACKET_CAP_FALLBACK, ...UI_LOOP_FALLBACK, ...SYMON_VOICE_FALLBACK, ...JUDGMENT_PROVIDER_FALLBACK, ...JUDGMENT_ALLOWANCE_FALLBACK,
 };
-interface StoredOperatorDefaults extends Partial<StorageReserveDefaults>, Partial<WorkspaceParkingDefaults>, Partial<ApfsDependencyImagesDefaults>, Partial<MeteredPacketCapDefaults>, Partial<UiLoopDefaults>, Partial<BroadcastCommentaryDefaults>, Partial<PresentationDefaults>, Partial<ReviewContinuationDefault>, Partial<CodexAppThreadsDefault>, Partial<WorkspaceManifestPolicyDefault>, Partial<SymonVoiceDefault>, Partial<JudgmentProviderDefault>, Partial<JudgmentAllowanceDefaults>, Partial<BrainDefaults> {
-  subscriptionProfile?: SubscriptionProfile;
-  parallelCap?: number;
-  overlapGate?: OverlapGateMode;
-  healBotEnabled?: boolean;
-  supervisorAutoEscalate?: boolean;
-  thinkingEffort?: ThinkingEffort;
-  promptCachingEnabled?: boolean;
-  autoTitleInferenceEnabled?: boolean;
-  mergeTestReplayEnabled?: boolean;
-  requireApproval?: RequireApproval;
-  orchestratorModel?: string;
-  opencodeOrchestratorModel?: string | null;
-  opencodeWorkerModel?: string | null;
-  threecodeWorkerModel?: string | null;
-  defaultDispatchRuntime?: OrchestratorRuntime;
-  workerExecutionCarrier?: ExecutionCarrierId | null;
+type StoredOperatorDefaults = Partial<OperatorDefaults> & {
   defaultDispatchRuntimeExplicit?: boolean;
-  workerStartMode?: WorkerStartMode;
-  workerRuntimes?: OrchestratorRuntime[];
-  codexWorkerEffort?: ThinkingEffort;
-  claudeWorkerEffort?: ThinkingEffort;
-  defaultDispatchModel?: string;
-  localInferenceBaseUrl?: string;
-  localEmbedModel?: string;
-  localChatModel?: string;
-  experimentalOpencode?: boolean;
-  experimentalGemini?: boolean;
-  experimentalChat?: boolean;
-  experimentalCanvas?: boolean;
-  nativeBrowserView?: boolean;
-  classAComposer?: ClassAComposer;
-  inAppOrchestratorEnabled?: boolean;
-  brainUseClaudeCli?: boolean;
-  workersUseBrain?: WorkersUseBrain;
-  crossHouseWorkerFallback?: boolean;
-  orchestratorBackend?: OrchestratorBackendSetting;
-  reviewerBackend?: ReviewerBackendSetting;
-  packetExplainerEnabled?: boolean;
-  quizGateEnabled?: boolean;
-  buyinDocEnabled?: boolean;
-  targetingTriage?: TargetingTier;
-  targetingAction?: TargetingTier;
-  updateAutoApply?: UpdateAutoApply;
   autoApplyUpdates?: 'off' | 'when-idle';
-  collideAggregator?: CollideAggregator;
-  productTelemetryEnabled?: boolean;
-  telemetryConsentAnswered?: boolean;
-  telemetryOptIn?: boolean;
-  telemetryIngestUrl?: string;
-  crashReportsEnabled?: boolean;
-  branchPrefix?: string;
-  commitAttributionEnabled?: boolean;
-  prLinkDestination?: PrLinkDestination;
-  worktreeMaxCount?: number;
-  worktreeMaxTotalGb?: number;
-}
+};
 
 type FileOperatorDefaults = Partial<OperatorDefaults> & {
   defaultDispatchRuntimeExplicit?: boolean;
@@ -461,7 +415,12 @@ type FileOperatorDefaults = Partial<OperatorDefaults> & {
 const parseStoredDefaults = (raw: string): StoredOperatorDefaults => parseStoredJson<StoredOperatorDefaults>(raw);
 
 function resolveFromFile(stored: StoredOperatorDefaults): FileOperatorDefaults {
-  const result: FileOperatorDefaults = {}; Object.assign(result, resolveStoredUiLoopDefaults(stored));
+  const result: FileOperatorDefaults = {};
+  if (stored.knowledgeSources !== undefined) {
+    try { result.knowledgeSources = parseKnowledgeSources(stored.knowledgeSources); }
+    catch { /* Ignore invalid legacy sources. */ }
+  }
+  Object.assign(result, resolveStoredUiLoopDefaults(stored));
   if (isSubscriptionProfile(stored.subscriptionProfile)) {
     result.subscriptionProfile = stored.subscriptionProfile;
   }
@@ -685,6 +644,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
   const defaultDispatchRuntime = profileDefaults?.defaultDispatchRuntime ?? baseDefaultDispatchRuntime;
 
   const resolved: OperatorDefaults = {
+    knowledgeSources: fileValues.knowledgeSources ?? [],
     subscriptionProfile,
     parallelCap: envCap ?? fileValues.parallelCap ?? OPERATOR_DEFAULTS_FALLBACK.parallelCap,
     overlapGate: envGate ?? fileValues.overlapGate ?? OPERATOR_DEFAULTS_FALLBACK.overlapGate,
@@ -764,6 +724,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
   };
 
   const sources: Record<keyof OperatorDefaults, SettingSource> = {
+    knowledgeSources: fileValues.knowledgeSources !== undefined ? 'file' : 'default',
     subscriptionProfile: envProfile !== null ? 'env' : fileValues.subscriptionProfile !== undefined ? 'file' : 'default',
     parallelCap: envCap !== null ? 'env' : fileValues.parallelCap !== undefined ? 'file' : 'default',
     overlapGate: envGate !== null ? 'env' : fileValues.overlapGate !== undefined ? 'file' : 'default',
@@ -897,6 +858,7 @@ async function updateOperatorDefaultsOnce(update: Partial<OperatorDefaults>, exp
   if (update.supervisorAutoEscalate !== undefined) {
     stored.supervisorAutoEscalate = Boolean(update.supervisorAutoEscalate);
   }
+  if (update.knowledgeSources !== undefined) stored.knowledgeSources = validateKnowledgeSourceRoots(update.knowledgeSources);
   applyReviewContinuationUpdate(stored, update);
   applyCodexAppThreadsUpdate(stored, update);
   applyBroadcastCommentaryUpdate(stored, update);
@@ -1122,11 +1084,26 @@ async function updateOperatorDefaultsOnce(update: Partial<OperatorDefaults>, exp
 }
 
 export async function updateOperatorDefaults(update: Partial<OperatorDefaults>, expectedRevision?: string): Promise<OperatorDefaultsWithSources> {
-  return expectedRevision ? withOperatorDefaultsWriteLock(() => updateOperatorDefaultsOnce(update, expectedRevision)) : withOperatorDefaultsUpdateRetry(() => updateOperatorDefaultsOnce(update));
+  const apply = async () => {
+    const before = getOperatorDefaultsSync().values.knowledgeSources;
+    const result = await updateOperatorDefaultsOnce(update, expectedRevision);
+    await reconcileKnowledgeSources(before, result.values.knowledgeSources);
+    return result;
+  };
+  return expectedRevision ? withOperatorDefaultsWriteLock(apply) : withOperatorDefaultsUpdateRetry(apply);
 }
 
 export async function applyOperatorDefaultsToml(raw: string, expectedRevision: string): Promise<OperatorDefaultsWithSources> {
-  return applyOperatorDefaultsTomlWithLock(raw, expectedRevision, OPERATOR_DEFAULTS_FALLBACK, getOperatorDefaults);
+  return withOperatorDefaultsWriteLock(async () => {
+    const knowledge = parseOperatorDefaultsToml(raw).knowledgeSources;
+    if (knowledge !== undefined) validateKnowledgeSourceRoots(knowledge);
+    const before = getOperatorDefaultsSync().values.knowledgeSources;
+    return applyOperatorDefaultsTomlFile(raw, expectedRevision, OPERATOR_DEFAULTS_FALLBACK, async () => {
+      const result = await getOperatorDefaults();
+      await reconcileKnowledgeSources(before, result.values.knowledgeSources);
+      return result;
+    });
+  });
 }
 
 /**

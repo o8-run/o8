@@ -1,5 +1,7 @@
+import { knowledgeSourceWriteRefusal } from '@/lib/cortex/knowledge/sources';
+import { isWorkspaceFileError, writeWorkspaceFile } from '@/lib/fs/workspace-file';
 import { NextResponse, type NextRequest } from 'next/server';
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { resolveRequestPrincipal } from '@/lib/auth/principal';
 import { extname, join, resolve, sep } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -57,6 +59,8 @@ function slugifyStem(name: string): string {
 }
 
 export async function POST(request: NextRequest) {
+  const sourceRefusal = knowledgeSourceWriteRefusal(request.nextUrl.searchParams.get('repoPath'));
+  if (sourceRefusal) return sourceRefusal;
   const repoPath = repoDir(request.nextUrl.searchParams.get('repoPath') ?? '');
   if (!repoPath) {
     return NextResponse.json({ ok: false, error: 'repoPath invalid' }, { status: 400 });
@@ -127,6 +131,8 @@ export async function POST(request: NextRequest) {
 
   const assetsDir = join(repoPath, ASSETS_DIR);
   const target = join(assetsDir, fileName);
+  const targetRefusal = knowledgeSourceWriteRefusal(assetsDir, target);
+  if (targetRefusal) return targetRefusal;
   // Defensive path-jail: fileName is slug+hash+ext (no separators), but verify
   // the resolved write still lands under <repoPath>/o8-assets anyway.
   if (!resolve(target).startsWith(resolve(assetsDir) + sep)) {
@@ -135,11 +141,11 @@ export async function POST(request: NextRequest) {
 
   try {
     mkdirSync(assetsDir, { recursive: true });
-    if (!existsSync(target)) writeFileSync(target, buf);
+    if (!existsSync(target)) await writeWorkspaceFile(assetsDir, fileName, buf);
   } catch (err) {
     return NextResponse.json(
       { ok: false, error: err instanceof Error ? err.message : 'write failed' },
-      { status: 500 },
+      { status: isWorkspaceFileError(err) ? err.status : 500 },
     );
   }
 

@@ -1,3 +1,4 @@
+import { assertNotKnowledgeSource, normalizeKnowledgeWritePath } from '@/lib/cortex/knowledge/sources';
 import 'server-only';
 
 import { execFile } from '@/lib/providers/child-process';
@@ -300,12 +301,12 @@ async function detectSetupConfig(repoRoot: string): Promise<RepoSetupConfig> {
 }
 
 async function resolveRepoRoot(inputPath: string) {
-  const expanded = inputPath.trim().replace(/^~(?=\/|$)/, os.homedir());
-  if (!expanded) {
+  const expanded = inputPath.replace(/^~(?=\/|$)/, os.homedir());
+  if (!expanded.trim()) {
     throw new Error('Repository path is required.');
   }
 
-  const resolved = path.resolve(expanded);
+  const resolved = normalizeKnowledgeWritePath(expanded);
   const stats = await stat(resolved).catch(() => null);
   if (!stats) {
     throw new Error('Path not found.');
@@ -320,7 +321,7 @@ async function resolveRepoRoot(inputPath: string) {
       maxBuffer: 256 * 1024,
       timeout: 10_000,
     });
-    const repoRoot = stdout.trim();
+    const repoRoot = stdout.replace(process.platform === 'win32' ? /\r?\n$/ : /\n$/, '');
     if (repoRoot) {
       const realRoot = await realpath(repoRoot).catch(() => repoRoot);
       return { localPath: path.resolve(realRoot), isGitRepo: true };
@@ -524,9 +525,12 @@ export async function validateRepo(localPath: string) {
 }
 
 export async function addRepo(localPath: string) {
+  assertNotKnowledgeSource(localPath);
   const candidate = await inspectLocalRepo(localPath);
+  assertNotKnowledgeSource(candidate.localPath);
   const manifest = await loadWorkspaceManifestCache(candidate.localPath);
   const { entry, created } = await withRegistryMutation(async () => {
+    assertNotKnowledgeSource(candidate.localPath);
     const store = await readStoreFresh();
     const now = nowIso();
     const existing = store.repos.find((repo) => repo.localPath === candidate.localPath);
@@ -627,12 +631,14 @@ export async function updateRepo(
     storagePressureParkingDisabled?: boolean;
   },
 ) {
+  assertNotKnowledgeSource(updates.localPath);
   const candidate = updates.localPath === undefined ? null : await inspectLocalRepo(updates.localPath);
   const manifest = candidate ? await loadWorkspaceManifestCache(candidate.localPath) : undefined;
   const next = await withRegistryMutation(async () => {
     const store = await readStoreFresh();
     const existing = store.repos.find((repo) => repo.id === id);
     if (!existing) throw new Error('Repository not found.');
+    assertNotKnowledgeSource(candidate?.localPath ?? existing.localPath);
     if (candidate && store.repos.some((repo) => repo.id !== id && repo.localPath === candidate.localPath)) {
       throw new Error('Another registered repository already uses that folder.');
     }

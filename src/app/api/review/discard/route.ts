@@ -1,10 +1,13 @@
 import { NextResponse } from 'next/server';
 import { execFileSync } from '@/lib/providers/child-process';
+import { knowledgeSourceWriteRefusal } from '@/lib/cortex/knowledge/sources';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: Request) {
+  const sourceRefusal = knowledgeSourceWriteRefusal(process.cwd());
+  if (sourceRefusal) return sourceRefusal;
   let body: { path?: string };
   try {
     body = await request.json();

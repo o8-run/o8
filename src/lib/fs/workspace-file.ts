@@ -6,6 +6,7 @@ import { lstat, open, realpath } from 'node:fs/promises';
 import { isAbsolute, relative, resolve } from 'node:path';
 
 import { safeJoin } from '@/lib/fs/safe-path';
+import { assertNotKnowledgeSource, KnowledgeSourceWriteError } from '@/lib/cortex/knowledge/sources';
 
 export type WorkspaceFileOpenMode = 'read' | 'read-write';
 
@@ -15,6 +16,8 @@ export type WorkspaceFileErrorCode =
   | 'workspace_not_regular_file'
   | 'workspace_path_invalid'
   | 'workspace_symlink_refused'
+  | 'workspace_hardlink_refused'
+  | 'knowledge_source_read_only'
   | 'workspace_file_open_failed';
 
 export class WorkspaceFileError extends Error {
@@ -25,6 +28,19 @@ export class WorkspaceFileError extends Error {
   ) {
     super(message);
     this.name = 'WorkspaceFileError';
+  }
+}
+
+function assertWritableTarget(filePath: string): void {
+  try { assertNotKnowledgeSource(filePath); } catch (error) {
+    if (error instanceof KnowledgeSourceWriteError) throw new WorkspaceFileError('knowledge_source_read_only', error.message, 403);
+    throw error;
+  }
+}
+
+function assertSingleWritableLink(stat: { nlink: number | bigint }): void {
+  if (stat.nlink !== 1 && stat.nlink !== BigInt(1)) {
+    throw new WorkspaceFileError('workspace_hardlink_refused', 'Files with multiple hard links cannot be edited.', 403);
   }
 }
 
@@ -135,12 +151,14 @@ export async function openWorkspaceFile(
     throw new WorkspaceFileError('workspace_path_invalid', 'File path must stay inside the workspace.', 403);
   }
 
+  if (mode === 'read-write') assertWritableTarget(lexicalPath);
   const { handle, created } = await openHandle(lexicalPath, mode, options.create === true);
   try {
     const descriptorStat = await handle.stat();
     if (!descriptorStat.isFile()) {
       throw new WorkspaceFileError('workspace_not_regular_file', 'Workspace target must be a regular file.', 400);
     }
+    if (mode === 'read-write') assertSingleWritableLink(descriptorStat);
 
     await options.afterOpen?.(lexicalPath, handle);
 
@@ -174,6 +192,10 @@ export async function openWorkspaceFile(
     if (!sameIdentity(descriptorStat, resolvedStat) || !sameIdentity(descriptorStat, lexicalStat)) {
       throw new WorkspaceFileError('workspace_identity_mismatch', 'Workspace file identity changed after open.', 409);
     }
+    if (mode === 'read-write') {
+      assertSingleWritableLink(resolvedStat);
+      assertSingleWritableLink(lexicalStat);
+    }
 
     return { handle, lexicalPath, realPath, stat: descriptorStat, created };
   } catch (error) {
@@ -206,6 +228,8 @@ export async function writeWorkspaceFile(
   try {
     const previousBytes = opened.created ? null : await opened.handle.readFile();
     const bytes = typeof content === 'string' ? Buffer.from(content, 'utf-8') : Buffer.from(content);
+    assertWritableTarget(opened.realPath);
+    assertSingleWritableLink(await opened.handle.stat());
     await opened.handle.truncate(0);
     if (bytes.byteLength > 0) await opened.handle.write(bytes, 0, bytes.byteLength, 0);
     await opened.handle.sync();

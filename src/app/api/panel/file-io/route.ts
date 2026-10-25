@@ -18,9 +18,11 @@ export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 import { execFile } from '@/lib/providers/child-process';
 import { promisify } from 'node:util';
-import { readFile, stat, writeFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { isAbsolute, normalize } from 'node:path';
+import { isAbsolute, normalize, basename, dirname } from 'node:path';
+import { knowledgeSourceWriteRefusal } from '@/lib/cortex/knowledge/sources';
+import { isWorkspaceFileError, writeWorkspaceFile } from '@/lib/fs/workspace-file';
 import { resolveRequestPrincipal } from '@/lib/auth/principal';
 import { isPathInRegisteredRepo } from '@/lib/llm/repo-scope';
 
@@ -48,11 +50,10 @@ const execFileAsync = promisify(execFile);
 const MAX_EDIT_BYTES = 2 * 1024 * 1024;
 
 function resolveAbsolute(raw: string): string | null {
-  const trimmed = raw.trim();
-  if (!trimmed) return null;
-  const expanded = trimmed === '~' || trimmed.startsWith('~/')
-    ? trimmed.replace('~', homedir())
-    : trimmed;
+  if (!raw.trim()) return null;
+  const expanded = raw === '~' || raw.startsWith('~/')
+    ? raw.replace('~', homedir())
+    : raw;
   if (!isAbsolute(expanded)) return null;
   return normalize(expanded);
 }
@@ -110,6 +111,8 @@ export async function PUT(request: Request) {
   }
   const workerDenied = await authorizeFileAccess(request, path);
   if (workerDenied) return workerDenied;
+  const sourceRefusal = knowledgeSourceWriteRefusal(body.path, path);
+  if (sourceRefusal) return sourceRefusal;
   try {
     // Edit-existing-files only — the card opens what's already on disk.
     const before = await stat(path);
@@ -123,10 +126,11 @@ export async function PUT(request: Request) {
     ) {
       return NextResponse.json({ error: 'changed-on-disk', mtimeMs: before.mtimeMs }, { status: 409 });
     }
-    await writeFile(path, body.content, 'utf-8');
+    await writeWorkspaceFile(dirname(path), basename(path), body.content);
     const after = await stat(path);
     return NextResponse.json({ ok: true, mtimeMs: after.mtimeMs });
   } catch (error) {
+    if (isWorkspaceFileError(error)) return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
     const code = (error as NodeJS.ErrnoException)?.code;
     if (code === 'ENOENT') return NextResponse.json({ error: 'File not found' }, { status: 404 });
     if (code === 'EACCES') return NextResponse.json({ error: 'Permission denied' }, { status: 403 });

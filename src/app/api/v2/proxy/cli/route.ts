@@ -1,4 +1,5 @@
 import { childEnvironment } from '@/lib/providers/spawn-environment';
+import { knowledgeSourceWriteRefusal } from '@/lib/cortex/knowledge/sources';
 export const dynamic = 'force-dynamic';
 
 import { spawn } from '@/lib/providers/child-process';
@@ -104,6 +105,8 @@ export async function POST(request: Request) {
     }
 
     const { runtime, model, messages, repoPath } = body;
+    const sourceRefusal = knowledgeSourceWriteRefusal(repoPath);
+    if (sourceRefusal) return sourceRefusal;
     const modelKey = extractModelKey(model);
     const prompt = buildPrompt(messages);
     if (!prompt) {
@@ -254,6 +257,8 @@ export async function POST(request: Request) {
       cwd = resolved.repoRoot;
     }
     const repoRoot = cwd;
+    const resolvedRefusal = knowledgeSourceWriteRefusal(repoRoot);
+    if (resolvedRefusal) return resolvedRefusal;
 
     const stream = new ReadableStream({
       start(controller) {
