@@ -390,6 +390,29 @@ describe('o8d MCP through the real HTTP JSON-RPC entry point', () => {
     expect(await replayMcp(base, nativeRust, token, additional)).toBe(additional.length);
   });
 
+  nativeReadTest('keeps all six warmed SQLite reads available during an upstream outage without writes', async () => {
+    const names = ['o8_status', 'get_mission_status', 'o8_task_list', 'o8_list_repos', 'o8_list_projects', 'o8_lease_list'];
+    const expected = new Map();
+    for (const name of names) expected.set(name, await call(base, name));
+    const sqlite = getSqlite();
+    const changes = sqlite.prepare('SELECT total_changes() AS count').get();
+    const version = sqlite.pragma('data_version', { simple: true });
+    const files = ['repos.json', 'projects.json', 'orchestrator-state.json'];
+    const contents = files.map((name) => readFileSync(join(directory, name), 'utf8'));
+    seen.length = 0;
+    failedSource = '/api/mcp';
+    try {
+      for (const name of names) {
+        compareMcpExchanges(expected.get(name), await call(nativeRust, name), name === 'o8_status'
+          ? ['/body/result/content/0/text/json/data/snapshot/ageMs'] : []);
+      }
+      expect(seen).toHaveLength(0);
+      expect(sqlite.prepare('SELECT total_changes() AS count').get()).toEqual(changes);
+      expect(sqlite.pragma('data_version', { simple: true })).toBe(version);
+      expect(files.map((name) => readFileSync(join(directory, name), 'utf8'))).toEqual(contents);
+    } finally { failedSource = ''; }
+  });
+
   nativeReadTest('sees committed WAL updates without modifying SQLite or the registries', async () => {
     const sqlite = getSqlite();
     expect(sqlite.pragma('journal_mode', { simple: true })).toBe('wal');
@@ -694,6 +717,7 @@ describe('o8d MCP through the real HTTP JSON-RPC entry point', () => {
     expect(result.stdout).toContain('MCP parity passed');
   });
   it.runIf(Boolean(process.env.O8_MCP_BENCH_REPORT))('measures both servers with the existing speed MCP client', async () => {
+    seen.length = 0;
     await promisify(execFile)(process.execPath, ['scripts/mcp-benchmark.mjs', `--reference=${base}`,
       `--candidate=${nativeRust}`, `--output=${process.env.O8_MCP_BENCH_REPORT}`], {
       env: { ...process.env, O8_MCP_PARITY_TOKEN: token },
@@ -701,6 +725,20 @@ describe('o8d MCP through the real HTTP JSON-RPC entry point', () => {
     const report = JSON.parse(readFileSync(process.env.O8_MCP_BENCH_REPORT!, 'utf8'));
     expect(report.results).toHaveLength(14);
     expect(report.samples).toBe(100);
+    expect(report.acceptance).toMatchObject({ statusP50Under10Ms: expect.any(Boolean),
+      everyNativeToolAtLeast5xLower: expect.any(Boolean) });
+    expect(report.comparisons).toHaveLength(6);
+    for (const comparison of report.comparisons) {
+      expect(comparison).toMatchObject({ name: expect.any(String), p50Speedup: expect.any(Number),
+        p95Speedup: expect.any(Number), p50AtLeast5xLower: expect.any(Boolean), p95AtLeast5xLower: expect.any(Boolean) });
+      const calls = seen.filter((entry) => entry.path === '/api/mcp'
+        && JSON.parse(entry.body).method === 'tools/call' && JSON.parse(entry.body).params?.name === comparison.name).length;
+      comparison.candidateForwardedCalls = calls - (report.samples + report.warmups);
+      expect(comparison.candidateForwardedCalls).toBeGreaterThanOrEqual(0);
+    }
+    expect(report.baseline).toMatchObject({ source: '#4374', comparable: false,
+      results: expect.arrayContaining([expect.objectContaining({ name: 'o8_status', median: 35.5, p95: 1667.03 })]) });
+    writeFileSync(process.env.O8_MCP_BENCH_REPORT!, `${JSON.stringify(report, null, 2)}\n`);
   }, 180_000);
 
   it.runIf(Boolean(process.env.O8_MCP_SCALE_BENCH_REPORT_DIR))('measures realistic state with idle and CPU-loaded TypeScript', async () => {

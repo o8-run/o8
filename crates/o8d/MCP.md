@@ -83,6 +83,16 @@ TypeScript opt-in is absent, native requests fall back to the original endpoint.
 
 ## Parity and measurements
 
+The paired benchmark reports per-tool p50/p95 speedup ratios and explicit
+results for the fivefold target and status p50 below 10 ms. An unmet target is
+recorded as false; it is not converted into a passing performance claim. The
+numeric #4374 baseline is included as historical context with `comparable: false`,
+because a fixture HTTP adapter is not the baseline's source Next.js server.
+The real-entry measurement test also records candidate `tools/call` forwards,
+including warmups, so fallback latency is visible rather than attributed to a
+native read. The six-tool outage test independently proves warmed reads need
+no TypeScript requests and do not modify SQLite or the JSON registries.
+
 Run the real HTTP fixture suite with Node 22 and Rust stable:
 
 ```sh
