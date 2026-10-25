@@ -7,19 +7,24 @@ import { promisify } from 'node:util';
 import { NextRequest } from 'next/server';
 import { afterAll, expect, it, vi } from 'vitest';
 
-const fixture = vi.hoisted(() => ({ compose: vi.fn() }));
-vi.mock('@/lib/cortex/qa/classifier', () => ({ classifyQuestion: async () => ({ class: 'A', bm25Variants: ['release policy'] }) }));
+const fixture = vi.hoisted(() => ({ compose: vi.fn(), vector: null as number[] | null,
+  classify: vi.fn(async (): Promise<{ class: 'A' | 'B'; bm25Variants: string[] }> => ({ class: 'A', bm25Variants: ['release policy'] })) }));
+vi.mock('@/lib/cortex/qa/classifier', () => ({ classifyQuestion: fixture.classify }));
 vi.mock('@/lib/cortex/qa/llm/haiku-adapter', () => ({ prewarmHaiku: vi.fn() }));
 vi.mock('@/lib/cortex/qa/llm/sonnet-adapter', () => ({ prewarmSonnetCli: vi.fn() }));
-vi.mock('@/lib/cortex/qa/llm/gemini-embed', () => ({ embedQuestion: async () => null }));
-vi.mock('@/lib/cortex/qa/composer', async original => ({ ...await original<typeof import('@/lib/cortex/qa/composer')>(),
-  composeClassA: async (_question: string, scope: string, rows: import('@/lib/cortex/qa/types').TypedRow[], emit: (name: string, value: unknown) => void) => {
-    fixture.compose(scope, rows);
-    const facts = rows.filter(row => row.citation.kind === 'fact');
-    emit('token', { text: facts.map(row => row.fields.content).join('\n') });
-    for (const row of facts) emit('citation', { ...row.citation, title: 'Release policy' });
-  },
+vi.mock('@/lib/cortex/qa/llm/gemini-embed', async original => ({
+  ...await original<typeof import('@/lib/cortex/qa/llm/gemini-embed')>(), embedQuestion: async () => fixture.vector,
 }));
+vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: vi.fn(async () => {}) }));
+vi.mock('@/lib/cortex/qa/composer', async original => {
+  const compose = async (_question: string, scope: string, rows: import('@/lib/cortex/qa/types').TypedRow[], emit: (name: string, value: unknown) => void) => {
+    fixture.compose(scope, rows);
+    const sources = rows.filter(row => ['fact', 'pr', 'doc', 'directive'].includes(row.citation.kind));
+    emit('token', { text: sources.map(row => row.fields.content ?? row.fields.title).join('\n') });
+    for (const row of sources) emit('citation', { ...row.citation, title: row.fields.title ?? 'Release policy' });
+  };
+  return { ...await original<typeof import('@/lib/cortex/qa/composer')>(), composeClassA: compose, composeClassB: compose };
+});
 // The native OS policy is not available here. Exercise the actual launch
 // preparation, supervisor, child CLI, middleware and answer route around it.
 vi.mock('@/lib/runtimes/shared/owned-session/sandbox', () => ({
@@ -167,6 +172,11 @@ await (await import('esbuild')).build({ entryPoints: [path.join(process.cwd(), '
   define: { __O8_CLI_VERSION__: JSON.stringify('fixture') },
 });
 const shellQuote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
+async function cliRead(token: string, cwd: string, question: string) {
+  return promisify(execFile)(process.execPath, [cli, 'ask', question], {
+    cwd, env: { ...inherited, O8_WORKER_TOKEN: token }, timeout: 20_000,
+  }).then(value => ({ ...value, code: 0 }), error => ({ stdout: error.stdout ?? '', stderr: error.stderr ?? '', code: error.code }));
+}
 afterAll(async () => {
   await new Promise<void>(resolve => server.close(() => resolve()));
   closeDb(); rmSync(root, { recursive: true, force: true });
@@ -217,6 +227,191 @@ it('refuses a rebound granted root even when the request omits its repository', 
   try { expect((await read(token, { question: 'Rebound root release policy?' })).status).toBe(401); }
   finally { unlinkSync(repo); renameSync(retained, repo); }
 });
+
+it('keeps eighteen scope denials identical and anonymous reads unauthorized', async () => {
+  const token = mintBrainReadWorkerToken(repo, projectA); const before = fixture.compose.mock.calls.length;
+  const bodies = [
+    ...[foreign, ...Array.from({ length: 5 }, (_, index) => path.join(root, `missing-${index}`))].map(repoPath => ({ repoPath })),
+    ...[projectB, ...Array.from({ length: 5 }, (_, index) => `missing-project-${index}`)].map(projectId => ({ projectId })),
+    ...Array.from({ length: 6 }, (_, index) => ({ packetId: `missing-packet-${index}` })),
+  ];
+  let expected: unknown;
+  for (const body of bodies) {
+    const response = await read(token, body); expect(response.status).toBe(403);
+    const result = await response.json(); expected ??= result; expect(result).toEqual(expected);
+  }
+  expect((await read(null)).status).toBe(401); expect(fixture.compose.mock.calls.length).toBe(before);
+});
+
+it('keeps operator and worker cache entries separate while retaining exact cache hits', async () => {
+  const question = 'Release policy cache authority control?';
+  const operator = inherited.O8_API_TOKEN; const worker = mintBrainReadWorkerToken(repo, projectA);
+  const foreignAnswer = await (await read(operator, { question, repoPath: foreign })).json();
+  expect(foreignAnswer.answer).toBe('Foreign release policy.');
+  const own = await (await read(worker, { question })).json(); expect(own.answer).toBe(policy);
+  const operatorCached = await (await read(operator, { question, repoPath: foreign })).json();
+  expect(operatorCached).toMatchObject({ answer: foreignAnswer.answer, cacheHit: 'exact' });
+  const workerCached = await (await read(worker, { question })).json();
+  expect(workerCached).toMatchObject({ answer: policy, cacheHit: 'exact' });
+});
+
+it('uses live membership after panel removal through HTTP and the built CLI, including warm answers', async () => {
+  const sqlite = getSqlite(); const original = readFileSync(path.join(data, 'projects.json'), 'utf8');
+  const question = 'Release policy membership snapshot?';
+  const token = mintBrainReadWorkerToken(repo, projectA);
+  const removed = mintBrainReadWorkerToken(foreign, projectA);
+  sqlite.prepare('DELETE FROM project_repos WHERE project_id = ? AND repo_id = ?').run(projectB, 'repo-b');
+  sqlite.prepare('INSERT INTO project_repos (project_id, repo_id, added_at) VALUES (?, ?, 1)').run(projectA, 'repo-b');
+  const stale = structuredClone(ledger); stale.projects[0].repoPaths = [repo, foreign]; stale.activeProjectId = projectA;
+  writeFileSync(path.join(data, 'projects.json'), JSON.stringify(stale));
+  try {
+    fixture.vector = [1, 0, 0];
+    expect((await (await read(token, { question })).json()).answer).toContain('Foreign release policy.');
+    expect(JSON.parse((await cliRead(token, repo, question)).stdout).answer).toContain('Foreign release policy.');
+    const request = new NextRequest('http://localhost/api/panel/projects/' + projectA, { method: 'PATCH',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${inherited.O8_API_TOKEN}` },
+      body: JSON.stringify({ repoPaths: [repo] }),
+    });
+    expect(panelGateMiddleware(request).status).toBe(200);
+    const panel = await import('@/app/api/panel/projects/[id]/route');
+    expect((await panel.PATCH(request, { params: Promise.resolve({ id: projectA }) })).status).toBe(200);
+    expect(sqlite.prepare('SELECT 1 FROM project_repos WHERE project_id = ? AND repo_id = ?').get(projectA, 'repo-b')).toBeUndefined();
+    expect(JSON.parse(readFileSync(path.join(data, 'projects.json'), 'utf8')).projects[0].repoPaths).toContain(foreign);
+    sqlite.prepare('INSERT INTO project_repos (project_id, repo_id, added_at) VALUES (?, ?, 1)').run(projectB, 'repo-b');
+    const missing = mintBrainReadWorkerToken(foreign, 'missing-project');
+    const absent = await read(missing, { question }); const absentBody = await absent.json();
+    const refusal = await read(removed, { question });
+    expect([403, 404]).toContain(refusal.status); expect(refusal.status).toBe(absent.status);
+    expect(await refusal.json()).toEqual(absentBody);
+    const refusedCli = await cliRead(removed, foreign, question);
+    expect(refusedCli.code).toBe(3); expect(refusedCli.stdout).toBe('');
+    const missingCli = await cliRead(missing, foreign, question);
+    expect(JSON.parse(refusedCli.stderr).error).toEqual(JSON.parse(missingCli.stderr).error);
+    const http = await read(token, { question }); expect(http.status).toBe(200);
+    const answer = await http.json();
+    expect.soft(answer.answer).toBe(policy);
+    expect.soft(answer.citations.map((citation: { rowId: string }) => citation.rowId)).toEqual(['policy']);
+    const built = await cliRead(token, repo, question); expect(built.code, built.stderr).toBe(0);
+    expect.soft(JSON.parse(built.stdout).answer).toBe(policy);
+    expect.soft(built.stdout).not.toContain('foreign-policy');
+    const semantic = await (await read(token, { question: 'How should release policy membership be applied?' })).json();
+    expect(semantic).toMatchObject({ answer: policy, cacheHit: 'semantic' });
+  } finally {
+    fixture.vector = null;
+    sqlite.prepare('DELETE FROM project_repos WHERE project_id = ? AND repo_id = ?').run(projectA, 'repo-b');
+    sqlite.prepare('INSERT OR IGNORE INTO project_repos (project_id, repo_id, added_at) VALUES (?, ?, 1)').run(projectB, 'repo-b');
+    writeFileSync(path.join(data, 'projects.json'), original);
+  }
+}, 60000);
+
+it('keeps full repository identity for same-basename PRs through HTTP and the built CLI', async () => {
+  const sqlite = getSqlite(); const priorProjects = readFileSync(path.join(data, 'projects.json'), 'utf8');
+  const priorRepos = readFileSync(path.join(data, 'repos.json'), 'utf8');
+  const projectLedger = JSON.parse(priorProjects); const registry = JSON.parse(priorRepos);
+  const ownRepo = path.join(root, 'scope-a', 'checkout'); const otherRepo = path.join(root, 'scope-b', 'checkout');
+  const ownTitle = 'Release policy assigned repository'; const otherTitle = 'Release policy foreign repository';
+  for (const [index, localPath, title] of [[1, ownRepo, ownTitle], [2, otherRepo, otherTitle]] as const) {
+    mkdirSync(localPath, { recursive: true });
+    const id = `same-name-${index}`; const fullName = `fixture-scope-${index}/checkout`;
+    projectLedger.projects.push({ id, name: id, repoPaths: [localPath], createdAt: new Date().toISOString() });
+    registry.repos.push({ id, name: 'checkout', localPath, remoteUrl: `https://github.com/${fullName}.git`, defaultBranch: 'main', addedAt: new Date().toISOString() });
+    sqlite.prepare('INSERT INTO projects (id, name, slug, created_at, updated_at) VALUES (?, ?, ?, 1, 1)').run(id, id, id);
+    sqlite.prepare('INSERT INTO project_repos (project_id, repo_id, added_at) VALUES (?, ?, 1)').run(id, id);
+    sqlite.prepare(`INSERT INTO github_pull_requests (pull_request_id, repo_full_name, number, title, body, state, url, head_ref_name)
+      VALUES (?, ?, 1, ?, 'Release policy', 'open', ?, 'shared-fixture-branch')`).run(100 + index, fullName, title, `https://github.com/${fullName}/pull/1`);
+    sqlite.prepare(`INSERT INTO docs (id, repo_path, repo_name, rel_path, kind, title, body, size_bytes, last_modified, last_synced)
+      VALUES (?, ?, 'checkout', 'policy.md', 'markdown', ?, 'Release policy', 14, '2026-01-01', '2026-01-01')`)
+      .run(`same-doc-${index}`, localPath, title + ' document');
+  }
+  mkdirSync(path.join(data, 'directives'), { recursive: true });
+  writeFileSync(path.join(data, 'directives', 'foreign-repo-directive.md'), '---\nid: foreign-repo-directive\ntitle: Release policy foreign repository directive\nscope: checkout\nrepoName: legacy-name\n---\nRelease policy.\n');
+  sqlite.prepare('INSERT INTO directives_fts (directive_id, title, body) VALUES (?, ?, ?)')
+    .run('foreign-repo-directive', 'Release policy foreign repository directive', 'Release policy.');
+  sqlite.prepare(`INSERT INTO session_outcomes (id, project_id, repo_path, branch, runtime, outcome, summary, started_at, completed_at)
+    VALUES ('assigned-outcome', 'same-name-1', ?, 'shared-fixture-branch', 'codex', 'succeeded', 'Release policy outcome', '2026-01-01', '2026-01-01')`).run(ownRepo);
+  writeFileSync(path.join(data, 'projects.json'), JSON.stringify(projectLedger));
+  writeFileSync(path.join(data, 'repos.json'), JSON.stringify(registry));
+  try {
+    const token = mintBrainReadWorkerToken(ownRepo, 'same-name-1'); const question = 'Release policy repository identity?';
+    const response = await read(token, { question }); expect(response.status).toBe(200);
+    const result = await response.json();
+    expect.soft(result.answer).toContain(ownTitle); expect.soft(result.answer).not.toContain(otherTitle);
+    expect.soft(result.citations.filter((citation: { kind: string }) => citation.kind === 'pr').map((citation: { rowId: string }) => citation.rowId)).toEqual(['101']);
+    expect(JSON.stringify(fixture.compose.mock.calls.at(-1)?.[1])).not.toContain(otherTitle);
+    expect(result.citations.filter((citation: { kind: string }) => citation.kind === 'doc').map((citation: { rowId: string }) => citation.rowId)).toEqual(['same-doc-1']);
+    expect(result.citations.map((citation: { rowId: string }) => citation.rowId)).not.toContain('foreign-repo-directive');
+    const built = await cliRead(token, ownRepo, question); expect(built.code, built.stderr).toBe(0);
+    expect.soft(built.stdout).toContain(ownTitle); expect.soft(built.stdout).not.toContain(otherTitle);
+    expect.soft(JSON.parse(built.stdout).citations.map((citation: { rowId: string }) => citation.rowId)).not.toContain('102');
+  } finally {
+    sqlite.prepare('DELETE FROM github_pull_requests WHERE pull_request_id IN (101, 102)').run();
+    sqlite.prepare("DELETE FROM session_outcomes WHERE id = 'assigned-outcome'").run();
+    sqlite.prepare("DELETE FROM docs WHERE id IN ('same-doc-1', 'same-doc-2')").run();
+    sqlite.prepare("DELETE FROM directives_fts WHERE directive_id = 'foreign-repo-directive'").run();
+    rmSync(path.join(data, 'directives', 'foreign-repo-directive.md'), { force: true });
+    sqlite.prepare("DELETE FROM project_repos WHERE project_id IN ('same-name-1', 'same-name-2')").run();
+    sqlite.prepare("DELETE FROM projects WHERE id IN ('same-name-1', 'same-name-2')").run();
+    writeFileSync(path.join(data, 'projects.json'), priorProjects); writeFileSync(path.join(data, 'repos.json'), priorRepos);
+  }
+}, 60000);
+
+it('does not coalesce a built CLI request with an in-flight answer from another membership snapshot', async () => {
+  const sqlite = getSqlite(); const token = mintBrainReadWorkerToken(repo, projectA);
+  const question = 'Release policy concurrent cache membership?';
+  let entered = false; let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  fixture.classify.mockImplementationOnce(async () => { entered = true; await gate; return { class: 'B', bm25Variants: ['release policy'] }; });
+  const first = read(token, { question });
+  try {
+    await vi.waitFor(() => expect(entered).toBe(true));
+    sqlite.prepare('DELETE FROM project_repos WHERE project_id = ? AND repo_id = ?').run(projectB, 'repo-b');
+    sqlite.prepare('INSERT INTO project_repos (project_id, repo_id, added_at) VALUES (?, ?, 1)').run(projectA, 'repo-b');
+    const second = await cliRead(token, repo, question); expect(second.code, second.stderr).toBe(0);
+    expect(JSON.parse(second.stdout).answer).toContain('Foreign release policy.');
+    release(); const oldAnswer = await (await first).json(); expect(oldAnswer.answer).toBe(policy);
+  } finally {
+    release(); await first;
+    sqlite.prepare('DELETE FROM project_repos WHERE project_id = ? AND repo_id = ?').run(projectA, 'repo-b');
+    sqlite.prepare('INSERT OR IGNORE INTO project_repos (project_id, repo_id, added_at) VALUES (?, ?, 1)').run(projectB, 'repo-b');
+  }
+}, 30000);
+
+it('refuses SQL membership read failure before using a warm answer or the JSON sidecar', async () => {
+  const token = mintBrainReadWorkerToken(repo, projectA); const question = 'Release policy membership failure?';
+  expect((await read(token, { question })).status).toBe(200);
+  const before = fixture.compose.mock.calls.length;
+  const projects = await import('@/lib/projects/store');
+  const spy = vi.spyOn(projects, 'listProjects').mockImplementationOnce(() => { throw new Error('Fixture membership store unavailable'); });
+  try {
+    const response = await read(token, { question }); expect(response.status).toBe(403);
+    const missing = await read(mintBrainReadWorkerToken(repo, 'missing-project'), { question });
+    expect(await response.json()).toEqual(await missing.json());
+    expect(fixture.compose.mock.calls.length).toBe(before);
+  } finally { spy.mockRestore(); }
+});
+
+it.each(['http', 'cli'] as const)('keeps in-flight %s retrieval inside its admitted SQL membership snapshot', async entry => {
+  const sqlite = getSqlite(); const token = mintBrainReadWorkerToken(repo, projectA);
+  let release!: () => void; let entered = false;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  fixture.classify.mockImplementationOnce(async () => { entered = true; await gate; return { class: 'B', bm25Variants: ['release policy'] }; });
+  const question = `Release policy in-flight snapshot ${entry}?`;
+  const pending = entry === 'http' ? read(token, { question, bypassCache: true }) : cliRead(token, repo, question);
+  try {
+    await vi.waitFor(() => expect(entered).toBe(true));
+    sqlite.prepare('INSERT INTO project_repos (project_id, repo_id, added_at) VALUES (?, ?, 1)').run(projectB, 'repo-a');
+    release();
+    const result = await pending;
+    if (entry === 'http') expect((result as Response).status).toBe(200);
+    else expect((result as { code: number }).code).toBe(0);
+    expect(JSON.stringify(fixture.compose.mock.calls.at(-1)?.[1])).not.toContain('Foreign project metadata.');
+    expect(JSON.stringify(fixture.compose.mock.calls.at(-1)?.[1])).not.toContain('foreign-policy');
+    const denied = await read(token, { question }); expect(denied.status).toBe(403);
+  } finally {
+    release(); await pending;
+    sqlite.prepare('DELETE FROM project_repos WHERE project_id = ? AND repo_id = ?').run(projectB, 'repo-a');
+  }
+}, 30000);
 
 it('refuses a repository shared by persisted projects before any project metadata is composed', async () => {
   const sqlite = getSqlite();

@@ -19,7 +19,7 @@ import {
 import { delimiter, dirname, join } from 'node:path';
 import { prepareWorkerSandbox } from '@/lib/runtimes/shared/owned-session/sandbox';
 import { mintBrainReadWorkerToken } from '@/lib/auth/brain-read-worker-token';
-import { getActiveProjectScopeForRepoSync } from '@/lib/repos/projects';
+import { getActiveProjectScopeForRepo } from '@/lib/repos/projects';
 
 const CONTROL_ENV_KEYS = [
   'O8_API_TOKEN',
@@ -395,8 +395,9 @@ export async function prepareSingleOrchestratorLaunch(input: {
       finalAllowExecPaths: [launchBinaryPath, ...(selectedToolHost ? [launchToolHostPath] : []), ...toolHosts],
     });
     const env = singleOrchestratorEnvironment(input.env, overlayHome);
-    const brainScope = getActiveProjectScopeForRepoSync(realpathSync(input.repoPath));
-    env.O8_WORKER_TOKEN = mintBrainReadWorkerToken(input.repoPath, brainScope.repoInActiveProject ? brainScope.projectId : null);
+    const brainScope = await getActiveProjectScopeForRepo(realpathSync(input.repoPath));
+    env.O8_WORKER_TOKEN = mintBrainReadWorkerToken(input.repoPath,
+      brainScope.repoInActiveProject ? brainScope.project.sqliteProjectId ?? brainScope.projectId : null);
     env.CODEX_SQLITE_HOME = input.codexHome;
     env.PATH = `${guardBinDir}${delimiter}${env.PATH ?? ''}`;
     return {

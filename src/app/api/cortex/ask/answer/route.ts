@@ -24,8 +24,8 @@ import { performance } from 'node:perf_hooks';
 import { realpathSync } from 'node:fs';
 import { isAbsolute, relative, sep } from 'node:path';
 import { isBrainReadWorkerBearer } from '@/lib/auth/brain-read-worker-token';
-import { getProjectsLedger, type ProjectRecord } from '@/lib/repos/projects';
-import { listReposFresh } from '@/lib/repos/registry';
+import { resolveBrainReadWorkerScope } from '@/lib/auth/brain-read-worker-scope';
+import { withRequestProjectScope, type RequestProjectSnapshot } from '@/lib/repos/request-project-scope';
 
 import { askCortex, type AskCortexResult } from '@/lib/cortex/qa/ask';
 import { ManagedBrainUnavailableError } from '@/lib/cortex/qa/compose-class-a';
@@ -90,18 +90,15 @@ export async function POST(request: NextRequest) {
     typeof body?.packetId === 'string' && body.packetId.trim() ? body.packetId.trim() : null;
   const principal = resolveRequestPrincipalContext(request);
   const bearer = request.headers.get('authorization')?.replace(/^Bearer /, '').trim() ?? '';
+  let readScope: RequestProjectSnapshot | null = null;
   if (isBrainReadWorkerBearer(bearer) && (principal.role !== 'worker' || !principal.brainRepoPath)) {
     return NextResponse.json({ ok: false, error: 'Invalid or expired Brain read credential.' }, { status: 401 });
   }
   if (principal.role === 'worker' && principal.brainRepoPath) {
-    // Retrieval can expand a repository into every linked project. Refuse
-    // ambiguous membership rather than giving a read grant that wider scope.
-    let memberships: ProjectRecord[] = [];
+    // Resolve live membership once and carry that exact snapshot through every
+    // retriever and cache. The display ledger cannot authorize a read.
     try {
-      await listReposFresh();
-      memberships = (await getProjectsLedger()).projects.filter(project => project.repoPaths.some(candidate => {
-        try { return realpathSync(candidate) === principal.brainRepoPath; } catch { return false; }
-      }));
+      if (principal.brainProjectId) readScope = await resolveBrainReadWorkerScope(principal.brainRepoPath, principal.brainProjectId);
     } catch { /* Missing membership evidence keeps the grant refused. */ }
     let scoped = !repoPath;
     if (repoPath) {
@@ -111,12 +108,12 @@ export async function POST(request: NextRequest) {
       } catch { scoped = false; }
     }
     if (!scoped || packetId || projectId || !principal.brainProjectId
-      || memberships.length !== 1 || memberships[0].id !== principal.brainProjectId) {
+      || !readScope) {
       return NextResponse.json({ ok: false, error: { code: 'worker_brain_scope_mismatch',
         message: 'Brain read credential cannot address another project or packet.' } }, { status: 403 });
     }
     repoPath = principal.brainRepoPath;
-    projectId = principal.brainProjectId;
+    projectId = readScope.scope.projectId;
   }
   const ownershipRefusal = principal.role === 'worker' && principal.brainRepoPath
     ? null : workerPacketRefusal(principal, packetId);
@@ -149,12 +146,13 @@ export async function POST(request: NextRequest) {
     const usageContext = laneId || packetId || missionId
       ? { laneId, packetId, missionId }
       : undefined;
-    const result = await askCortex(question, repoPath, {
+    const ask = () => askCortex(question, repoPath, {
       bypassCache,
       projectId,
       terse,
       ...(usageContext ? { usageContext } : {}),
     });
+    const result = await (readScope ? withRequestProjectScope(readScope, ask) : ask());
     const latencyMs = Math.max(0, performance.now() - startedAt);
     if (packetId && laneId) recordBrainConsulted(packetId, laneId, question, result, latencyMs);
     return NextResponse.json({
