@@ -44,7 +44,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends libfontconfig1-dev libfreetype-dev libxkbcommon-dev libxkbcommon-x11-dev libxcb1-dev libx11-xcb-dev libvulkan-dev mesa-vulkan-drivers xvfb xauth x11-xserver-utils imagemagick fonts-dejavu-core
       - name: Build native release
         run: cargo build --release --locked --manifest-path native/o8-next/Cargo.toml
-      - name: Three fresh fixture hosts, native frames and budgets
+      - name: Warm-up and three fresh fixture hosts, native frames and budgets
         run: |
           export VK_ICD_FILENAMES="$(find /usr/share/vulkan/icd.d -name 'lvp_icd*.json' -print -quit)"
           test -n "$VK_ICD_FILENAMES"
