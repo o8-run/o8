@@ -1,11 +1,13 @@
 # Files viewer
 
-The opt-in viewer registers in `src/surfaces/files.rs`. Its source, actions, refusal states and regression test function names are retained from the preceding port head.
+The opt-in viewer registers in `src/surfaces/files.rs`. Its component, request adapter, privacy guard, draft lifetime policy and tests live inside `src/surfaces/files/`.
 
 The disposable host discovers its fixture entry without shared dispatcher edits. Existing authenticated production routes remain authoritative.
 
-The shared `main.rs`, `client.rs`, `diff.rs`, workspace state, shell view/test dispatchers and development host match main. The shell inventory has one entry for this surface. `files/requests.rs` owns Save and uses `Client::url`, `Client::request` and `Client::read`, retaining operator authentication, timeout policy, status decoding and conflict responses.
+The shared composer, registry, Projects, client, diff renderer, workspace state and development host match main. The shell inventory has one registration line for this surface. `files/requests.rs` owns Save through the existing authenticated transport. Conflict decoding reads at most 16 KiB; larger responses use the bounded file-content endpoint to recover the current raw-byte revision. Both Reload and Keep mine remain available without decoding the complete external file. A successful overwrite also skips the potentially large `oldContent` receipt and confirms the saved content and revision through that bounded endpoint.
 
-Window-close and Projects draft refusal remain enforced. The six-line generic draft query in `surface_registry.rs` lets shared lifecycle actions ask registered views whether they have unsaved changes. The five-line check in `surfaces/projects.rs` must run before Projects refreshes repository membership: removing it fails the real-shell regression after desktop unregisters an owned repository and refresh destroys its editor entity. The current registry has no refusal hook at that entry point. The surface owns its window-close callback. Existing source-input and production-route safety fixes remain intact; Files does not use the shared diff renderer.
+`files/lifecycle.rs` retains dirty entities across navigation and registry refreshes, including desktop unregister followed by Projects refresh. Projects keeps main's behavior. Explicit discard releases the retained draft. Window close broadcasts a private query through existing registered callbacks so independently registered editors can veto it. Recovery does not steal focus from overlays. Source editing uses the unchanged shared Composer, including selection, clipboard, undo and its scrolling viewport; the surface handles source Enter only while that editor is focused and outside IME composition.
 
-Regression test function names are unchanged; fixtures extend `shell::test_support`.
+The private guard rejects credential-bearing assignments independently of value quoting, length or punctuation before assigning source to the editor. Ordinary code references remain editable. Binary and truncated reads, revision-guarded saves and canonical workspace containment remain enforced by the existing production routes.
+
+Tests extend `shell::test_support`. `round2.rs` covers punctuated passwords, 32 MiB external conflicts and ordinary code references through the real shell. `verify-module.mjs` creates an owned canonical temporary checkout of main and compiles only this module plus its registration line; run it with the normal Rust environment and an external Cargo target directory.

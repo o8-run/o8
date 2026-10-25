@@ -127,9 +127,6 @@ impl Registration {
 }
 
 pub(super) trait ShellView: Render {
-    fn has_draft(_view: &Entity<Self>, _cx: &App) -> bool {
-        false
-    }
     fn focus(view: &Entity<Self>, composer: bool, window: &mut Window, cx: &mut Context<Shell>);
     fn tick(_view: &Entity<Self>, _refresh: bool, _cx: &mut Context<Shell>) {}
     #[cfg(test)]
@@ -177,9 +174,6 @@ macro_rules! register_surfaces {
         }
         enum Content { $( $(#[$tab_attr])* $variant(Entity<$module::View>), )* }
         impl Content {
-            fn has_draft(&self, cx: &App) -> bool {
-                match self { $( $(#[$tab_attr])* Self::$variant(view) => <$module::View as ShellView>::has_draft(view, cx), )* }
-            }
             fn element(&self) -> gpui::AnyElement {
                 match self { $( $(#[$tab_attr])* Self::$variant(view) => view.clone().into_any_element(), )* }
             }

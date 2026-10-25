@@ -4,6 +4,39 @@ use serde_json::Value;
 use std::sync::LazyLock;
 
 pub(crate) fn sensitive(text: &str) -> bool {
+    // Credential literals are private regardless of quoting, punctuation or length.
+    // Known code references contain no credential value; keep those source files usable.
+    static ASSIGNMENT: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(
+        r#"(?im)\b(?P<key>[a-z0-9_]*(?:token|secret|password|api[_-]?key|access[_-]?key|credential|authorization)[a-z0-9_]*)["']?\s*[:=]\s*"#
+    ).unwrap()
+    });
+    static REFERENCE: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(
+        r"^(?:[A-Za-z_$][A-Za-z0-9_$.]*\(\s*\)|(?:process|import\.meta)\.env\.[A-Za-z0-9_]+)\s*;?\s*(?://.*)?$"
+    ).unwrap()
+    });
+    for assignment in ASSIGNMENT.captures_iter(text) {
+        let matched = assignment.get(0).unwrap();
+        let value = text[matched.end()..]
+            .lines()
+            .next()
+            .unwrap_or_default()
+            .trim();
+        if value.is_empty() {
+            continue;
+        }
+        let prefix = text[..matched.start()]
+            .rsplit('\n')
+            .next()
+            .unwrap_or_default();
+        let declaration = prefix.split_whitespace().last().is_some_and(|word| {
+            matches!(word.trim_start_matches(['+', '-']), "const" | "let" | "var")
+        });
+        if !declaration || !REFERENCE.is_match(value) {
+            return true;
+        }
+    }
     static CREDENTIAL: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(
         r#"(?im)(?:[a-z0-9_]*(?:token|secret|password|api[_-]?key|access[_-]?key|credential|authorization)[a-z0-9_]*)["']?\s*[:=]\s*(?:"[^"\r\n]{8,}"|'[^'\r\n]{8,}')|^[+\-]?[ \t]*(?:export[ \t]+)?(?:[a-z0-9_]*(?:token|secret|password|api[_-]?key|access[_-]?key|credential|authorization)[a-z0-9_]*)["']?[ \t]*[:=][ \t]*[A-Za-z0-9_+/=\-]{8,}[ \t]*(?:#[^\r\n]*)?$|[a-z][a-z0-9+.\-]*://[^/\s@]+@|(?:--password|--token|--api-key|--user|-u)\s+[^\s"']{8,}|bearer\s+[A-Za-z0-9._-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|\b(?:sk-[A-Za-z0-9_\-]{16,}|gh[pousr]_[A-Za-z0-9]{16,})\b|\beyJ[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\b"#

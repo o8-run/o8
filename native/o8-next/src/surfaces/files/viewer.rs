@@ -36,6 +36,17 @@ pub(crate) struct Files {
 }
 impl Files {
     #[cfg(test)]
+    pub(crate) fn test_hidden_source(&self, cx: &App) -> bool {
+        self.sensitive && self.baseline.is_empty() && self.editor.read(cx).text.is_empty()
+    }
+    #[cfg(test)]
+    pub(crate) fn test_bounded_readonly(&self, cx: &App) -> bool {
+        self.truncated
+            && !self.editable()
+            && self.baseline.len() <= 100_024
+            && self.editor.read(cx).text.is_empty()
+    }
+    #[cfg(test)]
     pub(crate) fn test_ready(&self, path: &str, truncated: bool) -> bool {
         self.path == path
             && self.ready
@@ -50,7 +61,7 @@ impl Files {
         cx: &mut Context<Self>,
     ) -> Self {
         let path_input = cx.new(Composer::new);
-        let editor = cx.new(Composer::source);
+        let editor = cx.new(Composer::new);
         path_input.read(cx).focus.focus(window);
         let subscriptions = vec![
             cx.subscribe(&path_input, |this, _, _: &Submit, cx| this.load(cx)),
@@ -340,6 +351,16 @@ impl Render for Files {
             .font_family(theme().font_ui)
             .text_size(px(13.))
             .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                if event.keystroke.key == "enter"
+                    && this.editor.read(cx).focus.is_focused(window)
+                    && !this.editor.read(cx).composing()
+                {
+                    this.editor.update(cx, |editor, cx| {
+                        EntityInputHandler::replace_text_in_range(editor, None, "\n", window, cx);
+                    });
+                    cx.stop_propagation();
+                    return;
+                }
                 if event.keystroke.key == "escape" && this.close_confirmation.is_some() {
                     this.cancel_close(cx);
                     cx.stop_propagation();
