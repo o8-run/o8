@@ -10,8 +10,40 @@ import { afterAll, describe, expect, it, vi } from 'vitest';
 
 const seams = vi.hoisted(() => ({ failAfterRename: false, failAfterReturn: false, failAfterOwnership: false, ownershipDepth: 0,
   addDuringRecovery: null as string | null, addAtRename: null as string | null,
+  addBeforeGeneratedPurge: null as string | null,
   addAtGeneratedRename: null as string | null, generatedReviewCount: 0, recoveryId: null as string | null,
+  matrix: null as null | { source: string; timing: string; mutate: (candidate: string) => void; changed: boolean; crash: string; crashed: boolean },
   imageWorkspace: null as string | null, imageDetachCount: 0 }));
+async function matrixBoundary(timing: string, candidate: string) {
+  const probe = seams.matrix;
+  if (!probe) return;
+  if (probe.timing === timing && !probe.changed) { probe.mutate(candidate); probe.changed = true; }
+  if (probe.changed && probe.crash === timing && !probe.crashed) {
+    probe.crashed = true; throw new Error(`fixture crash at ${timing}`);
+  }
+}
+vi.mock('@/lib/workspace/exact-parent-operation', async original => {
+  const actual = await original<typeof import('@/lib/workspace/exact-parent-operation')>();
+  return { ...actual, renameExactChildDirectory: async (...args: Parameters<typeof actual.renameExactChildDirectory>) => {
+    if (args[2] === seams.matrix?.source) await matrixBoundary('between capture and rename', args[2]);
+    return actual.renameExactChildDirectory(...args);
+  } };
+});
+vi.mock('@/lib/workspace/exact-directory-move', async original => {
+  const actual = await original<typeof import('@/lib/workspace/exact-directory-move')>();
+  return { ...actual, moveExactDirectoryNoReplace: async (...args: Parameters<typeof actual.moveExactDirectoryNoReplace>) => {
+    if (args[1] === seams.matrix?.source) await matrixBoundary('between capture and rename', args[1]);
+    return actual.moveExactDirectoryNoReplace(...args);
+  } };
+});
+vi.mock('@/lib/workspace/exact-directory-purge', async original => {
+  const actual = await original<typeof import('@/lib/workspace/exact-directory-purge')>();
+  return { ...actual, captureExactDirectoryManifest: async (...args: Parameters<typeof actual.captureExactDirectoryManifest>) => {
+    const captured = await actual.captureExactDirectoryManifest(...args);
+    if (seams.matrix?.changed && args[0].includes('.o8-retired-')) await matrixBoundary('after manifest capture', args[0]);
+    return captured;
+  } };
+});
 vi.mock('@/lib/workspace/dependency-materializer', async original => {
   const actual = await original<typeof import('@/lib/workspace/dependency-materializer')>();
   return { ...actual, detachDependencyMaterialization: async (...args: Parameters<typeof actual.detachDependencyMaterialization>) => {
@@ -30,6 +62,12 @@ vi.mock('@/lib/workspace/exact-managed-directory-retirement', async original => 
         seams.addAtRename = null;
         writeFileSync(path.join(input.directoryPath, 'late-rename-receipt.log'), 'unreviewed final-boundary evidence');
       }
+    }, afterRetirementRename: async () => {
+      await input.afterRetirementRename?.();
+      if (seams.matrix) {
+        const claim = (await import('@/lib/workspace/exact-workspace-claim-state')).readExactWorkspaceClaim('managed-retirement', input.repositoryPath, input.worktreeId);
+        await matrixBoundary('after rename', claim!.claimPath);
+      }
     } }),
   };
 });
@@ -40,6 +78,7 @@ vi.mock('@/lib/workspace/preservation-store', async original => {
       seams.addDuringRecovery = null;
       writeFileSync(path.join(args[0].originalPath, 'late-recovery-receipt.log'), 'unreviewed recovery-window evidence');
     }
+    if (args[0].originalPath === seams.matrix?.source) await matrixBoundary('between validation and manifest capture', args[0].originalPath);
     const receipt = await actual.preserveWorkspaceArtifacts(...args);
     seams.recoveryId = receipt.preservationId;
     return receipt;
@@ -66,6 +105,14 @@ vi.mock('@/lib/workspace/generated-output-retirement', async original => {
         writeFileSync(path.join(workspace, '.next', 'late-generated-receipt.log'), 'unreviewed generated-boundary evidence');
       }
       await hooks.beforeSourceRemoval?.();
+    },
+    beforePurge: async () => {
+      await hooks.beforePurge?.();
+      if (seams.addBeforeGeneratedPurge) {
+        const source = seams.addBeforeGeneratedPurge; seams.addBeforeGeneratedPurge = null;
+        const claim = getSqlite().prepare('SELECT claim_path FROM workspace_exact_claims WHERE source_path = ?').get(source) as { claim_path: string };
+        writeFileSync(path.join(claim.claim_path, 'late-purge.log'), 'unreviewed purge-window bytes');
+      }
     },
     afterRename: async () => { if (seams.failAfterRename) { seams.failAfterRename = false; throw new Error('fixture interrupted after exact rename'); } },
   }); if (seams.failAfterReturn) { seams.failAfterReturn = false; throw new Error('fixture lost native completion reply'); } return result; } };
@@ -138,6 +185,53 @@ afterAll(() => { closeDb(); rmSync(root, { recursive: true, force: true }); });
 // The generic 30s deadline (and 60s on a three-workspace case) can expire before
 // they settle on a shared Mac, leaving work running into the next test's state.
 describe('reviewed cleanup through native lifecycle operations', { timeout: 120_000, concurrent: false, shuffle: false }, () => {
+
+
+const mutationKinds = ['add', 'rename', 'delete', 'symlink swap'] as const;
+const mutationTimings = ['before validation', 'between validation and manifest capture', 'between capture and rename', 'after rename'] as const;
+const crashPoints = ['none', 'after rename', 'after manifest capture'] as const;
+const quarantineMatrix = mutationKinds.flatMap(kind => ['ignored', 'tracked'].flatMap(category =>
+  mutationTimings.flatMap(timing => crashPoints.map(crash => ({ kind, category, timing, crash })))));
+it.each(quarantineMatrix)('quarantine matrix $category $kind / $timing / crash $crash', async ({kind, category, timing, crash}) => {
+  const f = await fixture(); const done = await f.workspace(); const unselected = await f.workspace(false);
+  const outside = path.join(root, `outside-${++sequence}`); writeFileSync(outside, 'outside survives');
+  const name = category === 'ignored' ? 'reviewed.log' : 'README.md';
+  if (category === 'ignored') writeFileSync(path.join(done.path, name), 'reviewed ignored bytes');
+  const plan = await preview(f.repoPath); const entry = plan.entries.find((item: {worktreeId: string}) => item.worktreeId === done.id);
+  expect(entry.eligible, entry.reason).toBe(true);
+  let changedPath = name;
+  const probe = { source: done.path, timing, crash, changed: false, crashed: false, mutate(candidate: string) {
+    const selected = path.join(candidate, name);
+    if (kind === 'add') { changedPath = category === 'ignored' ? 'added.log' : 'added.txt'; writeFileSync(path.join(candidate, changedPath), 'new unreviewed bytes'); }
+    if (kind === 'rename') { changedPath = `renamed\n${name}`; renameSync(selected, path.join(candidate, changedPath)); }
+    if (kind === 'delete') unlinkSync(selected);
+    if (kind === 'symlink swap') { unlinkSync(selected); symlinkSync(outside, selected); }
+  } };
+  seams.matrix = probe;
+  if (timing === 'before validation') await matrixBoundary(timing, done.path);
+  const body = { action: 'execute', planId: plan.id, selection: [entry.id], fingerprint: plan.fingerprint };
+  try {
+    let response = await post(body); expect(response.status).toBe(200);
+    let result = (await response.json()).result.plan;
+    expect(probe.changed, 'mutation reached its real lifecycle seam').toBe(true);
+    // Replay uses only retained plan/claim truth, without the original fault callbacks.
+    seams.matrix = null;
+    if (result.outcomes[0].state === 'started') {
+      response = await post(body); expect(response.status).toBe(200); result = (await response.json()).result.plan;
+    }
+    expect(result.outcomes[0].state, JSON.stringify(result.outcomes)).toBe('held');
+    expect(existsSync(done.path), 'refusal restores the exact original namespace').toBe(true);
+    const fs = await import('node:fs');
+    if (kind === 'delete') expect(existsSync(path.join(done.path, name))).toBe(false);
+    else if (kind === 'symlink swap') expect(fs.readlinkSync(path.join(done.path, name))).toBe(outside);
+    else expect(readFileSync(path.join(done.path, changedPath), 'utf8')).toBe(kind === 'add' ? 'new unreviewed bytes' : category === 'ignored' ? 'reviewed ignored bytes' : 'preserved source\n');
+    expect(getSqlite().prepare('SELECT operation_id FROM workspace_exact_claims WHERE source_path = ?').all(done.path), 'rejection leaves no retained deletion authority').toEqual([]);
+    expect(readFileSync(outside, 'utf8')).toBe('outside survives');
+    expect(readFileSync(path.join(unselected.path, 'README.md'), 'utf8')).toBe('preserved source\n');
+    const fresh = await preview(f.repoPath);
+    expect(fresh.entries.find((item: {worktreeId: string}) => item.worktreeId === done.id)?.reason ?? '').not.toMatch(/existing exact lifecycle|retiring/i);
+  } finally { seams.matrix = null; }
+});
 
 it('previews exact terminal ownership without removing source, and holds active work', async () => {
   const f = await fixture(); const done = await f.workspace(); const active = await f.workspace(false);
@@ -374,6 +468,25 @@ it('requires renewed review when generated output changes at its final rename bo
   expect(seams.addAtGeneratedRename).toBeNull();
   expect((await response.json()).result.plan.outcomes.map((entry: { state: string }) => entry.state)).toEqual(['held', 'held']);
   expect(readFileSync(path.join(next, 'late-generated-receipt.log'), 'utf8')).toBe('unreviewed generated-boundary evidence');
+  expect(getSqlite().prepare('SELECT operation_id FROM workspace_exact_claims WHERE source_path = ?').all(next)).toEqual([]);
+});
+
+it('restores a changed generated tree after purging admission instead of retaining a missing source', async () => {
+  const f = await fixture(); const done = await f.workspace(); const next = path.join(done.path, '.next');
+  mkdirSync(next); writeFileSync(path.join(next, 'receipt.txt'), 'reviewed build');
+  const evidence = [path.join(root, `source-${++sequence}.txt`), path.join(root, `stop-${++sequence}.txt`)];
+  evidence.forEach(file => writeFileSync(file, 'fixture source and stop evidence'));
+  const adopted = await adoptGeneratedOutput({ workspacePath: done.path, owner: { repositoryPath: f.repoPath, worktreeId: done.id },
+    intent: 'Retain reviewed output', evidencePaths: evidence });
+  await recoverGeneratedOutput(adopted.resourceId);
+  const plan = await preview(f.repoPath); const entry = plan.entries.find((item: {kind: string}) => item.kind === 'generated-output');
+  expect(entry.eligible, entry.reason).toBe(true); seams.addBeforeGeneratedPurge = next;
+  const body = { action: 'execute', planId: plan.id, fingerprint: plan.fingerprint, selection: [entry.id] };
+  let result = (await (await post(body)).json()).result.plan;
+  expect(seams.addBeforeGeneratedPurge).toBeNull();
+  if (result.outcomes[0].state === 'started') result = (await (await post(body)).json()).result.plan;
+  expect(result.outcomes[0].state, JSON.stringify(result.outcomes)).toBe('held');
+  expect(readFileSync(path.join(next, 'late-purge.log'), 'utf8')).toBe('unreviewed purge-window bytes');
   expect(getSqlite().prepare('SELECT operation_id FROM workspace_exact_claims WHERE source_path = ?').all(next)).toEqual([]);
 });
 
