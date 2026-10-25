@@ -3,6 +3,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSy
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, expect, it } from 'vitest';
+import { parse } from 'yaml';
 
 const roots: string[] = [];
 const cli = resolve('scripts/next/linux-headless.mjs');
@@ -75,7 +76,7 @@ function harness(mode: 'ready' | 'exit' = 'ready') {
     fs.writeFileSync(file, JSON.stringify({ selected: 'fixture', workspaces: { fixture: { tabs: ['Session'] } } }));
     process.on('SIGTERM', () => { fs.unlinkSync(${JSON.stringify(running)}); fs.rmSync(${JSON.stringify(exposed)}, { force: true }); fs.writeFileSync(${JSON.stringify(stopped)}, 'reaped'); process.exit(0); });
     setInterval(() => {}, 1000);`);
-  const host = script('host.cjs', mode === 'exit' ? 'process.exit(2);' : `const fs = require('node:fs');
+  const host = script('host.cjs', mode === 'exit' ? `console.error('fixture-sensitive-child-output', ${JSON.stringify(root)}); process.exit(2);` : `const fs = require('node:fs');
     const text = JSON.stringify({ origin: 'http://127.0.0.1:12345' }) + '\\n' + JSON.stringify({ configDir: ${JSON.stringify(root)} }) + '\\n';
     process.stdout.write(text.slice(0, 17)); setTimeout(() => process.stdout.write(text.slice(17)), 20);
     process.on('SIGTERM', () => { fs.writeFileSync(process.env.O8_NEXT_REQUEST_LOG,
@@ -90,10 +91,13 @@ function harness(mode: 'ready' | 'exit' = 'ready') {
 
 it('handles chunked/reordered host readiness, captures background windows and reaps every run', () => {
   const f = harness();
+  mkdirSync(f.output);
+  writeFileSync(join(f.output, 'failure.json'), '{"status":"failed","stage":"old-run"}');
   const result = f.run();
   expect(result.status, result.stderr).toBe(0);
   expect(existsSync(f.stopped)).toBe(true);
   expect(existsSync(f.running)).toBe(false);
+  expect(existsSync(join(f.output, 'failure.json'))).toBe(false);
   expect(JSON.parse(readFileSync(f.budget, 'utf8')).baseline).toHaveLength(3);
   for (const args of readFileSync(f.captureLog, 'utf8').trim().split('\n').map(line => JSON.parse(line))) {
     expect(args.slice(0, 2)).toEqual(['-window', 'root']);
@@ -108,6 +112,38 @@ it('fails promptly when the fixture host exits during readiness without launchin
   expect(result.stderr).toContain('fixture host exited before measurement completed');
   expect(existsSync(f.running)).toBe(false);
   expect(existsSync(join(f.output, 'measurements.json'))).toBe(false);
+  const failure = readFileSync(join(f.output, 'failure.json'), 'utf8');
+  expect(JSON.parse(failure)).toEqual({ schema: 1, status: 'failed', stage: 'fixture-host', run: 1,
+    completedRuns: 0, reason: 'fixture host exited before measurement completed' });
+  expect(failure + result.stderr).not.toContain(f.root);
+  expect(failure + result.stderr).not.toContain('fixture-sensitive-child-output');
+});
+
+it.each(['compile', 'assertion'])('the actual CI native commands fail on a native test %s error', mode => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'o8-next-native-gate-')));
+  roots.push(root);
+  const calls = join(root, 'calls.jsonl');
+  const cargo = join(root, 'cargo');
+  writeFileSync(cargo, `#!${process.execPath}\nconst args = process.argv.slice(2);
+    require('node:fs').appendFileSync(${JSON.stringify(calls)}, JSON.stringify(args) + '\\n');
+    if (args[0] === 'test' && args.includes('--no-run') === ${mode === 'compile'}) {
+      console.error('fixture native test ${mode} failure'); process.exit(101);
+    }\n`);
+  chmodSync(cargo, 0o700);
+  const workflow = parse(readFileSync(resolve('.github/workflows/next-linux.yml'), 'utf8'));
+  const commands = workflow.jobs.shell.steps.flatMap((step: { run?: string }) =>
+    step.run?.trim().startsWith('cargo ') ? [step.run] : []);
+  const result = spawnSync('bash', ['-e', '-o', 'pipefail', '-c', commands.join('\n')], {
+    encoding: 'utf8', timeout: 10_000, env: { ...process.env, PATH: `${root}:${process.env.PATH}` },
+  });
+  expect(result.status, result.stderr).toBe(101);
+  expect(result.stderr).toContain(`fixture native test ${mode} failure`);
+  const invoked = readFileSync(calls, 'utf8').trim().split('\n').map(line => JSON.parse(line) as string[]);
+  expect(invoked.some(args => args[0] === 'test' && args.includes('--no-run'))).toBe(true);
+  if (mode === 'assertion') {
+    const run = invoked.find(args => args[0] === 'test' && !args.includes('--no-run'))!;
+    for (const suite of ['shell_cli', 'pane_grid_cli', 'terminal_cli', 'diff_cli']) expect(run).toContain(suite);
+  }
 });
 
 it('fails closed on missing, nonfinite, zero or incomplete measurements and unrecorded budgets', () => {

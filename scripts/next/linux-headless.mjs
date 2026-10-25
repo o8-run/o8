@@ -9,6 +9,9 @@ import { createInterface } from 'node:readline';
 import { setTimeout as delay } from 'node:timers/promises';
 
 class VerificationError extends Error {}
+function safeReason(error) {
+  return error instanceof VerificationError ? error.message : 'Headless verification failed';
+}
 const keys = ['launchToFirstFrameMs', 'idleRssMiB'];
 function readJson(file) { return JSON.parse(readFileSync(realpathSync(file), 'utf8')); }
 function samples(runs) {
@@ -70,7 +73,8 @@ function capture(file, env) {
   const colors = Number(execFileSync('identify', ['-format', '%k', file], { env, encoding: 'utf8', timeout: 3000 }));
   return Number.isFinite(colors) && colors > 32;
 }
-async function measure(index, options) {
+async function measure(index, options, progress) {
+  progress.stage = 'fixture-host';
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'o8-next-linux-')));
   const env = environment(root, randomBytes(32).toString('hex'));
   let host;
@@ -100,6 +104,7 @@ async function measure(index, options) {
     // Require an empty display before launch; stale or unrelated windows cannot satisfy first frame.
     if (capture(image, env)) throw new VerificationError('Display must be empty before shell launch');
     const started = performance.now();
+    progress.stage = 'first-frame';
     app = spawn(options.binary, ['--enable-next', '--app-shell', '--server', origin,
       '--shell-state', state], { env, stdio: 'ignore' });
     app.on('error', () => {});
@@ -109,12 +114,14 @@ async function measure(index, options) {
       return capture(image, env);
     }, app, 'first frame');
     const launchToFirstFrameMs = Math.round((performance.now() - started) * 100) / 100;
+    progress.stage = 'fixture-state';
     await until(() => {
       if (!existsSync(state)) return false;
       const saved = readJson(state);
       return saved.selected && saved.workspaces?.[saved.selected]?.tabs?.length > 0;
     }, app, 'fixture shell state');
     await delay(2000);
+    progress.stage = 'idle-rss';
     const rss = [];
     for (let n = 0; n < 5; n++) {
       alive(app, 'shell');
@@ -128,6 +135,7 @@ async function measure(index, options) {
     alive(app, 'shell');
     await stop(app);
     await stop(host);
+    progress.stage = 'fixture-requests';
     const requests = readJson(requestLog);
     for (const route of ['GET /api/mobile/orchestrator/threads', 'GET /api/mobile/history']) {
       if (!requests.includes(route)) throw new VerificationError('Shell did not read the production fixture routes');
@@ -157,24 +165,36 @@ async function main() {
     else throw new VerificationError('Use --binary FILE --output DIR --budget FILE [--record | --check RECEIPT]');
   }
   if (receipt) { check(readJson(receipt), readJson(options.budget)); return; }
-  if (!process.env.DISPLAY) throw new VerificationError('Run inside an isolated Xvfb display');
   mkdirSync(options.output, { recursive: true });
-  const runs = [];
-  for (let index = 1; index <= 3; index++) {
-    runs.push(await measure(index, options));
-    writeFileSync(join(options.output, 'measurements.json'), `${JSON.stringify({ schema: 1, runs }, null, 2)}\n`);
+  const progress = { stage: 'display', run: 0, completedRuns: 0 };
+  try {
+    rmSync(join(options.output, 'failure.json'), { force: true });
+    if (!process.env.DISPLAY) throw new VerificationError('Run inside an isolated Xvfb display');
+    const runs = [];
+    for (let index = 1; index <= 3; index++) {
+      progress.run = index;
+      runs.push(await measure(index, options, progress));
+      progress.completedRuns = runs.length;
+      writeFileSync(join(options.output, 'measurements.json'), `${JSON.stringify({ schema: 1, runs }, null, 2)}\n`);
+    }
+    const result = { schema: 1, runs };
+    progress.stage = 'budgets';
+    if (record) {
+      samples(runs);
+      writeFileSync(options.budget, `${JSON.stringify({ schema: 1,
+        launchToFirstFrameMs: Math.ceil(Math.max(...runs.map(r => r.launchToFirstFrameMs)) * 1.25),
+        idleRssMiB: Math.ceil(Math.max(...runs.map(r => r.idleRssMiB)) * 1.25), baseline: runs }, null, 2)}\n`);
+    }
+    check(result, readJson(options.budget));
+  } catch (error) {
+    // Publish only controlled stage/count fields and our bounded errors, never child diagnostics.
+    writeFileSync(join(options.output, 'failure.json'), `${JSON.stringify({ schema: 1, status: 'failed',
+      ...progress, reason: safeReason(error) }, null, 2)}\n`);
+    throw error;
   }
-  const result = { schema: 1, runs };
-  if (record) {
-    samples(runs);
-    writeFileSync(options.budget, `${JSON.stringify({ schema: 1,
-      launchToFirstFrameMs: Math.ceil(Math.max(...runs.map(r => r.launchToFirstFrameMs)) * 1.25),
-      idleRssMiB: Math.ceil(Math.max(...runs.map(r => r.idleRssMiB)) * 1.25), baseline: runs }, null, 2)}\n`);
-  }
-  check(result, readJson(options.budget));
 }
 main().catch(error => {
   // Child diagnostics can contain platform paths or credentials; publish only our bounded errors.
-  console.error(error instanceof VerificationError ? error.message : 'Headless verification failed');
+  console.error(safeReason(error));
   process.exitCode = 1;
 });

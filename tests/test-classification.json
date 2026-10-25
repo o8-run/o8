@@ -4063,6 +4063,7 @@
       "reasons": [
         "child-process",
         "executable-fixture",
+        "native-build",
         "process-signal",
         "real-path"
       ]

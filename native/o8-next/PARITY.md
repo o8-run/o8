@@ -43,7 +43,8 @@ the desktop shell. Native registration lives in [shell.rs](src/shell.rs).
 | Browser/preview (`preview`) | missing | No browser surface |
 | Timeline (`timeline`) | missing | No timeline surface |
 | Audit log (`audit-log`) | missing | No audit-log viewer |
-| Welcome, onboarding and sign-in (`welcome`) | missing | Explicit local opt-in connection only |
+| Welcome and onboarding (`welcome`) | partial | [First-run setup](docs/surfaces/setup.md); project registration, tools, privacy and first conversation; full desktop onboarding parity remains open |
+| Sign-in and account binding | missing | Explicit local opt-in connection only |
 | Mobile pairing (`mobile-pairing`) | missing | No pairing or mobile UI |
 | Notifications, toasts and quick drawers | missing | No equivalent desktop overlay system |
 | Voice, dictation and attention overlays | missing | No native voice surface |
@@ -111,6 +112,18 @@ the native process and renderer threads; the separately running fixture host is
 excluded. A successful run also requires production session-list/history reads,
 a final nonblank frame and child cleanup. Startup and command timeouts fail
 closed. No account credentials or raw child logs enter artifacts.
+
+Failures after runner setup persist `failure.json`, including fixture-host startup
+failures before any screenshot exists. It records the controlled stage, run and
+completed-run counts, and a sanitized reason. A new invocation removes the prior
+failure report. Raw child output and exception details are excluded.
+
+After measurements, CI compiles every native test target with `cargo test --no-run`
+and runs all four native CLI integration suites. Either a test-only compilation
+error or a failing CLI assertion fails the job. Tests run after screenshots so
+test-support features cannot replace the release binary being measured. The full
+GPUI fixture/throughput suite has recorded runs over 25 minutes and is excluded
+from this nine-minute launch gate; its unit assertions are compiled but not run.
 
 [Recorded budgets](linux-budgets.json) contain three initial measurements. Each
 limit is the ceiling of the largest corresponding sample times 1.25. CI checks
