@@ -343,6 +343,33 @@ describe('o8d MCP through the real HTTP JSON-RPC entry point', () => {
     }
   });
 
+  nativeReadTest.each([
+    '0009', '000A', '000B', '000C', '000D', '0020', '00A0', '1680',
+    '2000', '2001', '2002', '2003', '2004', '2005', '2006', '2007',
+    '2008', '2009', '200A', '2028', '2029', '202F', '205F', '3000', 'FEFF',
+    // Unicode White_Space and historical whitespace that ECMAScript retains.
+    '0085', '180E', '200B', '001C', '001D', '001E', '001F',
+  ])('matches JavaScript spec-path trim for U+%s through recorded replay', async (code) => {
+    const character = String.fromCodePoint(Number.parseInt(code, 16));
+    const repo = join(directory, `unicode-spec-${code}`);
+    for (const [path, content] of [[repo, '# Base spec\n'], [`${repo}${character}`, '# Distinct Unicode spec\n']]) {
+      mkdirSync(path, { recursive: true });
+      writeFileSync(join(path, 'o8.md'), content);
+    }
+    const repoPath = `${realpathSync(repo)}${character}`;
+    const recording = { name: `spec trim U+${code}`, body: { jsonrpc: '2.0', id: 'unicode-spec',
+      method: 'tools/call', params: { name: 'o8_spec_read', arguments: { repoPath } } } };
+    const reference = await sendRecordedMcp(base, token, recording);
+    expect(toolPayload(reference)).toMatchObject({
+      content: character.trim() ? '# Distinct Unicode spec\n' : '# Base spec\n',
+      path: join(repoPath.trim(), 'o8.md'),
+    });
+    seen.length = 0;
+    compareMcpExchanges(reference, await sendRecordedMcp(nativeRust, token, recording));
+    expect(seen).toHaveLength(0);
+    expect(await replayMcp(base, nativeRust, token, [recording])).toBe(1);
+  });
+
   nativeReadTest.each(['o8_status', 'get_mission_status', 'o8_task_list', 'o8_list_repos', 'o8_list_projects', 'o8_lease_list'])(
     'reads %s natively with zero TypeScript requests', async (name) => {
       const expected = await call(base, name);
