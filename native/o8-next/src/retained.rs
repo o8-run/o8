@@ -440,18 +440,19 @@ impl RetainedRow {
         gpui::div()
             .id(("system-event", index))
             .focusable()
+            .key_context("Button")
             .cursor_pointer()
             .focus(|style| style.bg(theme().hover))
             .on_click(move |_, window, cx| {
                 click(window);
                 cx.stop_propagation();
             })
-            .on_key_down(move |event, window, cx| {
-                if matches!(event.keystroke.key.as_str(), "enter" | "space")
-                    && !event.keystroke.modifiers.modified()
-                {
+            .on_action(move |action: &crate::keymap::Shortcut, window, cx| {
+                if matches!(action, crate::keymap::Shortcut::Activate) {
                     toggle(window);
                     cx.stop_propagation();
+                } else {
+                    cx.propagate();
                 }
             })
             .child(self)

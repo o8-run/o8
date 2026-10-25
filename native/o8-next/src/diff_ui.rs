@@ -5,9 +5,9 @@ use crate::{
     diff::{self, Document, Kind, Line, Target},
 };
 use gpui::{
-    App, Application, Bounds, Context, FocusHandle, HighlightStyle, KeyDownEvent,
-    ListHorizontalSizingBehavior, Render, ScrollStrategy, StyledText, UniformListScrollHandle,
-    Window, WindowBounds, WindowOptions, canvas, div, point, prelude::*, px, size, uniform_list,
+    App, Application, Bounds, Context, FocusHandle, HighlightStyle, ListHorizontalSizingBehavior,
+    Render, ScrollStrategy, StyledText, UniformListScrollHandle, Window, WindowBounds,
+    WindowOptions, canvas, div, point, prelude::*, px, size, uniform_list,
 };
 use serde_json::Value;
 use std::{cell::RefCell, collections::BTreeSet, rc::Rc};
@@ -35,6 +35,7 @@ impl DiffSurface {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        crate::keymap::install(cx);
         let focus = cx.focus_handle();
         focus.focus(window);
         let mut surface = Self {
@@ -285,25 +286,36 @@ impl Render for DiffSurface {
             .font_weight(gpui::FontWeight::LIGHT)
             .text_size(px(13.5))
             .track_focus(&self.focus)
-            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                match event.keystroke.key.as_str() {
-                    "home" => this.scroll_to(0, cx),
-                    "end" => this.scroll_to(this.row_count().saturating_sub(1), cx),
-                    "up" | "down" if event.keystroke.modifiers.alt => {
-                        let index = if event.keystroke.key == "up" {
-                            this.selected.saturating_sub(1)
-                        } else {
-                            this.selected + 1
-                        };
-                        this.select_file(index, cx);
+            .key_context("Diff List")
+            .on_action(
+                cx.listener(|this, action: &crate::keymap::Shortcut, _, cx| {
+                    match *action {
+                        crate::keymap::Shortcut::Navigate(end) => this.scroll_to(
+                            if end {
+                                this.row_count().saturating_sub(1)
+                            } else {
+                                0
+                            },
+                            cx,
+                        ),
+                        crate::keymap::Shortcut::DiffFile(next) => {
+                            let index = if !next {
+                                this.selected.saturating_sub(1)
+                            } else {
+                                this.selected + 1
+                            };
+                            this.select_file(index, cx);
+                        }
+                        crate::keymap::Shortcut::DiffMode(split) => this.mode(split, cx),
+                        crate::keymap::Shortcut::DiffRefresh => this.load(cx),
+                        _ => {
+                            cx.propagate();
+                            return;
+                        }
                     }
-                    "u" => this.mode(false, cx),
-                    "s" => this.mode(true, cx),
-                    "r" => this.load(cx),
-                    _ => return,
-                }
-                cx.stop_propagation();
-            }))
+                    cx.stop_propagation();
+                }),
+            )
             .child(
                 div()
                     .h(px(40.))

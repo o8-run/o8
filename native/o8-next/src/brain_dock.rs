@@ -1,22 +1,6 @@
 //! Retain Brain and its native editor per selected session; never persist drafts.
 use super::*;
 impl Surface {
-    pub(super) fn brain_key(
-        &mut self,
-        event: &KeyDownEvent,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let key = &event.keystroke;
-        if (key.modifiers.control || key.modifiers.platform)
-            && key.key == "e"
-            && !key.modifiers.shift
-            && !key.modifiers.alt
-        {
-            self.toggle_brain(window, cx);
-            cx.stop_propagation();
-        }
-    }
     pub(super) fn toggle_brain(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(session) = self
             .sessions

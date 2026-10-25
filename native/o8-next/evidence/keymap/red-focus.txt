@@ -1,0 +1,12 @@
+running 1 test
+test shell::tests::keymap_composer_focus_survives_surface_switch_and_reconnect ...
+thread 'shell::tests::keymap_composer_focus_survives_surface_switch_and_reconnect' (27587) panicked at src/shell_tests.rs:259:5:
+returning to a surface must restore its focused field
+FAILED
+
+failures:
+
+failures:
+    shell::tests::keymap_composer_focus_survives_surface_switch_and_reconnect
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 138 filtered out; finished in 1.59s

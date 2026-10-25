@@ -236,6 +236,7 @@ pub struct Inbox {
 }
 impl Inbox {
     pub fn new(client: Client, workspace: String, cx: &mut Context<Self>) -> Self {
+        crate::keymap::install(cx);
         let all = workspace.is_empty();
         let mut inbox = Self {
             client,

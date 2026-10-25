@@ -10,6 +10,7 @@ mod diff_ui;
 mod grid_sessions;
 mod inbox;
 mod issues;
+mod keymap;
 mod merge;
 mod model;
 mod pane;

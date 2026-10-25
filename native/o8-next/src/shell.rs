@@ -4,8 +4,8 @@ use crate::{
     shell_state::{State, Workspace},
 };
 use gpui::{
-    App, Application, Bounds, Context, Entity, FocusHandle, KeyDownEvent, Render, Window,
-    WindowBounds, WindowOptions, canvas, div, point, prelude::*, px, size,
+    App, Application, Bounds, Context, Entity, FocusHandle, Render, Window, WindowBounds,
+    WindowOptions, canvas, div, point, prelude::*, px, size,
 };
 use std::{
     cell::Cell,
@@ -55,8 +55,10 @@ pub struct Shell {
     workspaces: Vec<String>,
     content: HashMap<String, Content>,
     focus: FocusHandle,
+    surface_focus: HashMap<String, FocusHandle>,
     palette: bool,
     workspace_picker: bool,
+    palette_input: Entity<crate::composer::Composer>,
     shortcuts: bool,
     query: String,
     choice: usize,
@@ -77,6 +79,17 @@ impl Shell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        crate::keymap::install(cx);
+        let palette_input = cx.new(|cx| {
+            let mut input = crate::composer::Composer::new(cx);
+            input.context = "TextInput Palette";
+            input
+        });
+        let palette_subscription = cx.observe(&palette_input, |this: &mut Self, input, cx| {
+            this.query = input.read(cx).text.clone();
+            this.choice = 0;
+            cx.notify();
+        });
         let focus = cx.focus_handle();
         focus.focus(window);
         let mut shell = Self {
@@ -88,8 +101,10 @@ impl Shell {
             workspaces: vec![],
             content: HashMap::new(),
             focus,
+            surface_focus: HashMap::new(),
             palette: false,
             workspace_picker: false,
+            palette_input,
             shortcuts: false,
             query: String::new(),
             choice: 0,
@@ -99,7 +114,7 @@ impl Shell {
             connected: false,
             revision: 0,
             painted: Rc::new(Cell::new(u64::MAX)),
-            subscriptions: vec![],
+            subscriptions: vec![palette_subscription],
             surfaces: SurfaceRuntime::default(),
         };
         shell
@@ -249,7 +264,7 @@ impl Shell {
     }
     fn restore_focus(&self, window: &mut Window, cx: &mut Context<Self>) {
         if self.palette {
-            self.focus.focus(window);
+            self.palette_input.read(cx).focus.focus(window);
             return;
         }
         if registrations()
@@ -262,7 +277,14 @@ impl Shell {
             .active()
             .and_then(|tab| self.content.get(&self.key(&tab)))
         {
-            content.focus(self.current().is_some_and(|w| w.composer), window, cx);
+            if let Some(focus) = self
+                .active()
+                .and_then(|tab| self.surface_focus.get(&self.key(&tab)))
+            {
+                focus.focus(window);
+            } else {
+                content.focus(self.current().is_some_and(|w| w.composer), window, cx);
+            }
         } else {
             self.focus.focus(window);
         }
@@ -288,6 +310,11 @@ impl Shell {
     fn capture(&mut self, window: &Window, cx: &App) {
         if self.palette || registrations().iter().any(|r| (r.overlay_open)(self)) {
             return;
+        }
+        if let Some(tab) = self.active()
+            && let Some(focus) = window.focused(cx)
+        {
+            self.surface_focus.insert(self.key(&tab), focus);
         }
         for registration in registrations() {
             (registration.capture)(self, window, cx);
@@ -391,113 +418,100 @@ impl Shell {
             saved.composer = composer;
         }
         self.palette = false;
+        if composer && let Some(tab) = self.active() {
+            self.surface_focus.remove(&self.key(&tab));
+        }
         self.ensure(window, cx);
         self.restore_focus(window, cx);
         self.persist();
         self.revision += 1;
         cx.notify();
     }
-    fn key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        for extension in registry::extensions() {
-            match extension.key(self, event, window, cx) {
-                registry::KeyResult::Unhandled => {}
-                registry::KeyResult::Propagate => return,
-                registry::KeyResult::Handled => {
-                    self.revision += 1;
-                    cx.notify();
-                    cx.stop_propagation();
-                    return;
+    fn action(
+        &mut self,
+        action: &crate::keymap::Shortcut,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use crate::keymap::Shortcut;
+        match *action {
+            Shortcut::Palette => {
+                if !self.palette {
+                    self.capture(window, cx);
+                }
+                self.palette = !self.palette;
+                self.query.clear();
+                self.palette_input.update(cx, |input, cx| input.clear(cx));
+                self.choice = 0;
+                self.restore_focus(window, cx);
+            }
+            Shortcut::PaletteCancel => {
+                self.palette = false;
+                self.restore_focus(window, cx);
+            }
+            Shortcut::PaletteMove(next) => {
+                self.choice = if next {
+                    (self.choice + 1).min(self.commands().len().saturating_sub(1))
+                } else {
+                    self.choice.saturating_sub(1)
+                };
+            }
+            Shortcut::PaletteAccept => {
+                if let Some(command) = self.commands().get(self.choice).cloned() {
+                    self.execute(command, window, cx);
                 }
             }
-        }
-        let key = event.keystroke.key.as_str();
-        let modifiers = event.keystroke.modifiers;
-        if registrations()
-            .iter()
-            .any(|r| (r.key_down)(self, event, window, cx))
-        {
-        } else if (modifiers.control || modifiers.platform) && key == "k" {
-            if !self.palette {
+            Shortcut::Reference => {
+                self.shortcuts = !self.shortcuts;
+            }
+            Shortcut::Settings => {
+                if self.surfaces.settings.view.is_some() {
+                    self.close_settings(window, cx);
+                } else {
+                    self.open_settings(window, cx);
+                }
+            }
+            Shortcut::NextSurface => {
                 self.capture(window, cx);
-            }
-            self.palette = !self.palette;
-            self.workspace_picker = false;
-            self.shortcuts = false;
-            self.query.clear();
-            self.choice = 0;
-            self.restore_focus(window, cx);
-        } else if self.shortcuts && key == "escape" {
-            self.shortcuts = false;
-            self.restore_focus(window, cx);
-        } else if self.palette {
-            match key {
-                "escape" => {
-                    self.palette = false;
-                    self.restore_focus(window, cx);
+                for registration in registrations() {
+                    (registration.after_tab)(self);
                 }
-                "up" => self.choice = self.choice.saturating_sub(1),
-                "down" => {
-                    self.choice = (self.choice + 1).min(self.commands().len().saturating_sub(1))
-                }
-                "enter" => {
-                    if let Some(command) = self.commands().get(self.choice).cloned() {
-                        self.execute(command, window, cx);
-                    }
-                }
-                "backspace" => {
-                    self.query.pop();
-                    self.choice = 0;
-                }
-                _ => {
-                    if !modifiers.control
-                        && !modifiers.platform
-                        && !modifiers.alt
-                        && let Some(text) = &event.keystroke.key_char
-                    {
-                        self.query.push_str(text);
-                        self.choice = 0;
-                    }
-                }
-            }
-        } else if modifiers.control && !modifiers.alt && !modifiers.platform && key == "tab" {
-            self.capture(window, cx);
-            for registration in registrations() {
-                (registration.after_tab)(self);
-            }
-            if let Some(saved) = self
-                .state
-                .selected
-                .as_ref()
-                .and_then(|w| self.state.workspaces.get_mut(w))
-                && !saved.tabs.is_empty()
-            {
-                saved.active = (saved.active + 1) % saved.tabs.len();
-            }
-            self.ensure(window, cx);
-            self.restore_focus(window, cx);
-            self.persist();
-        } else if modifiers.control
-            && !modifiers.alt
-            && !modifiers.platform
-            && !modifiers.shift
-            && key == "w"
-        {
-            if let Some(tab) = self.active() {
-                self.content.remove(&self.key(&tab));
-                let saved = self
+                if let Some(saved) = self
                     .state
-                    .workspaces
-                    .get_mut(self.state.selected.as_deref().unwrap_or(""))
-                    .unwrap();
-                (tab.registration().remove)(saved, &tab);
-                saved.tabs.remove(saved.active);
-                saved.active = saved.active.min(saved.tabs.len().saturating_sub(1));
+                    .selected
+                    .as_ref()
+                    .and_then(|w| self.state.workspaces.get_mut(w))
+                    && !saved.tabs.is_empty()
+                {
+                    saved.active = (saved.active + 1) % saved.tabs.len();
+                }
                 self.ensure(window, cx);
                 self.restore_focus(window, cx);
                 self.persist();
             }
-        } else {
-            return;
+            Shortcut::CloseSurface => {
+                if let Some(tab) = self.active() {
+                    self.surface_focus.remove(&self.key(&tab));
+                    self.content.remove(&self.key(&tab));
+                    let saved = self
+                        .state
+                        .workspaces
+                        .get_mut(self.state.selected.as_deref().unwrap_or(""))
+                        .unwrap();
+                    (tab.registration().remove)(saved, &tab);
+                    saved.tabs.remove(saved.active);
+                    saved.active = saved.active.min(saved.tabs.len().saturating_sub(1));
+                    self.ensure(window, cx);
+                    self.restore_focus(window, cx);
+                    self.persist();
+                }
+            }
+            #[cfg(test)]
+            Shortcut::Probe => self.execute(Command::Fake, window, cx),
+            _ => {
+                cx.propagate();
+                return;
+            }
         }
         if self.palette {
             // The palette header is the first child of the scrolling container.
@@ -505,7 +519,6 @@ impl Shell {
         }
         self.revision += 1;
         cx.notify();
-        cx.stop_propagation();
     }
     fn tick(&mut self, refresh: bool, window: &mut Window, cx: &mut Context<Self>) {
         for extension in registry::extensions() {

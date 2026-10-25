@@ -1,0 +1,14 @@
+running 1 test
+test shell::activity::tests::activity_palette_reaches_native_pane ...
+thread 'shell::activity::tests::activity_palette_reaches_native_pane' (37826) panicked at src/surfaces/activity/tests.rs:27:5:
+assertion `left == right` failed
+  left: "Open pull requests"
+ right: "Open diff for a packet"
+FAILED
+
+failures:
+
+failures:
+    shell::activity::tests::activity_palette_reaches_native_pane
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 132 filtered out; finished in 7.50s

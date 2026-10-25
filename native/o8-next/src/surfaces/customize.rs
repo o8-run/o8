@@ -19,13 +19,15 @@ pub(super) const REGISTRATION: Registration = Registration {
             .map(|v| v.clone().into_any_element())
     },
     overlay_open: |s| s.surfaces.customize.open,
-    key_down: |s, event, window, cx| {
-        if !s.surfaces.customize.open {
-            return false;
+    focus_overlay: |s, window, cx| {
+        if s.surfaces.customize.open
+            && let Some(view) = &s.surfaces.customize.view
+        {
+            view.read(cx).focus.focus(window);
+            true
+        } else {
+            false
         }
-        let _ = (window, cx);
-        (event.keystroke.modifiers.control || event.keystroke.modifiers.platform)
-            && ["k", "w", "tab"].contains(&event.keystroke.key.as_str())
     },
     nav: |s, position, cx| {
         if position != NavPosition::BeforeWorkspaces {
@@ -79,6 +81,7 @@ impl Shell {
             }));
         }
         self.surfaces.customize.open = true;
+        self.restore_focus(window, cx);
         self.revision += 1;
         cx.notify();
     }

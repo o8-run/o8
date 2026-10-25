@@ -27,9 +27,11 @@ pub(super) const REGISTRATION: Registration = Registration {
     },
     overlay_open: |s| s.surfaces.projects.open,
     block_ensure: |s| s.surfaces.projects.open,
-    focus_overlay: |s, window, _| {
+    focus_overlay: |s, window, cx| {
         if s.surfaces.projects.open {
-            s.focus.focus(window);
+            if let Some(view) = &s.surfaces.projects.view {
+                view.read(cx).focus.focus(window);
+            }
             true
         } else {
             false
@@ -135,7 +137,7 @@ impl Shell {
         }
         self.surfaces.projects.open = true;
         self.palette = false;
-        self.focus.focus(window);
+        self.restore_focus(window, cx);
         cx.notify();
     }
 }

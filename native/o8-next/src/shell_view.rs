@@ -46,7 +46,8 @@ impl Render for Shell {
             .text_size(px(crate::theme::TYPE.chrome))
             .line_height(gpui::relative(crate::theme::TYPE.chrome_line))
             .track_focus(&self.focus)
-            .capture_key_down(cx.listener(Self::key_down))
+            .key_context("Global")
+            .on_action(cx.listener(Self::action))
             .when(self.system_glass, |view| view.child(material::veil()))
             .child(
                 div()
@@ -97,6 +98,7 @@ impl Render for Shell {
                     .child(
                         div()
                             .id("shell-palette")
+                            .debug_selector(|| "shell-palette".into())
                             .cursor_pointer()
                             .p(px(6.))
                             .child(
@@ -112,7 +114,8 @@ impl Render for Shell {
                                 this.query.clear();
                                 this.choice = 0;
                                 this.palette_scroll.scroll_to_item(1);
-                                this.focus.focus(window);
+                                this.palette_input.update(cx, |input, cx| input.clear(cx));
+                                this.palette_input.read(cx).focus.focus(window);
                                 this.revision += 1;
                                 cx.notify();
                             })),
@@ -121,12 +124,14 @@ impl Render for Shell {
                         view.child(
                             div()
                                 .id("shell-retry")
+                                .debug_selector(|| "shell-retry".into())
                                 .cursor_pointer()
                                 .p(px(6.))
                                 .child("Retry")
                                 .on_click(cx.listener(|this, _, _, cx| this.load(cx))),
                         )
                     }),
+
             )
             .when(frame.status, |view| {
                 view.child(
@@ -173,7 +178,7 @@ impl Render for Shell {
                         .track_scroll(&self.palette_scroll)
                         .p(px(12.))
                         .bg(theme().surface_raised)
-                        .child(format!("Commands: {}", self.query))
+                        .child(self.palette_input.clone())
                         .children(self.commands().into_iter().enumerate().map(|(i, command)| {
                             div()
                                 .id(("command", i))
@@ -258,6 +263,22 @@ impl Render for Shell {
                             }),
                     ),
             )
+            .when(self.shortcuts, |view| {
+                view.child(
+                    div()
+                        .id("shortcut-reference")
+                        .debug_selector(|| "shortcut-reference".into())
+                        .max_h(px(300.))
+                        .overflow_y_scroll()
+                        .p(px(12.))
+                        .child("Shortcuts (? to close)")
+                        .children(
+                            crate::keymap::reference()
+                                .into_iter()
+                                .map(|row| div().child(row)),
+                        ),
+                )
+            })
             .child(
                 registrations().iter().fold(
                     div()

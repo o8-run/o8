@@ -237,7 +237,7 @@ impl Render for Projects {
                 .all(|p| p.slug == "workspace" && p.repos.is_empty());
         let painted = self.painted.clone();
         let revision = self.revision;
-        div().id("projects-surface").size_full().overflow_y_scroll().p(px(20.))
+        div().id("projects-surface").track_focus(&self.focus).key_context("Projects List").size_full().overflow_y_scroll().p(px(20.))
             .bg(theme().background).text_color(theme().text).font_family(theme().font_ui).text_size(px(13.))
             .child(div().flex().items_center().gap(px(12.)).mb(px(12.))
                 .child(div().flex_1().text_size(px(18.)).child("Projects"))

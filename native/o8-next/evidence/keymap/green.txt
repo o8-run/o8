@@ -1,0 +1,29 @@
+running 10 tests
+test keymap::tests::keymap_every_binding_dispatches_only_on_its_focus_path ... keymap focus matrix: 6208 dispatch cases
+ok
+test keymap::tests::keymap_nested_terminal_and_text_take_precedence ... ok
+test keymap::tests::keymap_reference_has_exactly_the_registered_rows ... ok
+test shell::projects::tests::review::keymap_hidden_rename_returns_focus_to_projects ... ok
+test shell::tests::keymap_composer_focus_survives_surface_switch_and_reconnect ... ok
+test shell::tests::keymap_composer_keeps_focus_through_real_socket_reconnect ... ok
+test shell::tests::keymap_modified_palette_chord_does_not_open_palette ... ok
+test shell::tests::keymap_reference_is_reachable_and_field_question_mark_is_text ... ok
+test shell::tests::keymap_text_focus_keeps_palette_and_close_out ... ok
+test terminal::tests::keymap_terminal_control_keys_reach_real_pty_before_shell ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 133 filtered out; finished in 30.69s
+
+Full npm test: 1242 passed files, 3 skipped files; 9057 passed tests, 5 skipped; 234.24 s.
+npx tsc --noEmit with NODE_OPTIONS=--max-old-space-size=8192: exit 0.
+npm run typecheck:fast: exit 0 (tsc fallback on Linux).
+npm run test:classify: exit 0; 1238 hermetic, 910 resource-owning.
+Touched-file ESLint: exit 0; Rust and Python have no applicable ESLint rules.
+npm run rule-check -- --base=417586b6b00e55f4759fc95a68091ffad7596213: exit 0; 0 eligible source files.
+
+Native suite (only activity_palette_reaches_native_pane filtered):
+test result: ok. 139 passed; 0 failed; 3 ignored; 0 measured; 1 filtered out; finished in 483.42s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+Command: O8D_HTTP_TEST_BINARY set to the locally built fixture binary; cargo test --locked --manifest-path native/o8-next/Cargo.toml -- --nocapture --test-threads=1 --skip activity_palette_reaches_native_pane

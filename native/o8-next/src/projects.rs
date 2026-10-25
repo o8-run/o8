@@ -10,6 +10,7 @@ pub struct Changed {
     pub removed: Vec<String>,
 }
 pub struct Projects {
+    pub focus: FocusHandle,
     client: Client,
     snapshot: Snapshot,
     loading: bool,
@@ -48,6 +49,7 @@ impl Projects {
             }),
         ];
         let mut view = Self {
+            focus: cx.focus_handle(),
             client,
             snapshot: Snapshot::default(),
             loading: false,

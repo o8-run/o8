@@ -296,28 +296,31 @@ impl Brain {
         self.revision += 1;
         cx.notify();
     }
-    fn key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        let key = &event.keystroke;
-        if key.key == "escape" && self.searching {
-            self.searching = false;
-            self.search.update(cx, |editor, cx| editor.clear(cx));
-            self.focus(window, cx);
-        } else if key.key == "escape"
-            || ((key.modifiers.control || key.modifiers.platform)
-                && key.key == "e"
-                && !key.modifiers.shift
-                && !key.modifiers.alt)
-        {
-            self.toggle(window, cx);
-        } else if (key.modifiers.control || key.modifiers.platform) && key.key == "f" {
-            self.searching = true;
-            self.search.read(cx).focus.focus(window);
-        } else {
-            return;
+    fn action(
+        &mut self,
+        action: &crate::keymap::Shortcut,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use crate::keymap::Shortcut;
+        match action {
+            Shortcut::BrainCancel if self.searching => {
+                self.searching = false;
+                self.search.update(cx, |editor, cx| editor.clear(cx));
+                self.focus(window, cx);
+            }
+            Shortcut::BrainCancel | Shortcut::ToggleBrain => self.toggle(window, cx),
+            Shortcut::BrainFind => {
+                self.searching = true;
+                self.search.read(cx).focus.focus(window);
+            }
+            _ => {
+                cx.propagate();
+                return;
+            }
         }
         self.revision += 1;
         cx.notify();
-        cx.stop_propagation();
     }
 }
 #[path = "brain_view.rs"]

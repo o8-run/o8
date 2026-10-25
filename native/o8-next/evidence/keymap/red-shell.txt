@@ -1,0 +1,17 @@
+running 2 tests
+test shell::tests::keymap_modified_palette_chord_does_not_open_palette ...
+thread 'shell::tests::keymap_modified_palette_chord_does_not_open_palette' (11819) panicked at src/shell_tests.rs:236:5:
+Ctrl+Alt+K is not Ctrl+K
+FAILED
+test shell::tests::keymap_text_focus_keeps_palette_and_close_out ...
+thread 'shell::tests::keymap_text_focus_keeps_palette_and_close_out' (11842) panicked at src/shell_tests.rs:224:5:
+focused text owns Ctrl+K
+FAILED
+
+failures:
+
+failures:
+    shell::tests::keymap_modified_palette_chord_does_not_open_palette
+    shell::tests::keymap_text_focus_keeps_palette_and_close_out
+
+test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 133 filtered out; finished in 2.17s

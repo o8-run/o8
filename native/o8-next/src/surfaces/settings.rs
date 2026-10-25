@@ -47,33 +47,13 @@ pub(super) const REGISTRATION: Registration = Registration {
                 .into_any_element(),
         ]
     },
-    key_down: |s, event, window, cx| {
-        let key = event.keystroke.key.as_str();
-        let modifiers = event.keystroke.modifiers;
-        if (modifiers.control || modifiers.platform) && key == "," {
-            if s.surfaces.settings.view.is_some() {
-                s.close_settings(window, cx);
-            } else {
-                s.open_settings(window, cx);
-            }
-        } else if s.surfaces.settings.view.is_some()
-            && modifiers.control
-            && !modifiers.alt
-            && key == "w"
-        {
-            s.close_settings(window, cx);
-        } else {
-            return false;
-        }
-        true
-    },
     ..Registration::new("", "Open settings", |s, _, window, cx| {
         s.open_settings(window, cx);
         None
     })
 };
 impl Shell {
-    fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.capture(window, cx);
         self.palette = false;
         self.surfaces.projects.open = false;
@@ -88,7 +68,7 @@ impl Shell {
         self.revision += 1;
         cx.notify();
     }
-    fn close_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn close_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.surfaces.settings.view = None;
         self.surfaces.settings.subscription = None;
         self.restore_focus(window, cx);

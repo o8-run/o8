@@ -381,3 +381,39 @@ fn round2_legacy_desktop_rename_before_native_read_keeps_one_pair(cx: &mut TestA
     assert_eq!(remaining[0]["name"], "Legacy beta");
     assert!(repos(&fixture).is_empty());
 }
+
+// Hostile review: detaching a rename editor must not leave its focus handle live.
+#[gpui::test]
+fn keymap_hidden_rename_returns_focus_to_projects(cx: &mut TestAppContext) {
+    let fixture = Fixture::start_mode(true, "");
+    let (id, _) = seed_project(&fixture, "Focus project", "focus-project", 0);
+    let (shell, mut visual) = open(
+        fixture.client.clone(),
+        fixture.root.join("rename-focus.json"),
+        State::default(),
+        cx,
+    );
+    let cx = &mut visual;
+    settle(cx);
+    click(cx, "shell-projects");
+    click(cx, "project-edit-focus-project");
+    fill(cx, "project-name", "Hidden rename must not submit");
+    click(cx, "project-cancel");
+    let focus = shell.read_with(cx, |s, cx| {
+        s.surfaces
+            .projects
+            .view
+            .as_ref()
+            .unwrap()
+            .read(cx)
+            .focus
+            .clone()
+    });
+    assert!(
+        cx.update(|window, _| focus.is_focused(window)),
+        "cancelled rename must return focus to the visible list"
+    );
+    cx.simulate_keystrokes("enter");
+    settle(cx);
+    assert_eq!(project(&fixture, &id)["name"], "Focus project");
+}

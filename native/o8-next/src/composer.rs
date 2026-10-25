@@ -13,6 +13,7 @@ pub struct Submit(pub bool);
 impl EventEmitter<Submit> for Composer {}
 pub struct Composer {
     pub focus: FocusHandle,
+    pub context: &'static str,
     pub text: String,
     selection: Range<usize>,
     anchor: usize,
@@ -30,7 +31,9 @@ pub struct Composer {
 }
 impl Composer {
     pub fn new(cx: &mut Context<Self>) -> Self {
+        crate::keymap::install(cx);
         Self {
+            context: "TextInput",
             focus: cx.focus_handle(),
             text: String::new(),
             selection: 0..0,
@@ -159,39 +162,51 @@ impl Composer {
         }
         self.text.len()
     }
-    fn key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        let key = &event.keystroke;
-        // IME owns confirmation, arrows and deletion while a marked range exists.
-        if self.composing() {
-            cx.stop_propagation();
+    pub(crate) fn action(
+        &mut self,
+        action: &crate::keymap::Shortcut,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use crate::keymap::{Edit, Shortcut};
+        if self.composing() && matches!(action, Shortcut::Edit { .. } | Shortcut::IssueRemoveLabel)
+        {
             return;
         }
-        let command = key.modifiers.control || key.modifiers.platform;
-        let mac_command = cfg!(target_os = "macos") && key.modifiers.platform;
+        let Shortcut::Edit {
+            operation,
+            select,
+            boundary,
+        } = *action
+        else {
+            cx.propagate();
+            return;
+        };
+        let mac_command = boundary;
         let cursor = self.cursor();
         let line_start = self.text[..cursor].rfind('\n').map(|i| i + 1).unwrap_or(0);
         let line_end = self.text[cursor..]
             .find('\n')
             .map(|i| cursor + i)
             .unwrap_or(self.text.len());
-        match key.key.as_str() {
-            "enter" if command && key.modifiers.shift => cx.emit(Submit(true)),
-            "enter" if !key.modifiers.shift => cx.emit(Submit(false)),
-            "enter" => self.replace_text_in_range(None, "\n", window, cx),
-            "a" if command => {
+        match operation {
+            Edit::Steer => cx.emit(Submit(true)),
+            Edit::Submit => cx.emit(Submit(false)),
+            Edit::Newline => self.replace_text_in_range(None, "\n", window, cx),
+            Edit::SelectAll => {
                 self.anchor = 0;
                 self.selection = 0..self.text.len();
                 self.changed(cx);
             }
-            "c" | "x" if command => {
+            Edit::Copy | Edit::Cut => {
                 cx.write_to_clipboard(ClipboardItem::new_string(
                     self.text[self.selection.clone()].into(),
                 ));
-                if key.key == "x" {
+                if operation == Edit::Cut {
                     self.replace_text_in_range(None, "", window, cx);
                 }
             }
-            "v" if command => {
+            Edit::Paste => {
                 if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
                     self.replace_text_in_range(
                         None,
@@ -201,8 +216,8 @@ impl Composer {
                     );
                 }
             }
-            "z" if command => {
-                let redo = key.modifiers.shift;
+            Edit::Undo | Edit::Redo => {
+                let redo = operation == Edit::Redo;
                 let snapshot = if redo {
                     self.redo.pop()
                 } else {
@@ -218,34 +233,38 @@ impl Composer {
                     self.restore(snapshot, cx);
                 }
             }
-            "left" => self.move_to(
+            Edit::Left => self.move_to(
                 if mac_command {
                     line_start
-                } else if !key.modifiers.shift && !self.selection.is_empty() {
+                } else if !select && !self.selection.is_empty() {
                     self.selection.start
                 } else {
                     self.previous(cursor)
                 },
-                key.modifiers.shift,
+                select,
                 cx,
             ),
-            "right" => self.move_to(
+            Edit::Right => self.move_to(
                 if mac_command {
                     line_end
-                } else if !key.modifiers.shift && !self.selection.is_empty() {
+                } else if !select && !self.selection.is_empty() {
                     self.selection.end
                 } else {
                     self.next(cursor)
                 },
-                key.modifiers.shift,
+                select,
                 cx,
             ),
-            "up" | "down" if mac_command => self.move_to(
-                if key.key == "up" { 0 } else { self.text.len() },
-                key.modifiers.shift,
+            Edit::Up | Edit::Down if mac_command => self.move_to(
+                if operation == Edit::Up {
+                    0
+                } else {
+                    self.text.len()
+                },
+                select,
                 cx,
             ),
-            "up" | "down" => {
+            Edit::Up | Edit::Down => {
                 let position = self.layout.iter().find_map(|(offset, line, origin)| {
                     (cursor >= *offset && cursor <= offset + line.len())
                         .then(|| {
@@ -259,24 +278,20 @@ impl Composer {
                 });
                 if let Some(position) = position {
                     let next = self.index_at(
-                        position + point(px(0.), px(if key.key == "up" { -1. } else { 21. })),
+                        position + point(px(0.), px(if operation == Edit::Up { -1. } else { 21. })),
                     );
-                    self.move_to(next, key.modifiers.shift, cx);
+                    self.move_to(next, select, cx);
                 }
             }
-            "home" => self.move_to(
-                if command { 0 } else { line_start },
-                key.modifiers.shift,
+            Edit::Home => self.move_to(if boundary { 0 } else { line_start }, select, cx),
+            Edit::End => self.move_to(
+                if boundary { self.text.len() } else { line_end },
+                select,
                 cx,
             ),
-            "end" => self.move_to(
-                if command { self.text.len() } else { line_end },
-                key.modifiers.shift,
-                cx,
-            ),
-            "backspace" | "delete" => {
+            Edit::Backspace | Edit::Delete => {
                 if self.selection.is_empty() {
-                    self.selection = if key.key == "backspace" {
+                    self.selection = if operation == Edit::Backspace {
                         (if mac_command {
                             line_start
                         } else {
@@ -292,7 +307,6 @@ impl Composer {
                 }
                 self.replace_text_in_range(None, "", window, cx);
             }
-            _ => return,
         }
         cx.stop_propagation();
     }
@@ -413,6 +427,7 @@ impl Render for Composer {
             .id("composer-input")
             .debug_selector(|| "composer-input".into())
             .track_focus(&self.focus)
+            .key_context(self.context)
             .cursor(CursorStyle::IBeam)
             .max_h(px(176.))
             .overflow_y_scroll()
@@ -421,7 +436,7 @@ impl Render for Composer {
             .border_color(theme().border)
             .rounded(px(crate::theme::GEOMETRY.row_radius))
             .p(px(8.))
-            .on_key_down(cx.listener(Self::key))
+            .on_action(cx.listener(Self::action))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, event: &MouseDownEvent, window, cx| {

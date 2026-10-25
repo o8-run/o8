@@ -13,8 +13,8 @@ use alacritty_terminal::{
 };
 use gpui::{
     App, Application, Bounds, Context, ElementInputHandler, EntityInputHandler, FocusHandle,
-    KeyDownEvent, Keystroke, MouseButton, Pixels, Point, Render, TextRun, UTF16Selection, Window,
-    WindowBounds, WindowOptions, canvas, div, fill, font, point, prelude::*, px, rgb, size,
+    Keystroke, MouseButton, Pixels, Point, Render, TextRun, UTF16Selection, Window, WindowBounds,
+    WindowOptions, canvas, div, fill, font, point, prelude::*, px, rgb, size,
 };
 use std::{
     cell::Cell,
@@ -56,6 +56,7 @@ impl Pane {
     pub fn attached(client: Client, session: String, cx: &mut Context<Self>) -> Self {
         let dimensions = Size(80, 24);
         let grid = Arc::new(Mutex::new(Grid::new(dimensions)));
+        crate::keymap::install(cx);
         let focus = cx.focus_handle();
         Self {
             grid: grid.clone(),
@@ -127,43 +128,47 @@ impl Pane {
         }
         cx.notify();
     }
-    fn key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        let key = &event.keystroke;
+    fn action(
+        &mut self,
+        action: &crate::keymap::Shortcut,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use crate::keymap::Shortcut;
         if !self.composition.is_empty() {
             return;
         }
-        if key.modifiers.shift && matches!(key.key.as_str(), "pageup" | "pagedown" | "home" | "end")
-        {
-            let mut grid = self.grid.lock().unwrap();
-            let rows = grid.size().1 as i32;
-            grid.term.scroll_display(match key.key.as_str() {
-                "home" => Scroll::Top,
-                "end" => Scroll::Bottom,
-                "pageup" => Scroll::Delta(rows),
-                _ => Scroll::Delta(-rows),
-            });
-            grid.revision += 1;
-            cx.notify();
-            cx.stop_propagation();
-            return;
-        }
-        if (key.modifiers.platform || key.modifiers.control && key.modifiers.shift)
-            && key.key == "v"
-        {
-            if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
-                self.replace_text_in_range(None, &text, window, cx);
+        match action {
+            Shortcut::TerminalScroll(key) => {
+                let mut grid = self.grid.lock().unwrap();
+                let rows = grid.size().1 as i32;
+                grid.term.scroll_display(match *key {
+                    "home" => Scroll::Top,
+                    "end" => Scroll::Bottom,
+                    "pageup" => Scroll::Delta(rows),
+                    _ => Scroll::Delta(-rows),
+                });
+                grid.revision += 1;
+                cx.notify();
             }
-            cx.stop_propagation();
-            return;
-        }
-        let mode = *self.grid.lock().unwrap().term.mode();
-        if let Some(text) = encode_key(key, mode) {
-            self.input(text, cx);
-            cx.stop_propagation();
-        } else if key.modifiers.alt {
-            if let Some(text) = &key.key_char {
-                self.input(format!("\x1b{text}"), cx);
-                cx.stop_propagation();
+            Shortcut::TerminalPaste => {
+                if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
+                    self.replace_text_in_range(None, &text, window, cx);
+                }
+            }
+            Shortcut::TerminalText(text) => self.input(text.clone(), cx),
+            Shortcut::Terminal(key) => {
+                let mode = *self.grid.lock().unwrap().term.mode();
+                if let Some(text) = encode_key(key, mode) {
+                    self.input(text, cx);
+                } else if key.modifiers.alt
+                    && let Some(text) = &key.key_char
+                {
+                    self.input(format!("\x1b{text}"), cx);
+                }
+            }
+            _ => {
+                cx.propagate();
             }
         }
     }
@@ -280,7 +285,9 @@ impl Render for Pane {
             .text_color(theme().text)
             .font_family(theme().font_ui)
             .track_focus(&self.focus)
-            .on_key_down(cx.listener(Self::key))
+            .key_context("Terminal")
+            .map(crate::keymap::terminal_protocol_input)
+            .on_action(cx.listener(Self::action))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _, window, _| this.focus.focus(window)),

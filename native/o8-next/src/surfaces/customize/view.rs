@@ -205,6 +205,7 @@ struct Editor {
     tags: Entity<Composer>,
 }
 pub struct Customize {
+    pub focus: gpui::FocusHandle,
     client: Client,
     repo: Option<String>,
     personal: bool,
@@ -227,6 +228,7 @@ impl Customize {
             cx.notify();
         });
         let mut this = Self {
+            focus: cx.focus_handle(),
             client,
             personal: repo.is_none(),
             repo,
@@ -487,6 +489,8 @@ impl Render for Customize {
         let revision = self.revision;
         div()
             .id("customize")
+            .track_focus(&self.focus)
+            .key_context("Customize Modal")
             .size_full()
             .overflow_y_scroll()
             .p(px(24.))

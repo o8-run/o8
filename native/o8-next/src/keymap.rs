@@ -1,0 +1,541 @@
+//! Original Apache-2.0 keymap. See Zed's public key-binding design (contexts and
+//! precedence); no application crate or application implementation is used.
+use gpui::{App, Global, KeyBinding, Keystroke};
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Edit {
+    Submit,
+    Steer,
+    Newline,
+    SelectAll,
+    Copy,
+    Cut,
+    Paste,
+    Undo,
+    Redo,
+    Left,
+    Right,
+    Up,
+    Down,
+    Home,
+    End,
+    Backspace,
+    Delete,
+}
+#[derive(Clone, Debug, PartialEq, gpui::Action)]
+#[action(no_json)]
+pub enum Shortcut {
+    Palette,
+    NextSurface,
+    CloseSurface,
+    Settings,
+    Reference,
+    PaletteCancel,
+    PaletteMove(bool),
+    PaletteAccept,
+    Edit {
+        operation: Edit,
+        select: bool,
+        boundary: bool,
+    },
+    SessionFocus,
+    SessionSelect(bool),
+    SessionSteer,
+    SessionRemove,
+    Navigate(bool),
+    ToggleBrain,
+    BrainCancel,
+    BrainFind,
+    GridNeighbor {
+        direction: &'static str,
+        swap: bool,
+    },
+    GridSize(usize),
+    GridClose,
+    GridChoose,
+    GridToggle,
+    GridZoom,
+    GridCycle(bool),
+    InboxTab(bool),
+    InboxLane(u8),
+    InboxSelect(bool),
+    InboxOpen,
+    InboxRefresh,
+    SettingsCancel,
+    SettingsClose,
+    FocusNext(bool),
+    SettingsFind,
+    SettingsScroll(bool),
+    IssueCancel,
+    IssueRemoveLabel,
+    ActivityMove(bool),
+    ActivityActivate,
+    ActivityCancel,
+    DiffFile(bool),
+    DiffMode(bool),
+    DiffRefresh,
+    Activate,
+    Terminal(Keystroke),
+    TerminalText(String),
+    TerminalScroll(&'static str),
+    TerminalPaste,
+    #[cfg(test)]
+    Probe,
+}
+impl Shortcut {
+    fn label(&self) -> String {
+        use Shortcut::*;
+        match self {
+            Palette => "Open commands".into(),
+            NextSurface => "Next surface".into(),
+            CloseSurface => "Close surface".into(),
+            Settings => "Open settings".into(),
+            Reference => "Toggle shortcuts reference".into(),
+            PaletteCancel => "Close commands".into(),
+            PaletteMove(next) => if *next {
+                "Next command"
+            } else {
+                "Previous command"
+            }
+            .into(),
+            PaletteAccept => "Run selected command".into(),
+            Edit { operation, .. } => format!("Edit text: {operation:?}"),
+            SessionFocus => "Move between session list and composer".into(),
+            SessionSelect(next) => if *next {
+                "Next session"
+            } else {
+                "Previous session"
+            }
+            .into(),
+            SessionSteer => "Promote queued message".into(),
+            SessionRemove => "Remove queued message".into(),
+            Navigate(end) => if *end { "Go to end" } else { "Go to start" }.into(),
+            ToggleBrain => "Toggle Brain".into(),
+            BrainCancel => "Close Brain search or panel".into(),
+            BrainFind => "Search Brain".into(),
+            GridNeighbor { direction, swap } => {
+                format!("{} pane {direction}", if *swap { "Move" } else { "Focus" })
+            }
+            GridSize(n) => format!("Show {n} panes"),
+            GridClose => "Close pane".into(),
+            GridChoose => "Choose pane session".into(),
+            GridToggle => "Toggle pane terminal".into(),
+            GridZoom => "Zoom pane".into(),
+            GridCycle(previous) => if *previous {
+                "Previous pane"
+            } else {
+                "Next pane"
+            }
+            .into(),
+            InboxTab(previous) | FocusNext(previous) => if *previous {
+                "Focus previous control"
+            } else {
+                "Focus next control"
+            }
+            .into(),
+            InboxLane(_) => "Change Inbox view".into(),
+            InboxSelect(next) => if *next {
+                "Next Inbox card"
+            } else {
+                "Previous Inbox card"
+            }
+            .into(),
+            InboxOpen => "Open selected Inbox card".into(),
+            InboxRefresh => "Refresh Inbox".into(),
+            SettingsCancel => "Cancel edit or close settings".into(),
+            SettingsClose => "Close settings".into(),
+            SettingsFind => "Search settings".into(),
+            SettingsScroll(_) => "Scroll settings".into(),
+            IssueCancel => "Return to issue list".into(),
+            IssueRemoveLabel => "Remove empty issue label".into(),
+            ActivityMove(_) => "Select activity control".into(),
+            ActivityActivate => "Activate activity control".into(),
+            ActivityCancel => "Close activity detail".into(),
+            DiffFile(next) => if *next {
+                "Next diff file"
+            } else {
+                "Previous diff file"
+            }
+            .into(),
+            DiffMode(split) => if *split { "Split diff" } else { "Unified diff" }.into(),
+            DiffRefresh => "Refresh diff".into(),
+            Activate => "Activate focused control".into(),
+            Terminal(_) => "Send key to terminal".into(),
+            TerminalText(_) => "Send terminal text".into(),
+            TerminalScroll(_) => "Scroll terminal".into(),
+            TerminalPaste => "Paste into terminal".into(),
+            #[cfg(test)]
+            Probe => "Open registration probe".into(),
+        }
+    }
+}
+#[derive(Clone)]
+pub struct Binding {
+    pub key: String,
+    pub context: &'static str,
+    pub action: Shortcut,
+}
+impl Binding {
+    pub fn gpui(&self) -> KeyBinding {
+        KeyBinding::new(&self.key, self.action.clone(), Some(self.context))
+    }
+    pub fn reference(&self) -> String {
+        format!("{} · {} · {}", self.key, self.action.label(), self.context)
+    }
+}
+struct Installed;
+impl Global for Installed {}
+pub fn install(cx: &mut App) {
+    if !cx.has_global::<Installed>() {
+        cx.bind_keys(bindings().iter().map(Binding::gpui));
+        cx.set_global(Installed);
+    }
+}
+pub fn reference() -> Vec<String> {
+    bindings().iter().map(Binding::reference).collect()
+}
+pub fn bindings() -> Vec<Binding> {
+    use self::Edit as EditorOp;
+    use Shortcut::*;
+    let mut rows = Vec::new();
+    let mut bind = |key: &str, context, action| {
+        rows.push(Binding {
+            key: key.into(),
+            context,
+            action,
+        })
+    };
+    const GLOBAL: &str = "Global && !TextInput && !Terminal && !Modal";
+    for prefix in ["ctrl-", "cmd-"] {
+        bind(&format!("{prefix}k"), GLOBAL, Palette);
+        bind(&format!("{prefix}k"), "Palette && !Terminal", PaletteCancel);
+        bind(
+            &format!("{prefix}w"),
+            "Settings && !TextInput && !Terminal",
+            SettingsClose,
+        );
+        bind(&format!("{prefix}w"), GLOBAL, CloseSurface);
+        bind(
+            &format!("{prefix},"),
+            "Global && !Terminal && !TextInput",
+            Settings,
+        );
+        bind(
+            &format!("{prefix}e"),
+            "Session && !Terminal && !Modal",
+            ToggleBrain,
+        );
+        bind(&format!("{prefix}e"), "Brain && !Terminal", ToggleBrain);
+        bind(&format!("{prefix}f"), "Brain && !Terminal", BrainFind);
+        bind(&format!("{prefix}f"), "Settings && !Terminal", SettingsFind);
+    }
+    bind("ctrl-tab", GLOBAL, NextSurface);
+    bind("?", GLOBAL, Reference);
+    bind("escape", "Palette && !Terminal", PaletteCancel);
+    bind("up", "Palette && !Terminal", PaletteMove(false));
+    bind("down", "Palette && !Terminal", PaletteMove(true));
+    bind("enter", "Palette && !Terminal", PaletteAccept);
+    bind("escape", "Brain && !Terminal", BrainCancel);
+    bind("escape", "Settings && !Terminal", SettingsCancel);
+    bind("escape", "Issues && !Terminal", IssueCancel);
+    bind("backspace", "IssueLabel", IssueRemoveLabel);
+    for (key, operation) in [
+        ("enter", EditorOp::Submit),
+        ("shift-enter", EditorOp::Newline),
+        ("ctrl-enter", EditorOp::Submit),
+        ("cmd-enter", EditorOp::Submit),
+        ("ctrl-shift-enter", EditorOp::Steer),
+        ("cmd-shift-enter", EditorOp::Steer),
+    ] {
+        bind(
+            key,
+            "TextInput && !Palette",
+            Shortcut::Edit {
+                operation,
+                select: false,
+                boundary: false,
+            },
+        );
+    }
+    for prefix in ["ctrl-", "cmd-"] {
+        for (key, operation) in [
+            ("a", EditorOp::SelectAll),
+            ("c", EditorOp::Copy),
+            ("x", EditorOp::Cut),
+            ("v", EditorOp::Paste),
+            ("z", EditorOp::Undo),
+            ("shift-z", EditorOp::Redo),
+        ] {
+            bind(
+                &format!("{prefix}{key}"),
+                "TextInput",
+                Shortcut::Edit {
+                    operation,
+                    select: false,
+                    boundary: false,
+                },
+            );
+        }
+    }
+    for (key, operation) in [
+        ("left", EditorOp::Left),
+        ("right", EditorOp::Right),
+        ("up", EditorOp::Up),
+        ("down", EditorOp::Down),
+        ("home", EditorOp::Home),
+        ("end", EditorOp::End),
+        ("backspace", EditorOp::Backspace),
+        ("delete", EditorOp::Delete),
+    ] {
+        for prefix in ["", "shift-", "ctrl-", "ctrl-shift-", "cmd-", "cmd-shift-"] {
+            bind(
+                &format!("{prefix}{key}"),
+                if matches!(operation, EditorOp::Backspace) {
+                    "TextInput && !IssueLabel"
+                } else if matches!(operation, EditorOp::Up | EditorOp::Down) {
+                    "TextInput && !Palette"
+                } else {
+                    "TextInput"
+                },
+                Shortcut::Edit {
+                    operation,
+                    select: prefix.contains("shift"),
+                    boundary: if matches!(operation, EditorOp::Home | EditorOp::End) {
+                        prefix.contains("ctrl") || prefix.contains("cmd")
+                    } else {
+                        cfg!(target_os = "macos") && prefix.contains("cmd")
+                    },
+                },
+            );
+        }
+    }
+    bind("tab", "Session && !Brain && !Terminal", SessionFocus);
+    bind("shift-tab", "Session && !Brain && !Terminal", SessionFocus);
+    for (key, action) in [
+        ("up", SessionSelect(false)),
+        ("down", SessionSelect(true)),
+        ("f6", SessionSteer),
+        ("f7", SessionRemove),
+        ("home", Navigate(false)),
+        ("end", Navigate(true)),
+    ] {
+        bind(
+            key,
+            "Session && !TextInput && !Brain && !Button && !Terminal",
+            action,
+        );
+    }
+    for direction in ["left", "right", "up", "down"] {
+        bind(
+            &format!("ctrl-alt-{direction}"),
+            "Grid && !TextInput",
+            GridNeighbor {
+                direction,
+                swap: false,
+            },
+        );
+        bind(
+            &format!("ctrl-alt-shift-{direction}"),
+            "Grid && !TextInput",
+            GridNeighbor {
+                direction,
+                swap: true,
+            },
+        );
+    }
+    for n in [1, 2, 4, 6] {
+        bind(&format!("ctrl-alt-{n}"), "Grid && !TextInput", GridSize(n));
+    }
+    for (key, action) in [
+        ("ctrl-alt-w", GridClose),
+        ("ctrl-alt-p", GridChoose),
+        ("ctrl-alt-t", GridToggle),
+        ("ctrl-alt-enter", GridZoom),
+    ] {
+        bind(key, "Grid && !TextInput", action);
+    }
+    bind("tab", "Grid && !Terminal && !TextInput", GridCycle(false));
+    bind(
+        "shift-tab",
+        "Grid && !Terminal && !TextInput",
+        GridCycle(true),
+    );
+    for (key, action) in [("home", Navigate(false)), ("end", Navigate(true))] {
+        bind(key, "Grid && !Terminal && !TextInput", action);
+    }
+    for (key, action) in [
+        ("tab", InboxTab(false)),
+        ("shift-tab", InboxTab(true)),
+        ("left", InboxLane(0)),
+        ("right", InboxLane(1)),
+        ("home", InboxLane(2)),
+        ("end", InboxLane(3)),
+        ("up", InboxSelect(false)),
+        ("down", InboxSelect(true)),
+        ("enter", InboxOpen),
+        ("f5", InboxRefresh),
+    ] {
+        bind(key, "Inbox && !TextInput && !Terminal", action);
+    }
+    for (key, action) in [
+        ("tab", FocusNext(false)),
+        ("shift-tab", FocusNext(true)),
+        ("pageup", SettingsScroll(false)),
+        ("pagedown", SettingsScroll(true)),
+    ] {
+        bind(
+            key,
+            if matches!(action, FocusNext(_)) {
+                "Settings && !Terminal"
+            } else {
+                "Settings && !TextInput && !Terminal"
+            },
+            action,
+        );
+    }
+    for (key, action) in [
+        ("tab", ActivityMove(false)),
+        ("shift-tab", ActivityMove(true)),
+        ("down", ActivityMove(false)),
+        ("up", ActivityMove(true)),
+        ("enter", ActivityActivate),
+        ("space", ActivityActivate),
+        ("escape", ActivityCancel),
+    ] {
+        bind(key, "Activity && !TextInput && !Terminal", action);
+    }
+    for (key, action) in [
+        ("home", Navigate(false)),
+        ("end", Navigate(true)),
+        ("alt-up", DiffFile(false)),
+        ("alt-down", DiffFile(true)),
+        ("u", DiffMode(false)),
+        ("s", DiffMode(true)),
+        ("r", DiffRefresh),
+    ] {
+        bind(key, "Diff && !TextInput && !Terminal", action);
+    }
+    bind("enter", "Button", Activate);
+    bind("space", "Button", Activate);
+    // Terminal protocol keys are actions too. Printable/IME input uses GPUI's
+    // EntityInputHandler, independent of the shortcut map.
+    for key in ["pageup", "pagedown", "home", "end"] {
+        bind(&format!("shift-{key}"), "Terminal", TerminalScroll(key));
+    }
+    bind("cmd-v", "Terminal", TerminalPaste);
+    bind("ctrl-shift-v", "Terminal", TerminalPaste);
+    for key in [
+        "enter",
+        "backspace",
+        "escape",
+        "tab",
+        "up",
+        "down",
+        "right",
+        "left",
+        "home",
+        "end",
+        "insert",
+        "delete",
+        "pageup",
+        "pagedown",
+        "f1",
+        "f2",
+        "f3",
+        "f4",
+        "f5",
+        "f6",
+        "f7",
+        "f8",
+        "f9",
+        "f10",
+        "f11",
+        "f12",
+    ] {
+        for prefix in [
+            "",
+            "shift-",
+            "alt-",
+            "alt-shift-",
+            "ctrl-",
+            "ctrl-shift-",
+            "ctrl-alt-",
+            "ctrl-alt-shift-",
+        ] {
+            // Reserved grid chords and scroll actions take priority over PTY encoding.
+            if prefix == "shift-" && ["pageup", "pagedown", "home", "end"].contains(&key) {
+                continue;
+            }
+            let chord = format!("{prefix}{key}");
+            let context = if ["ctrl-alt-", "ctrl-alt-shift-"].contains(&prefix)
+                && ["left", "right", "up", "down", "enter"].contains(&key)
+            {
+                "Terminal && !Grid"
+            } else {
+                "Terminal"
+            };
+            bind(&chord, context, Terminal(Keystroke::parse(&chord).unwrap()));
+        }
+    }
+    for key in ('!'..='~')
+        .filter(|key| !key.is_ascii_uppercase())
+        .map(|c| c.to_string())
+        .chain(["space".to_owned()])
+    {
+        for prefix in [
+            "ctrl-",
+            "ctrl-shift-",
+            "alt-",
+            "alt-shift-",
+            "ctrl-alt-",
+            "ctrl-alt-shift-",
+        ] {
+            if prefix == "ctrl-shift-" && key == "v" {
+                continue;
+            }
+            let chord = format!("{prefix}{key}");
+            let mut stroke = Keystroke::parse(&chord).unwrap();
+            stroke.key_char = Some(if key == "space" {
+                " ".into()
+            } else if prefix.contains("shift") && key.len() == 1 {
+                key.to_uppercase()
+            } else {
+                key.to_string()
+            });
+            let context = if prefix == "ctrl-alt-"
+                && ["w", "p", "t", "1", "2", "4", "6"].contains(&key.as_str())
+            {
+                "Terminal && !Grid"
+            } else {
+                "Terminal"
+            };
+            bind(&chord, context, Terminal(stroke));
+        }
+    }
+    #[cfg(test)]
+    bind("ctrl-alt-j", GLOBAL, Probe);
+    rows
+}
+
+#[cfg(test)]
+#[path = "keymap_tests.rs"]
+mod tests;
+
+// Alt-modified Unicode is platform text, with an unbounded character set. Keep
+// its VT translation in this shared input bridge, after all named shortcuts.
+// The terminal surface only receives the resulting action, like IME text input.
+pub fn terminal_protocol_input(element: gpui::Div) -> gpui::Div {
+    use gpui::prelude::*;
+    element.on_key_down(|event, window, cx| {
+        let key = &event.keystroke;
+        if key.modifiers.alt
+            && !key.modifiers.control
+            && !key.modifiers.platform
+            && let Some(text) = &key.key_char
+            && !text.is_ascii()
+        {
+            window.dispatch_action(Box::new(Shortcut::TerminalText(format!("\x1b{text}"))), cx);
+            cx.stop_propagation();
+        }
+    })
+}

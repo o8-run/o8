@@ -5,7 +5,7 @@ use crate::{
     text,
     theme::current as theme,
 };
-use gpui::{IntoElement, KeyDownEvent, Render, canvas, div, px};
+use gpui::{IntoElement, Render, canvas, div, px};
 use std::{cell::RefCell, collections::BTreeSet};
 
 fn markdown(body: &str) -> gpui::AnyElement {
@@ -90,13 +90,18 @@ impl Issues {
             )
             .into_any_element()
     }
-    fn key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        if event.keystroke.key == "escape" {
+    fn key(
+        &mut self,
+        action: &crate::keymap::Shortcut,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if matches!(action, crate::keymap::Shortcut::IssueCancel) {
             self.mode = Mode::List;
             self.focus.focus(window);
             self.changed(cx);
             cx.stop_propagation();
-        } else if event.keystroke.key == "backspace"
+        } else if matches!(action, crate::keymap::Shortcut::IssueRemoveLabel)
             && self.mode == Mode::Create
             && self.label.read(cx).focus.is_focused(window)
             && self.label.read(cx).text.is_empty()
@@ -104,6 +109,20 @@ impl Issues {
             self.labels.pop();
             self.changed(cx);
             cx.stop_propagation();
+        } else if matches!(action, crate::keymap::Shortcut::IssueRemoveLabel) {
+            self.label.update(cx, |input, cx| {
+                input.action(
+                    &crate::keymap::Shortcut::Edit {
+                        operation: crate::keymap::Edit::Backspace,
+                        select: false,
+                        boundary: false,
+                    },
+                    window,
+                    cx,
+                )
+            });
+        } else {
+            cx.propagate();
         }
     }
     fn list_view(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
@@ -450,7 +469,8 @@ impl Render for Issues {
             .font_weight(gpui::FontWeight::LIGHT)
             .text_size(px(13.))
             .track_focus(&self.focus)
-            .capture_key_down(cx.listener(Self::key))
+            .key_context("Issues List")
+            .on_action(cx.listener(Self::key))
             .child(
                 div()
                     .flex()

@@ -18,7 +18,8 @@ impl Render for Brain {
         if !self.expanded {
             return div()
                 .track_focus(&self.focus)
-                .on_key_down(cx.listener(Self::key))
+                .key_context("Brain")
+                .on_action(cx.listener(Self::action))
                 .child(
                     control("brain-open", "Open Brain")
                         .on_click(cx.listener(|this, _, window, cx| this.toggle(window, cx))),
@@ -48,7 +49,8 @@ impl Render for Brain {
             .text_size(px(crate::theme::TYPE.body))
             .text_color(theme().text)
             .track_focus(&self.focus)
-            .capture_key_down(cx.listener(Self::key))
+            .key_context("Brain")
+            .on_action(cx.listener(Self::action))
             .child(
                 div()
                     .flex()

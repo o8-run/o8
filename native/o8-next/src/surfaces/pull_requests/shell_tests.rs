@@ -41,6 +41,14 @@ fn shell_pull_requests_opens_from_palette(cx: &mut TestAppContext) {
     draw(&mut visual);
     visual.simulate_input("Unsent shell review notes");
     visual.simulate_keystrokes("ctrl-w");
+    assert_eq!(
+        shell.read_with(&visual, |s, _| s.active()),
+        Some(Tab::PullRequests),
+        "review field owns close-tab keys"
+    );
+    prs.update_in(&mut visual, |s, window, _| s.focus.focus(window));
+    draw(&mut visual);
+    visual.simulate_keystrokes("ctrl-w");
     visual.simulate_keystrokes("ctrl-k");
     visual.simulate_keystrokes("p u l l enter");
     ready(&shell, &mut visual);

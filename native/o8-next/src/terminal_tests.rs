@@ -359,3 +359,61 @@ fn terminal_keys_follow_application_cursor_and_modifiers() {
         Some("\x1bOA")
     );
 }
+
+struct KeymapTerminal {
+    pane: Entity<Pane>,
+    shell_actions: usize,
+}
+impl Render for KeymapTerminal {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .size_full()
+            .flex()
+            .flex_col()
+            .key_context("Global")
+            .on_action(
+                cx.listener(|this, _: &crate::keymap::Shortcut, _, _| this.shell_actions += 1),
+            )
+            .child(self.pane.clone())
+    }
+}
+#[gpui::test]
+fn keymap_terminal_control_keys_reach_real_pty_before_shell(cx: &mut TestAppContext) {
+    let (_server, client, session) = fixture();
+    let (root, cx) = cx.add_window_view(|window, cx| KeymapTerminal {
+        pane: cx.new(|cx| Pane::new(client, session, window, cx)),
+        shell_actions: 0,
+    });
+    let pane = root.read_with(cx, |root, _| root.pane.clone());
+    until(&pane, cx, |pane| {
+        pane.ready && pane.grid.lock().unwrap().text().contains("READY")
+    });
+    cx.simulate_input("bytes:");
+    cx.simulate_keystrokes("ctrl-k ctrl-w ? enter");
+    until(&pane, cx, |pane| {
+        pane.grid.lock().unwrap().text().contains("INPUT 0b173f")
+    });
+    cx.simulate_keystrokes("cmd-k cmd-w");
+    cx.write_to_clipboard(gpui::ClipboardItem::new_string("pasted".into()));
+    cx.simulate_input("bytes:");
+    cx.simulate_keystrokes("ctrl-shift-v enter");
+    until(&pane, cx, |pane| {
+        pane.grid
+            .lock()
+            .unwrap()
+            .text()
+            .contains("INPUT 706173746564")
+    });
+    cx.simulate_input("bytes:");
+    cx.update(|window, cx| {
+        let mut key = gpui::Keystroke::parse("alt-界").unwrap();
+        key.key_char = Some("界".into());
+        window.dispatch_keystroke(key, cx);
+    });
+    cx.simulate_keystrokes("enter");
+    until(&pane, cx, |pane| {
+        pane.grid.lock().unwrap().text().contains("INPUT 1be7958c")
+    });
+    assert_eq!(root.read_with(cx, |root, _| root.shell_actions), 0);
+    assert!(cx.update(|window, cx| pane.read(cx).focus.is_focused(window)));
+}

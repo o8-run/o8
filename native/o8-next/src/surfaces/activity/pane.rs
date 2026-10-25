@@ -1,7 +1,7 @@
 //! Activity entity hosted by the opt-in shell. HTTP work stays off the UI thread.
 use super::feed::{self, CiDetail, ReadError, Repo, Row, Streams};
 use crate::client::Client;
-use gpui::{Context, EventEmitter, FocusHandle, KeyDownEvent, Window};
+use gpui::{Context, EventEmitter, FocusHandle, Window};
 use serde_json::{Value, json};
 use std::{
     collections::HashMap,
@@ -64,6 +64,7 @@ pub struct ActivityPane {
 impl EventEmitter<ActivityEvent> for ActivityPane {}
 impl ActivityPane {
     pub fn new(client: Client, workspace: String, cx: &mut Context<Self>) -> Self {
+        crate::keymap::install(cx);
         let mut pane = Self {
             client,
             scope: workspace.clone(),
@@ -358,28 +359,25 @@ impl ActivityPane {
     }
     pub(super) fn key_down(
         &mut self,
-        event: &KeyDownEvent,
+        action: &crate::keymap::Shortcut,
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if event.keystroke.modifiers.control || event.keystroke.modifiers.platform {
-            return;
-        }
-        match event.keystroke.key.as_str() {
-            "tab" | "down" | "up" => {
+        match *action {
+            crate::keymap::Shortcut::ActivityMove(previous) => {
                 let length = self.controls.len().max(1);
                 let current = self
                     .keyboard
                     .as_ref()
                     .and_then(|id| self.controls.iter().position(|(control, _)| control == id));
-                let index = if event.keystroke.key == "up" || event.keystroke.modifiers.shift {
+                let index = if previous {
                     current.unwrap_or(0).wrapping_add(length - 1) % length
                 } else {
                     current.map(|index| (index + 1) % length).unwrap_or(0)
                 };
                 self.keyboard = self.controls.get(index).map(|(id, _)| id.clone());
             }
-            "enter" | "space" => {
+            crate::keymap::Shortcut::ActivityActivate => {
                 if let Some((_, action)) = self
                     .keyboard
                     .as_ref()
@@ -389,11 +387,14 @@ impl ActivityPane {
                     self.act(action, cx);
                 }
             }
-            "escape" => {
+            crate::keymap::Shortcut::ActivityCancel => {
                 self.expanded = None;
                 self.keyboard = None;
             }
-            _ => return,
+            _ => {
+                cx.propagate();
+                return;
+            }
         }
         self.changed(cx);
         cx.stop_propagation();

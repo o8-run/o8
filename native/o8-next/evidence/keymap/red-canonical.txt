@@ -1,0 +1,12 @@
+running 1 test
+test keymap::tests::keymap_reference_has_exactly_the_registered_rows ...
+thread 'keymap::tests::keymap_reference_has_exactly_the_registered_rows' (67759) panicked at src/keymap_tests.rs:123:9:
+duplicate binding: ctrl-shift-A · Send key to terminal · Terminal
+FAILED
+
+failures:
+
+failures:
+    keymap::tests::keymap_reference_has_exactly_the_registered_rows
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 142 filtered out; finished in 0.00s

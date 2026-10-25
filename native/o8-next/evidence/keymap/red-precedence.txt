@@ -1,0 +1,14 @@
+running 1 test
+test keymap::tests::keymap_every_binding_dispatches_only_on_its_focus_path ...
+thread 'keymap::tests::keymap_every_binding_dispatches_only_on_its_focus_path' (74780) panicked at src/keymap_tests.rs:116:21:
+assertion `left == right` failed: ctrl-alt-1 · Show 1 panes · Grid && !TextInput with terminal focus (isolated=false)
+  left: [Terminal(Keystroke { modifiers: Modifiers { control: true, alt: true, shift: false, platform: false, function: false }, key: "1", key_char: Some("1") })]
+ right: [GridSize(1)]
+FAILED
+
+failures:
+
+failures:
+    keymap::tests::keymap_every_binding_dispatches_only_on_its_focus_path
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 142 filtered out; finished in 0.72s

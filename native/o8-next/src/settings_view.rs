@@ -1,6 +1,6 @@
 use super::*;
 use crate::{settings_fields::SECTIONS, theme::current as theme};
-use gpui::{AnyElement, Div, KeyDownEvent, Render, Stateful, canvas, div, prelude::*, px};
+use gpui::{AnyElement, Div, Render, Stateful, canvas, div, prelude::*, px};
 
 impl Settings {
     fn button(
@@ -26,6 +26,7 @@ impl Settings {
             .id(gpui::SharedString::from(id.clone()))
             .debug_selector(move || id.clone())
             .track_focus(&focus)
+            .key_context("Button")
             .tab_stop(enabled)
             .h(px(26.))
             .px(px(10.))
@@ -62,44 +63,50 @@ impl Settings {
                     action(this, window, cx);
                 }
             }))
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                if enabled && matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                    key_action(this, window, cx);
-                    cx.stop_propagation();
-                }
-            }))
+            .on_action(
+                cx.listener(move |this, action: &crate::keymap::Shortcut, window, cx| {
+                    if enabled && matches!(action, crate::keymap::Shortcut::Activate) {
+                        key_action(this, window, cx);
+                        cx.stop_propagation();
+                    } else {
+                        cx.propagate();
+                    }
+                }),
+            )
     }
-    fn key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        match event.keystroke.key.as_str() {
-            "escape" if !self.busy => {
+    fn key(
+        &mut self,
+        action: &crate::keymap::Shortcut,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match *action {
+            crate::keymap::Shortcut::SettingsClose if !self.busy => cx.emit(Close),
+            crate::keymap::Shortcut::SettingsCancel if !self.busy => {
                 if self.editor.is_some() || self.confirm.is_some() {
                     self.cancel(window, cx);
                 } else {
                     cx.emit(Close);
                 }
             }
-            "tab" => {
-                if event.keystroke.modifiers.shift {
+            crate::keymap::Shortcut::FocusNext(previous) => {
+                if previous {
                     window.focus_prev();
                 } else {
                     window.focus_next();
                 }
             }
-            "f" if event.keystroke.modifiers.control || event.keystroke.modifiers.platform => {
-                self.search.read(cx).focus.focus(window)
-            }
-            "pageup" | "pagedown" => {
+            crate::keymap::Shortcut::SettingsFind => self.search.read(cx).focus.focus(window),
+            crate::keymap::Shortcut::SettingsScroll(next) => {
                 let mut offset = self.scroll.offset();
-                offset.y = (offset.y
-                    + px(if event.keystroke.key == "pageup" {
-                        300.
-                    } else {
-                        -300.
-                    }))
-                .clamp(-self.scroll.max_offset().height, px(0.));
+                offset.y = (offset.y + px(if !next { 300. } else { -300. }))
+                    .clamp(-self.scroll.max_offset().height, px(0.));
                 self.scroll.set_offset(offset);
             }
-            _ => return,
+            _ => {
+                cx.propagate();
+                return;
+            }
         }
         self.changed(cx);
         cx.stop_propagation();
@@ -549,8 +556,9 @@ impl Render for Settings {
             .font_weight(gpui::FontWeight::LIGHT)
             .text_size(px(13.5))
             .track_focus(&self.focus)
+            .key_context("Settings Modal")
             .tab_stop(false)
-            .capture_key_down(cx.listener(Self::key))
+            .on_action(cx.listener(Self::key))
             .child(
                 div()
                     .flex()

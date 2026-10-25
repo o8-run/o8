@@ -1,14 +1,16 @@
 use super::*;
 use crate::theme::current as palette;
-use gpui::{FontWeight, IntoElement, KeyDownEvent, Render, div, prelude::*, px};
+use gpui::{FontWeight, IntoElement, Render, div, prelude::*, px};
 
 impl Inbox {
-    fn key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        if event.keystroke.modifiers.control || event.keystroke.modifiers.platform {
-            return;
-        }
-        match event.keystroke.key.as_str() {
-            "tab" => {
+    fn key_down(
+        &mut self,
+        action: &crate::keymap::Shortcut,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match *action {
+            crate::keymap::Shortcut::InboxTab(previous) => {
                 let controls = self.cards[self.lane]
                     .iter()
                     .enumerate()
@@ -24,7 +26,7 @@ impl Inbox {
                     let current = controls
                         .iter()
                         .position(|(_, handle)| handle.is_focused(window));
-                    let next = if event.keystroke.modifiers.shift {
+                    let next = if previous {
                         current
                             .map(|i| (i + controls.len() - 1) % controls.len())
                             .unwrap_or(controls.len() - 1)
@@ -35,28 +37,33 @@ impl Inbox {
                     controls[next].1.focus(window);
                 }
             }
-            "left" | "right" | "home" | "end" => {
-                let lane = match event.keystroke.key.as_str() {
-                    "left" => (self.lane + 4) % 5,
-                    "right" => (self.lane + 1) % 5,
-                    "home" => 0,
+            crate::keymap::Shortcut::InboxLane(direction) => {
+                let lane = match direction {
+                    0 => (self.lane + 4) % 5,
+                    1 => (self.lane + 1) % 5,
+                    2 => 0,
                     _ => 4,
                 };
                 self.focus.focus(window);
                 self.select_lane(lane, cx);
             }
-            "up" => self.selected = self.selected.saturating_sub(1),
-            "down" => {
+            crate::keymap::Shortcut::InboxSelect(false) => {
+                self.selected = self.selected.saturating_sub(1)
+            }
+            crate::keymap::Shortcut::InboxSelect(true) => {
                 self.selected =
                     (self.selected + 1).min(self.cards[self.lane].len().saturating_sub(1))
             }
-            "enter" => {
+            crate::keymap::Shortcut::InboxOpen => {
                 if let Some(card) = self.cards[self.lane].get(self.selected).cloned() {
                     self.open(&card, cx);
                 }
             }
-            "f5" => self.load(cx),
-            _ => return,
+            crate::keymap::Shortcut::InboxRefresh => self.load(cx),
+            _ => {
+                cx.propagate();
+                return;
+            }
         }
         self.scroll.scroll_to_item(self.selected);
         cx.stop_propagation();
@@ -135,6 +142,7 @@ impl Inbox {
             })
             .relative()
             .track_focus(&focus)
+            .key_context("Button")
             .tab_index((index * 2 + usize::from(approve)) as isize)
             .tab_stop(enabled)
             .p(px(10.))
@@ -178,12 +186,16 @@ impl Inbox {
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.decide(clicked.clone(), approve, window, cx)
                     }))
-                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                        if matches!(event.keystroke.key.as_str(), "enter" | "space" | " ") {
-                            this.decide(keyboard.clone(), approve, window, cx);
-                            cx.stop_propagation();
-                        }
-                    }))
+                    .on_action(cx.listener(
+                        move |this, action: &crate::keymap::Shortcut, window, cx| {
+                            if matches!(action, crate::keymap::Shortcut::Activate) {
+                                this.decide(keyboard.clone(), approve, window, cx);
+                                cx.stop_propagation();
+                            } else {
+                                cx.propagate();
+                            }
+                        },
+                    ))
             })
     }
 }
@@ -202,10 +214,11 @@ impl Render for Inbox {
             .font_weight(FontWeight::LIGHT)
             .text_size(px(13.))
             .track_focus(&self.focus)
+            .key_context("Inbox List")
             .tab_group()
             .tab_index(-1)
             .tab_stop(false)
-            .on_key_down(cx.listener(Self::key_down))
+            .on_action(cx.listener(Self::key_down))
             .child(
                 div()
                     .flex()

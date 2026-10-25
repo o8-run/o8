@@ -46,17 +46,6 @@ pub(super) const REGISTRATION: Registration = Registration {
                 .into_any_element(),
         ]
     },
-    key_down: |s, event, window, cx| {
-        if event.keystroke.modifiers.control
-            && event.keystroke.modifiers.alt
-            && event.keystroke.key == "j"
-        {
-            s.execute(Command::Fake, window, cx);
-            true
-        } else {
-            false
-        }
-    },
     ..Registration::new("Probe", "Open registration probe", |shell, _, _, _| {
         shell.surfaces.fake.opens += 1;
         Some((Tab::Fake, false))
@@ -66,6 +55,7 @@ impl Render for View {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         div()
             .track_focus(&self.focus)
+            .key_context("Probe List")
             .debug_selector(|| "registration-probe-view".into())
             .child("Registration probe")
     }

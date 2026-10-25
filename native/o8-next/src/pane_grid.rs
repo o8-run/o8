@@ -8,8 +8,8 @@ use crate::{
     pane_layout::{Layout, Options, SIZES, View},
 };
 use gpui::{
-    App, Application, Bounds, Context, FocusHandle, KeyDownEvent, Render, Window, WindowBounds,
-    WindowOptions, div, point, prelude::*, px, size,
+    App, Application, Bounds, Context, FocusHandle, Render, Window, WindowBounds, WindowOptions,
+    div, point, prelude::*, px, size,
 };
 use std::{collections::HashSet, time::Duration};
 
@@ -47,6 +47,7 @@ impl Grid {
             .clone()
             .unwrap_or_else(|| Layout::new(options.size, std::iter::empty()));
         let panes = layout.sessions.iter().cloned().map(Pane::new).collect();
+        crate::keymap::install(cx);
         let focus = cx.focus_handle();
         focus.focus(window);
         Self {
@@ -241,52 +242,47 @@ impl Grid {
         }
         cx.notify();
     }
-    fn key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        let key = event.keystroke.key.as_str();
-        let modifiers = event.keystroke.modifiers;
-        if modifiers.control && modifiers.alt {
-            match key {
-                "left" | "right" | "up" | "down" => {
-                    let next = self.layout.neighbor(key);
-                    if modifiers.shift {
-                        self.layout.sessions.swap(self.layout.focus, next);
-                        self.layout.views.swap(self.layout.focus, next);
-                        self.panes.swap(self.layout.focus, next);
-                    }
-                    self.focus(next, window, cx);
+    fn action(
+        &mut self,
+        action: &crate::keymap::Shortcut,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use crate::keymap::Shortcut;
+        match *action {
+            Shortcut::GridNeighbor { direction, swap } => {
+                let next = self.layout.neighbor(direction);
+                if swap {
+                    self.layout.sessions.swap(self.layout.focus, next);
+                    self.layout.views.swap(self.layout.focus, next);
+                    self.panes.swap(self.layout.focus, next);
                 }
-                "1" | "2" | "4" | "6" => self.resize(key.parse().unwrap(), cx),
-                "w" => self.close(cx),
-                "p" => self.choose(cx),
-                "t" => self.toggle_view(window, cx),
-                "enter" => {
-                    self.zoom = !self.zoom;
-                    cx.notify();
-                }
-                _ => return,
+                self.focus(next, window, cx);
             }
-        } else {
-            // Tab, Home/End, arrows and control keys belong to the focused PTY.
-            if self.layout.views[self.layout.focus] == View::Terminal {
-                return;
+            Shortcut::GridSize(size) => self.resize(size, cx),
+            Shortcut::GridClose => self.close(cx),
+            Shortcut::GridChoose => self.choose(cx),
+            Shortcut::GridToggle => self.toggle_view(window, cx),
+            Shortcut::GridZoom => {
+                self.zoom = !self.zoom;
+                cx.notify();
             }
-            match key {
-                "tab" => {
-                    let next = if modifiers.shift {
-                        (self.layout.focus + self.layout.size - 1) % self.layout.size
-                    } else {
-                        (self.layout.focus + 1) % self.layout.size
-                    };
-                    self.focus(next, window, cx);
-                }
-                "home" | "end" => {
-                    self.panes[self.layout.focus].navigate(key == "end");
-                    cx.notify();
-                }
-                _ => return,
+            Shortcut::GridCycle(previous) => {
+                let next = if previous {
+                    (self.layout.focus + self.layout.size - 1) % self.layout.size
+                } else {
+                    (self.layout.focus + 1) % self.layout.size
+                };
+                self.focus(next, window, cx);
+            }
+            Shortcut::Navigate(end) => {
+                self.panes[self.layout.focus].navigate(end);
+                cx.notify();
+            }
+            _ => {
+                cx.propagate();
             }
         }
-        cx.stop_propagation();
     }
     fn pane(&self, index: usize, cx: &mut Context<Self>) -> gpui::AnyElement {
         let pane = &self.panes[index];
@@ -396,7 +392,8 @@ impl Render for Grid {
             .font_family(theme().font_ui)
             .text_size(px(13.))
             .track_focus(&self.focus)
-            .capture_key_down(cx.listener(Self::key))
+            .key_context("Grid List")
+            .on_action(cx.listener(Self::action))
             .child(
                 div()
                     .h(px(36.))

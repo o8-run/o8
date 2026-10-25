@@ -1,8 +1,8 @@
 //! Write-only credential input. No copy, undo, text readback or persistence.
 use crate::{composer::Submit, theme::current as theme};
 use gpui::{
-    Bounds, Context, ElementInputHandler, EntityInputHandler, EventEmitter, FocusHandle,
-    KeyDownEvent, Render, UTF16Selection, Window, canvas, div, prelude::*, px,
+    Bounds, Context, ElementInputHandler, EntityInputHandler, EventEmitter, FocusHandle, Render,
+    UTF16Selection, Window, canvas, div, prelude::*, px,
 };
 use std::ops::Range;
 
@@ -13,6 +13,7 @@ pub struct Secret {
 }
 impl Secret {
     pub fn new(cx: &mut Context<Self>) -> Self {
+        crate::keymap::install(cx);
         Self {
             focus: cx.focus_handle(),
             text: String::new(),
@@ -24,17 +25,21 @@ impl Secret {
         cx.notify();
         std::mem::take(&mut self.text)
     }
-    fn key(&mut self, event: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
-        let command = event.keystroke.modifiers.control || event.keystroke.modifiers.platform;
-        match event.keystroke.key.as_str() {
-            "enter" => cx.emit(Submit(false)),
-            "a" if command => self.all = true,
-            "c" | "z" if command => {}
-            "x" if command => {
+    fn key(&mut self, action: &crate::keymap::Shortcut, _: &mut Window, cx: &mut Context<Self>) {
+        use crate::keymap::{Edit, Shortcut};
+        let Shortcut::Edit { operation, .. } = action else {
+            cx.propagate();
+            return;
+        };
+        match operation {
+            Edit::Submit | Edit::Steer => cx.emit(Submit(false)),
+            Edit::SelectAll => self.all = true,
+            Edit::Copy | Edit::Undo | Edit::Redo => {}
+            Edit::Cut => {
                 self.text.clear();
                 self.all = false;
             }
-            "v" if command => {
+            Edit::Paste => {
                 if let Some(text) = cx.read_from_clipboard().and_then(|v| v.text()) {
                     if self.all {
                         self.text.clear();
@@ -43,7 +48,7 @@ impl Secret {
                     self.all = false;
                 }
             }
-            "backspace" | "delete" => {
+            Edit::Backspace | Edit::Delete => {
                 if self.all {
                     self.text.clear();
                 } else {
@@ -51,7 +56,10 @@ impl Secret {
                 }
                 self.all = false;
             }
-            _ => return,
+            _ => {
+                cx.propagate();
+                return;
+            }
         }
         cx.notify();
         cx.stop_propagation();
@@ -151,6 +159,7 @@ impl Render for Secret {
         div()
             .id("settings-secret")
             .track_focus(&self.focus)
+            .key_context("TextInput Secret")
             .p(px(8.))
             .rounded(px(8.))
             .border_1()
@@ -159,7 +168,7 @@ impl Render for Secret {
             } else {
                 theme().border
             })
-            .on_key_down(cx.listener(Self::key))
+            .on_action(cx.listener(Self::key))
             .on_mouse_down(
                 gpui::MouseButton::Left,
                 cx.listener(|this, _, window, cx| {

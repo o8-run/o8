@@ -188,7 +188,11 @@ impl Issues {
     ) -> Self {
         let title = cx.new(Composer::new);
         let body = cx.new(Composer::new);
-        let label = cx.new(Composer::new);
+        let label = cx.new(|cx| {
+            let mut input = Composer::new(cx);
+            input.context = "TextInput IssueLabel";
+            input
+        });
         let search = cx.new(Composer::new);
         let mut this = Self {
             client,

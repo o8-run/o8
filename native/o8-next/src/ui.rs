@@ -24,9 +24,9 @@ use crate::{
     transport::{self, Incoming, Subscription},
 };
 use gpui::{
-    App, Application, Bounds, Context, FocusHandle, KeyDownEvent, Keystroke, ListAlignment,
-    ListOffset, ListState, Render, Window, WindowBounds, WindowHandle, WindowOptions, canvas, div,
-    list, point, prelude::*, px, size,
+    App, Application, Bounds, Context, FocusHandle, Keystroke, ListAlignment, ListOffset,
+    ListState, Render, Window, WindowBounds, WindowHandle, WindowOptions, canvas, div, list, point,
+    prelude::*, px, size,
 };
 use serde_json::{Value, json};
 use std::{
@@ -368,77 +368,82 @@ impl Render for Surface {
             .text_size(px(typography.body))
             .line_height(gpui::relative(typography.chrome_line))
             .track_focus(&self.focus)
-            .capture_key_down(cx.listener(Self::brain_key))
-            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                match event.keystroke.key.as_str() {
-                    "tab" => {
-                        if this.composer.read(cx).focus.is_focused(window) {
-                            this.focus.focus(window);
-                        } else {
-                            this.composer.read(cx).focus.focus(window);
-                        }
-                    }
-                    "up" | "down" => {
-                        let ids: Vec<_> = sidebar::tree(&this.sessions, None)
-                            .into_iter()
-                            .flat_map(|g| g.rows.into_iter().map(|r| r.id))
-                            .collect();
-                        if !ids.is_empty() {
-                            let current = ids
-                                .iter()
-                                .position(|id| Some(id) == this.selected.as_ref())
-                                .unwrap_or(0);
-                            let next = if event.keystroke.key == "up" {
-                                current.saturating_sub(1)
+            .key_context("Session List")
+            .on_action(
+                cx.listener(|this, action: &crate::keymap::Shortcut, window, cx| {
+                    match *action {
+                        crate::keymap::Shortcut::ToggleBrain => this.toggle_brain(window, cx),
+                        crate::keymap::Shortcut::SessionFocus => {
+                            if this.composer.read(cx).focus.is_focused(window) {
+                                this.focus.focus(window);
                             } else {
-                                (current + 1).min(ids.len() - 1)
-                            };
-                            this.select(ids[next].clone(), cx);
+                                this.composer.read(cx).focus.focus(window);
+                            }
                         }
-                    }
-                    "f6" => {
-                        let id = this.queue["items"]
-                            .as_array()
-                            .and_then(|items| {
-                                items.iter().find(|item| {
-                                    item["status"] == "queued"
-                                        && item["intent"] == "send-next"
-                                        && item["admittedAt"].is_null()
-                                        && item["payload"]["afterTaskId"].is_null()
-                                        && this.queue["steerableIds"]
-                                            .as_array()
-                                            .is_some_and(|ids| ids.contains(&item["id"]))
+                        crate::keymap::Shortcut::SessionSelect(next) => {
+                            let ids: Vec<_> = sidebar::tree(&this.sessions, None)
+                                .into_iter()
+                                .flat_map(|g| g.rows.into_iter().map(|r| r.id))
+                                .collect();
+                            if !ids.is_empty() {
+                                let current = ids
+                                    .iter()
+                                    .position(|id| Some(id) == this.selected.as_ref())
+                                    .unwrap_or(0);
+                                let next = if !next {
+                                    current.saturating_sub(1)
+                                } else {
+                                    (current + 1).min(ids.len() - 1)
+                                };
+                                this.select(ids[next].clone(), cx);
+                            }
+                        }
+                        crate::keymap::Shortcut::SessionSteer => {
+                            let id = this.queue["items"]
+                                .as_array()
+                                .and_then(|items| {
+                                    items.iter().find(|item| {
+                                        item["status"] == "queued"
+                                            && item["intent"] == "send-next"
+                                            && item["admittedAt"].is_null()
+                                            && item["payload"]["afterTaskId"].is_null()
+                                            && this.queue["steerableIds"]
+                                                .as_array()
+                                                .is_some_and(|ids| ids.contains(&item["id"]))
+                                    })
                                 })
-                            })
-                            .and_then(|item| item["id"].as_str())
-                            .map(str::to_owned);
-                        if let Some(id) = id {
-                            this.send(Some(id), cx);
+                                .and_then(|item| item["id"].as_str())
+                                .map(str::to_owned);
+                            if let Some(id) = id {
+                                this.send(Some(id), cx);
+                            }
                         }
-                    }
-                    "f7" => {
-                        let id = this.queue["items"]
-                            .as_array()
-                            .and_then(|items| {
-                                items.iter().find(|item| {
-                                    item["status"] == "queued"
-                                        || item["status"] == "held"
-                                        || (item["status"] == "dispatching"
-                                            && item["admittedAt"].is_null())
+                        crate::keymap::Shortcut::SessionRemove => {
+                            let id = this.queue["items"]
+                                .as_array()
+                                .and_then(|items| {
+                                    items.iter().find(|item| {
+                                        item["status"] == "queued"
+                                            || item["status"] == "held"
+                                            || (item["status"] == "dispatching"
+                                                && item["admittedAt"].is_null())
+                                    })
                                 })
-                            })
-                            .and_then(|item| item["id"].as_str())
-                            .map(str::to_owned);
-                        if let Some(id) = id {
-                            this.remove_queued(id, cx);
+                                .and_then(|item| item["id"].as_str())
+                                .map(str::to_owned);
+                            if let Some(id) = id {
+                                this.remove_queued(id, cx);
+                            }
+                        }
+                        crate::keymap::Shortcut::Navigate(end) => this.navigate(end, cx),
+                        _ => {
+                            cx.propagate();
+                            return;
                         }
                     }
-                    "home" => this.navigate(false, cx),
-                    "end" => this.navigate(true, cx),
-                    _ => return,
-                }
-                cx.stop_propagation();
-            }))
+                    cx.stop_propagation();
+                }),
+            )
             .when(!self.embedded, |view| {
                 view.child(
                     div()

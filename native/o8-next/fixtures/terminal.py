@@ -31,6 +31,8 @@ while True:
         command, pending = pending[:end].decode(errors="replace"), pending[end + 1:]
         if command == "\x0b":
             emit("CTRL-K\r\n")
+        elif command.startswith("bytes:"):
+            emit(f"INPUT {command[6:].encode().hex()}\r\n")
         elif command == "size":
             rows, cols, _, _ = struct.unpack("HHHH", fcntl.ioctl(0, termios.TIOCGWINSZ, b"\0" * 8))
             emit(f"SIZE {cols} {rows}\r\n")
