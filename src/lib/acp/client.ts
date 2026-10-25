@@ -1,5 +1,7 @@
 import { credentialPolicyFingerprint } from '@/lib/providers/credential-policy';
 import { withProviderStoreLock } from '@/lib/providers/store-lock';
+import { assertLocalAcpEnvironmentCurrent, localAcpOutputRedactor } from './local-connection';
+import type { AcpEnvironmentBinding } from './connection-environment';
 import { childEnvironment, childEnvironmentContext } from '@/lib/providers/spawn-environment';
 /**
  * Agent Client Protocol (ACP) stdio client.
@@ -194,6 +196,7 @@ export function mapStopReason(stopReason: AcpStopReason, sessionId: string | nul
 }
 
 export interface AcpClientOptions {
+  localEnvironment?: AcpEnvironmentBinding;
   runtimeId: string;
   command: string;
   args: string[];
@@ -221,15 +224,19 @@ export interface AcpClientOptions {
  * = one agent process = (typically) one ACP session, reused across turns.
  */
 export class AcpClient {
+  private readonly outputRedactor: ReturnType<typeof localAcpOutputRedactor>;
   private proc: ChildProcess;
   private readonly credentialRuntimeId?: string;
   private readonly credentialPolicy?: string;
   private nextId = 1;
   private readonly pending = new Map<number, {
+    method: string;
+    sessionId?: string;
     resolve: (v: unknown) => void;
     reject: (e: Error) => void;
     timeout: ReturnType<typeof setTimeout>;
   }>();
+  private readonly outputStreams = new Map<string, Array<{ method: string; params: Record<string, unknown>; text?: string }>>();
   private buf = '';
   private readonly onEvent?: (event: OrchestratorEvent, sessionId?: string) => void;
   private readonly onNotification?: (notification: AcpRawNotification) => void;
@@ -249,23 +256,85 @@ export class AcpClient {
     // see below.
     const launch = cliInvocation(opts.command, opts.args);
     this.viaInterpreter = spawnsViaInterpreter(opts.command);
-    const env = childEnvironment({ runtimeId: opts.runtimeId, runtimeLaunch: true, omitEnv: opts.omitEnv, env: { ...(opts.cwd ? { PWD: opts.cwd } : {}), ...opts.env } });
     this.credentialRuntimeId = opts.runtimeId;
-    this.credentialPolicy = childEnvironmentContext(env)?.policy;
-    this.proc = spawn(launch.command, launch.args, {
-      windowsHide: true,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      cwd: opts.cwd,
-      env,
+    const child = withProviderStoreLock(() => {
+      if (opts.localEnvironment) assertLocalAcpEnvironmentCurrent(opts.localEnvironment);
+      const outputRedactor = localAcpOutputRedactor(opts.localEnvironment, opts.env);
+      const env = childEnvironment({ runtimeId: opts.runtimeId, runtimeLaunch: true, omitEnv: opts.omitEnv, env: { ...(opts.cwd ? { PWD: opts.cwd } : {}), ...opts.env } });
+      const policy = childEnvironmentContext(env)?.policy;
+      return { policy, outputRedactor, proc: spawn(launch.command, launch.args, {
+        windowsHide: true,
+        stdio: ['pipe', 'pipe', 'pipe'],
+        cwd: opts.cwd,
+        env,
+      }) };
     });
+    this.proc = child.proc;
+    this.outputRedactor = child.outputRedactor;
+    this.credentialPolicy = child.policy;
     this.proc.stdout?.setEncoding('utf8');
     this.proc.stdout?.on('data', (chunk: string) => this.onStdout(chunk));
-    if (opts.onStderr) this.proc.stderr?.on('data', (c: Buffer) => opts.onStderr!(c.toString('utf8')));
+    if (opts.onStderr) {
+      const stderr = this.outputRedactor.stream(opts.onStderr);
+      this.proc.stderr?.setEncoding('utf8');
+      this.proc.stderr?.on('data', (chunk: string) => stderr(chunk));
+      this.proc.stderr?.on('end', () => stderr('', true));
+    }
     this.proc.on('close', (code, signal) => {
       this.onClose();
       opts.onExit?.({ code, signal });
     });
     this.proc.on('error', (err) => this.failAll(err instanceof Error ? err : new Error(String(err))));
+  }
+
+  /** Scrub external artifacts without changing the agent's protocol/session identifiers. */
+  redactOutput<T>(value: T): T { return this.outputRedactor.redact(value); }
+  private redactPayload<T>(value: T): T { return this.outputRedactor.redact(value, true); }
+
+  redactEvent(event: OrchestratorEvent): OrchestratorEvent {
+    const safe = { ...this.redactOutput(event), type: event.type } as OrchestratorEvent;
+    if (safe.type === 'turn_receipt' && event.type === 'turn_receipt') {
+      safe.effort = event.effort; safe.permissionMode = event.permissionMode;
+    }
+    if (safe.type === 'done' && event.type === 'done') safe.terminalOutcome = event.terminalOutcome;
+    if (safe.type === 'handoff' && event.type === 'handoff') safe.carries = event.carries;
+    if (safe.type === 'tool_use' && event.type === 'tool_use') safe.input = this.redactPayload(event.input);
+    if (safe.type === 'tool_result' && event.type === 'tool_result') safe.input = this.redactPayload(event.input);
+    if (safe.type === 'handoff' && event.type === 'handoff') safe.packet = this.redactPayload(event.packet);
+    return safe;
+  }
+
+  private flushOutput(sessionId?: string): void {
+    for (const [key, notifications] of this.outputStreams) {
+      if (sessionId !== undefined && key !== sessionId) continue;
+      this.outputStreams.delete(key);
+      const chunks = this.outputRedactor.chunks(notifications.filter(item => item.text !== undefined).map(item => item.text!));
+      let index = 0;
+      for (const { method, params, text } of notifications) {
+        if (text === undefined) this.publishNotification(method, params);
+        else {
+          const update = asRecord(params.update)!;
+          this.publishNotification(method, { ...params, update: { ...update, content: { type: 'text', text: chunks[index++] } } });
+        }
+      }
+    }
+  }
+
+  private publishNotification(method: string, params: Record<string, unknown>): void {
+    const safe = this.redactOutput(params);
+    // Routing tags remain internal protocol facts, not agent-authored content.
+    safe.sessionId = params.sessionId;
+    const update = asRecord(params.update); const safeUpdate = asRecord(safe.update);
+    if (update && safeUpdate) {
+      safeUpdate.sessionUpdate = update.sessionUpdate;
+      if (Object.hasOwn(update, 'rawInput')) safeUpdate.rawInput = this.redactPayload(update.rawInput);
+      if (Object.hasOwn(update, 'rawOutput')) safeUpdate.rawOutput = this.redactPayload(update.rawOutput);
+      const content = asRecord(update.content); const safeContent = asRecord(safeUpdate.content);
+      if (content && safeContent) safeContent.type = content.type;
+    }
+    this.onNotification?.({ method, params: safe });
+    const event = method === 'session/update' ? mapAcpUpdate(safe.update) : null;
+    if (event) this.onEvent?.(this.redactEvent(event), typeof params.sessionId === 'string' ? params.sessionId : undefined);
   }
 
   private onStdout(chunk: string): void {
@@ -293,8 +362,9 @@ export class AcpClient {
       if (!entry) return;
       this.pending.delete(msg.id);
       clearTimeout(entry.timeout);
+      if (entry.method === 'session/prompt') this.flushOutput(entry.sessionId);
       const res = msg as unknown as JsonRpcResponse;
-      if (res.error) entry.reject(new AcpRequestError(res.error.code, `ACP error ${res.error.code}: ${res.error.message}`, res.error.data));
+      if (res.error) entry.reject(new AcpRequestError(res.error.code, this.redactOutput(`ACP error ${res.error.code}: ${res.error.message}`), this.redactPayload(res.error.data)));
       else entry.resolve(res.result);
       return;
     }
@@ -333,10 +403,19 @@ export class AcpClient {
     }
     if (typeof msg.method === 'string') {
       const params = asRecord(msg.params) ?? {};
-      this.onNotification?.({ method: msg.method, params });
-      if (msg.method !== 'session/update') return;
-      const event = params ? mapAcpUpdate(params.update) : null;
-      if (event && this.onEvent) this.onEvent(event, typeof params.sessionId === 'string' ? params.sessionId : undefined);
+      const event = msg.method === 'session/update' ? mapAcpUpdate(params.update) : null;
+      const sessionId = typeof params.sessionId === 'string' ? params.sessionId : '';
+      if (!this.outputRedactor.hasSecrets) {
+        this.publishNotification(msg.method, params);
+      } else if (event?.type === 'text' || event?.type === 'thinking') {
+        const notifications = this.outputStreams.get(sessionId) ?? [];
+        notifications.push({ method: msg.method, params, text: event.text });
+        this.outputStreams.set(sessionId, notifications);
+      } else {
+        const pending = this.outputStreams.get(sessionId);
+        if (pending) pending.push({ method: msg.method, params });
+        else this.publishNotification(msg.method, params);
+      }
     }
   }
 
@@ -346,9 +425,10 @@ export class AcpClient {
   }
 
   private failAll(err: Error): void {
+    this.flushOutput();
     for (const { reject, timeout } of this.pending.values()) {
       clearTimeout(timeout);
-      reject(err);
+      reject(new Error(this.redactOutput(err.message)));
     }
     this.pending.clear();
   }
@@ -365,7 +445,8 @@ export class AcpClient {
         this.pending.delete(id);
         reject(new Error(`ACP ${method} timed out after ${timeoutMs}ms`));
       }, timeoutMs);
-      this.pending.set(id, { resolve, reject, timeout });
+      const sessionId = asRecord(params)?.sessionId;
+      this.pending.set(id, { resolve, reject, timeout, method, ...(typeof sessionId === 'string' ? { sessionId } : {}) });
       try {
         this.write({ jsonrpc: '2.0', id, method, params });
       } catch (err) {
