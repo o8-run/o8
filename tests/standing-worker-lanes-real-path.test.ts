@@ -454,6 +454,90 @@ it('resumes a standing task when the durable lane and runtime binding use canoni
   expect(JSON.parse(readFileSync(join(captures, 'alias_successor.json'), 'utf8')).resumed).toBe(true);
 }, 90000);
 
+it('keeps one surface lock identity when an aliased owned root is created during launch', async () => {
+  const { withOwnedSurfaceLock } = await import('@/lib/runtimes/shared/owned-session/surface-lock');
+  const parent = join(root, 'new-owned-parent');
+  const alias = join(root, 'new-owned-alias');
+  mkdirSync(parent); symlinkSync(parent, alias, 'dir');
+  let release!: () => void;
+  let entered!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const holding = new Promise<void>(resolve => { entered = resolve; });
+  const launch = withOwnedSurfaceLock(join(alias, 'sessions'), 'fixture-owned:new', async () => {
+    mkdirSync(join(parent, 'sessions')); entered(); await gate;
+  });
+  await holding;
+  let overlapped = false;
+  const callback = withOwnedSurfaceLock(join(parent, 'sessions'), 'fixture-owned:new', async () => { overlapped = true; });
+  try {
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(overlapped).toBe(false);
+  } finally { release(); await launch; await callback; }
+  expect(overlapped).toBe(true);
+});
+
+it('serializes a surviving inventory refresh with the next MCP task after a server reload', async () => {
+  const { lane } = await tool('create', { repoPath: repo, runtime: 'codex', model: 'gpt-5.6-sol', effort: 'high' });
+  await tool('send', { laneId: lane.id, task: 'LANE_TASK=old_inventory' });
+  const first = await idle(lane.id);
+  const { readOwnedSessionRecord } = await import('@/lib/runtimes/shared/owned-session-index');
+  const record = (await readOwnedSessionRecord(first.lane.sessionKey!))!;
+  // Real terminal-publication gap: inventory must refresh this run before saving.
+  record.recentRuns[0].outcome = 'running';
+  writeFileSync(join(record.sessionDir, 'session.json'), JSON.stringify(record));
+  let release!: () => void;
+  let entered!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const holding = new Promise<void>(resolve => { entered = resolve; });
+  const controllerModule = await import('@/lib/runtimes/shared/owned-session/run-controller');
+  const createController = controllerModule.createOwnedRunController;
+  const controllerSpy = vi.spyOn(controllerModule, 'createOwnedRunController').mockImplementation(options => {
+    const controller = createController(options);
+    const refresh = controller.refreshSession;
+    let held = false;
+    controller.refreshSession = async (session, ...args) => {
+      if (!held && session.surfaceId === record.surfaceId) {
+        held = true; entered(); await gate;
+      }
+      return refresh(session, ...args);
+    };
+    return controller;
+  });
+  const { createOwnedSessionStore } = await import('@/lib/runtimes/shared/owned-session/store');
+  const { codexOwnedAdapter } = await import('@/lib/codex/owned');
+  const ownedAlias = join(root, 'owned-alias');
+  symlinkSync(ownedRoot, ownedAlias, 'dir');
+  const survivingStore = createOwnedSessionStore({ ...codexOwnedAdapter,
+    rootEnvVar: 'O8_TEST_STANDING_ALIAS_ROOT', rootDefault: ownedAlias });
+  controllerSpy.mockRestore();
+  const inventory = survivingStore.getFleetAdditions({ fresh: true });
+  await holding;
+  let sending: ReturnType<typeof tool> | undefined;
+  let admittedWhileHeld = false;
+  try {
+    await new Promise<void>(done => server.close(() => done()));
+    stopServerTimers(); (await import('@/lib/db')).closeDb(); vi.resetModules(); await start();
+    sending = tool('send', { laneId: lane.id, task: 'LANE_TASK=new_inventory' });
+    admittedWhileHeld = await Promise.race([
+      sending.then(() => true),
+      new Promise<false>(resolve => setTimeout(() => resolve(false), 3000)),
+    ]);
+  } finally {
+    release(); await inventory; await sending;
+  }
+  expect(admittedWhileHeld, 'reload admitted a task while the old store held its session snapshot').toBe(false);
+  const second = await idle(lane.id);
+  const current = (await (await import('@/lib/runtimes/shared/owned-session-index')).readOwnedSessionRecord(record.surfaceId))!;
+  expect(second.lane.sessionKey).toBe(first.lane.sessionKey);
+  expect(current.recentRuns.slice(0, 2).map(run => run.id)).toEqual([second.tasks[1].runId, first.tasks[0].runId]);
+  expect(current.packetId).toBe(second.tasks[1].id);
+  expect(second.processSettlement?.totalRuns).toBe(2);
+  expect(second.tasks[1].receiptId).toBeTruthy();
+  expect(second.tasks[1].receiptId).not.toBe(first.tasks[0].receiptId);
+  expect(second.tasks[1].prNumber).toBeTruthy();
+  expect(second.tasks[1].prNumber).not.toBe(first.tasks[0].prNumber);
+}, 90000);
+
 it('preserves process settlement across restart and more than sixteen sequential tasks', async () => {
   const { lane } = await tool('create', { repoPath: repo, runtime: 'codex', model: 'gpt-5.6-sol', effort: 'high' });
   let sessionKey: string | null = null;

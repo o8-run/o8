@@ -287,8 +287,7 @@ export interface OrchestratorStoragePressureReceipt {
 }
 
 export interface OrchestratorPacket {
-  /** Standing worker owns dispatch and completion; ordinary scheduler never relaunches it. */
-  standingLaneId?: string;
+  standingLaneId?: string; // Standing worker owns dispatch and completion; ordinary scheduler never relaunches it.
   id: string;
   referenceLabel: string;
   title: string;

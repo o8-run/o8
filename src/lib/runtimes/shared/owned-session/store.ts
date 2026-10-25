@@ -21,7 +21,7 @@ import { OwnedArtifactAdmissionError, withOwnedArtifactAdmission } from './artif
 
 import { signalBridgeTerminalSession } from '@/lib/runtime/pty-bridge';
 import { recordLaneEvent } from '@/lib/lane/events';
-import { chainOnKey } from '@/lib/util/keyed-promise-chain';
+import { withOwnedSurfaceLock } from './surface-lock';
 import { bindControlledTaskSession } from '@/lib/mcp/task-execution-admission';
 import {
   getOrPinPacketRuntimeIdentity,
@@ -108,10 +108,8 @@ export function createOwnedSessionStore(
     fleetInflight = null;
   }
 
-  const surfaceOpChains = new Map<string, Promise<unknown>>();
-
   function withSurfaceLock<T>(surfaceId: string, fn: () => Promise<T>): Promise<T> {
-    return chainOnKey(surfaceOpChains, surfaceId, fn);
+    return withOwnedSurfaceLock(root, surfaceId, fn);
   }
 
   const io = createOwnedSessionIo({

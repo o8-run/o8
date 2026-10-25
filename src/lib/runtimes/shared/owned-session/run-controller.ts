@@ -770,7 +770,6 @@ export function createOwnedRunController({
             );
           }
         }
-
         session.activeRun = run;
         session.recentRuns = session.recentRuns.map((candidate) => candidate.id === run.id ? run : candidate);
         await io.saveSession(session);
