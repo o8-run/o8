@@ -131,9 +131,26 @@ fn packet_target(client: &Client, workspace: &str, id: &str) -> Result<Target, S
     {
         return Err("Packet belongs to another workspace".into());
     }
+    let lane_id = packet["lane"]["laneId"]
+        .as_str()
+        .ok_or("Packet has no lane")?;
+    let lane_id: String = url::form_urlencoded::byte_serialize(lane_id.as_bytes()).collect();
+    let detail: Value = client.get(&format!("/api/lanes/{lane_id}"), &[])?;
+    let lane = &detail["lane"];
+    if lane["packetId"] != id
+        || !lane["worktreePath"]
+            .as_str()
+            .is_some_and(|root| same_path(root, path))
+    {
+        return Err("Packet lane changed. Reopen the packet.".into());
+    }
+    let base = lane["baseBranch"]
+        .as_str()
+        .filter(|base| !base.trim().is_empty())
+        .ok_or("Packet lane has no base branch")?;
     Ok(Target::Worktree {
         path: path.into(),
-        base: None,
+        base: Some(base.into()),
         file: None,
     })
 }
@@ -316,7 +333,15 @@ impl DiffSurface {
                             base: comparison, ..
                         } = &mut target
                         {
-                            *comparison = (!base.is_empty()).then_some(base);
+                            if !base.is_empty() {
+                                *comparison = Some(base);
+                            } else if let Some(base) = comparison.as_ref() {
+                                s.inline.as_ref().unwrap().base.update(cx, |input, cx| {
+                                    input.clear(cx);
+                                    input.text = base.clone();
+                                    cx.notify();
+                                });
+                            }
                         }
                         s.inline.as_mut().unwrap().selected_packet = Some(id);
                         s.target = target;

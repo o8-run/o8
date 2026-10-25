@@ -338,7 +338,13 @@ impl Render for DiffSurface {
                     .items_center()
                     .px(px(16.))
                     .gap(px(8.))
-                    .child("o8 next · Diff")
+                    .when(!inline, |bar| {
+                        bar.child(
+                            div()
+                                .debug_selector(|| "diff-title".into())
+                                .child("o8 next · Diff"),
+                        )
+                    })
                     .when(!inline, |bar| {
                         bar.child(
                             button("diff-unified", "Unified", !split)
