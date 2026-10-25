@@ -2,7 +2,7 @@ import { createWorkerFailureHandler } from './worker-failure';
 import { assertRuntimeEffortPin } from '@/lib/orchestrator/effort-pin';
 import { assertOwnedActionFence, hasOwnedActionFence } from './action-fence';
 import { assertStandingSpawn } from './standing-task';
-import { spawnJournaledStandingBridge } from './standing-launch';
+import { spawnJournaledStandingBridge, withStandingRunLaunch } from './standing-launch';
 import { confirmOwnedLaunchAdmission } from './launch-admission-outcome';
 import { createCapacityRecovery } from './capacity-wait';
 import { packetCargoEnvironment } from '@/lib/worktree/cargo-target-cache';
@@ -454,11 +454,11 @@ export function createOwnedRunController({
   }
 
   async function spawnOwnedRun(session: OwnedSessionRecord, prompt: string, mode: OwnedRunMode) {
-    return withOwnedArtifactAdmission(root, () => (
+    return withStandingRunLaunch(session, () => withOwnedArtifactAdmission(root, () => (
       withPacketLifecycleSpawnLock(session.packetId ?? session.workspaceBinding?.packetId ?? null, () => (
         spawnOwnedRunInner(session, prompt, mode)
       ))
-    ));
+    )));
   }
 
   async function spawnOwnedRunInner(session: OwnedSessionRecord, prompt: string, mode: OwnedRunMode) {
