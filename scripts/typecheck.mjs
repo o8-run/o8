@@ -1,8 +1,8 @@
-import { spawnSync } from 'node:child_process';
 import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { resolveTypecheckChecker } from './typecheck-checker.mjs';
+import { runTypecheckProcess } from './typecheck-process.mjs';
 
 const require = createRequire(import.meta.url);
 const repoRoot = process.cwd();
@@ -10,13 +10,7 @@ const tsconfigPath = join(repoRoot, 'tsconfig.json');
 const originalTsconfig = readFileSync(tsconfigPath, 'utf8');
 
 function runNodeModule(modulePath, args) {
-  const result = spawnSync(process.execPath, [require.resolve(modulePath), ...args], {
-    cwd: repoRoot,
-    encoding: 'utf8',
-    stdio: 'inherit',
-  });
-  if (result.error) throw result.error;
-  return result.status ?? 1;
+  return runTypecheckProcess(require.resolve(modulePath), args, repoRoot);
 }
 
 rmSync(join(repoRoot, '.next', 'types'), { recursive: true, force: true });

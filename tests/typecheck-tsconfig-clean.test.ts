@@ -39,6 +39,7 @@ describe('typecheck checker selection', () => {
       copyFileSync('scripts/typecheck.mjs', join(root, 'typecheck.mjs'));
       copyFileSync('scripts/typecheck-checker.mjs', join(root, 'typecheck-checker.mjs'));
       copyFileSync('scripts/typecheck-fast.mjs', join(root, 'typecheck-fast.mjs'));
+      copyFileSync('scripts/typecheck-process.mjs', join(root, 'typecheck-process.mjs'));
       writeFileSync(join(root, 'package.json'), JSON.stringify({
         scripts: { 'typecheck:fast': JSON.parse(readFileSync('package.json', 'utf8')).scripts['typecheck:fast']
           .replace('scripts/', '') },
@@ -90,4 +91,65 @@ describe('typecheck checker selection', () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+});
+
+describe('typecheck heap boundary', () => {
+  it.each(['typecheck:fast', 'typecheck'])('%s sizes every child and contains heap failures', (command) => {
+    const root = mkdtempSync(join(tmpdir(), 'o8-typecheck-heap-'));
+    try {
+      mkdirSync(join(root, 'scripts'));
+      for (const script of ['typecheck.mjs', 'typecheck-fast.mjs', 'typecheck-checker.mjs', 'typecheck-process.mjs']) {
+        if (existsSync(join('scripts', script))) copyFileSync(join('scripts', script), join(root, 'scripts', script));
+      }
+      const scripts = JSON.parse(readFileSync('package.json', 'utf8')).scripts;
+      writeFileSync(join(root, 'package.json'), JSON.stringify({ scripts: {
+        [command]: scripts[command], 'verify:routes': 'node -e "process.exit(0)"',
+      } }));
+      writeFileSync(join(root, 'tsconfig.json'), '{}');
+      for (const [name, binary, dir] of [['next', 'next', 'dist/bin'], ['typescript', 'tsc', 'bin']]) {
+        const packageRoot = join(root, 'node_modules', name);
+        mkdirSync(join(packageRoot, dir), { recursive: true });
+        writeFileSync(join(packageRoot, 'package.json'), JSON.stringify({ name, version: '1.0.0' }));
+        writeFileSync(join(packageRoot, dir, binary), `
+          const fs = require('node:fs');
+          fs.appendFileSync('heap.jsonl', JSON.stringify({
+            args: process.argv.slice(2), heap: require('node:v8').getHeapStatistics().heap_size_limit / 1024 / 1024,
+          }) + '\\n');
+          if (process.env.FAIL_STAGE === '${name}' &&
+              (!process.env.FAIL_CLI || process.argv.includes('--project'))) {
+            process.stderr.write('FATAL ERROR: Reached heap limit Allocation failed - JavaScript heap out of memory\\n');
+            process.stderr.write(' 1: native V8 stack fixture\\n');
+            process.exit(134);
+          }
+          if (process.env.TYPE_ERROR && '${name}' === 'typescript') {
+            console.error('fixture.ts(1,1): error TS2322: wrong type'); process.exit(2);
+          }
+        `);
+      }
+      const run = (extra = {}) => spawnSync('npm', ['run', command], {
+        cwd: root, encoding: 'utf8', shell: process.platform === 'win32',
+        env: { ...process.env, NODE_OPTIONS: '--max-old-space-size=256', ...extra },
+      });
+      const success = run();
+      expect(success.status, success.stderr).toBe(0);
+      expect(success.stdout).toContain('[typecheck] heap limit: 8192 MiB');
+      const receipts = readFileSync(join(root, 'heap.jsonl'), 'utf8').trim().split('\n').map(line => JSON.parse(line));
+      expect(receipts).toHaveLength(command === 'typecheck' ? 3 : 1);
+      for (const receipt of receipts) expect(receipt.heap).toBeGreaterThanOrEqual(8192);
+      for (const stage of command === 'typecheck' ? ['next', 'typescript', 'cli'] : ['typescript']) {
+        rmSync(join(root, 'heap.jsonl'));
+        const failure = run({ FAIL_STAGE: stage === 'cli' ? 'typescript' : stage, FAIL_CLI: stage === 'cli' ? '1' : '' });
+        expect(failure.status).toBe(1);
+        const lines = failure.stderr.trim().split('\n').filter(line => !line.startsWith('tsrs has no '));
+        expect(lines).toEqual(['[typecheck] heap exhausted at 8192 MiB; type check failed.']);
+        const count = readFileSync(join(root, 'heap.jsonl'), 'utf8').trim().split('\n').length;
+        expect(count).toBe(stage === 'next' ? 1 : stage === 'cli' ? 3 : command === 'typecheck' ? 2 : 1);
+      }
+      const diagnostic = run({ TYPE_ERROR: '1' });
+      expect(diagnostic.status).toBe(2);
+      expect(diagnostic.stderr).toContain('error TS2322: wrong type');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 30_000);
 });
