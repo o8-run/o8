@@ -187,7 +187,7 @@ impl Render for Shell {
                                 })
                                 .child(command.label(&self.sessions))
                                 .on_click(cx.listener(move |this, _, window, cx| {
-                                    this.execute(command.clone(), window, cx)
+                                    command.clone().run(this, window, cx)
                                 }))
                         })),
                 )
