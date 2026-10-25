@@ -33,7 +33,7 @@ export function canonicalSource(source: KnowledgeSource): KnowledgeSource {
         if (overlapsSource(root, target)) throw new Error('Choose a notes folder separate from registered repositories.');
       };
       inspect(repoPath);
-      gitWriteRoots(repoPath, inspect);
+      gitWriteRoots(repoPath, inspect, [root]);
     }
   }
   return { ...source, path: root };
@@ -155,7 +155,7 @@ export function assertNotKnowledgeSource(candidate: string | null | undefined): 
   try {
     gitWriteRoots(physical, metadata => {
       if (roots.some(root => overlapsSource(root, metadata))) throw new KnowledgeSourceWriteError();
-    });
+    }, roots);
   } catch {
     // Unknown Git administration paths cannot authorize a writable alias.
     throw new KnowledgeSourceWriteError();

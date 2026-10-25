@@ -31,7 +31,8 @@ vi.mock('@/lib/providers/child-process', async original => {
     }
     if (file === 'git' && args[0] === 'clone' && f.cloneOrigin) {
       f.fallbackClones += 1;
-      return native(file, [args[0], args[1], f.cloneOrigin, ...args.slice(3)], options);
+      const urlIndex = args.indexOf('--') + 1;
+      return native(file, [...args.slice(0, urlIndex), f.cloneOrigin, ...args.slice(urlIndex + 1)], options);
     }
     return native(file, args, options);
   } });
@@ -103,6 +104,8 @@ it('refuses a case-only clone into an offline source before Git writes the desti
   } else {
     expect(response.status, await response.clone().text()).toBe(201);
     expect(existsSync(path.join(alias, '.git'))).toBe(true);
+    const object = git(alias, 'rev-parse', 'HEAD');
+    expect(statSync(path.join(alias, '.git', 'objects', object.slice(0, 2), object.slice(2))).nlink).toBe(1);
   }
 });
 

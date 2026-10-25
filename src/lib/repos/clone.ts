@@ -116,7 +116,9 @@ export async function cloneRepoToDefaultLocation(cloneUrl: string, explicitName?
 
   assertNotKnowledgeSource(dest);
   try {
-    await execFileAsync('git', ['clone', '--', url, dest], execOpts);
+    // Local clones must own their metadata inodes so subsequent guarded writes
+    // do not inherit shared object files from the source repository.
+    await execFileAsync('git', ['clone', '--no-hardlinks', '--', url, dest], execOpts);
   } catch (error) {
     const stderr = String((error as { stderr?: unknown }).stderr ?? '').trim();
     throw new RepoCloneError(`Clone failed: ${stderr.split('\n').pop() || 'git clone error'}`, 502);

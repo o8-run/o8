@@ -3232,6 +3232,14 @@
       ]
     },
     {
+      "path": "tests/knowledge-source-metadata-inodes-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/knowledge-source-write-boundaries-real-path.test.ts",
       "reasons": [
         "child-process",
