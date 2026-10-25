@@ -1,6 +1,6 @@
 import { writeFileSync } from 'node:fs';
 import { withMcpConfigPolicy } from '@/lib/providers/mcp-config-policy';
-import { readdir, unlink, writeFile } from 'node:fs/promises';
+import { readdir, realpath, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { recordLaneEvent } from '@/lib/lane/events';
@@ -90,7 +90,10 @@ export async function prepareOwnedWorkerMcpConfig({
 
   const injectableServers = resolution.servers;
   const commandReadPaths = sandboxEnabled
-    ? injectableServers.map((server) => path.dirname(server.command))
+    ? [...new Set((await Promise.all(injectableServers.map(async (server) => [
+      path.dirname(server.command),
+      path.dirname(await realpath(server.command)),
+    ]))).flat())]
     : [];
   if (adapter.workerMcpInjection === 'config-override') {
     recordWorkerMcpEvent(session, 'mcp_injected', {

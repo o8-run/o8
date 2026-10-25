@@ -136,7 +136,9 @@ export async function resolveWorkerMcpInjection(
   }
 }
 
-/** Resolve a configured stdio command to the executable admitted by the sandbox. */
+/** Resolve its location without replacing the configured CLI name with a
+ * symlink target such as cli.js. Payer identity belongs to that configured name.
+ */
 export async function resolveWorkerMcpCommand(
   command: string,
   cwd: string,
@@ -146,12 +148,13 @@ export async function resolveWorkerMcpCommand(
     ? [command]
     : command.includes(path.sep)
       ? [path.resolve(cwd, command)]
-      : pathValue.split(path.delimiter).filter(Boolean).map((entry) => path.join(entry, command));
+      : pathValue.split(path.delimiter).filter(Boolean).map((entry) => path.resolve(cwd, entry, command));
 
   for (const candidate of candidatePaths) {
     try {
       await access(candidate, fsConstants.X_OK);
-      return await realpath(candidate);
+      await realpath(candidate);
+      return path.resolve(candidate);
     } catch {
       // Continue through PATH entries until one resolves to an executable.
     }

@@ -3721,6 +3721,13 @@
       ]
     },
     {
+      "path": "tests/mcp-worker-command-payer-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/merge-check-stop-race-real-path.test.ts",
       "reasons": [
         "child-process",
