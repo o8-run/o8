@@ -1,11 +1,17 @@
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, watch, writeFileSync } from 'node:fs';
-import { delimiter, join } from 'node:path';
+import { delimiter, dirname, join } from 'node:path';
 import { afterAll, afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 vi.mock('@/lib/analytics/server', () => ({ emitProductEvent: vi.fn() }));
 vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: vi.fn() }));
+// Receipt transitions do not depend on a host-wide process census. The adjacent
+// warm-packet-safety suite exercises the real live-process retention guard.
+vi.mock('@/lib/worktree/live-process-guard', async original => ({
+  ...await original<typeof import('@/lib/worktree/live-process-guard')>(),
+  allowWorktreeRemoval: async () => true,
+}));
 vi.mock('node:fs/promises', async original => {
   const actual = await original<typeof import('node:fs/promises')>();
   return { ...actual, statfs: vi.fn(async (file: string) => {
@@ -21,7 +27,7 @@ vi.mock('@/lib/worktree/storage-telemetry', async original => ({
 
 const npmCli = process.env.npm_execpath!;
 const npmVersion = execFileSync(process.execPath, [npmCli, '--version'], { encoding: 'utf8' }).trim();
-const root = realpathSync(mkdtempSync(join(process.env.CORTEX_IDE_DATA_DIR!, 'warm-safety-')));
+const root = realpathSync(mkdtempSync(join(process.env.O8_READY_CRASH_ROOT ?? process.env.CORTEX_IDE_DATA_DIR!, 'warm-safety-')));
 let directory: string;
 let repo: string;
 let close: (() => void) | undefined;
@@ -30,9 +36,27 @@ const git = (...args: string[]) => execFileSync('git', args, { cwd: repo, encodi
 let preparedFixture: Awaited<ReturnType<typeof fixture>> | undefined;
 let heldSlots = 0;
 let retainedNote: string | undefined;
+let crashChild: ChildProcess | undefined;
+let crashError = '';
+
+function fileEvent(file: string, child?: ChildProcess): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const cleanup = () => { watcher.close(); child?.off('exit', exited); };
+    const exited = () => { cleanup(); reject(new Error(`Crash fixture exited before ${file}: ${crashError}`)); };
+    const watcher = watch(dirname(file), () => {
+      if (existsSync(file)) { cleanup(); resolve(); }
+    });
+    watcher.once('error', error => { cleanup(); reject(error); });
+    child?.once('exit', exited);
+    if (existsSync(file)) { cleanup(); resolve(); }
+  });
+}
 
 beforeEach(async context => {
   vi.resetModules();
+  // Drive only explicit receipt operations. An unrelated periodic refill must
+  // not race a slow host's handoff/crash or its cleanup assertions.
+  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
   directory = mkdtempSync(join(root, 'case-'));
   repo = join(directory, 'repo');
   const bin = join(directory, 'bin');
@@ -62,21 +86,52 @@ beforeEach(async context => {
   ].join('\n'));
   chmodSync(join(bin, 'npm'), 0o755);
   heldSlots = 0; retainedNote = undefined;
+  preparedFixture = undefined;
+  if (context.task.name.includes('real post-commit crash') && process.env.O8_READY_CRASH_CHILD !== '1') {
+    crashError = '';
+    crashChild = spawn(process.execPath, ['node_modules/vitest/vitest.mjs', 'run',
+      'tests/warm-packet-receipts-real-path.test.ts', '-t', 'real post-commit crash', '--maxWorkers=1'], {
+      env: { ...process.env, O8_READY_CRASH_CHILD: '1', O8_READY_CRASH_ROOT: directory,
+        O8_READY_CRASH_RECEIPT: join(directory, 'ready-crash.json'),
+        O8_READY_CRASH_READY: join(directory, 'prepared'), O8_READY_CRASH_GO: join(directory, 'go') },
+      detached: process.platform !== 'win32',
+      stdio: ['ignore', 'ignore', 'pipe'],
+    });
+    crashChild.stderr!.on('data', chunk => { crashError += String(chunk); });
+    await fileEvent(join(directory, 'prepared'), crashChild);
+    return;
+  }
   preparedFixture = await fixture();
-  if (context.task.name.includes('approved empty manifest') || context.task.name.includes('post-initialization root replacement')) {
+  if (context.task.name.includes('approved empty manifest') || context.task.name.includes('post-initialization root replacement')
+    || context.task.name.includes('real post-commit crash')) {
     await preparedFixture.pool.prepareWarmPacketWorktrees(preparedFixture.options, preparedFixture.manager);
+  }
+  if (context.task.name.includes('real post-commit crash')) {
+    writeFileSync(process.env.O8_READY_CRASH_READY!, 'prepared');
+    await fileEvent(process.env.O8_READY_CRASH_GO!);
   }
 });
 
 afterEach(async () => {
-  if (preparedFixture) {
-    await preparedFixture.pool.shutdownWarmPacketWorktrees();
-    const tables = preparedFixture.db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'warm_packet_slots'").get();
-    if (tables) expect(preparedFixture.db.prepare('SELECT count(*) FROM warm_packet_slots').pluck().get()).toBe(heldSlots);
-    if (retainedNote) expect(readFileSync(retainedNote, 'utf8')).toBe('retain unexpected bytes');
+  try {
+    if (preparedFixture) {
+      await preparedFixture.pool.shutdownWarmPacketWorktrees();
+      const tables = preparedFixture.db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'warm_packet_slots'").get();
+      if (tables) expect(preparedFixture.db.prepare('SELECT count(*) FROM warm_packet_slots').pluck().get()).toBe(heldSlots);
+      if (retainedNote) expect(readFileSync(retainedNote, 'utf8')).toBe('retain unexpected bytes');
+    }
+  } finally {
+    if (crashChild && crashChild.exitCode === null && crashChild.signalCode === null) {
+      const exited = once(crashChild, 'exit');
+      if (process.platform === 'win32') crashChild.kill('SIGKILL');
+      else process.kill(-crashChild.pid!, 'SIGKILL'); // Only this owned fixture's process group.
+      await exited;
+    }
+    crashChild = undefined;
+    close?.(); close = undefined;
+    vi.useRealTimers();
+    vi.restoreAllMocks(); vi.unstubAllEnvs();
   }
-  close?.(); close = undefined;
-  vi.restoreAllMocks(); vi.unstubAllEnvs();
 });
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
@@ -124,6 +179,58 @@ it('hands off an approved empty manifest with its persisted receipt and the orig
     expect(await readWorkspaceManifestReceipt(prepared.path)).toMatchObject({ packetId, laneId: lane.id, state: 'completed' });
     expect(lanes.getLaneEvents(lane.id, 100).some(e => e.verb === 'workspace_manifest_applied')).toBe(true);
   }
+});
+
+it('releases the warm slot atomically with ready despite a real post-commit crash', async () => {
+  const f = preparedFixture!;
+  const packetId = 'warm-ready-crash';
+  if (process.env.O8_READY_CRASH_CHILD === '1') {
+    const lanes = await import('@/lib/lane/registry');
+    const lane = lanes.createLane({ repoPath: repo, branch: 'packet/ready-crash', baseBranch: 'main',
+      runtime: 'codex', packetId, baseCommit: git('rev-parse', 'HEAD') });
+    lanes.setLaneStatus(lane.id, 'launching', 'system', 'fixture');
+    const leases = await import('@/lib/worktree/metadata-transaction-lease');
+    const release = leases.releaseMetadataTransactionLease;
+    vi.spyOn(leases, 'releaseMetadataTransactionLease').mockImplementation(lease => {
+      const snapshot = leases.readMetadataTransactionStateSnapshot(lease.metadataRoot, f.db);
+      const entries = JSON.parse(snapshot?.payload ?? '{}').worktrees ?? {};
+      const ready = Object.values(entries).some(e => {
+        const entry = e as { packetId?: string; status?: string };
+        return entry.packetId === packetId && entry.status === 'ready';
+      });
+      if (ready) {
+        writeFileSync(process.env.O8_READY_CRASH_RECEIPT!, JSON.stringify({ repo, directory, ready }));
+        // This is after the authoritative ready commit, before the manager's
+        // former separate slot deletion. No throw/rollback substitutes for death.
+        process.kill(process.pid, 'SIGKILL');
+      }
+      return release(lease);
+    });
+    await f.manager.create({ agentType: 'codex', taskName: packetId, packetId, laneId: lane.id,
+      branchName: lane.branch, baseBranch: 'main', repoSetup: f.options.repoSetup, managed: true });
+    throw new Error('The fixture did not reach its committed-ready crash point');
+  }
+  const receipt = join(directory, 'ready-crash.json');
+  const exited = once(crashChild!, 'exit');
+  writeFileSync(join(directory, 'go'), 'launch');
+  const [code] = await exited;
+  expect(code, crashError).not.toBe(0);
+  const crashed = JSON.parse(readFileSync(receipt, 'utf8')) as { repo: string; directory: string; ready: boolean };
+  expect(crashed.ready).toBe(true);
+  // Probe from another process, not an inherited in-memory pool or DB handle.
+  const probe = join(directory, 'ready-probe.json');
+  const script = `const budget = require('./src/lib/worktree/warm-packet-budget');
+    const db = require('./src/lib/db').getSqlite();
+    const before = db.prepare('SELECT count(*) FROM warm_packet_slots').pluck().get();
+    const tokens = [budget.reserveWarmPacketSlot(${JSON.stringify(crashed.repo)}), budget.reserveWarmPacketSlot(${JSON.stringify(crashed.repo)})];
+    require('node:fs').writeFileSync(${JSON.stringify(probe)}, JSON.stringify({ before, tokens }));
+    require('./src/lib/db').closeDb();`;
+  execFileSync(process.execPath, ['--import', './scripts/register-server-only-stub.mjs', '--import', 'tsx', '-e', script],
+    { env: { ...process.env, CORTEX_IDE_DATA_DIR: crashed.directory, O8_DATA_DIR: crashed.directory,
+      CORTEX_IDE_DB_PATH: join(crashed.directory, 'cortex-ide.db'), O8_WORKTREE_ROOT: join(crashed.directory, 'worktrees') }, stdio: 'pipe' });
+  const result = JSON.parse(readFileSync(probe, 'utf8')) as { before: number; tokens: Array<string | null> };
+  expect(result.before).toBe(0);
+  expect(result.tokens.every(Boolean)).toBe(true);
 });
 
 it('releases both pre-creation admission failures and can refill again', async () => {

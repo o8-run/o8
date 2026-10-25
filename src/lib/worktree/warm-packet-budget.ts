@@ -197,8 +197,8 @@ export function assertWarmPacketSlot(repoRoot: string, token: string | undefined
   if (worktreeId && worktreeId !== `warm-${token}-index.noindex`) throw new Error('Warm reservation cannot create another workspace.');
 }
 
-export function releaseWarmPacketSlot(token: string | undefined): void {
-  if (token) database().prepare('DELETE FROM warm_packet_slots WHERE token = ?').run(token);
+export function releaseWarmPacketSlot(token: string | undefined, sqlite?: ReturnType<typeof getSqlite>): void {
+  if (token) (sqlite ?? database()).prepare('DELETE FROM warm_packet_slots WHERE token = ?').run(token);
 }
 
 export function supportsWarmPacketWorktrees(): boolean { return process.platform === 'linux'; }

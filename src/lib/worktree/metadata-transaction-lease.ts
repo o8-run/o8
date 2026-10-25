@@ -305,6 +305,7 @@ export function writeMetadataTransactionState(
   payload: string,
   mirrorIdentity: MetadataMirrorIdentity | null,
   repositoryPath?: string,
+  commit?: (sqlite: Database.Database) => void,
 ): void {
   withLeaseDatabase((sqlite) => sqlite.transaction(() => {
     assertLeaseOwner(sqlite, lease);
@@ -323,5 +324,6 @@ export function writeMetadataTransactionState(
       Date.now(),
     );
     if (repositoryPath) projectMaintenanceMetadata(sqlite, repositoryPath, lease.metadataRoot, payload);
+    commit?.(sqlite);
   }).immediate());
 }

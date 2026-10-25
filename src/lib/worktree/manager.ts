@@ -2889,19 +2889,18 @@ export class WorktreeManager {
   }
 
   private async updateMetaStatus(id: string, status: WorktreeStatus): Promise<void> {
-    let releasedSlot: string | undefined;
     await withWorktreeMetaTransaction(this.repoRoot, async (transaction) => {
       const entry = (await transaction.readAll())[id];
       if (!entry) return;
+      const releasedSlot = status === 'ready' ? entry.warmTransfer?.slotToken : undefined;
       entry.status = status;
       if (status !== 'creating' && status !== 'setup') {
-        if (status === 'ready') releasedSlot = entry.warmTransfer?.slotToken;
         delete entry.creationOwner;
         delete entry.warmTransfer;
       }
-      await transaction.save(id, entry);
+      await transaction.save(id, entry, releasedSlot
+        ? sqlite => releaseWarmPacketSlot(releasedSlot, sqlite) : undefined);
     });
-    releaseWarmPacketSlot(releasedSlot);
   }
 
   private async updateMetaHydrationPaths(id: string, hydrationPaths: string[]): Promise<void> {

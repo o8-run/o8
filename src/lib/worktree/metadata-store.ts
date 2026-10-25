@@ -301,7 +301,8 @@ async function withMutationLock<T>(
 export interface WorktreeMetaTransaction {
   readAll: () => Promise<Record<string, WorktreeMetaEntry>>;
   remove: (worktreeId: string) => Promise<void>;
-  save: (worktreeId: string, entry: WorktreeMetaEntry) => Promise<void>;
+  /** Additional synchronous state committed with authoritative metadata, before mirror I/O. */
+  save: (worktreeId: string, entry: WorktreeMetaEntry, commit?: (sqlite: Database.Database) => void) => Promise<void>;
 }
 
 export async function withWorktreeMetaTransaction<T>(
@@ -345,9 +346,9 @@ export async function withWorktreeMetaTransaction<T>(
       entries = validatedMetaStore(JSON.parse(durableState.payload) as unknown, metaPath).worktrees;
       mirrorIdentity = durableState.mirrorIdentity;
     }
-    const persist = async (): Promise<void> => {
+    const persist = async (commit?: (sqlite: Database.Database) => void): Promise<void> => {
       const serialized = JSON.stringify({ version: 1, worktrees: entries } satisfies WorktreeMetaStore, null, 2);
-      writeMetadataTransactionState(lease, serialized, mirrorIdentity, repoPath);
+      writeMetadataTransactionState(lease, serialized, mirrorIdentity, repoPath, commit);
       mirrorIdentity = await writePinnedWorkspaceFile(
         path.dirname(metaPath),
         boundary.base,
@@ -371,9 +372,9 @@ export async function withWorktreeMetaTransaction<T>(
         delete entries[worktreeId];
         await persist();
       },
-      save: async (worktreeId, entry) => {
+      save: async (worktreeId, entry, commit) => {
         entries[worktreeId] = entry;
-        await persist();
+        await persist(commit);
       },
     });
   });
