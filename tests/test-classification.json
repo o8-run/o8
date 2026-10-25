@@ -6660,6 +6660,14 @@
       ]
     },
     {
+      "path": "tests/worker-environment-npx-registry-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/worker-live-status-real-path.test.ts",
       "reasons": [
         "network-listener",

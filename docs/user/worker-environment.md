@@ -10,8 +10,9 @@ through the host transport.
 
 ## Default allowlist
 
-Only variables that are set are copied. Names are case-sensitive; there are no
-vendor-prefix wildcards. The source of truth is
+Only variables that are set are copied. Names are case-sensitive except for the
+listed npm configuration names, which follow npm's case-insensitive matching.
+There are no vendor-prefix wildcards. The source of truth is
 [`worker-environment.ts`](../../src/lib/providers/worker-environment.ts).
 
 | Purpose | Variables |
@@ -24,7 +25,17 @@ vendor-prefix wildcards. The source of truth is
 | XDG directories | `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_CACHE_HOME`, `XDG_STATE_HOME`, `XDG_RUNTIME_DIR` |
 | Proxies | `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY`, and their lowercase equivalents |
 | Certificate trust | `SSL_CERT_FILE`, `SSL_CERT_DIR`, `NODE_EXTRA_CA_CERTS`, `NODE_USE_SYSTEM_CA`, `NODE_USE_ENV_PROXY`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE` |
+| npm configuration files and registry | `NPM_CONFIG_USERCONFIG`, `NPM_CONFIG_GLOBALCONFIG`, `NPM_CONFIG_REGISTRY` |
+| npm cache and installation paths | `NPM_CONFIG_CACHE`, `NPM_CONFIG_PREFIX` |
+| npm proxy and certificate trust | `NPM_CONFIG_PROXY`, `NPM_CONFIG_HTTPS_PROXY`, `NPM_CONFIG_NOPROXY`, `NPM_CONFIG_CA`, `NPM_CONFIG_CAFILE`, `NPM_CONFIG_STRICT_SSL` |
+| npm fetch behavior | `NPM_CONFIG_FETCH_RETRIES`, `NPM_CONFIG_FETCH_RETRY_FACTOR`, `NPM_CONFIG_FETCH_RETRY_MINTIMEOUT`, `NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT`, `NPM_CONFIG_FETCH_TIMEOUT`, `NPM_CONFIG_OFFLINE`, `NPM_CONFIG_PREFER_OFFLINE`, `NPM_CONFIG_PREFER_ONLINE` |
 | Host/runtime configuration | `NODE_ENV`, `O8_DATA_DIR`, `CORTEX_IDE_DATA_DIR`, `O8_API_PORT`, `O8_WS_PORT` |
+
+These npm settings let `npx` connection checks use the selected registry and npmrc
+files. Ambient `NPM_TOKEN`, `NODE_AUTH_TOKEN`, npm authentication variables,
+`NPM_CONFIG_NODE_OPTIONS`, and arbitrary `npm_config_*` names are not added to
+the default allowlist. Existing provider-value filtering still applies to every
+allowed setting. Explicit MCP service configuration remains separate.
 
 Each runtime additionally receives its own configuration variables:
 

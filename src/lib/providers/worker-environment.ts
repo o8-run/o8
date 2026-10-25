@@ -16,6 +16,18 @@ const COMMON_KEYS = new Set([
   'O8_DATA_DIR', 'CORTEX_IDE_DATA_DIR', 'O8_API_PORT', 'O8_WS_PORT',
 ]);
 
+// npm accepts configuration names without regard to case. Enumerate complete
+// names: npm_config_* also contains authentication and Node preload settings.
+const NPM_CONFIG_KEYS = new Set([
+  'npm_config_userconfig', 'npm_config_globalconfig', 'npm_config_registry',
+  'npm_config_cache', 'npm_config_prefix',
+  'npm_config_proxy', 'npm_config_https_proxy', 'npm_config_noproxy',
+  'npm_config_ca', 'npm_config_cafile', 'npm_config_strict_ssl',
+  'npm_config_fetch_retries', 'npm_config_fetch_retry_factor',
+  'npm_config_fetch_retry_mintimeout', 'npm_config_fetch_retry_maxtimeout', 'npm_config_fetch_timeout',
+  'npm_config_offline', 'npm_config_prefer_offline', 'npm_config_prefer_online',
+]);
+
 // Exact names, never vendor prefixes: a prefix can also contain unrelated secrets.
 const RUNTIME_KEYS: Record<string, readonly string[]> = {
   codex: ['CODEX_HOME'],
@@ -43,7 +55,8 @@ const RUNTIME_KEYS: Record<string, readonly string[]> = {
 
 /** Operator extensions accept comma-separated, exact environment variable names. */
 export function workerParentEnvironment(source: Record<string, string | undefined>, runtimeId?: string): Record<string, string | undefined> {
-  const names = new Set(source.O8_WORKER_ENV_INHERIT === '1' ? Object.keys(source) : [...COMMON_KEYS, ...(RUNTIME_KEYS[runtimeId ?? ''] ?? [])]);
+  const npmNames = Object.keys(source).filter(name => NPM_CONFIG_KEYS.has(name.toLowerCase()));
+  const names = new Set(source.O8_WORKER_ENV_INHERIT === '1' ? Object.keys(source) : [...COMMON_KEYS, ...npmNames, ...(RUNTIME_KEYS[runtimeId ?? ''] ?? [])]);
   for (const name of source.O8_WORKER_ENV_ALLOW?.split(',') ?? []) {
     const trimmed = name.trim();
     if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(trimmed)) names.add(trimmed);
