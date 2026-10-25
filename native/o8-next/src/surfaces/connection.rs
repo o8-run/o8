@@ -39,19 +39,30 @@ fn key(s: &Shell) -> Option<String> {
 
 fn refresh(client: &Client) -> Result<Client, String> {
     let origin = client.url("/").unwrap();
-    let source = std::env::var("O8_NEXT_TOKEN_FILE")
-        .ok()
-        .map(PathBuf::from)
-        .filter(|p| p.is_absolute())
-        .filter(|_| {
-            std::env::var("O8_NEXT_TOKEN_ORIGIN").ok().as_deref()
-                == Some(origin.origin().ascii_serialization().as_str())
-        });
-    let Some(file) = source else {
+    if std::env::var("O8_NEXT_TOKEN_ORIGIN").ok().as_deref()
+        != Some(origin.origin().ascii_serialization().as_str())
+    {
+        return Ok(client.clone());
+    }
+    let files = if let Ok(files) = std::env::var("O8_NEXT_TOKEN_FILES") {
+        serde_json::from_str::<Vec<PathBuf>>(&files)
+            .ok()
+            .filter(|files| {
+                (1..=2).contains(&files.len()) && files.iter().all(|file| file.is_absolute())
+            })
+    } else {
+        std::env::var("O8_NEXT_TOKEN_FILE")
+            .ok()
+            .map(PathBuf::from)
+            .filter(|file| file.is_absolute())
+            .map(|file| vec![file])
+    };
+    let Some(files) = files else {
         return Ok(client.clone());
     };
-    let mut bytes = vec![];
-    let token = std::fs::File::open(file).ok().and_then(|input| {
+    let token = files.iter().find_map(|file| {
+        let mut bytes = vec![];
+        let input = std::fs::File::open(file).ok()?;
         input.take(16 * 1024 + 1).read_to_end(&mut bytes).ok()?;
         if bytes.len() > 16 * 1024 {
             return None;
@@ -61,8 +72,8 @@ fn refresh(client: &Client) -> Result<Client, String> {
             .map(|s| s.trim().to_owned())
             .filter(|s| !s.is_empty())
     });
-    Client::authenticated(origin.as_str(), token)?
-        .with_desktop_session(std::env::var("O8_NEXT_CLERK_SESSION_TOKEN").ok())
+    client.refresh_bearer(token)?;
+    Ok(client.clone())
 }
 impl ShellExtension for Connection {
     fn load(&self, shell: &mut Shell, cx: &mut Context<Shell>) -> bool {

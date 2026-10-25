@@ -116,6 +116,7 @@ fn round1_token_file_created_after_launch_connects_on_retry() {
             "--nocapture",
         ])
         .env("O8_NEXT_TOKEN_FILE", &token_file)
+        .env_remove("O8_NEXT_TOKEN_FILES")
         .env("O8_NEXT_TOKEN_ORIGIN", &fixture.origin)
         .env("O8_NEXT_CORRECTION_ORIGIN", &fixture.origin)
         .env("O8_NEXT_CORRECTION_STATE", fixture.root.join("late.json"))
@@ -125,7 +126,9 @@ fn round1_token_file_created_after_launch_connects_on_retry() {
         .output()
         .unwrap();
     assert!(
-        output.status.success(),
+        output.status.success()
+            && String::from_utf8_lossy(&output.stdout)
+                .contains("test result: ok. 1 passed; 0 failed"),
         "late token must reconnect through the actual shell window: {}",
         String::from_utf8_lossy(&output.stdout)
     );
@@ -252,5 +255,220 @@ fn round1_connection_is_a_registered_module(cx: &mut TestAppContext) {
             .filter(|line| line.contains("surfaces/connection.rs"))
             .count(),
         1
+    );
+}
+
+#[test]
+fn round2_rotation_reaches_retained_composer_and_request_clones() {
+    let fixture = Fixture::new();
+    let server_token = PathBuf::from(
+        fixture.client.sessions().unwrap()[0]
+            .repo_path
+            .as_ref()
+            .unwrap(),
+    )
+    .parent()
+    .unwrap()
+    .join("data/ws-token");
+    assert!(server_token.is_file());
+    let token_file = fixture.root.join("client-token");
+    fs::copy(&server_token, &token_file).unwrap();
+    let output = Process::new(std::env::current_exe().unwrap())
+        .args([
+            "--ignored",
+            "--exact",
+            "shell::connection::tests::round2_rotation_child",
+            "--nocapture",
+        ])
+        .env("O8_NEXT_TOKEN_FILE", &token_file)
+        .env("O8_NEXT_CORRECTION_SERVER_TOKEN", &server_token)
+        .env_remove("O8_NEXT_TOKEN_FILES")
+        .env("O8_NEXT_TOKEN_ORIGIN", &fixture.origin)
+        .env("O8_NEXT_CORRECTION_ORIGIN", &fixture.origin)
+        .env(
+            "O8_NEXT_CORRECTION_STATE",
+            fixture.root.join("rotation.json"),
+        )
+        .env_remove("O8_NEXT_API_TOKEN")
+        .env_remove("O8_API_TOKEN")
+        .env_remove("O8_WORKER_TOKEN")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success()
+            && String::from_utf8_lossy(&output.stdout)
+                .contains("test result: ok. 1 passed; 0 failed"),
+        "retained requests must rotate with the shell: {}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[gpui::test]
+#[ignore = "owned subprocess supplies isolated launcher configuration"]
+fn round2_rotation_child(cx: &mut TestAppContext) {
+    let origin = std::env::var("O8_NEXT_CORRECTION_ORIGIN").unwrap();
+    let token_file = PathBuf::from(std::env::var("O8_NEXT_TOKEN_FILE").unwrap());
+    let (shell, mut visual) = open(
+        Client::authenticated(&origin, None).unwrap(),
+        PathBuf::from(std::env::var("O8_NEXT_CORRECTION_STATE").unwrap()),
+        State::default(),
+        cx,
+    );
+    let cx = &mut visual;
+    ready(&shell, cx);
+    cx.simulate_keystrokes("ctrl-k c o m p o s e r - f i r s t enter");
+    ready(&shell, cx);
+    cx.simulate_keystrokes("ctrl-k n e w enter");
+    ready(&shell, cx);
+    let (view, session, retained) = shell.read_with(cx, |s, _| {
+        let Some(Tab::Session(id)) = s.active() else {
+            panic!("session")
+        };
+        let Content::Session(view) = &s.content[&s.key(&Tab::Session(id.clone()))] else {
+            panic!("session")
+        };
+        (
+            view.clone(),
+            s.sessions
+                .iter()
+                .find(|session| session.id == id)
+                .unwrap()
+                .clone(),
+            s.client.in_workspace(s.state.selected.as_deref().unwrap()),
+        )
+    });
+    cx.simulate_input("message after rotation");
+    let rotated = "fixture-shell-rotated-operator";
+    let server_token = PathBuf::from(std::env::var("O8_NEXT_CORRECTION_SERVER_TOKEN").unwrap());
+    for file in [&token_file, &server_token] {
+        let replacement = file.with_extension("replacement");
+        fs::write(&replacement, rotated).unwrap();
+        fs::rename(&replacement, file).unwrap();
+    }
+    shell.update_in(cx, |s, w, cx| s.tick(true, w, cx));
+    cx.run_until_parked();
+    draw(cx);
+    assert!(
+        shell.read_with(cx, |s, _| s.connected),
+        "the shell must reconnect with the rotated credential"
+    );
+    cx.simulate_keystrokes("enter");
+    cx.run_until_parked();
+    draw(cx);
+    let state = view.read_with(cx, |view, cx| view.shell_issue_state(cx));
+    assert_eq!(
+        state["draft"],
+        json!(""),
+        "the retained composer must send with the rotated credential; notice: {}",
+        state["notice"]
+    );
+    assert!(
+        retained.sessions().is_ok(),
+        "a previously cloned request client must share the refreshed credential"
+    );
+    assert!(
+        retained.websocket().is_ok(),
+        "WebSocket-info reacquisition must use the refreshed authority"
+    );
+    let queue = retained.queue(&session).unwrap();
+    assert!(
+        queue["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["payload"]["text"] == "message after rotation")
+    );
+    assert!(
+        Client::authenticated(&origin, Some("fixture-shell-bearer".into()))
+            .unwrap()
+            .sessions()
+            .is_err(),
+        "independent clients must not acquire this shell's authority"
+    );
+    shell.read_with(cx, |s, _| match &s.content[&s.key(&s.active().unwrap())] {
+        Content::Session(current) => assert_eq!(current.entity_id(), view.entity_id()),
+        _ => panic!("retained session"),
+    });
+    fs::write(&token_file, "invalid\ncredential").unwrap();
+    shell.update_in(cx, |s, _, cx| s.load(cx));
+    cx.run_until_parked();
+    draw(cx);
+    assert!(!shell.read_with(cx, |s, _| s.connected));
+    assert!(
+        retained.sessions().is_err(),
+        "invalid credentials must revoke retained request clients"
+    );
+    fs::remove_file(&token_file).unwrap();
+    shell.update_in(cx, |s, _, cx| s.load(cx));
+    cx.run_until_parked();
+    draw(cx);
+    assert!(!shell.read_with(cx, |s, _| s.connected));
+    assert!(
+        retained.sessions().is_err(),
+        "a missing credential must revoke retained request clients"
+    );
+    fs::write(&token_file, rotated).unwrap();
+    shell.update_in(cx, |s, _, cx| s.load(cx));
+    cx.run_until_parked();
+    draw(cx);
+    assert!(shell.read_with(cx, |s, _| s.connected));
+    assert!(retained.sessions().is_ok());
+}
+
+#[test]
+fn round2_legacy_candidates_reach_the_real_shell() {
+    let fixture = Fixture::new();
+    let sessions = fixture.client.sessions().unwrap();
+    let token_file = PathBuf::from(sessions[0].repo_path.as_ref().unwrap())
+        .parent()
+        .unwrap()
+        .join("data/ws-token");
+    let missing = fixture.root.join("current-token");
+    let output = Process::new(std::env::current_exe().unwrap())
+        .args([
+            "--ignored",
+            "--exact",
+            "shell::connection::tests::round2_legacy_child",
+            "--nocapture",
+        ])
+        .env("O8_NEXT_TOKEN_FILE", &missing)
+        .env(
+            "O8_NEXT_TOKEN_FILES",
+            serde_json::to_string(&vec![&missing, &token_file]).unwrap(),
+        )
+        .env("O8_NEXT_TOKEN_ORIGIN", &fixture.origin)
+        .env("O8_NEXT_CORRECTION_ORIGIN", &fixture.origin)
+        .env("O8_NEXT_CORRECTION_STATE", fixture.root.join("legacy.json"))
+        .env_remove("O8_NEXT_API_TOKEN")
+        .env_remove("O8_API_TOKEN")
+        .env_remove("O8_WORKER_TOKEN")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success()
+            && String::from_utf8_lossy(&output.stdout)
+                .contains("test result: ok. 1 passed; 0 failed"),
+        "legacy authority must survive reload: {}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[gpui::test]
+#[ignore = "owned subprocess supplies isolated launcher configuration"]
+fn round2_legacy_child(cx: &mut TestAppContext) {
+    let origin = std::env::var("O8_NEXT_CORRECTION_ORIGIN").unwrap();
+    let (shell, mut visual) = open(
+        Client::authenticated(&origin, Some("fixture-shell-bearer".into())).unwrap(),
+        PathBuf::from(std::env::var("O8_NEXT_CORRECTION_STATE").unwrap()),
+        State::default(),
+        cx,
+    );
+    visual.run_until_parked();
+    draw(&mut visual);
+    assert!(
+        shell.read_with(&visual, |s, _| s.connected),
+        "reload must resolve the valid legacy candidate instead of reporting Token missing"
     );
 }

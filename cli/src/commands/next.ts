@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { isAbsolute, join } from 'node:path';
 import { CliError, EXIT } from '../api.js';
-import { resolveConfig, resolveCliDataDir } from '../config.js';
+import { resolveConfig, resolveCliDataDir, resolveCliTokenFiles } from '../config.js';
 
 /** Local configuration discovery is restricted to the opt-in app shell. */
 export async function runNext(args: string[]): Promise<number> {
@@ -25,6 +25,7 @@ export async function runNext(args: string[]): Promise<number> {
     const config = resolveConfig();
     const explicitNativeToken = Boolean(env.O8_NEXT_API_TOKEN?.trim());
     delete env.O8_NEXT_TOKEN_FILE;
+    delete env.O8_NEXT_TOKEN_FILES;
     delete env.O8_NEXT_TOKEN_ORIGIN;
     const serverAt = forwarded.indexOf('--server');
     const origin = serverAt < 0 ? config.apiBase : forwarded[serverAt + 1];
@@ -50,7 +51,9 @@ export async function runNext(args: string[]): Promise<number> {
     }
     if (!explicitNativeToken && config.source.token !== 'worker' && config.source.token !== 'env'
       && url.origin === config.apiBase) {
-      env.O8_NEXT_TOKEN_FILE = join(config.dataDir || resolveCliDataDir(), 'ws-token');
+      const files = resolveCliTokenFiles();
+      env.O8_NEXT_TOKEN_FILE = files[0];
+      env.O8_NEXT_TOKEN_FILES = JSON.stringify(files);
       env.O8_NEXT_TOKEN_ORIGIN = url.origin;
     }
     if (!forwarded.includes('--shell-state')) forwarded.push('--shell-state', join(config.dataDir || resolveCliDataDir(), 'next-shell.json'));

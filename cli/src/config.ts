@@ -16,7 +16,7 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join, sep } from 'node:path';
+import { join, resolve, sep } from 'node:path';
 
 export interface ResolvedConfig {
   apiPort: number;
@@ -32,6 +32,17 @@ export interface ResolvedConfig {
 
 const O8_DIR = () => join(homedir(), '.o8');
 const LEGACY_DIR = () => join(homedir(), '.cortex-ide');
+
+function tokenDirectories(): Array<{ dir: string; source: 'data-dir' | 'o8-dir' | 'cortex-ide-dir' }> {
+  const explicit = process.env.O8_DATA_DIR?.trim() || process.env.CORTEX_IDE_DATA_DIR?.trim();
+  return explicit ? [{ dir: explicit, source: 'data-dir' }]
+    : [{ dir: O8_DIR(), source: 'o8-dir' }, { dir: LEGACY_DIR(), source: 'cortex-ide-dir' }];
+}
+
+/** The same ordered file candidates used for initial and shell reconnect authority. */
+export function resolveCliTokenFiles(): string[] {
+  return tokenDirectories().map(({ dir }) => resolve(dir, 'ws-token'));
+}
 
 export function resolveCliDataDir(): string {
   return process.env.O8_DATA_DIR?.trim()
@@ -134,28 +145,14 @@ export function resolveConfig(): ResolvedConfig {
     token = envToken;
     tokenSource = 'env';
   } else {
-    const explicitDataDir = process.env.O8_DATA_DIR?.trim()
-      || process.env.CORTEX_IDE_DATA_DIR?.trim();
-    if (explicitDataDir) {
-      const configured = readTokenFile(explicitDataDir);
+    for (const { dir, source } of tokenDirectories()) {
+      const configured = readTokenFile(dir);
+      if (source === 'data-dir') dataDir = dir;
       if (configured) {
         token = configured;
-        tokenSource = 'data-dir';
-      }
-      dataDir = explicitDataDir;
-    } else {
-      const o8 = readTokenFile(O8_DIR());
-      if (o8) {
-        token = o8;
-        tokenSource = 'o8-dir';
-        if (!dataDir) dataDir = O8_DIR();
-      } else {
-        const legacy = readTokenFile(LEGACY_DIR());
-        if (legacy) {
-          token = legacy;
-          tokenSource = 'cortex-ide-dir';
-          if (!dataDir) dataDir = LEGACY_DIR();
-        }
+        tokenSource = source;
+        if (!dataDir) dataDir = dir;
+        break;
       }
     }
   }

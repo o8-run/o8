@@ -1,9 +1,9 @@
 import { spawn, execFileSync, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import { createServer } from 'node:http';
-import { mkdtempSync, writeFileSync, readFileSync, rmSync, chmodSync, realpathSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, rmSync, chmodSync, realpathSync, symlinkSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, isAbsolute, relative } from 'node:path';
 import { createInterface } from 'node:readline';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 
@@ -43,7 +43,7 @@ function launcherProbe(receipt: string) {
       headers: { authorization: 'Bearer ' + process.env.O8_NEXT_API_TOKEN }
     });
     const body = await response.json();
-    require('node:fs').writeFileSync(${JSON.stringify(receipt)}, JSON.stringify({ args, status: response.status, sessions: body.threads?.length, desktopSession: Boolean(process.env.O8_NEXT_CLERK_SESSION_TOKEN), tokenFile: process.env.O8_NEXT_TOKEN_FILE || null, tokenOrigin: process.env.O8_NEXT_TOKEN_ORIGIN || null }));
+    require('node:fs').writeFileSync(${JSON.stringify(receipt)}, JSON.stringify({ args, status: response.status, sessions: body.threads?.length, desktopSession: Boolean(process.env.O8_NEXT_CLERK_SESSION_TOKEN), tokenFile: process.env.O8_NEXT_TOKEN_FILE || null, tokenOrigin: process.env.O8_NEXT_TOKEN_ORIGIN || null, tokenFiles: process.env.O8_NEXT_TOKEN_FILES ? JSON.parse(process.env.O8_NEXT_TOKEN_FILES) : null }));
   })().catch(() => process.exit(1));\n`);
   chmodSync(binary, 0o700);
   return binary;
@@ -149,15 +149,47 @@ it('forwards reloadable token-file authority only for the configured local origi
       if (missing) rmSync(join(configDir, 'ws-token'));
       const result = launch(env);
       expect(result.tokenFile).toBe(join(configDir, 'ws-token'));
+      expect(result.tokenFiles).toEqual([join(configDir, 'ws-token')]);
       expect(result.tokenOrigin).toBe(origin);
     } finally { writeFileSync(join(configDir, 'ws-token'), token); }
   }
-  const inherited = { ...env, O8_NEXT_TOKEN_FILE: join(configDir, 'ws-token'), O8_NEXT_TOKEN_ORIGIN: origin };
+  const inherited = { ...env, O8_NEXT_TOKEN_FILE: join(configDir, 'ws-token'), O8_NEXT_TOKEN_FILES: JSON.stringify([join(configDir, 'ws-token')]), O8_NEXT_TOKEN_ORIGIN: origin };
   for (const source of [{ ...inherited, O8_WORKER_TOKEN: 'fixture-invalid-worker' },
+    { ...inherited, O8_API_TOKEN: token },
     { ...inherited, O8_NEXT_API_TOKEN: token },
     { ...inherited, O8_API_PORT: String(Number(new URL(origin).port) === 65535 ? 65534 : Number(new URL(origin).port) + 1) }]) {
     const result = launch(source);
     expect(result.tokenFile).toBeNull();
+    expect(result.tokenFiles).toBeNull();
     expect(result.tokenOrigin).toBeNull();
   }
+});
+
+it('reloads a legacy token when the port is in the current profile directory', () => {
+  const profile = join(root, 'split-profile');
+  const current = join(profile, '.o8');
+  const legacy = join(profile, '.cortex-ide');
+  mkdirSync(current, { recursive: true });
+  mkdirSync(legacy, { recursive: true });
+  writeFileSync(join(current, 'api-port'), new URL(origin).port);
+  writeFileSync(join(legacy, 'ws-token'), token);
+  const receipt = join(root, 'split-profile.json');
+  const env: NodeJS.ProcessEnv = { ...process.env, HOME: profile, USERPROFILE: profile };
+  for (const key of ['O8_DATA_DIR', 'CORTEX_IDE_DATA_DIR', 'O8_API_PORT', 'O8_API_TOKEN', 'O8_NEXT_API_TOKEN', 'O8_WORKER_TOKEN']) delete env[key];
+  execFileSync(process.execPath, ['cli/dist/o8.mjs', 'next', '--enable-next', '--binary', launcherProbe(receipt), '--app-shell'], { env, stdio: 'pipe' });
+  const result = JSON.parse(readFileSync(receipt, 'utf8')) as { status: number; tokenFiles: string[] | null };
+  expect(result.status).toBe(200);
+  expect(result.tokenFiles).toEqual([join(current, 'ws-token'), join(legacy, 'ws-token')]);
+});
+
+it('makes explicitly relative token candidates absolute at the native process boundary', () => {
+  const receipt = join(root, 'relative-source.json');
+  const env: NodeJS.ProcessEnv = { ...process.env, O8_DATA_DIR: relative(process.cwd(), configDir) };
+  for (const key of ['O8_API_PORT', 'O8_API_TOKEN', 'O8_NEXT_API_TOKEN', 'O8_WORKER_TOKEN']) delete env[key];
+  execFileSync(process.execPath, ['cli/dist/o8.mjs', 'next', '--enable-next', '--binary', launcherProbe(receipt),
+    '--app-shell', '--shell-state', join(root, 'relative-state.json')], { env, stdio: 'pipe' });
+  const result = JSON.parse(readFileSync(receipt, 'utf8')) as { status: number; tokenFiles: string[] };
+  expect(result.status).toBe(200);
+  expect(result.tokenFiles.every(file => isAbsolute(file))).toBe(true);
+  expect(realpathSync(dirname(result.tokenFiles[0]))).toBe(realpathSync(configDir));
 });

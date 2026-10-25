@@ -105,3 +105,140 @@ child test executed by its owning parent; CLI **8 passed**. TypeScript (8192 MiB
 fast typecheck, classification, touched-file ESLint/rule-check, native formatting
 and diff checks pass. Full npm verification is repeated at the end of this
 correction round.
+
+## Correction round 2
+
+Rebased on `0eeb65889` after first-run setup and the surface boundary gate landed. The real fixture host and production GPUI shell reproduced
+rotation after a successful reconnect, before changing credential sharing:
+
+```text
+round2_rotation_child
+the retained composer must send with the rotated credential
+notice: "Queue rejected the request (HTTP 401). Draft retained."
+left: String("message after rotation")
+right: String("")
+test result: FAILED. 0 passed; 1 failed
+```
+
+The built CLI and native shell separately reproduced split configuration:
+
+```text
+reloads a legacy token when the port is in the current profile directory
+expected ordered token-file candidates; received null
+Tests: 1 failed; 8 skipped
+
+round2_legacy_child
+reload must resolve the valid legacy candidate instead of reporting Token missing
+test result: FAILED. 0 passed; 1 failed
+```
+
+A live PR metadata assertion also failed before adding the authorized label:
+
+```text
+FAIL: PR #4700 shared shell hooks require shell-work
+Actual labels: size/L
+```
+
+The label is now present with its one-line reason in the PR body. Generic shared
+hooks remain optional/defaulted. The connection-owned transport adapter is
+selected by one root module path registration. It delegates the original
+transport primitives and replaces a single shared transport snapshot on
+reconnect. Existing retained views, workspace clones and subscriptions therefore
+use the refreshed operator bearer for subsequent requests. Network I/O does not
+hold the refresh lock. Independent clients keep separate authority; workspace
+and opt-in desktop identity remain scoped to each clone. Shared `src/client.rs`
+is byte-for-byte unchanged from main, and surface requests remain in their
+modules.
+
+Initial CLI resolution and native reload now share the same ordered current and
+legacy candidates, independently of the port file's directory. Explicit data
+directories have one candidate. Descriptors are absolute, bound to the selected
+numeric loopback origin, and suppressed for worker, environment, explicit-native
+and other-origin authority. Each reconnect reads at most two bounded files.
+
+Hostile review covered the three likeliest macOS/race failures:
+
+1. Rotation leaves retained request clients stale. The same composer entity sends
+   successfully after an atomic source replacement. Its retained workspace clone
+   can read the committed queue and reacquire WebSocket information. Separate
+   client-source and server-token files prove missing and invalid source values
+   revoke retained authority while the server still accepts the previous bearer.
+   An independently authenticated old client remains unauthorized.
+2. Port/token directory precedence diverges or a relative path is rejected on
+   reload. The built CLI authenticates with a split current-port/legacy-token
+   profile, and the actual native window resolves the legacy candidate. A further
+   relative-path regression was reproduced before normalizing descriptors:
+   `expected true; received false` for absolute candidate paths. Canonical-path
+   assertions cover the alias and relative-directory cases.
+3. Inherited descriptors override a test's source or promote worker authority.
+   Single-file child processes remove inherited candidate lists. The built CLI
+   checks worker, environment, explicit-native and other-origin suppression.
+   Child parents require both successful exit and an explicit one-test passing
+   receipt, preventing an empty filtered subprocess from counting as coverage.
+
+Green tails:
+
+```text
+Connection module: 8 passed; 0 failed; 3 owned children listed as ignored
+Rebased shell suite: 130 passed; 0 failed; 3 owned children listed as ignored
+Other native unit tests: 29 passed; 0 failed; 3 manual measurements ignored
+Native CLI tests: 7 passed; 0 failed
+Built CLI/config tests: 12 passed; 0 failed
+PASS: PR #4700 has shell-work and its one-line reason
+```
+
+All three owned child cases run through their parent tests; they are not skipped
+coverage. Native unit coverage totals **159 passed**, with the unchanged Activity
+ordering assertion excluded because current main inserts Pull Requests between
+Activity and Diff. The missing o8d test binary from the prior broad probe is now
+built with its existing HTTP feature: saved-history compatibility passes against
+that real entry point. The final CLI tests were rebuilt for this branch to avoid
+reusing another worktree's integration-test binary.
+
+Files: `src/surfaces/connection_tests.rs`,
+`src/surfaces/connection/client.rs` (delegated transport tests),
+`tests/o8-next-shell-real-path.test.ts` and `tests/cli-config-isolation.test.ts`.
+The existing native CLI, UI, fake-surface and desktop-identity tests also pass.
+Before/after: retained-composer rotation **401 -> accepted queue receipt**;
+split-profile reload **missing -> connected**; `shell-work` label **absent ->
+present**. Both new native review regressions are green.
+
+The 8192 MiB TypeScript check, fast typecheck, classification after test-module
+registration, touched TypeScript ESLint/rule-check, explicit Rust formatting and
+diff checks pass. Full `npm test` ran for this correction batch: **1242 files
+passed, 3 skipped; 9057 tests passed, 5 skipped** (474.79 s). The final focused
+CLI run includes the subsequent absolute-path normalization. No release, version,
+deploy or publishing files changed. WebSocket rotation coverage verifies fresh
+WebSocket-info acquisition; it does not claim a rotated-token handshake against
+the fixture's existing socket listener.
+
+
+Final rebase verification on `0eeb65889`:
+
+```text
+Shell suite including 22 new Setup cases: 130 passed; 0 failed
+Remaining native unit cases: 29 passed; 0 failed
+Native CLI: 7 passed; 0 failed
+Combined server/window patches on updated main:
+GPUI window tests 5 passed; geometry adapter 2 passed; native shell CLI 3 passed
+Surface boundary: exempt (label shell-work)
+```
+
+Both Setup and Connection registrations were preserved. The combined patch was
+applied only in a detached test checkout; no branches were merged. The window
+branch kept its one published correction push. Its new boundary-policy label
+and reason were verified from live PR metadata and the actual checker.
+
+The final full npm rerun on the updated base reports **1241 files passed, 1
+failed, 3 skipped; 9073 tests passed, 1 failed, 5 skipped** (677.12 s). The sole
+failure is `tests/desktop-account-identity.test.ts`, provider provisioning expected
+one entry and observed none. That file and its account-provider code are
+unchanged by these patches. The same npm entry point filtered to that file then
+passes **4 tests** (1.02 s). No account-provider changes are included, and the full
+rerun is not reported as green. The earlier full run's 9057 passing tests remain
+recorded above as an earlier checkpoint.
+
+All required typechecks, touched-file lint/rules, classification and formatting
+were rerun after the final rebase and passed. Shared `src/client.rs` remains
+byte-for-byte main. Final native CLI artifacts were rebuilt in the standalone
+server checkout after the combined check to avoid shared-target cache ambiguity.
