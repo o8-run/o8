@@ -1,3 +1,4 @@
+import { realpathSync } from 'node:fs';
 import type { SurfaceContext, SurfaceRoutes } from '../surface-routes';
 export default async function register({ repo }: SurfaceContext): Promise<SurfaceRoutes> {
   const composer = process.argv.includes('--composer');
@@ -18,7 +19,13 @@ export default async function register({ repo }: SurfaceContext): Promise<Surfac
         'PATCH /api/orchestrator/composer-queue': queue.PATCH, 'DELETE /api/orchestrator/composer-queue': queue.DELETE } : {}),
     },
     // The repository is supplied by the owned host, never by an external account.
-    admit: ({ body }) => !body || JSON.parse(body).threadId?.startsWith('thoughts-composer-') && JSON.parse(body).repoPath === repo ? 200 : 400,
+    admit: ({ body }) => {
+      if (!body) return 200;
+      try {
+        const target = JSON.parse(body);
+        return target.threadId?.startsWith('thoughts-composer-') && realpathSync(target.repoPath) === realpathSync(repo) ? 200 : 400;
+      } catch { return 400; }
+    },
     after: async (input, response) => {
       if (composer && response.ok && (input.route === queue.PATCH || (input.route === queue.POST && JSON.parse(input.body).intent === 'steer-now'))) {
         const { claimComposerSteer } = await import('../../../src/lib/orchestrator/composer-queue');

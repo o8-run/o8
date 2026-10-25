@@ -1,6 +1,13 @@
 use super::*;
 use crate::theme::current as theme;
 
+#[path = "composer/card.rs"]
+mod composer_card;
+
+#[cfg(test)]
+#[path = "composer/card_tests.rs"]
+mod card_tests;
+
 // The queue returns realpath(repoPath), while saved histories can retain a
 // symlink spelling (notably /var versus /private/var on macOS). Keep the frozen
 // request intact for retries and compare actual directory identity on mismatch.
@@ -30,7 +37,11 @@ impl Surface {
         self.mutate_message(Some(id), true, cx);
     }
     fn mutate_message(&mut self, promote: Option<String>, remove: bool, cx: &mut Context<Self>) {
-        if self.saving || !self.queue_ready || self.composer.read(cx).composing() {
+        if self.saving
+            || !self.queue_ready
+            || self.composer.read(cx).composing()
+            || self.composer.read(cx).controls.busy
+        {
             return;
         }
         let Some(session) = self
@@ -64,7 +75,7 @@ impl Surface {
                 }
                 ("POST", pending.clone())
             } else {
-                let Some(routing) = self.routing.clone() else {
+                let Some(routing) = self.composer_routing(cx) else {
                     return;
                 };
                 let nonce = std::time::SystemTime::now()
@@ -79,13 +90,15 @@ impl Surface {
                 {
                     text.clone()
                 } else {
-                    format!(
-                        "[Mode: Solo] Work directly in this session yourself — do NOT dispatch worker agents or create missions. Edit, run, and verify with your own tools.\n\n{contextual}"
+                    crate::composer::controls::wire(
+                        &contextual,
+                        routing["pickedMode"].as_str().unwrap_or("solo"),
                     )
                 };
+                let images = self.composer.read(cx).controls.images.clone();
                 let body = json!({"repoPath":repo,"threadId":session.id,"id":format!("next-{nonce:x}-{:x}", std::process::id()),
                     "intent":if !self.send_next && self.queue["canSteer"] == true { "steer-now" } else { "send-next" },
-                    "payload":{"text":text,"wireMessage":wire,"images":[],"routing":routing}});
+                    "payload":{"text":text,"wireMessage":wire,"images":images,"routing":routing}});
                 self.pending.insert(session.id.clone(), body.clone());
                 ("POST", body)
             }
@@ -101,6 +114,7 @@ impl Surface {
         .into();
         cx.notify();
         let client = self.client.clone();
+        let sent_images = body["payload"]["images"].as_array().cloned().unwrap_or_default();
         let task = cx.background_executor().spawn(async move {
             let response = client.mutate_queue(method, &body).map_err(|error| {
                 (
@@ -136,7 +150,10 @@ impl Surface {
                         if method == "POST" {
                             this.pending.remove(&session.id);
                             if this.composer.read(cx).text == draft {
-                                this.composer.update(cx, |i, cx| i.clear(cx));
+                                this.composer.update(cx, |i, cx| {
+                                    i.clear(cx);
+                                    i.controls.images.retain(|image| !sent_images.contains(image));
+                                });
                             }
                         }
                         this.notice = if method == "DELETE" {
@@ -237,86 +254,18 @@ impl Surface {
     }
     pub(super) fn composer_panel(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
         let enabled = self.queue_ready && !self.saving;
-        let can_steer = self.queue["canSteer"] == true;
-        let mode = if self.send_next || !can_steer {
-            "Send next"
-        } else {
-            "Steer now"
-        };
         let queue = self.queue["items"].as_array().cloned().unwrap_or_default();
         let queue = queue
             .into_iter()
             .filter(|item| item["status"] != "applied" && item["status"] != "cancelled");
-        let routing: Vec<String> = self
-            .routing
-            .as_ref()
-            .map(|r| {
-                [
-                    "Solo",
-                    r["backend"].as_str().unwrap_or(""),
-                    r["model"].as_str().unwrap_or(""),
-                    r["permissionMode"].as_str().unwrap_or(""),
-                ]
-                .into_iter()
-                .filter(|value| !value.is_empty())
-                .map(str::to_owned)
-                .collect()
-            })
-            .unwrap_or_default();
         div()
-            .id("composer-card").debug_selector(|| "composer-card".into())
-            .w_full().max_w(px(crate::theme::GEOMETRY.composer_width)).mx_auto()
-            .rounded(px(crate::theme::GEOMETRY.composer_radius))
-            .border_1().border_color(theme().border)
-            .p(px(crate::theme::GEOMETRY.gap))
+            .w_full()
+            .max_w(px(crate::theme::GEOMETRY.composer_width))
+            .mx_auto()
             .flex()
             .flex_col()
             .gap(px(8.))
-            .child(self.composer.clone())
-            .child(
-                div()
-                    .flex()
-                    .flex_wrap()
-                    .justify_end()
-                    .text_size(px(crate::theme::TYPE.chrome))
-                    .gap(px(crate::theme::GEOMETRY.gap))
-                    .children(routing.into_iter().map(|label| div()
-                        .h(px(crate::theme::GEOMETRY.tab_height))
-                        .px(px(crate::theme::GEOMETRY.gap))
-                        .rounded(px(crate::theme::GEOMETRY.tab_radius))
-                        .text_size(px(crate::theme::TYPE.chrome))
-                        .font_weight(crate::theme::TYPE.weight)
-                        .flex().items_center().child(label)))
-                    .child(
-                        div()
-                            .id("send-mode")
-                            .debug_selector(|| "send-mode".into())
-                            .px(px(10.))
-                            .h(px(crate::theme::GEOMETRY.tab_height))
-                            .flex().items_center()
-                            .rounded(px(crate::theme::GEOMETRY.tab_radius))
-                            .cursor_pointer()
-                            .child("⌄")
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                if !this.saving {
-                                    this.send_next = !this.send_next;
-                                    cx.notify();
-                                }
-                            })),
-                    )
-                    .child(
-                        div()
-                            .id("send")
-                            .px(px(10.))
-                            .h(px(crate::theme::GEOMETRY.tab_height))
-                            .flex().items_center()
-                            .rounded(px(crate::theme::GEOMETRY.tab_radius))
-                            .bg(if enabled { theme().accent } else { theme().surface_raised })
-                            .debug_selector(move || mode.into())
-                            .child(if self.saving { "Saving…" } else { mode })
-                            .on_click(cx.listener(|this, _, _, cx| this.send(None, cx))),
-                    ),
-            )
+            .child(self.composer_card(cx))
             .child(div().id("composer-queue").max_h(px(120.)).overflow_y_scroll().children(queue.map(|item| {
                 let id = item["id"].as_str().unwrap_or("").to_owned();
                 let remove_id = id.clone();
