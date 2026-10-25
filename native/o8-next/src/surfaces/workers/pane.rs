@@ -94,6 +94,14 @@ impl Workers {
                     self.scroll[self.filter].scroll_to_item(next);
                 }
             }
+            "enter" | "space" => {
+                if let Some(card) = self.selected.as_ref().and_then(|id| self.cards.get(id)) {
+                    card.update(cx, |card, cx| {
+                        card.focus.focus(window);
+                        card.toggle_activity(cx);
+                    });
+                }
+            }
             "f5" => self.load(cx),
             _ => return,
         }
@@ -132,7 +140,9 @@ impl Workers {
                             } else {
                                 this.cards.insert(
                                     task.id.clone(),
-                                    cx.new(|_| Card::new(task, this.compact)),
+                                    cx.new(|cx| {
+                                        Card::new(this.client.clone(), task, this.compact, cx)
+                                    }),
                                 );
                             }
                         }

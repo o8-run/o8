@@ -5,6 +5,7 @@ export default async function register({ repo }: SurfaceContext): Promise<Surfac
   const { createLane, setLaneStatus, appendEvent } = await import('../../../src/lib/lane/registry');
   const { createEmptyOrchestratorMissionState } = await import('../../../src/lib/orchestrator/store');
   const { writeOrchestratorControlPlaneState } = await import('../../../src/lib/orchestrator/control-plane');
+  const { getSqlite } = await import('../../../src/lib/db');
   const packets = [];
   const laneIds: Record<string, string> = {};
   const calls: string[] = [];
@@ -17,8 +18,12 @@ export default async function register({ repo }: SurfaceContext): Promise<Surfac
       sessionKey: `fixture:${id}`, label: `Task ${suffix}` });
     laneIds[id] = lane.id;
     setLaneStatus(lane.id, laneStatus, 'system', suffix === 'blocked' ? 'file_owned' : 'fixture_ready');
-    appendEvent(lane.id, 'agent_report', 'system', { event: 'progress', message: 'Read the task' });
-    appendEvent(lane.id, 'agent_report', 'system', { event: 'progress', message: 'Inspect the working tree' });
+    for (const [index, message] of ['Read the task', 'Inspect the working tree', 'Check ownership'].entries()) {
+      const event = appendEvent(lane.id, 'agent_report', 'system', { event: 'progress', message });
+      // Recorded order is explicit; UUID ordering must not decide same-ms steps.
+      getSqlite().prepare('UPDATE lane_events SET timestamp = ? WHERE id = ?')
+        .run(new Date(Date.now() - 100 + index).toISOString(), event.id);
+    }
     packets.push({ id, referenceLabel: `Task ${packets.length + 1}`, title: suffix === 'blocked' ? 'Resolve the shared file' : `Task ${suffix}`,
       summary: 'Fixture task', workspaceTargetPath: repo, branchTarget: id, runtime: 'pi' as const,
       dependencyLabels: [], dependencyPacketIds: [], queueState: suffix === 'blocked' ? 'held' as const : 'queued' as const, releaseState: 'pending' as const,
@@ -29,8 +34,13 @@ export default async function register({ repo }: SurfaceContext): Promise<Surfac
     repoPath: repo, packets, updatedAt: new Date().toISOString() });
   const lanes = await import('../../../src/app/api/lanes/route');
   const state = await import('../../../src/app/api/orchestrator/state/route');
+  const activity = await import('../../../src/app/api/lanes/[id]/events/route');
   const events = await import('../../../src/app/api/orchestrator/lane-events/route');
-  return { priority: 10, before: ({ method, url }) => { calls.push(`${method} ${url.pathname}${url.search}`); }, routes: {
+  return { priority: 10, match: (method, path) => {
+    const id = /^\/api\/lanes\/([^/]+)\/events$/.exec(path)?.[1];
+    return method === 'GET' && id && Object.values(laneIds).includes(id)
+      ? request => activity.GET(request, { params: Promise.resolve({ id }) }) : undefined;
+  }, before: ({ method, url }) => { calls.push(`${method} ${url.pathname}${url.search}`); }, routes: {
     'GET /api/orchestrator/state': state.GET,
     'GET /api/workers-fixture': async request => {
       if (request.nextUrl.searchParams.has('block')) setLaneStatus(laneIds['worker-running'], 'awaiting_orchestrator', 'system', 'file_owned');
