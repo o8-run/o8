@@ -50,15 +50,23 @@ fn committed_packet_uses_lane_base_and_enables_merge(cx: &mut TestAppContext) {
     wait_inline(&shell, &mut visual);
     assert!(shell.read_with(&visual, |s,cx| matches!(s.content.get(&s.key(&Tab::Diff)),Some(Content::Diff(v)) if !v.read(cx).notice.contains("No changes"))));
     // Flush the fixture's request log and prove the enabled control reached the real merge gate.
+    let receipt = fixture
+        .client
+        .get::<Value>("/api/orchestrator/inline-fixture-log", &[])
+        .unwrap();
     Process::new("kill")
         .args(["-TERM", &fixture.server.id().to_string()])
         .status()
         .unwrap();
     fixture.server.wait().unwrap();
-    let requests = fs::read_to_string(fixture.root.join("requests.json")).unwrap();
-    assert!(requests.contains("POST /api/orchestrator/merge"));
-    let mutation: Value =
-        serde_json::from_slice(&fs::read(fixture.root.join("mutation.json")).unwrap()).unwrap();
+    assert!(
+        receipt["requests"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r == "POST /api/orchestrator/merge")
+    );
+    let mutation = &receipt["mutation"];
     assert_eq!(mutation["packetId"], "next-inline");
     let head = shell.read_with(&visual, |s, cx| match s.content.get(&s.key(&Tab::Diff)) {
         Some(Content::Diff(v)) => v.read(cx).document.head.clone(),

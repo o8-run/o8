@@ -11,14 +11,6 @@ pub(crate) fn sensitive(text: &str) -> bool {
     });
     CREDENTIAL.is_match(text)
 }
-pub(crate) fn contains(value: &Value) -> bool {
-    match value {
-        Value::String(text) => sensitive(text),
-        Value::Array(items) => items.iter().any(contains),
-        Value::Object(items) => items.values().any(contains),
-        _ => false,
-    }
-}
 pub(crate) fn scrub(value: &mut Value) {
     match value {
         Value::String(text) if sensitive(text) || text.contains("Command failed:") => {
