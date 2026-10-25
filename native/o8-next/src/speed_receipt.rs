@@ -51,10 +51,29 @@ fn paired_speed_receipt(cx: &mut TestAppContext) {
     let (view, cx) = cx.add_window_view(|window, cx| {
         let mut s = Surface::new(client, window, cx);
         s.sessions = sessions;
-        s.select(ids[1].into(), cx);
         s
     });
-    ready(&view, ids[1], cx);
+    cx.simulate_resize(size(px(1200.), px(816.)));
+    let mut prewarmed_session_ids = vec![];
+    for id in ids {
+        view.update_in(cx, |s, _, cx| {
+            s.painted_rows.borrow_mut().clear();
+            s.select(id.into(), cx);
+        });
+        ready(&view, id, cx);
+        prewarmed_session_ids.push(id);
+    }
+    let switch_start_session_id = view.read_with(cx, |s, _| s.selected.clone().unwrap());
+    let scale_factor = cx.update(|window, _| window.scale_factor());
+    let viewport = cx.update(|window, _| {
+        let size = window.viewport_size();
+        vec![f32::from(size.width), f32::from(size.height)]
+    });
+    assert_eq!(
+        json!({"viewport":viewport,"scaleFactor":scale_factor,"prewarmedSessionIds":prewarmed_session_ids}),
+        json!({"viewport":[1200.,816.],"scaleFactor":2.,"prewarmedSessionIds":ids}),
+        "paired workloads must match viewport and warmup"
+    );
     let mut switches = vec![];
     for index in 0..10 {
         let id = ids[index % 2];
@@ -108,7 +127,8 @@ fn paired_speed_receipt(cx: &mut TestAppContext) {
         });
         keys.push(elapsed);
     }
-    let result = json!({"fixtureEntries":fixture_entries,"keyToFrameMs":keys,"scrollFrameMs":scrolls,
+    let result = json!({"fixtureEntries":fixture_entries,"viewport":viewport,"scaleFactor":scale_factor,
+        "prewarmedSessionIds":prewarmed_session_ids,"switchStartSessionId":switch_start_session_id,"keyToFrameMs":keys,"scrollFrameMs":scrolls,
         "sidebarSwitchToFirstFrameMs":switches,"idleMemoryMiB":rss(),"offscreen":true,
         "composerPaintAcknowledged":true,"sessionContentPaintAcknowledged":true,"release":!cfg!(debug_assertions)});
     fs::write(output, serde_json::to_vec_pretty(&result).unwrap()).unwrap();

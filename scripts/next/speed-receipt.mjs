@@ -17,6 +17,17 @@ import { observeComposerKeystroke } from '../bench/interactions/page-instrumenta
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const ids = ['thoughts-composer-first', 'thoughts-composer-second'];
+const viewport = [1200, 816];
+// GPUI TestWindow fixes its device scale at 2 on both supported platforms.
+const scaleFactor = 2;
+function conditions(prewarmedSessionIds, switchStartSessionId, historyPolicy) {
+  return { process: 'fresh-owned-process', coldStartMeasured: false, filesystemCache: 'uncontrolled-no-reset', prewarmedSessionIds, switchStartSessionId,
+    switchSamples: 'both-sessions-painted-before-sampling', inputAndScroll: 'after-ten-measured-warm-switches', historyPolicy };
+}
+function validSetup(value) {
+  return isDeepStrictEqual(value.viewport, viewport) && value.scaleFactor === scaleFactor
+    && isDeepStrictEqual(value.prewarmedSessionIds, ids) && value.switchStartSessionId === ids[1];
+}
 const composer = 'textarea[data-o8-active-composer="true"]';
 function fail(message) { throw Object.assign(new Error(message), { safe: true }); }
 function options() {
@@ -137,7 +148,7 @@ async function current(histories) {
     ` } });
   const measured = await launchMeasuredBrowser(resolveBrowserPath(), `o8-paired-speed-${process.pid}`);
   try {
-    const page = await measured.browser.newPage({ viewport: { width: 1200, height: 816 }, reducedMotion: 'reduce' });
+    const page = await measured.browser.newPage({ viewport: { width: viewport[0], height: viewport[1] }, deviceScaleFactor: scaleFactor, reducedMotion: 'reduce' });
     let pageError = false;
     page.on('pageerror', error => { pageError = true; if (process.env.O8_SPEED_DIAGNOSTICS) console.error('[next-speed] browser error:', error.stack?.split('\n').slice(0, 7).join('\n').replace(/\/(?:home|Users|root)\/\S+/g, '<runtime-path>')); });
     await page.route('**/*', route => route.fulfill({ json: { groups: [], visualizations: [], settings: {} } }));
@@ -146,10 +157,17 @@ async function current(histories) {
     await page.addScriptTag({ content: built.outputFiles[0].text });
     if (process.env.O8_SPEED_DIAGNOSTICS) console.error('[next-speed] browser mounted', JSON.stringify(await page.evaluate(() => ({ ids: [...document.querySelectorAll('[data-o8-message-id]')].slice(0, 3).map(el => el.getAttribute('data-o8-message-id')), textLength: document.body.textContent.length }))));
     if (pageError) fail('Current UI fixture render failed');
-    await page.locator('[data-o8-message-id="' + histories[0].at(-1).id + '"]').waitFor({ state: 'attached' });
-    await frames(page);
-    await page.locator('[data-switch="1"]').click();
-    await frames(page);
+    const prewarmedSessionIds = [];
+    for (const [index, id] of ids.entries()) {
+      await page.locator('[data-switch="' + index + '"]').click();
+      await page.waitForFunction(target => window.__speedActive === target, index);
+      await page.locator('section[data-session="' + index + '"] [data-o8-message-id="' + histories[index].at(-1).id + '"]').waitFor({ state: 'visible' });
+      await frames(page);
+      prewarmedSessionIds.push(id);
+    }
+    const setup = await page.evaluate(() => ({ viewport: [innerWidth, innerHeight], scaleFactor: devicePixelRatio, active: window.__speedActive }));
+    const switchStartSessionId = ids[setup.active];
+    if (!validSetup({ ...setup, prewarmedSessionIds, switchStartSessionId })) fail('Current UI viewport or warmup differed');
     const switches = [];
     for (let i = 0; i < 10; i++) {
       const target = i % 2;
@@ -204,7 +222,9 @@ async function current(histories) {
     if (!pids.length) fail('Browser process memory unavailable');
     const memory = execFileSync('ps', ['-p', pids.join(','), '-o', 'rss='], { encoding: 'utf8' })
       .trim().split(/\s+/).reduce((sum, kib) => sum + Number(kib), 0) / 1024;
-    return { keystrokeToPaintMs: keys, scrollFrameCostMs: scrolls, switchTimeMs: switches, memoryMiB: memory,
+    return { viewport: setup.viewport, scaleFactor: setup.scaleFactor,
+      conditions: conditions(prewarmedSessionIds, switchStartSessionId, 'retained-mounted-session-components'),
+      keystrokeToPaintMs: keys, scrollFrameCostMs: scrolls, switchTimeMs: switches, memoryMiB: memory,
       endpoint: 'Production ChatMessageList and ComposerArea; trusted browser input to next-frame observation; scroll TaskDuration through two animation frames',
       memoryScope: 'Owned browser process tree RSS; fixture server and harness excluded' };
   } finally { await closeMeasuredBrowser(measured); }
@@ -229,6 +249,7 @@ async function main() {
     const entries = histories.map(history => history.map(({ id, role, text }) => ({ id, role, text })));
     const next = await native(binary, host.origin, token, join(directory, 'native.json'));
     if (!isDeepStrictEqual(next.fixtureEntries, entries)) fail('Native fixture differed from current UI');
+    if (!validSetup(next)) fail('Native viewport or warmup differed');
     if (!next.offscreen || !next.composerPaintAcknowledged || !next.sessionContentPaintAcknowledged
       || !validate(next.keyToFrameMs, 20) || !validate(next.scrollFrameMs, 50) || !validate(next.sidebarSwitchToFirstFrameMs, 10)
       || !Number.isFinite(next.idleMemoryMiB) || next.idleMemoryMiB <= 0) fail('Native evidence was incomplete');
@@ -236,10 +257,11 @@ async function main() {
     const web = await current(histories);
     if (!validate(web.keystrokeToPaintMs, 20) || !validate(web.scrollFrameCostMs, 50) || !validate(web.switchTimeMs, 10)
       || !Number.isFinite(web.memoryMiB) || web.memoryMiB <= 0) fail('Current UI evidence was incomplete');
-    const receipt = { schema: 'o8/next-speed/v1', platform: process.platform, viewport: [1200, 816],
+    const receipt = { schema: 'o8/next-speed/v1', platform: process.platform, viewport,
       fixture: { digest, sessionIds: ids, entries: entries.map(history => history.length) },
       current: { ...web, fixtureDigest: digest },
-      next: { fixtureDigest: digest, keystrokeToPaintMs: next.keyToFrameMs, scrollFrameCostMs: next.scrollFrameMs,
+      next: { viewport: next.viewport, scaleFactor: next.scaleFactor,
+        conditions: conditions(next.prewarmedSessionIds, next.switchStartSessionId, 'production-history-read-on-each-selection'), fixtureDigest: digest, keystrokeToPaintMs: next.keyToFrameMs, scrollFrameCostMs: next.scrollFrameMs,
         switchTimeMs: next.sidebarSwitchToFirstFrameMs, memoryMiB: next.idleMemoryMiB,
         endpoint: 'GPUI TestAppContext with no-op text system; in-process keystrokes to changed-composer CPU paint; scroll first CPU draw; switch includes production history reads',
         buildMode: next.release ? 'release' : 'debug',
