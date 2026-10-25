@@ -1,4 +1,4 @@
-//! Headless transport probe: compile the actual native client and models, without GPUI.
+//! Headless transport probe: compile the native client, models and request adapters without GPUI.
 #![allow(dead_code)]
 #[path = "../../../../native/o8-next/src/activity.rs"]
 mod activity;
@@ -18,12 +18,14 @@ use std::{
     net::TcpStream,
 };
 
-// The production client now sends Brain events to GPUI. Keep only that UI
-// envelope here so the HTTP probe still compiles the real client without GPUI.
-mod brain {
-    pub(crate) enum Event {
-        Frame(String, serde_json::Value),
-        Finished(Result<(), String>),
+// Compile the registered surfaces' production request adapters without GPUI.
+#[path = "../../../../native/o8-next/src/surfaces/diff_requests.rs"]
+mod diff_requests;
+#[path = "../../../../native/o8-next/src/surfaces/session_requests.rs"]
+mod session_requests;
+mod shell {
+    pub mod session {
+        pub use crate::session_requests::{QueueError, Session};
     }
 }
 

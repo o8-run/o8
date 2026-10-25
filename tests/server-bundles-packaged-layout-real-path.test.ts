@@ -170,6 +170,27 @@ describe('shared server bundles in the packaged layout', () => {
     } finally { await stop(child); }
   });
 
+  it('serves native-owned HTTP from the packaged launcher with Next unreachable', async () => {
+    const wsPort = await freePort();
+    const { child, output } = launch('ws-server', { O8_WS_PORT: String(wsPort),
+      O8_NEXT_HTTP_OWNER: '1', NEXT_ORIGIN: 'http://127.0.0.1:1' });
+    const origin = `http://127.0.0.1:${wsPort}`;
+    try {
+      await waitFor(async () => {
+        try { return (await fetch(`${origin}/health`, { signal: AbortSignal.timeout(500) })).ok; }
+        catch { return false; }
+      }).catch(error => { throw new Error(`${String(error)}\n${output()}`); });
+      const denied = await fetch(`${origin}/api/panel/ws-info`, { signal: AbortSignal.timeout(5000) });
+      expect(denied.status, output()).toBe(401);
+      const token = readFileSync(join(state, 'ws-token'), 'utf8').trim();
+      const response = await fetch(`${origin}/api/panel/ws-info`, {
+        headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(5000),
+      });
+      expect(response.status, output()).toBe(200);
+      expect(await response.json()).toMatchObject({ wsPort, wsToken: token });
+    } finally { await stop(child); }
+  });
+
   it('boots terminal-host over the packaged fork IPC channel', async () => {
     const { child, output } = launch('terminal-host');
     try {

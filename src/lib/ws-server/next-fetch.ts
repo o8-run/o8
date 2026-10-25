@@ -135,7 +135,7 @@ export async function fetchNextJson<T>(
 
 async function fetchOwnedJsonResponse(url: string, init: RequestInit): Promise<Response> {
   const [{ NextRequest }, { dispatchNativeHttp }] = await Promise.all([
-    import('next/server'), import('./native-http-routes'),
+    import('./native-http-request'), import('./native-http-routes'),
   ]);
   const signal = init.signal;
   signal?.throwIfAborted();

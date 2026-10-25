@@ -1,7 +1,7 @@
 // One build contract for the desktop export, size gate, and packaged-layout tests.
 import { buildSync } from 'esbuild';
-import { mkdirSync, statSync, writeFileSync } from 'node:fs';
-import { join, relative, resolve } from 'node:path';
+import { mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 export const SERVER_ENTRIES = {
   'ws-server': 'src/ws-server.ts',
@@ -23,6 +23,39 @@ const ESM_BANNER = [
   'const __filename = __o8_fileURLToPath(import.meta.url);',
   'const __dirname = __o8_dirname(__filename);',
 ].join(' ');
+
+// esbuild can emit a lazy entry even after its importer was tree-shaken.
+// Package the full import closure of every shipped entry, including lazy edges.
+function pruneOrphanOutputs(root, outDir, metafile) {
+  const files = new Map(Object.entries(metafile.outputs).map(([file, output]) => {
+    const absolute = resolve(root, file);
+    const local = relative(outDir, absolute);
+    if (!local || isAbsolute(local) || local === '..' || local.startsWith('..' + sep)) {
+      throw new Error('Server output escapes the bundle directory');
+    }
+    return [absolute, { file, output }];
+  }));
+  const pending = Object.keys(SERVER_ENTRIES).map(label => join(outDir, `${label}-impl.mjs`));
+  const reachable = new Set();
+  while (pending.length) {
+    const file = pending.pop();
+    if (reachable.has(file)) continue;
+    const entry = files.get(file);
+    if (!entry) throw new Error('Server output references a missing bundled dependency');
+    reachable.add(file);
+    const dependencies = entry.output.imports.filter(item => !item.external).map(item => item.path);
+    if (entry.output.cssBundle) dependencies.push(entry.output.cssBundle);
+    for (const dependency of dependencies) {
+      const fromRoot = resolve(root, dependency);
+      pending.push(files.has(fromRoot) ? fromRoot : resolve(dirname(file), dependency));
+    }
+  }
+  for (const [absolute, { file }] of files) {
+    if (reachable.has(absolute)) continue;
+    rmSync(absolute);
+    delete metafile.outputs[file];
+  }
+}
 
 export function bundleServers({ root, outDir }) {
   root = resolve(root);
@@ -62,6 +95,8 @@ export function bundleServers({ root, outDir }) {
     Object.assign(metafile.inputs, result.metafile.inputs);
     Object.assign(metafile.outputs, result.metafile.outputs);
   }
+
+  pruneOrphanOutputs(root, outDir, metafile);
 
   for (const label of Object.keys(SERVER_ENTRIES)) {
     // Selection must precede the dynamic import: shared modules may load SQLite.
