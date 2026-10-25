@@ -82,6 +82,9 @@ impl Target {
                 client.get("/api/worktrees/diff", &query)?
             }
         };
+        if crate::viewer_guard::sensitive(&response.diff) {
+            return Err("Sensitive patch hidden. Read-only.".into());
+        }
         if response.error.is_some() {
             return Err("Diff unavailable. Refresh the selected target.".into());
         }
@@ -94,9 +97,26 @@ impl Target {
             Self::Packet(id) => client.review_state(id)?,
             _ => Value::Null,
         };
-        let mut document = parse(&response.diff);
+        // Keep pathological single-line patches off the text shaper. Retain the
+        // raw patch for identity, and refuse copy/merge of this bounded preview.
+        let long_line = response.diff.lines().any(|line| line.len() > 16384);
+        let preview = long_line.then(|| {
+            response
+                .diff
+                .lines()
+                .map(|line| {
+                    if line.len() > 16384 {
+                        line.chars().take(4096).collect::<String>() + " …"
+                    } else {
+                        line.to_owned()
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        });
+        let mut document = parse(preview.as_deref().unwrap_or(&response.diff));
         document.head = response.head_sha;
-        document.truncated = response.truncated;
+        document.truncated = response.truncated || long_line;
         document.revision = response.revision;
         document.source = response.diff;
         Ok((document, state))

@@ -124,7 +124,7 @@ export async function POST(request: NextRequest) {
     const path = typeof body?.path === 'string' ? body.path : '';
     const content = typeof body?.content === 'string' ? body.content : undefined;
     const workspace = typeof body?.workspace === 'string' ? body.workspace : undefined;
-    const expectedHash = typeof body?.expectedHash === 'string' ? body.expectedHash : undefined;
+    const expectedHash = typeof body?.expectedHash === 'string' || body?.expectedHash === null ? body.expectedHash : undefined;
     const force = body?.force === true;
 
     if (!path || content === undefined) {

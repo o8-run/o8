@@ -1,7 +1,7 @@
 //! Review regressions through the real shell, operator routes, and owned files.
 use super::*;
 
-fn open_file(
+pub(super) fn open_file(
     path: &str,
     fixture: &Fixture,
     cx: &mut TestAppContext,
@@ -23,7 +23,7 @@ fn open_file(
     wait_file(&shell, &mut visual, path, false);
     (shell, visual)
 }
-fn workspace(fixture: &Fixture) -> PathBuf {
+pub(super) fn workspace(fixture: &Fixture) -> PathBuf {
     fs::canonicalize(
         fixture.client.sessions().unwrap()[0]
             .repo_path
@@ -32,7 +32,7 @@ fn workspace(fixture: &Fixture) -> PathBuf {
     )
     .unwrap()
 }
-fn edit(cx: &mut VisualTestContext, text: &str) {
+pub(super) fn edit(cx: &mut VisualTestContext, text: &str) {
     let editor = cx.debug_bounds("file-editor").unwrap();
     cx.simulate_click(editor.center(), gpui::Modifiers::default());
     cx.simulate_keystrokes("ctrl-a");

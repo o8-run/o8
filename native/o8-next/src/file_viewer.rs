@@ -26,6 +26,7 @@ pub(crate) struct Files {
     ready: bool,
     truncated: bool,
     binary: bool,
+    sensitive: bool,
     close_confirmation: Option<Instant>,
     focus_editor: bool,
     notice: String,
@@ -73,6 +74,7 @@ impl Files {
             ready: false,
             truncated: false,
             binary: false,
+            sensitive: false,
             close_confirmation: None,
             focus_editor: false,
             notice: "Open a workspace file".into(),
@@ -89,10 +91,19 @@ impl Files {
         }
     }
     fn editable(&self) -> bool {
-        self.ready && !self.truncated && !self.binary
+        self.ready
+            && !self.truncated
+            && !self.binary
+            && !self.sensitive
+            && self.hash.as_ref().is_some_and(|hash| {
+                hash.len() == 64 && hash.bytes().all(|byte| byte.is_ascii_hexdigit())
+            })
     }
-    fn dirty(&self, cx: &App) -> bool {
+    pub(crate) fn dirty(&self, cx: &App) -> bool {
         self.editable() && self.editor.read(cx).text != self.baseline
+    }
+    pub(crate) fn has_draft(&self, cx: &App) -> bool {
+        self.dirty(cx) || self.saving
     }
     fn cancel_close(&mut self, cx: &mut Context<Self>) {
         if self.close_confirmation.take().is_some() {
@@ -166,8 +177,9 @@ impl Files {
                 match result {
                     Ok(data) => {
                         if let Some(content) = data["content"].as_str() {
+                            this.sensitive = crate::viewer_guard::contains(&data);
                             this.binary = data["binary"] == true;
-                            this.baseline = if this.binary {
+                            this.baseline = if this.binary || this.sensitive {
                                 String::new()
                             } else {
                                 content.chars().take(100_000).collect()
@@ -184,10 +196,14 @@ impl Files {
                                 }
                                 cx.notify();
                             });
-                            this.notice = if this.binary {
+                            this.notice = if this.sensitive {
+                                "Sensitive file hidden · Read-only"
+                            } else if this.binary {
                                 ""
                             } else if this.truncated {
                                 "File truncated by server. Saving disabled."
+                            } else if !this.editable() {
+                                "File revision unavailable · Read-only"
                             } else if content.is_empty() {
                                 "Empty file"
                             } else {
@@ -207,22 +223,36 @@ impl Files {
         .detach();
         cx.notify();
     }
-    fn save(&mut self, force: bool, cx: &mut Context<Self>) {
+    fn save(&mut self, overwrite: bool, cx: &mut Context<Self>) {
         if !self.editable()
             || self.loading
             || self.saving
-            || (!force && (!self.dirty(cx) || self.conflict.is_some()))
+            || (!overwrite && (!self.dirty(cx) || self.conflict.is_some()))
         {
             return;
         }
         let content = self.editor.read(cx).text.clone();
         let mut body = json!({"path":self.path,"workspace":self.workspace,"content":content});
-        if let Some(hash) = &self.hash {
-            body["expectedHash"] = json!(hash);
+        // Overwrite confirms the conflict revision, not any later desktop edit.
+        let expected = if overwrite {
+            self.conflict
+                .as_ref()
+                .and_then(|data| data.get("contentHash"))
+                .cloned()
+        } else {
+            self.hash.as_ref().map(|hash| json!(hash))
+        };
+        let Some(expected) = expected else {
+            return;
+        };
+        if !expected.is_null()
+            && !expected
+                .as_str()
+                .is_some_and(|hash| hash.len() == 64 && hash.bytes().all(|b| b.is_ascii_hexdigit()))
+        {
+            return;
         }
-        if force {
-            body["force"] = json!(true);
-        }
+        body["expectedHash"] = expected;
         self.saving = true;
         self.notice = "Saving…".into();
         self.revision += 1;
@@ -235,7 +265,10 @@ impl Files {
             let _ = this.update(cx, |this, cx| {
                 this.saving = false;
                 match result {
-                    Ok((status, data)) if status == 409 && data["error"] == "changed-on-disk" => {
+                    Ok((status, mut data))
+                        if status == 409 && data["error"] == "changed-on-disk" =>
+                    {
+                        crate::viewer_guard::scrub(&mut data);
                         this.conflict = Some(data);
                         this.notice = "Changed on disk".into();
                     }
@@ -306,7 +339,7 @@ impl Render for Files {
             .text_color(theme().text)
             .font_family(theme().font_ui)
             .text_size(px(13.))
-            .capture_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+            .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                 if event.keystroke.key == "escape" && this.close_confirmation.is_some() {
                     this.cancel_close(cx);
                     cx.stop_propagation();
@@ -314,6 +347,7 @@ impl Render for Files {
                 }
                 if (event.keystroke.modifiers.control || event.keystroke.modifiers.platform)
                     && event.keystroke.key == "s"
+                    && this.editor.read(cx).focus.is_focused(window)
                 {
                     this.save(false, cx);
                     cx.stop_propagation();
@@ -388,16 +422,19 @@ impl Render for Files {
                         .child("Binary file · Read-only"),
                 )
             })
-            .when(self.ready && self.truncated && !self.binary, |v| {
-                v.child(
-                    div()
-                        .id("file-preview")
-                        .debug_selector(|| "file-preview".into())
-                        .flex_1()
-                        .overflow_y_scroll()
-                        .child(self.baseline.clone()),
-                )
-            })
+            .when(
+                self.ready && self.truncated && !self.binary && !self.sensitive,
+                |v| {
+                    v.child(
+                        div()
+                            .id("file-preview")
+                            .debug_selector(|| "file-preview".into())
+                            .flex_1()
+                            .overflow_y_scroll()
+                            .child(self.baseline.clone()),
+                    )
+                },
+            )
             .when(!self.ready && !self.loading && !self.path.is_empty(), |v| {
                 v.child(
                     button("file-retry", "Retry", true)

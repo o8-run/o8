@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
-import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { readFileSync, realpathSync, writeFileSync, symlinkSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { afterAll, beforeAll, expect, it } from 'vitest';
@@ -34,11 +34,20 @@ function read(path: string, credential = token) {
     headers: { authorization: `Bearer ${credential}` },
   });
 }
-function save(content: string, expectedHash: string, force = false, path = 'viewer.md') {
+function save(content: string, expectedHash: string | null, force = false, path = 'viewer.md') {
   return fetch(origin + '/api/v2/files', { method: 'POST', headers: {
     authorization: `Bearer ${token}`, 'content-type': 'application/json',
   }, body: JSON.stringify({ workspace, path, content, expectedHash, force }) });
 }
+it('guards a missing-file revision before recreating a conflicted path', async () => {
+  const path = 'recreated.txt';
+  writeFileSync(join(workspace, path), 'desktop recreated bytes');
+  expect((await save('stale restore', null, false, path)).status).toBe(409);
+  expect(readFileSync(join(workspace, path), 'utf8')).toBe('desktop recreated bytes');
+  unlinkSync(join(workspace, path));
+  expect((await save('confirmed restore', null, false, path)).status).toBe(200);
+  expect(readFileSync(join(workspace, path), 'utf8')).toBe('confirmed restore');
+});
 it('loads and saves through the production middleware and guarded file routes', async () => {
   const response = await read('viewer.md');
   expect(response.status).toBe(200);
@@ -99,4 +108,16 @@ it('marks NUL-containing UTF-8 as binary and keeps Unicode text hashes compatibl
   expect(data.binary).toBe(false);
   expect(data.contentHash).toBe(createHash('sha256').update(text).digest('hex'));
   expect((await save(text + 'saved', data.contentHash, false, 'unicode.txt')).status).toBe(200);
+});
+
+it('refuses symlink, parent and absolute escapes without exposing an owned canary', async () => {
+  const canary = ['owned', 'file-boundary', 'canary'].join('-');
+  const outside = join(workspace, '..', 'outside-viewer.txt'); writeFileSync(outside, canary);
+  const link = join(workspace, 'outside-link.txt'); symlinkSync(outside, link);
+  for (const path of ['outside-link.txt', '../outside-viewer.txt', outside]) {
+    const response = await read(path);
+    expect(response.ok).toBe(false); expect(await response.text()).not.toContain(canary);
+    expect((await save('escape', '', false, path)).ok).toBe(false);
+  }
+  unlinkSync(link);
 });
