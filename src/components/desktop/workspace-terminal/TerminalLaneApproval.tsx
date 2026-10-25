@@ -18,9 +18,10 @@ export function TerminalLaneApproval({ terminalSession, evidence, active, readOn
   const pending = useRef(false);
   const generation = useRef(0);
   const sessionKey = evidence?.sessionId ?? '';
+  const runtime = evidence?.runtime;
   const eligible = active && !readOnly && evidence?.state === 'blocked' && evidence.authority === 'lane-state'
-    && (evidence.runtime === 'codex' || evidence.runtime === 'claude-code');
-  const owner = JSON.stringify([sessionKey, terminalSession, evidence?.observedAt, eligible]);
+    && (runtime === 'codex' || runtime === 'claude-code');
+  const owner = JSON.stringify([sessionKey, terminalSession, runtime, evidence?.observedAt, eligible]);
   const busy = busyRequest?.key === owner && busyRequest.generation === view?.generation ? busyRequest.action : null;
 
   useEffect(() => {
@@ -35,12 +36,13 @@ export function TerminalLaneApproval({ terminalSession, evidence, active, readOn
         if (controller.signal.aborted) return;
         const adapter = body.terminalAdapter;
         setView({ key: owner, generation: current, adapter: isTerminalApprovalAdapter(adapter)
-          && adapter.sessionKey === sessionKey && adapter.terminalSession === terminalSession ? adapter : null });
+          && adapter.sessionKey === sessionKey && adapter.terminalSession === terminalSession
+          && adapter.runtime === runtime ? adapter : null });
       }).catch(() => {
         if (!controller.signal.aborted) setView({ key: owner, generation: current, adapter: null, note: 'Unable to read the lane decision.' });
       });
     return () => { controller.abort(); if (generation.current === current) generation.current += 1; };
-  }, [eligible, owner, reload, sessionKey, terminalSession]);
+  }, [eligible, owner, reload, runtime, sessionKey, terminalSession]);
 
   const current = eligible && view?.key === owner ? view : null;
   const adapter = current?.adapter;
