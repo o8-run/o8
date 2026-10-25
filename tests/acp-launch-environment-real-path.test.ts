@@ -1,5 +1,6 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { NextRequest } from 'next/server';
@@ -14,7 +15,7 @@ vi.mock('node:fs', async original => {
   } };
 });
 vi.mock('@/lib/data-dir-migration', () => ({ getDataDir: () => fixture.dir }));
-vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: async () => {} }));
+vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: vi.fn(async () => {}) }));
 vi.mock('@/lib/runtimes/shared/auth-detect', () => ({ invalidateRuntimeAuthCache: vi.fn() }));
 vi.mock('@/lib/mcp/tool-spine/build', () => ({ buildToolRegistry: () => { throw new Error('No fixture tools'); } }));
 vi.mock('@/lib/providers/child-process', async original => ({ ...await original<typeof import('@/lib/providers/child-process')>(),
@@ -38,13 +39,14 @@ require('node:readline').createInterface({input:process.stdin}).on('line', line 
  if(r.method==='initialize') result={protocolVersion:1};
  if(r.method==='session/new') result={sessionId:String(process.pid),configOptions:[]};
  if(r.method==='session/prompt') {
-  send({jsonrpc:'2.0',method:'session/update',params:{sessionId:String(process.pid),update:{sessionUpdate:'agent_message_chunk',content:{type:'text',text:JSON.stringify({region:process.env.ACP_REGION,token:process.env.ACP_TOKEN||null})}}}});
+  send({jsonrpc:'2.0',method:'session/update',params:{sessionId:String(process.pid),update:{sessionUpdate:'agent_message_chunk',content:{type:'text',text:JSON.stringify({region:process.env.ACP_REGION,token:process.env.ACP_TOKEN?require('node:crypto').createHash('sha256').update(process.env.ACP_TOKEN).digest('hex'):null})}}}});
   result={stopReason:'end_turn'};
  }
  if(r.id!=null) send({jsonrpc:'2.0',id:r.id,result});
 });
 setTimeout(()=>process.exit(0),5000).unref();
 `);
+const tokenDigest = (value: string) => createHash('sha256').update(value).digest('hex');
 const connection = { name: 'Fixture', command: process.execPath, args: [peer], useOpenRouter: false };
 const request = (body?: unknown, token = getOrCreateWsToken()) => new NextRequest('http://fixture.invalid/api/runtime/acp-connection?environment=1', {
   method: body ? 'POST' : 'GET', headers: { authorization: `Bearer ${token}` }, ...(body ? { body: JSON.stringify(body) } : {}),
@@ -80,7 +82,7 @@ it('saves masked connection secrets and refreshes only new selected ACP processe
     expect(JSON.stringify(db.prepare('SELECT * FROM credentials').all())).not.toContain('synthetic-connection-secret');
   } finally { db.close(); }
   expect(readFileSync(join(fixture.dir, 'local-acp.json'), 'utf8')).not.toContain('synthetic-connection-secret');
-  expect(await turn('resident')).toEqual({ region: 'first', token: 'synthetic-connection-secret' });
+  expect(await turn('resident')).toEqual({ region: 'first', token: tokenDigest('synthetic-connection-secret') });
   const prepared = localAcpProcessLaunch()!;
   expect((await save([{ name: 'ACP_REGION', secret: false, value: 'second' }, { name: 'ACP_TOKEN', secret: true }])).status).toBe(200);
   expect(() => new AcpClient({ runtimeId: 'acp', cwd: fixture.dir, ...prepared })).toThrow(/environment changed/i);
@@ -89,11 +91,11 @@ it('saves masked connection secrets and refreshes only new selected ACP processe
   renameSync(databasePath, `${databasePath}.held`);
   writeFileSync(databasePath, 'unavailable fixture database');
   try {
-    expect(await turn('resident')).toEqual({ region: 'first', token: 'synthetic-connection-secret' });
+    expect(await turn('resident')).toEqual({ region: 'first', token: tokenDigest('synthetic-connection-secret') });
     await expect(turn('unavailable')).rejects.toThrow();
   } finally { rmSync(databasePath); renameSync(`${databasePath}.held`, databasePath); }
-  expect(await turn('resident')).toEqual({ region: 'first', token: 'synthetic-connection-secret' });
-  expect(await turn('new')).toEqual({ region: 'second', token: 'synthetic-connection-secret' });
+  expect(await turn('resident')).toEqual({ region: 'first', token: tokenDigest('synthetic-connection-secret') });
+  expect(await turn('new')).toEqual({ region: 'second', token: tokenDigest('synthetic-connection-secret') });
   const other = makeAcpBackend({ id: 'opencode', label: 'Other fixture', resolveLaunch: () => connection });
   expect(await turn('other', other)).toEqual({ region: 'ambient', token: null });
   expect((await save([], initial)).status).toBe(409);
@@ -108,7 +110,7 @@ it('binds edits to the current connection and preserves secrets on unavailable e
   vi.stubEnv('O8_MASTER_KEY', 'invalid');
   expect((await save([{ name: 'ACP_TOKEN', secret: true, value: 'synthetic-replacement' }])).status).toBe(400);
   vi.stubEnv('O8_MASTER_KEY', Buffer.alloc(32, 7).toString('base64url'));
-  expect(await turn('after-failed-save')).toEqual({ region: 'ambient', token: 'synthetic-retained-secret' });
+  expect(await turn('after-failed-save')).toEqual({ region: 'ambient', token: tokenDigest('synthetic-retained-secret') });
   expect((await POST(request({ connection: { ...connection, args: [peer, 'another-connection'] } }))).status).toBe(200);
   expect((await save([], binding)).status).toBe(409);
   expect((await inventory()).variables).toEqual([]);
@@ -145,6 +147,127 @@ it('preserves the original connection and credentials when disconnect cannot com
   const db = new Database(join(fixture.dir, 'acp-environment.sqlite'), { readonly: true });
   try { expect(db.prepare('SELECT * FROM credentials WHERE connection_id = ?').all(original.connectionId)).toEqual([]); }
   finally { db.close(); }
+});
+
+it.each(['initialize', 'session/prompt'] as const)('redacts saved secret echoes from Check connection, turn and lifecycle outputs at %s', async (failure) => {
+  const secrets = ['synthetic-echo-canary', 'synthetic-echo-canary::extended', 'synthetic-quoted-"canary"\nvalue'];
+  const failingPeer = join(fixture.dir, `echo-${failure.replace('/', '-')}.cjs`);
+  writeFileSync(failingPeer, String.raw`
+const send = value => process.stdout.write(JSON.stringify(value) + '\n');
+require('node:readline').createInterface({input:process.stdin}).on('line', async line => {
+ const r = JSON.parse(line);
+ if (r.method === process.argv[2]) {
+   const values = [process.env.ACP_TOKEN, process.env.ACP_EXTRA, process.env.ACP_LABEL];
+   const diagnostic = 'Fixture stderr: '+values.join(' / ');
+   process.stderr.write(diagnostic.slice(0, 23));
+   await new Promise(resolve => setTimeout(resolve, 10));
+   process.stderr.write(diagnostic.slice(23));
+   send({jsonrpc:'2.0',method:'session/update',params:{sessionId:'echo-session',update:{sessionUpdate:'agent_message_chunk',content:{type:'text',text:values.join(' / ')}}}});
+   send({jsonrpc:'2.0', id:r.id, error:{code:-32000, message:'Fixture diagnostic: '+values.join(' / ')+' / '+values[0], data:{[values[0]]:'Rejected input',nested:values}}});
+   return;
+ }
+ let result = r.method === 'initialize' ? {protocolVersion:1} : r.method === 'session/new' ? {sessionId:'echo-session',configOptions:[]} : {};
+ if (r.id != null) send({jsonrpc:'2.0', id:r.id, result});
+});
+setTimeout(() => process.exit(0), 5000).unref();
+`);
+  expect((await POST(request({ connection: { ...connection, args: [failingPeer, failure] } }))).status).toBe(200);
+  expect((await save(secrets.map((value, index) => ({ name: ['ACP_TOKEN', 'ACP_EXTRA', 'ACP_LABEL'][index], secret: true, value })))).status).toBe(200);
+  const { GET: checkConnection } = await import('@/app/api/orchestrator/backend-models/route');
+  if (failure === 'initialize') {
+    const response = await checkConnection(new NextRequest(`http://fixture.invalid/api/orchestrator/backend-models?backend=acp&refresh=1&repoPath=${encodeURIComponent(fixture.dir)}`, {
+      headers: { authorization: `Bearer ${getOrCreateWsToken()}` },
+    }));
+    const body = await response.text();
+    expect(body).toContain('Fixture diagnostic:');
+    for (const secret of secrets) expect.soft(body.includes(secret) || body.includes(JSON.stringify(secret).slice(1, -1))).toBe(false);
+  }
+  const { publishRealtimeMutation } = await import('@/lib/realtime/publisher');
+  vi.mocked(publishRealtimeMutation).mockClear();
+  const events: unknown[] = [];
+  await acpBackend.sendTurn(fixture.dir, 'Synthetic echo failure.', event => events.push(event), { threadId: `echo-${failure}` });
+  const output = JSON.stringify(events);
+  const lifecycle = JSON.stringify(vi.mocked(publishRealtimeMutation).mock.calls);
+  expect(output).toContain('Fixture diagnostic:'); expect(lifecycle).toContain('Fixture diagnostic:');
+  for (const secret of secrets) {
+    const encoded = JSON.stringify(secret).slice(1, -1);
+    expect.soft(output.includes(encoded)).toBe(false);
+    expect.soft(lifecycle.includes(encoded)).toBe(false);
+  }
+  // A resident process retains its original credentials and redaction even if
+  // the saved variables are removed before it reports a diagnostic.
+  const stderr: string[] = []; const notifications: unknown[] = [];
+  let closed!: () => void;
+  const exit = new Promise<void>(resolve => { closed = resolve; });
+  const resident = new AcpClient({ runtimeId: 'acp', cwd: fixture.dir, ...localAcpProcessLaunch()!,
+    onStderr: chunk => stderr.push(chunk), onNotification: notification => notifications.push(notification), onExit: closed });
+  expect((await save([])).status).toBe(200);
+  let diagnostic: { message?: string; data?: unknown } | undefined;
+  try {
+    await resident.initialize();
+    const session = await resident.newSession(fixture.dir, []);
+    await resident.prompt(session.sessionId, 'Synthetic resident failure.');
+  } catch (error) { diagnostic = error as typeof diagnostic; }
+  finally { resident.kill(); await exit; }
+  expect(diagnostic?.message).toContain('Fixture diagnostic:');
+  expect(stderr.join('')).toContain('Fixture stderr:');
+  expect(notifications.length).toBeGreaterThan(0);
+  for (const secret of secrets) {
+    expect(diagnostic?.message?.includes(secret)).toBe(false);
+    expect(JSON.stringify(diagnostic?.data).includes(JSON.stringify(secret).slice(1, -1))).toBe(false);
+    expect(JSON.stringify(notifications).includes(JSON.stringify(secret).slice(1, -1))).toBe(false);
+    expect(stderr.join('').includes(secret)).toBe(false);
+  }
+});
+
+it.each(['synthetic-stream-canary', 'text', 'model'])('keeps schemas and redacts split ACP text/thinking for saved value %s', async (secret) => {
+  const streamPeer = join(fixture.dir, 'stream-peer.cjs');
+  writeFileSync(streamPeer, String.raw`
+const send = value => process.stdout.write(JSON.stringify(value)+'\n');
+require('node:readline').createInterface({input:process.stdin}).on('line', line => {
+ const r=JSON.parse(line); let result={};
+ if(r.method==='initialize') result={protocolVersion:1};
+ if(r.method==='session/new') result={sessionId:'stream-session',configOptions:[{id:'model',type:'select',currentValue:'fixture',options:[{value:'fixture'}]}]};
+ if(r.method==='session/prompt') {
+   const secret=process.env.ACP_TOKEN;
+   send({jsonrpc:'2.0',method:'session/update',params:{sessionId:'stream-session',update:{sessionUpdate:'tool_call',toolCallId:'fixture-tool',title:'Fixture tool',rawInput:{[secret]:'Rejected input'}}}});
+   for(const kind of ['agent_message_chunk','agent_thought_chunk']) {
+     for(const piece of ['Visible reply: ',secret.slice(0,Math.ceil(secret.length/2)),secret.slice(Math.ceil(secret.length/2)),'!'])
+       send({jsonrpc:'2.0',method:'session/update',params:{sessionId:'stream-session',update:{sessionUpdate:kind,content:{type:'text',text:piece}}}});
+   }
+   result={stopReason:'end_turn'};
+ }
+ if(r.id!=null) send({jsonrpc:'2.0',id:r.id,result});
+});
+setTimeout(()=>process.exit(0),5000).unref();
+`);
+  expect((await POST(request({ connection: { ...connection, args: [streamPeer] } }))).status).toBe(200);
+  expect((await save([{ name: 'ACP_TOKEN', secret: true, value: secret }])).status).toBe(200);
+  const { GET: checkConnection } = await import('@/app/api/orchestrator/backend-models/route');
+  const response = await checkConnection(new NextRequest(`http://fixture.invalid/api/orchestrator/backend-models?backend=acp&refresh=1&repoPath=${encodeURIComponent(fixture.dir)}`, {
+    headers: { authorization: `Bearer ${getOrCreateWsToken()}` },
+  }));
+  expect(await response.json()).toMatchObject({ total: 1, currentModel: 'fixture' });
+  const cachePath = join(fixture.dir, 'acp-models', 'acp.json');
+  const cache = JSON.parse(readFileSync(cachePath, 'utf8'));
+  cache.models[0].name = `Diagnostic ${secret}`;
+  writeFileSync(cachePath, JSON.stringify(cache));
+  const cached = await checkConnection(new NextRequest(`http://fixture.invalid/api/orchestrator/backend-models?backend=acp&repoPath=${encodeURIComponent(fixture.dir)}`, {
+    headers: { authorization: `Bearer ${getOrCreateWsToken()}` },
+  }));
+  const cachedBody = await cached.json();
+  expect.soft(cachedBody.groups[0].models[0].label).toBe('Diagnostic [redacted]');
+  const events: Array<{ type: string; text?: string }> = [];
+  await acpBackend.sendTurn(fixture.dir, 'Synthetic split echo.', event => events.push(event), { threadId: `split-${secret}` });
+  for (const type of ['text', 'thinking']) {
+    const text = events.filter(event => event.type === type).map(event => event.text).join('');
+    expect(text).toBe('Visible reply: [redacted]!');
+    expect(text.includes(secret)).toBe(false);
+  }
+  expect(events.some(event => event.type === 'done')).toBe(true);
+  expect((events.find(event => event.type === 'tool_use') as { input?: unknown })?.input).toEqual({ '[redacted]': 'Rejected input' });
+  const { acpBackendModels } = await import('@/lib/lane/orchestrator-backends/acp');
+  expect(acpBackendModels('acp')).toEqual([{ value: 'fixture', name: undefined }]);
 });
 
 it('never creates a replacement key for cache-cold ACP credentials with a missing backing key', async () => {

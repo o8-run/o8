@@ -5,6 +5,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { withProviderStoreLock } from '@/lib/providers/store-lock';
 import { acpEnvironmentId, readAcpEnvironment, resolveAcpEnvironment, saveAcpEnvironment, type AcpEnvironmentBinding } from './connection-environment';
+import { createAcpOutputRedactor } from './output-redaction';
 
 export interface LocalAcpConnection { name: string; command: string; args: string[]; useOpenRouter: boolean }
 const file = () => join(getDataDir(), 'local-acp.json');
@@ -60,6 +61,12 @@ export function assertLocalAcpEnvironmentCurrent(binding: AcpEnvironmentBinding)
     || readAcpEnvironment(binding.connectionId).revision !== binding.revision) {
     throw new Error('The connection environment changed during preparation. Retry the launch.');
   }
+}
+
+/** Call under the spawn lock after validating the exact saved environment revision. */
+export function localAcpOutputRedactor(binding: AcpEnvironmentBinding | undefined, env: Record<string, string> = {}) {
+  const variables = binding ? readAcpEnvironment(binding.connectionId).variables : [];
+  return createAcpOutputRedactor(variables.filter(variable => variable.secret).map(variable => env[variable.name] ?? ''));
 }
 
 export function acpLaunchFingerprint(launch: { command: string; args: string[]; env?: Record<string, string>; omitEnv?: string[]; localEnvironment?: AcpEnvironmentBinding }): string {
