@@ -1,6 +1,6 @@
 {
   "name": "o8",
-  "version": "0.1.807",
+  "version": "0.1.808",
   "description": "o8 — governance layer for autonomous engineering teams. Approvals, audit, organizational memory.",
   "license": "MIT",
   "productName": "o8",
@@ -11,7 +11,9 @@
   },
   "packageManager": "npm@11.21.1",
   "o8DependencyClone": {
-    "lifecycleInputs": ["scripts/postinstall.mjs"]
+    "lifecycleInputs": [
+      "scripts/postinstall.mjs"
+    ]
   },
   "scripts": {
     "worker:login": "node --import ./scripts/register-server-only-stub.mjs --import tsx scripts/connect-native-worker.ts",
