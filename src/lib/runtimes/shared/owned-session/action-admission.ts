@@ -11,7 +11,11 @@ const actionGuard = new AsyncLocalStorage<ActionGuard>();
 
 /** Keep a queued operator intent fenced through asynchronous spawn preparation. */
 export function withOwnedActionGuard<T>(check: ActionGuard, action: () => Promise<T>): Promise<T> {
-  return actionGuard.run(check, action);
+  const parent = actionGuard.getStore();
+  return actionGuard.run((session, preparedRunId) => {
+    parent?.(session, preparedRunId);
+    check(session, preparedRunId);
+  }, action);
 }
 
 /** Assert only the surrounding action guard, including before lane attachment. */

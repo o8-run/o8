@@ -1,9 +1,10 @@
-import { execFileSync } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import { retainTestRunAfterTimeout } from './test-fixture-lifecycle';
@@ -108,6 +109,10 @@ let upstreamCalls = 0;
 let responseGate: Promise<void> | null = null;
 let releaseResponseGate: (() => void) | undefined;
 const upstream = createServer(async (request, response) => {
+  if (request.url === '/api/setup/status' || request.url === '/supervisor/watch') {
+    response.writeHead(200, { 'content-type': 'application/json' }).end('{}');
+    return;
+  }
   if (request.url !== '/api/v1/messages') {
     response.writeHead(404).end();
     return;
@@ -123,8 +128,12 @@ const upstream = createServer(async (request, response) => {
 await new Promise<void>((resolve) => upstream.listen(0, '127.0.0.1', resolve));
 const address = upstream.address();
 if (!address || typeof address === 'string') throw new Error('Fake gateway did not bind.');
+process.env.O8_API_PORT = String(address.port);
+process.env.O8_WS_PORT = String(address.port);
 process.env.O8_OPENROUTER_CLAUDE_CODE_BASE_URL = `http://127.0.0.1:${address.port}/api`;
 
+const { saveRuntimeBillingMode } = await import('@/lib/providers/runtime-billing');
+saveRuntimeBillingMode('claude-code', 'api');
 const { writeClaudeCodeWorkerProfile } = await import('@/lib/claude-code/worker-profile');
 const { prepareMeteredGatewaySession } = await import('@/lib/claude-code/metered-gateway');
 import type { OwnedSessionRecord } from '@/lib/runtimes/shared/owned-session/types';
@@ -214,7 +223,7 @@ function collectFixtureTree(): number[] {
 function isAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
-    return true;
+    return !execFileSync('ps', ['-o', 'stat=', '-p', String(pid)], { encoding: 'utf8' }).trim().startsWith('Z');
   } catch (error) {
     return (error as NodeJS.ErrnoException).code === 'EPERM';
   }
@@ -335,6 +344,90 @@ describe('metered packet cap real path', () => {
     });
   });
 
+  it.each(['capped', 'held', 'operator stopped'] as const)(
+    'cold recovery respects a %s packet before interruption journaling', async (stop) => {
+      await writeClaudeCodeWorkerProfile({ source: 'openrouter', model: 'metered/test', codexModel: null });
+      await addRepo(repoPath);
+      const packetId = `cold-${stop.replaceAll(' ', '-')}`;
+      const lane = createLane({ repoPath, branch: `issue/${packetId}`, runtime: 'claude-code', packetId });
+      const beforeRequests = upstreamCalls;
+      const beforeStarts = starts();
+      writeOrchestratorControlPlaneState({ ...createEmptyOrchestratorMissionState(), repoPath,
+        packets: [{ id: packetId, referenceLabel: 'P1', title: 'Cold recovery', summary: 'Recovery window.',
+          runtime: 'claude-code', workspaceTargetPath: repoPath, branchTarget: `issue/${packetId}`,
+          dependencyLabels: [], dependencyPacketIds: [], status: 'launching', releaseState: 'pending', queueState: 'queued', lane: null }] });
+      const launched = await dispatch({ verb: 'launch_session', laneId: lane.id, prompt: 'Synthetic recovery window.',
+        claudeCodeCarrier: 'openrouter', spendCap: { carrier: 'openrouter', costUsd: 1, inputTokens: 7_000_000 }, actor: 'orchestrator' });
+      expect(launched.ok, launched.note).toBe(true);
+      const launch = { surfaceId: getLane(lane.id)!.sessionKey! };
+      const pids = await waitForFixturePids();
+      await vi.waitFor(() => expect(upstreamCalls - beforeRequests).toBe(1), { timeout: 15_000 });
+      await vi.waitFor(async () => {
+        await claudeOwned.getOwnedClaudeCodeFleetAdditions({ fresh: true });
+        expect((await ownedIo.findSession(launch.surfaceId))?.threadId).toBeTruthy();
+      });
+      // The process has exited, but no interruption receipt has been journaled.
+      try { process.kill(pids.workerPid, 'SIGKILL'); } catch {}
+      await waitUntilGone([pids.workerPid]);
+      try { process.kill(pids.interpreterPid, 'SIGKILL'); } catch {}
+      await waitUntilGone([pids.interpreterPid]);
+      await claudeOwned.getOwnedClaudeCodeFleetAdditions({ fresh: true });
+      const saved = (await ownedIo.findSession(launch.surfaceId))!;
+      const run = (saved.activeRun ?? saved.recentRuns[0])!;
+      run.outcome = 'finished';
+      run.finishedAt = new Date().toISOString();
+      delete run.interruptRequestedAt;
+      saved.recentRuns = [run, ...saved.recentRuns.filter(candidate => candidate.id !== run.id)];
+      delete saved.activeRun;
+      await ownedIo.saveSession(saved);
+      const reason = stop === 'capped' ? 'Packet spend cap reached.' : stop;
+      const state = readOrchestratorControlPlaneState();
+      Object.assign(state.packets[0], { status: 'running', queueState: stop === 'held' ? 'held' : 'queued',
+        operatorStopped: stop === 'operator stopped', blockedReason: reason,
+        ...(stop === 'capped' ? { spendCap: { carrier: 'openrouter', costUsd: 0.05, inputTokens: 700_000 },
+          spendTelemetry: { capHit: true, costUsd: 0.09, inputTokens: 653_000, outputTokens: 10,
+            costSource: 'gateway', updatedAt: new Date().toISOString() } } : {}),
+      });
+      writeOrchestratorControlPlaneState(state);
+      const { stdout } = await promisify(execFile)(process.execPath, ['--import', './scripts/register-server-only-stub.mjs',
+        '--import', import.meta.resolve('tsx'), '--input-type=module', '-e', `
+        const load = async p => { const m = await import(p); return m.default ?? m; };
+        const supervisor = await load('./src/lib/supervisor/agent-supervisor.ts');
+        const { POST } = await load('./src/app/api/runtime/action/route.ts');
+        const { NextRequest } = await import('next/server');
+        let actions = 0;
+        supervisor.startSupervisorLoop({ fetchFleetStatus: async () => [{sessionKey: ${JSON.stringify(launch.surfaceId)}, status: 'waiting'}],
+          fetchTranscript: async () => [], steerAgent: async (surfaceId, message, automaticRecoveryRunId) => {
+            actions++;
+            await POST(new NextRequest('http://localhost/api/runtime/action', {method: 'POST',
+              headers: {'content-type': 'application/json'}, body: JSON.stringify({action: 'steer', surfaceId,
+                message, automaticRecoveryRunId, clientMutationId: crypto.randomUUID()})}));
+          }, interruptAgent: async () => {}, relaunchAgent: async () => ({status: 'held', reason: 'fixture'}),
+          broadcastAgentUpdate: () => {}, queueOrchestratorEscalation: () => {} });
+        supervisor.stopSupervisorLoop();
+        supervisor.registerWatchedAgent(${JSON.stringify(launch.surfaceId)}, ${JSON.stringify(repoPath)}, 'fixture', 'recovery');
+        const watched = supervisor.getWatchedAgents().find(agent => agent.surfaceId === ${JSON.stringify(launch.surfaceId)});
+        watched.registeredAt = watched.lastActivityAt = Date.now() - 30 * 60_000;
+        watched.nextPollAt = 0;
+        await supervisor.ingestAgentCompletionSignal(${JSON.stringify(launch.surfaceId)}, ${JSON.stringify(run.id)});
+        await supervisor.runSupervisorTickForTesting();
+        const direct = await POST(new NextRequest('http://localhost/api/runtime/action', {method: 'POST',
+          headers: {'content-type': 'application/json'}, body: JSON.stringify({action: 'steer',
+            surfaceId: ${JSON.stringify(launch.surfaceId)}, message: 'Synthetic direct recovery.',
+            automaticRecoveryRunId: ${JSON.stringify(run.id)}, clientMutationId: crypto.randomUUID()})}));
+        console.log('COLD_DIRECT_OK=' + (await direct.json()).ok);
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        console.log('COLD_ACTIONS=' + actions);
+        process.exit(0);
+      `], { cwd: process.cwd(), env: process.env, timeout: 30_000 });
+      expect.soft(upstreamCalls - beforeRequests, 'provider requests after cold recovery').toBe(1);
+      expect.soft(starts() - beforeStarts, 'worker launches after cold recovery').toBe(1);
+      expect(stdout).toContain('COLD_ACTIONS=0');
+      expect(stdout).toContain('COLD_DIRECT_OK=false');
+      expect(readOrchestratorControlPlaneState().packets[0].blockedReason).toBe(reason);
+      expect((await ownedIo.findSession(launch.surfaceId))?.recentRuns[0]).toMatchObject({ id: run.id, outcome: 'finished' });
+    }, 60_000);
+
   it('holds a metered cap stop through supervisor recovery and SQLite reopen without another request', async () => {
     await writeClaudeCodeWorkerProfile({ source: 'openrouter', model: 'metered/test', codexModel: null });
     await addRepo(repoPath);
@@ -418,7 +511,7 @@ describe('metered packet cap real path', () => {
     const { readOwnedRecoveryState } = await import('@/lib/runtimes/shared/owned-session/automatic-recovery');
     let stoppingRunId: string | undefined;
     await vi.waitFor(async () => {
-      const recovery = await readOwnedRecoveryState(surfaceId!);
+      const recovery = await readOwnedRecoveryState(surfaceId!, { includeArchived: true });
       expect(recovery).toMatchObject({ owned: true, interrupted: true });
       stoppingRunId = recovery.owned ? recovery.runId : undefined;
       expect(stoppingRunId).toBeTruthy();
@@ -428,15 +521,15 @@ describe('metered packet cap real path', () => {
     watchedDuringStop.nextPollAt = 0;
     await supervisor.runSupervisorTickForTesting();
     const stoppingRefusal = await automaticAction(surfaceId!, stoppingRunId!);
-    expect(stoppingRefusal).toMatchObject({ ok: false, note: expect.stringContaining('interrupted') });
+    expect(stoppingRefusal).toMatchObject({ ok: false, note: expect.stringMatching(/spend_cap_hit|interrupted/) });
     expect(stoppingRefusal.outcomeUnknown).not.toBe(true);
-    expect(watchedDuringStop.lastStatus).toBe('interrupted');
+    expect(['interrupted', 'unavailable']).toContain(watchedDuringStop.lastStatus);
     expect(callbacks.steerAgent).not.toHaveBeenCalled();
     const workerPids = await waitForFixturePids();
     const kill = await waitForConfirmedKillEvent(lane.id);
     expect(kill.payload).toMatchObject({ confirmed: true });
     for (const pid of [workerPids.interpreterPid, workerPids.workerPid]) {
-      expect(() => process.kill(pid, 0)).toThrow(expect.objectContaining({ code: 'ESRCH' }));
+      expect(isAlive(pid)).toBe(false);
     }
 
     const mission = await getMissionStatus({ includeCost: true });
