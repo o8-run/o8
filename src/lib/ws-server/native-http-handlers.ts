@@ -1,6 +1,8 @@
 /** Named handler exports for the lazy native shell transport; retain existing route auth. */
 import { GET as api_mobile_orchestrator_threads_GET } from '@/app/api/mobile/orchestrator/threads/route';
 import { GET as api_orchestrator_state_GET, PATCH as api_orchestrator_state_PATCH } from '@/app/api/orchestrator/state/route';
+import { GET as api_lanes_GET } from '@/app/api/lanes/route';
+import { GET as api_orchestrator_lane_events_GET } from '@/app/api/orchestrator/lane-events/route';
 import { GET as api_runtime_inventory_GET } from '@/app/api/runtime/inventory/route';
 import { GET as api_mobile_history_GET } from '@/app/api/mobile/history/route';
 import { GET as api_mobile_terminal_sessions_GET } from '@/app/api/mobile/terminal-sessions/route';
@@ -57,6 +59,8 @@ import { POST as api_review_auto_review_POST } from '@/app/api/review/auto-revie
 
 export const api_mobile_orchestrator_threads = { GET: api_mobile_orchestrator_threads_GET };
 export const api_orchestrator_state = { GET: api_orchestrator_state_GET, PATCH: api_orchestrator_state_PATCH };
+export const api_lanes = { GET: api_lanes_GET };
+export const api_orchestrator_lane_events = { GET: api_orchestrator_lane_events_GET };
 export const api_runtime_inventory = { GET: api_runtime_inventory_GET };
 export const api_mobile_history = { GET: api_mobile_history_GET };
 export const api_mobile_terminal_sessions = { GET: api_mobile_terminal_sessions_GET };

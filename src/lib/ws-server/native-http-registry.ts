@@ -35,6 +35,11 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
   grid: [],
   terminal: [route('/api/mobile/terminal-sessions', 'GET', () => import('./native-http-handlers').then(handlers => handlers.api_mobile_terminal_sessions))],
   palette: [], // Local commands and workspace navigation reuse the selected surface's transport.
+  workers: [
+    route('/api/lanes', 'GET', () => import('./native-http-handlers').then(handlers => handlers.api_lanes)),
+    route('/api/orchestrator/state', 'GET', () => import('./native-http-handlers').then(handlers => handlers.api_orchestrator_state)),
+    route('/api/orchestrator/lane-events', 'GET', () => import('./native-http-handlers').then(handlers => handlers.api_orchestrator_lane_events)),
+  ],
   settings: [
     route('/api/panel/operator-defaults', 'GET POST', () => import('./native-http-handlers').then(handlers => handlers.api_panel_operator_defaults)),
     route('/api/v2/keys', 'GET POST PATCH DELETE', () => import('./native-http-handlers').then(handlers => handlers.api_v2_keys)),
