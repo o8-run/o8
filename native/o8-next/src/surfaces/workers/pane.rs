@@ -61,7 +61,22 @@ impl Workers {
         self.selected = Some(id);
     }
     fn key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.focus.is_focused(window) {
+        if event.keystroke.modifiers.control
+            || event.keystroke.modifiers.platform
+            || event.keystroke.modifiers.alt
+        {
+            return;
+        }
+        if event.keystroke.key == "escape" && self.focus.contains_focused(window, cx) {
+            self.focus.focus(window);
+            cx.stop_propagation();
+            return;
+        }
+        let card_focused = self
+            .cards
+            .values()
+            .any(|card| card.read(cx).focus.is_focused(window));
+        if !self.focus.is_focused(window) && !card_focused {
             return;
         }
         match event.keystroke.key.as_str() {
@@ -91,6 +106,9 @@ impl Workers {
                         _ => 0,
                     };
                     self.select(ids[next].clone(), cx);
+                    if card_focused {
+                        self.cards[&ids[next]].read(cx).focus.focus(window);
+                    }
                     self.scroll[self.filter].scroll_to_item(next);
                 }
             }

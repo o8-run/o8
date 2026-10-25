@@ -36,7 +36,7 @@ it('Workers uses the production state, lanes and live event routes behind operat
   expect(events.status).toBe(200);
   expect((await events.json()).events.length).toBeGreaterThan(0);
   const blocked = laneData.lanes.find((lane: { packetId: string }) => lane.packetId === 'worker-blocked');
-  const activity = await fetch(origin + `/api/lanes/${blocked.id}/events?since=0&limit=500`, { headers });
+  const activity = await fetch(origin + `/api/lanes/${blocked.id}?events=500`, { headers });
   expect(activity.status).toBe(200);
   const activityData = await activity.json();
   expect(activityData.events.filter((event: { payload: { message?: string } }) => event.payload.message).map((event: { payload: { message: string } }) => event.payload.message))

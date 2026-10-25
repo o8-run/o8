@@ -11,7 +11,7 @@ pub struct Card {
     pub expanded: bool,
     client: Client,
     pub focus: FocusHandle,
-    activity: Vec<Value>,
+    pub(super) activity: Vec<Value>,
     loading: bool,
     loaded: bool,
     error: String,
@@ -58,10 +58,7 @@ impl Card {
         let lane = self.task.lane_id();
         let task = cx.background_executor().spawn(async move {
             let id: String = url::form_urlencoded::byte_serialize(lane.as_bytes()).collect();
-            let value: Value = client.get(
-                &format!("/api/lanes/{id}/events"),
-                &[("since", "0"), ("limit", "500")],
-            )?;
+            let value: Value = client.get(&format!("/api/lanes/{id}"), &[("events", "500")])?;
             value["events"]
                 .as_array()
                 .cloned()

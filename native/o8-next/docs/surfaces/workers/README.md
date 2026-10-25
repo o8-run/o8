@@ -14,6 +14,10 @@ The item-1 PNGs compare an actual native frame in a private virtual display usin
 
 ## Task card
 
-Each task now shows its repository chip, task reference, title, a plain worker status sentence and a status pill. Activity opens the existing `/api/lanes/:id/events` route lazily and renders numbered messages in the server's order. Equal activity responses retain the view. Collapsing and reopening reuse the card and scroll handle; Enter or Space opens activity for a keyboard-selected card. Errors retain prior activity and reopening retries the read.
+Each task now shows its repository chip, task reference, title, a plain worker status sentence and a status pill. Activity opens the existing `/api/lanes/:id?events=500` route lazily for its newest bounded window and renders numbered messages in the server's order. Equal activity responses retain the view. Collapsing and reopening reuse the card and scroll handle; Enter or Space opens activity for a keyboard-selected card. Errors retain prior activity and reopening retries the read.
 
 The item-2 GPUI test opens the real palette, selects the blocked filter, reads three persisted activity steps, and verifies that expanding and collapsing keep the card's origin. The route test verifies the same production event handler. The native screenshot shows the Linux fallback; the adjacent reference uses existing desktop worker components under All Glass. macOS material and exact visual parity remain open under #4711.
+
+## Card review round 1
+
+Up and Down continue peer selection when Activity has card focus. Escape returns focus to the list, including its filter shortcuts. Activity now uses the desktop lane-detail route's newest 500 events instead of repeatedly reading the first tail page. The review tests seed 515 progress records, assert that progress 515 appears, append another persisted event, and verify the refreshed window includes it. Red and green native tails are recorded beside the item-2 evidence.
