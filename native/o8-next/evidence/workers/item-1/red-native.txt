@@ -1,0 +1,13 @@
+thread 'shell::workers::tests::workers_real_shell_filters_route_membership' (12408) panicked at src/surfaces/workers/tests.rs:20:5:
+assertion failed: visual.debug_bounds("worker-card-worker-running").is_some()
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test shell::workers::tests::workers_real_shell_filters_route_membership ... FAILED
+
+failures:
+
+failures:
+    shell::workers::tests::workers_real_shell_filters_route_membership
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 155 filtered out; finished in 3.94s
+
+error: test failed, to rerun pass `--bin o8-next`

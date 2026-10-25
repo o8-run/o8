@@ -28,6 +28,7 @@ register_surfaces! {
         brain: Brain = "surfaces/brain.rs";
         grid: Grid = "surfaces/grid.rs";
         activity: Activity = "surfaces/activity.rs";
+        workers: Workers = "surfaces/workers.rs";
         pull_requests: PullRequests = "surfaces/pull_requests.rs";
         inbox: Inbox = "surfaces/inbox.rs";
         issues: Issues = "surfaces/issues.rs";
