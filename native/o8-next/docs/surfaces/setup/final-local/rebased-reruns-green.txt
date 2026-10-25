@@ -1,0 +1,15 @@
+Diff isolated, unchanged source:
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 156 filtered out; finished in 124.98s
+
+Pane-grid isolated, unchanged source:
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 156 filtered out; finished in 26.25s
+
+Terminal isolated, unchanged source:
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 156 filtered out; finished in 39.91s
+
+Native CLI integrations:
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.16s
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.25s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.14s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+Total CLI: 7 passed; 0 failed.

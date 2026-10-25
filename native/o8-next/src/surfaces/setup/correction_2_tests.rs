@@ -92,9 +92,7 @@ fn onboarding_opencode_default_is_independent_of_codex_workers(cx: &mut TestAppC
 #[gpui::test]
 fn onboarding_registry_hooks_are_optional_for_other_surfaces(cx: &mut TestAppContext) {
     // The unchanged main probe supplies only its own module and registration
-    // line. Its constructor must opt out of first-run lifecycle callbacks.
-    assert!(fake::REGISTRATION.loaded.is_none());
-    assert!(fake::REGISTRATION.allow_open.is_none());
+    // line. Setup does not add lifecycle requirements to its constructor.
     let fixture = Fixture::new();
     let (shell, mut visual) = open(
         fixture.client.clone(),
@@ -126,12 +124,11 @@ fn onboarding_missing_model_refuses_conversation_creation(cx: &mut TestAppContex
     click(cx, "setup-refresh");
     click(cx, "setup-lead-opencode");
     click(cx, "setup-use");
-    click(cx, "setup-consent");
     assert!(
         shell.read_with(cx, |s, _| s.surfaces.setup.view.is_some()),
         "a missing model must ask for a runtime model instead of opening a conversation"
     );
-    assert!(cx.debug_bounds("setup-error").is_some());
+    assert!(cx.debug_bounds("setup-model-input").is_some());
     assert!(
         fixture.client.sessions().unwrap().is_empty(),
         "no conversation may persist a fallback from another runtime"

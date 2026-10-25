@@ -1,0 +1,2 @@
+test shell::setup::view::lifecycle_tests::onboarding_module_owns_busy_navigation_and_does_not_reopen_after_close ... ok
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 128 filtered out; finished in 12.43s

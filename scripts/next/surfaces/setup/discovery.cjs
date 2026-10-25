@@ -7,6 +7,7 @@ const inventory = () => [
   { id: 'codex', label: 'Codex', installed: true, available: ready, unavailableReason: ready ? null : 'needs_auth', detail: ready ? 'Connected' : 'Sign in required', fix: 'codex login' },
   { id: 'claude-code', label: 'Claude Code', installed: true, available: ready, unavailableReason: ready ? null : 'needs_auth', detail: ready ? 'Connected' : 'Sign in required', fix: 'claude' },
   { id: 'opencode', label: 'OpenCode', installed: true, available: ready, unavailableReason: ready ? null : 'needs_auth', detail: ready ? 'Connected' : 'Sign in required', fix: 'opencode2 auth login' },
+  ...(process.argv.includes('--onboarding-model-matrix') || process.argv.includes('--onboarding-pi-saved-model') ? [{ id: 'pi', label: 'Pi', installed: true, available: ready, unavailableReason: ready ? null : 'needs_auth', detail: 'Fixture Pi connection', fix: 'pi', piSetup: { provider: process.argv.includes('--onboarding-api-key-saved-model') ? 'openrouter' : undefined, model: process.argv.includes('--onboarding-api-key-saved-model') ? 'fixture/api-saved-model' : process.argv.includes('--onboarding-pi-saved-model') ? 'fixture/pi-saved-model' : undefined } }] : []),
   { id: 'gemini', label: 'Gemini CLI', installed: true, available: false, unavailableReason: 'needs_auth', detail: 'Sign in required', fix: 'gemini' },
 ];
 Module._load = function(request, parent, isMain) {
@@ -21,7 +22,7 @@ Module._load = function(request, parent, isMain) {
   };
   if (request.endsWith('/setup/runtime-activity') || request === './runtime-activity') return {
     readRuntimeActivity: async () => ({ codex: 0, claude: 0, complete: false }),
-    readLocalLeadModels: async () => ({}),
+    readLocalLeadModels: async () => process.argv.includes('--onboarding-codex-saved-model') ? { codex: require('../../../../src/lib/models').MODEL_IDS.codexCliDefault } : ({}),
   };
   if (request.endsWith('/skeleton/autoscan') || request.endsWith('/skeleton/autoscan.ts')) return {
     triggerScan() {}, startChangePolling() {}, triggerScanIfStale() {}, stopChangePolling() {},

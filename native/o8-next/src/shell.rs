@@ -27,6 +27,8 @@ register_surfaces! {
         session: Session(String) = "surfaces/session.rs";
         brain: Brain = "surfaces/brain.rs";
         grid: Grid = "surfaces/grid.rs";
+        activity: Activity = "surfaces/activity.rs";
+        pull_requests: PullRequests = "surfaces/pull_requests.rs";
         inbox: Inbox = "surfaces/inbox.rs";
         issues: Issues = "surfaces/issues.rs";
         #[cfg(test)] fake: Fake = "surfaces/fake.rs";
@@ -156,11 +158,6 @@ impl Shell {
                         }
                         this.notice = if this.workspaces.is_empty() { "Connected. No saved workspace sessions." } else { "Connected · Ctrl+K / Cmd+K: commands · Ctrl+Tab: next surface" }.into();
                         this.persist();
-                        for registration in registrations() {
-                            if let Some(loaded) = registration.loaded {
-                                loaded(this, cx);
-                            }
-                        }
                     }
                     Err(error) => {
                         this.connected = false;
@@ -307,9 +304,6 @@ impl Shell {
             .collect()
     }
     fn execute(&mut self, command: Command, window: &mut Window, cx: &mut Context<Self>) {
-        if registrations().iter().filter_map(|r| r.allow_open).any(|allow_open| !allow_open(self, cx)) {
-            return;
-        }
         let registration = command.registration();
         if registration.overlay_command {
             (registration.open)(self, command, window, cx);

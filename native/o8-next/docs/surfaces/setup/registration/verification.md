@@ -1,5 +1,7 @@
 # Registration verification
 
+Historical receipt. The [final local correction](../final-local/verification.md) removes the shared lifecycle hooks and adds the complete model matrix.
+
 Final rebase: `9f44b02ea`, including the request ownership refactor.
 All main and original surface test function names remain present. All **5 surface cases passed** through the real GPUI/fixture entries.
 

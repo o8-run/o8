@@ -2,22 +2,29 @@ use super::*;
 use crate::theme::current as theme;
 impl Render for Shell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        self.ensure(window, cx);
+        if !registrations().iter().any(|r| (r.block_ensure)(self)) {
+            self.ensure(window, cx);
+        }
         let revision = self.revision;
         let painted = self.painted.clone();
         let active = self.active();
-        let content = active
-            .as_ref()
-            .and_then(|t| self.content.get(&self.key(t)))
-            .map(|c| match c {
-                Content::Session(s) => s.clone().into_any_element(),
-                Content::Grid(g) => g.clone().into_any_element(),
+        let content = registrations()
+            .iter()
+            .find_map(|r| (r.overlay)(self))
+            .or_else(|| {
+                active
+                    .as_ref()
+                    .and_then(|t| self.content.get(&self.key(t)))
+                    .map(Content::element)
             });
-        let content = self
-            .setup
-            .as_ref()
-            .map(|setup| setup.clone().into_any_element())
-            .or(content);
+        let before_workspaces = registrations()
+            .iter()
+            .flat_map(|r| (r.nav)(self, NavPosition::BeforeWorkspaces, cx))
+            .collect::<Vec<_>>();
+        let after_workspaces = registrations()
+            .iter()
+            .flat_map(|r| (r.nav)(self, NavPosition::AfterWorkspaces, cx))
+            .collect::<Vec<_>>();
         div()
             .size_full()
             .flex()
@@ -39,37 +46,7 @@ impl Render for Shell {
                         cx.listener(|_, _, window, _| window.prevent_default()),
                     )
                     .child("o8 next alpha")
-                    .child(
-                        div()
-                            .id("setup-open")
-                            .debug_selector(|| "setup-open".into())
-                            .cursor_pointer()
-                            .p(px(6.))
-                            .child("Setup")
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.capture(window, cx);
-                                this.open_setup(cx);
-                            })),
-                    )
-                    .when(self.setup.is_some(), |v| {
-                        v.child(
-                            div()
-                                .id("setup-close")
-                                .debug_selector(|| "setup-close".into())
-                                .cursor_pointer()
-                                .p(px(6.))
-                                .child("Close setup")
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    if this.setup.as_ref().is_some_and(|s| s.read(cx).busy()) {
-                                        return;
-                                    }
-                                    this.setup = None;
-                                    this.restore_focus(window, cx);
-                                    this.revision += 1;
-                                    cx.notify();
-                                })),
-                        )
-                    })
+                    .children(before_workspaces)
                     .children(self.workspaces.clone().into_iter().enumerate().map(
                         |(i, workspace)| {
                             let label = std::path::Path::new(&workspace)
@@ -93,6 +70,7 @@ impl Render for Shell {
                                 }))
                         },
                     ))
+                    .children(after_workspaces)
                     .child(
                         div()
                             .id("shell-palette")
@@ -178,9 +156,12 @@ impl Render for Shell {
                                     .child(t.label())
                                     .on_click(cx.listener(move |this, _, window, cx| {
                                         this.capture(window, cx);
+                                        for registration in registrations() {
+                                            (registration.after_tab)(this);
+                                        }
                                         this.state
                                             .workspaces
-                                            .get_mut(this.state.selected.as_ref().unwrap())
+                                            .get_mut(this.state.selected.as_deref().unwrap_or(""))
                                             .unwrap()
                                             .active = i;
                                         this.ensure(window, cx);

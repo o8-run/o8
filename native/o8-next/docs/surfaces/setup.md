@@ -26,12 +26,13 @@ first-run trigger. A [new red](setup/registration/registered-red.txt) reproduced
 suppression by registered paths; [final green](setup/registration/registered-green.txt)
 passes all five setup and sixteen Projects cases through their real entries.
 
-Two shared files need lifecycle dispatch in addition to the inventory line:
-`src/surface_registry.rs` declares optional `loaded`/`allow_open` callbacks, both
-defaulting to `None`, and `src/shell.rs` calls opted-in callbacks. The surface owns automatic first-run entry and its
-existing busy-navigation refusal. Existing Projects and Settings overlays keep
-their registration precedence. Client, main, shared shell tests/view/state and
-dev-host dispatchers match main.
+The final local correction removes the lifecycle changes to the shared registry
+and shell dispatcher. The setup runtime owns a once-per-shell first-run check,
+scheduled through the existing navigation hook after the shell connects. The
+existing key hook and the view's per-frame capture listeners block navigation
+while setup is busy. Closing setup leaves the shell-lifetime check complete.
+Shared client, registry, shell view/state/tests and dev-host dispatchers match main;
+the native shell adds only its one setup inventory line.
 
 All [main test names and original surface names](setup/registration/preserved-tests.json)
 are preserved. Current gate totals are recorded in the registration receipts.
@@ -43,11 +44,17 @@ OpenCode lead recommendations now resolve a saved model, validated CLI default,
 then the canonical OpenCode default. The native view refuses an absent model
 before creating a conversation. A Codex worker pool cannot supply its lead model.
 
-Only first-run setup opts into the lifecycle callbacks. `loaded` needs the GPUI
-context after asynchronous workspace loading to open first-run setup before its
-frame. `allow_open` rejects commands before navigation mutates state while setup
-is busy. Other registered modules keep their existing constructors and no hooks;
-the unchanged main probe is exercised through the native shell. Setup state and
-callback policy remain in its module.
+Final local round: [matrix and receipts](setup/final-local/verification.md).
+Claude, Codex and OpenCode keep their own saved or canonical models. Codex uses
+its validated local lead default when present. Pi uses its detected model; an
+unresolved choice asks for a model in the native tools page before any
+conversation is created. The managed o8 backend uses its canonical managed
+model, independently of saved preferences from another backend. No runtime model
+ID is copied into the native implementation.
+
+The final compiler proof applies only setup source files and its single inventory
+line to an untouched main snapshot. Both the registered and removed-entry native
+applications compile, including unchanged surface constructors and tests.
+Earlier registration and correction receipts remain historical evidence.
 
 Refs #4548

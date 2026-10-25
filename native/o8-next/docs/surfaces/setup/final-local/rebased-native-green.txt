@@ -1,0 +1,24 @@
+test shell::setup::tests::correction_2::onboarding_fresh_opencode_uses_its_own_default ... ok
+test shell::setup::tests::correction_2::onboarding_missing_model_refuses_conversation_creation ... ok
+test shell::setup::tests::correction_2::onboarding_opencode_default_is_independent_of_codex_workers ... ok
+test shell::setup::tests::correction_2::onboarding_registry_hooks_are_optional_for_other_surfaces ... ok
+test shell::setup::tests::final_round::onboarding_matrix_api_key_with_saved ... ok
+test shell::setup::tests::final_round::onboarding_matrix_api_key_without_saved ... ok
+test shell::setup::tests::final_round::onboarding_matrix_claude_with_saved ... ok
+test shell::setup::tests::final_round::onboarding_matrix_claude_without_saved ... ok
+test shell::setup::tests::final_round::onboarding_matrix_codex_with_saved ... ok
+test shell::setup::tests::final_round::onboarding_matrix_codex_without_saved ... ok
+test shell::setup::tests::final_round::onboarding_matrix_managed_o8_with_saved ... ok
+test shell::setup::tests::final_round::onboarding_matrix_managed_o8_without_saved ... ok
+test shell::setup::tests::final_round::onboarding_matrix_opencode_with_saved ... ok
+test shell::setup::tests::final_round::onboarding_matrix_opencode_without_saved ... ok
+test shell::setup::tests::final_round::onboarding_matrix_pi_with_saved ... ok
+test shell::setup::tests::final_round::onboarding_matrix_pi_without_saved ... ok
+test shell::setup::tests::onboarding_folder_registration_error_and_cancel ... ok
+test shell::setup::tests::onboarding_operator_auth_error_retry ... ok
+test shell::setup::tests::onboarding_opencode_keeps_selected_model_for_first_send ... ok
+test shell::setup::tests::onboarding_registered_workspace_without_sessions_still_starts_setup ... ok
+test shell::setup::tests::onboarding_project_tools_privacy_and_workspace ... ok
+test shell::setup::view::lifecycle_tests::onboarding_module_owns_busy_navigation_and_does_not_reopen_after_close ... ok
+
+22 setup cases passed, including all 12 matrix cases; all 28 integrated PR cases also passed.

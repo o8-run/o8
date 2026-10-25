@@ -1,5 +1,7 @@
 # Correction round 2
 
+Historical receipt. The [final local correction](../final-local/verification.md) removes the shared lifecycle hooks and adds the complete model matrix.
+
 Rebased only the first-run branch onto `3b99b20d6`, retaining Customize as merged
 on main. No other PR branch or surface was edited. All 99 main native test
 function names are preserved; see [inventory](preserved-tests.json).

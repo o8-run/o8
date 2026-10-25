@@ -4,6 +4,9 @@ use crate::shell::*;
 #[path = "correction_2_tests.rs"]
 mod correction_2;
 
+#[path = "final_tests.rs"]
+mod final_round;
+
 fn click(cx: &mut VisualTestContext, selector: &'static str) {
     draw(cx);
     let bounds = cx

@@ -1,0 +1,20 @@
+ FAIL  src/lib/setup/runtime-recommendation.test.ts > detected runtime recommendation > resolves its own lead model or asks: 'pi' saved=true
+AssertionError: expected 'fixture/api-saved-model' to be 'openrouter/fixture/api-saved-model' // Object.is equality
+
+Expected: "openrouter/fixture/api-saved-model"
+Received: "fixture/api-saved-model"
+
+ ❯ src/lib/setup/runtime-recommendation.test.ts:41:29
+     39|       localLeadModels: saved ? { codex: MODEL_IDS.codexCliDefault } : …
+     40|     });
+     41|     expect(setup.leadModel).toBe(expected);
+       |                             ^
+     42|   });
+     43|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 22 passed (23)
+   Duration  822ms (transform 92ms, setup 82ms, import 67ms, tests 68ms, environment 0ms)

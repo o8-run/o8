@@ -7,16 +7,10 @@ pub(super) type Slice = EmptyState;
 #[derive(Default)]
 pub(super) struct Runtime {
     pub view: Option<Entity<view::Setup>>,
+    first_run_checked: Cell<bool>,
 }
 pub(super) const REGISTRATION: Registration = Registration {
-    loaded: Some(|s, cx| {
-        if !s.sessions.iter().any(|session| session.repo_path.is_some())
-            && s.surfaces.setup.view.is_none()
-        {
-            s.open_setup(cx);
-        }
-    }),
-    allow_open: Some(|s, cx| {
+    key_down: |s, _, _, cx| {
         if s.surfaces
             .setup
             .view
@@ -25,11 +19,11 @@ pub(super) const REGISTRATION: Registration = Registration {
         {
             s.notice = "Wait for setup to finish before opening another surface.".into();
             cx.notify();
-            false
-        } else {
             true
+        } else {
+            false
         }
-    }),
+    },
     overlay_command: true,
     overlay: |s| {
         s.surfaces
@@ -44,6 +38,16 @@ pub(super) const REGISTRATION: Registration = Registration {
     nav: |s, position, cx| {
         if position != NavPosition::BeforeWorkspaces {
             return vec![];
+        }
+        if s.connected && !s.loading && !s.surfaces.setup.first_run_checked.replace(true) {
+            let shell = cx.weak_entity();
+            cx.defer(move |cx| {
+                let _ = shell.update(cx, |s, cx| {
+                    if !s.sessions.iter().any(|session| session.repo_path.is_some()) {
+                        s.open_setup(cx);
+                    }
+                });
+            });
         }
         let mut nav = vec![
             div()

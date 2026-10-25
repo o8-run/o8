@@ -1,0 +1,38 @@
+error[E0560]: struct `registry::Registration` has no field named `loaded`
+  --> src/surfaces/setup.rs:12:5
+   |
+12 |     loaded: Some(|s, cx| {
+   |     ^^^^^^ `registry::Registration` does not have this field
+   |
+   = note: available fields are: `tab_label`, `command_label`, `command`, `open`, `create` ... and 7 others
+
+error[E0560]: struct `registry::Registration` has no field named `allow_open`
+  --> src/surfaces/setup.rs:19:5
+   |
+19 |     allow_open: Some(|s, cx| {
+   |     ^^^^^^^^^^ `registry::Registration` does not have this field
+   |
+   = note: available fields are: `tab_label`, `command_label`, `command`, `open`, `create` ... and 7 others
+
+error[E0609]: no field `loaded` on type `registry::Registration`
+  --> src/surfaces/setup/correction_2_tests.rs:96:32
+   |
+96 |     assert!(fake::REGISTRATION.loaded.is_none());
+   |                                ^^^^^^ unknown field
+   |
+   = note: available fields are: `tab_label`, `command_label`, `command`, `open`, `create` ... and 13 others
+
+error[E0609]: no field `allow_open` on type `registry::Registration`
+  --> src/surfaces/setup/correction_2_tests.rs:97:32
+   |
+97 |     assert!(fake::REGISTRATION.allow_open.is_none());
+   |                                ^^^^^^^^^^ unknown field
+   |
+   = note: available fields are: `tab_label`, `command_label`, `command`, `open`, `create` ... and 13 others
+
+For more information about this error, try `rustc --explain E0560`.
+error: could not compile `o8-next` (bin "o8-next") due to 2 previous errors
+warning: build failed, waiting for other jobs to finish...
+Some errors have detailed explanations: E0560, E0609.
+For more information about an error, try `rustc --explain E0560`.
+error: could not compile `o8-next` (bin "o8-next" test) due to 4 previous errors

@@ -85,10 +85,16 @@ export async function persistOnboardingRuntimeSelection(
   selection: Pick<OnboardingRuntimeSelection, 'orchestratorRuntime' | 'workerRuntimes'> & { leadModel?: string; workerModel?: string },
   request: OnboardingFetch = fetch,
 ): Promise<void> {
+  // These models describe runtime-owned defaults; only the editable lead
+  // backends persist a model setting in operator defaults.
+  const storesLeadModel = selection.orchestratorRuntime === 'claude-code'
+    || selection.orchestratorRuntime === 'opencode';
   const response = await request('/api/panel/operator-defaults', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(runtimeSelectionUpdate(selection)),
+    body: JSON.stringify(runtimeSelectionUpdate({
+      ...selection, leadModel: storesLeadModel ? selection.leadModel : undefined,
+    })),
   });
   const payload = await response.json().catch(() => null) as { error?: string } | null;
   if (!response.ok) {

@@ -1,0 +1,19 @@
+ FAIL  tests/onboarding-runtime-picker-real-path.test.ts > saves 'codex' setup with its detected model without changing another runtime model default
+ FAIL  tests/onboarding-runtime-picker-real-path.test.ts > saves 'pi' setup with its detected model without changing another runtime model default
+Error: This lead uses its runtime model default. Choose a different model in the conversation.
+ ❯ runtimeSelectionUpdate src/lib/setup/runtime-selection.ts:18:11
+     16|   if (selection.leadModel && backend !== 'claude' && backend !== 'open…
+     17|     && selection.leadModel !== leadModelPreset(backend)) {
+     18|     throw new Error('This lead uses its runtime model default. Choose …
+       |           ^
+     19|   }
+     20|   return {
+ ❯ persistOnboardingRuntimeSelection src/components/desktop/onboarding/onboarding-runtime-selection.ts:91:26
+ ❯ tests/onboarding-runtime-picker-real-path.test.ts:241:9
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 8 passed (10)
+   Duration  6.44s (transform 3.27s, setup 110ms, import 4.69s, tests 814ms, environment 0ms)

@@ -1,0 +1,13 @@
+Main baseline: 160576643e1138b4cb5a8519d9f6260f5991d4eb
+Overlay: src/surfaces/setup.rs and src/surfaces/setup/**
+Shell: + setup: Setup = "surfaces/setup.rs";
+All 90 original native source files match main after removing that entry.
+Setup source matches the final tested source.
+
+Registered: cargo check --locked --offline --all-targets
+Finished `dev` profile [unoptimized + debuginfo] target(s) in 8.70s
+exit: 0
+
+Remove only the setup entry: cargo check --locked --offline --all-targets
+Finished `dev` profile [unoptimized + debuginfo] target(s) in 10.71s
+exit: 0

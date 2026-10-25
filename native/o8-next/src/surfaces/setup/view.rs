@@ -15,6 +15,10 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+#[cfg(test)]
+#[path = "view_lifecycle_tests.rs"]
+mod lifecycle_tests;
+
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Project {
@@ -86,6 +90,13 @@ impl Snapshot {
                 .collect(),
         )
     }
+    fn model(&self, chosen: &str) -> Option<String> {
+        self.setup["setupRecommendation"]["leadModel"]
+            .as_str()
+            .filter(|model| !model.trim().is_empty())
+            .or_else(|| (!chosen.trim().is_empty()).then_some(chosen))
+            .map(|model| model.trim().to_owned())
+    }
 }
 pub struct Opened(pub Option<Session>);
 impl EventEmitter<Opened> for Setup {}
@@ -97,6 +108,7 @@ pub struct Setup {
     backend: String,
     workers: Vec<String>,
     folder: Entity<Composer>,
+    model: Entity<Composer>,
     session_id: String,
     busy: bool,
     error: Option<String>,
@@ -140,6 +152,7 @@ impl Setup {
             backend: String::new(),
             workers: vec![],
             folder: cx.new(Composer::new),
+            model: cx.new(Composer::new),
             session_id: format!(
                 "thoughts-next-{}",
                 SystemTime::now()
@@ -176,6 +189,7 @@ impl Setup {
         let project = self.project.clone();
         let backend = self.backend.clone();
         let workers = self.workers.clone();
+        let model = self.model.read(cx).text.trim().to_owned();
         let telemetry = self.telemetry;
         let crashes = self.crashes;
         let step = self.step;
@@ -197,7 +211,7 @@ impl Setup {
                     let loaded = Snapshot::load(&client, true)?;
                     Self::registered(&loaded, selected.as_ref())?;
                     let (lead, pool) = loaded.recommendation();
-                    if selected.is_some() && !loaded.ready(&lead, &pool) { target = Step::Tools; }
+                    if selected.is_some() && (!loaded.ready(&lead, &pool) || loaded.model(&model).is_none()) { target = Step::Tools; }
                     else {
                         if loaded.ready(&lead, &pool) && loaded.setup["setupRecommendation"]["preserved"] != true {
                             client.setup_request("POST", "/api/panel/operator-defaults", &Self::selection(&loaded, &lead, &pool))?;
@@ -213,7 +227,8 @@ impl Setup {
                     client.setup_request("POST", "/api/panel/operator-defaults", &Self::selection(&current, &backend, &workers))?;
                     next = Some(Snapshot::load(&client, false)?);
                     if selected.is_some() {
-                        if next.as_ref().unwrap().setup["values"]["telemetryConsentAnswered"] == true { finish = true; }
+                        if next.as_ref().unwrap().model(&model).is_none() { target = Step::Tools; }
+                        else if next.as_ref().unwrap().setup["values"]["telemetryConsentAnswered"] == true { finish = true; }
                         else { target = Step::Privacy; }
                     } else { target = Step::Projects; }
                 }
@@ -224,7 +239,7 @@ impl Setup {
                 }
             }
             let loaded = next.ok_or("Setup has not loaded. Try again.")?;
-            let opened = if finish { Some(Self::finish(&client, &loaded, selected.as_ref(), &id)?) } else { None };
+            let opened = if finish { Some(Self::finish(&client, &loaded, selected.as_ref(), &id, &model)?) } else { None };
             Ok::<_, String>(ResultState { snapshot: loaded, step: target, project: selected, opened })
         });
         cx.spawn(async move |this, cx| {
@@ -233,6 +248,9 @@ impl Setup {
                 this.busy = false;
                 match result {
                     Ok(result) => {
+                        if this.backend != result.snapshot.recommendation().0 {
+                            this.model.update(cx, |model, cx| model.clear(cx));
+                        }
                         (this.backend, this.workers) = result.snapshot.recommendation();
                         this.snapshot = Some(result.snapshot);
                         this.project = result.project;
@@ -289,6 +307,7 @@ impl Setup {
         snapshot: &Snapshot,
         project: Option<&Project>,
         id: &str,
+        chosen_model: &str,
     ) -> Result<Option<Session>, String> {
         let current = Snapshot::load(client, true)?;
         Self::registered(&current, project)?;
@@ -296,10 +315,8 @@ impl Setup {
         let mut session = None;
         if let Some(project) = project {
             let (backend, workers) = snapshot.recommendation();
-            let model = snapshot.setup["setupRecommendation"]["leadModel"]
-                .as_str()
-                .filter(|model| !model.trim().is_empty())
-                .ok_or("Choose a model for this runtime in desktop setup, then check again.")?;
+            let model = snapshot.model(chosen_model)
+                .ok_or("Choose a model for this runtime before continuing.")?;
             if !current.ready(&backend, &workers) {
                 return Err("Connect a coding tool before opening this project.".into());
             }
@@ -499,7 +516,7 @@ impl Render for Setup {
                                         .to_owned();
                                     let enabled = runtime["available"] == true && !busy;
                                     let lead_enabled = enabled
-                                        && (["codex", "claude", "opencode", "muse", "fable", "o8"]
+                                        && (["codex", "claude", "opencode", "muse", "fable", "o8", "pi"]
                                             .contains(&backend.as_str())
                                             || runtime["builtIn"].is_object());
                                     div()
@@ -534,6 +551,7 @@ impl Render for Setup {
                                                     .on_click(cx.listener(move |this, _, _, cx| {
                                                         if lead_enabled {
                                                             this.backend = backend.clone();
+                                                            this.model.update(cx, |model, cx| model.clear(cx));
                                                             this.workers = vec![id.clone()];
                                                             this.revision += 1;
                                                             cx.notify();
@@ -576,6 +594,16 @@ impl Render for Setup {
                             }) && !busy,
                             |v| v.child("No coding tools found"),
                         )
+                        .when(snapshot.as_ref().is_some_and(|s| {
+                            s.setup["setupRecommendation"]["backend"] == self.backend
+                                && s.model("").is_none()
+                        }), |v| {
+                            v.child("Choose a model ID for this runtime to continue.")
+                                .child(div().id("setup-model-input")
+                                    .debug_selector(|| "setup-model-input".into())
+                                    .on_click(cx.listener(|s, _, window, cx| s.model.read(cx).focus.focus(window)))
+                                    .child(self.model.clone()))
+                        })
                         .child(
                             control("setup-use", "Use this setup", ready && !busy)
                                 .on_click(cx.listener(|this, _, _, cx| this.act(Action::Use, cx))),
@@ -633,6 +661,23 @@ impl Render for Setup {
                         ),
                 )
             })
-            .child(canvas(|_, _, _| (), move |_, _, _, _| painted.set(revision)).size(px(1.)))
+            .child(canvas(|_, _, _| (), move |_, _, window, _| {
+                painted.set(revision);
+                // A busy setup is modal, including shell navigation outside its
+                // content bounds. These listeners live for this painted frame.
+                if busy {
+                    window.on_mouse_event(|_: &gpui::MouseDownEvent, phase, window, cx| {
+                        if phase == gpui::DispatchPhase::Capture {
+                            window.prevent_default();
+                            cx.stop_propagation();
+                        }
+                    });
+                    window.on_mouse_event(|_: &gpui::MouseUpEvent, phase, _, cx| {
+                        if phase == gpui::DispatchPhase::Capture {
+                            cx.stop_propagation();
+                        }
+                    });
+                }
+            }).size(px(1.)))
     }
 }

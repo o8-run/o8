@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { MODEL_IDS } from '@/lib/models';
 import { recommendRuntimeSetup, visibleRuntimeInventory } from './runtime-recommendation';
+import { resolveBackendTurnModel } from '@/lib/orchestrator/turn-model-selection';
 
 const inventory = [
   { id: 'codex', label: 'Codex', available: true, unavailableReason: null, detail: '', fix: '' },
@@ -11,6 +12,35 @@ const inventory = [
 const activity = { codex: 3, claude: 8, complete: true };
 
 describe('detected runtime recommendation', () => {
+  it.each([
+    { backend: 'claude', saved: false, expected: MODEL_IDS.orchestratorDefault },
+    { backend: 'claude', saved: true, expected: MODEL_IDS.claudeWorkerDefault },
+    { backend: 'codex', saved: false, expected: MODEL_IDS.codexDefault },
+    { backend: 'codex', saved: true, expected: MODEL_IDS.codexCliDefault },
+    { backend: 'opencode', saved: false, expected: MODEL_IDS.opencodeDefault },
+    { backend: 'opencode', saved: true, expected: 'fixture/selected-model' },
+    { backend: 'pi', saved: false, expected: '' },
+    { backend: 'pi', saved: true, expected: 'fixture/pi-saved-model' },
+    { backend: 'pi', apiKey: true, saved: false, expected: '' },
+    { backend: 'pi', apiKey: true, saved: true, expected: 'openrouter/fixture/api-saved-model' },
+    { backend: 'o8', saved: false, expected: resolveBackendTurnModel('o8', undefined) },
+    { backend: 'o8', saved: true, expected: resolveBackendTurnModel('o8', undefined) },
+  ] as const)('resolves its own lead model or asks: $backend saved=$saved', (row) => {
+    const { backend, saved, expected } = row;
+    const apiKey = 'apiKey' in row && row.apiKey;
+    const setup = recommendRuntimeSetup({
+      inventory: [...inventory, { id: 'pi', label: 'Pi', available: true, unavailableReason: null, detail: '', fix: '',
+        piSetup: { detected: true, agentDir: '/fixture/pi', credentialsPresent: true, extensions: 0, skills: 0, sessions: 0, countsTruncated: false,
+          ...(apiKey ? { provider: 'openrouter' } : {}),
+          ...(saved ? { model: apiKey ? 'fixture/api-saved-model' : 'fixture/pi-saved-model' } : {}) } }],
+      activity, values: { orchestratorBackend: backend, workerRuntimes: ['codex'],
+        ...(saved ? { orchestratorModel: MODEL_IDS.claudeWorkerDefault, opencodeOrchestratorModel: 'fixture/selected-model' } : {}) },
+      sources: { orchestratorBackend: 'file', workerRuntimes: 'file', ...(saved ? { orchestratorModel: 'file' } : {}) },
+      localLeadModels: saved ? { codex: MODEL_IDS.codexCliDefault } : {},
+    });
+    expect(setup.leadModel).toBe(expected);
+  });
+
   it.each([null, '', '   '])('uses OpenCode defaults with no saved lead model (%j), independently of Codex workers', (saved) => {
     const setup = recommendRuntimeSetup({ inventory, activity, values: {
       orchestratorBackend: 'opencode', opencodeOrchestratorModel: saved,
