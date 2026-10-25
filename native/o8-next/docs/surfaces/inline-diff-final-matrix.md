@@ -47,6 +47,8 @@ Commands run from the repository root:
 
 ```sh
 export CARGO_TARGET_DIR="$PWD/native/o8-next/target"
+cargo build --locked --manifest-path crates/o8d/Cargo.toml --bin o8d --features experimental-http
+export O8D_HTTP_TEST_BINARY="$CARGO_TARGET_DIR/debug/o8d"
 cargo test --locked --manifest-path native/o8-next/Cargo.toml -- --test-threads=1 --nocapture
 cargo clippy --locked --manifest-path native/o8-next/Cargo.toml --all-targets --message-format=json
 NODE_OPTIONS=--max-old-space-size=8192 npm run typecheck:fast
@@ -55,3 +57,7 @@ node scripts/next/check-surface-boundary.mjs --base origin/main --head HEAD
 ```
 
 The boundary checker is first compared byte-for-byte with the version on `origin/main`, then used without an exemption event. Clippy diagnostics are checked against all touched Rust paths. The target directory is removed after native verification. The full TypeScript suite is outside this final round's scope.
+
+The o8d HTTP binary is a prerequisite for the existing saved-history integration case. It must use the local target path above rather than the test's default crate target path.
+
+The complete serial run before the final main rebase recorded 177 passed, 3 failed and 3 ignored, including all 15 inline cases passing. The Activity failure was fixed upstream, and its final-source rerun passed. The missing o8d binary was built locally and that rerun passed. The unchanged standalone diff performance case failed in the full batch and passed its isolated rerun; #4728 tracks that instability. These reruns do not establish a green complete native run.
