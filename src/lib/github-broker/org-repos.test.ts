@@ -49,6 +49,30 @@ it('reads PR lists, persisted issue/PR sync, CI and checks anonymously outside t
   expect(request.mock.calls.some(([url]) => String(url).endsWith('/graphql'))).toBe(false);
 });
 
+it.each([false, true])('serves oversized 100-PR list pages uncached through the real route (authenticated=%s)', async authenticated => {
+  h.account = authenticated ? 'organization' : 'personal';
+  const pulls = Array.from({ length: 100 }, (_, index) => ({ ...pull, id: index + 1, number: index + 1, node_id: `node-${index + 1}`, body: 'b'.repeat(26 * 1024) }));
+  expect(Buffer.byteLength(JSON.stringify(pulls))).toBeGreaterThan(2 * 1024 * 1024);
+  const request = vi.fn(async (url: unknown, _init?: RequestInit) => String(url).endsWith('/graphql')
+    ? Response.json({ data: { nodes: [] } }) : Response.json(pulls, { headers: { etag: '"oversized"' } }));
+  vi.stubGlobal('fetch', request);
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  const { GET } = await import('@/app/api/panel/prs/route');
+  const read = () => GET(new Request(`http://fixture.invalid/api/panel/prs?repo=${h.repo}&view=list`));
+  for (const response of await Promise.all([read(), read()])) {
+    expect(response.status).toBe(200);
+    const payload = await response.json();
+    expect(payload.prs).toHaveLength(100);
+    expect(payload.prs.at(-1)).toMatchObject({ number: 100, title: pull.title });
+  }
+  expect((await read()).status).toBe(200);
+  const listings = request.mock.calls.filter(([url]) => String(url).includes('/pulls?'));
+  expect(listings).toHaveLength(2);
+  expect(listings.every(([, init]) => !new Headers(init?.headers).has('if-none-match'))).toBe(true);
+  expect(warn).toHaveBeenCalledTimes(1);
+  expect(warn.mock.calls[0]?.[0]).toMatch(/cache.*2 MiB/i);
+});
+
 it('uses the managed token for a case-insensitive owner match and refuses cross-owner writes', async () => {
   h.account = 'ORGANIZATION';
   const request = vi.fn(async (_url: unknown, _init?: RequestInit) => Response.json([])); vi.stubGlobal('fetch', request);
@@ -140,6 +164,23 @@ it('does not deny a public repository when one child resource is missing', async
   const { githubInstallationFetch } = await import('./auth');
   expect((await githubInstallationFetch(h.repo, `/repos/${h.repo}/pulls/999`)).response.status).toBe(404);
   expect((await githubInstallationFetch(h.repo, `/repos/${h.repo}/pulls?state=open`)).response.ok).toBe(true);
+});
+
+it('remembers public metadata after a child 404 so later CI refreshes never retry the installation token', async () => {
+  h.account = 'organization';
+  vi.spyOn(console, 'error').mockImplementation(() => {});
+  const request = vi.fn(async (url: unknown, _init?: RequestInit) => String(url).endsWith(`/repos/${h.repo}`)
+    ? Response.json({ full_name: h.repo, private: false }) : Response.json({ message: 'Not Found' }, { status: 404 }));
+  vi.stubGlobal('fetch', request);
+  const { GET } = await import('@/app/api/panel/ci/route');
+  const read = () => GET(new Request(`http://fixture.invalid/api/panel/ci?repo=${h.repo}&fresh=1`));
+  await read();
+  const afterDecision = request.mock.calls.length;
+  expect(afterDecision).toBe(3); // Installation child, anonymous child, public metadata.
+  await read();
+  expect(request.mock.calls.slice(afterDecision).filter(([, init]) => new Headers(init?.headers).has('authorization'))).toHaveLength(0);
+  expect(request.mock.calls.filter(([, init]) => new Headers(init?.headers).has('authorization'))).toHaveLength(1);
+  expect(request).toHaveBeenCalledTimes(5);
 });
 
 it('confines the request path and never follows a repository transfer with a token', async () => {

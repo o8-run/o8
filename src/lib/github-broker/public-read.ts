@@ -35,6 +35,7 @@ export async function publicGitHubRead(repo: string, path: string, apiBaseUrl: s
       const repoPath = `/repos/${repo}`;
       const metadata = path === repoPath ? result : await dispatch(repoPath);
       if (metadata !== result) await metadata.body?.cancel().catch(() => {});
+      if (metadata.ok) rememberPublicGitHubDecision(decisionKey, false);
       if (metadata.status === 404) {
         await result.body?.cancel().catch(() => {});
         rememberPublicGitHubDecision(decisionKey, true);
