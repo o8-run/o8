@@ -540,6 +540,38 @@ it('serializes a surviving inventory refresh with the next MCP task after a serv
   expect(second.tasks[1].prNumber).not.toBe(first.tasks[0].prNumber);
 }, 90000);
 
+it.each(['transient', 'persistent'] as const)('retains fresh process proof after a %s unavailable marker scan', async kind => {
+  const { lane } = await tool('create', { repoPath: repo, runtime: 'codex', model: 'gpt-5.6-sol', effort: 'high' });
+  await tool('send', { laneId: lane.id, task: `LANE_TASK=marker_${kind}` });
+  const { getLane } = await import('@/lib/lane/registry');
+  const { readOwnedSessionRecord } = await import('@/lib/runtimes/shared/owned-session-index');
+  const record = (await readOwnedSessionRecord(getLane(lane.id)!.sessionKey!))!;
+  const marker = record.recentRuns[0].processMarker;
+  const probes = await import('@/lib/runtimes/shared/owned-session/run-process-proof');
+  const probe = probes.probeOwnedRunMarker;
+  let unavailable = 0;
+  const spy = vi.spyOn(probes, 'probeOwnedRunMarker').mockImplementation(async candidate => {
+    const actual = await probe(candidate);
+    if (candidate === marker && actual === 'clear' && (kind === 'persistent' || unavailable === 0)) {
+      unavailable++; return 'unknown';
+    }
+    return actual;
+  });
+  try {
+    if (kind === 'transient') {
+      const completed = await idle(lane.id);
+      expect(completed.tasks[0].phase).toBe('done');
+      expect(completed.tasks[0].receiptId).toBeTruthy();
+    } else {
+      await expect(idle(lane.id)).rejects.toThrow('still live or unconfirmed');
+      expect(getLane(lane.id)!.prNumber).toBeNull();
+      await tool('send', { laneId: lane.id, task: 'LANE_TASK=marker_unproven_successor' }, true);
+      expect(existsSync(join(captures, 'marker_unproven_successor.json'))).toBe(false);
+    }
+    expect(unavailable).toBeGreaterThan(0);
+  } finally { spy.mockRestore(); }
+}, 90000);
+
 it('preserves process settlement across restart and more than sixteen sequential tasks', async () => {
   const { lane } = await tool('create', { repoPath: repo, runtime: 'codex', model: 'gpt-5.6-sol', effort: 'high' });
   let sessionKey: string | null = null;

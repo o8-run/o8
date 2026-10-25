@@ -38,7 +38,11 @@ export async function settleStandingTaskProcesses(laneId: string, state: Standin
   }
   // Include the proven boundary itself and every newer run, including idle steers.
   // Older identities can roll out only after their entire process tree was proved absent.
-  if (!(await Promise.all(runs.slice(0, boundaryIndex + 1).map(executionRunIsClear))).every(Boolean)) {
+  const settlingRuns = runs.slice(0, boundaryIndex + 1);
+  const processesClear = async () => (await Promise.all(settlingRuns.map(executionRunIsClear))).every(Boolean);
+  // One unavailable observation must not permanently latch a settled lane.
+  // Recheck every exact run; persistent uncertainty still refuses reuse.
+  if (!await processesClear() && !await processesClear()) {
     throw new Error('Previous task processes are still live or unconfirmed; checkout reuse refused.');
   }
   const cwd = await readProcessCwdSnapshot({ forceRefresh: true });
