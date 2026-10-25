@@ -35,6 +35,7 @@ function manifestPreviewUrl(laneId: string): string | null {
   const events = getLaneEvents(laneId, 500);
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index];
+    if (event.verb === 'workspace_manifest_failed' || event.verb === 'workspace_manifest_services_stopped') return null;
     if (event.verb !== 'workspace_manifest_applied') continue;
     const preview = stringValue(event.payload.preview);
     if (preview) return preview;

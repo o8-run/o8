@@ -33,6 +33,11 @@ interface WorkspaceManifestV1 {
     name: string;
     command: string;
     cwd?: string;
+    dependsOn?: string[];
+    restart?: { maxRestarts: number; delayMs?: number };
+    timeoutMs?: number;
+    outputLimitBytes?: number;
+    shutdownGraceMs?: number;
     env?: Record<string, string>;
     port?: {
       preferred: number;
@@ -46,7 +51,9 @@ interface WorkspaceManifestV1 {
   }>;
   preview?: {
     url: string;
+    autoOpen?: boolean;
   };
+  limits?: { timeoutMs?: number; outputLimitBytes?: number; shutdownGraceMs?: number };
 }
 ```
 
@@ -74,10 +81,10 @@ interface WorkspaceManifestV1 {
       },
       "port": {
         "preferred": 4100,
-        "env": "PORT"
+        "env": "API_PORT"
       },
       "health": {
-        "http": "http://127.0.0.1:4100/health",
+        "http": "http://127.0.0.1:{{port}}/health",
         "timeoutMs": 30000
       }
     },
@@ -85,9 +92,11 @@ interface WorkspaceManifestV1 {
       "name": "web",
       "command": "npm run dev:web",
       "cwd": "apps/web",
+      "dependsOn": ["api"],
+      "env": { "API_ORIGIN": "http://127.0.0.1:{{service:api}}" },
       "port": {
         "preferred": 4173,
-        "env": "PORT"
+        "env": "WEB_PORT"
       },
       "health": {
         "tcp": true,
@@ -103,7 +112,7 @@ interface WorkspaceManifestV1 {
 
 ## Validation and discovery rules
 
-- Parsing is strict at every schema object. An unknown key fails validation and the error names its JSON path, such as `$.services[0].restart`.
+- Parsing is strict at every schema object. An unknown key fails validation and the error names its JSON path, such as `$.services[0].restartPolicy`.
 - `version` is required. Version 1 passes through `migrateManifest()` unchanged. Unsupported versions fail with an error at `$.version`.
 - Service names must be unique within one manifest.
 - A preferred port must be an integer from 1 through 65535. It cannot use o8's current production, reserved, or development blocks: `47100` through `47111` and `47120` through `47129`. `src/lib/panel/port-constants.ts` is authoritative.
@@ -111,4 +120,16 @@ interface WorkspaceManifestV1 {
 - Repository connection never fails because of an invalid manifest. The registry caches `{ manifest: { error } }` and leaves the checked-in file unchanged.
 - Discovery does not run setup, teardown, services, health checks, placeholder resolution, or port allocation.
 
-#1909 wires launch-time consumption of this declaration.
+## Owned local service lifecycle
+
+Approved packet provisioning allocates all ports, validates real service directories, and starts a private supervisor in a registered o8 terminal. Repository commands remain held until setup completes and durable terminal registration succeeds. Services start in dependency order; each dependency must pass its declared readiness check before the next starts. `PORT` is the current service's allocated port. Named port environment variables and `{{service:<name>}}` values let peers find one another without sharing credentials. A failed health check never publishes a ready preview.
+
+`restart.maxRestarts` defaults to zero and is capped at five. Every attempt retains command identity, timing, exit, output byte count and health evidence. `timeoutMs` on a service bounds its lifetime; root `limits.timeoutMs` bounds each setup/teardown command. Service output and shutdown limits override the root defaults. Output is counted and bounded rather than copied into receipts or persistent logs. Setup retains its existing bounded execution path. Health deadlines are capped at five minutes each and aggregate readiness at 45 minutes.
+
+Completion, cancellation, reset, provisioning failure, unexpected service exit and server-owner death stop the owned process groups before teardown. The supervisor keeps an exact process-group leader until settlement and verifies process birth identity before signalling. Teardown is claimed durably before it runs and is never replayed after interruption. Failed or unconfirmed cleanup retains its evidence and refuses a new generation. The normal terminal Stop action also waits for the coordinator, so a slow approved teardown is not interrupted by ordinary process escalation.
+
+The immutable approved command snapshot and generation state live in the operator data directory. Restarted modules read that state; they do not load replacement teardown commands from the worktree. Symlinked/escaping service directories and authenticated or non-loopback preview/health URLs are refused before setup. Manifest environment declarations cannot contain credential fields; repository services receive only declared non-secret values, allocated ports and executable lookup paths. Existing provider credential policy remains authoritative, and provider material is rejected rather than copied into manifests or receipts.
+
+`preview.autoOpen` opts into the existing Browser-open request after readiness. Its receipt distinguishes a confirmed opened view from pending or unavailable native transport. Unavailable Browser transport does not turn a healthy service into a failed provision. UI-loop readiness consumes the same declared preview, and a later service failure invalidates it.
+
+Local service ownership currently requires tmux and a POSIX host. An unavailable terminal or unsupported host fails visibly; no detached raw-process fallback runs repository commands. Repositories without a manifest retain their existing setup path. Remote task previews use their existing worker lifecycle described above.

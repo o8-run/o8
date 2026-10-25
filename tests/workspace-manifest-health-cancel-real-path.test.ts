@@ -54,8 +54,8 @@ describe.sequential('workspace manifest HTTP health cancellation real path', () 
     execFileSync('git', ['init', '-q', '-b', 'main', repoPath]);
     writeFileSync(path.join(repoPath, 'o8.workspace.json'), JSON.stringify({
       version: 1,
-      services: [{ name: 'web', command: 'fixture-web', port: { preferred: port },
-        health: { http: url, timeoutMs: 30_000 } }],
+      services: [{ name: 'web', command: 'exec sleep 600', port: { preferred: port },
+        health: { http: url, timeoutMs: mode.startsWith('failed') ? 150 : 30_000 } }],
       preview: { url },
     }));
     execFileSync('git', ['add', 'o8.workspace.json'], { cwd: repoPath });
@@ -71,14 +71,14 @@ describe.sequential('workspace manifest HTTP health cancellation real path', () 
     setLaneStatus(lane.id, 'launching', 'system', 'fixture launch');
     const application = applyWorkspaceManifest({ repoPath, worktreePath: repoPath, packetId, laneId: lane.id });
     try {
-      await vi.waitFor(() => expect(requestArrived).toBe(true));
+      await vi.waitFor(() => expect(requestArrived).toBe(true), { timeout: 10_000 });
       if (mode === 'cancelled') {
         setLaneStatus(lane.id, 'failed', 'system', 'cancel pending health check');
-        await vi.waitFor(() => expect(responseClosed).toBe(true), { timeout: 2_000 });
+        await vi.waitFor(() => expect(responseClosed).toBe(true), { timeout: 5_000 });
       }
       const result = await application;
       if (streaming) {
-        await vi.waitFor(() => expect(responseClosed).toBe(true), { timeout: 2_000 });
+        await vi.waitFor(() => expect(responseClosed).toBe(true), { timeout: 5_000 });
       }
       const receipt = await readWorkspaceManifestReceipt(repoPath);
       const events = getLaneEvents(lane.id, 100);
@@ -96,7 +96,7 @@ describe.sequential('workspace manifest HTTP health cancellation real path', () 
         ]);
         if (mode.startsWith('failed')) expect(receipt?.services[0].health).toMatchObject({ ok: false, error: 'HTTP health probe returned 503.' });
         else {
-          expect(receipt?.services).toEqual([]);
+          expect(receipt?.services).toHaveLength(1);
           expect(Object.values(await readWorkspacePortLeases()).some(lease => lease.laneId === lane.id)).toBe(false);
         }
       }

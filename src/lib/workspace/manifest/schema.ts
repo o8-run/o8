@@ -65,6 +65,7 @@ function expectStringArray(value: unknown, jsonPath: string): asserts value is s
   if (!Array.isArray(value)) {
     fail(jsonPath, `expected an array, received ${valueKind(value)}.`);
   }
+  if (value.length > 32) fail(jsonPath, 'expected at most 32 entries.');
   value.forEach((entry, index) => expectString(entry, `${jsonPath}[${index}]`));
 }
 
@@ -96,29 +97,43 @@ function validateHealth(value: unknown, jsonPath: string): void {
     fail(propertyPath(jsonPath, 'tcp'), `expected true, received ${valueKind(health.tcp)}.`);
   }
   if (health.timeoutMs !== undefined
-    && (!Number.isInteger(health.timeoutMs) || (health.timeoutMs as number) < 0)) {
+    && (!Number.isSafeInteger(health.timeoutMs) || Number(health.timeoutMs) < 1 || Number(health.timeoutMs) > 300_000)) {
     fail(
       propertyPath(jsonPath, 'timeoutMs'),
-      `expected a non-negative integer, received ${valueKind(health.timeoutMs)}.`,
+      `expected an integer from 1 through 300000.`,
     );
   }
 }
 
+function boundedNumber(value: unknown, jsonPath: string, min: number, max: number): void {
+  if (!Number.isSafeInteger(value) || Number(value) < min || Number(value) > max) fail(jsonPath, `expected an integer from ${min} through ${max}.`);
+}
+
 function validateService(value: unknown, jsonPath: string): WorkspaceManifestService {
   const service = expectObject(value, jsonPath);
-  assertAllowedKeys(service, ['name', 'command', 'cwd', 'env', 'port', 'health'], jsonPath);
+  assertAllowedKeys(service, ['name', 'command', 'cwd', 'env', 'port', 'health', 'dependsOn', 'restart', 'timeoutMs', 'outputLimitBytes', 'shutdownGraceMs'], jsonPath);
   expectString(service.name, propertyPath(jsonPath, 'name'));
   expectString(service.command, propertyPath(jsonPath, 'command'));
   if (service.cwd !== undefined) expectString(service.cwd, propertyPath(jsonPath, 'cwd'));
   if (service.env !== undefined) validateEnvironment(service.env, propertyPath(jsonPath, 'env'));
   if (service.port !== undefined) validatePort(service.port, propertyPath(jsonPath, 'port'));
   if (service.health !== undefined) validateHealth(service.health, propertyPath(jsonPath, 'health'));
+  if (service.dependsOn !== undefined) expectStringArray(service.dependsOn, propertyPath(jsonPath, 'dependsOn'));
+  if (service.timeoutMs !== undefined) boundedNumber(service.timeoutMs, propertyPath(jsonPath, 'timeoutMs'), 1, 86_400_000);
+  if (service.outputLimitBytes !== undefined) boundedNumber(service.outputLimitBytes, propertyPath(jsonPath, 'outputLimitBytes'), 1024, 8 * 1024 * 1024);
+  if (service.shutdownGraceMs !== undefined) boundedNumber(service.shutdownGraceMs, propertyPath(jsonPath, 'shutdownGraceMs'), 0, 30_000);
+  if (service.restart !== undefined) {
+    const restart = expectObject(service.restart, propertyPath(jsonPath, 'restart'));
+    assertAllowedKeys(restart, ['maxRestarts', 'delayMs'], propertyPath(jsonPath, 'restart'));
+    boundedNumber(restart.maxRestarts, propertyPath(jsonPath, 'restart.maxRestarts'), 0, 5);
+    if (restart.delayMs !== undefined) boundedNumber(restart.delayMs, propertyPath(jsonPath, 'restart.delayMs'), 0, 60_000);
+  }
   return service as unknown as WorkspaceManifestService;
 }
 
 function validateServices(value: unknown, jsonPath: string): void {
-  if (!Array.isArray(value)) {
-    fail(jsonPath, `expected an array, received ${valueKind(value)}.`);
+  if (!Array.isArray(value) || value.length > 16) {
+    fail(jsonPath, 'expected an array of at most 16 services.');
   }
   const names = new Set<string>();
   value.forEach((entry, index) => {
@@ -133,16 +148,24 @@ function validateServices(value: unknown, jsonPath: string): void {
 
 function validatePreview(value: unknown, jsonPath: string): void {
   const preview = expectObject(value, jsonPath);
-  assertAllowedKeys(preview, ['url'], jsonPath);
+  assertAllowedKeys(preview, ['url', 'autoOpen'], jsonPath);
+  if (preview.autoOpen !== undefined && typeof preview.autoOpen !== 'boolean') fail(propertyPath(jsonPath, 'autoOpen'), 'expected a boolean.');
   expectString(preview.url, propertyPath(jsonPath, 'url'));
 }
 
 function validateManifestV1(value: JsonObject): WorkspaceManifestV1 {
-  assertAllowedKeys(value, ['version', 'setup', 'teardown', 'services', 'preview'], '$');
+  assertAllowedKeys(value, ['version', 'setup', 'teardown', 'services', 'preview', 'limits'], '$');
   if (value.setup !== undefined) expectStringArray(value.setup, '$.setup');
   if (value.teardown !== undefined) expectStringArray(value.teardown, '$.teardown');
   if (value.services !== undefined) validateServices(value.services, '$.services');
   if (value.preview !== undefined) validatePreview(value.preview, '$.preview');
+  if (value.limits !== undefined) {
+    const limits = expectObject(value.limits, '$.limits');
+    assertAllowedKeys(limits, ['timeoutMs', 'outputLimitBytes', 'shutdownGraceMs'], '$.limits');
+    if (limits.timeoutMs !== undefined) boundedNumber(limits.timeoutMs, '$.limits.timeoutMs', 1, 45 * 60_000);
+    if (limits.outputLimitBytes !== undefined) boundedNumber(limits.outputLimitBytes, '$.limits.outputLimitBytes', 1024, 8 * 1024 * 1024);
+    if (limits.shutdownGraceMs !== undefined) boundedNumber(limits.shutdownGraceMs, '$.limits.shutdownGraceMs', 0, 30_000);
+  }
   return value as unknown as WorkspaceManifestV1;
 }
 

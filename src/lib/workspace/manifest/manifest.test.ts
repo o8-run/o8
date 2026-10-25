@@ -47,8 +47,8 @@ describe('workspace manifest v1', () => {
   it('rejects an unknown key with its JSON path', () => {
     expect(() => parseWorkspaceManifest({
       version: 1,
-      services: [{ name: 'api', command: 'npm run api', restart: 'always' }],
-    })).toThrow('$.services[0].restart: unknown key');
+      services: [{ name: 'api', command: 'npm run api', restartPolicy: 'always' }],
+    })).toThrow('$.services[0].restartPolicy: unknown key');
   });
 
   it('rejects a preferred port reserved by o8', () => {

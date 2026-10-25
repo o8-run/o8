@@ -149,7 +149,7 @@ async function launchPacket(input: {
 }) {
   launchSequence += 1;
   const branch = input.branch ?? `issue/1910-lifecycle-${launchSequence}`;
-  const { createLane } = await import('@/lib/lane/registry');
+  const { createLane, setLaneStatus } = await import('@/lib/lane/registry');
   const { prepareLaunchWorktree } = await import('@/lib/worktree/launch');
   const lane = createLane({
     repoPath,
@@ -159,6 +159,7 @@ async function launchPacket(input: {
     label: `${input.packetId}-${launchSequence}`,
     packetId: input.packetId,
   });
+  setLaneStatus(lane.id, 'launching', 'system', 'fixture launch');
   const prepared = await prepareLaunchWorktree({
     repoRoot: repoPath,
     agentType: 'codex',
@@ -216,7 +217,7 @@ describe.sequential('workspace manifest lifecycle through packet launch', () => 
       setup: ['manifest-step-one', 'manifest-step-two'],
       services: [{
         name: 'app',
-        command: 'run-app',
+        command: 'exec sleep 600',
         port: { preferred: preferredPort, env: 'APP_PORT' },
       }],
     }, null, 2)}\n`);
@@ -242,6 +243,11 @@ describe.sequential('workspace manifest lifecycle through packet launch', () => 
   });
 
   afterAll(async () => {
+    const { listManagedRuns } = await import('@/lib/runtimes/managed-runs/registry');
+    const { settleTerminalWorkspaceManifest } = await import('@/lib/workspace/manifest/lifecycle');
+    for (const run of await listManagedRuns()) {
+      if (run.workspaceService && run.cwd.startsWith(`${tempRoot}${path.sep}`)) await settleTerminalWorkspaceManifest(run.workspaceService);
+    }
     const { setWorkspaceManifestSetupTimeoutForTest } = await import(
       '@/lib/workspace/manifest/apply'
     );
@@ -333,6 +339,7 @@ describe.sequential('workspace manifest lifecycle through packet launch', () => 
       label: packetId,
       packetId,
     });
+    setLaneStatus(lane.id, 'launching', 'system', 'fixture launch');
     const launchPromise = prepareLaunchWorktree({
       repoRoot: repoPath,
       agentType: 'codex',
@@ -344,6 +351,7 @@ describe.sequential('workspace manifest lifecycle through packet launch', () => 
       packetId,
       laneId: lane.id,
     });
+    const launchOutcome = launchPromise.then(prepared => ({ prepared, error: null }), error => ({ prepared: null, error }));
     let worktreePath = '';
     await vi.waitFor(async () => {
       const setupWorktree = (await getWorktreeManager(repoPath).list())
@@ -355,8 +363,12 @@ describe.sequential('workspace manifest lifecycle through packet launch', () => 
 
     await bindLaneWorktree(lane.id, worktreePath);
     setLaneStatus(lane.id, 'failed', 'system', 'cancel manifest setup');
-    const prepared = await launchPromise;
-    expect(prepared?.cwd).toBe(worktreePath);
+    const outcome = await launchOutcome;
+    expect(outcome.prepared).toBeNull();
+    expect(outcome.error).toMatchObject({
+      message: expect.stringContaining('Managed worktree was prepared without an exact unbound pre-launch lane. Exact retirement was refused; durable workspace ownership was retained:'),
+      cause: expect.objectContaining({ message: 'Creation rollback has no matching durable creation authority.' }),
+    });
     expect(setupChild()?.killed).toBe(true);
     expect(await readWorkspaceManifestReceipt(worktreePath)).toMatchObject({
       state: 'cancelled',
@@ -376,64 +388,33 @@ describe.sequential('workspace manifest lifecycle through packet launch', () => 
   }, 90_000);
 
   it('settles a completed transition before removing its worktree', async () => {
-    resetExecution('cancel');
-    const {
-      createLane,
-      getLane,
-      getLaneEvents,
-      setLaneStatus,
-    } = await import('@/lib/lane/registry');
-    const { prepareLaunchWorktree, getWorktreeManager } = await import('@/lib/worktree/launch');
+    resetExecution('complete');
+    const { getLane, getLaneEvents, setLaneStatus } = await import('@/lib/lane/registry');
     const { readWorkspaceManifestReceipt } = await import('@/lib/workspace/manifest');
-    const packetId = 'packet-manifest-completed-cleanup';
-    const branch = 'issue/1910-lifecycle-completed-cleanup';
-    const lane = createLane({
-      repoPath,
-      branch,
-      baseBranch: 'main',
-      runtime: 'codex',
-      label: packetId,
-      packetId,
-    });
-    const launchPromise = prepareLaunchWorktree({
-      repoRoot: repoPath,
-      agentType: 'codex',
-      taskName: packetId,
-      branchName: branch,
-      baseBranch: 'main',
-      isolate: true,
-      skipSetup: true,
-      packetId,
-      laneId: lane.id,
-    });
-    let worktreePath = '';
-    await vi.waitFor(async () => {
-      const setupWorktree = (await getWorktreeManager(repoPath).list())
-        .find((worktree) => worktree.branch === branch && worktree.status === 'setup');
-      worktreePath = setupWorktree?.path ?? '';
-      expect((await readWorkspaceManifestReceipt(worktreePath))?.state).toBe('running');
-      expect((await readWorkspaceManifestReceipt(worktreePath))?.step).toBe('setup:1');
-    }, { timeout: 30_000 });
-
-    await bindLaneWorktree(lane.id, worktreePath);
+    const launch = await launchPacket({ packetId: 'packet-manifest-completed-cleanup',
+      branch: 'issue/1910-lifecycle-completed-cleanup' });
+    const lane = launch.lane;
+    const worktreePath = launch.prepared.cwd;
+    const receipt = await readWorkspaceManifestReceipt(worktreePath);
+    expect(receipt?.state).toBe('completed');
+    const servicePid = receipt!.services[0].pid!;
+    expect(servicePid).toBeGreaterThan(0);
     setLaneStatus(lane.id, 'completed', 'system', 'completed');
-    const prepared = await launchPromise;
-    expect(prepared?.cwd).toBe(worktreePath);
-    expect(setupChild()?.killed).toBe(true);
-    expect(getLaneEvents(lane.id, 100).find(
-      (event) => event.verb === 'workspace_manifest_failed',
-    )?.payload).toMatchObject({ state: 'cancelled', step: 'setup:1' });
     await waitForNoLaneLeases(lane.id);
+    // The valid post-provisioning transition settles its owned service before
+    // maintenance can remove the directory and lifecycle evidence.
+    expect(() => process.kill(servicePid, 0)).toThrow();
+    expect((await readWorkspaceManifestReceipt(worktreePath))?.cleanup?.state).toBe('completed');
     const { runWorktreeMaintenanceTick } = await import('@/lib/lane/worktree-reaper');
     await vi.waitFor(async () => {
-      await runWorktreeMaintenanceTick();
+      await runWorktreeMaintenanceTick(repoPath);
       expect(existsSync(worktreePath)).toBe(false);
       expect(getLane(lane.id)?.worktreePath).toBeNull();
       expect(getLaneEvents(lane.id, 100).some((event) => (
         event.payload.phase === 'bounded_maintenance'
         && event.payload.worktreeRemoved === true
       ))).toBe(true);
-    }, { timeout: 30_000 });
+    }, { timeout: 60_000 });
   }, 90_000);
 
   it('rewrites a dead owner as crashed, releases stale leases, and starts a fresh attempt', async () => {
@@ -493,7 +474,7 @@ describe.sequential('workspace manifest lifecycle through packet launch', () => 
     const { getLaneEvents } = await import('@/lib/lane/registry');
     const { resetPacket } = await import('@/lib/orchestrator/operator-mission-service/reset');
     const { getWorktreeManager, prepareLaunchWorktree } = await import('@/lib/worktree/launch');
-    const { createLane } = await import('@/lib/lane/registry');
+    const { createLane, setLaneStatus } = await import('@/lib/lane/registry');
     const { readWorkspaceManifestReceipt } = await import('@/lib/workspace/manifest');
     const packetId = 'packet-manifest-reset';
     const branch = 'issue/1910-lifecycle-reset';
@@ -537,6 +518,7 @@ describe.sequential('workspace manifest lifecycle through packet launch', () => 
       label: `${packetId}-replacement`,
       packetId,
     });
+    setLaneStatus(lane.id, 'launching', 'system', 'fixture replacement launch');
     const launchPromise = prepareLaunchWorktree({
       repoRoot: repoPath,
       agentType: 'codex',

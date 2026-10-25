@@ -77,16 +77,16 @@ function manifest(previewRevision: number) {
   return {
     version: 1,
     setup: ['prepare-workspace'],
-    teardown: ['clean-workspace'],
+    teardown: ['true'],
     services: [
       {
         name: 'api',
-        command: 'run-api',
+        command: 'exec sleep 600',
         port: { preferred: 43_400, env: 'API_PORT' },
       },
       {
         name: 'web',
-        command: 'run-web',
+        command: 'exec sleep 601',
         port: { preferred: 43_400, env: 'WEB_PORT' },
         health: { tcp: true, timeoutMs: 2_000 },
       },
@@ -112,7 +112,7 @@ async function launchPacket(label: string) {
   launchSequence += 1;
   const packetId = `packet-manifest-policy-${launchSequence}-${label}`;
   const branch = `test/manifest-policy-${launchSequence}-${label}`;
-  const { createLane, updateLane } = await import('@/lib/lane/registry');
+  const { createLane, updateLane, setLaneStatus } = await import('@/lib/lane/registry');
   const { prepareLaunchWorktree } = await import('@/lib/worktree/launch');
   const lane = createLane({
     repoPath,
@@ -122,6 +122,7 @@ async function launchPacket(label: string) {
     label: packetId,
     packetId,
   });
+  setLaneStatus(lane.id, 'launching', 'system', 'fixture launch');
   const prepared = await prepareLaunchWorktree({
     repoRoot: repoPath,
     agentType: 'codex',
@@ -182,6 +183,11 @@ describe.sequential('workspace manifest execution policy through packet launch',
   });
 
   afterAll(async () => {
+    const { listManagedRuns } = await import('@/lib/runtimes/managed-runs/registry');
+    const { settleTerminalWorkspaceManifest } = await import('@/lib/workspace/manifest/lifecycle');
+    for (const run of await listManagedRuns()) {
+      if (run.workspaceService && run.cwd.startsWith(`${tempRoot}${path.sep}`)) await settleTerminalWorkspaceManifest(run.workspaceService);
+    }
     for (const socket of setupSockets) socket.destroy();
     await Promise.all(setupServers.map(closeServer));
     const { closeDb } = await import('@/lib/db');
@@ -248,9 +254,9 @@ describe.sequential('workspace manifest execution policy through packet launch',
       },
     });
     expect(firstCards[0].description).toContain('prepare-workspace');
-    expect(firstCards[0].description).toContain('run-api');
-    expect(firstCards[0].description).toContain('run-web');
-    expect(firstCards[0].description).toContain('clean-workspace');
+    expect(firstCards[0].description).toContain('exec sleep 600');
+    expect(firstCards[0].description).toContain('exec sleep 601');
+    expect(firstCards[0].description).toContain('true');
     expect(getLaneEvents(first.lane.id, 100).find(
       (candidate) => candidate.verb === 'workspace_manifest_skipped',
     )?.payload).toMatchObject({

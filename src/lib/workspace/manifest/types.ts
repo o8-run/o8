@@ -19,10 +19,16 @@ export interface WorkspaceManifestService {
   env?: Record<string, string>;
   port?: WorkspaceManifestServicePort;
   health?: WorkspaceManifestServiceHealth;
+  dependsOn?: string[];
+  restart?: { maxRestarts: number; delayMs?: number };
+  timeoutMs?: number;
+  outputLimitBytes?: number;
+  shutdownGraceMs?: number;
 }
 
 export interface WorkspaceManifestPreview {
   url: string;
+  autoOpen?: boolean;
 }
 
 export interface WorkspaceManifestV1 {
@@ -31,6 +37,7 @@ export interface WorkspaceManifestV1 {
   teardown?: string[];
   services?: WorkspaceManifestService[];
   preview?: WorkspaceManifestPreview;
+  limits?: { timeoutMs?: number; outputLimitBytes?: number; shutdownGraceMs?: number };
 }
 
 export type WorkspaceManifest = WorkspaceManifestV1;

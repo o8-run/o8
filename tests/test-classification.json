@@ -6518,6 +6518,7 @@
       "reasons": [
         "child-process",
         "git-cli",
+        "process-signal",
         "real-path",
         "worktree-api"
       ]
@@ -6580,6 +6581,18 @@
         "executable-fixture",
         "git-cli",
         "real-path"
+      ]
+    },
+    {
+      "path": "tests/workspace-services-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "network-listener",
+        "process-signal",
+        "real-path",
+        "terminal-tool",
+        "worktree-api"
       ]
     },
     {
