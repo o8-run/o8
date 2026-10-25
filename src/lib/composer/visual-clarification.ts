@@ -46,7 +46,7 @@ export async function confirmVisualQuestion(draft: VisualInstructionDraft, value
   const meaning = currentMeaningCheck(current);
   if (meaning?.status === 'choice') {
     if (currentMeaningCheck(draft)?.key !== meaning.key) return false;
-    await saveVisualDraft({ ...current, meaningCheck: { ...meaning, status: 'accepted', selectedValue: value } });
+    await saveVisualDraft({ ...current, meaningCheck: { ...meaning, status: 'accepted', selectedValue: value } }, { advisory: true });
     return true;
   }
   if (key(current) !== key(draft)) return false;
@@ -58,7 +58,7 @@ export async function dismissVisualQuestion(draft: VisualInstructionDraft) {
   if (!current || current.status !== 'draft') return;
   const meaning = currentMeaningCheck(current);
   if (meaning?.status === 'choice' && currentMeaningCheck(draft)?.key === meaning.key) {
-    await saveVisualDraft({ ...current, meaningCheck: { ...meaning, status: 'dismissed' } });
+    await saveVisualDraft({ ...current, meaningCheck: { ...meaning, status: 'dismissed' } }, { advisory: true });
   } else if (key(current) === key(draft) && current.visualQuestion) {
     await saveVisualDraft({ ...current, visualQuestion: { ...current.visualQuestion, dismissed: true } });
   }
@@ -71,11 +71,14 @@ export function visualQuestionContext(scope: VisualLiveScope) {
 export async function answerVisualQuestion(scope: VisualLiveScope, text: string): Promise<string | null> {
   const draft = readVisualDraft(scope.principal, scope.target);
   const meaning = draft && currentMeaningCheck(draft);
-  if (draft?.status === 'draft' && meaning?.resolution) {
+  if (draft && meaning?.resolution) {
     const answer = text.trim().replace(/[.!?]+$/, '').toLowerCase();
-    if (meaning.status === 'choice' && answer === 'skip') { await dismissVisualQuestion(draft); return 'Clarification skipped. The marked draft has not been sent.'; }
     const matches = meaning.resolution.options.filter((option, index) => [option.value, option.label, String(index + 1), ['first', 'second', 'third', 'fourth'][index]].some(value => value.toLowerCase() === answer));
+    if (matches.length === 1 && draft.status !== 'draft' && ['accepted', 'dismissed'].includes(meaning.status)) return 'That clarification is closed. No new instruction has been sent.';
+    if (draft.status !== 'draft') return null;
+    if (meaning.status === 'choice' && answer === 'skip') { await dismissVisualQuestion(draft); return 'Clarification skipped. The marked draft has not been sent.'; }
     if (matches.length === 1 && meaning.status === 'accepted') return 'That meaning is already confirmed. The marked draft has not been sent.';
+    if (matches.length === 1 && meaning.status === 'dismissed') return 'That clarification was dismissed. The marked draft has not been sent. Use Send in the composer when ready.';
     if (meaning.status === 'choice') {
       if (matches.length === 1 && await confirmVisualQuestion(draft, matches[0].value)) return 'That meaning is confirmed in the marked draft. It has not been sent.';
       return `${meaning.resolution.question} ${meaning.resolution.options.map(option => option.label).join('; ')}. The draft has not been sent.`;

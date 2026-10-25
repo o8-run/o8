@@ -69,7 +69,9 @@ export async function checkVisualMeaning(draft: VisualInstructionDraft, current:
   const stored = readVisualDraft(draft.principal, draft.request.target);
   if (!current() || stored && (stored.status !== 'draft' || visualMeaningKey(stored) !== key)) return null;
   const checked = { ...(stored ?? draft), meaningCheck: { key, ...result, latencyMs } };
-  await saveVisualDraft(checked);
+  // This receipt is advisory. Normal draft/queue saves carry it durably; its
+  // background write must never extend the resolver's send deadline.
+  void saveVisualDraft(checked, { advisory: true }).catch(() => {});
   const latest = readVisualDraft(draft.principal, draft.request.target);
   if (!current() || latest && (latest.status !== 'draft' || visualMeaningKey(latest) !== key)) return null;
   return result.status === 'choice' ? null : latest ?? checked;

@@ -2,11 +2,11 @@ import { readVisualDraft, saveVisualDraft, type VisualInstructionDraft } from '.
 import { submitVisualInstruction, VisualInstructionDeliveryError } from './visual-instruction-send';
 import { invalidateVisualInspection } from './visual-inspection-client';
 import { openVisualQuestion } from './visual-clarification';
-import { checkVisualMeaning } from './visual-meaning';
+import { checkVisualMeaning, currentMeaningCheck, visualMeaningKey } from './visual-meaning';
 
 const commits = new Map<string, Promise<Awaited<ReturnType<typeof submitVisualInstruction>> | null>>();
 /** Send and deliberate voice delegation claim the same frozen request and queue ID. */
-export function commitVisualInstruction(draft: VisualInstructionDraft, current: () => boolean = () => true, transport: typeof fetch = fetch) {
+export function commitVisualInstruction(draft: VisualInstructionDraft, current: () => boolean = () => true, transport: typeof fetch = fetch, source: 'composer' | 'voice' = 'composer') {
   const key = JSON.stringify([draft.principal, draft.request.target, draft.request.id]);
   const pending = commits.get(key); if (pending) return pending;
   const commit = (async () => {
@@ -19,6 +19,11 @@ export function commitVisualInstruction(draft: VisualInstructionDraft, current: 
       if (openVisualQuestion(stored ?? draft)) return null;
       const checked = await checkVisualMeaning(frozen, current, transport);
       if (!checked) return null;
+      const latest = readVisualDraft(draft.principal, draft.request.target);
+      if (latest && (latest.status !== 'draft' || visualMeaningKey(latest) !== visualMeaningKey(checked))) return null;
+      // A Live delegation can be a late answer, not another deliberate Send.
+      const meaning = currentMeaningCheck(checked);
+      if (source === 'voice' && meaning && meaning.status !== 'accepted') return null;
       frozen = structuredClone(checked);
     }
     try {

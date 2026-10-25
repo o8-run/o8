@@ -7,7 +7,8 @@ import type { LiveBackend, LiveState } from '@/lib/voice/managed-live/session';
 import { useManagedVoicePresentation } from './useManagedVoicePresentation';
 import type { VisualInstructionDraft } from '@/lib/composer/visual-draft-store';
 import { visualMeaningKey } from '@/lib/composer/visual-meaning';
-import { answerVisualQuestion, visualQuestionContext } from '@/lib/composer/visual-clarification';
+import { answerVisualQuestion, visualQuestionContext, dismissVisualQuestion } from '@/lib/composer/visual-clarification';
+import { sampleObservation } from '@/lib/composer/visual-inspection.test-fixture';
 const marked = vi.hoisted(() => ({ draft: null as VisualInstructionDraft | null }));
 vi.mock('@/lib/composer/visual-draft-store', () => ({ readVisualDraft: () => marked.draft,
   saveVisualDraft: async (draft: VisualInstructionDraft) => { marked.draft = draft; } }));
@@ -15,11 +16,13 @@ const fixture = vi.hoisted(() => ({ backend: null as LiveBackend | null, native:
 vi.mock('@/lib/tauri/bridge', () => ({ canUseTauriEvents: () => fixture.native, isTauri: () => fixture.native }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: fixture.invoke }));
 vi.mock('@/lib/mobile/ws-token-client', () => ({ getMobileWsToken: () => 'fixture' }));
+vi.mock('@/components/auth/O8AuthProvider', () => ({ useO8Auth: () => ({ user: { id: 'fixture' }, isLoaded: true }) }));
 vi.mock('@/lib/voice/managed-live/session', () => ({ startManagedLive: async (backend: LiveBackend, onState: (state: string) => void) => {
   await backend.ready?.();
   let state = 'live'; fixture.backend = backend; onState(state); return { get state() { return state; }, close: async () => { state = 'closed'; onState(state); }, activity() {} };
 } }));
 import { ManagedLiveButton as VoiceButton } from './ManagedLiveButton';
+import { ManagedChatVoiceEntry } from './ManagedChatVoiceEntry';
 import { voiceFollowupReceipt } from './managed-voice-followup';
 const queues = new Map<string, QueuedComposerSendRecord[]>();
 const saved = vi.fn();
@@ -50,7 +53,7 @@ async function toggleVoice() {
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
-  queues.clear(); saved.mockClear(); fixture.backend = null;
+  queues.clear(); saved.mockClear(); fixture.backend = null; marked.draft = null;
   fixture.native = false; fixture.invoke.mockReset();
   vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue([{}] as unknown as DOMRectList);
   vi.stubGlobal('fetch', vi.fn(async () => Response.json({ enabled: true, entitled: true })));
@@ -449,4 +452,69 @@ it('selects a matching spoken Ripple option through an active Live delegate with
   expect(reply).toHaveBeenCalledWith(expect.stringContaining('has not been sent'));
   expect(send).not.toHaveBeenCalled(); expect(sendVisual).not.toHaveBeenCalled(); expect(saved).not.toHaveBeenCalled();
   marked.draft = null;
+});
+
+it.each(['none', 'failure'].flatMap(result => ['draft', 'saved'].map(status => ({ result, status }))))('keeps a late dismissed option out of the real Live send path: $result / $status', async ({ result, status }) => {
+  const routing = { backend: 'codex' as const, model: 'selected', effort: 'low' as const, permissionMode: 'plan' as const, mode: 'single' as const, pickedMode: 'solo' as const, collide: false };
+  const target = { threadId: 'dismissed-meaning-chat', repoPath: '/fixture' };
+  const observation = sampleObservation();
+  const draft: VisualInstructionDraft = { principal: 'fixture', status: 'draft', template: { text: '', wireMessage: '[o8-visual-instruction]', images: [], routing },
+    request: { version: 1, id: crypto.randomUUID(), createdAt: '2026-10-24T12:00:00Z', target, utterance: 'Make it bigger.',
+      frames: [{ id: 'marked-button', atMs: 0, width: 320, height: 280, image: observation.image, observation, strokes: [], pins: [], transcript: '',
+        candidates: [{ id: 'button', name: 'Save', role: 'button', rect: [0.1, 0.2, 0.1, 0.1] }] }] } };
+  draft.meaningCheck = { key: visualMeaningKey(draft), status: 'choice', latencyMs: 1, resolution: { id: 'dismissed-choice', kind: 'choice', question: 'What should be bigger?', aodlPath: 'intent.size',
+    options: [{ label: 'Button size', value: 'button-size' }, { label: 'Text size', value: 'text-size' }] } };
+  marked.draft = draft;
+  const resolver = vi.fn(async () => result === 'none' ? Response.json({ kind: 'none' }) : Response.json({ error: 'Fixture unavailable' }, { status: 503 }));
+  const dispatch = vi.fn(async (_url: unknown, init?: RequestInit) => Response.json({ item: { ...JSON.parse(String(init?.body)), status: 'queued' } }));
+  vi.mocked(fetch).mockImplementation(async (url, init) => url === '/api/mobile/ripple/resolve' ? resolver()
+    : url === '/api/orchestrator/composer-queue' ? dispatch(url, init) : Response.json({ enabled: true, entitled: true }));
+  const send = vi.fn(); const reply = vi.fn(async () => {});
+  const queue = { items: [], ready: true, error: null } as unknown as ComponentProps<typeof ManagedChatVoiceEntry>['queue'];
+  await act(async () => root.render(createElement(ManagedChatVoiceEntry, { identity: [target.threadId], visualTarget: target, queue,
+    capture: () => draft.template, messages: [], busy: false, terminals: {}, send, interrupt: vi.fn() })));
+  await toggleVoice();
+  await act(async () => dismissVisualQuestion(marked.draft!));
+  const { commitVisualInstruction } = await import('@/lib/composer/visual-instruction-commit');
+  if (status === 'saved') {
+    await act(async () => { await commitVisualInstruction(marked.draft!); });
+    dispatch.mockClear();
+  }
+  await act(async () => { void fixture.backend!.delegate('Text size.', 'late-dismissed-option', reply).catch(() => {}); });
+  expect(resolver).not.toHaveBeenCalled();
+  expect(dispatch).not.toHaveBeenCalled(); expect(send).not.toHaveBeenCalled();
+  expect(marked.draft?.request.utterance).toBe('Make it bigger.');
+  expect(marked.draft?.meaningCheck?.status).toBe('dismissed');
+  expect(reply).toHaveBeenCalledWith(expect.stringContaining(status === 'saved' ? 'No new instruction' : 'has not been sent'));
+  if (status === 'draft') {
+    await act(async () => { await commitVisualInstruction(marked.draft!); });
+    expect(dispatch).toHaveBeenCalledTimes(1);
+  }
+});
+
+it.each(['none', 'failure'])('requires a composer Send after Live meaning resolution returns %s', async result => {
+  const routing = { backend: 'codex' as const, model: 'selected', effort: 'low' as const, permissionMode: 'plan' as const, mode: 'single' as const, pickedMode: 'solo' as const, collide: false };
+  const target = { threadId: 'unresolved-meaning-chat', repoPath: '/fixture' };
+  const observation = sampleObservation();
+  const draft: VisualInstructionDraft = { principal: 'fixture', status: 'draft', template: { text: '', wireMessage: '[o8-visual-instruction]', images: [], routing },
+    request: { version: 1, id: crypto.randomUUID(), createdAt: '2026-10-24T12:00:00Z', target, utterance: 'Make it bigger.',
+      frames: [{ id: 'marked-button', atMs: 0, width: 320, height: 280, image: observation.image, observation, strokes: [], pins: [], transcript: '',
+        candidates: [{ id: 'button', name: 'Save', role: 'button', rect: [0.1, 0.2, 0.1, 0.1] }] }] } };
+  marked.draft = draft;
+  const resolver = vi.fn(async () => result === 'none' ? Response.json({ kind: 'none' }) : Response.json({ error: 'Fixture unavailable' }, { status: 503 }));
+  const dispatch = vi.fn(async (_url: unknown, init?: RequestInit) => Response.json({ item: { ...JSON.parse(String(init?.body)), status: 'queued' } }));
+  vi.mocked(fetch).mockImplementation(async (url, init) => url === '/api/mobile/ripple/resolve' ? resolver()
+    : url === '/api/orchestrator/composer-queue' ? dispatch(url, init) : Response.json({ enabled: true, entitled: true }));
+  const queue = { items: [], ready: true, error: null } as unknown as ComponentProps<typeof ManagedChatVoiceEntry>['queue'];
+  const ordinary = vi.fn();
+  await act(async () => root.render(createElement(ManagedChatVoiceEntry, { identity: [target.threadId], visualTarget: target, queue,
+    capture: () => draft.template, messages: [], busy: false, terminals: {}, send: ordinary, interrupt: vi.fn() })));
+  await toggleVoice();
+  await act(async () => { void fixture.backend!.delegate('Make it bigger.', 'unresolved-voice-request', vi.fn(async () => {})).catch(() => {}); });
+  expect(resolver).toHaveBeenCalledTimes(1);
+  expect(dispatch).not.toHaveBeenCalled(); expect(ordinary).not.toHaveBeenCalled();
+  expect(marked.draft?.status).toBe('draft');
+  const { commitVisualInstruction } = await import('@/lib/composer/visual-instruction-commit');
+  await act(async () => { await commitVisualInstruction(marked.draft!); });
+  expect(dispatch).toHaveBeenCalledTimes(1);
 });

@@ -9,7 +9,7 @@ import { claimVisualCapture, releaseVisualCapture } from '@/lib/composer/visual-
 import { DictationHost } from '@/components/desktop/dictation/DictationHost';
 import type { DictationStartOptions, DictationState } from '@/components/desktop/dictation/types';
 const test = vi.hoisted(() => ({ principal: 'a', rows: new Map<string, VisualInstructionDraft>(), listeners: new Set<() => void>(), hold: null as Promise<void> | null,
-  removal: null as Promise<void> | null, remove: vi.fn(),
+  removal: null as Promise<void> | null, remove: vi.fn(), receipt: null as Promise<void> | null, receiptEdit: null as (() => void) | null,
   dictation: 'idle' as DictationState, words: null as DictationStartOptions | null, cancel: vi.fn() }));
 vi.mock('@/components/auth/O8AuthProvider', () => ({ useO8Auth: () => ({ user: { id: test.principal }, isLoaded: true }) }));
 vi.mock('@/lib/tauri/bridge', () => ({ canUseTauriEvents: () => false, isTauri: () => false }));
@@ -33,7 +33,15 @@ vi.mock('@/lib/composer/visual-draft-store', () => ({
   readVisualDraft: (principal: string) => test.rows.get(principal) ?? null,
   subscribeVisualDrafts: (listener: () => void) => { test.listeners.add(listener); return () => test.listeners.delete(listener); },
   restoreVisualDraft: async () => {}, removeVisualDraft: async () => { await test.remove(); await test.removal; test.rows.delete('a'); test.listeners.forEach(listener => listener()); },
-  saveVisualDraft: async (draft: VisualInstructionDraft) => { test.rows.set(draft.principal, draft); test.listeners.forEach(listener => listener()); if (draft.status === 'saving') await test.hold; },
+  saveVisualDraft: async (draft: VisualInstructionDraft) => {
+    test.rows.set(draft.principal, draft); test.listeners.forEach(listener => listener());
+    if (draft.status === 'draft' && draft.meaningCheck) {
+      const edit = test.receiptEdit; test.receiptEdit = null;
+      if (edit) queueMicrotask(edit);
+      await test.receipt;
+    }
+    if (draft.status === 'saving') await test.hold;
+  },
 }));
 const { VisualComposerArea } = await import('./VisualComposerArea');
 const { POST: resolveRipple } = await import('@/app/api/mobile/ripple/resolve/route');
@@ -63,7 +71,7 @@ function mount(scope = 'chat-a') { root.render(React.createElement(DictationHost
 const send = () => node.querySelector<HTMLButtonElement>('[data-testid="composer-send-control"]')!;
 beforeEach(async () => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-  test.principal = 'a'; test.rows.clear(); test.rows.set('a', sample()); test.hold = null; test.removal = null; test.remove.mockClear(); test.listeners.clear(); fetcher.mockReset();
+  test.principal = 'a'; test.rows.clear(); test.rows.set('a', sample()); test.hold = null; test.removal = null; test.receipt = null; test.receiptEdit = null; test.remove.mockClear(); test.listeners.clear(); fetcher.mockReset();
   inference.route.mockReset(); inference.provider.mockReset();
   inference.route.mockResolvedValue({ url: 'https://model.example.test/resolve', headers: {}, via: 'direct' });
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
@@ -384,4 +392,35 @@ it('drops a confirmed meaning after the words or marked pixels change', async ()
   await act(async () => send().click());
   expect(inference.provider).toHaveBeenCalledTimes(2);
   expect(sentInstruction().wireMessage).not.toContain('intent.size =');
+});
+
+it.each(['none', 'timeout'])('does not add a 3100ms receipt write to the resolver deadline: %s', async result => {
+  vi.useFakeTimers();
+  inference.provider.mockImplementation(() => result === 'none'
+    ? Promise.resolve(providerResult({ kind: 'none' })) : new Promise<Response>(() => {}));
+  await meaningDraft('Set this button width to 160px.');
+  let persisted = false;
+  test.receipt = new Promise<void>(resolve => setTimeout(() => { persisted = true; resolve(); }, 3100));
+  await act(async () => send().click());
+  await act(async () => vi.advanceTimersByTimeAsync(1500));
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  expect(persisted).toBe(false);
+  expect(test.rows.get('a')?.status).toBe('saved');
+  await act(async () => vi.advanceTimersByTimeAsync(1600));
+  expect(persisted).toBe(true);
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  expect(test.rows.get('a')?.status).toBe('saved');
+});
+
+it('retains a newer draft edit arriving between advisory receipt publication and dispatch', async () => {
+  inference.provider.mockImplementation(async () => providerResult({ kind: 'none' }));
+  await meaningDraft('Set this button width to 160px.');
+  test.receiptEdit = () => {
+    const current = test.rows.get('a')!;
+    test.rows.set('a', { ...current, request: { ...current.request, utterance: 'Keep these newer words unsent.' } });
+    test.listeners.forEach(listener => listener());
+  };
+  await act(async () => send().click());
+  expect(fetcher).not.toHaveBeenCalled();
+  expect(test.rows.get('a')).toMatchObject({ status: 'draft', request: { utterance: 'Keep these newer words unsent.' } });
 });
