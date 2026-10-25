@@ -218,7 +218,8 @@ it.each(['store', 'mcp'] as const)('confirms exact worker cleanup when Stop wins
   await dead();
   expect(lanes.getLane(currentLane.id)).toMatchObject({ status: 'paused', sessionKey: null });
   expect(control.readOrchestratorControlPlaneState().packets[0]).toMatchObject({ operatorStopped: true, queueState: 'held' });
-  expect((await io.findSession(spawned!))?.recentRuns[0]).toMatchObject({ id: saved.activeRun!.id, outcome: 'interrupted' });
+  await vi.waitFor(async () => expect((await io.findSession(spawned!))?.recentRuns[0])
+    .toMatchObject({ id: saved.activeRun!.id, outcome: 'interrupted' }));
   finishAttempt!(); await pending;
 }, 40000);
 
@@ -239,5 +240,5 @@ it.each(['store', 'escalation'] as const)('allows %s Stop under a live denied re
     }
   });
   await dead();
-  expect((await io.findSession(surfaceId))?.recentRuns[0].outcome).toBe('interrupted');
+  await vi.waitFor(async () => expect((await io.findSession(surfaceId))?.recentRuns[0].outcome).toBe('interrupted'));
 }, 30000);
