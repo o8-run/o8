@@ -1,3 +1,4 @@
+import { hasRuntimeLaunchDeadline, runtimeLaunchStep } from '@/lib/runtime/launch-deadline';
 import { createWorkerFailureHandler } from './worker-failure';
 import { assertRuntimeEffortPin } from '@/lib/orchestrator/effort-pin';
 import { assertOwnedActionFence, hasOwnedActionFence } from './action-fence';
@@ -462,7 +463,7 @@ export function createOwnedRunController({
   async function spawnOwnedRunInner(session: OwnedSessionRecord, prompt: string, mode: OwnedRunMode) {
     assertRuntimeEffortPin(runtimeId, session.model, session.effort);
     assertOwnedSingleAttemptSpawn(session, runtimeId, mode);
-    await ensureDir(path.join(session.sessionDir, RUNS_DIR));
+    await runtimeLaunchStep(session, 'run_directory', () => ensureDir(path.join(session.sessionDir, RUNS_DIR)));
 
     const runId = `${Date.now()}-${randomUUID().slice(0, 8)}`;
     const stdoutPath = path.join(session.sessionDir, RUNS_DIR, `${runId}.jsonl`);
@@ -470,15 +471,15 @@ export function createOwnedRunController({
 
     let binary: string;
     try {
-      binary = (await resolveCli({
+      binary = (await runtimeLaunchStep(session, 'binary_resolution', () => resolveCli({
         runtimeId,
         binaryName: adapter.binaryName,
         envOverride: adapter.binaryEnvOverride,
         extraEnvOverrides: adapter.binaryExtraEnvOverrides,
-      })).path;
+      }))).path;
     } catch (error) {
       if (!(error instanceof CliNotFoundError)) {
-        if (session.executionPolicy !== undefined) throw error;
+        if (hasRuntimeLaunchDeadline() || session.executionPolicy !== undefined) throw error;
         console.error(`[owned-session] ${runtimeId} CLI resolution failed, falling back to bare "${adapter.binaryName}":`, error);
         binary = adapter.binaryName;
       } else {
@@ -506,7 +507,7 @@ export function createOwnedRunController({
     const readOnlySandbox = resolveReadOnlySandboxPlan(session);
     const sandboxEnabled = workerSandboxEnabled() || readOnlySandbox.enforced;
     const credentialPolicy = credentialPolicyFingerprint(runtimeId);
-    const { args, stdinPayload, workerMcp } = await prepareOwnedLaunchArgs({
+    const { args, stdinPayload, workerMcp } = await runtimeLaunchStep(session, 'launch_arguments', () => prepareOwnedLaunchArgs({
       adapter,
       session,
       runId,
@@ -514,21 +515,21 @@ export function createOwnedRunController({
       mode,
       sandboxEnabled,
       humanLabel,
-    });
+    }));
     // Prepare the exact isolated config root before Seatbelt is built.
     const adapterEnv: Record<string, string> = adapter.extraSpawnEnv
-      ? await adapter.extraSpawnEnv(session)
+      ? await runtimeLaunchStep(session, 'runtime_environment', () => adapter.extraSpawnEnv!(session))
       : {};
     const runtimeState = preparedRuntimeStateSandboxPolicy(adapter, session, adapterEnv);
 
-    const carrierLaunch = await resolveExecutionCarrierInvocation({ runtime: runtimeId as OrchestratorRuntime, runtimeConfig: session.runtimeConfig, runtimeBinary: binary, runtimeArgs: args });
+    const carrierLaunch = await runtimeLaunchStep(session, 'execution_carrier', () => resolveExecutionCarrierInvocation({ runtime: runtimeId as OrchestratorRuntime, runtimeConfig: session.runtimeConfig, runtimeBinary: binary, runtimeArgs: args }));
     let spawnBinary = carrierLaunch.command;
     let spawnArgs = carrierLaunch.args;
     const sandboxEnvExtra: Record<string, string> = {};
     if (sandboxEnabled) {
       try {
         const controlledSandbox = controlledProviderSandbox(session, spawnBinary);
-        const prepared = await prepareWorkerSandbox({
+        const prepared = await runtimeLaunchStep(session, 'sandbox_preparation', () => prepareWorkerSandbox({
           ...controlledSandbox,
           runId,
           profileDir: path.join(session.sessionDir, RUNS_DIR),
@@ -546,7 +547,7 @@ export function createOwnedRunController({
           enforceReadOnly: readOnlySandbox.enforced,
           finalAllowReadWritePaths: runtimeState.writablePaths,
           finalImmutableWritePaths: runtimeState.immutablePaths,
-        });
+        }));
         spawnBinary = prepared.binary;
         spawnArgs = prepared.args;
         const { apiPort, wsPort } = resolvePortInfo();
@@ -620,22 +621,22 @@ export function createOwnedRunController({
     };
     try {
       if (session.laneId) {
-        await ensureDispatchBackendReady(runtimeId, mode, { laneId: session.laneId, packetId: session.packetId });
+        await runtimeLaunchStep(session, 'backend_gate', () => ensureDispatchBackendReady(runtimeId, mode, { laneId: session.laneId!, packetId: session.packetId }));
       } else {
-        await ensureDispatchBackendReady(runtimeId, mode);
+        await runtimeLaunchStep(session, 'backend_gate', () => ensureDispatchBackendReady(runtimeId, mode));
       }
-      const durableSession = await io.findSession(session.surfaceId);
+      const durableSession = await runtimeLaunchStep(session, 'durable_session', () => io.findSession(session.surfaceId));
       assertOwnedActionAdmission(durableSession);
       assertDurableOwnedSpawn(durableSession, session, runtimeId, mode);
       Object.assign(session, durableSession);
       return await withControlledTaskSpawn(session, runtimeId, runId, async () => {
-        const spawnDecision = await assertOwnedWorkspaceSpawnAvailable({
+        const spawnDecision = await runtimeLaunchStep(session, 'workspace_spawn_guard', () => assertOwnedWorkspaceSpawnAvailable({
           surfaceId: session.surfaceId, sessionPacketId: session.packetId ?? null, laneId: session.laneId ?? null,
           runtimeId, mode, binding: session.workspaceBinding ?? null, repoPath: session.repoPath,
-        }, workspaceSpawnGuard);
+        }, workspaceSpawnGuard));
         const materializationIdentity = spawnDecision.materializationIdentity ?? null;
-        assertOwnedActionAdmission(await io.findSession(session.surfaceId));
-        await assertOwnedActionFence(session.surfaceId, await io.findSession(session.surfaceId));
+        assertOwnedActionAdmission(await runtimeLaunchStep(session, 'spawn_session', () => io.findSession(session.surfaceId)));
+        await runtimeLaunchStep(session, 'action_fence', async () => assertOwnedActionFence(session.surfaceId, await io.findSession(session.surfaceId)));
         const bridgeLaunch = guardedWorkspaceInvocation(spawnBinary, spawnArgs, materializationIdentity);
         const cliCmd = [bridgeLaunch.command, ...bridgeLaunch.args].map(quoteShellArg).join(' ');
         const shellCmd = `${stdinPayload ? `printf %s ${quoteShellArg(stdinPayload)} | ` : ''}${cliCmd} | tee '${stdoutPath}' 2>'${stderrPath}'`;
@@ -662,7 +663,7 @@ export function createOwnedRunController({
         session.reviewDispositionUpdatedAt = nowIso();
         session.activeRun = preparedRun;
         prependOwnedRun(session, preparedRun);
-        await io.saveSession(session);
+        await runtimeLaunchStep(session, 'prepared_journal', () => io.saveSession(session));
 
         try {
           assertOwnedActionAdmission(session, runId);
@@ -670,7 +671,7 @@ export function createOwnedRunController({
           const bridgeEnv = ownedSpawnEnvironment(session, spawnEnv, true);
           const hasProviderCredentials = Object.entries(bridgeEnv).some(([name, value]) => value && providerCredentialName(name));
           // Credential-bearing launches require policy validation at OS spawn.
-          if (!hasOwnedActionFence() && !useSupervisor && !hasProviderCredentials && !workerMcp.configPath && workerMcp.servers.length === 0 && process.platform !== 'win32' && session.executionPolicy === undefined && !carrierLaunch.carried && !crashSurvivableWorkersEnabled()) {
+          if (!hasRuntimeLaunchDeadline() && !hasOwnedActionFence() && !useSupervisor && !hasProviderCredentials && !workerMcp.configPath && workerMcp.servers.length === 0 && process.platform !== 'win32' && session.executionPolicy === undefined && !carrierLaunch.carried && !crashSurvivableWorkersEnabled()) {
             try {
               const result = await spawnBridgeTerminalSession({
                 sessionName: bridgeSessionName,
@@ -706,11 +707,11 @@ export function createOwnedRunController({
                 materializationIdentity,
               };
               if (useSupervisor) {
-                supervised = await spawnCredentialCheckedSupervised({ ...launchInput, stdoutPath, stderrPath, stdinPath });
+                supervised = await runtimeLaunchStep(session, 'process_spawn', () => spawnCredentialCheckedSupervised({ ...launchInput, stdoutPath, stderrPath, stdinPath }));
                 pid = supervised.pid;
                 detachMode = 'detached';
               } else {
-                const child = spawnCredentialCheckedChild(launchInput);
+                const child = await runtimeLaunchStep(session, 'process_spawn', async () => spawnCredentialCheckedChild(launchInput));
                 detachedChild = child;
                 observeChildExit(child, (childExit) => {
                   if (!runPersisted) {
@@ -740,7 +741,7 @@ export function createOwnedRunController({
 
         const processGroupId = process.platform !== 'win32' && detachMode === 'detached' && pid > 0
           ? pid
-          : await resolveSpawnedProcessGroupId(pid);
+          : await runtimeLaunchStep(session, 'process_group', () => resolveSpawnedProcessGroupId(pid));
         const run: OwnedRunRecord = {
           ...preparedRun,
           pid,
@@ -752,7 +753,7 @@ export function createOwnedRunController({
           ...(supervised ? { supervisor: { id: runId, owner: session.surfaceId, epoch: supervised.epoch, cursor: 0 },
             processIdentity: supervised.identity, processIdentitySource: 'platform' as const, processIdentityRequired: true } : {}),
         };
-        if (!supervised) await captureOwnedRunIdentity(session, runtimeId, run);
+        if (!supervised) await runtimeLaunchStep(session, 'process_identity', () => captureOwnedRunIdentity(session, runtimeId, run));
 
         if (session.packetId && session.executionPolicy === undefined) {
           try {
@@ -770,14 +771,14 @@ export function createOwnedRunController({
 
         session.activeRun = run;
         session.recentRuns = session.recentRuns.map((candidate) => candidate.id === run.id ? run : candidate);
-        await io.saveSession(session);
+        await runtimeLaunchStep(session, 'started_journal', () => io.saveSession(session));
         runPersisted = true;
         if (detachedChild && pendingDetachedExit) {
           void recordDetachedChildExit(session.surfaceId, run.id, run.stderrPath, pendingDetachedExit).catch((err) => {
             console.warn(`[owned-store] ${runtimeId} child-exit recording failed for ${run.id}:`, err);
           });
         }
-        await assertOwnedSessionProcessIdentity(session, runtimeId);
+        await runtimeLaunchStep(session, 'identity_proof', () => assertOwnedSessionProcessIdentity(session, runtimeId));
         return run;
       });
     } catch (error) {

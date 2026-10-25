@@ -1,3 +1,4 @@
+import { runtimeLaunchStep, withRuntimeLaunchDeadline } from './launch-deadline';
 import { assertNotKnowledgeSource } from '@/lib/cortex/knowledge/sources';
 import { assertReviewerPrCheckout } from '@/lib/orchestrator/reviewer-pr-source';
 import { assertPreRunAdmission, retireCancelledPreRunWorktree } from '@/lib/lane/pre-run-cancellation';
@@ -39,9 +40,7 @@ import { confirmDiscoveredInterrupt } from '@/lib/runtime/confirmed-interrupt';
 import { settleRuntimeLaunchGovernance } from '@/lib/runtime/launch-governance';
 import { holdPendingOwnedCorrections } from '@/lib/runtimes/shared/owned-session/action-admission';
 import { assertSingleAttemptLaunch } from '@/lib/runtime/single-attempt-launch';
-
 export type RuntimeActionKind = 'steer' | 'stop' | 'send_input' | 'interrupt' | 'watch' | 'resolve' | 'launch';
-
 export interface RuntimeActionRequest {
   /** Restricts automated steering to this uninterrupted owned run. */
   automaticRecoveryRunId?: string;
@@ -184,7 +183,6 @@ export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promi
   }
   return launchRuntimeSurfaceInner(payload);
 }
-
 async function launchRuntimeSurfaceInner(payload: RuntimeLaunchRequest): Promise<RuntimeLaunchResult> {
   const runtimeId = payload.runtime;
   const prompt = payload.prompt?.trim();
@@ -424,42 +422,44 @@ async function launchRuntimeSurfaceInner(payload: RuntimeLaunchRequest): Promise
       throw packetWorktreeProvisionError(payload, runtimeId, repoPath, note, note);
     }
   }
-  await assertReviewerPrCheckout(payload.packetId, cwd);
-  assertPreRunAdmission();
-  const result = await runtime.launch({
-    cwd,
-    sourceRepoPath: repoPath,
-    branchName: payload.branchName,
-    baseBranch: payload.baseBranch,
-    prompt: launchPrompt,
-    taskName: payload.taskName,
-    clientMutationId: payload.clientMutationId,
-    model: payload.model,
-    claudeCodeModel: payload.claudeCodeModel,
-    claudeCodeCarrier: payload.claudeCodeCarrier,
-    executionCarrier: payload.executionCarrier,
-    effort: payload.effort,
-    worktreeFlag: launchWorktree?.claudeWorktreeFlag,
-    worktreePath: launchWorktree?.worktree?.path,
-    laneId: payload.existingLaneId ?? undefined,
-    packetId: payload.packetId,
-    spendCap: payload.spendCap,
-    workMode: workModeResolution.workMode,
-    executionPolicy: payload.executionPolicy,
-    controlledTask: payload.controlledTask,
-    controlledProvider: payload.controlledProvider,
-  });
+  return withRuntimeLaunchDeadline({ runtime: runtimeId, laneId: payload.existingLaneId ?? undefined, packetId: payload.packetId }, async () => {
+    await runtimeLaunchStep({ laneId: payload.existingLaneId ?? undefined, packetId: payload.packetId }, 'reviewer_checkout', () => assertReviewerPrCheckout(payload.packetId, cwd));
+    assertPreRunAdmission();
+    const result = await runtime.launch({
+      cwd,
+      sourceRepoPath: repoPath,
+      branchName: payload.branchName,
+      baseBranch: payload.baseBranch,
+      prompt: launchPrompt,
+      taskName: payload.taskName,
+      clientMutationId: payload.clientMutationId,
+      model: payload.model,
+      claudeCodeModel: payload.claudeCodeModel,
+      claudeCodeCarrier: payload.claudeCodeCarrier,
+      executionCarrier: payload.executionCarrier,
+      effort: payload.effort,
+      worktreeFlag: launchWorktree?.claudeWorktreeFlag,
+      worktreePath: launchWorktree?.worktree?.path,
+      laneId: payload.existingLaneId ?? undefined,
+      packetId: payload.packetId,
+      spendCap: payload.spendCap,
+      workMode: workModeResolution.workMode,
+      executionPolicy: payload.executionPolicy,
+      controlledTask: payload.controlledTask,
+      controlledProvider: payload.controlledProvider,
+    });
 
-  return settleRuntimeLaunchGovernance({
-    payload,
-    runtime,
-    runtimeId,
-    prompt,
-    result,
-    launchWorktree,
-    projectId: projectContext?.id ?? null,
-    cwd,
-    repoPath,
+    return runtimeLaunchStep({ laneId: payload.existingLaneId ?? undefined, packetId: payload.packetId }, 'launch_governance', () => settleRuntimeLaunchGovernance({
+      payload,
+      runtime,
+      runtimeId,
+      prompt,
+      result,
+      launchWorktree,
+      projectId: projectContext?.id ?? null,
+      cwd,
+      repoPath,
+    }));
   });
 }
 

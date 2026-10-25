@@ -15,6 +15,7 @@ import { NextRequest } from 'next/server';
 
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { declarativeLaunchDeadlineTest } from './fixtures/declarative-launch-deadline';
 import type { OrchestratorMissionState, OrchestratorPacket } from '@/lib/orchestrator/types';
 
 const queueProbe = vi.hoisted(() => ({ entered: 0 }));
@@ -165,7 +166,7 @@ writeFileSync(
     '  process.exit(0);',
     '}',
     'fs.appendFileSync(',
-    '  process.env.O8_FAKE_QODER_CAPTURE,',
+    `  ${JSON.stringify(capturePath)},`,
     "  `${JSON.stringify({ cwd: process.cwd(), argv: process.argv.slice(2) })}\\n`,",
     ');',
     "process.stderr.write('fake qoder fatal exit\\n');",
@@ -290,6 +291,7 @@ async function waitFor<T>(
 }
 
 describe('declarative packet dispatch worktree reachability', () => {
+  declarativeLaunchDeadlineTest({ repo: createRemoteBackedRepo, packet, mission, capturePath });
   beforeEach(() => {
     readinessBoundary.real = false;
     worktreeFailure.enabled = false;
@@ -331,13 +333,14 @@ describe('declarative packet dispatch worktree reachability', () => {
 
     const spawn = await waitFor(() => {
       if (!existsSync(capturePath)) return null;
-      const line = readFileSync(capturePath, 'utf8').trim().split('\n').filter(Boolean)[0];
+      const line = readFileSync(capturePath, 'utf8').trim().split('\n').filter(Boolean)
+        .find(row => realpathSync(JSON.parse(row).cwd) === realpathSync(launchedLane!.worktreePath!));
       return line ? JSON.parse(line) as { cwd: string; argv: string[] } : null;
     }, 'fake qoder spawn');
     expect(realpathSync(spawn.cwd)).not.toBe(realpathSync(repoPath));
     expect(launchedLane?.worktreePath).toBeTruthy();
     expect(laneRegistry.getLaneEvents(launchedLane!.id, 200)
-      .filter((event) => event.verb === 'runtime_launch_step').map((event) => event.payload.phase))
+      .filter((event) => event.verb === 'runtime_launch_step' && event.payload.step === 'backend_readiness').map((event) => event.payload.phase))
       .toEqual(['started', 'completed']);
     expect(launchedPacket.lane?.worktreePath).toBe(launchedLane?.worktreePath);
     const worktreePath = realpathSync(launchedLane!.worktreePath!);
@@ -451,7 +454,7 @@ describe('declarative packet dispatch worktree reachability', () => {
   it('retries changing artifact accounting before spawning and records the admission cause', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })));
     mkdirSync(ownedRoot, { recursive: true });
-    artifactRace.file = join(ownedRoot, 'active-writer.log');
+    artifactRace.file = join(realpathSync(ownedRoot), 'active-writer.log');
     artifactRace.reads = 0;
     writeFileSync(artifactRace.file, 'initial writer output\n');
     const repoPath = createRemoteBackedRepo();
@@ -484,7 +487,7 @@ describe('declarative packet dispatch worktree reachability', () => {
   it('stops after three admission retries when the writer never settles, without spawning or deleting evidence', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })));
     mkdirSync(ownedRoot, { recursive: true });
-    artifactRace.file = join(ownedRoot, 'continuous-writer.log');
+    artifactRace.file = join(realpathSync(ownedRoot), 'continuous-writer.log');
     artifactRace.reads = 0;
     artifactRace.continuous = true;
     writeFileSync(artifactRace.file, 'initial writer output\n');
@@ -560,7 +563,7 @@ describe('declarative packet dispatch worktree reachability', () => {
     });
     const lane = lanes.findLatestLaneByPacket(packetId)!;
     const events = lanes.getLaneEvents(lane.id, 200);
-    const steps = events.filter((event) => event.verb === 'runtime_launch_step');
+    const steps = events.filter((event) => event.verb === 'runtime_launch_step' && event.payload.step === 'backend_readiness');
     expect(steps.map((event) => event.payload.phase)).toEqual(['started', 'failed']);
     expect(steps[0].payload).toMatchObject({ packetId, runtime: 'qoder', step: 'backend_readiness', deadlineMs: 20_000 });
     expect(steps[1].payload).toMatchObject({

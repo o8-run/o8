@@ -1,3 +1,5 @@
+import { assertRuntimeSpawnDeadline } from '@/lib/runtime/launch-deadline';
+import { getLane } from '@/lib/lane/registry';
 import type { ChildProcess } from 'node:child_process';
 import { spawnWithWorkAdmission as spawn } from '@/lib/app-update/work-launch-admission';
 import { bindDeferredCodexMcpLaunch } from '@/lib/providers/deferred-mcp-arguments';
@@ -9,7 +11,7 @@ import { assertControlledLaunchGrantCurrent } from '@/lib/mcp/task-execution-adm
 import { ownedSpawnEnvironment } from './restricted-spawn-env';
 import { assertOwnedActionAdmission } from './action-admission';
 import type { OwnedSessionRecord } from './types';
-import { withChildEnvironment } from '@/lib/providers/child-process';
+import { withChildCreationGuard, withChildEnvironment } from '@/lib/providers/child-process';
 import { reserveWorkLaunch } from '@/lib/app-update/work-launch-admission';
 import { ownedSupervisorClient, type SupervisorReceipt } from '@/lib/runtime/o8d-supervisor';
 import { getDataDir } from '@/lib/data-dir-migration';
@@ -42,7 +44,13 @@ function withCheckedLaunch<T>(input: LaunchInput, create: (launch: { command: st
       ? bindDeferredCodexMcpLaunch(env, input.args, input.mcpServers ?? [], build) : build(input.args);
     assertControlledLaunchGrantCurrent(input.session);
     assertOwnedActionAdmission(input.session, input.runId);
-    return create(launch, env);
+    return withChildCreationGuard(() => {
+      assertOwnedActionAdmission(input.session, input.runId);
+      assertRuntimeSpawnDeadline();
+      if (input.session.laneId && getLane(input.session.laneId)?.lastEventLabel === 'runtime_launch_timeout') {
+        throw new Error('Original launch timed out; inspect its held receipt before starting another worker.');
+      }
+    }, () => create(launch, env));
   });
 }
 
