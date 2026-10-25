@@ -64,17 +64,30 @@ replace a newly selected project. The fixture contract similarly accepts a
 surface-owned socket peer. Session embedding, shared HTTP/transport contracts,
 backend pagination and the worker fixture retain the prior integration fixes.
 
-The shared files retained in this PR are:
+Sidebar request adapters live in `src/surfaces/sidebar/thread_list_client.rs`.
+They use `Client::get`, `url`, `request` and `read`, preserving operator bearer
+handling, timeouts, response limits and mutation errors. `client.rs` is unchanged.
+The existing `Client::sessions` entry delegates to sidebar discovery so standalone
+sessions, grids and worker callers retain the same complete paged inventory.
 
-- `native/o8-next/src/client.rs`, `conversation.rs`, `shell_session.rs`, `transport.rs`
-  and `ui.rs`: existing HTTP, stream and retained session integration.
-- `native/o8-next/src/projects.rs` and `surfaces/projects.rs`: the ledger snapshot
-  and generic catalog-change dispatch used to fence stale discovery.
-- `native/o8-next/src/shell.rs`, `shell_view.rs` and `surface_registry.rs`: generic
-  lifecycle/layout dispatch and the Unassigned workspace identity.
-- `native/o8-next/src/issue_tests.rs`: the previously fixed bounded I/O wait.
-- `scripts/next/dev-server.ts` and `surface-routes.ts`: generic socket registration.
-- `scripts/next/worker-server.ts`: the previously fixed history-list fixture route.
-- `src/app/api/mobile/orchestrator/threads/route.ts` and
-  `src/lib/mobile/orchestrator-thread-history.ts`: existing bounded pagination.
-- `tests/test-classification.json`: generated sidebar test classification.
+Each shared file still changed has a cross-surface responsibility:
+
+| Shared file | Why this cannot live only in the sidebar module |
+| --- | --- |
+| `native/o8-next/src/shell.rs` | Dispatch generic rail lifecycle hooks, normalize Unassigned workspace selection, and contain the single sidebar inventory entry. |
+| `native/o8-next/src/surface_registry.rs` | Define shared initialization, refresh, tick, content decoration and catalog-change hooks with no-op defaults. |
+| `native/o8-next/src/shell_view.rs` | Pass the shell's active content through registered decorators so a persistent rail can sit beside every surface. |
+| `native/o8-next/src/surfaces/session.rs` | Own the shared Session record and compatibility `sessions()` entry used by grids, workers and standalone sessions; delegate discovery to the sidebar adapter. |
+| `native/o8-next/src/shell_session.rs` | Expose retained-session selection and embed the existing session surface without constructing another session sidebar. |
+| `native/o8-next/src/ui.rs` | Suppress the session surface's own rail when embedded while preserving standalone rendering and focus. |
+| `native/o8-next/src/conversation.rs` | Reconcile embedded transcripts using shell-owned inventory rather than independently rereading every sidebar page each second. |
+| `native/o8-next/src/transport.rs` | Reuse the shared authenticated WebSocket connection lifecycle for a global subscription without duplicating transport. |
+| `native/o8-next/src/projects.rs` | Expose the Projects-owned ledger snapshot needed to retain registered repositories without chats. |
+| `native/o8-next/src/surfaces/projects.rs` | Publish catalog-change notifications at the owner of project mutations so stale sidebar reads cannot overwrite newer choices. |
+| `native/o8-next/src/issue_tests.rs` | Keep the previously fixed bounded real-I/O wait in the sibling Issues fixture tests that run alongside sidebar bootstrap. |
+| `scripts/next/dev-server.ts` | Attach a discovered surface's socket peer at the shared HTTP server lifecycle boundary. |
+| `scripts/next/surface-routes.ts` | Type the generic socket registration hook used by the shared fixture host. |
+| `scripts/next/worker-server.ts` | Keep the history-list production route available on the separate worker fixture entry used by shell tests. |
+| `src/app/api/mobile/orchestrator/threads/route.ts` | Admit the bounded offset query at the actual shared desktop/mobile HTTP endpoint. |
+| `src/lib/mobile/orchestrator-thread-history.ts` | Apply bounded paging in the server's shared history reader so all clients read the same records. |
+| `tests/test-classification.json` | Register the sidebar's real-path test in the repository-wide generated classification manifest. |

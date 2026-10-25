@@ -1,5 +1,5 @@
 use super::*;
-use crate::{client::same_workspace, model::History};
+use crate::model::History;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -124,10 +124,8 @@ pub struct Session {
     pub packet_header: Option<Value>,
     #[serde(default)]
     pub tmux_session: Option<String>,
-}
-#[derive(Deserialize)]
-struct Sessions {
-    threads: Vec<Session>,
+    #[serde(default)]
+    pub packet_state: bool,
 }
 impl Session {
     pub fn key(&self) -> String {
@@ -153,85 +151,7 @@ pub struct QueueError {
 
 impl Client {
     pub fn sessions(&self) -> Result<Vec<Session>, String> {
-        let mut sessions = self
-            .get::<Sessions>("/api/mobile/orchestrator/threads", &[("limit", "500")])?
-            .threads;
-        let state: Value = self.get("/api/orchestrator/state", &[])?;
-        for session in &mut sessions {
-            if session.status == "busy" {
-                session.status = "running".into();
-            }
-            let mut candidates = Vec::new();
-            if let Some(packets) = state["mission"]["packets"].as_array() {
-                for packet in packets.iter().filter(|p| {
-                    p["orchestratorThreadId"] == session.id && p["status"] != "archived"
-                }) {
-                    let mut subject = session.clone();
-                    subject.status = packet["status"].as_str().unwrap_or("idle").into();
-                    subject.rejected = packet["review"]["approved"] == false;
-                    subject.outcome =
-                        (packet["releaseState"] == "released").then(|| "merged".into());
-                    let timestamp = packet["releaseStatePayload"]["releasedAt"]
-                        .as_str()
-                        .or(packet["archivedAt"].as_str())
-                        .or(packet["lastEventAt"].as_str())
-                        .or(packet["lane"]["lastEventAt"].as_str())
-                        .unwrap_or("")
-                        .to_owned();
-                    candidates.push((subject, timestamp));
-                }
-            }
-            candidates.sort_by(|(a, at), (b, bt)| {
-                crate::sidebar::rank(b)
-                    .cmp(&crate::sidebar::rank(a))
-                    .then_with(|| crate::sidebar::working(b).cmp(&crate::sidebar::working(a)))
-                    .then_with(|| bt.cmp(at))
-            });
-            if let Some((subject, _)) = candidates.first() {
-                session.status = subject.status.clone();
-                session.rejected = subject.rejected;
-                session.outcome = subject.outcome.clone();
-            }
-        }
-        let inventory: Value = self.get("/api/runtime/inventory", &[("fresh", "1")])?;
-        for agent in inventory["agents"].as_array().into_iter().flatten() {
-            let Some(key) = agent["sessionKey"].as_str().filter(|key| key.contains(':')) else {
-                continue;
-            };
-            if sessions.iter().any(|session| session.key() == key) {
-                continue;
-            }
-            let packet_header = state["mission"]["packets"].as_array().and_then(|packets| packets.iter().find(|packet| packet["lane"]["sessionKey"] == key)).map(|packet| json!({
-                "enabled":true,"title":packet["title"],"branch":packet["branchTarget"],"runtime":packet["runtime"],"status":packet["status"],"repo":packet["workspaceTargetPath"].as_str().and_then(|path| path.rsplit('/').find(|part| !part.is_empty())),"launchContext":packet["launchContext"]
-            }));
-            sessions.push(Session {
-                tmux_session: agent["tmuxSession"].as_str().map(str::to_owned),
-                id: key.into(),
-                title: agent["name"].as_str().unwrap_or(key).into(),
-                runtime: agent["runtime"].as_str().unwrap_or("").into(),
-                status: agent["status"].as_str().unwrap_or("idle").into(),
-                message_count: 0,
-                last_message_at: agent["lastActivityAt"]
-                    .as_i64()
-                    .map(|time| format!("{time:020}"))
-                    .unwrap_or_default(),
-                repo_path: None,
-                backend: None,
-                outcome: None,
-                rejected: false,
-                unread: false,
-                packet_header,
-            });
-        }
-        if let Some(workspace) = self.workspace() {
-            sessions.retain(|session| {
-                session
-                    .repo_path
-                    .as_deref()
-                    .is_some_and(|path| same_workspace(path, workspace))
-            });
-        }
-        Ok(sessions)
+        self.sidebar_threads()
     }
     pub fn context(&self, session: &Session) -> Result<Value, String> {
         let record: Value = self.get(

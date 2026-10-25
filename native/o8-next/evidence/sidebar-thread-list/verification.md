@@ -104,3 +104,5 @@ The surface-registration follow-up moves the current tests to
 Their original test function names remain intact; historical red receipts above
 retain their original paths. See `docs/surfaces/sidebar.md` for registration,
 fixture ownership and the shared integration files.
+
+The #4696 request-ownership follow-up is captured in [API registration verification](api-registration/verification.md).
