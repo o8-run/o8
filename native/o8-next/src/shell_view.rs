@@ -2,6 +2,10 @@ use super::*;
 use crate::theme::current as theme;
 impl Render for Shell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let overlay_open = registrations().iter().any(|r| (r.overlay_open)(self));
+        if !self.connected && !overlay_open {
+            self.focus.focus(window);
+        }
         if !registrations().iter().any(|r| (r.block_ensure)(self)) {
             self.ensure(window, cx);
         }
@@ -45,7 +49,6 @@ impl Render for Shell {
                         gpui::MouseButton::Left,
                         cx.listener(|_, _, window, _| window.prevent_default()),
                     )
-                    .child("o8 next alpha")
                     .children(before_workspaces)
                     .children(self.workspaces.clone().into_iter().enumerate().map(
                         |(i, workspace)| {
@@ -76,7 +79,7 @@ impl Render for Shell {
                             .id("shell-palette")
                             .cursor_pointer()
                             .p(px(6.))
-                            .child("Commands (Ctrl+K / Cmd+K)")
+                            .child("Commands")
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.capture(window, cx);
                                 this.palette = true;
@@ -86,22 +89,16 @@ impl Render for Shell {
                                 this.revision += 1;
                                 cx.notify();
                             })),
-                    )
-                    .child(
-                        div()
-                            .id("shell-retry")
-                            .cursor_pointer()
-                            .p(px(6.))
-                            .child("Retry")
-                            .on_click(cx.listener(|this, _, _, cx| this.load(cx))),
                     ),
             )
-            .child(
-                div()
-                    .debug_selector(|| "shell-status".into())
-                    .p(px(8.))
-                    .child(self.notice.clone()),
-            )
+            .when(self.connected && !self.notice.is_empty(), |view| {
+                view.child(
+                    div()
+                        .debug_selector(|| "shell-status".into())
+                        .p(px(8.))
+                        .child(self.notice.clone()),
+                )
+            })
             .when(self.palette, |view| {
                 view.child(
                     div()
@@ -172,12 +169,40 @@ impl Render for Shell {
                             }),
                     ),
             )
-            .child(div().flex_1().min_h_0().child(content.unwrap_or_else(|| {
+            .child(
                 div()
-                    .p(px(24.))
-                    .child("Open a saved session or grid from Commands.")
-                    .into_any_element()
-            })))
+                    .flex_1()
+                    .min_h_0()
+                    .child(if self.connected || overlay_open {
+                        content.unwrap_or_else(|| div().into_any_element())
+                    } else {
+                        div()
+                            .size_full()
+                            .flex()
+                            .flex_col()
+                            .items_center()
+                            .justify_center()
+                            .gap(px(16.))
+                            .child(
+                                div()
+                                    .debug_selector(|| "shell-status".into())
+                                    .child(self.notice.clone()),
+                            )
+                            .when(!self.loading, |view| {
+                                view.child(
+                                    div()
+                                        .id("shell-retry")
+                                        .debug_selector(|| "shell-retry".into())
+                                        .cursor_pointer()
+                                        .p(px(8.))
+                                        .bg(theme().surface_raised)
+                                        .child("Retry")
+                                        .on_click(cx.listener(|this, _, _, cx| this.load(cx))),
+                                )
+                            })
+                            .into_any_element()
+                    }),
+            )
             .child(canvas(|_, _, _| (), move |_, _, _, _| painted.set(revision)).size(px(1.)))
     }
 }

@@ -83,7 +83,7 @@ impl Shell {
             palette: false,
             query: String::new(),
             choice: 0,
-            notice: "Connecting to local o8 server…".into(),
+            notice: "Connecting…".into(),
             loading: false,
             connected: false,
             revision: 0,
@@ -124,8 +124,11 @@ impl Shell {
             return;
         }
         self.loading = true;
-        self.notice = "Connecting to local o8 server…".into();
         let client = self.client.clone();
+        let missing_token = client
+            .request("GET", &client.url("/").unwrap())
+            .header("Authorization")
+            .is_none();
         let task = cx.background_executor().spawn(async move {
             let sessions = client.sessions()?;
             let mut load = WorkspaceLoad {
@@ -148,25 +151,51 @@ impl Shell {
                     Ok((sessions, load)) => {
                         this.sessions = sessions;
                         this.workspaces = load.paths.into_iter().collect();
+                        let recovering = !this.connected;
+                        let selected = this.state.selected.clone();
                         this.connected = true;
                         if let Some(active) = load.active_project {
-                            if !this.state.selected.as_ref().is_some_and(|w| active.contains(w)) {
+                            if !this
+                                .state
+                                .selected
+                                .as_ref()
+                                .is_some_and(|w| active.contains(w))
+                            {
                                 this.state.selected = active.first().cloned();
                             }
-                        } else if !this.state.selected.as_ref().is_some_and(|w| this.workspaces.contains(w)) {
+                        } else if !this
+                            .state
+                            .selected
+                            .as_ref()
+                            .is_some_and(|w| this.workspaces.contains(w))
+                        {
                             this.state.selected = this.workspaces.first().cloned();
                         }
-                        this.notice = if this.workspaces.is_empty() { "Connected. No saved workspace sessions." } else { "Connected · Ctrl+K / Cmd+K: commands · Ctrl+Tab: next surface" }.into();
-                        this.persist();
+                        if recovering {
+                            this.notice.clear();
+                        }
+                        if selected != this.state.selected {
+                            this.persist();
+                        }
                     }
                     Err(error) => {
                         this.connected = false;
-                        this.notice = format!("Local server unavailable: {error}. Start the local o8 server, then Retry.");
+                        this.notice = if error.contains("HTTP 401") || error.contains("HTTP 403") {
+                            if missing_token {
+                                "Token missing"
+                            } else {
+                                "Token rejected"
+                            }
+                        } else {
+                            "Server down"
+                        }
+                        .into();
                     }
                 }
                 cx.notify();
             });
-        }).detach();
+        })
+        .detach();
         cx.notify();
     }
     fn workspace_sessions(&self) -> Vec<Session> {
@@ -245,7 +274,7 @@ impl Shell {
         }
     }
     fn switch(&mut self, workspace: String, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.workspaces.contains(&workspace) {
+        if !self.connected || !self.workspaces.contains(&workspace) {
             return;
         }
         self.capture(window, cx);
@@ -297,14 +326,18 @@ impl Shell {
         commands
             .into_iter()
             .filter(|c| {
-                c.label(&self.sessions)
-                    .to_lowercase()
-                    .contains(&self.query.to_lowercase())
+                (self.connected || c.registration().overlay_command)
+                    && c.label(&self.sessions)
+                        .to_lowercase()
+                        .contains(&self.query.to_lowercase())
             })
             .collect()
     }
     fn execute(&mut self, command: Command, window: &mut Window, cx: &mut Context<Self>) {
         let registration = command.registration();
+        if !self.connected && !registration.overlay_command {
+            return;
+        }
         if registration.overlay_command {
             (registration.open)(self, command, window, cx);
             return;
@@ -389,6 +422,14 @@ impl Shell {
                     }
                 }
             }
+        } else if !self.connected {
+            if key == "f5" {
+                self.load(cx);
+            }
+            if !registrations().iter().any(|r| (r.overlay_open)(self)) {
+                cx.stop_propagation();
+            }
+            return;
         } else if modifiers.control && !modifiers.alt && !modifiers.platform && key == "tab" {
             self.capture(window, cx);
             for registration in registrations() {
@@ -434,6 +475,9 @@ impl Shell {
         cx.stop_propagation();
     }
     fn tick(&mut self, refresh: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if refresh {
+            self.load(cx);
+        }
         let before = serde_json::to_vec(&self.state).unwrap();
         self.capture(window, cx);
         if before != serde_json::to_vec(&self.state).unwrap() {

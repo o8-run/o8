@@ -25,6 +25,12 @@ impl Fixture {
         Self::start_mode(false, if settings { "--settings" } else { "" })
     }
     pub(super) fn start_mode(projects: bool, option: &str) -> Self {
+        Self::start_port(projects, option, 0)
+    }
+    pub(super) fn on_port(port: u16) -> Self {
+        Self::start_port(false, "", port)
+    }
+    fn start_port(projects: bool, option: &str, port: u16) -> Self {
         let root = std::env::temp_dir().join(format!(
             "o8-shell-{}-{}",
             std::process::id(),
@@ -63,6 +69,7 @@ impl Fixture {
         }
         let mut server = command
             .current_dir(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.."))
+            .env("O8_NEXT_FIXTURE_PORT", port.to_string())
             .env(
                 "O8_NEXT_BRAIN_REQUEST_LOG",
                 root.join("brain-requests.json"),
@@ -107,9 +114,11 @@ impl Fixture {
 
 impl Drop for Fixture {
     fn drop(&mut self) {
-        let _ = Process::new("kill")
-            .args(["-TERM", &self.server.id().to_string()])
-            .status();
+        if self.server.try_wait().ok().flatten().is_none() {
+            let _ = Process::new("kill")
+                .args(["-TERM", &self.server.id().to_string()])
+                .status();
+        }
         let _ = self.server.wait();
         if let Ok(directory) = std::env::var("O8_NEXT_SETTINGS_DIAGNOSTICS") {
             let _ = fs::copy(

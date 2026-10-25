@@ -1,16 +1,16 @@
 import { spawn, execFileSync, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import { createServer } from 'node:http';
-import { mkdtempSync, writeFileSync, readFileSync, rmSync, chmodSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, rmSync, chmodSync, realpathSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 
 let host: ChildProcess;
 let origin = '';
 let configDir = '';
-const root = mkdtempSync(join(tmpdir(), 'o8-shell-launch-'));
+const root = realpathSync(mkdtempSync(join(tmpdir(), 'o8-shell-launch-')));
 const token = 'fixture-shell-operator';
 beforeAll(async () => {
   execFileSync(process.execPath, ['cli/esbuild.config.mjs'], { stdio: 'pipe' });
@@ -121,4 +121,17 @@ it('does not forward the desktop account session to a different explicit loopbac
   const result = JSON.parse(readFileSync(receipt, 'utf8')) as { status: number; desktopSession: boolean };
   expect(result.status).toBe(200);
   expect(result.desktopSession).toBe(false);
+});
+
+
+it('resolves token and state configuration through a directory alias using canonical paths', () => {
+  const alias = join(root, 'config-alias');
+  symlinkSync(configDir, alias, 'junction');
+  const receipt = join(root, 'alias-receipt.json');
+  const env: NodeJS.ProcessEnv = { ...process.env, O8_DATA_DIR: alias };
+  for (const key of ['O8_API_PORT', 'O8_API_TOKEN', 'O8_NEXT_API_TOKEN', 'O8_WORKER_TOKEN', 'O8_SPECTATOR_TOKEN']) delete env[key];
+  execFileSync(process.execPath, ['cli/dist/o8.mjs', 'next', '--enable-next', '--binary', launcherProbe(receipt), '--app-shell'], { env, stdio: 'pipe' });
+  const result = JSON.parse(readFileSync(receipt, 'utf8')) as { args: string[]; status: number };
+  expect(result.status).toBe(200);
+  expect(realpathSync(dirname(result.args[result.args.indexOf('--shell-state') + 1]))).toBe(realpathSync(configDir));
 });
