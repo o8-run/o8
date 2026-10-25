@@ -2,6 +2,8 @@
 use super::*;
 #[path = "files/viewer.rs"]
 mod component;
+#[path = "files/requests.rs"]
+mod requests;
 pub(super) type View = component::Files;
 #[path = "files/guard.rs"]
 pub(crate) mod guard;
