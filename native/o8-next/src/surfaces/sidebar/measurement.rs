@@ -17,27 +17,28 @@ fn sidebar_2000_thread_first_paint_and_scroll_measurement(cx: &mut TestAppContex
         let cx = &mut visual;
         loop {
             cx.run_until_parked();
-            cx.update(|window, cx| {
-                window.refresh();
-                window.draw(cx).clear();
+            // open() bypasses launch()'s timer. Drain the real surface tick and
+            // both layout/paint turns while asynchronous HTTP settles.
+            shell.update_in(cx, |s, window, cx| s.tick(false, window, cx));
+            draw(cx);
+            let (connected, threads, painted, diagnostic) = shell.read_with(cx, |s, cx| {
+                let list = s.surfaces.sidebar.view.as_ref().unwrap().read(cx);
+                (
+                    s.connected,
+                    list.sessions
+                        .iter()
+                        .filter(|s| s.id.starts_with("thoughts-sidebar-"))
+                        .count(),
+                    list.painted.get(),
+                    list.diagnostic(),
+                )
             });
-            if shell.read_with(cx, |s, cx| {
-                s.connected
-                    && s.surfaces
-                        .sidebar
-                        .view
-                        .as_ref()
-                        .unwrap()
-                        .read(cx)
-                        .painted
-                        .get()
-                        != usize::MAX
-            }) {
+            if connected && threads == 2000 && painted != usize::MAX {
                 break;
             }
             assert!(
                 start.elapsed() < std::time::Duration::from_secs(20),
-                "HTTP bootstrap must reach a painted thread"
+                "HTTP bootstrap must reach 2,000 records and a painted thread within 20s: sample={sample} connected={connected} threads={threads} painted={painted} sidebar={diagnostic}"
             );
             std::thread::sleep(std::time::Duration::from_millis(5));
         }

@@ -157,6 +157,10 @@ impl ThreadList {
             .and_then(|id| self.rows.iter().find(|r| r.id.as_ref() == Some(id)))
     }
     fn rebuild(&mut self) {
+        let previous_choice = self
+            .rows
+            .iter()
+            .position(|r| r.id.is_some() && r.id == self.choice);
         if let Some(session) = self
             .sessions
             .iter()
@@ -172,12 +176,42 @@ impl ThreadList {
             &self.expanded,
             &self.branch_ids,
         ));
+        // An incoming message can push the keyboard choice past Show more.
+        // Disclosure must follow that thread's identity before choosing a fallback.
+        if self.query.trim().is_empty()
+            && !self
+                .rows
+                .iter()
+                .any(|r| r.id.is_some() && r.id == self.choice)
+            && let Some(session) = self
+                .sessions
+                .iter()
+                .find(|s| self.choice.as_ref() == Some(&s.id))
+        {
+            self.expanded
+                .insert(recents::group(session, recents::now()).into());
+            self.rows = Rc::new(recents::rows(
+                &self.sessions,
+                &self.query,
+                &self.search_matches,
+                &self.expanded,
+                &self.branch_ids,
+            ));
+        }
         if !self
             .rows
             .iter()
             .any(|r| r.id.is_some() && r.id == self.choice)
         {
             self.choice = self.rows.iter().find_map(|r| r.id.clone());
+        }
+        if let Some(index) = self
+            .rows
+            .iter()
+            .position(|r| r.id.is_some() && r.id == self.choice)
+            && previous_choice.is_some_and(|previous| previous != index)
+        {
+            self.scroll.scroll_to_item(index, ScrollStrategy::Top);
         }
     }
     pub fn catalog_changed(&mut self) {
