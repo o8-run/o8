@@ -22,16 +22,33 @@ pub async fn serve(
     upstream: String,
     key: String,
     bus: Arc<EventBus>,
-    shutdown: tokio::sync::watch::Receiver<bool>,
+    mut shutdown: tokio::sync::watch::Receiver<bool>,
 ) -> std::io::Result<()> {
+    let mut connections = tokio::task::JoinSet::new();
     loop {
-        let (socket, peer) = listener.accept().await?;
-        let (upstream, key, bus) = (upstream.clone(), key.clone(), bus.clone());
-        let shutdown = shutdown.clone();
-        tokio::spawn(async move {
-            let _ = connection(socket, peer.ip().to_string(), upstream, key, bus, shutdown).await;
-        });
+        tokio::select! {
+            _ = shutdown.changed() => break,
+            _ = connections.join_next(), if !connections.is_empty() => {},
+            accepted = listener.accept() => {
+                let (socket, peer) = accepted?;
+                let (upstream, key, bus) = (upstream.clone(), key.clone(), bus.clone());
+                let shutdown = shutdown.clone();
+                connections.spawn(async move {
+                    let _ = connection(socket, peer.ip().to_string(), upstream, key, bus, shutdown).await;
+                });
+            }
+        }
     }
+    // Release the public port before announcing fallback. Existing TCP streams
+    // remain alive until their HTTP responses complete; WS tasks observe shutdown.
+    drop(listener);
+    println!("{}", json!({"draining":true}));
+    let _ = timeout(Duration::from_secs(5), async {
+        while connections.join_next().await.is_some() {}
+    })
+    .await;
+    // JoinSet aborts remaining connections at the bounded shutdown deadline.
+    Ok(())
 }
 
 async fn connection(

@@ -38,11 +38,30 @@ publication during fallback, restart, and oversized-publication fallback.
 These are **bounded replay guarantees**, not a durable journal: history evicted
 from the TS log uses the existing checkpoint/gap protocol. Exact redelivery of
 all transitions beyond that retention window is still outstanding for #4533.
-HTTP forwarding drains for a fixed 100 ms during orderly Rust shutdown; this is
-best effort, and a slow request or abrupt process exit can lose its acknowledgment
-after TS accepts it. Completion-aware draining or idempotent ingress remains to
-be implemented. The Rust frontend does not negotiate permessage-deflate; device
+During orderly producer shutdown, Rust stops accepting and releases the public
+listener before notifying the bridge to start TypeScript fallback. Existing
+HTTP connections drain until they finish, with a five-second shutdown deadline;
+WebSocket clients close and reconnect for replay. A real accepted ingress test
+holds a request body across fallback for 400 ms and verifies its 202 response
+and exactly one replayed mutation. Abrupt exit or ingress exceeding the deadline
+can still lose an acknowledgment after TypeScript accepts it; idempotent ingress
+remains outstanding. The Rust frontend does not negotiate permessage-deflate; device
 traffic and legacy channel fan-out still use their TS owners.
+
+## Acceptance audit for #4533
+
+The merged #4538 supplies the off-by-default publish path and 1 MiB pipe bound,
+the four live app parity recordings, real-entry missing/exited-binary fallback,
+and flag-on/off stall, fan-out (1 and 20 clients), and memory measurements.
+Its restart test recovers all 30 retained events, in order, across TypeScript
+fallback and Rust restart. This follow-up replaces the fixed 100 ms ingress
+delay with tracked connection draining while fallback is already available.
+
+The no-loss acceptance item is still partial. Replay beyond the existing
+TypeScript retention window needs a durable journal, and abrupt or overdue
+ingress needs idempotent acknowledgment/retry semantics. Keep #4533 open until
+those guarantees have real-entry evidence. macOS runtime measurements have not
+been collected in the Linux fixture environment.
 
 ## Verification and measurements
 

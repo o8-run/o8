@@ -93,9 +93,15 @@ export class O8dBridge {
       };
       child.once('error', failed);
       child.once('exit', failed);
-      output.once('line', (line) => {
+      output.on('line', (line) => {
         try {
-          if (typeof JSON.parse(line).listening !== 'string') throw new Error('invalid readiness');
+          const message = JSON.parse(line);
+          if (ready && message.draining === true && this.child === child) {
+            this.transport = 'typescript';
+            if (!this.stopped && !this.fallback.listening) this.fallback.listen(this.port, '0.0.0.0');
+            return;
+          }
+          if (ready || typeof message.listening !== 'string') throw new Error('invalid readiness');
           ready = true;
           clearTimeout(timeout);
           this.transport = 'o8d';

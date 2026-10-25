@@ -109,14 +109,14 @@ async fn websocket_run() -> Result<(), Box<dyn std::error::Error>> {
             Ok::<(), ()>(())
         });
         let (shutdown, receiver) = tokio::sync::watch::channel(false);
+        let app = o8d::app::serve(listener, upstream, key, bus, receiver);
+        tokio::pin!(app);
         tokio::select! {
-            result = o8d::app::serve(listener, upstream, key, bus, receiver) => { result?; }
+            result = &mut app => { result?; return Ok(()); }
             _ = input => {}
         }
         let _ = shutdown.send(true);
-        // Stop accepting, close WS clients, and let already accepted HTTP
-        // ingress responses drain before the supervisor reclaims the listener.
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        app.await?;
         return Ok(());
     }
     let token = env::var("WS_TOKEN")?.trim().to_owned();

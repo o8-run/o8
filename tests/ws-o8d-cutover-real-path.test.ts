@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { once } from 'node:events';
 import { createConnection } from 'node:net';
+import { request as httpRequest } from 'node:http';
 import { promisify } from 'node:util';
 import { beforeAll, expect, it } from 'vitest';
 import { runRecordedSession, type RecordedSession } from '../scripts/lib/ws-parity-session';
@@ -79,6 +80,39 @@ it('bounds the producer pipe and replays an oversized publication after falling 
       expect(fallback.events().filter((event) => event.data?.mutation?.mutationId === 'pipe-overflow')).toHaveLength(1);
     } finally { await fallback.close(); await first.close(); }
   } finally { await server.stop(); }
+});
+
+it('completes accepted HTTP ingress across a pipe-triggered handoff to TypeScript', async () => {
+  const server = await startParityReference({ o8d: true, binary, logLimit: 400 });
+  const first = await cutoverClient(server.url, server.token);
+  const body = JSON.stringify({ kind: 'mutation', mutation: { mutationId: 'accepted-before-drain',
+    source: 'server', action: 'cutover-fixture', status: 'completed', createdAt: '2026-01-01T00:00:00.000Z' } });
+  const request = httpRequest(new URL('/internal/realtime', server.url.replace(/^ws/, 'http')), {
+    method: 'POST', agent: false, headers: { Authorization: `Bearer ${server.token}`,
+      'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body), Expect: '100-continue', Connection: 'close' },
+  });
+  const completed = new Promise<number | null>((resolve) => {
+    request.once('error', () => resolve(null));
+    request.once('response', (response) => {
+      response.resume();
+      response.once('end', () => resolve(response.statusCode ?? null));
+    });
+  });
+  try {
+    request.flushHeaders();
+    // The real TS HTTP server's Continue proves it accepted this request.
+    await once(request, 'continue');
+    await publishCutoverMutation(server, 'drain-trigger', 1024 * 1024 + 1);
+    await waitForTransport(server, 'typescript');
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    request.end(body);
+    expect(await completed).toBe(202);
+    const fallback = await cutoverClient(server.url, server.token, { since: first.since, epoch: first.epoch });
+    try {
+      await fallback.delivered('accepted-before-drain');
+      expect(fallback.events().filter((event) => event.data?.mutation?.mutationId === 'accepted-before-drain')).toHaveLength(1);
+    } finally { await fallback.close(); }
+  } finally { request.destroy(); await first.close(); await server.stop(); }
 });
 
 it('replays every event across exit, TS fallback publication and a Rust restart', async () => {
