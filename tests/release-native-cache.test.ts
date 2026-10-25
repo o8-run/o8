@@ -389,6 +389,75 @@ describe('native release cache real entry points', { timeout: 120_000 }, () => {
     expect(readFileSync(join(second, 'src-tauri/target/.release-native-artifact/o8'), 'utf8')).toBe('native artifact');
   });
 
+  it.each([
+    ['MACOSX_DEPLOYMENT_TARGET', '15.0', '14.0'],
+    ['RUSTFLAGS', '--cfg o8_next_fixture_first', '--cfg o8_next_fixture_second'],
+    ['O8_TAURI_BUILD_TARGET', 'aarch64-apple-darwin', 'universal-apple-darwin'],
+    ['cargo-config', '[build]\nrustflags = ["--cfg", "o8_next_fixture_first"]\n', '[build]\nrustflags = ["--cfg", "o8_next_fixture_second"]\n'],
+  ])('rebuilds the o8 next sidecar before artifact reuse after changing %s on the same clean commit', (key, first, second) => {
+    const f = fixture();
+    put(f.root, '.gitignore', readFileSync(join(f.root, '.gitignore'), 'utf8') + 'src-tauri/helpers/o8-next*\n');
+    for (const name of ['build-speech-local.mjs', 'build-pi-write.mjs', 'bust-stale-patch-cache.mjs', 'packaged-server-smoke.mjs']) {
+      put(f.root, 'scripts/' + name, 'process.exit(0);');
+    }
+    put(f.root, 'scripts/next/build-sidecar.mjs', `
+      import { mkdirSync, writeFileSync, readFileSync, appendFileSync } from 'node:fs';
+      import { join } from 'node:path';
+      const setting = ${JSON.stringify(key)} === 'cargo-config'
+        ? readFileSync(join(process.env.CARGO_HOME, 'config.toml'), 'utf8') : process.env[${JSON.stringify(key)}];
+      mkdirSync('src-tauri/helpers', { recursive: true });
+      for (const suffix of ['', '-aarch64-apple-darwin', '-x86_64-apple-darwin', '-universal-apple-darwin']) {
+        writeFileSync('src-tauri/helpers/o8-next' + suffix, 'fixture sidecar ' + setting);
+      }
+      appendFileSync('.fixture/next-builds', 'compile\\n');
+    `);
+    put(f.root, 'scripts/tauri-export.mjs', `
+      import { mkdirSync, writeFileSync } from 'node:fs';
+      mkdirSync('out', { recursive: true }); writeFileSync('out/server.js', 'fixture export');
+    `);
+    put(f.root, 'node_modules/next/dist/bin/next', `
+      const fs = require('node:fs'); fs.mkdirSync('.next/cache', { recursive: true });
+      fs.writeFileSync('.next/cache/proof', 'fixture web compiler output');
+    `);
+    mkdirSync(join(f.root, '.fixture')); commit(f.root);
+    const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: f.root, encoding: 'utf8' }).trim();
+    const script = `
+      import { spawnSync } from 'node:child_process';
+      import { runPrebuild } from ${JSON.stringify(new URL('../scripts/lib/prebuild-continuation.mjs', import.meta.url).href)};
+      await runPrebuild({ canReuse: true, runBuild: operation => operation(async (command, args, env) => {
+        const result = spawnSync(command, args, { env, stdio: 'inherit' });
+        if (result.error) throw result.error; return result.status ?? 1;
+      }) });
+    `;
+    const run = (value: string) => {
+      const env = { ...f.env, CARGO_HOME: join(f.base, 'cargo') };
+      if (key === 'cargo-config') put(env.CARGO_HOME, 'config.toml', value);
+      else Object.assign(env, { [key]: value });
+      const result = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
+        cwd: f.root, env, encoding: 'utf8', timeout: 90_000,
+      });
+      expect(result.status, result.stdout + result.stderr).toBe(0);
+      return result.stdout;
+    };
+    const manifest = () => JSON.parse(readFileSync(join(f.root, 'out/.o8-release-artifact-manifest.json'), 'utf8'));
+    const builds = () => readFileSync(join(f.root, '.fixture/next-builds'), 'utf8').trim().split('\n');
+    run(first);
+    const original = manifest().recipe;
+    expect(original.worktreeClean).toBe(true);
+    expect(run(first)).toContain('reused verified artifact');
+    expect(builds()).toHaveLength(1);
+    const changed = run(second);
+    expect(changed).toContain('rebuilding artifact: recipe_mismatch');
+    expect(manifest().recipe.recipeSha256).not.toBe(original.recipeSha256);
+    expect(manifest().recipe.head).toBe(head);
+    expect(manifest().recipe.worktreeClean).toBe(true);
+    expect(JSON.stringify(manifest().recipe)).not.toContain('o8_next_fixture_second');
+    expect(JSON.stringify(manifest().recipe)).not.toContain(join(f.base, 'cargo'));
+    expect(readFileSync(join(f.root, 'src-tauri/helpers/o8-next-universal-apple-darwin'), 'utf8')).toBe('fixture sidecar ' + second);
+    expect(run(second)).toContain('reused verified artifact');
+    expect(builds()).toHaveLength(2);
+  }, 90_000);
+
   it('skips unchanged speech compilation through prebuild and rebuilds changed speech sources', () => {
     const f = fixture();
     put(f.root, 'scripts/build-speech-local.mjs', `

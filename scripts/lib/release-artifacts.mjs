@@ -10,6 +10,7 @@ import {
 } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 import { collectReleaseBuildCacheIdentity } from './release-build-cache.mjs';
+import { compilerEnvironment } from './release-native-inputs.mjs';
 
 export const RELEASE_ARTIFACT_MANIFEST = 'out/.o8-release-artifact-manifest.json';
 
@@ -154,6 +155,14 @@ export function collectReleaseArtifactRecipe(root, version, options = {}) {
   const webBuildCompatibilitySha256 = collectReleaseBuildCacheIdentity(root, 'web', {
     env: options.env ?? process.env,
   }).compatibilitySha256;
+  // Whole-artifact reuse also skips native sidecar compilation. Use the native
+  // compiler registry (including external Cargo config), without persisting its
+  // values or depending on generated frontend files that prebuild recreates.
+  const env = options.env ?? process.env;
+  const nativeCompilerInputsSha256 = createHash('sha256').update(stableJson({
+    environment: compilerEnvironment(root, 'native', env),
+    sidecarTarget: env.O8_TAURI_BUILD_TARGET || env.TAURI_ENV_TARGET_TRIPLE || '',
+  })).digest('hex');
   const recipe = {
     schema: 'o8/release-artifact-recipe/v1',
     head,
@@ -175,6 +184,7 @@ export function collectReleaseArtifactRecipe(root, version, options = {}) {
     },
     inputs,
     webBuildCompatibilitySha256,
+    nativeCompilerInputsSha256,
   };
   return {
     ...recipe,
