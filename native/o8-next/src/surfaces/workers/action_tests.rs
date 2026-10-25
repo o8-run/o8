@@ -134,3 +134,45 @@ fn workers_actions_are_reachable_by_tab_and_enter(cx: &mut TestAppContext) {
             .any(|call| call.starts_with("GET /api/worktrees/diff?"))
     );
 }
+
+#[gpui::test]
+fn workers_lost_steer_reopens_with_same_key_and_draft(cx: &mut TestAppContext) {
+    let (fixture, shell, mut visual) = task(cx);
+    let state_file = fixture.root.join("worker-actions.json");
+    let _: Value = fixture.client.get("/api/workers-fixture", &[("drop", "1")]).unwrap();
+    super::tests::click(&mut visual, "worker-adjust-worker-blocked");
+    visual.simulate_input("Retain this adjustment");
+    super::tests::click(&mut visual, "worker-send-worker-blocked");
+    let first = receipt(&fixture)["bodies"][0].clone();
+    assert_eq!(receipt(&fixture)["deliveries"].as_array().unwrap().len(), 1);
+    visual.simulate_keystrokes("ctrl-w"); visual.run_until_parked(); draw(&mut visual);
+    assert!(shell.read_with(&visual, |s, _| !s.content.contains_key(&s.key(&Tab::Workers))), "the original Workers entity must be removed");
+
+    // A fresh shell has no retained Card, runtime slot or in-memory request.
+    let (fresh, mut reopened) = open(fixture.client.clone(), state_file.clone(), State::load(&state_file).unwrap(), cx);
+    ready(&fresh, &mut reopened);
+    reopened.simulate_keystrokes("ctrl-shift-p"); reopened.simulate_keystrokes("w o r k e r s enter"); ready(&fresh, &mut reopened);
+    let view = fresh.read_with(&reopened, |s, _| { let Content::Workers(v) = s.content.get(&s.key(&Tab::Workers)).unwrap() else { panic!("Workers") }; v.clone() });
+    let card = view.read_with(&reopened, |v, _| v.cards["worker-blocked"].clone());
+    assert_eq!(card.read_with(&reopened, |c, cx| c.composer.read(cx).text.clone()), "Retain this adjustment", "an unconfirmed draft must survive closing Workers");
+    assert_eq!(card.read_with(&reopened, |c, _| c.pending.clone()), Some(first.clone()), "reopening must retain the original idempotency identity");
+    let private_file = state_file.with_extension("workers.json");
+    let saved: Value = serde_json::from_slice(&fs::read(&private_file).unwrap()).unwrap();
+    assert!(saved.to_string().contains(first["idempotencyKey"].as_str().unwrap()));
+    #[cfg(unix)] {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(fs::metadata(&private_file).unwrap().permissions().mode() & 0o777, 0o600);
+    }
+    super::tests::click(&mut reopened, "worker-adjust-worker-running"); reopened.simulate_input("Separate task draft");
+    view.read_with(&reopened, |v, _| v.scroll[v.filter].scroll_to_bottom()); draw(&mut reopened);
+    super::tests::click(&mut reopened, "worker-send-worker-blocked");
+    let replay = receipt(&fixture);
+    assert_eq!(replay["bodies"].as_array().unwrap().len(), 2);
+    assert_eq!(replay["bodies"][1], first);
+    assert_eq!(replay["deliveries"].as_array().unwrap().len(), 1, "reopening must not deliver another steer");
+    assert!(card.read_with(&reopened, |c, _| c.pending.is_none()));
+    assert!(card.read_with(&reopened, |c, cx| c.composer.read(cx).text.is_empty()));
+    let saved = fs::read_to_string(&private_file).unwrap();
+    assert!(!saved.contains(first["idempotencyKey"].as_str().unwrap()), "only a confirmed response may release the pending key");
+    assert!(saved.contains("Separate task draft"), "confirming one card must retain another card's draft");
+}
