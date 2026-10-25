@@ -155,8 +155,20 @@ class TTSEngineImpl {
     this.tauriListenerSetup = true;
     import('@tauri-apps/api/event')
       .then(({ listen }) => {
-        void listen<{ state?: 'idle' | 'playing' | 'paused' }>('o8:tts-state', (e) => {
+        void listen<{ state?: 'idle' | 'playing' | 'paused'; messageId?: string | null; usingFallback?: boolean; voiceError?: unknown }>('o8:tts-state', (e) => {
           if (this.webPlayback) return;
+          if (e.payload?.usingFallback) {
+            // A late native fallback must not warn on a stopped/new message or
+            // on unrelated Symon read-back (which has no message ID).
+            if (typeof e.payload.messageId !== 'string' || e.payload.messageId !== this._state.activeMessageId) return;
+            this.updateState({
+              state: 'playing',
+              usingFallback: true,
+              voiceError: isEdgeVoiceError(e.payload.voiceError) ? e.payload.voiceError : null,
+              activeChunk: null,
+            });
+            return;
+          }
           const next = e.payload?.state;
           if (next === 'playing') {
             this.updateState({ state: 'playing' });
