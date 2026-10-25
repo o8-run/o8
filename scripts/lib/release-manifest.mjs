@@ -89,9 +89,8 @@ function assertUniversalDarwinArtifact(artifact) {
 function cpuDarwinPlatforms(artifacts, universal, version, downloadBase) {
   if (!Array.isArray(artifacts) || ![1, 2].includes(artifacts.length)
     || new Set(artifacts.map((artifact) => artifact?.architecture)).size !== artifacts.length
-    || !artifacts.some((artifact) => artifact?.architecture === 'x86_64')
     || artifacts.some((artifact) => !['x86_64', 'arm64'].includes(artifact?.architecture))) {
-    throw new Error('CPU packages require exactly one x86_64 artifact, optionally with one arm64 artifact');
+    throw new Error('CPU packages require one artifact per selected macOS architecture');
   }
   const platforms = {};
   const uploadAssets = [];

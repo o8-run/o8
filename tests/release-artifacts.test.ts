@@ -191,8 +191,21 @@ describe('release updater manifest', () => {
     expect(plan.uploadArgs.some(path => path.includes('o8_arm64.'))).toBe(false);
   });
 
-  it.each([{ architectures: ['arm64'] }, { architectures: ['x86_64', 'x86_64'] }, { architectures: [] }] as Array<{ architectures: Array<'x86_64' | 'arm64'> }>)('rejects a partial or duplicate CPU set $architectures', ({ architectures }) => {
-    expect(() => buildReleaseManifest(cpuPlan(architectures).options)).toThrow('exactly one x86_64');
+  it('supports Apple Silicon-only delivery while retaining the Intel universal fallback', () => {
+    const f = cpuPlan(['arm64']);
+    const plan = buildReleaseManifest(f.options);
+    expect(plan.latestJson.platforms).toEqual({
+      'darwin-x86_64': { signature: 'universal-signature', url: 'https://example.test/v0.1.999/o8.app.tar.gz' },
+      'darwin-aarch64': { signature: 'arm64-signature', url: 'https://example.test/v0.1.999/o8_arm64.app.tar.gz' },
+    });
+    expect(plan.uploadArgs).toEqual([
+      ...f.bundle.macosAssets,
+      ...f.cpus.flatMap((cpu) => [cpu.dmgPath, cpu.archivePath, cpu.signaturePath]),
+    ]);
+  });
+
+  it.each([{ architectures: ['x86_64', 'x86_64'] }, { architectures: ['arm64', 'arm64'] }, { architectures: [] }] as Array<{ architectures: Array<'x86_64' | 'arm64'> }>)('rejects an empty or duplicate CPU set $architectures', ({ architectures }) => {
+    expect(() => buildReleaseManifest(cpuPlan(architectures).options)).toThrow('one artifact per selected macOS architecture');
   });
 
   it('rejects a CPU artifact derived from another universal build', () => {

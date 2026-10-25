@@ -322,6 +322,46 @@ describe('release channels through the publication entry point', () => {
     if (channel === 'preview') expect(existsSync(join(f.bundle, 'macos/latest.json'))).toBe(false);
   });
 
+  it.each([
+    { channel: 'stable', version: '0.1.741', manifest: 'latest.json' },
+    { channel: 'preview', version: '0.1.741-preview.1', manifest: 'preview.json' },
+  ])('generates the $channel feed from all three macOS distributions and retains every download', ({ channel, version, manifest }) => {
+    const f = fixture(version);
+    const result = run(f, channel, [], addCpuFixtures(f));
+    expect(result.status, result.stderr).toBe(0);
+    const plan = JSON.parse(readFileSync(join(f.bundle, 'macos', manifest), 'utf8'));
+    const uploads = effects(f).filter(c => c.name === 'gh' && ['create', 'upload'].includes(c.args[1]));
+    const uploaded = new Set(uploads.flatMap(c => c.args.map(arg => arg.split('/').at(-1))));
+    for (const name of [`o8_${version}_universal.dmg`, 'o8.app.tar.gz', 'o8.app.tar.gz.sig']) {
+      expect(uploaded.has(name), name).toBe(true);
+    }
+    for (const [architecture, platform] of [['x86_64', 'darwin-x86_64'], ['arm64', 'darwin-aarch64']] as const) {
+      const cpu = resolveMacosCpuArtifacts(f.root, version, architecture);
+      expect(plan.platforms[platform].url).toMatch(new RegExp(`/o8_${architecture}\\.app\\.tar\\.gz$`));
+      expect(plan.platforms[platform].signature).toBe(readFileSync(cpu.updaterSignature, 'utf8').trim());
+      for (const name of [`o8_${version}_${architecture}.dmg`, `o8_${architecture}.app.tar.gz`, `o8_${architecture}.app.tar.gz.sig`]) {
+        expect(uploaded.has(name), name).toBe(true);
+      }
+    }
+  });
+
+  it.each([
+    { channel: 'stable', version: '0.1.741', manifest: 'latest.json' },
+    { channel: 'preview', version: '0.1.741-preview.1', manifest: 'preview.json' },
+  ])('generates an Apple Silicon-only $channel feed without requiring an Intel package', ({ channel, version, manifest }) => {
+    const f = fixture(version);
+    const result = run(f, channel, [], { ...addCpuFixtures(f, ['arm64']), O8_MACOS_CPU_PACKAGES: 'arm64' });
+    expect(result.status, result.stderr).toBe(0);
+    const plan = JSON.parse(readFileSync(join(f.bundle, 'macos', manifest), 'utf8'));
+    expect(plan.platforms['darwin-aarch64'].url).toMatch(/o8_arm64\.app\.tar\.gz$/);
+    expect(plan.platforms['darwin-x86_64']).toMatchObject({
+      signature: readFileSync(join(f.bundle, 'macos/o8.app.tar.gz.sig'), 'utf8').trim(),
+      url: expect.stringMatching(/\/o8\.app\.tar\.gz$/),
+    });
+    const uploads = effects(f).filter(c => c.name === 'gh' && ['create', 'upload'].includes(c.args[1]));
+    expect(uploads.some(c => c.args.some(arg => /o8_[^/]*x86_64/.test(arg)))).toBe(false);
+  });
+
   it.each(['missing', 'wrong-cpu', 'changed-code', 'changed-runtime', 'bad-signature', 'not-notarized'])('refuses CPU publication for %s before any publication write', (failure) => {
     const f = fixture('0.1.741');
     const env: Record<string, string> = addCpuFixtures(f);

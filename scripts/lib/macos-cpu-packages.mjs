@@ -15,9 +15,9 @@ import {
 
 export function macosCpuPackageArchitectures(mode) {
   if (mode === undefined || mode === '' || mode === '0') return [];
-  if (mode === 'x86_64') return ['x86_64'];
+  if (MACOS_RELEASE_ARCHITECTURES.includes(mode)) return [mode];
   if (mode === '1') return [...MACOS_RELEASE_ARCHITECTURES];
-  throw new Error('O8_MACOS_CPU_PACKAGES must be 0, 1 or x86_64');
+  throw new Error('O8_MACOS_CPU_PACKAGES must be 0, 1, x86_64 or arm64');
 }
 
 function inspectSignature(path, architecture, options) {
