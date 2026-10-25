@@ -149,7 +149,9 @@ describe('native release cache real entry points', { timeout: 120_000 }, () => {
     expect(f.run(env)).toContain('native capture=captured');
     rmSync(join(f.root, 'src-tauri/target'), { recursive: true, force: true });
     rmSync(join(f.root, 'frontend'), { recursive: true, force: true });
-    expect(f.run(env)).toContain('native compiler skipped');
+    const repeated = f.run(env);
+    expect(repeated).toContain('native restore=hit_exact reason=verified');
+    expect(repeated).toContain('native compiler skipped');
     expect(f.events().filter(row => row.phase === 'compile')).toHaveLength(2);
     for (const target of ['x86_64-apple-darwin', 'aarch64-apple-darwin']) {
       const release = join(f.root, 'src-tauri/target', target, 'release');
@@ -179,6 +181,7 @@ describe('native release cache real entry points', { timeout: 120_000 }, () => {
       if (!['bundle icon', 'tray icon', 'features', 'target'].includes(input)) commit(f.root);
       rmSync(join(f.root, 'src-tauri/target'), { recursive: true, force: true });
       const output = f.run({}, args);
+      expect(output).toContain('native restore=miss reason=entry_missing');
       expect(output).not.toContain('native compiler skipped');
       expect(f.events().filter(row => row.phase === 'compile')).toHaveLength(4);
     });
