@@ -25,8 +25,10 @@ fn file_boundary_projects_refresh_retains_unregistered_draft(cx: &mut TestAppCon
         .unwrap()["id"]
         .clone();
     fs::write(path.join("draft.txt"), "loaded bytes").unwrap();
-    let mut state = State::default();
-    state.selected = Some(name.clone());
+    let mut state = State {
+        selected: Some(name.clone()),
+        ..State::default()
+    };
     state.workspaces.insert(
         name,
         crate::shell_state::Workspace {
@@ -152,7 +154,7 @@ fn file_boundary_window_close_settings_and_focused_path_preserve_draft(cx: &mut 
     );
     visual.simulate_keystrokes("ctrl-,");
     draw(&mut visual);
-    assert!(shell.read_with(&visual, |s, _| s.settings.is_some()));
+    assert!(shell.read_with(&visual, |s, _| s.surfaces.settings.view.is_some()));
     visual.simulate_keystrokes("ctrl-,");
     draw(&mut visual);
     let initial = shell.read_with(&visual, |s, _| s.state.selected.clone().unwrap());

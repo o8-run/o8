@@ -177,7 +177,7 @@ impl Files {
                 match result {
                     Ok(data) => {
                         if let Some(content) = data["content"].as_str() {
-                            this.sensitive = crate::viewer_guard::contains(&data);
+                            this.sensitive = crate::shell::files::guard::contains(&data);
                             this.binary = data["binary"] == true;
                             this.baseline = if this.binary || this.sensitive {
                                 String::new()
@@ -268,7 +268,7 @@ impl Files {
                     Ok((status, mut data))
                         if status == 409 && data["error"] == "changed-on-disk" =>
                     {
-                        crate::viewer_guard::scrub(&mut data);
+                        crate::shell::files::guard::scrub(&mut data);
                         this.conflict = Some(data);
                         this.notice = "Changed on disk".into();
                     }
