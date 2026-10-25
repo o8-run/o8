@@ -129,6 +129,14 @@ export async function withPinnedWorkspaceReadSession<T>(operation: () => Promise
   }
 }
 
+/** Settle this launch's exact reader before requiring a quiescent workspace. */
+export async function settlePinnedWorkspaceReadSession(): Promise<void> {
+  const session = sessions.getStore();
+  if (!session || session.closed) return;
+  session.closed = true;
+  await session.reader?.close();
+}
+
 export function tryPinnedWorkspaceRead(
   workspacePath: string,
   identity: WorktreeMaterializationIdentity,

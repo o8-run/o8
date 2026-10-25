@@ -32,11 +32,10 @@ function withO8ChildPolicy(create, options = {}) {
     catch (error) { if (error.code === 'ENOENT') return 'missing'; throw error; }
   };
   const Database = require(policy.sqliteModule);
-  const lock = new Database(policyPath.join(policy.directory, '.provider-keys.lock'), { timeout: 0 });
+  // Match the parent store boundary's bounded acquisition wait. The empty lock
+  // database needs no journal-mode change, which can itself fail under contention.
+  const lock = new Database(policyPath.join(policy.directory, '.provider-keys.lock'), { timeout: 1000 });
   try {
-    // This database coordinates OS locks and contains no application data.
-    lock.unsafeMode(true);
-    lock.pragma('journal_mode = OFF');
     lock.exec('BEGIN EXCLUSIVE');
     if (hashFile(policy.policyFile) !== policy.policyHash) throw new Error('Child credential policy changed. Retry the launch.');
     for (const [name, value] of Object.entries({ ...process.env, ...env })) {

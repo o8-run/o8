@@ -22,19 +22,33 @@ interface ManagedWorktreeAdmissionInput {
   repoRoot: string;
   packetId?: string;
   reservationId?: string;
+  /** Dependency-only idle preparation does not mutate the Git registry. */
+  backgroundSetup?: boolean;
+}
+
+/** Serialize only shared Git administration, never idle dependency installation. */
+export async function withManagedWorktreeRegistryQueue<T>(repoRoot: string, operation: () => Promise<T>): Promise<T> {
+  const canonicalRepo = await realpath(repoRoot);
+  const rootKey = createHash('sha256').update(canonicalRepo).digest('hex');
+  return withWorktreeProvisionQueue(`managed-worktree-root:${rootKey}`, () => {}, operation);
 }
 
 export async function withManagedWorktreeStorageAdmission<T>(
   input: ManagedWorktreeAdmissionInput,
   materialize: (volumeId: string, rootIdentity: StorageRootIdentity) => Promise<T>,
 ): Promise<T> {
+  if (input.backgroundSetup) return withManagedWorktreeStorageAdmissionUnlocked(input, materialize);
   const canonicalRepo = await realpath(input.repoRoot);
   const rootKey = createHash('sha256').update(canonicalRepo).digest('hex');
   return withWorktreeProvisionQueue(`managed-worktree-root:${rootKey}`, (position) => {
     const lane = input.packetId ? findLatestLaneByPacket(input.packetId) : null;
-    if (!lane || lane.status !== 'launching' || lane.sessionKey) return;
+    if (!lane || lane.sessionKey || !(lane.status === 'launching'
+      || (lane.status === 'awaiting_orchestrator' && lane.lastEventLabel === 'launch_stalled'))) return;
     const eventLabel = position > 0 ? 'worktree_provision_queued' : 'worktree_provision_started';
     recordLaneEvent(lane.id, eventLabel, 'system', { packetId: input.packetId, position });
+    // A watchdog stall preserves launch authority. Record the effect-start
+    // fence even then, while leaving its escalation label and status intact.
+    if (lane.status !== 'launching') return;
     updateLane(lane.id, {
       lastEventLabel: position > 0 ? `${eventLabel}:${position}` : eventLabel,
       lastEventAt: new Date().toISOString(),
