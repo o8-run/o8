@@ -69,7 +69,7 @@ function writeCache(id: OrchestratorBackendId, result: AcpModelProbeResult, fing
  */
 export async function probeAcpModels(
   id: OrchestratorBackendId,
-  launch: { command: string; args: string[]; env?: Record<string, string>; omitEnv?: string[] },
+  launch: import('@/lib/lane/orchestrator-backends/acp').AcpLaunch,
   repoPath: string,
   options?: { force?: boolean },
 ): Promise<AcpModelProbeResult> {
@@ -79,7 +79,7 @@ export async function probeAcpModels(
     if (cached && Date.now() - cached.probedAt < CACHE_TTL_MS) return cached;
   }
 
-  const client = new AcpClient({ runtimeId: id, command: launch.command, args: launch.args, cwd: repoPath, env: launch.env, omitEnv: launch.omitEnv });
+  const client = new AcpClient({ runtimeId: id, command: launch.command, args: launch.args, cwd: repoPath, env: launch.env, omitEnv: launch.omitEnv, localEnvironment: launch.localEnvironment });
   const timeout = setTimeout(() => client.kill(), PROBE_TIMEOUT_MS);
   try {
     await client.initialize();

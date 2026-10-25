@@ -1,5 +1,7 @@
 import { credentialPolicyFingerprint } from '@/lib/providers/credential-policy';
 import { withProviderStoreLock } from '@/lib/providers/store-lock';
+import { assertLocalAcpEnvironmentCurrent } from './local-connection';
+import type { AcpEnvironmentBinding } from './connection-environment';
 import { childEnvironment, childEnvironmentContext } from '@/lib/providers/spawn-environment';
 /**
  * Agent Client Protocol (ACP) stdio client.
@@ -194,6 +196,7 @@ export function mapStopReason(stopReason: AcpStopReason, sessionId: string | nul
 }
 
 export interface AcpClientOptions {
+  localEnvironment?: AcpEnvironmentBinding;
   runtimeId: string;
   command: string;
   args: string[];
@@ -249,15 +252,20 @@ export class AcpClient {
     // see below.
     const launch = cliInvocation(opts.command, opts.args);
     this.viaInterpreter = spawnsViaInterpreter(opts.command);
-    const env = childEnvironment({ runtimeId: opts.runtimeId, runtimeLaunch: true, omitEnv: opts.omitEnv, env: { ...(opts.cwd ? { PWD: opts.cwd } : {}), ...opts.env } });
     this.credentialRuntimeId = opts.runtimeId;
-    this.credentialPolicy = childEnvironmentContext(env)?.policy;
-    this.proc = spawn(launch.command, launch.args, {
-      windowsHide: true,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      cwd: opts.cwd,
-      env,
+    const child = withProviderStoreLock(() => {
+      if (opts.localEnvironment) assertLocalAcpEnvironmentCurrent(opts.localEnvironment);
+      const env = childEnvironment({ runtimeId: opts.runtimeId, runtimeLaunch: true, omitEnv: opts.omitEnv, env: { ...(opts.cwd ? { PWD: opts.cwd } : {}), ...opts.env } });
+      const policy = childEnvironmentContext(env)?.policy;
+      return { policy, proc: spawn(launch.command, launch.args, {
+        windowsHide: true,
+        stdio: ['pipe', 'pipe', 'pipe'],
+        cwd: opts.cwd,
+        env,
+      }) };
     });
+    this.proc = child.proc;
+    this.credentialPolicy = child.policy;
     this.proc.stdout?.setEncoding('utf8');
     this.proc.stdout?.on('data', (chunk: string) => this.onStdout(chunk));
     if (opts.onStderr) this.proc.stderr?.on('data', (c: Buffer) => opts.onStderr!(c.toString('utf8')));

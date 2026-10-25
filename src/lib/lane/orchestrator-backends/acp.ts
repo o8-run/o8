@@ -173,6 +173,7 @@ function publishAcpLifecycle(backendId: string, session: AcpSession, event: Orch
 }
 
 export interface AcpLaunch {
+  localEnvironment?: import('@/lib/acp/connection-environment').AcpEnvironmentBinding;
   command: string;
   args: string[];
   env?: Record<string, string>;
@@ -215,6 +216,7 @@ export function makeAcpBackend(config: AcpBackendConfig): OrchestratorBackend {
         args: launch.args,
         cwd: repoPath,
         env: launch.env,
+        localEnvironment: launch.localEnvironment,
         runtimeId: id,
         omitEnv: launch.omitEnv,
         onEvent: (event, sourceSessionId) => { if (sourceSessionId === session.sessionId && session.status === 'busy') session.onEvent?.(event); },
@@ -229,8 +231,12 @@ export function makeAcpBackend(config: AcpBackendConfig): OrchestratorBackend {
     const key = sessionKey(id, repoPath, threadId);
     const existing = sessions.get(key);
     if (existing && existing.status !== 'dead' && existing.client.alive) {
+      if (existing.status === 'busy') return existing;
+      // Established processes retain their original environment even while a
+      // different saved connection or its credential store is unavailable.
+      if (existing.credentialFingerprint === credentialPolicyFingerprint(id) && existing.sessionId) return existing;
       const launch = config.resolveLaunch(repoPath);
-      if (existing.status === 'busy' || (existing.credentialFingerprint === credentialPolicyFingerprint(id) && (existing.sessionId || (launch && existing.launchFingerprint === acpLaunchFingerprint(launch))))) return existing;
+      if (existing.credentialFingerprint === credentialPolicyFingerprint(id) && launch && existing.launchFingerprint === acpLaunchFingerprint(launch)) return existing;
       existing.client.kill();
     }
     if (existing) sessions.delete(key);
