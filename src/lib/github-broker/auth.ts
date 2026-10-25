@@ -12,6 +12,7 @@ import { publicGitHubRead } from './public-read';
 
 const INSTALLATION_TOKEN_TTL_SKEW_MS = 60_000;
 const installationTokenCache = new Map<number, { token: string; expiresAtMs: number }>();
+class AnonymousReadRequired extends Error {}
 
 /** Capture before any request await; installation ids alone do not identify an o8 account. */
 export function captureGitHubAccount() {
@@ -221,15 +222,20 @@ export async function githubInstallationFetch(repoFullName: string, path: string
     // Retry only reads. Never use public fallback to authorize a mutation.
     if (isRead && !authorization && (response.status === 404 || response.status === 301 || response.status === 308)) {
       await response.body?.cancel().catch(() => {});
-      return (await anonymousRead()).response;
+      // Leave the installation cache before changing transport/credential scope.
+      throw new AnonymousReadRequired();
     }
     return response;
   };
-  const response = readOptions.share && (!init?.method || init.method === 'GET')
-    ? await sharedConditionalGitHubRead(JSON.stringify([scope, repoFullName.toLowerCase(), path]), read) : await read();
-  const anonymous = isRead && !authorization && Boolean(publicGitHubDecision(decisionKey));
-  return { response, installation: anonymous ? { ...installation, id: 0 } : installation,
-    scope: anonymous ? githubCredentialScope(apiBaseUrl, 0, 'anonymous') : scope, anonymous };
+  try {
+    const response = readOptions.share && (!init?.method || init.method === 'GET')
+      ? await sharedConditionalGitHubRead(JSON.stringify([scope, repoFullName.toLowerCase(), path]), read) : await read();
+    // A concurrent public decision cannot relabel an installation response.
+    return { response, installation, scope, anonymous: false };
+  } catch (error) {
+    if (error instanceof AnonymousReadRequired) return anonymousRead();
+    throw error;
+  }
 }
 
 export function verifyGitHubWebhookSignature(rawBody: string, signatureHeader: string | null) {

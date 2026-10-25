@@ -33,6 +33,47 @@ describe('pull request detail reads', () => {
     githubInstallationFetch.mockImplementation(async (_repo: string, path: string) => ({ response: path.endsWith('/pulls/7') ? Response.json(pull) : Response.json({ message: 'Files unavailable' }, { status: 502 }) }));
     await expect(fetchGitHubPullRequestDetail('example/repo', 7)).rejects.toThrow('Pull request changes could not be read');
   });
+
+  it('discards a supplied review decision when restarting an aggregate anonymously', async () => {
+    let metadataReads = 0;
+    let reviewReads = 0;
+    githubInstallationFetch.mockImplementation(async (_repo: string, path: string) => {
+      if (path.endsWith('/pulls/7')) {
+        metadataReads++;
+        return { scope: metadataReads === 1 ? 'installation' : 'anonymous', anonymous: metadataReads > 1,
+          response: Response.json({ ...pull, head: null }) };
+      }
+      if (path.includes('/reviews?')) { reviewReads++; return { scope: 'anonymous', anonymous: true, response: Response.json([{ state: 'CHANGES_REQUESTED' }]) }; }
+      return { scope: 'anonymous', anonymous: true, response: Response.json([{ filename: 'public.ts' }]) };
+    });
+    expect(await fetchGitHubPullRequestDetail('example/retry-reviews', 7, Promise.resolve('APPROVED')))
+      .toMatchObject({ githubScope: 'anonymous', reviewDecision: 'CHANGES_REQUESTED', files: [{ path: 'public.ts' }] });
+    expect(metadataReads).toBe(2);
+    expect(reviewReads).toBe(1);
+  });
+
+  it.each([false, true])('bounds scope-change retries and refuses ordinary credential rotation (anonymous=%s)', async anonymous => {
+    let metadataReads = 0;
+    githubInstallationFetch.mockImplementation(async (_repo: string, path: string) => {
+      if (path.endsWith('/pulls/7')) { metadataReads++; return { scope: `root-${metadataReads}`, anonymous, response: Response.json({ ...pull, head: null }) }; }
+      return { scope: 'different', anonymous, response: Response.json([]) };
+    });
+    await expect(fetchGitHubPullRequestDetail('example/bounded-retry', 7)).rejects.toThrow('authorization changed');
+    expect(metadataReads).toBe(anonymous ? 2 : 1);
+  });
+
+  it('restarts rather than mixing reviews returned under a different scope', async () => {
+    let metadataReads = 0;
+    githubInstallationFetch.mockImplementation(async (_repo: string, path: string) => {
+      if (path.endsWith('/pulls/7')) metadataReads++;
+      const scope = metadataReads === 1 ? 'installation' : 'anonymous';
+      if (path.endsWith('/pulls/7')) return { scope, anonymous: scope === 'anonymous', response: Response.json({ ...pull, title: scope, head: null }) };
+      if (path.includes('/reviews?')) return { scope: 'anonymous', anonymous: true, response: Response.json([{ state: 'CHANGES_REQUESTED' }]) };
+      return { scope, anonymous: scope === 'anonymous', response: Response.json([]) };
+    });
+    expect(await fetchGitHubPullRequestDetail('example/retry-review-scope', 7)).toMatchObject({ title: 'anonymous', reviewDecision: 'CHANGES_REQUESTED' });
+    expect(metadataReads).toBe(2);
+  });
 });
 
 describe('conditional pull request checks', () => {

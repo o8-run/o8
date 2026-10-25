@@ -183,6 +183,59 @@ it('remembers public metadata after a child 404 so later CI refreshes never retr
   expect(request).toHaveBeenCalledTimes(5);
 });
 
+it.each([false, true])('restarts the whole PR route aggregate anonymously after optional checks establish public access (decision during metadata=%s)', async duringMetadata => {
+  h.account = 'organization';
+  const anonymousHead = 'b'.repeat(40);
+  let releaseMetadata!: () => void;
+  let metadataStarted!: () => void;
+  const heldMetadata = new Promise<void>(resolve => { releaseMetadata = resolve; });
+  const started = new Promise<void>(resolve => { metadataStarted = resolve; });
+  const request = vi.fn(async (url: unknown, init?: RequestInit) => {
+    const path = new URL(String(url)).pathname;
+    const authenticated = new Headers(init?.headers).has('authorization');
+    if (path === `/repos/${h.repo}`) return Response.json({ full_name: h.repo, private: false });
+    if (path.endsWith('/pulls/1')) {
+      if (authenticated && duringMetadata) { metadataStarted(); await heldMetadata; }
+      return Response.json({ ...pull,
+      title: authenticated ? 'INSTALLATION_ONLY_TITLE' : 'Public title',
+      body: authenticated ? 'INSTALLATION_ONLY_BODY' : 'Public body',
+      head: { ref: authenticated ? 'INSTALLATION_ONLY_BRANCH' : 'public-branch', sha: authenticated ? pull.head.sha : anonymousHead },
+      });
+    }
+    if (path.endsWith('/files')) return Response.json([{ filename: authenticated ? 'INSTALLATION_ONLY.ts' : 'public.ts', additions: 3 }]);
+    if (path.endsWith('/reviews')) return Response.json([{ state: authenticated ? 'APPROVED' : 'CHANGES_REQUESTED' }]);
+    if (path.includes(`/commits/${pull.head.sha}/check-runs`)) return Response.json({ message: 'Not Found' }, { status: 404 });
+    if (path.includes(`/commits/${anonymousHead}/check-runs`)) return Response.json({ check_runs: [{ name: 'public-check', conclusion: 'failure', status: 'completed' }] });
+    if (path.endsWith('/stacks')) return Response.json([]);
+    throw new Error(`Unexpected aggregate fixture path: ${path}`);
+  });
+  vi.stubGlobal('fetch', request);
+  const db = await import('@/lib/db'); closeDb = db.closeDb;
+  const { NextRequest } = await import('next/server');
+  const { GET } = await import('@/app/api/panel/pr/route');
+  const pending = GET(new NextRequest(`http://fixture.invalid/api/panel/pr?repo=${h.repo}&number=1`));
+  if (duringMetadata) {
+    await started;
+    const { githubInstallationFetch } = await import('./auth');
+    try { await githubInstallationFetch(h.repo, `/repos/${h.repo}/commits/${pull.head.sha}/check-runs?per_page=100`); }
+    finally { releaseMetadata(); }
+  }
+  const response = await pending;
+  expect(response.status).toBe(200);
+  const payload = await response.json();
+  expect(payload).toMatchObject({ title: 'Public title', body: 'Public body', branch: 'public-branch',
+    files: [{ path: 'public.ts', additions: 3 }], reviewDecision: 'CHANGES_REQUESTED', checksStatus: 'failure', stack: { status: 'none' } });
+  expect(JSON.stringify(payload)).not.toContain('INSTALLATION_ONLY');
+  const roots = request.mock.calls.filter(([url]) => new URL(String(url)).pathname.endsWith('/pulls/1'));
+  expect(roots).toHaveLength(2);
+  expect(roots.map(([, init]) => new Headers(init?.headers).has('authorization'))).toEqual([true, false]);
+  const restartedAt = request.mock.calls.indexOf(roots[1]);
+  expect(request.mock.calls.slice(restartedAt).every(([, init]) => !new Headers(init?.headers).has('authorization'))).toBe(true);
+  const { githubCredentialScope } = await import('./request-budget');
+  expect(db.getSqlite().prepare('SELECT scope FROM github_pr_stack_observations WHERE repo = ? AND pr_number = 1').all(h.repo))
+    .toEqual([{ scope: githubCredentialScope('https://api.github.com', 0, 'anonymous') }]);
+});
+
 it('confines the request path and never follows a repository transfer with a token', async () => {
   h.account = 'organization';
   const request = publicServer(); const normal = request.getMockImplementation()!;
