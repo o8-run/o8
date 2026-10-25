@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
@@ -70,4 +71,32 @@ it('keeps empty files distinct from errors and exposes the existing truncation f
   expect(await (await read('empty.txt')).json()).toMatchObject({ content: '' });
   writeFileSync(join(workspace, 'large.txt'), 'x'.repeat(100_001));
   expect(await (await read('large.txt')).json()).toMatchObject({ truncated: true });
+});
+
+it('hashes raw binary revisions and refuses a stale save despite identical lossy text', async () => {
+  const first = Buffer.from([0xff]);
+  const second = Buffer.from([0xfe]);
+  writeFileSync(join(workspace, 'binary.dat'), first);
+  const opened = await (await read('binary.dat')).json() as { contentHash: string; binary?: boolean };
+  expect(opened.contentHash).toBe(createHash('sha256').update(first).digest('hex'));
+  expect(opened.binary).toBe(true);
+  writeFileSync(join(workspace, 'binary.dat'), second);
+  const changed = await (await read('binary.dat')).json() as { contentHash: string };
+  expect(changed.contentHash).not.toBe(opened.contentHash);
+  expect((await save('replacement', opened.contentHash, false, 'binary.dat')).status).toBe(409);
+  expect(readFileSync(join(workspace, 'binary.dat'))).toEqual(second);
+  // The write route must use the same raw-byte hash, including when it matches.
+  expect((await save('replacement', changed.contentHash, false, 'binary.dat')).status).toBe(200);
+  expect(readFileSync(join(workspace, 'binary.dat'), 'utf8')).toBe('replacement');
+});
+
+it('marks NUL-containing UTF-8 as binary and keeps Unicode text hashes compatible', async () => {
+  writeFileSync(join(workspace, 'nul.dat'), Buffer.from([65, 0, 66]));
+  expect(await (await read('nul.dat')).json()).toMatchObject({ binary: true });
+  const text = 'é🙂\n';
+  writeFileSync(join(workspace, 'unicode.txt'), text);
+  const data = await (await read('unicode.txt')).json() as { binary: boolean; contentHash: string };
+  expect(data.binary).toBe(false);
+  expect(data.contentHash).toBe(createHash('sha256').update(text).digest('hex'));
+  expect((await save(text + 'saved', data.contentHash, false, 'unicode.txt')).status).toBe(200);
 });

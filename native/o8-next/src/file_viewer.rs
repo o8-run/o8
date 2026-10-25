@@ -6,7 +6,11 @@ use crate::{
 };
 use gpui::{prelude::*, *};
 use serde_json::{Value, json};
-use std::{cell::Cell, rc::Rc};
+use std::{
+    cell::Cell,
+    rc::Rc,
+    time::{Duration, Instant},
+};
 
 pub(crate) struct Files {
     client: Client,
@@ -21,6 +25,8 @@ pub(crate) struct Files {
     saving: bool,
     ready: bool,
     truncated: bool,
+    binary: bool,
+    close_confirmation: Option<Instant>,
     focus_editor: bool,
     notice: String,
     revision: u64,
@@ -48,6 +54,7 @@ impl Files {
         let subscriptions = vec![
             cx.subscribe(&path_input, |this, _, _: &Submit, cx| this.load(cx)),
             cx.observe(&editor, |this, _, cx| {
+                this.cancel_close(cx);
                 this.revision += 1;
                 cx.notify();
             }),
@@ -65,6 +72,8 @@ impl Files {
             saving: false,
             ready: false,
             truncated: false,
+            binary: false,
+            close_confirmation: None,
             focus_editor: false,
             notice: "Open a workspace file".into(),
             revision: 0,
@@ -73,14 +82,51 @@ impl Files {
         }
     }
     pub(crate) fn focus(&self, window: &mut Window, cx: &App) {
-        if self.ready && !self.truncated {
+        if self.editable() {
             self.editor.read(cx).focus.focus(window);
         } else {
             self.path_input.read(cx).focus.focus(window);
         }
     }
+    fn editable(&self) -> bool {
+        self.ready && !self.truncated && !self.binary
+    }
     fn dirty(&self, cx: &App) -> bool {
-        self.ready && self.editor.read(cx).text != self.baseline
+        self.editable() && self.editor.read(cx).text != self.baseline
+    }
+    fn cancel_close(&mut self, cx: &mut Context<Self>) {
+        if self.close_confirmation.take().is_some() {
+            self.notice.clear();
+            cx.notify();
+        }
+    }
+    pub(crate) fn request_close(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.saving {
+            return false;
+        }
+        if !self.dirty(cx) {
+            return true;
+        }
+        let now = Instant::now();
+        if self.close_confirmation.is_some_and(|until| now < until) {
+            return true;
+        }
+        let until = now + Duration::from_millis(2600);
+        self.close_confirmation = Some(until);
+        self.notice = "Unsaved — close again to discard · Esc to cancel".into();
+        cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(Duration::from_millis(2600))
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                if this.close_confirmation == Some(until) {
+                    this.cancel_close(cx);
+                }
+            });
+        })
+        .detach();
+        cx.notify();
+        false
     }
     fn load(&mut self, cx: &mut Context<Self>) {
         if self.loading || self.saving {
@@ -95,6 +141,10 @@ impl Files {
         if path.is_empty() {
             return;
         }
+        self.read_path(path, cx);
+    }
+    fn read_path(&mut self, path: String, cx: &mut Context<Self>) {
+        self.cancel_close(cx);
         self.path = path.clone();
         self.loading = true;
         self.ready = false;
@@ -116,17 +166,27 @@ impl Files {
                 match result {
                     Ok(data) => {
                         if let Some(content) = data["content"].as_str() {
-                            this.baseline = content.into();
+                            this.binary = data["binary"] == true;
+                            this.baseline = if this.binary {
+                                String::new()
+                            } else {
+                                content.chars().take(100_000).collect()
+                            };
                             this.hash = data["contentHash"].as_str().map(str::to_owned);
-                            this.truncated = data["truncated"] == true;
+                            this.truncated =
+                                data["truncated"] == true || content.chars().count() > 100_000;
                             this.ready = true;
                             this.focus_editor = true;
                             this.editor.update(cx, |editor, cx| {
                                 editor.clear(cx);
-                                editor.text = content.into();
+                                if this.editable() {
+                                    editor.text = this.baseline.clone();
+                                }
                                 cx.notify();
                             });
-                            this.notice = if this.truncated {
+                            this.notice = if this.binary {
+                                ""
+                            } else if this.truncated {
                                 "File truncated by server. Saving disabled."
                             } else if content.is_empty() {
                                 "Empty file"
@@ -148,8 +208,7 @@ impl Files {
         cx.notify();
     }
     fn save(&mut self, force: bool, cx: &mut Context<Self>) {
-        if !self.ready
-            || self.truncated
+        if !self.editable()
             || self.loading
             || self.saving
             || (!force && (!self.dirty(cx) || self.conflict.is_some()))
@@ -202,25 +261,11 @@ impl Files {
         if self.saving {
             return;
         }
-        let Some(conflict) = self.conflict.take() else {
-            return;
-        };
-        self.ready = conflict["content"].is_string();
-        self.baseline = conflict["content"].as_str().unwrap_or("").into();
-        self.hash = conflict["contentHash"].as_str().map(str::to_owned);
-        self.editor.update(cx, |editor, cx| {
-            editor.clear(cx);
-            editor.text = self.baseline.clone();
-            cx.notify();
-        });
-        self.notice = if self.ready {
-            "Reloaded"
-        } else {
-            "File was removed. Retry."
+        if self.conflict.take().is_some() {
+            // Reload through the bounded, binary-aware read route, never the full
+            // conflict payload. The loaded path may differ from the path input.
+            self.read_path(self.path.clone(), cx);
         }
-        .into();
-        self.revision += 1;
-        cx.notify();
     }
 }
 fn button(id: &'static str, label: &'static str, enabled: bool) -> Stateful<Div> {
@@ -262,6 +307,11 @@ impl Render for Files {
             .font_family(theme().font_ui)
             .text_size(px(13.))
             .capture_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                if event.keystroke.key == "escape" && this.close_confirmation.is_some() {
+                    this.cancel_close(cx);
+                    cx.stop_propagation();
+                    return;
+                }
                 if (event.keystroke.modifiers.control || event.keystroke.modifiers.platform)
                     && event.keystroke.key == "s"
                 {
@@ -314,7 +364,7 @@ impl Render for Files {
                         ),
                 )
             })
-            .when(self.ready && !self.truncated, |v| {
+            .when(self.editable(), |v| {
                 v.child(
                     div()
                         .debug_selector(|| "file-editor".into())
@@ -331,7 +381,14 @@ impl Render for Files {
                         .child(self.editor.clone()),
                 )
             })
-            .when(self.ready && self.truncated, |v| {
+            .when(self.ready && self.binary, |v| {
+                v.child(
+                    div()
+                        .debug_selector(|| "file-binary".into())
+                        .child("Binary file · Read-only"),
+                )
+            })
+            .when(self.ready && self.truncated && !self.binary, |v| {
                 v.child(
                     div()
                         .id("file-preview")

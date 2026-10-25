@@ -9,6 +9,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { isAbsolute, relative } from 'node:path';
+import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import { getDefaultLlmRepoRoot, resolveRegisteredRepoScope } from '@/lib/llm/repo-scope';
 import {
@@ -108,7 +109,7 @@ export async function GET(request: NextRequest) {
     }
     const opened = await readWorkspaceFile(target.root, target.relativePath);
     const content = opened.bytes.toString('utf-8');
-    return NextResponse.json({ content, contentHash: await contentHash(content), path, exists: true });
+    return NextResponse.json({ content, contentHash: createHash('sha256').update(opened.bytes).digest('hex'), path, exists: true });
   } catch (err) {
     if (isWorkspaceFileError(err) && err.code === 'workspace_file_not_found') {
       return NextResponse.json({ error: 'File not found', code: err.code, exists: false }, { status: 404 });
@@ -138,13 +139,14 @@ export async function POST(request: NextRequest) {
 
     if (expectedHash !== undefined && !force) {
       let currentContent: string | null = null;
+      let currentHash: string | null = null;
       try {
         const current = await readWorkspaceFile(target.root, target.relativePath);
         currentContent = current.bytes.toString('utf-8');
+        currentHash = createHash('sha256').update(current.bytes).digest('hex');
       } catch (err) {
         if (!isWorkspaceFileError(err) || err.code !== 'workspace_file_not_found') throw err;
       }
-      const currentHash = currentContent === null ? null : await contentHash(currentContent);
       if (currentHash !== expectedHash) {
         return NextResponse.json({
           error: 'changed-on-disk',

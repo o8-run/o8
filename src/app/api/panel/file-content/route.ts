@@ -4,7 +4,8 @@ import { NextResponse } from 'next/server';
 import { getDefaultLlmRepoRoot, resolveRegisteredRepoScope } from '@/lib/llm/repo-scope';
 import { expandHome } from '@/lib/fs/safe-path';
 import { isWorkspaceFileError, readWorkspaceFile } from '@/lib/fs/workspace-file';
-import { contentHash } from '@/lib/markdown/transport';
+import { createHash } from 'node:crypto';
+import { isUtf8 } from 'node:buffer';
 
 export async function GET(request: Request) {
   try {
@@ -31,18 +32,20 @@ export async function GET(request: Request) {
     }
 
     const opened = await readWorkspaceFile(root, filePath);
+    const binary = opened.bytes.includes(0) || !isUtf8(opened.bytes);
     const content = opened.bytes.toString('utf-8');
-    const fullContentHash = await contentHash(content);
+    const fullContentHash = createHash('sha256').update(opened.bytes).digest('hex');
     // Truncate large files
     if (content.length > 100000) {
       return NextResponse.json({
         content: content.slice(0, 100000) + '\n\n... (truncated at 100KB)',
         contentHash: fullContentHash,
+        binary,
         path: filePath,
         truncated: true,
       });
     }
-    return NextResponse.json({ content, contentHash: fullContentHash, path: filePath });
+    return NextResponse.json({ content, contentHash: fullContentHash, binary, path: filePath });
   } catch (error) {
     console.error('[panel/file-content] Could not read file', error);
     if (isWorkspaceFileError(error)) {
