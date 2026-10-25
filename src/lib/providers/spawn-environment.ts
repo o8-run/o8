@@ -10,16 +10,13 @@ import { matchesProviderCredential } from './credential-materials';
 import { runtimeBillingMode } from './runtime-billing';
 import { ensureLaunchPolicy } from './launch-policy';
 import { ORCHESTRATOR_RUNTIMES } from '@/lib/orchestrator/runtime-capabilities';
+import { GENERIC_ALIASES, SCOPED_ALIASES, providerCredentialName } from './credential-names';
+export { providerCredentialName } from './credential-names';
 
 const permitsApiCredentials = (runtimeId: string | undefined): boolean => Boolean(runtimeId && runtimeId !== 'codex'
   && (Object.hasOwn(ORCHESTRATOR_RUNTIMES, runtimeId) || runtimeId === 'openclaw') && runtimeBillingMode(runtimeId) === 'api');
 
 // These aliases have no provider identity. Resolve the selected provider; never trust their literal value.
-const SCOPED_ALIASES: Record<string, string> = { O8_FABLE_ANTHROPIC_API_KEY: 'ANTHROPIC_API_KEY' };
-const GENERIC_ALIASES = ['LLM_API_KEY', 'GOOSE_API_KEY', 'COPILOT_PROVIDER_API_KEY', 'COPILOT_PROVIDER_BEARER_TOKEN'];
-export function providerCredentialName(name: string): boolean {
-  return Object.hasOwn(SCOPED_ALIASES, name) || GENERIC_ALIASES.includes(name) || (PROVIDER_ENV_KEYS as readonly string[]).includes(name) || Object.values(PROVIDER_KEY_ALIASES).some(aliases => aliases.includes(name));
-}
 function genericProvider(input: Record<string, string | undefined>, alias: string): string | null {
   const selected = alias === 'GOOSE_API_KEY' ? input.GOOSE_PROVIDER
     : alias.startsWith('COPILOT_PROVIDER_') ? input.COPILOT_PROVIDER_TYPE : input.LLM_PROVIDER;
@@ -107,8 +104,7 @@ export function providerConfigEnvironment(input: Record<string, string>, runtime
 export function childEnvironment(options: SpawnOptions & { env?: Record<string, string | undefined>; inherit?: boolean } = {}): ReturnType<typeof resolvedEnvironment> {
   let parent: Record<string, string | undefined> = {};
   if (options.inherit !== false) {
-    parent = options.runtimeId || options.runtimeLaunch
-      ? workerParentEnvironment(process.env, options.runtimeId) : process.env;
+    parent = workerParentEnvironment(process.env, options.runtimeId);
     // Credentials still enter only through the existing runtime billing/injection policy.
     if (permitsApiCredentials(options.runtimeId)) {
       parent = { ...parent };

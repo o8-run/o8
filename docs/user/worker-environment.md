@@ -2,7 +2,8 @@
 
 Dispatched CLI workers start with an allowlist of launching-shell variables. An
 unrelated exported signing password or service token does not reach the worker.
-The same policy covers specialized CLI adapters, ACP workers, Pi CLI, and every
+The same policy covers terminal commands and PTYs, connection checks, registered
+and codebase-memory MCP children, specialized CLI adapters, ACP workers, Pi CLI, and every
 declarative adapter, including Antigravity. Bundled Pi already starts with a
 private state home and an explicit minimal environment; its model calls go
 through the host transport.
@@ -16,6 +17,7 @@ vendor-prefix wildcards. The source of truth is
 | Purpose | Variables |
 | --- | --- |
 | Executables and user directories | `PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `USERPROFILE`, `HOMEDRIVE`, `HOMEPATH`, `APPDATA`, `LOCALAPPDATA` |
+| Git authentication through an agent | `SSH_AUTH_SOCK` (the socket path; private keys stay in the agent) |
 | Windows execution | `SystemRoot`, `SYSTEMROOT`, `WINDIR`, `COMSPEC`, `PATHEXT` |
 | Temporary files and locale | `TMPDIR`, `TMP`, `TEMP`, `TZ`, `LANG`, `LANGUAGE`, `LC_ALL`, `LC_ADDRESS`, `LC_COLLATE`, `LC_CTYPE`, `LC_IDENTIFICATION`, `LC_MEASUREMENT`, `LC_MESSAGES`, `LC_MONETARY`, `LC_NAME`, `LC_NUMERIC`, `LC_PAPER`, `LC_TELEPHONE`, `LC_TIME` |
 | Terminal | `TERM`, `COLORTERM`, `TERM_PROGRAM`, `TERM_PROGRAM_VERSION`, `NO_COLOR`, `FORCE_COLOR` |
@@ -57,6 +59,25 @@ After selecting ambient variables, o8 merges adapter and per-task inputs such as
 Existing billing and provider credential policy still decides which API
 credentials o8 injects. Subscription mode does not gain API credentials from this
 setting. Restricted/controlled workers retain their stricter credential policy.
+An API-billed runtime receives its authorized provider slots, without inheriting
+unlisted copies under other names. MCP checks and generic servers keep explicit
+service credentials, but do not acquire saved provider keys or authority to use
+provider slots from an unidentified runtime.
+
+Application process launches use `providers/child-process.ts`, which applies the
+same ambient allowlist even without a runtime identity. MCP configuration supplies
+explicit service variables separately; copying the host environment into those
+overrides bypasses ambient selection and is prohibited. Terminal launch helpers
+also select ambient values before merging resolved task overrides.
+
+Node 22 discovery and interpreter re-execution run before native credential-store
+loading. These two bootstrap modules call the same dependency-free allowlist
+directly. Re-execution additionally carries only named local API/worker transport
+tokens, MCP transport/port/loading settings, bundled-server paths, and its startup
+markers. Tests enumerate production process imports to prevent a new raw launch
+path from bypassing this boundary. The dependency-free selector excludes the
+store master key and provider-key slots even when debug extensions are enabled;
+normal launches apply the billing decision before restoring provider credentials.
 
 ## Adding a variable
 

@@ -14,7 +14,8 @@
  * actionable diagnostics.
  */
 
-import { spawn } from 'node:child_process';
+import { spawn } from '@/lib/providers/child-process';
+import { childEnvironment } from '@/lib/providers/spawn-environment';
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 import { isNpxFamily } from './npx-detection';
 
@@ -106,7 +107,7 @@ async function testStdio(input: StdioTestInput, timeoutMs: number, npxFamily: bo
 
   return new Promise<McpTestResult>((resolve) => {
     let child: ReturnType<typeof spawn> | null = null;
-    const childEnv: NodeJS.ProcessEnv = { ...process.env, ...(input.env ?? {}) };
+    const childEnv = childEnvironment({ env: input.env ?? {}, inject: false });
     try {
       // Most stdio MCP servers are configured as `npx …`, which on Windows is
       // `npx.cmd` — spawning it directly throws EINVAL and the user sees

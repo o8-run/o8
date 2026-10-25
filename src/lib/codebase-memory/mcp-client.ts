@@ -12,7 +12,7 @@
 
 import 'server-only';
 
-import { spawn } from 'node:child_process';
+import { spawn } from '@/lib/providers/child-process';
 
 const INIT_TIMEOUT_MS = 10_000;
 const DEFAULT_CALL_TIMEOUT_MS = 5 * 60_000; // 5 min — large repos take time to index
@@ -92,7 +92,6 @@ export async function withCodebaseMemoryToolSession<T>(
       windowsHide: true,
       stdio: ['pipe', 'pipe', 'pipe'],
       cwd: input.cwd,
-      env: { ...process.env },
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

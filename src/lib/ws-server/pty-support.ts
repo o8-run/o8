@@ -9,11 +9,12 @@
 
 import { existsSync } from 'node:fs';
 import { execSync, execFileSync } from '@/lib/providers/child-process';
+import { workerParentEnvironment } from '@/lib/providers/worker-environment';
 
-/** A clean env for spawned PTYs: inherits process.env, pins TERM/locale/PATH, drops the parent terminal identity. */
+/** Allowlisted PTY ambient inputs, with terminal defaults and no parent terminal identity. */
 export function sanitizePtyEnv(): Record<string, string> {
   const env: Record<string, string> = {};
-  for (const [key, value] of Object.entries(process.env)) {
+  for (const [key, value] of Object.entries(workerParentEnvironment(process.env))) {
     if (typeof value === 'string') {
       env[key] = value;
     }

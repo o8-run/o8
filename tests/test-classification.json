@@ -6628,6 +6628,38 @@
       ]
     },
     {
+      "path": "tests/worker-environment-dispatch-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/worker-environment-git-agent-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "network-listener",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/worker-environment-launch-boundary-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/worker-environment-launch-call-sites.test.ts",
+      "reasons": [
+        "child-process"
+      ]
+    },
+    {
       "path": "tests/worker-live-status-real-path.test.ts",
       "reasons": [
         "network-listener",

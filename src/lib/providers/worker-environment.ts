@@ -1,6 +1,9 @@
+import { providerCredentialName } from './credential-names';
+
 /** Ambient worker inputs only. Adapter/task overrides are merged separately. */
 const COMMON_KEYS = new Set([
   'PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'USERPROFILE', 'HOMEDRIVE', 'HOMEPATH',
+  'SSH_AUTH_SOCK',
   'SystemRoot', 'SYSTEMROOT', 'WINDIR', 'COMSPEC', 'PATHEXT', 'APPDATA', 'LOCALAPPDATA',
   'TMPDIR', 'TMP', 'TEMP', 'TZ', 'LANG', 'LANGUAGE',
   'LC_ALL', 'LC_ADDRESS', 'LC_COLLATE', 'LC_CTYPE', 'LC_IDENTIFICATION', 'LC_MEASUREMENT',
@@ -40,11 +43,12 @@ const RUNTIME_KEYS: Record<string, readonly string[]> = {
 
 /** Operator extensions accept comma-separated, exact environment variable names. */
 export function workerParentEnvironment(source: Record<string, string | undefined>, runtimeId?: string): Record<string, string | undefined> {
-  if (source.O8_WORKER_ENV_INHERIT === '1') return { ...source };
-  const names = new Set([...COMMON_KEYS, ...(RUNTIME_KEYS[runtimeId ?? ''] ?? [])]);
+  const names = new Set(source.O8_WORKER_ENV_INHERIT === '1' ? Object.keys(source) : [...COMMON_KEYS, ...(RUNTIME_KEYS[runtimeId ?? ''] ?? [])]);
   for (const name of source.O8_WORKER_ENV_ALLOW?.split(',') ?? []) {
     const trimmed = name.trim();
     if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(trimmed)) names.add(trimmed);
   }
-  return Object.fromEntries([...names].filter(name => source[name] !== undefined).map(name => [name, source[name]]));
+  // Debug/addition knobs do not authorize store or provider credentials. The
+  // normal process boundary restores API keys only after the billing decision.
+  return Object.fromEntries([...names].filter(name => source[name] !== undefined && name !== 'O8_MASTER_KEY' && !providerCredentialName(name)).map(name => [name, source[name]]));
 }

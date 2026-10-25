@@ -223,11 +223,11 @@ jobs:
         run: npm install -g "$(node -p 'require("./package.json").packageManager')"
       - if: steps.select.outputs.count != '0'
         run: npm ci --prefer-offline
-      - name: Install content-search prerequisite
+      - name: Install resource-test prerequisites
         if: steps.select.outputs.count != '0'
         run: |
           sudo apt-get update
-          sudo apt-get install -y ripgrep
+          sudo apt-get install -y ripgrep openssh-server
           rg --version
       - if: steps.select.outputs.count != '0'
         run: npm run test:integration -- ${{ steps.select.outputs.files }}
@@ -266,10 +266,10 @@ jobs:
           cache: npm
       - run: npm install -g "$(node -p 'require("./package.json").packageManager')"
       - run: npm ci --prefer-offline
-      - name: Install content-search prerequisite
+      - name: Install resource-test prerequisites
         run: |
           sudo apt-get update
-          sudo apt-get install -y ripgrep
+          sudo apt-get install -y ripgrep openssh-server
           rg --version
       - if: matrix.shard == 1
         run: npm run test:classification:check

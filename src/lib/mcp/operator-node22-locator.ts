@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { workerParentEnvironment } from '../providers/worker-environment';
 
 export const NODE22_REEXEC_GUARD = 'O8_MCP_REEXECED';
 
@@ -39,6 +40,7 @@ function defaultReadVersion(candidate: string): string | null {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
       timeout: 3000,
+      env: { ...workerParentEnvironment(process.env), NODE_ENV: process.env.NODE_ENV ?? 'production' },
     }).trim();
   } catch {
     return null;
