@@ -170,6 +170,7 @@ impl Client {
             })).map_err(|_| "Invalid worker inventory".to_string()))
         }).collect()
     }
+    #[cfg(test)]
     pub(crate) fn sidebar_sessions(&self) -> Result<Vec<Session>, String> {
         self.sidebar_sessions_with_branches()
             .map(|(sessions, _)| sessions)
