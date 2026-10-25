@@ -356,6 +356,7 @@ export async function materializeDependencyInstall(
   let fallbackReason = imageRequired ? 'image-required' : 'directory-clone-not-requested';
   if (!imageRequired && options.cloneSourceWorkspace && await tryCloneDependencyDirectory({
     sourceWorkspace: options.cloneSourceWorkspace,
+    platform,
     usePool: options.useDependencyPool,
     onDecision: async (decision) => {
       if (decision.path === 'fallback') fallbackReason = decision.reason;

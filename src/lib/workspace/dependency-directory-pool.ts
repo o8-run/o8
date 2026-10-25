@@ -140,14 +140,14 @@ async function refill(sourceWorkspace: string, recipe: DependencyInstallRecipe, 
         exactBytes: DEPENDENCY_POOL_POLICY.maxTreeBytes, ownerId: id, ownerGeneration: 1, leaseExpiresAt: Date.now() + 5 * 60_000 });
       if (admitted.decision !== 'reserved' || !admitted.reservation) throw new Error(`Dependency pool storage held: ${admitted.reason}`);
       reservation = admitted.reservation;
-      for (const name of ['package.json', 'package-lock.json']) {
+      for (const name of ['package.json', recipe.lockfile.path]) {
         const contents = await readPinnedWorkspaceFile(sourceWorkspace, sourceIdentity, name);
         if (contents === null) throw new Error('Dependency pool source input missing.');
         await writePinnedWorkspaceFile(slot, parent, name, contents);
       }
       const cloned = await clonePinnedWorkspaceDirectory(slot, parent, 'node_modules', path.join(sourceWorkspace, 'node_modules'));
       if (cloned.disposition !== 'created' || cloned.sourceChanged) throw new Error('Dependency pool clone unavailable or changed.');
-      const target = await validateDependencyCloneGraph(slot);
+      const target = await validateDependencyCloneGraph(slot, recipe.lockfile.path);
       if (!target || target.digest !== graph.digest || !await matches()
         || !await dependencyCloneSnapshotMatches(sourceWorkspace, graph.snapshot)) throw new Error('Dependency pool validation changed.');
       await probeDependencyCloneNativeFiles(slot, parent, target.nativeFiles);

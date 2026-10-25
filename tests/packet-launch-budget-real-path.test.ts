@@ -6,6 +6,27 @@ import { afterAll, expect, it, vi } from 'vitest';
 
 import type { OrchestratorMissionState, OrchestratorPacket } from '@/lib/orchestrator/types';
 
+// The scheduler and materializer stay real. Only the unavailable OS clone
+// boundary is modeled; these timings cannot establish physical block sharing.
+vi.mock('@/lib/workspace/dependency-materializer', async original => {
+  const actual = await original<typeof import('@/lib/workspace/dependency-materializer')>();
+  return { ...actual, materializeDependencyInstall: (workspace: string, command: string, options: Parameters<typeof actual.materializeDependencyInstall>[2]) => {
+    return actual.materializeDependencyInstall(workspace, command, process.env.O8_SPEED_SHRINKWRAP === '1'
+      ? { ...options, platform: 'darwin', useDependencyPool: false } : options);
+  } };
+});
+vi.mock('@/lib/worktree/materialization-leaf-io', async original => {
+  const actual = await original<typeof import('@/lib/worktree/materialization-leaf-io')>();
+  return { ...actual, clonePinnedWorkspaceDirectory: async (...args: Parameters<typeof actual.clonePinnedWorkspaceDirectory>) => {
+    if (process.env.O8_SPEED_SHRINKWRAP !== '1' || process.platform === 'darwin') return actual.clonePinnedWorkspaceDirectory(...args);
+    const { cp, lstat } = await import('node:fs/promises');
+    const target = path.join(args[0], args[2]);
+    await cp(args[3], target, { recursive: true, errorOnExist: true, force: false });
+    const stat = await lstat(target);
+    return { disposition: 'created' as const, device: stat.dev, inode: stat.ino, sourceChanged: false };
+  } };
+});
+
 vi.mock('@/lib/codex/live-capacity', () => ({ readLiveCodexRuntimeCapacity: vi.fn(async () => ({ runtime: 'codex', identityId: null, status: 'unavailable',
   reason: 'fixture', observedAt: null, source: null, confidence: null, buckets: [] })) }));
 vi.mock('@/lib/claude-code/live-capacity', () => ({ readClaudeAccountCapacity: vi.fn(async () => ({ runtime: 'claude-code', identityId: null, status: 'unavailable',
@@ -150,7 +171,7 @@ it('dispatches through a matching warm worktree without dependency preparation',
     },
   }));
   const installedPackages = { 'node_modules/fixture': { version: '1.0.0' } };
-  writeFileSync(path.join(repo, 'package-lock.json'), JSON.stringify({ lockfileVersion: 3, packages: installedPackages }));
+  writeFileSync(path.join(repo, process.env.O8_SPEED_SHRINKWRAP === '1' ? 'npm-shrinkwrap.json' : 'package-lock.json'), JSON.stringify({ lockfileVersion: 3, packages: installedPackages }));
   mkdirSync(path.join(repo, 'tools'));
   writeFileSync(path.join(repo, 'tools/package.json'), '{"name":"unrelated-tool"}');
   git('add', '.');
@@ -171,6 +192,13 @@ it('dispatches through a matching warm worktree without dependency preparation',
   writeFileSync(path.join(repo, 'node_modules', 'fixture', 'index.js'), 'module.exports = 42;\n');
   writeFileSync(path.join(repo, 'node_modules', 'fixture', 'package.json'), '{"name":"fixture","version":"1.0.0"}\n');
   writeFileSync(path.join(repo, 'node_modules', '.package-lock.json'), JSON.stringify({ lockfileVersion: 3, packages: installedPackages }));
+  if (process.env.O8_SPEED_SHRINKWRAP_STALE === 'lockfile') {
+    const lock = path.join(repo, 'npm-shrinkwrap.json');
+    writeFileSync(lock, readFileSync(lock, 'utf8') + '\n');
+  }
+  if (process.env.O8_SPEED_SHRINKWRAP_STALE === 'installed') {
+    writeFileSync(path.join(repo, 'node_modules/fixture/package.json'), '{"name":"fixture","version":"0.9.0"}');
+  }
   writeFileSync(path.join(repo, 'README.md'), 'source WIP\n');
   writeFileSync(path.join(repo, '.env'), 'FIXTURE_SETTING=source-only\n');
   // The external package-manager fixture never installs packages or uses the network.
@@ -219,7 +247,7 @@ it('dispatches through a matching warm worktree without dependency preparation',
   const credentials = await import('@/lib/runtimes/shared/owned-session/credential-spawn');
   const checkedSpawn = vi.spyOn(credentials, 'spawnCredentialCheckedChild');
   const registration = await addRepo(repo);
-  await updateRepo(registration.id, { setup: { ...registration.setup, workspaceIsolationPreference: 'auto', installCommand: 'npm ci --offline' } });
+  await updateRepo(registration.id, { setup: { ...registration.setup, workspaceIsolationPreference: 'auto', ...(process.env.O8_SPEED_SHRINKWRAP === '1' ? { installOnCreateWorkspace: true } : {}), installCommand: 'npm ci --offline' } });
   const packet = {
     id: 'pkt-launch-budget', referenceLabel: 'LAUNCH-BUDGET', title: 'Launch fixture',
     summary: 'Measure dispatch to the persisted launch event.', workspaceTargetPath: repo,
@@ -232,7 +260,7 @@ it('dispatches through a matching warm worktree without dependency preparation',
   control.writeOrchestratorControlPlaneState(state);
   const readMainHooks = () => { try { return git('config', '--local', '--get', 'core.hooksPath'); } catch { return null; } };
   const mainHooks = readMainHooks();
-  const warm = process.env.O8_SPEED_WARM !== '0' && process.platform === 'linux' && process.env.O8_SPEED_MAC_ASSERTIONS !== '1';
+  const warm = process.env.O8_SPEED_WARM !== '0' && process.platform === 'linux' && process.env.O8_SPEED_MAC_ASSERTIONS !== '1' && process.env.O8_SPEED_SHRINKWRAP !== '1';
   const invalidation = process.env.O8_SPEED_INVALIDATION;
   const bindingFault = process.env.O8_SPEED_BINDING_FAULT === '1';
   const inodeSwap = process.env.O8_SPEED_INODE_SWAP === '1';
@@ -598,7 +626,7 @@ it('dispatches through a matching warm worktree without dependency preparation',
   expect.soft(receipt.dispatchToOutputMs).toBeLessThan(launchBudgetMs);
   if (hit) expect.soft(stages.dependencyProvisioningMs).toBe(0);
   else expect(stages.dependencyProvisioningMs).toBeGreaterThan(0);
-  if (process.platform !== 'darwin') {
+  if (process.platform !== 'darwin' && process.env.O8_SPEED_SHRINKWRAP !== '1') {
     expect(JSON.parse(readFileSync(path.join(workspace, 'installer-runtime.json'), 'utf8'))).toEqual({ contained: true, isolatedConfig: true });
     expect(readdirSync(path.join(workspace, '.o8-install-runtime'))).toHaveLength(0);
   }
@@ -617,6 +645,13 @@ it('dispatches through a matching warm worktree without dependency preparation',
   expect(readFileSync(path.join(repo, 'README.md'), 'utf8')).toBe('source WIP\n');
   expect(sessionMs).toBeLessThan(60_000);
   expect(elapsedMs).toBeLessThan(60_000);
+  if (process.env.O8_SPEED_SHRINKWRAP === '1') {
+    const stale = process.env.O8_SPEED_SHRINKWRAP_STALE;
+    expect(timings).toContainEqual(expect.objectContaining({ stage: 'dependency_selection',
+      path: stale ? 'native-install' : 'directory-clone',
+      reason: stale === 'lockfile' ? 'source-inputs-mismatch' : stale === 'installed' ? 'installed-graph-ineligible' : 'matching-inputs' }));
+    expect(existsSync(path.join(workspace, 'installer-fallback.txt'))).toBe(Boolean(stale));
+  }
   if (process.platform !== 'darwin' && process.env.O8_SPEED_MAC_ASSERTIONS !== '1') return;
   const clonedDependencies = timings.some(timing => timing.stage === 'dependency_selection' && timing.path === 'directory-clone');
   expect(existsSync(path.join(workspace, 'installer-fallback.txt'))).toBe(!clonedDependencies);

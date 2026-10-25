@@ -24,13 +24,14 @@ function permits(values: string[] | undefined, actual: string): boolean {
 }
 
 /** npm's installed lock is independent evidence of the installed resolution. */
-export async function validateDependencyCloneGraph(workspace: string): Promise<{ digest: string; nativeFiles: string[]; snapshot: DependencyCloneSnapshot } | null> {
+export async function validateDependencyCloneGraph(workspace: string, lockfilePath = 'package-lock.json'): Promise<{ digest: string; nativeFiles: string[]; snapshot: DependencyCloneSnapshot } | null> {
+  if (!['package-lock.json', 'npm-shrinkwrap.json'].includes(lockfilePath)) return null;
   try {
     const capture = dependencyCloneSnapshot(workspace);
     const read = async (relative: string) => JSON.parse(await capture.read(relative)) as {
       lockfileVersion?: number; packages?: Record<string, LockedPackage>;
     };
-    const [lock, installed, manifest] = await Promise.all([read('package-lock.json'), read('node_modules/.package-lock.json'), read('package.json')]);
+    const [lock, installed, manifest] = await Promise.all([read(lockfilePath), read('node_modules/.package-lock.json'), read('package.json')]);
     if (installed.lockfileVersion !== 3 || !lock.packages || !installed.packages) return null;
     const inspectModules = async (relative: string): Promise<boolean> => {
       let entries;
