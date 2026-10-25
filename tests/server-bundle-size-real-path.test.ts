@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { bundleServers, SERVER_ENTRIES } from '../scripts/lib/server-bundles.mjs';
@@ -38,6 +38,63 @@ function run(root: string, budget: string) {
 }
 
 describe('server size check CLI', () => {
+  it('keeps the actual server export inside the committed size gate', () => {
+    const result = spawnSync(process.execPath, [check], {
+      encoding: 'utf8', timeout: 120_000,
+      env: { PATH: process.env.PATH, NODE_ENV: 'test' },
+    });
+    expect(result.status, result.stdout + result.stderr).toBe(0);
+    expect(result.stdout).toContain('Server bundle size check passed.');
+  }, 120_000);
+
+  it('rejects an oversized export against the unchanged committed total gate', () => {
+    const { root } = fixture();
+    const committedBudget = join(process.cwd(), 'scripts/server-bundle-budget.json');
+    const originalBudget = readFileSync(committedBudget, 'utf8');
+    const budget = JSON.parse(originalBudget);
+    expect(budget.totalBytes + 1_000_000).toBe(14_077_919);
+    const entry = join(root, entries[0]);
+    writeFileSync(entry, 'console.log("");\n');
+    const initial = bundleServers({ root, outDir: join(root, 'sizing') }).outputs
+      .reduce((sum, output) => sum + output.bytes, 0);
+    writeFileSync(entry, `console.log(${JSON.stringify('x'.repeat(14_104_638 - initial))});\n`);
+    const red = run(root, committedBudget);
+    expect(red.status, red.stdout + red.stderr).toBe(1);
+    expect(red.stdout).toContain('total: 14104638 bytes (budget 13077919, delta 1026719)');
+    expect(red.stderr).toContain('total exceeds budget by 1026719 bytes (allowed growth: 1 MB).');
+    expect(readFileSync(committedBudget, 'utf8')).toBe(originalBudget);
+    console.info(red.stdout.split('\n').filter(line => line.startsWith('total:')).join('\n'));
+    console.info(red.stderr.trim());
+  });
+
+  it('excludes orphan lazy chunks and executes retained lazy imports', () => {
+    const { root, budget } = fixture();
+    writeFileSync(join(root, 'optional.ts'), `
+      export const marker = 'entry';
+      export async function unusedFeature() { return import('./orphan'); }
+    `);
+    writeFileSync(join(root, 'orphan.ts'), `export const payload = ${JSON.stringify('unreachable payload '.repeat(90_000))};`);
+    writeFileSync(join(root, 'retained.ts'), "export const value = 'reachable lazy import';");
+    writeFileSync(join(root, entries[0]), `
+      import { marker } from '../optional';
+      console.log(marker);
+      if (process.argv[2] === 'lazy') console.log((await import('../retained')).value);
+    `);
+    const checked = run(root, budget);
+    expect(checked.status, checked.stdout + checked.stderr).toBe(0);
+    const outDir = join(root, 'built');
+    const report = bundleServers({ root, outDir });
+    expect(report.outputs.some(output => output.budgetKey === 'shared:entry:orphan.ts')).toBe(false);
+    expect(report.outputs.some(output => output.budgetKey === 'shared:entry:retained.ts')).toBe(true);
+    expect(readdirSync(outDir).sort()).toEqual(report.outputs.map(output => output.file).sort());
+    writeFileSync(join(outDir, 'native-addon-runtime.cjs'), 'exports.prepareNativeAddons = () => {};');
+    const executed = spawnSync(process.execPath, [join(outDir, 'ws-server.mjs'), 'lazy'], {
+      encoding: 'utf8', timeout: 10_000, env: { PATH: process.env.PATH, NODE_ENV: 'test' },
+    });
+    expect(executed.status, executed.stderr).toBe(0);
+    expect(executed.stdout.trim().split('\n')).toEqual(['entry', 'reachable lazy import']);
+  });
+
   it('rejects a large dependency imported by an entry and accepts an explicit budget edit', () => {
     const { root, budget } = fixture();
     expect(run(root, budget).status).toBe(0);
