@@ -1,7 +1,7 @@
 //! Native counterparts of src/app/globals.css. Keep appearance selection here;
 //! views consume semantic tokens and never choose their own palette or fonts.
 use gpui::{Rgba, rgb};
-use std::sync::LazyLock;
+use std::{cell::Cell, sync::LazyLock};
 
 #[derive(Clone, Copy, Debug)]
 pub enum Appearance {
@@ -11,6 +11,7 @@ pub enum Appearance {
 
 pub struct Theme {
     pub background: Rgba,
+    pub shell_background: Rgba,
     pub surface: Rgba,
     pub surface_raised: Rgba,
     pub text: Rgba,
@@ -37,11 +38,66 @@ pub struct Theme {
     pub font_mono: &'static str,
 }
 
-// This is the only appearance selection. A future system-appearance hook can
-// replace it without changing any view's choice of semantic tokens.
-static CURRENT: LazyLock<Theme> = LazyLock::new(|| Theme::for_appearance(Appearance::Dark));
+// Startup preferences select semantic tokens before opening the shell. GPUI
+// owns one UI thread; a test window's selection stays on its own test thread.
+static DARK: LazyLock<Theme> = LazyLock::new(|| Theme::for_appearance(Appearance::Dark));
+static LIGHT: LazyLock<Theme> = LazyLock::new(|| Theme::for_appearance(Appearance::Light));
+static DARK_GLASS: LazyLock<Theme> = LazyLock::new(|| glass_theme(Appearance::Dark, false));
+static LIGHT_GLASS: LazyLock<Theme> = LazyLock::new(|| glass_theme(Appearance::Light, false));
+static ALL_GLASS: LazyLock<Theme> = LazyLock::new(|| glass_theme(Appearance::Dark, true));
+#[derive(Clone, Copy)]
+struct Choice {
+    light: bool,
+    glass: bool,
+    all_glass: bool,
+    width: f32,
+    visible: bool,
+}
+thread_local! {
+    static CHOICE: Cell<Choice> = const { Cell::new(Choice { light: false, glass: false, all_glass: false, width: 250., visible: true }) };
+}
+pub fn configure(palette: &str, glass: bool, all_glass: bool, width: f32, visible: bool) {
+    let glass = glass && cfg!(target_os = "macos");
+    CHOICE.set(Choice {
+        light: palette == "light" && !(glass && all_glass),
+        glass,
+        all_glass: glass && all_glass,
+        width,
+        visible,
+    });
+}
+pub fn glass_enabled() -> bool {
+    CHOICE.get().glass
+}
+pub fn sidebar_width() -> f32 {
+    let choice = CHOICE.get();
+    if choice.visible { choice.width } else { 0. }
+}
+pub fn sidebar_inset() -> f32 {
+    if CHOICE.get().visible { 8. } else { 0. }
+}
+fn glass_theme(appearance: Appearance, all: bool) -> Theme {
+    let mut theme = Theme::for_appearance(appearance);
+    theme.shell_background.a = 0.;
+    if all {
+        theme.background.a = 0.;
+        theme.surface.a = 0.;
+    }
+    theme
+}
 pub fn current() -> &'static Theme {
-    &CURRENT
+    let choice = CHOICE.get();
+    if choice.all_glass {
+        &ALL_GLASS
+    } else if choice.glass && choice.light {
+        &LIGHT_GLASS
+    } else if choice.glass {
+        &DARK_GLASS
+    } else if choice.light {
+        &LIGHT
+    } else {
+        &DARK
+    }
 }
 
 // GPUI takes one native family, not a CSS fallback stack. These are members of
@@ -86,6 +142,7 @@ impl Theme {
         match appearance {
             Appearance::Dark => Self {
                 background: rgb(0x1c1c1e),
+                shell_background: rgb(0x1c1c1e),
                 surface: translucent(0x1c1c1e, 0.82),
                 surface_raised: rgb(0x1c1c1e),
                 text: rgb(0xf5f5f7),
@@ -113,6 +170,7 @@ impl Theme {
             },
             Appearance::Light => Self {
                 background: rgb(0xf5f7fb),
+                shell_background: rgb(0xf5f7fb),
                 surface: translucent(0xffffff, 0.82),
                 surface_raised: rgb(0xffffff),
                 text: rgb(0x111827),

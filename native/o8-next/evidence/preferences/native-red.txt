@@ -1,0 +1,13 @@
+thread 'shell::preferences::tests::launch_preferences_match_palette_sidebar_and_window_before_input' (59163) panicked at src/preferences_tests.rs:15:5:
+assertion `left == right` failed
+  left: 1200px
+ right: 900px
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test shell::preferences::tests::launch_preferences_match_palette_sidebar_and_window_before_input ... FAILED
+
+failures:
+
+failures:
+    shell::preferences::tests::launch_preferences_match_palette_sidebar_and_window_before_input
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 133 filtered out; finished in 1.15s

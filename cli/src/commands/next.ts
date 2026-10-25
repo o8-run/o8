@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { isAbsolute, join } from 'node:path';
 import { CliError, EXIT } from '../api.js';
 import { resolveConfig, resolveCliDataDir } from '../config.js';
+import { readNextPreferences } from './next-preferences.js';
 
 /** Local configuration discovery is restricted to the opt-in app shell. */
 export async function runNext(args: string[]): Promise<number> {
@@ -21,6 +22,7 @@ export async function runNext(args: string[]): Promise<number> {
   }
   const forwarded = [...args.slice(0, at), ...args.slice(at + 2)];
   const env = { ...process.env };
+  delete env.O8_NEXT_PREFERENCES;
   if (shell) {
     const config = resolveConfig();
     const serverAt = forwarded.indexOf('--server');
@@ -46,6 +48,11 @@ export async function runNext(args: string[]): Promise<number> {
       env.O8_NEXT_API_TOKEN = config.token;
     }
     if (!forwarded.includes('--shell-state')) forwarded.push('--shell-state', join(config.dataDir || resolveCliDataDir(), 'next-shell.json'));
+    if (config.source.token !== 'worker' && !env.O8_SPECTATOR_TOKEN && url.origin === config.apiBase
+      && (config.source.port !== 'env' || Boolean(env.O8_TAURI_MCP_SOCKET?.trim()))) {
+      const preferences = await readNextPreferences();
+      if (preferences) env.O8_NEXT_PREFERENCES = preferences;
+    }
   }
   return new Promise((resolve, reject) => {
     const child = spawn(binary, forwarded, { stdio: 'inherit', shell: false, env });

@@ -29,7 +29,7 @@ impl Render for Shell {
             .size_full()
             .flex()
             .flex_col()
-            .bg(theme().background)
+            .bg(theme().shell_background)
             .text_color(theme().text)
             .font_family(theme().font_ui)
             .text_size(px(13.))
@@ -273,9 +273,43 @@ pub(super) fn open_window(
     offscreen: bool,
     cx: &mut App,
 ) -> gpui::WindowHandle<Shell> {
+    let prefs = std::env::var("O8_NEXT_PREFERENCES")
+        .ok()
+        .and_then(|v| preferences::Preferences::parse(&v));
+    open_window_with_preferences(client, file, state, offscreen, prefs, cx)
+}
+
+pub(super) fn open_window_with_preferences(
+    client: Client,
+    file: PathBuf,
+    mut state: State,
+    offscreen: bool,
+    prefs: Option<preferences::Preferences>,
+    cx: &mut App,
+) -> gpui::WindowHandle<Shell> {
+    if let Some(prefs) = prefs {
+        crate::theme::configure(
+            &prefs.palette,
+            prefs.glass,
+            prefs.all_glass,
+            prefs.sidebar_width,
+            prefs.sidebar_visible,
+        );
+        if let Some([w, h]) = prefs.window_size {
+            state.bounds[2] = w;
+            state.bounds[3] = h;
+        }
+    } else {
+        crate::theme::configure("dark", false, false, 250., true);
+    }
     let [x, y, w, h] = state.bounds;
     cx.open_window(
         WindowOptions {
+            window_background: if crate::theme::glass_enabled() {
+                gpui::WindowBackgroundAppearance::Blurred
+            } else {
+                gpui::WindowBackgroundAppearance::Opaque
+            },
             focus: false,
             show: !offscreen,
             window_bounds: Some(WindowBounds::Windowed(Bounds::new(

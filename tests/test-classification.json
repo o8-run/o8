@@ -4090,6 +4090,15 @@
       ]
     },
     {
+      "path": "tests/next-preferences-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/next-pull-requests-real-path.test.ts",
       "reasons": [
         "child-process",

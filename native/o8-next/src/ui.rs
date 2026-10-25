@@ -451,10 +451,12 @@ impl Render for Surface {
                     .child(
                         div()
                             .id("sessions")
-                            .w(px(250.))
+                            .debug_selector(|| "session-sidebar".into())
+                            .w(px(crate::theme::sidebar_width()))
                             .flex_shrink_0()
+                            .overflow_x_hidden()
                             .overflow_y_scroll()
-                            .px(px(8.))
+                            .px(px(crate::theme::sidebar_inset()))
                             .children(
                                 sidebar::tree(&self.sessions, self.selected.as_deref())
                                     .into_iter()

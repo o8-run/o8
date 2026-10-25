@@ -144,6 +144,7 @@ fn every_theme_token_resolves_for_both_appearances_and_matches_desktop_css() {
         // No `..`: adding a field requires exercising the new token here.
         let Theme {
             background,
+            shell_background,
             surface,
             surface_raised,
             text,
@@ -188,6 +189,7 @@ fn every_theme_token_resolves_for_both_appearances_and_matches_desktop_css() {
             .unwrap();
         for (name, color) in [
             ("--bg", background),
+            ("--bg", shell_background),
             ("--panel", surface),
             ("--panel-strong", surface_raised),
             ("--text", text),
