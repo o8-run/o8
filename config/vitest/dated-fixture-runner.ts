@@ -1,9 +1,9 @@
 import { writeFileSync } from 'node:fs';
 import { TestRunner, vi, type RunnerTask, type RunnerTestFile, type RunnerTestSuite } from 'vitest';
+import { captureFixtureClock } from './dated-fixture-surfaces';
 
 export default class DatedFixtureRunner extends TestRunner {
-  private readonly probeDate = globalThis.Date;
-  private readonly probeNow = Date.now;
+  private readonly clock = captureFixtureClock();
 
   onCollected(files: RunnerTestFile[]) {
     const selected = process.env.O8_DATED_FIXTURE_TEST;
@@ -29,8 +29,7 @@ export default class DatedFixtureRunner extends TestRunner {
       // can execute unrelated describe bodies too; none may lend a test a pin.
       // Start fresh before running the selected test's own ancestor hooks.
       vi.useRealTimers();
-      globalThis.Date = this.probeDate;
-      Date.now = this.probeNow;
+      this.clock.restore();
     } else {
       const output = process.env.O8_DATED_FIXTURE_CASES;
       if (!output || files.length !== 1) throw new Error('A dated-fixture probe requires one collected file');
@@ -39,16 +38,20 @@ export default class DatedFixtureRunner extends TestRunner {
   }
 
   async onAfterRunSuite(suite: RunnerTestSuite) {
-    await super.onAfterRunSuite(suite);
     // All afterEach/afterAll hooks and their cleanup callbacks have finished.
     // A fresh worker prevents another test or sibling suite from lending a pin.
-    if (suite === suite.file && (Date !== this.probeDate || Date.now !== this.probeNow)) {
+    if (suite === suite.file && !this.clock.matches()) {
       suite.result!.state = 'fail';
       suite.result!.errors ??= [];
       suite.result!.errors.push({
         name: 'Error',
-        message: 'Restore Date after the isolated dated-fixture test and its hooks',
+        message: 'Restore Date, Intl.DateTimeFormat and performance.timeOrigin after the isolated dated-fixture test and its hooks',
       });
+      // Report the failure using clean clocks; automatic cleanup never turns
+      // an unrestored pin into a successful validation.
+      vi.useRealTimers();
+      this.clock.restore();
     }
+    await super.onAfterRunSuite(suite);
   }
 }

@@ -83,8 +83,13 @@ referencing hermetic test through Vitest with Date past its latest fixed expiry.
 After collection, each test ID runs in a fresh process with only its ancestor
 hooks, including parameterized cases with identical names. The probe installs
 an advancing future clock at worker startup, before Vitest captures Date, so
-restoring timers also restores the probe clock. It clears collection-time pins
-before the selected test's hooks and verifies Date is restored after cleanup.
+restoring timers also restores the probe clock. Default Intl date formatting
+and performance.timeOrigin use the same future epoch; explicit dates and
+monotonic durations retain their normal behavior. It clears collection-time
+pins before the selected test's hooks, including Date prototype mocks, formatter
+mocks and timeOrigin shadows. After cleanup, the original clock descriptors,
+references and prototype links must be restored. Pins belong in the selected
+test or its ancestor hooks; collection-time state cannot supply a runtime pin.
 An unrelated suite cannot lend a later test its clock. Ordinary Date.now() use
 continues to work under the advancing clock.
 

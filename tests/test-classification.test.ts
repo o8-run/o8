@@ -232,9 +232,29 @@ describe('dated fixture PR gate', () => {
 
   it('executes the flagged file with both Date.now and new Date past expiry', () => {
     const root = datedFixture(`
-      it('observes the probe clock', () => {
+      it('observes the probe clock', async () => {
         expect(Date.now()).toBeGreaterThan(Date.UTC(2030, 0, 9));
         expect(new Date().getTime()).toBeGreaterThan(Date.UTC(2030, 0, 9));
+        expect(new Date().constructor).toBe(Date);
+        expect(Date.prototype.constructor.now()).toBeGreaterThan(Date.UTC(2030, 0, 9));
+        expect(new Date(0).getTime()).toBe(0);
+        expect(new Date(0).toISOString()).toBe('1970-01-01T00:00:00.000Z');
+        const formatter = new Intl.DateTimeFormat('en', { year: 'numeric', timeZone: 'UTC' });
+        expect(formatter.format).toBe(formatter.format);
+        expect(formatter.format()).toBe('2030');
+        expect(formatter.format(undefined)).toBe('2030');
+        expect(formatter.format(0)).toBe('1970');
+        expect(formatter.format(null)).toBe('1970');
+        expect(formatter.format(new Date(0))).toBe('1970');
+        expect(formatter.formatToParts().find(part => part.type === 'year')?.value).toBe('2030');
+        expect(formatter.formatToParts(undefined).find(part => part.type === 'year')?.value).toBe('2030');
+        expect(formatter.formatToParts(0).find(part => part.type === 'year')?.value).toBe('1970');
+        expect(() => Intl.DateTimeFormat.prototype.formatToParts.call({}, 0)).toThrow(TypeError);
+        expect(performance.timeOrigin).toBeGreaterThan(Date.UTC(2030, 0, 9));
+        const { performance: nativePerformance } = await import('node:perf_hooks');
+        expect(nativePerformance.timeOrigin).toBe(performance.timeOrigin);
+        const start = performance.now();
+        expect(performance.now()).toBeGreaterThanOrEqual(start);
       });
     `);
     try {
@@ -350,4 +370,115 @@ describe('dated fixture PR gate', () => {
       }
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
+});
+
+
+const clockPins = [
+  { name: 'vi.useFakeTimers', read: 'Date.now()', install: `
+    vi.useFakeTimers({ now: pin });
+    return () => vi.useRealTimers();
+  ` },
+  { name: 'vi.setSystemTime', read: 'Date.now()', install: `
+    vi.setSystemTime(pin);
+    return () => vi.useRealTimers();
+  ` },
+  { name: 'Date assignment', read: 'new Date().getTime()', install: `
+    const original = Date;
+    globalThis.Date = class extends original {
+      constructor() { super(pin); }
+      static now() { return pin; }
+    } as DateConstructor;
+    return () => { globalThis.Date = original; };
+  ` },
+  ...[
+    ['Date.now', 'Date', 'now', '() => pin', 'Date.now()'],
+    ['Date.prototype.getTime', 'Date.prototype', 'getTime', '() => pin', 'new Date().getTime()'],
+    ['Date.prototype.valueOf', 'Date.prototype', 'valueOf', '() => pin', '+new Date()'],
+    ['Date.prototype.toISOString', 'Date.prototype', 'toISOString', "() => '2029-01-01T00:00:00.000Z'", 'Date.parse(new Date().toISOString())'],
+    ['Date.prototype.getFullYear', 'Date.prototype', 'getFullYear', '() => 2029', 'Date.UTC(new Date().getFullYear(), 0, 1)'],
+  ].map(([name, target, key, value, read]) => ({ name, read, install: `
+    const target = ${target};
+    const original = Object.getOwnPropertyDescriptor(target, '${key}')!;
+    Object.defineProperty(target, '${key}', { configurable: true, writable: true, value: ${value} });
+    return () => Object.defineProperty(target, '${key}', original);
+  ` })),
+  { name: 'Intl.DateTimeFormat', read: "Date.UTC(Number(new Intl.DateTimeFormat('en', { year: 'numeric', timeZone: 'UTC' }).format()), 0, 1)", install: `
+    const original = Intl.DateTimeFormat;
+    Intl.DateTimeFormat = class extends original {
+      get format() { return () => '2029'; }
+    } as typeof Intl.DateTimeFormat;
+    return () => { Intl.DateTimeFormat = original; };
+  ` },
+  { name: 'performance.timeOrigin', read: 'performance.timeOrigin', install: `
+    const original = Object.getOwnPropertyDescriptor(performance, 'timeOrigin');
+    Object.defineProperty(performance, 'timeOrigin', { configurable: true, value: pin });
+    return () => {
+      if (original) Object.defineProperty(performance, 'timeOrigin', original);
+      else delete (performance as unknown as Record<string, unknown>).timeOrigin;
+    };
+  ` },
+];
+
+const pinOwners = [
+  'unpinned', 'sibling collection', 'sibling hooks', 'test restored',
+  'describe restored', 'test unrestored', 'describe unrestored',
+] as const;
+
+describe('dated fixture clock ownership matrix', () => {
+  it.each(clockPins.flatMap(clock => pinOwners.map(owner => ({ ...clock, owner }))))(
+    '$name / $owner', ({ name, read, install, owner }) => {
+      const validate = "it('validates the dated fixture', () => check());";
+      const source = {
+        unpinned: validate,
+        'sibling collection': `
+          describe('unrelated collection', () => { installPin(); });
+          describe('validation', () => { ${validate} });
+        `,
+        'sibling hooks': `
+          describe('unrelated hooks', () => {
+            let restore: () => void;
+            beforeAll(() => { restore = installPin(); });
+            afterAll(() => restore());
+            it('uses its own clock', () => check());
+          });
+          describe('validation', () => { ${validate} });
+        `,
+        'test restored': `it('validates the dated fixture', () => {
+          const restore = installPin();
+          try { check(); } finally { restore(); }
+        });`,
+        'describe restored': `describe('validation', () => {
+          let restore: () => void;
+          beforeAll(() => { restore = installPin(); });
+          afterAll(() => restore());
+          ${validate}
+        });`,
+        'test unrestored': "it('validates the dated fixture', () => { installPin(); check(); });",
+        'describe unrestored': `describe('validation', () => {
+          beforeAll(() => { installPin(); });
+          ${validate}
+        });`,
+      }[owner];
+      const root = datedFixture(`
+        function installPin() {
+          const pin = Date.UTC(2029, 0, 1);
+          ${install}
+        }
+        ${source}
+      `, 'export const contract = { expiresAt: Date.UTC(2030, 0, 1) };', false);
+      try {
+        writeFileSync(join(root, 'tests/fixtures/check.ts'), `
+          import { contract } from '@/contract';
+          export function check() {
+            if (${read} >= contract.expiresAt) throw new Error('expired');
+          }
+        `);
+        const result = runClassification(root, '--write');
+        const allowed = owner === 'test restored' || owner === 'describe restored';
+        expect(result.status, `${name} / ${owner}\n${result.stderr}`).toBe(allowed ? 0 : 1);
+        if (allowed) expect(result.stdout).toContain('passed with Date after');
+        else expect(result.stderr).toContain('[dated-fixtures] tests/clock.test.ts');
+      } finally { rmSync(root, { recursive: true, force: true }); }
+    },
+  );
 });
