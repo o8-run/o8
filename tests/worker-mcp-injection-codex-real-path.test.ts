@@ -277,7 +277,7 @@ describe.sequential('Codex worker MCP injection real path', () => {
     expect(launchResult.ok, launchResult.note || 'launch refused').toBe(true);
     const launchArgs = spawnedArgs(launchCall);
     const expectedOverrides = [
-      `mcp_servers.packet-observer.command=${JSON.stringify(process.execPath)}`,
+      expect.stringContaining('mcp_servers.packet-observer.command='),
       'mcp_servers.packet-observer.args=["fixture-server.mjs"]',
       expect.stringContaining(`mcp_servers.packet-observer.env={"PACKET_ID"=${JSON.stringify(launchPacket.id)}, "WORKTREE"=${JSON.stringify(launchLane.worktreePath)}, "BRANCH"=${JSON.stringify(launchPacket.branchTarget)}, "LANE_ID"=${JSON.stringify(launchLane.id)}`),
     ];

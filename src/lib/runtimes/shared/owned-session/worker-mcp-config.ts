@@ -8,13 +8,13 @@ import {
   resolveWorkerMcpInjection,
   type ResolvedWorkerMcpServer,
 } from '@/lib/mcp/worker-injection';
-import { pathWithNodeRuntime } from '@/lib/util/node-on-path';
 
 import type { OwnedRunMode, OwnedRuntimeAdapter, OwnedSessionRecord } from './types';
 import { installedTool } from '@/lib/devices/tools';
 import { getDeviceManager } from '@/lib/devices/service';
 import { devMcpServerLaunch, findBundledMcpServer, resolveToolSpineApiBase } from '@/lib/mcp/tool-spine/build';
 import { fileURLToPath } from 'node:url';
+import { guardWorkerMcpLaunch } from '@/lib/providers/mcp-worker-launch';
 
 export interface PreparedOwnedWorkerMcpConfig {
   configPath?: string;
@@ -58,14 +58,17 @@ export async function prepareOwnedWorkerMcpConfig({
     return { sandboxReadPaths: [], servers: [] };
   }
 
+  // Preserve operator PATH precedence when resolving a configured command;
+  // the server's Node directory is a fallback for interpreter availability.
+  const commandPath = [process.env.PATH, path.dirname(process.execPath)].filter(Boolean).join(path.delimiter);
   const resolution = await resolveWorkerMcpInjection({
     packetId: session.packetId,
     worktreePath: session.repoPath,
     branch: session.branch ?? '',
     laneId: session.laneId,
   }, {
-    resolveCommands: sandboxEnabled,
-    pathValue: pathWithNodeRuntime(),
+    resolveCommands: true,
+    pathValue: commandPath,
   });
   for (const skipped of resolution.skipped) {
     recordWorkerMcpEvent(session, 'mcp_injection_skipped', skipped);
@@ -88,11 +91,18 @@ export async function prepareOwnedWorkerMcpConfig({
   }
   if (resolution.servers.length === 0) return { sandboxReadPaths: [], servers: [] };
 
-  const injectableServers = resolution.servers;
+  let injectableServers: ResolvedWorkerMcpServer[];
+  try {
+    injectableServers = resolution.servers.map(server => guardWorkerMcpLaunch(server, session.sessionDir, session.repoPath, commandPath));
+  } catch {
+    recordWorkerMcpEvent(session, 'mcp_injection_skipped', { reason: 'MCP executable changed or could not be resolved. Retry the launch.' });
+    return { sandboxReadPaths: [], servers: [] };
+  }
   const commandReadPaths = sandboxEnabled
     ? [...new Set((await Promise.all(injectableServers.map(async (server) => [
       path.dirname(server.command),
       path.dirname(await realpath(server.command)),
+      ...(server.executable ? [path.dirname(server.executable.alias), path.dirname(server.executable.target)] : []),
     ]))).flat())]
     : [];
   if (adapter.workerMcpInjection === 'config-override') {
@@ -124,7 +134,7 @@ export async function prepareOwnedWorkerMcpConfig({
       configPath,
       `${JSON.stringify({ mcpServers }, null, 2)}\n`,
       { encoding: 'utf8', mode: 0o600 },
-    ));
+    ), session.repoPath);
     recordWorkerMcpEvent(session, 'mcp_injected', {
       servers: injectableServers.map((server) => server.name),
       configPath,

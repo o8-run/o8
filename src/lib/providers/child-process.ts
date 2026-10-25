@@ -8,6 +8,7 @@ import { credentialPolicyFingerprint } from './credential-policy';
 import { withProviderStoreLock } from './store-lock';
 import { assertLegacyRuntimeConfigSelection } from './legacy-runtime-config';
 import { recordRuntimeProfileChild } from './runtime-profile-processes';
+import { preparedMcpExecutable, verifyMcpExecutable } from './mcp-executable';
 export type * from 'node:child_process';
 
 /** Keychain bootstrap cannot read the provider store it unlocks. Inherit nothing. */
@@ -31,6 +32,16 @@ function invoke(name: Operation, supplied: unknown[], asPromise = false): unknow
   return withChildEnvironment(input, launchArgs, env => {
     options.env = env;
     const operation = asPromise ? (processApi[name] as unknown as { [promisify.custom]: (...values: unknown[]) => unknown })[promisify.custom] : processApi[name];
+    const executable = preparedMcpExecutable(input);
+    if (executable) {
+      if (options.shell || name === 'exec' || name === 'execSync' || name === 'fork') throw new Error('MCP launch requires a direct executable.');
+      if (process.platform === 'win32' && Array.isArray(args[1]) && args[1][0] === '/d' && args[1][1] === '/c') {
+        args[1] = [...args[1]];
+        (args[1] as string[])[2] = executable.target;
+      } else args[0] = executable.target;
+      // No asynchronous work or PATH lookup between this check and OS creation.
+      verifyMcpExecutable(executable);
+    }
     return Reflect.apply(operation, processApi, args);
   }, !options.shell && name !== 'exec' && name !== 'execSync', options.cwd instanceof URL ? fileURLToPath(options.cwd) : options.cwd as string | undefined);
 }
@@ -44,7 +55,7 @@ export function withChildEnvironment<T>(input: Record<string, string | undefined
     }
     const env = refreshChildEnvironment(input);
     assertChildArguments(args, input, env, allowDeferredMcp);
-    assertMcpConfigArguments(args, env, context?.runtimeId);
+    assertMcpConfigArguments(args, env, context?.runtimeId, allowDeferredMcp ? input : undefined, { depth: 0, files: new Set(), cwd });
     const profiles = context?.runtimeId || context?.runtimeLaunch ? assertLegacyRuntimeConfigSelection(context.runtimeId, env, args, cwd) : [];
     stampChildPolicy(env);
     const result = create(env);

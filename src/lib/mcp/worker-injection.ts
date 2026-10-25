@@ -1,6 +1,5 @@
 import { configuredMcpEnvironment } from '@/lib/providers/spawn-environment';
-import { access, constants as fsConstants, realpath } from 'node:fs/promises';
-import path from 'node:path';
+import { captureMcpExecutable, type McpExecutable } from '@/lib/providers/mcp-executable';
 
 import {
   listEnabledExternalMcpServers,
@@ -37,6 +36,7 @@ export interface ResolvedWorkerMcpServer {
   command: string;
   args: string[];
   env: Record<string, string> | null;
+  executable?: McpExecutable;
 }
 
 export interface WorkerMcpInjectionResolution {
@@ -110,14 +110,8 @@ export async function resolveWorkerMcpInjection(
     const servers: ResolvedWorkerMcpServer[] = [];
     for (const server of validServers) {
       try {
-        servers.push({
-          ...server,
-          command: await resolveWorkerMcpCommand(
-            server.command,
-            context.worktreePath,
-            options.pathValue ?? process.env.PATH ?? '',
-          ),
-        });
+        const executable = captureMcpExecutable(server.command, context.worktreePath, options.pathValue ?? process.env.PATH ?? '');
+        servers.push({ ...server, command: executable.alias, executable });
       } catch (error) {
         skipped.push({
           server: server.name,
@@ -144,21 +138,5 @@ export async function resolveWorkerMcpCommand(
   cwd: string,
   pathValue: string,
 ): Promise<string> {
-  const candidatePaths = path.isAbsolute(command)
-    ? [command]
-    : command.includes(path.sep)
-      ? [path.resolve(cwd, command)]
-      : pathValue.split(path.delimiter).filter(Boolean).map((entry) => path.resolve(cwd, entry, command));
-
-  for (const candidate of candidatePaths) {
-    try {
-      await access(candidate, fsConstants.X_OK);
-      await realpath(candidate);
-      return path.resolve(candidate);
-    } catch {
-      // Continue through PATH entries until one resolves to an executable.
-    }
-  }
-
-  throw new Error(`Command "${command}" could not be resolved to an executable path`);
+  return captureMcpExecutable(command, cwd, pathValue).alias;
 }

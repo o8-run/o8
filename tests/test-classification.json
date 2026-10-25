@@ -3669,6 +3669,14 @@
       ]
     },
     {
+      "path": "tests/mcp-payer-launch-matrix-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/mcp-payer-real-path.test.ts",
       "reasons": [
         "child-process",

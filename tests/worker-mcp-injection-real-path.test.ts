@@ -283,9 +283,11 @@ describe.sequential('worker MCP injection real path', () => {
       mcpServers: Record<string, { command: string; args: string[]; env: Record<string, string> }>;
     };
     const observed = config.mcpServers['packet-observer'];
+    expect(path.basename(observed.command)).toBe(path.basename(process.execPath));
+    expect(existsSync(observed.command)).toBe(true);
     expect(Object.entries(observed.env).filter(([name]) => providerCredentialName(name)).every(([, value]) => value === '')).toBe(true);
     expect({ ...observed, env: Object.fromEntries(Object.entries(observed.env).filter(([name]) => !providerCredentialName(name))) }).toEqual({
-      command: process.execPath,
+      command: observed.command,
       args: ['fixture-server.mjs'],
       env: {
         PACKET_ID: firstPacket.id,

@@ -23,7 +23,7 @@ const { insertExternalMcpServer, removeExternalMcpServer } = await import('@/lib
 const { prepareOwnedWorkerMcpConfig } = await import('@/lib/runtimes/shared/owned-session/worker-mcp-config');
 const { claudeCodeOwnedAdapter } = await import('@/lib/claude-code/owned');
 const { childEnvironment } = await import('@/lib/providers/spawn-environment');
-const { execFileSync } = await import('@/lib/providers/child-process');
+const { spawn } = await import('@/lib/providers/child-process');
 let serverId: string | undefined;
 let fixturePath = '';
 
@@ -90,7 +90,9 @@ for (const candidate of cases) it.each(['api', 'subscription'] as const)(`${cand
   const entry = config.mcpServers.configured_cli;
   const api = mode === 'api' && candidate.apiAuthority;
   expect(basename(entry.command)).toBe(basename(candidate.expected));
-  expect(realpathSync(entry.command) === realpathSync(candidate.expected)).toBe(true);
+  // A private launcher preserves the configured CLI name and verifies the
+  // original executable at the nested spawn boundary; receipts below prove
+  // which CLI actually received the environment.
   expect(Object.values(entry.env).some(value => value.includes(key))).toBe(api);
   expect(prepared.sandboxReadPaths).toContain(dirname(candidate.expected));
   expect(prepared.sandboxReadPaths).toContain(dirname(realpathSync(candidate.expected)));
@@ -107,8 +109,12 @@ process.exit(result.status ?? 1);
 `;
   const consumerFile = join(sessionDir, 'consumer.cjs');
   writeFileSync(consumerFile, consumer, { mode: 0o600 });
-  execFileSync(process.execPath, [consumerFile, '--mcp-config', prepared.configPath!], {
-    env: childEnvironment({ runtimeId: 'codex' }), stdio: 'pipe',
+  // Match the owned worker's asynchronous spawn: the nested helper reacquires
+  // the store lock at its own process-creation boundary.
+  const child = spawn(process.execPath, [consumerFile, '--mcp-config', prepared.configPath!], {
+    env: childEnvironment({ runtimeId: 'codex' }), stdio: 'ignore',
   });
+  const status = await new Promise<number | null>(resolve => child.once('close', resolve));
+  expect(status).toBe(0);
   expect(JSON.parse(readFileSync(receipt, 'utf8'))).toEqual({ key: api, alias: api, service: true });
 });

@@ -13,6 +13,7 @@ import { matchesProviderCredential } from './credential-materials';
 import { runtimeBillingMode } from './runtime-billing';
 import { ensureLaunchPolicy } from './launch-policy';
 import { ORCHESTRATOR_RUNTIMES } from '@/lib/orchestrator/runtime-capabilities';
+import { bindMcpExecutable } from './mcp-executable';
 
 const permitsApiCredentials = (runtimeId: string | undefined): boolean => Boolean(runtimeId && runtimeId !== 'codex'
   && (Object.hasOwn(ORCHESTRATOR_RUNTIMES, runtimeId) || runtimeId === 'openclaw') && runtimeBillingMode(runtimeId) === 'api');
@@ -105,6 +106,7 @@ export function configuredMcpEnvironment(command: string, env: Record<string, st
   const result = childEnvironment({ runtimeId, env: { ...base, ...env }, inherit: false, clearInherited: !inherit });
   assertChildArguments([command, ...args], env, result);
   if (!inherit && !('NODE_ENV' in env)) delete (result as Record<string, string>).NODE_ENV;
+  if (inherit) bindMcpExecutable(result, command, result.PATH);
   return result;
 }
 
@@ -177,7 +179,7 @@ export function internalBrokerEnvironment(input?: Record<string, string | undefi
 }
 
 /** Non-secret generation stamp for our delayed nested-execution helpers. */
-export function stampChildPolicy(env: NodeJS.ProcessEnv): void {
+export function stampChildPolicy(env: Record<string, string | undefined>): void {
   const context = childEnvironmentContext(env);
   if (!context?.runtimeId) { delete env.O8_CHILD_CREDENTIAL_POLICY; return; }
   const directory = realpathSync(getDataDir());
