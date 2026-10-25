@@ -43,3 +43,11 @@ The requested native/current-UI pixel pair remains open because this platform's
 GPUI test window does not render pixels. Full All Glass, native font and speed
 parity need a renderer-capable host. Whole-suite gate results and any remaining
 failures are recorded in the pull request.
+
+The unchanged measurement passes in isolation (10 first-paint samples, 500
+scroll frames, 2,000 retained threads, at most 19 materialized rows). Its debug
+CPU-scene receipts are retained in `headless.json`: first paint p50 2123.388ms /
+p95 2494.058ms; scroll p50 68.374ms / p95 93.673ms. These include the test text
+system and are not comparable with a release renderer or compositor. They do
+not establish the requested speed parity. The parallel whole-suite HTTP-wait
+failure is retained separately in the PR; it is not counted as a green run.
