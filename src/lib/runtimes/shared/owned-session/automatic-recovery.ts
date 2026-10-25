@@ -10,7 +10,7 @@ export class AutomaticRecoveryRefusedError extends Error {}
 
 type SurfaceLock = <T>(surfaceId: string, operation: () => Promise<T>) => Promise<T>;
 const stores = new Map<string, { io: OwnedSessionIo; lock: SurfaceLock }>();
-const recoveryRequest = new AsyncLocalStorage<{ surfaceId: string; runId: string }>();
+const recoveryRequest = new AsyncLocalStorage<{ surfaceId: string; runId: string; active: boolean }>();
 
 export function registerOwnedRecoveryStore(prefix: string, io: OwnedSessionIo, lock: SurfaceLock): void {
   stores.set(prefix, { io, lock });
@@ -64,7 +64,8 @@ export function assertAutomaticRecoveryGeneration(session: OwnedSessionRecord | 
 
 export function requestedAutomaticRecoveryRun(surfaceId: string): string | undefined {
   const request = recoveryRequest.getStore();
-  if (request && request.surfaceId !== surfaceId) throw new AutomaticRecoveryRefusedError('Automatic recovery refused: the owned target changed.');
+  if (!request?.active) return undefined;
+  if (request.surfaceId !== surfaceId) throw new AutomaticRecoveryRefusedError('Automatic recovery refused: the owned target changed.');
   return request?.runId;
 }
 
@@ -72,7 +73,11 @@ export function withAutomaticRecoveryRequest<T>(surfaceId: string, runId: string
   if (![...stores.keys()].some(prefix => surfaceId.startsWith(prefix))) {
     throw new AutomaticRecoveryRefusedError('Automatic recovery refused: the owned session lock is unavailable.');
   }
-  return recoveryRequest.run({ surfaceId, runId }, () => withOwnedActionGuard(assertRecoveryPacketAdmission, operation));
+  const request = { surfaceId, runId, active: true };
+  return recoveryRequest.run(request, async () => {
+    try { return await withOwnedActionGuard(assertRecoveryPacketAdmission, operation); }
+    finally { request.active = false; }
+  });
 }
 
 /** A restrictive generation fence, never an authorization or an explicit resume. */
