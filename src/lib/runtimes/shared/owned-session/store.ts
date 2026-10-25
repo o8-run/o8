@@ -1,3 +1,4 @@
+import { withStandingLaunchMutation } from './standing-launch';
 import { readStandingLane } from '@/lib/lane/standing-store';
 import { bindStandingTask, withStandingSessionMutation } from './standing-task';
 import { providerFromConfig } from './controlled-provider';
@@ -154,7 +155,11 @@ export function createOwnedSessionStore(
     invalidateFleetCache,
   });
 
-  async function launch(request: OwnedLaunchRequest): Promise<OwnedLaunchResponse> {
+  function launch(request: OwnedLaunchRequest): Promise<OwnedLaunchResponse> {
+    return withStandingLaunchMutation(request.laneId, () => launchInner(request));
+  }
+
+  async function launchInner(request: OwnedLaunchRequest): Promise<OwnedLaunchResponse> {
     const executionPolicy = createOwnedExecutionPolicy(request, runtimeId);
     assertRuntimeEffortPin(runtimeId, request.model ?? adapter.defaultModel, request.effort);
     const prompt = request.prompt.trim();

@@ -14,6 +14,7 @@ import { getOwnedSessionLifecycle } from '@/lib/runtimes/shared/owned-session-li
 import { withOwnedStopOutcome } from '@/lib/runtimes/shared/owned-session/stop-outcome';
 import { probeOwnedSignalIdentity, type OwnedProcessEvidence } from '@/lib/runtimes/shared/owned-session/process-identity';
 import {
+  probeOwnedRunMarker,
   probeOwnedRunProcessClaim,
   resolveSpawnedProcessGroupId,
 } from '@/lib/runtimes/shared/owned-session/run-process-proof';
@@ -34,6 +35,7 @@ export type InterruptEscalationMechanism = InterruptEscalationSignal | 'taskkill
 export interface InterruptEscalationTarget extends OwnedProcessEvidence {
   pid?: number;
   processGroupId?: number;
+  processMarker?: string;
   tmuxSession?: string;
   commandLabel?: string;
 }
@@ -224,8 +226,11 @@ async function defaultIsAlive(
   state: DefaultInterruptState,
 ): Promise<InterruptLivenessProbe> {
   if (target.tmuxSession) {
-    if (await isBridgeSessionAlive(target.tmuxSession)) {
+    if (await isBridgeSessionAlive(target.tmuxSession, { requireConfirmation: true })) {
       return { alive: true, confirmedDead: false };
+    }
+    if (target.processMarker && await probeOwnedRunMarker(target.processMarker) !== 'clear') {
+      return { alive: true, confirmedDead: false, note: 'Bridge process marker is still live or unconfirmed.' };
     }
     if (!target.pid) return { alive: false, confirmedDead: true };
   }
@@ -607,7 +612,7 @@ export async function escalateInterruptOwnedSurface(surfaceId: string): Promise<
   // be replaced after exec while the tmux session remains alive, so a reused
   // pid must never override positive bridge liveness.
   const bridgeAlive = activeRun.tmuxSession
-    ? await isBridgeSessionAlive(activeRun.tmuxSession)
+    ? await isBridgeSessionAlive(activeRun.tmuxSession, { requireConfirmation: true })
     : false;
   if (activeRun.pid && !bridgeAlive) {
     const expectedCommand = activeRun.commandIdentity ?? commandLabel;
@@ -664,6 +669,7 @@ export async function escalateInterruptOwnedSurface(surfaceId: string): Promise<
     processIdentitySource: activeRun.processIdentitySource,
     processIdentityRequired: activeRun.processIdentityRequired,
     processGroupId: activeRun.processGroupId,
+    processMarker: activeRun.processMarker,
     tmuxSession: activeRun.tmuxSession,
     commandLabel,
   }));

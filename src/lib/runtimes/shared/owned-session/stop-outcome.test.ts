@@ -49,8 +49,8 @@ describe('owned Stop outcome transaction', () => {
     expect(await pending).toBe(delivered);
     await exitWriter;
     expect(observed).toBe('interrupted');
-    expect(saved.activeRun?.interruptRequestedAt).toEqual(expect.any(String));
-    expect(saved.recentRuns[0].interruptRequestedAt).toBe(saved.activeRun?.interruptRequestedAt);
+    expect(saved.activeRun).toBeUndefined();
+    expect(saved.recentRuns[0].interruptRequestedAt).toEqual(expect.any(String));
     expect(saved.recentRuns[1]).toEqual({ id: 'prior', outcome: 'finished' });
     expect(invalidate).toHaveBeenCalledOnce();
   });

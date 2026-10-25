@@ -98,6 +98,8 @@ async function start() {
       if (incoming.url?.startsWith('/api/orchestrator/standing-lanes')) {
         const route = await import('@/app/api/orchestrator/standing-lanes/route');
         response = await route.POST(request);
+      } else if (incoming.url === '/terminal-spawn') {
+        response = Response.json({ ok: false, error: 'Fixture has no PTY transport' }, { status: 503 });
       } else if (incoming.url?.startsWith('/api/panel/managed-runs')) {
         response = await (await import('@/app/api/panel/managed-runs/route')).POST(request);
       } else response = new Response('{}');
@@ -106,7 +108,7 @@ async function start() {
   });
   server.listen(port, '127.0.0.1'); await once(server, 'listening');
   port = (server.address() as { port: number }).port; base = `http://127.0.0.1:${port}`;
-  process.env.O8_API_PORT = String(port); setApiBase(base);
+  process.env.O8_API_PORT = String(port); process.env.O8_WS_PORT = String(port); setApiBase(base);
   writeFileSync(join(root, 'api-port'), String(port));
 }
 async function tool(action: string, args: Record<string, unknown> = {}, fail = false) {
@@ -200,7 +202,7 @@ it('runs two MCP/CLI tasks on one pinned session and clean current-base branches
   expect((await cli('status', laneId)).lane.sessionKey).toBe(first.lane.sessionKey);
   await tool('send', { laneId, task: 'LANE_TASK=third' }); await idle(laneId);
   expect(JSON.parse(readFileSync(join(captures, 'third.json'), 'utf8')).thread).toBe(firstTurn.thread);
-  // The dedicated speed command enforces the two-second target on all three samples.
+  // The dedicated speed command enforces the two-second target on all five samples.
   // Functional lifecycle checks also run on shared runners with variable scheduling.
   const measurement = { dispatchToOutputMs, runtimeSessionReused: true, tasks: 2, pullRequests: 2 };
   process.stdout.write('[standing-lane-speed] ' + JSON.stringify(measurement) + '\n');

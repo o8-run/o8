@@ -66,6 +66,7 @@ import { materializationAwareExecFile } from '@/lib/worktree/materialization-exe
 import { enqueueLaneReview } from '@/lib/lane/review-queue';
 import { assertPacketCreationBaseAuthority, resolvePacketCreationBase, PacketCreationBaseError, type PacketCreationBaseAuthority } from '@/lib/lane/packet-creation-base';
 import { readPinnedLaneCreationBaseCommit } from '@/lib/lane/creation-base';
+import { withStandingStopMutation } from '@/lib/runtimes/shared/owned-session/standing-launch';
 import { persistLanePacketHold } from '@/lib/lane/packet-stop-hold';
 import { killLaneSessionsConfirmed } from '@/lib/lane/reap-sessions';
 import { liveWorkerSessionLanes } from '@/lib/lane/worker-session-state';
@@ -272,111 +273,113 @@ async function dispatchUnlocked(
 
     case 'stop': {
       holdStandingLane(command.laneId);
-      const lane = getLane(command.laneId);
-      if (!lane) return { ok: false, laneId: command.laneId, note: 'Lane not found.' };
+      return withStandingStopMutation(command.laneId, async () => {
+        const lane = getLane(command.laneId);
+        if (!lane) return { ok: false, laneId: command.laneId, note: 'Lane not found.' };
 
-      // 1) Flag the packet operator-stopped FIRST, inside the control-plane lock.
-      //    The order is the correctness point: interrupting the session can end it
-      //    and trip a stall/ralph requeue, and a concurrent dispatch tick reads
-      //    state under the same lock — setting operatorStopped + held atomically
-      //    here means getDispatchBlocker rejects every relaunch path before the
-      //    interrupt can race a re-dispatch in. (2026-06-22)
-      const standing = readStandingLane(lane.id);
-      if (lane.packetId && (!standing || standing.tasks.some(task => task.phase === 'running' || task.phase === 'dispatching'))) {
-        try {
-          if (!await persistLanePacketHold(lane.packetId, lane)) {
+        // 1) Flag the packet operator-stopped FIRST, inside the control-plane lock.
+        //    The order is the correctness point: interrupting the session can end it
+        //    and trip a stall/ralph requeue, and a concurrent dispatch tick reads
+        //    state under the same lock — setting operatorStopped + held atomically
+        //    here means getDispatchBlocker rejects every relaunch path before the
+        //    interrupt can race a re-dispatch in. (2026-06-22)
+        const standing = readStandingLane(lane.id);
+        if (lane.packetId && (!standing || standing.tasks.some(task => task.phase === 'running' || task.phase === 'dispatching'))) {
+          try {
+            if (!await persistLanePacketHold(lane.packetId, lane)) {
+              return {
+                ok: false,
+                laneId: command.laneId,
+                note: 'Stop refused because the packet hold could not be persisted.',
+                lane,
+              };
+            }
+          } catch (err) {
+            console.warn('[lane] stop: could not mark packet operator-stopped', err);
             return {
               ok: false,
               laneId: command.laneId,
-              note: 'Stop refused because the packet hold could not be persisted.',
+              note: `Stop refused because the packet hold could not be persisted: ${err instanceof Error ? err.message : String(err)}`,
               lane,
             };
           }
-        } catch (err) {
-          console.warn('[lane] stop: could not mark packet operator-stopped', err);
-          return {
-            ok: false,
-            laneId: command.laneId,
-            note: `Stop refused because the packet hold could not be persisted: ${err instanceof Error ? err.message : String(err)}`,
-            lane,
-          };
         }
-      }
 
-      // 2) Interrupt the live session if one exists. Truthful status matters:
-      //    only show paused after the runtime confirms the worker is gone.
-      let stopOk = true;
-      let stopNote = 'No active session was attached.';
-      if (lane.sessionKey) {
-        const liveWorkerLanes = liveWorkerSessionLanes([lane]);
-        if (liveWorkerLanes.length === 0) {
-          stopNote = 'Worker exit was already recorded.';
-        } else {
-          try {
-            const [result] = await killLaneSessionsConfirmed(liveWorkerLanes);
-            stopOk = Boolean(result?.confirmed || result?.alreadyDead);
-            stopNote = result?.note ?? 'No confirmed process result was returned.';
-          } catch (err) {
-            stopOk = false;
-            stopNote = err instanceof Error ? err.message : 'Interrupt failed.';
+        // 2) Interrupt the live session if one exists. Truthful status matters:
+        //    only show paused after the runtime confirms the worker is gone.
+        let stopOk = true;
+        let stopNote = 'No active session was attached.';
+        if (lane.sessionKey) {
+          const liveWorkerLanes = liveWorkerSessionLanes([lane]);
+          if (liveWorkerLanes.length === 0) {
+            stopNote = 'Worker exit was already recorded.';
+          } else {
+            try {
+              const [result] = await killLaneSessionsConfirmed(liveWorkerLanes);
+              stopOk = Boolean(result?.confirmed || result?.alreadyDead);
+              stopNote = result?.note ?? 'No confirmed process result was returned.';
+            } catch (err) {
+              stopOk = false;
+              stopNote = err instanceof Error ? err.message : 'Interrupt failed.';
+            }
           }
         }
-      }
 
-      if (!stopOk) {
-        appendEvent(command.laneId, 'interrupt_failed', actor, {
-          packetId: lane.packetId,
-          sessionKey: lane.sessionKey,
-          note: stopNote,
-        });
-        setLaneStatus(command.laneId, 'running', actor, 'interrupt_failed');
-        return {
-          ok: false,
-          laneId: command.laneId,
-          note: `Stop guard is held, but the live worker did not exit: ${stopNote}`,
-          lane: getLane(command.laneId) ?? undefined,
-        };
-      }
-
-      // `o8 packet stop` and mission stop both enter through this lane command
-      // path. A packet-owned `o8 run --detach` lives in its own tmux process
-      // tree, so confirming only the worker session would leave that workload
-      // running against a held packet. Settle the packet-bound runs after the
-      // worker can no longer register new ones, while preserving runs owned by
-      // sibling packets.
-      if (lane.packetId) {
-        const managedRuns = await terminatePacketManagedRuns(lane.packetId);
-        if (managedRuns.failures.length > 0) {
-          appendEvent(command.laneId, 'managed_run_stop_failed', actor, {
+        if (!stopOk) {
+          appendEvent(command.laneId, 'interrupt_failed', actor, {
             packetId: lane.packetId,
-            targeted: managedRuns.targeted,
-            confirmed: managedRuns.confirmed,
-            failures: managedRuns.failures,
+            sessionKey: lane.sessionKey,
+            note: stopNote,
           });
-          setLaneStatus(command.laneId, 'paused', actor, 'managed_run_stop_failed');
+          setLaneStatus(command.laneId, 'running', actor, 'interrupt_failed');
           return {
             ok: false,
             laneId: command.laneId,
-            note: `Agent stopped, but ${managedRuns.failures.length} packet-managed run${managedRuns.failures.length === 1 ? '' : 's'} could not be confirmed dead. The packet remains held.`,
+            note: `Stop guard is held, but the live worker did not exit: ${stopNote}`,
             lane: getLane(command.laneId) ?? undefined,
           };
         }
-        if (managedRuns.confirmed > 0) {
-          appendEvent(command.laneId, 'managed_runs_stopped', actor, {
-            packetId: lane.packetId,
-            targeted: managedRuns.targeted,
-            confirmed: managedRuns.confirmed,
-          });
-        }
-      }
 
-      setLaneStatus(command.laneId, 'paused', actor, 'operator_stopped');
-      return {
-        ok: true,
-        laneId: command.laneId,
-        note: 'Agent stopped. It will not auto-redispatch — reset or relaunch to continue.',
-        lane: getLane(command.laneId) ?? undefined,
-      };
+        // `o8 packet stop` and mission stop both enter through this lane command
+        // path. A packet-owned `o8 run --detach` lives in its own tmux process
+        // tree, so confirming only the worker session would leave that workload
+        // running against a held packet. Settle the packet-bound runs after the
+        // worker can no longer register new ones, while preserving runs owned by
+        // sibling packets.
+        if (lane.packetId) {
+          const managedRuns = await terminatePacketManagedRuns(lane.packetId);
+          if (managedRuns.failures.length > 0) {
+            appendEvent(command.laneId, 'managed_run_stop_failed', actor, {
+              packetId: lane.packetId,
+              targeted: managedRuns.targeted,
+              confirmed: managedRuns.confirmed,
+              failures: managedRuns.failures,
+            });
+            setLaneStatus(command.laneId, 'paused', actor, 'managed_run_stop_failed');
+            return {
+              ok: false,
+              laneId: command.laneId,
+              note: `Agent stopped, but ${managedRuns.failures.length} packet-managed run${managedRuns.failures.length === 1 ? '' : 's'} could not be confirmed dead. The packet remains held.`,
+              lane: getLane(command.laneId) ?? undefined,
+            };
+          }
+          if (managedRuns.confirmed > 0) {
+            appendEvent(command.laneId, 'managed_runs_stopped', actor, {
+              packetId: lane.packetId,
+              targeted: managedRuns.targeted,
+              confirmed: managedRuns.confirmed,
+            });
+          }
+        }
+
+        setLaneStatus(command.laneId, 'paused', actor, 'operator_stopped');
+        return {
+          ok: true,
+          laneId: command.laneId,
+          note: 'Agent stopped. It will not auto-redispatch — reset or relaunch to continue.',
+          lane: getLane(command.laneId) ?? undefined,
+        };
+      });
     }
 
     case 'resume': {

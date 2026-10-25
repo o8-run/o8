@@ -11,7 +11,7 @@ const payload = option('payload');
 const soak = process.argv.includes('--soak');
 const standing = process.argv.includes('--standing');
 const warm = !process.argv.includes('--cold');
-const samples = Number(option('samples') ?? 3);
+const samples = Number(option('samples') ?? (standing ? 5 : 3));
 if (!Number.isInteger(samples) || samples < 1 || samples > 20) throw new Error('Samples must be an integer from 1 to 20.');
 const npmCli = process.env.npm_execpath ?? (process.env.PATH ?? '').split(path.delimiter)
   .map(directory => path.join(directory, 'npm')).filter(file => fs.existsSync(file))

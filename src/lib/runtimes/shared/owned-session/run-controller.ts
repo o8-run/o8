@@ -2,6 +2,7 @@ import { createWorkerFailureHandler } from './worker-failure';
 import { assertRuntimeEffortPin } from '@/lib/orchestrator/effort-pin';
 import { assertOwnedActionFence, hasOwnedActionFence } from './action-fence';
 import { assertStandingSpawn } from './standing-task';
+import { spawnJournaledStandingBridge } from './standing-launch';
 import { confirmOwnedLaunchAdmission } from './launch-admission-outcome';
 import { createCapacityRecovery } from './capacity-wait';
 import { packetCargoEnvironment } from '@/lib/worktree/cargo-target-cache';
@@ -33,7 +34,6 @@ import { recordLaneEvent } from '@/lib/lane/events';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
 import { withPacketLifecycleSpawnLock } from '@/lib/orchestrator/lifecycle-mutation-lock';
 import { resolvePortInfo } from '@/lib/panel/api-port';
-import { spawnBridgeTerminalSession } from '@/lib/runtime/pty-bridge';
 import { ensureDispatchBackendReady } from '@/lib/runtimes/shared/dispatch-readiness';
 import { CliNotFoundError, resolveCli } from '@/lib/runtimes/shared/cli-resolver';
 import { executionCarrierCommandIdentity, executionCarrierSandboxReadPaths, executionCarrierSpawnPath, resolveExecutionCarrierInvocation } from '@/lib/runtimes/shared/execution-carrier-launch';
@@ -675,7 +675,7 @@ export function createOwnedRunController({
           // Credential-bearing launches require policy validation at OS spawn.
           if (!hasOwnedActionFence() && !useSupervisor && !hasProviderCredentials && !workerMcp.configPath && workerMcp.servers.length === 0 && process.platform !== 'win32' && session.executionPolicy === undefined && !carrierLaunch.carried && !crashSurvivableWorkersEnabled()) {
             try {
-              const result = await spawnBridgeTerminalSession({
+              const result = await spawnJournaledStandingBridge(session, preparedRun, io, {
                 sessionName: bridgeSessionName,
                 shellCommand: shellCmd,
                 cwd: session.repoPath,
@@ -686,8 +686,8 @@ export function createOwnedRunController({
               });
               terminalSessionName = result.sessionName;
               pid = typeof result.pid === 'number' ? result.pid : 0;
-            } catch {
-              // bridge spawn failed; fall through to detached spawn
+            } catch (error) {
+              if (preparedRun.tmuxSession) throw error; // Submitted standing launches never fall through.
             }
           }
 

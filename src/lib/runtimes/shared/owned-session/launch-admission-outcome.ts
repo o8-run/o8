@@ -1,4 +1,4 @@
-import { escalateInterrupt } from '@/lib/runtime/interrupt-escalation';
+import { escalateInterrupt, type InterruptEscalationDeps } from '@/lib/runtime/interrupt-escalation';
 import { ownedSupervisorClient } from '@/lib/runtime/o8d-supervisor';
 import { recordLaneEvent } from '@/lib/lane/events';
 import { assertOwnedActionAdmission } from './action-admission';
@@ -19,7 +19,7 @@ export function confirmOwnedLaunchAdmission(
   }
 }
 
-async function cancelLaunchedRun(session: OwnedSessionRecord, run: OwnedRunRecord, io: OwnedSessionIo): Promise<void> {
+export async function cancelLaunchedRun(session: OwnedSessionRecord, run: OwnedRunRecord, io: OwnedSessionIo, deps?: Partial<InterruptEscalationDeps>): Promise<void> {
   // The surface lock is already held. The public Stop wrapper would reacquire it.
   const result = await escalateInterrupt(run, run.supervisor ? {
     isAlive: async () => {
@@ -28,14 +28,16 @@ async function cancelLaunchedRun(session: OwnedSessionRecord, run: OwnedRunRecor
     },
     kill: async (_target, signal) => { await ownedSupervisorClient().signal(run.supervisor!, signal); },
     sleep: ms => new Promise(resolve => setTimeout(resolve, ms)),
-  } : undefined);
+  } : deps);
   const current = await io.findSession(session.surfaceId);
   if (!current || current.activeRun?.id !== run.id) throw new Error('Cancelled launch process ownership changed; termination remains held.');
   const interrupted = { ...current.activeRun, interruptRequestedAt: current.activeRun.interruptRequestedAt ?? new Date().toISOString(),
-    ...(result.confirmedDead ? { outcome: 'interrupted' as const, finishedAt: new Date().toISOString() } : {}) };
+    ...(result.confirmedDead ? { outcome: 'interrupted' as const, finishedAt: new Date().toISOString(),
+      spawnState: run.spawnState === 'prepared' ? 'reconciled_clear' as const : run.spawnState } : {}) };
   current.recentRuns = current.recentRuns.map(entry => entry.id === run.id ? interrupted : entry);
   current.activeRun = result.confirmedDead ? undefined : interrupted;
   await io.saveSession(current);
+  Object.assign(session, current);
   if (session.laneId) for (const step of result.steps) {
     try { recordLaneEvent(session.laneId, 'kill_escalated', 'system', {
       surfaceId: session.surfaceId, runId: run.id, pid: run.pid, stage: step.mechanism, confirmed: step.confirmedDead,

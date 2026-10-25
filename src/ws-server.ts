@@ -1,3 +1,4 @@
+import { withOwnedBridgeLaunchAdmission } from '@/lib/runtime/owned-bridge-launch';
 import { mutationToLaneLifecyclePayload } from '@/lib/realtime/lane-lifecycle';
 import { assertOrchestratorPermissionMode, resolveOrchestratorPermissionMode } from '@/lib/orchestrator/permission-mode';
 import { managedCommandLaunch } from './lib/terminal/managed-command-launch';
@@ -1015,6 +1016,7 @@ interface TerminalAttachment {
 }
 
 interface InternalTerminalSpawnPayload {
+  ownedSurfaceId?: string;
   resolvedEnvironment?: boolean;
   sessionName?: string;
   shellCommand?: string;
@@ -7708,7 +7710,7 @@ const httpServer = createServer(async (req, res) => {
 
     const chunks: Buffer[] = [];
     req.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
-    req.on('end', () => {
+    req.on('end', async () => {
       let payload: InternalTerminalSpawnPayload = {};
       try {
         payload = JSON.parse(Buffer.concat(chunks).toString('utf-8')) as InternalTerminalSpawnPayload;
@@ -7761,37 +7763,39 @@ const httpServer = createServer(async (req, res) => {
       }
 
       try {
-        const ptyProcess = spawnManagedCommandPty(sessionName, shellCommand, cwd, cols, rows, payload?.env, payload?.resolvedEnvironment === true);
-        const now = Date.now();
-        const attachment: TerminalAttachment = {
-          id: randomUUID(),
-          sessionName,
-          kind: 'managed-process',
-          ptyProcess,
-          clientIds: new Set(),
-          clientViews: new Map(),
-          snapshotSource: 'scrollback',
-          cols,
-          rows,
-          batchBuffer: '',
-          batchTimer: null,
-          lastOutputAt: now,
-          lastInputAt: now,
-          createdAt: now,
-          orphanTimer: null,
-          scrollbackChunks: [],
-          scrollbackBytes: 0,
-          scrollbackStartOffset: 0,
-          streamEndOffset: 0,
-          cwd,
-          commandHint: shellCommand,
-          ownerPacketId,
-          ownerLaneId,
-        };
-        terminalAttachments.set(sessionName, attachment);
-        registerTerminalAttachment(attachment);
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ ok: true, sessionName, pid: ptyProcess.pid ?? null }));
+        await withOwnedBridgeLaunchAdmission({ ownedSurfaceId: payload.ownedSurfaceId, sessionName, env: payload.env, laneId: ownerLaneId, packetId: ownerPacketId }, () => {
+          const ptyProcess = spawnManagedCommandPty(sessionName, shellCommand, cwd, cols, rows, payload?.env, payload?.resolvedEnvironment === true);
+          const now = Date.now();
+          const attachment: TerminalAttachment = {
+            id: randomUUID(),
+            sessionName,
+            kind: 'managed-process',
+            ptyProcess,
+            clientIds: new Set(),
+            clientViews: new Map(),
+            snapshotSource: 'scrollback',
+            cols,
+            rows,
+            batchBuffer: '',
+            batchTimer: null,
+            lastOutputAt: now,
+            lastInputAt: now,
+            createdAt: now,
+            orphanTimer: null,
+            scrollbackChunks: [],
+            scrollbackBytes: 0,
+            scrollbackStartOffset: 0,
+            streamEndOffset: 0,
+            cwd,
+            commandHint: shellCommand,
+            ownerPacketId,
+            ownerLaneId,
+          };
+          terminalAttachments.set(sessionName, attachment);
+          registerTerminalAttachment(attachment);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true, sessionName, pid: ptyProcess.pid ?? null }));
+        });
       } catch (error) {
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: error instanceof Error ? error.message : 'Failed to spawn terminal session' }));

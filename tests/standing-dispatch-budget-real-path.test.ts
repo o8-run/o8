@@ -27,6 +27,6 @@ it.each([1999, 2000, 3101])('enforces the under-two-second target at the speed C
   });
   expect(result.status, result.stderr).toBe(ms < 2000 ? 0 : 1);
   const receipt = JSON.parse(readFileSync(join(output, 'receipt.json'), 'utf8'));
-  expect(receipt.samples.map((row: { dispatchToOutputMs: number }) => row.dispatchToOutputMs)).toEqual([ms, ms, ms]);
-  if (ms >= 2000) expect(receipt.failures).toHaveLength(3);
+  expect(receipt.samples.map((row: { dispatchToOutputMs: number }) => row.dispatchToOutputMs)).toEqual([ms, ms, ms, ms, ms]);
+  if (ms >= 2000) expect(receipt.failures).toHaveLength(5);
 });

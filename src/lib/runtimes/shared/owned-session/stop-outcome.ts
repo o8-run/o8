@@ -1,3 +1,4 @@
+import { withOwnedBridgeMutation } from '@/lib/runtime/owned-bridge-launch';
 import type { InterruptEscalationResult } from '@/lib/runtime/interrupt-escalation';
 import type { OwnedActiveRun } from '../owned-session-index';
 import type { OwnedSessionIo } from './session-io';
@@ -32,25 +33,30 @@ export function registerOwnedStopHandler(
         note: 'The owned run changed before Stop acquired its session lock; no process was signaled.',
       };
     }
-    const requestedAt = new Date().toISOString();
-    const result = await operation();
-    // An absent process or a denied signal is not an intentional interruption.
-    if (!result.steps.some((step) => step.sent)) return result;
+    const stop = async () => {
+      const requestedAt = new Date().toISOString();
+      const result = await operation();
+      // An absent process or a denied signal is not an intentional interruption.
+      if (!result.steps.some((step) => step.sent)) return result;
 
-    // Tail refresh can settle a dead run while the ladder verifies its children.
-    // Reload that state and label only the exact run whose signal was delivered.
-    const current = await io.findSession(surfaceId);
-    if (!current) throw new Error('Stop signaled the owned run but its outcome record is unavailable.');
-    const stamp = <T extends { id: string; interruptRequestedAt?: string }>(entry: T) => (
-      entry.id === run.id
-        ? { ...entry, outcome: 'interrupted' as const, interruptRequestedAt: entry.interruptRequestedAt ?? requestedAt }
-        : entry
-    );
-    current.recentRuns = current.recentRuns.map(stamp);
-    if (current.activeRun) current.activeRun = stamp(current.activeRun);
-    await io.saveSession(current);
-    invalidate();
-    return result;
+      // Tail refresh can settle a dead run while the ladder verifies its children.
+      // Reload that state and label only the exact run whose signal was delivered.
+      const current = await io.findSession(surfaceId);
+      if (!current) throw new Error('Stop signaled the owned run but its outcome record is unavailable.');
+      const stamp = <T extends { id: string; interruptRequestedAt?: string; finishedAt?: string }>(entry: T) => (
+        entry.id === run.id
+          ? { ...entry, outcome: 'interrupted' as const, interruptRequestedAt: entry.interruptRequestedAt ?? requestedAt,
+              ...(result.confirmedDead ? { finishedAt: entry.finishedAt ?? new Date().toISOString() } : {}) }
+          : entry
+      );
+      current.recentRuns = current.recentRuns.map(stamp);
+      if (current.activeRun) current.activeRun = stamp(current.activeRun);
+      if (result.confirmedDead && current.activeRun?.id === run.id) current.activeRun = undefined;
+      await io.saveSession(current);
+      invalidate();
+      return result;
+    };
+    return run.tmuxSession ? withOwnedBridgeMutation(surfaceId, stop) : stop();
   }));
 }
 
