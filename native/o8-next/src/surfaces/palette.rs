@@ -35,6 +35,8 @@ impl Entry {
             Self::Workspace(path) => format!("workspace:{path}"),
             Self::Surface(Command::Session(id)) => format!("session:{id}"),
             Self::Surface(Command::Message(id)) => format!("message:{id}"),
+            Self::Surface(Command::Refresh) => "command:refresh".into(),
+            Self::Surface(Command::Shortcuts) => "command:shortcuts".into(),
             Self::Surface(command) => format!("surface:{}", command.registration().command_label),
         }
     }
@@ -46,11 +48,15 @@ impl Entry {
     }
 }
 fn entries(shell: &Shell) -> Vec<Entry> {
-    let mut entries = shell
-        .commands()
-        .into_iter()
-        .map(Entry::Surface)
-        .collect::<Vec<_>>();
+    let mut entries = if shell.workspace_picker {
+        Vec::new()
+    } else {
+        shell
+            .commands()
+            .into_iter()
+            .map(Entry::Surface)
+            .collect::<Vec<_>>()
+    };
     if registry::extensions().all(|extension| extension.allow_switch(shell)) {
         entries.extend(shell.workspaces.iter().cloned().map(Entry::Workspace));
     }
@@ -65,8 +71,11 @@ fn toggle(shell: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
         shell.capture(window, cx);
     }
     shell.palette = !shell.palette;
+    shell.workspace_picker = false;
+    shell.shortcuts = false;
     shell.query.clear();
     shell.choice = 0;
+    shell.palette_scroll.scroll_to_item(1);
     shell.restore_focus(window, cx);
 }
 fn focused_control_owns_keys(shell: &Shell, window: &Window, cx: &App) -> bool {
@@ -139,6 +148,9 @@ impl ShellExtension for Palette {
         } else {
             return KeyResult::Unhandled;
         }
+        if s.palette {
+            s.palette_scroll.scroll_to_item(s.choice + 1);
+        }
         KeyResult::Handled
     }
     fn palette(&self, shell: &Shell, cx: &mut Context<Shell>) -> Option<gpui::AnyElement> {
@@ -148,6 +160,7 @@ impl ShellExtension for Palette {
                 .debug_selector(|| "command-palette".into())
                 .max_h(px(300.))
                 .overflow_y_scroll()
+                .track_scroll(&shell.palette_scroll)
                 .p(px(12.))
                 .bg(theme().surface_raised)
                 .child(if shell.query.is_empty() {
@@ -158,6 +171,7 @@ impl ShellExtension for Palette {
                 .children(entries(shell).into_iter().enumerate().map(|(row, entry)| {
                     div()
                         .id(gpui::SharedString::from(entry.identity()))
+                        .debug_selector(move || format!("command-{row}"))
                         .p(px(6.))
                         .cursor_pointer()
                         .bg(if row == shell.choice {

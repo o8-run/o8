@@ -1,0 +1,18 @@
+note: to see what the problems were, use the option `--future-incompat-report`, or run `cargo report future-incompatibilities --id 1`
+     Running unittests src/main.rs (work/native-target/debug/deps/o8_next-f96529fb57d58ecd)
+
+running 1 test
+test shell::tests::look::correction_rebase_keeps_header_without_secondary_labels ...
+thread 'shell::tests::look::correction_rebase_keeps_header_without_secondary_labels' (139898) panicked at src/shell_look_tests.rs:8:5:
+rebasing the frame extension must not restore the alpha label
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    shell::tests::look::correction_rebase_keeps_header_without_secondary_labels
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 181 filtered out; finished in 1.26s
+
+error: test failed, to rerun pass `--bin o8-next`

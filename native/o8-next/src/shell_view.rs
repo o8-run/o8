@@ -54,7 +54,11 @@ impl Render for Shell {
                         gpui::MouseButton::Left,
                         cx.listener(|_, _, window, _| window.prevent_default()),
                     )
-                    .children(frame.brand)
+                    .children(
+                        frame
+                            .brand
+                            .map(|brand| div().debug_selector(move || brand.into()).child(brand)),
+                    )
                     .children(before_workspaces)
                     .child(
                         div()
@@ -90,7 +94,11 @@ impl Render for Shell {
                             .id("shell-palette")
                             .cursor_pointer()
                             .p(px(6.))
-                            .child(frame.commands)
+                            .child(
+                                div()
+                                    .debug_selector(move || frame.commands.into())
+                                    .child(frame.commands),
+                            )
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.capture(window, cx);
                                 this.palette = true;

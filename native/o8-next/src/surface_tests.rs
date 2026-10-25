@@ -107,6 +107,61 @@ fn session_chrome_uses_layout_instead_of_role_labels(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn correction_empty_conversation_has_no_tagline(cx: &mut TestAppContext) {
+    let (_server, client) = fixture_options(false, true);
+    let saved = client.clone();
+    let (surface, cx) = cx.add_window_view(|window, cx| Surface::new(client, window, cx));
+    surface.update(cx, |s, cx| {
+        s.sessions = saved.sessions().unwrap();
+        s.select("thoughts-composer-first".into(), cx);
+    });
+    cx.run_until_parked();
+    for (width, height) in [(900., 700.), (1680., 1050.)] {
+        cx.simulate_resize(size(px(width), px(height)));
+        cx.update(|window, cx| {
+            window.refresh();
+            window.draw(cx).clear();
+        });
+        assert!(surface.read_with(cx, |s, _| s.transcript.is_some() && s.rows.is_empty()));
+        assert!(cx.debug_bounds("composer-card").is_some());
+        assert!(
+            cx.debug_bounds("session-empty").is_none(),
+            "empty conversations must not render a build tagline at {width}x{height}"
+        );
+    }
+}
+
+#[gpui::test]
+fn correction_composer_has_no_shortcut_or_mode_helper(cx: &mut TestAppContext) {
+    let (_server, client) = fixture_options(false, true);
+    let saved = client.clone();
+    let (surface, cx) = cx.add_window_view(|window, cx| Surface::new(client, window, cx));
+    surface.update(cx, |s, cx| {
+        s.sessions = saved.sessions().unwrap();
+        s.select("thoughts-composer-first".into(), cx);
+    });
+    cx.run_until_parked();
+    cx.update(|window, cx| {
+        window.refresh();
+        window.draw(cx).clear();
+    });
+    assert!(
+        cx.debug_bounds("composer-shortcuts").is_none(),
+        "composer must not render a permanent shortcut hint"
+    );
+    for helper in ["Queued for after this turn", "Steers the running turn"] {
+        assert!(
+            cx.debug_bounds(helper).is_none(),
+            "composer must use action labels instead of mode helper text: {helper}"
+        );
+    }
+    assert!(
+        cx.debug_bounds("send-mode").is_some(),
+        "mode selection remains available without helper text"
+    );
+}
+
+#[gpui::test]
 fn placement_empty_state_composer_and_right_panel(cx: &mut TestAppContext) {
     let (_server, client) = fixture_options(false, true);
     let saved = client.clone();
@@ -125,13 +180,12 @@ fn placement_empty_state_composer_and_right_panel(cx: &mut TestAppContext) {
             window.refresh();
             window.draw(cx).clear();
         });
-        let empty = cx
-            .debug_bounds("session-empty")
-            .expect("empty history must render the centred build prompt");
+        let column = cx.debug_bounds("conversation-column").unwrap();
         let card = cx.debug_bounds("composer-card").expect("composer card");
         let sidebar = cx.debug_bounds("session-sidebar").expect("left sidebar");
-        assert!(empty.bottom() <= card.top());
-        assert!((empty.center().x - card.center().x).abs() < px(1.));
+        let space = cx.debug_bounds("composer-space").unwrap();
+        assert!((space.center().y - card.center().y).abs() < px(1.));
+        assert!((column.center().x - card.center().x).abs() < px(1.));
         assert!(card.left() > sidebar.right());
         assert!(card.size.width <= px(720.));
         assert!(card.right() <= px(width));

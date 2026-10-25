@@ -14,8 +14,7 @@ proxies. A worker launch keeps worker authority even if a native operator
 credential was inherited. An explicit different origin never receives the local
 configuration's disk credential. The normal explicit fixture modes remain available.
 
-The workspace switcher opens one searchable list, including with 15 or more
-saved workspaces. Ctrl+K or Cmd+K opens searchable
+The shell lists workspaces with saved sessions. Ctrl+K or Cmd+K opens searchable
 commands; arrows and Enter choose, Escape cancels. Open session, Open grid and
 New message use the existing views; New message focuses the selected session's
 composer. Open Inbox opens the native Needs reply, Contributions, Approvals,
@@ -25,7 +24,8 @@ including Ctrl+Alt+W to close one pane, reach the grid. Drafts remain in memory
 while switching workspaces and sessions. An unavailable local server has a clear
 error and Retry control.
 
-Brain, Refresh and Keyboard shortcuts are palette commands. The shortcut
+Workspaces use one searchable switcher, including with 15 or more saved
+workspaces. Brain, Refresh and Keyboard shortcuts are palette commands. The shortcut
 reference closes with Escape; key hints are absent from permanent chrome.
 Session tabs use their conversation titles. The embedded session shares the
 shell header. The composer action says Send next or Steer now; its adjacent
@@ -33,8 +33,8 @@ disclosure switches the mode, as does Ctrl+Shift+Enter.
 
 Existing session surfaces use the shared typography and geometry in
 `src/theme.rs`: compact sidebar rows, top tab pills, and a composer card up to
-720 px wide. An empty saved conversation centres its build prompt above that
-card. The existing per-session Brain dock occupies the right panel slot, with
+720 px wide. An empty saved conversation centres that card in the available
+column without a tagline or permanent composer hints. The existing per-session Brain dock occupies the right panel slot, with
 its draft and focus retained while resizing and switching sessions. Compact
 windows reduce the sidebar and right-slot widths without cropping the composer.
 The sidebar renderer lives in `src/session_sidebar.rs` to keep the session module

@@ -1,0 +1,17 @@
+running 11 tests
+test shell::tests::look::chrome_refresh_keeps_workspace_selected_during_load ... ok
+test shell::tests::look::chrome_switcher_cancel_restores_composer_with_platform_shortcut ... ok
+test shell::tests::look::correction_fifteenth_workspace_scrolls_into_view ... workspace 15 at 1200x816: row=Bounds { origin: Point { x: 12px, y: 347px }, size: Size { 1176px × 27px } }, palette=Bounds { origin: Point { x: 0px, y: 74px }, size: Size { 1200px × 300px } }
+workspace 15 at 900x700: row=Bounds { origin: Point { x: 12px, y: 347px }, size: Size { 876px × 27px } }, palette=Bounds { origin: Point { x: 0px, y: 74px }, size: Size { 900px × 300px } }
+ok
+test shell::tests::look::correction_native_screenshots ... ignored, requires an owned isolated X11 display, Vulkan software driver and PNG capture tool
+test shell::tests::look::correction_palette_brain_resumes_the_session_draft ... ok
+test shell::tests::look::correction_placement_uses_the_single_shell_header ... ok
+test shell::tests::look::correction_rebase_keeps_header_without_secondary_labels ... ok
+test shell::tests::look::correction_refresh_recovers_initial_history_503 ... ok
+test shell::tests::look::placement_shell_tabs_use_compact_rows ... ok
+test shell::tests::look::shell_chrome_fifteen_workspaces_keeps_one_switcher ... ok
+test shell::tests::shell_palette_switch_restart_and_server_down ... O8_NEXT_SHELL_EVIDENCE {"endpoint":"GPUI TestAppContext CPU scene paint; test text system; no GPU/compositor","platform":"linux","launchToInteractiveMs":144.730775,"paletteOpenToFrameMs":[14.213704,15.46963,14.438228,13.058738,13.253267000000001,14.082479,13.434106,13.40324,13.539162000000001,13.291133,13.196072,14.282797,13.42382,13.505131,13.189642999999998,13.36333,13.232516,13.888599999999999,13.248069,13.516238],"workspaceSwitchMs":[20.02466,14.00943,12.943828,14.024984,11.540441,16.070933999999998,12.308612,14.574391,11.414504,13.698317999999999],"idleMemoryMiB":39.859375,"workspaces":2,"restoredSurfaces":3}
+ok
+
+test result: ok. 10 passed; 0 failed; 1 ignored; 0 measured; 171 filtered out; finished in 14.89s

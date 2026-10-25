@@ -14,7 +14,7 @@ fn brain_opens_from_the_real_shell_palette(cx: &mut TestAppContext) {
         )
     });
     ready(&shell, cx);
-    cx.simulate_keystrokes("ctrl-k");
+    cx.simulate_keystrokes("ctrl-shift-p");
     cx.simulate_keystrokes("b r a i n enter");
     draw(cx);
     assert_eq!(
@@ -56,7 +56,7 @@ fn settle(brain: &Entity<crate::brain::Brain>, cx: &mut VisualTestContext) {
     panic!("fixture answer must finish");
 }
 fn open_brain(shell: &Entity<Shell>, cx: &mut VisualTestContext) -> Entity<crate::brain::Brain> {
-    cx.simulate_keystrokes("ctrl-k");
+    cx.simulate_keystrokes("ctrl-shift-p");
     cx.simulate_keystrokes("b r a i n enter");
     draw(cx);
     brain(shell, cx)

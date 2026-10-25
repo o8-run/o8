@@ -281,16 +281,6 @@ impl Shell {
         }
     }
     fn commands(&self) -> Vec<Command> {
-        let workspaces = self.workspaces.iter().cloned().map(Command::Workspace);
-        if self.workspace_picker {
-            return workspaces
-                .filter(|c| {
-                    c.label(&self.sessions)
-                        .to_lowercase()
-                        .contains(&self.query.to_lowercase())
-                })
-                .collect();
-        }
         let mut entries = registrations()
             .iter()
             .filter_map(|r| r.command)
@@ -316,7 +306,6 @@ impl Shell {
                 .iter()
                 .map(|s| Command::Session(s.id.clone())),
         );
-        commands.extend(workspaces);
         commands.extend([Command::Refresh, Command::Shortcuts]);
         commands
             .into_iter()
@@ -333,10 +322,6 @@ impl Shell {
             return;
         }
         match command {
-            Command::Workspace(workspace) => {
-                self.switch(workspace, window, cx);
-                return;
-            }
             Command::Refresh => {
                 self.capture(window, cx);
                 if let Some(content) = self

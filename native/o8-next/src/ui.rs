@@ -354,14 +354,6 @@ impl Render for Surface {
         let sidebar_width = (viewport * 0.25).min(geometry.sidebar_width);
         let right_width = (viewport * 0.30).min(geometry.right_width);
         let empty = self.transcript.is_some() && self.rows.is_empty();
-        let repository = self
-            .sessions
-            .iter()
-            .find(|session| Some(&session.id) == self.selected.as_ref())
-            .and_then(|session| session.repo_path.as_deref())
-            .and_then(|path| std::path::Path::new(path).file_name())
-            .map(|name| name.to_string_lossy().to_string())
-            .unwrap_or_else(|| "this workspace".into());
         div()
             .size_full()
             .flex()
@@ -478,6 +470,7 @@ impl Render for Surface {
                     .child(self.session_sidebar(px(sidebar_width), cx))
                     .child(
                         div()
+                            .debug_selector(|| "conversation-column".into())
                             .flex()
                             .flex_col()
                             .flex_1()
@@ -510,34 +503,15 @@ impl Render for Surface {
                                     .min_h_0(),
                                 )
                             })
-                            .when(empty, |view| {
-                                view.child(
-                                    div()
-                                        .flex_1()
-                                        .min_h_0()
-                                        .flex()
-                                        .items_center()
-                                        .justify_center()
-                                        .px(px(geometry.content_inset))
-                                        .child(
-                                            div()
-                                                .debug_selector(|| "session-empty".into())
-                                                .w_full()
-                                                .text_center()
-                                                .text_size(px(typography.empty))
-                                                .font_weight(typography.weight)
-                                                .line_height(gpui::relative(1.2))
-                                                .child(format!(
-                                                    "What should we build in {repository}?"
-                                                )),
-                                        ),
-                                )
-                            })
                             .child(
                                 div()
-                                    .flex_shrink_0()
+                                    .debug_selector(|| "composer-space".into())
+                                    .flex()
+                                    .flex_col()
+                                    .when(empty, |view| view.flex_1().min_h_0().justify_center())
+                                    .when(!empty, |view| view.flex_shrink_0())
                                     .px(px(geometry.content_inset))
-                                    .pb(px(geometry.gap * 2.))
+                                    .pb(px(if empty { 0. } else { geometry.gap * 2. }))
                                     .child(self.composer_panel(cx)),
                             ),
                     )
