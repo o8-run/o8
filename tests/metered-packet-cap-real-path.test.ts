@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { createServer } from 'node:http';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer, IncomingMessage, request as httpRequest } from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -39,7 +39,7 @@ vi.mock('@/lib/worktree/storage-telemetry', async (importOriginal) => ({
   })),
 }));
 
-const root = mkdtempSync(path.join(os.tmpdir(), 'o8-metered-cap-'));
+const root = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'o8-metered-cap-')));
 const dataDir = path.join(root, 'data');
 const repoPath = path.join(dataDir, 'repo');
 const ownedRoot = path.join(dataDir, 'owned');
@@ -52,7 +52,7 @@ process.env.NODE_OPTIONS = `${process.env.NODE_OPTIONS ?? ''} --import=${egressP
 await import(egressPreload);
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
 process.env.CORTEX_IDE_OWNED_CLAUDE_CODE_ROOT = ownedRoot;
-process.env.OPENROUTER_API_KEY = 'test-metered-key';
+vi.stubEnv('O8_MASTER_KEY', Buffer.alloc(32, 81).toString('base64url'));
 process.env.O8_CRASH_SURVIVABLE_WORKERS = '1';
 
 mkdirSync(dataDir, { recursive: true });
@@ -131,6 +131,15 @@ process.env.O8_OPENROUTER_CLAUDE_CODE_BASE_URL = `http://127.0.0.1:${address.por
 
 const { writeClaudeCodeWorkerProfile } = await import('@/lib/claude-code/worker-profile');
 const { saveRuntimeBillingMode } = await import('@/lib/providers/runtime-billing');
+const { mutateProviderKey, PROVIDER_ENV_KEYS, PROVIDER_KEY_ALIASES } = await import('@/lib/providers/key-store');
+// Keep synthetic credentials in the isolated store. Inherited credentials also
+// reach managed-worktree Git commands, which correctly reject unstamped keys.
+for (const key of [...PROVIDER_ENV_KEYS, ...Object.values(PROVIDER_KEY_ALIASES).flat(),
+  'LLM_API_KEY', 'GOOSE_API_KEY', 'COPILOT_PROVIDER_API_KEY', 'COPILOT_PROVIDER_BEARER_TOKEN', 'O8_FABLE_ANTHROPIC_API_KEY']) {
+  vi.stubEnv(key, '');
+}
+vi.stubEnv('O8_CHILD_CREDENTIAL_POLICY', undefined);
+mutateProviderKey('OPENROUTER_API_KEY', { key: 'test-metered-key' });
 saveRuntimeBillingMode('claude-code', 'api');
 const { prepareMeteredGatewaySession } = await import('@/lib/claude-code/metered-gateway');
 import type { OwnedSessionRecord } from '@/lib/runtimes/shared/owned-session/types';
@@ -151,6 +160,12 @@ const { relaunchSupervisedAgent } = await import('@/lib/supervisor/relaunch-agen
 const { createOwnedSessionIo } = await import('@/lib/runtimes/shared/owned-session/session-io');
 const { closeDb } = await import('@/lib/db');
 const claudeOwned = await import('@/lib/claude-code/owned');
+// This fixture refreshes explicitly. Background writes would race the strict
+// metadata reads and the one-shot readiness hook used to measure admission.
+const refreshTimer = (globalThis as unknown as Record<symbol, NodeJS.Timeout | undefined>)[
+  Symbol.for('o8.ownedSession.refreshTimer.claude-code')
+];
+if (refreshTimer) clearInterval(refreshTimer);
 const ownedIo = createOwnedSessionIo({ root: ownedRoot, surfacePrefix: 'claude-code-owned:', invalidateFleetCache: () => {} });
 const starts = () => {
   try { return readFileSync(path.join(root, 'starts.jsonl'), 'utf8').trim().split('\n').filter(Boolean).length; }
@@ -285,6 +300,7 @@ afterAll(() => {
   for (const [key, value] of Object.entries(priorEgressEnv)) {
     if (value === undefined) delete process.env[key]; else process.env[key] = value;
   }
+  vi.unstubAllEnvs();
   if (!retainFixture) rmSync(root, { recursive: true, force: true });
   else console.error(`Retained metered fixture evidence: ${root}`);
 });
@@ -311,16 +327,74 @@ async function waitForConfirmedKillEvent(laneId: string) {
 }
 
 describe('metered packet cap real path', () => {
+  it('rechecks a disk cap latch after reading a delayed request body', async () => {
+    const sessionDir = mkdtempSync(path.join(root, 'upload-cap-'));
+    const gateway = await prepareMeteredGatewaySession({ sessionDir } as OwnedSessionRecord,
+      process.env.O8_OPENROUTER_CLAUDE_CODE_BASE_URL!, { carrier: 'openrouter', costUsd: 1, inputTokens: 7_000_000 });
+    let bodyStarted!: () => void;
+    const reading = new Promise<void>(resolve => { bodyStarted = resolve; });
+    const iterator = IncomingMessage.prototype[Symbol.asyncIterator];
+    const spy = vi.spyOn(IncomingMessage.prototype, Symbol.asyncIterator).mockImplementation(function (this: IncomingMessage) {
+      bodyStarted();
+      return iterator.call(this);
+    });
+    const before = upstreamCalls;
+    try {
+      let finish!: () => void;
+      const response = new Promise<number | undefined>((resolve, reject) => {
+        const request = httpRequest(`${gateway}/v1/messages`, { method: 'POST', headers: { 'content-length': '2' } }, res => {
+          res.resume(); res.once('end', () => resolve(res.statusCode));
+        });
+        request.once('error', reject);
+        request.write('{'); finish = () => request.end('}');
+      });
+      await reading;
+      writeFileSync(path.join(sessionDir, 'gateway-spend.json'), JSON.stringify({ costUsd: 0.01,
+        inputTokens: 10, outputTokens: 1, costSource: 'gateway', capHit: true, updatedAt: new Date().toISOString() }));
+      finish();
+      expect.soft(await response).toBe(429);
+      expect(upstreamCalls).toBe(before);
+    } finally { spy.mockRestore(); }
+  });
+
+  it.each(['before-admission', 'in-flight'] as const)('retains a disk-only cap latch across stale and fresh gateway registrations: %s', async phase => {
+    const sessionDir = mkdtempSync(path.join(root, 'disk-cap-'));
+    const session = { sessionDir } as OwnedSessionRecord;
+    const cap = { carrier: 'openrouter' as const, costUsd: 1, inputTokens: 7_000_000 };
+    const old = await prepareMeteredGatewaySession(session, process.env.O8_OPENROUTER_CLAUDE_CODE_BASE_URL!, cap);
+    const before = upstreamCalls;
+    const call = (gateway: string) => fetch(`${gateway}/v1/messages`, { method: 'POST',
+      headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: 'metered/test' }) });
+    let pending: Promise<Response> | undefined;
+    if (phase === 'in-flight') {
+      responseGate = new Promise(resolve => { releaseResponseGate = resolve; });
+      pending = call(old);
+      await vi.waitFor(() => expect(upstreamCalls).toBe(before + 1));
+    }
+    writeFileSync(path.join(sessionDir, 'gateway-spend.json'), JSON.stringify({ costUsd: 0.01,
+      inputTokens: 10, outputTokens: 1, costSource: 'gateway', capHit: true, updatedAt: new Date().toISOString() }));
+    const fresh = await prepareMeteredGatewaySession(session, process.env.O8_OPENROUTER_CLAUDE_CODE_BASE_URL!, cap);
+    releaseResponseGate?.(); responseGate = null;
+    expect.soft((await (pending ?? call(old))).status).toBe(429);
+    expect.soft((await call(fresh)).status).toBe(429);
+    expect.soft(upstreamCalls).toBe(before + (phase === 'in-flight' ? 1 : 0));
+    expect(JSON.parse(readFileSync(path.join(sessionDir, 'gateway-spend.json'), 'utf8')).capHit).toBe(true);
+  });
+
   it('keeps known cap refusal latched when publishing telemetry fails after upstream inference', async () => {
     const sessionDir = mkdtempSync(path.join(root, 'cap-persistence-failure-'));
-    mkdirSync(path.join(sessionDir, 'gateway-spend.json'));
     const gateway = await prepareMeteredGatewaySession({ sessionDir } as OwnedSessionRecord,
       process.env.O8_OPENROUTER_CLAUDE_CODE_BASE_URL!, { carrier: 'openrouter', costUsd: 0.05, inputTokens: 700_000 });
     const before = upstreamCalls;
     const call = () => fetch(`${gateway}/v1/messages`, { method: 'POST',
       headers: { 'content-type': 'application/json', authorization: 'Bearer test' },
       body: JSON.stringify({ model: 'metered/test', messages: [{ role: 'user', content: 'test' }] }) });
-    expect((await call()).status).toBe(502);
+    responseGate = new Promise(resolve => { releaseResponseGate = resolve; });
+    const pending = call();
+    await vi.waitFor(() => expect(upstreamCalls - before).toBe(1));
+    mkdirSync(path.join(sessionDir, 'gateway-spend.json'));
+    releaseResponseGate?.(); responseGate = null;
+    expect((await pending).status).toBe(502);
     expect((await call()).status).toBe(429);
     expect(upstreamCalls - before).toBe(1);
   });
@@ -342,7 +416,7 @@ describe('metered packet cap real path', () => {
     });
   });
 
-  it.each(['cap-hit', 'input-cap', 'operator-stop', 'registry-stop'] as const)('refuses cold recovery of an unarchived %s packet before its interrupt marker is saved', async (reason) => {
+  it.each(['telemetry-cap-hit', 'cap-hit', 'input-cap', 'operator-stop', 'registry-stop'] as const)('refuses cold recovery of an unarchived %s packet before its interrupt marker is saved', async (reason) => {
     process.env.O8_TEST_FINISH_METERED_WORKER = '1';
     await writeClaudeCodeWorkerProfile({ source: 'openrouter', model: 'metered/test', codexModel: null });
     await addRepo(repoPath);
@@ -367,8 +441,17 @@ describe('metered packet cap real path', () => {
     // Simulate a server exit after the gateway persisted its cap/stop decision,
     // before interruption or archival could mark the owned generation.
     const stopped = readOrchestratorControlPlaneState();
+    const telemetryOnly = reason === 'telemetry-cap-hit';
+    const telemetryFile = path.join(saved.sessionDir, 'gateway-spend.json');
+    if (telemetryOnly) {
+      expect(stopped.packets[0].operatorStopped).not.toBe(true);
+      expect(stopped.packets[0].spendTelemetry?.capHit).not.toBe(true);
+      const telemetry = JSON.parse(readFileSync(telemetryFile, 'utf8'));
+      writeFileSync(telemetryFile, JSON.stringify({ ...telemetry, capHit: true }));
+    }
+    const persistedTelemetry = readFileSync(telemetryFile, 'utf8');
     const budget = reason === 'cap-hit' || reason === 'input-cap';
-    Object.assign(stopped.packets[0], { operatorStopped: reason !== 'input-cap', status: 'blocked', queueState: 'held', blockedReason: budget ? 'spend_cap_hit' : 'operator_stopped',
+    if (!telemetryOnly) Object.assign(stopped.packets[0], { operatorStopped: reason !== 'input-cap', status: 'blocked', queueState: 'held', blockedReason: budget ? 'spend_cap_hit' : 'operator_stopped',
       spendCap: { carrier: 'openrouter', costUsd: budget ? 0.05 : 1, inputTokens: budget ? 600_000 : 7_000_000 },
       spendTelemetry: { costUsd: reason === 'input-cap' ? null : 0.09, inputTokens: 653_000, outputTokens: 10, costSource: 'gateway', capHit: reason === 'cap-hit', updatedAt: new Date().toISOString() } });
     writeOrchestratorControlPlaneState(stopped);
@@ -395,24 +478,24 @@ describe('metered packet cap real path', () => {
       await supervisor.runSupervisorTickForTesting();
       console.log('COLD_RESULT=' + JSON.stringify({mutations, status: watched.lastStatus})); process.exit(0);
     `], { cwd: process.cwd(), env: process.env, encoding: 'utf8', timeout: 20_000 });
-    expect(JSON.parse(cold.split('COLD_RESULT=')[1].split('\n')[0])).toEqual({ mutations: 0, status: 'held' });
+    expect.soft(JSON.parse(cold.split('COLD_RESULT=')[1].split('\n')[0])).toEqual({ mutations: 0, status: 'held' });
     const beforeRequests = upstreamCalls; const beforeStarts = starts();
-    expect(await automaticAction(surfaceId, runId))
+    expect.soft(await automaticAction(surfaceId, runId))
       .toMatchObject({ ok: false, note: expect.stringMatching(/packet.*(budget|stopped)/i) });
     const explicit = await runtimeAction(new NextRequest('http://localhost/api/runtime/action', {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'steer', surfaceId,
         message: 'A prompt alone grants no new budget.', clientMutationId: crypto.randomUUID() }),
     }));
-    expect(await explicit.json()).toMatchObject({ ok: false, note: expect.stringMatching(/packet.*(budget|stopped)/i) });
+    expect.soft(await explicit.json()).toMatchObject({ ok: false, note: expect.stringMatching(/packet.*(budget|stopped)/i) });
     const { launchRuntimeSurface } = await import('@/lib/runtime/actions');
-    expect(await launchRuntimeSurface({ runtime: 'claude-code', prompt: 'Synthetic fresh retry.', repoPath, cwd: repoPath,
+    expect.soft(await launchRuntimeSurface({ runtime: 'claude-code', prompt: 'Synthetic fresh retry.', repoPath, cwd: repoPath,
       automaticRecoverySurfaceId: surfaceId, automaticRecoveryRunId: runId }))
       .toMatchObject({ ok: false, note: expect.stringMatching(/packet.*(budget|stopped)/i) });
     await vi.waitFor(async () => {
       await claudeOwned.getOwnedClaudeCodeFleetAdditions({ fresh: true });
       expect((await ownedIo.findSession(surfaceId))?.activeRun).toBeUndefined();
     }, { timeout: 15_000, interval: 50 });
-    expect(starts()).toBe(beforeStarts); expect(upstreamCalls).toBe(beforeRequests);
+    expect.soft(starts()).toBe(beforeStarts); expect.soft(upstreamCalls).toBe(beforeRequests);
     expect((await ownedIo.findSession(surfaceId))?.recentRuns[0].id).toBe(runId);
     const packet = reason === 'registry-stop'
       ? (await import('@/lib/orchestrator/mission-registry')).readMissionRegistryEntry(stopped.missionId!, { includeArchived: true })!.mission.packets[0]
@@ -420,6 +503,10 @@ describe('metered packet cap real path', () => {
     expect(packet).toMatchObject({ operatorStopped: persistedStop.packets[0].operatorStopped,
       queueState: persistedStop.packets[0].queueState, blockedReason: persistedStop.packets[0].blockedReason,
       spendCap: persistedStop.packets[0].spendCap, spendTelemetry: persistedStop.packets[0].spendTelemetry });
+    if (telemetryOnly) {
+      expect(readFileSync(telemetryFile, 'utf8')).toBe(persistedTelemetry);
+      return; // A packet-only update cannot erase the independent durable telemetry stop.
+    }
     // An explicit budget/stop change admits an ordinary automatic turn again.
     const authorized = structuredClone(persistedStop);
     Object.assign(authorized.packets[0], { operatorStopped: false, status: 'running', queueState: 'running', blockedReason: undefined,
@@ -434,13 +521,13 @@ describe('metered packet cap real path', () => {
     }, { timeout: 15_000, interval: 50 });
     if (reason === 'cap-hit') {
       // A stop arriving during async provider readiness must win at spawn, too.
+      const nextRun = (await ownedIo.findSession(surfaceId))!.recentRuns[0].id;
       const { ensureDispatchBackendReady } = await import('@/lib/runtimes/shared/dispatch-readiness');
       vi.mocked(ensureDispatchBackendReady).mockImplementationOnce(async () => {
         writeOrchestratorControlPlaneState(persistedStop);
         return { ready: true, reason: 'fixture', waitedMs: 0, attempts: 1,
           lastCheck: { ready: true, reason: 'fixture', apiBase: 'http://127.0.0.1', portSource: 'file', apiPortFilePresent: true } };
       });
-      const nextRun = (await ownedIo.findSession(surfaceId))!.recentRuns[0].id;
       expect(await automaticAction(surfaceId, nextRun)).toMatchObject({ ok: false, note: expect.stringMatching(/packet.*budget/i) });
       expect(upstreamCalls).toBe(beforeRequests + 1); expect(starts()).toBe(beforeStarts + 1);
     }

@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { OwnedRuntimeAdapter, OwnedSessionRecord } from '@/lib/runtimes/shared/owned-session/types';
@@ -7,6 +7,7 @@ import * as recoveryModule from '@/lib/runtimes/shared/owned-session/automatic-r
 import * as laneGitModule from '@/lib/lane/lane-git';
 import { getSqlite } from '@/lib/db';
 import type { RuntimeCapacitySnapshot } from '@/lib/runtimes/types';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 vi.mock('@/lib/runtimes/shared/dispatch-readiness', () => ({
   ensureDispatchBackendReady: async () => ({ status: 'ready', binaryPath: process.execPath }),
@@ -69,7 +70,7 @@ async function launch(wait: boolean | 'card' = true) {
 
 beforeEach(async () => {
   workerRuntime = 'codex'; workerModel = 'gpt-6.1-sol';
-  root = await mkdtemp(path.join(process.cwd(), '.tmp-capacity-resume-'));
+  root = await realpath(await mkdtemp(path.join(getDataDir(), 'capacity-resume-')));
   repo = path.join(root, 'repo');
   execFileSync('git', ['init', '-q', '-b', 'main', repo]);
   await writeFile(path.join(repo, 'fixture.txt'), 'before\n');

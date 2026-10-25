@@ -1,23 +1,22 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { randomUUID } from 'node:crypto';
-import { readFile, writeFile } from 'node:fs/promises';
-import path from 'node:path';
+import { realpathSync } from 'node:fs';
 
 import { recordLaneEvent } from '@/lib/lane/events';
 import { packetSpendCapBreach, type PacketSpendCap, type PacketSpendTelemetry } from '@/lib/orchestrator/metered-spend';
 import type { OwnedSessionRecord } from '@/lib/runtimes/shared/owned-session/types';
-
-const TELEMETRY_FILE = 'gateway-spend.json';
+import { readMeteredGatewayTelemetrySync, mergeMeteredGatewayTelemetry, persistMeteredGatewayTelemetry } from './metered-gateway-telemetry';
 
 interface Registration {
   session: OwnedSessionRecord;
   upstreamBaseUrl: string;
   cap: PacketSpendCap;
   telemetry: PacketSpendTelemetry;
-  admission: Promise<void>;
+  admission: { pending: Promise<void> };
 }
 
 const registrations = new Map<string, Registration>();
+const admissions = new Map<string, Registration['admission']>();
 let serverPromise: Promise<{ port: number }> | null = null;
 
 function finiteNonnegative(value: unknown): number | null {
@@ -81,7 +80,7 @@ async function requestBody(request: IncomingMessage): Promise<Uint8Array<ArrayBu
 async function enforceCap(registration: Registration): Promise<boolean> {
   const telemetry = registration.telemetry;
   const breach = packetSpendCapBreach(registration.cap, telemetry);
-  if (telemetry.capHit) return true;
+  if (telemetry.capHit) { await persistTelemetry(registration); return true; }
   if (!breach) return false;
   telemetry.capHit = true;
   await persistTelemetry(registration);
@@ -134,7 +133,7 @@ async function enforceCap(registration: Registration): Promise<boolean> {
 
 async function persistTelemetry(registration: Registration): Promise<void> {
   registration.telemetry.updatedAt = new Date().toISOString();
-  await writeFile(path.join(registration.session.sessionDir, TELEMETRY_FILE), JSON.stringify(registration.telemetry, null, 2), 'utf8');
+  registration.telemetry = persistMeteredGatewayTelemetry(registration.session.sessionDir, registration.telemetry);
   if (registration.session.packetId) {
     const { patchMissionPacket } = await import('@/lib/orchestrator/operator-mission-service/packet-patch');
     await patchMissionPacket(registration.session.packetId, {
@@ -152,14 +151,19 @@ async function relay(request: IncomingMessage, response: ServerResponse): Promis
     response.writeHead(404).end('Unknown metered gateway session.');
     return;
   }
-  const previous = registration.admission;
+  const previous = registration.admission.pending;
   let release!: () => void;
-  registration.admission = new Promise<void>((resolve) => { release = resolve; });
+  registration.admission.pending = new Promise<void>((resolve) => { release = resolve; });
   await previous;
   try {
+    if (!registration.telemetry.capHit) registration.telemetry = mergeMeteredGatewayTelemetry(
+      readMeteredGatewayTelemetrySync(registration.session.sessionDir), registration.telemetry);
     if (registration.telemetry.capHit) {
       response.writeHead(429, { 'content-type': 'application/json' }).end(JSON.stringify({ error: { message: 'Packet spend cap reached.' } }));
       return;
+    }
+    if (await enforceCap(registration)) {
+      response.writeHead(429).end('Packet spend cap reached.'); return;
     }
     await forward(registration, request, response, incomingUrl, suffix);
   } finally { release(); }
@@ -174,10 +178,27 @@ async function forward(registration: Registration, request: IncomingMessage, res
     headers.set(name, Array.isArray(value) ? value.join(', ') : value);
   }
   headers.set('x-openrouter-metadata', 'enabled');
-  const upstreamResponse = await fetch(upstream, { method: request.method, headers, body: await requestBody(request) });
+  const body = await requestBody(request);
+  // Uploading can yield after relay admission. Nothing may yield between this
+  // final successful durable check and starting the upstream request.
+  registration.telemetry = mergeMeteredGatewayTelemetry(
+    readMeteredGatewayTelemetrySync(registration.session.sessionDir), registration.telemetry);
+  if (registration.telemetry.capHit || packetSpendCapBreach(registration.cap, registration.telemetry)) {
+    await enforceCap(registration);
+    response.writeHead(429).end('Packet spend cap reached.');
+    return;
+  }
+  const upstreamResponse = await fetch(upstream, { method: request.method, headers, body });
   const bytes = Buffer.from(await upstreamResponse.arrayBuffer());
   const usage = parseGatewayUsage(bytes.toString('utf8'));
   const exactCost = usage.costUsd ?? (usage.generationId ? await queryGenerationCost(registration, usage.generationId, headers) : null);
+  try {
+    registration.telemetry = mergeMeteredGatewayTelemetry(readMeteredGatewayTelemetrySync(registration.session.sessionDir), registration.telemetry);
+  } catch (error) {
+    if (packetSpendCapBreach(registration.cap, { costUsd: exactCost === null ? registration.telemetry.costUsd : (registration.telemetry.costUsd ?? 0) + exactCost,
+      inputTokens: registration.telemetry.inputTokens + usage.inputTokens })) registration.telemetry.capHit = true;
+    throw error;
+  }
   if (exactCost !== null) {
     registration.telemetry.costUsd = (registration.telemetry.costUsd ?? 0) + exactCost;
     registration.telemetry.costSource = 'gateway';
@@ -219,21 +240,25 @@ async function ensureServer(): Promise<{ port: number }> {
 }
 
 export async function prepareMeteredGatewaySession(session: OwnedSessionRecord, upstreamBaseUrl: string, cap: PacketSpendCap): Promise<string> {
+  const sessionDir = realpathSync(session.sessionDir);
+  const telemetry = readMeteredGatewayTelemetrySync(sessionDir);
   const { port } = await ensureServer();
   const key = randomUUID();
+  const admission = admissions.get(sessionDir) ?? { pending: Promise.resolve() };
+  admissions.set(sessionDir, admission);
   registrations.set(key, {
-    session,
+    session: { ...session, sessionDir },
     upstreamBaseUrl,
     cap,
-    admission: Promise.resolve(),
-    telemetry: { costUsd: null, inputTokens: 0, outputTokens: 0, costSource: 'unknown', capHit: false, updatedAt: new Date().toISOString() },
+    admission,
+    telemetry: telemetry ?? { costUsd: null, inputTokens: 0, outputTokens: 0, costSource: 'unknown', capHit: false, updatedAt: new Date().toISOString() },
   });
   return `http://127.0.0.1:${port}/${key}`;
 }
 
 export async function readMeteredGatewayTelemetry(sessionDir: string): Promise<PacketSpendTelemetry | null> {
   try {
-    return JSON.parse(await readFile(path.join(sessionDir, TELEMETRY_FILE), 'utf8')) as PacketSpendTelemetry;
+    return readMeteredGatewayTelemetrySync(sessionDir);
   } catch {
     return null;
   }

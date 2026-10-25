@@ -353,11 +353,16 @@ it.each(['interrupt', 'resume'] as const)('refuses a queued automatic launch aft
 
 it('retains unknown action outcomes without retrying the automatic mutation', async () => {
   const surface = await launch('finished'); const before = starts();
+  // This case exercises the inventory-backed action path. A cold snapshot can
+  // instead take the metadata-free fallback, which reports a known refusal.
+  const { getRuntimeInventorySnapshot } = await import('@/lib/runtime/inventory');
+  await vi.waitFor(async () => expect((await getRuntimeInventorySnapshot({ fresh: true })).agents
+    .some(agent => agent.sessionKey === surface)).toBe(true), { timeout: 15_000 });
   const { ensureDispatchBackendReady } = await import('@/lib/runtimes/shared/dispatch-readiness');
   vi.mocked(ensureDispatchBackendReady).mockRejectedValueOnce(new Error('Synthetic uncertain backend boundary'));
   const extra = { automaticRecoveryRunId: record(surface).recentRuns[0].id, clientMutationId: crypto.randomUUID() };
   const first = await action(surface, extra);
-  expect(first).toMatchObject({ ok: false, outcomeUnknown: true });
+  expect(first, JSON.stringify(first)).toMatchObject({ ok: false, outcomeUnknown: true });
   expect(await action(surface, extra)).toMatchObject({ ok: false, outcomeUnknown: true, replayed: true });
   expect(starts()).toBe(before);
 }, 25_000);
