@@ -1,0 +1,21 @@
+{
+  "finalFullRun": {
+    "filesPassed": 1235,
+    "filesFailed": 1,
+    "filesSkipped": 3,
+    "testsPassed": 8923,
+    "testsFailed": 4,
+    "testsSkipped": 5
+  },
+  "failureFile": "tests/pi-sdk-live-contract.test.ts",
+  "reason": "An unchanged fixed-date test contract expired; all four failures reproduced with JavaScript sources identical to main. The contract was not changed.",
+  "earlierRun": {
+    "filesPassed": 1232,
+    "filesFailed": 1,
+    "testsPassed": 8895,
+    "testsFailed": 1,
+    "failureReason": "Local temporary cache files overflowed a provenance git-status buffer. Local Git exclusion corrected it; focused retry passed 15 tests."
+  },
+  "intermediateStartup": "Missing Vitest cache directory; recreated locally and restarted.",
+  "scope": "Full run on onboarding branch; all three branches share the same production JavaScript baseline. Native checks ran separately on each branch."
+}

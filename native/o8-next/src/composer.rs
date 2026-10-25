@@ -413,6 +413,7 @@ impl Render for Composer {
             .id("composer-input")
             .debug_selector(|| "composer-input".into())
             .track_focus(&self.focus)
+            .key_context("o8-editable")
             .cursor(CursorStyle::IBeam)
             .max_h(px(176.))
             .overflow_y_scroll()

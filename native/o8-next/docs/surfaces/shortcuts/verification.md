@@ -57,4 +57,13 @@ Base has no overlay, so before latency is unavailable. No speedup or production
 latency target is claimed. GPU/compositor, physical keyboard and macOS display
 measurements remain unverified.
 
+
+## Current main integration
+
+Reconciled with the native Inbox already on main. The final [green run](green-main-tail.txt)
+passes **9 shell and Inbox cases**. The [second timing receipt](run-2.json)
+records **23.18 ms open-to-first-frame** and **14.96 ms interaction-to-frame**
+on the same debug/headless CPU endpoint. Earlier receipts remain in place.
+No GPU/compositor or macOS display claim is added.
+
 Refs #4548
