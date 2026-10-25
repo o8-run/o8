@@ -270,3 +270,31 @@ fn native_single_line_megabyte_selection_copy_and_undo(cx: &mut TestAppContext) 
     draw(cx);
     input.read_with(cx, |i, _| assert_eq!(i.revision, i.painted));
 }
+
+#[gpui::test]
+fn native_review_word_dispatch_survives_focus_and_unicode(cx: &mut TestAppContext) {
+    let (input, cx) = editor(cx);
+    cx.simulate_input("🦀 first second\nlast line");
+    cx.update(|window, _| window.blur());
+    input.update_in(cx, |i, window, _| i.focus.focus(window));
+    draw(cx);
+    cx.simulate_keystrokes(&word_key("left"));
+    assert_eq!(
+        selection(&input, cx).range,
+        21..21,
+        "the active dispatcher must move by word after refocus"
+    );
+    cx.simulate_keystrokes(&word_key("shift-left"));
+    assert_eq!(selection(&input, cx).range, 16..21);
+    cx.simulate_keystrokes("backspace ctrl-z");
+    assert_eq!(
+        input.read_with(cx, |i, _| i.text.clone()),
+        "🦀 first second\nlast line"
+    );
+    cx.simulate_keystrokes("right");
+    cx.simulate_keystrokes(&word_key("delete"));
+    assert_eq!(
+        input.read_with(cx, |i, _| i.text.clone()),
+        "🦀 first second\nlast "
+    );
+}

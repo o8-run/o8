@@ -1,6 +1,6 @@
 use super::*;
 use crate::composer::controls::mode_label;
-use gpui::{AnyElement, Div, SharedString, Stateful};
+use gpui::{AnyElement, Div, KeyDownEvent, SharedString, Stateful};
 
 impl Surface {
     pub(super) fn composer_routing(&self, cx: &App) -> Option<Value> {
@@ -366,7 +366,10 @@ impl Surface {
                     if self.saving { "…" } else { "↑" },
                     enabled,
                     cx,
-                    |s, _, cx| s.send(None, cx),
+                    |s, window, cx| {
+                        s.send(None, cx);
+                        s.composer.read(cx).focus.focus(window);
+                    },
                 )
                 .bg(theme().accent)
                 .text_color(theme().background),

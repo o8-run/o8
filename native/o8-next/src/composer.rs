@@ -16,6 +16,7 @@ pub struct Submit(pub bool);
 impl EventEmitter<Submit> for Composer {}
 pub struct Composer {
     pub focus: FocusHandle,
+    pub context: &'static str,
     pub text: String,
     selection: Range<usize>,
     anchor: usize,
@@ -39,6 +40,7 @@ impl Composer {
     pub fn new(cx: &mut Context<Self>) -> Self {
         Self {
             focus: cx.focus_handle(),
+            context: "TextInput",
             text: String::new(),
             selection: 0..0,
             anchor: 0,
@@ -189,7 +191,9 @@ impl Composer {
         self.text.len()
     }
     fn key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        let key = &event.keystroke;
+        self.edit_key(&event.keystroke, window, cx);
+    }
+    fn edit_key(&mut self, key: &Keystroke, window: &mut Window, cx: &mut Context<Self>) {
         // IME owns confirmation, arrows and deletion while a marked range exists.
         if self.composing() {
             cx.stop_propagation();
@@ -485,6 +489,7 @@ impl Render for Composer {
             .id("composer-input")
             .debug_selector(|| "composer-input".into())
             .track_focus(&self.focus)
+            .key_context(self.context)
             .tab_stop(true)
             .cursor(CursorStyle::IBeam)
             .max_h(px(176.))

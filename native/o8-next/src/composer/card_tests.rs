@@ -395,3 +395,40 @@ fn native_composer_card_send_preserves_images_added_after_the_request(cx: &mut T
         assert_eq!(s.composer.read(cx).controls.images, vec![later]);
     });
 }
+
+#[gpui::test]
+fn native_composer_review_send_button_returns_focus_to_editor(cx: &mut TestAppContext) {
+    let fixture = Fixture::start(true);
+    let (surface, cx) = open(cx, &fixture);
+    surface.update(cx, |s, _| s.send_next = true);
+    click("composer-input", cx);
+    cx.simulate_input("Send with the pointer");
+    click("send", cx);
+    surface.update_in(cx, |s, window, cx| {
+        assert!(s.composer.read(cx).text.is_empty());
+        assert_eq!(
+            s.queue["items"][0]["payload"]["text"],
+            "Send with the pointer"
+        );
+        assert!(
+            s.composer.read(cx).focus.is_focused(window),
+            "successful pointer Send must return focus to the editor"
+        );
+    });
+    cx.simulate_input("Continue typing immediately");
+    surface.read_with(cx, |s, cx| {
+        assert_eq!(s.composer.read(cx).text, "Continue typing immediately")
+    });
+    surface.update_in(cx, |s, window, cx| {
+        s.composer.read(cx).controls.focus["send"].focus(window)
+    });
+    cx.simulate_keystrokes("enter");
+    cx.run_until_parked();
+    surface.update_in(cx, |s, window, cx| {
+        assert!(s.composer.read(cx).text.is_empty());
+        assert!(
+            s.composer.read(cx).focus.is_focused(window),
+            "keyboard activation of Send must also restore the editor"
+        );
+    });
+}
