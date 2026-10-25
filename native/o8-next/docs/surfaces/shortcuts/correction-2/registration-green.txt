@@ -1,0 +1,2 @@
+Finished `dev` profile [unoptimized + debuginfo] target(s) in 6.85s
+Surface files and one inventory line compile; shared registry and editors match the base.

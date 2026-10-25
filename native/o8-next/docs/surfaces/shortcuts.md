@@ -1,38 +1,37 @@
 # Keyboard shortcuts
 
-The reference and its bindings register through `src/surfaces/shortcuts.rs`.
-The original modal focus, dismissal, clipboard-free reference and tab navigation
-remain scoped to the opt-in shell. See [parity and prior evidence](shortcuts/verification.md).
+The reference, modal, bindings and input ownership live in
+`src/surfaces/shortcuts.rs` and its `shortcuts/` child modules. The shell adds one
+registration line. Composer, terminal, registry, shared shell dispatch/view/state
+and tests match main. Original parity and receipts remain in
+[shortcuts/verification.md](shortcuts/verification.md).
 
-Neither new review finding was fixed at the previous pushed head. The earlier
-Enter-to-close and composer-focus fixes remain covered by the original test.
+The input observer uses GPUI's public entity-creation API to track weak focus
+handles for ordinary editors, credential fields and terminals. It reads no input
+contents. Closed inputs are released and removed from the tracker. The first
+frame and restored-field paths are covered.
 
-Editable controls now advertise the `o8-editable` key context. The surface reads
-the focused context to keep `?` and close chords with the terminal/text editor.
-The optional registry `pass_key` hook preserves propagation to the editor rather
-than running the shell's Ctrl+W handler. Ctrl+Alt+Left/Right remain owned by Grid;
-Cmd+Alt+Left/Right continue to cycle shell tabs.
+Focused text fields retain typing, help, close, numbered-tab and directional-tab
+keys. Palette, Settings and the existing Ctrl+Tab/Shift+Tab chords pass through
+every text field. Focused PTYs retain their keys, including palette and Settings
+chords. The module delivers Ctrl+K/W and Tab/BackTab bytes through the existing
+terminal input API before the unchanged shell capture handler can claim them.
+Grid's Ctrl+Alt+Left/Right pane navigation remains intact.
 
-The dialog renders as an anchored, deferred window layer owned by this module.
-Its focus loop, dismissal and return focus stay intact without changes to the
-shared shell view. [Red](shortcuts/registration/red-tail.txt) reproduced all three
-new regressions (including a real PTY); [green](shortcuts/registration/green-tail.txt)
-passes those and the original overlay case. The owned PTY fixture uses graceful
-shutdown, matching the existing test host.
+The owned raw PTY fixture reports actual bytes received at stdin. Tests verify
+`0b`, `17`, `09` and `1b5b5a` through the production WebSocket server and PTYs.
+The Settings credential-field matrix covers each guarded binding and each
+permitted global chord. Credential contents remain masked and unread by the
+observer.
 
-The extraction also preserves the existing list scroll position across reopen;
-the new [scroll red](shortcuts/registration/scroll-red-tail.txt) caught a reset
-to zero, and [final green](shortcuts/registration/green-final-tail.txt) passes
-all five surface cases after moving that handle into `Runtime`.
+The module-only registration probe archives main, copies only this module's
+files and adds its single inventory line, then compiles the real binary entry.
+Its red run reproduced `E0560: pass_key`; its green run needs no shared hooks or
+editor tags. See [correction round 2](shortcuts/correction-2/verification.md).
 
-Outside the surface files and inventory line: `src/composer.rs` and
-`src/terminal.rs` add one editable-context line each; `src/surface_registry.rs`
-and `src/shell.rs` add the generic key-propagation hook. Main's view/state/tests,
-client and dev-host dispatcher remain unchanged. All
-[main and original surface test names](shortcuts/registration/preserved-tests.json)
-are preserved. Three pre-existing Clippy suggestions remain in unchanged parts
-of the shared composer/terminal files; the new surface code has none.
-
-Current rebase results, failures and retries: [shortcuts/registration/verification.md](shortcuts/registration/verification.md).
+The prior Grid guards, modal focus/dismissal and retained list scroll remain
+covered. Earlier registration receipts under `shortcuts/registration/` describe
+the previous shared-hook implementation; correction round 2 supersedes it.
+All main and previous shortcut test function names remain present.
 
 Refs #4548

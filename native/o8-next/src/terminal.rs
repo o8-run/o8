@@ -280,7 +280,6 @@ impl Render for Pane {
             .text_color(theme().text)
             .font_family(theme().font_ui)
             .track_focus(&self.focus)
-            .key_context("o8-editable")
             .on_key_down(cx.listener(Self::key))
             .on_mouse_down(
                 MouseButton::Left,

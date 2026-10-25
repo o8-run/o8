@@ -1,12 +1,15 @@
 use super::*;
 #[path = "shortcuts/dialog.rs"]
 mod dialog;
+#[path = "shortcuts/input.rs"]
+mod input;
 pub(super) type Slice = EmptyState;
 #[derive(Default)]
 pub(super) struct Runtime {
     pub view: Option<Entity<dialog::Dialog>>,
     scroll: gpui::ScrollHandle,
     subscription: Option<gpui::Subscription>,
+    inputs: input::Inputs,
 }
 pub(super) const REGISTRATION: Registration = Registration {
     overlay_command: true,
@@ -19,13 +22,8 @@ pub(super) const REGISTRATION: Registration = Registration {
     },
     overlay_open: |s| s.surfaces.shortcuts.view.is_some(),
     key_down: keys,
-    pass_key: |s, event, window, cx| {
-        s.surfaces.shortcuts.view.is_none()
-            && (event.keystroke.modifiers.control || event.keystroke.modifiers.platform)
-            && event.keystroke.key == "w"
-            && editing(s, window, cx)
-    },
-    nav: |_, position, cx| {
+    nav: |s, position, cx| {
+        s.surfaces.shortcuts.inputs.watch(cx);
         if position != NavPosition::AfterWorkspaces {
             return vec![];
         }
@@ -79,10 +77,8 @@ impl Shell {
     }
 }
 fn editing(s: &Shell, window: &Window, cx: &App) -> bool {
-    if window
-        .context_stack()
-        .iter()
-        .any(|context| context.contains("o8-editable"))
+    if s.surfaces.shortcuts.inputs.field_focused(window)
+        || s.surfaces.shortcuts.inputs.terminal(window, cx).is_some()
     {
         return true;
     }
@@ -132,9 +128,20 @@ fn keys(s: &mut Shell, event: &KeyDownEvent, window: &mut Window, cx: &mut Conte
         cx.notify();
         return true;
     }
+    let terminal = s.surfaces.shortcuts.inputs.terminal(window, cx);
+    if let Some(terminal) = terminal
+        && input::core_chord(event)
+    {
+        input::deliver_core_chord(&terminal, event, window, cx);
+        return true;
+    }
+    if editing(s, window, cx) {
+        // Text fields pass palette, Settings and legacy Ctrl+Tab chords.
+        // Keep Ctrl+W from closing the editor or its underlying tab.
+        return m.control && !m.alt && key == "w";
+    }
     let question = !command && !m.alt && (key == "?" || (key == "/" && m.shift));
-    let is_editing = editing(s, window, cx);
-    if (help_key || question) && !is_editing && !s.palette {
+    if (help_key || question) && !s.palette {
         s.set_help(true, window, cx);
         return true;
     }
@@ -171,7 +178,7 @@ fn keys(s: &mut Shell, event: &KeyDownEvent, window: &mut Window, cx: &mut Conte
         cx.notify();
         return true;
     }
-    if command && !m.alt && !m.shift && key == "w" && !is_editing {
+    if command && !m.alt && !m.shift && key == "w" {
         if let Some(tab) = s.active() {
             s.content.remove(&s.key(&tab));
             let saved = s

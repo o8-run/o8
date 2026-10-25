@@ -1,4 +1,6 @@
 use super::*;
+#[path = "correction_2_tests.rs"]
+mod correction_2;
 #[gpui::test]
 fn shortcuts_reopen_retains_list_scroll(cx: &mut TestAppContext) {
     let f = Fixture::new();
@@ -60,6 +62,12 @@ impl Drop for GridHost {
     }
 }
 fn terminal_shell(cx: &mut TestAppContext) -> (GridHost, Entity<Shell>, VisualTestContext) {
+    terminal_shell_with_peer(cx, false)
+}
+fn terminal_shell_with_peer(
+    cx: &mut TestAppContext,
+    report_input: bool,
+) -> (GridHost, Entity<Shell>, VisualTestContext) {
     let root = std::env::temp_dir().join(format!(
         "o8-shortcuts-{}-{}",
         std::process::id(),
@@ -104,6 +112,9 @@ fn terminal_shell(cx: &mut TestAppContext) -> (GridHost, Entity<Shell>, VisualTe
         .unwrap()
         .to_string_lossy()
         .into_owned();
+    if report_input {
+        correction_2::install_key_peer(&client, &workspace);
+    }
     let file = root.join("terminal.json");
     let options = crate::pane_layout::Options {
         size: 6,
