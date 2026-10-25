@@ -293,6 +293,7 @@ function reviewRequest(
     }>;
   },
   missingContractWaiverReason?: string,
+  findingSeverity: 'note' | 'warning' = 'note',
 ): NextRequest {
   return new NextRequest('http://localhost:3001/api/orchestrator/review', {
     method: 'POST',
@@ -310,7 +311,7 @@ function reviewRequest(
       missingContractWaiverReason,
       findings: [{
         file: 'safe.ts',
-        severity: 'note',
+        severity: findingSeverity,
         description: 'The expansion is intentional and reviewed.',
         status: 'accepted',
       }],
@@ -850,6 +851,10 @@ describe('requireApproval merge governance through the real command path', () =>
       token,
       fixture.lane.packetId!,
       fixture.reviewedHeadSha,
+      undefined,
+      undefined,
+      // Notes cannot waive budgets; this race explicitly accepts the warning.
+      'warning',
     ));
     for (let attempt = 0; attempt < 100; attempt += 1) {
       const auditLanded = listApprovalsForContext({ laneId: fixture.lane.id }).some((approval) => (
@@ -869,7 +874,7 @@ describe('requireApproval merge governance through the real command path', () =>
     const mergePayload = await mergeResponse.json();
 
     expect(reviewResponse.status).toBe(200);
-    expect(mergePayload).toMatchObject({ ok: true, result: { merged: true } });
+    expect(mergePayload, JSON.stringify(mergePayload)).toMatchObject({ ok: true, result: { merged: true } });
     expect(git(fixture.repo, ['rev-parse', 'HEAD'])).toBe(fixture.reviewedHeadSha);
     expect(getLane(fixture.lane.id)?.status).not.toBe('archived');
   }, 60_000);

@@ -19,7 +19,7 @@ type Selection = { repo?: string | null; number?: number; active?: boolean };
 let host: HTMLDivElement;
 let root: Root;
 let client: QueryClient;
-let fetchMock: ReturnType<typeof vi.fn>;
+let fetchMock: ReturnType<typeof vi.fn<(url: string, init?: RequestInit) => Promise<Response>>>;
 async function flush() { for (let i = 0; i < 4; i++) await act(async () => { await vi.advanceTimersByTimeAsync(1); }); }
 async function render(selections: Selection[] = [{ repo: 'Org/Sample' }], composer?: Selection) {
   await act(async () => root.render(createElement(QueryClientProvider, { client }, ...selections.map((selection, index) => createElement(PrPanel, { key: index, prNumber: selection.number ?? 7, repoSlug: selection.repo, active: selection.active ?? true, onClose: () => {} })), composer ? createElement(PrCommentComposer, { detail: detail(composer.number ?? 7), repoSlug: composer.repo, draft: 'Posted comment', onDraftChange: () => {}, onCollapse: () => {} }) : null)));
@@ -41,7 +41,10 @@ beforeEach(() => {
   vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener() {}, removeEventListener() {} }));
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
-  fetchMock = vi.fn(async () => response()); vi.stubGlobal('fetch', fetchMock);
+  fetchMock = vi.fn(async () => response());
+  vi.stubGlobal('fetch', (url: string, init?: RequestInit) => String(url).startsWith('/api/orchestrator/pull-request-context')
+    ? Promise.resolve(Response.json({ ok: true, result: { links: [], nextCursor: null } }))
+    : fetchMock(url, init));
 });
 afterEach(async () => { await act(async () => root.unmount()); client.clear(); invalidateSWR('pr-detail'); host.remove(); vi.clearAllTimers(); vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
@@ -126,7 +129,7 @@ describe('compact PR detail snapshots through PrPanel', () => {
 
   it('cancels abandoned reads and discards late replies rather than seeding obsolete detail', async () => {
     const held = deferred(); fetchMock.mockReturnValueOnce(held.promise); await render();
-    const oldSignal = reads()[0][1].signal as AbortSignal;
+    const oldSignal = reads()[0][1]!.signal as AbortSignal;
     fetchMock.mockResolvedValue(response(8, 'Other selection')); await render([{ repo: 'Org/Sample', number: 8 }]); expect(oldSignal.aborted).toBe(true);
     await act(async () => held.resolve(response(7, 'Obsolete change'))); await flush(); expect(host.textContent).not.toContain('Obsolete change');
     fetchMock.mockResolvedValue(response(7, 'Current change')); await render(); expect(host.textContent).toContain('Current change'); expect(reads()).toHaveLength(3);
@@ -134,7 +137,7 @@ describe('compact PR detail snapshots through PrPanel', () => {
 
   it('keeps one shared read alive while another alias observer remains', async () => {
     const held = deferred(); fetchMock.mockReturnValue(held.promise); await render([{ repo: 'Org/Sample' }, { repo: 'org/sample' }]);
-    const signal = reads()[0][1].signal as AbortSignal;
+    const signal = reads()[0][1]!.signal as AbortSignal;
     await render([{ repo: 'org/sample' }]); expect(signal.aborted).toBe(false); expect(reads()).toHaveLength(1);
     await act(async () => held.resolve(response())); await flush(); expect(host.textContent).toContain('Known change');
   });
@@ -186,7 +189,7 @@ describe('compact PR detail snapshots through PrPanel', () => {
       if (firstRead) { firstRead = false; return held.promise; }
       return Promise.resolve(response(7, 'After comment'));
     });
-    await refresh(); const oldSignal = reads().at(-1)![1].signal as AbortSignal;
+    await refresh(); const oldSignal = reads().at(-1)![1]!.signal as AbortSignal;
     await act(async () => host.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))); await flush();
     expect(oldSignal.aborted).toBe(true); expect(host.textContent).toContain('After comment');
     await act(async () => held.resolve(response(7, 'Before comment'))); await flush(); expect(host.textContent).not.toContain('Before comment');
