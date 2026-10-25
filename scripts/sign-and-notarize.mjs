@@ -283,7 +283,7 @@ execFileSync('hdiutil', [
   '-volname', `o8 ${version}`,
   '-srcfolder', DMG_STAGING,
   '-ov',
-  '-format', 'UDZO',
+  '-format', 'ULMO',
   DMG,
 ], { stdio: 'inherit' });
 rmSync(DMG_STAGING, { recursive: true, force: true });

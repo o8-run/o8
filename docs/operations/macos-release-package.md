@@ -56,6 +56,11 @@ any existing password export yourself and start a fresh release shell.
 
 ## Compression
 
+The final universal and CPU-specific DMGs use ULMO (LZMA) compression. The
+`hdiutil` manual requires macOS 10.15 or newer for ULMO; the app minimum in
+`src-tauri/tauri.conf.json` is macOS 14.0. The final installer format is selected
+in `scripts/sign-and-notarize.mjs`.
+
 Use the normal approved release workflow from the clean, tagged release checkout.
 On macOS, set the system `tar` writer's gzip compression level for that command:
 
