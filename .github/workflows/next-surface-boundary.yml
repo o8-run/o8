@@ -1,0 +1,56 @@
+name: o8 next surface boundary
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+    paths:
+      - 'native/o8-next/**'
+      - 'scripts/next/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: next-surface-boundary-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  boundary:
+    name: o8 next surface boundary
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      BASE_REF: origin/main
+      HEAD_REF: ${{ github.event.pull_request.head.sha }}
+      CARGO_HOME: ${{ runner.temp }}/next-surface-cargo
+      CARGO_TARGET_DIR: ${{ github.workspace }}/.next-surface-target
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # Refuse shared hunks before installing Rust or restoring a build cache.
+      - name: Check shared files and select isolated build
+        id: select
+        run: node scripts/next/check-surface-boundary.mjs --base "$BASE_REF" --head "$HEAD_REF" --select-only
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        if: steps.select.outputs.run == 'true'
+        with:
+          toolchain: stable
+      - uses: actions/cache@v4
+        if: steps.select.outputs.run == 'true'
+        with:
+          path: |
+            ${{ runner.temp }}/next-surface-cargo/registry
+            ${{ runner.temp }}/next-surface-cargo/git
+            .next-surface-target
+          key: next-surface-${{ runner.os }}-${{ hashFiles('native/o8-next/Cargo.lock') }}-${{ github.sha }}
+          restore-keys: next-surface-${{ runner.os }}-${{ hashFiles('native/o8-next/Cargo.lock') }}-
+      - name: Check surface patch on main and report wall time
+        if: steps.select.outputs.run == 'true'
+        run: node scripts/next/check-surface-boundary.mjs --base "$BASE_REF" --head "$HEAD_REF"

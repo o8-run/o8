@@ -72,3 +72,39 @@ on main; it does not enable unlanded Activity, pull-request, file, commit, diff,
 Customize, shortcuts, first-run or stack-review ports. Those ports follow the same
 module contract when they rebase. Sidebar selection remains in the session view,
 with its shell regression owned by the session test module.
+
+## CI boundary
+
+The `o8 next surface boundary` PR check runs for changes under `native/o8-next/`
+or `scripts/next/`. It rejects shared shell files (including shell helpers/tests),
+the surface registry, `client.rs`, the crate entry point, shared renderer files
+(`ui`, `model`, `retained`, `rich`, `text`, `theme`, `render*` and `composer*`), and the fixture
+host's `dev-server.ts` and `surface-routes.ts`. The explicit inventory lives in
+`scripts/next/check-surface-boundary.mjs`.
+
+The only shared exception is one added entry inside `shell.rs`'s registration
+macro. Counts are additions plus deletions: replacing a line counts as two, and
+renaming or deleting a shared file is checked too. Each refusal reports the path
+and changed-line count on one line. Intentional shell work must carry the exact
+`shell-work` PR label; that label exempts the boundary and isolated build. Adding
+or removing the label reruns the check. Ordinary CI still applies.
+
+For surface work, the check creates a disposable worktree at current main, applies
+only the PR's Rust surface files and discovered fixture entries, inserts its one
+registration without removing entries landed since the PR branched, and runs
+`cargo check --all-targets --locked --manifest-path native/o8-next/Cargo.toml`.
+It excludes shared edits, manifests, build scripts and vendor changes. Keep any
+support the port needs inside its own included modules. Both native tests and
+production code must compile. The check cleans up on success or failure and
+reports wall time in the CI log and job summary; CI caches Cargo dependencies and
+build output, and refuses shared edits before restoring that cache.
+
+Run the same entry point locally after fetching main:
+
+```sh
+node scripts/next/check-surface-boundary.mjs --base origin/main --head HEAD
+npx vitest run tests/next-surface-boundary-real-path.test.ts
+```
+
+For a local shell-work check, supply `--event FILE` with the GitHub PR event
+containing its labels. CI reads the event from `GITHUB_EVENT_PATH`.
