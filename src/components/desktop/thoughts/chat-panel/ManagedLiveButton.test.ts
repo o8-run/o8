@@ -5,6 +5,12 @@ import { createRoot, type Root } from 'react-dom/client';
 import { beforeEach, afterEach, it, expect, vi } from 'vitest';
 import type { LiveBackend, LiveState } from '@/lib/voice/managed-live/session';
 import { useManagedVoicePresentation } from './useManagedVoicePresentation';
+import type { VisualInstructionDraft } from '@/lib/composer/visual-draft-store';
+import { visualMeaningKey } from '@/lib/composer/visual-meaning';
+import { answerVisualQuestion, visualQuestionContext } from '@/lib/composer/visual-clarification';
+const marked = vi.hoisted(() => ({ draft: null as VisualInstructionDraft | null }));
+vi.mock('@/lib/composer/visual-draft-store', () => ({ readVisualDraft: () => marked.draft,
+  saveVisualDraft: async (draft: VisualInstructionDraft) => { marked.draft = draft; } }));
 const fixture = vi.hoisted(() => ({ backend: null as LiveBackend | null, native: false, invoke: vi.fn() }));
 vi.mock('@/lib/tauri/bridge', () => ({ canUseTauriEvents: () => fixture.native, isTauri: () => fixture.native }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: fixture.invoke }));
@@ -422,4 +428,25 @@ it('keeps an explicit personal-key choice from silently reverting to the managed
   expect(document.querySelector('[role="dialog"]')).toBeNull();
   expect(fixture.backend).not.toBe(previous);
   expect(fixture.backend).toMatchObject({ binding: previous!.binding, source: 'byok' });
+});
+
+it('selects a matching spoken Ripple option through an active Live delegate without dispatching', async () => {
+  const routing = { backend: 'codex' as const, model: 'selected', effort: 'low' as const, permissionMode: 'plan' as const, mode: 'single' as const, pickedMode: 'solo' as const, collide: false };
+  const target = { threadId: 'meaning-chat', repoPath: '/fixture' };
+  const scope = { principal: 'fixture', target, routing };
+  const draft: VisualInstructionDraft = { principal: 'fixture', status: 'draft', template: { text: '', wireMessage: '', images: [], routing },
+    request: { version: 1, id: 'spoken-meaning', createdAt: '2026-10-24T12:00:00Z', target, utterance: 'Make it bigger.', frames: [] } };
+  draft.meaningCheck = { key: visualMeaningKey(draft), status: 'choice', latencyMs: 1, resolution: { id: 'meaning-choice', kind: 'choice', question: 'What should be bigger?', aodlPath: 'intent.size',
+    options: [{ label: 'Button size', value: 'button-size' }, { label: 'Text size', value: 'text-size' }] } };
+  marked.draft = draft;
+  const send = vi.fn(); const sendVisual = vi.fn(); const reply = vi.fn(async () => {});
+  await act(async () => root.render(createElement(ManagedLiveButton, { binding: 'meaning-chat', messages: [], busy: false, terminals: {}, send, sendVisual, interrupt: vi.fn(),
+    visualContext: () => visualQuestionContext(scope), answerVisual: text => answerVisualQuestion(scope, text) })));
+  await toggleVoice();
+  expect(fixture.backend!.context()).toContain('What should be bigger?');
+  await act(async () => fixture.backend!.delegate('Text size.', 'spoken-option', reply));
+  expect(marked.draft?.meaningCheck).toMatchObject({ status: 'accepted', selectedValue: 'text-size' });
+  expect(reply).toHaveBeenCalledWith(expect.stringContaining('has not been sent'));
+  expect(send).not.toHaveBeenCalled(); expect(sendVisual).not.toHaveBeenCalled(); expect(saved).not.toHaveBeenCalled();
+  marked.draft = null;
 });

@@ -9,7 +9,9 @@ export interface VisualInstructionDraft {
   status: 'draft' | 'saving' | 'saved' | 'unknown';
   error?: string;
   inspectionReadyAt?: number;
-  visualQuestion?: { key: string; resolution: RippleChoiceResolution };
+  visualQuestion?: { key: string; resolution: RippleChoiceResolution; dismissed?: boolean };
+  meaningCheck?: { key: string; status: 'none' | 'choice' | 'error' | 'timeout' | 'accepted' | 'dismissed';
+    latencyMs: number; resolution?: RippleChoiceResolution; selectedValue?: string };
 }
 const drafts = new Map<string, VisualInstructionDraft>();
 const listeners = new Set<() => void>();
@@ -74,8 +76,17 @@ export async function restoreVisualDraft(principal: string, target: VisualInstru
   const storedQuestion = value.visualQuestion;
   const resolution = storedQuestion && parseRippleResolutionResult(storedQuestion.resolution);
   const visualQuestion = storedQuestion && typeof storedQuestion.key === 'string' && storedQuestion.key.length <= 32_000 && resolution?.kind === 'choice'
-    ? { key: storedQuestion.key, resolution } : undefined;
-  drafts.set(key, { ...value, visualQuestion, request, status: value.status === 'saving' ? 'unknown' : value.status }); publish();
+    ? { key: storedQuestion.key, resolution, ...(storedQuestion.dismissed === true ? { dismissed: true } : {}) } : undefined;
+  const check = value.meaningCheck;
+  const meaningResolution = parseRippleResolutionResult(check?.resolution);
+  const meaningCheck = check && typeof check.key === 'string' && check.key.length <= 250_000
+    && ['none', 'choice', 'error', 'timeout', 'accepted', 'dismissed'].includes(check.status)
+    && Number.isFinite(check.latencyMs) && check.latencyMs >= 0
+    && (!['choice', 'accepted'].includes(check.status) || meaningResolution?.kind === 'choice')
+    ? { key: check.key, status: check.status, latencyMs: check.latencyMs,
+      ...(meaningResolution?.kind === 'choice' ? { resolution: meaningResolution } : {}),
+      ...(typeof check.selectedValue === 'string' && check.selectedValue.length <= 96 ? { selectedValue: check.selectedValue } : {}) } : undefined;
+  drafts.set(key, { ...value, visualQuestion, meaningCheck, request, status: value.status === 'saving' ? 'unknown' : value.status }); publish();
 }
 
 export async function removeVisualDraft(principal: string, target: VisualInstruction['target'], id: string): Promise<void> {

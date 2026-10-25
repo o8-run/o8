@@ -41,6 +41,8 @@ export function ManagedChatVoiceEntry({ identity, queue, capture, visualTarget, 
         draft = { ...draft, request: { ...draft.request, utterance }, template: { ...draft.template, ...(afterTaskId ? { afterTaskId } : {}) } };
         await saveVisualDraft(draft);
       }
-      return commitVisualInstruction(draft, valid);
+      const item = await commitVisualInstruction(draft, valid);
+      if (!item) throw new Error('Review the optional visual question in the composer. The marked draft has not been sent.');
+      return item;
     }} followup={managedVoiceFollowup(queue, capture)} />;
 }

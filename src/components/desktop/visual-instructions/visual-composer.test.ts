@@ -2,6 +2,8 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { NextRequest } from 'next/server';
+import { sampleObservation } from '@/lib/composer/visual-inspection.test-fixture';
 import type { VisualInstructionDraft } from '@/lib/composer/visual-draft-store';
 import { claimVisualCapture, releaseVisualCapture } from '@/lib/composer/visual-capture-state';
 import { DictationHost } from '@/components/desktop/dictation/DictationHost';
@@ -25,7 +27,8 @@ vi.mock('@/components/desktop/dictation/useSymonEditBridge', () => ({ useSymonEd
 vi.mock('@/lib/tts/dictation-barge-in', () => ({ stopPlaybackForDictation: () => false }));
 vi.mock('@/components/desktop/thoughts/chat-panel/SlashCommandPicker', () => ({ SlashCommandPicker: () => null }));
 vi.mock('@/components/desktop/thoughts/chat-panel/ComposerStatusBar', () => ({ ComposerStatusBar: () => null }));
-vi.mock('./VisualInstructionClarification', () => ({ VisualInstructionClarification: () => null }));
+const inference = vi.hoisted(() => ({ route: vi.fn(), provider: vi.fn() }));
+vi.mock('@/lib/cortex/qa/llm/inference-route', () => ({ resolveOpenRouterRoute: inference.route }));
 vi.mock('@/lib/composer/visual-draft-store', () => ({
   readVisualDraft: (principal: string) => test.rows.get(principal) ?? null,
   subscribeVisualDrafts: (listener: () => void) => { test.listeners.add(listener); return () => test.listeners.delete(listener); },
@@ -33,6 +36,7 @@ vi.mock('@/lib/composer/visual-draft-store', () => ({
   saveVisualDraft: async (draft: VisualInstructionDraft) => { test.rows.set(draft.principal, draft); test.listeners.forEach(listener => listener()); if (draft.status === 'saving') await test.hold; },
 }));
 const { VisualComposerArea } = await import('./VisualComposerArea');
+const { POST: resolveRipple } = await import('@/app/api/mobile/ripple/resolve/route');
 const target = { threadId: 'thoughts-a', repoPath: '/project' };
 const sample = (): VisualInstructionDraft => ({ principal: 'a', status: 'draft', template: {
   text: '[o8-visual-instruction]', wireMessage: '[o8-visual-instruction]', images: [],
@@ -60,12 +64,20 @@ const send = () => node.querySelector<HTMLButtonElement>('[data-testid="composer
 beforeEach(async () => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   test.principal = 'a'; test.rows.clear(); test.rows.set('a', sample()); test.hold = null; test.removal = null; test.remove.mockClear(); test.listeners.clear(); fetcher.mockReset();
-  vi.stubGlobal('fetch', (url: RequestInfo | URL, options?: RequestInit) => options?.method === 'POST' ? fetcher(url, options) : Promise.resolve(Response.json({})));
+  inference.route.mockReset(); inference.provider.mockReset();
+  inference.route.mockResolvedValue({ url: 'https://model.example.test/resolve', headers: {}, via: 'direct' });
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
+  vi.stubGlobal('fetch', (url: RequestInfo | URL, options?: RequestInit) => {
+    if (url === '/api/mobile/ripple/resolve') return resolveRipple(new NextRequest('http://localhost/api/mobile/ripple/resolve', { ...options, signal: options?.signal ?? undefined }));
+    if (url === 'https://model.example.test/resolve') return inference.provider(url, options);
+    if (url === '/api/orchestrator/visual-inspection') return Promise.resolve(Response.json({ status: 'unavailable' }));
+    return options?.method === 'POST' ? fetcher(url, options) : Promise.resolve(Response.json({}));
+  });
   ordinarySend.mockClear(); localStorage.clear(); node = document.createElement('div'); document.body.append(node); root = createRoot(node);
   ordinaryChange.mockClear(); test.cancel.mockClear(); test.dictation = 'idle'; test.words = null;
   await act(async () => mount());
 });
-afterEach(async () => { await act(async () => { releaseVisualCapture('capture'); root.unmount(); }); node.remove(); vi.unstubAllGlobals(); });
+afterEach(async () => { await act(async () => { releaseVisualCapture('capture'); root.unmount(); }); node.remove(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 it('does not dispatch the old principal after a pending durable save', async () => {
   let release!: () => void; test.hold = new Promise<void>(done => { release = done; });
   await act(async () => send().click()); test.principal = 'b'; await act(async () => mount());
@@ -239,4 +251,137 @@ it('returns focus to a surviving control after confirming the final frame remova
   expect(test.rows.get('a')?.request.frames).toHaveLength(0);
   expect(document.activeElement).toBe(labelledButton('Discard visual draft'));
   expect(send().disabled).toBe(true);
+});
+
+const meaningChoice = { kind: 'choice', question: 'What should be bigger?', aodlPath: 'intent.size', options: [
+  { label: 'Button size', value: 'button-size' }, { label: 'Text size', value: 'text-size' }, { label: 'Spacing', value: 'spacing' },
+] };
+const providerResult = (value: unknown) => Response.json({ choices: [{ message: { content: JSON.stringify(value) } }] });
+const questionSurface = () => document.querySelector<HTMLElement>('[aria-label="Clarify visual intent"]');
+const optionButton = (label: string) => [...document.querySelectorAll('button')].find(button => button.textContent === label)!;
+async function meaningDraft(words = 'Make it bigger.', candidates = 1) {
+  const observation = sampleObservation();
+  const draft = sample(); draft.request.id = crypto.randomUUID(); draft.request.utterance = words;
+  draft.request.frames = [{ ...draft.request.frames[0], width: 320, height: 280, image: observation.image, observation,
+    candidates: Array.from({ length: candidates }, (_, index) => ({ id: `button-${index}`, name: 'Save', role: 'button', rect: [index * 0.5, 0.2, 0.2, 0.1] })) }];
+  fetcher.mockImplementation(async (_url, init) => Response.json({ item: { ...JSON.parse(String(init?.body)), status: 'queued' } }));
+  await act(async () => { test.rows.set('a', draft); test.listeners.forEach(listener => listener()); });
+}
+function sentInstruction() { return JSON.parse(String(fetcher.mock.calls.at(-1)?.[1]?.body)).payload; }
+it.each(['click', 'keyboard', 'Live voice'])('asks one meaning question through Send; a %s answer only edits until the next Send', async answer => {
+  inference.provider.mockImplementation(async () => providerResult(meaningChoice));
+  await meaningDraft();
+  await act(async () => send().click());
+  expect(questionSurface()?.textContent).toContain('What should be bigger?');
+  expect(document.querySelectorAll('[aria-label="Clarify visual intent"]')).toHaveLength(1);
+  expect(fetcher).not.toHaveBeenCalled();
+  const prompt = JSON.parse(String(inference.provider.mock.calls[0][1]?.body)).messages;
+  expect(JSON.parse(prompt[1].content)).toMatchObject({ utterance: 'Make it bigger.', markedTarget: { name: 'Save', role: 'button' } });
+  await act(async () => {
+    if (answer === 'click') optionButton('Text size').click();
+    else if (answer === 'keyboard') questionSurface()!.dispatchEvent(new KeyboardEvent('keydown', { key: '2', bubbles: true, cancelable: true }));
+    else {
+      const { answerVisualQuestion } = await import('@/lib/composer/visual-clarification');
+      expect(await answerVisualQuestion({ principal: 'a', target, routing: sample().template.routing }, 'Text size.')).toContain('has not been sent');
+    }
+  });
+  expect(fetcher).not.toHaveBeenCalled(); expect(questionSurface()).toBeNull();
+  expect(node.querySelector('textarea')!.value).toBe('Make it bigger.');
+  await act(async () => send().click());
+  expect(fetcher).toHaveBeenCalledTimes(1); expect(inference.provider).toHaveBeenCalledTimes(1);
+  expect(sentInstruction().text).toBe('Make it bigger.');
+  expect(sentInstruction().wireMessage).toContain('intent.size = "text-size"');
+});
+it('sends a clear marked ask unchanged without a question', async () => {
+  inference.provider.mockImplementation(async () => providerResult({ kind: 'none' }));
+  await meaningDraft('Set this button width to 160px.');
+  await act(async () => send().click());
+  expect(inference.provider).toHaveBeenCalledTimes(1); expect(questionSurface()).toBeNull();
+  expect(fetcher).toHaveBeenCalledTimes(1); expect(sentInstruction().text).toBe('Set this button width to 160px.');
+});
+it('bounds a hung resolver at 1500ms, records the timeout, sends unchanged, and ignores a late choice', async () => {
+  vi.useFakeTimers();
+  let late!: (value: Response) => void;
+  inference.provider.mockImplementation(() => new Promise<Response>(resolve => { late = resolve; }));
+  await meaningDraft();
+  await act(async () => send().click());
+  expect(fetcher).not.toHaveBeenCalled();
+  await act(async () => vi.advanceTimersByTimeAsync(1499)); expect(fetcher).not.toHaveBeenCalled();
+  await act(async () => vi.advanceTimersByTimeAsync(1));
+  expect(fetcher).toHaveBeenCalledTimes(1); expect(sentInstruction().text).toBe('Make it bigger.');
+  expect(inference.provider.mock.calls[0][1].signal.aborted).toBe(true);
+  expect(test.rows.get('a')).toMatchObject({ meaningCheck: { status: 'timeout', latencyMs: 1500 } });
+  await act(async () => late(providerResult(meaningChoice)));
+  expect(questionSurface()).toBeNull(); expect(fetcher).toHaveBeenCalledTimes(1);
+});
+it('resolves meaning only after the marked target has been chosen, retaining both answers', async () => {
+  inference.provider.mockImplementation(async () => providerResult(meaningChoice));
+  await meaningDraft('Make it bigger.', 2);
+  await act(async () => send().click());
+  expect(questionSurface()?.textContent).toContain('Which marked component'); expect(inference.provider).not.toHaveBeenCalled();
+  await act(async () => optionButton('Left: Save').click());
+  expect(fetcher).not.toHaveBeenCalled();
+  await act(async () => send().click());
+  expect(questionSurface()?.textContent).toContain('What should be bigger?');
+  await act(async () => optionButton('Button size').click());
+  await act(async () => send().click());
+  expect(sentInstruction().wireMessage).toContain('button-0'); expect(sentInstruction().wireMessage).toContain('intent.size = "button-size"');
+});
+it.each(['Skip', 'Escape'])('dismisses a meaning question with %s and sends only on the next Send', async dismissal => {
+  inference.provider.mockImplementation(async () => providerResult(meaningChoice));
+  await meaningDraft(); await act(async () => send().click());
+  expect(questionSurface()).not.toBeNull();
+  await act(async () => {
+    if (dismissal === 'Skip') optionButton('Skip').click();
+    else questionSurface()!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+  });
+  expect(questionSurface()).toBeNull(); expect(fetcher).not.toHaveBeenCalled();
+  await act(async () => send().click());
+  expect(fetcher).toHaveBeenCalledTimes(1); expect(inference.provider).toHaveBeenCalledTimes(1);
+  expect(sentInstruction().wireMessage).not.toContain('intent.size =');
+});
+it('ignores a late resolver after switching the composer account', async () => {
+  let late!: (value: Response) => void;
+  inference.provider.mockImplementation(() => new Promise<Response>(resolve => { late = resolve; }));
+  await meaningDraft(); await act(async () => send().click());
+  test.principal = 'b'; await act(async () => mount());
+  await act(async () => late(providerResult(meaningChoice)));
+  expect(fetcher).not.toHaveBeenCalled(); expect(questionSurface()).toBeNull();
+});
+it('fails open on a forbidden resolver patch without changing routing or permissions', async () => {
+  inference.provider.mockImplementation(async () => providerResult({ ...meaningChoice, aodlPath: 'authority.deploy' }));
+  await meaningDraft(); await act(async () => send().click());
+  expect(inference.provider).toHaveBeenCalledTimes(1); expect(questionSurface()).toBeNull();
+  expect(sentInstruction().routing).toEqual(sample().template.routing);
+  expect(sentInstruction().wireMessage).not.toContain('authority.deploy');
+});
+
+it('measures resolver p50 and p95 through the composer on 40 deterministic model fixtures', async ({ annotate }) => {
+  inference.provider.mockImplementation(async () => providerResult({ kind: 'none' }));
+  const latencies: number[] = [];
+  for (let index = 0; index < 40; index += 1) {
+    await meaningDraft('Set this button width to 160px.');
+    await act(async () => send().click());
+    latencies.push(test.rows.get('a')!.meaningCheck!.latencyMs);
+  }
+  latencies.sort((a, b) => a - b);
+  const p50 = latencies[Math.ceil(latencies.length * 0.5) - 1];
+  const p95 = latencies[Math.ceil(latencies.length * 0.95) - 1];
+  expect(inference.provider).toHaveBeenCalledTimes(40);
+  expect(p95).toBeLessThan(1500);
+  await annotate(`n=40 resolver p50=${p50.toFixed(2)}ms p95=${p95.toFixed(2)}ms (fixture transport and model; no provider call)`, 'ripple-fixture');
+});
+it('drops a confirmed meaning after the words or marked pixels change', async () => {
+  inference.provider.mockImplementation(async () => providerResult(meaningChoice));
+  await meaningDraft(); await act(async () => send().click());
+  await act(async () => optionButton('Text size').click());
+  const confirmed = test.rows.get('a')!;
+  await act(async () => {
+    test.rows.set('a', { ...confirmed, request: { ...confirmed.request, utterance: 'Make the button blue.', frames: confirmed.request.frames.map(frame => ({ ...frame, id: 'new-pixels' })) } });
+    test.listeners.forEach(listener => listener());
+  });
+  inference.provider.mockImplementation(async () => providerResult({ kind: 'none' }));
+  await act(async () => send().click());
+  expect(inference.provider).toHaveBeenCalledTimes(2);
+  expect(sentInstruction().wireMessage).not.toContain('intent.size =');
 });

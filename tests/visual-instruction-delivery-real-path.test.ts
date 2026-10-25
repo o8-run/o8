@@ -9,6 +9,10 @@ import sharp from 'sharp';
 import { submitVisualInstruction, VISUAL_REQUEST_MARKER, VisualInstructionDeliveryError } from '@/lib/composer/visual-instruction-send';
 import type { VisualInstructionDraft } from '@/lib/composer/visual-draft-store';
 import type { ComposerQueuePayload } from '@/lib/orchestrator/composer-queue-types';
+import { sampleObservation } from '@/lib/composer/visual-inspection.test-fixture';
+import { commitVisualInstruction } from '@/lib/composer/visual-instruction-commit';
+import { saveVisualDraft, readVisualDraft } from '@/lib/composer/visual-draft-store';
+import { confirmVisualQuestion, currentVisualQuestion } from '@/lib/composer/visual-clarification';
 
 const mocks = vi.hoisted(() => ({ beforeProject: null as (() => Promise<void>) | null,
   send: vi.fn(async (_repo: string, _message: string, emit: (event: OrchestratorEvent) => void, options: OrchestratorTurnOptions) => {
@@ -27,6 +31,7 @@ vi.mock('@/lib/ws-server/orchestrator-project-context', async importOriginal => 
   } };
 });
 vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: vi.fn(async () => true) }));
+vi.mock('@/lib/cortex/qa/llm/inference-route', () => ({ resolveOpenRouterRoute: async () => ({ url: 'https://model.example.test/resolve', headers: {}, via: 'direct' }) }));
 const root = realpathSync(mkdtempSync(join(tmpdir(), 'o8-visual-exec-')));
 const repo = join(root, 'repo'); mkdirSync(repo); mkdirSync(join(root, 'chat-history'));
 vi.stubEnv('O8_DATA_DIR', root); vi.stubEnv('CORTEX_IDE_DATA_DIR', root); vi.stubEnv('CORTEX_IDE_DB_PATH', join(root, 'queue.db'));
@@ -35,6 +40,7 @@ const historyPath = join(root, 'chat-history', `${threadId}.json`);
 const { getSqlite, closeDb } = await import('@/lib/db');
 const queue = await import('@/lib/orchestrator/composer-queue');
 const { POST, GET } = await import('@/app/api/orchestrator/composer-queue/route');
+const { POST: resolveRipple } = await import('@/app/api/mobile/ripple/resolve/route');
 const { createChatContinuationHeartbeat } = await import('@/lib/ws-server/composer-queue-heartbeat');
 const { readPersistedLlmChat } = await import('@/lib/llm/chat-history-store');
 const active = new Map<string, AbortController>(); let busy = false;
@@ -144,4 +150,53 @@ it('reads the persisted lead turn identity rather than guessing the ordinary cha
   const response = await GET(new NextRequest(`http://localhost/api/orchestrator/composer-queue?repoPath=${encodeURIComponent(repo)}&threadId=${threadId}&id=${item.id}`, { headers: { host: 'localhost' } }));
   expect((await response.json()).userMessageId).toBe('lead-user-actual-admitted-turn');
   getSqlite().prepare('DELETE FROM orchestrator_leads WHERE id = ?').run('fixture-lead');
+});
+
+it('retains the confirmed meaning through draft persistence, a lost queue reply, and actual chat dispatch', async () => {
+  // Exercise the production draft store with an asynchronous IndexedDB boundary.
+  vi.stubGlobal('indexedDB', { open: () => {
+    const opening = { result: { transaction: () => {
+      const transaction = { oncomplete: null as (() => void) | null, objectStore: () => ({ put: () => queueMicrotask(() => transaction.oncomplete?.()) }) };
+      return transaction;
+    } }, onsuccess: null as (() => void) | null };
+    queueMicrotask(() => opening.onsuccess?.()); return opening;
+  } });
+  const choice = { kind: 'choice', question: 'What should be bigger?', aodlPath: 'intent.size', options: [
+    { label: 'Button size', value: 'button-size' }, { label: 'Text size', value: 'text-size' },
+  ] };
+  const provider = vi.fn(async () => Response.json({ choices: [{ message: { content: JSON.stringify(choice) } }] }));
+  vi.stubGlobal('fetch', provider);
+  try {
+    const draft = await visualDraft(); draft.request.id = 'meaning-real'; draft.request.utterance = 'Make it bigger.'; draft.request.clarification = undefined;
+    const observation = sampleObservation();
+    const png = await sharp({ create: { width: 320, height: 280, channels: 4, background: 'white' } }).png().toBuffer();
+    observation.image.dataUri = `data:image/png;base64,${png.toString('base64')}`;
+    draft.request.frames = [{ ...draft.request.frames[0], image: observation.image, width: 320, height: 280, observation,
+      candidates: [{ id: 'save-button', name: 'Save', role: 'button', rect: [0.1, 0.2, 0.1, 0.1] }] }];
+    await saveVisualDraft(draft);
+    const transport: typeof fetch = (url, init) => url === '/api/mobile/ripple/resolve'
+      ? resolveRipple(new NextRequest('http://localhost/api/mobile/ripple/resolve', { ...init, signal: init?.signal ?? undefined })) : routeTransport(url, init);
+    expect(await commitVisualInstruction(draft, () => true, transport)).toBeNull();
+    expect(queue.listQueuedComposerSends(target)).toHaveLength(0);
+    const pending = readVisualDraft(draft.principal, target)!;
+    expect(currentVisualQuestion(pending)?.question).toBe(choice.question);
+    expect(await confirmVisualQuestion(pending, 'text-size')).toBe(true);
+    expect(queue.listQueuedComposerSends(target)).toHaveLength(0);
+    const accepted = readVisualDraft(draft.principal, target)!;
+    await expect(commitVisualInstruction(accepted, () => true, async (url, init) => {
+      await transport(url, init); throw new Error('Lost acceptance reply');
+    })).rejects.toThrow('Lost acceptance reply');
+    closeDb();
+    const uncertain = readVisualDraft(draft.principal, target)!;
+    expect(uncertain.status).toBe('unknown');
+    const item = await commitVisualInstruction(uncertain, () => true, transport);
+    expect(provider).toHaveBeenCalledTimes(1);
+    expect(queue.readComposerSend(item!.id)?.payload.wireMessage).toContain('intent.size = "text-size"');
+    createChatContinuationHeartbeat(hooks)();
+    await vi.waitFor(() => expect(queue.readComposerSend(item!.id)?.status).toBe('applied'));
+    expect(mocks.send).toHaveBeenCalledTimes(1);
+    expect(mocks.send.mock.calls[0][1]).toContain('intent.size = "text-size"');
+    expect(mocks.send.mock.calls[0][3].permissionMode).toBe('plan');
+    expect(readPersistedLlmChat(threadId)?.history.messages.find(row => row.role === 'user')?.content).toBe('Make it bigger.');
+  } finally { vi.unstubAllGlobals(); }
 });
