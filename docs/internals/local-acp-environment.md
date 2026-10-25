@@ -50,12 +50,16 @@ response cannot clear that warning or display an obsolete inventory as current.
 Saved secret values are masked in Check connection diagnostics, turn output and
 errors, lifecycle errors and stderr. Matching normalizes JSON string escapes,
 percent escapes, Base64 and Base64url, including mixed and nested text encodings.
-Replacements apply to the original text spans. Ambiguous decoding or exceeded
-normalization bounds replace the complete value.
+Replacements apply only to matched original spans. Base64 and Base64url matching
+ignores every character outside their combined alphabet and maps decoded UTF-8
+characters back to their contributing source sextets. Invalid bytes and malformed
+escape syntax do not establish a match and remain visible. Valid matches beside
+malformed syntax are still redacted.
 
-With saved secrets present, text and thinking chunks are retained until a logical
-output boundary; stderr is retained until EOF. A partial encoded tail at an
-intermediate boundary is masked as a complete value. Each buffered value is capped
-at 256 Ki UTF-16 code units; excess data is discarded after one redaction marker.
-Normalization also bounds decoding depth, candidate views and matching work.
-Connections without saved secrets retain their existing streaming behavior.
+With saved secrets present, session text, thinking and intervening notifications
+are retained until the prompt completes or the process closes. Text is normalized
+across notification boundaries, then emitted in its original notification order;
+a tool notification does not discard progress or expose a partial encoded tail.
+Stderr is retained until EOF. Large benign output is preserved, including the
+4 MiB real-path performance fixture. Connections without saved secrets keep
+immediate streaming. Offset maps are built once, only when a match needs them.

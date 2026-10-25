@@ -236,7 +236,7 @@ export class AcpClient {
     reject: (e: Error) => void;
     timeout: ReturnType<typeof setTimeout>;
   }>();
-  private readonly outputStreams = new Map<string, { kind: 'text' | 'thinking'; write: ReturnType<ReturnType<typeof localAcpOutputRedactor>['stream']> }>();
+  private readonly outputStreams = new Map<string, Array<{ method: string; params: Record<string, unknown>; text?: string }>>();
   private buf = '';
   private readonly onEvent?: (event: OrchestratorEvent, sessionId?: string) => void;
   private readonly onNotification?: (notification: AcpRawNotification) => void;
@@ -304,10 +304,19 @@ export class AcpClient {
     return safe;
   }
 
-  private flushOutput(sessionId?: string, maskPartial = false): void {
-    for (const [key, stream] of this.outputStreams) {
+  private flushOutput(sessionId?: string): void {
+    for (const [key, notifications] of this.outputStreams) {
       if (sessionId !== undefined && key !== sessionId) continue;
-      stream.write('', true, maskPartial); this.outputStreams.delete(key);
+      this.outputStreams.delete(key);
+      const chunks = this.outputRedactor.chunks(notifications.filter(item => item.text !== undefined).map(item => item.text!));
+      let index = 0;
+      for (const { method, params, text } of notifications) {
+        if (text === undefined) this.publishNotification(method, params);
+        else {
+          const update = asRecord(params.update)!;
+          this.publishNotification(method, { ...params, update: { ...update, content: { type: 'text', text: chunks[index++] } } });
+        }
+      }
     }
   }
 
@@ -396,18 +405,16 @@ export class AcpClient {
       const params = asRecord(msg.params) ?? {};
       const event = msg.method === 'session/update' ? mapAcpUpdate(params.update) : null;
       const sessionId = typeof params.sessionId === 'string' ? params.sessionId : '';
-      if (event?.type === 'text' || event?.type === 'thinking') {
-        if (this.outputStreams.get(sessionId)?.kind !== event.type) this.flushOutput(sessionId, true);
-        if (!this.outputStreams.has(sessionId)) {
-          const update = asRecord(params.update) ?? {};
-          this.outputStreams.set(sessionId, { kind: event.type, write: this.outputRedactor.stream(text => this.publishNotification('session/update', {
-            ...params, update: { ...update, content: { type: 'text', text } },
-          })) });
-        }
-        this.outputStreams.get(sessionId)!.write(event.text);
-      } else {
-        this.flushOutput(sessionId, true);
+      if (!this.outputRedactor.hasSecrets) {
         this.publishNotification(msg.method, params);
+      } else if (event?.type === 'text' || event?.type === 'thinking') {
+        const notifications = this.outputStreams.get(sessionId) ?? [];
+        notifications.push({ method: msg.method, params, text: event.text });
+        this.outputStreams.set(sessionId, notifications);
+      } else {
+        const pending = this.outputStreams.get(sessionId);
+        if (pending) pending.push({ method: msg.method, params });
+        else this.publishNotification(msg.method, params);
       }
     }
   }

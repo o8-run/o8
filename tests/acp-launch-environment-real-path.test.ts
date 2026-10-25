@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { NextRequest } from 'next/server';
 import { afterAll, expect, it, vi } from 'vitest';
+import { defineAcpRedactionMatrix } from './fixtures/acp-redaction-matrix';
 
 const fixture = vi.hoisted(() => ({ dir: '', failRename: false }));
 vi.mock('node:fs', async original => {
@@ -68,6 +69,21 @@ async function turn(threadId: string, backend = acpBackend) {
   return JSON.parse(text);
 }
 afterAll(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); rmSync(fixture.dir, { recursive: true, force: true }); });
+
+defineAcpRedactionMatrix({ dir: fixture.dir, token: getOrCreateWsToken,
+  configure: async (args, values) => {
+    expect((await POST(request({ connection: { ...connection, args } }))).status).toBe(200);
+    expect((await save(values.map((value, index) => ({ name: `ACP_CANARY_${index}`, secret: true, value })))).status).toBe(200);
+  },
+  client: options => new AcpClient({runtimeId: 'acp', cwd: fixture.dir, ...localAcpProcessLaunch()!, ...options}),
+  turn: async id => {
+    const { publishRealtimeMutation } = await import('@/lib/realtime/publisher');
+    vi.mocked(publishRealtimeMutation).mockClear();
+    const events: Array<{type: string; text?: string; error?: string}> = [];
+    await acpBackend.sendTurn(fixture.dir, 'Fixture generated matrix.', event => events.push(event), {threadId: `matrix-${id}`});
+    return {events, lifecycle: vi.mocked(publishRealtimeMutation).mock.calls};
+  },
+});
 
 it('saves masked connection secrets and refreshes only new selected ACP processes', async () => {
   expect((await POST(request({ connection }))).status).toBe(200);
