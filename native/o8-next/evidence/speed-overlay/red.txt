@@ -1,0 +1,20 @@
+running 2 tests
+
+thread 'shell::speed::tests::speed_overlay_is_opt_in_compact_and_preserves_composer_focus' (11812) panicked at src/surfaces/speed/tests.rs:5:50:
+Experimental speed control
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test shell::speed::tests::speed_overlay_is_opt_in_compact_and_preserves_composer_focus ... FAILED
+
+thread 'shell::speed::tests::speed_overlay_reopen_does_not_restore_old_samples_or_save_opt_in' (11813) panicked at src/surfaces/speed/tests.rs:5:50:
+Experimental speed control
+test shell::speed::tests::speed_overlay_reopen_does_not_restore_old_samples_or_save_opt_in ... FAILED
+
+failures:
+
+failures:
+    shell::speed::tests::speed_overlay_is_opt_in_compact_and_preserves_composer_focus
+    shell::speed::tests::speed_overlay_reopen_does_not_restore_old_samples_or_save_opt_in
+
+test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 133 filtered out; finished in 4.91s
+
+error: test failed, to rerun pass `--bin o8-next`

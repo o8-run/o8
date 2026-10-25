@@ -1,0 +1,9 @@
+running 5 tests
+test shell::speed::tests::speed_overlay_discards_focus_changes_and_bounds_samples ... O8_NEXT_SPEED {"keyToCpuPaintMs":31.187454,"frameToCpuPaintMs":12.730495,"retainedSamples":64}
+ok
+test shell::speed::tests::speed_overlay_ignores_memory_completion_from_a_previous_opt_in ... ok
+test shell::speed::tests::speed_overlay_is_opt_in_compact_and_preserves_composer_focus ... ok
+test shell::speed::tests::speed_overlay_keyboard_toggle_restores_composer ... ok
+test shell::speed::tests::speed_overlay_reopen_does_not_restore_old_samples_or_save_opt_in ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 133 filtered out; finished in 16.25s

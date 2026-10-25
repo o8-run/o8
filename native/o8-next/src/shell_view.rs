@@ -8,6 +8,10 @@ impl Render for Shell {
         let frame = registry::extensions()
             .find_map(|extension| extension.frame(self))
             .unwrap_or_default();
+        let probes = registrations()
+            .iter()
+            .filter_map(|r| (r.frame_probe)(self))
+            .collect::<Vec<_>>();
         if !registrations().iter().any(|r| (r.block_ensure)(self)) {
             self.ensure(window, cx);
         }
@@ -191,6 +195,7 @@ impl Render for Shell {
                 content.unwrap_or_else(|| div().p(px(24.)).child(frame.empty).into_any_element()),
             ))
             .child(canvas(|_, _, _| (), move |_, _, _, _| painted.set(revision)).size(px(1.)))
+            .children(probes)
     }
 }
 

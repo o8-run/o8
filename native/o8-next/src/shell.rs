@@ -41,6 +41,7 @@ register_surfaces! {
         customize: Customize = "surfaces/customize.rs";
         setup: Setup = "surfaces/setup.rs";
         palette: Palette = "surfaces/palette.rs";
+        speed: Speed = "surfaces/speed.rs";
     }
 }
 
@@ -458,6 +459,9 @@ impl Shell {
     fn tick(&mut self, refresh: bool, window: &mut Window, cx: &mut Context<Self>) {
         for extension in registry::extensions() {
             extension.tick(self, refresh, window, cx);
+        }
+        for registration in registrations() {
+            (registration.tick)(self, cx);
         }
         let before = serde_json::to_vec(&self.state).unwrap();
         self.capture(window, cx);

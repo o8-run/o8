@@ -1,6 +1,9 @@
 //! Narrow embedding API. The shell uses the production Surface and composer.
 use super::*;
 impl Surface {
+    pub(crate) fn shell_composer(&self) -> gpui::Entity<Composer> {
+        self.composer.clone()
+    }
     pub(crate) fn shell_linked_issue(&self) -> Option<crate::issues::LinkedIssue> {
         self.selected
             .as_ref()
