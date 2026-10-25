@@ -31,6 +31,13 @@ function changedNativeInputs() {
   // No rename detection: both the old and new paths must be considered,
   // including deletions. NUL delimiters preserve whitespace in file names.
   const paths = git(['diff', '--name-only', '--no-renames', '-z', base, head, '--']).split('\0');
+  if (process.argv.includes('--o8-next')) {
+    return paths.some(file =>
+      /^(native\/o8-next|scripts\/next|crates\/o8d|\.github\/actions\/next-linux-setup)\//.test(file)
+      || ['package.json', 'package-lock.json', '.github/workflows/ci.yml',
+        '.github/workflows/next-linux.yml', 'scripts/ci/native-changes.mjs',
+        'scripts/register-server-only-stub.mjs'].includes(file));
+  }
   return paths.some((file) =>
     /\.rs$/.test(file)
     || /(^|\/)Cargo\.(toml|lock)$/.test(file)

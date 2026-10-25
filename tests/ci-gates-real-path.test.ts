@@ -8,9 +8,13 @@ import { parse } from 'yaml';
 const repo = process.cwd();
 const workflow = parse(readFileSync(path.join(repo, '.github/workflows/ci.yml'), 'utf8'));
 const root = mkdtempSync(path.join(tmpdir(), 'o8-ci-gates-'));
+const probeRoot = mkdtempSync(path.join(tmpdir(), 'o8-ci-native-probe-'));
 const nativeScript = path.join(repo, 'scripts/ci/native-changes.mjs');
 
-afterAll(() => rmSync(root, { recursive: true, force: true }));
+afterAll(() => {
+  rmSync(root, { recursive: true, force: true });
+  rmSync(probeRoot, { recursive: true, force: true });
+});
 
 function git(...args: string[]): string {
   const result = spawnSync('git', args, { cwd: root, encoding: 'utf8' });
@@ -157,13 +161,13 @@ describe('required CI gates through workflow commands', () => {
   it('runs four independent shards and fails the stable aggregate on every non-success', () => {
     const shards = workflow.jobs['test-shards'];
     expect(shards.strategy).toEqual({ 'fail-fast': false, matrix: { shard: [1, 2, 3, 4] } });
-    expect(workflow.jobs.test.needs).toEqual(['test-shards']);
+    expect(workflow.jobs.test.needs).toEqual(['test-shards', 'o8-next-tests']);
     for (const result of ['success', 'failure', 'cancelled', 'skipped']) {
       expect(condition(workflow.jobs.test.if, { event: {} }, { 'test-shards': { result } })).toBe(true);
       const step = workflow.jobs.test.steps[0];
       const run = spawnSync(step.run, {
         shell: true, encoding: 'utf8',
-        env: { ...process.env, SHARD_RESULT: result },
+        env: { ...process.env, SHARD_RESULT: result, NATIVE_RESULT: 'success' },
       });
       expect(run.status).toBe(result === 'success' ? 0 : 1);
     }
@@ -195,4 +199,105 @@ describe('required CI gates through workflow commands', () => {
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout, result.stderr).toMatch(/\d+ files, 4 shards, 0 missing, 0 duplicates, 0 extra/);
   }, 60_000);
+});
+
+function selectNext(eventName: string, event: object): string {
+  const job = workflow.jobs['o8-next-tests'];
+  expect(job, 'native tests must have an automatic CI job').toBeDefined();
+  const step = job.steps.find((entry: { id?: string }) => entry.id === 'native');
+  const eventPath = path.join(root, 'next-event.json');
+  const outputPath = path.join(root, 'next-output.txt');
+  writeFileSync(eventPath, JSON.stringify(event));
+  writeFileSync(outputPath, '');
+  const result = spawnSync(step.run.replace('scripts/ci/native-changes.mjs', nativeScript), {
+    shell: true, cwd: root, encoding: 'utf8',
+    env: { ...process.env, GITHUB_EVENT_NAME: eventName, GITHUB_EVENT_PATH: eventPath, GITHUB_OUTPUT: outputPath },
+  });
+  expect(result.status, result.stderr).toBe(0);
+  return readFileSync(outputPath, 'utf8').trim();
+}
+
+describe('native next CI through persisted fixtures', () => {
+  it.each(['native/o8-next/src/main.rs', 'native/o8-next/README.md',
+    'native/o8-next/fixtures/state.json', 'scripts/next/dev-server.ts',
+    'crates/o8d/src/main.rs', 'package-lock.json', '.github/workflows/ci.yml',
+    'scripts/ci/native-changes.mjs'])('selects native tests for %s', file => {
+    const before = git('rev-parse', 'HEAD');
+    const after = commit(file);
+    expect(selectNext('push', { before, after })).toBe('changed=true');
+    expect(selectNext('pull_request', { pull_request: { base: { sha: before }, head: { sha: after } } }))
+      .toBe('changed=true');
+    expect(selectNext('merge_group', { merge_group: { base_sha: before, head_sha: after } }))
+      .toBe('changed=true');
+  });
+
+  it('skips unrelated changes, includes removed inputs and fails safe on missing history', () => {
+    const before = git('rev-parse', 'HEAD');
+    const after = commit('src/unrelated.ts');
+    expect(selectNext('push', { before, after })).toBe('changed=false');
+    const renameBase = commit('native/o8-next/removed.txt');
+    git('mv', 'native/o8-next/removed.txt', 'renamed-outside.txt');
+    git('commit', '-qm', 'fixture rename outside native');
+    expect(selectNext('push', { before: renameBase, after: git('rev-parse', 'HEAD') })).toBe('changed=true');
+    const deleteBase = commit('native/o8-next/deleted.txt');
+    const deleted = commit('native/o8-next/deleted.txt', true);
+    expect(selectNext('push', { before: deleteBase, after: deleted })).toBe('changed=true');
+    expect(selectNext('workflow_dispatch', {})).toBe('changed=true');
+    expect(selectNext('push', { before: 'missing', after })).toBe('changed=true');
+  });
+
+  it('runs the declared headless cargo command against red and green persisted state', () => {
+    const job = workflow.jobs['o8-next-tests'];
+    expect(job, 'native tests must have an automatic CI job').toBeDefined();
+    expect(job['runs-on']).toBe('ubuntu-24.04');
+    expect(job['timeout-minutes']).toBe(10);
+    expect(job.if).toBe(workflow.jobs['test-shards'].if);
+    const step = job.steps.find((entry: { run?: string }) => entry.run?.includes('cargo test'));
+    expect(step.if).toBe("steps.native.outputs.changed == 'true'");
+    expect(step['continue-on-error']).toBeUndefined();
+    expect(step.run).toContain('--locked --manifest-path native/o8-next/Cargo.toml');
+    const directory = probeRoot;
+    const crate = path.join(directory, 'native/o8-next');
+    mkdirSync(path.join(crate, 'src'), { recursive: true });
+    writeFileSync(path.join(crate, 'Cargo.toml'), '[package]\nname = "native-probe"\nversion = "0.0.0"\nedition = "2024"\n[workspace]\n');
+    writeFileSync(path.join(crate, 'Cargo.lock'), 'version = 4\n\n[[package]]\nname = "native-probe"\nversion = "0.0.0"\n');
+    writeFileSync(path.join(crate, 'src/main.rs'), `fn main() {}
+#[test]
+fn persisted_state() {
+    assert!(std::env::var_os("DISPLAY").is_none());
+    assert!(std::env::var_os("WAYLAND_DISPLAY").is_none());
+    let state = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/state")).unwrap();
+    assert_eq!(state, "ready");
+}
+`);
+    const run = () => spawnSync('bash', ['-e', '-o', 'pipefail', '-c', step.run], {
+      cwd: directory, encoding: 'utf8', timeout: 30_000,
+      env: { ...process.env, CARGO_NET_OFFLINE: 'true', CARGO_TARGET_DIR: path.join(directory, 'target'),
+        DISPLAY: 'fixture-display', WAYLAND_DISPLAY: 'fixture-display' },
+    });
+    writeFileSync(path.join(crate, 'state'), 'blocked');
+    const red = run();
+    expect(red.error).toBeUndefined();
+    expect(red.status, red.stderr).toBe(101);
+    expect(red.stdout).toContain('persisted_state ... FAILED');
+    writeFileSync(path.join(crate, 'state'), 'ready');
+    const green = run();
+    expect(green.error).toBeUndefined();
+    expect(green.status, green.stderr).toBe(0);
+    expect(green.stdout).toContain('1 passed; 0 failed');
+    console.log('declared native command: persisted red exit=101, green exit=0');
+  });
+
+  it('fails the required aggregate for every unsuccessful native result', () => {
+    const aggregate = workflow.jobs.test;
+    const step = aggregate.steps[0];
+    for (const result of ['success', 'failure', 'cancelled', 'skipped']) {
+      const run = spawnSync(step.run, {
+        shell: true, encoding: 'utf8',
+        env: { ...process.env, SHARD_RESULT: 'success', NATIVE_RESULT: result },
+      });
+      expect(run.status, `native result ${result} must reach the required gate`).toBe(result === 'success' ? 0 : 1);
+    }
+    expect(aggregate.needs).toContain('o8-next-tests');
+  });
 });
