@@ -1,6 +1,9 @@
 //! Drive the actual shell, GPUI pointer/text events, middleware and persisted project routes.
 use super::*;
 
+#[path = "projects_review_tests.rs"]
+mod review;
+
 fn settle(cx: &mut VisualTestContext) {
     for _ in 0..6 {
         cx.run_until_parked();

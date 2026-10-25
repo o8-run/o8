@@ -37,8 +37,8 @@ export async function projectsFixture(root: string) {
   const ownedRoot = realpathSync(root);
   const registryPost: Route = async request => {
     const body = await request.clone().json() as { action?: string; localPath?: unknown };
-    if (!['add', 'validate'].includes(body.action ?? 'add')) {
-      return Response.json({ error: 'This fixture only registers or validates owned folders.' }, { status: 400 });
+    if (!['add', 'validate', 'update'].includes(body.action ?? 'add')) {
+      return Response.json({ error: 'This fixture only registers, validates or repoints owned folders.' }, { status: 400 });
     }
     if (typeof body.localPath === 'string' && body.localPath.trim()) {
       let candidate = resolve(body.localPath);
@@ -76,6 +76,7 @@ export async function projectsFixture(root: string) {
       if (fixed) return fixed;
       const panelMatch = path.match(/^\/api\/panel\/projects\/([^/]+)$/);
       if (panelMatch && method === 'DELETE') return request => panelProject.DELETE(request, { params: Promise.resolve({ id: decodeURIComponent(panelMatch[1]) }) });
+      if (panelMatch && method === 'PATCH') return request => panelProject.PATCH(request, { params: Promise.resolve({ id: decodeURIComponent(panelMatch[1]) }) });
       const match = path.match(/^\/api\/projects\/([^/]+)(?:\/repos(?:\/([^/]+))?)?$/);
       if (!match) return undefined;
       const id = decodeURIComponent(match[1]);

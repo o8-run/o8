@@ -102,7 +102,12 @@ impl Projects {
             .snapshot
             .repos
             .iter()
-            .filter(|old| !snapshot.repos.iter().any(|repo| repo.id == old.id))
+            .filter(|old| {
+                !snapshot
+                    .repos
+                    .iter()
+                    .any(|repo| repo.id == old.id && repo.local_path == old.local_path)
+            })
             .map(|repo| repo.local_path.clone())
             .collect();
         let registered = snapshot

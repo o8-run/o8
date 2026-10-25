@@ -31,7 +31,6 @@ pub struct Repo {
 #[serde(rename_all = "camelCase")]
 pub struct LedgerProject {
     pub id: String,
-    pub name: String,
     pub repo_paths: Vec<String>,
 }
 #[derive(Default, Clone, Deserialize)]
@@ -71,21 +70,6 @@ impl Snapshot {
             .as_deref()
             .or_else(|| project.repos.first().map(|r| r.repo_id.as_str()))?;
         self.repos.iter().find(|r| r.id == id)
-    }
-    pub fn ledger_id<'a>(&'a self, project: &'a Project) -> &'a str {
-        self.ledger
-            .projects
-            .iter()
-            .find(|p| p.id == project.id && p.name.eq_ignore_ascii_case(&project.name))
-            .or_else(|| {
-                self.ledger
-                    .projects
-                    .iter()
-                    .find(|p| p.name.eq_ignore_ascii_case(&project.name))
-            })
-            .or_else(|| self.ledger.projects.iter().find(|p| p.id == project.id))
-            .map(|p| p.id.as_str())
-            .unwrap_or(&project.id)
     }
 }
 pub const ROLES: &[&str] = &[
@@ -128,6 +112,7 @@ pub enum Action {
     Validate(String),
     Register(String, Option<String>),
     Remove(String),
+    /// Stable project and repository IDs; the folder is resolved at dispatch.
     Open(String, String),
     Activate(String),
 }
@@ -146,6 +131,7 @@ impl Action {
             |method: &str, path: &str, body: Value| client.project_request(method, path, &body);
         let mut validation = None;
         let mut workspace = None;
+        let mut open_repo = None;
         match self {
             Self::Save {
                 id,
@@ -156,9 +142,29 @@ impl Action {
                 if name.trim().is_empty() {
                     return Err("Project name is required.".into());
                 }
+                let current = Snapshot::load(client)?;
+                let requested_name = name.trim().to_lowercase();
+                if current.projects.iter().any(|p| {
+                    Some(&p.id) != id.as_ref() && p.name.trim().to_lowercase() == requested_name
+                }) {
+                    return Err(
+                        "A project with this name already exists. Choose another name.".into(),
+                    );
+                }
                 let body = json!({"name":name.trim(),"description":description.trim()});
                 if let Some(id) = id {
-                    request("PATCH", &route(id), body)?;
+                    // The panel rename updates both stores while preserving the
+                    // caller's project ID. Names and slugs never select a mutation.
+                    request(
+                        "PATCH",
+                        &route(id).replacen("/api/projects/", "/api/panel/projects/", 1),
+                        json!({"name":name.trim()}),
+                    )?;
+                    request(
+                        "PATCH",
+                        &route(id),
+                        json!({"description":description.trim()}),
+                    )?;
                 } else {
                     let mut body = body;
                     if !slug.trim().is_empty() {
@@ -262,13 +268,13 @@ impl Action {
             Self::Remove(id) => {
                 request("DELETE", "/api/panel/repos", json!({"id":id}))?;
             }
-            Self::Open(project, path) => {
+            Self::Open(project, repo_id) => {
                 request(
                     "POST",
                     "/api/panel/projects/active",
                     json!({"projectId":project}),
                 )?;
-                workspace = Some(WorkspaceChange::Open(path.clone()));
+                open_repo = Some(repo_id);
             }
             Self::Activate(id) => {
                 let ledger = request(
@@ -286,8 +292,20 @@ impl Action {
                 workspace = Some(WorkspaceChange::Select(path));
             }
         }
+        let snapshot = Snapshot::load(client)?;
+        if let Some(id) = open_repo {
+            let repo = snapshot
+                .repos
+                .iter()
+                .find(|repo| &repo.id == id)
+                .ok_or("Repository is no longer registered. Refresh Projects.")?;
+            if !repo.exists {
+                return Err("Repository folder is missing. Locate it before opening.".into());
+            }
+            workspace = Some(WorkspaceChange::Open(repo.local_path.clone()));
+        }
         Ok(Outcome {
-            snapshot: Snapshot::load(client)?,
+            snapshot,
             validation,
             workspace,
         })

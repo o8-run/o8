@@ -1,0 +1,7 @@
+running 4 tests
+test shell::tests::projects_tests::review::review_p1_deletes_existing_duplicate_by_stable_id ... ok
+test shell::tests::projects_tests::review::review_p1_rejects_duplicate_rename_before_deleting_alpha ... ok
+test shell::tests::projects_tests::review::review_p2_project_open_resolves_repointed_repository ... ok
+test shell::tests::projects_tests::review::review_p2_repository_open_resolves_repointed_repository ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 50 filtered out; finished in 8.20s

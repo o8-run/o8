@@ -6,11 +6,16 @@ session sidebar and retained session/grid views. The installed app and launcher
 defaults are unchanged. No dependencies, manifests or release files changed.
 
 The native client uses the desktop project store, project ledger, membership and
-repository routes with the existing operator bearer. Project IDs are joined to
-their ledger identity before activation or deletion. Removing a repository keeps
+repository routes with the existing operator bearer. Project mutations use stable
+project IDs, with duplicate display names rejected before native saves. Removing a repository keeps
 its local folder, clears removed native views only after confirmation, and retains
 the server's runtime-stop refusal. Registration reconciles an unconfirmed write
 by canonical path and preserves an existing membership role.
+
+Review correction 1 removes display-name identity resolution and resolves Open
+targets by repository ID from fresh inventory. Its separate red/green receipts
+and results are in [correction-1](correction-1/verification.md). The timing samples
+below record the initial implementation.
 
 ## Desktop parity
 

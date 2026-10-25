@@ -1,0 +1,11 @@
+Final npm test:
+ Test Files  1 failed | 1236 passed | 3 skipped (1240)
+      Tests  4 failed | 8947 passed | 5 skipped (8956)
+
+Untouched main: 6892d7c1c4c4c0ee0b47a8999ab7d00b9dbf0431
+tests/pi-sdk-live-contract.test.ts:
+Error: Billing contract is expired or outside the bounded test scope
+Error: Billing contract is expired or outside the bounded test scope
+Error: Billing contract is expired or outside the bounded test scope
+ Test Files  1 failed (1)
+      Tests  4 failed (4)

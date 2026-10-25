@@ -46,9 +46,9 @@ impl Projects {
         let id = project.id.clone();
         let detail_id = id.clone();
         let edit = project.clone();
-        let delete = self.snapshot.ledger_id(&project).to_owned();
+        let delete = id.clone();
         let workspace = self.snapshot.workspace(&project).cloned();
-        let open_id = self.snapshot.ledger_id(&project).to_owned();
+        let open_id = id.clone();
         let open_enabled = enabled && workspace.as_ref().is_some_and(|r| r.exists);
         let members = project.repos.clone();
         let detail = self.detail.as_ref() == Some(&id);
@@ -90,14 +90,12 @@ impl Projects {
                     )
                     .child(self.action(
                         format!("project-activate-{}", project.slug),
-                        if self.snapshot.ledger.active_project_id
-                            == self.snapshot.ledger_id(&project)
-                        {
+                        if self.snapshot.ledger.active_project_id == id {
                             "Active project"
                         } else {
                             "Switch project"
                         },
-                        Action::Activate(self.snapshot.ledger_id(&project).to_owned()),
+                        Action::Activate(id.clone()),
                         cx,
                     ))
                     .child(
@@ -111,7 +109,7 @@ impl Projects {
                                 this.act(
                                     Action::Open(
                                         open_id.clone(),
-                                        workspace.as_ref().unwrap().local_path.clone(),
+                                        workspace.as_ref().unwrap().id.clone(),
                                     ),
                                     cx,
                                 );
@@ -291,13 +289,13 @@ impl Render for Projects {
                 let remove = repo.id.clone();
                 let owner = self.snapshot.ledger.projects.iter().find(|p| p.repo_paths.contains(&repo.local_path))
                     .map(|p| p.id.clone()).unwrap_or_else(|| self.snapshot.ledger.active_project_id.clone());
-                let path = repo.local_path.clone();
+                let repo_id = repo.id.clone();
                 let open_enabled = enabled && repo.exists;
                 div().flex().gap(px(8.)).items_center().py(px(6.)).border_b_1().border_color(theme().border)
                     .child(div().flex_1().child(repo.name).child(div().text_size(px(11.)).text_color(theme().text_muted)
                         .child(if repo.exists { repo.local_path } else { "Folder missing. Locate the repository before opening.".into() })))
                     .child(control(format!("repo-open-{i}"), "Open repository", open_enabled).on_click(cx.listener(move |this, _, _, cx| {
-                        if open_enabled { this.act(Action::Open(owner.clone(), path.clone()), cx); }
+                        if open_enabled { this.act(Action::Open(owner.clone(), repo_id.clone()), cx); }
                     })))
                     .child(control(format!("repo-remove-{i}"), "Remove repository", enabled).on_click(cx.listener(move |this, _, _, cx| {
                         if enabled { this.confirmation = Some(Action::Remove(remove.clone())); cx.notify(); }

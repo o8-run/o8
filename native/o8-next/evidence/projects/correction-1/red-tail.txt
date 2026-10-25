@@ -1,0 +1,36 @@
+running 4 tests
+test shell::tests::projects_tests::review::review_p1_deletes_existing_duplicate_by_stable_id ...
+thread 'shell::tests::projects_tests::review::review_p1_deletes_existing_duplicate_by_stable_id' (69145) panicked at src/projects_review_tests.rs:104:5:
+deleting the renamed Alpha must never delete the original Beta
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+test shell::tests::projects_tests::review::review_p1_rejects_duplicate_rename_before_deleting_alpha ...
+thread 'shell::tests::projects_tests::review::review_p1_rejects_duplicate_rename_before_deleting_alpha' (69201) panicked at src/projects_review_tests.rs:51:5:
+assertion `left == right` failed: duplicate display names must be rejected before mutating Alpha
+  left: String("Review beta")
+ right: "Review alpha"
+FAILED
+test shell::tests::projects_tests::review::review_p2_project_open_resolves_repointed_repository ...
+thread 'shell::tests::projects_tests::review::review_p2_project_open_resolves_repointed_repository' (69238) panicked at src/projects_review_tests.rs:146:5:
+assertion `left == right` failed: Open must resolve the repository ID against fresh inventory, never the captured old checkout
+  left: "<fixture>/project-one"
+ right: "<fixture>/project-two"
+FAILED
+test shell::tests::projects_tests::review::review_p2_repository_open_resolves_repointed_repository ...
+thread 'shell::tests::projects_tests::review::review_p2_repository_open_resolves_repointed_repository' (69280) panicked at src/projects_review_tests.rs:146:5:
+assertion `left == right` failed: Open must resolve the repository ID against fresh inventory, never the captured old checkout
+  left: "<fixture>/project-one"
+ right: "<fixture>/project-two"
+FAILED
+
+failures:
+
+failures:
+    shell::tests::projects_tests::review::review_p1_deletes_existing_duplicate_by_stable_id
+    shell::tests::projects_tests::review::review_p1_rejects_duplicate_rename_before_deleting_alpha
+    shell::tests::projects_tests::review::review_p2_project_open_resolves_repointed_repository
+    shell::tests::projects_tests::review::review_p2_repository_open_resolves_repointed_repository
+
+test result: FAILED. 0 passed; 4 failed; 0 ignored; 0 measured; 50 filtered out; finished in 8.29s
+
+error: test failed, to rerun pass `--bin o8-next`
