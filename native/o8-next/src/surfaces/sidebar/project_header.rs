@@ -4,6 +4,29 @@ use crate::theme::current as theme;
 use gpui::{AnyElement, div, px};
 
 impl ThreadList {
+    /// An open header menu owns input before shell or row shortcut dispatch.
+    pub fn header_key(
+        &mut self,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.header_menu.is_none() || !self.focus.contains_focused(window, cx) {
+            return false;
+        }
+        if event.keystroke.key == "escape" {
+            self.header_menu = None;
+            if self.editing {
+                self.editor.read(cx).focus.focus(window);
+            } else {
+                self.focus.focus(window);
+            }
+            cx.notify();
+        }
+        cx.stop_propagation();
+        true
+    }
+
     pub fn set_workspace(&mut self, workspace: Option<String>) {
         self.workspace = workspace;
     }
@@ -226,6 +249,7 @@ impl ThreadList {
         if let Some(projects) = self.header_menu {
             let mut menu = div()
                 .id("sidebar-header-menu")
+                .debug_selector(|| "sidebar-header-menu".into())
                 .max_h(px(240.))
                 .overflow_y_scroll()
                 .rounded(px(14.))

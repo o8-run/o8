@@ -693,3 +693,6 @@ impl Fixture {
 
 #[path = "project_header_tests.rs"]
 mod project_header_tests;
+
+#[path = "project_keyboard_tests.rs"]
+mod project_keyboard_tests;

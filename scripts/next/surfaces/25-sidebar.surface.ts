@@ -8,6 +8,8 @@ export async function prepare({ dataDir }: SurfaceContext): Promise<SurfaceRoute
 }
 export default async function register({ dataDir, root, seeds, fixtureToken, transcriptFixtures }: SurfaceContext): Promise<SurfaceRoutes> {
   const enabled = process.argv.includes('--sidebar');
+  const auditKeyboard = process.argv.includes('--sidebar-keyboard-audit');
+  const archives: Array<{ method: string; path: string; tabId?: string }> = [];
   const { GET: historyList } = await import('../../../src/app/api/v2/chat-history/list/route');
   if (!enabled) return { routes: { 'GET /api/v2/chat-history/list': historyList } };
   const fixture = await import('../sidebar-fixture');
@@ -26,8 +28,13 @@ export default async function register({ dataDir, root, seeds, fixtureToken, tra
       'GET /api/v2/chat-history': context, 'PATCH /api/v2/chat-history': patchHistory,
       'POST /api/v2/chat-history': saveHistory, 'GET /api/v2/chat-history/list': historyList,
       'GET /api/runtime/archive': runtimeArchive.GET, 'POST /api/runtime/archive': runtimeArchive.POST,
+      ...(auditKeyboard ? { 'GET /api/sidebar-fixture/archives': async () => Response.json({ archives }) } : {}),
     },
-    admit: ({ route, url, body }) => {
+    admit: ({ route, url, body, method }) => {
+      if (auditKeyboard && body && (route === runtimeArchive.POST
+        || route === patchHistory && Object.hasOwn(JSON.parse(body), 'archivedAt'))) {
+        archives.push({ method, path: url.pathname, tabId: JSON.parse(body).tabId });
+      }
       if (route === history && !seeds.some(seed => `llm-chat:${seed.id}` === url.searchParams.get('sessionKey'))
         && !(transcriptFixtures && url.searchParams.get('sessionKey') === 'opencode-owned:next-worker')
         && url.searchParams.get('sessionKey') !== 'pi-owned:grid-runtime') return 404;

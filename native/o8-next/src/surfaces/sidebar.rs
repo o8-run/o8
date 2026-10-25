@@ -63,6 +63,11 @@ pub(super) const REGISTRATION: Registration = Registration {
             .into_any_element()
     },
     key_down: |shell, event, window, cx| {
+        if shell.surfaces.sidebar.view.as_ref().is_some_and(|view| {
+            view.update(cx, |sidebar, cx| sidebar.header_key(event, window, cx))
+        }) {
+            return true;
+        }
         let key = event.keystroke.key.as_str();
         let modifiers = event.keystroke.modifiers;
         let search = shell.surfaces.settings.view.is_none()
