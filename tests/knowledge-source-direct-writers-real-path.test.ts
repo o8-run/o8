@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { NextRequest } from 'next/server';
 import { afterAll, beforeEach, expect, it, vi } from 'vitest';
@@ -11,7 +11,7 @@ const f = vi.hoisted(() => {
   const fs = process.getBuiltinModule('node:fs'); const p = process.getBuiltinModule('node:path');
   const root = fs.realpathSync(fs.mkdtempSync(p.join(process.getBuiltinModule('node:os').tmpdir(), 'o8-source-writers-')));
   process.env.O8_DATA_DIR = p.join(root, 'data'); process.env.CORTEX_IDE_DATA_DIR = process.env.O8_DATA_DIR;
-  return { root, launched: vi.fn(), claude: vi.fn(), spawned: vi.fn(), failGitProbe: false };
+  return { root, launched: vi.fn(), claude: vi.fn(), spawned: vi.fn(), failGitProbe: false, gitCalls: 0 };
 });
 vi.mock('@/lib/skeleton/autoscan', () => ({ triggerScan: vi.fn() }));
 vi.mock('@/lib/cortex/knowledge/reconcile', () => ({ reconcileKnowledgeSources: async () => {} }));
@@ -27,6 +27,7 @@ vi.mock('@/lib/claude-code/interactive-session', () => ({
 }));
 vi.mock('@/lib/providers/child-process', async original => ({ ...await original<typeof import('@/lib/providers/child-process')>(),
   execFileSync: (...args: Parameters<typeof execFileSync>) => {
+    if (args[0] === 'git') f.gitCalls += 1;
     if (f.failGitProbe && args[0] === 'git' && Array.isArray(args[1]) && args[1].includes('--git-common-dir')) throw Object.assign(new Error('fixture Git became unavailable'), { code: 'ENOENT' });
     return execFileSync(...args);
   },
@@ -236,16 +237,117 @@ it('refuses a commit whose environment redirects Git objects into protected note
   }
 });
 
-it('keeps an unrelated editor file writable with a benign Git object override', async () => {
+it('refuses caller Git overrides even when they point at unrelated writable storage', async () => {
   const writable = repo(), vault = repo(); await protect(vault);
   const original = process.env.GIT_OBJECT_DIRECTORY;
   process.env.GIT_OBJECT_DIRECTORY = path.join(writable, '.git', 'objects');
   try {
     const response = await editor.PUT(req('/api/panel/file-io', { path: path.join(writable, 'note.md'), content: 'permitted editor update' }, 'PUT'));
-    expect(response.status, await response.text()).toBe(200);
-    expect(readFileSync(path.join(writable, 'note.md'), 'utf8')).toBe('permitted editor update');
+    expect(response.status, await response.text()).toBe(403);
+    expect(readFileSync(path.join(writable, 'note.md'), 'utf8')).toBe('retained');
     expect(readFileSync(path.join(vault, 'note.md'), 'utf8')).toBe('retained');
   } finally {
     if (original === undefined) delete process.env.GIT_OBJECT_DIRECTORY; else process.env.GIT_OBJECT_DIRECTORY = original;
   }
+});
+
+
+it.each(['refs', 'refs/heads', 'logs', 'logs/refs/heads', 'packed-refs', 'index', 'objects', 'objects/pack', 'objects/info', 'worktrees', 'worktrees/redirected'] as const)(
+  'refuses symlinked Git %s storage before branch writes can touch protected notes', async storage => {
+    const writable = repo(); const vault = path.join(f.root, `symlink-notes-${++sequence}`); mkdirSync(vault);
+    const note = path.join(vault, 'note.md'); writeFileSync(note, 'retained notes\n'); await protect(vault);
+    const target = path.join(writable, '.git', storage); mkdirSync(path.dirname(target), { recursive: true });
+    const file = storage === 'index' || storage === 'packed-refs';
+    const destination = file ? note : vault;
+    if (existsSync(target)) renameSync(target, path.join(vault, 'retained-storage'));
+    if (storage === 'packed-refs') writeFileSync(note, '# pack-refs with: peeled fully-peeled sorted \n');
+    if (storage === 'index') writeFileSync(note, readFileSync(path.join(vault, 'retained-storage')));
+    if (storage === 'objects') {
+      for (const name of readdirSync(path.join(vault, 'retained-storage'))) renameSync(path.join(vault, 'retained-storage', name), path.join(vault, name));
+    }
+    symlinkSync(destination, target, file ? 'file' : 'dir');
+    const retained = readFileSync(note); const names = readdirSync(vault).sort();
+    const branch = storage === 'logs/refs/heads' ? 'note.md' : 'unreviewed';
+    const response = await branches.POST(req('/api/panel/branches', { path: writable, branch }));
+    expect.soft(readFileSync(note), 'protected note bytes changed').toEqual(retained);
+    expect.soft(readdirSync(vault).sort(), 'Git created files inside protected notes').toEqual(names);
+    expect(response.status, await response.text()).toBe(403);
+  },
+);
+
+it.each(['GIT_TRACE', 'GIT_TRACE_SETUP', 'GIT_TRACE_PERFORMANCE', 'GIT_TRACE2', 'GIT_TRACE2_EVENT', 'GIT_TRACE2_PERF', 'GIT_DIR', 'GIT_WORK_TREE', 'GIT_COMMON_DIR', 'GIT_INDEX_FILE', 'GIT_OBJECT_DIRECTORY', 'GIT_CONFIG_GLOBAL', 'GIT_CONFIG_COUNT', 'GIT_PAGER'])(
+  'refuses inherited %s before the guard itself can run Git or modify notes', async name => {
+    const writable = repo(); const vault = path.join(f.root, `trace-notes-${++sequence}`); mkdirSync(vault);
+    const note = path.join(vault, 'note.md'); writeFileSync(note, '# Retained trace canary\n'); await protect(vault);
+    // The old guard ultimately refuses this worktree, but its earlier probe
+    // must not append trace output on the way to that refusal.
+    git(writable, 'config', 'core.worktree', vault);
+    const retained = readFileSync(note); const previous = process.env[name];
+    process.env[name] = note; f.gitCalls = 0;
+    try {
+      const response = await checkout.POST(req('/api/panel/branches/checkout', { repoPath: writable, branch: 'other', force: true }));
+      expect.soft(readFileSync(note)).toEqual(retained);
+      expect.soft(f.gitCalls, 'a guard probe inherited caller-controlled Git behavior').toBe(0);
+      expect(response.status, await response.text()).toBe(403);
+    } finally {
+      if (previous === undefined) delete process.env[name]; else process.env[name] = previous;
+    }
+  },
+);
+
+it('keeps guard probes read-only when local Git config enables trace2 output', async () => {
+  const writable = repo(); const vault = path.join(f.root, `config-trace-${++sequence}`); mkdirSync(vault);
+  const note = path.join(vault, 'note.md'); writeFileSync(note, '# Retained configuration trace canary\n'); await protect(vault);
+  git(writable, 'config', 'core.worktree', vault);
+  git(writable, 'config', 'trace2.eventTarget', note);
+  const retained = readFileSync(note);
+  const response = await checkout.POST(req('/api/panel/branches/checkout', { repoPath: writable, branch: 'other', force: true }));
+  expect.soft(readFileSync(note)).toEqual(retained);
+  expect(response.status, await response.text()).toBe(403);
+});
+
+it.each(['refs/heads', 'logs/refs/heads'])('refuses source admission when a registered repo redirects %s into it', async storage => {
+  const writable = repo(); const vault = path.join(f.root, `admission-notes-${++sequence}`); mkdirSync(vault);
+  const note = path.join(vault, 'note.md'); writeFileSync(note, '# Retained admission canary\n');
+  const target = path.join(writable, '.git', storage); renameSync(target, `${target}-retained`); symlinkSync(vault, target, 'dir');
+  await addRepo(writable);
+  const sourceApi = await import('@/app/api/cortex/sources/route');
+  const retained = readFileSync(note);
+  const response = await sourceApi.POST(req('/api/cortex/sources', { action: 'add', path: vault }));
+  expect.soft(readFileSync(note)).toEqual(retained);
+  expect(response.status, await response.text()).toBe(400);
+});
+
+it.each(['refs/heads', 'logs/refs/heads'])('allows Git %s symlinks whose physical storage remains separate from knowledge sources', async storage => {
+  const writable = repo(); const vault = repo(); await protect(vault);
+  const target = path.join(writable, '.git', storage); const external = path.join(f.root, `permitted-storage-${++sequence}`);
+  renameSync(target, external); symlinkSync(external, target, 'dir');
+  const retained = readFileSync(path.join(vault, 'note.md'));
+  const response = await branches.POST(req('/api/panel/branches', { path: writable, branch: 'allowed-new' }));
+  expect(response.status, await response.text()).toBe(200);
+  expect(readFileSync(path.join(vault, 'note.md'))).toEqual(retained);
+  expect(existsSync(path.join(external, 'allowed-new'))).toBe(true);
+});
+
+it('keeps an unrelated editor file writable without caller Git overrides', async () => {
+  const writable = repo(), vault = repo(); await protect(vault);
+  const response = await editor.PUT(req('/api/panel/file-io', { path: path.join(writable, 'note.md'), content: 'permitted editor update' }, 'PUT'));
+  expect(response.status, await response.text()).toBe(200);
+  expect(readFileSync(path.join(writable, 'note.md'), 'utf8')).toBe('permitted editor update');
+  expect(readFileSync(path.join(vault, 'note.md'), 'utf8')).toBe('retained');
+});
+
+it('resolves parent traversal after intermediate symlinks before Git reflog writes', async () => {
+  const writable = repo(); const vault = path.join(f.root, `traversal-notes-${++sequence}`);
+  const outside = path.join(f.root, `traversal-outside-${sequence}`);
+  mkdirSync(path.join(vault, 'heads'), { recursive: true }); mkdirSync(path.join(vault, 'child'));
+  mkdirSync(path.join(outside, 'heads'), { recursive: true });
+  const note = path.join(vault, 'heads', 'note.md'); writeFileSync(note, 'retained notes\n'); await protect(vault);
+  symlinkSync(path.join(vault, 'child'), path.join(outside, 'hop'));
+  const logs = path.join(writable, '.git', 'logs', 'refs', 'heads'); rmSync(logs, { recursive: true });
+  symlinkSync(`${outside}/hop/../heads`, logs);
+  const retained = readFileSync(note);
+  const response = await branches.POST(req('/api/panel/branches', { path: writable, branch: 'note.md' }));
+  expect.soft(readFileSync(note)).toEqual(retained);
+  expect(response.status, await response.text()).toBe(403);
 });

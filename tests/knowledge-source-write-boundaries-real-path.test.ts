@@ -297,9 +297,18 @@ it.each([['long s', 'ſ', 's'], ['sharp s', 'ß', 'ss'], ['normalization', 'Caf�
     if (offline !== vault) renameSync(vault, offline);
     const target = path.join(parent, alias);
     expect(existsSync(target)).toBe(false);
+    const protectedAlias = aliasesOnVolume || insensitive && _label !== 'normalization';
+    if (!protectedAlias) {
+      // Registration accepts existing folders; it does not create missing
+      // directories on a volume where this spelling is genuinely distinct.
+      const missing = await reposPost(request('/api/panel/repos', { action: 'add', localPath: target }));
+      expect(missing.status).toBe(500);
+      expect(existsSync(target)).toBe(false);
+      mkdirSync(target); git(target, 'init', '-b', 'main');
+    }
     const response = await reposPost(request('/api/panel/repos', { action: 'add', localPath: target }));
     expect(readFileSync(path.join(offline, 'note.md'))).toEqual(note);
-    if (aliasesOnVolume || insensitive && _label !== 'normalization') {
+    if (protectedAlias) {
       expect.soft(response.status, await response.clone().text()).toBe(400);
       expect.soft(existsSync(target), 'registration must not create the source alias').toBe(false);
       expect.soft(existsSync(path.join(target, '.git'))).toBe(false);
