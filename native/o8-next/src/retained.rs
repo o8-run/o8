@@ -366,26 +366,26 @@ fn layout(row: &Row, width: Pixels, expanded: bool, window: &Window) -> Layout {
             }
         }
         Row::Message { role, nodes, .. } => {
-            if !(nodes.len() == 1 && crate::rich::system_event(&nodes[0])) {
-                b.plain(
-                    match role.as_str() {
-                        "user" => "Operator",
-                        "assistant" => "Agent",
-                        other => other,
-                    }
-                    .into(),
-                    9.5,
-                    14.,
-                    window,
-                );
-                b.y += px(4.);
-            }
+            let top = b.y;
             for node in nodes {
                 b.node(node, expanded, window);
             }
+            if role == "user" {
+                b.backgrounds.insert(
+                    0,
+                    Backdrop {
+                        bounds: Bounds::new(
+                            point(px(16.), top),
+                            size((width - px(32.)).max(px(1.)), b.y - top + px(4.)),
+                        ),
+                        color: theme().selection,
+                    },
+                );
+            }
+            b.y += px(8.);
         }
         Row::Activity { steps, .. } => {
-            b.plain("Work details".into(), 11., 16., window);
+            b.y += px(8.);
             let mut previous = None;
             for step in steps {
                 if previous != Some(step.group) {

@@ -74,6 +74,33 @@ fn fixture_mode(worker: bool) -> (Server, Client) {
 mod worker_tests;
 
 #[gpui::test]
+fn session_chrome_uses_layout_instead_of_role_labels(cx: &mut TestAppContext) {
+    let (_server, client) = fixture();
+    let saved = client.clone();
+    let (surface, cx) = cx.add_window_view(|window, cx| Surface::new(client, window, cx));
+    surface.update(cx, |s, cx| {
+        s.sessions = saved.sessions().unwrap();
+        s.select("thoughts-tools".into(), cx);
+    });
+    cx.run_until_parked();
+    cx.update(|window, cx| {
+        window.refresh();
+        window.draw(cx).clear();
+        window.refresh();
+        window.draw(cx).clear();
+    });
+    surface.read_with(cx, |s, _| {
+        let (_, lines) = s.rows[0].borrow().rendered();
+        assert!(
+            !lines
+                .iter()
+                .any(|line| ["Operator", "Agent", "Work details"].contains(&line.as_str())),
+            "message identity must use layout, not a secondary label: {lines:?}"
+        );
+    });
+}
+
+#[gpui::test]
 fn fixture_send_selected_queue_promote_and_echo(cx: &mut TestAppContext) {
     let (_server, client) = fixture();
     let saved = client.clone();

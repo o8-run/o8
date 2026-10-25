@@ -14,7 +14,8 @@ proxies. A worker launch keeps worker authority even if a native operator
 credential was inherited. An explicit different origin never receives the local
 configuration's disk credential. The normal explicit fixture modes remain available.
 
-The shell lists workspaces with saved sessions. Ctrl+K or Cmd+K opens searchable
+The workspace switcher opens one searchable list, including with 15 or more
+saved workspaces. Ctrl+K or Cmd+K opens searchable
 commands; arrows and Enter choose, Escape cancels. Open session, Open grid and
 New message use the existing views; New message focuses the selected session's
 composer. Open Inbox opens the native Needs reply, Contributions, Approvals,
@@ -23,6 +24,12 @@ Ctrl+Tab cycles surfaces and Ctrl+W closes a surface. Grid shortcuts,
 including Ctrl+Alt+W to close one pane, reach the grid. Drafts remain in memory
 while switching workspaces and sessions. An unavailable local server has a clear
 error and Retry control.
+
+Brain, Refresh and Keyboard shortcuts are palette commands. The shortcut
+reference closes with Escape; key hints are absent from permanent chrome.
+Session tabs use their conversation titles. The embedded session shares the
+shell header. The composer action says Send next or Steer now; its adjacent
+disclosure switches the mode, as does Ctrl+Shift+Enter.
 
 Settings opens from the shell's Settings button, the Open settings command, or
 Ctrl+, / Cmd+,. This partial port edits shared server defaults, provider keys and

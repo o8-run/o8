@@ -66,6 +66,7 @@ impl Surface {
         cx: &mut Context<Self>,
     ) -> Self {
         let mut surface = Self::new(client, window, cx);
+        surface.embedded = true;
         surface.sessions = sessions;
         surface.select(id, cx);
         surface

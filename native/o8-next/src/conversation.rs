@@ -226,9 +226,9 @@ impl Surface {
         let enabled = self.queue_ready && !self.saving;
         let can_steer = self.queue["canSteer"] == true;
         let mode = if self.send_next || !can_steer {
-            "Queued for after this turn"
+            "Send next"
         } else {
-            "Steers the running turn"
+            "Steer now"
         };
         let queue = self.queue["items"].as_array().cloned().unwrap_or_default();
         let queue = queue
@@ -253,7 +253,6 @@ impl Surface {
             .flex_col()
             .gap(px(8.))
             .child(self.composer.clone())
-            .child(div().text_size(px(9.5)).text_color(theme().text_muted).child("Enter: send · Shift+Enter: new line · Ctrl+Shift+Enter: switch mode · F6: steer queued · F7: remove queued"))
             .child(
                 div()
                     .text_size(px(10.))
@@ -266,12 +265,13 @@ impl Surface {
                     .gap(px(8.))
                     .child(
                         div()
-                            .id("send-mode").debug_selector(|| "send-mode".into())
+                            .id("send-mode")
+                            .debug_selector(|| "send-mode".into())
                             .px(px(10.))
                             .py(px(5.))
                             .rounded(px(7.))
                             .cursor_pointer()
-                            .child(div().id("mode-description").debug_selector(move || mode.into()).child(mode))
+                            .child("⌄")
                             .on_click(cx.listener(|this, _, _, cx| {
                                 if !this.saving {
                                     this.send_next = !this.send_next;
@@ -285,8 +285,13 @@ impl Surface {
                             .px(px(10.))
                             .py(px(5.))
                             .rounded(px(7.))
-                            .bg(if enabled { theme().accent } else { theme().surface_raised })
-                            .child(if self.saving { "Saving…" } else { "Send" })
+                            .bg(if enabled {
+                                theme().accent
+                            } else {
+                                theme().surface_raised
+                            })
+                            .debug_selector(move || mode.into())
+                            .child(if self.saving { "Saving…" } else { mode })
                             .on_click(cx.listener(|this, _, _, cx| this.send(None, cx))),
                     ),
             )

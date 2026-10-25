@@ -53,6 +53,8 @@ pub struct Shell {
     content: HashMap<String, Content>,
     focus: FocusHandle,
     palette: bool,
+    workspace_picker: bool,
+    shortcuts: bool,
     query: String,
     choice: usize,
     notice: String,
@@ -82,6 +84,8 @@ impl Shell {
             content: HashMap::new(),
             focus,
             palette: false,
+            workspace_picker: false,
+            shortcuts: false,
             query: String::new(),
             choice: 0,
             notice: "Connecting to local o8 server…".into(),
@@ -160,7 +164,7 @@ impl Shell {
                         } else if !this.state.selected.as_ref().is_some_and(|w| this.workspaces.contains(w)) {
                             this.state.selected = this.workspaces.first().cloned();
                         }
-                        this.notice = if this.workspaces.is_empty() { "Connected. No saved workspace sessions." } else { "Connected · Ctrl+K / Cmd+K: commands · Ctrl+Tab: next surface" }.into();
+                        this.notice.clear();
                         this.persist();
                     }
                     Err(error) => {
@@ -275,6 +279,16 @@ impl Shell {
         }
     }
     fn commands(&self) -> Vec<Command> {
+        let workspaces = self.workspaces.iter().cloned().map(Command::Workspace);
+        if self.workspace_picker {
+            return workspaces
+                .filter(|c| {
+                    c.label(&self.sessions)
+                        .to_lowercase()
+                        .contains(&self.query.to_lowercase())
+                })
+                .collect();
+        }
         let mut entries = registrations()
             .iter()
             .filter_map(|r| r.command)
@@ -300,6 +314,8 @@ impl Shell {
                 .iter()
                 .map(|s| Command::Session(s.id.clone())),
         );
+        commands.extend(workspaces);
+        commands.extend([Command::Refresh, Command::Shortcuts]);
         commands
             .into_iter()
             .filter(|c| {
@@ -313,6 +329,27 @@ impl Shell {
     fn execute(&mut self, command: Command, window: &mut Window, cx: &mut Context<Self>) {
         if !registry::extensions().all(|extension| extension.allow_command(self, &command)) {
             return;
+        }
+        match command {
+            Command::Workspace(workspace) => {
+                self.switch(workspace, window, cx);
+                return;
+            }
+            Command::Refresh => {
+                self.tick(true, window, cx);
+                self.palette = false;
+                self.load(cx);
+                self.restore_focus(window, cx);
+                return;
+            }
+            Command::Shortcuts => {
+                self.palette = false;
+                self.shortcuts = true;
+                self.focus.focus(window);
+                cx.notify();
+                return;
+            }
+            _ => {}
         }
         let registration = command.registration();
         if registration.overlay_command {
@@ -378,8 +415,13 @@ impl Shell {
                 self.capture(window, cx);
             }
             self.palette = !self.palette;
+            self.workspace_picker = false;
+            self.shortcuts = false;
             self.query.clear();
             self.choice = 0;
+            self.restore_focus(window, cx);
+        } else if self.shortcuts && key == "escape" {
+            self.shortcuts = false;
             self.restore_focus(window, cx);
         } else if self.palette {
             match key {

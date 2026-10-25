@@ -5,6 +5,123 @@ use serde_json::json;
 use std::time::Instant;
 
 #[gpui::test]
+fn shell_chrome_fifteen_workspaces_keeps_one_switcher(cx: &mut TestAppContext) {
+    let fixture = Fixture::start_mode(false, "--shell-many");
+    let (shell, mut visual) = open(
+        fixture.client.clone(),
+        fixture.root.join("chrome.json"),
+        State::default(),
+        cx,
+    );
+    let cx = &mut visual;
+    ready(&shell, cx);
+    assert_eq!(shell.read_with(cx, |s, _| s.workspaces.len()), 15);
+    assert!(
+        cx.debug_bounds("workspace-switcher").is_some(),
+        "15 workspaces must share one switcher"
+    );
+    assert!(
+        cx.debug_bounds("workspace-0").is_none(),
+        "workspace choices stay out of permanent chrome"
+    );
+    assert!(
+        shell.read_with(cx, |s, _| s.notice.is_empty()),
+        "connected shell has no permanent hints"
+    );
+    assert!(
+        cx.debug_bounds("session-refresh").is_none(),
+        "embedded session has no duplicate header"
+    );
+    let mut layouts = vec![];
+    for (width, height) in [(900., 700.), (1680., 1050.)] {
+        cx.simulate_resize(size(px(width), px(height)));
+        draw(cx);
+        let bounds = cx.debug_bounds("workspace-switcher").unwrap();
+        assert!(bounds.right() <= px(width));
+        assert!(bounds.size.height <= px(40.));
+        layouts.push(json!({"viewport":[width,height], "switcher":[f32::from(bounds.origin.x),f32::from(bounds.origin.y),f32::from(bounds.size.width),f32::from(bounds.size.height)]}));
+        cx.simulate_click(bounds.center(), gpui::Modifiers::default());
+        draw(cx);
+        assert_eq!(shell.read_with(cx, |s, _| s.commands().len()), 15);
+        cx.simulate_keystrokes("escape");
+    }
+    if let Ok(file) = std::env::var("O8_NEXT_CHROME_EVIDENCE") {
+        fs::write(file, serde_json::to_vec_pretty(&json!({"endpoint":"headless GPUI layout; no raster or compositor capture", "workspaces":15,"permanentWorkspaceControls":1,"layouts":layouts})).unwrap()).unwrap();
+    }
+}
+
+#[gpui::test]
+fn chrome_switcher_cancel_restores_composer_with_platform_shortcut(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    let (shell, mut visual) = open(
+        fixture.client.clone(),
+        fixture.root.join("focus.json"),
+        State::default(),
+        cx,
+    );
+    let cx = &mut visual;
+    ready(&shell, cx);
+    cx.simulate_keystrokes("cmd-k");
+    cx.simulate_keystrokes("n e w enter");
+    ready(&shell, cx);
+    draw(cx);
+    cx.simulate_input("Draft");
+    let switcher = cx.debug_bounds("workspace-switcher").unwrap();
+    cx.simulate_click(switcher.center(), gpui::Modifiers::default());
+    draw(cx);
+    cx.simulate_keystrokes("escape");
+    draw(cx);
+    cx.simulate_input(" retained");
+    cx.simulate_keystrokes("cmd-k");
+    cx.simulate_keystrokes("r e f r e s h enter");
+    ready(&shell, cx);
+    draw(cx);
+    cx.simulate_input(" refreshed");
+    shell.read_with(cx, |s, cx| {
+        let Content::Session(session) = s.content.get(&s.key(&s.active().unwrap())).unwrap() else {
+            panic!("session")
+        };
+        assert_eq!(
+            session.read(cx).shell_issue_state(cx)["draft"],
+            "Draft retained refreshed"
+        );
+    });
+}
+
+#[gpui::test]
+fn chrome_refresh_keeps_workspace_selected_during_load(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    let (shell, mut visual) = open(
+        fixture.client.clone(),
+        fixture.root.join("refresh.json"),
+        State::default(),
+        cx,
+    );
+    let cx = &mut visual;
+    ready(&shell, cx);
+    let target = shell.read_with(cx, |s, _| s.workspaces[1].clone());
+    shell.update_in(cx, |s, window, cx| {
+        // Start the production palette command and switch before its background
+        // inventory response can run on the foreground executor.
+        s.execute(Command::Refresh, window, cx);
+        assert!(s.loading);
+        s.switch(target.clone(), window, cx);
+    });
+    ready(&shell, cx);
+    cx.run_until_parked();
+    assert_eq!(
+        shell.read_with(cx, |s, _| s.state.selected.clone()),
+        Some(target)
+    );
+    cx.simulate_keystrokes("ctrl-k");
+    cx.simulate_keystrokes("s h o r t c u t s enter");
+    draw(cx);
+    assert!(cx.debug_bounds("shortcut-reference").is_some());
+    cx.simulate_keystrokes("escape");
+    assert!(!shell.read_with(cx, |s, _| s.shortcuts));
+}
+
+#[gpui::test]
 fn shell_palette_switch_restart_and_server_down(cx: &mut TestAppContext) {
     let fixture = Fixture::new();
     let file = fixture.root.join("shell.json");
@@ -68,12 +185,11 @@ fn shell_palette_switch_restart_and_server_down(cx: &mut TestAppContext) {
             s.workspaces.iter().position(|w| w == &target).unwrap()
         });
         draw(cx);
+        let switcher = cx.debug_bounds("workspace-switcher").unwrap();
+        cx.simulate_click(switcher.center(), gpui::Modifiers::default());
+        draw(cx);
         let bounds = cx
-            .debug_bounds(if index == 0 {
-                "workspace-0"
-            } else {
-                "workspace-1"
-            })
+            .debug_bounds(if index == 0 { "command-0" } else { "command-1" })
             .unwrap();
         let start = Instant::now();
         cx.simulate_click(bounds.center(), gpui::Modifiers::default());

@@ -35,6 +35,7 @@ use std::{
 
 pub(crate) struct Surface {
     client: Client,
+    embedded: bool,
     brains: HashMap<String, gpui::Entity<crate::brain::Brain>>,
     composer: gpui::Entity<Composer>,
     drafts: HashMap<String, gpui::Entity<Composer>>,
@@ -68,6 +69,7 @@ impl Surface {
         focus.focus(window);
         Self {
             client,
+            embedded: false,
             brains: HashMap::new(),
             composer: cx.new(Composer::new),
             drafts: HashMap::new(),
@@ -244,7 +246,11 @@ impl Surface {
                     }
                 }
                 Incoming::Status(status) => {
-                    self.notice = status.trim_end_matches(" · read-only").into();
+                    self.notice = if status == "Live · read-only" {
+                        String::new()
+                    } else {
+                        status.trim_end_matches(" · read-only").into()
+                    };
                     cx.notify();
                 }
             }
@@ -421,28 +427,30 @@ impl Render for Surface {
                 }
                 cx.stop_propagation();
             }))
-            .child(
-                div()
-                    .h(px(40.))
-                    .px(px(16.))
-                    .flex()
-                    .items_center()
-                    .gap(px(16.))
-                    .child("o8 next")
-                    .child(self.brain_control(cx))
-                    .child(
-                        div()
-                            .id("refresh")
-                            .debug_selector(|| "session-refresh".into())
-                            .px(px(8.))
-                            .py(px(4.))
-                            .rounded(px(5.))
-                            .cursor_pointer()
-                            .bg(theme().surface_raised)
-                            .child("Refresh")
-                            .on_click(cx.listener(|this, _, _, cx| this.load_sessions(cx))),
-                    ),
-            )
+            .when(!self.embedded, |view| {
+                view.child(
+                    div()
+                        .h(px(40.))
+                        .px(px(16.))
+                        .flex()
+                        .items_center()
+                        .gap(px(16.))
+                        .child("o8 next")
+                        .child(self.brain_control(cx))
+                        .child(
+                            div()
+                                .id("refresh")
+                                .debug_selector(|| "session-refresh".into())
+                                .px(px(8.))
+                                .py(px(4.))
+                                .rounded(px(5.))
+                                .cursor_pointer()
+                                .bg(theme().surface_raised)
+                                .child("Refresh")
+                                .on_click(cx.listener(|this, _, _, cx| this.load_sessions(cx))),
+                        ),
+                )
+            })
             .child(
                 div()
                     .flex()
@@ -526,14 +534,16 @@ impl Render for Surface {
                             .flex_col()
                             .flex_1()
                             .min_w_0()
-                            .child(
-                                div()
-                                    .px(px(24.))
-                                    .py(px(8.))
-                                    .text_size(px(11.))
-                                    .text_color(theme().text_muted)
-                                    .child(self.notice.clone()),
-                            )
+                            .when(!self.notice.is_empty(), |view| {
+                                view.child(
+                                    div()
+                                        .px(px(24.))
+                                        .py(px(8.))
+                                        .text_size(px(11.))
+                                        .text_color(theme().text_muted)
+                                        .child(self.notice.clone()),
+                                )
+                            })
                             .child(self.history_control(cx))
                             .child(
                                 list(self.list.clone(), {
