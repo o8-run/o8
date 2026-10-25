@@ -14,10 +14,32 @@ const stopPath = path.join(directory, 'stop');
 const abort = new AbortController();
 const children = new Set();
 const state = { version: 1, generation: config.generation, state: 'starting', services: [], teardown: null };
+const identitySource = process.platform === 'darwin' ? 'ps' : 'platform';
+const bootId = process.platform === 'darwin'
+  ? execFileSync('/usr/sbin/sysctl', ['-n', 'kern.bootsessionuuid'], { encoding: 'utf8', timeout: 2000 }).trim()
+  : fs.readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim();
+function processIdentity(row) {
+  let startId = row.birth.trim().replace(/\s+/g, ' ');
+  if (process.platform === 'linux') {
+    const stat = fs.readFileSync('/proc/' + row.pid + '/stat', 'utf8');
+    startId = stat.slice(stat.lastIndexOf(') ') + 2).trim().split(/\s+/)[19];
+    if (!/^\d+$/.test(startId)) throw new Error('Workspace process identity is unavailable.');
+  }
+  return { version: 1, platform: process.platform, bootId, startId };
+}
+function sameProcess(row, identity) {
+  return identity && JSON.stringify(processIdentity(row)) === JSON.stringify(identity);
+}
+const supervisor = processRows().find(row => row.pid === process.pid);
+if (!supervisor) throw new Error('Workspace supervisor identity is unavailable.');
+state.supervisor = { pid: process.pid, processIdentity: processIdentity(supervisor), processIdentitySource: identitySource };
 let stopped = false;
 let failure = null;
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 function persist() {
+  // Capture detached ownership before opening any repository command's gate.
+  state.groups = [...children].map(child => ({ group: child.pid, shutdownGraceMs: child.shutdownGraceMs ?? config.limits.shutdownGraceMs,
+    members: [...child.identities].map(([pid, processIdentity]) => ({ pid, processIdentity, processIdentitySource: identitySource })) }));
   for (const service of state.services) if (service.attempts?.length) Object.assign(service, service.attempts[service.attempts.length - 1]);
   const temporary = statePath + '.' + process.pid + '.tmp';
   fs.writeFileSync(temporary, JSON.stringify(state), { mode: 0o600 });
@@ -54,8 +76,9 @@ function signal(child, name) {
   if (!child.pid || child.quiet) return;
   const rows = processRows().filter(row => row.group === child.pid);
   if (!rows.length) { child.quiet = true; return; }
-  if (!rows.some(row => child.identities.get(row.pid) === row.birth)) throw new Error('Workspace process group ownership changed.');
-  for (const row of rows) child.identities.set(row.pid, row.birth);
+  if (!rows.some(row => sameProcess(row, child.identities.get(row.pid)))) throw new Error('Workspace process group ownership changed.');
+  for (const row of rows) child.identities.set(row.pid, processIdentity(row));
+  persist(); // A later stopper also owns descendants if this supervisor dies after TERM.
   try { process.kill(-child.pid, name); } catch (error) { if (error.code !== 'ESRCH') throw error; }
 }
 function terminate(child) {
@@ -94,7 +117,7 @@ function start(command, cwd, env, record, timeoutMs, limits = {}) {
       "const expected=JSON.parse(process.argv[1]); const cwd=fs.statSync('.'); const held=fs.fstatSync(4);",
       "if(cwd.dev!==expected.dev || cwd.ino!==expected.ino || held.dev!==cwd.dev || held.ino!==cwd.ino || fs.realpathSync('.')!==expected.canonical) process.exit(78); fs.closeSync(4);",
       "const byte=Buffer.alloc(1); let gate=''; while(fs.readSync(0,byte,0,1,null)>0) { if(byte[0]===10) break; gate+=byte.toString(); if(gate.length>2) process.exit(125); } if(gate!=='go') process.exit(125);",
-      "setInterval(()=>{},60000); let done=false; const finish=code=>{if(done)return;done=true;fs.writeSync(3,String(code)+String.fromCharCode(10));};",
+      "setInterval(()=>{},60000); let done=false; const finish=code=>{if(done)return;done=true;try{fs.writeSync(3,String(code)+String.fromCharCode(10));}catch(error){if(error.code!=='EPIPE')throw error;}};",
       "const child=spawn('/bin/sh',['-c',process.argv[2]],{env:process.env,stdio:['ignore','inherit','inherit']}); child.once('error',()=>finish(127)); child.once('close',(code,signal)=>finish(code===null?128+(require('node:os').constants.signals[signal]||0):code));"
     ].join('');
     child = spawn(process.execPath, ['-e', guard, JSON.stringify({ dev: pinned.dev, ino: pinned.ino, canonical }), command], { cwd: canonical, env, detached: true, stdio: ['pipe', 'pipe', 'pipe', 'pipe', descriptor] });
@@ -108,7 +131,7 @@ function start(command, cwd, env, record, timeoutMs, limits = {}) {
   child.shutdownGraceMs = limits.shutdownGraceMs;
   const identity = processRows().find(row => row.pid === child.pid && row.group === child.pid);
   if (!identity) { child.kill(); throw new Error('Workspace command ownership could not be captured.'); }
-  child.identities.set(identity.pid, identity.birth);
+  child.identities.set(identity.pid, processIdentity(identity));
   children.add(child);
   record.pid = child.pid;
   record.startedAt = new Date().toISOString();
@@ -262,6 +285,7 @@ async function teardown() {
     if (!state.cleanupUnconfirmed) { try { await teardown(); } catch { failure ||= 'Workspace teardown failed.'; } }
     try { await Promise.all([...children].map(terminate)); } catch { state.cleanupUnconfirmed = true; failure ||= 'Workspace teardown process settlement is unconfirmed.'; }
     clearInterval(watcher);
+    if (!state.cleanupUnconfirmed) state.cleanupUnconfirmed = false;
     state.state = failure ? 'failed' : 'stopped';
     state.error = failure;
     state.finishedAt = new Date().toISOString();

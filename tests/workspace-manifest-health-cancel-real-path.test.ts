@@ -32,10 +32,13 @@ describe.sequential('workspace manifest HTTP health cancellation real path', () 
     const healthy = mode.startsWith('healthy');
     const streaming = mode.endsWith('-stream');
     let requestArrived = false;
+    let markRequestArrived!: () => void;
+    const requestArrival = new Promise<void>(resolve => { markRequestArrived = resolve; });
     let responseClosed = false;
     let pendingResponse: ServerResponse | undefined;
     const server = createServer((_request, response) => {
       requestArrived = true;
+      markRequestArrived();
       response.once('close', () => { responseClosed = true; });
       if (mode === 'cancelled') { pendingResponse = response; return; }
       response.writeHead(healthy ? 200 : 503);
@@ -55,7 +58,8 @@ describe.sequential('workspace manifest HTTP health cancellation real path', () 
     writeFileSync(path.join(repoPath, 'o8.workspace.json'), JSON.stringify({
       version: 1,
       services: [{ name: 'web', command: 'exec sleep 600', port: { preferred: port },
-        health: { http: url, timeoutMs: mode.startsWith('failed') ? 150 : 30_000 } }],
+        // Include real child/fetch startup on loaded CI runners in the health budget.
+        health: { http: url, timeoutMs: mode.startsWith('failed') ? 5000 : 30_000 } }],
       preview: { url },
     }));
     execFileSync('git', ['add', 'o8.workspace.json'], { cwd: repoPath });
@@ -71,7 +75,14 @@ describe.sequential('workspace manifest HTTP health cancellation real path', () 
     setLaneStatus(lane.id, 'launching', 'system', 'fixture launch');
     const application = applyWorkspaceManifest({ repoPath, worktreePath: repoPath, packetId, laneId: lane.id });
     try {
-      await vi.waitFor(() => expect(requestArrived).toBe(true), { timeout: 10_000 });
+      let arrivalTimer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([requestArrival, application.then(() => {
+          if (!requestArrived) throw new Error('Manifest finished before its first health request.');
+        }), new Promise<never>((_resolve, reject) => {
+          arrivalTimer = setTimeout(() => reject(new Error('Health request did not arrive.')), 20_000);
+        })]);
+      } finally { clearTimeout(arrivalTimer); }
       if (mode === 'cancelled') {
         setLaneStatus(lane.id, 'failed', 'system', 'cancel pending health check');
         await vi.waitFor(() => expect(responseClosed).toBe(true), { timeout: 5_000 });

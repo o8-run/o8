@@ -1,8 +1,9 @@
 import { createHash } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
+import { execFile, execFileSync, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { promisify } from 'node:util';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 const browserCalls = vi.hoisted(() => ({ evaluations: 0, beforeReply: null as null | (() => Promise<void>) }));
@@ -23,6 +24,31 @@ const prior = { ...process.env };
 const running: Array<{ worktreePath: string; packetId: string; laneId: string }> = [];
 const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 const node = quote(process.execPath);
+
+async function stopInFreshProcess(id: string, onSpawn?: (child: ChildProcess) => void) {
+  const script = `void (async () => {
+    const imported = await import('./src/lib/runtimes/managed-runs/termination.ts');
+    const { terminateManagedRun } = imported.default ?? imported;
+    const registry = await import('./src/lib/runtimes/managed-runs/registry.ts');
+    const { findManagedRun } = registry.default ?? registry;
+    try {
+      const receipt = await terminateManagedRun(findManagedRun(${JSON.stringify(id)}), { reason: 'operator_stop', exitCode: 130 });
+      console.log('O8_STOP ' + JSON.stringify(receipt));
+    } catch (error) { console.log('O8_STOP ' + JSON.stringify({ error: error.message })); }
+    const db = await import('./src/lib/db/index.ts'); (db.default ?? db).closeDb();
+  })().catch(error => { console.error(error); process.exitCode = 1; });`;
+  // Launch the actual interpreter directly: killing a tsx CLI parent would
+  // leave its interpreter child running and let it race the recovery assertion.
+  const pending = promisify(execFile)(process.execPath, ['--import', import.meta.resolve('tsx'), '--eval', script], {
+    cwd: process.cwd(), timeout: 35_000, env: { ...process.env,
+      NODE_OPTIONS: [process.env.NODE_OPTIONS, '--conditions=react-server'].filter(Boolean).join(' ') },
+  });
+  onSpawn?.(pending.child);
+  const result = await pending;
+  const line = result.stdout.split('\n').find(line => line.startsWith('O8_STOP '));
+  if (!line) throw new Error(`Missing fresh-process stop receipt: ${result.stdout}\n${result.stderr}`);
+  return JSON.parse(line.slice('O8_STOP '.length));
+}
 
 beforeAll(async () => {
   process.env.CORTEX_IDE_DATA_DIR = path.join(root, 'data');
@@ -207,6 +233,81 @@ describe.sequential('workspace lifecycle failure and recovery boundaries', () =>
     running.splice(running.indexOf(result.identity), 1);
     const { readWorkspaceServiceState } = await import('@/lib/workspace/manifest/services');
     expect((await readWorkspaceServiceState(result.identity))?.teardown?.state).toBe('failed');
+  }, 60_000);
+
+  it('recovers detached teardown groups after the supervisor is killed without replaying teardown or stopping a sibling', async () => {
+    const command = `${node} -e ${quote("const fs=require('node:fs'); fs.appendFileSync('teardown-attempts','1'); fs.writeFileSync('orphan.pid',String(process.pid)); process.on('SIGTERM',()=>{}); setInterval(()=>{},1000)")}`;
+    const repo = await fixture('killed-supervisor', { version: 1, services: [services[0]], teardown: [command], limits: { timeoutMs: 1000, shutdownGraceMs: 25 } });
+    const result = await provision(repo, 'killed-supervisor');
+    const sibling = await provision(await fixture('surviving-sibling', { version: 1, services: [services[0]], teardown: [teardown] }), 'surviving-sibling');
+    const { listManagedRuns } = await import('@/lib/runtimes/managed-runs/registry');
+    const run = (await listManagedRuns()).find(run => run.packetId === 'killed-supervisor')!;
+    const { stopWorkspaceServices } = await import('@/lib/workspace/manifest/services');
+    let stopper: ChildProcess | undefined;
+    const firstStop = stopInFreshProcess(run.id, child => { stopper = child; }).catch(error => error);
+    const key = createHash('sha256').update(JSON.stringify([result.identity.worktreePath, result.identity.packetId, result.identity.laneId])).digest('hex');
+    const handle = JSON.parse(readFileSync(path.join(root, 'data', 'workspace-services', key, 'handle.json'), 'utf8'));
+    let group: number | undefined;
+    try {
+      await vi.waitFor(() => expect(existsSync(path.join(result.identity.worktreePath, 'orphan.pid'))).toBe(true), { timeout: 10_000 });
+      const state = JSON.parse(readFileSync(path.join(handle.directory, 'state.json'), 'utf8'));
+      group = state.teardown.commands[0].pid;
+      const orphan = Number(readFileSync(path.join(result.identity.worktreePath, 'orphan.pid'), 'utf8'));
+      stopper!.kill('SIGKILL');
+      process.kill(run.panePid!, 'SIGKILL');
+      await firstStop;
+      expect(() => process.kill(orphan, 0)).not.toThrow();
+      const stopped = await stopInFreshProcess(run.id);
+      expect(stopped).toMatchObject({ confirmedDead: true });
+      await vi.waitFor(() => {
+        const rows = execFileSync('ps', ['ax', '-o', 'pid=,pgid=,stat='], { encoding: 'utf8' });
+        expect(rows.split('\n').some(row => { const parts = row.trim().split(/\s+/); return Number(parts[1]) === group && !parts[2]?.startsWith('Z'); })).toBe(false);
+      });
+      const recovered = JSON.parse(readFileSync(path.join(handle.directory, 'state.json'), 'utf8'));
+      expect(recovered).toMatchObject({ state: 'failed', cleanupUnconfirmed: false, teardown: { state: 'failed' } });
+      expect(readFileSync(path.join(result.identity.worktreePath, 'teardown-attempts'), 'utf8')).toBe('1');
+      expect(await (await fetch(`http://127.0.0.1:${sibling.receipt!.ports.api}`)).text()).toBe('api');
+      await expect(stopWorkspaceServices(result.identity)).rejects.toThrow('Workspace teardown failed');
+    } finally {
+      // Red runs must also stop their fixture-owned orphan group.
+      if (group) { try { process.kill(-group, 'SIGKILL'); } catch { /* Already settled. */ } }
+      stopper?.kill('SIGKILL');
+      running.splice(running.indexOf(result.identity), 1); // Interrupted teardown remains held.
+      await firstStop;
+    }
+  }, 90_000);
+
+  it('keeps failed teardown held for a lifecycle caller concurrent with an operator stop', async () => {
+    const repo = await fixture('stop-policies', { version: 1, services: [services[0]], teardown: ['sleep 1; exit 23'] });
+    const result = await provision(repo, 'stop-policies');
+    const { listManagedRuns } = await import('@/lib/runtimes/managed-runs/registry');
+    const run = (await listManagedRuns()).find(run => run.packetId === 'stop-policies')!;
+    const { readWorkspaceServiceState, stopManagedWorkspaceService } = await import('@/lib/workspace/manifest/services');
+    const { settleTerminalWorkspaceManifest } = await import('@/lib/workspace/manifest/lifecycle');
+    const operator = stopManagedWorkspaceService(run);
+    try {
+      await vi.waitFor(async () => expect((await readWorkspaceServiceState(result.identity))?.teardown?.state).toBe('running'), { timeout: 10_000 });
+      const outcomes = await Promise.allSettled([operator, settleTerminalWorkspaceManifest(result.identity)]);
+      expect(outcomes[0].status).toBe('fulfilled');
+      expect(outcomes[1]).toMatchObject({ status: 'rejected', reason: expect.objectContaining({ message: expect.stringContaining('Workspace teardown failed') }) });
+    } finally {
+      await operator.catch(() => {});
+      running.splice(running.indexOf(result.identity), 1);
+    }
+  }, 60_000);
+
+  it('preserves clean settlement when a fresh process stops an already exited supervisor', async () => {
+    const repo = await fixture('clean-stop-again', { version: 1, services: [services[0]], teardown: [teardown] });
+    const result = await provision(repo, 'clean-stop-again');
+    const { listManagedRuns } = await import('@/lib/runtimes/managed-runs/registry');
+    const run = (await listManagedRuns()).find(run => run.packetId === 'clean-stop-again')!;
+    const { settleTerminalWorkspaceManifest } = await import('@/lib/workspace/manifest/lifecycle');
+    const { readWorkspaceServiceState } = await import('@/lib/workspace/manifest/services');
+    await settleTerminalWorkspaceManifest(result.identity);
+    await vi.waitFor(() => expect(() => process.kill(run.panePid!, 0)).toThrow());
+    expect(await stopInFreshProcess(run.id)).toMatchObject({ confirmedDead: true });
+    expect(await readWorkspaceServiceState(result.identity)).toMatchObject({ state: 'stopped', teardown: { state: 'completed' } });
+    expect(readFileSync(path.join(result.identity.worktreePath, 'teardown.txt'), 'utf8')).toBe('done\n');
   }, 60_000);
 
   it.each([

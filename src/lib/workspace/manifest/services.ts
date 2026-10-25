@@ -8,19 +8,21 @@ import { execFile } from '@/lib/providers/child-process';
 import { childEnvironment, providerCredentialName } from '@/lib/providers/spawn-environment';
 import { writeExactChildFile, readExactChildFile } from '@/lib/workspace/exact-parent-operation';
 import type { WorktreeMaterializationIdentity } from '@/lib/worktree/materialization-identity';
+import { guardedWorkspaceScriptInvocation } from '@/lib/worktree/materialization-execution';
 import { getDataDir } from '@/lib/data-dir-migration';
 import type { ManagedRunRecord } from '@/lib/runtimes/managed-runs/types';
 import { registerManagedRun, finishManagedRun } from '@/lib/runtimes/managed-runs/registry';
 import type { WorkspaceManifest, WorkspaceManifestService } from './types';
 import type { WorkspaceManifestServiceReceipt } from './lifecycle';
 import { WORKSPACE_SERVICE_RUNNER_SOURCE } from './service-runner-source';
+import { recoverWorkspaceServiceGroups, type WorkspaceServiceProcessState } from './service-process-recovery';
 
 const execute = promisify(execFile);
 const pause = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 const digest = (value: string) => createHash('sha256').update(value).digest('hex');
 export const defaultServiceLimits = { timeoutMs: 5000, outputLimitBytes: 1024 * 1024, shutdownGraceMs: 100 };
 export interface WorkspaceServiceIdentity { worktreePath: string; packetId: string; laneId: string; serviceGeneration?: string }
-interface ServiceState {
+interface ServiceState extends WorkspaceServiceProcessState {
   version: 1; generation: string; state: 'starting' | 'ready' | 'stopping' | 'stopped' | 'failed';
   services: WorkspaceManifestServiceReceipt[]; error?: string; teardown?: { state: string }; cleanupUnconfirmed?: boolean;
 }
@@ -207,7 +209,14 @@ export async function waitWorkspaceServices(input: WorkspaceServiceIdentity, sig
     await pause(25);
   }
 }
-export function stopWorkspaceServices(input: WorkspaceServiceIdentity): Promise<ServiceState | null> {
+export async function stopWorkspaceServices(input: WorkspaceServiceIdentity, options: { allowFailedTeardown?: boolean } = {}): Promise<ServiceState | null> {
+  const state = await stopWorkspaceServiceProcesses(input);
+  // Process cleanup is shared, but a relaxed operator policy cannot grant a
+  // concurrent lifecycle caller permission to release failed teardown evidence.
+  if (state?.teardown?.state === 'failed' && !options.allowFailedTeardown) throw new Error('Workspace teardown failed; retain the cleanup evidence and worktree.');
+  return state;
+}
+function stopWorkspaceServiceProcesses(input: WorkspaceServiceIdentity): Promise<ServiceState | null> {
   const identity = key(input);
   const existing = stops.get(identity);
   if (existing) return existing;
@@ -218,8 +227,18 @@ export function stopWorkspaceServices(input: WorkspaceServiceIdentity): Promise<
     if (!initial || !['stopped', 'failed'].includes(initial.state)) await writePrivateFlag(handle, 'stop');
     const deadline = Date.now() + handle.timeoutMs;
     while (Date.now() < deadline) {
+      await recoverWorkspaceServiceGroups(handle.directory, () => readWorkspaceServiceState(input), async state => {
+        // Capture cwd before validation, then use only relative paths for atomic publication.
+        const invocation = guardedWorkspaceScriptInvocation(`
+          const fs = require('node:fs');
+          const temporary = '.recovery-' + require('node:crypto').randomUUID();
+          const fd = fs.openSync(temporary, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, 0o600);
+          try { fs.writeFileSync(fd, process.argv[1]); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+          fs.renameSync(temporary, 'state.json');
+        `, [JSON.stringify(state)], handle.directoryIdentity);
+        await execute(invocation.command, invocation.args, { cwd: handle.directory, timeout: 5000 });
+      });
       const state = await readWorkspaceServiceState(input);
-      if (state?.teardown?.state === 'failed') throw new Error('Workspace teardown failed; retain the cleanup evidence and worktree.');
       if (state?.cleanupUnconfirmed) throw new Error('Workspace service cleanup is unconfirmed; retain the worktree and leases.');
       if (state && ['stopped', 'failed'].includes(state.state)) {
         finishManagedRun(handle.runId, state.state === 'stopped' ? 0 : 1);
@@ -263,5 +282,7 @@ export async function stopManagedWorkspaceService(record: ManagedRunRecord): Pro
   if (!identity || record.packetId !== identity.packetId || record.laneId !== identity.laneId || record.cwd !== identity.worktreePath) throw new Error('Workspace service stop binding changed.');
   const handle = await readHandle(identity);
   if (!handle || handle.runId !== record.id || record.session !== `cortex-run-${handle.runId}`) throw new Error('Workspace service stop generation changed.');
-  await stopWorkspaceServices(identity);
+  // Operator process termination can finish after an interrupted teardown, while
+  // ordinary lifecycle settlement still retains its failure, evidence and leases.
+  await stopWorkspaceServices(identity, { allowFailedTeardown: true });
 }
