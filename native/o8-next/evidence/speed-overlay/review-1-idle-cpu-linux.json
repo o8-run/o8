@@ -1,0 +1,62 @@
+{
+  "before": {
+    "scope": "shell test process plus reaped helpers; owned live fixture server excluded; 50 callbacks/s; debug CPU scene",
+    "samples": [
+      {
+        "enabled": false,
+        "cpuPercent": 2.6029610738685003,
+        "wallSeconds": 10.452868785
+      },
+      {
+        "enabled": true,
+        "cpuPercent": 3.6293350706761185,
+        "wallSeconds": 10.543862803
+      },
+      {
+        "enabled": false,
+        "cpuPercent": 2.239986944791493,
+        "wallSeconds": 10.399750515
+      },
+      {
+        "enabled": true,
+        "cpuPercent": 3.45846419736682,
+        "wallSeconds": 10.527074468
+      }
+    ],
+    "meanCpuPercent": {
+      "false": 2.4214740093299967,
+      "true": 3.5438996340214692
+    },
+    "enabledMinusDisabledPercentagePoints": 1.1224256246914726
+  },
+  "after": {
+    "scope": "shell test process plus reaped helpers; owned live fixture server excluded; 50 callbacks/s; debug CPU scene",
+    "samples": [
+      {
+        "enabled": false,
+        "cpuPercent": 2.695155032777332,
+        "wallSeconds": 10.443112808
+      },
+      {
+        "enabled": true,
+        "cpuPercent": 3.633175567160168,
+        "wallSeconds": 10.577912058999999
+      },
+      {
+        "enabled": false,
+        "cpuPercent": 2.8115168318112906,
+        "wallSeconds": 10.497539325
+      },
+      {
+        "enabled": true,
+        "cpuPercent": 3.7424131246286025,
+        "wallSeconds": 10.580422852
+      }
+    ],
+    "meanCpuPercent": {
+      "false": 2.7533359322943114,
+      "true": 3.6877943458943854
+    },
+    "enabledMinusDisabledPercentagePoints": 0.934458413600074
+  }
+}

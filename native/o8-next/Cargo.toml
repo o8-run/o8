@@ -6,6 +6,7 @@ license = "Apache-2.0"
 publish = false
 
 [dependencies]
+libc = "=0.2.183"
 async-channel = "=2.5.0"
 alacritty_terminal = { version = "=0.26.0", default-features = false }
 base64 = "=0.22.1"

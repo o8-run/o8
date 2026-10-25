@@ -3533,6 +3533,7 @@ dependencies = [
  "async-channel 2.5.0",
  "base64",
  "gpui",
+ "libc",
  "regex",
  "serde",
  "serde_json",

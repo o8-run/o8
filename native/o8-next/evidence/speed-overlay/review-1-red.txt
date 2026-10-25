@@ -1,0 +1,25 @@
+running 6 tests
+test shell::speed::tests::speed_overlay_discards_focus_changes_and_bounds_samples ... O8_NEXT_SPEED {"keyToCpuPaintMs":3.443248,"frameToCpuPaintMs":3.3822069999999997,"retainedSamples":64}
+ok
+test shell::speed::tests::speed_overlay_ignores_memory_completion_from_a_previous_opt_in ... ok
+test shell::speed::tests::speed_overlay_is_opt_in_compact_and_preserves_composer_focus ...
+thread 'shell::speed::tests::speed_overlay_is_opt_in_compact_and_preserves_composer_focus' (94381) panicked at src/surfaces/speed/tests.rs:33:5:
+numbers-only panel must fit two rows
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+test shell::speed::tests::speed_overlay_keyboard_toggle_restores_composer ... ok
+test shell::speed::tests::speed_overlay_reads_memory_without_a_helper_process ...
+thread 'shell::speed::tests::speed_overlay_reads_memory_without_a_helper_process' (94446) panicked at src/surfaces/speed/tests.rs:236:5:
+visible overlay must not spawn a process for sampling
+FAILED
+test shell::speed::tests::speed_overlay_reopen_does_not_restore_old_samples_or_save_opt_in ... ok
+
+failures:
+
+failures:
+    shell::speed::tests::speed_overlay_is_opt_in_compact_and_preserves_composer_focus
+    shell::speed::tests::speed_overlay_reads_memory_without_a_helper_process
+
+test result: FAILED. 4 passed; 2 failed; 0 ignored; 0 measured; 155 filtered out; finished in 8.04s
+
+error: test failed, to rerun pass `--bin o8-next`

@@ -48,22 +48,10 @@ pub(super) const REGISTRATION: Registration = Registration {
         }
         let sample = s.surfaces.speed.sample.borrow();
         let values = [
-            (
-                "speed-key",
-                "Key → paint",
-                metric(sample.key_ms.back().copied(), "ms"),
-            ),
-            (
-                "speed-frame",
-                "Frame",
-                metric(sample.frame_ms.back().copied(), "ms"),
-            ),
-            (
-                "speed-wakeups",
-                "Idle wakeups",
-                metric(sample.wakeups, "/s"),
-            ),
-            ("speed-memory", "Memory", metric(sample.memory_mib, "MiB")),
+            ("speed-key", metric(sample.key_ms.back().copied(), "ms")),
+            ("speed-frame", metric(sample.frame_ms.back().copied(), "ms")),
+            ("speed-wakeups", metric(sample.wakeups, "/s")),
+            ("speed-memory", metric(sample.memory_mib, "MiB")),
         ];
         vec![
             div()
@@ -90,20 +78,21 @@ pub(super) const REGISTRATION: Registration = Registration {
                                 .absolute()
                                 .top(px(34.))
                                 .right(px(0.))
-                                .w(px(248.))
+                                .w(px(176.))
+                                .flex()
+                                .flex_wrap()
                                 .p(px(8.))
                                 .rounded(px(7.))
                                 .bg(theme().surface_raised)
                                 .text_color(theme().text)
                                 .text_size(px(11.))
                                 .font_weight(gpui::FontWeight::LIGHT)
-                                .children(values.into_iter().map(|(id, label, value)| {
+                                .children(values.into_iter().map(|(id, value)| {
                                     div()
                                         .debug_selector(move || id.into())
-                                        .flex()
-                                        .justify_between()
+                                        .w(px(80.))
+                                        .text_right()
                                         .h(px(20.))
-                                        .child(label)
                                         .child(value)
                                 })),
                         )
@@ -223,28 +212,16 @@ pub(super) const REGISTRATION: Registration = Registration {
         sample.memory_at = Some(now);
         let generation = sample.generation;
         drop(sample);
-        let task = cx.background_executor().spawn(async {
-            let output = std::process::Command::new("ps")
-                .args(["-p", &std::process::id().to_string(), "-o", "rss="])
-                .output()
-                .ok()?;
-            if !output.status.success() {
-                return None;
-            }
-            let kib = std::str::from_utf8(&output.stdout)
-                .ok()?
-                .trim()
-                .parse::<f64>()
-                .ok()?;
-            (kib.is_finite() && kib > 0.).then_some(kib / 1024.)
-        });
+        let task = cx.background_executor().spawn(async { process::usage() });
         cx.spawn(async move |s, cx| {
             let memory = task.await;
             let _ = s.update(cx, |s, cx| {
                 let mut sample = s.surfaces.speed.sample.borrow_mut();
                 if sample.enabled && sample.generation == generation {
                     sample.memory_pending = false;
-                    sample.memory_mib = memory;
+                    sample.memory_mib = memory
+                        .filter(|usage| usage.cpu_seconds.is_finite())
+                        .map(|usage| usage.memory_mib);
                     cx.notify();
                 }
             });
@@ -275,3 +252,6 @@ impl Shell {
 #[cfg(test)]
 #[path = "speed/tests.rs"]
 mod tests;
+
+#[path = "speed/process.rs"]
+mod process;
