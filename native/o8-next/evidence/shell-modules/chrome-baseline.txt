@@ -1,0 +1,13 @@
+running 1 test
+test shell::tests::look::shell_chrome_fifteen_workspaces_keeps_one_switcher ...
+thread 'shell::tests::look::shell_chrome_fifteen_workspaces_keeps_one_switcher' (134532) panicked at src/shell_look_tests.rs:246:5:
+connected shell has no permanent hints
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    shell::tests::look::shell_chrome_fifteen_workspaces_keeps_one_switcher
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 224 filtered out; finished in 2.67s
