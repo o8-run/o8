@@ -7,6 +7,7 @@ publish = false
 [workspace]
 
 [dependencies]
+async-channel = "=2.5.0"
 serde = { version = "=1.0.228", features = ["derive"] }
 serde_json = { version = "=1.0.150", features = ["preserve_order"] }
 regex = "=1.13.1"

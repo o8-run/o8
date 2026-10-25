@@ -379,7 +379,8 @@
     {
       "path": "src/lib/chatgpt-plan/plan-entry.test.ts",
       "reasons": [
-        "child-process"
+        "child-process",
+        "network-listener"
       ]
     },
     {
@@ -4255,6 +4256,7 @@
         "git-cli",
         "native-build",
         "network-listener",
+        "process-signal",
         "real-path"
       ]
     },

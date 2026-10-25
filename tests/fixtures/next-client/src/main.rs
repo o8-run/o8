@@ -18,6 +18,15 @@ use std::{
     net::TcpStream,
 };
 
+// The production client now sends Brain events to GPUI. Keep only that UI
+// envelope here so the HTTP probe still compiles the real client without GPUI.
+mod brain {
+    pub(crate) enum Event {
+        Frame(String, serde_json::Value),
+        Finished(Result<(), String>),
+    }
+}
+
 fn main() {
     let origin = std::env::args().nth(1).expect("fixture origin");
     let token = std::env::var("O8_NEXT_API_TOKEN").expect("fixture credential");

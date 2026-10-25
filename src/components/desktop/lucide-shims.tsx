@@ -1,3 +1,6 @@
+// eslint-disable-next-line @typescript-eslint/triple-slash-reference -- CLI imports must also discover the ambient wildcard module.
+/// <reference path="../../types/lucide-react.d.ts" />
+
 'use client';
 
 /**

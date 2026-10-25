@@ -111,5 +111,5 @@ declare module 'lucide-react' {
 // Each icon file exports an __iconNode data array we render manually
 // to bypass the Tauri webview rendering bug in the lucide React components.
 declare module 'lucide-react/dist/esm/icons/*.js' {
-  export const __iconNode: ReadonlyArray<readonly [string, Record<string, string | number>]>;
+  export const __iconNode: import('lucide-react/dist/lucide-react').IconNode;
 }
