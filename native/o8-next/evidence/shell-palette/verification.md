@@ -191,3 +191,11 @@ reading-focus compatibility regression green. Final native test files are
 `src/surfaces/palette_tests.rs`, `src/surfaces/palette_target.rs`,
 `src/shell_tests.rs` and `src/projects_tests.rs`. The source and test moves
 retain existing function names; `npm run test:classify` passes.
+
+## Correction round 2
+
+The current boundary verdict, rebase integration regression, latest reviewer
+macOS measurements and completion receipts are recorded in
+[correction-round-2/verification.md](correction-round-2/verification.md).
+The PR now declares shared shell work and includes main's trusted #4705 checker.
+The 26 ms macOS palette-open target remains unconfirmed.

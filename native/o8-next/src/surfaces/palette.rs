@@ -93,15 +93,23 @@ impl ShellExtension for Palette {
         let key = event.keystroke.key.as_str();
         let modifiers = event.keystroke.modifiers;
         let command = modifiers.control || modifiers.platform;
-        if command && modifiers.shift && !modifiers.alt && key == "p" {
-            toggle(s, window, cx);
-        } else if command && key == "k" {
-            if modifiers.shift
+        let global = command && modifiers.shift && !modifiers.alt && key == "p";
+        if command
+            && key == "k"
+            && (modifiers.shift
                 || modifiers.alt
-                || (!s.palette && focused_control_owns_keys(s, window, cx))
-            {
-                return KeyResult::Propagate;
-            }
+                || (!s.palette && focused_control_owns_keys(s, window, cx)))
+        {
+            return KeyResult::Propagate;
+        }
+        if (global || (command && key == "k") || s.palette)
+            && registrations()
+                .iter()
+                .any(|registration| (registration.key_down)(s, event, window, cx))
+        {
+            return KeyResult::Handled;
+        }
+        if global || (command && key == "k") {
             toggle(s, window, cx);
         } else if s.palette {
             match key {

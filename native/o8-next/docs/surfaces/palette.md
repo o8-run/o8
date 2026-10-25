@@ -18,3 +18,13 @@ available without transferring keys from another control.
 Palette-intent tests use the explicit global chord. Ownership tests deliberately
 use Ctrl/Cmd+K; the terminal fixture acknowledges byte 0x0b through the real PTY.
 Requests and persisted target IDs remain in the Diff and Terminal modules.
+
+The shared ShellExtension dispatch is shell work under the surface-boundary
+policy. The PR must carry `shell-work` with a reason for those shared hooks;
+main's trusted checker enforces that classification. Whole-shell compilation
+includes the shared protocol and the registered palette together.
+
+Before handling palette navigation, the module honors registered keyboard guards,
+including Setup's busy state. Focused editor/terminal Ctrl/Cmd+K propagation still
+returns before those palette navigation handlers run. Global palette shortcuts
+resume after the registered guard releases.
