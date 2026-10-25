@@ -18,9 +18,12 @@ export function outcomeMemoryInventory(request: NextRequest) {
       outcome, summary, completed_at AS completedAt, valid_to AS validTo
       FROM session_outcomes
       WHERE (@repos = '[]' OR repo_path IN (SELECT value FROM json_each(@repos)))
+        AND (@allProjects OR project_id IS @projectId)
         AND (@query = '' OR instr(lower(COALESCE(summary, '') || ' ' || outcome || ' ' || runtime), @query) > 0)
       ORDER BY completed_at DESC, id LIMIT @limit OFFSET @offset
-    `).all({ repos: JSON.stringify(repos), query: (params.get('query') ?? '').toLowerCase(), offset, limit: limit + 1 });
+    `).all({ repos: JSON.stringify(repos), allProjects: Number(!params.has('projectId')),
+      projectId: params.get('projectId')?.trim() || null,
+      query: (params.get('query') ?? '').toLowerCase(), offset, limit: limit + 1 });
     return NextResponse.json({ ok: true, outcomes: rows.slice(0, limit), hasMore: rows.length > limit }, { headers });
   } catch {
     return NextResponse.json({ ok: false, error: 'Could not load retained outcomes. Try again.' }, { status: 500, headers });

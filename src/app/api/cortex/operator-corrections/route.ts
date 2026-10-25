@@ -19,6 +19,7 @@ export async function GET(request: NextRequest) {
   try {
     return NextResponse.json({ ok: true, ...listCorrectionMemory({ offset, limit,
       repoPaths: params.getAll('repoPath').map(value => value.trim()).filter(Boolean), query: params.get('query') ?? '',
+      projectId: params.has('projectId') ? params.get('projectId')?.trim() || null : undefined,
     }) }, { headers });
   } catch {
     return NextResponse.json({ ok: false, error: 'Could not load retained corrections. Try again.' }, { status: 500, headers });
@@ -27,12 +28,24 @@ export async function GET(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   if (resolveRequestPrincipal(request) !== 'operator') return refused();
-  const body = await request.json().catch(() => null) as { id?: unknown } | null;
+  const body = await request.json().catch(() => null) as { id?: unknown; projectId?: unknown } | null;
   if (!body || typeof body.id !== 'string' || !/^(approval|steer):[A-Za-z0-9._:-]{1,240}$/.test(body.id)) {
     return NextResponse.json({ ok: false, error: 'A qualified correction ID is required.' }, { status: 400, headers });
   }
+  if (body.projectId !== undefined && body.projectId !== null && (typeof body.projectId !== 'string' || !body.projectId.trim())) {
+    return NextResponse.json({ ok: false, error: 'A valid project identity is required.' }, { status: 400, headers });
+  }
+  const projectId = request.nextUrl.searchParams.has('projectId')
+    ? request.nextUrl.searchParams.get('projectId')?.trim() || null
+    : body.projectId === null ? null : typeof body.projectId === 'string' ? body.projectId.trim() : undefined;
+  if (projectId === undefined) {
+    return NextResponse.json({ ok: false, error: 'Select the correction project, including null for unscoped memory.' }, { status: 400, headers });
+  }
+  if (request.nextUrl.searchParams.has('projectId') && body.projectId !== undefined && body.projectId !== projectId) {
+    return NextResponse.json({ ok: false, error: 'Correction not found in this project.' }, { status: 404, headers });
+  }
   try {
-    if (!forgetCorrectionMemory(body.id)) return NextResponse.json({ ok: false, error: 'Correction not found in recall.' }, { status: 404, headers });
+    if (!forgetCorrectionMemory(body.id, projectId)) return NextResponse.json({ ok: false, error: 'Correction not found in this project.' }, { status: 404, headers });
     invalidateAnswerCache();
     await publishCortexChange({ scope: 'codebase-memory', reason: 'correction-forgotten' });
     return NextResponse.json({ ok: true, id: body.id }, { headers });

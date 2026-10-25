@@ -1,11 +1,12 @@
 import type Database from 'better-sqlite3';
+import { createHash } from 'node:crypto';
 import { getSqlite } from '@/lib/db';
 import type { PacketContext } from '@/lib/orchestrator/types';
 
 /** Called inside the forget transaction. Store identity only, never forgotten content. */
 export function excludeOutcomeFromMemory(db: Database.Database, id: string): void {
   db.exec(`CREATE TABLE IF NOT EXISTS forgotten_session_outcomes (
-    id TEXT PRIMARY KEY, forgotten_at TEXT NOT NULL
+    id TEXT PRIMARY KEY, forgotten_at TEXT NOT NULL, packet_id TEXT
   )`);
   // Durable database guards also cover already-running capture processes and
   // reindex writers. Checking in one JS reader would leave a check/insert race.
@@ -22,13 +23,18 @@ export function excludeOutcomeFromMemory(db: Database.Database, id: string): voi
         ) BEGIN SELECT RAISE(IGNORE); END`);
     }
   }
-  db.prepare('INSERT INTO forgotten_session_outcomes (id, forgotten_at) VALUES (?, ?)').run(id, new Date().toISOString());
+  const outcome = db.prepare('SELECT packet_id FROM session_outcomes WHERE id = ?').get(id) as { packet_id: string | null } | undefined;
+  db.prepare('INSERT INTO forgotten_session_outcomes (id, forgotten_at, packet_id) VALUES (?, ?, ?)')
+    .run(id, new Date().toISOString(), outcome?.packet_id ?? null);
 }
 
 /** One identity for ledger writes and all completion-memory readers, including receipts. */
 export function completionOutcomeId(context: Pick<PacketContext, 'packetId' | 'sessionKey' | 'completedAt'>): string {
-  const session = context.sessionKey.replace(/[^a-z0-9]/gi, '').slice(-24);
-  return `outcome-${context.packetId.slice(0, 16)}-${session}-${context.completedAt.slice(0, 19)}`;
+  // Hash the complete tuple so delimiter, truncation and normalization cannot
+  // conflate siblings, and the qualified ID stays within the forget API's bound.
+  return `outcome-${createHash('sha256').update(JSON.stringify([
+    context.packetId, context.sessionKey, context.completedAt,
+  ])).digest('hex')}`;
 }
 
 export function isOutcomeForgotten(id: string): boolean {
@@ -41,6 +47,5 @@ export function isOutcomeForgotten(id: string): boolean {
 export function hasForgottenPacketOutcome(packetId: string): boolean {
   const db = getSqlite();
   if (!db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'forgotten_session_outcomes'").get()) return false;
-  const prefix = `outcome-${packetId.slice(0, 16)}-`;
-  return Boolean(db.prepare('SELECT 1 FROM forgotten_session_outcomes WHERE substr(id, 1, ?) = ? LIMIT 1').get(prefix.length, prefix));
+  return Boolean(db.prepare('SELECT 1 FROM forgotten_session_outcomes WHERE packet_id = ? LIMIT 1').get(packetId));
 }

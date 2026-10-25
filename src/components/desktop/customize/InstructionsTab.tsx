@@ -78,7 +78,7 @@ function IndexedDocumentation({ directives, ...rowProps }: InstructionRowsProps)
   );
 }
 
-export function InstructionsTab({ directives, query, correctionRepoPaths, ...rowProps }: InstructionRowsProps & { query: string; correctionRepoPaths?: string[] }) {
+export function InstructionsTab({ directives, query, correctionRepoPaths, projectId, ...rowProps }: InstructionRowsProps & { query: string; correctionRepoPaths?: string[]; projectId?: string }) {
   const q = query.toLowerCase();
   const references = directives.filter(isIndexedDocumentation);
   const authored = directives.filter((d) => !isIndexedDocumentation(d));
@@ -107,7 +107,7 @@ export function InstructionsTab({ directives, query, correctionRepoPaths, ...row
         </div>
       ) : null)}
       {visibleReferences.length ? <IndexedDocumentation key={q} directives={visibleReferences} {...rowProps} /> : null}
-      {(['correction', 'outcome'] as const).map(kind => <RetainedMemory key={JSON.stringify([kind, correctionRepoPaths, q])} kind={kind} query={query} repoPaths={correctionRepoPaths} />)}
+      {(['correction', 'outcome'] as const).map(kind => <RetainedMemory key={JSON.stringify([kind, projectId, correctionRepoPaths, q])} kind={kind} projectId={projectId} query={query} repoPaths={correctionRepoPaths} />)}
     </div>
   );
 }

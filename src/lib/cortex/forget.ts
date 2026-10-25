@@ -109,6 +109,10 @@ export async function deleteRetainedMemory(request: NextRequest, kind: Kind) {
       repoPath = body.repoPath.trim();
       const projectId = body.projectId === null ? null : typeof body.projectId === 'string' && body.projectId.trim()
         ? body.projectId.trim() : (await getActiveProjectScopeForRepo(repoPath)).projectId;
+      const requestedProject = request.nextUrl.searchParams.get('projectId');
+      if (requestedProject !== null && (requestedProject.trim() || null) !== projectId) {
+        throw new ForgetError('Outcome not found in this project.', 404);
+      }
       forgetOutcome(body.id, repoPath, projectId);
     }
     invalidateAnswerCache();

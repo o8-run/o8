@@ -2957,6 +2957,13 @@
       ]
     },
     {
+      "path": "tests/forget-project-matrix-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/fuzzy-watch-real-path.test.ts",
       "reasons": [
         "executable-fixture",

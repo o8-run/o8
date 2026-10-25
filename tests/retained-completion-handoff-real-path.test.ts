@@ -308,14 +308,20 @@ describe('retained worker completion through the production supervisor callback'
     passed = true;
   });
 
-  // Retirement, two separately bounded cold reads and Git recovery share this
-  // outer budget. Keep each operation's deadline and recovery assertions intact.
+  // Measured locally: completion 12.0s, maintenance through 43.2s, and two cold
+  // reads plus Git recovery through 58.0s. The old 60s aggregate deadline timed
+  // out under contention. Keep each operation's deadline and recovery assertions.
   it('keeps unheld completion on the established automatic retirement and private Git banking path', async () => {
+    const started = performance.now();
+    const phase = (name: string) => console.log(`[retirement-timing] ${name} elapsedMs=${Math.round(performance.now() - started)}`);
     const f = await fixture(false);
+    phase('fixture');
     expect(await handleAgentCompletion(f.sessionKey, 'completed', f.dependencies)).toMatchObject({ detail: expect.stringContaining('completed its read-only inspection') });
+    phase('completion');
     const { runWorktreeMaintenanceTick } = await import('@/lib/lane/worktree-reaper');
     // Join the bounded retirement job; its real preservation work can outlast a polling deadline.
     await runWorktreeMaintenanceTick();
+    phase('maintenance');
     await vi.waitFor(() => expect(getWorkspaceSnapshot(f.repo.id, f.packet.id)?.state).toBe('retired'), { timeout: 15_000, interval: 50 });
     expect(existsSync(f.workspacePath)).toBe(false);
     const handoff = readCompletionHandoff(f.repo.id, f.packet.id);
@@ -324,12 +330,14 @@ describe('retained worker completion through the production supervisor callback'
     const preservationId = terminal?.receipt?.preservationId;
     expect(preservationId).toMatch(/^[a-f0-9]{64}$/);
     const preservation = await readWorkspacePreservation(String(preservationId));
+    phase('preservation-read');
     expect(preservation.payload.gitBundle).toMatchObject({ headCommit: f.head, treeSha: f.tree });
     expect(preservation.payload.handoff.revision).toBe(f.head);
     expect(getWorkspaceRetentionHold(f.workspacePath, f.identity)).toBeNull();
     const historical = JSON.stringify(handoff);
     closeDb();
     const current = coldCompletionContext(f.packet.id);
+    phase('cold-recovery-read');
     expect(current.recovery).toMatchObject({ source: 'verified-preservation', preservationId,
       bundleSha256: preservation.payload.gitBundle!.sha256 });
     expect(current.recovery!.instructions).toContain('live-source instructions are historical');
@@ -339,16 +347,18 @@ describe('retained worker completion through the production supervisor callback'
     execFileSync('sh', ['-c', commands.replaceAll('<empty-successor-path>', destination)], { timeout: 10_000, stdio: 'pipe' });
     expect(git(destination, 'rev-parse', 'HEAD')).toBe(f.head);
     expect(git(destination, 'rev-parse', 'HEAD^{tree}')).toBe(f.tree);
+    phase('git-recovery');
     const bundle = join(getDataDir(), 'workspace-preservation', 'git-bundles', preservation.payload.gitBundle!.sha256 + '.bundle');
     renameSync(bundle, bundle + '.unavailable');
     try {
       const missing = coldCompletionContext(f.packet.id);
+      phase('cold-unavailable-read');
       expect(missing.recovery).toMatchObject({ source: 'unavailable' });
       expect(missing.recovery!.instructions).toContain('instructions are historical');
       expect(missing.recovery!.instructions).not.toMatch(/git (clone|init|fetch)/);
     } finally { renameSync(bundle + '.unavailable', bundle); }
     expect(JSON.stringify(readCompletionHandoff(f.repo.id, f.packet.id))).toBe(historical);
-  }, 60_000);
+  }, 120_000);
 
   it('does not republish an older run when a newer turn completes during transcript capture', async () => {
     const f = await fixture();
@@ -713,46 +723,44 @@ describe('retained worker completion through the production supervisor callback'
     }
   });
 
-  it('publishes held dirty-salvage review and already-merged completion at their accepted silent-exit transitions', async () => {
+  it.each(['salvage', 'already-merged'] as const)('publishes held %s completion at its accepted silent-exit transition', async (route) => {
     const { runSilentExitTriageForLane } = await import('@/lib/supervisor/silent-exit-detector');
     const verification = await import('@/lib/supervisor/completion-verification');
-    for (const route of ['salvage', 'already-merged'] as const) {
-      const f = await fixture();
-      const mission = readOrchestratorControlPlaneState();
-      mission.packets[0].launchContext!.workMode = 'edit';
-      writeOrchestratorControlPlaneState(mission);
-      writeFileSync(join(f.workspacePath, 'tracked.txt'), 'Silent-exit committed source.\n');
-      if (route === 'already-merged') {
-        git(f.workspacePath, 'commit', '-qam', 'completed work already on remote main');
-        const remote = join(root, 'remote-' + fixtureIndex);
-        git(root, 'clone', '--bare', '-q', f.workspacePath, remote);
-        git(remote, 'update-ref', 'refs/heads/main', 'HEAD');
-        git(f.workspacePath, 'remote', 'add', 'origin', remote);
-      }
-      // Provider output/liveness and all triage/salvage/merge decisions remain real;
-      // only the heavy repository verification command is replaced here.
-      const verify = vi.spyOn(verification, 'runCompletionVerification').mockResolvedValue({ ok: true, kind: 'typecheck', output: '' });
-      try { expect(await runSilentExitTriageForLane(f.lane.id)).toBe(true); } finally { verify.mockRestore(); }
-      const record = readCompletionHandoff(f.repo.id, f.packet.id)!;
-      expect(record).toMatchObject({ acceptedState: route === 'salvage' ? 'reviewing' : 'completed',
-        sessionKey: f.sessionKey, owner: { runId: f.session.recentRuns[0].id },
-        handoff: { revision: git(f.workspacePath, 'rev-parse', 'HEAD'), treeSha: git(f.workspacePath, 'rev-parse', 'HEAD^{tree}') } });
-      if (route === 'already-merged') expect(record.handoff.outcome).toBe('already_merged');
-      expect(getLane(f.lane.id)?.status).toBe(route === 'salvage' ? 'reviewing' : 'completed');
-      if (route === 'already-merged') {
-        expect(getLaneEvents(f.lane.id, 100)).toEqual(expect.arrayContaining([
-          expect.objectContaining({ verb: 'silent_exit_already_merged', payload: expect.objectContaining({ headSha: record.handoff.revision }) }),
-        ]));
-      }
-      const saved = privateHandoffs(getDataDir(), f.packet.id)[0].path;
-      const bytes = readFileSync(saved), modified = lstatSync(saved).mtimeMs;
-      await capturePacketCompletionContext(f.packet.id, f.sessionKey);
-      expect(readFileSync(saved)).toEqual(bytes);
-      expect(lstatSync(saved).mtimeMs).toBe(modified);
-      expect(getWorkspaceRetentionHold(f.workspacePath, f.identity)).toEqual(f.hold);
-      expect(existsSync(f.workspacePath)).toBe(true);
-      expect(git(f.workspacePath, 'status', '--porcelain')).toBe('');
+    const f = await fixture();
+    const mission = readOrchestratorControlPlaneState();
+    mission.packets[0].launchContext!.workMode = 'edit';
+    writeOrchestratorControlPlaneState(mission);
+    writeFileSync(join(f.workspacePath, 'tracked.txt'), 'Silent-exit committed source.\n');
+    if (route === 'already-merged') {
+      git(f.workspacePath, 'commit', '-qam', 'completed work already on remote main');
+      const remote = join(root, 'remote-' + fixtureIndex);
+      git(root, 'clone', '--bare', '-q', f.workspacePath, remote);
+      git(remote, 'update-ref', 'refs/heads/main', 'HEAD');
+      git(f.workspacePath, 'remote', 'add', 'origin', remote);
     }
+    // Provider output/liveness and all triage/salvage/merge decisions remain real;
+    // only the heavy repository verification command is replaced here.
+    const verify = vi.spyOn(verification, 'runCompletionVerification').mockResolvedValue({ ok: true, kind: 'typecheck', output: '' });
+    try { expect(await runSilentExitTriageForLane(f.lane.id)).toBe(true); } finally { verify.mockRestore(); }
+    const record = readCompletionHandoff(f.repo.id, f.packet.id)!;
+    expect(record).toMatchObject({ acceptedState: route === 'salvage' ? 'reviewing' : 'completed',
+      sessionKey: f.sessionKey, owner: { runId: f.session.recentRuns[0].id },
+      handoff: { revision: git(f.workspacePath, 'rev-parse', 'HEAD'), treeSha: git(f.workspacePath, 'rev-parse', 'HEAD^{tree}') } });
+    if (route === 'already-merged') expect(record.handoff.outcome).toBe('already_merged');
+    expect(getLane(f.lane.id)?.status).toBe(route === 'salvage' ? 'reviewing' : 'completed');
+    if (route === 'already-merged') {
+      expect(getLaneEvents(f.lane.id, 100)).toEqual(expect.arrayContaining([
+        expect.objectContaining({ verb: 'silent_exit_already_merged', payload: expect.objectContaining({ headSha: record.handoff.revision }) }),
+      ]));
+    }
+    const saved = privateHandoffs(getDataDir(), f.packet.id)[0].path;
+    const bytes = readFileSync(saved), modified = lstatSync(saved).mtimeMs;
+    await capturePacketCompletionContext(f.packet.id, f.sessionKey);
+    expect(readFileSync(saved)).toEqual(bytes);
+    expect(lstatSync(saved).mtimeMs).toBe(modified);
+    expect(getWorkspaceRetentionHold(f.workspacePath, f.identity)).toEqual(f.hold);
+    expect(existsSync(f.workspacePath)).toBe(true);
+    expect(git(f.workspacePath, 'status', '--porcelain')).toBe('');
   });
 
   it('refuses a newer owner generation during actual silent-exit capture before acceptance', async () => {

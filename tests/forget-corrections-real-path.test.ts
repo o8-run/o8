@@ -49,7 +49,7 @@ async function loadRoute() {
 function request(method = 'GET', body?: object, token = operator, query = '') {
   return new NextRequest(`http://localhost/api/cortex/operator-corrections${query}`, {
     method, headers: { host: 'localhost', authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-    ...(body ? { body: JSON.stringify(body) } : {}),
+    ...(body ? { body: JSON.stringify({ projectId: 'default', ...body }) } : {}),
   });
 }
 function packet(id: string) {

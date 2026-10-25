@@ -11,12 +11,12 @@ interface OutcomeRow { id: string; summary: string | null; outcome: string; runt
 
 const PAGE_SIZE = 50;
 
-export function RetainedMemory({ kind, query, repoPaths }: { kind: 'correction' | 'outcome'; query: string; repoPaths?: string[] }) {
+export function RetainedMemory({ kind, query, repoPaths, projectId }: { kind: 'correction' | 'outcome'; query: string; repoPaths?: string[]; projectId?: string }) {
   const noun = kind === 'correction' ? 'feedback' : 'outcomes';
   const [page, setPage] = useState(0);
   const [refresh, setRefresh] = useState(0);
   const [expanded, setExpanded] = useState<string | null>(null);
-  const key = JSON.stringify([repoPaths, query, page, kind]);
+  const key = JSON.stringify([repoPaths, query, page, kind, projectId]);
   const [loaded, setLoaded] = useState<{ key: string; corrections: MemoryRow[]; hasMore: boolean; error?: string } | null>(null);
   const current = loaded?.key === key ? loaded : null;
   useEffect(() => {
@@ -26,10 +26,11 @@ export function RetainedMemory({ kind, query, repoPaths }: { kind: 'correction' 
   }, []);
   useEffect(() => {
     const controller = new AbortController();
-    const [paths, query, page, kind] = JSON.parse(key) as [string[] | null, string, number, 'correction' | 'outcome'];
+    const [paths, query, page, kind, projectId] = JSON.parse(key) as [string[] | null, string, number, 'correction' | 'outcome', string | null];
     if (paths?.length === 0) return () => controller.abort();
     const params = new URLSearchParams({ query, offset: String(page * PAGE_SIZE), limit: String(PAGE_SIZE) });
     paths?.forEach(path => params.append('repoPath', path));
+    if (projectId) params.set('projectId', projectId);
     if (kind === 'outcome') params.set('inventory', 'true');
     const endpoint = kind === 'correction' ? 'operator-corrections' : 'recent-outcomes';
     void fetch(`/api/cortex/${endpoint}?${params}`, { signal: controller.signal, cache: 'no-store' })
@@ -65,7 +66,7 @@ export function RetainedMemory({ kind, query, repoPaths }: { kind: 'correction' 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             <DetailLine label="Recorded" value={correction.at} />
             {correction.repoPath ? <DetailLine label="Repository" value={correction.repoPath} /> : null}
-            {kind === 'outcome' ? <DetailLine label="Project" value={correction.projectId ?? 'Unscoped'} /> : null}
+            <DetailLine label="Project" value={correction.projectId ?? 'Unscoped'} />
             <div style={{ fontSize: 12.5, fontWeight: 300, lineHeight: 1.55, color: 'var(--t-text-secondary)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{correction.reason}</div>
             <ForgetMemoryButton kind={kind} id={correction.id} label={correction.title} repoPath={correction.repoPath ?? undefined} projectId={correction.projectId} />
           </div>

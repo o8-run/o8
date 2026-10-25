@@ -14,7 +14,7 @@ export function ForgetMemoryButton({ kind, id, label, repoPath, projectId }: { k
     try {
       const response = await fetch(`/api/cortex/${kind === 'directive' ? 'directives' : kind === 'correction' ? 'operator-corrections' : 'recent-outcomes'}`, {
         method: 'DELETE', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, ...(kind === 'outcome' ? { repoPath, projectId } : {}) }),
+        body: JSON.stringify({ id, ...(kind === 'outcome' ? { repoPath, projectId } : kind === 'correction' ? { projectId } : {}) }),
       });
       const payload = await response.json().catch(() => null);
       if (!response.ok || payload?.ok !== true) throw new Error(payload?.error || 'Could not delete this item. Try again.');

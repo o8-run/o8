@@ -11,7 +11,7 @@ import type { Lane } from '@/lib/lane/types';
 import type { CloseUnmergedDisposition } from '@/lib/orchestrator/close-unmerged';
 import type { AgentSummary } from '@/lib/fleet/types';
 import { extractReviewFindings, extractReviewPatterns } from '@/lib/orchestrator/review-lessons';
-import { outcomeFromPacketSelfReview } from '@/lib/orchestrator/context-relay-outcome';
+import { completionTimestamp, outcomeFromPacketSelfReview } from '@/lib/orchestrator/context-relay-outcome';
 import {
   buildMissingPacketSelfReview,
   parsePacketSelfReview,
@@ -157,17 +157,6 @@ function findRecentNote(entries: RuntimeTranscriptEntry[], excludedEntryId?: str
     return normalizeSummaryText(text, NOTE_LIMIT);
   }
   return '';
-}
-
-function latestTranscriptTimestamp(entries: RuntimeTranscriptEntry[]): string | null {
-  for (let index = entries.length - 1; index >= 0; index -= 1) {
-    const timestamp = entries[index]?.timestamp;
-    if (!(timestamp instanceof Date) || Number.isNaN(timestamp.getTime())) {
-      continue;
-    }
-    return timestamp.toISOString();
-  }
-  return null;
 }
 
 function findLatestSelfReview(entries: RuntimeTranscriptEntry[]): PacketContext['selfReview'] {
@@ -378,7 +367,7 @@ export async function recordPacketReviewContext(
   const existing = await readPacketCompletionContext(normalizedPacketId);
   const lane = existing ? null : findLaneByPacket(normalizedPacketId);
   const projectId = existing?.projectId
-    ?? getActiveProjectScopeForRepoSync(lane?.repoPath ?? null).projectId;
+    ?? lane?.projectId ?? getActiveProjectScopeForRepoSync(lane?.repoPath ?? null).projectId;
   const nextContext: PacketContext = existing
     ? {
         ...existing,
@@ -415,7 +404,7 @@ export async function capturePacketCompletionContext(packetId: string, sessionKe
   const runtime = runtimeId ? getRuntime(runtimeId) : undefined;
   const lane = findLaneByPacket(normalizedPacketId) ?? findLatestLaneByPacket(normalizedPacketId);
   const handoffCapture = await beginCompletionHandoffCapture(lane, normalizedSessionKey);
-  const projectId = getActiveProjectScopeForRepoSync(lane?.repoPath ?? null).projectId;
+  const projectId = lane?.projectId ?? getActiveProjectScopeForRepoSync(lane?.repoPath ?? null).projectId;
 
   const [transcriptResult, changedFilesResult, agentResult, telemetryResult, spokenDiffResult] = await Promise.allSettled([
     runtime?.readTranscript(normalizedSessionKey, undefined, TRANSCRIPT_CAPTURE_LIMIT) ?? Promise.resolve([]),
@@ -470,9 +459,8 @@ export async function capturePacketCompletionContext(packetId: string, sessionKe
     changedFiles,
     selfReview,
     ...(taskContract ? { taskContract } : {}),
-    completedAt: agent?.runtimeSurface?.lifecycle?.lastRunFinishedAt
-      ?? latestTranscriptTimestamp(transcript)
-      ?? new Date().toISOString(),
+    completedAt: completionTimestamp(transcript, handoffCapture?.provider.finishedAt,
+      agent?.runtimeSurface?.lifecycle?.lastRunFinishedAt),
     model: telemetry?.model?.trim()
       || agent?.model?.trim()
       || lane?.model?.trim()
@@ -519,7 +507,7 @@ export async function capturePacketCompletionContext(packetId: string, sessionKe
 /**
  * Insert one `session_outcomes` row per captured completion (mergedClean NULL
  * until merge). Idempotent: id = packetId + sessionKey + completedAt, so
- * same-second re-captures collapse via onConflictDoNothing. True on a new row.
+ * identical re-captures collapse via onConflictDoNothing. True on a new row.
  */
 // Runtimes the ledger tracks: a subset of RuntimeId ('remote-customer' etc. are not scored).
 type LedgerRuntime = OrchestratorRuntime;

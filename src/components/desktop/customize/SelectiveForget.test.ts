@@ -21,7 +21,7 @@ beforeEach(async () => {
   localStorage.clear(); setCustomizeTab('rules'); fail = false; deleted.length = 0;
   directives = ['remove', 'keep'].map(id => ({ id, title: `${id} instruction`, scope: 'global', body: `${id} guidance`, repoName: null, projects: [], file: `/fixture/directives/${id}.md` }));
   outcomes = ['remove', 'keep'].map(id => ({ id, summary: `${id} outcome`, outcome: 'succeeded', runtime: 'codex', completedAt: new Date().toISOString() }));
-  corrections = ['remove', 'keep'].map(id => ({ id: `approval:${id}`, title: `${id} correction`, reason: `${id} operator feedback`, kind: 'rejected', repoPath: '/fixture/repo', at: '2026-10-24T12:00:00.000Z', standing: 'operator' }));
+  corrections = ['remove', 'keep'].map(id => ({ id: `approval:${id}`, title: `${id} correction`, reason: `${id} operator feedback`, kind: 'rejected', repoPath: '/fixture/repo', projectId: 'fixture-project', at: '2026-10-24T12:00:00.000Z', standing: 'operator' }));
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input).split('?')[0];
     if (init?.method === 'DELETE') {
@@ -95,7 +95,7 @@ it('lets the operator inspect a correction and confirm forgetting only that memo
   expect(host.querySelector('[role="alert"]')?.textContent).toContain('Fixture delete refused');
   expect(host.textContent).toContain('remove operator feedback');
   fail = false; await click('Delete');
-  expect(deleted).toEqual([{ path: '/api/cortex/operator-corrections', body: { id: 'approval:remove' } }]);
+  expect(deleted).toEqual([{ path: '/api/cortex/operator-corrections', body: { id: 'approval:remove', projectId: 'fixture-project' } }]);
   await vi.waitFor(() => expect(host.textContent).not.toContain('remove correction'));
   expect(host.textContent).toContain('keep correction');
   expect(host.textContent).toContain('keep instruction');
@@ -113,4 +113,21 @@ it('browses older outcomes and deletes only the selected historical repository/p
   expect(deleted).toEqual([{ path: '/api/cortex/recent-outcomes', body: { id: 'history-54', repoPath: '/fixture/history', projectId: 'older-project' } }]);
   await vi.waitFor(() => expect(host.textContent).not.toContain('Historical outcome 54'));
   expect(host.textContent).toContain('Historical outcome 53');
+});
+
+it('carries the selected project through both inventories and the correction confirmation', async () => {
+  await act(async () => root.render(createElement(CustomizePage, {
+    project: { id: 'fixture-project', name: 'Fixture', repoPaths: ['/fixture/repo'], createdAt: '' },
+    registeredRepos: [{ name: 'Fixture repo', localPath: '/fixture/repo' }],
+  })));
+  for (const endpoint of ['operator-corrections', 'recent-outcomes']) {
+    const reads = vi.mocked(fetch).mock.calls.map(([input]) => new URL(String(input), 'http://localhost'))
+      .filter(url => url.pathname.endsWith(endpoint) && url.searchParams.get('projectId') === 'fixture-project');
+    expect(reads.length, endpoint).toBeGreaterThan(0);
+    expect(reads.at(-1)?.searchParams.getAll('repoPath')).toEqual(['/fixture/repo']);
+  }
+  const row = [...host.querySelectorAll<HTMLElement>('[role="button"]')].find(value => value.textContent?.includes('remove correction'))!;
+  await act(async () => row.click());
+  await click('Delete correction remove correction'); await click('Delete');
+  expect(deleted).toEqual([{ path: '/api/cortex/operator-corrections', body: { id: 'approval:remove', projectId: 'fixture-project' } }]);
 });

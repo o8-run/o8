@@ -6,6 +6,8 @@ import path from 'node:path';
 import { readClaudeCodeWorkerProfileSync } from '@/lib/claude-code/worker-profile';
 import { buildContextBlock } from '@/lib/codebase-memory/build-context';
 import { buildPacketCorrectionsSection } from '@/lib/cortex/operator-corrections';
+import { findLatestLaneByPacket } from '@/lib/lane/registry';
+import { getActiveProjectScopeForRepoSync } from '@/lib/repos/projects';
 import { resolvePacketAlignment } from '@/lib/orchestrator/alignment-access';
 import { BRAIN_PROMPT_SECTION, resolvePacketBrainEnabled } from '@/lib/orchestrator/brain-access';
 import { renderEdgeCaseSections } from '@/lib/dispatch/edge-case-surfacer';
@@ -347,7 +349,9 @@ async function assemblePacketPrompt(
   );
   // #2219 — a rejection reason or steer message recorded against this packet
   // reaches the next worker dispatched or rerun on it.
-  const operatorCorrectionsSection = buildPacketCorrectionsSection(packet.id);
+  const projectId = packet.projectId ?? findLatestLaneByPacket(packet.id)?.projectId
+    ?? getActiveProjectScopeForRepoSync(packet.workspaceTargetPath).projectId;
+  const operatorCorrectionsSection = buildPacketCorrectionsSection(packet.id, projectId);
   const fileSizeSections = checkFileSizeThresholds(packet);
   const preservationSections = buildPreservationEnvelope(packet);
   const packetType = packet.title.trim().split(/\s+/)[0]?.toLowerCase() || 'feat';
@@ -428,6 +432,7 @@ async function assemblePacketPrompt(
   const contextBlock = packet.workspaceTargetPath
     ? await buildContextBlock({
         repoPath: packet.workspaceTargetPath,
+        projectId,
         excludeCorrectionsForPacketId: packet.id,
         packetBody: [packet.title, packet.summary, packet.issue?.body]
           .filter((value): value is string => Boolean(value))

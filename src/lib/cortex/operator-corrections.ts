@@ -31,6 +31,7 @@ export interface OperatorCorrection {
   table: 'approvals' | 'lane_events';
   packetId: string | null;
   repoPath: string | null;
+  projectId: string | null;
   /** Approval title or lane label — what was being corrected. */
   title: string;
   reason: string;
@@ -47,6 +48,8 @@ export interface ReadOperatorCorrectionsOptions {
   packetId?: string;
   /** Only corrections whose lane resolves to one of these repo paths. */
   repoPaths?: string[];
+  /** Exact project identity; undefined is the operator's global inventory. */
+  projectId?: string | null;
   /** Packet whose own corrections should be left out (already shown per-packet). */
   excludePacketId?: string;
   limit?: number;
@@ -68,6 +71,7 @@ interface RejectionRow {
   updated_at: number;
   repo_path: string | null;
   lane_packet_id: string | null;
+  project_id: string | null;
 }
 
 interface SteerRow {
@@ -77,6 +81,7 @@ interface SteerRow {
   packet_id: string | null;
   repo_path: string;
   label: string;
+  project_id: string | null;
 }
 
 function resolvePathSafe(value: string | null | undefined): string | null {
@@ -104,7 +109,7 @@ export function retainedCorrectionPredicate(idSql: string): string {
     : '1';
 }
 
-function readRejections(packetId: string | undefined, scan: number, ids?: string[]): OperatorCorrection[] {
+function readRejections(packetId: string | undefined, scan: number, ids?: string[], projectId?: string | null): OperatorCorrection[] {
   const packetClause = packetId
     ? `AND (a.packet_id = @packetId
          OR a.lane_id IN (SELECT id FROM lanes WHERE packet_id = @packetId)
@@ -113,7 +118,7 @@ function readRejections(packetId: string | undefined, scan: number, ids?: string
   const rows = getSqlite().prepare(`
     SELECT a.id, a.title, a.packet_id, a.resolved_at, a.updated_at,
            json_extract(a.resolution_json, '$.note') AS note,
-           l.repo_path AS repo_path, l.packet_id AS lane_packet_id
+           l.repo_path AS repo_path, l.packet_id AS lane_packet_id, a.project_id
     FROM approvals a
     LEFT JOIN lanes l ON l.id = COALESCE(
       a.lane_id,
@@ -126,9 +131,11 @@ function readRejections(packetId: string | undefined, scan: number, ids?: string
       ${packetClause}
       AND ${retainedCorrectionPredicate("'approval:' || a.id")}
       AND (@ids IS NULL OR 'approval:' || a.id IN (SELECT value FROM json_each(@ids)))
+      AND (@allProjects OR a.project_id IS @projectId)
     ORDER BY COALESCE(a.resolved_at, a.updated_at) DESC
     LIMIT @scan
-  `).all({ packetId: packetId ?? null, scan, ids: ids ? JSON.stringify(ids) : null }) as RejectionRow[];
+  `).all({ packetId: packetId ?? null, scan, ids: ids ? JSON.stringify(ids) : null,
+    allProjects: Number(projectId === undefined), projectId: projectId ?? null }) as RejectionRow[];
 
   return rows.map((row) => ({
     id: `approval:${row.id}`,
@@ -137,6 +144,7 @@ function readRejections(packetId: string | undefined, scan: number, ids?: string
     table: 'approvals' as const,
     packetId: row.packet_id ?? row.lane_packet_id ?? null,
     repoPath: row.repo_path ?? null,
+    projectId: row.project_id,
     title: row.title,
     reason: String(row.note).trim(),
     source: null,
@@ -145,12 +153,12 @@ function readRejections(packetId: string | undefined, scan: number, ids?: string
   }));
 }
 
-function readSteers(packetId: string | undefined, scan: number, ids?: string[]): OperatorCorrection[] {
+function readSteers(packetId: string | undefined, scan: number, ids?: string[], projectId?: string | null): OperatorCorrection[] {
   const packetClause = packetId
     ? `AND (l.packet_id = @packetId OR json_extract(e.payload_json, '$.packetId') = @packetId)`
     : '';
   const rows = getSqlite().prepare(`
-    SELECT e.id, e.payload_json, e.timestamp, l.packet_id, l.repo_path, l.label
+    SELECT e.id, e.payload_json, e.timestamp, l.packet_id, l.repo_path, l.label, l.project_id
     FROM lane_events e
     JOIN lanes l ON l.id = e.lane_id
     WHERE e.verb = 'steered_packet'
@@ -158,9 +166,11 @@ function readSteers(packetId: string | undefined, scan: number, ids?: string[]):
       ${packetClause}
       AND ${retainedCorrectionPredicate("'steer:' || e.id")}
       AND (@ids IS NULL OR 'steer:' || e.id IN (SELECT value FROM json_each(@ids)))
+      AND (@allProjects OR l.project_id IS @projectId)
     ORDER BY e.timestamp DESC
     LIMIT @scan
-  `).all({ packetId: packetId ?? null, scan, ids: ids ? JSON.stringify(ids) : null }) as SteerRow[];
+  `).all({ packetId: packetId ?? null, scan, ids: ids ? JSON.stringify(ids) : null,
+    allProjects: Number(projectId === undefined), projectId: projectId ?? null }) as SteerRow[];
 
   return rows.flatMap((row) => {
     const payload = parsePayload(row.payload_json);
@@ -174,6 +184,7 @@ function readSteers(packetId: string | undefined, scan: number, ids?: string[]):
       table: 'lane_events' as const,
       packetId: typeof payload.packetId === 'string' ? payload.packetId : row.packet_id,
       repoPath: row.repo_path,
+      projectId: row.project_id,
       title: row.label,
       reason: message,
       source,
@@ -200,7 +211,7 @@ export function readOperatorCorrections(options: ReadOperatorCorrectionsOptions 
     : null;
   const scan = Math.min(MAX_SCAN, Math.max(limit * 5, 20));
   try {
-    return [...readRejections(packetId, scan, options.ids), ...readSteers(packetId, scan, options.ids)]
+    return [...readRejections(packetId, scan, options.ids, options.projectId), ...readSteers(packetId, scan, options.ids, options.projectId)]
       .filter((correction) => !options.excludePacketId || correction.packetId !== options.excludePacketId)
       .filter((correction) => {
         if (!scopedPaths) return true;
@@ -240,8 +251,8 @@ export function formatCorrectionLine(correction: OperatorCorrection, maxReasonCh
  * Operator rulings and machine steering render under separate headings so a
  * machine nudge is never presented with operator standing.
  */
-export function buildPacketCorrectionsSection(packetId: string): string | null {
-  const corrections = readOperatorCorrections({ packetId, limit: DEFAULT_LIMIT });
+export function buildPacketCorrectionsSection(packetId: string, projectId?: string | null): string | null {
+  const corrections = readOperatorCorrections({ packetId, projectId, limit: DEFAULT_LIMIT });
   if (corrections.length === 0) return null;
   const operator = corrections.filter((correction) => correction.standing === 'operator');
   const machine = corrections.filter((correction) => correction.standing === 'machine');
