@@ -121,6 +121,27 @@ impl Workers {
                     });
                 }
             }
+            "tab" => {
+                let id = self
+                    .selected
+                    .as_ref()
+                    .filter(|id| {
+                        self.cards
+                            .get(*id)
+                            .is_some_and(|c| c.read(cx).task.filter == self.filter)
+                    })
+                    .cloned()
+                    .or_else(|| {
+                        self.order
+                            .iter()
+                            .find(|id| self.cards[*id].read(cx).task.filter == self.filter)
+                            .cloned()
+                    });
+                if let Some(id) = id {
+                    self.select(id.clone(), cx);
+                    self.cards[&id].read(cx).focus_actions(window);
+                }
+            }
             "f5" => self.load(cx),
             _ => return,
         }
@@ -252,7 +273,8 @@ impl Render for Workers {
                     })
                     .cursor_pointer()
                     .child(format!("{label} {}", counts[filter]))
-                    .on_click(cx.listener(move |this, _, _, cx| {
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.focus.focus(window);
                         this.filter = filter;
                         cx.notify();
                     })),
@@ -326,6 +348,9 @@ impl Render for Workers {
             .debug_selector(|| "workers-pane".into())
             .size_full()
             .track_focus(&self.focus)
+            .tab_group()
+            .tab_index(-1)
+            .tab_stop(false)
             .on_key_down(cx.listener(Self::key_down))
             .font_family(theme().font_ui)
             .font_weight(gpui::FontWeight::LIGHT)

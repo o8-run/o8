@@ -41,5 +41,22 @@ it('Workers uses the production state, lanes and live event routes behind operat
   const activityData = await activity.json();
   expect(activityData.events.filter((event: { payload: { message?: string } }) => event.payload.message).map((event: { payload: { message: string } }) => event.payload.message))
     .toEqual(['Read the task', 'Inspect the working tree', 'Check ownership']);
+  const detail = await fetch(origin + `/api/lanes/${blocked.id}?events=0`, { headers });
+  expect(detail.status).toBe(200);
+  const fixture = await (await fetch(origin + '/api/workers-fixture', { headers })).json();
+  const diff = await fetch(origin + '/api/worktrees/diff?' + new URLSearchParams({ worktreePath: fixture.repo, baseBranch: 'main' }), { headers });
+  expect(diff.status).toBe(200);
+  expect((await diff.json()).diff).toContain('shared.txt');
+  const adjustment = { packetId: 'worker-blocked', message: 'Check ownership', source: 'operator', idempotencyKey: 'fixture-workers-adjust' };
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const steered = await fetch(origin + '/api/orchestrator/steer-packet', { method: 'POST',
+      headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify(adjustment) });
+    const result = await steered.json();
+    expect(steered.status, JSON.stringify(result)).toBe(200);
+    expect(result.ok).toBe(true);
+  }
+  const receipt = await (await fetch(origin + '/api/workers-fixture', { headers })).json();
+  expect(receipt.bodies).toEqual([adjustment, adjustment]);
+  expect(receipt.deliveries).toEqual([{ sessionKey: 'fixture:worker-blocked', message: 'Check ownership' }]);
   expect((await fetch(origin + '/api/lanes?active=true')).status).toBe(401);
 }, 60_000);
