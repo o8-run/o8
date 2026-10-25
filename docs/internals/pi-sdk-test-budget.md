@@ -7,34 +7,23 @@ test must explicitly use `createBudgetedPiTestTransport` and its one approved
 persistent ledger in trusted host storage outside the tool workspace. The guarded
 transport rejects a canonical ledger path inside that workspace. No UI or public route selects this test entry today.
 
-## Live contract
+## Retired managed contract
 
-`resolveLivePiTestContract()` returns one verified contract,
-`O8_MANAGED_FLASH_LITE_CONTRACT` in `src/lib/pi/sdk/live-contract.ts`, until it
-expires on 2026-10-25. It covers `google/gemini-2.5-flash-lite` at
-`https://api.o8.run/v1/inference` only. The evidence, checked 2026-10-04:
+The dated managed pricing contract and its paid live acceptance test are retired.
+`resolveLivePiTestContract()` returns `null`, so the guarded transport refuses
+before route resolution or a request unless trusted offline code injects a
+synthetic contract. There is no managed paid test or environment opt-in.
 
-- The hosted endpoint caps this model at 0.18 USD per million prompt tokens
-  and 0.72 USD per million completion tokens, with at most 4096 output tokens
-  per call.
-- OpenRouter's published endpoint prices for the model topped out at exactly
-  those rates, with no per-request fee.
-- Billable input tokens cannot exceed the serialized request bytes; the bound
-  adds 16 KiB for provider-added prompt tokens.
+The generic ledger and transport remain because
+`tests/pi-sdk-budget-real-path.test.ts` exercises reservation, concurrency,
+crash, cancellation, usage, and expiry boundaries through real SDK workers and
+SQLite. `tests/pi-sdk-live-contract.test.ts` checks request compatibility with
+synthetic bounds and a pinned Date clock. Runtime model descriptions in
+`src/lib/pi/sdk/live-contract.ts` remain in use by model selection, orchestrators,
+workers, and durable sessions; their values no longer depend on pricing evidence.
 
-The contract caps each request at 64 KiB of serialized input and 4096 output
-tokens, so the worst case is 17,696 micro-USD per request and at most 8 calls.
-After expiry, validation refuses the contract and live testing is blocked
-again until the evidence is rechecked.
-
-`O8_MANAGED_FLASH_LITE_MODEL` describes the model to Pi so it sends only fields
-the endpoint accepts: `max_tokens` instead of `max_completion_tokens`, no
-`store`, and the system role. `tests/pi-sdk-live-contract.test.ts` checks the
-serialized request offline.
-
-The resolver injection is for trusted host code and offline tests, never a
-request field, worker tool, environment JSON value, or checkbox that a caller
-can label “verified.”
+Resolver injection remains a trusted offline seam, never a request field,
+worker tool, environment JSON value, or user flag.
 
 ## What the guard enforces
 
@@ -69,26 +58,6 @@ provider error. The transport keeps existing error sanitization. These are
 host-side controls, not protection from a malicious process that can rewrite
 its own application files or create another budget ledger.
 
-## Contract required from the hosted owner
-
-Before enabling a live test, verify all of the following for one exact model:
-
-- The permitted hosted endpoint, model identifier, context bound and expiry;
-  these bounds must cover the full lifetime of every request admitted before expiry
-- Input and output rates, fixed fees and billing rounding, including any markup
-- A billable-input upper bound for every accepted serialized request within the
-  byte limit, including tool schemas, system messages and internal overhead
-- The output-token limit covers reasoning and all other billed output
-- Failed or interrupted calls and any upstream retries cannot exceed the stated
-  per-request maximum
-- Stream usage fields are complete and meaningful for checking the stated bounds
-
-If any item is unknown or the evidence changes, the resolver must return no contract. A cached client price
-estimate or a fail-open daily ledger is not sufficient evidence. A completed
-stream is still charged its full reservation locally; no invoice equivalence is
-claimed. Secure sign-in and a tested build containing the guard are separate
-prerequisites.
-
 ## Offline verification
 
 `tests/pi-sdk-budget-real-path.test.ts` drives the full transport through a real
@@ -101,10 +70,21 @@ npx vitest run tests/pi-sdk-budget-real-path.test.ts --maxWorkers=1
 npm run test:integration -- tests/pi-sdk-budget-real-path.test.ts
 ```
 
-## Live acceptance
+## Dated fixture checks
 
-`tests/pi-sdk-live-acceptance.test.ts` is skipped unless `O8_PI_LIVE_PAID=1`. It runs the real worker against the live contract with synthetic files: an approved edit, an attempted read of the fixture outside the workspace that the host refuses, resume of the persisted session in a new process, stop on the first streamed update, clean shutdown, and a ledger smaller than one request that refuses with no network request. Every network request must match one ledger reservation. `O8_PI_LIVE_RECEIPT` must be a new file outside the o8 data directory, checked before and after creation; the runner hides test console output. `O8_PI_LIVE_LEDGER_MICRO_USD` sets the main ledger limit (at most 990,000).
+Both `npm run test:classify` and `npm run test:classification:check` audit fixed
+expiry dates in source, tests, CLI, script, and configuration files. The latter
+already runs on every PR. Dates within the next seven days produce a warning,
+including the file, line, and UTC expiry; the warning does not fail the command
+or alter the manifest.
 
-The contract model sets `supportsLongCacheRetention: false`, and the guarded transport refuses any body field outside the endpoint's accepted set before reserving, so `PI_CACHE_RETENTION=long` cannot add a rejected field after money is reserved.
-
-Passing run, 2026-10-04: every step passed, and the stop landed after the first streamed update. Seven requests matched seven reservations. Six completed calls used 1,397 input and 69 output tokens. The stopped call stayed in the ledger as an unknown charge, which blocks further calls on that ledger.
+Every hermetic test reaching a fixed expiry fixture through local imports or
+static JSON fixture paths must
+pin Date before running assertions. Use `beforeEach` with
+`vi.useFakeTimers({ toFake: ['Date'] })` and a fixed `vi.setSystemTime(...)`, then
+restore timers in `afterEach`. An explicit `now` in `useFakeTimers` also works.
+Relative expiries such as `Date.now() + 60_000` do not require this policy.
+The static gate deliberately applies even to serialization-only assertions so
+adding validation later cannot quietly introduce a calendar-dependent failure.
+Do not restore the wall clock inside a dated-fixture test or hide clock setup
+in conditional code or helper declarations.

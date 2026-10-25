@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { NextRequest } from 'next/server';
-import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({ resolve: vi.fn(), open: vi.fn(), ensure: vi.fn() }));
 vi.mock('@/lib/cloud/preview-authority', () => ({ resolveTaskPreview: mocks.resolve }));
@@ -14,7 +14,10 @@ process.env.CORTEX_IDE_DATA_DIR = dataDir;
 const { getOrCreateWsToken } = await import('@/lib/ws-auth');
 const { POST } = await import('./route');
 afterAll(() => rmSync(dataDir, { recursive: true, force: true }));
+afterEach(() => vi.useRealTimers());
 beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(Date.UTC(2026, 5, 1));
   vi.clearAllMocks();
   mocks.resolve.mockResolvedValue({ taskId: 'task-origin', jobId: 'job-origin', attempt: 1, service: { name: 'web' } });
   mocks.open.mockResolvedValue({ id: 'preview-origin', url: 'http://[::1]:4444/__o8_connect', expiresAt: '2026-10-02T13:00:00Z', close: vi.fn() });

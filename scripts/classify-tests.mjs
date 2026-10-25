@@ -2,12 +2,18 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { buildTestClassificationReport } from './lib/test-classification.mjs';
+import { auditDatedFixtures } from './lib/dated-fixtures.mjs';
 
 const root = process.cwd();
 const manifestPath = join(root, 'tests/test-classification.json');
 const classification = buildTestClassificationReport(root);
 const next = `${JSON.stringify(classification.manifest, null, 2)}\n`;
 const mode = process.argv[2] || '--check';
+
+const dated = auditDatedFixtures(root, classification.hermeticFiles);
+for (const warning of dated.warnings) console.warn(`[dated-fixtures] WARNING ${warning}`);
+for (const error of dated.errors) console.error(`[dated-fixtures] ${error}`);
+if (dated.errors.length) process.exit(1);
 
 if (mode === '--write') {
   writeFileSync(manifestPath, next);

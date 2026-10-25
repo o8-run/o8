@@ -1,15 +1,15 @@
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { classifyTestSource } from '../scripts/lib/test-classification.mjs';
 
 const classificationScript = fileURLToPath(new URL('../scripts/classify-tests.mjs', import.meta.url));
 
-function runClassification(root: string, mode: '--check' | '--write') {
-  return spawnSync(process.execPath, [classificationScript, mode], {
+function runClassification(root: string, mode: '--check' | '--write', preload?: string) {
+  return spawnSync(process.execPath, [...(preload ? ['--import', pathToFileURL(preload).href] : []), classificationScript, mode], {
     cwd: root,
     encoding: 'utf8',
   });
@@ -83,5 +83,118 @@ describe('test factory classification', () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+});
+
+function datedFixture(testSource: string, contractSource = 'export const contract = { expiresAt: Date.UTC(2030, 0, 9) };') {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'o8-dated-fixture-')));
+  mkdirSync(join(root, 'tests/fixtures'), { recursive: true });
+  mkdirSync(join(root, 'src'));
+  writeFileSync(join(root, 'src/contract.ts'), contractSource);
+  writeFileSync(join(root, 'tests/fixtures/check.ts'), `
+    import { contract } from '@/contract';
+    export function check() { if (contract.expiresAt <= Date.now()) throw new Error('expired'); }
+  `);
+  writeFileSync(join(root, 'tests/clock.test.ts'), `
+    import { check } from './fixtures/check';
+    ${testSource}
+  `);
+  return root;
+}
+
+describe('dated fixture PR gate', () => {
+  it.each([
+    ['transitive fixture', "it('valid', () => check());"],
+    ['timers without a pinned Date', "beforeEach(() => vi.useFakeTimers()); it('valid', () => check());"],
+    ['timers excluding Date', "beforeEach(() => { vi.useFakeTimers({ toFake: ['setTimeout'] }); vi.setSystemTime(0); }); it('valid', () => check());"],
+    ['wall clock pin', "beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(Date.now()); }); it('valid', () => check());"],
+    ['only a sibling pins Date', "it('pinned', () => { vi.useFakeTimers(); vi.setSystemTime(0); check(); }); it('unbounded', () => check());"],
+    ['a late pin', "it('valid', () => { check(); vi.useFakeTimers({ now: 0 }); });"],
+    ['a conditional pin', "it('valid', () => { if (flag) vi.useFakeTimers({ now: 0 }); check(); });"],
+    ['a restored wall clock', "beforeEach(() => vi.useFakeTimers({ now: 0 })); it('valid', () => { vi.useRealTimers(); check(); });"],
+  ])('rejects %s through the classification entry point', (_name, source) => {
+    const root = datedFixture(source);
+    try {
+      for (const mode of ['--write', '--check'] as const) {
+        const result = runClassification(root, mode);
+        expect(result.status, result.stderr).toBe(1);
+        expect(result.stderr).toContain('[dated-fixtures] tests/clock.test.ts');
+        expect(result.stderr).toContain('pin Date');
+      }
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it.each([
+    "beforeEach(() => { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(Date.UTC(2029, 0, 1)); }); it('valid', () => check());",
+    "it('valid', () => { vi.useFakeTimers({ now: 0 }); check(); });",
+  ])('accepts an explicit fixture clock', (source) => {
+    const root = datedFixture(source);
+    try {
+      expect(runClassification(root, '--write').status).toBe(0);
+      expect(runClassification(root, '--check').status).toBe(0);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it('accepts a relative expiry without confusing it with a dated contract', () => {
+    const root = datedFixture("it('valid', () => check());", 'export const contract = { expiresAt: Date.now() + 60_000 };');
+    try { expect(runClassification(root, '--write').status).toBe(0); }
+    finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it.each([
+    "export const contract = { expiresAt: '2030-01-09T00:00:00Z' };",
+    'export const contract = { expiresAt: 1_894_147_200_000 };',
+    "export const contract = { expiresAt: new Date('2030-01-09T00:00:00Z').getTime() };",
+    'const boundary = Date.UTC(2030, 0, 9); export const contract = { expiresAt: boundary };',
+  ])('finds fixed expiry syntax through an imported fixture', (contract) => {
+    const root = datedFixture("it('valid', () => check());", contract);
+    try {
+      const result = runClassification(root, '--write');
+      expect(result.status, result.stderr).toBe(1);
+      expect(result.stderr).toContain('fixed expiry in src/contract.ts');
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it.each([
+    "new URL('./fixtures/token.json', import.meta.url)",
+    "join(process.cwd(), 'tests', 'fixtures', 'token.json')",
+  ])('follows a JSON fixture loaded from disk: %s', (path) => {
+    const root = datedFixture(`
+      import { readFileSync } from 'node:fs'; import { join } from 'node:path';
+      it('valid', () => {
+        const fixture = JSON.parse(readFileSync(${path}, 'utf8'));
+        expect(Date.parse(fixture.expiresAt)).toBeGreaterThan(Date.now());
+      });
+    `, 'export const contract = { expiresAt: Date.now() + 60_000 };');
+    try {
+      writeFileSync(join(root, 'tests/fixtures/token.json'), '{"expiresAt":"2030-01-09T00:00:00Z"}');
+      const result = runClassification(root, '--write');
+      expect(result.status, result.stderr).toBe(1);
+      expect(result.stderr).toContain('fixed expiry in tests/fixtures/token.json');
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it('warns at seven days without failing or changing the manifest', () => {
+    const root = datedFixture("beforeEach(() => { vi.useFakeTimers({ now: 0 }); }); it('valid', () => check());");
+    try {
+      writeFileSync(join(root, 'tests/fixtures/token.json'), '{"expires_at":"2030-01-09T00:00:00Z"}');
+      const preload = join(root, 'clock.mjs');
+      const runAt = (day: number, mode: '--write' | '--check') => {
+        writeFileSync(preload, `Date.now = () => Date.UTC(2030, 0, ${day});`);
+        return runClassification(root, mode, preload);
+      };
+      const early = runAt(1, '--write');
+      expect(early.status).toBe(0);
+      expect(early.stderr).not.toContain('[dated-fixtures] WARNING');
+      const manifest = readFileSync(join(root, 'tests/test-classification.json'), 'utf8');
+      for (const day of [2, 8]) {
+        const warning = runAt(day, '--check');
+        expect(warning.status, warning.stderr).toBe(0);
+        expect(warning.stderr).toContain('[dated-fixtures] WARNING src/contract.ts:');
+        expect(warning.stderr).toContain('[dated-fixtures] WARNING tests/fixtures/token.json:');
+        expect(warning.stderr).toContain('2030-01-09');
+        expect(readFileSync(join(root, 'tests/test-classification.json'), 'utf8')).toBe(manifest);
+      }
+    } finally { rmSync(root, { recursive: true, force: true }); }
   });
 });

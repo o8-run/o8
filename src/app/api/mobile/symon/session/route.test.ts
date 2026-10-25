@@ -271,6 +271,8 @@ function writePreviousBillingSource(billingSource: 'chatgpt-subscription' | 'ope
 }
 
 beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(Date.UTC(2026, 5, 1));
   // Reset ONLY these fns — not vi.clearAllMocks(), which would also wipe the
   // O8WebviewClient constructor's `() => ({ evalJs })` implementation.
   h.evalJs.mockReset();
@@ -299,6 +301,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
 });

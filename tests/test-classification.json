@@ -4736,12 +4736,6 @@
       ]
     },
     {
-      "path": "tests/pi-sdk-live-acceptance.test.ts",
-      "reasons": [
-        "process-signal"
-      ]
-    },
-    {
       "path": "tests/pi-sdk-packaged-layout-real-path.test.ts",
       "reasons": [
         "child-process",
