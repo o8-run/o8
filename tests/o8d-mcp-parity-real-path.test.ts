@@ -413,6 +413,41 @@ describe('o8d MCP through the real HTTP JSON-RPC entry point', () => {
     } finally { failedSource = ''; }
   });
 
+  nativeReadTest('publishes through the macOS platform gate and serves fresh SQLite status during an outage', async () => {
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+    // Exercise the publisher's platform gate on Linux too. Process identity is
+    // still observed on the real host; this is not a macOS runtime measurement.
+    const expected = await call(base, 'o8_status', { fresh: true });
+    process.env.O8D_MCP_READS = '0';
+    await call(base, 'o8_list_projects');
+    process.env.O8D_MCP_READS = '1';
+    try {
+      Object.defineProperty(process, 'platform', { ...platform, value: 'darwin' });
+      await call(base, 'o8_status');
+    } finally { Object.defineProperty(process, 'platform', platform); }
+    seen.length = 0;
+    failedSource = '/api/mcp';
+    try {
+      const actual = await call(nativeRust, 'o8_status');
+      expect(actual.status).toBe(200);
+      compareMcpExchanges(expected, actual, ['/body/result/content/0/text/json/data/snapshot/ageMs']);
+      expect(seen).toHaveLength(0);
+      for (const args of [{ fresh: true }, { sessionKey: 'fixture:outage-unobserved' }]) {
+        expect((await call(nativeRust, 'o8_status', args)).status).toBe(503);
+      }
+      const sqlite = getSqlite();
+      const row = sqlite.prepare("SELECT key, value FROM app_state WHERE key LIKE 'o8d/mcp/v1/status/%' ORDER BY updated_at DESC LIMIT 1").get() as { key: string; value: string };
+      const stale = JSON.parse(row.value);
+      stale.snapshot.capturedAt = Date.now() - 5_000;
+      sqlite.prepare('UPDATE app_state SET value = ? WHERE key = ?').run(JSON.stringify(stale), row.key);
+      try { expect((await call(nativeRust, 'o8_status')).status).toBe(503); }
+      finally { sqlite.prepare('UPDATE app_state SET value = ? WHERE key = ?').run(row.value, row.key); }
+    } finally {
+      failedSource = '';
+      await call(base, 'o8_list_projects');
+    }
+  });
+
   nativeReadTest('sees committed WAL updates without modifying SQLite or the registries', async () => {
     const sqlite = getSqlite();
     expect(sqlite.pragma('journal_mode', { simple: true })).toBe('wal');
@@ -470,7 +505,9 @@ describe('o8d MCP through the real HTTP JSON-RPC entry point', () => {
     const sqlite = getSqlite();
     const row = sqlite.prepare("SELECT value FROM app_state WHERE key = 'o8d/mcp/v1/policy'").get() as { value: string };
     const original = JSON.parse(row.value);
-    for (const value of ['{', JSON.stringify({ ...original, identity: { ...original.identity, startId: 'invalid' } }), JSON.stringify({ ...original, enabled: false })]) {
+    for (const value of ['{', ...['bootId', 'startId'].map((field) => JSON.stringify({
+      ...original, identity: { ...original.identity, [field]: 'invalid' },
+    })), JSON.stringify({ ...original, enabled: false })]) {
       sqlite.prepare("UPDATE app_state SET value = ? WHERE key = 'o8d/mcp/v1/policy'").run(value);
       seen.length = 0;
       expect((await call(nativeRust, 'o8_list_repos')).status).toBe(200);

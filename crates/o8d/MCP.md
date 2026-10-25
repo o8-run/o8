@@ -91,7 +91,10 @@ because a fixture HTTP adapter is not the baseline's source Next.js server.
 The real-entry measurement test also records candidate `tools/call` forwards,
 including warmups, so fallback latency is visible rather than attributed to a
 native read. The six-tool outage test independently proves warmed reads need
-no TypeScript requests and do not modify SQLite or the JSON registries.
+no TypeScript requests and do not modify SQLite or the JSON registries. Native
+assertions run on Linux and macOS. The publication-gate regression also runs
+on Linux with a macOS platform selector and real host identity; it is not
+macOS runtime or latency evidence. Measure on each actual platform separately.
 
 Run the real HTTP fixture suite with Node 22 and Rust stable:
 
