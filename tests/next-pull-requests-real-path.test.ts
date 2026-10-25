@@ -8,7 +8,10 @@ let origin = '';
 const headers = { authorization: 'Bearer fixture-next-pr-operator', 'Content-Type': 'application/json' };
 beforeAll(async () => {
   server = spawn(process.execPath, ['--import', './scripts/register-server-only-stub.mjs', '--import', 'tsx',
-    'scripts/next/pull-request-server.ts'], { stdio: ['ignore', 'pipe', 'ignore'] });
+    'scripts/next/dev-server.ts', '--pull-requests'], {
+    env: { ...process.env, O8_NEXT_API_TOKEN: 'fixture-next-pr-operator' },
+    stdio: ['ignore', 'pipe', 'ignore'],
+  });
   for await (const line of createInterface({ input: server.stdout! })) {
     try { origin = (JSON.parse(line) as { origin: string }).origin; } catch { continue; }
     if (origin) break;

@@ -1,23 +1,18 @@
-/** Disposable production PR route host. Only the external GitHub transport is authored. */
-import { createServer } from 'node:http';
+/** PR fixture registration; only the external GitHub transport is authored. */
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { NextRequest } from 'next/server';
+import type { SurfaceContext, SurfaceRoutes } from '../surface-routes';
 
-async function main() {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'o8-next-pr-')));
-  const data = join(root, 'data'); const repo = join(root, 'repo');
-  mkdirSync(data); mkdirSync(repo);
-  execFileSync('git', ['init', '-q', repo]);
+let fixture: (() => Promise<SurfaceRoutes>) | undefined;
+export async function prepare({ dataDir, repo }: SurfaceContext): Promise<SurfaceRoutes> {
+  if (!process.argv.includes('--pull-requests')) return {};
   execFileSync('git', ['-C', repo, 'remote', 'add', 'origin', 'https://github.com/example/repo.git']);
-  Object.assign(process.env, { O8_DATA_DIR: data, CORTEX_IDE_DATA_DIR: data, CORTEX_IDE_DB_PATH: join(data, 'fixture.db'), NODE_ENV: 'test' });
-  for (const key of ['O8_API_TOKEN', 'O8_WORKER_TOKEN', 'O8_SPECTATOR_TOKEN', 'WS_TOKEN', 'GITHUB_APP_ID', 'GITHUB_APP_PRIVATE_KEY', 'GITHUB_APP_PRIVATE_KEY_PATH']) delete process.env[key];
-  writeFileSync(join(data, 'ws-token'), 'fixture-next-pr-operator', { mode: 0o600 });
-  writeFileSync(join(data, 'active-identity'), 'fixture-pr-owner');
-  writeFileSync(join(data, 'github-app-managed.json'), JSON.stringify({ installed: true, token: 'fixture-github-token',
+  for (const key of ['GITHUB_APP_ID', 'GITHUB_APP_PRIVATE_KEY', 'GITHUB_APP_PRIVATE_KEY_PATH']) delete process.env[key];
+  writeFileSync(join(dataDir, 'active-identity'), 'fixture-pr-owner');
+  writeFileSync(join(dataDir, 'github-app-managed.json'), JSON.stringify({ installed: true, token: 'fixture-github-token',
     installationId: 1, ownerClerkUserId: 'fixture-pr-owner', expiresAt: new Date(Date.now() + 3600_000).toISOString() }));
+  const originalFetch = globalThis.fetch;
   const comments: Array<Record<string, unknown>> = [];
   const reviews: Array<Record<string, unknown>> = [];
   const pulls = new Map<number, Record<string, unknown>>();
@@ -90,43 +85,37 @@ async function main() {
     }
     throw new Error(`Unhandled GitHub fixture route: ${method} ${path}`);
   };
-  const list = await import('../../src/app/api/panel/prs/route');
-  const detail = await import('../../src/app/api/panel/prs/[number]/route');
-  const preview = await import('../../src/app/api/orchestrator/merge-preview/route');
-  const { createLane } = await import('../../src/lib/lane/registry');
-  createLane({ repoPath: repo, worktreePath: repo, branch: 'fixture-missing', baseBranch: 'main', runtime: 'codex', packetId: 'next-pr-drift' });
-  const { panelGateMiddleware } = await import('../../src/middleware');
-  const receipts: Array<{ method: string; path: string; body: unknown }> = [];
-  const server = createServer(async (req, res) => {
-    try {
-      const url = new URL(req.url!, `http://${req.headers.host}`);
-      let body = ''; for await (const chunk of req) body += String(chunk);
-      const request = new NextRequest(url, { method: req.method, headers: { host: url.host, 'x-o8-client-addr': '127.0.0.1',
-        'Content-Type': 'application/json', ...(req.headers.authorization ? { authorization: req.headers.authorization } : {}) }, ...(body ? { body } : {}) });
-      const gate = panelGateMiddleware(request);
-      let response: Response = gate;
-      if (gate.status === 200) {
-        receipts.push({ method: req.method!, path: url.pathname, body: body ? JSON.parse(body) : null });
-        const number = url.pathname.match(/^\/api\/panel\/prs\/(\d+)$/)?.[1];
-        response = url.pathname === '/api/panel/prs' ? await list.GET(request)
-          : number ? await (req.method === 'POST' ? detail.POST : detail.GET)(request, { params: Promise.resolve({ number }) })
-          : url.pathname === '/api/orchestrator/merge-preview' ? await preview.GET(request)
-          : url.pathname === '/api/orchestrator/state' ? Response.json({ mission: { packets: [
-            { id: 'next-pr-unwired', workspaceTargetPath: repo, branchTarget: 'fixture-8', status: 'awaiting_review' },
-            { id: 'next-pr-drift', workspaceTargetPath: repo, branchTarget: 'fixture-9', status: 'awaiting_review' },
-          ] } })
-          : url.pathname === '/api/panel/github-status' ? Response.json({ authenticated: true, username: 'fixture-author' })
-          : url.pathname === '/api/panel/status' ? Response.json({ repo, receipts }) : new Response('', { status: 404 });
-      }
-      if (body && JSON.parse(body).comment === 'Fixture lose response') { res.destroy(); return; }
-      res.writeHead(response.status, Object.fromEntries(response.headers)); res.end(Buffer.from(await response.arrayBuffer()));
-    } catch { res.writeHead(500).end('fixture failed'); }
-  });
-  server.listen(0, '127.0.0.1', () => {
-    const address = server.address(); if (!address || typeof address === 'string') throw new Error('Fixture address');
-    process.stdout.write(`${JSON.stringify({ origin: `http://127.0.0.1:${address.port}` })}\n`);
-  });
-  const close = () => { server.closeAllConnections(); server.close(() => { rmSync(root, { recursive: true, force: true }); process.exit(0); }); };
-  process.on('SIGTERM', close); process.on('SIGINT', close); setTimeout(close, 120_000).unref();
+  fixture = async () => {
+    const list = await import('../../../src/app/api/panel/prs/route');
+    const detail = await import('../../../src/app/api/panel/prs/[number]/route');
+    const preview = await import('../../../src/app/api/orchestrator/merge-preview/route');
+    const { createLane } = await import('../../../src/lib/lane/registry');
+    createLane({ repoPath: repo, worktreePath: repo, branch: 'fixture-missing', baseBranch: 'main', runtime: 'codex', packetId: 'next-pr-drift' });
+    const receipts: Array<{ method: string; path: string; body: unknown }> = [];
+    return {
+      priority: 10,
+      routes: {
+        'GET /api/panel/prs': list.GET,
+        'GET /api/orchestrator/merge-preview': preview.GET,
+        'GET /api/orchestrator/state': async () => Response.json({ mission: { packets: [
+          { id: 'next-pr-unwired', workspaceTargetPath: repo, branchTarget: 'fixture-8', status: 'awaiting_review' },
+          { id: 'next-pr-drift', workspaceTargetPath: repo, branchTarget: 'fixture-9', status: 'awaiting_review' },
+        ] } }),
+        'GET /api/panel/github-status': async () => Response.json({ authenticated: true, username: 'fixture-author' }),
+        'GET /api/panel/status': async () => Response.json({ repo, receipts }),
+      },
+      match: (method, path) => {
+        const number = path.match(/^\/api\/panel\/prs\/(\d+)$/)?.[1];
+        if (!number || !['GET', 'POST'].includes(method)) return;
+        return request => (method === 'POST' ? detail.POST : detail.GET)(request, { params: Promise.resolve({ number }) });
+      },
+      admit: () => 200,
+      before: ({ method, url, body }) => { receipts.push({ method, path: url.pathname, body: body ? JSON.parse(body) : null }); },
+      after: ({ body }) => !!body && JSON.parse(body).comment === 'Fixture lose response',
+    };
+  };
+  return { close: () => { globalThis.fetch = originalFetch; } };
 }
-void main().catch(() => { process.stderr.write('PR fixture startup failed\n'); process.exit(1); });
+export default async function register(): Promise<SurfaceRoutes> {
+  return fixture ? fixture() : {};
+}

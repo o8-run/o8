@@ -23,8 +23,10 @@ impl Fixture {
                 "./scripts/register-server-only-stub.mjs",
                 "--import",
                 "tsx",
-                "scripts/next/pull-request-server.ts",
+                "scripts/next/dev-server.ts",
+                "--pull-requests",
             ])
+            .env("O8_NEXT_API_TOKEN", "fixture-next-pr-operator")
             .args(args)
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
@@ -190,6 +192,7 @@ fn pull_requests_uncertain_delivery_is_shared_across_worktrees(cx: &mut TestAppC
         assert!(
             Command::new("git")
                 .args(["-C", &fixture.workspace])
+                .env("O8_NEXT_API_TOKEN", "fixture-next-pr-operator")
                 .args(args)
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())

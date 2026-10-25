@@ -42,7 +42,7 @@ The final focused native tail is:
 test result: ok. 8 passed; 0 failed; 0 ignored; 33 filtered out
 ```
 
-These eight tests are in `src/pull_request_tests.rs` and `src/shell_tests.rs`.
+These eight tests are in `src/surfaces/pull_requests/tests.rs` and `src/surfaces/pull_requests/shell_tests.rs`.
 They click GPUI controls, type through the shared composer, use an owned fixture
 HTTP server, and inspect production-route responses and server-side action
 receipts. They cover all eleven implemented PR write actions, all three merge
@@ -116,6 +116,6 @@ This is a partial parity slice. Packet-linked merging and enabling auto-merge
 remain unavailable. Full native per-gate mutation coverage, independent red
 receipts for every desktop action, desktop keyboard behavior, saved per-PR
 draft/view state, and the controls marked partial/missing in the
-[parity table](../../PULL-REQUESTS.md) remain open. macOS and real display
+[parity table](../pull-requests.md) remain open. macOS and real display
 measurements were not available in this environment. The installed app changes
 only when the user explicitly opts in to o8 next.

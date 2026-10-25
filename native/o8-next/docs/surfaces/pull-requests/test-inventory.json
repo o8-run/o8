@@ -1,0 +1,423 @@
+{
+  "beforeHead": "a57dbcdf4",
+  "beforeTests": 83,
+  "afterTests": 100,
+  "allPriorNamesAndStatusesRetained": true,
+  "comparison": [
+    {
+      "before": "client::tests::explicit_loopback_only",
+      "after": "client::tests::explicit_loopback_only",
+      "status": "ok"
+    },
+    {
+      "before": "composer::tests::composer_height_bounds_follow_content",
+      "after": "composer::tests::composer_height_bounds_follow_content",
+      "status": "ok"
+    },
+    {
+      "before": "composer::tests::ime_multiline_paste_undo",
+      "after": "composer::tests::ime_multiline_paste_undo",
+      "status": "ok"
+    },
+    {
+      "before": "composer::tests::long_multiline_paste_keeps_caret_reachable",
+      "after": "composer::tests::long_multiline_paste_keeps_caret_reachable",
+      "status": "ok"
+    },
+    {
+      "before": "composer::tests::utf16_selection_and_composition_at_nonzero_offset",
+      "after": "composer::tests::utf16_selection_and_composition_at_nonzero_offset",
+      "status": "ok"
+    },
+    {
+      "before": "diff_tests::diff_parser_highlights_languages_preserves_bytes_and_pairs_changes",
+      "after": "diff_tests::diff_parser_highlights_languages_preserves_bytes_and_pairs_changes",
+      "status": "ok"
+    },
+    {
+      "before": "diff_tests::diff_real_server_selection_modes_review_and_virtualized_paint",
+      "after": "diff_tests::diff_real_server_selection_modes_review_and_virtualized_paint",
+      "status": "ok"
+    },
+    {
+      "before": "grid_sessions::tests::inventory_display_paths_keep_workspace_identity",
+      "after": "grid_sessions::tests::inventory_display_paths_keep_workspace_identity",
+      "status": "ok"
+    },
+    {
+      "before": "merge::tests::production_web_merge_cases",
+      "after": "merge::tests::production_web_merge_cases",
+      "status": "ok"
+    },
+    {
+      "before": "pane_grid::tests::pane_grid_measurement",
+      "after": "pane_grid::tests::pane_grid_measurement",
+      "status": "ignored"
+    },
+    {
+      "before": "pane_grid::tests::real_workspace_grid_focus_reorder_close_and_restart",
+      "after": "pane_grid::tests::real_workspace_grid_focus_reorder_close_and_restart",
+      "status": "ok"
+    },
+    {
+      "before": "pane_grid::tests::six_live_panes_cull_hidden_and_clipped_content",
+      "after": "pane_grid::tests::six_live_panes_cull_hidden_and_clipped_content",
+      "status": "ok"
+    },
+    {
+      "before": "pane_grid::tests::slot_terminal_choice_is_keyboard_reachable_and_persisted",
+      "after": "pane_grid::tests::slot_terminal_choice_is_keyboard_reachable_and_persisted",
+      "status": "ok"
+    },
+    {
+      "before": "pane_grid::tests::terminals::grid_terminal_measurement",
+      "after": "pane_grid::tests::terminals::grid_terminal_measurement",
+      "status": "ignored"
+    },
+    {
+      "before": "pane_grid::tests::terminals::real_slot_terminals_route_keys_retain_hidden_attachments_and_restart",
+      "after": "pane_grid::tests::terminals::real_slot_terminals_route_keys_retain_hidden_attachments_and_restart",
+      "status": "ok"
+    },
+    {
+      "before": "pull_requests::tests::pull_requests_check_buckets_match_desktop",
+      "after": "shell::pull_requests::model::tests::pull_requests_check_buckets_match_desktop",
+      "status": "ok"
+    },
+    {
+      "before": "pull_requests::tests::pull_requests_filters_empty_retry_and_server_merge_refusal",
+      "after": "shell::pull_requests::model::tests::pull_requests_filters_empty_retry_and_server_merge_refusal",
+      "status": "ok"
+    },
+    {
+      "before": "pull_requests::tests::pull_requests_linked_packet_preview_refuses_merge",
+      "after": "shell::pull_requests::model::tests::pull_requests_linked_packet_preview_refuses_merge",
+      "status": "ok"
+    },
+    {
+      "before": "pull_requests::tests::pull_requests_loading_error_retry_and_unavailable",
+      "after": "shell::pull_requests::model::tests::pull_requests_loading_error_retry_and_unavailable",
+      "status": "ok"
+    },
+    {
+      "before": "pull_requests::tests::pull_requests_non_comment_actions_preserve_unsent_notes",
+      "after": "shell::pull_requests::model::tests::pull_requests_non_comment_actions_preserve_unsent_notes",
+      "status": "ok"
+    },
+    {
+      "before": "pull_requests::tests::pull_requests_real_server_actions_and_paint",
+      "after": "shell::pull_requests::model::tests::pull_requests_real_server_actions_and_paint",
+      "status": "ok"
+    },
+    {
+      "before": "pull_requests::tests::pull_requests_repository_change_invalidates_old_detail",
+      "after": "shell::pull_requests::model::tests::pull_requests_repository_change_invalidates_old_detail",
+      "status": "ok"
+    },
+    {
+      "before": "pull_requests::tests::pull_requests_structured_preview_refusal_and_rebase",
+      "after": "shell::pull_requests::model::tests::pull_requests_structured_preview_refusal_and_rebase",
+      "status": "ok"
+    },
+    {
+      "before": "pull_requests::tests::pull_requests_uncertain_delivery_and_partial_close",
+      "after": "shell::pull_requests::model::tests::pull_requests_uncertain_delivery_and_partial_close",
+      "status": "ok"
+    },
+    {
+      "before": "pull_requests::tests::pull_requests_uncertain_delivery_is_shared_across_worktrees",
+      "after": "shell::pull_requests::model::tests::pull_requests_uncertain_delivery_is_shared_across_worktrees",
+      "status": "ok"
+    },
+    {
+      "before": "shell::inbox_tests::inbox_cards_counts_statuses_and_approval_match_desktop_routes",
+      "after": "shell::inbox::tests1::inbox_cards_counts_statuses_and_approval_match_desktop_routes",
+      "status": "ok"
+    },
+    {
+      "before": "shell::inbox_tests::inbox_empty_and_server_error_never_claim_a_false_clean_state",
+      "after": "shell::inbox::tests1::inbox_empty_and_server_error_never_claim_a_false_clean_state",
+      "status": "ok"
+    },
+    {
+      "before": "shell::inbox_tests::inbox_keyboard_buttons_activate_enter_space_and_skip_disabled",
+      "after": "shell::inbox::tests1::inbox_keyboard_buttons_activate_enter_space_and_skip_disabled",
+      "status": "ok"
+    },
+    {
+      "before": "shell::inbox_tests::inbox_opens_related_session_and_pull_request_and_restores",
+      "after": "shell::inbox::tests1::inbox_opens_related_session_and_pull_request_and_restores",
+      "status": "ok"
+    },
+    {
+      "before": "shell::inbox_tests::inbox_plan_session_header_preserves_desktop_authority_and_continuation",
+      "after": "shell::inbox::tests1::inbox_plan_session_header_preserves_desktop_authority_and_continuation",
+      "status": "ok"
+    },
+    {
+      "before": "shell::issue_tests::issues_create_enhance_preview_labels_and_success",
+      "after": "shell::issues::tests::issues_create_enhance_preview_labels_and_success",
+      "status": "ok"
+    },
+    {
+      "before": "shell::issue_tests::issues_errors_retry_stale_and_account_switch",
+      "after": "shell::issues::tests::issues_errors_retry_stale_and_account_switch",
+      "status": "ok"
+    },
+    {
+      "before": "shell::issue_tests::issues_interaction_frames_and_missing_checkout_refusal",
+      "after": "shell::issues::tests::issues_interaction_frames_and_missing_checkout_refusal",
+      "status": "ok"
+    },
+    {
+      "before": "shell::issue_tests::issues_link_follows_worker_selection",
+      "after": "shell::issues::tests::issues_link_follows_worker_selection",
+      "status": "ok"
+    },
+    {
+      "before": "shell::issue_tests::issues_view_search_link_clear_and_worker_task",
+      "after": "shell::issues::tests::issues_view_search_link_clear_and_worker_task",
+      "status": "ok"
+    },
+    {
+      "before": "shell::issue_tests::issues_worker_receives_linked_context_through_stream",
+      "after": "shell::issues::tests::issues_worker_receives_linked_context_through_stream",
+      "status": "ok"
+    },
+    {
+      "before": "shell::issue_tests::review_tests::round1_repository_drafts_survive_a_b_a",
+      "after": "shell::issues::tests::review_tests::round1_repository_drafts_survive_a_b_a",
+      "status": "ok"
+    },
+    {
+      "before": "shell::issue_tests::review_tests::round1_repository_switch_survives_a_frame_between_mouse_events",
+      "after": "shell::issues::tests::review_tests::round1_repository_switch_survives_a_frame_between_mouse_events",
+      "status": "ok"
+    },
+    {
+      "before": "shell::issue_tests::review_tests::round1_symlink_worker_survives_real_refresh_and_send",
+      "after": "shell::issues::tests::review_tests::round1_symlink_worker_survives_real_refresh_and_send",
+      "status": "ok"
+    },
+    {
+      "before": "shell::issue_tests::review_tests::round1_timed_out_create_retry_commits_once",
+      "after": "shell::issues::tests::review_tests::round1_timed_out_create_retry_commits_once",
+      "status": "ok"
+    },
+    {
+      "before": "shell::issue_tests::review_tests::round2_account_cannot_retry_another_accounts_timed_out_creation",
+      "after": "shell::issues::tests::review_tests::round2_account_cannot_retry_another_accounts_timed_out_creation",
+      "status": "ok"
+    },
+    {
+      "before": "shell::issue_tests::review_tests::round2_definite_429_leaves_native_draft_editable_and_retryable",
+      "after": "shell::issues::tests::review_tests::round2_definite_429_leaves_native_draft_editable_and_retryable",
+      "status": "ok"
+    },
+    {
+      "before": "shell::tests::brain_tests::brain_fixture_actions_sources_search_clear_and_refusals",
+      "after": "shell::brain::tests::brain_fixture_actions_sources_search_clear_and_refusals",
+      "status": "ok"
+    },
+    {
+      "before": "shell::tests::brain_tests::brain_fixture_errors_cancel_retention_and_workspace_isolation",
+      "after": "shell::brain::tests::brain_fixture_errors_cancel_retention_and_workspace_isolation",
+      "status": "ok"
+    },
+    {
+      "before": "shell::tests::brain_tests::brain_opens_from_the_real_shell_palette",
+      "after": "shell::brain::tests::brain_opens_from_the_real_shell_palette",
+      "status": "ok"
+    },
+    {
+      "before": "shell::tests::inbox_is_reachable_from_the_real_shell_palette",
+      "after": "shell::inbox::tests::inbox_is_reachable_from_the_real_shell_palette",
+      "status": "ok"
+    },
+    {
+      "before": "shell::tests::settings::review::settings_review_edit_reloads_the_desktop_value",
+      "after": "shell::settings::tests1::review::settings_review_edit_reloads_the_desktop_value",
+      "status": "ok"
+    },
+    {
+      "before": "shell::tests::settings::review::settings_review_stale_save_preserves_the_desktop_value",
+      "after": "shell::settings::tests1::review::settings_review_stale_save_preserves_the_desktop_value",
+      "status": "ok"
+    },
+    {
+      "before": "shell::tests::settings::review::settings_review_toml_never_reads_or_copies_saved_secrets",
+      "after": "shell::settings::tests1::review::settings_review_toml_never_reads_or_copies_saved_secrets",
+      "status": "ok"
+    },
+    {
+      "before": "shell::tests::settings::review::settings_review_updates_the_running_desktop_presentation",
+      "after": "shell::settings::tests1::review::settings_review_updates_the_running_desktop_presentation",
+      "status": "ok"
+    },
+    {
+      "before": "shell::tests::settings::settings_fixture_all_default_controls_persist_and_refresh",
+      "after": "shell::settings::tests1::settings_fixture_all_default_controls_persist_and_refresh",
+      "status": "ok"
+    },
+    {
+      "before": "shell::tests::settings::settings_fixture_provider_keys_presence_save_cancel_remove_enable_check_and_refusals",
+      "after": "shell::settings::tests1::settings_fixture_provider_keys_presence_save_cancel_remove_enable_check_and_refusals",
+      "status": "ok"
+    },
+    {
+      "before": "shell::tests::settings::settings_fixture_toml_save_reload_conflict_and_cancel",
+      "after": "shell::settings::tests1::settings_fixture_toml_save_reload_conflict_and_cancel",
+      "status": "ok"
+    },
+    {
+      "before": "shell::tests::settings::settings_fixture_unauthorized_and_close_restore_shell",
+      "after": "shell::settings::tests1::settings_fixture_unauthorized_and_close_restore_shell",
+      "status": "ok"
+    },
+    {
+      "before": "shell::tests::settings::settings_fixture_validation_locks_loading_errors_and_empty",
+      "after": "shell::settings::tests1::settings_fixture_validation_locks_loading_errors_and_empty",
+      "status": "ok"
+    },
+    {
+      "before": "shell::tests::settings_opens_from_shell_command_palette",
+      "after": "shell::settings::tests::settings_opens_from_shell_command_palette",
+      "status": "ok"
+    },
+    {
+      "before": "shell::tests::shell_palette_switch_restart_and_server_down",
+      "after": "shell::tests::shell_palette_switch_restart_and_server_down",
+      "status": "ok"
+    },
+    {
+      "before": "shell::tests::shell_pull_requests_opens_from_palette",
+      "after": "shell::pull_requests::shell_tests::shell_pull_requests_opens_from_palette",
+      "status": "ok"
+    },
+    {
+      "before": "shell::tests::shell_retains_sidebar_selection_and_view_identity",
+      "after": "shell::session::tests::shell_retains_sidebar_selection_and_view_identity",
+      "status": "ok"
+    },
+    {
+      "before": "stream::tests::recorded_streams_match_web",
+      "after": "stream::tests::recorded_streams_match_web",
+      "status": "ok"
+    },
+    {
+      "before": "stream::tests::retention_matches_web_store",
+      "after": "stream::tests::retention_matches_web_store",
+      "status": "ok"
+    },
+    {
+      "before": "stream::tests::saved_tail_keeps_older_rows_and_yields_to_newer_websocket_history",
+      "after": "stream::tests::saved_tail_keeps_older_rows_and_yields_to_newer_websocket_history",
+      "status": "ok"
+    },
+    {
+      "before": "terminal::tests::production_pty_to_gpui_terminal",
+      "after": "terminal::tests::production_pty_to_gpui_terminal",
+      "status": "ok"
+    },
+    {
+      "before": "terminal::tests::replay_queries_split_utf8_and_reset",
+      "after": "terminal::tests::replay_queries_split_utf8_and_reset",
+      "status": "ok"
+    },
+    {
+      "before": "terminal::tests::terminal_keys_follow_application_cursor_and_modifiers",
+      "after": "terminal::tests::terminal_keys_follow_application_cursor_and_modifiers",
+      "status": "ok"
+    },
+    {
+      "before": "tests::recorded_web_parity",
+      "after": "tests::recorded_web_parity",
+      "status": "ok"
+    },
+    {
+      "before": "theme_tests::every_theme_token_resolves_for_both_appearances_and_matches_desktop_css",
+      "after": "theme_tests::every_theme_token_resolves_for_both_appearances_and_matches_desktop_css",
+      "status": "ok"
+    },
+    {
+      "before": "theme_tests::native_styles_use_theme_tokens",
+      "after": "theme_tests::native_styles_use_theme_tokens",
+      "status": "ok"
+    },
+    {
+      "before": "ui::conversation::receipt_tests::canonical_receipt_keeps_request_session_payload_and_repository_fences",
+      "after": "ui::conversation::receipt_tests::canonical_receipt_keeps_request_session_payload_and_repository_fences",
+      "status": "ok"
+    },
+    {
+      "before": "ui::o8d_read_tests::saved_history_surface_with_only_o8d",
+      "after": "ui::o8d_read_tests::saved_history_surface_with_only_o8d",
+      "status": "ok"
+    },
+    {
+      "before": "ui::tests::brain_dock_tests::brain_dock_returns_focus_and_keeps_each_session_draft",
+      "after": "ui::tests::brain_dock_tests::brain_dock_returns_focus_and_keeps_each_session_draft",
+      "status": "ok"
+    },
+    {
+      "before": "ui::tests::fixture_send_selected_queue_promote_and_echo",
+      "after": "ui::tests::fixture_send_selected_queue_promote_and_echo",
+      "status": "ok"
+    },
+    {
+      "before": "ui::tests::worker_tests::worker_send_steer_queue_promote_remove_and_streaming_latency",
+      "after": "ui::tests::worker_tests::worker_send_steer_queue_promote_remove_and_streaming_latency",
+      "status": "ok"
+    },
+    {
+      "before": "ui::transcript_tests::persisted_workers_rich_events_and_older_history",
+      "after": "ui::transcript_tests::persisted_workers_rich_events_and_older_history",
+      "status": "ok"
+    },
+    {
+      "before": "ui::transcript_tests::system_events_are_compact_and_expand_on_click",
+      "after": "ui::transcript_tests::system_events_are_compact_and_expand_on_click",
+      "status": "ok"
+    },
+    {
+      "before": "ui::transcript_tests::transcript_2000_rows_20hz_measurement",
+      "after": "ui::transcript_tests::transcript_2000_rows_20hz_measurement",
+      "status": "ignored"
+    },
+    {
+      "before": "diff_cli_is_explicit_and_documents_both_targets",
+      "after": "diff_cli_is_explicit_and_documents_both_targets",
+      "status": "ok"
+    },
+    {
+      "before": "grid_rejects_conflicting_terminal_mode_and_invalid_slot_views",
+      "after": "grid_rejects_conflicting_terminal_mode_and_invalid_slot_views",
+      "status": "ok"
+    },
+    {
+      "before": "pane_grid_is_an_explicit_native_opt_in",
+      "after": "pane_grid_is_an_explicit_native_opt_in",
+      "status": "ok"
+    },
+    {
+      "before": "pane_grid_rejects_invalid_persistence_before_window_startup",
+      "after": "pane_grid_rejects_invalid_persistence_before_window_startup",
+      "status": "ok"
+    },
+    {
+      "before": "app_shell_is_explicit_and_documents_persistence",
+      "after": "app_shell_is_explicit_and_documents_persistence",
+      "status": "ok"
+    },
+    {
+      "before": "invalid_shell_state_is_retained_through_native_entrypoint",
+      "after": "invalid_shell_state_is_retained_through_native_entrypoint",
+      "status": "ok"
+    },
+    {
+      "before": "terminal_pane_is_an_explicit_native_opt_in",
+      "after": "terminal_pane_is_an_explicit_native_opt_in",
+      "status": "ok"
+    }
+  ]
+}

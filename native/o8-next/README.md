@@ -6,9 +6,6 @@
 
 [Opt-in app shell](APP-SHELL.md): local connection, workspace switching and persisted session/grid surfaces. The explicit fixture modes below remain available.
 
-[Pull requests](PULL-REQUESTS.md): opt-in shell list, detail, checks and PR actions,
-with an explicit desktop parity table and remaining packet-merge limitations.
-
 Opt-in Rust GPUI surface for #4405, stacked on the static history slice in #4410.
 Lists saved orchestrator sessions beside runtime workers, bootstraps the selected
 session's latest 100 messages over HTTP, then subscribes to its existing WebSocket

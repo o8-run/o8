@@ -77,7 +77,7 @@ native PR/shell filter: 11 passed; 0 failed
 desktop actions/delivery and production HTTP fixture: 3 files passed; 10 tests passed
 ```
 
-The native tests are in `native/o8-next/src/pull_request_tests.rs`. The HTTP checks
+The native tests are in `native/o8-next/src/surfaces/pull_requests/tests.rs`. The HTTP checks
 use `tests/next-pull-requests-real-path.test.ts`; desktop comparison checks are
 `src/components/desktop/pr-panel/PrPanelActions.test.ts` and
 `src/components/desktop/pr-panel/PrDeliveryState.test.ts`.

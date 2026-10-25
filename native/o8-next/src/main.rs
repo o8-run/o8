@@ -17,7 +17,6 @@ mod pane_grid;
 mod pane_layout;
 mod projects;
 mod projects_model;
-mod pull_requests;
 mod retained;
 mod rich;
 mod settings;

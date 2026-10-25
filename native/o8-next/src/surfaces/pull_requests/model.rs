@@ -511,7 +511,7 @@ impl PullRequests {
     }
 }
 #[cfg(test)]
-#[path = "pull_request_tests.rs"]
+#[path = "tests.rs"]
 mod tests;
-#[path = "pull_request_view.rs"]
+#[path = "view.rs"]
 mod view;

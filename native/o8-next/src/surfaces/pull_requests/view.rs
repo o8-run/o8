@@ -293,5 +293,5 @@ impl Render for PullRequests {
     }
 }
 
-#[path = "pull_request_detail.rs"]
+#[path = "detail.rs"]
 mod detail;

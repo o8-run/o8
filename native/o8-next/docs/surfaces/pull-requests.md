@@ -5,6 +5,13 @@ and choose **Open pull requests**. The selected workspace supplies `repoPath`;
 the server resolves its GitHub origin. The installed desktop client and launcher
 defaults are unchanged. No additional crates or application routes are added.
 
+Registration, workspace view retention, focus and shell tests belong to
+`src/surfaces/pull_requests.rs` and `src/surfaces/pull_requests/`. The shell has
+one inventory entry. PR transport remains a private child of `client.rs`, loaded
+from the same surface directory so its credential fields stay private. The
+fixture registers with `scripts/next/dev-server.ts --pull-requests` through
+`scripts/next/surfaces/55-pull-requests.surface.ts`.
+
 The surface uses the shared native theme and GPUI composer. Reads and writes use
 the existing `Client` and its explicit loopback origin/operator bearer. The PR
 list uses `/api/panel/prs?view=list`; details and writes use
@@ -83,7 +90,7 @@ measure dispatch to the changed revision's first CPU paint. The Linux headless
 text system does not shape native fonts, render on a GPU or present to a display.
 These debug-profile measurements establish no macOS/display latency target.
 
-See [verification receipts](evidence/pull-requests/verification.md) and
-[correction-round receipts](evidence/pull-requests/correction-1.md), plus
-[raw timing samples](evidence/pull-requests/timing.json). Full desktop parity,
+See [verification receipts](pull-requests/verification.md) and
+[correction-round receipts](pull-requests/correction-1.md), plus
+[raw timing samples](pull-requests/timing.json). See also the [registration migration receipts](pull-requests/registration.md). Full desktop parity,
 every-gate native mutation coverage and packet-linked merging remain open.
