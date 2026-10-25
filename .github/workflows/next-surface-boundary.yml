@@ -23,7 +23,7 @@ jobs:
     env:
       BASE_REF: origin/main
       HEAD_REF: ${{ github.event.pull_request.head.sha }}
-      CARGO_HOME: ${{ runner.temp }}/next-surface-cargo
+      CARGO_HOME: ${{ github.workspace }}/.next-surface-cargo
       CARGO_TARGET_DIR: ${{ github.workspace }}/.next-surface-target
     steps:
       - uses: actions/checkout@v4
@@ -46,8 +46,8 @@ jobs:
         if: steps.select.outputs.run == 'true'
         with:
           path: |
-            ${{ runner.temp }}/next-surface-cargo/registry
-            ${{ runner.temp }}/next-surface-cargo/git
+            .next-surface-cargo/registry
+            .next-surface-cargo/git
             .next-surface-target
           key: next-surface-${{ runner.os }}-${{ hashFiles('native/o8-next/Cargo.lock') }}-${{ github.sha }}
           restore-keys: next-surface-${{ runner.os }}-${{ hashFiles('native/o8-next/Cargo.lock') }}-

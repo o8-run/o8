@@ -242,6 +242,17 @@ describe('workflow policy — every workflow is classified from the filesystem',
       .map((file) => file.name);
     expect(violations, 'top-level permissions make the default token scope explicit and least-privilege').toEqual([]);
   });
+
+  it('keeps runner and step contexts out of job-level environments', () => {
+    // GitHub rejects the whole workflow before creating any jobs when job.env
+    // uses a context that is available only after the job has started.
+    const violations = workflowFiles.flatMap(file => jobsIn(file).flatMap(([name, job]) =>
+      stringsIn(job.env)
+        .filter(value => /\$\{\{[^}]*\b(?:runner|steps|job|env)\s*(?:\.|\[)/.test(value))
+        .map(value => `${file.name}: jobs.${name}.env: ${value}`),
+    ));
+    expect(violations, 'job.env accepts github, inputs, matrix, needs, secrets, strategy and vars contexts').toEqual([]);
+  });
 });
 
 describe('workflow policy — github-script syntax', () => {

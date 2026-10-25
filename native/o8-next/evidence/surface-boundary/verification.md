@@ -44,12 +44,26 @@ Test Files  1 failed (1)
 Tests       1 failed | 7 skipped (8)
 ```
 
-Final focused run, including the existing `tests/workflow-policy.test.ts`:
+The published workflow exposed a context validation error before jobs were
+created. `actionlint` reproduced it, and a filesystem-driven workflow policy
+regression was added and run red before correcting the Cargo cache path:
+
+```text
+context "runner" is not allowed here
+next-surface-boundary.yml: jobs.boundary.env: ${{ runner.temp }}/next-surface-cargo
+Test Files  1 failed (1)
+Tests       1 failed | 7 passed (8)
+```
+
+Job-level Cargo paths now use `github.workspace`, an available context. Both the
+new regression and `actionlint` pass.
+
+Final focused run, including `tests/workflow-policy.test.ts`:
 
 ```text
 Test Files  2 passed (2)
-Tests       15 passed (15)
-Duration    1.62s
+Tests       16 passed (16)
+Duration    7.36s
 ```
 
 The boundary file has **8 passing tests**, up from **7 failures and 1 passing
@@ -106,14 +120,16 @@ only for the two requested directories and reruns on label changes.
 - `npx tsc --noEmit` with `NODE_OPTIONS=--max-old-space-size=8192`: passed.
 - `npm run typecheck:fast`: passed (the supported Linux TypeScript fallback).
 - ESLint on the new CLI and test: passed.
-- `npm run rule-check -- --base=origin/main`: passed; the repository filter
+- `npm run rule-check -- --base=160576643` (the PR merge base): passed; the repository filter
   excludes test files and `.mjs`, so there are zero eligible source files.
 - `npm run test:classify` and `npm run test:classification:check`: passed.
-- Workflow YAML parsed and the existing workflow policy tests passed.
+- Workflow YAML parsed, `actionlint` passed, and workflow policy tests passed.
 - The first full `npm test` found the new Rust action's mutable tag: **1 failed,
   9,056 passed, 5 skipped**. The action now uses the existing full commit pin.
-- Final full `npm test`: **1,242 files passed, 3 skipped; 9,057 tests passed,
-  5 skipped, 0 failed**, in **175.13 s**. Before/after the action pin:
-  **1 failure / 9,056 passes → 0 failures / 9,057 passes**.
+- Full `npm test` after the action pin: **1,242 files passed, 3 skipped; 9,057
+  tests passed, 5 skipped, 0 failed**, in **175.13 s**. Before/after the action
+  pin: **1 failure / 9,056 passes → 0 failures / 9,057 passes**.
+- Final full `npm test` after the workflow-context regression: **1,242 files
+  passed, 3 skipped; 9,058 tests passed, 5 skipped, 0 failed**, in **218.84 s**.
 
 No release, version, deployment or publishing files changed.
