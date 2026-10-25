@@ -2,7 +2,7 @@
 //! O8_NEXT_OCCLUSION_BINARY and O8_NEXT_OCCLUSION_DIR to this integration test.
 #[cfg(target_os = "macos")]
 #[test]
-#[ignore = "requires macOS native rendering; reads pixels from owned offscreen windows"]
+#[ignore = "requires macOS native rendering; reads pixels from owned inactive windows"]
 fn hidden_glass_text_pixels_click_and_reduced_transparency() {
     use std::{
         fs,
@@ -54,6 +54,7 @@ fn hidden_glass_text_pixels_click_and_reduced_transparency() {
         assert!(receipt["contrastTextPixels"].as_u64().unwrap() > 80);
         assert_eq!(receipt["clicks"], 1);
         assert_eq!(receipt["activated"], false);
+        assert_eq!(receipt["actualFrame"].as_array().unwrap().len(), 4);
         assert!(
             fs::metadata(PathBuf::from(&directory).join(format!("{mode}.png")))
                 .unwrap()

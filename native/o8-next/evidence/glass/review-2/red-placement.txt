@@ -1,0 +1,28 @@
+   |         ^^^^^^^^^
+
+warning: `o8-next` (example "window-occlusion" test) generated 4 warnings (run `cargo fix --example "window-occlusion" -p o8-next --tests` to apply 1 suggestion)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.67s
+warning: the following packages contain code that will be rejected by a future version of Rust: proc-macro-error2 v2.0.1
+note: to see what the problems were, use the option `--future-incompat-report`, or run `cargo report future-incompatibilities --id 1`
+     Running unittests test-support/window_occlusion.rs (/workspace/o8/work/glass-target/debug/examples/window_occlusion-388fa4757886aeed)
+
+running 2 tests
+test tests::adjusted_frame_reaches_capture_callback_and_click ...
+thread 'tests::adjusted_frame_reaches_capture_callback_and_click' (163460) panicked at test-support/window_occlusion.rs:129:5:
+probe remains outside the visible desktop
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+test tests::probe_window_starts_on_known_screen ...
+thread 'tests::probe_window_starts_on_known_screen' (163461) panicked at test-support/window_occlusion.rs:157:13:
+probe must start on the known screen: Bounds { origin: Point { x: -10000px, y: -10000px }, size: Size { 768px × 576px } } in Bounds { origin: Point { x: 0px, y: 0px }, size: Size { 1920px × 1080px } }
+FAILED
+
+failures:
+
+failures:
+    tests::adjusted_frame_reaches_capture_callback_and_click
+    tests::probe_window_starts_on_known_screen
+
+test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `--example window-occlusion`
