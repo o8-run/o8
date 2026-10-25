@@ -280,43 +280,41 @@ impl ThreadList {
                         frame["event"].as_str(),
                         Some("upsert" | "created" | "updated")
                     )
-                {
-                    if let Ok(mut incoming) =
+                    && let Ok(mut incoming) =
                         serde_json::from_value::<Session>(frame["data"]["thread"].clone())
-                    {
-                        if incoming.status == "busy" {
-                            incoming.status = "running".into();
-                        }
-                        if let Some(old) = self.sessions.iter_mut().find(|s| s.id == incoming.id) {
-                            if incoming.last_message_at < old.last_message_at
-                                || old.status == "archived"
-                            {
-                                continue;
-                            }
-                            incoming.unread = self.selected.as_ref() != Some(&old.id)
-                                && (old.unread || incoming.last_message_at > old.last_message_at);
-                            incoming.packet_header = old.packet_header.clone();
-                            incoming.packet_state = old.packet_state;
-                            // Packet attention comes from the lifecycle API.
-                            // A thread's own failure can recover on this stream.
-                            if old.packet_state || old.outcome.is_some() {
-                                incoming.status = old.status.clone();
-                                incoming.rejected = old.rejected;
-                                incoming.outcome = old.outcome.clone();
-                            }
-                            if *old == incoming {
-                                continue;
-                            }
-                            *old = incoming;
-                        } else {
-                            self.sessions.push(incoming);
-                        }
-                        changed = true;
-                        // Fence an older in-flight HTTP read without making a
-                        // new inventory request for each streamed text chunk.
-                        self.generation += 1;
-                        continue;
+                {
+                    if incoming.status == "busy" {
+                        incoming.status = "running".into();
                     }
+                    if let Some(old) = self.sessions.iter_mut().find(|s| s.id == incoming.id) {
+                        if incoming.last_message_at < old.last_message_at
+                            || old.status == "archived"
+                        {
+                            continue;
+                        }
+                        incoming.unread = self.selected.as_ref() != Some(&old.id)
+                            && (old.unread || incoming.last_message_at > old.last_message_at);
+                        incoming.packet_header = old.packet_header.clone();
+                        incoming.packet_state = old.packet_state;
+                        // Packet attention comes from the lifecycle API.
+                        // A thread's own failure can recover on this stream.
+                        if old.packet_state || old.outcome.is_some() {
+                            incoming.status = old.status.clone();
+                            incoming.rejected = old.rejected;
+                            incoming.outcome = old.outcome.clone();
+                        }
+                        if *old == incoming {
+                            continue;
+                        }
+                        *old = incoming;
+                    } else {
+                        self.sessions.push(incoming);
+                    }
+                    changed = true;
+                    // Fence an older in-flight HTTP read without making a
+                    // new inventory request for each streamed text chunk.
+                    self.generation += 1;
+                    continue;
                 }
                 if matches!(
                     frame["channel"].as_str(),

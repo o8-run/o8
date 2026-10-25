@@ -97,3 +97,10 @@ message shifting a chat across offset pages, plus the repeated-page fallback.
 
 [Current-main rebase verification](rebase-verification.txt) covers the combined
 Projects, Settings, Brain, Inbox, Issues and sidebar behavior.
+
+
+The surface-registration follow-up moves the current tests to
+`src/surfaces/sidebar/sidebar_tests.rs` and `src/surfaces/sidebar/measurement.rs`.
+Their original test function names remain intact; historical red receipts above
+retain their original paths. See `docs/surfaces/sidebar.md` for registration,
+fixture ownership and the shared integration files.

@@ -259,17 +259,19 @@ impl Render for Shell {
                     ),
             )
             .child(
-                div()
-                    .flex()
-                    .flex_1()
-                    .min_h_0()
-                    .child(self.sidebar.clone())
-                    .child(div().flex_1().min_w_0().child(content.unwrap_or_else(|| {
-                        div()
-                            .p(px(24.))
-                            .child(frame.empty)
-                            .into_any_element()
-                    }))),
+                registrations().iter().fold(
+                    div()
+                        .flex_1()
+                        .min_h_0()
+                        .child(content.unwrap_or_else(|| {
+                            div()
+                                .p(px(24.))
+                                .child(frame.empty)
+                                .into_any_element()
+                        }))
+                        .into_any_element(),
+                    |content, registration| (registration.decorate)(self, content),
+                ),
             )
             .child(canvas(|_, _, _| (), move |_, _, _, _| painted.set(revision)).size(px(1.)))
     }

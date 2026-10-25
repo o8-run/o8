@@ -1,5 +1,6 @@
 //! Full shell -> virtual native list -> production HTTP -> persisted record.
 use super::*;
+use crate::shell::test_support::*;
 use gpui::{ScrollDelta, ScrollStrategy, ScrollWheelEvent};
 use std::io::Write;
 
@@ -87,7 +88,12 @@ fn sidebar_selection_leaves_projects_and_settings(cx: &mut TestAppContext) {
     let cx = &mut visual;
     ready(&shell, cx);
     settle(&shell, cx);
-    let selected = shell.read_with(cx, |s, cx| s.sidebar.read(cx).rows[2].id.clone().unwrap());
+    let selected = shell.read_with(cx, |s, cx| {
+        s.surfaces.sidebar.view.as_ref().unwrap().read(cx).rows[2]
+            .id
+            .clone()
+            .unwrap()
+    });
     for (button, panel) in [
         ("shell-settings", "settings-page"),
         ("shell-projects", "project-new"),
@@ -98,7 +104,8 @@ fn sidebar_selection_leaves_projects_and_settings(cx: &mut TestAppContext) {
         click(cx, "thread-row-2");
         settle(&shell, cx);
         assert!(
-            shell.read_with(cx, |s, _| s.settings.is_none() && !s.projects_open),
+            shell.read_with(cx, |s, _| s.surfaces.settings.view.is_none()
+                && !s.surfaces.projects.open),
             "selecting a thread must display its session surface"
         );
         assert_eq!(active_id(&shell, cx), selected);
@@ -233,7 +240,14 @@ fn wait_for(
         assert!(
             started.elapsed() < Duration::from_secs(10),
             "native event and HTTP result must become visible: {}",
-            shell.read_with(cx, |s, cx| s.sidebar.read(cx).diagnostic())
+            shell.read_with(cx, |s, cx| s
+                .surfaces
+                .sidebar
+                .view
+                .as_ref()
+                .unwrap()
+                .read(cx)
+                .diagnostic())
         );
         std::thread::sleep(Duration::from_millis(20));
     }
@@ -248,7 +262,7 @@ fn active_id(shell: &Entity<Shell>, cx: &mut VisualTestContext) -> String {
 }
 fn assert_oracle(shell: &Entity<Shell>, cx: &VisualTestContext, expected: Value) {
     let actual = shell.read_with(cx, |s, cx| {
-        serde_json::to_value(&*s.sidebar.read(cx).rows).unwrap()
+        serde_json::to_value(&*s.surfaces.sidebar.view.as_ref().unwrap().read(cx).rows).unwrap()
     });
     for (i, (actual, expected)) in actual
         .as_array()
@@ -287,7 +301,11 @@ fn sidebar_group_order_search_keyboard_rename_archive_and_live_events(cx: &mut T
     settle(&shell, cx);
     shell.read_with(cx, |s, cx| {
         assert_eq!(
-            s.sidebar
+            s.surfaces
+                .sidebar
+                .view
+                .as_ref()
+                .unwrap()
                 .read(cx)
                 .rows
                 .iter()
@@ -305,7 +323,11 @@ fn sidebar_group_order_search_keyboard_rename_archive_and_live_events(cx: &mut T
     cx.simulate_input("Renamed native 界");
     cx.simulate_keystrokes("enter");
     wait_for(&shell, cx, |s, cx| {
-        s.sidebar
+        s.surfaces
+            .sidebar
+            .view
+            .as_ref()
+            .unwrap()
             .read(cx)
             .sessions
             .iter()
@@ -328,7 +350,11 @@ fn sidebar_group_order_search_keyboard_rename_archive_and_live_events(cx: &mut T
     draw(cx);
     cx.simulate_keystrokes("delete");
     wait_for(&shell, cx, |s, cx| {
-        s.sidebar
+        s.surfaces
+            .sidebar
+            .view
+            .as_ref()
+            .unwrap()
             .read(cx)
             .sessions
             .iter()
@@ -353,7 +379,11 @@ fn sidebar_group_order_search_keyboard_rename_archive_and_live_events(cx: &mut T
         )
         .unwrap();
     wait_for(&shell, cx, |s, cx| {
-        s.sidebar
+        s.surfaces
+            .sidebar
+            .view
+            .as_ref()
+            .unwrap()
             .read(cx)
             .sessions
             .iter()
@@ -378,7 +408,11 @@ fn sidebar_group_order_search_keyboard_rename_archive_and_live_events(cx: &mut T
     };
     write_turn("user", 1791000000000);
     wait_for(&shell, cx, |s, cx| {
-        s.sidebar
+        s.surfaces
+            .sidebar
+            .view
+            .as_ref()
+            .unwrap()
             .read(cx)
             .rows
             .iter()
@@ -386,16 +420,28 @@ fn sidebar_group_order_search_keyboard_rename_archive_and_live_events(cx: &mut T
     });
     write_turn("assistant", 1791000000001);
     wait_for(&shell, cx, |s, cx| {
-        s.sidebar.read(cx).rows.iter().any(|r| {
-            r.id.as_deref() == Some(live_id) && r.status == "ready" && !r.running && r.unread
-        })
+        s.surfaces
+            .sidebar
+            .view
+            .as_ref()
+            .unwrap()
+            .read(cx)
+            .rows
+            .iter()
+            .any(|r| {
+                r.id.as_deref() == Some(live_id) && r.status == "ready" && !r.running && r.unread
+            })
     });
     // Original worker key opens its persisted worker history in the same Surface.
     cx.simulate_keystrokes("ctrl-f");
     cx.simulate_input("Grid runtime worker");
     settle(&shell, cx);
     let row = shell.read_with(cx, |s, cx| {
-        s.sidebar
+        s.surfaces
+            .sidebar
+            .view
+            .as_ref()
+            .unwrap()
             .read(cx)
             .rows
             .iter()
@@ -448,7 +494,11 @@ fn sidebar_search_matches_desktop_message_text_route(cx: &mut TestAppContext) {
     cx.simulate_keystrokes("ctrl-f");
     cx.simulate_input("Fixture question");
     wait_for(&shell, cx, |s, cx| {
-        s.sidebar
+        s.surfaces
+            .sidebar
+            .view
+            .as_ref()
+            .unwrap()
             .read(cx)
             .rows
             .iter()
@@ -457,7 +507,11 @@ fn sidebar_search_matches_desktop_message_text_route(cx: &mut TestAppContext) {
             == expected.len()
     });
     let actual: std::collections::BTreeSet<_> = shell.read_with(cx, |s, cx| {
-        s.sidebar
+        s.surfaces
+            .sidebar
+            .view
+            .as_ref()
+            .unwrap()
             .read(cx)
             .rows
             .iter()
@@ -507,7 +561,11 @@ fn sidebar_worker_archive_real_path(cx: &mut TestAppContext) {
     ready(&shell, cx);
     click(cx, "thread-archive");
     wait_for(&shell, cx, |s, cx| {
-        !s.sidebar
+        !s.surfaces
+            .sidebar
+            .view
+            .as_ref()
+            .unwrap()
             .read(cx)
             .sessions
             .iter()
@@ -526,110 +584,109 @@ fn sidebar_worker_archive_real_path(cx: &mut TestAppContext) {
     );
 }
 
+#[path = "measurement.rs"]
+mod measurement;
+
 #[gpui::test]
-fn sidebar_2000_thread_first_paint_and_scroll_measurement(cx: &mut TestAppContext) {
+fn sidebar_real_path_matches_desktop_and_opens_session(cx: &mut TestAppContext) {
     let fixture = Fixture::with_sidebar(true);
-    let mut first_paint = vec![];
-    let mut scroll = vec![];
-    let mut max_visible = 0;
-    for sample in 0..10 {
-        let start = Instant::now();
-        let (shell, mut visual) = open(
-            fixture.client.clone(),
-            fixture.root.join(format!("measure-{sample}.json")),
-            State::default(),
-            cx,
-        );
-        let cx = &mut visual;
-        for _ in 0..30 {
-            cx.run_until_parked();
-            cx.update(|window, cx| {
-                window.refresh();
-                window.draw(cx).clear();
-            });
-            if shell.read_with(cx, |s, cx| s.sidebar.read(cx).painted.get() != usize::MAX) {
-                break;
-            }
-        }
-        first_paint.push(start.elapsed().as_secs_f64() * 1000.);
-        shell.read_with(cx, |s, cx| {
-            let sidebar = s.sidebar.read(cx);
-            assert_eq!(
-                sidebar
-                    .sessions
-                    .iter()
-                    .filter(|s| s.id.starts_with("thoughts-sidebar-"))
-                    .count(),
-                2000
-            );
-            assert_ne!(
-                sidebar.painted.get(),
-                usize::MAX,
-                "sidebar row reached CPU scene paint"
-            );
-        });
-        let bounds = cx.debug_bounds("thread-list").unwrap();
-        let initial_painted = shell.read_with(cx, |s, cx| s.sidebar.read(cx).painted.get());
-        for i in 0..50 {
-            shell.read_with(cx, |s, cx| s.sidebar.read(cx).painted.set(usize::MAX));
-            let start = Instant::now();
-            cx.simulate_event(ScrollWheelEvent {
-                position: bounds.center(),
-                delta: ScrollDelta::Pixels(point(px(0.), px(if i < 25 { -144. } else { 144. }))),
-                ..Default::default()
-            });
-            cx.update(|window, cx| {
-                window.refresh();
-                window.draw(cx).clear();
-            });
-            scroll.push(start.elapsed().as_secs_f64() * 1000.);
-            max_visible =
-                max_visible.max(shell.read_with(cx, |s, cx| s.sidebar.read(cx).materialized.get()));
-            shell.read_with(cx, |s, cx| {
-                assert_ne!(
-                    s.sidebar.read(cx).painted.get(),
-                    usize::MAX,
-                    "scroll frame reached row paint"
-                )
-            });
-            if i == 24 {
-                shell.read_with(cx, |s, cx| {
-                    let list = s.sidebar.read(cx);
-                    assert!(
-                        list.painted.get() > initial_painted + 50,
-                        "wheel must paint later virtual rows"
-                    );
-                });
-            }
-        }
-        // First/last navigation also crosses the complete virtual inventory.
-        shell.read_with(cx, |s, cx| {
-            s.sidebar
-                .read(cx)
-                .scroll
-                .scroll_to_item(s.sidebar.read(cx).rows.len() - 1, ScrollStrategy::Top)
-        });
-        draw(cx);
-        shell.read_with(cx, |s, cx| assert!(s.sidebar.read(cx).painted.get() > 1900));
-        assert!(cx.simulate_close());
-    }
-    let percentile = |samples: &[f64], p: f64| {
-        let mut sorted = samples.to_vec();
-        sorted.sort_by(f64::total_cmp);
-        sorted[((sorted.len() as f64 * p).ceil() as usize).saturating_sub(1)]
-    };
-    assert!(
-        max_visible < 80,
-        "only viewport rows should be materialized"
+    let desktop: Value = fixture
+        .client
+        .get("/api/v2/chat-history/list", &[("include", "orchestrator")])
+        .unwrap();
+    let expected = desktop["conversations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|s| {
+            s["tabId"]
+                .as_str()
+                .unwrap()
+                .starts_with("thoughts-sidebar-")
+        })
+        .count();
+    assert_eq!(expected, 2000);
+    let (shell, mut visual) = open(
+        fixture.client.clone(),
+        fixture.root.join("sidebar.json"),
+        State::default(),
+        cx,
     );
-    let receipt = json!({"threads":2000,"maxVisibleRows":max_visible,"endpoint":"GPUI TestAppContext CPU scene paint; test text system; no GPU/compositor", "firstPaintMs":first_paint,
-        "scrollFrameMs":scroll,"firstPaintP50Ms":percentile(&first_paint,0.5),"firstPaintP95Ms":percentile(&first_paint,0.95),
-        "scrollP50Ms":percentile(&scroll,0.5),"scrollP95Ms":percentile(&scroll,0.95)});
-    if let Ok(file) = std::env::var("O8_NEXT_SIDEBAR_RESULTS") {
-        fs::File::create(file)
-            .unwrap()
-            .write_all(serde_json::to_string_pretty(&receipt).unwrap().as_bytes())
-            .unwrap();
+    ready(&shell, &mut visual);
+    shell.read_with(&visual, |s, _| {
+        assert_eq!(
+            s.sessions
+                .iter()
+                .filter(|s| s.id.starts_with("thoughts-sidebar-"))
+                .count(),
+            expected,
+            "native shell must expose every desktop fixture thread rather than the first 500"
+        );
+    });
+    assert!(
+        visual.debug_bounds("thread-list").is_some(),
+        "native grouped sidebar must be in the app shell"
+    );
+}
+
+#[gpui::test]
+fn sidebar_retained_session_selection_tracks_the_rail(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    let file = fixture.root.join("selected.json");
+    let (shell, cx) = cx.add_window_view(|window, cx| {
+        Shell::new(
+            fixture.client.clone(),
+            file.clone(),
+            State::default(),
+            window,
+            cx,
+        )
+    });
+    ready(&shell, cx);
+    let before = shell.read_with(cx, |s, _| {
+        match s.content.get(&s.key(&s.active().unwrap())).unwrap() {
+            Content::Session(session) => session.entity_id(),
+            _ => panic!("session"),
+        }
+    });
+    cx.simulate_keystrokes("down");
+    cx.run_until_parked();
+    shell.update_in(cx, |s, window, cx| s.tick(false, window, cx));
+    ready(&shell, cx);
+    let after = shell.read_with(cx, |s, _| {
+        match s.content.get(&s.key(&s.active().unwrap())).unwrap() {
+            Content::Session(session) => session.entity_id(),
+            _ => panic!("session"),
+        }
+    });
+    assert_eq!(
+        before, after,
+        "changing the session in the sidebar must retain the existing Surface and its drafts"
+    );
+    shell.read_with(cx, |s, cx| {
+        let Content::Session(surface) = s.content.get(&s.key(&s.active().unwrap())).unwrap() else {
+            panic!("session");
+        };
+        assert_eq!(
+            s.surfaces
+                .sidebar
+                .view
+                .as_ref()
+                .unwrap()
+                .read(cx)
+                .selected
+                .as_ref(),
+            Some(&surface.read(cx).shell_selected()),
+            "the shell sidebar selection must follow the retained session surface"
+        );
+    });
+}
+
+impl Fixture {
+    fn with_sidebar(sidebar: bool) -> Self {
+        Self::with_options(if sidebar { &["--sidebar"] } else { &[] })
     }
-    println!("O8_NEXT_SIDEBAR_EVIDENCE {receipt}");
+    fn with_options(options: &[&str]) -> Self {
+        Self::start_mode(false, &options.join(" "))
+    }
 }
