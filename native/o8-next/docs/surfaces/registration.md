@@ -4,8 +4,8 @@ The shell's `register_surfaces!` invocation is its only surface inventory. Each
 entry loads a module in `src/surfaces/` and generates the typed command, tab,
 content, runtime slot and persisted workspace slice. A new surface adds its own
 files and one line to that invocation. The test-only `fake.rs` is a complete,
-executable example, including command routing, paint, nav, keyboard and restart
-state. Production builds exclude it.
+executable example, including command routing, an authenticated HTTP request,
+paint, nav, keyboard and restart state. Production builds exclude it.
 
 A tab module supplies `View`, `Slice`, `Runtime` and `REGISTRATION`, and implements
 `ShellView` for its view. `Slice` is serialized into the existing workspace object;
@@ -24,6 +24,17 @@ did before extraction. Only shared palette, workspace and tab lifecycle behavior
 belongs in the shell. A surface may include its own `#[cfg(test)] mod tests`;
 `test_support` supplies the existing production-host fixture and GPUI helpers.
 
+Surface requests belong in that same surface module as inherent `impl Client`
+methods (or in a child request module it includes). The shell's one registration
+entry loads the module and its request methods together; no request list or
+`client.rs` edit is needed. Keep route paths, queries, bodies, response decoding
+and surface-specific error messages there. Use shared transport helpers:
+`Client::get` for JSON reads, or `Client::url`, `Client::request` and `Client::read`
+for other methods. `request` applies the existing operator bearer, redirect and
+timeout policy; only existing desktop-identity endpoints opt in through
+`with_desktop_identity`. Streaming adapters retain their own existing framing and
+limits. `client.rs` holds the transport and compatibility type reexports.
+
 The disposable HTTP host discovers sorted `scripts/next/surfaces/*.surface.ts`
 files. Each exports an async default registration returning its route map and
 optional request, response, streaming and cleanup hooks. An optional `prepare`
@@ -40,10 +51,13 @@ terminal status handshake. New registrations should use the normal gated path.
    shared registration hunks by keeping main's dispatcher and registration macro.
 2. Move the port's command/route, workspace state fields, view factory, nav and
    key handling into `src/surfaces/<surface>.rs`. Put persisted fields in `Slice`
-   and live entities/subscriptions in `Runtime`. Keep the port's existing behavior.
+   and live entities/subscriptions in `Runtime`. Move its request methods (for
+   example `activity_request`) into an `impl Client` in that same module, using
+   the shared transport helpers above. Keep the port's existing behavior.
 3. Add exactly one entry, `<surface>: Variant = "surfaces/<surface>.rs";`, in the
    macro's `tabs` group (or `commands` for an overlay). Import the view in its own
-   module. Remove the port's edits to `shell_state.rs` and `shell_view.rs`.
+   module. Remove the port's edits to `shell_state.rs`, `shell_view.rs` and
+   `client.rs`; the same entry also compiles its request methods.
 4. Include the port's tests from that surface module. Keep test function names;
    use `crate::shell::test_support` for shared fixture helpers. Remove additions
    to `shell_tests.rs`.

@@ -1,4 +1,6 @@
 use super::*;
+use serde_json::{Value, json};
+
 use crate::inbox::{Inbox, OpenSession};
 pub(super) type Slice = EmptyState;
 pub(super) type Runtime = ();
@@ -63,6 +65,31 @@ impl ShellView for Inbox {
     #[cfg(test)]
     fn ready(view: &Entity<Self>, cx: &App) -> bool {
         view.read(cx).loaded && !view.read(cx).loading
+    }
+}
+
+// Request adapters compile with this surface through its existing shell entry.
+impl Client {
+    /// The desktop Inbox's decision endpoint owns principal checks and durable resolution.
+    pub fn inbox_decision(&self, id: &str, approve: bool) -> Result<Value, String> {
+        let url = self.url("/api/panel/approvals").unwrap();
+        let request = self.request("POST", &url);
+        let request = self.with_desktop_identity(request);
+        match request.send_json(json!({"id":id,"action":if approve {"approve"} else {"reject"}})) {
+            Ok(response) => {
+                let body: Value = Self::read(response)?;
+                if body["ok"] == false {
+                    return Err(body["error"].as_str().or(body["note"].as_str()).unwrap_or("Approval could not be resolved").into());
+                }
+                Ok(body)
+            }
+            Err(ureq::Error::Status(status, response)) => {
+                let body = Self::read::<Value>(response).unwrap_or_default();
+                Err(body["error"].as_str().or(body["note"].as_str())
+                    .map(|message| format!("{message} (HTTP {status})")).unwrap_or_else(|| format!("Approval refused (HTTP {status})")))
+            }
+            Err(_) => Err("Decision unconfirmed. Refresh to inspect the recorded approval before another action.".into()),
+        }
     }
 }
 

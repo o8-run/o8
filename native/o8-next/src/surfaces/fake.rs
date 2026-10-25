@@ -14,6 +14,7 @@ pub(super) struct Runtime {
 }
 pub(super) struct View {
     focus: FocusHandle,
+    receipt: Result<serde_json::Value, String>,
 }
 pub(super) const REGISTRATION: Registration = Registration {
     command: Some((8, || Command::Fake)),
@@ -26,8 +27,10 @@ pub(super) const REGISTRATION: Registration = Registration {
             .surfaces
             .fake
             .probe_visits += 1;
+        let receipt = shell.client.fake_request();
         Some(Content::Fake(cx.new(|cx| View {
             focus: cx.focus_handle(),
+            receipt,
         })))
     },
     nav: |_, position, cx| {
@@ -76,6 +79,24 @@ impl ShellView for View {
     }
 }
 
+// This inherent method is loaded by the same single shell registration entry.
+impl Client {
+    fn fake_request(&self) -> Result<serde_json::Value, String> {
+        let mut url = self
+            .url("/api/panel/registration-probe")
+            .map_err(|_| "Invalid probe route")?;
+        url.query_pairs_mut().append_pair("surface", "fake");
+        let response = self
+            .request("POST", &url)
+            .send_json(serde_json::json!({"probe":"native request"}))
+            .map_err(|error| match error {
+                ureq::Error::Status(status, _) => format!("Probe HTTP {status}"),
+                _ => "Probe transport failed".into(),
+            })?;
+        Self::read(response)
+    }
+}
+
 #[gpui::test]
 fn new_surface_routes_renders_and_gets_navigation(cx: &mut gpui::TestAppContext) {
     use crate::shell::test_support::*;
@@ -121,6 +142,32 @@ fn new_surface_routes_renders_and_gets_navigation(cx: &mut gpui::TestAppContext)
         "Probe"
     );
     assert!(visual.debug_bounds("registration-probe-view").is_some());
+    shell.read_with(&visual, |s, cx| {
+        let Content::Fake(view) = s.content.get(&s.key(&Tab::Fake)).unwrap() else {
+            panic!("fake surface");
+        };
+        assert_eq!(
+            view.read(cx).receipt.as_ref().unwrap(),
+            &serde_json::json!({
+                "surface":"fake", "payload":"native request", "request":1, "desktopSession":false,
+            }),
+            "the real shell must create its view using the module-owned authenticated request"
+        );
+    });
+    assert_eq!(
+        fixture
+            .client
+            .clone()
+            .with_desktop_session(Some("fixture-probe-account".into()))
+            .unwrap()
+            .fake_request()
+            .unwrap()["desktopSession"],
+        false,
+        "ordinary surface requests must not forward desktop account identity implicitly"
+    );
+    let refused =
+        Client::authenticated(&fixture.origin, Some("fixture-invalid-probe".into())).unwrap();
+    assert_eq!(refused.fake_request().unwrap_err(), "Probe HTTP 401");
     let nav = visual
         .debug_bounds("registration-probe-nav")
         .expect("module nav entry");
