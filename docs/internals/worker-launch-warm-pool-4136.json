@@ -476,5 +476,86 @@
     "APFS/private-Git-clone warming is disabled. Portable fixture assertions pass, but real macOS validation remains unavailable.",
     "The final timed workload is the small fixture with a modeled OS capacity. Full installed-dependency payload latency under the new content seals is not revalidated; earlier measurements are historical.",
     "Complete process-restart fault injection at every transfer boundary, large-tree retirement cost, the original macOS volume-sharing acceptance and mission CLI wait/phase receipts remain unverified."
-  ]
+  ],
+  "packetCancellation": {
+    "policy": "Refills belong to the pool; packet cancellation never closes refill admission. Pool shutdown and invalidation retain their existing exact-tree guards.",
+    "packetReservation": "Cancellation first fences queued creators, then releases only the exact generation whose checkout is confirmed absent. Started materializers remain charged until settlement.",
+    "effectStart": "Persist provisioning-started even for watchdog-stalled attempts; mutable status labels do not erase that attempt progress.",
+    "test": "tests/warm-packet-cancellation-real-path.test.ts",
+    "entryPoints": [
+      "scheduled pool refill",
+      "production stop-mission POST",
+      "managed provisioning queue",
+      "durable storage reservation"
+    ],
+    "red": {
+      "failed": 2,
+      "passed": 1
+    },
+    "green": {
+      "passed": 3,
+      "failed": 0
+    },
+    "cases": [
+      "packet cancel during refill preserves sealed pool inventory",
+      "queued cancellation releases its empty reservation before queue unblocks; creator never runs",
+      "watchdog-stalled creator stays charged until its in-flight operation settles"
+    ],
+    "validation": {
+      "linuxRegressionTests": {
+        "passed": 3,
+        "failed": 0
+      },
+      "macosRegressionTests": {
+        "passed": 2,
+        "skipped": 1,
+        "failed": 0,
+        "skip": "Pool warming is Linux-only."
+      },
+      "guardCases": {
+        "passed": 20,
+        "failed": 0
+      },
+      "relatedTests": {
+        "filesPassed": 8,
+        "passed": 77,
+        "failed": 0
+      },
+      "hermetic": {
+        "filesPassed": 1236,
+        "filesSkipped": 3,
+        "passed": 8927,
+        "skipped": 5
+      },
+      "tsc": 0,
+      "typecheckFast": 0,
+      "eslint": 0,
+      "rules": 0,
+      "classification": 0,
+      "warmLaunchTiming": {
+        "targetMs": 3000,
+        "attempts": [
+          {
+            "condition": "focused checks overlapped guard checks",
+            "dispatchToOutputMs": 3468
+          },
+          {
+            "condition": "isolated fixed run",
+            "dispatchToOutputMs": 3453
+          },
+          {
+            "condition": "paired pre-fix control, after other checks finished",
+            "revision": "258b27cb8770db10acfa5aea205287c3ddccfb3a",
+            "dispatchToOutputMs": 3469
+          },
+          {
+            "condition": "paired fixed run, immediately after control",
+            "dispatchToOutputMs": 3511
+          }
+        ],
+        "dependencyPreparationMs": 0,
+        "result": "The existing three-second fixture target remains unmet before and after this correction. The assertion is unchanged."
+      }
+    }
+  }
 }

@@ -6370,6 +6370,16 @@
       ]
     },
     {
+      "path": "tests/warm-packet-cancellation-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "real-path",
+        "worktree-api"
+      ]
+    },
+    {
       "path": "tests/worker-capacity-resume-real-path.test.ts",
       "reasons": [
         "child-process",

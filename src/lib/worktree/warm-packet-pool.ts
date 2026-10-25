@@ -3,6 +3,7 @@ import path from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 
 import { appendEvent } from '@/lib/lane/registry';
+import { withoutPreRunAdmission } from '@/lib/lane/pre-run-cancellation';
 import { readPinnedLaneCreationBaseCommit } from '@/lib/lane/creation-base';
 import { renameExactChildDirectory } from '@/lib/workspace/exact-parent-operation';
 import { isDependencyMaterializationIncomplete, verifyDependencyMaterialization } from '@/lib/workspace/dependency-materialization-verification';
@@ -178,7 +179,7 @@ export async function prepareWarmPacketWorktrees(opts: WarmPacketOptions, manage
   requests.set(opts.repoRoot, { opts, manager });
   startRefresh();
   if (!building) {
-    building = fill().finally(() => { building = null; });
+    building = withoutPreRunAdmission(fill).finally(() => { building = null; });
   }
   await building;
 }
@@ -205,7 +206,7 @@ function queueRefill(delay: number): void {
       timer.unref();
       return;
     }
-    const filling = building ?? (building = fill().finally(() => { building = null; }));
+    const filling = building ?? (building = withoutPreRunAdmission(fill).finally(() => { building = null; }));
     void filling.catch(() => { /* Cold provisioning remains authoritative. */ });
   };
   timer = setTimeout(refill, delay);
@@ -213,20 +214,22 @@ function queueRefill(delay: number): void {
 }
 
 export async function shutdownWarmPacketWorktrees(): Promise<void> {
-  stopped = true;
-  if (timer) clearTimeout(timer);
-  if (refresh) clearInterval(refresh);
-  timer = null;
-  refresh = null;
-  await Promise.all([...activeBindings]);
-  await building?.catch (() => { });
-  const results = await Promise.allSettled([
-    ...entries.map(retire),
-    ...pending.filter(slot => slot.info).map(slot => slot.request.manager.retireWarmWorktree(slot.info!.id)),
-  ]);
-  requests.clear();
-  const failures = results.filter(result => result.status === 'rejected');
-  if (failures.length) throw new AggregateError(failures.map(result => result.reason), 'Warm worktree shutdown retained an unproven workspace.');
+  return withoutPreRunAdmission(async () => {
+    stopped = true;
+    if (timer) clearTimeout(timer);
+    if (refresh) clearInterval(refresh);
+    timer = null;
+    refresh = null;
+    await Promise.all([...activeBindings]);
+    await building?.catch (() => { });
+    const results = await Promise.allSettled([
+      ...entries.map(retire),
+      ...pending.filter(slot => slot.info).map(slot => slot.request.manager.retireWarmWorktree(slot.info!.id)),
+    ]);
+    requests.clear();
+    const failures = results.filter(result => result.status === 'rejected');
+    if (failures.length) throw new AggregateError(failures.map(result => result.reason), 'Warm worktree shutdown retained an unproven workspace.');
+  });
 }
 
 export async function bindWarmPacketWorktree(input: {
