@@ -10,16 +10,14 @@ import { getSqlite } from '@/lib/db';
 import { readRepoPathRegistry } from './repo-path-registry';
 import {
   createProject as createSqliteProject,
-  deleteProject as deleteSqliteProject,
-  getProjectBySlug as getSqliteProjectBySlug,
-  getProjectWithRepos as getSqliteProjectWithRepos,
   listProjects as listSqliteProjects,
   updateProject as updateSqliteProject,
 } from '@/lib/projects/store';
 import { listRepos } from './registry';
-import { removeRepoFromPool } from './remove';
+import { removeProjectRepositories } from './project-removal';
+import { resolveProjectIdentity, sqliteProjectForLedger } from './project-identity';
 import { reconcileSqliteProjectRepos } from './project-membership';
-import { isVirtualRepoProjectId, virtualProjectRepoId, virtualRepoProjectId } from './virtual-project-id';
+import { isVirtualRepoProjectId, virtualRepoProjectId } from './virtual-project-id';
 
 const PROJECTS_DIR = getDataDir();
 const PROJECTS_PATH = path.join(PROJECTS_DIR, 'projects.json');
@@ -46,6 +44,8 @@ export type ProjectColor = typeof PROJECT_COLOR_PALETTE[number];
 
 export interface ProjectRecord {
   id: string;
+  /** Stable SQLite partner for legacy ledger IDs, retained across renames. */
+  sqliteProjectId?: string;
   name: string;
   repoPaths: string[];
   createdAt: string;
@@ -59,10 +59,6 @@ export interface ProjectsLedger {
 
 function nowIso() {
   return new Date().toISOString();
-}
-
-function makeId() {
-  return `prj-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
 function normalizeRepoPath(inputPath: string) {
@@ -88,6 +84,7 @@ function repoPathBelongsToProject(project: ProjectRecord, repoPath: string): boo
 function normalizeProjectRecord(entry: ProjectRecord): ProjectRecord {
   return {
     id: entry.id,
+    sqliteProjectId: entry.sqliteProjectId,
     name: entry.name,
     repoPaths: entry.repoPaths.map(normalizeRepoPath),
     createdAt: entry.createdAt ?? nowIso(),
@@ -168,7 +165,7 @@ function overlayLedgerWithSqliteMeta(ledger: ProjectsLedger): ProjectsLedger {
   // legacy 'default' that pre-date the SQLite project surface).
   const decorated = ledger.projects.map((project) => {
     const slugCandidate = projectNameToSlug(project.name);
-    const matched = meta.byId.get(project.id) ?? meta.bySlug.get(slugCandidate);
+    const matched = meta.byId.get(project.sqliteProjectId ?? project.id) ?? meta.bySlug.get(slugCandidate);
     if (!matched) return project;
     const color = matched.color && PROJECT_COLOR_PALETTE.includes(matched.color as ProjectColor)
       ? matched.color as ProjectColor
@@ -215,8 +212,8 @@ function writeSqliteProjectMeta(ledger: ProjectsLedger): void {
       if (isVirtualRepoProjectId(project.id)) return;
       const color = project.color ?? null;
       const sortOrder = index;
-      const res = updateById.run(color, sortOrder, project.id);
-      if (res.changes === 0) {
+      const res = updateById.run(color, sortOrder, project.sqliteProjectId ?? project.id);
+      if (res.changes === 0 && !project.sqliteProjectId) {
         updateBySlug.run(color, sortOrder, projectNameToSlug(project.name));
       }
     });
@@ -342,8 +339,6 @@ async function enrichLedgerWithSqliteRepoPaths(ledger: ProjectsLedger): Promise<
     .map(normalizeRepoPath);
 
   const repoPathsBySlug = new Map<string, string[]>();
-  const sqliteProjectById = new Map(sqliteProjects.map((project) => [project.id, project]));
-  const sqliteProjectBySlug = new Map(sqliteProjects.map((project) => [project.slug, project]));
   for (const sp of sqliteProjects) {
     repoPathsBySlug.set(sp.slug, pathsFor(sp));
   }
@@ -351,18 +346,13 @@ async function enrichLedgerWithSqliteRepoPaths(ledger: ProjectsLedger): Promise<
   // Override matched projects' repoPaths from SQLite (the canonical membership store).
   const representedSqliteProjectIds = new Set<string>();
   const projects: ProjectRecord[] = ledger.projects.map((project) => {
-    const slug = projectNameToSlug(project.name);
-    const matched = sqliteProjectById.get(project.id)
-      ?? (() => {
-        const bySlug = sqliteProjectBySlug.get(slug);
-        return bySlug?.name.toLowerCase() === project.name.toLowerCase() ? bySlug : undefined;
-      })();
+    const matched = sqliteProjectForLedger(project, sqliteProjects, ledger.projects);
     if (matched) representedSqliteProjectIds.add(matched.id);
     const fresh = matched ? repoPathsBySlug.get(matched.slug) : undefined;
     // SQLite is the membership source of truth: a ledger project with no SQLite
     // match owns no repos. Don't keep stale stored repoPaths — that's what kept
     // a repo "assigned" to a deleted project and hid it from the single-repo view.
-    return { ...project, repoPaths: fresh ?? [] };
+    return { ...project, sqliteProjectId: matched?.id ?? project.sqliteProjectId, repoPaths: fresh ?? [] };
   });
 
   // Project SQLite projects the ledger doesn't know about (e.g. created in the
@@ -486,10 +476,8 @@ export async function getActiveProjectScopeForRepo(repoPath?: string | null): Pr
 
 export async function setActiveProject(projectId: string): Promise<ProjectsLedger> {
   const ledger = await getProjectsLedger();
-  if (!ledger.projects.some((p) => p.id === projectId)) {
-    throw new Error(`Project ${projectId} does not exist.`);
-  }
-  const next: ProjectsLedger = { ...ledger, activeProjectId: projectId };
+  const { project } = resolveProjectIdentity(projectId, ledger);
+  const next: ProjectsLedger = { ...ledger, activeProjectId: project.id };
   await writeLedger(next);
   return next;
 }
@@ -540,9 +528,10 @@ export async function setProjectColor(projectId: string, color: ProjectColor): P
     throw new Error('Unknown project color.');
   }
   const ledger = await getProjectsLedger();
+  const { project } = resolveProjectIdentity(projectId, ledger);
   const next: ProjectsLedger = {
     ...ledger,
-    projects: ledger.projects.map((p) => (p.id === projectId ? { ...p, color } : p)),
+    projects: ledger.projects.map((p) => (p.id === project.id ? { ...p, color } : p)),
   };
   await writeLedger(next);
   return next;
@@ -552,20 +541,16 @@ export async function renameProject(projectId: string, name: string): Promise<Pr
   const trimmed = name.trim();
   if (!trimmed) throw new Error('Project name is required.');
   const ledger = await getProjectsLedger();
-  const target = ledger.projects.find((p) => p.id === projectId);
-  // Rename in SQLite too so the slug stays aligned (the ledger↔SQLite bridge).
-  if (target) {
-    const sqlite = resolveSqliteProject(target);
-    if (sqlite) {
-      updateSqliteProject(sqlite.id, {
-        name: trimmed,
-        slug: uniqueProjectSlugForName(trimmed, ledger.projects, projectId),
-      });
-    }
+  const { project: target, sqlite } = resolveProjectIdentity(projectId, ledger);
+  if (sqlite) {
+    updateSqliteProject(sqlite.id, {
+      name: trimmed,
+      slug: uniqueProjectSlugForName(trimmed, ledger.projects, target.id),
+    });
   }
   const next: ProjectsLedger = {
     ...ledger,
-    projects: ledger.projects.map((p) => (p.id === projectId ? { ...p, name: trimmed } : p)),
+    projects: ledger.projects.map((p) => (p.id === target.id ? { ...p, name: trimmed } : p)),
   };
   await writeLedger(next);
   return getProjectsLedger();
@@ -576,98 +561,13 @@ export async function deleteProject(projectId: string): Promise<ProjectsLedger> 
   if (ledger.projects.length <= 1) {
     throw new Error('Cannot delete the only project.');
   }
-  const target = ledger.projects.find((p) => p.id === projectId);
-
-  // Delete removes the repos too (operator ruling 2026-07-09): a repo left in
-  // the pool re-projects as a virtual single-repo row with the same name, so
-  // the delete visibly "doesn't work". Repos on disk are never touched, and a
-  // repo that another project still uses survives.
-  const virtualRepoId = virtualProjectRepoId(projectId);
-  if (virtualRepoId) {
-    // Virtual single-repo projection — nothing is persisted for it, so the ONLY
-    // real delete is removing the repo from the pool (the old filter-and-write
-    // was a silent no-op: writeLedger drops repo:* ids and the projection
-    // re-derived the row on every read).
-    if (target) {
-      try {
-        await removeRepoFromPool(virtualRepoId);
-      } catch (error) {
-        console.warn(`[projects] Failed to remove repo ${virtualRepoId} for virtual project delete:`, error);
-      }
-    }
-    const remaining = ledger.projects.filter((p) => p.id !== projectId);
-    const activeProjectId = ledger.activeProjectId === projectId ? remaining[0]!.id : ledger.activeProjectId;
-    await writeLedger({ projects: remaining, activeProjectId });
-    return getProjectsLedger();
-  }
-
-  // Delete the SQLite project (source of truth) so the projection stops re-adding
-  // it — otherwise a deleted project resurrects on the next read. Resolve it
-  // whether the caller passed a ledger id or a raw SQLite id: the Settings
-  // dialog passes SQLite ids, and slug-bridged projects appear in the
-  // projection under their LEDGER id.
-  const sqlite = target ? resolveSqliteProject(target) : getSqliteProjectWithRepos(projectId);
-  let ownedRepoIds: string[] = [];
-  if (sqlite) {
-    ownedRepoIds = sqlite.repos.map((link) => link.repoId);
-    deleteSqliteProject(sqlite.id);
-  }
-
-  // Remove repos exclusive to the deleted project from the pool. Membership is
-  // re-read AFTER the SQLite delete so a repo shared with any surviving project
-  // is kept.
-  if (ownedRepoIds.length > 0) {
-    let stillUsed = new Set<string>();
-    try {
-      stillUsed = new Set(
-        listSqliteProjects()
-          // The synthetic `workspace` project is the unassigned-repo pool, not a
-          // real user project — `syncProjectStoreFromPanelLedger` materializes it
-          // from the default "Workspace" ledger row and links every loose repo to
-          // it. Counting it as "still using" a repo made EVERY repo look shared,
-          // so a deleted project never removed anything and its repos visibly
-          // "went to the Workspace" (operator report, 0.1.580). Exclude it so a
-          // repo whose only other home is the pool is still treated as exclusive.
-          .filter((project) => project.slug !== 'workspace')
-          .flatMap((project) => project.repos.map((link) => link.repoId)),
-      );
-    } catch {
-      // If membership can't be read, err on the side of keeping repos.
-      stillUsed = new Set(ownedRepoIds);
-    }
-    for (const repoId of ownedRepoIds) {
-      if (stillUsed.has(repoId)) continue;
-      try {
-        await removeRepoFromPool(repoId);
-      } catch (error) {
-        console.warn(`[projects] Failed to remove repo ${repoId} while deleting project ${projectId}:`, error);
-      }
-    }
-  }
-
-  // Drop every identity the project is known by: the caller's id, the projected
-  // ledger id, and the SQLite id (all can differ across the slug bridge).
-  const removedIds = new Set<string>([projectId]);
-  if (target) removedIds.add(target.id);
-  if (sqlite) removedIds.add(sqlite.id);
+  const removedIds = await removeProjectRepositories(projectId, ledger);
   const remaining = ledger.projects.filter((p) => !removedIds.has(p.id));
   const activeProjectId = removedIds.has(ledger.activeProjectId)
     ? remaining[0]!.id
     : ledger.activeProjectId;
   await writeLedger({ projects: remaining, activeProjectId });
   return getProjectsLedger();
-}
-
-/**
- * Resolve the SQLite project for a ledger project (by id, else slug). The ledger
- * and SQLite use separate id namespaces bridged by slug, so try both.
- */
-function resolveSqliteProject(ledgerProject: { id: string; name: string }) {
-  return getSqliteProjectWithRepos(ledgerProject.id)
-    ?? (() => {
-      const bySlug = getSqliteProjectBySlug(projectNameToSlug(ledgerProject.name));
-      return bySlug ? getSqliteProjectWithRepos(bySlug.id) : null;
-    })();
 }
 
 /**
@@ -678,7 +578,7 @@ function resolveSqliteProject(ledgerProject: { id: string; name: string }) {
  */
 export async function setProjectRepos(projectId: string, repoPaths: string[]): Promise<ProjectsLedger> {
   const ledger = await getProjectsLedger();
-  const project = ledger.projects.find((p) => p.id === projectId);
+  const { project } = resolveProjectIdentity(projectId, ledger);
   const normalized = Array.from(new Set(repoPaths.map(normalizeRepoPath)));
   if (project) {
     // Membership goes to SQLite (the source of truth). The ledger's repoPaths are
@@ -689,29 +589,31 @@ export async function setProjectRepos(projectId: string, repoPaths: string[]): P
 }
 
 export async function upsertProjectLedgerRecord(input: {
-  id?: string | null;
+  id: string;
+  sqliteProjectId?: string;
   name: string;
   slug?: string | null;
   repoPaths: string[];
 }): Promise<ProjectsLedger> {
   const ledger = await getProjectsLedger();
   const normalized = Array.from(new Set(input.repoPaths.map(normalizeRepoPath)));
-  const targetSlug = input.slug?.trim() || projectNameToSlug(input.name);
-  const existingIndex = ledger.projects.findIndex((project) => (
-    (input.id && project.id === input.id)
-    || projectNameToSlug(project.name) === targetSlug
-    || project.name.toLowerCase() === input.name.toLowerCase()
-  ));
+  const existingIndex = ledger.projects.findIndex((project) =>
+    project.id === input.id || project.sqliteProjectId === input.id);
 
   if (existingIndex >= 0) {
-    const nextProjects = ledger.projects.map((project, index) => (
-      index === existingIndex
-        ? {
-            ...project,
-            repoPaths: normalized,
-          }
-        : project
-    ));
+    const target = ledger.projects[existingIndex];
+    const nextProjects = ledger.projects
+      .filter((project) => project.id === target.id || project.id !== input.sqliteProjectId)
+      .map((project) => (
+        project.id === target.id
+          ? {
+              ...project,
+              sqliteProjectId: input.sqliteProjectId ?? project.sqliteProjectId,
+              name: input.name.trim(),
+              repoPaths: normalized,
+            }
+          : project
+      ));
     const next: ProjectsLedger = { ...ledger, projects: nextProjects };
     await writeLedger(next);
     return next;
@@ -719,7 +621,8 @@ export async function upsertProjectLedgerRecord(input: {
 
   const used = new Set<ProjectColor | undefined>(ledger.projects.map((project) => project.color));
   const project: ProjectRecord = {
-    id: input.id?.trim() || makeId(),
+    id: input.id.trim(),
+    sqliteProjectId: input.sqliteProjectId,
     name: input.name.trim(),
     repoPaths: normalized,
     createdAt: nowIso(),

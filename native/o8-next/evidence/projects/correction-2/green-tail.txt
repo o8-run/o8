@@ -1,0 +1,12 @@
+running 9 tests
+test shell::tests::projects_tests::review::review_p1_deletes_existing_duplicate_by_stable_id ... ok
+test shell::tests::projects_tests::review::review_p1_rejects_duplicate_rename_before_deleting_alpha ... ok
+test shell::tests::projects_tests::review::review_p2_project_open_resolves_repointed_repository ... ok
+test shell::tests::projects_tests::review::review_p2_repository_open_resolves_repointed_repository ... ok
+test shell::tests::projects_tests::review::round2_legacy_desktop_rename_before_native_read_keeps_one_pair ... ok
+test shell::tests::projects_tests::review::round2_legacy_open_resolves_id_pair ... ok
+test shell::tests::projects_tests::review::round2_legacy_rename_updates_both_stable_ids ... ok
+test shell::tests::projects_tests::review::round2_legacy_switch_resolves_id_pair ... ok
+test shell::tests::projects_tests::review::round2_project_delete_refuses_unconfirmed_runtime ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 60 filtered out; finished in 25.84s

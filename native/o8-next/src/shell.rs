@@ -150,6 +150,8 @@ impl Shell {
     }
     fn open_projects(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.capture(window, cx);
+        self.settings = None;
+        self.settings_subscription = None;
         if self.projects.is_none() {
             let client = self.client.clone();
             let projects = cx.new(|cx| Projects::new(client, cx));

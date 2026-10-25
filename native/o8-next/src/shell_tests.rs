@@ -104,12 +104,21 @@ impl Fixture {
         }
     }
 }
+#[path = "settings_tests.rs"]
+mod settings;
+
 impl Drop for Fixture {
     fn drop(&mut self) {
         let _ = Process::new("kill")
             .args(["-TERM", &self.server.id().to_string()])
             .status();
         let _ = self.server.wait();
+        if let Ok(directory) = std::env::var("O8_NEXT_SETTINGS_DIAGNOSTICS") {
+            let _ = fs::copy(
+                self.root.join("fixture.log"),
+                PathBuf::from(directory).join(format!("fixture-{}.log", self.server.id())),
+            );
+        }
         let _ = fs::remove_dir_all(&self.root);
     }
 }
@@ -157,6 +166,25 @@ fn ready(shell: &Entity<Shell>, cx: &mut VisualTestContext) {
         }
     }
     panic!("selected fixture history must reach CPU scene paint through the existing surface");
+}
+
+#[gpui::test]
+fn settings_opens_from_shell_command_palette(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    let (shell, mut visual) = open(
+        fixture.client.clone(),
+        fixture.root.join("settings-shell.json"),
+        State::default(),
+        cx,
+    );
+    ready(&shell, &mut visual);
+    visual.simulate_keystrokes("ctrl-k");
+    visual.simulate_keystrokes("s e t t i n g s enter");
+    draw(&mut visual);
+    assert!(
+        visual.debug_bounds("settings-page").is_some(),
+        "Settings must be reachable through the real shell command palette"
+    );
 }
 
 #[gpui::test]

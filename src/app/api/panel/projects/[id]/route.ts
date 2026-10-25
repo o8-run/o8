@@ -1,3 +1,4 @@
+import { RepoRuntimeStopUnconfirmed } from '@/lib/repos/runtime-removal';
 import { NextRequest, NextResponse } from 'next/server';
 import {
   deleteProject,
@@ -57,6 +58,9 @@ async function handleDELETE(_request: NextRequest, context: RouteContext) {
     const ledger = await deleteProject(id);
     return NextResponse.json(ledger, { headers: NO_STORE });
   } catch (error) {
+    if (error instanceof RepoRuntimeStopUnconfirmed) {
+      return NextResponse.json({ ok: false, error: error.message, note: error.cleanup.note, stoppedSessions: error.cleanup }, { status: 409, headers: NO_STORE });
+    }
     console.error('[api] panel/projects/[id] failed:', error);
     const message = 'Failed to delete project.';
     return NextResponse.json({ error: message }, { status: 400, headers: NO_STORE });

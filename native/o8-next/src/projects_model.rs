@@ -31,6 +31,7 @@ pub struct Repo {
 #[serde(rename_all = "camelCase")]
 pub struct LedgerProject {
     pub id: String,
+    pub sqlite_project_id: Option<String>,
     pub repo_paths: Vec<String>,
 }
 #[derive(Default, Clone, Deserialize)]
@@ -284,7 +285,11 @@ impl Action {
                 )?;
                 let path = ledger["projects"]
                     .as_array()
-                    .and_then(|projects| projects.iter().find(|p| p["id"] == id.as_str()))
+                    .and_then(|projects| {
+                        projects
+                            .iter()
+                            .find(|p| p["id"] == id.as_str() || p["sqliteProjectId"] == id.as_str())
+                    })
                     .and_then(|p| p["repoPaths"].as_array())
                     .and_then(|paths| paths.first())
                     .and_then(Value::as_str)

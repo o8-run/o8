@@ -1,0 +1,23 @@
+Final base: f059b4f0658930ebeac87a199cdd1a504a348839
+
+Full native suite:
+test result: ok. 66 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 434.84s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+Full npm test:
+ Test Files  1240 passed | 3 skipped (1243)
+      Tests  8962 passed | 5 skipped (8967)
+
+Production project/shell routes:
+ Test Files  6 passed (6)
+      Tests  33 passed (33)
+
+Earlier native run:
+worker_send_steer_queue_promote_remove_and_streaming_latency failed at src/worker_tests.rs:133
+  left: String("send-next")
+ right: "steer-now"
+test result: FAILED. 65 passed; 1 failed; 3 ignored
+Final full rerun: worker_send_steer_queue_promote_remove_and_streaming_latency ... ok

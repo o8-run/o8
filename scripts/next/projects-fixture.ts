@@ -1,6 +1,6 @@
 /** Project route adapter for the disposable native host. All state stays in its root. */
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, realpathSync } from 'node:fs';
+import { mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { NextRequest } from 'next/server';
 import type { RuntimeSession } from '../../src/lib/runtimes/types';
@@ -20,6 +20,21 @@ export async function projectsFixture(root: string) {
   const ledger = await import('../../src/app/api/panel/projects/route');
   const active = await import('../../src/app/api/panel/projects/active/route');
   const panelProject = await import('../../src/app/api/panel/projects/[id]/route');
+  if (process.argv.includes('--projects-legacy')) {
+    const { addRepo } = await import('../../src/lib/repos/registry');
+    const { createProject, addRepoToProject } = await import('../../src/lib/projects/store');
+    const repo = await addRepo(folders[0]);
+    const stored = createProject({ name: 'Legacy alpha', slug: 'legacy-alpha', description: null });
+    const bystander = createProject({ name: 'Legacy beta', slug: 'legacy-beta', description: null });
+    addRepoToProject(stored.id, repo.id, null, 'manual');
+    writeFileSync(join(root, 'data', 'projects.json'), JSON.stringify({
+      projects: [
+        { id: 'legacy-alpha-id', name: stored.name, repoPaths: [repo.localPath], createdAt: new Date().toISOString() },
+        { id: bystander.id, name: bystander.name, repoPaths: [], createdAt: new Date().toISOString() },
+      ],
+      activeProjectId: bystander.id,
+    }));
+  }
   if (process.argv.includes('--projects-refuse-remove')) {
     const { getRuntime } = await import('../../src/lib/runtimes');
     const runtime = getRuntime('codex');

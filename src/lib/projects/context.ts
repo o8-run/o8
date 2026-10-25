@@ -17,6 +17,7 @@ import {
   type ProjectRecord,
 } from '@/lib/repos/projects';
 import { listRepos } from '@/lib/repos/registry';
+import { sqliteProjectForLedger } from '@/lib/repos/project-identity';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
 import { isVirtualRepoProjectId } from '@/lib/repos/virtual-project-id';
 import { truncateText } from '@/lib/util/text';
@@ -243,9 +244,7 @@ export async function syncProjectStoreFromPanelLedger(): Promise<{
     if (hasConcretePanelProject && panelProject.id === DEFAULT_PROJECT_ID) continue;
 
     const slug = projectNameToSlug(panelProject.name);
-    let settingsProject = projects.find((project) => project.slug === slug)
-      ?? projects.find((project) => project.name.toLowerCase() === panelProject.name.toLowerCase())
-      ?? null;
+    let settingsProject = sqliteProjectForLedger(panelProject, projects, ledger.projects);
 
     if (!settingsProject) {
       const created = createProject({
@@ -281,7 +280,7 @@ export async function syncProjectStoreFromPanelLedger(): Promise<{
   return { createdProjects, linkedRepos };
 }
 
-export async function syncPanelLedgerFromProjectStore(project: ProjectWithRepos): Promise<void> {
+export async function syncPanelLedgerFromProjectStore(project: ProjectWithRepos, ledgerProjectId = project.id): Promise<void> {
   const repos = await listRepos();
   const byId = repoById(repos);
   const repoPaths = project.repos
@@ -290,6 +289,8 @@ export async function syncPanelLedgerFromProjectStore(project: ProjectWithRepos)
     .map(normalizeRepoPath);
 
   await upsertProjectLedgerRecord({
+    id: ledgerProjectId,
+    sqliteProjectId: project.id,
     name: project.name,
     slug: project.slug,
     repoPaths,

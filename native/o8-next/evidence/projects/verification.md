@@ -17,6 +17,12 @@ targets by repository ID from fresh inventory. Its separate red/green receipts
 and results are in [correction-1](correction-1/verification.md). The timing samples
 below record the initial implementation.
 
+Review correction 2 adds the shared live-runtime refusal to project deletion,
+resolves legacy ledger/SQLite ID pairs, and prevents rename/delete from recreating
+a project or retaining its exclusive repository under another ID. See
+[correction-2](correction-2/verification.md) for the strengthened regressions and
+current verification results.
+
 ## Desktop parity
 
 | Desktop control | Native counterpart | Status |

@@ -90,7 +90,10 @@ impl Projects {
                     )
                     .child(self.action(
                         format!("project-activate-{}", project.slug),
-                        if self.snapshot.ledger.active_project_id == id {
+                        if self.snapshot.ledger.projects.iter().any(|p| {
+                            p.id == self.snapshot.ledger.active_project_id
+                                && (p.id == id || p.sqlite_project_id.as_ref() == Some(&id))
+                        }) {
                             "Active project"
                         } else {
                             "Switch project"

@@ -1,0 +1,17 @@
+running 1 test
+test shell::tests::projects_tests::review::round2_legacy_desktop_rename_before_native_read_keeps_one_pair ...
+thread 'shell::tests::projects_tests::review::round2_legacy_desktop_rename_before_native_read_keeps_one_pair' (103606) panicked at src/projects_review_tests.rs:366:5:
+assertion `left == right` failed: a desktop rename before the first native read must not recreate the legacy project
+  left: 3
+ right: 2
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    shell::tests::projects_tests::review::round2_legacy_desktop_rename_before_native_read_keeps_one_pair
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 68 filtered out; finished in 3.38s
+
+error: test failed, to rerun pass `--bin o8-next`
