@@ -58,6 +58,9 @@ fn sidebar_2000_thread_first_paint_and_scroll_measurement(cx: &mut TestAppContex
                 "sidebar row reached CPU scene paint"
             );
         });
+        // Reveal the full inventory through keyboard input before the 2,000-row scroll workload.
+        cx.simulate_keystrokes("f8 end home");
+        draw(cx);
         let bounds = cx.debug_bounds("thread-list").unwrap();
         let initial_painted = shell.read_with(cx, |s, cx| {
             s.surfaces
