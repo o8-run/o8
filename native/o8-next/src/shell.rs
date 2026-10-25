@@ -44,6 +44,7 @@ register_surfaces! {
 }
 
 pub struct Shell {
+    system_glass: bool,
     client: Client,
     file: PathBuf,
     state: State,
@@ -73,6 +74,7 @@ impl Shell {
         let focus = cx.focus_handle();
         focus.focus(window);
         let mut shell = Self {
+            system_glass: false,
             client,
             file,
             state,
@@ -446,6 +448,8 @@ impl Shell {
 }
 #[path = "shell_view.rs"]
 mod view;
+#[path = "shell_material.rs"]
+mod material;
 pub use view::try_launch;
 
 #[cfg(test)]

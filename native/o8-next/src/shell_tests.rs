@@ -4,6 +4,113 @@ use gpui::TestAppContext;
 use serde_json::json;
 use std::time::Instant;
 
+#[test]
+fn glass_and_plain_open_through_the_production_shell() {
+    for mode in ["glass", "plain"] {
+        let output = Process::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "shell::tests::glass_shell_probe",
+                "--ignored",
+                "--nocapture",
+                "--test-threads=1",
+            ])
+            .env("O8_NEXT_APPEARANCE", mode)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{mode} shell probe:\n{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
+#[gpui::test]
+#[ignore = "isolated appearance probe, invoked by glass_and_plain_open_through_the_production_shell"]
+fn glass_shell_probe(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    let (shell, mut visual) = open(
+        fixture.client.clone(),
+        fixture.root.join("glass.json"),
+        State::default(),
+        cx,
+    );
+    let cx = &mut visual;
+    ready(&shell, cx);
+    let glass = std::env::var("O8_NEXT_APPEARANCE").unwrap() == "glass";
+    let theme = crate::theme::current();
+    assert_eq!(
+        theme.background.a,
+        if glass { 0. } else { 1. },
+        "requested glass must leave the native backdrop visible"
+    );
+    assert_eq!(theme.surface.a, if glass { 0. } else { 0.82 });
+    assert_eq!(theme.surface_raised.a, if glass { 0.05 } else { 1. });
+    assert!(
+        !shell.read_with(cx, |s, _| s.system_glass),
+        "headless windows use the plain fallback and never require an AppKit handle"
+    );
+    assert_eq!(
+        material::background(true),
+        gpui::WindowBackgroundAppearance::Opaque
+    );
+    cx.update(|window, _| window.activate_window());
+    cx.deactivate_window();
+    draw(cx);
+    assert_eq!(
+        crate::theme::current().background,
+        theme.background,
+        "focus changes must retain the selected material tokens"
+    );
+    if glass {
+        // Emulate only the native adapter's success result. The production veil
+        // and its input hit-testing still paint through the real shell view.
+        shell.update(cx, |s, cx| {
+            s.system_glass = true;
+            cx.notify();
+        });
+        draw(cx);
+        let workspace = cx.debug_bounds("workspace-1").unwrap();
+        cx.simulate_click(workspace.center(), gpui::Modifiers::default());
+        ready(&shell, cx);
+        assert_eq!(
+            shell.read_with(cx, |s, _| s.state.selected.clone()),
+            shell.read_with(cx, |s, _| Some(s.workspaces[1].clone()))
+        );
+    }
+    cx.simulate_keystrokes("cmd-k");
+    draw(cx);
+    assert!(shell.read_with(cx, |s, _| s.palette));
+    cx.simulate_keystrokes("escape");
+    assert!(!shell.read_with(cx, |s, _| s.palette));
+    cx.simulate_resize(size(px(900.), px(700.)));
+    draw(cx);
+    assert!(cx.simulate_close());
+    let saved = State::load(&fixture.root.join("glass.json")).unwrap();
+    assert_eq!(saved.bounds[2..], [900., 700.]);
+    // A closing window can still have session/inventory reads in flight.
+    let (_, mut pending) = open(
+        fixture.client.clone(),
+        fixture.root.join("pending.json"),
+        State::default(),
+        &mut cx.cx,
+    );
+    assert!(pending.simulate_close());
+    pending.run_until_parked();
+    let (reopened, mut reopened_visual) = open(
+        fixture.client.clone(),
+        fixture.root.join("glass.json"),
+        saved,
+        &mut cx.cx,
+    );
+    ready(&reopened, &mut reopened_visual);
+    if let Ok(directory) = std::env::var("O8_NEXT_GLASS_EVIDENCE") {
+        fs::write(PathBuf::from(directory).join(if glass { "glass.json" } else { "plain.json" }), serde_json::to_vec_pretty(&json!({"endpoint":"headless production GPUI shell; no raster or compositor capture", "requested":if glass { "glass" } else { "plain" }, "nativeMaterialInstalled":false,"opaqueFallback":true,"surfaceAlpha":theme.surface.a,"raisedAlpha":theme.surface_raised.a,"restoredSize":[900,700],"paletteFocusAndCloseRace":true})).unwrap()).unwrap();
+    }
+}
+
 #[gpui::test]
 fn shell_palette_switch_restart_and_server_down(cx: &mut TestAppContext) {
     let fixture = Fixture::new();

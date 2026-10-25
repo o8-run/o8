@@ -14,6 +14,15 @@ proxies. A worker launch keeps worker authority even if a native operator
 credential was inherited. An explicit different origin never receives the local
 configuration's disk credential. The normal explicit fixture modes remain available.
 
+The shell defaults to All Glass on macOS and plain dark elsewhere.
+`O8_NEXT_APPEARANCE=glass` or `O8_NEXT_APPEARANCE=plain` selects the appearance
+at process startup. On macOS, All Glass installs one window-owned
+NSVisualEffectView with FullScreenUI, BehindWindow blending and Active state.
+Its size follows the GPUI content view. The desktop's three-stop veil and panel
+alpha tokens come from the shared native theme. In-flow surfaces pass through
+to that material. Non-macOS and offscreen windows keep an opaque dark root;
+they do not emulate system blur. Hidden tests never request a native handle.
+
 The shell lists workspaces with saved sessions. Ctrl+K or Cmd+K opens searchable
 commands; arrows and Enter choose, Escape cancels. Open session, Open grid and
 New message use the existing views; New message focuses the selected session's

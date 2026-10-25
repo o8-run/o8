@@ -29,12 +29,17 @@ impl Render for Shell {
             .size_full()
             .flex()
             .flex_col()
-            .bg(theme().background)
+            .bg(if self.system_glass {
+                theme().background
+            } else {
+                crate::theme::plain_background()
+            })
             .text_color(theme().text)
             .font_family(theme().font_ui)
             .text_size(px(13.))
             .track_focus(&self.focus)
             .capture_key_down(cx.listener(Self::key_down))
+            .when(self.system_glass, |view| view.child(material::veil()))
             .child(
                 div()
                     .flex()
@@ -276,6 +281,7 @@ pub(super) fn open_window(
     let [x, y, w, h] = state.bounds;
     cx.open_window(
         WindowOptions {
+            window_background: material::background(offscreen),
             focus: false,
             show: !offscreen,
             window_bounds: Some(WindowBounds::Windowed(Bounds::new(
@@ -289,7 +295,14 @@ pub(super) fn open_window(
             }),
             ..Default::default()
         },
-        |window, cx| cx.new(|cx| Shell::new(client, file, state, window, cx)),
+        |window, cx| {
+            cx.new(|cx| {
+                let system_glass = material::apply(window, offscreen);
+                let mut shell = Shell::new(client, file, state, window, cx);
+                shell.system_glass = system_glass;
+                shell
+            })
+        },
     )
     .expect("GPUI shell window")
 }

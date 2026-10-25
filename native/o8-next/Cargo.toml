@@ -26,6 +26,11 @@ tree-sitter-md = "=0.5.3"
 [dev-dependencies]
 gpui = { version = "=0.2.2", default-features = false, features = ["font-kit", "test-support"] }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+cocoa = "=0.26.0"
+objc = "=0.2.7"
+raw-window-handle = "=0.6.2"
+
 [workspace]
 
 # Published GPUI pins Taffy exactly; backport its internal Grid security update.

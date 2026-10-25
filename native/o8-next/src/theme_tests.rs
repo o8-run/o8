@@ -137,6 +137,57 @@ fn css_color(block: &str, variable: &str) -> gpui::Rgba {
 }
 
 #[test]
+fn glass_tokens_match_the_desktop_overrides_and_window_veil() {
+    let theme = crate::theme::Theme::for_appearance(crate::theme::Appearance::Glass);
+    let context = include_str!("../../../src/lib/theme/context.tsx");
+    let overrides = context
+        .split("const WORKSPACE_GLASS_OVERRIDES")
+        .nth(1)
+        .unwrap()
+        .split("};")
+        .next()
+        .unwrap();
+    for (token, native) in [
+        ("--t-panel", theme.surface),
+        ("--t-chat-surface-bg", theme.background),
+        ("--t-terminal-bg", theme.code_background),
+        ("--t-glass-elevated", theme.surface_raised),
+        ("--t-chat-surface-text", theme.text),
+        ("--t-chat-surface-text-secondary", theme.text_secondary),
+        ("--t-text-muted", theme.text_muted),
+        ("--t-text-faint", theme.text_faint),
+        ("--t-glass-muted", theme.hover),
+        ("--t-input-bg", theme.selection),
+    ] {
+        let pattern = Regex::new(&format!("'{}': '([^']+)'", regex::escape(token))).unwrap();
+        let value = &pattern.captures(overrides).unwrap()[1];
+        if value == "transparent" {
+            assert_eq!(native.a, 0., "{token}");
+        } else {
+            assert_eq!(
+                native,
+                css_color(&format!("color:{value};"), "color"),
+                "{token}"
+            );
+        }
+    }
+    let veil = include_str!("../../../src/lib/theme/glass-material.ts")
+        .lines()
+        .find(|line| line.contains("WORKSPACE_GLASS_VEIL ="))
+        .unwrap();
+    let pattern = Regex::new(r"(rgba\([^)]+\)) (\d+)%").unwrap();
+    let stops: Vec<_> = pattern.captures_iter(veil).collect();
+    assert_eq!(stops.len(), crate::theme::GLASS_VEIL.len());
+    for (capture, (offset, alpha)) in stops.iter().zip(crate::theme::GLASS_VEIL) {
+        assert_eq!(capture[2].parse::<f32>().unwrap() / 100., offset);
+        assert_eq!(
+            css_color(&format!("color:{};", &capture[1]), "color"),
+            crate::theme::veil_color(alpha)
+        );
+    }
+}
+
+#[test]
 fn every_theme_token_resolves_for_both_appearances_and_matches_desktop_css() {
     use crate::theme::{Appearance, Theme, current};
     let css = include_str!("../../../src/app/globals.css");
@@ -178,6 +229,7 @@ fn every_theme_token_resolves_for_both_appearances_and_matches_desktop_css() {
                 ":root {",
                 "html[data-palette='light'][data-surface='solid'] {",
             ),
+            Appearance::Glass => unreachable!("glass has its own desktop override contract"),
         };
         let block = css
             .split(selector)
@@ -262,7 +314,7 @@ fn every_theme_token_resolves_for_both_appearances_and_matches_desktop_css() {
         }
     }
     assert_eq!(
-        current().background,
-        Theme::for_appearance(Appearance::Dark).background
+        current().font_ui,
+        Theme::for_appearance(Appearance::Dark).font_ui
     );
 }
