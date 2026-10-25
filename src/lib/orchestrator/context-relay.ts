@@ -1,3 +1,6 @@
+import { isCorrectionForgotten } from '@/lib/cortex/operator-corrections';
+import { completionOutcomeId } from '@/lib/cortex/outcome-exclusion';
+import { readMemoryRevision } from '@/lib/cortex/memory-revision';
 import { asc, eq, or } from 'drizzle-orm';
 import { listApprovalsForContext } from '@/lib/approvals/store';
 import type { ApprovalAuditEvent, OrchestratorReviewFinding } from '@/lib/approvals/types';
@@ -14,9 +17,7 @@ import {
   parsePacketSelfReview,
   stripPacketSelfReview,
 } from '@/lib/orchestrator/self-review';
-import {
-  stripPacketTaskContract,
-} from '@/lib/orchestrator/packet-task-contract';
+import { stripPacketTaskContract } from '@/lib/orchestrator/packet-task-contract';
 import {
   findFirstTaskContractCapture,
 } from '@/lib/orchestrator/task-contract-cost';
@@ -407,6 +408,7 @@ export async function recordPacketReviewContext(
 }
 
 export async function capturePacketCompletionContext(packetId: string, sessionKey: string, options: { fallbackSummary?: string } = {}): Promise<PacketContext> {
+  const memoryRevision = readMemoryRevision();
   const normalizedPacketId = packetId.trim();
   const normalizedSessionKey = sessionKey.trim();
   const runtimeId = inferRuntimeId(normalizedSessionKey);
@@ -444,7 +446,7 @@ export async function capturePacketCompletionContext(packetId: string, sessionKe
     sessionKey: normalizedSessionKey,
   });
   const approvalReviewContext = extractApprovalReviewContext(
-    matchingApprovals.flatMap((approval) => approval.audit),
+    matchingApprovals.filter(approval => !isCorrectionForgotten(`approval:${approval.id}`)).flatMap((approval) => approval.audit),
     changedFiles,
   );
   const context: PacketContext = {
@@ -478,6 +480,8 @@ export async function capturePacketCompletionContext(packetId: string, sessionKe
     ...approvalReviewContext,
   };
 
+  context.sourceOutcomeId = completionOutcomeId(context);
+  context.memoryRevision = memoryRevision;
   await finishCompletionHandoffCapture(context, handoffCapture);
   await persistTaskContractCapture({ packetId: normalizedPacketId, sessionKey: normalizedSessionKey, contract: taskContract, lane, runtime: runtimeId, transcript, capture: taskContractCapture, telemetry });
 
@@ -624,11 +628,9 @@ async function persistSessionOutcome(
   const db = getDb();
   if (!db) return false;
 
-  // Deterministic id keyed on the unique-per-second tuple — re-captures of the
-  // exact same completion (auto-review re-pulling context) collapse cleanly.
+  // Share the deterministic identity with every read-time recall guard.
   const completedAt = context.completedAt;
-  const sessionFingerprint = context.sessionKey.replace(/[^a-z0-9]/gi, '').slice(-24);
-  const id = `outcome-${context.packetId.slice(0, 16)}-${sessionFingerprint}-${completedAt.slice(0, 19)}`;
+  const id = completionOutcomeId(context);
   const start = deriveOutcomeStartFromLaneEvents(db, lane, completedAt);
   console.log(
     `[context-relay] ${start.source} packet=${context.packetId} lane=${lane.id} startedAt=${start.startedAt} completedAt=${completedAt} durationMs=${start.durationMs ?? 'null'} detail=${start.detail}`,

@@ -1,3 +1,5 @@
+import { hasForgottenPacketOutcome } from '@/lib/cortex/outcome-exclusion';
+import { readMemoryRevision } from '@/lib/cortex/memory-revision';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
@@ -307,7 +309,7 @@ async function buildDependencyContextSections(
         ?? value.dependencyPacketId;
       const reviewSections = value.context
         ? buildReviewLessonSections(dependencyTitle, value.context)
-        : value.dependencyPacket
+        : value.dependencyPacket && !hasForgottenPacketOutcome(value.dependencyPacketId) && readMemoryRevision() === '0'
           ? formatPacketReviewFallback(value.dependencyPacket)
           : [];
 
@@ -328,7 +330,7 @@ async function buildDependencyContextSections(
     });
 }
 
-export async function buildPacketPrompt(
+async function assemblePacketPrompt(
   packet: OrchestratorPacket,
   allPackets: OrchestratorPacket[],
   baseBranch = 'main',
@@ -517,4 +519,16 @@ export async function buildPacketPrompt(
     readOnlyPacket ? null : 'If the task requires a path outside the packet allowlist, request a bounded audited expansion with `o8 packet expand-scope --paths <path[,path]> --reason "<why the task requires it>"` before editing that path.',
     'Stay within this packet scope. Surface blockers, review handoffs, and required operator decisions explicitly.',
   ].filter((value): value is string => Boolean(value)).join('\n');
+}
+
+/** A concurrent forget invalidates all fragments assembled before its commit. */
+export async function buildPacketPrompt(
+  packet: OrchestratorPacket, allPackets: OrchestratorPacket[], baseBranch = 'main', worktreePath?: string | null,
+): Promise<string> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const revision = readMemoryRevision();
+    const prompt = await assemblePacketPrompt(packet, allPackets, baseBranch, worktreePath);
+    if (revision === readMemoryRevision()) return prompt;
+  }
+  throw new Error('Worker memory changed during prompt assembly. Retry dispatch.');
 }

@@ -1,3 +1,5 @@
+import { completionOutcomeId, hasForgottenPacketOutcome, isOutcomeForgotten } from '@/lib/cortex/outcome-exclusion';
+import { readMemoryRevision } from '@/lib/cortex/memory-revision';
 import 'server-only';
 import { execFileSync } from '@/lib/providers/child-process';
 import { constants, closeSync, fstatSync, lstatSync, openSync, readSync, realpathSync } from 'node:fs';
@@ -231,8 +233,8 @@ export async function persistCapturedCompletionHandoff(context: PacketContext, o
     const provider = providerRun(capture.lane, capture.repositoryUuid);
     if (JSON.stringify(provider) !== JSON.stringify(capture.provider)) throw new Error('Completion provider run changed during capture.');
     if (outcome === 'no_changes' && provider.outcome !== 'finished') throw new Error('Read-only completion provider did not finish successfully.');
-    const compact: PacketContext = { packetId: context.packetId, sessionKey: context.sessionKey,
-      projectId: context.projectId, headSha: facts.revision, completedAt: capture.owner.finishedAt,
+    const compact: PacketContext = { sourceOutcomeId: context.sourceOutcomeId ?? completionOutcomeId(context), packetId: context.packetId, sessionKey: context.sessionKey,
+      memoryRevision: context.memoryRevision, projectId: context.projectId, headSha: facts.revision, completedAt: capture.owner.finishedAt,
       ...(context.diffFingerprint ? { diffFingerprint: bounded(context.diffFingerprint, 128) } : {}),
       model: bounded(context.model, 120), summary: bounded(context.summary),
       changedFiles: context.changedFiles.slice(0, 16).map((file) => bounded(file, 240)),
@@ -298,7 +300,7 @@ export async function finishCompletionHandoffCapture(context: PacketContext, cap
   packetCompletionContextStore.set(context.packetId, context);
 }
 
-export async function readPacketCompletionContext(packetId: string): Promise<PacketContext | null> {
+async function readUnfilteredCompletionContext(packetId: string): Promise<PacketContext | null> {
   const id = packetId.trim();
   if (!id) return null;
   const cached = packetCompletionContextStore.get(id);
@@ -319,4 +321,14 @@ export async function readPacketCompletionContext(packetId: string): Promise<Pac
     || !packetReleaseIdentityIsCurrent(owner.packet, lane.id, record.owner.generation, true)
     || turnCursor(lane.id) !== record.owner.turnCursor) return null;
   return completionContextRecovery(record);
+}
+
+/** Receipts and the process cache are audit evidence, not authority to recall forgotten memory. */
+export async function readPacketCompletionContext(packetId: string): Promise<PacketContext | null> {
+  const context = await readUnfilteredCompletionContext(packetId);
+  if (!context || isOutcomeForgotten(context.sourceOutcomeId ?? completionOutcomeId(context))
+    || (!context.sourceOutcomeId && hasForgottenPacketOutcome(context.packetId))) return null;
+  if ((context.memoryRevision ?? '0') === readMemoryRevision()) return context;
+  // Review lessons can be flattened operator corrections with no per-fragment ID.
+  return { ...context, attemptLearnings: undefined, review: undefined, reviewFindings: undefined, patterns: undefined, conflictZones: undefined };
 }

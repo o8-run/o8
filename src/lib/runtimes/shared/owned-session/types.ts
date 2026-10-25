@@ -45,6 +45,7 @@ export interface OwnedRunRecord {
   id: string;
   mode: OwnedRunMode;
   prompt: string;
+  memoryRevision?: string;
   startedAt: string;
   finishedAt?: string;
   pid: number;
@@ -112,6 +113,8 @@ export interface OwnedSessionRecord {
   updatedAt: string;
   threadId?: string;
   initialPrompt?: string;
+  /** Recall revision for opaque assembled worker prompts and provider thread context. */
+  promptMemoryRevision?: string;
   latestPrompt: string;
   latestSummary: string;
   model?: string;
@@ -236,6 +239,7 @@ export interface OwnedTailGroup {
   mode: OwnedRunMode;
   outcome: OwnedRunOutcome;
   prompt: string;
+  memoryRevision?: string;
   startedAt: string;
   finishedAt?: string;
   startedAtLabel?: string;

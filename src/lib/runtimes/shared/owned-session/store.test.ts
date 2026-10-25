@@ -371,6 +371,61 @@ describe('createOwnedSessionStore launch readiness gate', () => {
       expectedVersion: 1,
     })).resolves.toMatchObject({ status: 'idempotent' });
   });
+  it.each(['resume', 'forget during preparation'] as const)('fences forgotten worker memory at %s through the owned store', async kind => {
+    const { createOwnedSessionStore } = await import('./store');
+    const { writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
+    const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
+    const { advanceMemoryRevision, readMemoryRevision } = await import('@/lib/cortex/memory-revision');
+    const { getSqlite } = await import('@/lib/db');
+    const db = getSqlite();
+    const prior = readMemoryRevision();
+    const packetId = 'packet-forget-owned-store';
+    writeOrchestratorControlPlaneState({ ...createEmptyOrchestratorMissionState(), packets: [{
+      id: packetId, branchTarget: 'fixture-forget', workspaceTargetPath: repoPath, referenceLabel: packetId,
+      title: 'Current retained worker task', summary: 'Inspect the fixture.', runtime: 'codex',
+      status: 'running', queueState: 'held', releaseState: 'pending', dependencyPacketIds: [], dependencyLabels: [],
+    }] });
+    ensureDispatchBackendReadyMock.mockResolvedValue(readyResult());
+    const store = createOwnedSessionStore(testAdapter(), {
+      workspaceSpawnGuard: async () => ({ status: 'available', source: 'no-snapshot' }),
+    });
+    try {
+      const launched = await store.launch({ cwd: repoPath, prompt: 'forgotten assembled context canary', packetId });
+      const session = readSingleSession(process.env.O8_TEST_OWNED_ROOT!);
+      session.threadId = 'old-provider-thread';
+      session.recentRuns[0] = { ...session.recentRuns[0], outcome: 'finished', pid: 0, finishedAt: new Date().toISOString() };
+      session.activeRun = undefined;
+      writeFileSync(path.join(session.sessionDir, 'session.json'), JSON.stringify(session));
+      spawnMock.mockClear();
+      if (kind === 'forget during preparation') {
+        ensureDispatchBackendReadyMock.mockImplementationOnce(async () => {
+          db.transaction(() => advanceMemoryRevision(db))();
+          return readyResult();
+        });
+        await expect(store.resume(launched.surfaceId, 'fresh operator instruction')).rejects.toThrow(/memory changed/i);
+        expect(spawnMock).not.toHaveBeenCalled();
+      } else {
+        db.transaction(() => advanceMemoryRevision(db))();
+        const expectedRevision = readMemoryRevision();
+        spawnMock.mockImplementationOnce(() => {
+          const prepared = readSingleSession(process.env.O8_TEST_OWNED_ROOT!);
+          expect(prepared.threadId).toBeUndefined();
+          expect(prepared.promptMemoryRevision).toBe(expectedRevision);
+          expect(prepared.initialPrompt).toContain('Current retained worker task');
+          expect(prepared.activeRun?.mode).toBe('launch');
+          expect(prepared.activeRun?.prompt).toContain('fresh operator instruction');
+          expect(prepared.activeRun?.prompt).not.toContain('forgotten assembled context canary');
+          return { pid: 42, unref: vi.fn(), once: vi.fn() };
+        });
+        await expect(store.resume(launched.surfaceId, 'fresh operator instruction')).resolves.toMatchObject({ ok: true });
+        expect(spawnMock).toHaveBeenCalledTimes(1);
+      }
+    } finally {
+      if (prior === '0') db.exec('DROP TABLE IF EXISTS memory_forget_revision');
+      else db.prepare('UPDATE memory_forget_revision SET revision = ? WHERE singleton = 1').run(prior);
+    }
+  });
+
 });
 
 function testAdapter(binaryName = 'node'): OwnedRuntimeAdapter {

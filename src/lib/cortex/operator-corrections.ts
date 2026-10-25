@@ -260,3 +260,10 @@ export function buildPacketCorrectionsSection(packetId: string): string | null {
   }
   return blocks.join('\n\n');
 }
+
+/** Audit rows remain durable; callers deriving new prompt fragments must check recall standing. */
+export function isCorrectionForgotten(id: string): boolean {
+  const db = getSqlite();
+  if (!db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'forgotten_operator_corrections'").get()) return false;
+  return Boolean(db.prepare('SELECT 1 FROM forgotten_operator_corrections WHERE id = ?').get(id));
+}

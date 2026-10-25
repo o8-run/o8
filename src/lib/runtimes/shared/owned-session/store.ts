@@ -365,7 +365,7 @@ export function createOwnedSessionStore(
       if (automaticRunId) assertAutomaticRecoveryGeneration(await io.findSession(surfaceId), automaticRunId);
       assertOwnedActionAdmission(await io.findSession(surfaceId));
       await assertOwnedActionFence(surfaceId, await io.findSession(surfaceId));
-      const run = await runController.spawnOwnedRun(session, prompt.trim(), 'resume');
+      const run = await runController.spawnOwnedRun(session, prompt.trim(), 'resume', { freshRequest: !automaticRunId });
       if (run.outcome === 'failed' && coldRestored) {
         await rollbackColdRestore();
       }

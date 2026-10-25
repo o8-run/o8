@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { checkForgetDependentDispatch } from './fixtures/forget-dependent-dispatch';
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { createRequire } from 'node:module';
 import { basename, dirname, join } from 'node:path';
@@ -15,6 +16,25 @@ import type { CompletionHandoffRecord } from '@/lib/workspace/completion-handoff
 
 // Stub provider/notification side effects, not completion, ownership, Git,
 // context capture, retention, terminal cleanup or private persistence.
+vi.mock('@/lib/runtimes/shared/auth-detect', async original => ({
+  ...await original<typeof import('@/lib/runtimes/shared/auth-detect')>(),
+  assertRuntimeDispatchable: vi.fn(async () => {}),
+}));
+vi.mock('@/lib/worktree/storage-telemetry', async original => ({
+  ...await original<typeof import('@/lib/worktree/storage-telemetry')>(),
+  measureHostVolume: async () => ({ accountingStatus: 'observed', probePath: '/', availableBytes: 90_000_000_000,
+    freeBytes: 90_000_000_000, totalBytes: 100_000_000_000, error: null }),
+}));
+const providerStarts = vi.hoisted(() => vi.fn(async (input: import('@/lib/runtimes/types').LaunchOptions) => ({
+  ok: true, sessionKey: `fixture:${input.packetId}`, note: 'Provider seam; no inference.',
+})));
+vi.mock('@/lib/runtimes', async original => {
+  const actual = await original<typeof import('@/lib/runtimes')>();
+  return { ...actual, getRuntime: (id: import('@/lib/runtimes/types').RuntimeId) => {
+    const runtime = actual.getRuntime(id);
+    return runtime ? { ...runtime, launch: providerStarts } : undefined;
+  } };
+});
 const publicationRace = vi.hoisted(() => ({ before: null as null | ((request: { operation?: string; identity?: { canonicalPath: string } }) => void) }));
 vi.mock('node:child_process', async (original) => {
   const actual = await original<typeof import('node:child_process')>();
@@ -30,17 +50,18 @@ vi.mock('@/lib/runtime/pty-bridge', async (original) => ({
 }));
 vi.mock('@/lib/runtimes/shared/dispatch-readiness', () => ({ ensureDispatchBackendReady: vi.fn(async () => {}) }));
 vi.mock('@/lib/runtime/inventory', () => ({ getRuntimeInventorySnapshot: async () => ({ agents: [] }) }));
-vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: vi.fn(async () => {}) }));
+vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: vi.fn(async () => {}), publishCortexChange: vi.fn(async () => {}) }));
 vi.mock('@/lib/command-center/snapshot', () => ({ invalidateCommandCenterSnapshotCaches: vi.fn() }));
 vi.mock('@/lib/mobile/inbox', () => ({ invalidateInboxCache: vi.fn() }));
 vi.mock('@/lib/orchestrator/cost-persistence', () => ({ persistRuntimeSessionCost: vi.fn(async () => {}) }));
 vi.mock('@/lib/orchestrator/capacity-snapshots', () => ({ capturePacketCapacitySnapshot: vi.fn(async () => {}) }));
 vi.mock('@/lib/lane/report-claim-check', () => ({ startReportClaimCheck: vi.fn() }));
 
-const root = mkdtempSync(join(tmpdir(), 'o8-retained-completion-handoff-'));
+const restartRoot = process.env.O8_FORGET_DISPATCH_RESTART_ROOT;
+const root = restartRoot ?? realpathSync(mkdtempSync(join(tmpdir(), 'o8-retained-completion-handoff-')));
 const dataDir = join(root, 'data');
 const sessionsRoot = join(root, 'sessions');
-mkdirSync(dataDir, { mode: 0o700 });
+mkdirSync(dataDir, { mode: 0o700, recursive: true });
 process.env.O8_DATA_DIR = dataDir;
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
 process.env.O8_WORKTREE_ROOT = join(dataDir, 'worktrees');
@@ -106,11 +127,11 @@ afterEach((context) => { publicationRace.before = null; if (context.task.result?
 afterAll(() => {
   closeDb();
   // Keep a failed fixture available for the lead's private red receipt.
-  if (passed && !failed) rmSync(root, { recursive: true, force: true });
+  if (!restartRoot && passed && !failed) rmSync(root, { recursive: true, force: true });
 });
 
 let fixtureIndex = 0;
-async function fixture(retained = true) {
+async function fixture(retained = true, transcriptOffsetMs = 0) {
   const repoPath = join(dataDir, 'repo-' + ++fixtureIndex);
   mkdirSync(repoPath);
   git(repoPath, 'init', '-q', '-b', 'main');
@@ -170,7 +191,7 @@ async function fixture(retained = true) {
     capabilities: { discover: false, readTranscript: true, launch: false, resume: false,
       interrupt: false, reviewDiffs: false, costTelemetry: false, streaming: false },
     discoverSessions: async () => [],
-    readTranscript: async () => [{ id: 'completion-1', role: 'assistant', text: transcriptText, timestamp: new Date(completedAt) }],
+    readTranscript: async () => [{ id: 'completion-1', role: 'assistant', text: transcriptText, timestamp: new Date(Date.parse(completedAt) + transcriptOffsetMs) }],
     getChangedFiles: async () => [],
     launch: async () => ({ ok: false, note: 'Transcript-only fixture' }),
     resume: async () => ({ ok: false, note: 'Transcript-only fixture' }),
@@ -201,6 +222,11 @@ async function fixture(retained = true) {
 }
 
 describe('retained worker completion through the production supervisor callback', () => {
+  it('excludes forgotten completion memory from dependent dispatch after a process restart', async () => {
+    await checkForgetDependentDispatch({ root, dataDir, restartRoot, fixture, starts: () => providerStarts.mock.calls.map(call => call[0]) });
+    passed = true;
+  }, 180_000);
+
   it('persists a compact private handoff while the active hold retains the completed source', async () => {
     const { packet: { id: packetId }, lane, sessionDir, sessionKey, workspacePath, identity, head, tree, hold, remainingWork, exitEvent, dependencies } = await fixture();
 
@@ -287,6 +313,9 @@ describe('retained worker completion through the production supervisor callback'
   it('keeps unheld completion on the established automatic retirement and private Git banking path', async () => {
     const f = await fixture(false);
     expect(await handleAgentCompletion(f.sessionKey, 'completed', f.dependencies)).toMatchObject({ detail: expect.stringContaining('completed its read-only inspection') });
+    const { runWorktreeMaintenanceTick } = await import('@/lib/lane/worktree-reaper');
+    // Join the bounded retirement job; its real preservation work can outlast a polling deadline.
+    await runWorktreeMaintenanceTick();
     await vi.waitFor(() => expect(getWorkspaceSnapshot(f.repo.id, f.packet.id)?.state).toBe('retired'), { timeout: 15_000, interval: 50 });
     expect(existsSync(f.workspacePath)).toBe(false);
     const handoff = readCompletionHandoff(f.repo.id, f.packet.id);

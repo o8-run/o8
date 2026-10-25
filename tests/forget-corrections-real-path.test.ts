@@ -98,6 +98,10 @@ describe('selective correction recall through operator routes and persisted cons
     await capture();
     const selected = db.getSqlite().prepare('SELECT id, repo_path AS repoPath, project_id AS projectId FROM session_outcomes WHERE packet_id = ?').get(packetId) as { id: string; repoPath: string; projectId: string };
     expect(selected).toBeDefined();
+    const learnings = await import('@/lib/orchestrator/attempt-log');
+    await learnings.persistAttemptLearnings(repo, packetId, 1, { summary, filesChanged: [], sourceOutcomeId: selected.id });
+    const dependent = { ...packet('dependent-after-forget'), dependencyPacketIds: [packetId] };
+    expect(await prompt.buildPacketPrompt(dependent, [packet(packetId), dependent])).toContain(summary);
     expect(await prompt.buildPacketPrompt(packet('fresh-before-forget'), [])).toContain(summary);
     const inventory = () => outcomes.GET(new NextRequest('http://localhost/api/cortex/recent-outcomes?inventory=true&query=recapturecanary', { headers: { authorization: `Bearer ${operator}` } }));
     expect((await (await inventory()).json()).outcomes.map((row: { id: string }) => row.id)).toContain(selected.id);
@@ -113,11 +117,21 @@ describe('selective correction recall through operator routes and persisted cons
     const retrieved = await retrieve.retrieveAll({ question: 'recapturecanary', repoPath: repo });
     expect.soft(JSON.stringify(retrieved.flatMap(result => result.rows))).not.toContain(summary);
     expect.soft(await prompt.buildPacketPrompt(packet('fresh-after-forget'), [])).not.toContain(summary);
+    // A late learning writer also cannot launder the forgotten completion into a retry.
+    await learnings.persistAttemptLearnings(repo, packetId, 2, { summary, filesChanged: [], sourceOutcomeId: selected.id });
+    expect(await learnings.readPacketAttemptLearnings(packetId, repo)).toEqual([]);
+    expect(await prompt.buildPacketPrompt(dependent, [packet(packetId), dependent])).not.toContain(summary);
+    expect(await prompt.buildPacketPrompt(packet(packetId), [])).not.toContain(summary);
   });
 
   it('inspects and forgets a route-recorded rejection, invalidating recall while retaining its audit and neighbors after reopen', async () => {
     const removed = await rejection('remove-feedback'); const kept = await rejection('keep-feedback');
     expect(await brainReasons()).toContain(removed.reason);
+    const relay = await import('@/lib/orchestrator/context-relay');
+    await relay.recordPacketReviewContext('remove-feedback', { approved: false, findings: [{ file: 'parser.ts',
+      severity: 'bug', description: removed.reason, resolution: 'deferred' }] });
+    const dependent = { ...packet('correction-dependent'), dependencyPacketIds: ['remove-feedback'] };
+    expect(await prompt.buildPacketPrompt(dependent, [packet('remove-feedback'), dependent])).toContain(removed.reason);
     expect(await prompt.buildPacketPrompt(packet('remove-feedback'), [])).toContain(removed.reason);
     await loadRoute();
     const listed = await (await route.GET(request())).json();
@@ -131,6 +145,7 @@ describe('selective correction recall through operator routes and persisted cons
     expect(approvals.getApproval(removed.rowId)?.resolution?.note).toBe(removed.reason);
     db.closeDb(); db.getSqlite();
     expect(await brainReasons()).not.toContain(removed.reason);
+    expect(await prompt.buildPacketPrompt(dependent, [packet('remove-feedback'), dependent])).not.toContain(removed.reason);
     expect(await brainReasons()).toContain(kept.reason);
     expect(await prompt.buildPacketPrompt(packet('remove-feedback'), [])).not.toContain(removed.reason);
     expect((await (await route.GET(request())).json()).corrections.map((c: { id: string }) => c.id)).toEqual([kept.id]);

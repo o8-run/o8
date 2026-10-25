@@ -1,3 +1,4 @@
+import { assertWorkerMemoryCurrent, refreshOwnedWorkerMemory, workerMemoryNeedsRefresh } from '@/lib/dispatch/worker-memory-context';
 import { credentialPolicyFingerprint } from '@/lib/providers/credential-policy';
 import { appendFile, mkdir, readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -42,6 +43,7 @@ const RUNS_DIR = 'runs';
 const DEFAULT_TURN_TIMEOUT_MS = 14_400_000;
 
 interface ActiveAcpProcess {
+  memoryRevision?: string;
   credentialPolicy: string;
   client: AcpClient;
   sessionId: string;
@@ -252,11 +254,13 @@ export function createOwnedAcpSessionStore(adapter: OwnedAcpRuntimeAdapter): Own
 
   async function ensureProcess(session: OwnedAcpSessionRecord): Promise<ActiveAcpProcess> {
     const existing = activeProcesses.get(session.surfaceId);
-    if (existing?.client.alive && existing.credentialPolicy === credentialPolicyFingerprint(adapter.runtimeId)) return existing;
+    if (existing?.client.alive && existing.credentialPolicy === credentialPolicyFingerprint(adapter.runtimeId)
+      && existing.memoryRevision === session.promptMemoryRevision) { assertWorkerMemoryCurrent(session); return existing; }
     if (existing?.client.alive) { existing.client.kill(); activeProcesses.delete(session.surfaceId); }
     await retireUnattachedProcess(session);
     const launch = await adapter.resolveLaunch(session);
     const activeProcess: ActiveAcpProcess = {
+      memoryRevision: session.promptMemoryRevision,
       credentialPolicy: credentialPolicyFingerprint(adapter.runtimeId),
       client: new AcpClient({
         command: launch.command,
@@ -293,6 +297,7 @@ export function createOwnedAcpSessionStore(adapter: OwnedAcpRuntimeAdapter): Own
       const validated = adapter.validateInitialize?.(initialized);
       const supportsResume = adapter.supportsResume?.(initialized)
         ?? sessionCapability(initialized, 'resume');
+      assertWorkerMemoryCurrent(session);
       const priorSessionId = session.remoteSessionId ?? session.threadId;
       const resumed = Boolean(priorSessionId && supportsResume);
       if (priorSessionId && !supportsResume) {
@@ -353,6 +358,7 @@ export function createOwnedAcpSessionStore(adapter: OwnedAcpRuntimeAdapter): Own
         id,
         mode,
         prompt,
+        memoryRevision: session.promptMemoryRevision,
         startedAt: nowIso(),
         outcome: 'running',
         stdoutPath: path.join(session.sessionDir, RUNS_DIR, `${id}.jsonl`),
@@ -376,12 +382,44 @@ export function createOwnedAcpSessionStore(adapter: OwnedAcpRuntimeAdapter): Own
     prompt: string,
     mode: 'launch' | 'resume',
   ): Promise<{ ok: boolean; note: string; sideEffect?: 'none' | 'unknown' }> {
+    try {
+      const prior = await findSession(surfaceId, false);
+      if (!prior) throw new Error(`${adapter.humanLabel} session was not found.`);
+      if (workerMemoryNeedsRefresh(prior)) {
+        if (prior.activeRun?.outcome === 'running') throw new Error('Wait for the active ACP turn before rebuilding forgotten context.');
+        // Kill/retire the old process before clearing its durable provider thread.
+        await interrupt(surfaceId);
+        await withSession(surfaceId, async () => {
+          const current = await findSession(surfaceId, false);
+          if (!current) throw new Error('The ACP worker disappeared before memory rebuild.');
+          ({ prompt, mode } = await refreshOwnedWorkerMemory(current, prompt, mode, mode === 'resume'));
+          current.remoteSessionId = undefined;
+          await saveSession(current);
+        });
+      } else {
+        await withSession(surfaceId, async () => {
+          const current = await findSession(surfaceId, false);
+          if (!current) throw new Error('The ACP worker disappeared before dispatch.');
+          ({ prompt, mode } = await refreshOwnedWorkerMemory(current, prompt, mode, mode === 'resume'));
+          if (mode === 'launch') {
+            const old = activeProcesses.get(surfaceId);
+            activeProcesses.delete(surfaceId);
+            await old?.client.close();
+            current.remoteSessionId = undefined;
+          }
+          await saveSession(current);
+        });
+      }
+    } catch (error) {
+      return { ok: false, sideEffect: 'none', note: error instanceof Error ? error.message : String(error) };
+    }
     const run = await createRun(surfaceId, prompt, mode);
     let process: ActiveAcpProcess;
     try {
       const session = await findSession(surfaceId, false);
       if (!session) throw new Error(`${adapter.humanLabel} session was not found.`);
       process = await ensureProcess(session);
+      assertWorkerMemoryCurrent(session);
       if (process.credentialPolicy !== credentialPolicyFingerprint(adapter.runtimeId)) {
         process.client.kill();
         throw new Error('Credentials or billing changed during ACP initialization. Retry the launch.');

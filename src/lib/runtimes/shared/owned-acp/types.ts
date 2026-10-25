@@ -10,6 +10,7 @@ export interface OwnedAcpRunRecord {
   id: string;
   mode: 'launch' | 'resume';
   prompt: string;
+  memoryRevision?: string;
   startedAt: string;
   finishedAt?: string;
   outcome: OwnedRunOutcome;
@@ -38,6 +39,8 @@ export interface OwnedAcpSessionRecord {
   remoteSessionId?: string;
   /** Compatibility with the shared one-process-per-turn store's persisted field. */
   threadId?: string;
+  initialPrompt?: string;
+  promptMemoryRevision?: string;
   latestPrompt: string;
   latestSummary: string;
   model?: string;
