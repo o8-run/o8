@@ -37,6 +37,30 @@ interface ReapDashSessionsOptions extends DashGcOptions {
   beforeKill: (sessionName: string) => void;
 }
 
+function retireSession(session: DashSessionInventory, owner: string, interrupt = false): boolean {
+  if (!/^\$\d+$/.test(session.sessionId) || !/^[1-9]\d*$/.test(session.serverPid)
+    || session.createdMs <= 0) return false;
+  const guard = `#{&&:#{==:#{pid},${session.serverPid}},#{&&:#{==:#{session_created},${session.createdMs / 1000}},#{==:#{${DASH_PROFILE_OWNER_OPTION}},${owner}}}}`;
+  try {
+    const output = execFileSync(resolveTmuxBinary(), dashTmuxArgs('if-shell', '-F', '-t', session.sessionId, guard,
+      `${interrupt ? 'send-keys' : 'kill-session'} -t '${session.sessionId}'${interrupt ? ' C-c' : ''} ; display-message -p o8-session-signalled`, ''), {
+      windowsHide: true, timeout: 3000, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], env: sanitizePtyEnv() as NodeJS.ProcessEnv,
+    });
+    return output.trim() === 'o8-session-signalled';
+  } catch { return false; }
+}
+
+/** Explicit close uses the same ownership and exact-identity fence as GC. */
+export function signalOwnedDashTmuxSession(name: string, signal: string): 'signalled' | 'refused' | 'absent' {
+  const session = listDashTmuxSessionsWithAge().find((row) => row.name === name);
+  if (!session) return 'absent';
+  try {
+    const owner = dashProfileOwnerId();
+    if (session.profileOwner === owner && retireSession(session, owner, signal === 'SIGINT')) return 'signalled';
+  } catch { /* An unresolved profile has no retirement authority. */ }
+  return 'refused';
+}
+
 /** The bridge's real collector, including durable references and tmux I/O. */
 export function reapOrphanDashTmuxSessions(options: ReapDashSessionsOptions): number {
   const dataDir = options.dataDir ?? getDataDir();
@@ -63,17 +87,9 @@ export function reapOrphanDashTmuxSessions(options: ReapDashSessionsOptions): nu
     if (!session || !/^\$\d+$/.test(session.sessionId) || !/^[1-9]\d*$/.test(session.serverPid)
       || session.createdMs <= 0) continue;
     options.beforeKill(name);
-    try {
-      // Reused names and restarted servers are new work. Evaluate ownership
-      // and the inventoried identity inside tmux's command queue, then retire
-      // that session id only, never whichever session now has its old name.
-      const guard = `#{&&:#{==:#{pid},${session.serverPid}},#{&&:#{==:#{session_created},${session.createdMs / 1000}},#{==:#{${DASH_PROFILE_OWNER_OPTION}},${owner}}}}`;
-      const output = execFileSync(resolveTmuxBinary(), dashTmuxArgs('if-shell', '-F', '-t', session.sessionId, guard,
-        `kill-session -t '${session.sessionId}' ; display-message -p o8-gc-retired`, ''), {
-        windowsHide: true, timeout: 3000, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], env: sanitizePtyEnv() as NodeJS.ProcessEnv,
-      });
-      if (output.trim() === 'o8-gc-retired') killed += 1;
-    } catch { /* already gone */ }
+    // Reused names and restarted servers are new work. Retire only the
+    // inventoried server/session identity inside tmux's command queue.
+    if (retireSession(session, owner)) killed += 1;
   }
   return killed;
 }

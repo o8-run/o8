@@ -269,7 +269,7 @@ import { manualReviewRequested } from './lib/lane/review-mode';
 import { queueOrchestratorEscalation as queueSupervisorEscalationTurn } from './lib/orchestrator/supervisor-escalation';
 import { startWorktreeReaper, stopWorktreeReaper } from './lib/lane/worktree-reaper';
 import { startLaneZombieReaper, stopLaneZombieReaper } from './lib/lane/reaper';
-import { listDashTmuxSessionsWithAge, reapOrphanDashTmuxSessions } from './lib/ws-server/dash-terminal-gc';
+import { listDashTmuxSessionsWithAge, reapOrphanDashTmuxSessions, signalOwnedDashTmuxSession } from './lib/ws-server/dash-terminal-gc';
 import { resolveDeviceByToken, isDeviceActive, isTokenRevoked, type MobileDevice } from './lib/mobile/device-registry';
 import { startRelayConnectorIfEnabled, stopRelayConnector } from './lib/mobile/relay-connector';
 import {
@@ -7587,6 +7587,20 @@ function handleAgentKill(_client: ClientState, msg: Record<string, unknown>) {
 function terminateTerminalSession(sessionName: string, signal: string = 'SIGTERM') {
   if (!sessionName) return;
 
+  if (isDashTerminalSession(sessionName)) {
+    const outcome = signalOwnedDashTmuxSession(sessionName, signal);
+    if (outcome === 'refused') return false;
+    if (outcome === 'signalled') {
+      if (signal === 'SIGINT') return;
+      try { terminalAttachments.get(sessionName)?.ptyProcess.kill(); } catch { /* transport already closed */ }
+      broadcastLifecycle(sessionName, 'killed');
+      return;
+    }
+    // A direct PTY belongs to this process; an absent shared session cannot
+    // fall through to tmux's prefix matching against another profile.
+    if (!terminalAttachments.has(sessionName)) return false;
+  }
+
   console.log(`[ws-server] Kill request for ${sessionName} (signal: ${signal})`);
 
   // 1. Try killing via PTY attachment (Codex / Claude Code terminals)
@@ -8105,7 +8119,11 @@ const httpServer = createServer(async (req, res) => {
       }
 
       try {
-        terminateTerminalSession(sessionName, signal);
+        if (terminateTerminalSession(sessionName, signal) === false) {
+          res.writeHead(403, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'terminal_profile_mismatch' }));
+          return;
+        }
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: true }));
       } catch (error) {

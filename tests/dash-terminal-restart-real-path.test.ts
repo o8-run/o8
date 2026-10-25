@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { WebSocket } from 'ws';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { dashSessionNameForOwnerKey } from '@/lib/ws-server/dash-terminal-persistence';
+import { DASH_PROFILE_OWNER_OPTION, dashProfileOwnerId } from '@/lib/terminal/dash-session-owner';
 import {
   probeMetadataLockProcessIdentitySync,
   sameMetadataLockProcessIdentity,
@@ -235,6 +236,40 @@ afterAll(async () => {
 }, 45_000);
 
 describe.runIf(tmuxAvailable)('dashboard terminal restart through the real WebSocket path', () => {
+  it('refuses cleanup of another persisted profile on the shared server', async () => {
+    const foreignProfile = join(dataDir, 'foreign-profile');
+    mkdirSync(foreignProfile);
+    const foreignSession = 'cortex-dash-foreign-cleanup';
+    execFileSync('tmux', tmuxArgs('new-session', '-d', '-s', foreignSession, '/bin/sh'));
+    execFileSync('tmux', tmuxArgs('set-option', '-t', `=${foreignSession}:`, DASH_PROFILE_OWNER_OPTION, dashProfileOwnerId(foreignProfile)));
+    const ownedSession = 'cortex-dash-owned-cleanup';
+    execFileSync('tmux', tmuxArgs('new-session', '-d', '-s', ownedSession, '/bin/sh'));
+    execFileSync('tmux', tmuxArgs('set-option', '-t', `=${ownedSession}:`, DASH_PROFILE_OWNER_OPTION, dashProfileOwnerId(dataDir)));
+    writeFileSync(join(foreignProfile, 'terminal-state.json'), JSON.stringify({ tabs: [{ tmuxSession: foreignSession }] }));
+    writeFileSync(join(dataDir, 'terminal-state.json'), JSON.stringify({ tabs: [{ tmuxSession: ownedSession }] }));
+    const identity = () => execFileSync('tmux', tmuxArgs('display-message', '-p', '-t', `=${foreignSession}:`, '#{pid}:#{session_id}:#{pane_pid}'), { encoding: 'utf8' });
+    const before = identity();
+    const response = await fetch(`http://127.0.0.1:${wsPort}/terminal-signal`, {
+      method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ sessionName: foreignSession, signal: 'SIGTERM' }),
+    });
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({ error: 'terminal_profile_mismatch' });
+    expect(identity()).toBe(before);
+    expect(JSON.parse(readFileSync(join(foreignProfile, 'terminal-state.json'), 'utf8')).tabs)
+      .toEqual([{ tmuxSession: foreignSession }]);
+    const signal = (sessionName: string, value: string) => fetch(`http://127.0.0.1:${wsPort}/terminal-signal`, {
+      method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ sessionName, signal: value }),
+    });
+    expect((await signal('cortex-dash-foreign', 'SIGTERM')).status).toBe(403);
+    expect((await signal(ownedSession, 'SIGINT')).status).toBe(200);
+    expect(() => execFileSync('tmux', tmuxArgs('has-session', '-t', `=${ownedSession}`))).not.toThrow();
+    expect((await signal(ownedSession, 'SIGTERM')).status).toBe(200);
+    expect(spawnSync('tmux', tmuxArgs('has-session', '-t', `=${ownedSession}`)).status).toBe(1);
+    expect(identity()).toBe(before);
+  });
+
   it.each([{ directPty: true, code: 0 }, { directPty: true, code: 7 }, { directPty: false, code: 7 }])('reports exit provenance for a real shell: %j', async ({ directPty, code }) => {
     const client = await connectClient();
     const requestId = `exit-${directPty}-${code}`;
