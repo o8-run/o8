@@ -70,19 +70,7 @@ pub struct Document {
 impl Target {
     pub fn read(&self, client: &Client) -> Result<(Document, Value), String> {
         let response: Response = match self {
-            Self::Commit { workspace, hash } => {
-                let data: Value = client.get(
-                    &format!("/api/panel/commits/{hash}"),
-                    &[("workspace", workspace)],
-                )?;
-                if !data["commit"].is_object() {
-                    return Err("Commit unavailable".into());
-                }
-                serde_json::from_value(
-                    json!({"diff":data["commit"]["diff"],"headSha":data["commit"]["hash"]}),
-                )
-                .map_err(|_| "Invalid commit diff")?
-            }
+            Self::Commit { workspace, hash } => return client.commit_diff(workspace, hash),
             Self::Packet(packet) => {
                 // Packet ids occupy exactly one path segment.
                 let id: String = url::form_urlencoded::byte_serialize(packet.as_bytes()).collect();
@@ -99,9 +87,6 @@ impl Target {
                 client.get("/api/worktrees/diff", &query)?
             }
         };
-        if crate::shell::commit::guard::sensitive(&response.diff) {
-            return Err("Sensitive patch hidden. Read-only.".into());
-        }
         if response.error.is_some() {
             return Err("Diff unavailable. Refresh the selected target.".into());
         }
@@ -114,26 +99,9 @@ impl Target {
             Self::Packet(id) => client.review_state(id)?,
             _ => Value::Null,
         };
-        // Keep pathological single-line patches off the text shaper. Retain the
-        // raw patch for identity, and refuse copy/merge of this bounded preview.
-        let long_line = response.diff.lines().any(|line| line.len() > 16384);
-        let preview = long_line.then(|| {
-            response
-                .diff
-                .lines()
-                .map(|line| {
-                    if line.len() > 16384 {
-                        line.chars().take(4096).collect::<String>() + " …"
-                    } else {
-                        line.to_owned()
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join("\n")
-        });
-        let mut document = parse(preview.as_deref().unwrap_or(&response.diff));
+        let mut document = parse(&response.diff);
         document.head = response.head_sha;
-        document.truncated = response.truncated || long_line;
+        document.truncated = response.truncated;
         document.revision = response.revision;
         document.source = response.diff;
         Ok((document, state))

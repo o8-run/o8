@@ -2,6 +2,8 @@
 use super::*;
 #[path = "commit/viewer.rs"]
 mod component;
+#[path = "commit/requests.rs"]
+mod requests;
 pub(super) type View = component::Commit;
 #[path = "commit/guard.rs"]
 pub(crate) mod guard;
