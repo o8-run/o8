@@ -22,6 +22,8 @@ const READ_TOOLS: &[&str] = &[
     "o8_list_repos",
     "o8_list_projects",
     "o8_lease_list",
+    "o8_lease_status",
+    "o8_spec_read",
 ];
 
 #[derive(Clone)]
@@ -185,6 +187,24 @@ impl McpServer {
                 projections::projects(self.source("/api/panel/projects", headers).await?)
             }
             "o8_lease_list" => self.source("/api/leases", headers).await?,
+            "o8_lease_status" => {
+                args["resource"]
+                    .as_str()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .ok_or(())?;
+                self.source(&query("/api/leases", args, &["resource"], &[]), headers)
+                    .await?
+            }
+            "o8_spec_read" => {
+                args["repoPath"]
+                    .as_str()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .ok_or(())?;
+                self.source(&query("/api/repo-spec", args, &["repoPath"], &[]), headers)
+                    .await?
+            }
             _ => return Err(()),
         };
         Ok(

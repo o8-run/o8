@@ -9,7 +9,9 @@ use std::{fs, path::PathBuf, sync::Mutex, time::Duration};
 
 mod leases;
 mod mission;
+mod process_identity;
 mod registries;
+mod spec;
 mod tasks;
 type ReadResult<T> = Result<T, ()>;
 
@@ -76,25 +78,7 @@ impl NativeReads {
             return Err(());
         }
         let pid = policy["pid"].as_u64().ok_or(())?;
-        if policy["bootId"].as_str()
-            != Some(
-                fs::read_to_string("/proc/sys/kernel/random/boot_id")
-                    .map_err(|_| ())?
-                    .trim(),
-            )
-        {
-            return Err(());
-        }
-        let stat = fs::read_to_string(format!("/proc/{pid}/stat")).map_err(|_| ())?;
-        let fields = stat
-            .rsplit_once(") ")
-            .ok_or(())?
-            .1
-            .split_whitespace()
-            .collect::<Vec<_>>();
-        if fields.get(19).copied() != policy["startId"].as_str() {
-            return Err(());
-        }
+        process_identity::matches(pid, &policy["identity"])?;
         let bearer = headers
             .get("authorization")
             .and_then(|v| v.to_str().ok())
@@ -167,6 +151,8 @@ impl NativeReads {
                     "o8_task_list" => tasks::read(self, &tx, &args)?,
                     "get_mission_status" => mission::read(self, &tx, &args)?,
                     "o8_lease_list" => leases::read(&tx)?,
+                    "o8_lease_status" => leases::status(&tx, &args)?,
+                    "o8_spec_read" => spec::read(&args)?,
                     _ => return Err(()),
                 };
                 json!({"isError":data.get("error").is_some(),"content":[{"type":"text","text":data.to_string()}]})

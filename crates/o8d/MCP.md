@@ -48,17 +48,26 @@ readiness uses the same process's published readiness observations.
 
 `o8_list_repos` reads the registry and filesystem existence. `o8_list_projects`
 combines JSON metadata with SQLite membership, ordering, active selection, and
-virtual repository projects. `o8_lease_list` reads holders and waiters after
-proving their current Linux process identities; uncertain/dead participants and
+virtual repository projects. `o8_lease_list` and `o8_lease_status` read holders and waiters after
+proving their current platform process identities; uncertain/dead participants and
 holderless queues return to the TypeScript reconciler.
+
+`o8_spec_read` reads an existing canonical repository's `o8.md` directly and
+computes the same SHA-256 content hash. A missing file returns the API's template
+without creating it. Unusual path spellings and read errors retain the original
+handler. Review-index parsing, validation and annotation tools still use TypeScript.
 
 The current mission fast path supports prepared, unbound queued packets.
 Dependency/hold/release reconciliation, runtime bindings, cost and timing retain
 TypeScript ownership. The compact task fast path combines those packets with
 SQLite lanes; detailed/brief and explicit project-filter requests retain the
 existing context resolver. Unsupported collation or source shapes also fall
-back. The native path currently requires Linux process identity evidence;
-other platforms retain TypeScript reads.
+back. Native publisher and lease identities follow the app's metadata-lock
+contract on Linux and macOS: boot-session identity plus process start identity.
+macOS probes use the same C-locale system commands as the app. Unsupported
+platforms and uncertain probes retain TypeScript reads. The real-entry suite
+runs native assertions on both Linux and macOS; Linux execution does not prove
+macOS runtime behavior.
 
 Legacy initialization is handled in Rust after the existing TypeScript
 credential gate authorizes `o8d/read-context`, with the same response fields
