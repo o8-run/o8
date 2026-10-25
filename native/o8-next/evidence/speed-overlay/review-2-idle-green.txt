@@ -1,0 +1,9 @@
+running 1 test
+test shell::speed::tests::speed_overlay_idle_cpu_receipt ... O8_SPEED_IDLE_SPAN {"enabled":false,"cpuPercent":1.0169552523005003,"cpuSeconds":0.305288,"wallSeconds":30.019806605,"explicitDraws":0,"shellNotifications":0,"readoutNotifications":0}
+O8_SPEED_IDLE_SPAN {"enabled":true,"cpuPercent":1.6047824585010122,"cpuSeconds":0.4817109999999999,"wallSeconds":30.017214947,"explicitDraws":0,"shellNotifications":0,"readoutNotifications":58}
+O8_SPEED_IDLE_SPAN {"enabled":true,"cpuPercent":1.3206555471115984,"cpuSeconds":0.3964679999999998,"wallSeconds":30.020545544,"explicitDraws":0,"shellNotifications":0,"readoutNotifications":36}
+O8_SPEED_IDLE_SPAN {"enabled":false,"cpuPercent":1.1068720549987479,"cpuSeconds":0.33221199999999995,"wallSeconds":30.013586349,"explicitDraws":0,"shellNotifications":0,"readoutNotifications":0}
+O8_SPEED_IDLE_CPU {"platform":"linux","scope":"shell test process plus reaped helpers; live owned fixture server excluded; 20ms tick target; notification-driven CPU scenes; no GPU or compositor","samples":[{"enabled":false,"cpuPercent":1.0169552523005003,"cpuSeconds":0.305288,"wallSeconds":30.019806605,"explicitDraws":0,"shellNotifications":0,"readoutNotifications":0},{"enabled":true,"cpuPercent":1.6047824585010122,"cpuSeconds":0.4817109999999999,"wallSeconds":30.017214947,"explicitDraws":0,"shellNotifications":0,"readoutNotifications":58},{"enabled":true,"cpuPercent":1.3206555471115984,"cpuSeconds":0.3964679999999998,"wallSeconds":30.020545544,"explicitDraws":0,"shellNotifications":0,"readoutNotifications":36},{"enabled":false,"cpuPercent":1.1068720549987479,"cpuSeconds":0.33221199999999995,"wallSeconds":30.013586349,"explicitDraws":0,"shellNotifications":0,"readoutNotifications":0}]}
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 174 filtered out; finished in 133.33s

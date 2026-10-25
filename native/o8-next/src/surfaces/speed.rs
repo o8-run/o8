@@ -6,6 +6,7 @@ pub(super) type Slice = EmptyState;
 #[derive(Default)]
 pub(super) struct Runtime {
     sample: Rc<RefCell<Sample>>,
+    readout: Option<Entity<readout::Readout>>,
 }
 #[derive(Default)]
 struct Sample {
@@ -27,6 +28,8 @@ struct Sample {
     memory_mib: Option<f64>,
     memory_pending: bool,
     memory_at: Option<Instant>,
+    dirty: bool,
+    readout_frame: bool,
 }
 fn retain(values: &mut VecDeque<f64>, value: f64) {
     if values.len() == 64 {
@@ -47,12 +50,6 @@ pub(super) const REGISTRATION: Registration = Registration {
             return vec![];
         }
         let sample = s.surfaces.speed.sample.borrow();
-        let values = [
-            ("speed-key", metric(sample.key_ms.back().copied(), "ms")),
-            ("speed-frame", metric(sample.frame_ms.back().copied(), "ms")),
-            ("speed-wakeups", metric(sample.wakeups, "/s")),
-            ("speed-memory", metric(sample.memory_mib, "MiB")),
-        ];
         vec![
             div()
                 .relative()
@@ -70,34 +67,19 @@ pub(super) const REGISTRATION: Registration = Registration {
                         .on_click(cx.listener(|s, _, window, cx| s.toggle_speed(window, cx))),
                 )
                 .when(sample.enabled, |v| {
-                    v.child(
+                    v.children(s.surfaces.speed.readout.clone().map(|readout| {
                         gpui::deferred(
-                            div()
-                                .id("speed-panel")
-                                .debug_selector(|| "speed-panel".into())
-                                .absolute()
-                                .top(px(34.))
-                                .right(px(0.))
-                                .w(px(176.))
-                                .flex()
-                                .flex_wrap()
-                                .p(px(8.))
-                                .rounded(px(7.))
-                                .bg(theme().surface_raised)
-                                .text_color(theme().text)
-                                .text_size(px(11.))
-                                .font_weight(gpui::FontWeight::LIGHT)
-                                .children(values.into_iter().map(|(id, value)| {
-                                    div()
-                                        .debug_selector(move || id.into())
-                                        .w(px(80.))
-                                        .text_right()
-                                        .h(px(20.))
-                                        .child(value)
-                                })),
+                            gpui::AnyView::from(readout).cached(
+                                gpui::StyleRefinement::default()
+                                    .absolute()
+                                    .top(px(34.))
+                                    .right(px(0.))
+                                    .w(px(176.))
+                                    .h(px(56.)),
+                            ),
                         )
-                        .with_priority(1),
-                    )
+                        .with_priority(1)
+                    }))
                 })
                 .into_any_element(),
         ]
@@ -130,7 +112,6 @@ pub(super) const REGISTRATION: Registration = Registration {
                     sample
                         .pending
                         .get_or_insert((now, window.focused(cx), input, revision));
-                    cx.notify();
                 }
             } else {
                 sample.pending = None;
@@ -142,6 +123,10 @@ pub(super) const REGISTRATION: Registration = Registration {
         let sample = s.surfaces.speed.sample.clone();
         let state = sample.borrow();
         if !state.enabled {
+            return None;
+        }
+        // A readout-only update must not turn its own paint into a new sample.
+        if state.readout_frame && state.pending.is_none() {
             return None;
         }
         let generation = state.generation;
@@ -160,6 +145,7 @@ pub(super) const REGISTRATION: Registration = Registration {
                         return;
                     }
                     retain(&mut sample.frame_ms, start.elapsed().as_secs_f64() * 1000.);
+                    sample.dirty = true;
                     if let Some((start, focus, input, revision)) = sample.pending.take() {
                         let input = input.read(cx);
                         if focus == window.focused(cx)
@@ -172,6 +158,7 @@ pub(super) const REGISTRATION: Registration = Registration {
                 },
             )
             .size(px(1.))
+            .absolute()
             .into_any_element(),
         )
     },
@@ -198,9 +185,12 @@ pub(super) const REGISTRATION: Registration = Registration {
                 sample.wakeups = Some(sample.idle_ticks as f64 / sample.idle_seconds);
                 sample.idle_ticks = 0;
                 sample.idle_seconds = 0.;
-                cx.notify();
+                sample.dirty = true;
             }
         }
+        drop(sample);
+        publish(s, cx);
+        let mut sample = s.surfaces.speed.sample.borrow_mut();
         if sample.memory_pending
             || sample
                 .memory_at
@@ -222,7 +212,9 @@ pub(super) const REGISTRATION: Registration = Registration {
                     sample.memory_mib = memory
                         .filter(|usage| usage.cpu_seconds.is_finite())
                         .map(|usage| usage.memory_mib);
-                    cx.notify();
+                    sample.dirty = true;
+                    drop(sample);
+                    publish(s, cx);
                 }
             });
         })
@@ -233,6 +225,25 @@ pub(super) const REGISTRATION: Registration = Registration {
         None
     })
 };
+fn publish(s: &mut Shell, cx: &mut Context<Shell>) {
+    let mut sample = s.surfaces.speed.sample.borrow_mut();
+    if !sample.enabled || !std::mem::take(&mut sample.dirty) {
+        return;
+    }
+    let values = [
+        metric(sample.key_ms.back().copied(), "ms"),
+        metric(sample.frame_ms.back().copied(), "ms"),
+        metric(sample.wakeups, "/s"),
+        metric(sample.memory_mib, "MiB"),
+    ];
+    drop(sample);
+    if let Some(readout) = s.surfaces.speed.readout.clone() {
+        if readout.update(cx, |view, cx| view.publish(values, cx)) {
+            s.surfaces.speed.sample.borrow_mut().readout_frame = true;
+        }
+    }
+}
+
 impl Shell {
     fn toggle_speed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let mut sample = self.surfaces.speed.sample.borrow_mut();
@@ -242,7 +253,10 @@ impl Shell {
             last_input: Some(Instant::now()),
             ..Default::default()
         };
+        let enabled = sample.enabled;
         drop(sample);
+        self.surfaces.speed.readout =
+            enabled.then(|| cx.new(|_| readout::Readout::new(self.surfaces.speed.sample.clone())));
         self.palette = false;
         self.restore_focus(window, cx);
         cx.notify();
@@ -255,3 +269,6 @@ mod tests;
 
 #[path = "speed/process.rs"]
 mod process;
+
+#[path = "speed/readout.rs"]
+mod readout;

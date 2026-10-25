@@ -1,0 +1,59 @@
+{
+  "platform": "linux",
+  "scope": "shell test process plus reaped helpers; live owned fixture server excluded; 20ms tick target; notification-driven CPU scenes; no GPU or compositor",
+  "samples": [
+    {
+      "enabled": false,
+      "cpuPercent": 1.0169552523005003,
+      "cpuSeconds": 0.305288,
+      "wallSeconds": 30.019806605,
+      "explicitDraws": 0,
+      "shellNotifications": 0,
+      "readoutNotifications": 0
+    },
+    {
+      "enabled": true,
+      "cpuPercent": 1.6047824585010122,
+      "cpuSeconds": 0.4817109999999999,
+      "wallSeconds": 30.017214947,
+      "explicitDraws": 0,
+      "shellNotifications": 0,
+      "readoutNotifications": 58
+    },
+    {
+      "enabled": true,
+      "cpuPercent": 1.3206555471115984,
+      "cpuSeconds": 0.3964679999999998,
+      "wallSeconds": 30.020545544,
+      "explicitDraws": 0,
+      "shellNotifications": 0,
+      "readoutNotifications": 36
+    },
+    {
+      "enabled": false,
+      "cpuPercent": 1.1068720549987479,
+      "cpuSeconds": 0.33221199999999995,
+      "wallSeconds": 30.013586349,
+      "explicitDraws": 0,
+      "shellNotifications": 0,
+      "readoutNotifications": 0
+    }
+  ],
+  "baseCommit": "a0b4f4f1084d291db00fbc1d4631240d1faeaf56",
+  "aggregation": "sum process CPU seconds / sum wall seconds per panel state; all four prespecified ABBA spans included",
+  "totals": {
+    "closed": {
+      "wallSeconds": 60.033392954,
+      "cpuSeconds": 0.6375,
+      "cpuPercent": 1.0619089953627612
+    },
+    "open": {
+      "wallSeconds": 60.037760491,
+      "cpuSeconds": 0.8781789999999997,
+      "cpuPercent": 1.462711121830808
+    }
+  },
+  "overheadPercentagePoints": 0.4008021264680468,
+  "targetPercentagePoints": 0.5,
+  "targetScope": "Linux GPUI test-window fixture only; macOS real-window target unverified"
+}

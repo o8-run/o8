@@ -288,7 +288,7 @@ fn speed_overlay_reads_memory_without_a_helper_process() {
     );
 }
 
-// Opt-in receipt: real shell tick cadence, no physical display or OS event loop.
+// Opt-in receipt: >=60 seconds in each state, notification-driven CPU scenes.
 #[gpui::test]
 #[ignore]
 fn speed_overlay_idle_cpu_receipt(cx: &mut TestAppContext) {
@@ -306,6 +306,21 @@ fn speed_overlay_idle_cpu_receipt(cx: &mut TestAppContext) {
             })
             .sum()
     }
+    fn watch<T: 'static>(
+        entity: &Entity<T>,
+        cx: &mut VisualTestContext,
+        dirty: Rc<Cell<bool>>,
+        count: Rc<Cell<u64>>,
+        painted: Rc<Cell<u64>>,
+    ) -> gpui::Subscription {
+        cx.update(|_, cx| {
+            cx.observe(entity, move |_, _| {
+                dirty.set(true);
+                painted.set(u64::MAX);
+                count.set(count.get() + 1);
+            })
+        })
+    }
     let f = Fixture::new();
     let (shell, mut visual) = open(
         f.client.clone(),
@@ -315,35 +330,279 @@ fn speed_overlay_idle_cpu_receipt(cx: &mut TestAppContext) {
     );
     let cx = &mut visual;
     ready(&shell, cx);
+    shell.update_in(cx, |s, window, cx| {
+        let id = s.workspace_sessions()[0].id.clone();
+        s.execute(Command::Message(id), window, cx);
+    });
+    ready(&shell, cx);
+    let session = shell.read_with(cx, |s, _| {
+        let Content::Session(view) = s.content.get(&s.key(&s.active().unwrap())).unwrap() else {
+            panic!("session")
+        };
+        view.clone()
+    });
+    let composer = session.read_with(cx, |s, _| s.shell_composer());
+    let painted = shell.read_with(cx, |s, _| s.painted.clone());
+    let dirty = Rc::new(Cell::new(false));
+    let shell_notifications = Rc::new(Cell::new(0));
+    let other_notifications = Rc::new(Cell::new(0));
+    let _watches = [
+        watch(
+            &shell,
+            cx,
+            dirty.clone(),
+            shell_notifications.clone(),
+            painted.clone(),
+        ),
+        watch(
+            &session,
+            cx,
+            dirty.clone(),
+            other_notifications.clone(),
+            painted.clone(),
+        ),
+        watch(
+            &composer,
+            cx,
+            dirty.clone(),
+            other_notifications.clone(),
+            painted.clone(),
+        ),
+    ];
     let mut measurements = Vec::new();
-    for enabled in [false, true, false, true] {
+    // ABBA order reduces linear warmup/load drift; each state totals >=60 sec.
+    for enabled in [false, true, true, false] {
         if enabled != shell.read_with(cx, |s, _| s.surfaces.speed.sample.borrow().enabled) {
             toggle(cx);
         }
-        // Settle initial fixture work and the toggle before each timed span.
-        for tick in 0..150 {
+        let readout_notifications = Rc::new(Cell::new(0));
+        let _readout_watch = shell
+            .read_with(cx, |s, _| s.surfaces.speed.readout.clone())
+            .map(|view| {
+                watch(
+                    &view,
+                    cx,
+                    dirty.clone(),
+                    readout_notifications.clone(),
+                    painted.clone(),
+                )
+            });
+        let mut tick = 0;
+        let settle = Instant::now();
+        while settle.elapsed() < Duration::from_secs(3) {
             shell.update_in(cx, |s, window, cx| s.tick(tick % 50 == 0, window, cx));
             cx.run_until_parked();
-            if tick % 50 == 0 {
-                draw(cx);
+            if dirty.replace(false) && painted.get() == u64::MAX {
+                cx.update(|window, cx| window.draw(cx).clear());
             }
+            tick += 1;
             std::thread::sleep(Duration::from_millis(20));
         }
+        shell_notifications.set(0);
+        readout_notifications.set(0);
         let start = Instant::now();
         let before = cpu();
-        for tick in 0..500 {
+        let mut draws = 0;
+        while start.elapsed() < Duration::from_secs(30) {
             shell.update_in(cx, |s, window, cx| s.tick(tick % 50 == 0, window, cx));
             cx.run_until_parked();
-            // The shell callback invalidates the visible panel at most once/sec.
-            if tick % 50 == 0 {
-                draw(cx);
+            if dirty.replace(false) && painted.get() == u64::MAX {
+                cx.update(|window, cx| window.draw(cx).clear());
+                draws += 1;
             }
+            tick += 1;
             std::thread::sleep(Duration::from_millis(20));
         }
-        measurements.push(json!({"enabled":enabled,"cpuPercent":(cpu()-before)/start.elapsed().as_secs_f64()*100.,"wallSeconds":start.elapsed().as_secs_f64()}));
+        let cpu_seconds = cpu() - before;
+        let wall_seconds = start.elapsed().as_secs_f64();
+        let span = json!({"enabled":enabled,"cpuPercent":cpu_seconds/wall_seconds*100.,"cpuSeconds":cpu_seconds,"wallSeconds":wall_seconds,
+            "explicitDraws":draws,"shellNotifications":shell_notifications.get(),"readoutNotifications":readout_notifications.get()});
+        println!("O8_SPEED_IDLE_SPAN {span}");
+        measurements.push(span);
     }
     println!(
         "O8_SPEED_IDLE_CPU {}",
-        json!({"scope":"shell test process plus reaped helpers; owned live fixture server excluded; 50 callbacks/s; debug CPU scene", "samples":measurements})
+        json!({"platform":std::env::consts::OS,"scope":"shell test process plus reaped helpers; live owned fixture server excluded; 20ms tick target; notification-driven CPU scenes; no GPU or compositor", "samples":measurements})
+    );
+}
+
+#[gpui::test]
+fn speed_overlay_samples_never_invalidate_shell_or_repaint_session(cx: &mut TestAppContext) {
+    let f = Fixture::new();
+    let (shell, mut visual) = open(
+        f.client.clone(),
+        f.root.join("sample-paint.json"),
+        State::default(),
+        cx,
+    );
+    let cx = &mut visual;
+    ready(&shell, cx);
+    shell.update_in(cx, |s, window, cx| {
+        let id = s.workspace_sessions()[0].id.clone();
+        s.execute(Command::Message(id), window, cx);
+    });
+    ready(&shell, cx);
+    toggle(cx);
+    let session = shell.read_with(cx, |s, _| {
+        let Content::Session(view) = s.content.get(&s.key(&s.active().unwrap())).unwrap() else {
+            panic!("session")
+        };
+        view.clone()
+    });
+    let composer = session.read_with(cx, |s, _| s.shell_composer());
+    // Settle the selection's queue/context completions before isolating samples.
+    for _ in 0..3 {
+        shell.update_in(cx, |s, window, cx| s.tick(false, window, cx));
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear());
+    }
+    let notifications = Rc::new(Cell::new(0));
+    let _watch = cx.update(|_, cx| {
+        cx.observe(&shell, {
+            let notifications = notifications.clone();
+            move |_, _| notifications.set(notifications.get() + 1)
+        })
+    });
+    composer.update(cx, |input, _| input.painted = u64::MAX);
+    cx.update(|window, cx| window.draw(cx).clear());
+    composer.read_with(cx, |input, _| {
+        assert_eq!(
+            input.painted,
+            u64::MAX,
+            "unchanged window must reuse session"
+        )
+    });
+    let content_notifications = Rc::new(Cell::new(0));
+    let _content_watch = cx.update(|_, cx| {
+        cx.observe(&session, {
+            let count = content_notifications.clone();
+            move |_, _| count.set(count.get() + 1)
+        })
+    });
+    let input_notifications = Rc::new(Cell::new(0));
+    let _input_watch = cx.update(|_, cx| {
+        cx.observe(&composer, {
+            let count = input_notifications.clone();
+            move |_, _| count.set(count.get() + 1)
+        })
+    });
+    for _ in 0..3 {
+        shell.update_in(cx, |s, window, cx| {
+            s.surfaces.speed.sample.borrow_mut().memory_at = None;
+            let _ = window;
+            (super::REGISTRATION.tick)(s, cx);
+        });
+        cx.run_until_parked();
+        assert_eq!(
+            notifications.get(),
+            0,
+            "sampling must never invalidate the shell"
+        );
+        assert_eq!(
+            content_notifications.get(),
+            0,
+            "sample content notifications"
+        );
+        assert_eq!(input_notifications.get(), 0, "sample input notifications");
+        composer.update(cx, |input, _| input.painted = u64::MAX);
+        cx.update(|window, cx| window.draw(cx).clear());
+        composer.read_with(cx, |input, _| {
+            assert_eq!(
+                input.painted,
+                u64::MAX,
+                "sampling must reuse the session scene"
+            )
+        });
+    }
+    cx.simulate_keystrokes("a");
+    cx.update(|window, cx| window.draw(cx).clear());
+    composer.read_with(cx, |input, _| {
+        assert_eq!(input.text, "a");
+        assert_eq!(
+            input.painted, input.revision,
+            "genuine input must invalidate the cached session"
+        );
+    });
+    shell.read_with(cx, |s, _| {
+        assert_eq!(s.surfaces.speed.sample.borrow().key_ms.len(), 1)
+    });
+}
+
+#[gpui::test]
+fn speed_overlay_only_invalidates_readout_for_changed_formatted_values(cx: &mut TestAppContext) {
+    let f = Fixture::new();
+    let (shell, mut visual) = open(
+        f.client.clone(),
+        f.root.join("unchanged.json"),
+        State::default(),
+        cx,
+    );
+    let cx = &mut visual;
+    ready(&shell, cx);
+    toggle(cx);
+    let seed = |value: f64, s: &mut Shell, cx: &mut Context<Shell>| {
+        let mut sample = s.surfaces.speed.sample.borrow_mut();
+        sample.frame_ms.clear();
+        sample.frame_ms.push_back(value);
+        sample.last_input = Some(Instant::now());
+        sample.memory_at = Some(Instant::now());
+        sample.memory_mib = Some(24.);
+        sample.dirty = true;
+        drop(sample);
+        (super::REGISTRATION.tick)(s, cx);
+    };
+    shell.update_in(cx, |s, _, cx| seed(3.0001, s, cx));
+    cx.run_until_parked();
+    cx.update(|window, cx| window.draw(cx).clear());
+    let readout = shell.read_with(cx, |s, _| s.surfaces.speed.readout.clone().unwrap());
+    let counts = Rc::new(Cell::new((0, 0)));
+    let _shell_watch = cx.update(|_, cx| {
+        cx.observe(&shell, {
+            let counts = counts.clone();
+            move |_, _| {
+                let (shell, view) = counts.get();
+                counts.set((shell + 1, view));
+            }
+        })
+    });
+    let _readout_watch = cx.update(|_, cx| {
+        cx.observe(&readout, {
+            let counts = counts.clone();
+            move |_, _| {
+                let (shell, view) = counts.get();
+                counts.set((shell, view + 1));
+            }
+        })
+    });
+    shell.update_in(cx, |s, _, cx| seed(3.0002, s, cx));
+    cx.run_until_parked();
+    assert_eq!(
+        counts.get(),
+        (0, 0),
+        "identical displayed values must not invalidate anything"
+    );
+    shell.update_in(cx, |s, _, cx| seed(3.01, s, cx));
+    cx.run_until_parked();
+    assert_eq!(
+        counts.get(),
+        (0, 1),
+        "changed values must invalidate only the readout"
+    );
+    let frames = shell.read_with(cx, |s, _| s.surfaces.speed.sample.borrow().frame_ms.len());
+    // Test input dispatch may have already serviced the queued window frame.
+    if shell.read_with(cx, |s, _| s.surfaces.speed.sample.borrow().readout_frame) {
+        cx.update(|window, cx| window.draw(cx).clear());
+    }
+    assert_eq!(
+        frames,
+        shell.read_with(cx, |s, _| s.surfaces.speed.sample.borrow().frame_ms.len()),
+        "readout paint must not feed another frame sample"
+    );
+    shell.update_in(cx, |s, _, cx| (super::REGISTRATION.tick)(s, cx));
+    cx.run_until_parked();
+    assert_eq!(
+        counts.get(),
+        (0, 1),
+        "a readout frame must not publish a feedback sample"
     );
 }

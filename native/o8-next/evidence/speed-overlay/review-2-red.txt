@@ -1,0 +1,15 @@
+running 1 test
+test shell::speed::tests::speed_overlay_samples_never_invalidate_shell_or_repaint_session ...
+thread 'shell::speed::tests::speed_overlay_samples_never_invalidate_shell_or_repaint_session' (142819) panicked at src/surfaces/speed/tests.rs:388:9:
+assertion `left == right` failed: sampling must never invalidate the shell
+  left: 1
+ right: 0
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    shell::speed::tests::speed_overlay_samples_never_invalidate_shell_or_repaint_session
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 173 filtered out; finished in 1.39s

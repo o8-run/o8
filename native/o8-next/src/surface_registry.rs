@@ -179,7 +179,7 @@ macro_rules! register_surfaces {
         enum Content { $( $(#[$tab_attr])* $variant(Entity<$module::View>), )* }
         impl Content {
             fn element(&self) -> gpui::AnyElement {
-                match self { $( $(#[$tab_attr])* Self::$variant(view) => view.clone().into_any_element(), )* }
+                match self { $( $(#[$tab_attr])* Self::$variant(view) => gpui::AnyView::from(view.clone()).cached(gpui::StyleRefinement::default().size_full()).into_any_element(), )* }
             }
             fn focus(&self, composer: bool, window: &mut Window, cx: &mut Context<Shell>) {
                 match self { $( $(#[$tab_attr])* Self::$variant(view) => <$module::View as ShellView>::focus(view, composer, window, cx), )* }

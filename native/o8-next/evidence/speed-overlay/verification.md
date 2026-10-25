@@ -31,3 +31,23 @@ Paint timings stop at CPU scene paint. They do not include GPU work or display p
 
 
 Round-1 completion gates: `npm run typecheck:fast`, heap-bounded `npx tsc --noEmit`, touched-file ESLint, `npm run rule-check -- --base=origin/main` (zero applicable TypeScript files), and `npm run test:classify` passed. `shell::tests::shell_palette_switch_restart_and_server_down`: 1 passed. Full `npm test`: 1242 files passed / 3 skipped; 9074 tests passed / 5 skipped. No release, version or publishing configuration changed; the native dependency declaration only makes the already-locked system API bindings a direct dependency.
+
+
+## Review round 2
+
+Sampling formerly called the shell entity's `notify`, rebuilding the window's registered content. The readout now owns an independent cached view and publishes only when its four formatted strings change. Sampler completion, callback-rate updates and keystroke observation do not notify the shell; the explicit user toggle still does. A readout paint cannot become a new timing sample and perpetuate another readout update.
+
+Shell work: the single generic `Content::element` line now uses GPUI's cached-view boundary so a readout update reuses unchanged registered content. The speed module's final paint probe is absolute: adding or skipping it cannot change content height by one pixel and defeat that cache. No new screen or unrelated cleanup is included.
+
+- First failure, `src/surfaces/speed/tests.rs`: `sampling must never invalidate the shell`, observed 1 vs required 0; 0 passed / 1 failed. `review-2-red.txt` retains the parent failure. Green: 8 passed / 0 failed / 1 ignored; the ignored receipt was executed separately.
+- Three completed sampler callbacks while open yield zero shell, session or composer notifications; an unchanged composer paint sentinel survives window drawing, proving scene reuse. Genuine platform keystrokes still change and paint the composer revision and produce an acknowledged key timing.
+- Formatted values 3.0001 → 3.0002 ms notify neither entity; 3.0002 → 3.01 ms notifies the readout once and the shell zero times. A subsequent sampler tick does not publish feedback from that readout frame.
+- Hostile review: existing Command/Control palette focus tests and canonical temp paths remain; genuine input after a cached sample repaints; opt-in generation guards reject stale memory and readout paint completion. Existing palette tests: 7 passed; session routing: 1 passed; palette/switch/restart/server-down: 1 passed.
+- Required checks passed: fast typecheck, heap-bounded `npx tsc --noEmit`, touched-file ESLint, rule-check (zero applicable TypeScript files) and test classification. Full `npm test`: 1243 files passed / 3 skipped; 9084 tests passed / 5 skipped.
+
+Paint timings remain CPU scene paint, excluding GPU/compositor/display presentation. Wakeups count input-idle shell callbacks, not OS wakeups. macOS real-window idle CPU remains unmeasured in this Linux environment.
+
+
+The final rebased notification-driven idle receipt, `review-2-idle-cpu-linux.json`, contains four prespecified 30-second spans in closed/open/open/closed order, after three seconds of settling per span, with all other verification processes stopped. Totals: closed 60.033 seconds / 1.062% CPU; open 60.038 seconds / 1.463% CPU; overhead **+0.401 percentage points**, below 0.5 in this Linux fixture. All four spans recorded zero shell notifications. The initial run before the last main rebase is also retained in `review-2-idle-cpu-linux-initial.json`: closed 1.088%, open 1.475%, overhead +0.387 points, with at least 60 seconds per state. Both receipts identify their base commit.
+
+The driver watches shell/session/composer/readout notifications and draws only if the window has not already painted, without forced refreshes or a sampling helper process. CPU is from in-process self plus reaped-child `getrusage`; the live owned fixture server is excluded. Native test text and CPU scenes exclude GPU/compositor work. All raw spans are retained; no cross-platform reduction claim is made against the reviewer's macOS 5.86% / 10.87% (+5.01-point) measurement. The real macOS target remains unverified.
