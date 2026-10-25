@@ -12,8 +12,10 @@ import { getRuntime } from '@/lib/runtimes/registry';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import type { AgentSummary } from '@/lib/fleet/types';
 import type { ProjectThread, ThreadWorker } from './types';
+import type { createThreadProjectScope, ThreadTarget } from './project-scope';
+import { threadProjectMatches } from '@/components/desktop/o8-panel/thread-project-identity';
 
-export async function attachThreadEvidence(task: ProjectThread, packet: OrchestratorPacket | undefined, agents: AgentSummary[], detail: boolean) {
+export async function attachThreadEvidence(task: ProjectThread, packet: OrchestratorPacket | undefined, agents: AgentSummary[], detail: boolean, scope: Awaited<ReturnType<typeof createThreadProjectScope>>) {
   const db = getSqlite();
   const lane = task.laneId ? getLane(task.laneId) : null;
   const members = agents.filter(agent => agent.sessionKey === task.thread.sessionKey && (!agent.workspace || agent.workspace === task.repoPath || agent.workspace === lane?.worktreePath));
@@ -35,12 +37,16 @@ export async function attachThreadEvidence(task: ProjectThread, packet: Orchestr
     }
     return worker;
   }));
+  const projectId = task.project?.panelProjectId;
+  const inProject = (target: ThreadTarget) => !task.project || threadProjectMatches(scope.targetProject(target), projectId ?? task.project.id);
+  const artifactHref = (id: string, interactive = false) => `/api/panel/threads/artifact?${new URLSearchParams({ id,
+    ...(projectId ? { projectId } : {}), ...(interactive ? { source: 'interactive' } : {}) })}`;
   task.thread.artifacts = lane || packet ? listArtifacts(packet ? { packetId: packet.id } : { laneId: lane!.id })
-    .filter(record => record.repoPath === task.repoPath && (!record.laneId || record.laneId === task.laneId))
-    .slice(-50).map(record => ({ id: record.id, title: record.label || record.kind, kind: record.kind, href: `/api/panel/threads/artifact?id=${encodeURIComponent(record.id)}` })) : [];
+    .filter(record => record.repoPath === task.repoPath && (!record.laneId || record.laneId === task.laneId) && inProject(record))
+    .slice(-50).map(record => ({ id: record.id, title: record.label || record.kind, kind: record.kind, href: artifactHref(record.id) })) : [];
   if (packet) task.thread.artifacts.push(...listTaskArtifactsByPacket(packet.id, 50).filter(record => record.target.repoPath === task.repoPath
-    && record.target.laneId === task.laneId && record.target.sessionKey === task.thread.sessionKey)
-    .map(record => ({ id: record.id, title: record.title, kind: 'interactive', href: `/api/panel/threads/artifact?source=interactive&id=${encodeURIComponent(record.id)}`, interactive: true })));
+    && record.target.laneId === task.laneId && record.target.sessionKey === task.thread.sessionKey && inProject(record.target))
+    .map(record => ({ id: record.id, title: record.title, kind: 'interactive', href: artifactHref(record.id, true), interactive: true })));
   if (packet && lane) {
     const completion = db.prepare(`SELECT changed_files_json AS files FROM session_outcomes
       WHERE packet_id = ? AND lane_id = ? AND session_key IS ? AND repo_path = ? ORDER BY completed_at DESC LIMIT 1`)

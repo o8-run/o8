@@ -13,12 +13,11 @@ import { normalizeAgentBusRepoPath } from '@/lib/agents/repo-paths';
 import { listRecentAgentMessages } from '@/lib/agents/store';
 import { listRecordedInboxItems } from '@/lib/supervisor/inbox';
 import { listPersistedLlmChats, readPersistedLlmChat } from '@/lib/llm/chat-history-store';
-import { getProjectsLedgerSync } from '@/lib/repos/projects';
-import { listProjects } from '@/lib/projects/store';
 import { buildDagMetadata } from '@/lib/orchestrator/dag';
 import { groupThreads, type ThreadGrouping } from './grouping';
 import { attachThreadEvidence } from './evidence';
 import { redactThreadDisplay } from './redaction';
+import { createThreadProjectScope } from './project-scope';
 import type { ProjectThread, ProjectThreads, ThreadEvidence, ThreadState } from './types';
 
 const states: ThreadState[] = ['waiting', 'review', 'working', 'resolved'];
@@ -44,30 +43,21 @@ export async function readProjectThreads(options: ThreadReadOptions = {}): Promi
   if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 250 || (options.state && !states.includes(options.state))) throw new ThreadReadInputError('Use a valid thread state and a nonnegative offset with a limit from 1 to 250.');
   const observedAt = new Date().toISOString();
   const paths = new Set((options.repoPaths ?? []).map(normalizeAgentBusRepoPath));
-  const ledger = getProjectsLedgerSync();
-  const projectRecords = new Map(listProjects().map(project => [project.id, project]));
-  const recordProject = (id: string | null): ProjectThread['project'] => {
-    if (!id) return null;
-    const aliases = ledger.projects.filter(candidate => candidate.sqliteProjectId === id);
-    const project = ledger.projects.find(candidate => candidate.id === id) ?? (aliases.length === 1 ? aliases[0] : undefined);
-    return { id, panelProjectId: project?.id ?? null, name: project?.name ?? 'Unavailable project',
-      slug: projectRecords.get(project?.sqliteProjectId ?? id)?.slug ?? '', mainRepo: null, currentRepo: null, relatedRepos: [] };
-  };
-  const recordVisible = (id: string | null) => !options.projectId || threadProjectMatches(recordProject(id), options.projectId);
-  const visible = (task: Pick<ProjectThread, 'repoPath' | 'project'>) => {
-    if (paths.size && (!task.repoPath || !paths.has(normalizeAgentBusRepoPath(task.repoPath)))) return false;
-    if (!options.projectId) return true;
-    if (task.project) return threadProjectMatches(task.project, options.projectId);
-    return Boolean(task.repoPath && ledger.projects.find(project => project.id === options.projectId)?.repoPaths.some(repo => normalizeAgentBusRepoPath(repo) === normalizeAgentBusRepoPath(task.repoPath!)));
-  };
-  const pool = await getTaskPool({ includeDone: true, includeMissionHistory: true });
-  const inventory = await getRuntimeInventorySnapshot();
   const missions = listMissionRegistryEntries({ includeArchived: true }).map(entry => entry.mission);
   const current = currentMissionState();
   if (current.missionId) { const index = missions.findIndex(mission => mission.missionId === current.missionId); if (index >= 0) missions.splice(index, 1); missions.push(current); }
   const packets = new Map(missions.flatMap(mission => mission.packets).concat(current.packets).map(packet => [packet.id, packet]));
-  const tasks: ProjectThread[] = pool.tasks.filter(visible).map(task => ({ ...task,
-    thread: blank(task.packetId ? 'packet' : 'lane', stateFor(task.status, task.group), task.lane?.sessionKey ?? task.execution?.sessionKey ?? null, observedAt) }));
+  const scope = await createThreadProjectScope(packets);
+  const recordProject = scope.project;
+  const recordVisible = (id: string | null) => !options.projectId || threadProjectMatches(recordProject(id), options.projectId);
+  const visible = (task: Pick<ProjectThread, 'repoPath' | 'project'>) => {
+    if (paths.size && (!task.repoPath || !paths.has(normalizeAgentBusRepoPath(task.repoPath)))) return false;
+    return threadProjectMatches(task.project, options.projectId ?? null);
+  };
+  const pool = await getTaskPool({ includeDone: true, includeMissionHistory: true });
+  const inventory = await getRuntimeInventorySnapshot();
+  const tasks: ProjectThread[] = pool.tasks.map(task => ({ ...task, project: scope.targetProject(task),
+    thread: blank(task.packetId ? 'packet' : 'lane', stateFor(task.status, task.group), task.lane?.sessionKey ?? task.execution?.sessionKey ?? null, observedAt) })).filter(visible);
   for (const item of listRecordedInboxItems({ includeAllProjects: true, includeDismissed: true })) {
     if (!recordVisible(item.projectId)) continue;
     const existing = tasks.find(task => item.packetId && task.packetId === item.packetId && task.repoPath === item.repoPath);
@@ -96,11 +86,15 @@ export async function readProjectThreads(options: ThreadReadOptions = {}): Promi
     if (!matched) { node.lastEventAt = new Date(approval.updatedAt).toISOString(); tasks.push(node); }
   }
   for (const repo of await listRepos()) {
-    if (!visible({ repoPath: repo.localPath, project: null })) continue;
+    if (paths.size && !paths.has(normalizeAgentBusRepoPath(repo.localPath))) continue;
     const messages = listRecentAgentMessages(repo.localPath, 250);
     const latest = [...new Map(messages.map(message => [message.conversation?.id ?? message.id, message] as const).reverse()).values()];
     for (const message of latest) {
-      const bound = tasks.find(task => task.repoPath && normalizeAgentBusRepoPath(task.repoPath) === normalizeAgentBusRepoPath(repo.localPath) && (message.refs.laneId ? task.laneId === message.refs.laneId : Boolean(message.refs.packetId && task.packetId === message.refs.packetId)));
+      const project = scope.targetProject({ repoPath: message.repo, ...message.refs });
+      if (!visible({ repoPath: message.repo, project })) continue;
+      const bound = tasks.find(task => task.repoPath && normalizeAgentBusRepoPath(task.repoPath) === normalizeAgentBusRepoPath(repo.localPath)
+        && Boolean(message.refs.laneId || message.refs.packetId) && (!message.refs.laneId || task.laneId === message.refs.laneId)
+        && (!message.refs.packetId || task.packetId === message.refs.packetId));
       if (bound) {
         bound.thread.history.push({ id: message.id, at: message.timestamp, label: message.text.slice(0, 500) });
         if (message.delivery === 'failed' && message.conversation?.status !== 'closed') {
@@ -110,6 +104,7 @@ export async function readProjectThreads(options: ThreadReadOptions = {}): Promi
       }
       const state = message.conversation?.status === 'closed' ? 'resolved' : message.delivery === 'failed' ? 'waiting' : 'working';
       const node = synthetic(`handoff:${message.conversation?.id ?? message.id}`, `${message.from} → ${message.to}`, repo.localPath, message.refs.identities?.from?.runtime ?? 'unknown', state, blank('handoff', state, null, observedAt));
+      node.project = project;
       node.summary = message.text.slice(0, 500); node.lastEventAt = message.timestamp;
       node.blockedReason = state === 'waiting' ? 'Handoff delivery failed. Open the recorded exchange.' : null;
       node.thread.history = [{ id: message.id, at: message.timestamp, label: node.summary }];
@@ -127,15 +122,22 @@ export async function readProjectThreads(options: ThreadReadOptions = {}): Promi
     const key = `llm-chat:${id}`; if (sessions.has(key)) continue;
     const record = readPersistedLlmChat(id); if (!record?.history.repoPath) continue;
     const node = synthetic(`session:${key}`, record.history.title || 'Saved conversation', record.history.repoPath, 'llm-chat', 'idle', blank('session', 'resolved', key, observedAt));
+    node.project = scope.targetProject({ repoPath: record.history.repoPath, threadId: id });
     node.lastEventAt = record.modifiedAt;
     if (visible(node)) { tasks.push(node); sessions.add(key); }
   }
-  await Promise.all(tasks.map(task => attachThreadEvidence(task, packets.get(task.packetId ?? ''), inventory.agents, options.taskId === task.id || missions.some(mission => mission.missionId === options.taskId && mission.packets.some(packet => packet.id === task.packetId)))));
+  await Promise.all(tasks.map(task => attachThreadEvidence(task, packets.get(task.packetId ?? ''), inventory.agents, options.taskId === task.id || missions.some(mission => mission.missionId === options.taskId && mission.packets.some(packet => packet.id === task.packetId)), scope)));
   for (const mission of missions) {
     const children = tasks.filter(task => mission.packets.some(packet => packet.id === task.packetId));
     if (!children.length || !mission.missionId) continue;
     const state = states.find(candidate => children.some(child => child.thread.state === candidate))!;
     const node = synthetic(mission.missionId, mission.summary || mission.prompt || 'Mission', children[0].repoPath!, mission.runtime || 'mixed', state, blank('mission', state, null, observedAt));
+    // A mission has no separate project field. Its global prompt is attributable
+    // only when every recorded child carries the same explicit project identity.
+    const owners = mission.packets.map(packet => scope.targetProject(pool.tasks.find(task => task.packetId === packet.id)
+      ?? { repoPath: packet.workspaceTargetPath ?? mission.repoPath ?? null, packetId: packet.id }));
+    node.project = owners.length && owners.every(owner => owner && owner.panelProjectId === owners[0]?.panelProjectId) ? owners[0] : null;
+    if (!visible(node)) continue;
     node.thread.childIds = children.map(child => child.id);
     const waves = buildDagMetadata(mission.packets).waves;
     for (const wave of waves) {

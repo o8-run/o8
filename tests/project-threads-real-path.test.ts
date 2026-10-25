@@ -343,3 +343,188 @@ it('authenticates artifact reads and refuses recorded paths outside the artifact
     expect(response.status).toBe(404); expect(await response.text()).not.toContain(displaySecret);
   }
 });
+
+async function sharedThreadProjects(suffix: string) {
+  const { createProject, setProjectRepos, getProjectsLedger } = await import('@/lib/repos/projects');
+  const { createLane, attachSession } = await import('@/lib/lane/registry');
+  const { persistAgentMessage } = await import('@/lib/agents/store');
+  const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
+  const { recordMission } = await import('@/lib/db/missions-store');
+  const projects = [];
+  for (const label of ['A', 'B']) {
+    const projectId = (await createProject(`Shared ${suffix} ${label}`)).activeProjectId;
+    await setProjectRepos(projectId, [repoPath]);
+    const id = `pkt-shared-${suffix}-${label}`;
+    const lane = createLane({ repoPath, packetId: id, projectId, branch: id, runtime: 'codex', label: `Thread ${suffix} ${label}` });
+    const sessionKey = `codex:shared-${suffix}-${label}`;
+    attachSession(lane.id, sessionKey);
+    const state = createEmptyOrchestratorMissionState();
+    state.missionId = `mission-shared-${suffix}-${label}`; state.repoPath = repoPath;
+    state.summary = `Mission ${suffix} ${label}`;
+    state.packets = [{ id, projectId, title: lane.label, summary: '', status: 'running', runtime: 'codex',
+      workspaceTargetPath: repoPath, dependencyPacketIds: [], dependencyLabels: [] } as unknown as OrchestratorPacket];
+    recordMission({ id: state.missionId, repoPath, runtime: 'codex', prompt: '', summary: state.summary, constraints: '', packetMeta: [], totalWaves: 1, missionState: state });
+    const marker = `handoff-private-${suffix}-${label}`;
+    const { message } = persistAgentMessage({ from: `sender-${label}`, to: `reader-${label}`, repo: repoPath, text: marker, refs: { laneId: lane.id, packetId: id } });
+    projects.push({ projectId, packetId: id, laneId: lane.id, sessionKey, marker, handoffId: `handoff:${message.conversation!.id}` });
+  }
+  // Include persisted legacy ledger rows as well as SQLite-projected projects.
+  const ledger = await getProjectsLedger();
+  for (const project of ledger.projects) if (projects.some(own => own.projectId === project.id)) project.repoPaths = [repoPath];
+  writeFileSync(join(root, 'projects.json'), JSON.stringify(ledger));
+  return projects;
+}
+
+it('scopes every handoff read by project identity in routes and built CLI list and show', async () => {
+  const projects = await sharedThreadProjects('handoffs');
+  for (const own of projects) {
+    const foreign = projects.find(project => project !== own)!;
+    for (const taskId of [undefined, own.packetId]) {
+      const response = await route.GET(request(`&projectId=${own.projectId}${taskId ? `&taskId=${taskId}` : ''}`));
+      expect.soft(response.status).toBe(200);
+      const text = await response.text();
+      expect.soft(text).toContain(own.marker); expect.soft(text).not.toContain(foreign.marker);
+      const args = taskId ? ['show', taskId] : ['list'];
+      const cli = await cliThreads(['threads', ...args, '--repo', repoPath, '--project', own.projectId]);
+      expect.soft(cli.stdout).toContain(own.marker); expect.soft(cli.stdout).not.toContain(foreign.marker);
+    }
+    for (const id of [foreign.packetId, foreign.handoffId]) {
+      const response = await route.GET(request(`&projectId=${own.projectId}&taskId=${id}`));
+      expect.soft(response.status).toBe(404); expect.soft(await response.text()).not.toContain(foreign.marker);
+      await expect.soft(cliThreads(['threads', 'show', id, '--repo', repoPath, '--project', own.projectId])).rejects.toMatchObject({ code: 4 });
+    }
+  }
+}, 60_000);
+
+it('keeps projectless sessions out of shared-project reads and uses saved chat identity', async () => {
+  const [a, b] = await sharedThreadProjects('sessions');
+  const { writePersistedLlmChat } = await import('@/lib/llm/chat-history-store');
+  for (const project of [a, b]) {
+    const history = { messages: [], repoPath, projectId: project.projectId, title: `saved-${project.marker}` };
+    writePersistedLlmChat(`thoughts-${project.packetId}`, history);
+  }
+  const unknown = { name: 'Unattributed shared session', sessionKey: 'codex:unattributed-shared', workspace: repoPath, runtime: 'codex', status: 'working' } as unknown as import('@/lib/fleet/types').AgentSummary;
+  fixture.agents.push(unknown);
+  try {
+    for (const own of [a, b]) {
+      const foreign = own === a ? b : a;
+      const response = await route.GET(request(`&projectId=${own.projectId}`));
+      const text = await response.text();
+      expect.soft(text).toContain(`saved-${own.marker}`);
+      expect.soft(text).not.toContain(`saved-${foreign.marker}`);
+      expect.soft(text).not.toContain(unknown.sessionKey);
+      const cli = await cliThreads(['threads', 'list', '--repo', repoPath, '--project', own.projectId]);
+      expect.soft(cli.stdout).toContain(`saved-${own.marker}`);
+      expect.soft(cli.stdout).not.toContain(`saved-${foreign.marker}`);
+      expect.soft(cli.stdout).not.toContain(unknown.sessionKey);
+    }
+  } finally { fixture.agents = fixture.agents.filter(agent => agent !== unknown); }
+}, 60_000);
+
+it.each(['file', 'interactive'] as const)('refuses another shared project\'s %s artifact without exposing its existence', async kind => {
+  const projects = await sharedThreadProjects(kind);
+  const reader = await import('@/app/api/panel/threads/artifact/route');
+  const { recordArtifact } = await import('@/lib/artifacts/store');
+  const { insertTaskArtifact } = await import('@/lib/task-artifacts/store');
+  const ids: string[] = [];
+  for (const [index, project] of projects.entries()) {
+    if (kind === 'file') {
+      const relPath = `artifacts/shared-${kind}-${index}.json`;
+      mkdirSync(join(root, 'artifacts'), { recursive: true }); writeFileSync(join(root, relPath), JSON.stringify({ note: project.marker }));
+      ids.push(recordArtifact({ source: 'manual', kind: 'report', packetId: project.packetId, laneId: project.laneId, repoPath, relPath, mimeType: 'application/json' })!.id);
+    } else {
+      const id = `tart-00000000-0000-4000-8000-00000000470${index}`;
+      const at = new Date().toISOString();
+      insertTaskArtifact({ id, schemaVersion: 1, title: project.marker, html: `<p>${project.marker}</p>`,
+        target: { kind: 'packet', repoPath, packetId: project.packetId, laneId: project.laneId, sessionKey: project.sessionKey, threadId: null },
+        originHead: initialHead, headPolicy: 'any', actions: [], state: 'live', stateReason: null, createdBy: 'operator', createdAt: at, updatedAt: at });
+      ids.push(id);
+    }
+  }
+  const read = (id: string, projectId: string) => reader.GET(new NextRequest(`http://localhost/api/panel/threads/artifact?${new URLSearchParams({ id, projectId, ...(kind === 'interactive' ? { source: 'interactive' } : {}) })}`, { headers: { authorization: `Bearer ${token}` } }));
+  for (const [index, own] of projects.entries()) {
+    const foreign = projects[1 - index];
+    const ownResponse = await read(ids[index], own.projectId);
+    expect.soft(ownResponse.status).toBe(200); expect.soft(await ownResponse.text()).toContain(own.marker);
+    const denied = await read(ids[1 - index], own.projectId);
+    const missing = await read('missing-artifact', own.projectId);
+    expect.soft(denied.status).toBe(404); expect.soft(await denied.text()).toBe(await missing.text());
+    for (const projectId of ['unknown-project', '']) expect.soft((await read(ids[index], projectId)).status).toBe(404);
+    const detail = await (await route.GET(request(`&projectId=${own.projectId}&taskId=${own.packetId}`))).json() as { task: ProjectThread };
+    const link = detail.task.thread.artifacts.find(artifact => artifact.id === ids[index]);
+    expect.soft(link).toBeDefined();
+    expect.soft(new URL(link!.href, 'http://localhost').searchParams.get('projectId')).toBe(own.projectId);
+    expect.soft(JSON.stringify(detail)).not.toContain(foreign.marker);
+  }
+}, 60_000);
+
+it('refuses contradictory or unowned evidence identities before exposing metadata or bytes', async () => {
+  const [a, b] = await sharedThreadProjects('conflicts');
+  const { writePersistedLlmChat } = await import('@/lib/llm/chat-history-store');
+  const { recordArtifact } = await import('@/lib/artifacts/store');
+  const { insertTaskArtifact } = await import('@/lib/task-artifacts/store');
+  const reader = await import('@/app/api/panel/threads/artifact/route');
+  const foreignChat = 'thoughts-foreign-evidence';
+  const unownedChat = 'thoughts-unowned-evidence';
+  writePersistedLlmChat(foreignChat, { messages: [], repoPath, ...{ projectId: b.projectId } });
+  writePersistedLlmChat(unownedChat, { messages: [], repoPath });
+  const marker = 'foreign-artifact-conflicting-owner';
+  const reads: Array<Record<string, string>> = [];
+  mkdirSync(join(root, 'artifacts'), { recursive: true });
+  for (const [index, threadId] of [foreignChat, unownedChat].entries()) {
+    const relPath = `artifacts/conflicting-${index}.json`;
+    writeFileSync(join(root, relPath), JSON.stringify({ note: marker }));
+    const file = recordArtifact({ source: 'manual', kind: 'report', label: marker, repoPath, packetId: a.packetId, laneId: a.laneId, threadId, relPath, mimeType: 'application/json' })!;
+    const id = `tart-00000000-0000-4000-8000-00000000471${index}`;
+    const at = new Date().toISOString();
+    insertTaskArtifact({ id, schemaVersion: 1, title: marker, html: `<p>${marker}</p>`,
+      target: { kind: 'packet', repoPath, packetId: a.packetId, laneId: a.laneId, sessionKey: a.sessionKey, threadId },
+      originHead: initialHead, headPolicy: 'any', actions: [], state: 'live', stateReason: null, createdBy: 'operator', createdAt: at, updatedAt: at });
+    reads.push({ id: file.id }, { id, source: 'interactive' });
+  }
+  for (const target of reads) {
+    const response = await reader.GET(new NextRequest(`http://localhost/api/panel/threads/artifact?${new URLSearchParams({ ...target, projectId: a.projectId })}`, { headers: { authorization: `Bearer ${token}` } }));
+    expect.soft(response.status).toBe(404); expect.soft(await response.text()).not.toContain(marker);
+  }
+  for (const taskId of [undefined, a.packetId]) {
+    const response = await route.GET(request(`&projectId=${a.projectId}${taskId ? `&taskId=${taskId}` : ''}`));
+    expect.soft(response.status).toBe(200); expect.soft(await response.text()).not.toContain(marker);
+    const cli = await cliThreads(['threads', ...(taskId ? ['show', taskId] : ['list']), '--repo', repoPath, '--project', a.projectId]);
+    expect.soft(cli.stdout).not.toContain(marker);
+  }
+}, 60_000);
+
+it('does not infer ownership for projectless pool rows or mixed-project mission prompts', async () => {
+  const [a, b] = await sharedThreadProjects('unowned');
+  const { createLane } = await import('@/lib/lane/registry');
+  const lane = createLane({ repoPath, branch: 'unowned', runtime: 'codex', label: 'unowned-pool-private-title' });
+  db.getSqlite().prepare('UPDATE lanes SET project_id = NULL WHERE id = ?').run(lane.id);
+  const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
+  const state = createEmptyOrchestratorMissionState();
+  state.missionId = 'unowned-aggregate'; state.repoPath = repoPath; state.summary = 'unowned-aggregate-private-summary';
+  state.packets = [a, b].map(project => ({ id: project.packetId, projectId: project.projectId, title: 'Own child', status: 'running', runtime: 'codex', workspaceTargetPath: repoPath, dependencyPacketIds: [], dependencyLabels: [] } as unknown as OrchestratorPacket));
+  (await import('@/lib/db/missions-store')).recordMission({ id: state.missionId, repoPath, runtime: 'codex', prompt: '', summary: state.summary, constraints: '', packetMeta: [], totalWaves: 1, missionState: state });
+  for (const id of [lane.id, state.missionId]) {
+    expect.soft((await route.GET(request(`&projectId=${a.projectId}&taskId=${id}`))).status).toBe(404);
+    await expect.soft(cliThreads(['threads', 'show', id, '--repo', repoPath, '--project', a.projectId])).rejects.toMatchObject({ code: 4 });
+  }
+  const text = await (await route.GET(request(`&projectId=${a.projectId}`))).text();
+  expect(text).toContain(a.packetId); expect(text).not.toContain(lane.label); expect(text).not.toContain(state.summary);
+}, 60_000);
+
+it('refuses mission summaries when a child packet and lane disagree about project ownership', async () => {
+  const [a, b] = await sharedThreadProjects('mission-conflict');
+  const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
+  const state = createEmptyOrchestratorMissionState();
+  state.missionId = 'mission-conflicting-child'; state.repoPath = repoPath;
+  state.summary = 'conflicting-child-private-mission-summary';
+  state.packets = [a, b].map(project => ({ id: project.packetId, projectId: a.projectId, title: 'Child',
+    status: 'running', runtime: 'codex', workspaceTargetPath: repoPath, dependencyPacketIds: [], dependencyLabels: [] } as unknown as OrchestratorPacket));
+  (await import('@/lib/db/missions-store')).recordMission({ id: state.missionId, repoPath, runtime: 'codex', prompt: '', summary: state.summary, constraints: '', packetMeta: [], totalWaves: 1, missionState: state });
+  const response = await route.GET(request(`&projectId=${a.projectId}`));
+  expect.soft(response.status).toBe(200); expect.soft(await response.text()).not.toContain(state.summary);
+  expect.soft((await route.GET(request(`&projectId=${a.projectId}&taskId=${state.missionId}`))).status).toBe(404);
+  const cli = await cliThreads(['threads', 'list', '--repo', repoPath, '--project', a.projectId]);
+  expect.soft(cli.stdout).not.toContain(state.summary);
+  await expect.soft(cliThreads(['threads', 'show', state.missionId, '--repo', repoPath, '--project', a.projectId])).rejects.toMatchObject({ code: 4 });
+}, 60_000);
