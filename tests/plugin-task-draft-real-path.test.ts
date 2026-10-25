@@ -1,6 +1,6 @@
 import { execFile, execFileSync } from 'node:child_process';
 import { generateKeyPairSync, randomUUID, sign } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { NextRequest } from 'next/server';
@@ -30,6 +30,7 @@ import { addRepoToProject, createProject } from '@/lib/projects/store';
 import { upsertProjectLedgerRecord } from '@/lib/repos/projects';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
 import { panelGateMiddleware } from '@/middleware';
+import { TASK_DRAFT_TOOLS } from '@/lib/mcp/task-draft-tools';
 
 const keys = generateKeyPairSync('ed25519');
 const oldKey = process.env.O8_LICENSE_PUBKEY;
@@ -74,6 +75,15 @@ async function options() {
   expect(value.status).toBe(200);
   expect(value.result.ok).toBe(true);
   return value.result;
+}
+async function discover(bearer = token(accountId, ['o8:read', 'o8:follow-up', PLUGIN_PREPARE_TASK_SCOPE])) {
+  const request = new NextRequest('http://localhost/api/plugins/mcp', {
+    method: 'POST', headers: { authorization: `Bearer ${bearer}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 'catalog', method: 'tools/list' }),
+  });
+  expect(panelGateMiddleware(request).status).toBe(200);
+  const response = await POST(request);
+  return { status: response.status, body: await response.json(), cacheControl: response.headers.get('cache-control') };
 }
 function contract(snapshotId: string) {
   return {
@@ -132,6 +142,80 @@ afterAll(() => {
 });
 
 describe('plugin task drafts through the actual authenticated route and persisted state', () => {
+  it('refreshes discovery and drops only obsolete preparation snapshots for this app connection', async () => {
+    const selected = await options();
+    const prepared = await call('o8_prepare_task', contract(selected.snapshotId));
+    const held = listTaskDrafts(accountId)[0];
+    const source = join(taskDraftRoot(), 'snapshots', `${selected.snapshotId}.json`);
+    const snapshot = JSON.parse(readFileSync(source, 'utf8'));
+    const seed = (changes: Record<string, unknown>) => {
+      const snapshotId = randomUUID();
+      const file = join(taskDraftRoot(), 'snapshots', `${snapshotId}.json`);
+      writeFileSync(file, JSON.stringify({ ...snapshot, snapshotId, ...changes }));
+      return file;
+    };
+    const stale = seed({ catalogRevision: 'obsolete' });
+    const legacy = seed({ catalogRevision: undefined });
+    const oldEpoch = seed({ epoch: 'obsolete' });
+    const foreignClient = seed({ clientId: 'another-app', catalogRevision: 'obsolete' });
+    const foreignAccount = seed({ accountId: 'user_another_account', catalogRevision: 'obsolete' });
+    const foreignMachine = seed({ machineId: 'another-machine', catalogRevision: 'obsolete' });
+    expect((await discover(token('user_another_account'))).status).toBe(403);
+    expect(existsSync(stale)).toBe(true);
+    const readOnly = await discover(token(accountId, ['o8:read']));
+    expect(readOnly.status).toBe(200);
+    expect(readOnly.body.result.tools.some((tool: { name: string }) => tool.name === 'o8_prepare_task')).toBe(false);
+    expect(existsSync(stale)).toBe(true);
+
+    const current = await discover();
+    expect(current.status).toBe(200);
+    expect(current.cacheControl).toBe('no-store');
+    expect(current.body.result).toMatchObject({ catalogRevision: snapshot.catalogRevision, preparationSnapshotsInvalidated: 3 });
+    expect(current.body.result.catalogRevision).toMatch(/^[a-f0-9]{64}$/u);
+    expect(current.body.result.tools).toHaveLength(7);
+    for (const tool of TASK_DRAFT_TOOLS) expect(current.body.result.tools).toContainEqual(tool);
+    expect(existsSync(stale)).toBe(false);
+    expect(existsSync(legacy)).toBe(false);
+    expect(existsSync(oldEpoch)).toBe(false);
+    for (const file of [source, foreignClient, foreignAccount, foreignMachine]) expect(existsSync(file)).toBe(true);
+    expect(listTaskDrafts(accountId)).toEqual([held]);
+    expect((await call('o8_prepare_task', contract(selected.snapshotId))).result)
+      .toMatchObject({ taskId: prepared.result.taskId, replayed: true, state: 'held', dispatched: false });
+    expect(launches).not.toHaveBeenCalled();
+  });
+
+  it('retains the discovered bounded provider contract in one held task without launching', async () => {
+    const selected = await options();
+    const discovery = await discover();
+    expect(discovery.status).toBe(200);
+    const preparation = discovery.body.result.tools.find((tool: { name: string }) => tool.name === 'o8_prepare_task');
+    const runtime = selected.runtimes.find((row: { models: Array<{ provider?: unknown }> }) => row.models.some((model) => model.provider));
+    const offered = runtime.models.find((model: { provider?: unknown }) => model.provider);
+    for (const [field, value] of Object.entries(offered.provider)) {
+      expect(preparation.inputSchema.properties.provider.properties[field].enum).toEqual([value]);
+      expect(preparation.inputSchema.properties.provider.required).toContain(field);
+    }
+    const args = { ...contract(selected.snapshotId), runtime: runtime.runtime, model: offered.model,
+      effort: offered.efforts[0], provider: offered.provider };
+    expect((await call('o8_prepare_task', { ...args, provider: undefined })).result.ok).toBe(false);
+    expect((await call('o8_prepare_task', { ...args, provider: { ...offered.provider, maxRequests: 5 } })).result.ok).toBe(false);
+    const prepared = await call('o8_prepare_task', args);
+    expect(prepared.result).toMatchObject({ ok: true, state: 'held', provider: offered.provider, dispatched: false });
+    expect(listTaskDrafts(accountId)).toHaveLength(1);
+    expect(listTaskDrafts(accountId)[0].contract.provider).toEqual(offered.provider);
+    expect(await runHeadlessSprintTick()).toMatchObject({ launched: 0 });
+    expect(launches).not.toHaveBeenCalled();
+  });
+
+  it('refuses a stale preparation catalog before persisting a new task even without rediscovery', async () => {
+    const selected = await options();
+    const file = join(taskDraftRoot(), 'snapshots', `${selected.snapshotId}.json`);
+    writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, 'utf8')), catalogRevision: 'obsolete' }));
+    expect((await call('o8_prepare_task', contract(selected.snapshotId))).result.code).toBe('snapshot_unavailable');
+    expect(intents()).toHaveLength(0);
+    expect(launches).not.toHaveBeenCalled();
+  });
+
   it('prepares one held draft, preserves existing work, and launches nothing on headless ticks', async () => {
     const before = readOrchestratorMissionState();
     const choice = await call('o8_task_options', { machineId: 'draft-machine' });
