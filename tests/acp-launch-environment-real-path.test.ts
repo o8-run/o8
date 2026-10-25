@@ -220,6 +220,104 @@ setTimeout(() => process.exit(0), 5000).unref();
   }
 });
 
+const echoEncodings = ['json', 'json-unicode', 'json-ascii-slash', 'json-html-slash', 'url', 'url-lower', 'form', 'base64', 'base64url'] as const;
+it.each(echoEncodings)('redacts %s encoded canaries through Check connection, turn output/errors, lifecycle errors and stderr', async encoding => {
+  const paths = ['CHECK', 'OUTPUT', 'ERROR', 'LIFECYCLE', 'STDERR'] as const;
+  const secrets = Object.fromEntries(paths.map(name => [name, `synthetic-${encoding}-${name}:"\\\n\t\u0001 café/<> &?+=`]));
+  const encode = (value: string) => {
+    if (encoding === 'json') return JSON.stringify(value).slice(1, -1);
+    if (encoding === 'json-unicode') return [...value].map(char => `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`).join('');
+    if (encoding === 'json-ascii-slash' || encoding === 'json-html-slash') return JSON.stringify(value).slice(1, -1)
+      .replace(encoding === 'json-ascii-slash' ? /[\u007f-\uffff]/g : /[<>&\u2028\u2029]/g,
+        char => `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`).replace(/\//g, '\\/');
+    if (encoding === 'url') return encodeURIComponent(value);
+    if (encoding === 'url-lower') return encodeURIComponent(value).replace(/%[A-F0-9]{2}/g, match => match.toLowerCase());
+    if (encoding === 'form') return new URLSearchParams({ token: value }).toString().slice(6);
+    return Buffer.from(value).toString(encoding);
+  };
+  const encodedPeer = join(fixture.dir, `encoded-${encoding}.cjs`);
+  writeFileSync(encodedPeer, String.raw`
+const send = value => process.stdout.write(JSON.stringify(value)+'\n');
+const encoding = process.argv[3];
+const encode = value => {
+ if(encoding==='json') return JSON.stringify({token:value});
+ if(encoding==='json-unicode') return [...value].map(char=>'\\u'+char.charCodeAt(0).toString(16).padStart(4,'0')).join('');
+ if(encoding==='json-ascii-slash'||encoding==='json-html-slash') return JSON.stringify({token:value})
+  .replace(encoding==='json-ascii-slash'?/[\u007f-\uffff]/g:/[<>&\u2028\u2029]/g,char=>'\\u'+char.charCodeAt(0).toString(16).padStart(4,'0')).replace(/\//g,'\\/');
+ if(encoding==='url') return encodeURIComponent(value);
+ if(encoding==='url-lower') return encodeURIComponent(value).replace(/%[A-F0-9]{2}/g, match=>match.toLowerCase());
+ if(encoding==='form') return new URLSearchParams({token:value}).toString().slice(6);
+ return Buffer.from(value).toString(encoding);
+};
+require('node:readline').createInterface({input:process.stdin}).on('line', async line=>{
+ const r=JSON.parse(line); let result={};
+ if(r.method==='initialize') {
+  if(process.argv[2]==='check') return send({jsonrpc:'2.0',id:r.id,error:{code:-32000,message:'Fixture encoded check: '+encode(process.env.ACP_CHECK_TOKEN)}});
+  result={protocolVersion:1};
+ }
+ if(r.method==='session/new') result={sessionId:'encoded-session',configOptions:[]};
+ if(r.method==='session/prompt') {
+  const output=encode(process.env.ACP_OUTPUT_TOKEN);
+  for(const kind of ['agent_message_chunk','agent_thought_chunk']) {
+   for(const text of ['Fixture encoded output: ', output.slice(0,Math.floor(output.length/2)), output.slice(Math.floor(output.length/2)), '!'])
+    send({jsonrpc:'2.0',method:'session/update',params:{sessionId:'encoded-session',update:{sessionUpdate:kind,content:{type:'text',text}}}});
+  }
+  const diagnostic='Fixture encoded stderr: '+encode(process.env.ACP_STDERR_TOKEN);
+  process.stderr.write(diagnostic.slice(0,diagnostic.length-3));
+  await new Promise(resolve=>setTimeout(resolve,10)); process.stderr.write(diagnostic.slice(-3));
+  return send({jsonrpc:'2.0',id:r.id,error:{code:-32000,message:'Fixture encoded turn: '+encode(process.env.ACP_ERROR_TOKEN)+' / '+encode(process.env.ACP_LIFECYCLE_TOKEN),data:{nested:encode(process.env.ACP_ERROR_TOKEN),[encode(process.env.ACP_LIFECYCLE_TOKEN)]:'Fixture encoded data'}}});
+ }
+ if(r.id!=null) send({jsonrpc:'2.0',id:r.id,result});
+});
+setTimeout(()=>process.exit(0),5000).unref();
+`);
+  const configure = async (mode: string) => {
+    expect((await POST(request({ connection: { ...connection, args: [encodedPeer, mode, encoding] } }))).status).toBe(200);
+    expect((await save(paths.map(name => ({ name: `ACP_${name}_TOKEN`, secret: true, value: secrets[name] })))).status).toBe(200);
+  };
+  const strings = (value: unknown): string => typeof value === 'string' ? value : value && typeof value === 'object'
+    ? Object.entries(value).map(([key, item]) => key + '\n' + strings(item)).join('\n') : '';
+  const assertMasked = (value: unknown, names: typeof paths[number][]) => {
+    const exposed = strings(value);
+    for (const name of names) {
+      expect.soft(exposed.includes(encode(secrets[name])), `${encoding} ${name} encoded canary`).toBe(false);
+      expect.soft(exposed.includes(secrets[name]), `${encoding} ${name} raw canary`).toBe(false);
+    }
+    expect.soft(exposed).toContain('[redacted]');
+  };
+  await configure('check');
+  const { GET: checkConnection } = await import('@/app/api/orchestrator/backend-models/route');
+  const checked = await checkConnection(new NextRequest(`http://fixture.invalid/api/orchestrator/backend-models?backend=acp&refresh=1&repoPath=${encodeURIComponent(fixture.dir)}`, {
+    headers: { authorization: `Bearer ${getOrCreateWsToken()}` },
+  }));
+  const checkBody = await checked.json(); expect(strings(checkBody)).toContain('Fixture encoded check:');
+  assertMasked(checkBody, ['CHECK']);
+  await configure('turn');
+  const { publishRealtimeMutation } = await import('@/lib/realtime/publisher');
+  vi.mocked(publishRealtimeMutation).mockClear();
+  const events: Array<{ type: string; text?: string; error?: string }> = [];
+  await acpBackend.sendTurn(fixture.dir, 'Synthetic encoded echo.', event => events.push(event), { threadId: `encoded-${encoding}` });
+  for (const type of ['text', 'thinking']) {
+    const output = events.filter(event => event.type === type).map(event => event.text).join('');
+    expect(output).toContain('Fixture encoded output:'); assertMasked(output, ['OUTPUT']);
+  }
+  const errors = events.filter(event => event.type === 'error'); expect(strings(errors)).toContain('Fixture encoded turn:');
+  assertMasked(errors, ['ERROR', 'LIFECYCLE']);
+  const lifecycle = vi.mocked(publishRealtimeMutation).mock.calls;
+  expect(strings(lifecycle)).toContain('Fixture encoded turn:'); assertMasked(lifecycle, ['ERROR', 'LIFECYCLE']);
+  const stderr: string[] = []; const notifications: unknown[] = [];
+  let closed!: () => void; const exited = new Promise<void>(resolve => { closed = resolve; });
+  const resident = new AcpClient({ runtimeId: 'acp', cwd: fixture.dir, ...localAcpProcessLaunch()!,
+    onStderr: chunk => stderr.push(chunk), onNotification: notification => notifications.push(notification), onExit: closed });
+  expect((await save([])).status).toBe(200);
+  let diagnostic: unknown;
+  try { await resident.initialize(); const session = await resident.newSession(fixture.dir, []); await resident.prompt(session.sessionId, 'Synthetic encoded resident echo.'); }
+  catch (error) { const failure = error as { message: string; data?: unknown }; diagnostic = { message: failure.message, data: failure.data }; }
+  finally { resident.kill(); await exited; }
+  assertMasked(diagnostic, ['ERROR', 'LIFECYCLE']); assertMasked(notifications, ['OUTPUT']);
+  expect(stderr.join('')).toContain('Fixture encoded stderr:'); assertMasked(stderr.join(''), ['STDERR']);
+});
+
 it.each(['synthetic-stream-canary', 'text', 'model'])('keeps schemas and redacts split ACP text/thinking for saved value %s', async (secret) => {
   const streamPeer = join(fixture.dir, 'stream-peer.cjs');
   writeFileSync(streamPeer, String.raw`
