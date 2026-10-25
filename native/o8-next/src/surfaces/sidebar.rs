@@ -211,12 +211,7 @@ impl Shell {
             }
         }
         if self.connected {
-            self.notice = if self.workspaces.is_empty() {
-                "Connected. No saved workspace sessions."
-            } else {
-                "Connected · Ctrl+F: search threads · F8: sidebar · Ctrl+K: commands"
-            }
-            .into();
+            self.notice.clear();
         }
         for content in self.content.values() {
             if let Content::Grid(grid) = content {
