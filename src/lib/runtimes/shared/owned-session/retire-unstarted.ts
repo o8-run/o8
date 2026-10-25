@@ -3,7 +3,7 @@ import path from 'node:path';
 import { appendEvent, getLane, setLaneStatus } from '@/lib/lane/registry';
 import { POST_WORKTREE_LAUNCH_MS } from '@/lib/runtime/launch-deadline';
 import { withOwnedArtifactRootLock } from './artifact-admission';
-import { archiveOwnedSessionDir } from './archive';
+import { archiveOwnedSessionDir, assertOwnedSessionArchivable } from './archive';
 import { attachSupervisedRun } from './supervised-run';
 import { probeOwnedRunMarker } from './run-process-proof';
 import type { OwnedSessionIo } from './session-io';
@@ -49,6 +49,7 @@ export async function retireUnstartedSession(runtime: string, root: string, sess
     for (const run of session.recentRuns) if (!await processClear(run, session.surfaceId)) return false;
     const current = await lstat(sessionDir);
     if (current.dev !== directory.dev || current.ino !== directory.ino || current.isSymbolicLink()) return false;
+    if (!await assertOwnedSessionArchivable(root, sessionDir)) return false;
     session.orphanedAt = new Date().toISOString();
     session.orphanedReason = 'runtime_launch_timeout: no persistent thread or active process after the launch deadline.';
     await io.saveSession(session);

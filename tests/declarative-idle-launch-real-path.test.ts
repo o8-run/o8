@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, lstatSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { NextRequest } from 'next/server';
 import { afterAll, expect, it, vi } from 'vitest';
@@ -124,4 +124,61 @@ it.each([undefined, { version: 1, totalRuns: null, complete: false }, { version:
   const record = JSON.parse(readFileSync(file, 'utf8'));
   writeFileSync(file, JSON.stringify({ ...record, runIdentityLedger: ledger }));
   await snapshot(); expect(existsSync(sessionDir)).toBe(true);
+});
+
+function outsideSnapshot(directory: string): unknown {
+  const stat = lstatSync(directory);
+  return { mode: stat.mode, mtimeMs: stat.mtimeMs, entries: readdirSync(directory).sort().map(name => {
+    const target = join(directory, name); const entry = lstatSync(target);
+    return { name, mode: entry.mode, mtimeMs: entry.mtimeMs,
+      content: entry.isDirectory() ? outsideSnapshot(target) : readFileSync(target, 'utf8') };
+  }) };
+}
+
+it('refuses a symlinked sessions-archive through inventory without changing anything outside the owned root', async () => {
+  const outside = mkdtempSync(join(process.env.CORTEX_IDE_DATA_DIR!, 'idle-launch-outside-archive-'));
+  const archive = join(root, 'sessions-archive'); const heldArchive = `${archive}-held`;
+  const hadArchive = existsSync(archive);
+  if (hadArchive) renameSync(archive, heldArchive);
+  const { sessionDir, lane } = seed('archive-symlink', 31_000);
+  writeFileSync(join(outside, 'canary'), 'outside archive must remain unchanged');
+  const before = outsideSnapshot(outside);
+  const metadata = readFileSync(join(sessionDir, 'session.json'), 'utf8');
+  symlinkSync(outside, archive, 'dir');
+  const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  try {
+    await snapshot();
+    expect.soft(outsideSnapshot(outside)).toEqual(before);
+    expect.soft(existsSync(sessionDir)).toBe(true);
+    if (existsSync(sessionDir)) expect.soft(readFileSync(join(sessionDir, 'session.json'), 'utf8')).toBe(metadata);
+    expect.soft(registry.getLane(lane.id)?.status).not.toBe('failed');
+    expect.soft(warning.mock.calls.flat().join(' ')).toMatch(/sessions-archive.*symbolic link/i);
+  } finally {
+    warning.mockRestore(); unlinkSync(archive);
+    if (hadArchive) renameSync(heldArchive, archive);
+    rmSync(sessionDir, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+it('skips a symlinked session directory through inventory without changing anything outside the owned root', async () => {
+  const outside = mkdtempSync(join(process.env.CORTEX_IDE_DATA_DIR!, 'idle-launch-outside-session-'));
+  const { sessionDir, lane } = seed('session-symlink', 31_000);
+  const externalSession = join(outside, 'session'); renameSync(sessionDir, externalSession);
+  const file = join(externalSession, 'session.json');
+  const record = JSON.parse(readFileSync(file, 'utf8'));
+  writeFileSync(file, JSON.stringify({ ...record, sessionDir: externalSession }));
+  const before = outsideSnapshot(outside);
+  symlinkSync(externalSession, sessionDir, 'dir');
+  const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  try {
+    const result = await snapshot();
+    expect(result.agents.some((agent: { id: string }) => agent.id === 'antigravity-owned:session-symlink')).toBe(false);
+    expect.soft(outsideSnapshot(outside)).toEqual(before);
+    expect.soft(registry.getLane(lane.id)?.status).toBe('running');
+    expect.soft(warning.mock.calls.flat().join(' ')).toMatch(/session directory.*symbolic link/i);
+  } finally {
+    warning.mockRestore(); unlinkSync(sessionDir);
+    rmSync(outside, { recursive: true, force: true });
+  }
 });
