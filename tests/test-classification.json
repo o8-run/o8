@@ -4059,6 +4059,15 @@
       ]
     },
     {
+      "path": "tests/next-linux-headless-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/next-monaco-build-failure-real-path.test.ts",
       "reasons": [
         "child-process",

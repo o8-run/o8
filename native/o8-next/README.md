@@ -1,5 +1,7 @@
 # o8 next: live sessions, composer and opt-in terminal
 
+[Current UI parity and Linux CI budgets](PARITY.md): surface states, remaining gaps and the headless release workload.
+
 [Per-surface port documentation](docs/surfaces/): registration contracts and rebase steps. Add each port's documentation there.
 
 [Brain conversation and memory retrieval](BRAIN.md): reading, search, sources and a native composer.
@@ -82,7 +84,8 @@ for the three release receipts, license graphs and remaining latency limits.
 
 ## Build and use
 
-macOS is the verified target for this slice. From the repository root, with the
+Linux release shell rendering is checked in [headless CI](PARITY.md#linux-ci-measurements).
+macOS remains the interactive verification target. From the repository root, with the
 normal JavaScript dependencies installed:
 
 ```sh
