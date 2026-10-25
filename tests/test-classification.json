@@ -4090,6 +4090,14 @@
       ]
     },
     {
+      "path": "tests/next-pull-requests-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/next-render-parity.test.ts",
       "reasons": [
         "native-build"

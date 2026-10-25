@@ -62,6 +62,7 @@ export interface PrIssueComment {
 }
 
 export interface PrDetail {
+  mergeGate?: import('@/lib/github-broker/pr-merge-gate').PrMergeGate;
   stack?: import('@/lib/github-client/pr-stack').PullRequestStackObservation;
   number: number;
   title: string;

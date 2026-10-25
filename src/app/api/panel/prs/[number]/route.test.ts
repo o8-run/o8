@@ -3,7 +3,7 @@ const mocks = vi.hoisted(() => ({ resolveRepoSlug: vi.fn(), reviewGitHubPullRequ
 vi.mock('@/lib/github-broker', () => ({ ...mocks, DEFAULT_GITHUB_REPO: 'example/default' }));
 vi.mock('@/lib/repos/registry', () => ({ listRepos: mocks.listRepos }));
 vi.mock('@/lib/repos/readiness', () => ({ getCachedRepoReadiness: mocks.getCachedRepoReadiness, getRepoReadiness: mocks.getRepoReadiness }));
-vi.mock('@/lib/workflows/status', () => ({ deriveWorkflowStage: mocks.deriveWorkflowStage }));
+vi.mock('@/lib/workflows/status', () => ({ deriveWorkflowStage: mocks.deriveWorkflowStage, describeWorkflowStage: () => ({ mergeAllowed: true, mergeDetail: 'Fixture workflow' }) }));
 import { GET, POST } from './route';
 beforeEach(() => {
   vi.clearAllMocks(); mocks.resolveRepoSlug.mockResolvedValue('example/repo');
@@ -35,7 +35,7 @@ describe('pull request write entry point', () => {
   it.each(['merge', 'squash', 'rebase'])('keeps the branch and sends the reviewed head for %s', async (mergeMethod) => {
     const commitSha = 'b'.repeat(40);
     expect((await post({ action: 'merge', mergeMethod, commitSha })).status).toBe(200);
-    expect(mocks.mergeGitHubPullRequest).toHaveBeenCalledWith('example/repo', 5, { deleteBranch: false, mergeMethod, expectedHeadSha: commitSha });
+    expect(mocks.mergeGitHubPullRequest).toHaveBeenCalledWith('example/repo', 5, { deleteBranch: false, mergeMethod, expectedHeadSha: commitSha, beforePublish: expect.any(Function) });
   });
   it.each([{ action: 'merge' }, { action: 'merge', commitSha: 'a'.repeat(40), mergeMethod: 'bad' }, { action: 'enable-auto-merge', mergeMethod: 'squash' }])('refuses an unbound action', async (body) => {
     expect((await post(body)).status).toBe(400); expect(mocks.mergeGitHubPullRequest).not.toHaveBeenCalled(); expect(mocks.updateGitHubPullRequestMode).not.toHaveBeenCalled();
@@ -43,7 +43,7 @@ describe('pull request write entry point', () => {
   it.each(['draft', 'ready', 'enable-auto-merge', 'disable-auto-merge'])('uses the repository-bound handler for %s', async (action) => {
     const commitSha = 'c'.repeat(40);
     expect((await post({ action, commitSha, mergeMethod: 'rebase' })).status).toBe(200);
-    expect(mocks.updateGitHubPullRequestMode).toHaveBeenCalledWith('example/repo', 5, action, { expectedHeadSha: commitSha, mergeMethod: 'rebase' });
+    expect(mocks.updateGitHubPullRequestMode).toHaveBeenCalledWith('example/repo', 5, action, { expectedHeadSha: commitSha, mergeMethod: 'rebase', ...(action === 'enable-auto-merge' ? { beforePublish: expect.any(Function) } : {}) });
   });
   it.each([['approve', 'APPROVE'], ['request-changes', 'REQUEST_CHANGES'], ['review-comment', 'COMMENT']])('submits %s against the supplied commit', async (action, event) => {
     const commitSha = 'a'.repeat(40);

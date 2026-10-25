@@ -3,6 +3,9 @@ use crate::{client::Client, composer::Composer};
 use gpui::{AppContext, Context, Entity, FocusHandle, Window};
 use serde_json::{Value, json};
 use std::{cell::Cell, collections::HashMap, rc::Rc, time::Instant};
+#[path = "merge_gate.rs"]
+mod merge_gate;
+use merge_gate::Submission;
 
 pub fn string<'a>(v: &'a Value, key: &str) -> &'a str {
     v[key].as_str().unwrap_or("")
@@ -45,6 +48,7 @@ pub struct Confirmation {
     pub method: String,
     pub body: String,
     pub draft: Option<String>,
+    pub merge_gate: Option<String>,
 }
 pub struct PullRequests {
     client: Client,
@@ -232,21 +236,15 @@ impl PullRequests {
         let epoch = self.detail_epoch;
         let client = self.client.clone();
         let repo = string(&self.page, "repo").to_owned();
-        let workspace = self.workspace.clone();
         let task = cx.background_executor().spawn(async move {
-            let detail = client.get::<Value>(&format!("/api/panel/prs/{number}"), &[("repo", &repo)]);
-            let governance = client.get::<Value>("/api/orchestrator/state", &[]).and_then(|state| {
-                if !state["mission"]["packets"].is_array() { return Err("Packet state is unavailable. Refresh before merging.".into()); }
-                let branch = detail.as_ref().ok().map(|d| string(&d["pr"], "headRefName")).unwrap_or("");
-                let packets: Vec<_> = array(&state["mission"], "packets").into_iter().filter(|p| std::fs::canonicalize(string(p, "workspaceTargetPath")).ok().zip(std::fs::canonicalize(&workspace).ok()).is_some_and(|(a,b)| a == b) && string(p, "branchTarget") == branch && p["status"] != "archived").collect();
-                if packets.len() > 1 { return Err("Multiple packets match this branch. Inspect the packet before merging.".into()); }
-                let packet = packets.first().map(|p| string(p, "id").to_owned());
-                let preview = match &packet { Some(id) => client.pr_preview(id)?, None => Value::Null };
-                Ok((packet, preview))
-            }); (detail, governance)
+            client.get::<Value>(&format!("/api/panel/prs/{number}"), &[("repo", &repo)])
         });
         cx.spawn(async move |this, cx| {
-            let (result, governance) = task.await;
+            let result = task.await;
+            let governance = result
+                .as_ref()
+                .map_err(Clone::clone)
+                .and_then(|value| merge_gate::governance(&value["pr"]));
             let _ = this.update(cx, |s, cx| {
                 if s.detail_epoch != epoch || s.selected != Some(number) {
                     return;
@@ -414,6 +412,11 @@ impl PullRequests {
             return false;
         }
         if ["merge", "enable-auto-merge"].contains(&action) {
+            if merge_gate::snapshot(&self.detail).is_err()
+                || self.detail["mergeGate"]["allowed"] != true
+            {
+                return false;
+            }
             if self.detail["draft"] == true
                 || (!self.detail["allowedMergeMethods"].is_null()
                     && !array(&self.detail, "allowedMergeMethods").contains(&json!(method)))
@@ -444,6 +447,9 @@ impl PullRequests {
             method: method.into(),
             body: draft.as_deref().unwrap_or("").trim().into(),
             draft,
+            merge_gate: ["merge", "enable-auto-merge"]
+                .contains(&action)
+                .then(|| merge_gate::snapshot(&self.detail).unwrap().to_owned()),
         });
         self.changed(cx);
     }
@@ -469,11 +475,9 @@ impl PullRequests {
         let attempt = d.attempt;
         let client = self.client.clone();
         let sent = c.clone();
-        let task = cx.background_executor().spawn(async move {
-            // Match the desktop PR control: merge this repository's PR using
-            // the chosen method and expected head, never a different packet/base.
-            client.pr_post(&format!("/api/panel/prs/{}", sent.number), &json!({"repo":sent.repo,"action":sent.action,"comment":sent.body,"commitSha":sent.head,"mergeMethod":sent.method}))
-        });
+        let task = cx
+            .background_executor()
+            .spawn(async move { merge_gate::submit(&client, &sent) });
         cx.spawn(async move |this, cx| {
             let result = task.await;
             // Resolve the app-wide hold even if its originating surface closed.
@@ -482,12 +486,20 @@ impl PullRequests {
                 if d.attempt != attempt { return false; }
                 d.busy = false;
                 let confirmed = match result {
-                    Ok(v) if c.action == "close-with-comment" && v["commentPosted"] == true && v["ok"] != true => {
+                    Submission::Refused(notice) => {
+                        *d = Delivery { attempt, notice, ..Default::default() };
+                        false
+                    }
+                    Submission::Sent(Ok(v)) if v["mergeRefused"] == true => {
+                        *d = Delivery { attempt, notice: string(&v,"error").to_owned(), ..Default::default() };
+                        false
+                    }
+                    Submission::Sent(Ok(v)) if c.action == "close-with-comment" && v["commentPosted"] == true && v["ok"] != true => {
                         d.partial_close = true;
                         d.notice = "Comment posted. Closing could not be confirmed. Retry close without posting again.".into();
                         true
                     }
-                    Ok(v) if v["ok"] == true && v["outcomeUnknown"] != true && v["inProgress"] != true => {
+                    Submission::Sent(Ok(v)) if v["ok"] == true && v["outcomeUnknown"] != true && v["inProgress"] != true => {
                         *d = Delivery { attempt, notice: format!("{} completed.", c.action), ..Default::default() };
                         true
                     }

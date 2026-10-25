@@ -19,6 +19,7 @@ import { deriveWorkflowStage } from '@/lib/workflows/status';
 import { GitHubRequestDeferredError } from '@/lib/github-broker/request-budget';
 import { beginPrWatchRead, recordPrWatchSnapshot } from '@/lib/github-broker/pr-watch';
 import { waitForPrRemarkWrites } from '@/lib/github-broker/pr-watch-writes';
+import { assessPrMergeGate, assertPrMergeAllowed, PrMergeRefused } from '@/lib/github-broker/pr-merge-gate';
 
 function normalizeRepoSlug(remoteUrl: string | null | undefined) {
   if (!remoteUrl) return null;
@@ -69,6 +70,7 @@ export async function GET(
     // Reading a PR must not start workspace setup/Git probes. Safety-sensitive
     // workspace actions still obtain exact readiness at their own entry point.
     const readiness = localRepo ? getCachedRepoReadiness(localRepo) ?? null : null;
+    const mergeGate = await assessPrMergeGate(repo, pr, commentsData);
     const failedChecks = (pr.statusCheckRollup ?? []).filter((check) => check.conclusion && check.conclusion.toLowerCase() !== 'success').length;
     const pendingChecks = (pr.statusCheckRollup ?? []).filter((check) => !check.conclusion || check.status?.toLowerCase() !== 'completed').length;
     const requestedChanges = (commentsData.reviews ?? []).filter((review) => review.state?.toLowerCase() === 'changes_requested').length;
@@ -87,6 +89,7 @@ export async function GET(
     return NextResponse.json({
       pr: {
         ...publicPr,
+        mergeGate,
         stack,
         watch,
         discussionIncomplete: commentsData.discussionIncomplete,
@@ -115,7 +118,7 @@ export async function POST(
     return NextResponse.json({ error: 'Invalid PR number' }, { status: 400 });
   }
 
-  let body: { action: string; repo?: string; comment?: string; mergeMethod?: 'squash' | 'merge' | 'rebase'; commitSha?: string };
+  let body: { action: string; repo?: string; comment?: string; mergeMethod?: 'squash' | 'merge' | 'rebase'; commitSha?: string; expectedMergeGate?: string };
   try {
     body = await request.json();
   } catch {
@@ -132,6 +135,7 @@ export async function POST(
   }
 
   const { action } = body;
+  if (body.expectedMergeGate !== undefined && (typeof body.expectedMergeGate !== 'string' || !/^[a-f0-9]{64}$/.test(body.expectedMergeGate))) return NextResponse.json({ error: 'Invalid merge gate snapshot' }, { status: 400 });
   const comment = body.comment?.trim();
 
   try {
@@ -180,13 +184,15 @@ export async function POST(
         deleteBranch: false,
         mergeMethod: body.mergeMethod,
         expectedHeadSha: body.commitSha,
+        beforePublish: () => assertPrMergeAllowed(repo, prNum, body.commitSha!, body.mergeMethod!, body.expectedMergeGate),
       });
       return NextResponse.json({ ok: true, action: 'merged' });
     }
 
     if (action === 'draft' || action === 'ready' || action === 'enable-auto-merge' || action === 'disable-auto-merge') {
       if (!body.commitSha || (action === 'enable-auto-merge' && !['merge', 'squash', 'rebase'].includes(body.mergeMethod || ''))) return NextResponse.json({ error: 'A reviewed commit and merge method are required' }, { status: 400 });
-      await updateGitHubPullRequestMode(repo, prNum, action, { expectedHeadSha: body.commitSha, mergeMethod: body.mergeMethod });
+      await updateGitHubPullRequestMode(repo, prNum, action, { expectedHeadSha: body.commitSha, mergeMethod: body.mergeMethod,
+        ...(action === 'enable-auto-merge' ? { beforePublish: () => assertPrMergeAllowed(repo, prNum, body.commitSha!, body.mergeMethod!, body.expectedMergeGate) } : {}) });
       return NextResponse.json({ ok: true, action });
     }
 
@@ -197,6 +203,7 @@ export async function POST(
 
     return NextResponse.json({ error: `Unknown action: ${action}` }, { status: 400 });
   } catch (err) {
+    if (err instanceof PrMergeRefused) return NextResponse.json({ ok: false, mergeRefused: true, error: err.message, mergeGate: err.gate }, { status: 409 });
     const message = err instanceof Error ? err.message : 'Unknown error';
     return NextResponse.json({ error: message }, { status: 500 });
   }

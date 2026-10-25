@@ -30,15 +30,16 @@ export function usePrComment(repo: string | null | undefined, number: number) {
   }, [key]);
   const snapshot = useCallback(() => read(key), [key]);
   const state = useSyncExternalStore(subscribe, snapshot, () => idle);
-  const post = useCallback(async (body: string, action: WriteAction = 'comment', commitSha?: string, mergeMethod?: PrMergeMethod): Promise<boolean> => {
+  const post = useCallback(async (body: string, action: WriteAction = 'comment', commitSha?: string, mergeMethod?: PrMergeMethod, expectedMergeGate?: string): Promise<boolean> => {
     const previous = read(key);
     const needsBody = action === 'comment' || action === 'close-with-comment' || action === 'request-changes' || action === 'review-comment';
     if (!repo || !/^[\w.-]+\/[\w.-]+$/.test(repo) || (needsBody && !body.trim()) || previous.busy || previous.uncertain || (previous.partialClose && action !== 'close')) return false;
     update(key, { ...previous, busy: true, error: null });
     const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), 45_000);
     try {
-      const response = await fetch('/api/panel/prs/' + number, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, repo, comment: body.trim(), ...(commitSha ? { commitSha } : {}), ...(mergeMethod ? { mergeMethod } : {}) }), signal: controller.signal });
-      const result = await response.json().catch(() => null) as { ok?: boolean; commentPosted?: boolean } | null;
+      const response = await fetch('/api/panel/prs/' + number, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, repo, comment: body.trim(), ...(commitSha ? { commitSha } : {}), ...(mergeMethod ? { mergeMethod } : {}), ...(expectedMergeGate ? { expectedMergeGate } : {}) }), signal: controller.signal });
+      const result = await response.json().catch(() => null) as { ok?: boolean; commentPosted?: boolean; mergeRefused?: boolean; error?: string } | null;
+      if (result?.mergeRefused === true) { update(key, { ...idle, error: result.error || 'Merge gates refused publication. Refresh before retrying.' }); return false; }
       const partialClose = action === 'close-with-comment' && result?.commentPosted === true && result.ok !== true;
       if (!partialClose && (!response.ok || result?.ok !== true)) throw new Error('Delivery could not be confirmed.');
       update(key, { ...idle, posted: true, postedAction: partialClose ? 'comment' : action, partialClose, error: partialClose ? 'Comment posted. Closing could not be confirmed. Retry close without posting again.' : null });

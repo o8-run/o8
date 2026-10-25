@@ -2,13 +2,16 @@
 
 Open the opt-in app shell, open its command palette with Ctrl+K or Cmd+K,
 and choose **Open pull requests**. The selected workspace supplies `repoPath`;
-the server resolves its GitHub origin. The installed desktop client and launcher
-defaults are unchanged. No additional crates or application routes are added.
+the server resolves its GitHub origin. The launcher remains opt-in. Shared merge
+safety is enforced for both desktop and native clients through the existing PR
+routes. No additional crates or application routes are added.
 
 Registration, workspace view retention, focus and shell tests belong to
 `src/surfaces/pull_requests.rs` and `src/surfaces/pull_requests/`. The shell has
 one inventory entry. PR transport remains a private child of `client.rs`, loaded
-from the same surface directory so its credential fields stay private. The
+from the same surface directory so its credential fields stay private. That
+second registration site is unchanged in correction round 2 and tracked by
+#4695. The
 fixture registers with `scripts/next/dev-server.ts --pull-requests` through
 `scripts/next/surfaces/55-pull-requests.surface.ts`.
 
@@ -26,10 +29,21 @@ posted comment. Metadata actions preserve unsent editor text; confirmed comment
 and review submissions may clear only the unchanged draft they sent.
 
 PR merge uses the desktop PR server route with the selected method and reviewed
-head. It never calls GitHub directly or substitutes a packet merge. When a packet
-matches the canonical workspace and head branch, the native surface reads
-`/api/orchestrator/merge-preview` and displays all returned checks, details,
-remediation actions and blockers, including structured HTTP 409 refusals.
+head. It never calls GitHub directly or substitutes a packet merge. The server
+resolves repository/PR packet membership across current and archived missions,
+delivery links and lanes, including linked worktrees. Git common directories
+and paths are canonicalized. Explicit PR identities take precedence over branch
+fallback; fork branch collisions do not link unrelated packets. Unavailable
+identity, review or packet state refuses merging.
+
+The detail response includes one shared merge decision covering checks, reviews,
+every linked packet's merge-preview checks, holds, blocked state and fresh runtime
+liveness. Confirm refreshes this decision and refuses any change from preparation,
+including membership, head, base and merge methods. The existing POST route
+rechecks immediately before provider publication, after the broker's metadata
+read, even for callers without a snapshot. This is fresh validation, without a
+cross-writer lease or an atomicity claim. Native Checks displays all gate rows,
+details, remedies and structured preview refusals.
 Packet-linked PR merging and enabling auto-merge remain disabled in this slice,
 even when preview passes: the packet merge protocol cannot preserve the selected
 PR/base/method, and a preview followed by a GitHub merge cannot atomically enforce
@@ -90,7 +104,8 @@ measure dispatch to the changed revision's first CPU paint. The Linux headless
 text system does not shape native fonts, render on a GPU or present to a display.
 These debug-profile measurements establish no macOS/display latency target.
 
-See [verification receipts](pull-requests/verification.md) and
-[correction-round receipts](pull-requests/correction-1.md), plus
+See [verification receipts](pull-requests/verification.md),
+[draft/delivery correction receipts](pull-requests/correction-1.md),
+[merge correction receipts](pull-requests/correction-2.md), plus
 [raw timing samples](pull-requests/timing.json). See also the [registration migration receipts](pull-requests/registration.md). Full desktop parity,
-every-gate native mutation coverage and packet-linked merging remain open.
+packet-linked merging and the partial/missing controls above remain open.

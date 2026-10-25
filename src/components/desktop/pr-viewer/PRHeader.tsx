@@ -65,6 +65,7 @@ function PRHeaderBase({
     failedChecks: failedChecks.length,
     pendingChecks: pendingChecks.length,
   });
+  const mergeAllowed = reviewGuidance.mergeAllowed && (pr.mergeGate?.allowed ?? true);
   const reviewStatus = reviewStage
     ? {
         label: reviewStage.label,
@@ -278,8 +279,8 @@ function PRHeaderBase({
               <button
                 type="button"
                 onClick={() => submitAction('merge')}
-                disabled={actionLoading !== null || !reviewGuidance.mergeAllowed}
-                title={!reviewGuidance.mergeAllowed ? reviewGuidance.mergeDetail : 'Merge this pull request'}
+                disabled={actionLoading !== null || !mergeAllowed}
+                title={!mergeAllowed ? reviewGuidance.mergeDetail : 'Merge this pull request'}
                 style={{
                   display: 'inline-flex',
                   alignItems: 'center',
@@ -292,15 +293,15 @@ function PRHeaderBase({
                   border: '1px solid rgba(139, 92, 246, 0.2)',
                   background: actionLoading === 'merge'
                     ? 'rgba(139,92,246,0.15)'
-                    : !reviewGuidance.mergeAllowed
+                    : !mergeAllowed
                       ? 'rgba(148,163,184,0.12)'
                       : 'rgba(139,92,246,0.06)',
-                  color: !reviewGuidance.mergeAllowed ? 'var(--t-text-muted)' : '#8b5cf6',
+                  color: !mergeAllowed ? 'var(--t-text-muted)' : '#8b5cf6',
                   fontSize: 11,
                   fontWeight: 600,
                   cursor: actionLoading ? 'wait' : reviewGuidance.mergeAllowed ? 'pointer' : 'not-allowed',
                   fontFamily: 'var(--font-sans-system)',
-                  opacity: reviewGuidance.mergeAllowed ? 1 : 0.7,
+                  opacity: mergeAllowed ? 1 : 0.7,
                 }}
               >
                 <GitMerge size={12} strokeWidth={2.5} />

@@ -1,12 +1,12 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import { createInterface } from 'node:readline';
-import { afterAll, beforeAll, expect, it } from 'vitest';
+import { afterEach, beforeEach, expect, it } from 'vitest';
 
 let server: ChildProcess;
 let origin = '';
 const headers = { authorization: 'Bearer fixture-next-pr-operator', 'Content-Type': 'application/json' };
-beforeAll(async () => {
+beforeEach(async () => {
   server = spawn(process.execPath, ['--import', './scripts/register-server-only-stub.mjs', '--import', 'tsx',
     'scripts/next/dev-server.ts', '--pull-requests'], {
     env: { ...process.env, O8_NEXT_API_TOKEN: 'fixture-next-pr-operator' },
@@ -18,8 +18,49 @@ beforeAll(async () => {
   }
   expect(origin, 'disposable production route host').toBeTruthy();
 }, 30_000);
-afterAll(async () => {
+afterEach(async () => {
   if (server?.exitCode === null) { server.kill('SIGTERM'); await once(server, 'exit'); }
+});
+
+const control = (body: unknown) => fetch(`${origin}/__fixture/pr-gates`, { method: 'POST', headers, body: JSON.stringify(body) });
+const merge = (expectedMergeGate?: string, action = 'merge') => fetch(`${origin}/api/panel/prs/7`, { method: 'POST', headers,
+  body: JSON.stringify({ repo: 'example/repo', action, commitSha: 'a'.repeat(40), mergeMethod: 'squash', ...(expectedMergeGate ? { expectedMergeGate } : {}) }) });
+const providerMerges = async () => {
+  const value = await (await fetch(`${origin}/api/panel/status`, { headers })).json();
+  return value.providerWrites.filter((r: { publication: boolean }) => r.publication);
+};
+
+it.each(['merge', 'enable-auto-merge'])('rejects a new held packet between the read and the desktop %s POST', async (action) => {
+  const detail = await (await fetch(`${origin}/api/panel/prs/7?repo=example/repo`, { headers })).json();
+  expect(detail.pr.mergeGate.allowed).toBe(true);
+  await control({ packet: 'held' });
+  const response = await merge(detail.pr.mergeGate.snapshot, action);
+  expect(response.status).toBe(409);
+  expect(await response.json()).toMatchObject({ mergeRefused: true, ok: false });
+  expect(await providerMerges()).toEqual([]);
+});
+
+it.each(['merge', 'enable-auto-merge'])('rechecks after broker metadata is read and before %s publication', async (action) => {
+  await control({ scenario: 'link-on-metadata' });
+  const response = await merge(undefined, action);
+  expect(response.status).toBe(409);
+  expect(await response.json()).toMatchObject({ mergeRefused: true, ok: false });
+  expect(await providerMerges()).toEqual([]);
+});
+
+it.each(['checks-failed', 'checks-pending', 'checks-unavailable', 'reviews-incomplete', 'review-changes', 'blocked', 'runtime-live', 'runtime-unknown', 'owner-unavailable'])('enforces %s for a desktop caller without a client snapshot', async (scenario) => {
+  await control({ scenario });
+  const response = await merge();
+  expect(response.status).toBe(409);
+  expect(await response.json()).toMatchObject({ mergeRefused: true, ok: false });
+  expect(await providerMerges()).toEqual([]);
+});
+
+it.each(['merge', 'enable-auto-merge'])('allows unchanged, unlinked %s with its reviewed snapshot', async (action) => {
+  const detail = await (await fetch(`${origin}/api/panel/prs/7?repo=example/repo`, { headers })).json();
+  expect(detail.pr.mergeGate.allowed).toBe(true);
+  expect((await merge(detail.pr.mergeGate.snapshot, action)).status).toBe(200);
+  expect(await providerMerges()).toHaveLength(1);
 });
 
 it('serves paged PRs and details and refuses unauthenticated mutations through middleware', async () => {

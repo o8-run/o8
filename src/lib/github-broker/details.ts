@@ -62,7 +62,7 @@ export async function fetchGitHubPullRequestDetail(repoFullName: string, prNumbe
     user?: { login?: string | null; avatar_url?: string | null } | null;
     labels?: Array<{ name?: string | null }>;
     requested_reviewers?: Array<{ login?: string | null }>;
-    head?: { ref?: string | null; sha?: string | null } | null;
+    head?: { ref?: string | null; sha?: string | null; repo?: { full_name?: string | null } | null } | null;
     base?: { ref?: string | null; sha?: string | null; repo?: { id?: number; allow_merge_commit?: boolean; allow_squash_merge?: boolean; allow_rebase_merge?: boolean } } | null;
     additions?: number;
     deletions?: number;
@@ -102,6 +102,7 @@ export async function fetchGitHubPullRequestDetail(repoFullName: string, prNumbe
     labels: (pr.labels ?? []).flatMap((label) => label.name ? [label.name] : []),
     requestedReviewers: (pr.requested_reviewers ?? []).flatMap((reviewer) => reviewer.login ? [reviewer.login] : []),
     headRefName: pr.head?.ref ?? '',
+    headRepoFullName: pr.head?.repo?.full_name ?? null,
     baseRefName: pr.base?.ref ?? '',
     headSha: pr.head?.sha ?? '',
     baseSha: pr.base?.sha ?? '',
@@ -167,6 +168,7 @@ export async function fetchGitHubPullRequestComments(repoFullName: string, prNum
   return {
     githubScope: [reviewCommentsResponse.scope, reviewsResponse.scope, issueCommentsResponse.scope].every(scope => scope === reviewCommentsResponse.scope) ? reviewCommentsResponse.scope : null,
     discussionIncomplete: [reviewCommentsResponse, reviewsResponse, issueCommentsResponse].some(({ response }) => /rel="next"/.test(response.headers.get('link') ?? '')),
+    reviewsIncomplete: /rel="next"/.test(reviewsResponse.response.headers.get('link') ?? ''),
     comments: reviewComments.map((comment) => ({
       id: comment.id,
       author: comment.user?.login ?? 'unknown',

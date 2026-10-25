@@ -6,6 +6,9 @@ use std::{
     time::Instant,
 };
 
+#[path = "merge_tests.rs"]
+mod merge;
+
 struct Fixture {
     server: Child,
     client: Client,
@@ -407,6 +410,15 @@ fn pull_requests_real_server_actions_and_paint(cx: &mut TestAppContext) {
     click(cx, "pr-merge-squash");
     assert!(view.read_with(cx, |s, _| s.confirmation.is_none()));
     perform(&view, cx, "ready");
+    assert!(
+        !view.read_with(cx, |s, cx| s.can("merge", "squash", cx)),
+        "requested changes must block merge"
+    );
+    fixture
+        .client
+        .pr_post("/__fixture/pr-gates", &json!({"scenario":"review-cleared"}))
+        .unwrap();
+    click(cx, "pr-row-7");
     perform(&view, cx, "enable-auto-merge");
     perform(&view, cx, "disable-auto-merge");
     click(cx, "pr-merge-rebase");
@@ -423,7 +435,7 @@ fn pull_requests_real_server_actions_and_paint(cx: &mut TestAppContext) {
     let bodies: Vec<_> = fixture
         .receipts()
         .into_iter()
-        .filter(|r| r["method"] == "POST")
+        .filter(|r| r["method"] == "POST" && string(r, "path").starts_with("/api/panel/prs/"))
         .map(|r| r["body"].clone())
         .collect();
     for action in [
@@ -551,13 +563,30 @@ fn pull_requests_filters_empty_retry_and_server_merge_refusal(cx: &mut TestAppCo
         )
         .unwrap();
     click(cx, "pr-confirm");
-    assert!(view.read_with(cx, |s, cx| s.delivery(cx).uncertain));
+    assert!(
+        !view.read_with(cx, |s, cx| s.delivery(cx).uncertain),
+        "a stale preflight is refused before any merge POST"
+    );
     assert!(view.read_with(cx, |s, _| s.detail["mergedAt"].is_null()));
-    click(cx, "pr-acknowledge");
     assert_eq!(
         view.read_with(cx, |s, _| string(&s.detail, "headSha").to_owned()),
         "d".repeat(40)
     );
+    fixture
+        .client
+        .pr_post("/__fixture/pr-gates", &json!({"scenario":"merge-refused"}))
+        .unwrap();
+    click(cx, "pr-merge-squash");
+    click(cx, "pr-confirm");
+    assert!(
+        view.read_with(cx, |s, cx| s.delivery(cx).uncertain),
+        "an unconfirmed publication still keeps its delivery hold"
+    );
+    click(cx, "pr-acknowledge");
+    fixture
+        .client
+        .pr_post("/__fixture/pr-gates", &json!({"scenario":"ready"}))
+        .unwrap();
     perform(&view, cx, "merge-merge");
 }
 

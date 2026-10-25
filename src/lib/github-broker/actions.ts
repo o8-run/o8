@@ -259,7 +259,7 @@ export async function getGitHubPullRequestHeadRef(repoFullName: string, prNumber
 export async function mergeGitHubPullRequest(
   repoFullName: string,
   prNumber: number,
-  options?: { deleteBranch?: boolean; mergeMethod?: 'squash' | 'merge' | 'rebase'; expectedHeadSha?: string },
+  options?: { deleteBranch?: boolean; mergeMethod?: 'squash' | 'merge' | 'rebase'; expectedHeadSha?: string; beforePublish?: () => Promise<void> },
 ) {
   const head = await getGitHubPullRequestHeadRef(repoFullName, prNumber);
   const mergeMethod = options?.mergeMethod ?? 'squash';
@@ -270,6 +270,7 @@ export async function mergeGitHubPullRequest(
   const commitTitle = mergeMethod === 'squash' && head.title && !head.title.includes('[via-o8]')
     ? `${head.title} (#${prNumber}) [via-o8]`
     : undefined;
+  await options?.beforePublish?.();
   const { response } = await githubInstallationFetch(repoFullName, `/repos/${repoFullName}/pulls/${prNumber}/merge`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },

@@ -7,6 +7,7 @@ import { buildDependencyGraph } from '@/lib/orchestrator/dag';
 import { normalizeOrchestratorMissionState } from '@/lib/orchestrator/store';
 import { normalizeOrchestratorMissionStateForPersistence } from '@/lib/orchestrator/persisted-mission';
 import type { OrchestratorMissionState, OrchestratorPacket } from '@/lib/orchestrator/types';
+import { assertMissionSnapshotAvailable } from './mission-snapshot-availability';
 
 interface MissionStateRow {
   id: string;
@@ -32,11 +33,14 @@ function nextRegistryVersion(missionId: string): number {
   return Math.max(Date.now(), (row?.updated_at ?? 0) + 1);
 }
 
-function parseMissionState(json: string | null): OrchestratorMissionState | null {
-  if (!json) return null;
+function parseMissionState(json: string | null, strict = false): OrchestratorMissionState | null {
+  if (!json?.trim()) return null;
   try {
-    return normalizeOrchestratorMissionState(JSON.parse(json));
+    const parsed: unknown = JSON.parse(json);
+    if (strict) assertMissionSnapshotAvailable(parsed);
+    return normalizeOrchestratorMissionState(parsed as OrchestratorMissionState);
   } catch {
+    if (strict) throw new Error('Stored packet snapshot is unavailable.');
     return null;
   }
 }
@@ -85,8 +89,8 @@ export function missionIsTerminal(state: OrchestratorMissionState) {
   return state.packets.length > 0 && state.packets.every((packet) => !packetIsActive(packet));
 }
 
-function missionRegistryEntryFromRow(row: MissionStateRow): MissionRegistryEntry | null {
-  const mission = parseMissionState(row.mission_state_json);
+function missionRegistryEntryFromRow(row: MissionStateRow, strict = false): MissionRegistryEntry | null {
+  const mission = parseMissionState(row.mission_state_json, strict);
   return mission ? {
     id: row.id,
     mission,
@@ -112,7 +116,7 @@ export function readMissionRegistryEntry(
 }
 
 export function listMissionRegistryEntries(
-  options: { includeArchived?: boolean; excludeMissionId?: string | null } = {},
+  options: { includeArchived?: boolean; excludeMissionId?: string | null; strict?: boolean } = {},
 ): MissionRegistryEntry[] {
   const rows = getSqlite().prepare(`
     SELECT id, mission_state_json, created_at, updated_at, archived_at
@@ -125,7 +129,7 @@ export function listMissionRegistryEntries(
   const excludeMissionId = options.excludeMissionId?.trim() ?? '';
   for (const row of rows) {
     if (excludeMissionId && row.id === excludeMissionId) continue;
-    const entry = missionRegistryEntryFromRow(row);
+    const entry = missionRegistryEntryFromRow(row, options.strict);
     if (!entry) continue;
     entries.push(entry);
   }

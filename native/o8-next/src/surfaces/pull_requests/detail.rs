@@ -375,6 +375,30 @@ impl PullRequests {
                 self.governance_error
             )));
         }
+        let merge_checks = array(&self.detail["mergeGate"], "checks");
+        if let Some(check) = merge_checks.iter().find(|c| c["verdict"] == "fail") {
+            content = content.child(
+                div()
+                    .text_color(theme().danger)
+                    .child(format!("Merge refused: {}", string(check, "detail"))),
+            );
+        }
+        if self.tab == "checks" {
+            content = content.child("Merge gates (shared with desktop)");
+            for check in merge_checks {
+                content = content.child(format!(
+                    "{} · {}\n{}\n{}",
+                    string(&check, "name"),
+                    string(&check, "verdict"),
+                    string(&check, "detail"),
+                    array(&check, "actions")
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                ));
+            }
+        }
         if let Some(packet) = &self.packet {
             content = content.child("Packet-linked merging and enabling auto-merge are unavailable in this build. Use the governed packet merge surface.");
             content = content.child(format!(

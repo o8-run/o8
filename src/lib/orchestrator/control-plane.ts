@@ -9,6 +9,7 @@ import { recoveryInfoFromLaneEvents } from '@/lib/lane/recovery-info';
 import type { Lane, LaneEvent } from '@/lib/lane/types';
 import type { DomainLaneSummary } from '@/lib/orchestrator/domain-lane-summary';
 import { normalizeOrchestratorMissionStateForPersistence } from '@/lib/orchestrator/persisted-mission';
+import { assertMissionSnapshotAvailable } from './mission-snapshot-availability';
 import type { OrchestratorMissionState, OrchestratorRuntimeTruth } from '@/lib/orchestrator/types';
 import { packetContextObservationFromEvent } from '@/lib/orchestrator/packet-context-telemetry';
 import { CODEX_AUTH_RECOVERY_MESSAGE, codexAuthRecoveryMessage } from '@/lib/runtimes/shared/codex-auth-failure';
@@ -288,18 +289,20 @@ function ensureControlPlaneDir() {
   mkdirSync(ORCHESTRATOR_DIR, { recursive: true });
 }
 
-function readPersistedControlPlaneState(): OrchestratorMissionState {
+function readPersistedControlPlaneState(strict = false): OrchestratorMissionState {
   try {
     const raw = readFileSync(ORCHESTRATOR_PATH, 'utf8');
     const parsed = JSON.parse(raw) as Partial<OrchestratorControlPlaneFile>;
+    if (strict) assertMissionSnapshotAvailable(parsed?.mission);
     return normalizeOrchestratorMissionState(parsed.mission ?? createEmptyOrchestratorMissionState());
-  } catch {
+  } catch (error) {
+    if (strict && (error as NodeJS.ErrnoException).code !== 'ENOENT') throw new Error('Current packet snapshot is unavailable.');
     return createEmptyOrchestratorMissionState();
   }
 }
 
-export function readOrchestratorControlPlaneState(): OrchestratorMissionState {
-  const mission = readPersistedControlPlaneState();
+export function readOrchestratorControlPlaneState(options: { strict?: boolean } = {}): OrchestratorMissionState {
+  const mission = readPersistedControlPlaneState(options.strict);
   updateOrchestratorMissionState(mission);
   return mission;
 }

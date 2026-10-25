@@ -3,6 +3,7 @@ import type { WorkflowStageBadge } from '@/lib/workflows/status';
 import type { AgentPanelChatInjectionPayload } from '@/lib/chat/injection';
 
 export interface PRDetail {
+  mergeGate?: import('@/lib/github-broker/pr-merge-gate').PrMergeGate;
   stack?: import('@/lib/github-client/pr-stack').PullRequestStackObservation;
   number: number;
   title: string;
