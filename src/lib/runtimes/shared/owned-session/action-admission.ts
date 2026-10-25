@@ -22,7 +22,7 @@ export function withOwnedActionGuard<T>(check: ActionGuard, action: () => Promis
   });
 }
 
-/** Gateway requests are new operations, never continuations of their launch. */
+/** Gateway requests and exact-surface cleanup are independent of launch admission. */
 export function withoutOwnedStartAdmission<T>(operation: () => Promise<T>): Promise<T> {
   return withoutPreRunAdmission(() => admission.exit(() => actionGuard.exit(operation)));
 }
@@ -44,6 +44,15 @@ export function withOwnedActionAdmission<T>(input: Admission, action: () => Prom
 export function assertOwnedActionAdmission(session: OwnedSessionRecord | null, preparedRunId?: string): void {
   assertPreRunAdmission();
   actionGuard.getStore()?.(session, preparedRunId);
+  assertCorrectionAdmission(session, preparedRunId);
+}
+
+/** Stop cannot be vetoed by start admission. Keep a correction's exact-run checks. */
+export function assertOwnedStopAdmission(session: OwnedSessionRecord | null): void {
+  assertCorrectionAdmission(session);
+}
+
+function assertCorrectionAdmission(session: OwnedSessionRecord | null, preparedRunId?: string): void {
   const expected = admission.getStore();
   if (!expected?.active) return;
   expected.check();

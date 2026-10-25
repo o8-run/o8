@@ -93,7 +93,8 @@ process.stdin.on('end', () => {
     stdio: ['ignore', 'inherit', 'inherit'],
     env: process.env,
   });
-  writeFileSync(process.env.O8_TEST_FAKE_WORKER_PID_FILE, JSON.stringify({
+  // Fixture receipts must survive the worker's ambient-environment allowlist.
+  writeFileSync(${JSON.stringify(fakeWorkerPidFile)}, JSON.stringify({
     interpreterPid: process.pid,
     workerPid: worker.pid,
   }));
@@ -107,7 +108,6 @@ process.stdin.on('end', () => {
 `);
 chmodSync(fakeWorker, 0o755);
 process.env.O8_CLAUDE_CODE_BIN = fakeWorker;
-process.env.O8_TEST_FAKE_WORKER_PID_FILE = fakeWorkerPidFile;
 
 let upstreamCalls = 0;
 let responseGate: Promise<void> | null = null;

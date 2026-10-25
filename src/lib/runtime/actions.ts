@@ -545,10 +545,14 @@ async function performRuntimeActionInner(payload: RuntimeActionRequest): Promise
     return actionUnavailable(payload, '', '', 'surfaceId is required');
   }
 
-  if (payload.action === 'stop' || payload.action === 'interrupt') holdPendingOwnedCorrections(surfaceId);
+  if (payload.action === 'stop' || payload.action === 'interrupt') {
+    holdPendingOwnedCorrections(surfaceId);
+    // Stop the exact owned run before discovery can reconnect a cancelled launch.
+    const ownedResult = await performOwnedActionWithoutInventory(payload, surfaceId);
+    if (ownedResult) return ownedResult;
+  }
 
-  // Try cached snapshot first to avoid expensive full re-discovery on every action.
-  // Only fall back to a fresh fetch if the agent isn't in cache (e.g. just spawned).
+  // Refresh inventory only if the surface is absent from its cached snapshot.
   const cached = await getRuntimeInventorySnapshot();
   let agent = findRuntimeAgent(cached, surfaceId);
   if (!agent) {
@@ -558,7 +562,6 @@ async function performRuntimeActionInner(payload: RuntimeActionRequest): Promise
   if (!agent) {
     const ownedResult = await performOwnedActionWithoutInventory(payload, surfaceId);
     if (ownedResult) return ownedResult;
-    // Fix #3: return structured error instead of throwing across the API boundary
     return actionUnavailable(payload, surfaceId, '', 'Runtime surface not found.');
   }
 
@@ -736,8 +739,6 @@ async function performRuntimeActionInner(payload: RuntimeActionRequest): Promise
       }
 
       if (payload.action === 'stop' || payload.action === 'interrupt') {
-        const ownedResult = await performOwnedActionWithoutInventory(payload, runtimeSurface.id);
-        if (ownedResult) return ownedResult;
         if (runtimeSurface.ownership === 'owned') {
           const result = await escalateInterruptOwnedSurface(runtimeSurface.id);
           if (!result) {
