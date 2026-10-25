@@ -6,6 +6,7 @@ on:
       - '.github/workflows/macos-dmg-compatibility.yml'
       - 'scripts/sign-and-notarize.mjs'
       - 'src-tauri/tauri.conf.json'
+      - 'tests/workflow-policy.test.ts'
   workflow_dispatch:
 
 permissions:

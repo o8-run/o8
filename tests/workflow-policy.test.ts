@@ -180,7 +180,7 @@ describe('workflow policy — every workflow is classified from the filesystem',
     expect(violations, 'push triggers are permitted only as push.branches: [main] with no tag filter').toEqual([]);
   });
 
-  it('limits macOS runners to manual work and the bounded weekly workspace regression suite', () => {
+  it('limits macOS runners to manual work and the bounded native regression checks', () => {
     const violations: string[] = [];
     for (const file of workflowFiles) {
       const triggers = triggerNames(file.workflow);
@@ -195,13 +195,31 @@ describe('workflow policy — every workflow is classified from the filesystem',
         expect(job['timeout-minutes']).toBe(45);
         expect(job.strategy).toBeUndefined();
       }
+      // The minimum-OS DMG fixture is explicitly bounded to three minutes and
+      // runs only when its format, OS floor, workflow or policy changes.
+      const minimumOsDmg = file.name === 'macos-dmg-compatibility.yml';
+      if (minimumOsDmg) {
+        expect([...triggers].sort()).toEqual(['pull_request', 'workflow_dispatch']);
+        expect((file.workflow.on as RecordValue).pull_request).toEqual({ paths: [
+          '.github/workflows/macos-dmg-compatibility.yml',
+          'scripts/sign-and-notarize.mjs',
+          'src-tauri/tauri.conf.json',
+          'tests/workflow-policy.test.ts',
+        ] });
+        expect(jobsIn(file)).toHaveLength(1);
+        const job = jobsIn(file)[0][1];
+        expect(job['runs-on']).toBe('macos-14');
+        expect(job['timeout-minutes']).toBe(3);
+        expect(job.strategy).toBeUndefined();
+        expect(job.steps).toHaveLength(2);
+      }
       for (const [jobName, job] of jobsIn(file)) {
-        if (usesMacOsRunner(job) && !manualOnly && !weeklyResources) {
+        if (usesMacOsRunner(job) && !manualOnly && !weeklyResources && !minimumOsDmg) {
           violations.push(`${file.name}: jobs.${jobName}`);
         }
       }
     }
-    expect(violations, 'macOS jobs require explicit dispatch except the single bounded weekly workspace suite').toEqual([]);
+    expect(violations, 'macOS jobs require explicit dispatch except the bounded workspace and minimum-OS DMG checks').toEqual([]);
   });
 
   it('pins every third-party action to a full commit SHA', () => {
