@@ -1,14 +1,7 @@
 //! Opt-in shell. Uses only main's surfaces; unavailable surfaces stay explicit.
 use crate::{
     client::{Client, Session},
-    inbox::{Inbox, OpenSession},
-    pane_grid::Grid,
-    pane_layout,
-    projects::{Changed, Projects},
-    projects_model::{Ledger, WorkspaceChange},
-    settings::Settings,
-    shell_state::{State, Tab, Workspace},
-    ui::Surface,
+    shell_state::{State, Workspace},
 };
 use gpui::{
     App, Application, Bounds, Context, Entity, FocusHandle, KeyDownEvent, Render, Window,
@@ -23,49 +16,29 @@ use std::{
 };
 
 pub const HELP: &str = "App shell: --app-shell --shell-state ABSOLUTE_FILE --server ORIGIN [--offscreen]. The o8 next launcher resolves existing local configuration.";
-#[derive(Clone)]
-enum Command {
-    Projects,
-    Session(String),
-    Brain,
-    Grid,
-    Message(String),
-    Diff,
-    Terminal,
-    Inbox,
-    Settings,
-    Issues,
-}
-impl Command {
-    fn label(&self, sessions: &[Session]) -> String {
-        match self {
-            Self::Projects => "Open projects and repositories".into(),
-            Self::Session(id) => format!(
-                "Open session: {}",
-                sessions
-                    .iter()
-                    .find(|s| &s.id == id)
-                    .map(|s| s.title.as_str())
-                    .unwrap_or("Unavailable")
-            ),
-            Self::Brain => "Open Brain".into(),
-            Self::Grid => "Open grid".into(),
-            Self::Message(_) => "New message in selected session".into(),
-            Self::Diff => "Open diff for a packet".into(),
-            Self::Terminal => "Open terminal".into(),
-            Self::Inbox => "Open Inbox".into(),
-            Self::Settings => "Open settings".into(),
-            Self::Issues => "Open issues".into(),
-        }
+#[path = "surface_registry.rs"]
+mod registry;
+use registry::{
+    EmptyState, NavPosition, Registration, ShellView, WorkspaceLoad, register_surfaces,
+};
+
+register_surfaces! {
+    tabs {
+        session: Session(String) = "surfaces/session.rs";
+        brain: Brain = "surfaces/brain.rs";
+        grid: Grid = "surfaces/grid.rs";
+        inbox: Inbox = "surfaces/inbox.rs";
+        issues: Issues = "surfaces/issues.rs";
+        #[cfg(test)] fake: Fake = "surfaces/fake.rs";
+    }
+    commands {
+        settings: Settings = "surfaces/settings.rs";
+        projects: Projects = "surfaces/projects.rs";
+        diff: Diff = "surfaces/diff.rs";
+        terminal: Terminal = "surfaces/terminal.rs";
     }
 }
-enum Content {
-    Session(Entity<Surface>),
-    Brain(Entity<crate::brain::Brain>),
-    Grid(Entity<Grid>),
-    Inbox(Entity<Inbox>),
-    Issues(Entity<crate::issues::Issues>),
-}
+
 pub struct Shell {
     client: Client,
     file: PathBuf,
@@ -83,10 +56,7 @@ pub struct Shell {
     revision: u64,
     painted: Rc<Cell<u64>>,
     subscriptions: Vec<gpui::Subscription>,
-    settings: Option<Entity<Settings>>,
-    settings_subscription: Option<gpui::Subscription>,
-    projects: Option<Entity<Projects>>,
-    projects_open: bool,
+    surfaces: SurfaceRuntime,
 }
 impl Shell {
     fn new(
@@ -115,10 +85,7 @@ impl Shell {
             revision: 0,
             painted: Rc::new(Cell::new(u64::MAX)),
             subscriptions: vec![],
-            settings: None,
-            settings_subscription: None,
-            projects: None,
-            projects_open: false,
+            surfaces: SurfaceRuntime::default(),
         };
         shell
             .subscriptions
@@ -148,55 +115,6 @@ impl Shell {
             self.notice = format!("{error}. View state remains in memory.");
         }
     }
-    fn open_projects(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.capture(window, cx);
-        self.settings = None;
-        self.settings_subscription = None;
-        if self.projects.is_none() {
-            let client = self.client.clone();
-            let projects = cx.new(|cx| Projects::new(client, cx));
-            self.subscriptions.push(cx.subscribe_in(
-                &projects,
-                window,
-                |this, _, event: &Changed, window, cx| {
-                    for path in &event.removed {
-                        this.workspaces.retain(|w| w != path);
-                        this.state.workspaces.remove(path);
-                        this.content
-                            .retain(|key, _| !key.starts_with(&format!("{path}|")));
-                        if this.state.selected.as_ref() == Some(path) {
-                            this.state.selected = None;
-                        }
-                    }
-                    for path in &event.registered {
-                        if !this.workspaces.contains(path) {
-                            this.workspaces.push(path.clone());
-                        }
-                    }
-                    match &event.workspace {
-                        Some(WorkspaceChange::Select(path)) => this.state.selected = path.clone(),
-                        Some(WorkspaceChange::Open(path)) => {
-                            this.state.selected = Some(path.clone());
-                            this.projects_open = false;
-                            this.ensure(window, cx);
-                            this.restore_focus(window, cx);
-                        }
-                        None => {}
-                    }
-                    this.persist();
-                    this.revision += 1;
-                    cx.notify();
-                },
-            ));
-            self.projects = Some(projects);
-        } else if let Some(projects) = &self.projects {
-            projects.update(cx, |view, cx| view.load(cx));
-        }
-        self.projects_open = true;
-        self.palette = false;
-        self.focus.focus(window);
-        cx.notify();
-    }
     fn load(&mut self, cx: &mut Context<Self>) {
         if self.loading {
             return;
@@ -206,28 +124,30 @@ impl Shell {
         let client = self.client.clone();
         let task = cx.background_executor().spawn(async move {
             let sessions = client.sessions()?;
-            // Older fixture modes only expose session routes. The app server
-            // also supplies the desktop ledger, including empty projects.
-            let ledger = client.get::<Ledger>("/api/panel/projects", &[]).ok();
-            Ok::<_, String>((sessions, ledger))
+            let mut load = WorkspaceLoad {
+                paths: sessions
+                    .iter()
+                    .filter_map(|s| s.repo_path.clone())
+                    .collect(),
+                active_project: None,
+            };
+            for registration in registrations() {
+                (registration.workspaces)(&client, &mut load);
+            }
+            Ok::<_, String>((sessions, load))
         });
         cx.spawn(async move |this, cx| {
             let result = task.await;
             let _ = this.update(cx, |this, cx| {
                 this.loading = false;
                 match result {
-                    Ok((sessions, ledger)) => {
+                    Ok((sessions, load)) => {
                         this.sessions = sessions;
-                        let mut workspaces = this.sessions.iter().filter_map(|s| s.repo_path.clone()).collect::<BTreeSet<_>>();
-                        if let Some(ledger) = &ledger {
-                            workspaces.extend(ledger.projects.iter().flat_map(|p| p.repo_paths.clone()));
-                        }
-                        this.workspaces = workspaces.into_iter().collect();
+                        this.workspaces = load.paths.into_iter().collect();
                         this.connected = true;
-                        let active = ledger.as_ref().and_then(|ledger| ledger.projects.iter().find(|p| p.id == ledger.active_project_id && p.id != "default"));
-                        if let Some(active) = active {
-                            if !this.state.selected.as_ref().is_some_and(|w| active.repo_paths.contains(w)) {
-                                this.state.selected = active.repo_paths.first().cloned();
+                        if let Some(active) = load.active_project {
+                            if !this.state.selected.as_ref().is_some_and(|w| active.contains(w)) {
+                                this.state.selected = active.first().cloned();
                             }
                         } else if !this.state.selected.as_ref().is_some_and(|w| this.workspaces.contains(w)) {
                             this.state.selected = this.workspaces.first().cloned();
@@ -269,7 +189,7 @@ impl Shell {
         }
         let workspace = match self.state.selected.clone() {
             Some(workspace) => workspace,
-            None if self.active() == Some(Tab::Inbox) => String::new(),
+            None if self.active().is_some_and(|tab| tab.registration().global) => String::new(),
             None => return,
         };
         if !self.state.workspaces.contains_key(&workspace) {
@@ -294,92 +214,28 @@ impl Shell {
         if self.content.contains_key(&key) {
             return;
         }
-        let client = self.client.in_workspace(&workspace);
-        let content = match tab {
-            Tab::Brain => Content::Brain(
-                cx.new(|cx| crate::brain::Brain::new(client, workspace, None, window, cx)),
-            ),
-            Tab::Inbox => {
-                let inbox = cx.new(|cx| Inbox::new(client, workspace, cx));
-                self.subscriptions.push(cx.subscribe_in(&inbox, window, |this, _, event: &OpenSession, window, cx| {
-                    if let Some(session) = this.sessions.iter().find(|s| s.key() == event.0 || s.id == event.0).cloned() {
-                        if let Some(workspace) = session.repo_path {
-                            this.switch(workspace, window, cx);
-                        }
-                        let id = session.id;
-                        this.execute(Command::Session(id.clone()), window, cx);
-                        if let Some(Content::Session(surface)) = this.content.get(&this.key(&Tab::Session(id.clone()))) {
-                            surface.update(cx, |surface, cx| surface.shell_open(id, cx));
-                        }
-                        this.capture(window, cx);
-                        this.persist();
-                    } else {
-                        this.notice = "Related session is unavailable. Refresh the server connection and try again.".into();
-                        cx.notify();
-                    }
-                }));
-                Content::Inbox(inbox)
-            }
-            Tab::Issues => Content::Issues(cx.new(|cx| {
-                crate::issues::Issues::new(self.client.clone(), Some(workspace.clone()), window, cx)
-            })),
-            Tab::Session(id) => {
-                let id = self
-                    .current()
-                    .and_then(|w| w.selections.get(&id))
-                    .cloned()
-                    .unwrap_or(id);
-                let mut sessions = self.workspace_sessions();
-                if !sessions.iter().any(|s| s.id == id) {
-                    if let Some(session) = self.sessions.iter().find(|s| s.id == id) {
-                        sessions.push(session.clone());
-                    } else {
-                        return;
-                    }
-                }
-                Content::Session(cx.new(|cx| Surface::shell_new(client, sessions, id, window, cx)))
-            }
-            Tab::Grid => {
-                let options = pane_layout::Options {
-                    size: 4,
-                    workspace,
-                    file: self.file.with_extension("grid.json"),
-                };
-                if let Err(error) = options.load() {
-                    self.notice = error;
-                    return;
-                }
-                let grid = cx.new(|cx| Grid::new(client, options, window, cx));
-                grid.update(cx, |g, cx| g.load(cx));
-                Content::Grid(grid)
-            }
+        let Some(content) = (tab.registration().create)(self, tab, workspace, window, cx) else {
+            return;
         };
         self.content.insert(key, content);
         self.restore_focus(window, cx);
     }
     fn restore_focus(&self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.palette || self.projects_open {
+        if self.palette {
             self.focus.focus(window);
             return;
         }
-        if let Some(settings) = &self.settings {
-            settings.read(cx).focus(window);
+        if registrations()
+            .iter()
+            .any(|r| (r.focus_overlay)(self, window, cx))
+        {
             return;
         }
-        if let Some(tab) = self.active() {
-            match self.content.get(&self.key(&tab)) {
-                Some(Content::Session(session)) => session.read(cx).shell_focus(
-                    self.current().is_some_and(|w| w.composer),
-                    window,
-                    cx,
-                ),
-                Some(Content::Brain(brain)) => brain.read(cx).focus(window, cx),
-                // Grid reestablishes its own keyboard focus when opened or clicked.
-                Some(Content::Grid(grid)) => grid.update(cx, |g, cx| g.shell_focus(window, cx)),
-                Some(Content::Inbox(inbox)) => inbox.read(cx).focus(window),
-                Some(Content::Issues(issues)) => issues.read(cx).focus(window, cx),
-                _ => self.focus.focus(window),
-            }
+        if let Some(content) = self
+            .active()
+            .and_then(|tab| self.content.get(&self.key(&tab)))
+        {
+            content.focus(self.current().is_some_and(|w| w.composer), window, cx);
         } else {
             self.focus.focus(window);
         }
@@ -390,7 +246,9 @@ impl Shell {
         }
         self.capture(window, cx);
         self.state.selected = Some(workspace);
-        self.projects_open = false;
+        for registration in registrations() {
+            (registration.after_tab)(self);
+        }
         self.palette = false;
         self.ensure(window, cx);
         self.restore_focus(window, cx);
@@ -399,33 +257,23 @@ impl Shell {
         cx.notify();
     }
     fn capture(&mut self, window: &Window, cx: &App) {
-        if self.palette || self.settings.is_some() || self.projects_open {
+        if self.palette || registrations().iter().any(|r| (r.overlay_open)(self)) {
             return;
         }
-        if let Some(tab) = self.active() {
-            if let Some(Content::Session(session)) = self.content.get(&self.key(&tab)) {
-                let (id, composer) = session.read(cx).shell_selection(window, cx);
-                let workspace = self.state.selected.as_ref().unwrap();
-                if let Some(saved) = self.state.workspaces.get_mut(workspace) {
-                    if let (Tab::Session(original), Some(id)) = (&tab, id) {
-                        saved.selections.insert(original.clone(), id);
-                    }
-                    saved.composer = composer;
-                }
-            }
+        for registration in registrations() {
+            (registration.capture)(self, window, cx);
         }
     }
     fn commands(&self) -> Vec<Command> {
-        let mut commands = vec![
-            Command::Brain,
-            Command::Inbox,
-            Command::Projects,
-            Command::Grid,
-            Command::Diff,
-            Command::Terminal,
-            Command::Settings,
-            Command::Issues,
-        ];
+        let mut entries = registrations()
+            .iter()
+            .filter_map(|r| r.command)
+            .collect::<Vec<_>>();
+        entries.sort_by_key(|(order, _)| *order);
+        let mut commands = entries
+            .into_iter()
+            .map(|(_, command)| command())
+            .collect::<Vec<_>>();
         if let Some(id) = match self.active() {
             Some(Tab::Session(id)) => Some(
                 self.current()
@@ -452,40 +300,26 @@ impl Shell {
             .collect()
     }
     fn execute(&mut self, command: Command, window: &mut Window, cx: &mut Context<Self>) {
-        if matches!(command, Command::Settings) {
-            self.open_settings(window, cx);
+        let registration = command.registration();
+        if registration.overlay_command {
+            (registration.open)(self, command, window, cx);
             return;
         }
-        if matches!(command, Command::Projects) {
-            self.open_projects(window, cx);
-            return;
+        for registration in registrations() {
+            (registration.before_tab)(self);
         }
-        self.settings = None;
-        self.settings_subscription = None;
-        let (tab, composer) = match command {
-            Command::Projects => unreachable!(),
-            Command::Session(id) => (Tab::Session(id), false),
-            Command::Message(id) => (Tab::Session(id), true),
-            Command::Brain => (Tab::Brain, false),
-            Command::Grid => (Tab::Grid, false),
-            Command::Inbox => (Tab::Inbox, false),
-            Command::Settings => unreachable!(),
-            Command::Issues => (Tab::Issues, false),
-            Command::Diff | Command::Terminal => {
-                self.notice = "This surface is not available in this build. The terminal and packet diff changes must land before the shell can open them.".into();
-                self.palette = false;
-                self.restore_focus(window, cx);
-                cx.notify();
-                return;
-            }
+        let Some((tab, composer)) = (registration.open)(self, command, window, cx) else {
+            return;
         };
-        self.projects_open = false;
+        for registration in registrations() {
+            (registration.after_tab)(self);
+        }
         // An empty key stores the global Inbox before any workspace exists.
         if let Some(workspace) = self
             .state
             .selected
             .clone()
-            .or_else(|| (tab == Tab::Inbox).then(String::new))
+            .or_else(|| tab.registration().global.then(String::new))
         {
             let saved = self.state.workspaces.entry(workspace).or_default();
             let index = saved.tabs.iter().position(|t| t == &tab);
@@ -506,39 +340,13 @@ impl Shell {
         self.revision += 1;
         cx.notify();
     }
-    fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.capture(window, cx);
-        self.palette = false;
-        self.projects_open = false;
-        let client = self.client.clone();
-        let settings = cx.new(|cx| Settings::new(client, window, cx));
-        self.settings_subscription = Some(cx.subscribe_in(
-            &settings,
-            window,
-            |this, _, _: &crate::settings::Close, window, cx| this.close_settings(window, cx),
-        ));
-        self.settings = Some(settings);
-        self.revision += 1;
-        cx.notify();
-    }
-    fn close_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.settings = None;
-        self.settings_subscription = None;
-        self.restore_focus(window, cx);
-        self.revision += 1;
-        cx.notify();
-    }
     fn key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let key = event.keystroke.key.as_str();
         let modifiers = event.keystroke.modifiers;
-        if (modifiers.control || modifiers.platform) && key == "," {
-            if self.settings.is_some() {
-                self.close_settings(window, cx);
-            } else {
-                self.open_settings(window, cx);
-            }
-        } else if self.settings.is_some() && modifiers.control && !modifiers.alt && key == "w" {
-            self.close_settings(window, cx);
+        if registrations()
+            .iter()
+            .any(|r| (r.key_down)(self, event, window, cx))
+        {
         } else if (modifiers.control || modifiers.platform) && key == "k" {
             if !self.palette {
                 self.capture(window, cx);
@@ -567,26 +375,29 @@ impl Shell {
                     self.choice = 0;
                 }
                 _ => {
-                    if !modifiers.control && !modifiers.platform && !modifiers.alt {
-                        if let Some(text) = &event.keystroke.key_char {
-                            self.query.push_str(text);
-                            self.choice = 0;
-                        }
+                    if !modifiers.control
+                        && !modifiers.platform
+                        && !modifiers.alt
+                        && let Some(text) = &event.keystroke.key_char
+                    {
+                        self.query.push_str(text);
+                        self.choice = 0;
                     }
                 }
             }
         } else if modifiers.control && !modifiers.alt && !modifiers.platform && key == "tab" {
             self.capture(window, cx);
-            self.projects_open = false;
+            for registration in registrations() {
+                (registration.after_tab)(self);
+            }
             if let Some(saved) = self
                 .state
                 .selected
                 .as_ref()
                 .and_then(|w| self.state.workspaces.get_mut(w))
+                && !saved.tabs.is_empty()
             {
-                if !saved.tabs.is_empty() {
-                    saved.active = (saved.active + 1) % saved.tabs.len();
-                }
+                saved.active = (saved.active + 1) % saved.tabs.len();
             }
             self.ensure(window, cx);
             self.restore_focus(window, cx);
@@ -604,9 +415,7 @@ impl Shell {
                     .workspaces
                     .get_mut(self.state.selected.as_deref().unwrap_or(""))
                     .unwrap();
-                if let Tab::Session(id) = &tab {
-                    saved.selections.remove(id);
-                }
+                (tab.registration().remove)(saved, &tab);
                 saved.tabs.remove(saved.active);
                 saved.active = saved.active.min(saved.tabs.len().saturating_sub(1));
                 self.ensure(window, cx);
@@ -627,18 +436,7 @@ impl Shell {
             self.persist();
         }
         for content in self.content.values() {
-            match content {
-                Content::Brain(_) => {}
-                Content::Issues(issues) => issues.update(cx, |s, cx| s.tick(refresh, cx)),
-                Content::Session(s) => s.update(cx, |s, cx| s.shell_tick(refresh, cx)),
-                Content::Grid(g) => g.update(cx, |g, cx| {
-                    g.poll(cx);
-                    if refresh {
-                        g.load(cx);
-                    }
-                }),
-                Content::Inbox(inbox) => inbox.update(cx, |inbox, cx| inbox.tick(cx)),
-            }
+            content.tick(refresh, cx);
         }
     }
 }
@@ -651,9 +449,5 @@ pub use view::try_launch;
 mod tests;
 
 #[cfg(test)]
-#[path = "inbox_tests.rs"]
-mod inbox_tests;
-
-#[cfg(test)]
-#[path = "issue_tests.rs"]
-mod issue_tests;
+#[path = "shell_test_support.rs"]
+mod test_support;

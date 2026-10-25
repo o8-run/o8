@@ -1,5 +1,7 @@
 # o8 next: live sessions, composer and opt-in terminal
 
+[Per-surface port documentation](docs/surfaces/): registration contracts and rebase steps. Add each port's documentation there.
+
 [Brain conversation and memory retrieval](BRAIN.md): reading, search, sources and a native composer.
 
 [Opt-in app shell](APP-SHELL.md): local connection, workspace switching and persisted session/grid surfaces. The explicit fixture modes below remain available.

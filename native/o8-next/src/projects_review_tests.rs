@@ -55,7 +55,9 @@ fn review_p1_rejects_duplicate_rename_before_deleting_alpha(cx: &mut TestAppCont
     );
     shell.read_with(cx, |s, cx| {
         assert!(
-            s.projects
+            s.surfaces
+                .projects
+                .view
                 .as_ref()
                 .unwrap()
                 .read(cx)
@@ -231,7 +233,9 @@ fn round2_project_delete_refuses_unconfirmed_runtime(cx: &mut TestAppContext) {
     assert_eq!(project(&fixture, &beta)["repos"][0]["repoId"], beta_repo);
     shell.read_with(cx, |s, cx| {
         assert!(
-            s.projects
+            s.surfaces
+                .projects
+                .view
                 .as_ref()
                 .unwrap()
                 .read(cx)
@@ -305,7 +309,9 @@ fn legacy_selection(cx: &mut TestAppContext, selector: &'static str) {
     click(&mut visual, selector);
     shell.read_with(&visual, |s, cx| {
         assert!(
-            s.projects
+            s.surfaces
+                .projects
+                .view
                 .as_ref()
                 .unwrap()
                 .read(cx)

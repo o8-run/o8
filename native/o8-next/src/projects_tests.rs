@@ -1,5 +1,6 @@
 //! Drive the actual shell, GPUI pointer/text events, middleware and persisted project routes.
 use super::*;
+use crate::shell::test_support::*;
 
 #[path = "projects_review_tests.rs"]
 mod review;
@@ -34,9 +35,9 @@ fn measured_click(
             window.draw(cx).clear();
         });
         if shell.read_with(cx, |s, cx| {
-            let projects = s.projects.as_ref().unwrap().read(cx);
+            let projects = s.surfaces.projects.view.as_ref().unwrap().read(cx);
             !projects.pending()
-                && if s.projects_open {
+                && if s.surfaces.projects.open {
                     projects.frame_ready()
                 } else {
                     s.painted.get() == s.revision
@@ -236,7 +237,9 @@ fn projects_auth_refusal_and_retry(cx: &mut TestAppContext) {
     click(cx, "project-save");
     shell.read_with(cx, |s, cx| {
         assert!(
-            s.projects
+            s.surfaces
+                .projects
+                .view
                 .as_ref()
                 .unwrap()
                 .read(cx)
@@ -380,7 +383,7 @@ fn projects_palette_loading_and_cancel(cx: &mut TestAppContext) {
     });
     draw(cx);
     assert!(
-        shell.read_with(cx, |s, _| s.projects_open),
+        shell.read_with(cx, |s, _| s.surfaces.projects.open),
         "Projects must be reachable from the shell palette on first run"
     );
     assert!(cx.debug_bounds("projects-loading").is_some());
@@ -392,7 +395,7 @@ fn projects_palette_loading_and_cancel(cx: &mut TestAppContext) {
     click(cx, "repo-add");
     click(cx, "repo-cancel");
     click(cx, "shell-workspace");
-    assert!(!shell.read_with(cx, |s, _| s.projects_open));
+    assert!(!shell.read_with(cx, |s, _| s.surfaces.projects.open));
 }
 
 #[gpui::test]
@@ -428,7 +431,9 @@ fn projects_reconnect_and_runtime_removal_refusal(cx: &mut TestAppContext) {
     assert!(cx.debug_bounds("projects-error").is_some());
     shell.read_with(cx, |s, cx| {
         assert!(
-            s.projects
+            s.surfaces
+                .projects
+                .view
                 .as_ref()
                 .unwrap()
                 .read(cx)
@@ -515,18 +520,18 @@ fn projects_preserve_session_focus_and_allow_inbox_navigation(cx: &mut TestAppCo
     cx.simulate_keystrokes("ctrl-k i n b o x enter");
     settle(cx);
     assert!(
-        !shell.read_with(cx, |s, _| s.projects_open),
+        !shell.read_with(cx, |s, _| s.surfaces.projects.open),
         "opening Inbox must leave Projects"
     );
     assert_eq!(shell.read_with(cx, |s, _| s.active()), Some(Tab::Inbox));
     assert!(cx.debug_bounds("inbox-view-replies").is_some());
     cx.simulate_keystrokes("ctrl-k p r o j e c t s enter");
     settle(cx);
-    assert!(shell.read_with(cx, |s, _| s.projects_open));
+    assert!(shell.read_with(cx, |s, _| s.surfaces.projects.open));
     cx.simulate_keystrokes("ctrl-tab");
     settle(cx);
     assert!(
-        !shell.read_with(cx, |s, _| s.projects_open),
+        !shell.read_with(cx, |s, _| s.surfaces.projects.open),
         "cycling shell surfaces must leave Projects"
     );
 }

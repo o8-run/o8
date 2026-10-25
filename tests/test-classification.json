@@ -4053,6 +4053,14 @@
       ]
     },
     {
+      "path": "tests/next-surface-registration-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/next-terminal-real-path.test.ts",
       "reasons": [
         "child-process",

@@ -1,5 +1,6 @@
 //! Real keyboard/mouse -> shell -> GPUI settings -> production HTTP -> persisted store.
 use super::*;
+use crate::shell::test_support::*;
 use gpui::Modifiers;
 
 fn click(cx: &mut VisualTestContext, selector: &str) {
@@ -52,7 +53,7 @@ fn frame(shell: &Entity<Shell>, cx: &mut VisualTestContext) {
         cx.run_until_parked();
         draw(cx);
         if shell.read_with(cx, |s, cx| {
-            s.settings.as_ref().is_some_and(|s| {
+            s.surfaces.settings.view.as_ref().is_some_and(|s| {
                 let s = s.read(cx);
                 !s.busy && s.painted.get() == s.revision
             })
@@ -64,7 +65,14 @@ fn frame(shell: &Entity<Shell>, cx: &mut VisualTestContext) {
 }
 fn error(shell: &Entity<Shell>, cx: &mut VisualTestContext) -> Option<String> {
     shell.read_with(cx, |s, cx| {
-        s.settings.as_ref().unwrap().read(cx).error.clone()
+        s.surfaces
+            .settings
+            .view
+            .as_ref()
+            .unwrap()
+            .read(cx)
+            .error
+            .clone()
     })
 }
 fn timed_action(shell: &Entity<Shell>, cx: &mut VisualTestContext, selector: &str) -> f64 {
@@ -231,7 +239,7 @@ fn settings_fixture_all_default_controls_persist_and_refresh(cx: &mut TestAppCon
     click(cx, "settings-cancel");
     assert_eq!(values(&fixture)["branchPrefix"], "desktop-fixture");
     // No settings or drafts enter shell view-state persistence.
-    let saved = fs::read_to_string(&shell.read_with(cx, |s, _| s.file.clone())).unwrap();
+    let saved = fs::read_to_string(shell.read_with(cx, |s, _| s.file.clone())).unwrap();
     assert!(!saved.contains("desktop-fixture") && !saved.contains("discarded"));
     assert_eq!(frames.len(), 41);
     if let Ok(path) = std::env::var("O8_NEXT_SETTINGS_RESULTS") {
@@ -338,7 +346,9 @@ fn settings_fixture_validation_locks_loading_errors_and_empty(cx: &mut TestAppCo
     // after the fixture response has already arrived.
     let pending = std::rc::Rc::new(std::cell::Cell::new(false));
     let observed = pending.clone();
-    let settings = shell.read_with(cx, |s, _| s.settings.as_ref().unwrap().clone());
+    let settings = shell.read_with(cx, |s, _| {
+        s.surfaces.settings.view.as_ref().unwrap().clone()
+    });
     let subscription = cx.update(|_, cx| {
         cx.observe(&settings, move |settings, cx| {
             if settings.read(cx).busy {
@@ -364,7 +374,9 @@ fn settings_fixture_validation_locks_loading_errors_and_empty(cx: &mut TestAppCo
     click(cx, "settings-nav-keys");
     settle(cx);
     assert!(shell.read_with(cx, |s, cx| {
-        s.settings
+        s.surfaces
+            .settings
+            .view
             .as_ref()
             .unwrap()
             .read(cx)
@@ -414,7 +426,10 @@ fn settings_fixture_provider_keys_presence_save_cancel_remove_enable_check_and_r
         settle(cx);
         assert_eq!(error(&shell, cx), None, "native {provider} save");
         let native = shell.read_with(cx, |s, cx| {
-            format!("{:?}", s.settings.as_ref().unwrap().read(cx).keys)
+            format!(
+                "{:?}",
+                s.surfaces.settings.view.as_ref().unwrap().read(cx).keys
+            )
         });
         assert!(
             !native.contains("fixt") && !native.contains("alue") && !native.contains("maskedKey")
@@ -467,7 +482,7 @@ fn settings_fixture_unauthorized_and_close_restore_shell(cx: &mut TestAppContext
     let cx = &mut visual;
     click(cx, "settings-close");
     draw(cx);
-    assert!(shell.read_with(cx, |s, _| s.settings.is_none()));
+    assert!(shell.read_with(cx, |s, _| s.surfaces.settings.view.is_none()));
     cx.simulate_keystrokes("ctrl-,");
     settle(cx);
     assert!(cx.debug_bounds("settings-loaded").is_some());
@@ -484,7 +499,14 @@ fn settings_fixture_unauthorized_and_close_restore_shell(cx: &mut TestAppContext
     settle(&mut visual);
     assert!(error(&denied_shell, &mut visual).is_some());
     assert!(denied_shell.read_with(&visual, |s, cx| {
-        s.settings.as_ref().unwrap().read(cx).snapshot.is_none()
+        s.surfaces
+            .settings
+            .view
+            .as_ref()
+            .unwrap()
+            .read(cx)
+            .snapshot
+            .is_none()
     }));
     drop(shell);
 }

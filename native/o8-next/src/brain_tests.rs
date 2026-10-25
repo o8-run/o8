@@ -1,4 +1,5 @@
 use super::*;
+use crate::shell::test_support::*;
 
 #[gpui::test]
 fn brain_opens_from_the_real_shell_palette(cx: &mut TestAppContext) {

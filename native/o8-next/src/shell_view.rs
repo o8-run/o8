@@ -2,32 +2,29 @@ use super::*;
 use crate::theme::current as theme;
 impl Render for Shell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        if !self.projects_open {
+        if !registrations().iter().any(|r| (r.block_ensure)(self)) {
             self.ensure(window, cx);
         }
         let revision = self.revision;
         let painted = self.painted.clone();
         let active = self.active();
-        let content = self
-            .settings
-            .as_ref()
-            .map(|s| s.clone().into_any_element())
+        let content = registrations()
+            .iter()
+            .find_map(|r| (r.overlay)(self))
             .or_else(|| {
-                if self.projects_open {
-                    self.projects.as_ref().map(|p| p.clone().into_any_element())
-                } else {
-                    active
-                        .as_ref()
-                        .and_then(|t| self.content.get(&self.key(t)))
-                        .map(|c| match c {
-                            Content::Brain(brain) => brain.clone().into_any_element(),
-                            Content::Session(s) => s.clone().into_any_element(),
-                            Content::Grid(g) => g.clone().into_any_element(),
-                            Content::Inbox(inbox) => inbox.clone().into_any_element(),
-                            Content::Issues(issues) => issues.clone().into_any_element(),
-                        })
-                }
+                active
+                    .as_ref()
+                    .and_then(|t| self.content.get(&self.key(t)))
+                    .map(Content::element)
             });
+        let before_workspaces = registrations()
+            .iter()
+            .flat_map(|r| (r.nav)(self, NavPosition::BeforeWorkspaces, cx))
+            .collect::<Vec<_>>();
+        let after_workspaces = registrations()
+            .iter()
+            .flat_map(|r| (r.nav)(self, NavPosition::AfterWorkspaces, cx))
+            .collect::<Vec<_>>();
         div()
             .size_full()
             .flex()
@@ -49,32 +46,7 @@ impl Render for Shell {
                         cx.listener(|_, _, window, _| window.prevent_default()),
                     )
                     .child("o8 next alpha")
-                    .child(
-                        div()
-                            .id("shell-projects")
-                            .debug_selector(|| "shell-projects".into())
-                            .cursor_pointer()
-                            .p(px(6.))
-                            .child("Projects")
-                            .on_click(
-                                cx.listener(|this, _, window, cx| this.open_projects(window, cx)),
-                            ),
-                    )
-                    .when(self.projects_open, |view| {
-                        view.child(
-                            div()
-                                .id("shell-workspace")
-                                .debug_selector(|| "shell-workspace".into())
-                                .cursor_pointer()
-                                .p(px(6.))
-                                .child("Back to workspace")
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.projects_open = false;
-                                    this.restore_focus(window, cx);
-                                    cx.notify();
-                                })),
-                        )
-                    })
+                    .children(before_workspaces)
                     .children(self.workspaces.clone().into_iter().enumerate().map(
                         |(i, workspace)| {
                             let label = std::path::Path::new(&workspace)
@@ -98,17 +70,7 @@ impl Render for Shell {
                                 }))
                         },
                     ))
-                    .child(
-                        div()
-                            .id("shell-settings")
-                            .debug_selector(|| "shell-settings".into())
-                            .cursor_pointer()
-                            .p(px(6.))
-                            .child("Settings")
-                            .on_click(
-                                cx.listener(|this, _, window, cx| this.open_settings(window, cx)),
-                            ),
-                    )
+                    .children(after_workspaces)
                     .child(
                         div()
                             .id("shell-palette")
@@ -194,7 +156,9 @@ impl Render for Shell {
                                     .child(t.label())
                                     .on_click(cx.listener(move |this, _, window, cx| {
                                         this.capture(window, cx);
-                                        this.projects_open = false;
+                                        for registration in registrations() {
+                                            (registration.after_tab)(this);
+                                        }
                                         this.state
                                             .workspaces
                                             .get_mut(this.state.selected.as_deref().unwrap_or(""))

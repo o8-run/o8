@@ -1,6 +1,6 @@
 //! Production fixture routes -> shell palette -> GPUI controls -> persisted approvals.
-use super::tests::{draw, open};
 use super::*;
+use crate::shell::test_support::{draw, open};
 use gpui::TestAppContext;
 use serde_json::Value;
 use std::{
@@ -540,8 +540,10 @@ fn inbox_opens_related_session_and_pull_request_and_restores(cx: &mut TestAppCon
         .repo_path
         .clone()
         .unwrap();
-    let mut initial = State::default();
-    initial.selected = Some(workspace.clone());
+    let mut initial = State {
+        selected: Some(workspace.clone()),
+        ..Default::default()
+    };
     let mut saved_workspace = Workspace {
         tabs: vec![Tab::Session("thoughts-review".into())],
         ..Default::default()
