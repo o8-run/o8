@@ -39,7 +39,7 @@ interface ReapDashSessionsOptions extends DashGcOptions {
 
 function retireSession(session: DashSessionInventory, owner: string, interrupt = false): boolean {
   if (!/^\$\d+$/.test(session.sessionId) || !/^[1-9]\d*$/.test(session.serverPid)
-    || session.createdMs <= 0) return false;
+    || !Number.isSafeInteger(session.createdMs) || session.createdMs <= 0) return false;
   const guard = `#{&&:#{==:#{pid},${session.serverPid}},#{&&:#{==:#{session_created},${session.createdMs / 1000}},#{==:#{${DASH_PROFILE_OWNER_OPTION}},${owner}}}}`;
   try {
     const output = execFileSync(resolveTmuxBinary(), dashTmuxArgs('if-shell', '-F', '-t', session.sessionId, guard,
@@ -50,15 +50,37 @@ function retireSession(session: DashSessionInventory, owner: string, interrupt =
   } catch { return false; }
 }
 
-/** Explicit close uses the same ownership and exact-identity fence as GC. */
-export function signalOwnedDashTmuxSession(name: string, signal: string): 'signalled' | 'refused' | 'absent' {
-  const session = listDashTmuxSessionsWithAge().find((row) => row.name === name);
-  if (!session) return 'absent';
+/** Resolve native selectors on the explicit dashboard server, never an inherited socket. */
+function resolveDashTmuxSelector(selector: string): DashSessionInventory | null {
+  // tmux interprets semicolons in argv as command separators even without a shell.
+  if (!selector.trim() || /[;\0\r\n]/u.test(selector)) return null;
+  try {
+    // list-panes fails on missing/ambiguous targets; display-message may return
+    // success with an empty or fallback context. Multiple panes share one row.
+    const output = execFileSync(resolveTmuxBinary(), dashTmuxArgs('list-panes', '-t', selector, '-F',
+      `#{session_name}\t#{session_created}\t#{${DASH_PROFILE_OWNER_OPTION}}\t#{session_id}\t#{pid}`), {
+      windowsHide: true, timeout: 3000, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], env: sanitizePtyEnv() as NodeJS.ProcessEnv,
+    });
+    const rows = [...new Set(output.trim().split('\n'))];
+    if (rows.length !== 1) return null;
+    const fields = rows[0].split('\t');
+    if (fields.length !== 5 || !fields[0]) return null;
+    const [name, created, profileOwner, sessionId, serverPid] = fields;
+    return { name, createdMs: Number(created) * 1000, profileOwner, sessionId, serverPid };
+  } catch { return null; }
+}
+
+/** Every selector must resolve to one owned session before the guarded action. */
+export function signalOwnedDashTmuxSession(selector: string, signal: string): { sessionName: string } | null {
+  const session = resolveDashTmuxSelector(selector);
+  if (!session) return null;
   try {
     const owner = dashProfileOwnerId();
-    if (session.profileOwner === owner && retireSession(session, owner, signal === 'SIGINT')) return 'signalled';
+    if (session.profileOwner === owner && retireSession(session, owner, signal === 'SIGINT')) {
+      return { sessionName: session.name };
+    }
   } catch { /* An unresolved profile has no retirement authority. */ }
-  return 'refused';
+  return null;
 }
 
 /** The bridge's real collector, including durable references and tmux I/O. */

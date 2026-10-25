@@ -7585,27 +7585,12 @@ function handleAgentKill(_client: ClientState, msg: Record<string, unknown>) {
 }
 
 function terminateTerminalSession(sessionName: string, signal: string = 'SIGTERM') {
-  if (!sessionName) return;
+  if (!sessionName) return false;
 
-  if (isDashTerminalSession(sessionName)) {
-    const outcome = signalOwnedDashTmuxSession(sessionName, signal);
-    if (outcome === 'refused') return false;
-    if (outcome === 'signalled') {
-      if (signal === 'SIGINT') return;
-      try { terminalAttachments.get(sessionName)?.ptyProcess.kill(); } catch { /* transport already closed */ }
-      broadcastLifecycle(sessionName, 'killed');
-      return;
-    }
-    // A direct PTY belongs to this process; an absent shared session cannot
-    // fall through to tmux's prefix matching against another profile.
-    if (!terminalAttachments.has(sessionName)) return false;
-  }
-
-  console.log(`[ws-server] Kill request for ${sessionName} (signal: ${signal})`);
-
-  // 1. Try killing via PTY attachment (Codex / Claude Code terminals)
+  // Direct processes belong to this bridge. Only their literal in-memory
+  // identities qualify; selectors cannot acquire this local-process authority.
   const attachment = terminalAttachments.get(sessionName);
-  if (attachment) {
+  if (attachment?.snapshotSource === 'scrollback') {
     try {
       if (signal === 'SIGINT') {
         // Send Ctrl+C to the PTY (interrupt, not kill)
@@ -7623,34 +7608,13 @@ function terminateTerminalSession(sessionName: string, signal: string = 'SIGTERM
     return;
   }
 
-  // 2. Try killing tmux session directly (if PTY already detached but tmux lives)
-  try {
-    const tmuxBin = resolveTmuxBinary();
-    const tmuxArgs = isDashTerminalSession(sessionName) ? dashTmuxArgs() : [];
-    execFileSync(tmuxBin, [...tmuxArgs, 'has-session', '-t', sessionName], {
-      windowsHide: true,
-      timeout: 2000,
-      stdio: 'ignore',
-      env: sanitizePtyEnv() as NodeJS.ProcessEnv,
-    });
-    execFileSync(tmuxBin, [...tmuxArgs, 'kill-session', '-t', sessionName], {
-      windowsHide: true,
-      timeout: 3000,
-      stdio: 'ignore',
-      env: sanitizePtyEnv() as NodeJS.ProcessEnv,
-    });
-    console.log(`[ws-server] Killed tmux session: ${sessionName}`);
-    broadcastLifecycle(sessionName, 'killed');
-    return;
-  } catch { /* no tmux session */ }
-
-  // 3. No PTY or tmux session remains — broadcast the kill state so the UI can reconcile.
-  if (sessionName.startsWith('cortex-')) {
-    console.log(`[ws-server] No live PTY found for ${sessionName} — skipping stale kill broadcast`);
-    return;
-  }
-  console.log(`[ws-server] No PTY/tmux found for ${sessionName} — broadcasting killed state`);
-  broadcastLifecycle(sessionName, 'killed');
+  // Resolve every tmux selector before deciding ownership. Never dispatch a
+  // raw selector through the inherited TMUX socket or use it as a lifecycle ID.
+  const resolved = signalOwnedDashTmuxSession(sessionName, signal);
+  if (!resolved) return false;
+  if (signal === 'SIGINT') return;
+  try { terminalAttachments.get(resolved.sessionName)?.ptyProcess.kill(); } catch { /* transport already closed */ }
+  broadcastLifecycle(resolved.sessionName, 'killed');
 }
 
 /** Constant-time equality for the ws-token (avoids a timing side-channel). */

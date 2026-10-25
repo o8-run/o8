@@ -14,6 +14,7 @@ import {
   type MetadataLockProcessIdentity,
 } from '@/lib/worktree/metadata-lock-process-identity';
 import { renderTerminalBytes } from './helpers/headless-terminal';
+import { tmuxIntegrationAvailable } from './helpers/tmux-prerequisite';
 
 type WireFrame = {
   channel?: string;
@@ -45,14 +46,7 @@ let wsProcess: ChildProcess | null = null;
 let wsClosed: Promise<void> = Promise.resolve();
 let serverOutput = '';
 
-const tmuxAvailable = process.platform !== 'win32' && (() => {
-  try {
-    execFileSync('tmux', ['-V'], { stdio: 'ignore' });
-    return true;
-  } catch {
-    return false;
-  }
-})();
+const tmuxAvailable = tmuxIntegrationAvailable();
 
 function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -79,7 +73,7 @@ async function waitFor(
   throw new Error(`Timed out waiting for ${description}. ${serverOutput.slice(-4_000)}`);
 }
 
-async function startWsServer() {
+async function startWsServer(overrides: Partial<NodeJS.ProcessEnv> = {}) {
   serverOutput = '';
   wsProcess = execFile(process.execPath, [
     '--import=./scripts/register-server-only-stub.mjs',
@@ -105,6 +99,8 @@ async function startWsServer() {
       O8_PERSISTENT_TERMINALS: '1',
       O8_DASH_TMUX_SERVER_NAME: dashboardServerName,
       NEXT_ORIGIN: `http://127.0.0.1:${apiPort}`,
+      TMUX: '',
+      ...overrides,
     },
   });
   const child = wsProcess;
@@ -268,6 +264,93 @@ describe.runIf(tmuxAvailable)('dashboard terminal restart through the real WebSo
     expect((await signal(ownedSession, 'SIGTERM')).status).toBe(200);
     expect(spawnSync('tmux', tmuxArgs('has-session', '-t', `=${ownedSession}`)).status).toBe(1);
     expect(identity()).toBe(before);
+  });
+
+  describe('selector ownership with an inherited tmux server', () => {
+    const foreignProfile = join(dataDir, 'selector-foreign-profile');
+    const anchor = 'cortex-dash-selector-anchor';
+    function create(name: string, profile: string) {
+      execFileSync('tmux', tmuxArgs('new-session', '-d', '-s', name, '/bin/sh'));
+      execFileSync('tmux', tmuxArgs('set-option', '-t', `=${name}:`, DASH_PROFILE_OWNER_OPTION, dashProfileOwnerId(profile)));
+      writeFileSync(join(profile, 'terminal-state.json'), JSON.stringify({ tabs: [{ tmuxSession: name }] }));
+    }
+    const identity = (name: string) => execFileSync('tmux', tmuxArgs('display-message', '-p', '-t', `=${name}:`,
+      '#{pid}:#{session_id}:#{pane_pid}'), { encoding: 'utf8' }).trim();
+    const signal = (sessionName: string, value: string) => fetch(`http://127.0.0.1:${wsPort}/terminal-signal`, {
+      method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ sessionName, signal: value }),
+    });
+    beforeAll(async () => {
+      mkdirSync(foreignProfile);
+      create(anchor, dataDir);
+      const inherited = execFileSync('tmux', tmuxArgs('display-message', '-p', '-t', `=${anchor}:`,
+        '#{socket_path},#{pid},0'), { encoding: 'utf8' }).trim();
+      await stopWsServer();
+      await startWsServer({ TMUX: inherited });
+    });
+    afterAll(async () => {
+      await stopWsServer();
+      await startWsServer();
+    });
+
+    it.each(['name', '=name', '$id', 'session:window', 'name prefix'])('fences the %s selector by its resolved session owner', async (kind) => {
+      const suffix = kind === '=name' ? 'exact' : kind.replace(/\W/gu, '');
+      const owned = `cortex-dash-selector-owned-${suffix}`;
+      const foreign = `cortex-dash-selector-foreign-${suffix}`;
+      create(owned, dataDir);
+      create(foreign, foreignProfile);
+      if (kind === '$id') execFileSync('tmux', tmuxArgs('split-window', '-d', '-t', `=${owned}:`, '/bin/sh'));
+      const foreignBefore = identity(foreign);
+      const ownedBefore = identity(owned);
+      const selector = (name: string, resolved: string) => kind === '=name' ? `=${name}`
+        : kind === '$id' ? resolved.split(':')[1]
+          : kind === 'session:window' ? `${name}:0`
+            : kind === 'name prefix' ? name.slice(0, -2) : name;
+      const refused = await signal(selector(foreign, foreignBefore), 'SIGTERM');
+      expect(refused.status).toBe(403);
+      expect(await refused.json()).toMatchObject({ error: 'terminal_profile_mismatch' });
+      expect(identity(foreign)).toBe(foreignBefore);
+      expect((await signal(selector(owned, ownedBefore), 'SIGINT')).status).toBe(200);
+      expect(identity(owned)).toBe(ownedBefore);
+      expect((await signal(selector(owned, ownedBefore), 'SIGTERM')).status).toBe(200);
+      expect(spawnSync('tmux', tmuxArgs('has-session', '-t', `=${owned}`)).status).toBe(1);
+      expect(identity(foreign)).toBe(foreignBefore);
+      expect(JSON.parse(readFileSync(join(foreignProfile, 'terminal-state.json'), 'utf8')).tabs)
+        .toEqual([{ tmuxSession: foreign }]);
+    });
+
+    it('refuses ambiguous and unresolved selectors without acting on either profile', async () => {
+      const owned = 'cortex-dash-selector-ambiguous-owned';
+      const foreign = 'cortex-dash-selector-ambiguous-foreign';
+      create(owned, dataDir);
+      create(foreign, foreignProfile);
+      const legacy = 'cortex-dash-selector-untagged';
+      execFileSync('tmux', tmuxArgs('new-session', '-d', '-s', legacy, '/bin/sh'));
+      const before = [identity(owned), identity(foreign), identity(legacy)];
+      for (const selector of ['cortex-dash-selector-ambiguous-', '=absent-session', '$99999999', ':99999999',
+        legacy, `=${legacy}`, before[2].split(':')[1], `${legacy}:0`, legacy.slice(0, -2), `${owned};`]) {
+        expect((await signal(selector, 'SIGTERM')).status).toBe(403);
+        expect([identity(owned), identity(foreign), identity(legacy)]).toEqual(before);
+      }
+    });
+
+    it('signals a direct process only by its literal bridge identity', async () => {
+      const client = await connectClient();
+      const requestId = 'selector-direct-process';
+      client.socket.send(JSON.stringify({ type: 'terminal-create', requestId, directPty: true, cols: 80, rows: 24, cwd: repoDir }));
+      await waitFor(() => client.frames.some((frame) => frame.event === 'created' && frame.data?.requestId === requestId), 'direct process creation');
+      const sessionName = client.frames.find((frame) => frame.event === 'created' && frame.data?.requestId === requestId)!.data!.sessionName!;
+      client.socket.send(JSON.stringify({ type: 'terminal-attach', sessionName, cols: 80, rows: 24 }));
+      await waitFor(() => client.frames.some((frame) => frame.event === 'attached' && frame.data?.sessionName === sessionName), 'direct process attachment');
+      expect((await signal(`=${sessionName}`, 'SIGTERM')).status).toBe(403);
+      expect((await signal(sessionName, 'SIGINT')).status).toBe(200);
+      const marker = 'O8_DIRECT_PROCESS_STILL_RUNNING';
+      client.socket.send(JSON.stringify({ type: 'terminal-input', sessionName, data: `printf '${marker}\\n'\n` }));
+      await waitFor(() => terminalText(client.frames, sessionName).includes(marker), 'direct process remains responsive');
+      expect((await signal(sessionName, 'SIGTERM')).status).toBe(200);
+      await waitFor(() => client.frames.some((frame) => frame.event === 'exited' && frame.data?.sessionName === sessionName), 'direct process termination');
+      client.socket.close();
+    });
   });
 
   it.each([{ directPty: true, code: 0 }, { directPty: true, code: 7 }, { directPty: false, code: 7 }])('reports exit provenance for a real shell: %j', async ({ directPty, code }) => {
