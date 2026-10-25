@@ -3,7 +3,8 @@ import { GET as api_mobile_orchestrator_threads_GET } from '@/app/api/mobile/orc
 import { GET as api_orchestrator_state_GET, PATCH as api_orchestrator_state_PATCH } from '@/app/api/orchestrator/state/route';
 import { GET as api_runtime_inventory_GET } from '@/app/api/runtime/inventory/route';
 import { GET as api_mobile_history_GET } from '@/app/api/mobile/history/route';
-import { GET as api_v2_chat_history_GET } from '@/app/api/v2/chat-history/route';
+import { GET as api_v2_chat_history_GET, POST as api_v2_chat_history_POST } from '@/app/api/v2/chat-history/route';
+import { GET as api_setup_config_GET, POST as api_setup_config_POST } from '@/app/api/setup/config/route';
 import { GET as api_orchestrator_composer_queue_GET, POST as api_orchestrator_composer_queue_POST, PATCH as api_orchestrator_composer_queue_PATCH, DELETE as api_orchestrator_composer_queue_DELETE } from '@/app/api/orchestrator/composer-queue/route';
 import { GET as api_panel_ws_info_GET } from '@/app/api/panel/ws-info/route';
 import { POST as api_cortex_ask_POST } from '@/app/api/cortex/ask/route';
@@ -57,7 +58,8 @@ export const api_mobile_orchestrator_threads = { GET: api_mobile_orchestrator_th
 export const api_orchestrator_state = { GET: api_orchestrator_state_GET, PATCH: api_orchestrator_state_PATCH };
 export const api_runtime_inventory = { GET: api_runtime_inventory_GET };
 export const api_mobile_history = { GET: api_mobile_history_GET };
-export const api_v2_chat_history = { GET: api_v2_chat_history_GET };
+export const api_v2_chat_history = { GET: api_v2_chat_history_GET, POST: api_v2_chat_history_POST };
+export const api_setup_config = { GET: api_setup_config_GET, POST: api_setup_config_POST };
 export const api_orchestrator_composer_queue = { GET: api_orchestrator_composer_queue_GET, POST: api_orchestrator_composer_queue_POST, PATCH: api_orchestrator_composer_queue_PATCH, DELETE: api_orchestrator_composer_queue_DELETE };
 export const api_panel_ws_info = { GET: api_panel_ws_info_GET };
 export const api_cortex_ask = { POST: api_cortex_ask_POST };

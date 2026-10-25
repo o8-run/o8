@@ -1,0 +1,42 @@
+PR #4724 review round 1
+Rebased on origin/main 0eeb65889; both findings reproduced before fixes.
+
+Review findings and registry red
+ FAIL  tests/o8d-next-surfaces-real-path.test.ts > walks every production surface registration and its HTTP routes
+AssertionError: expected [ 'activity', 'brain', …(10) ] to deeply equal [ 'activity', 'brain', …(11) ]
+ FAIL  tests/o8d-next-surfaces-real-path.test.ts > preserves packet-worker lane diff admission and authoritative ownership through o8d
+AssertionError: expected 401 to be 409 // Object.is equality
+ FAIL  src/lib/ws-server/next-fetch.test.ts > ws-server runtime action transport > keeps conflict reads and Symon turns on Next while registered native producers use WS
+AssertionError: promise rejected "Error: Unregistered native route" instead of resolving
+Caused by: Error: Unregistered native route
+ Test Files  2 failed (2)
+      Tests  3 failed | 27 skipped (30)
+   Duration  18.60s (transform 2.24s, setup 54ms, import 3.05s, tests 15.21s, environment 0ms)
+
+Setup rebase red
+ FAIL  tests/o8d-next-surfaces-real-path.test.ts > serves Setup through the production o8d bridge with Next stopped
+AssertionError: expected 404 to be 200 // Object.is equality
+ FAIL  tests/o8d-next-surfaces-real-path.test.ts > persists Setup conversation creation through its existing handler with Next stopped
+AssertionError: expected 405 to be 200 // Object.is equality
+ Test Files  1 failed (1)
+      Tests  2 failed | 17 skipped (19)
+   Duration  18.05s (transform 47ms, setup 40ms, import 46ms, tests 17.84s, environment 0ms)
+
+Focused green
+ Test Files  5 passed (5)
+      Tests  62 passed | 1 skipped (63)
+   Duration  65.23s (transform 6.14s, setup 93ms, import 1.95s, tests 62.70s, environment 0ms)
+
+Full npm test green
+ Test Files  1242 passed | 3 skipped (1245)
+      Tests  9074 passed | 5 skipped (9079)
+   Duration  211.72s (transform 14.79s, setup 23.81s, import 267.87s, tests 248.85s, environment 183.32s)
+
+Passed: NODE_OPTIONS=--max-old-space-size=8192 npx tsc --noEmit; npm run typecheck:fast; ESLint on touched TypeScript; rule-check; npm run test:classify.
+Independent review found no concrete correctness or security blockers.
+
+Hostile-review coverage: canonical paths and packaged platform addons; request/response isolation with stream disconnects; packet-worker revocation, stale recognition hashes, foreign packet access and forbidden methods/capabilities.
+
+Existing exceptions remain: public status, operator ws-token responses and canonical repository paths. No literal token/path-exclusion guarantee is claimed.
+Unchanged bundle ceiling remains unmet: 14,526,715 bytes versus 14,077,919; excess 448,796 bytes.
+Prior production/native combined memory/CPU, macOS, full replay and latency gaps remain open.

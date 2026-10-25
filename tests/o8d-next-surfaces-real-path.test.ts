@@ -24,6 +24,7 @@ it.each([
   ['Inbox', 'GET', '/api/panel/approvals', 200],
   ['Customize', 'GET', '/api/prompt-library', 200],
   ['Brain', 'POST', '/api/cortex/ask', 400],
+  ['Setup', 'GET', '/api/setup/config', 200],
 ])('serves %s through the production o8d bridge with Next stopped', async (_surface, method, path, status) => {
   const response = await fetch(origin + path, { method, headers: { authorization: `Bearer ${server.token}`, 'content-type': 'application/json' },
     ...(method === 'POST' ? { body: '{}' } : {}) });
@@ -42,6 +43,20 @@ it('reads saved fixture sessions with Next stopped', async () => {
   });
   expect(response.status).toBe(200);
   expect(await response.text()).toContain('Fixture saved history');
+});
+
+it('persists Setup conversation creation through its existing handler with Next stopped', async () => {
+  const headers = { authorization: `Bearer ${server.token}`, 'content-type': 'application/json' };
+  const created = await fetch(`${origin}/api/v2/chat-history`, { method: 'POST', headers, body: JSON.stringify({
+    tabId: 'thoughts-native-setup', messages: [], backend: 'pi', model: 'pi', repoPath: server.directory,
+    title: 'Fixture setup conversation',
+  }) });
+  expect(created.status).toBe(200);
+  const saved = await fetch(`${origin}/api/v2/chat-history?tabId=thoughts-native-setup`, { headers });
+  expect(saved.status).toBe(200);
+  const history = await saved.json();
+  expect(history).toMatchObject({ backend: 'pi', model: 'pi', messages: [] });
+  expect(realpathSync(history.repoPath)).toBe(realpathSync(server.directory));
 });
 
 it('walks every production surface registration and its HTTP routes', async () => {
@@ -182,4 +197,52 @@ it('does not turn the Rust relay peer into unauthenticated loopback authority', 
   expect(response.status).toBe(401);
   const authenticated = await fetch(`${origin}/api/setup/identity`, { headers: { authorization: `Bearer ${server.token}` } });
   expect(authenticated.status).toBe(200);
+});
+
+it('preserves packet-worker lane diff admission and authoritative ownership through o8d', async () => {
+  const env = { ...process.env, O8_DATA_DIR: server.directory, CORTEX_IDE_DATA_DIR: server.directory,
+    CORTEX_IDE_DB_PATH: join(server.directory, 'cortex-ide.db'), WS_TOKEN: server.token };
+  const seeded = await promisify(execFile)(process.execPath, ['--import=./scripts/register-server-only-stub.mjs', '--import=tsx', '--eval', `
+    (async () => {
+      const { createLane } = require('./src/lib/lane/registry.ts');
+      const { mintPacketWorkerToken } = require('./src/lib/auth/packet-worker-token.ts');
+      const { registerPacketWorkerTokenHash } = require('./src/lib/auth/worker-token.ts');
+      const { createHash } = require('node:crypto');
+      const { NextRequest } = require('next/server');
+      const { GET } = require('./src/app/api/lanes/[id]/diff/route.ts');
+      const root = process.env.CORTEX_IDE_DATA_DIR;
+      const lane = createLane({ repoPath: root, branch: 'fixture-unresolved-', runtime: 'codex', packetId: 'fixture-native-worker' });
+      const foreign = createLane({ repoPath: root, branch: 'fixture-foreign-', runtime: 'codex', packetId: 'fixture-native-foreign' });
+      const token = mintPacketWorkerToken(lane.packetId);
+      const ghostToken = 'o8pw_fixture-recognized-without-row';
+      registerPacketWorkerTokenHash(createHash('sha256').update(ghostToken).digest('hex'));
+      const response = await GET(new NextRequest('http://127.0.0.1/api/lanes/' + lane.id + '/diff', {
+        headers: { authorization: 'Bearer ' + token, 'x-o8-client-addr': '127.0.0.1' },
+      }), { params: Promise.resolve({ id: lane.id }) });
+      console.log(JSON.stringify({ laneId: lane.id, foreignLaneId: foreign.id, token, ghostToken, status: response.status, body: await response.json() }));
+      require('./src/lib/db/index.ts').closeDb();
+    })().catch(() => { process.exitCode = 1; });
+  `], { env });
+  const fixture = JSON.parse(seeded.stdout.split('\n').find(line => line.startsWith('{"laneId":'))!);
+  expect(fixture.status).toBe(409);
+  const read = (laneId: string, bearer = fixture.token, method = 'GET') => fetch(`${origin}/api/lanes/${laneId}/diff`, {
+    method, headers: { authorization: `Bearer ${bearer}` },
+  });
+  const own = await read(fixture.laneId);
+  expect(own.status).toBe(fixture.status);
+  expect(await own.json()).toEqual(fixture.body);
+  const foreign = await read(fixture.foreignLaneId);
+  expect(foreign.status).toBe(403);
+  expect((await foreign.json()).error.code).toBe('worker_packet_mismatch');
+  expect((await read(fixture.laneId, fixture.ghostToken)).status).toBe(401);
+  expect((await read(fixture.laneId, fixture.token, 'POST')).status).toBe(403);
+  const unrelated = await fetch(`${origin}/api/prompt-library`, { headers: { authorization: `Bearer ${fixture.token}` } });
+  expect(unrelated.status).toBe(403);
+  await promisify(execFile)(process.execPath, ['--import=./scripts/register-server-only-stub.mjs', '--import=tsx', '--eval', `
+    const { getSqlite, closeDb } = require('./src/lib/db/index.ts');
+    getSqlite().prepare("UPDATE worker_tokens SET revoked_at = ? WHERE packet_id = ?").run(new Date().toISOString(), 'fixture-native-worker');
+    closeDb();
+  `], { env });
+  expect((await read(fixture.laneId)).status).toBe(401);
+  expect((await read(fixture.foreignLaneId)).status).toBe(401);
 });

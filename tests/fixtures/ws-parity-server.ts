@@ -76,6 +76,7 @@ export async function startParityReference(options: {
     cwd: process.cwd(), env: { ...process.env, NODE_ENV: 'test',
       HOME: directory, USERPROFILE: directory,
       O8_DATA_DIR: undefined, CORTEX_IDE_DATA_DIR: directory,
+      CORTEX_IDE_DB_PATH: join(directory, 'cortex-ide.db'),
       CORTEX_IDE_REVIEW_REPO_ROOT: directory, WS_TOKEN: token,
       O8_API_PORT: String(address.port), O8_WS_PORT: String(port),
       O8_WS_O8D: (options.o8d ?? process.env.O8_WS_PARITY_O8D === '1') ? '1' : '0',
