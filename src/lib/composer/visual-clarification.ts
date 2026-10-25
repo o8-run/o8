@@ -70,9 +70,19 @@ export function visualQuestionContext(scope: VisualLiveScope) {
 }
 export async function answerVisualQuestion(scope: VisualLiveScope, text: string): Promise<string | null> {
   const draft = readVisualDraft(scope.principal, scope.target);
+  const prior = draft && remembered(draft);
+  const answer = text.trim().replace(/[.!?]+$/, '').toLowerCase();
+  const targetMatches = draft && prior ? prior.resolution.options.filter((option, index) => [option.value, option.label, draft.request.frames.at(-1)?.candidates?.[index]?.name, String(index + 1), ['first', 'second', 'third', 'fourth'][index], option.label.split(':')[0], `the ${option.label.split(':')[0].toLowerCase()} one`].some(value => value?.toLowerCase() === answer)) : [];
+  // Closed target answers must be consumed before status checks or a newer
+  // meaning question can let them fall through to ordinary Live submission.
+  if (draft && prior && targetMatches.length && (draft.status !== 'draft'
+    || prior.key === key(draft) && (draft.visualQuestion?.dismissed || draft.request.clarification))) {
+    return draft.status === 'draft' && draft.request.clarification && !draft.visualQuestion?.dismissed
+      ? 'That target is already confirmed. The marked draft has not been sent.'
+      : 'That clarification is closed. No new instruction has been sent.';
+  }
   const meaning = draft && currentMeaningCheck(draft);
   if (draft && meaning?.resolution) {
-    const answer = text.trim().replace(/[.!?]+$/, '').toLowerCase();
     const matches = meaning.resolution.options.filter((option, index) => [option.value, option.label, String(index + 1), ['first', 'second', 'third', 'fourth'][index]].some(value => value.toLowerCase() === answer));
     if (matches.length === 1 && draft.status !== 'draft' && ['accepted', 'dismissed'].includes(meaning.status)) return 'That clarification is closed. No new instruction has been sent.';
     if (draft.status !== 'draft') return null;
@@ -85,15 +95,13 @@ export async function answerVisualQuestion(scope: VisualLiveScope, text: string)
     }
     return null;
   }
-  const prior = draft && remembered(draft);
   if (draft && draft.status !== 'draft') return null;
   if (!draft || !prior) return null;
   if (prior.key !== key(draft)) { questions.delete(JSON.stringify([draft.principal, draft.request.id])); await saveVisualDraft({ ...draft, visualQuestion: undefined }); return 'The marked target or instruction changed. Review the current draft before answering or sending.'; }
   const question = prior.resolution;
-  const answer = text.trim().replace(/[.!?]+$/, '').toLowerCase();
   if (draft.visualQuestion?.dismissed) return null;
   if (answer === 'skip') { await dismissVisualQuestion(draft); return 'Clarification skipped. The marked draft has not been sent.'; }
-  const matches = question.options.filter((option, index) => [option.value, option.label, draft.request.frames.at(-1)?.candidates?.[index]?.name, String(index + 1), ['first', 'second', 'third', 'fourth'][index], option.label.split(':')[0], `the ${option.label.split(':')[0].toLowerCase()} one`].some(value => value?.toLowerCase() === answer));
+  const matches = targetMatches;
   if (draft.request.clarification) return matches.length === 1 ? 'That target is already confirmed. The marked draft has not been sent.' : null;
   if (matches.length !== 1) return `${question.question} ${question.options.map((option, index) => `${index + 1}: ${option.label}`).join('. ')}. The draft has not been sent.`;
   return await confirmVisualQuestion(draft, matches[0].value) ? 'That target is confirmed in the marked draft. It has not been sent.' : 'The marked draft changed. Review the current target in the composer.';

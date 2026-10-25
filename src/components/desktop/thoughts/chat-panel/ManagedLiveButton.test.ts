@@ -7,7 +7,7 @@ import type { LiveBackend, LiveState } from '@/lib/voice/managed-live/session';
 import { useManagedVoicePresentation } from './useManagedVoicePresentation';
 import type { VisualInstructionDraft } from '@/lib/composer/visual-draft-store';
 import { visualMeaningKey } from '@/lib/composer/visual-meaning';
-import { answerVisualQuestion, visualQuestionContext, dismissVisualQuestion } from '@/lib/composer/visual-clarification';
+import { answerVisualQuestion, visualQuestionContext, dismissVisualQuestion, openVisualQuestion, confirmVisualQuestion } from '@/lib/composer/visual-clarification';
 import { sampleObservation } from '@/lib/composer/visual-inspection.test-fixture';
 const marked = vi.hoisted(() => ({ draft: null as VisualInstructionDraft | null }));
 vi.mock('@/lib/composer/visual-draft-store', () => ({ readVisualDraft: () => marked.draft,
@@ -517,4 +517,55 @@ it.each(['none', 'failure'])('requires a composer Send after Live meaning resolu
   const { commitVisualInstruction } = await import('@/lib/composer/visual-instruction-commit');
   await act(async () => { await commitVisualInstruction(marked.draft!); });
   expect(dispatch).toHaveBeenCalledTimes(1);
+});
+
+it.each([
+  { closure: 'dismissed', status: 'draft', answer: 'Left' },
+  { closure: 'dismissed', status: 'saved', answer: 'Left' },
+  { closure: 'confirmed', status: 'draft', answer: 'Left' },
+  { closure: 'confirmed', status: 'saved', answer: 'Left' },
+  { closure: 'confirmed', status: 'saved', answer: 'first' },
+  { closure: 'meaning dismissed', status: 'saved', answer: 'Left' },
+])('drops a closed target answer through Live: $closure / $status / $answer', async ({ closure, status, answer }) => {
+  const routing = { backend: 'codex' as const, model: 'selected', effort: 'low' as const, permissionMode: 'plan' as const, mode: 'single' as const, pickedMode: 'solo' as const, collide: false };
+  const target = { threadId: 'closed-target-chat', repoPath: '/fixture' };
+  const observation = sampleObservation();
+  const draft: VisualInstructionDraft = { principal: 'fixture', status: 'draft', template: { text: '', wireMessage: '[o8-visual-instruction]', images: [], routing },
+    request: { version: 1, id: crypto.randomUUID(), createdAt: '2026-10-24T12:00:00Z', target, utterance: 'Change this button.',
+      frames: [{ id: 'marked-buttons', atMs: 0, width: 320, height: 280, image: observation.image, observation, strokes: [], pins: [], transcript: '',
+        candidates: [{ id: 'left', name: 'Save', role: 'button', rect: [0.1, 0.2, 0.1, 0.1] },
+          { id: 'right', name: 'Save', role: 'button', rect: [0.7, 0.2, 0.1, 0.1] }] }] } };
+  marked.draft = draft;
+  const resolver = vi.fn(async () => Response.json(closure === 'meaning dismissed' ? {
+    kind: 'choice', id: 'meaning-after-target', question: 'What should change?', aodlPath: 'intent.size',
+    options: [{ label: 'Button size', value: 'button-size' }, { label: 'Text size', value: 'text-size' }],
+  } : { kind: 'none' }));
+  const dispatch = vi.fn(async (_url: unknown, init?: RequestInit) => Response.json({ item: { ...JSON.parse(String(init?.body)), status: 'queued' } }));
+  vi.mocked(fetch).mockImplementation(async (url, init) => url === '/api/mobile/ripple/resolve' ? resolver()
+    : url === '/api/orchestrator/composer-queue' ? dispatch(url, init) : Response.json({ enabled: true, entitled: true }));
+  const ordinary = vi.fn(); const reply = vi.fn(async () => {});
+  const queue = { items: [], ready: true, error: null } as unknown as ComponentProps<typeof ManagedChatVoiceEntry>['queue'];
+  await act(async () => root.render(createElement(ManagedChatVoiceEntry, { identity: [target.threadId], visualTarget: target, queue,
+    capture: () => draft.template, messages: [], busy: false, terminals: {}, send: ordinary, interrupt: vi.fn() })));
+  await toggleVoice();
+  await act(async () => {
+    expect(openVisualQuestion(marked.draft!)?.question).toBe('Which marked component should change?');
+    if (closure === 'dismissed') await dismissVisualQuestion(marked.draft!);
+    else expect(await confirmVisualQuestion(marked.draft!, 'left')).toBe(true);
+  });
+  const { commitVisualInstruction } = await import('@/lib/composer/visual-instruction-commit');
+  if (closure === 'meaning dismissed') {
+    await act(async () => { expect(await commitVisualInstruction(marked.draft!)).toBeNull(); });
+    await act(async () => dismissVisualQuestion(marked.draft!));
+  }
+  if (status === 'saved') {
+    await act(async () => { await commitVisualInstruction(marked.draft!); });
+    expect(dispatch).toHaveBeenCalledTimes(1);
+  }
+  const before = structuredClone(marked.draft!);
+  dispatch.mockClear(); resolver.mockClear();
+  await act(async () => fixture.backend!.delegate(answer, 'late-target-option', reply));
+  expect(ordinary).not.toHaveBeenCalled(); expect(dispatch).not.toHaveBeenCalled(); expect(resolver).not.toHaveBeenCalled();
+  expect(marked.draft).toEqual(before);
+  expect(reply).toHaveBeenCalledWith(expect.stringMatching(/already confirmed|No new instruction/));
 });
