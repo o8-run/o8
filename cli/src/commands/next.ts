@@ -23,6 +23,9 @@ export async function runNext(args: string[]): Promise<number> {
   const env = { ...process.env };
   if (shell) {
     const config = resolveConfig();
+    const explicitNativeToken = Boolean(env.O8_NEXT_API_TOKEN?.trim());
+    delete env.O8_NEXT_TOKEN_FILE;
+    delete env.O8_NEXT_TOKEN_ORIGIN;
     const serverAt = forwarded.indexOf('--server');
     const origin = serverAt < 0 ? config.apiBase : forwarded[serverAt + 1];
     let url: URL;
@@ -44,6 +47,11 @@ export async function runNext(args: string[]): Promise<number> {
       if (url.origin === config.apiBase && config.token) env.O8_NEXT_API_TOKEN = config.token;
     } else if (!env.O8_NEXT_API_TOKEN && url.origin === config.apiBase && config.token) {
       env.O8_NEXT_API_TOKEN = config.token;
+    }
+    if (!explicitNativeToken && config.source.token !== 'worker' && config.source.token !== 'env'
+      && url.origin === config.apiBase) {
+      env.O8_NEXT_TOKEN_FILE = join(config.dataDir || resolveCliDataDir(), 'ws-token');
+      env.O8_NEXT_TOKEN_ORIGIN = url.origin;
     }
     if (!forwarded.includes('--shell-state')) forwarded.push('--shell-state', join(config.dataDir || resolveCliDataDir(), 'next-shell.json'));
   }

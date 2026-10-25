@@ -67,3 +67,41 @@ is deferred to the end of the three-item batch, as requested.
 Remaining for #4548: terminal/packet-diff palette integration, keyboard workspace
 switching, measurements, and tolerant restart state. Supported-display native
 process startup and compositor measurements are unavailable in this environment.
+
+
+## Correction round 1
+
+Rebased on current main at `160576643`. Tests were written first through the
+existing fixture host and production GPUI window factory. The late-token case
+runs an owned native test subprocess with isolated launcher metadata; no process
+environment is mutated in a concurrent test.
+
+Red receipts:
+
+```text
+round1_connection_is_a_registered_module: connection state must render through its registered module
+round1_reconnect_keeps_composer_focus_draft_and_queue: retained draft != retained draft after reconnect
+round1_token_file_created_after_launch_connects_on_retry: Retry must reread the newly created token file
+Native: 3 new failures
+CLI reload descriptor: 1 failed; 7 skipped
+```
+
+Green: the six connection tests pass, including the owned child which exercises
+missing -> wrong -> corrected token files. The built CLI suite passes eight
+checks, including missing files and suppression of file descriptors for workers,
+explicit bearers and other origins. Reconnect preserves the actual composer
+focus handle, draft and production queue response.
+
+All connection policy, focus recovery and error rendering now live in
+`src/surfaces/connection.rs`; its tests live in `connection_tests.rs`. One
+registration line loads the module. Shared lifecycle/chrome dispatch is an
+optional `ShellExtension` with defaults; existing surface registrations,
+including Activity and the real-request probe, compile unchanged. Shared
+`client.rs` is unchanged. The original server-link tests moved into their module,
+retaining their test function names.
+
+Correction gates: native shell suite **79 passed, 0 failed**, plus one ignored
+child test executed by its owning parent; CLI **8 passed**. TypeScript (8192 MiB),
+fast typecheck, classification, touched-file ESLint/rule-check, native formatting
+and diff checks pass. Full npm verification is repeated at the end of this
+correction round.

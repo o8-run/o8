@@ -43,7 +43,7 @@ function launcherProbe(receipt: string) {
       headers: { authorization: 'Bearer ' + process.env.O8_NEXT_API_TOKEN }
     });
     const body = await response.json();
-    require('node:fs').writeFileSync(${JSON.stringify(receipt)}, JSON.stringify({ args, status: response.status, sessions: body.threads?.length, desktopSession: Boolean(process.env.O8_NEXT_CLERK_SESSION_TOKEN) }));
+    require('node:fs').writeFileSync(${JSON.stringify(receipt)}, JSON.stringify({ args, status: response.status, sessions: body.threads?.length, desktopSession: Boolean(process.env.O8_NEXT_CLERK_SESSION_TOKEN), tokenFile: process.env.O8_NEXT_TOKEN_FILE || null, tokenOrigin: process.env.O8_NEXT_TOKEN_ORIGIN || null }));
   })().catch(() => process.exit(1));\n`);
   chmodSync(binary, 0o700);
   return binary;
@@ -134,4 +134,30 @@ it('resolves token and state configuration through a directory alias using canon
   const result = JSON.parse(readFileSync(receipt, 'utf8')) as { args: string[]; status: number };
   expect(result.status).toBe(200);
   expect(realpathSync(dirname(result.args[result.args.indexOf('--shell-state') + 1]))).toBe(realpathSync(configDir));
+});
+
+it('forwards reloadable token-file authority only for the configured local origin', () => {
+  const receipt = join(root, 'reloadable.json');
+  const env: NodeJS.ProcessEnv = { ...process.env, O8_DATA_DIR: configDir };
+  for (const key of ['O8_API_PORT', 'O8_API_TOKEN', 'O8_NEXT_API_TOKEN', 'O8_WORKER_TOKEN']) delete env[key];
+  const launch = (source: NodeJS.ProcessEnv) => {
+    execFileSync(process.execPath, ['cli/dist/o8.mjs', 'next', '--enable-next', '--binary', launcherProbe(receipt), '--app-shell', '--server', origin], { env: source, stdio: 'pipe' });
+    return JSON.parse(readFileSync(receipt, 'utf8'));
+  };
+  for (const missing of [false, true]) {
+    try {
+      if (missing) rmSync(join(configDir, 'ws-token'));
+      const result = launch(env);
+      expect(result.tokenFile).toBe(join(configDir, 'ws-token'));
+      expect(result.tokenOrigin).toBe(origin);
+    } finally { writeFileSync(join(configDir, 'ws-token'), token); }
+  }
+  const inherited = { ...env, O8_NEXT_TOKEN_FILE: join(configDir, 'ws-token'), O8_NEXT_TOKEN_ORIGIN: origin };
+  for (const source of [{ ...inherited, O8_WORKER_TOKEN: 'fixture-invalid-worker' },
+    { ...inherited, O8_NEXT_API_TOKEN: token },
+    { ...inherited, O8_API_PORT: String(Number(new URL(origin).port) === 65535 ? 65534 : Number(new URL(origin).port) + 1) }]) {
+    const result = launch(source);
+    expect(result.tokenFile).toBeNull();
+    expect(result.tokenOrigin).toBeNull();
+  }
 });

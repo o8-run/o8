@@ -2,10 +2,12 @@ use super::*;
 use crate::theme::current as theme;
 impl Render for Shell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let overlay_open = registrations().iter().any(|r| (r.overlay_open)(self));
-        if !self.connected && !overlay_open {
-            self.focus.focus(window);
+        for extension in registry::extensions() {
+            extension.prepare(self, window, cx);
         }
+        let frame = registry::extensions()
+            .find_map(|extension| extension.frame(self))
+            .unwrap_or_default();
         if !registrations().iter().any(|r| (r.block_ensure)(self)) {
             self.ensure(window, cx);
         }
@@ -49,6 +51,7 @@ impl Render for Shell {
                         gpui::MouseButton::Left,
                         cx.listener(|_, _, window, _| window.prevent_default()),
                     )
+                    .children(frame.brand)
                     .children(before_workspaces)
                     .children(self.workspaces.clone().into_iter().enumerate().map(
                         |(i, workspace)| {
@@ -79,7 +82,7 @@ impl Render for Shell {
                             .id("shell-palette")
                             .cursor_pointer()
                             .p(px(6.))
-                            .child("Commands")
+                            .child(frame.commands)
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.capture(window, cx);
                                 this.palette = true;
@@ -89,9 +92,19 @@ impl Render for Shell {
                                 this.revision += 1;
                                 cx.notify();
                             })),
-                    ),
+                    )
+                    .when(frame.retry, |view| {
+                        view.child(
+                            div()
+                                .id("shell-retry")
+                                .cursor_pointer()
+                                .p(px(6.))
+                                .child("Retry")
+                                .on_click(cx.listener(|this, _, _, cx| this.load(cx))),
+                        )
+                    }),
             )
-            .when(self.connected && !self.notice.is_empty(), |view| {
+            .when(frame.status, |view| {
                 view.child(
                     div()
                         .debug_selector(|| "shell-status".into())
@@ -100,6 +113,11 @@ impl Render for Shell {
                 )
             })
             .when(self.palette, |view| {
+                if let Some(palette) =
+                    registry::extensions().find_map(|extension| extension.palette(self, cx))
+                {
+                    return view.child(palette);
+                }
                 view.child(
                     div()
                         .id("command-palette")
@@ -169,40 +187,9 @@ impl Render for Shell {
                             }),
                     ),
             )
-            .child(
-                div()
-                    .flex_1()
-                    .min_h_0()
-                    .child(if self.connected || overlay_open {
-                        content.unwrap_or_else(|| div().into_any_element())
-                    } else {
-                        div()
-                            .size_full()
-                            .flex()
-                            .flex_col()
-                            .items_center()
-                            .justify_center()
-                            .gap(px(16.))
-                            .child(
-                                div()
-                                    .debug_selector(|| "shell-status".into())
-                                    .child(self.notice.clone()),
-                            )
-                            .when(!self.loading, |view| {
-                                view.child(
-                                    div()
-                                        .id("shell-retry")
-                                        .debug_selector(|| "shell-retry".into())
-                                        .cursor_pointer()
-                                        .p(px(8.))
-                                        .bg(theme().surface_raised)
-                                        .child("Retry")
-                                        .on_click(cx.listener(|this, _, _, cx| this.load(cx))),
-                                )
-                            })
-                            .into_any_element()
-                    }),
-            )
+            .child(div().flex_1().min_h_0().child(
+                content.unwrap_or_else(|| div().p(px(24.)).child(frame.empty).into_any_element()),
+            ))
             .child(canvas(|_, _, _| (), move |_, _, _, _| painted.set(revision)).size(px(1.)))
     }
 }
