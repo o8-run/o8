@@ -7,17 +7,12 @@ publish = false
 default-run = "o8-next"
 
 [features]
-macos-diagnostics = ["dep:objc", "dep:cocoa", "dep:raw-window-handle", "gpui/frame-diagnostics"]
+macos-diagnostics = ["gpui/frame-diagnostics"]
 
 [[bin]]
 name = "o8-next-macos-check"
 path = "diagnostics/macos_repaint.rs"
 required-features = ["macos-diagnostics"]
-
-[target.'cfg(target_os = "macos")'.dependencies]
-cocoa = { version = "=0.26.0", optional = true }
-objc = { version = "=0.2.7", optional = true }
-raw-window-handle = { version = "=0.6.2", optional = true }
 
 [dependencies]
 async-channel = "=2.5.0"
