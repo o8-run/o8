@@ -1,0 +1,17 @@
+Isolated unchanged worker regression:
+ui::tests::worker_tests::worker_send_steer_queue_promote_remove_and_streaming_latency ... ok
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 119 filtered out; finished in 66.32s
+
+Native CLI integrations:
+test diff_cli_is_explicit_and_documents_both_targets ... ok
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+test grid_rejects_conflicting_terminal_mode_and_invalid_slot_views ... ok
+test pane_grid_is_an_explicit_native_opt_in ... ok
+test pane_grid_rejects_invalid_persistence_before_window_startup ... ok
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.18s
+test app_shell_is_explicit_and_documents_persistence ... ok
+test invalid_shell_state_is_retained_through_native_entrypoint ... ok
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.11s
+test terminal_pane_is_an_explicit_native_opt_in ... ok
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+Total CLI: 7 passed; 0 failed.

@@ -1,5 +1,8 @@
 # PR #4652 registration migration
 
+Historical #4689 migration receipt. The final [request-registration correction](final-registration.md)
+removes the shared-client exception described below after #4696.
+
 Rebased on the per-surface registration contract from #4689 (`506ea06a1`).
 The model, renderers and client method bodies match the previous pushed head
 `a57dbcdf4`, apart from child-module filenames. Independent review found no

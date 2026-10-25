@@ -1,0 +1,17 @@
+running 1 test
+test shell::pull_requests::registration_tests::pull_requests_single_registration_owns_the_request_adapter ... registered real entry point: PR preview and POST compile
+removed single registration: real application still compiles
+
+thread 'shell::pull_requests::registration_tests::pull_requests_single_registration_owns_the_request_adapter' (384723914) panicked at src/surfaces/pull_requests/registration_tests.rs:114:5:
+Removing the PR registration must remove its request adapter; both PR methods still compile
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    shell::pull_requests::registration_tests::pull_requests_single_registration_owns_the_request_adapter
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 119 filtered out; finished in 162.69s
+
+error: test failed, to rerun pass `--bin o8-next`

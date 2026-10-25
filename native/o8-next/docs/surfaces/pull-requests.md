@@ -8,12 +8,17 @@ routes. No additional crates or application routes are added.
 
 Registration, workspace view retention, focus and shell tests belong to
 `src/surfaces/pull_requests.rs` and `src/surfaces/pull_requests/`. The shell has
-one inventory entry. PR transport remains a private child of `client.rs`, loaded
-from the same surface directory so its credential fields stay private. That
-second registration site is unchanged in correction round 2 and tracked by
-#4695. The
+one inventory entry. The surface loads its own request adapter from
+`pull_requests/client.rs`; its inherent `impl Client` uses the shared URL,
+authenticated-request and bounded-response helpers. Shared `src/client.rs`
+matches main and contains no PR-specific code. Removing the inventory entry
+removes the view and request methods together. The
 fixture registers with `scripts/next/dev-server.ts --pull-requests` through
 `scripts/next/surfaces/55-pull-requests.surface.ts`.
+
+The final [registration correction](pull-requests/final-registration.md) records
+the real-entry compiler regression and its red/green output. The accepted merge
+gate and linked-worktree fixes are unchanged in that correction.
 
 The surface uses the shared native theme and GPUI composer. Reads and writes use
 the existing `Client` and its explicit loopback origin/operator bearer. The PR

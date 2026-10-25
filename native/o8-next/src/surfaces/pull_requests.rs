@@ -2,6 +2,8 @@ use super::*;
 
 #[path = "pull_requests/model.rs"]
 mod model;
+#[path = "pull_requests/client.rs"]
+mod requests;
 pub(super) type Slice = EmptyState;
 #[derive(Default)]
 pub(super) struct Runtime {
@@ -40,3 +42,7 @@ impl ShellView for View {
 #[cfg(test)]
 #[path = "pull_requests/shell_tests.rs"]
 mod shell_tests;
+
+#[cfg(test)]
+#[path = "pull_requests/registration_tests.rs"]
+mod registration_tests;

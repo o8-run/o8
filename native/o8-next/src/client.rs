@@ -4,9 +4,6 @@ use std::net::{IpAddr, SocketAddr};
 use std::{io::Read, time::Duration};
 use url::{Host, Url};
 
-#[path = "surfaces/pull_requests/client.rs"]
-mod pull_requests;
-
 pub(crate) fn same_workspace(a: &str, b: &str) -> bool {
     a == b
         || matches!((std::fs::canonicalize(a), std::fs::canonicalize(b)), (Ok(a), Ok(b)) if a == b)

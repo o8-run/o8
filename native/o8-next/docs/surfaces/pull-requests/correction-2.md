@@ -1,5 +1,8 @@
 # Merge safety correction
 
+Historical P1 correction receipt. The subsequent [final registration correction](final-registration.md)
+removes the retained shared-client include without changing these merge gates.
+
 Both reported P1s were reproduced through GPUI controls, the shared fixture host,
 persisted packet state and the production PR handlers before implementing fixes.
 Only the external GitHub boundary is authored. No account or installed app was
