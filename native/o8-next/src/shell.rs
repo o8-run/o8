@@ -49,6 +49,7 @@ register_surfaces! {
 
 pub struct Shell {
     system_glass: bool,
+    chrome: crate::render_region::Regions<Shell>,
     client: Client,
     file: PathBuf,
     state: State,
@@ -82,6 +83,7 @@ impl Shell {
         focus.focus(window);
         let mut shell = Self {
             system_glass: false,
+            chrome: crate::render_region::Regions::default(),
             client,
             file,
             state,
@@ -525,10 +527,10 @@ impl Shell {
         }
     }
 }
-#[path = "shell_view.rs"]
-mod view;
 #[path = "shell_material.rs"]
 mod material;
+#[path = "shell_view.rs"]
+mod view;
 pub use view::try_launch;
 
 #[cfg(test)]

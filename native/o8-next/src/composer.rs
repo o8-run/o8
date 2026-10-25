@@ -452,9 +452,12 @@ impl EntityInputHandler for Composer {
             if index < *offset || index > offset + line.len() {
                 return None;
             }
-            let start = line.position_for_index(index - offset, px(crate::theme::TYPE.body_line))?;
-            let end =
-                line.position_for_index(range.end.min(offset + line.len()) - offset, px(crate::theme::TYPE.body_line))?;
+            let start =
+                line.position_for_index(index - offset, px(crate::theme::TYPE.body_line))?;
+            let end = line.position_for_index(
+                range.end.min(offset + line.len()) - offset,
+                px(crate::theme::TYPE.body_line),
+            )?;
             // The platform asks for the first visual line's rectangle. A range
             // can run in either direction after shaping, or cross a soft wrap.
             let end_x = if end.y == start.y {
@@ -464,7 +467,10 @@ impl EntityInputHandler for Composer {
             };
             Some(Bounds::new(
                 *origin + point(start.x.min(end_x), start.y),
-                size((end_x - start.x).abs().max(px(1.)), px(crate::theme::TYPE.body_line)),
+                size(
+                    (end_x - start.x).abs().max(px(1.)),
+                    px(crate::theme::TYPE.body_line),
+                ),
             ))
         })
     }
@@ -492,7 +498,7 @@ impl Render for Composer {
             .key_context(self.context)
             .tab_stop(true)
             .cursor(CursorStyle::IBeam)
-            .max_h(px(176.))
+            .max_h(px(if self.framed { 176. } else { 52. }))
             .overflow_y_scroll()
             .track_scroll(&self.scroll)
             .when(self.framed, |d| d.border_1())
@@ -631,7 +637,13 @@ impl Render for Composer {
                                 .collect();
                             let lines = window
                                 .text_system()
-                                .shape_text(display, px(crate::theme::TYPE.body), &runs, Some(bounds.size.width), None)
+                                .shape_text(
+                                    display,
+                                    px(crate::theme::TYPE.body),
+                                    &runs,
+                                    Some(bounds.size.width),
+                                    None,
+                                )
                                 .expect("shape input");
                             for line in lines {
                                 let origin = point(bounds.left(), y);
@@ -698,7 +710,9 @@ impl Render for Composer {
                                     let cursor_y = position.y - bounds.top();
                                     let top = -scroll.y;
                                     // The viewport excludes the input's padding and border.
-                                    let visible = height.min(px(158.));
+                                    let visible = (input.scroll.bounds().size.height
+                                        - px(if input.framed { 18. } else { 15. }))
+                                    .max(px(20.));
                                     let bottom = top + visible;
                                     let next = if cursor_y < top {
                                         -cursor_y

@@ -11,6 +11,9 @@ struct Fixture {
 }
 impl Fixture {
     fn start(_: bool) -> Self {
+        Self::with_loaded(false)
+    }
+    fn with_loaded(loaded: bool) -> Self {
         let mut server = Command::new("node")
             .current_dir(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
             .args([
@@ -22,6 +25,11 @@ impl Fixture {
                 "--composer",
                 "--settings",
             ])
+            .args(if loaded {
+                vec!["--composer-loaded"]
+            } else {
+                vec![]
+            })
             .env("O8_NEXT_API_TOKEN", "fixture-composer-card")
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
@@ -430,5 +438,205 @@ fn native_composer_review_send_button_returns_focus_to_editor(cx: &mut TestAppCo
             s.composer.read(cx).focus.is_focused(window),
             "keyboard activation of Send must also restore the editor"
         );
+    });
+}
+
+fn loaded<'a>(
+    cx: &'a mut TestAppContext,
+    fixture: &Fixture,
+) -> (gpui::Entity<Surface>, &'a mut VisualTestContext) {
+    let (surface, cx) = open(cx, fixture);
+    cx.simulate_resize(gpui::size(px(1200.), px(816.)));
+    surface.update(cx, |s, cx| s.select("thoughts-composer-loaded".into(), cx));
+    cx.run_until_parked();
+    // Exercise history pagination through the production client until all 200
+    // fixed messages are installed. No synthetic rows bypass the renderer.
+    for _ in 0..3 {
+        if surface.read_with(cx, |s, _| s.rows.len()) >= 200 {
+            break;
+        }
+        surface.update(cx, |s, cx| s.load_older(cx));
+        cx.run_until_parked();
+    }
+    click("composer-input", cx);
+    surface.read_with(cx, |s, _| assert_eq!(s.rows.len(), 200));
+    (surface, cx)
+}
+
+#[gpui::test]
+fn native_composer_loaded_typing_invalidates_only_editor(cx: &mut TestAppContext) {
+    let fixture = Fixture::with_loaded(true);
+    let (surface, cx) = loaded(cx, &fixture);
+    let notifications = Rc::new(Cell::new(0));
+    let observed = notifications.clone();
+    let _subscription =
+        cx.update(|_, cx| cx.observe(&surface, move |_, _| observed.set(observed.get() + 1)));
+    let layouts = surface.read_with(cx, |s, _| {
+        s.painted_rows.borrow_mut().clear();
+        s.rows
+            .iter()
+            .map(|row| row.borrow().layouts)
+            .collect::<Vec<_>>()
+    });
+    let renders = surface.read_with(cx, |s, cx| s.regions.renders(cx));
+    cx.update(|window, cx| {
+        window.dispatch_keystroke(Keystroke::parse("a").unwrap(), cx);
+    });
+    // A normal first CPU scene, without Window::refresh (which intentionally
+    // discards GPUI's view caches). A second scene must not be needed to paint.
+    cx.update(|window, cx| window.draw(cx).clear());
+    surface.read_with(cx, |s, cx| {
+        let editor = s.composer.read(cx);
+        assert_eq!(editor.text, "a");
+        assert_eq!(editor.revision, editor.painted);
+        assert_eq!(notifications.get(), 0, "typing must not notify the session");
+        assert_eq!(
+            s.regions.renders(cx),
+            renders,
+            "typing must not render sibling views"
+        );
+        assert!(
+            s.painted_rows.borrow().is_empty(),
+            "typing must reuse the transcript scene, without laying out or painting its rows"
+        );
+        assert_eq!(
+            s.rows
+                .iter()
+                .map(|row| row.borrow().layouts)
+                .collect::<Vec<_>>(),
+            layouts,
+            "unchanged rows must reuse shaped text"
+        );
+    });
+}
+
+#[gpui::test]
+fn native_composer_loaded_typing_benchmark(cx: &mut TestAppContext) {
+    let fixture = Fixture::with_loaded(true);
+    let (surface, cx) = loaded(cx, &fixture);
+    let mut samples = Vec::with_capacity(100);
+    for count in 1..=100 {
+        let start = Instant::now();
+        cx.update(|window, cx| {
+            window.dispatch_keystroke(Keystroke::parse("a").unwrap(), cx);
+        });
+        samples.push(start.elapsed().as_secs_f64() * 1000.);
+        surface.read_with(cx, |s, cx| {
+            let editor = s.composer.read(cx);
+            assert_eq!(editor.text.len(), count);
+            assert_eq!(
+                editor.revision, editor.painted,
+                "first scene must paint the edit"
+            );
+        });
+    }
+    samples.sort_by(f64::total_cmp);
+    println!(
+        "LOADED_COMPOSER_CPU_SCENE platform={} profile={} messages=200 inputs=100 p50_ms={:.6} p95_ms={:.6}",
+        std::env::consts::OS,
+        if cfg!(debug_assertions) {
+            "debug"
+        } else {
+            "release"
+        },
+        samples[49],
+        samples[94]
+    );
+}
+
+#[gpui::test]
+fn native_composer_loaded_wrapping_keeps_transcript_geometry(cx: &mut TestAppContext) {
+    let fixture = Fixture::with_loaded(true);
+    let (surface, cx) = loaded(cx, &fixture);
+    let before = cx.debug_bounds("composer-card").unwrap();
+    let regions = surface.read_with(cx, |s, cx| s.regions.renders(cx));
+    cx.write_to_clipboard(gpui::ClipboardItem::new_string(
+        "a long draft line\n".repeat(20),
+    ));
+    cx.simulate_keystrokes("ctrl-v");
+    for _ in 0..2 {
+        cx.update(|window, cx| window.draw(cx).clear());
+    }
+    assert_eq!(
+        cx.debug_bounds("composer-card").unwrap(),
+        before,
+        "growing a draft must scroll inside the composer, without resizing the conversation"
+    );
+    surface.read_with(cx, |s, cx| assert_eq!(s.regions.renders(cx), regions));
+    let viewport = cx.debug_bounds("composer-input").unwrap();
+    surface.update_in(cx, |s, window, cx| {
+        s.composer.update(cx, |i, cx| {
+            let end = i.text.encode_utf16().count();
+            let caret = gpui::EntityInputHandler::bounds_for_range(
+                i,
+                end..end,
+                gpui::Bounds::default(),
+                window,
+                cx,
+            )
+            .expect("native caret bounds");
+            assert!(
+                caret.top() >= viewport.top() && caret.bottom() <= viewport.bottom(),
+                "the fixed composer viewport must scroll the insertion point into view"
+            );
+        });
+    });
+}
+
+#[gpui::test]
+fn native_composer_loaded_resize_reshapes_rows_then_resumes_isolation(cx: &mut TestAppContext) {
+    let fixture = Fixture::with_loaded(true);
+    let (surface, cx) = loaded(cx, &fixture);
+    let row = surface.read_with(cx, |s, _| {
+        s.rows[s.list.logical_scroll_top().item_ix].clone()
+    });
+    let before = row.borrow().layouts;
+    cx.simulate_resize(gpui::size(px(900.), px(700.)));
+    for _ in 0..2 {
+        cx.update(|window, cx| window.draw(cx).clear());
+    }
+    assert!(
+        row.borrow().layouts > before,
+        "a width change must reshape retained text"
+    );
+    let renders = surface.read_with(cx, |s, cx| s.regions.renders(cx));
+    cx.update(|window, cx| {
+        window.dispatch_keystroke(Keystroke::parse("a").unwrap(), cx);
+    });
+    cx.update(|window, cx| window.draw(cx).clear());
+    surface.read_with(cx, |s, cx| assert_eq!(s.regions.renders(cx), renders));
+}
+
+#[gpui::test]
+fn native_composer_loaded_focus_and_pending_switch_keep_current_scene(cx: &mut TestAppContext) {
+    let fixture = Fixture::with_loaded(true);
+    let (surface, cx) = loaded(cx, &fixture);
+    let old_editor = surface.read_with(cx, |s, _| s.composer.clone());
+    cx.simulate_input("Retained draft");
+    surface.update(cx, |s, cx| s.select("thoughts-composer-first".into(), cx));
+    // The history request is still pending. A late notification from the old
+    // input must neither replace the selected transcript nor steal its focus.
+    old_editor.update(cx, |i, cx| i.set_text("Late draft", cx));
+    cx.run_until_parked();
+    surface.update_in(cx, |s, window, cx| {
+        assert_eq!(s.selected.as_deref(), Some("thoughts-composer-first"));
+        assert_eq!(s.rows.len(), 1);
+        s.composer.read(cx).focus.focus(window);
+    });
+    for _ in 0..2 {
+        cx.update(|window, cx| window.draw(cx).clear());
+    }
+    cx.update(|window, _| window.blur());
+    surface.update_in(cx, |s, window, cx| s.composer.read(cx).focus.focus(window));
+    for _ in 0..2 {
+        cx.update(|window, cx| window.draw(cx).clear());
+    }
+    let renders = surface.read_with(cx, |s, cx| s.regions.renders(cx));
+    cx.simulate_keystrokes("x");
+    cx.update(|window, cx| window.draw(cx).clear());
+    surface.read_with(cx, |s, cx| {
+        assert_eq!(s.composer.read(cx).text, "x");
+        assert_eq!(s.regions.renders(cx), renders);
+        assert_eq!(old_editor.read(cx).text, "Late draft");
     });
 }

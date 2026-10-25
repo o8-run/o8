@@ -4,6 +4,9 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::ui::Surface;
+#[cfg(test)]
+#[path = "../composer/loaded_shell_tests.rs"]
+mod loaded_shell_tests;
 pub(super) type Runtime = ();
 #[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct Slice {

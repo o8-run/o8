@@ -3,6 +3,121 @@ use crate::composer::controls::mode_label;
 use gpui::{AnyElement, Div, KeyDownEvent, SharedString, Stateful};
 
 impl Surface {
+    pub(crate) fn composer_footer(&mut self, _: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let routing = self.composer_routing(cx).unwrap_or(Value::Null);
+        let mode = mode_label(routing["pickedMode"].as_str().unwrap_or("solo"));
+        let access = if routing["permissionMode"] == "plan" {
+            "Plan only"
+        } else {
+            "Full access"
+        };
+        let enabled = self.queue_ready && !self.saving && !self.composer.read(cx).controls.busy;
+        div()
+            .flex()
+            .items_center()
+            .gap(px(6.))
+            .min_h(px(36.))
+            .pt(px(4.))
+            .px(px(8.))
+            .pb(px(8.))
+            .child(
+                self.composer_button("composer-mode", mode, enabled, cx, |s, w, cx| {
+                    s.open_composer_picker("mode", w, cx)
+                }),
+            )
+            .child(
+                self.composer_button("composer-access", access, enabled, cx, |s, w, cx| {
+                    s.open_composer_picker("access", w, cx)
+                }),
+            )
+            .child(self.composer_button(
+                "composer-attach",
+                "+",
+                enabled
+                    && matches!(
+                        routing["backend"].as_str(),
+                        Some("codex" | "claude" | "fable" | "collide")
+                    ),
+                cx,
+                |s, _, cx| s.attach_composer_image(cx),
+            ))
+            .when(self.queue["canSteer"] == true, |d| {
+                d.child(self.composer_button(
+                    "send-mode",
+                    if self.send_next { "Queue" } else { "Steer" },
+                    enabled,
+                    cx,
+                    |s, _, cx| {
+                        s.send_next = !s.send_next;
+                        cx.notify();
+                    },
+                ))
+            })
+            .child(div().flex_1().min_w(px(0.)))
+            .child(
+                self.composer_button(
+                    "composer-model",
+                    routing["model"].as_str().unwrap_or("Model"),
+                    enabled,
+                    cx,
+                    |s, w, cx| s.open_composer_picker("model", w, cx),
+                )
+                .max_w(px(140.))
+                .truncate(),
+            )
+            .child(self.composer_button(
+                "composer-effort",
+                routing["effort"].as_str().unwrap_or("Effort"),
+                enabled,
+                cx,
+                |s, w, cx| s.open_composer_picker("effort", w, cx),
+            ))
+            .child(
+                self.composer_button("composer-microphone", "", false, cx, |_, _, _| {})
+                    .w(px(26.))
+                    .child(
+                        canvas(
+                            |_, _, _| (),
+                            |bounds, _, window, _| {
+                                let p = |x, y| bounds.origin + point(px(x), px(y));
+                                let mut path = gpui::PathBuilder::stroke(px(1.3));
+                                path.move_to(p(4., 3.));
+                                path.line_to(p(4., 8.));
+                                path.curve_to(p(10., 8.), p(7., 14.));
+                                path.line_to(p(10., 3.));
+                                path.curve_to(p(4., 3.), p(7., -1.));
+                                path.move_to(p(1., 7.));
+                                path.curve_to(p(13., 7.), p(7., 20.));
+                                path.move_to(p(7., 14.));
+                                path.line_to(p(7., 18.));
+                                path.move_to(p(4., 18.));
+                                path.line_to(p(10., 18.));
+                                if let Ok(path) = path.build() {
+                                    window.paint_path(path, theme().text_secondary);
+                                }
+                            },
+                        )
+                        .w(px(14.))
+                        .h(px(20.)),
+                    ),
+            )
+            .child(
+                self.composer_button(
+                    "send",
+                    if self.saving { "…" } else { "↑" },
+                    enabled,
+                    cx,
+                    |s, window, cx| {
+                        s.send(None, cx);
+                        s.composer.read(cx).focus.focus(window);
+                    },
+                )
+                .bg(theme().accent)
+                .text_color(theme().background),
+            )
+            .into_any_element()
+    }
+
     pub(super) fn composer_routing(&self, cx: &App) -> Option<Value> {
         let mut routing = self.routing.clone()?;
         for (key, value) in self.composer.read(cx).controls.overrides.as_object()? {
@@ -247,14 +362,9 @@ impl Surface {
             });
         }).detach();
     }
-    pub(super) fn composer_card(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn composer_card(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let routing = self.composer_routing(cx).unwrap_or(Value::Null);
         let mode = mode_label(routing["pickedMode"].as_str().unwrap_or("solo"));
-        let access = if routing["permissionMode"] == "plan" {
-            "Plan only"
-        } else {
-            "Full access"
-        };
         let (open, busy, error, model, images) = self.composer.update(cx, |i, cx| {
             let placeholder = format!("Message {mode}…");
             if i.placeholder != placeholder || i.framed {
@@ -270,110 +380,12 @@ impl Surface {
                 i.controls.images.clone(),
             )
         });
-        let enabled = self.queue_ready && !self.saving && !busy;
-        let footer = div()
-            .flex()
-            .items_center()
-            .gap(px(6.))
-            .min_h(px(36.))
-            .pt(px(4.))
-            .px(px(8.))
-            .pb(px(8.))
-            .child(
-                self.composer_button("composer-mode", mode, enabled, cx, |s, w, cx| {
-                    s.open_composer_picker("mode", w, cx)
-                }),
-            )
-            .child(
-                self.composer_button("composer-access", access, enabled, cx, |s, w, cx| {
-                    s.open_composer_picker("access", w, cx)
-                }),
-            )
-            .child(self.composer_button(
-                "composer-attach",
-                "+",
-                enabled
-                    && matches!(
-                        routing["backend"].as_str(),
-                        Some("codex" | "claude" | "fable" | "collide")
-                    ),
-                cx,
-                |s, _, cx| s.attach_composer_image(cx),
-            ))
-            .when(self.queue["canSteer"] == true, |d| {
-                d.child(self.composer_button(
-                    "send-mode",
-                    if self.send_next { "Queue" } else { "Steer" },
-                    enabled,
-                    cx,
-                    |s, _, cx| {
-                        s.send_next = !s.send_next;
-                        cx.notify();
-                    },
-                ))
-            })
-            .child(div().flex_1().min_w(px(0.)))
-            .child(
-                self.composer_button(
-                    "composer-model",
-                    routing["model"].as_str().unwrap_or("Model"),
-                    enabled,
-                    cx,
-                    |s, w, cx| s.open_composer_picker("model", w, cx),
-                )
-                .max_w(px(140.))
-                .truncate(),
-            )
-            .child(self.composer_button(
-                "composer-effort",
-                routing["effort"].as_str().unwrap_or("Effort"),
-                enabled,
-                cx,
-                |s, w, cx| s.open_composer_picker("effort", w, cx),
-            ))
-            .child(
-                self.composer_button("composer-microphone", "", false, cx, |_, _, _| {})
-                    .w(px(26.))
-                    .child(
-                        canvas(
-                            |_, _, _| (),
-                            |bounds, _, window, _| {
-                                let p = |x, y| bounds.origin + point(px(x), px(y));
-                                let mut path = gpui::PathBuilder::stroke(px(1.3));
-                                path.move_to(p(4., 3.));
-                                path.line_to(p(4., 8.));
-                                path.curve_to(p(10., 8.), p(7., 14.));
-                                path.line_to(p(10., 3.));
-                                path.curve_to(p(4., 3.), p(7., -1.));
-                                path.move_to(p(1., 7.));
-                                path.curve_to(p(13., 7.), p(7., 20.));
-                                path.move_to(p(7., 14.));
-                                path.line_to(p(7., 18.));
-                                path.move_to(p(4., 18.));
-                                path.line_to(p(10., 18.));
-                                if let Ok(path) = path.build() {
-                                    window.paint_path(path, theme().text_secondary);
-                                }
-                            },
-                        )
-                        .w(px(14.))
-                        .h(px(20.)),
-                    ),
-            )
-            .child(
-                self.composer_button(
-                    "send",
-                    if self.saving { "…" } else { "↑" },
-                    enabled,
-                    cx,
-                    |s, window, cx| {
-                        s.send(None, cx);
-                        s.composer.read(cx).focus.focus(window);
-                    },
-                )
-                .bg(theme().accent)
-                .text_color(theme().background),
-            );
+        let footer = self.regions.view(
+            "footer",
+            composer_regions::footer_style(),
+            Self::composer_footer,
+            cx,
+        );
         let mut card = div()
             .id("composer-card")
             .debug_selector(|| "composer-card".into())

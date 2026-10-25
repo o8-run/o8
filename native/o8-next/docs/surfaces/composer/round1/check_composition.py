@@ -23,8 +23,59 @@ with tempfile.TemporaryDirectory(prefix="o8-composer-composition-") as temporary
     try:
         (root / "node_modules").symlink_to(repository / "node_modules", target_is_directory=True)
         prefix = pathlib.Path("native/o8-next")
-        for relative in ["src/composer.rs", "src/conversation.rs", "src/surfaces/session.rs", "src/worker_tests.rs"]:
+        peer_ui = git("show", f"{args.peer_ref}:{prefix}/src/ui.rs").decode()
+        peer_shell = git("show", f"{args.peer_ref}:{prefix}/src/shell_view.rs").decode()
+        for relative in ["src/composer.rs", "src/conversation.rs", "src/surfaces/session.rs", "src/worker_tests.rs",
+                         "src/ui.rs", "src/shell_session.rs", "src/render_region.rs", "src/speed_receipt.rs"]:
             shutil.copyfile(repository / prefix / relative, root / prefix / relative)
+        # Retain the peer's actual focused session and shell listeners while
+        # porting these retained sibling boundaries. Do not replace its actions
+        # with the raw-key hooks from this branch.
+        ui = root / prefix / "src/ui.rs"
+        source = ui.read_text()
+        begin = peer_ui.index('            .key_context("Session List")')
+        end = peer_ui.index('\n            .child(', begin)
+        start_own = source.index('            .capture_key_down(cx.listener(Self::brain_key))')
+        stop_own = source.index('\n            .child(header)', start_own)
+        ui.write_text(source[:start_own] + peer_ui[begin:end] + source[stop_own:])
+        shell = root / prefix / "src/shell.rs"
+        source = shell.read_text().replace('pub struct Shell {', 'pub struct Shell {\n    chrome: crate::render_region::Regions<Shell>,', 1)
+        source = source.replace('let mut shell = Self {', 'let mut shell = Self {\n            chrome: crate::render_region::Regions::default(),', 1)
+        shell.write_text(source)
+        # Move the peer's unchanged chrome into a retained sibling, leaving its
+        # real Global actions, palette editor and modal ownership in place.
+        shell = root / prefix / "src/shell_view.rs"
+        source = peer_shell
+        begin = source.index('        let before_workspaces =')
+        end = source.index('\n        div()\n            .size_full()', begin)
+        preparation = source[begin:end]
+        start_chrome = source.index('            .child(\n                div()\n                    .flex()\n                    .flex_wrap()', end)
+        stop_chrome = source.index('            .child(\n                div()\n                    .debug_selector(|| "shell-content"', start_chrome)
+        chrome = source[start_chrome:stop_chrome]
+        source = source[:start_chrome] + '            .child(chrome)\n' + source[stop_chrome:]
+        source = source[:begin] + '''        let mut style = gpui::StyleRefinement::default();
+        style.size.width = Some(gpui::relative(1.).into());
+        style.flex_shrink = Some(0.);
+        let chrome = self.chrome.measured_view("shell-chrome", style, Self::render_chrome, window.viewport_size().width, cx);''' + source[end:]
+        source += '\nimpl Shell {\n    fn render_chrome(&mut self, _: &mut Window, cx: &mut Context<Self>) -> gpui::AnyElement {\n        let active = self.active();\n' + preparation + '\n        div().w_full().flex().flex_col()\n' + chrome + '.into_any_element()\n    }\n}\n'
+        shell.write_text(source)
+        main = root / prefix / "src/main.rs"
+        main.write_text('mod render_region;\n' + main.read_text())
+        # The peer caches each entire surface. A descendant input makes that
+        # outer cache dirty; GPUI then refreshes *all* nested caches while it
+        # rebuilds the surface. Session owns finer sibling boundaries instead.
+        registry = root / prefix / "src/surface_registry.rs"
+        source = registry.read_text()
+        cached = 'gpui::AnyView::from(view.clone()).cached(gpui::StyleRefinement::default().size_full()).into_any_element()'
+        assert cached in source
+        source = source.replace(cached, '<$module::View as ShellView>::element(view)', 1)
+        source = source.replace('pub(super) trait ShellView: Render {',
+            'pub(super) trait ShellView: Render {\n    fn element(view: &Entity<Self>) -> gpui::AnyElement {\n        ' + cached + '\n    }', 1)
+        registry.write_text(source)
+        session = root / prefix / "src/surfaces/session.rs"
+        source = session.read_text().replace('impl ShellView for Surface {',
+            'impl ShellView for Surface {\n    fn element(view: &Entity<Self>) -> gpui::AnyElement { view.clone().into_any_element() }', 1)
+        session.write_text(source)
         shutil.copytree(repository / prefix / "src/composer", root / prefix / "src/composer", dirs_exist_ok=True)
         fixture = pathlib.Path("scripts/next/surfaces/70-composer.surface.ts")
         shutil.copyfile(repository / fixture, root / fixture)

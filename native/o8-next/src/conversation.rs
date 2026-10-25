@@ -114,7 +114,10 @@ impl Surface {
         .into();
         cx.notify();
         let client = self.client.clone();
-        let sent_images = body["payload"]["images"].as_array().cloned().unwrap_or_default();
+        let sent_images = body["payload"]["images"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
         let task = cx.background_executor().spawn(async move {
             let response = client.mutate_queue(method, &body).map_err(|error| {
                 (
@@ -152,7 +155,9 @@ impl Surface {
                             if this.composer.read(cx).text == draft {
                                 this.composer.update(cx, |i, cx| {
                                     i.clear(cx);
-                                    i.controls.images.retain(|image| !sent_images.contains(image));
+                                    i.controls
+                                        .images
+                                        .retain(|image| !sent_images.contains(image));
                                 });
                             }
                         }
@@ -252,7 +257,7 @@ impl Surface {
         })
         .detach();
     }
-    pub(super) fn composer_panel(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
+    pub(super) fn composer_panel(&mut self, cx: &mut Context<Self>) -> gpui::AnyElement {
         let enabled = self.queue_ready && !self.saving;
         let queue = self.queue["items"].as_array().cloned().unwrap_or_default();
         let queue = queue
@@ -266,49 +271,67 @@ impl Surface {
             .flex_col()
             .gap(px(8.))
             .child(self.composer_card(cx))
-            .child(div().id("composer-queue").max_h(px(120.)).overflow_y_scroll().children(queue.map(|item| {
-                let id = item["id"].as_str().unwrap_or("").to_owned();
-                let remove_id = id.clone();
-                let cancellable = enabled && (item["status"] == "queued" || item["status"] == "held"
-                    || (item["status"] == "dispatching" && item["admittedAt"].is_null()));
-                let steerable = enabled
-                    && item["status"] == "queued"
-                    && item["intent"] == "send-next"
-                    && item["admittedAt"].is_null()
-                    && item["payload"]["afterTaskId"].is_null()
-                    && self.queue["steerableIds"]
-                        .as_array()
-                        .is_some_and(|ids| ids.iter().any(|v| v == &id));
+            .child(
                 div()
-                    .flex()
-                    .flex_col()
-                    .text_size(px(11.))
-                    .child(format!(
-                        "{} · {}",
-                        item["status"].as_str().unwrap_or("queued"),
-                        item["payload"]["text"].as_str().unwrap_or("")
-                    ))
-                    .when(item["reason"].is_string(), |d| {
-                        d.child(item["reason"].as_str().unwrap_or("").to_owned())
-                    })
-                    .when(steerable, |d| {
-                        d.child(
-                            div()
-                                .id(gpui::ElementId::Name(format!("steer-{id}").into())).debug_selector(|| "steer-now".into())
-                                .cursor_pointer()
-                                .child("Steer now")
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.send(Some(id.clone()), cx)
-                                })),
-                        )
-                    })
-                    .when(cancellable, |d| {
-                        d.child(div().id(gpui::ElementId::Name(format!("remove-{remove_id}").into()))
-                            .debug_selector(|| "remove-queued".into())
-                            .cursor_pointer().child("Remove")
-                            .on_click(cx.listener(move |this, _, _, cx| this.remove_queued(remove_id.clone(), cx))))
-                    })
-            })))
+                    .id("composer-queue")
+                    .max_h(px(120.))
+                    .overflow_y_scroll()
+                    .children(queue.map(|item| {
+                        let id = item["id"].as_str().unwrap_or("").to_owned();
+                        let remove_id = id.clone();
+                        let cancellable = enabled
+                            && (item["status"] == "queued"
+                                || item["status"] == "held"
+                                || (item["status"] == "dispatching"
+                                    && item["admittedAt"].is_null()));
+                        let steerable = enabled
+                            && item["status"] == "queued"
+                            && item["intent"] == "send-next"
+                            && item["admittedAt"].is_null()
+                            && item["payload"]["afterTaskId"].is_null()
+                            && self.queue["steerableIds"]
+                                .as_array()
+                                .is_some_and(|ids| ids.iter().any(|v| v == &id));
+                        div()
+                            .flex()
+                            .flex_col()
+                            .text_size(px(11.))
+                            .child(format!(
+                                "{} · {}",
+                                item["status"].as_str().unwrap_or("queued"),
+                                item["payload"]["text"].as_str().unwrap_or("")
+                            ))
+                            .when(item["reason"].is_string(), |d| {
+                                d.child(item["reason"].as_str().unwrap_or("").to_owned())
+                            })
+                            .when(steerable, |d| {
+                                d.child(
+                                    div()
+                                        .id(gpui::ElementId::Name(format!("steer-{id}").into()))
+                                        .debug_selector(|| "steer-now".into())
+                                        .cursor_pointer()
+                                        .child("Steer now")
+                                        .on_click(cx.listener(move |this, _, _, cx| {
+                                            this.send(Some(id.clone()), cx)
+                                        })),
+                                )
+                            })
+                            .when(cancellable, |d| {
+                                d.child(
+                                    div()
+                                        .id(gpui::ElementId::Name(
+                                            format!("remove-{remove_id}").into(),
+                                        ))
+                                        .debug_selector(|| "remove-queued".into())
+                                        .cursor_pointer()
+                                        .child("Remove")
+                                        .on_click(cx.listener(move |this, _, _, cx| {
+                                            this.remove_queued(remove_id.clone(), cx)
+                                        })),
+                                )
+                            })
+                    })),
+            )
             .into_any_element()
     }
 }
