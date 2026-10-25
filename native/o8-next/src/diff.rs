@@ -99,7 +99,7 @@ impl Target {
                 client.get("/api/worktrees/diff", &query)?
             }
         };
-        if crate::viewer_guard::sensitive(&response.diff) {
+        if crate::shell::commit::guard::sensitive(&response.diff) {
             return Err("Sensitive patch hidden. Read-only.".into());
         }
         if response.error.is_some() {

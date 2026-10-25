@@ -147,8 +147,8 @@ impl Commit {
                 s.loading = false;
                 match result {
                     Ok(mut data) if data["commit"].is_object() => {
-                        let sensitive = crate::viewer_guard::contains(&data);
-                        crate::viewer_guard::scrub(&mut data);
+                        let sensitive = crate::shell::commit::guard::contains(&data);
+                        crate::shell::commit::guard::scrub(&mut data);
                         s.data = data["commit"].clone();
                         if sensitive {
                             s.compare = json!({"sensitive":true});
@@ -200,8 +200,8 @@ impl Commit {
                 s.loading = false;
                 match result {
                     Ok(mut data) if data["file"].is_object() => {
-                        let sensitive = crate::viewer_guard::contains(&data);
-                        crate::viewer_guard::scrub(&mut data);
+                        let sensitive = crate::shell::commit::guard::contains(&data);
+                        crate::shell::commit::guard::scrub(&mut data);
                         s.compare = data["file"].clone();
                         s.compare["sensitive"] = json!(sensitive);
                         s.baseline = s.compare["workspaceContent"]
@@ -252,8 +252,8 @@ impl Commit {
         {
             return;
         }
-        if crate::viewer_guard::sensitive(&message)
-            || crate::viewer_guard::sensitive(&self.editor.read(cx).text)
+        if crate::shell::commit::guard::sensitive(&message)
+            || crate::shell::commit::guard::sensitive(&self.editor.read(cx).text)
         {
             self.notice = "Sensitive content hidden. Action refused.".into();
             cx.notify();

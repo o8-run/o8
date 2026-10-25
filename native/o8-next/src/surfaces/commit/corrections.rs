@@ -33,8 +33,10 @@ fn commit_projects_refresh_retains_unregistered_draft(cx: &mut TestAppContext) {
     git(&path, &["add", "-A"]);
     git(&path, &["commit", "-qm", "fixture comparison"]);
     let hash = git(&path, &["rev-parse", "HEAD"]);
-    let mut state = State::default();
-    state.selected = Some(name.clone());
+    let mut state = State {
+        selected: Some(name.clone()),
+        ..State::default()
+    };
     state.workspaces.insert(
         name,
         crate::shell_state::Workspace {
@@ -174,7 +176,7 @@ fn commit_draft_survives_close_settings_and_file_switch(cx: &mut TestAppContext)
     );
     visual.simulate_keystrokes("ctrl-,");
     draw(&mut visual);
-    assert!(shell.read_with(&visual, |s, _| s.settings.is_some()));
+    assert!(shell.read_with(&visual, |s, _| s.surfaces.settings.view.is_some()));
     visual.simulate_keystrokes("ctrl-,");
     draw(&mut visual);
     let initial = shell.read_with(&visual, |s, _| s.state.selected.clone().unwrap());

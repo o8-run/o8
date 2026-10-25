@@ -33,6 +33,7 @@ register_surfaces! {
         issues: Issues = "surfaces/issues.rs";
         diff: Diff = "surfaces/diff.rs";
         terminal: Terminal = "surfaces/terminal.rs";
+        commit: Commit = "surfaces/commit.rs";
         #[cfg(test)] fake: Fake = "surfaces/fake.rs";
     }
     commands {
