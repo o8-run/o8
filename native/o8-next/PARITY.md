@@ -27,12 +27,13 @@ the desktop shell. Native registration lives in [shell.rs](src/shell.rs).
 | File tree and text file viewer/editor (`file`) | missing | No registered file surface |
 | Diff and review (`diff`) | partial | `surfaces/diff.rs`, `diff_ui.rs`; native review slice, full desktop integration missing |
 | Commit detail (`commit`) | missing | No commit surface |
-| Pull request detail and list (`pr`, `pull-requests`) | missing | Inbox links are not a PR surface |
+| Pull request detail and list (`pr`, `pull-requests`) | partial | [Native PRs](docs/surfaces/pull-requests.md); list/detail and confirmed actions, packet-linked merge, thread controls and view persistence missing |
 | Git history (`git-log`) | missing | No history surface |
-| CI runs (`ci`) | missing | No CI viewer |
+| CI runs (`ci`) | partial | Activity exposes lazy CI failure details/retry/links; no standalone CI workspace |
 | Deployments (`deploy`) | missing | No deployment surface |
 | Usage (`usage`) | missing | No analytics workspace |
 | Automations (`automations`) | missing | No automation workspace |
+| Activity feed and packet controls | partial | [Activity parity](evidence/activity/parity.md); grouped feed, details, holds and mission stop; complete packet editing, lifecycle and review navigation missing |
 | Plugin catalog (`plugins`) | missing | No catalog or installation UI |
 | Customize (`customize`) | partial | See section inventory below and [detailed parity](docs/surfaces/customize/verification.md) |
 | README and Markdown documents (`readme`) | missing | Transcript prose is not a document surface |

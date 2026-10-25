@@ -1,19 +1,19 @@
 {
   "schema": 1,
-  "launchToFirstFrameMs": 2045,
+  "launchToFirstFrameMs": 1849,
   "idleRssMiB": 150,
   "baseline": [
     {
-      "launchToFirstFrameMs": 1428.89,
-      "idleRssMiB": 118.84
+      "launchToFirstFrameMs": 1448.87,
+      "idleRssMiB": 119.09
     },
     {
-      "launchToFirstFrameMs": 1635.65,
-      "idleRssMiB": 119.94
+      "launchToFirstFrameMs": 1478.76,
+      "idleRssMiB": 119.23
     },
     {
-      "launchToFirstFrameMs": 1465.93,
-      "idleRssMiB": 119.47
+      "launchToFirstFrameMs": 1392.28,
+      "idleRssMiB": 118.19
     }
   ]
 }
