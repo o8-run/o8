@@ -690,3 +690,6 @@ impl Fixture {
         Self::start_mode(false, &options.join(" "))
     }
 }
+
+#[path = "project_header_tests.rs"]
+mod project_header_tests;
