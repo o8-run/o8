@@ -448,6 +448,10 @@ mod view;
 pub use view::try_launch;
 
 #[cfg(test)]
+#[path = "shell_window_tests.rs"]
+mod window_tests;
+
+#[cfg(test)]
 #[path = "shell_tests.rs"]
 mod tests;
 

@@ -77,11 +77,12 @@ impl State {
             .read_to_end(&mut bytes)
             .map_err(|_| "Cannot read shell state")?;
         if bytes.len() > 1024 * 1024 {
-            return Err("Shell state exceeds 1 MiB".into());
+            return Ok(Self::default());
         }
-        let state: Self = serde_json::from_slice(&bytes)
-            .map_err(|_| "Invalid shell state; original file retained")?;
-        state.validate()?;
+        let state: Self = serde_json::from_slice(&bytes).unwrap_or_default();
+        if state.validate().is_err() {
+            return Ok(Self::default());
+        }
         Ok(state)
     }
     pub fn save(&self, file: &Path) -> Result<(), String> {
