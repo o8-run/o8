@@ -1,11 +1,12 @@
 import { execFile, execFileSync, spawn } from 'node:child_process';
 import { createServer } from 'node:http';
+import { once } from 'node:events';
 import { promisify } from 'node:util';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { NextRequest } from 'next/server';
-import { afterAll, expect, it, vi } from 'vitest';
+import { afterAll, describe, expect, it, vi } from 'vitest';
 
 const seams = vi.hoisted(() => ({ failAfterRename: false, failAfterReturn: false, failAfterOwnership: false, ownershipDepth: 0 }));
 vi.mock('@/lib/workspace/retirement-process-authority', async original => {
@@ -46,13 +47,12 @@ const { adoptGeneratedOutput } = await import('@/lib/workspace/generated-output-
 const { recoverGeneratedOutput } = await import('@/lib/workspace/generated-output-recovery');
 const token = getOrCreateWsToken();
 let sequence = 0;
-let replay: { body: unknown; result: unknown } | undefined;
 function git(cwd: string, ...args: string[]) { return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: 'pipe' }).trim(); }
 async function fixture() {
   const repoPath = path.join(root, `repo-${++sequence}`); mkdirSync(repoPath);
   git(repoPath, 'init', '-q', '-b', 'main');
   writeFileSync(path.join(repoPath, 'README.md'), 'preserved source\n');
-  writeFileSync(path.join(repoPath, '.gitignore'), '.next\nnode_modules\n.o8-generated-output-store\n');
+  writeFileSync(path.join(repoPath, '.gitignore'), '.next\nnode_modules\n.o8-generated-output-store\n*.log\n');
   git(repoPath, 'add', '.'); git(repoPath, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'fixture');
   const repo = await addRepo(repoPath);
   const manager = getWorktreeManager(repoPath);
@@ -90,6 +90,11 @@ async function preview(repoPath: string) {
 }
 afterAll(() => { closeDb(); rmSync(root, { recursive: true, force: true }); });
 
+// Real Git, volume identity and process probes have multiple bounded native steps.
+// The generic 30s deadline (and 60s on a three-workspace case) can expire before
+// they settle on a shared Mac, leaving work running into the next test's state.
+describe('reviewed cleanup through native lifecycle operations', { timeout: 120_000, concurrent: false, shuffle: false }, () => {
+
 it('previews exact terminal ownership without removing source, and holds active work', async () => {
   const f = await fixture(); const done = await f.workspace(); const active = await f.workspace(false);
   const plan = await preview(f.repoPath);
@@ -101,8 +106,9 @@ it('previews exact terminal ownership without removing source, and holds active 
   expect(plan.fingerprint).toMatch(/^[a-f0-9]{64}$/);
 });
 
-it('executes only the approved selection, retains recovery, and replays the same receipt after database reopen', async () => {
+it('executes only the approved selection and retains recovery', async () => {
   const f = await fixture(); const done = await f.workspace(); const unselected = await f.workspace();
+  writeFileSync(path.join(done.path, 'reviewed-receipt.log'), 'unchanged reviewed ignored evidence');
   const plan = await preview(f.repoPath);
   const selected = plan.entries.find((entry: { worktreeId: string; kind: string }) => entry.worktreeId === done.id && entry.kind === 'workspace');
   const late = await f.workspace();
@@ -112,8 +118,8 @@ it('executes only the approved selection, retains recovery, and replays the same
   expect(result.outcomes).toEqual([expect.objectContaining({ entryId: selected.id, state: 'removed', recovery: expect.anything() })]);
   expect(existsSync(done.path)).toBe(false); expect(existsSync(unselected.path)).toBe(true); expect(existsSync(late.path)).toBe(true);
   expect(git(f.repoPath, 'rev-parse', done.branch)).toMatch(/^[a-f0-9]{40}$/);
-  replay = { body, result };
-}, 60_000);
+  expect((await (await post(body)).json()).result.plan).toEqual(result);
+});
 
 it('refuses changed source after preview and never silently adds new work', async () => {
   const f = await fixture(); const done = await f.workspace(); const plan = await preview(f.repoPath);
@@ -123,6 +129,38 @@ it('refuses changed source after preview and never silently adds new work', asyn
   expect(response.status, await response.clone().text()).toBe(200);
   expect((await response.json()).result.plan.outcomes).toEqual([expect.objectContaining({ state: 'held' })]);
   expect(readFileSync(path.join(done.path, 'README.md'), 'utf8')).toBe('new unreviewed source\n');
+});
+
+it.each(['addition', 'rename', 'symlink swap', 'size', 'mtime', 'deletion'])('requires renewed review after an ignored file %s', async change => {
+  const f = await fixture(); const done = await f.workspace();
+  const directory = ['rename', 'size', 'mtime'].includes(change) ? path.join(done.path, 'node_modules', 'cache') : done.path;
+  mkdirSync(directory, { recursive: true });
+  const ignored = path.join(directory, 'receipt.log');
+  const target = path.join(root, `target-${++sequence}`);
+  writeFileSync(target, 'retained external evidence');
+  if (change === 'symlink swap') symlinkSync(target, ignored);
+  else writeFileSync(ignored, 'reviewed ignored evidence');
+  const plan = await preview(f.repoPath);
+  const entry = plan.entries.find((entry: { worktreeId: string }) => entry.worktreeId === done.id);
+  expect(entry.eligible, entry.reason).toBe(true);
+  if (change === 'addition') writeFileSync(path.join(done.path, 'new-unique-receipt.log'), 'new evidence');
+  else if (change === 'rename') renameSync(ignored, path.join(directory, 'renamed\nreceipt.log'));
+  else if (change === 'symlink swap') {
+    const replacement = `${target}-replacement`; writeFileSync(replacement, 'other external evidence');
+    unlinkSync(ignored); symlinkSync(replacement, ignored);
+  } else if (change === 'size') writeFileSync(ignored, 'longer unreviewed ignored evidence');
+  else if (change === 'mtime') {
+    const previous = statSync(ignored); utimesSync(ignored, previous.atime, new Date(previous.mtimeMs + 10_000));
+  } else unlinkSync(ignored);
+  const response = await post({ action: 'execute', planId: plan.id, selection: [entry.id], fingerprint: plan.fingerprint });
+  expect(response.status, await response.clone().text()).toBe(200);
+  const result = (await response.json()).result.plan;
+  expect(result.outcomes).toEqual([expect.objectContaining({ state: 'held', reason: expect.stringMatching(/changed/i) })]);
+  expect(existsSync(done.path)).toBe(true);
+  expect(readFileSync(target, 'utf8')).toBe('retained external evidence');
+  const renewed = await preview(f.repoPath);
+  expect(renewed.entries[0].eligible, renewed.entries[0].reason).toBe(true);
+  expect(renewed.entries[0].fingerprint).not.toBe(entry.fingerprint);
 });
 
 it('refuses a wrong fingerprint, foreign selection, and worker authority before any cleanup', async () => {
@@ -166,7 +204,7 @@ it('previews and executes the same selected plan through authenticated HTTP and 
     expect(result.outcomes[0].state).toBe('removed'); expect(existsSync(done.path)).toBe(false);
     expect(JSON.parse((await cli('status', '--plan', plan.id)).stdout).result.plan).toEqual(result);
   } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }
-}, 120_000);
+});
 
 it('holds generated output that appeared after the reviewed workspace preview', async () => {
   const f = await fixture(); const done = await f.workspace(); const plan = await preview(f.repoPath);
@@ -176,7 +214,7 @@ it('holds generated output that appeared after the reviewed workspace preview', 
   expect(response.status).toBe(200);
   expect((await response.json()).result.plan.outcomes[0].state).toBe('held');
   expect(readFileSync(path.join(done.path, '.next', 'unique.txt'), 'utf8')).toBe('new output');
-}, 60_000);
+});
 
 it('refuses historical removal proof when a replacement public namespace exists', async () => {
   const f = await fixture(); const done = await f.workspace(); const plan = await preview(f.repoPath);
@@ -191,7 +229,28 @@ it('refuses historical removal proof when a replacement public namespace exists'
   const response = await post(body);
   expect((await response.json()).result.plan.outcomes[0].state).toBe('held');
   expect(readFileSync(path.join(done.path, 'replacement.txt'), 'utf8')).toBe('different generation');
-}, 60_000);
+});
+
+it('requires renewed review for ignored output inside a separately selected generated generation', async () => {
+  const f = await fixture(); const done = await f.workspace();
+  const next = path.join(done.path, '.next'); mkdirSync(next); writeFileSync(path.join(next, 'receipt.txt'), 'reviewed build');
+  const evidence = [path.join(root, `source-${++sequence}.txt`), path.join(root, `stop-${++sequence}.txt`)];
+  evidence.forEach(file => writeFileSync(file, 'fixture completion evidence'));
+  const adopted = await adoptGeneratedOutput({ workspacePath: done.path,
+    owner: { repositoryPath: f.repoPath, worktreeId: done.id }, intent: 'Retain the reviewed build', evidencePaths: evidence });
+  await recoverGeneratedOutput(adopted.resourceId);
+  const plan = await preview(f.repoPath);
+  expect(plan.entries.every((entry: { eligible: boolean }) => entry.eligible), JSON.stringify(plan.entries)).toBe(true);
+  writeFileSync(path.join(next, 'new-unique-receipt.log'), 'unreviewed build evidence');
+  const response = await post({ action: 'execute', planId: plan.id, fingerprint: plan.fingerprint,
+    selection: plan.entries.map((entry: { id: string }) => entry.id) });
+  const result = (await response.json()).result.plan;
+  expect(result.outcomes).toEqual([
+    expect.objectContaining({ entryId: `generated-output:${adopted.resourceId}`, state: 'held', reason: expect.stringContaining('changed') }),
+    expect.objectContaining({ entryId: `workspace:${done.id}`, state: 'held' }),
+  ]);
+  expect(readFileSync(path.join(next, 'new-unique-receipt.log'), 'utf8')).toBe('unreviewed build evidence');
+});
 
 it('retains a pending generated-output claim after an interrupted rename and resumes consumer before workspace', async () => {
   const f = await fixture(); const done = await f.workspace();
@@ -220,25 +279,28 @@ it('retains a pending generated-output claim after an interrupted rename and res
   expect(existsSync(done.path)).toBe(false);
   expect(existsSync(adopted.bank!.root.canonicalPath)).toBe(true);
   expect(readFileSync(path.join(recovered.recovery!.path, 'receipt.txt'), 'utf8')).toBe('unique build evidence');
-}, 120_000);
+});
 
 it('refuses a competing native executor and resumes only after its exact process exits', async () => {
   const f = await fixture(); const done = await f.workspace(); const plan = await preview(f.repoPath);
   const entry = plan.entries.find((entry: { worktreeId: string }) => entry.worktreeId === done.id);
   const entered = path.join(root, `lease-${++sequence}.txt`);
   const child = spawn(process.execPath, ['--import', 'tsx', path.join(process.cwd(), 'tests/fixtures/workspace-cleanup-plan-lease-child.ts'), plan.id, entered], { cwd: process.cwd(),
-    env: { ...process.env, NODE_OPTIONS: '--conditions=react-server' }, stdio: ['ignore', 'pipe', 'pipe'] });
-  let stderr = ''; child.stderr.on('data', chunk => { stderr += chunk; });
+    env: { ...process.env, NODE_OPTIONS: '--conditions=react-server' }, stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
+  const ready = once(child, 'message', { signal: AbortSignal.timeout(60_000) });
+  let stderr = ''; child.stderr!.on('data', chunk => { stderr += chunk; });
   const closed = new Promise<void>(resolve => child.once('close', () => resolve()));
   const body = { action: 'execute', planId: plan.id, selection: [entry.id], fingerprint: plan.fingerprint };
   try {
-    await vi.waitFor(() => expect(existsSync(entered), stderr).toBe(true), { timeout: 15_000 });
+    const message = await Promise.race([ready, closed.then(() => { throw new Error(`Competing fixture exited before acquiring its lease: ${stderr}`); })]);
+    expect(message[0], stderr).toEqual({ ready: true });
+    expect(readFileSync(entered, 'utf8')).toBe('exact plan lease acquired');
     expect((await post(body)).status).toBe(409); expect(existsSync(done.path)).toBe(true);
     expect(readMaintenanceState<{ status: string }>(`cleanup-plan:${plan.id}`)?.status).toBe('preview');
   } finally { child.kill('SIGKILL'); await closed; }
   const result = (await (await post(body)).json()).result.plan;
   expect(result.outcomes[0].state).toBe('removed'); expect(existsSync(done.path)).toBe(false);
-}, 90_000);
+});
 
 it('holds a dependency donor consumed by unsupported linked output and retains unique evidence', async () => {
   const f = await fixture(); const done = await f.workspace();
@@ -259,7 +321,7 @@ it('holds a dependency donor consumed by unsupported linked output and retains u
   expect((await post({ action: 'execute', planId: plan.id, fingerprint: plan.fingerprint, selection: [workspace.id] })).status).toBe(409);
   expect(readFileSync(path.join(next, 'receipt.txt'), 'utf8')).toBe('unique evidence');
   expect(readFileSync(path.join(donor, 'dependency.txt'), 'utf8')).toBe('donor content');
-}, 60_000);
+});
 
 it('records a fresh lifecycle admission refusal per entry and continues unrelated approved work', async () => {
   const f = await fixture(); const ambiguous = await f.workspace(); const other = await f.workspace();
@@ -277,9 +339,16 @@ it('records a fresh lifecycle admission refusal per entry and continues unrelate
     expect.objectContaining({ entryId: `workspace:${other.id}`, state: 'removed' }),
   ]));
   expect(existsSync(ambiguous.path)).toBe(true); expect(existsSync(other.path)).toBe(false);
-}, 90_000);
+});
 
-it('reopens the durable plan and returns the identical completed receipt', async () => {
-  expect(replay).toBeDefined(); closeDb();
-  expect((await (await post(replay!.body)).json()).result.plan).toEqual(replay!.result);
+it('reopens its own durable plan and returns the identical completed receipt', async () => {
+  const f = await fixture(); const done = await f.workspace(); const plan = await preview(f.repoPath);
+  const body = { action: 'execute', planId: plan.id, fingerprint: plan.fingerprint,
+    selection: [`workspace:${done.id}`] };
+  const result = (await (await post(body)).json()).result.plan;
+  expect(result.outcomes[0].state).toBe('removed');
+  // Close only after the last native fixture: its admission store owns its connection.
+  closeDb();
+  expect((await (await post(body)).json()).result.plan).toEqual(result);
+});
 });

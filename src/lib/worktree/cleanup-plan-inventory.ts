@@ -14,6 +14,7 @@ import { assertWorktreeMaterializationIdentity } from './materialization-identit
 import { readWorktreeMetaSnapshot } from './metadata-store';
 import { WORKTREE_MAINTENANCE_POLICY, withWorktreeMaintenanceBudget } from './maintenance-budget';
 import { probeLiveProcessInside } from './live-process-guard';
+import { cleanupIgnoredFingerprint } from './cleanup-plan-ignored';
 import type { WorktreeMetaEntry } from './types';
 import type { CleanupPlanEntry } from './cleanup-plan-types';
 
@@ -32,6 +33,7 @@ export async function inspectCleanupWorkspace(repositoryPath: string, worktreeId
     workspacePath: identity?.canonicalPath ?? '', identity, eligible: false, reason: null, fingerprint: '',
     completion: null, head: null, branch: entry?.branchName ?? null, createdAt: entry?.createdAt ?? 0,
     dependencies: [], estimate: { logicalBytes: null, exclusiveBytes: null }, recovery: {} };
+  let ignored: string | null = null;
   try {
     if (!entry || entry.claudeManaged || !identity || !entry.materializationParentIdentity) throw new Error('Exact o8-created ownership is unavailable.');
     const managed = identity.canonicalPath;
@@ -66,9 +68,10 @@ export async function inspectCleanupWorkspace(repositoryPath: string, worktreeId
     const refHead = (await laneGit(repositoryPath, repositoryPath, ['rev-parse', '--verify', `refs/heads/${branch}`], { timeout: 5_000 })).stdout.trim();
     if (refHead !== result.head) throw new Error('Source branch does not retain the selected HEAD.');
     result.recovery = { ref: `refs/heads/${branch}` };
+    ignored = await cleanupIgnoredFingerprint(repositoryPath, managed);
     result.eligible = true;
   } catch (error) { result.reason = error instanceof Error ? error.message : 'Ownership or recovery could not be verified.'; }
-  result.fingerprint = cleanupFingerprint({ entry, completion: result.completion, head: result.head, reason: result.reason });
+  result.fingerprint = cleanupFingerprint({ entry, completion: result.completion, head: result.head, reason: result.reason, ignored });
   return result;
 }
 
@@ -87,6 +90,7 @@ export async function inspectCleanupGenerated(workspace: CleanupPlanEntry, repos
     outputIdentity: resource.output ?? undefined,
     dependencies: [], estimate: { logicalBytes: resource.bank?.expandedBytes ?? null, exclusiveBytes: null },
     recovery: { bankPath: resource.bank?.root.canonicalPath, recoveryPath: resource.recovery?.path } };
+  let ignored: string | null = null;
   if (!workspace.eligible) { /* Keep the containing-workspace hold. */ }
   else if (resource.owner?.worktreeId !== workspace.worktreeId || resource.owner.repositoryPath !== repositoryPath
     || resource.workspace.canonicalPath !== workspace.workspacePath
@@ -101,9 +105,10 @@ export async function inspectCleanupGenerated(workspace: CleanupPlanEntry, repos
       await verifyGeneratedOutputRecovery(resource);
       const hold = getWorkspaceRetentionHold(path.join(workspace.workspacePath, '.next'), resource.output);
       if (hold) throw new Error(`Retention hold: ${hold.reason}`);
+      ignored = await cleanupIgnoredFingerprint(repositoryPath, workspace.workspacePath, true);
     } catch (error) { result.eligible = false; result.reason = error instanceof Error ? error.message : 'Generated-output identity changed.'; }
   }
-  result.fingerprint = cleanupFingerprint({ workspace: workspace.fingerprint, resource });
+  result.fingerprint = cleanupFingerprint({ workspace: workspace.fingerprint, resource, ignored });
   return result;
 }
 

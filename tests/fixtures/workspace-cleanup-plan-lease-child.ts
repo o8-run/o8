@@ -6,6 +6,7 @@ if (!planId || !entered) throw new Error('Fixture requires a plan and receipt pa
 async function main() { await withResourceLease({ resource: `workspace-cleanup-plan:${planId}`,
   owner: { id: `cleanup-fixture:${planId}`, label: 'Competing cleanup fixture', pid: process.pid }, actor: 'operator' }, async () => {
   writeFileSync(entered, 'exact plan lease acquired');
+  process.send?.({ ready: true });
   const timer = setInterval(() => {}, 1000);
   try { await new Promise<void>(() => {}); } finally { clearInterval(timer); }
 });
