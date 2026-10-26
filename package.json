@@ -1,6 +1,6 @@
 {
   "name": "o8",
-  "version": "0.1.810",
+  "version": "0.1.811",
   "description": "o8 — governance layer for autonomous engineering teams. Approvals, audit, organizational memory.",
   "license": "MIT",
   "productName": "o8",
@@ -216,7 +216,7 @@
     "tsrs": "0.18.0-ts7.1.0-dev.20260929",
     "tsx": "^4.21.0",
     "typescript": "5.8.2",
-    "vitest": "^4.1.11"
+    "vitest": "^4.1.12"
   },
   "overrides": {
     "@earendil-works/pi-coding-agent": {

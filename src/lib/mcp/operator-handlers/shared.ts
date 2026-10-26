@@ -259,7 +259,7 @@ export function errorText(error: unknown) {
 export function requiredString(args: Record<string, unknown>, key: string) {
   const value = args[key];
   if (typeof value !== 'string' || !value.trim()) {
-    throw new McpInputError(`${key} is required`);
+    throw new McpInputError(`${key} is required. Set ${key} to a non-empty string.`);
   }
   return value.trim();
 }
