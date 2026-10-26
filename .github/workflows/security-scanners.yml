@@ -13,6 +13,27 @@ permissions:
   contents: read
 
 jobs:
+  secrets:
+    name: Secret Findings (optional)
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install pinned scanner
+        working-directory: ${{ runner.temp }}
+        run: |
+          curl --fail --silent --show-error --location --output gitleaks.tar.gz https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
+          echo '551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  gitleaks.tar.gz' | sha256sum --check
+          tar -xzf gitleaks.tar.gz gitleaks
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+      - name: Collect redacted working-tree matches
+        run: gitleaks dir . --redact=100 --no-banner --log-level error --report-format json --report-path "$RUNNER_TEMP/secret-audit.json" || test "$?" = 1
+      - name: Apply reviewed source fingerprints
+        run: node scripts/ci/security-secrets.mjs "$RUNNER_TEMP/secret-audit.json"
   audit:
     name: Dependency Findings (optional)
     continue-on-error: true

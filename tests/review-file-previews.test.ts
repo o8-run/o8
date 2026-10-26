@@ -28,16 +28,17 @@ describe('bounded review and file previews', () => {
     await writeFile(join(scope.root, 'source.txt'), 'line\n'.repeat(140_000));
     expect(await (await diff(request('panel/file-diff', 'source.txt'))).json()).toMatchObject({ diff: '', diffStatus: 'too_large', size: 700_000 });
   });
-  it('serves byte ranges from the confined media descriptor and rejects invalid ranges', async () => {
+  it('refuses opaque byte ranges while retaining descriptor confinement', async () => {
     await writeFile(join(scope.root, 'clip.mp4'), Buffer.from('0123456789'));
-    const response = await asset(request('panel/file-asset', 'clip.mp4', {}, { Range: 'bytes=2-5' }));
-    expect(response.status).toBe(206); expect(response.headers.get('Content-Range')).toBe('bytes 2-5/10'); expect(await response.text()).toBe('2345');
-    const suffix = await asset(request('panel/file-asset', 'clip.mp4', {}, { Range: 'bytes=-3' })); expect(await suffix.text()).toBe('789');
-    const invalid = await asset(request('panel/file-asset', 'clip.mp4', {}, { Range: 'bytes=99-' })); expect(invalid.status).toBe(416); expect(invalid.headers.get('Content-Range')).toBe('bytes */10');
+    for (const Range of ['bytes=2-5', 'bytes=-3', 'bytes=99-']) {
+      const response = await asset(request('panel/file-asset', 'clip.mp4', {}, { Range }));
+      expect(response.status).toBe(415); expect(response.headers.get('Content-Range')).toBeNull();
+      expect(await response.json()).toMatchObject({ code: 'binary_preview_refused' });
+    }
     await symlink('/etc/passwd', join(scope.root, 'escape.mp4')); expect((await asset(request('panel/file-asset', 'escape.mp4'))).status).toBe(404);
     expect((await diff(request('panel/file-diff', '../escape'))).status).toBe(403);
   });
-  it('preserves every binary byte and exact content length in full and ranged media responses', async () => {
+  it('refuses opaque formats across all binary aliases without changing stored bytes', async () => {
     const bytes = Buffer.from([99, 0, 255, 128, 13, 10, 42]).subarray(1, 6);
     await writeFile(join(scope.root, 'image.png'), bytes);
     const full = await asset(request('panel/file-asset', 'image.png'));
@@ -45,16 +46,21 @@ describe('bounded review and file previews', () => {
     vi.stubEnv('CORTEX_IDE_MEDIA_ROOT', scope.root);
     const { GET: mobileMedia } = await import('@/app/api/mobile/media/route');
     const mobile = await mobileMedia(request('mobile/media', join(scope.root, 'image.png')));
-    for (const response of [full, image, mobile]) {
-      expect(response.status).toBe(200);
-      expect(response.headers.get('Content-Type')).toBe('image/png');
-      expect(response.headers.get('Content-Length')).toBe(String(bytes.length));
-      expect(new Uint8Array(await response.arrayBuffer())).toEqual(new Uint8Array(bytes));
-    }
     const range = await asset(request('panel/file-asset', 'image.png', {}, { Range: 'bytes=1-3' }));
-    expect(range.status).toBe(206);
-    expect(range.headers.get('Content-Length')).toBe('3');
-    expect(new Uint8Array(await range.arrayBuffer())).toEqual(new Uint8Array([255, 128, 13]));
+    for (const response of [full, image, mobile, range]) {
+      expect(response.status).toBe(415);
+      expect(await response.json()).toMatchObject({ code: 'binary_preview_refused' });
+    }
+    expect(await readFile(join(scope.root, 'image.png'))).toEqual(bytes);
+  });
+  it('preserves inspected UTF-8 SVG bytes and attests the complete body before ignoring ranges', async () => {
+    const text = '<svg xmlns="http://www.w3.org/2000/svg"><text>π</text></svg>';
+    await writeFile(join(scope.root, 'public.svg'), text);
+    const response = await asset(request('panel/file-asset', 'public.svg', {}, { Range: 'bytes=2-5' }));
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe(text);
+    expect(response.headers.get('Content-Length')).toBe(String(Buffer.byteLength(text)));
+    expect(JSON.parse(response.headers.get('X-O8-Viewer-Redaction')!)).toEqual({ version: 1, offsetEncoding: 'utf-8', spans: [] });
   });
   it('bounds a read-only file preview without truncating the normal file API or changing disk contents', async () => {
     const original = 'readable line\n'.repeat(100_000); await writeFile(join(scope.root, 'large.txt'), original);
