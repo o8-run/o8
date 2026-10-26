@@ -28,7 +28,7 @@ export function AddRepoDialog(options: AddRepoOptions) {
     },
   });
   const existing = flow.repos.find(repo => repo.localPath.replace(/\/+$/, '') === flow.value.trim().replace(/\/+$/, ''));
-  const cloning = isRepoUrl(flow.value);
+  const cloning = !existing && !flow.registered && isRepoUrl(flow.value);
   return <GlassModal open={options.open} onClose={flow.close} title="Add repository" width={480} popoverSurface>
     <div ref={hostRef} onDragOver={event => event.preventDefault()} onDrop={event => {
       event.preventDefault();
@@ -54,13 +54,13 @@ export function AddRepoDialog(options: AddRepoOptions) {
           <option value="none">Workspace</option>
           {options.projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}
         </select> : null}
-        {existing && !flow.busy ? <div role="status" style={{ color: 'var(--t-text-muted)', fontSize: 12 }}>Already added. Open {existing.name}.</div> : null}
         {flow.stage ? <div role="status" aria-live="polite" style={{ color: 'var(--t-text-muted)', fontSize: 12 }}>{flow.stage}</div> : null}
+        {flow.retryState ? <div role="status" aria-live="polite" style={{ color: 'var(--t-text-muted)', fontSize: 12 }}>{flow.retryState}</div> : null}
         {flow.error ? <div role="alert" style={{ color: 'var(--t-danger)', fontSize: 12, lineHeight: 1.45 }}>{flow.error}</div> : null}
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
           <ProjectButton onClick={flow.close} disabled={flow.busy}>Cancel</ProjectButton>
           <ProjectButton primary onClick={() => { void flow.submit(flow.value); }} busy={flow.busy} disabled={!flow.value.trim() || flow.busy}>
-            {flow.busy ? cloning ? 'Cloning…' : 'Opening…' : cloning ? 'Clone and open' : 'Open'}
+            {flow.busy ? cloning ? 'Cloning…' : 'Opening…' : flow.retryState ? 'Retry' : cloning ? 'Clone and open' : 'Open'}
           </ProjectButton>
         </div>
       </form>

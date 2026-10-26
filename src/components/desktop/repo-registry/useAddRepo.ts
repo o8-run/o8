@@ -36,6 +36,7 @@ export function useAddRepo(options: AddRepoOptions) {
   const [value, setValue] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [retryState, setRetryState] = useState<string | null>(null);
   const [stage, setStage] = useState('');
   const [repos, setRepos] = useState<RepoRegistryEntry[]>([]);
   const [recents, setRecents] = useState<RecentRepoFolder[]>([]);
@@ -56,7 +57,7 @@ export function useAddRepo(options: AddRepoOptions) {
   const close = useCallback(() => {
     if (pending.current) return;
     generation.current += 1;
-    setValue(''); setError(null); setProjectId(null); setBusy(false); setStage('');
+    setValue(''); setError(null); setRetryState(null); setProjectId(null); setBusy(false); setStage('');
     recovery.current = null;
     onClose();
   }, [onClose]);
@@ -65,8 +66,9 @@ export function useAddRepo(options: AddRepoOptions) {
     const trimmed = input.trim();
     if (!trimmed || pending.current) return;
     pending.current = true;
-    setBusy(true); setError(null); setValue(trimmed);
+    setBusy(true); setError(null); setRetryState(null); setValue(trimmed);
     const cloning = isRepoUrl(trimmed);
+    let cloningPending = cloning;
     const current = generation.current;
     const live = () => mounted.current && current === generation.current;
     try {
@@ -88,16 +90,25 @@ export function useAddRepo(options: AddRepoOptions) {
         attempt = { value: trimmed, repo, linked: false };
         recovery.current = attempt;
       }
+      cloningPending = false;
       if (!attempt.linked && project && !project.repoPaths.includes(attempt.repo.localPath)) {
         setStage('Opening project…');
+        // The membership API also maintains the stored project's repo links.
+        const link = () => requestJson(`/api/panel/projects/${encodeURIComponent(project.id)}`, {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ repoPaths: [...new Set([...project.repoPaths, attempt.repo.localPath])] }),
+        });
         try {
-          // The membership API also maintains the stored project's repo links.
-          await requestJson(`/api/panel/projects/${encodeURIComponent(project.id)}`, {
-            method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ repoPaths: [...new Set([...project.repoPaths, attempt.repo.localPath])] }),
-          });
+          await link();
         } catch {
-          throw new Error('Folder added, but the project could not be updated. Try again to finish opening it.');
+          if (!cloning) throw new Error('Folder added, but the project could not be updated. Try again to finish opening it.');
+          if (!live()) return;
+          try {
+            await link();
+          } catch {
+            if (live()) setRetryState('Cloned. Link pending.');
+            return;
+          }
         }
       }
       attempt.linked = true;
@@ -115,7 +126,7 @@ export function useAddRepo(options: AddRepoOptions) {
       pending.current = false;
       close();
     } catch (cause) {
-      if (live()) setError(repoOpenError(cause, cloning));
+      if (live()) setError(repoOpenError(cause, cloningPending));
     } finally {
       pending.current = false;
       if (live()) { setBusy(false); setStage(''); }
@@ -140,7 +151,7 @@ export function useAddRepo(options: AddRepoOptions) {
         generation.current += 1;
         pending.current = false;
         recovery.current = null;
-        setValue(''); setError(null); setBusy(false); setStage(''); setProjectId(null);
+        setValue(''); setError(null); setRetryState(null); setBusy(false); setStage(''); setProjectId(null);
       }
       opened.current = false;
       return;
@@ -158,6 +169,7 @@ export function useAddRepo(options: AddRepoOptions) {
     else if (initialMode !== 'scratch') void browse();
   }, [open, initialMode, initialPath, browse, submit]);
 
-  const changeValue = (next: string) => { setValue(next); setError(null); };
-  return { value, changeValue, busy, error, setError, stage, recents, repos, projectId: selectedProjectId, setProjectId, submit, browse, close };
+  const changeValue = (next: string) => { setValue(next); setError(null); setRetryState(null); };
+  const registered = recovery.current?.value === value.trim();
+  return { value, changeValue, busy, error, setError, retryState, registered, stage, recents, repos, projectId: selectedProjectId, setProjectId, submit, browse, close };
 }

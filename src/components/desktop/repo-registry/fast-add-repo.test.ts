@@ -122,10 +122,23 @@ it('does not reopen a stale registered path when the server rejects it', async (
     : Response.json({ repos: [repo] }));
   await render();
   await type(repo.localPath);
-  expect(document.querySelector('[role="status"]')?.textContent).toContain('Already added');
+  expect(document.querySelector('[role="status"]')).toBeNull();
   await enter();
   expect(onRepoAdded).not.toHaveBeenCalled();
   expect(document.querySelector('[role="alert"]')?.textContent).toContain('Folder not found');
+});
+
+it('uses the Open action without a helper when a registered path is pasted', async () => {
+  fetchMock.mockImplementation(async (_url, init) => Response.json(init?.method ? { repo } : { repos: [repo] }));
+  await render();
+  await type(repo.localPath);
+  expect(document.querySelector('[role="status"]')).toBeNull();
+  expect(document.body.textContent).not.toContain(`Open ${repo.name}.`);
+  const open = [...document.querySelectorAll('button')].find(button => button.textContent?.trim() === 'Open');
+  expect(open?.disabled).toBe(false);
+  await act(async () => open!.click());
+  expect(mutations().map(([, init]) => JSON.parse(String(init?.body)))).toEqual([{ action: 'add', localPath: repo.localPath }]);
+  expect(onRepoAdded).toHaveBeenCalledExactlyOnceWith(repo);
 });
 
 it('explains an unavailable system picker without opening a second prompt', async () => {
