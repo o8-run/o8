@@ -4,6 +4,7 @@
  */
 
 import { fetchOnce } from '@/lib/panel/fetch-cache';
+import { isTerminalChatConnectivityPrompt } from '@/lib/orchestrator/connectivity-check';
 import type { TerminalExitState } from '@/lib/terminal/exit-state';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import type { OrchestrationMode, OrchestratorRuntime, WorkspaceOrchestrationPacketBadge } from '@/lib/orchestrator/types';
@@ -160,6 +161,7 @@ const COMPARISON_CANDIDATE_RE = /-cmp-\d+/;
 export function stripPersistedTabs<T extends {
   id?: string;
   kind?: string;
+  label?: string;
   orchestrationPacket?: { packetId?: string; branchTarget?: string | null } | null;
 }>(tabs: T[]): T[] {
   return tabs.filter((tab) => {
@@ -170,6 +172,9 @@ export function stripPersistedTabs<T extends {
     if (kind !== 'orchestrator' && id.startsWith('orchestrator-')) return false;
     // Shape 2 (#1293): best-of-N comparison candidate chat tabs.
     const pkt = tab.orchestrationPacket;
+    // Shape 3: the legacy connectivity probe was saved as a conversation tab.
+    if (!pkt && ['orchestrator', 'llm-chat', 'chat'].includes(kind)
+      && isTerminalChatConnectivityPrompt(tab.label)) return false;
     if (pkt && (COMPARISON_CANDIDATE_RE.test(pkt.packetId ?? '') || COMPARISON_CANDIDATE_RE.test(pkt.branchTarget ?? ''))) {
       return false;
     }
@@ -386,7 +391,7 @@ function buildStatePath(scope: string, repoPath?: string | null) {
 }
 
 const LOCALSTORAGE_SCRUB_MARKER_KEY = 'o8:tab-state:localstorage-scrubbed';
-const LOCALSTORAGE_SCRUB_VERSION = '717-v1';
+const LOCALSTORAGE_SCRUB_VERSION = '4147-v2';
 
 /**
  * Issue #717 — one-time, no-op-if-already-clean migration.
