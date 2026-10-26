@@ -1592,6 +1592,7 @@
       "path": "tests/analytics-activation-real-path.test.ts",
       "reasons": [
         "child-process",
+        "process-signal",
         "real-path"
       ]
     },
