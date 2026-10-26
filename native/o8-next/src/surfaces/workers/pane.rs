@@ -72,10 +72,11 @@ impl Workers {
             cx.stop_propagation();
             return;
         }
-        let card_focused = self
+        let focused_card = self
             .cards
-            .values()
-            .any(|card| card.read(cx).focus.is_focused(window));
+            .iter()
+            .find_map(|(id, card)| card.read(cx).focus.is_focused(window).then(|| id.clone()));
+        let card_focused = focused_card.is_some();
         if !self.focus.is_focused(window) && !card_focused {
             return;
         }
@@ -96,9 +97,9 @@ impl Workers {
                     .cloned()
                     .collect();
                 if !ids.is_empty() {
-                    let position = self
-                        .selected
+                    let position = focused_card
                         .as_ref()
+                        .or(self.selected.as_ref())
                         .and_then(|id| ids.iter().position(|v| v == id));
                     let next = match (position, event.keystroke.key.as_str()) {
                         (Some(i), "up") => i.saturating_sub(1),
@@ -309,9 +310,14 @@ impl Render for Workers {
             list = list.child(
                 div()
                     .id(SharedString::from(format!("worker-select-{id}")))
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.select(select.clone(), cx);
-                    }))
+                    .capture_any_mouse_down(cx.listener(
+                        move |this, event: &gpui::MouseDownEvent, window, cx| {
+                            if event.button == gpui::MouseButton::Left {
+                                this.select(select.clone(), cx);
+                                this.cards[&select].read(cx).focus.focus(window);
+                            }
+                        },
+                    ))
                     .child(self.cards[id].clone()),
             );
         }

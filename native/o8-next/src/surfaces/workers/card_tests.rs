@@ -118,6 +118,40 @@ fn workers_enter_keeps_arrow_navigation_inside_card(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn workers_clicked_activity_selects_card_before_enter_and_down(cx: &mut TestAppContext) {
+    let (_fixture, view, mut visual) = review_open("--workers --workers-navigation", cx);
+    visual.simulate_keystrokes("down");
+    draw(&mut visual);
+    assert_eq!(
+        view.read_with(&visual, |v, _| v.selected.clone())
+            .as_deref(),
+        Some("worker-running"),
+        "card A starts selected"
+    );
+    super::tests::click(&mut visual, "worker-activity-worker-running-next");
+    let clicked = view.read_with(&visual, |v, _| v.selected.clone());
+    visual.simulate_keystrokes("enter down");
+    draw(&mut visual);
+    assert_eq!(
+        view.read_with(&visual, |v, _| v.selected.clone())
+            .as_deref(),
+        Some("worker-running-third"),
+        "A selected, click B Activity, Enter, Down must select C"
+    );
+    assert_eq!(
+        clicked.as_deref(),
+        Some("worker-running-next"),
+        "Activity must select B before handling its click"
+    );
+    assert!(visual.update(|window, cx| {
+        view.read(cx).cards["worker-running-third"]
+            .read(cx)
+            .focus
+            .is_focused(window)
+    }));
+}
+
+#[gpui::test]
 fn workers_escape_returns_focus_to_list(cx: &mut TestAppContext) {
     let (_fixture, view, mut visual) = review_open("--workers", cx);
     visual.simulate_keystrokes("down enter");

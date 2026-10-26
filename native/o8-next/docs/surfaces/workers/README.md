@@ -21,3 +21,7 @@ The item-2 GPUI test opens the real palette, selects the blocked filter, reads t
 ## Card review round 1
 
 Up and Down continue peer selection when Activity has card focus. Escape returns focus to the list, including its filter shortcuts. Activity now uses the desktop lane-detail route's newest 500 events instead of repeatedly reading the first tail page. The review tests seed 515 progress records, assert that progress 515 appears, append another persisted event, and verify the refreshed window includes it. Red and green native tails are recorded beside the item-2 evidence.
+
+## Card review round 2
+
+Primary mouse presses select and focus a card during capture, before Activity or another child control handles the event. Child controls retain their own subsequent focus handling. Up and Down derive their starting position from the focused card, falling back to list selection when the list has focus. The GPUI regression selects A, clicks B Activity, presses Enter then Down, and verifies C is selected and focused, including that the Activity click selected B first. The item-2 review-r2 tails record the failure on the prior head and the passing test after the fix.

@@ -12,7 +12,10 @@ export default async function register({ repo }: SurfaceContext): Promise<Surfac
   for (const [suffix, status, laneStatus] of [
     ['running', 'running', 'running'], ['review', 'awaiting_review', 'reviewing'],
     ['blocked', 'blocked', 'awaiting_orchestrator'],
-    ...(process.argv.includes('--workers-navigation') ? [['running-next', 'running', 'running'] as const] : []),
+    ...(process.argv.includes('--workers-navigation') ? [
+      ['running-next', 'running', 'running'] as const,
+      ['running-third', 'running', 'running'] as const,
+    ] : []),
   ] as const) {
     const id = `worker-${suffix}`;
     const lane = createLane({ repoPath: repo, branch: id, runtime: 'pi', packetId: id,
