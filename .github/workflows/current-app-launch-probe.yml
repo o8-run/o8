@@ -9,29 +9,15 @@ permissions:
   contents: read
 
 jobs:
-  verify:
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22.23.4
-          cache: npm
-      - run: npm install -g npm@11.21.1
-      - run: npm ci --prefer-offline
-      - run: npm run typecheck:fast
-      - run: npm run typecheck
-      - run: npm test
-      - run: npx vitest run tests/preship-gate.test.ts --maxWorkers=1
-
-  measure:
+  baseline:
     if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[measure-launch]')
     runs-on: macos-latest
-    timeout-minutes: 180
+    timeout-minutes: 120
     concurrency:
-      group: current-app-launch-measure
+      group: current-app-launch-baseline
       cancel-in-progress: true
+    outputs:
+      base: ${{ steps.base.outputs.sha }}
     env:
       NEXT_TELEMETRY_DISABLED: '1'
       O8_RELEASE_BUILD_CACHE: 'off'
@@ -71,13 +57,17 @@ jobs:
         with:
           projectPath: main
           args: --features dev-mcp-plugin --bundles app --config work/native-launch.json
+      - name: Preserve the exact main artifact
+        run: tar -C main/src-tauri/target/release/bundle/macos -cf "$RUNNER_TEMP/main-app.tar" o8.app
+      - uses: actions/upload-artifact@v4
+        with:
+          name: current-app-launch-main-app
+          path: ${{ runner.temp }}/main-app.tar
+          compression-level: 0
+          retention-days: 1
       - name: Measure main three times before the fix
         continue-on-error: true
-        run: >-
-          node harness/scripts/bench/native-launch.mjs
-          --app=main/src-tauri/target/release/bundle/macos/o8.app
-          --sha=${{ steps.base.outputs.sha }} --samples=3 --check
-          --output=${{ runner.temp }}/o8-launch-before
+        run: node harness/scripts/bench/native-launch.mjs --app=main/src-tauri/target/release/bundle/macos/o8.app --sha=${{ steps.base.outputs.sha }} --samples=3 --check --output="$RUNNER_TEMP/o8-launch-before"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -91,16 +81,27 @@ jobs:
           const report = JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP + '/o8-launch-before/receipt.json', 'utf8'));
           if (report.samples.length !== 3 || report.samples.some(sample => !sample.acknowledged)) process.exit(1);
           JS
+
+  candidate:
+    needs: baseline
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    outputs:
+      sha: ${{ steps.candidate.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Wait for a measured-path fix on this branch
         id: candidate
         env:
           GH_TOKEN: ${{ github.token }}
-          LAUNCH_BASE_SHA: ${{ steps.base.outputs.sha }}
+          LAUNCH_BASE_SHA: ${{ needs.baseline.outputs.base }}
         run: |
           for launch_attempt in $(seq 1 180); do
             launch_candidate_sha=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$GITHUB_REF_NAME" --jq .object.sha)
-            git -C harness fetch origin "$launch_candidate_sha"
-            if ! git -C harness diff --quiet "$LAUNCH_BASE_SHA" "$launch_candidate_sha" -- src src-tauri scripts ':(exclude)scripts/bench/**' ':(exclude)scripts/preship-webview-gate.mjs'; then
+            git fetch origin "$launch_candidate_sha"
+            if ! git diff --quiet "$LAUNCH_BASE_SHA" "$launch_candidate_sha" -- src src-tauri scripts ':(exclude)scripts/bench/**' ':(exclude)scripts/preship-webview-gate.mjs'; then
               echo "sha=$launch_candidate_sha" >> "$GITHUB_OUTPUT"
               exit 0
             fi
@@ -108,10 +109,33 @@ jobs:
           done
           echo 'No measured-path candidate arrived within 45 minutes' >&2
           exit 1
+
+  compare:
+    needs: [baseline, candidate]
+    runs-on: macos-latest
+    timeout-minutes: 120
+    concurrency:
+      group: current-app-launch-comparison
+      cancel-in-progress: true
+    env:
+      NEXT_TELEMETRY_DISABLED: '1'
+      O8_RELEASE_BUILD_CACHE: 'off'
+      APPLE_SIGNING_IDENTITY: '-'
+    steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ steps.candidate.outputs.sha }}
+          ref: ${{ needs.candidate.outputs.sha }}
           path: head
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.23.4
+          cache: npm
+          cache-dependency-path: head/package-lock.json
+      - name: Install build tools
+        run: |
+          npm install -g npm@11.21.1
+          rustup toolchain install stable --profile minimal
+          rustup default stable
       - run: npm ci --prefer-offline
         working-directory: head
       - run: node head/scripts/bench/native-launch-config.mjs head
@@ -120,10 +144,18 @@ jobs:
         with:
           projectPath: head
           args: --features dev-mcp-plugin --bundles app --config work/native-launch.json
+      - uses: actions/download-artifact@v4
+        with:
+          name: current-app-launch-main-app
+          path: ${{ runner.temp }}/main-artifact
+      - name: Restore the exact main artifact
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/main-artifact"
+          tar -C "$GITHUB_WORKSPACE/main-artifact" -xf "$RUNNER_TEMP/main-artifact/main-app.tar"
       - name: Measure main and head back to back on this runner
         run: |
-          node head/scripts/bench/native-launch.mjs --app=main/src-tauri/target/release/bundle/macos/o8.app --sha=${{ steps.base.outputs.sha }} --samples=3 --output="$RUNNER_TEMP/o8-launch-paired-main"
-          node head/scripts/bench/native-launch.mjs --app=head/src-tauri/target/release/bundle/macos/o8.app --sha=${{ steps.candidate.outputs.sha }} --samples=3 --check --output="$RUNNER_TEMP/o8-launch-paired-head"
+          node head/scripts/bench/native-launch.mjs --app=main-artifact/o8.app --sha=${{ needs.baseline.outputs.base }} --samples=3 --output="$RUNNER_TEMP/o8-launch-paired-main"
+          node head/scripts/bench/native-launch.mjs --app=head/src-tauri/target/release/bundle/macos/o8.app --sha=${{ needs.candidate.outputs.sha }} --samples=3 --check --output="$RUNNER_TEMP/o8-launch-paired-head"
       - uses: actions/upload-artifact@v4
         if: always()
         with:

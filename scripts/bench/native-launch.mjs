@@ -9,7 +9,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { WebviewSocketClient, executeJs } from '../preship-webview-gate.mjs';
 import { cleanupGate } from '../lib/preship-gate-cleanup.mjs';
-import { computeArtifactDigest } from '../lib/footprint-budget.mjs';
+import { computeArtifactDigest, descendantPids, snapshotProcesses, webkitPids } from '../lib/footprint-budget.mjs';
 import { buildFixturePlan, materializeFixture } from './interactions/fixtures.mjs';
 
 const round = n => Math.round(n * 100) / 100;
@@ -41,6 +41,19 @@ export const COMPOSER_PROBE_JS = `(() => {
     navigation: navigation ? { requestStart: navigation.requestStart, responseStart: navigation.responseStart,
       responseEnd: navigation.responseEnd, domContentLoaded: navigation.domContentLoadedEventEnd } : null });
 })()`;
+
+function wholeAppRss(rootPid, webkitBaseline) {
+  const processes = snapshotProcesses();
+  const owned = new Set([...descendantPids(processes, rootPid),
+    ...[...webkitPids(processes)].filter(pid => !webkitBaseline.has(pid))]);
+  const rows = execFileSync('ps', ['-axo', 'pid=,rss='], { encoding: 'utf8' });
+  let bytes = 0, count = 0;
+  for (const row of rows.trim().split('\n')) {
+    const match = row.trim().match(/^(\d+)\s+(\d+)$/);
+    if (match && owned.has(Number(match[1]))) { count++; bytes += Number(match[2]) * 1024; }
+  }
+  return { bytes, count, includes: 'native shell, server descendants and new webview helpers' };
+}
 
 function requireDisposableRunner(app) {
   assert.equal(process.platform, 'darwin', 'Native launch measurements require macOS');
@@ -80,9 +93,10 @@ export async function measureNativeLaunch({ app, output, sourceSha, samples = 3 
   const artifactDigest = computeArtifactDigest(app, { version, gitSha: sourceSha });
   const stageRoot = fs.mkdtempSync(path.join(fs.realpathSync('/tmp'), 'o8-launch-'));
   const stagedApp = path.join(stageRoot, 'o8.app');
+  let preserveFixture = false;
   const receipt = { schema: 'o8/native-launch/v1', platform: process.platform, arch: process.arch,
     osVersion: execFileSync('sw_vers', ['-productVersion'], { encoding: 'utf8' }).trim(), sourceSha, artifactDigest,
-    method: 'normal release startup, private app data and incognito webview; spawn to controlled composer edit acknowledgment',
+    method: 'normal release startup, private app data and incognito webview; spawn, foreground activation and controlled composer edit acknowledgment',
     pollMs: 10, limitMs: 1000, samples: [] };
   try {
     execFileSync('ditto', [app, stagedApp], { stdio: 'pipe' });
@@ -109,6 +123,7 @@ export async function measureNativeLaunch({ app, output, sourceSha, samples = 3 
           if (!seen.has(id)) { seen.add(id); nativeStages.push({ stage, atMs: Number(match[2]) }); }
         }
       };
+      const webkitBaseline = webkitPids(snapshotProcesses());
       const epoch = Date.now(), started = performance.now();
       try {
         child = spawn(path.join(stagedApp, 'Contents/MacOS/o8'), [], { cwd: stageRoot, detached: true,
@@ -121,7 +136,13 @@ export async function measureNativeLaunch({ app, output, sourceSha, samples = 3 
           assert(child.exitCode === null && child.signalCode === null, 'The app exited before accepting input');
           if (fs.existsSync(socketPath)) {
             try {
-              if (socketReadyMs === undefined) { await client.connectOnly(); socketReadyMs = round(performance.now() - started); }
+              if (socketReadyMs === undefined) {
+                await client.connectOnly(); socketReadyMs = round(performance.now() - started);
+                await client.send('manage_window', { window_label: 'main', operation: 'focus' });
+                const activation = spawnSync('/usr/bin/osascript', ['-e',
+                  `tell application ${JSON.stringify(stagedApp)} to activate`], { stdio: 'ignore', timeout: 10_000 });
+                assert.equal(activation.status, 0, 'Foreground activation failed');
+              }
               lastProbe = JSON.parse(await executeJs(client, COMPOSER_PROBE_JS));
               if (lastProbe.state === 'ready') {
                 const interactiveComposerMs = round(performance.now() - started);
@@ -136,20 +157,26 @@ export async function measureNativeLaunch({ app, output, sourceSha, samples = 3 
         }
         assert.equal(receipt.samples.length, sample, `Composer did not acknowledge input: ${JSON.stringify(lastProbe)}`);
         console.log(JSON.stringify({ sample, interactiveComposerMs: receipt.samples.at(-1).interactiveComposerMs }));
+        await sleep(30_000);
+        receipt.samples.at(-1).idleRss = wholeAppRss(child.pid, webkitBaseline);
       } catch (error) {
         receipt.failure = { sample, message: String(error.message).replaceAll(stageRoot, '<fixture>'),
           lastProbe, nativeStages: [...nativeStages], exitCode: child?.exitCode, signal: child?.signalCode };
         throw error;
       } finally {
-        await cleanupGate({ client, child, dataDir: seeded.dataDir, socketPath });
-        fs.rmSync(sampleRoot, { recursive: true, force: true });
+        try {
+          await cleanupGate({ client, child, dataDir: seeded.dataDir, socketPath });
+          fs.rmSync(sampleRoot, { recursive: true, force: true });
+        } catch (error) { preserveFixture = true; throw error; }
       }
     }
     receipt.maxMs = Math.max(...receipt.samples.map(row => row.interactiveComposerMs));
     return receipt;
   } finally {
+    receipt.teardownVerified = !preserveFixture && receipt.samples.length === samples && !receipt.failure;
     fs.writeFileSync(path.join(output, 'receipt.json'), JSON.stringify(receipt, null, 2) + '\n');
-    fs.rmSync(stageRoot, { recursive: true, force: true });
+    console.log(JSON.stringify(receipt));
+    if (!preserveFixture) fs.rmSync(stageRoot, { recursive: true, force: true });
   }
 }
 
@@ -159,6 +186,5 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   }));
   const receipt = await measureNativeLaunch({ app: String(args.app), output: String(args.output),
     sourceSha: String(args.sha), samples: Number(args.samples ?? 3) });
-  console.log(JSON.stringify(receipt));
   if (args.check) assert(receipt.maxMs < 1000, `Launch budget exceeded: ${receipt.maxMs} ms >= 1000 ms`);
 }
