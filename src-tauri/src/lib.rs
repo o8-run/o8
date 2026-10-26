@@ -2228,12 +2228,19 @@ fn find_preferred_node_22_in<F>(home: &str, mut check_node: F) -> Option<String>
 where
     F: FnMut(&str) -> Option<(u32, String)>,
 {
-    let glob_dirs: [(String, &str); 5] = [
+    let glob_dirs: [(String, &str); 9] = [
         (format!("{}/.nvm/versions/node", home), "v22"),
         (format!("{}/.fnm/node-versions", home), "v22"),
+        // fnm's default root on Linux is $XDG_DATA_HOME/fnm, not ~/.fnm.
+        (format!("{}/.local/share/fnm/node-versions", home), "v22"),
         (format!("{}/.volta/tools/image/node", home), "22"),
+        // asdf and mise, common on Linux desktops where the distro Node is
+        // older than 22 (Debian 13 and Ubuntu 24.04 ship Node 20).
+        (format!("{}/.asdf/installs/nodejs", home), "22."),
+        (format!("{}/.local/share/mise/installs/node", home), "22"),
         ("/opt/homebrew/opt/node@22".to_string(), ""),
         ("/usr/local/opt/node@22".to_string(), ""),
+        ("/home/linuxbrew/.linuxbrew/opt/node@22".to_string(), ""),
     ];
     for (dir, prefix) in glob_dirs {
         // Homebrew's node@22 keg has node directly at <keg>/bin/node — no
@@ -2444,10 +2451,10 @@ mod node_preflight_tests {
         if !Path::new(path).exists() {
             return None;
         }
-        if path.contains("/v22.") || path.contains("/node/22.") {
+        if path.contains("/v22.") || path.contains("/22.") {
             return Some((22, "v22.19.0".to_string()));
         }
-        if path.contains("/v24.") || path.contains("/node/24.") {
+        if path.contains("/v24.") || path.contains("/24.") {
             return Some((24, "v24.11.1".to_string()));
         }
         None
@@ -2485,6 +2492,31 @@ mod node_preflight_tests {
         assert_eq!(
             find_preferred_node_22_in(home.str(), checker),
             Some(volta_node.to_string_lossy().to_string())
+        );
+    }
+
+    #[test]
+    fn preferred_node_discovery_supports_linux_manager_layouts() {
+        let fnm = TempHome::new("fnm-xdg");
+        let fnm_node =
+            fnm.touch_node(".local/share/fnm/node-versions/v22.18.0/installation/bin/node");
+        assert_eq!(
+            find_preferred_node_22_in(fnm.str(), checker),
+            Some(fnm_node.to_string_lossy().to_string())
+        );
+
+        let asdf = TempHome::new("asdf");
+        let asdf_node = asdf.touch_node(".asdf/installs/nodejs/22.17.0/bin/node");
+        assert_eq!(
+            find_preferred_node_22_in(asdf.str(), checker),
+            Some(asdf_node.to_string_lossy().to_string())
+        );
+
+        let mise = TempHome::new("mise");
+        let mise_node = mise.touch_node(".local/share/mise/installs/node/22.17.0/bin/node");
+        assert_eq!(
+            find_preferred_node_22_in(mise.str(), checker),
+            Some(mise_node.to_string_lossy().to_string())
         );
     }
 
@@ -2571,7 +2603,20 @@ fn node_install_hint() -> String {
         .to_string()
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
+fn node_install_hint() -> String {
+    format!(
+        "Many distributions ship an older Node.js (Debian 13 and Ubuntu 24.04 ship 20.x).\n\
+         Install Node {major} with nvm (`nvm install {major}`), fnm (`fnm install {major}`),\n\
+         or the NodeSource packages at https://github.com/nodesource/distributions,\n\
+         then launch o8 again.\n\n\
+         o8 also finds Node {major} under nvm, fnm, Volta, asdf, mise, and Linuxbrew\n\
+         even when your default `node` is older.",
+        major = PREFERRED_NODE_MAJOR
+    )
+}
+
+#[cfg(all(not(target_os = "windows"), not(target_os = "linux")))]
 fn node_install_hint() -> String {
     format!(
         "Install a supported version with `brew install node@{major}` / `nvm install {major}`\n\

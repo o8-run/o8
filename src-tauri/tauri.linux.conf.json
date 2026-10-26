@@ -26,10 +26,10 @@
   "bundle": {
     "linux": {
       "deb": {
-        "depends": ["nodejs (>= 22)"]
+        "recommends": ["nodejs (>= 22)"]
       },
       "rpm": {
-        "depends": ["nodejs >= 22.0.0"]
+        "recommends": ["nodejs >= 22.0.0"]
       }
     }
   }
