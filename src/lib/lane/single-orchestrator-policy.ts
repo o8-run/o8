@@ -179,21 +179,25 @@ function discoverCodexInstallations(binaries: string[], env: NodeJS.ProcessEnv):
   };
 }
 
-function discoverCodexToolHosts(env: NodeJS.ProcessEnv): string[] {
+function discoverCodexToolHosts(env: NodeJS.ProcessEnv, protectedBinaries: string[]): string[] {
   const userApplications = env.HOME ? join(env.HOME, 'Applications') : null;
   const candidates = [
+    '/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex-code-mode-host',
     '/Applications/ChatGPT.app/Contents/Resources/codex-code-mode-host',
     '/Applications/Codex.app/Contents/Resources/codex-code-mode-host',
     ...(userApplications ? [
+      join(userApplications, 'ChatGPT.app', 'Contents', 'Resources', 'codex-cli', 'bin', 'codex-code-mode-host'),
       join(userApplications, 'ChatGPT.app', 'Contents', 'Resources', 'codex-code-mode-host'),
       join(userApplications, 'Codex.app', 'Contents', 'Resources', 'codex-code-mode-host'),
     ] : []),
   ];
   return candidates.filter((candidate) => {
     try {
-      // Re-opening a symlink target after the CLI denials would let a forged
-      // helper alias restore execution of the protected Codex binary.
-      return lstatSync(candidate).isFile() && realpathSync(candidate) === candidate;
+      // Exact helper grants follow the CLI denials, so no alias or copy may
+      // reopen a protected executable through a tool-host name.
+      const host = lstatSync(candidate);
+      return host.isFile() && Boolean(host.mode & 0o111) && realpathSync(candidate) === candidate
+        && !protectedBinaries.some((binary) => hasSameExecutableBytes(candidate, binary));
     } catch {
       return false;
     }
@@ -292,7 +296,7 @@ export async function prepareSingleOrchestratorLaunch(input: {
     const source = resolvePrivateCodexSource(binary);
     // The originally selected binary stays denied even when Solo runs another.
     const installations = discoverCodexInstallations([binary, input.binary], input.env);
-    const toolHosts = discoverCodexToolHosts(input.env);
+    const toolHosts = discoverCodexToolHosts(input.env, installations.nativeBinaries);
     const selectedToolHost = selectedCodexToolHost(source.nativeBinary, installations.nativeBinaries);
     copyFileSync(source.nativeBinary, launchBinaryPath, fsConstants.COPYFILE_FICLONE);
     chmodSync(launchBinaryPath, 0o700);
