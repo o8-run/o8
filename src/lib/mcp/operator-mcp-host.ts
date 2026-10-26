@@ -515,8 +515,12 @@ async function dispatchOperatorMcpMessage(message: OperatorMcpRequest, requested
   }
   if (method === 'tools/call') {
     const toolName = (params as Record<string, unknown> | undefined)?.name as string;
+    const rawArgs = params?.arguments === undefined ? {} : params.arguments;
+    if (!rawArgs || typeof rawArgs !== 'object' || Array.isArray(rawArgs)) {
+      return { jsonrpc: '2.0', id, result: textResult('arguments must be an object. Set arguments to an object such as {}.', true) };
+    }
     const toolArgs = expandToolPathArgs(
-      ((params as Record<string, unknown> | undefined)?.arguments ?? {}) as Record<string, unknown>,
+      rawArgs as Record<string, unknown>,
     ) as Record<string, unknown>;
     const exposed = activeTools.some((tool) => tool.name === toolName);
     if (!exposed) {
@@ -524,7 +528,7 @@ async function dispatchOperatorMcpMessage(message: OperatorMcpRequest, requested
       return {
         jsonrpc: '2.0',
         id,
-        result: textResult(`Tool unavailable in operator MCP profile ${profile}: ${toolName}`, true),
+        result: textResult(`Tool unavailable in operator MCP profile ${profile}: ${toolName}. Call tools/list and use an available name exactly.`, true),
       };
     }
     const handler = toolName === 'o8_device' ? (args: Record<string, unknown>) => handleDevice(args, deviceContext) : TOOL_HANDLERS[toolName];

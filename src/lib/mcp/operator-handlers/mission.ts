@@ -468,7 +468,7 @@ export const MISSION_TOOLS: McpTool[] = [
   {
     name: 'submit_review',
     description:
-      'USE THIS WHEN a packet is awaiting_review and you\'ve inspected the diff (via o8_merge_preview or by reading the worktree). approved:true unlocks the F18 auto-merge path; approved:false sends the packet back to the agent with findings as feedback. Findings are relayed to downstream dependent packets. Use status for the finding enum (fixed, accepted, deferred); put free-text fix details in description or fixSuggestion. Example: submit_review({packetId: "pkt-abc", approved: false, findings: [{file: "src/foo.ts", severity: "warning", description: "CSS shorthand used", status: "fixed", fixSuggestion: "Use paddingTop and paddingLeft instead."}]})',
+      'Required: packetId, findings, approved. Each finding requires file, severity (bug, rule_violation, note), description, and status (fixed, accepted, deferred). USE THIS WHEN a packet is awaiting_review and you\'ve inspected the diff (via o8_merge_preview or by reading the worktree). approved:true unlocks the F18 auto-merge path; approved:false sends the packet back to the agent with findings as feedback. Findings are relayed to downstream dependent packets. Use status for the finding enum (fixed, accepted, deferred); put free-text fix details in description or fixSuggestion. Example: submit_review({packetId: "pkt-abc", approved: false, findings: [{file: "src/foo.ts", severity: "rule_violation", description: "CSS shorthand used", status: "fixed", fixSuggestion: "Use paddingTop and paddingLeft instead."}]})',
     inputSchema: {
       type: 'object',
       properties: {
@@ -484,7 +484,7 @@ export const MISSION_TOOLS: McpTool[] = [
             properties: {
               file: { type: 'string' },
               line: { type: 'number' },
-              severity: { type: 'string' },
+              severity: { type: 'string', enum: ['bug', 'rule_violation', 'note'], description: 'bug for defects, rule_violation for policy failures, note for observations. Legacy severity aliases remain accepted.' },
               description: { type: 'string' },
               status: {
                 type: 'string',
@@ -501,7 +501,7 @@ export const MISSION_TOOLS: McpTool[] = [
                 description: 'Optional free-text fix narrative.',
               },
             },
-            required: ['file', 'severity', 'description'],
+            required: ['file', 'severity', 'description', 'status'],
           },
         },
         approved: {

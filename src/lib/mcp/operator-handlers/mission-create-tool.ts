@@ -6,17 +6,19 @@ import { MISSION_WORKER_PIN_PROPERTIES, WORKER_PROVIDER_OPTIONS } from './missio
 export const CREATE_MISSION_TOOL: McpTool = {
   name: 'create_mission',
   description:
-    'USE THIS WHEN the user wants to delegate one or more coding tasks to autonomous agents — phrasings like "fix issues #X, #Y", "dispatch this bug", "have an agent work on...", "build me a feature for...". Don\'t code it yourself — o8 spawns CLI runtimes in isolated worktrees, runs governance checks, and ships a clean PR. By default packets run in parallel and dispatch immediately. Use `issues` for GitHub refs (any format: 495, "#495", URL), or `issues_inline` for ad-hoc tasks without GitHub issues. Examples: create_mission({issues: [495, 496], repoPath: "/path/to/repo"}) creates from GitHub issues. create_mission({issues_inline: [{title: "Add dark mode"}, {title: "Fix login button"}], repoPath: "/path/to/repo"}) creates from inline descriptions.' + SEALED_TASK_CONTRACT_GUIDANCE,
+    'Prepare or dispatch coding tasks. Required: repoPath and at least one non-empty issues or issues_inline list. Issue references in issues are strings; each inline task needs title, with optional body. dispatch defaults to true and starts workers immediately; set dispatch:false to prepare, then pass the returned missionId to dispatch_mission. Packets run in parallel unless sequential:true. Example: create_mission({repoPath: "/path/to/repo", issues: ["495", "496"], dispatch:false}). Example: create_mission({repoPath: "/path/to/repo", issues_inline: [{title: "Check empty input"}], dispatch:false}).' + SEALED_TASK_CONTRACT_GUIDANCE,
   inputSchema: {
     type: 'object',
     properties: {
       issues: {
         type: 'array',
+        minItems: 1,
         items: { type: 'string' },
-        description: 'GitHub issue references. Accepts any format: "495", "#495", or "https://github.com/org/repo/issues/495" (pass numbers as strings). Fetches full issue data via `gh` CLI.',
+        description: 'Issue references as strings. Accepts any format: "495", "#495", or "https://github.com/org/repo/issues/495" (pass numbers as strings). Fetches the complete referenced issue.',
       },
       issues_inline: {
         type: 'array',
+        minItems: 1,
         items: {
           type: 'object',
           properties: {
@@ -25,7 +27,7 @@ export const CREATE_MISSION_TOOL: McpTool = {
           },
           required: ['title'],
         },
-        description: 'Ad-hoc inline tasks — no GitHub issue required. Each becomes its own packet.',
+        description: 'Ad-hoc inline tasks; no remote issue required. Each becomes its own packet.',
       },
       idempotencyKey: { type: 'string', minLength: 1, description: 'Stable identity for one mission creation. Reuse the same key and arguments after an uncertain response; a replay returns the saved ids without starting dispatch again.' },
       repoPath: { type: 'string', description: 'Absolute local path to the repository.' },
@@ -62,6 +64,7 @@ export const CREATE_MISSION_TOOL: McpTool = {
       },
       dispatch: {
         type: 'boolean',
+        default: true,
         description: 'When true (default), immediately dispatches all packets after creation. Set false to prepare without launching; then call dispatch_mission with the returned missionId when ready.',
       },
       useBrain: { type: 'boolean', description: 'Engineering Brain for the workers. true: every packet prompt teaches the worker `o8 ask` (instant cited repo answers — use for weaker models or knowledge-heavy tasks). false: suppress. Omit to inherit the operator "Workers use the Brain" setting (auto = on for non-frontier runtimes only).' },
@@ -74,6 +77,7 @@ export const CREATE_MISSION_TOOL: McpTool = {
       readOnly: { type: 'boolean', description: 'When true, the worker inspects and reports without editing. A clean zero-diff exit is recorded as a successful read-only completion.' },
       comparisonModels: {
         type: 'array',
+        minItems: 1,
         items: { type: 'string' },
         description: 'Best-of-N — race the task across N candidates (one per model string), each in its own isolated worktree. The operator then compares the N diffs side-by-side and merges the winner through the review gate, archiving the losers. Same model repeated (["codex","codex","codex"]) runs N attempts of one runtime; mix runtimes (["codex","gemini"]) to compare them. Max 4. Omit for a single packet. Use when a task is worth a bake-off — risky, ambiguous, or when you want the best of several attempts.',
       },
