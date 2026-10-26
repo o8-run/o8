@@ -31,7 +31,11 @@ jobs:
       - run: npm install -g npm@11
       - run: npm ci --prefer-offline
       - run: npm run test:classification:check
+      - name: Run workspace preservation fixtures
+        if: github.event_name == 'pull_request'
+        run: npm run test:integration -- tests/workspace-preservation-cli-real-path.test.ts
       - name: Run native resource tests without a red baseline
+        if: github.event_name != 'pull_request'
         run: >-
           npm run test:integration --
           src/lib/orchestrator/mission-registry-headless.test.ts

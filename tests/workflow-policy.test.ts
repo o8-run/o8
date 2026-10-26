@@ -231,6 +231,14 @@ describe('workflow policy — every workflow is classified from the filesystem',
         const job = jobsIn(file)[0][1];
         expect(job['timeout-minutes']).toBe(45);
         expect(job.strategy).toBeUndefined();
+        const steps = job.steps as RecordValue[];
+        const preservation = steps.find(step => step.name === 'Run workspace preservation fixtures');
+        expect(preservation?.if).toBe("github.event_name == 'pull_request'");
+        expect(preservation?.run).toBe('npm run test:integration -- tests/workspace-preservation-cli-real-path.test.ts');
+        const resources = steps.find(step => step.name === 'Run native resource tests without a red baseline');
+        expect(resources?.if).toBe("github.event_name != 'pull_request'");
+        expect(resources?.run).toContain('src/lib/workspace/exact-directory-purge.test.ts');
+        expect(resources?.run).toContain('tests/workspace-preservation-cli-real-path.test.ts');
       }
       // The minimum-OS DMG fixture is explicitly bounded to three minutes and
       // runs only when its format, OS floor, workflow or policy changes.
