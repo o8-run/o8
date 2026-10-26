@@ -318,10 +318,15 @@ function buildRepoContextPreamble(repoPath: string): string {
 }
 
 function thinkingFlag(effort: ThinkingEffort | undefined): string | null {
-  if (!effort) return null;
+  if (effort === undefined) return null;
   // openclaw --thinking accepts: off|minimal|low|medium|high|xhigh|adaptive|max.
-  // o8's ThinkingEffort values are a subset, so they pass through directly.
-  return effort;
+  // Admit only the intersection with the app vocabulary; ultra is not supported.
+  switch (effort) {
+    case 'low': case 'medium': case 'high': case 'xhigh': case 'adaptive': case 'max':
+      return effort;
+    default:
+      throw new Error('Unsupported reasoning effort for the selected runtime. Choose a supported level or use the runtime default.');
+  }
 }
 
 function publishOpenclawRealtimeEvent(
@@ -580,6 +585,13 @@ export const openclawBackend: OrchestratorBackend = {
     return { sessionName: session.sessionName, status: session.status };
   },
   sendTurn(repoPath, message, onEvent, options) {
+    try {
+      thinkingFlag(options?.thinkingEffort);
+    } catch (error) {
+      onEvent({ type: 'error', error: error instanceof Error ? error.message : String(error) });
+      onEvent({ type: 'done', sessionId: null, cost: null });
+      return Promise.resolve();
+    }
     const session = ensureSession(repoPath, resolveOpenclawAgentId(options?.agent));
     return sendToOpenclawOrchestrator(session, message, onEvent, options);
   },
