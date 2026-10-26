@@ -210,6 +210,7 @@ export const opencodeRuntime: AgentRuntime = {
       prompt: opts.prompt,
       clientMutationId: opts.clientMutationId,
       model: opts.model,
+      effort: opts.effort,
       laneId: opts.laneId,
       packetId: opts.packetId,
     });

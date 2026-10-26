@@ -69,7 +69,9 @@ export async function workerModelCatalog(runtime: OrchestratorRuntime, repoPath:
     ids = defaultModel ? [defaultModel] : [];
     source = 'configured-execution-carrier-model';
   } else if (runtime === 'codex') {
-    ids = Object.keys((await getCodexSpeedCatalogue()).models);
+    const catalog = await getCodexSpeedCatalogue();
+    ids = Object.keys(catalog.models);
+    modelEfforts = new Map(ids.map(id => [id, catalog.reasoningEfforts?.[id] ?? null]));
     if (defaultModel && parseLocalModel(defaultModel)) ids.push(defaultModel);
     source = 'installed-model-list';
   } else if (runtime === '3code') {
@@ -93,7 +95,12 @@ export async function workerModelCatalog(runtime: OrchestratorRuntime, repoPath:
     ids = defaultModel ? [defaultModel] : [];
   }
   return {
-    models: [...new Set(ids)].map(id => ({ id, efforts: THINKING_EFFORTS.filter(effort => resolveEffortPin({ runtime, model: id, requestedEffort: effort, modelEfforts: modelEfforts?.get(id) }).ok) })),
+    models: [...new Set(ids)].map(id => ({ id, efforts: THINKING_EFFORTS.filter(effort => {
+      // Report the installed catalog faithfully. Transport admission may still
+      // refuse a choice that the current adapter cannot apply exactly.
+      if (runtime === 'codex' && modelEfforts?.has(id)) return effort === 'adaptive' || modelEfforts.get(id)?.includes(effort);
+      return resolveEffortPin({ runtime, model: id, requestedEffort: effort, modelEfforts: modelEfforts?.get(id) }).ok;
+    }) })),
     defaultModel, carrier, source, observedAt: new Date().toISOString(),
   };
 }
