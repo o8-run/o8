@@ -23,6 +23,7 @@
 pub mod capture;
 pub mod gate;
 pub mod keys;
+pub mod secret_store;
 pub mod polish;
 pub mod whisper;
 

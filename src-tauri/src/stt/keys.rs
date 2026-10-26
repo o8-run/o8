@@ -3,8 +3,10 @@
 //! This is the de-Symonized replacement for aqua's `keys.rs` /
 //! `product_mode.rs` / license logic. There is NO proxy, NO license token,
 //! NO product-mode gate — both resolvers read an environment variable first,
-//! then fall back to macOS Keychain. Non-secret preferences live in a small JSON
-//! config under `~/.o8`; legacy plaintext keys migrate on first use.
+//! then fall back to macOS Keychain or, on Linux, the freedesktop Secret Service
+//! (`secret_store.rs`). Non-secret preferences live in a small JSON config under
+//! `~/.o8`; legacy plaintext keys migrate on first use. Linux without a running
+//! Secret Service keeps keys in that 0600 file.
 //!
 //! `GEMINI_API_KEY` powers transcript polish; `OPENROUTER_API_KEY` powers the
 //! optional Whisper re-transcription pass. The Tauri sidecar already forwards
@@ -210,6 +212,17 @@ fn redact_config(
     value
 }
 
+/// Linux presence check for the public preferences read; never migrates.
+#[cfg(target_os = "linux")]
+fn secret_service_present(key: &str) -> bool {
+    #[cfg(test)]
+    if std::env::var("O8_TEST_DISABLE_VOICE_PROVIDER_KEYS").as_deref() == Ok("1") {
+        return std::env::var("O8_TEST_PRESENT_VOICE_PROVIDER_KEY").as_deref() == Ok(key);
+    }
+    use super::secret_store::SecretBackend;
+    super::secret_store::SystemSecretStore.present(key)
+}
+
 /// Read public preferences without retrieving or migrating secret values.
 /// Secret migration remains in the explicit provider-use path.
 pub fn config_public() -> serde_json::Value {
@@ -218,7 +231,11 @@ pub fn config_public() -> serde_json::Value {
         {
             keychain_secret_present(key)
         }
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(target_os = "linux")]
+        {
+            secret_service_present(key)
+        }
+        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
         {
             let _ = key;
             false
@@ -261,15 +278,52 @@ pub fn set_pref(key: &str, value: serde_json::Value) -> Result<(), String> {
             obj.remove(key);
         }
 
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(target_os = "linux")]
+        {
+            // Secret Service when one is running; otherwise the 0600 file
+            // below, as before. A refusing (e.g. locked) store is an error,
+            // never a silent downgrade to plaintext.
+            let outcome = super::secret_store::write_secret(
+                &super::secret_store::SystemSecretStore,
+                key,
+                secret,
+            )?;
+            if outcome == super::secret_store::WriteOutcome::Stored || secret.is_empty() {
+                obj.remove(key);
+            } else {
+                obj.insert(key.to_string(), serde_json::Value::String(secret.to_string()));
+            }
+        }
+
+        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
         {
             // Cross-platform secure storage is not wired yet. Preserve current
-            // behavior off macOS, but the file writer below constrains access.
+            // behavior here, but the file writer below constrains access.
             obj.insert(key.to_string(), serde_json::Value::String(secret.to_string()));
         }
     } else {
         obj.insert(key.to_string(), value);
     }
+    write_config_object(obj)
+}
+
+/// Drop a plaintext secret from `dictation.json` after it was verified in the
+/// Secret Service. Leaves every other key untouched.
+#[cfg(target_os = "linux")]
+fn remove_file_secret(key: &str) -> Result<(), String> {
+    let mut obj = std::fs::read_to_string(config_path())
+        .ok()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+        .and_then(|v| v.as_object().cloned())
+        .unwrap_or_default();
+    if obj.remove(key).is_none() {
+        return Ok(());
+    }
+    write_config_object(obj)
+}
+
+fn write_config_object(obj: serde_json::Map<String, serde_json::Value>) -> Result<(), String> {
+    let path = config_path();
     let serialized =
         serde_json::to_string_pretty(&serde_json::Value::Object(obj)).map_err(|e| e.to_string())?;
     if let Some(parent) = path.parent() {
@@ -341,7 +395,24 @@ fn stored_secret(key: &str) -> Option<String> {
         return Some(legacy);
     }
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "linux")]
+    {
+        use super::secret_store::{migrate_legacy, read_secret, SystemSecretStore};
+        // A value in the file is the newest one: either pre-dates the Secret
+        // Service or was written while it was unavailable. Copy it in, verify
+        // the read-back, and only then drop the plaintext copy.
+        if let Some(legacy) = config_string(key) {
+            if migrate_legacy(&SystemSecretStore, key, &legacy) {
+                if let Err(error) = remove_file_secret(key) {
+                    log::warn!("[voice-keys] {key} is in the Secret Service; dictation.json cleanup failed: {error}");
+                }
+            }
+            return Some(legacy);
+        }
+        read_secret(&SystemSecretStore, key)
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     {
         config_string(key)
     }
