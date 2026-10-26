@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import { existsSync, copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { request as httpRequest } from 'node:http';
-import { createServer, type Server, type Socket } from 'node:net';
+import { connect, createServer, type Server, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runInNewContext } from 'node:vm';
@@ -25,6 +25,8 @@ const socketPath = join(root, 'native.sock');
 const nativeState = { boundaryCount: 0 };
 const sockets = new Set<Socket>();
 let child: ChildProcess;
+let noUpgradeChild: ChildProcess;
+let noUpgradePort: number;
 let native: Server;
 let port: number;
 let nativeCalls = 0;
@@ -66,7 +68,7 @@ const http = require('node:http');
 let next = 0; const responses = new Map();
 process.on('message', message => { const res = responses.get(message.id); if (!res) return; responses.delete(message.id); res.writeHead(message.status, message.headers || {}); res.end(message.body); });
 const server = http.createServer(async (req, res) => { const chunks = []; for await (const chunk of req) chunks.push(chunk); const id = ++next; responses.set(id, res); process.send({ id, method: req.method, url: req.url, headers: req.headers, body: Buffer.concat(chunks).toString() }); });
-server.on('upgrade', (_req, socket) => socket.end('HTTP/1.1 101 Switching Protocols\\r\\nConnection: Upgrade\\r\\nUpgrade: websocket\\r\\n\\r\\n'));
+if (!process.env.O8_FIXTURE_NO_UPGRADE) server.on('upgrade', (_req, socket) => socket.end('HTTP/1.1 101 Switching Protocols\\r\\nConnection: Upgrade\\r\\nUpgrade: websocket\\r\\n\\r\\n'));
 server.listen(0, '127.0.0.1', () => process.send({ ready: true, port: server.address().port }));
 `);
   const { panelGateMiddleware, config } = await import('@/middleware');
@@ -79,7 +81,7 @@ server.listen(0, '127.0.0.1', () => process.send({ ready: true, port: server.add
     if (message.ready) { port = message.port!; resolveReady(); return; }
     handlerCalls++;
     try {
-      const req = new NextRequest(`http://127.0.0.1:${port}${message.url}`, { method: message.method,
+      const req = new NextRequest(new URL(message.url, `http://127.0.0.1:${port}`), { method: message.method,
         headers: message.headers, ...(message.method === 'POST' ? { body: message.body } : {}) });
       const gated = config.matcher.includes('/:path*') || message.url.startsWith('/api/') || message.url.startsWith('/broadcast');
       const gate = gated ? panelGateMiddleware(req) : NextResponse.next();
@@ -96,11 +98,19 @@ server.listen(0, '127.0.0.1', () => process.send({ ready: true, port: server.add
     } catch { child.send({ id: message.id, status: 500, body: 'Fixture route failed' }); }
   });
   await ready;
+  noUpgradeChild = spawn(process.execPath, [join(root, 'server.js')], { env: { ...process.env,
+    O8_DATA_DIR: root, CORTEX_IDE_DATA_DIR: root, O8_FIXTURE_NO_UPGRADE: '1' }, stdio: ['ignore', 'ignore', 'pipe', 'ipc'] });
+  await new Promise<void>(resolve => noUpgradeChild.on('message', (message: { ready?: boolean; port?: number }) => {
+    if (message.ready) { noUpgradePort = message.port!; resolve(); }
+    else noUpgradeChild.send({ id: (message as { id?: number }).id, status: 500, body: 'Refused request reached the fixture app' });
+  }));
   vi.stubEnv('O8_API_PORT', String(port)); vi.stubEnv('PORT', String(port));
 }, 60000);
 
 afterAll(async () => {
-  if (child?.exitCode === null) { const closed = once(child, 'exit'); child.kill(); await closed; }
+  for (const serverChild of [child, noUpgradeChild]) {
+    if (serverChild?.exitCode === null) { const closed = once(serverChild, 'exit'); serverChild.kill(); await closed; }
+  }
   for (const socket of sockets) socket.destroy();
   if (native) await new Promise<void>(resolve => native.close(() => resolve()));
   const { closeDb } = await import('@/lib/db'); closeDb();
@@ -115,6 +125,48 @@ function request(host: string, path = '/', options: { method?: string; headers?:
     req.setTimeout(10000, () => req.destroy(new Error('Fixture request timeout'))); req.on('error', reject); req.end(options.body);
   });
 }
+function rawRequest(target: string, host: string, upgrade = false, socketPort = port): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const socket = connect(socketPort, '127.0.0.1'); let response = '';
+    socket.setEncoding('utf8');
+    socket.setTimeout(10000, () => socket.destroy(new Error('Fixture TCP timeout')));
+    socket.on('error', reject); socket.on('data', chunk => { response += chunk; });
+    socket.on('end', () => resolve(response));
+    socket.on('connect', () => socket.write(`GET ${target} HTTP/1.1\r\nHost: ${host}\r\nConnection: ${upgrade ? 'Upgrade' : 'close'}\r\n${upgrade ? 'Upgrade: websocket\r\n' : ''}\r\n`));
+  });
+}
+
+it.each(['untrusted.invalid', 'localhost.untrusted.invalid', 'localhost.', '127.1', 'localhost:1', 'localhost:123@untrusted.invalid'])('refuses absolute-form authority %s before app routing over TCP', async authority => {
+  const before = handlerCalls;
+  const response = await rawRequest(`http://${authority}/`, `127.0.0.1:${port}`);
+  expect(response).toMatch(/^HTTP\/1\.1 421 Misdirected Request\r\n/);
+  expect(handlerCalls).toBe(before); expect(response).not.toContain(bearer);
+});
+
+it.each([['http:untrusted.invalid', 400], ['http:/untrusted.invalid', 400], ['ftp://untrusted.invalid/', 421]] as const)('refuses malformed or unsupported absolute-form target %s', async (target, status) => {
+  const before = handlerCalls;
+  expect(await rawRequest(target, `127.0.0.1:${port}`)).toMatch(new RegExp(`^HTTP/1\\.1 ${status} `));
+  expect(handlerCalls).toBe(before);
+});
+
+it.each(['localhost', '127.0.0.1', '[::1]', 'tauri.localhost'])('retains absolute-form requests to an allowed authority %s', async authority => {
+  const response = await rawRequest(`http://${authority}:${port}/`, `127.0.0.1:${port}`);
+  expect(response).toMatch(/^HTTP\/1\.1 200 OK\r\n/);
+});
+
+it.each([false, true])('answers a refused upgrade authority with HTTP 421 (downstream handler: %s)', async downstreamHandler => {
+  const socketPort = downstreamHandler ? port : noUpgradePort;
+  const response = await rawRequest('/', `untrusted.invalid:${socketPort}`, true, socketPort);
+  expect(response).toMatch(/^HTTP\/1\.1 421 Misdirected Request\r\n/);
+  expect(response).toContain('Connection: close\r\n');
+});
+
+it.each([false, true])('refuses an absolute-form upgrade authority with an allowed Host (downstream handler: %s)', async downstreamHandler => {
+  const socketPort = downstreamHandler ? port : noUpgradePort;
+  const response = await rawRequest('http://untrusted.invalid/', `127.0.0.1:${socketPort}`, true, socketPort);
+  expect(response).toMatch(/^HTTP\/1\.1 421 Misdirected Request\r\n/);
+});
+
 const call = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: {
   name: 'o8_view_eval', arguments: { code: 'globalThis.boundaryCount += 1; globalThis.boundaryCount' },
 } });

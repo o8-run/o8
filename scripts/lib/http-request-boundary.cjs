@@ -18,6 +18,14 @@ function isAllowedLocalHost(host, port) {
     : /^tauri\.localhost:[1-9][0-9]{0,4}$/.test(canonical) && Number(canonical.split(':')[1]) <= 65535);
 }
 
+function requestTargetAllowed(target, port) {
+  if (typeof target !== 'string') return false;
+  if (!/^[a-z][a-z0-9+.-]*:/i.test(target)) return true;
+  // Validate the raw authority: URL parsing would normalize disallowed aliases.
+  const absolute = /^https?:\/\/([^/?#]*)(?:[/?]|$)/i.exec(target);
+  return !!absolute && !target.includes('#') && isAllowedLocalHost(absolute[1], port);
+}
+
 function browserWriteAllowed(method, get, protocol = 'http:') {
   if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(method.toUpperCase())) return true;
   const origin = get('origin');
@@ -37,4 +45,5 @@ function browserWriteAllowed(method, get, protocol = 'http:') {
 
 exports.isLoopbackHost = isLoopbackHost;
 exports.isAllowedLocalHost = isAllowedLocalHost;
+exports.requestTargetAllowed = requestTargetAllowed;
 exports.browserWriteAllowed = browserWriteAllowed;

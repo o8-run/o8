@@ -437,13 +437,17 @@ if (process.platform === 'darwin') {
 
 const http = require('node:http');
 const https = require('node:https');
-const { isAllowedLocalHost, browserWriteAllowed } = require('./http-request-boundary.cjs');
+const { isAllowedLocalHost, requestTargetAllowed, browserWriteAllowed } = require('./http-request-boundary.cjs');
 
 function stampClientAddr(server) {
+  // Ensure upgrade requests reach the boundary even without an app listener.
+  const upgradeSentinel = () => {};
+  server.on('upgrade', upgradeSentinel);
   const emit = server.emit;
   server.emit = function (event, ...args) {
     if (event !== 'request' && event !== 'upgrade') return emit.call(this, event, ...args);
     const [req, target] = args;
+    const hasUpgradeHandler = event === 'upgrade' && this.rawListeners('upgrade').some(listener => listener !== upgradeSentinel);
     const refuse = (status) => {
       const text = status === 421 ? 'Misdirected Request' : 'Origin is not allowed';
       if (event === 'upgrade') target.end('HTTP/1.1 ' + status + ' ' + text + '\\r\\nConnection: close\\r\\nContent-Length: 0\\r\\n\\r\\n');
@@ -451,7 +455,8 @@ function stampClientAddr(server) {
       return true;
     };
     try {
-      if (!isAllowedLocalHost(req.headers.host, req.socket?.localPort)) return refuse(421);
+      if (!isAllowedLocalHost(req.headers.host, req.socket?.localPort)
+        || !requestTargetAllowed(req.url, req.socket?.localPort)) return refuse(421);
       const get = (name) => typeof req.headers[name] === 'string' ? req.headers[name] : null;
       if (!browserWriteAllowed(req.method, get, req.socket?.encrypted ? 'https:' : 'http:')) return refuse(403);
       const peer = req.socket?.remoteAddress || '';
@@ -473,6 +478,7 @@ function stampClientAddr(server) {
         req.headers['x-o8-client-addr'] = peer;
       }
     } catch { return refuse(421); }
+    if (event === 'upgrade' && !hasUpgradeHandler) { target.destroy(); return true; }
     return emit.call(this, event, ...args);
   };
   return server;
