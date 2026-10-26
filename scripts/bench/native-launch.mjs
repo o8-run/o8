@@ -9,6 +9,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { WebviewSocketClient, executeJs } from '../preship-webview-gate.mjs';
 import { cleanupGate } from '../lib/preship-gate-cleanup.mjs';
+import { prepareNativeRunner } from './native-runner-preconditions.mjs';
 import { computeArtifactDigest, descendantPids, snapshotProcesses, webkitPids } from '../lib/footprint-budget.mjs';
 import { buildFixturePlan, materializeFixture } from './interactions/fixtures.mjs';
 
@@ -102,12 +103,15 @@ export async function measureNativeLaunch({ app, output, sourceSha, samples = 3 
   const artifactDigest = computeArtifactDigest(app, { version, gitSha: sourceSha });
   const stageRoot = fs.mkdtempSync(path.join(fs.realpathSync('/tmp'), 'o8-launch-'));
   const stagedApp = path.join(stageRoot, 'o8.app');
-  let preserveFixture = false;
+  let preserveFixture = false, runner;
   const receipt = { schema: 'o8/native-launch/v1', platform: process.platform, arch: process.arch,
     osVersion: execFileSync('sw_vers', ['-productVersion'], { encoding: 'utf8' }).trim(), sourceSha, artifactDigest,
     method: 'normal release startup, private app data and incognito webview; spawn, foreground activation and controlled composer edit acknowledgment',
     pollMs: 10, limitMs: 1000, samples: [] };
   try {
+    runner = prepareNativeRunner('ai.o8.desktop.launchbench', stageRoot);
+    receipt.privacyPrecondition = runner.services.map(service => `${service}: denied`);
+    receipt.privacySetupError = runner.privacySetupError ?? null;
     execFileSync('ditto', [app, stagedApp], { stdio: 'pipe' });
     execFileSync('codesign', ['--verify', '--deep', '--strict', stagedApp], { stdio: 'pipe' });
     assert.equal(computeArtifactDigest(stagedApp, { version, gitSha: sourceSha }), artifactDigest);
@@ -149,8 +153,8 @@ export async function measureNativeLaunch({ app, output, sourceSha, samples = 3 
               }
               if (!activated) {
                 await client.send('manage_window', { window_label: 'main', operation: 'focus' });
-                const activation = spawnSync('/usr/bin/osascript', ['-e',
-                  `tell application ${JSON.stringify(stagedApp)} to activate`], { stdio: 'ignore', timeout: 10_000 });
+                const activation = spawnSync(runner.executable, [String(child.pid), 'ai.o8.desktop.launchbench'],
+                  { stdio: 'ignore', timeout: 3000 });
                 assert.equal(activation.status, 0, 'Foreground activation failed');
                 activated = true;
               }
@@ -184,6 +188,7 @@ export async function measureNativeLaunch({ app, output, sourceSha, samples = 3 
     receipt.maxMs = Math.max(...receipt.samples.map(row => row.interactiveComposerMs));
     return receipt;
   } finally {
+    runner?.restore();
     receipt.teardownVerified = !preserveFixture && receipt.samples.length === samples && !receipt.failure;
     fs.writeFileSync(path.join(output, 'receipt.json'), JSON.stringify(receipt, null, 2) + '\n');
     console.log(JSON.stringify(receipt));
