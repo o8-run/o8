@@ -1,3 +1,5 @@
+import { viewerHttpRoutes } from '@/lib/viewers/http-routes';
+
 /** Shared shell transport registrations; importing this module loads no handlers or middleware. */
 interface Route {
   path: string;
@@ -104,7 +106,7 @@ const producers = [
   route('/api/orchestrator/headless-tick', 'POST', () => import('@/app/api/orchestrator/headless-tick/route')),
   route('/api/review/auto-review', 'POST', () => import('@/app/api/review/auto-review/route')),
 ];
-const routes = [...Object.values(nativeSurfaceRoutes).flat(), ...producers];
+const routes = [...Object.values(nativeSurfaceRoutes).flat(), ...producers, ...viewerHttpRoutes];
 function parameters(pattern: string, pathname: string): Record<string, string> | null {
   const expected = pattern.split('/');
   const actual = pathname.split('/');

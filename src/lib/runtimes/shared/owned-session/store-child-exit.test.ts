@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DispatchBackendWaitResult } from '@/lib/runtimes/shared/dispatch-readiness';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import type { OwnedRuntimeAdapter, OwnedSessionRecord, ParsedRunLog } from './types';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 const ensureDispatchBackendReadyMock = vi.hoisted(() => vi.fn());
 const fetchRuntimeLaunchMock = vi.hoisted(() => vi.fn());
@@ -41,7 +42,7 @@ describe('createOwnedSessionStore child exit recording', () => {
   let priorCodexRoot: string | undefined;
 
   beforeEach(async () => {
-    tempRoot = await mkdtemp(path.join(process.cwd(), '.tmp-owned-child-exit-'));
+    tempRoot = await mkdtemp(path.join(getDataDir(), '.tmp-owned-child-exit-'));
     repoPath = path.join(tempRoot, 'repo');
     execFileSync('git', ['init', '-q', '-b', 'main', repoPath]);
     priorRoot = process.env.O8_TEST_CHILD_EXIT_ROOT;

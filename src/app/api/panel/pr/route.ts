@@ -1,4 +1,5 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { viewerJson } from '@/lib/viewers/response';
+import { NextRequest } from 'next/server';
 import { DEFAULT_GITHUB_REPO, fetchGitHubPullRequestDetail, resolveRepoSlug } from '@/lib/github-broker';
 import { readPullRequestStack } from '@/lib/github-broker/pull-request-stack';
 export const runtime = 'nodejs';
@@ -10,7 +11,7 @@ export async function GET(request: NextRequest) {
   const number = searchParams.get('number');
 
   if (!repo || !number) {
-    return NextResponse.json({ error: 'repo and number required' }, { status: 400 });
+    return viewerJson({ error: 'repo and number required' }, { status: 400 });
   }
 
   try {
@@ -27,7 +28,7 @@ export async function GET(request: NextRequest) {
       return 'success';
     })();
 
-    return NextResponse.json({
+    return viewerJson({
       number: data.number,
       title: data.title,
       body: data.body || '',
@@ -51,7 +52,7 @@ export async function GET(request: NextRequest) {
       stack,
     });
   } catch (err) {
-    return NextResponse.json(
+    return viewerJson(
       { error: err instanceof Error ? err.message : 'Failed to fetch PR' },
       { status: 500 },
     );

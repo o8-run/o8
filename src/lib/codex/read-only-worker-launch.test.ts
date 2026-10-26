@@ -25,6 +25,14 @@ vi.mock('node:child_process', async (importOriginal) => {
   return { ...actual, spawn: spawnMock };
 });
 
+// Hosts without an OS sandbox must refuse; pin Linux to "no bubblewrap" so the
+// refusal below does not depend on what this machine has installed.
+vi.mock('@/lib/runtimes/shared/owned-session/sandbox-linux', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/runtimes/shared/owned-session/sandbox-linux')>();
+  const { SandboxUnavailableError } = await import('@/lib/runtimes/shared/owned-session/sandbox-error');
+  return { ...actual, requireBwrap: vi.fn(async () => { throw new SandboxUnavailableError('bubblewrap unavailable'); }) };
+});
+
 vi.mock('@/lib/runtimes/shared/dispatch-readiness', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/runtimes/shared/dispatch-readiness')>();
   return { ...actual, ensureDispatchBackendReady: vi.fn(async () => ({ ready: true, reason: 'http_200' })) };
@@ -224,7 +232,7 @@ describe('owned Codex read-only argv', () => {
 
   // A read-only launch runs inside the macOS sandbox-exec profile; every other
   // host refuses it before spawning, so the launched argv exists only on macOS.
-  it.skipIf(process.platform === 'darwin')('refuses a read-only launch without the macOS sandbox', async () => {
+  it.skipIf(process.platform === 'darwin')('refuses a read-only launch without an OS sandbox', async () => {
     const result = await launchOwnedCodexSession({
       cwd: repoPath, prompt: 'inspect the repository', workMode: 'read-only',
     });

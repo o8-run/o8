@@ -59,3 +59,25 @@ describe('GET /api/panel/mobile-pairing — credential boundary', () => {
     expect(res.status).toBe(403);
   });
 });
+
+describe('GET /api/panel/mobile-pairing — LAN reachability flag', () => {
+  const original = process.env.O8_LAN_ACCESS;
+  afterEach(() => {
+    if (original === undefined) delete process.env.O8_LAN_ACCESS;
+    else process.env.O8_LAN_ACCESS = original;
+  });
+
+  it('reports lanAccess:false when the servers are loopback-only (default)', async () => {
+    delete process.env.O8_LAN_ACCESS;
+    h.resolveRequestPrincipal.mockReturnValue('operator');
+    const body = await (await GET(req())).json();
+    expect(body.lanAccess).toBe(false);
+  });
+
+  it('reports lanAccess:true when the operator opted in with O8_LAN_ACCESS=1', async () => {
+    process.env.O8_LAN_ACCESS = '1';
+    h.resolveRequestPrincipal.mockReturnValue('operator');
+    const body = await (await GET(req())).json();
+    expect(body.lanAccess).toBe(true);
+  });
+});

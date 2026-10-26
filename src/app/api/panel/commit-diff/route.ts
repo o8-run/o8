@@ -1,6 +1,7 @@
+import { viewerGitJson } from '@/lib/viewers/git-response';
+import { viewerJson } from '@/lib/viewers/response';
 export const dynamic = 'force-dynamic';
 
-import { NextResponse } from 'next/server';
 import { getLocalCommitDiffFiles, isValidCommitHash, resolveWorkspaceRoot } from '@/lib/panel/git-commits';
 
 export async function GET(request: Request) {
@@ -9,22 +10,22 @@ export async function GET(request: Request) {
   const workspace = searchParams.get('workspace');
 
   if (!sha) {
-    return NextResponse.json({ error: 'sha param required' }, { status: 400 });
+    return viewerJson({ error: 'sha param required' }, { status: 400 });
   }
 
   if (!isValidCommitHash(sha)) {
-    return NextResponse.json({ error: 'Invalid commit hash' }, { status: 400 });
+    return viewerJson({ error: 'Invalid commit hash' }, { status: 400 });
   }
 
   try {
     const files = getLocalCommitDiffFiles(sha, workspace);
-    return NextResponse.json({
+    return viewerGitJson({
       sha,
       workspace: resolveWorkspaceRoot(workspace),
       files,
-    });
+    }, resolveWorkspaceRoot(workspace), { oldRef: `${sha}^`, newRef: sha });
   } catch (error) {
-    return NextResponse.json({
+    return viewerJson({
       sha,
       workspace: resolveWorkspaceRoot(workspace),
       files: [],
