@@ -334,7 +334,7 @@ export async function prepareSingleOrchestratorLaunch(input: {
       "import { chmodSync, rmSync } from 'node:fs';",
       "import { Transform } from 'node:stream';",
       'const [, , launchBinary, cleanupRoot, sandboxBinary, ...sandboxArgs] = process.argv;',
-      "const child = spawn(sandboxBinary, sandboxArgs, { stdio: ['ignore', 'pipe', 'pipe'], env: process.env });",
+      "const child = spawn(sandboxBinary, sandboxArgs, { stdio: [sandboxArgs.at(-1) === '-' ? 'inherit' : 'ignore', 'pipe', 'pipe'], env: process.env });",
       'let sealed = false;',
       'let sealFailed = false;',
       'const relay = new Transform({ transform(chunk, _encoding, callback) {',
