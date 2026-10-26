@@ -6,12 +6,14 @@ const models = [...CODEX_MODEL_IDS, 'gpt-future-fixture'];
 export const codexEffortCatalogFixture = {
   models: Object.fromEntries(models.map(model => [model, []])),
   defaultModel: 'gpt-6.1-sol',
+  nativeDefaultModel: 'gpt-6.1-sol',
   reasoningEfforts: Object.fromEntries(models.map(model => [model, [...MANUAL_THINKING_EFFORTS]])),
 };
 
 /** Add read-only model discovery to a finite executable fixture. */
 export function codexModelListFixtureScript(): string {
   const data = models.map(model => ({ model,
+    isDefault: model === 'gpt-6.1-sol',
     supportedReasoningEfforts: MANUAL_THINKING_EFFORTS.map(reasoningEffort => ({ reasoningEffort })),
   }));
   return `if(args[0]==='app-server'){

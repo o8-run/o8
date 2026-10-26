@@ -218,7 +218,7 @@ export async function launchPacketWithStorageAdmission(input: {
       explicitModel: input.workerRouting.requestedModel,
       model: workerRouting.selectedModel,
       modelDisposition: workerRouting.modelDisposition,
-    }, { cwd: packet.workspaceTargetPath ?? undefined });
+    }, { cwd: packet.workspaceTargetPath ?? undefined, packetId: packet.id });
     if (!pin.ok) {
       throw new EffortPinRejectionError(pin.code, `Refusing to launch packet ${packet.id}: ${pin.message}`);
     }

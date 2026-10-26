@@ -45,4 +45,17 @@ describe('read-only installed Codex service tiers', () => {
     const promise = readCodexSpeedCatalogue('/fixture/codex', { NODE_ENV: 'test' }); child.reply(1, {}); child.reply(2, {});
     await expect(promise).rejects.toThrow('did not return a model catalogue'); child.emit('exit', 0);
   });
+  it.each([true, false])('keeps the native default separate from configured model (config first: %s)', async configFirst => {
+    const promise = readCodexSpeedCatalogue('/fixture/codex', { NODE_ENV: 'test' });
+    child.reply(1, {});
+    if (configFirst) child.reply(3, { config: { model: 'configured-high' } });
+    child.reply(2, { data: [
+      { model: 'native-low', isDefault: true, supportedReasoningEfforts: [{ reasoningEffort: 'low' }] },
+      { model: 'configured-high', supportedReasoningEfforts: [{ reasoningEffort: 'high' }] },
+    ] });
+    if (!configFirst) child.reply(3, { config: { model: 'configured-high' } });
+    expect(await promise).toMatchObject({ nativeDefaultModel: 'native-low', defaultModel: 'configured-high',
+      reasoningEfforts: { 'native-low': ['low'], 'configured-high': ['high'] } });
+    child.emit('exit', 0);
+  });
 });

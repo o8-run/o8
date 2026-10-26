@@ -12,7 +12,8 @@ process.env.CORTEX_IDE_DATA_DIR = dataDir;
 vi.mock('@/lib/lane/commands', () => ({ dispatch: h.dispatch }));
 vi.mock('@/lib/runtimes/shared/auth-detect', () => ({ assertRuntimeDispatchable: vi.fn(async () => {}) }));
 vi.mock('@/lib/codex/service-tier-catalogue', () => ({
-  getCodexSpeedCatalogue: async () => ({ models: { 'gpt-5.6-terra': [] } }),
+  getCodexSpeedCatalogue: async () => ({ models: { 'gpt-5.6-terra': [] },
+    reasoningEfforts: { 'gpt-5.6-terra': ['low', 'high'] } }),
 }));
 vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: vi.fn(async () => {}) }));
 vi.mock('@/lib/command-center/snapshot', () => ({ invalidateCommandCenterSnapshotCaches: vi.fn() }));

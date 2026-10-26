@@ -15,7 +15,7 @@ import { resolveAcpLaunch } from '@/lib/lane/orchestrator-backends/acp';
 import { probeAcpModels } from './acp-model-probe';
 import { museWorkerModelContext, probeMuseModels } from '@/lib/muse/models';
 import { getRuntimeCapability, type OrchestratorRuntime } from './runtime-capabilities';
-import { resolveEffortPin } from './effort-pin';
+import { resolveCodexWorkerConfigHome, resolveEffortPin } from './effort-pin';
 import { THINKING_EFFORTS, type ThinkingEffort } from './thinking-effort';
 
 export interface WorkerModelCatalog {
@@ -69,9 +69,11 @@ export async function workerModelCatalog(runtime: OrchestratorRuntime, repoPath:
     ids = defaultModel ? [defaultModel] : [];
     source = 'configured-execution-carrier-model';
   } else if (runtime === 'codex') {
-    const catalog = await getCodexSpeedCatalogue();
+    const catalog = await getCodexSpeedCatalogue(await resolveCodexWorkerConfigHome(), true);
     ids = Object.keys(catalog.models);
     modelEfforts = new Map(ids.map(id => [id, catalog.reasoningEfforts?.[id] ?? null]));
+    defaultModel = runtime === defaults.defaultDispatchRuntime && defaults.defaultDispatchModel
+      ? defaults.defaultDispatchModel : catalog.nativeDefaultModel ?? null;
     if (defaultModel && parseLocalModel(defaultModel)) ids.push(defaultModel);
     source = 'installed-model-list';
   } else if (runtime === '3code') {

@@ -1,7 +1,7 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { getCodexSpeedCatalogue } from '@/lib/codex/service-tier-catalogue';
-import { getSelectedRuntimeIdentity } from '@/lib/runtime/identity-catalog';
+import { getOrPinPacketRuntimeIdentity, getSelectedRuntimeIdentity } from '@/lib/runtime/identity-catalog';
 import { codexCliSupportsUltraEfforts, resolveCodexReasoningEffort } from '@/lib/codex/reasoning-effort';
 import { parseLocalModel } from '@/lib/codex/local-model';
 import { getRuntimeCapability, isOrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
@@ -197,18 +197,27 @@ export function resolveEffortPin(input: ResolveEffortPinInput): ResolveEffortPin
   return { ok: true, requestedEffort: raw, selectedEffort: raw };
 }
 
+/** Match the owned worker's selected account, or its durable packet binding. */
+export async function resolveCodexWorkerConfigHome(packetId?: string): Promise<string> {
+  const home = process.env.CODEX_HOME?.trim() || join(homedir(), '.codex');
+  const identity = packetId
+    ? await getOrPinPacketRuntimeIdentity({ runtime: 'codex', packetId,
+      fallback: { id: 'codex-local-default', label: 'Current local sign-in', configHomeRef: home } })
+    : await getSelectedRuntimeIdentity('codex');
+  return identity?.configHomeRef ?? home;
+}
+
 /** Shared last admission boundary for owned launch, cold resume and automatic retries. */
-export async function resolveRuntimeEffortPin(input: ResolveEffortPinInput, context: { cwd?: string; runtimeConfig?: Record<string, string>; configHome?: string } = {}): Promise<ResolveEffortPinResult> {
+export async function resolveRuntimeEffortPin(input: ResolveEffortPinInput, context: { cwd?: string; runtimeConfig?: Record<string, string>; configHome?: string; packetId?: string } = {}): Promise<ResolveEffortPinResult> {
   if (!isThinkingEffort(input.requestedEffort) || input.requestedEffort === 'adaptive') return resolveEffortPin(input);
   if (input.runtime !== 'muse' && input.runtime !== 'codex') return resolveEffortPin(input);
   if (input.runtime === 'codex') {
     const transport = resolveEffortPin(input);
     if (!transport.ok) return transport;
     try {
-      const identity = context.configHome ? null : await getSelectedRuntimeIdentity('codex');
-      const home = context.configHome ?? identity?.configHomeRef ?? (process.env.CODEX_HOME?.trim() || join(homedir(), '.codex'));
+      const home = context.configHome ?? await resolveCodexWorkerConfigHome(context.packetId);
       const catalog = await getCodexSpeedCatalogue(home, true);
-      const model = input.model ?? catalog.defaultModel ?? null;
+      const model = input.model?.trim() || catalog.nativeDefaultModel || null;
       return resolveEffortPin({ ...input, model, modelEfforts: model ? catalog.reasoningEfforts?.[model] ?? null : null });
     } catch {
       return { ok: false, code: 'effort_unsupported_model', message: 'Cannot verify this model effort with the selected account. Refresh the model catalog or omit effort; no worker was started.' };
@@ -224,7 +233,7 @@ export async function resolveRuntimeEffortPin(input: ResolveEffortPinInput, cont
 }
 
 export async function assertRuntimeEffortPin(runtime: string, model: string | null | undefined, effort: unknown,
-  context?: { cwd?: string; runtimeConfig?: Record<string, string>; configHome?: string }): Promise<void> {
+  context?: { cwd?: string; runtimeConfig?: Record<string, string>; configHome?: string; packetId?: string }): Promise<void> {
   const pin = await resolveRuntimeEffortPin({ runtime, model: model ?? null, requestedEffort: effort }, context);
   if (!pin.ok) throw new EffortPinRejectionError(pin.code, pin.message);
 }

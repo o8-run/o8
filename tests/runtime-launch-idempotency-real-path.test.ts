@@ -27,7 +27,7 @@ vi.mock('@/lib/runtime/actions', async (importOriginal) => {
   return { ...original, launchRuntimeSurface: h.launch };
 });
 vi.mock('@/lib/codex/service-tier-catalogue', () => ({ getCodexSpeedCatalogue: async () => ({
-  models: { 'gpt-6.1-sol': [], 'gpt-6-luna': [] }, defaultModel: 'gpt-6.1-sol',
+  models: { 'gpt-6.1-sol': [], 'gpt-6-luna': [] }, defaultModel: 'gpt-6.1-sol', nativeDefaultModel: 'gpt-6.1-sol',
   reasoningEfforts: { 'gpt-6.1-sol': ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'], 'gpt-6-luna': ['low', 'medium', 'high', 'xhigh', 'max'] },
 }) }));
 vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: h.publish }));
