@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, beforeEach, expect, it, vi } from 'vitest';
@@ -30,7 +30,7 @@ const { openclawBackend } = await import('@/lib/lane/orchestrator-backends/openc
 function turns(): string[][] {
   return existsSync(capture) ? readFileSync(capture, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line)) : [];
 }
-function setContract(contract: { text?: string; fail?: boolean }) {
+function setContract(contract: { text?: string; fail?: boolean; version?: string; versionFail?: boolean }) {
   writeFileSync(help, JSON.stringify(contract));
   binaryTimestamp += 1;
   utimesSync(binary, binaryTimestamp, binaryTimestamp);
@@ -48,7 +48,11 @@ beforeAll(() => {
   writeFileSync(join(root, '.openclaw', 'openclaw.json'), JSON.stringify({ agents: { list: [{ id: 'fixture', model: 'fixture/model' }] }, mcp: { servers: { o8: { command: 'fixture' } } } }));
   writeFileSync(binary, `#!${process.execPath}
 const fs=require('node:fs'),args=process.argv.slice(2);
-if(args.includes('--version')){console.log('2026.10.7');process.exit(0);}
+if(args.includes('--version')){
+ const contract=JSON.parse(fs.readFileSync(${JSON.stringify(help)},'utf8'));
+ if(contract.versionFail){process.exit(1);}
+ console.log(contract.version??'2026.10.7');process.exit(0);
+}
 if(args.includes('--help')){
  fs.appendFileSync(${JSON.stringify(helpCapture)},JSON.stringify(args)+'\\n');
  const help=JSON.parse(fs.readFileSync(${JSON.stringify(help)},'utf8'));
@@ -102,10 +106,11 @@ it('preserves ultra only when the selected executable advertises it', async () =
   expect(events).toContainEqual({ type: 'turn_receipt', leadModel: 'fixture/model', effort: 'ultra' });
 });
 
-it('reuses parsed thinking choices so a second launch does not start another help process', async () => {
-  const first = await turn('high'), second = await turn('high');
-  expect([...first, ...second].filter(event => event.type === 'error')).toEqual([]);
-  expect(turns()).toHaveLength(2);
+it('shares one help read across 14 unchanged launches', async () => {
+  for (let launch = 0; launch < 14; launch += 1) {
+    expect((await turn('high')).filter(event => event.type === 'error')).toEqual([]);
+  }
+  expect(turns()).toHaveLength(14);
   expect(helpCalls()).toBe(1);
 });
 it('invalidates cached choices when the selected executable changes modification time', async () => {
@@ -113,6 +118,18 @@ it('invalidates cached choices when the selected executable changes modification
   expect((await turn('ultra')).some(event => event.type === 'error')).toBe(false);
   setContract({ text: oldHelp });
   expect(await turn('ultra')).toContainEqual(expect.objectContaining({ type: 'error', code: 'effort_cli_incompatible' }));
+  expect(turns()).toHaveLength(1);
+  expect(helpCalls()).toBe(2);
+});
+
+it.each([{ version: '' }, { versionFail: true }])('does not reuse help when the reported version is unavailable: %j', async version => {
+  setContract({ text: currentHelp, ...version });
+  expect((await turn('ultra')).some(event => event.type === 'error')).toBe(false);
+  writeFileSync(help, JSON.stringify({ text: oldHelp, ...version }));
+  const events = await turn('ultra');
+  expect(events).toContainEqual(expect.objectContaining({ type: 'error', code: 'effort_cli_incompatible' }));
+  expect(events.some(event => event.type === 'turn_receipt')).toBe(false);
+  expect(gateway).toHaveBeenCalledTimes(1);
   expect(turns()).toHaveLength(1);
   expect(helpCalls()).toBe(2);
 });
@@ -133,6 +150,53 @@ it('retries a failed help probe without requiring another executable modificatio
   setContract({ fail: true });
   expect(await turn('high')).toContainEqual(expect.objectContaining({ type: 'error', code: 'effort_cli_incompatible' }));
   writeFileSync(help, JSON.stringify({ text: oldHelp }));
+  expect((await turn('high')).some(event => event.type === 'error')).toBe(false);
+  expect(turns()).toHaveLength(1);
+  expect(helpCalls()).toBe(2);
+});
+
+it.each(['inode', 'size', 'version'] as const)('invalidates cached choices when executable %s changes with preserved mtime', async identity => {
+  setContract({ text: currentHelp });
+  expect((await turn('ultra')).some(event => event.type === 'error')).toBe(false);
+  const before = statSync(binary);
+  const source = readFileSync(binary, 'utf8');
+  if (identity === 'inode') {
+    const replacement = join(root, 'replacement-lead.cjs');
+    writeFileSync(replacement, source, { mode: 0o700 });
+    utimesSync(replacement, before.atime, before.mtime);
+    renameSync(replacement, binary);
+  } else if (identity === 'size') {
+    writeFileSync(binary, source + '\n// Changed executable size.\n');
+    utimesSync(binary, before.atime, before.mtime);
+  }
+  writeFileSync(help, JSON.stringify({ text: oldHelp, version: identity === 'version' ? '2026.10.8' : '2026.10.7' }));
+  const after = statSync(binary);
+  expect(after.mtimeMs).toBe(before.mtimeMs);
+  expect(after.ino === before.ino).toBe(identity !== 'inode');
+  expect(after.size === before.size).toBe(identity !== 'size');
+  const events = await turn('ultra');
+  expect(events).toContainEqual(expect.objectContaining({ type: 'error', code: 'effort_cli_incompatible' }));
+  expect(events.some(event => event.type === 'turn_receipt')).toBe(false);
+  expect(gateway).toHaveBeenCalledTimes(1);
+  expect(turns()).toHaveLength(1);
+  expect(helpCalls()).toBe(2);
+});
+
+it.each([
+  '  --thinking <level>  Thinking level: | |\n  --timeout <seconds>  Turn timeout\n',
+  '  --thinking <level>  Thinking level: temporarily unavailable\n  --timeout <seconds>  Turn timeout\n',
+  'Usage: agent [options]\n',
+])('retries empty or unparseable help after repair without changing executable identity: %j', async text => {
+  setContract({ text });
+  const before = statSync(binary);
+  const events = await turn('high');
+  expect(events).toContainEqual(expect.objectContaining({ type: 'error', code: 'effort_cli_incompatible' }));
+  expect(events.some(event => event.type === 'turn_receipt')).toBe(false);
+  expect(turns()).toEqual([]);
+  expect(gateway).not.toHaveBeenCalled();
+  writeFileSync(help, JSON.stringify({ text: oldHelp }));
+  const after = statSync(binary);
+  expect([after.ino, after.size, after.mtimeMs]).toEqual([before.ino, before.size, before.mtimeMs]);
   expect((await turn('high')).some(event => event.type === 'error')).toBe(false);
   expect(turns()).toHaveLength(1);
   expect(helpCalls()).toBe(2);
