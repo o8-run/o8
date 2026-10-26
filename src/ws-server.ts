@@ -76,6 +76,7 @@ import { expireStaleApprovals } from '@/lib/approvals/store';
 import { getDb } from '@/lib/db';
 import { resolvePortInfo } from '@/lib/panel/api-port';
 import { getInstanceIdentity } from '@/lib/panel/instance-identity';
+import { resolveListenHost } from '@/lib/panel/listen-host';
 import { HEADLESS_LAUNCH_DEADLINE_MS } from '@/lib/orchestrator/headless-tick-deadline';
 import {
   startAgentSession,
@@ -8801,7 +8802,9 @@ const httpServer = createServer(async (req, res) => {
   res.end();
 });
 
-const o8dBridge = process.env.O8_WS_O8D === '1' ? new O8dBridge(httpServer, WS_PORT, REALTIME_EPOCH) : null;
+// Loopback by default; O8_LAN_ACCESS=1 opts in to 0.0.0.0 for phone access.
+const WS_LISTEN_HOST = resolveListenHost();
+const o8dBridge = process.env.O8_WS_O8D === '1' ? new O8dBridge(httpServer, WS_PORT, REALTIME_EPOCH, WS_LISTEN_HOST) : null;
 
 const WS_TOKEN = getOrCreateWsToken();
 console.log(`[ws-auth] WS token loaded (source: ${process.env.WS_TOKEN ? 'env' : WS_TOKEN_PATH})`);
@@ -9504,7 +9507,7 @@ async function recoverFromPortInUse(): Promise<void> {
     }
     setTimeout(() => {
       if (shuttingDown) return;
-      httpServer.listen(WS_PORT, '0.0.0.0');
+      httpServer.listen(WS_PORT, WS_LISTEN_HOST);
     }, 500);
   } catch (error) {
     console.error(
@@ -9534,10 +9537,10 @@ async function bootstrapWsServer() {
   } else {
     await new Promise<void>((done) => {
       httpServer.once('listening', () => {
-        console.log(`[ws-server] o8 WebSocket server listening on ws://0.0.0.0:${WS_PORT}/ws`);
+        console.log(`[ws-server] o8 WebSocket server listening on ws://${WS_LISTEN_HOST}:${WS_PORT}/ws`);
         done();
       });
-      httpServer.listen(WS_PORT, '0.0.0.0');
+      httpServer.listen(WS_PORT, WS_LISTEN_HOST);
     });
   }
 
