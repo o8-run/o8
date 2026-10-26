@@ -19,12 +19,13 @@ import { parseReleaseNotes } from './public-release.mjs';
 
 const DEFAULT_MIN_FREE_GIB = 25;
 
-function commandReceipt(command, args, options = {}) {
+export function commandReceipt(command, args, options = {}) {
+  const timeoutMs = options.timeoutMs ?? 15_000;
   const result = spawnSync(command, args, {
     cwd: options.cwd,
     encoding: 'utf8',
     env: options.env,
-    timeout: options.timeoutMs ?? 15_000,
+    timeout: timeoutMs,
     ...(options.maxBuffer ? { maxBuffer: options.maxBuffer } : {}),
     ...(options.detached ? { detached: true } : {}),
     windowsHide: true,
@@ -32,7 +33,10 @@ function commandReceipt(command, args, options = {}) {
   return {
     status: result.status ?? (result.error ? 127 : 0),
     stdout: result.stdout ?? '',
-    stderr: result.stderr ?? result.error?.message ?? '',
+    // A timeout leaves no exit status; say so instead of reporting a bare 127.
+    stderr: result.error?.code === 'ETIMEDOUT'
+      ? `timed out after ${timeoutMs} ms`
+      : result.stderr ?? result.error?.message ?? '',
     ...(options.detached ? { pid: result.pid ?? null } : {}),
   };
 }
@@ -209,17 +213,16 @@ export function performShipPreflight(options) {
   // so a stale manifest reaches the tag unnoticed and turns every open PR's
   // Hermetic Unit Tests job red for a reason unrelated to its diff (#2053).
   // Reuse the exact same script + remedy text CI prints on failure.
-  const classification = run(process.execPath, ['scripts/classify-tests.mjs', '--check'], {
+  const classification = run(process.execPath, ['scripts/classify-tests.mjs', '--check-manifest'], {
     cwd: root,
     env,
-    timeoutMs: 15_000,
+    timeoutMs: 60_000,
   });
   if (classification.status !== 0) {
-    throw new Error(
+    throw new Error(`test classification check: ${
       classification.stderr.trim()
         || classification.stdout.trim()
-        || `test classification check exited ${classification.status}`,
-    );
+        || `exited ${classification.status}`}`);
   }
   const repo = env.O8_RELEASE_REPO?.trim() || repositoryFromRemote(requireSuccess(
     run('git', ['remote', 'get-url', 'origin'], { cwd: root, env }),

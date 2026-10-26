@@ -12,6 +12,10 @@ pub enum Edit {
     Paste,
     Undo,
     Redo,
+    WordLeft,
+    WordRight,
+    WordBackspace,
+    WordDelete,
     Left,
     Right,
     Up,
@@ -46,6 +50,8 @@ pub enum Shortcut {
         select: bool,
         boundary: bool,
     },
+    ComposerFocus(bool),
+    ComposerCancel,
     SessionFocus,
     SessionSelect(bool),
     SessionSteer,
@@ -121,6 +127,13 @@ impl Shortcut {
             .into(),
             PaletteAccept => "Run selected command".into(),
             Edit { operation, .. } => format!("Edit text: {operation:?}"),
+            ComposerFocus(previous) => if *previous {
+                "Focus previous composer control"
+            } else {
+                "Focus next composer control"
+            }
+            .into(),
+            ComposerCancel => "Close composer picker".into(),
             SessionFocus => "Move between session list and composer".into(),
             SessionSelect(next) => if *next {
                 "Next session"
@@ -321,6 +334,7 @@ pub fn bindings() -> Vec<Binding> {
             ("v", EditorOp::Paste),
             ("z", EditorOp::Undo),
             ("shift-z", EditorOp::Redo),
+            ("y", EditorOp::Redo),
         ] {
             bind(
                 &format!("{prefix}{key}"),
@@ -343,7 +357,32 @@ pub fn bindings() -> Vec<Binding> {
         ("backspace", EditorOp::Backspace),
         ("delete", EditorOp::Delete),
     ] {
-        for prefix in ["", "shift-", "ctrl-", "ctrl-shift-", "cmd-", "cmd-shift-"] {
+        for prefix in [
+            "",
+            "shift-",
+            "ctrl-",
+            "ctrl-shift-",
+            "cmd-",
+            "cmd-shift-",
+            "alt-",
+            "alt-shift-",
+        ] {
+            let word = if cfg!(target_os = "macos") {
+                prefix.contains("alt")
+            } else {
+                prefix.contains("ctrl")
+            };
+            let operation = if word {
+                match operation {
+                    EditorOp::Left => EditorOp::WordLeft,
+                    EditorOp::Right => EditorOp::WordRight,
+                    EditorOp::Backspace => EditorOp::WordBackspace,
+                    EditorOp::Delete => EditorOp::WordDelete,
+                    other => other,
+                }
+            } else {
+                operation
+            };
             bind(
                 &format!("{prefix}{key}"),
                 if matches!(operation, EditorOp::Backspace) {
@@ -365,8 +404,23 @@ pub fn bindings() -> Vec<Binding> {
             );
         }
     }
-    bind("tab", "Session && !Brain && !Terminal", SessionFocus);
-    bind("shift-tab", "Session && !Brain && !Terminal", SessionFocus);
+    bind("tab", "ComposerCard && !Terminal", ComposerFocus(false));
+    bind(
+        "shift-tab",
+        "ComposerCard && !Terminal",
+        ComposerFocus(true),
+    );
+    bind("escape", "ComposerPicker && !Terminal", ComposerCancel);
+    bind(
+        "tab",
+        "Session && !Brain && !Terminal && !ComposerCard",
+        SessionFocus,
+    );
+    bind(
+        "shift-tab",
+        "Session && !Brain && !Terminal && !ComposerCard",
+        SessionFocus,
+    );
     for (key, action) in [
         ("up", SessionSelect(false)),
         ("down", SessionSelect(true)),

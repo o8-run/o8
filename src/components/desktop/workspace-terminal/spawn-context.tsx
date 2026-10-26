@@ -18,6 +18,7 @@ import type { OrchestrationMode, OrchestratorRuntime } from '@/lib/orchestrator/
 export interface WorkspaceSpawnHandlers {
   spawnSingleRuntimeTab: (runtime: OrchestratorRuntime) => string;
   spawnChatTab: () => string;
+  spawnChatGPTPlanTab?: () => void;
   spawnOrchestratorTab: () => string;
   spawnFleetCanvasTab?: () => string;
   updateTabMode: (

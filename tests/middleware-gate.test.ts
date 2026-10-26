@@ -9,7 +9,7 @@
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createHash } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
 
 import { describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
@@ -39,15 +39,22 @@ writeFileSync(
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
 
 const { panelGateMiddleware } = await import('@/middleware');
+const { createPreviewResourceAccess } = await import('@/lib/panel/preview-resource-access');
 
 function gatedRequest(
   url: string,
   options: { method?: string; headers?: Record<string, string> } = {},
 ): NextRequest {
-  return new NextRequest(url, {
-    method: options.method ?? 'GET',
-    headers: options.headers,
-  });
+  // Remote-principal fixtures use the allowed local authority and retain
+  // their remote peer identity, as requests forwarded by the relay do.
+  const target = new URL(url);
+  const headers = { ...options.headers };
+  if (target.hostname === '192.168.1.50') {
+    headers['x-o8-client-addr'] ??= target.hostname;
+    target.hostname = 'localhost';
+    headers.host = target.host;
+  }
+  return new NextRequest(target, { method: options.method ?? 'GET', headers });
 }
 
 describe('panelGateMiddleware — Broadcast spectator capability', () => {
@@ -247,7 +254,7 @@ describe('panelGateMiddleware — loopback trust', () => {
         },
       }),
     );
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(403);
   });
 
   it('gates /api/orchestrator/steer-packet (extracted layer-3 steer mutation) against LAN', () => {
@@ -667,7 +674,7 @@ describe('panelGateMiddleware — allowlists and bypasses', () => {
         headers: { host: '192.168.1.50:3001', origin: 'https://example.com' },
       }),
     );
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(403);
   });
 
   it('still gates setup WRITES from LAN (config-write CSRF protection)', () => {
@@ -1020,5 +1027,53 @@ describe('panelGateMiddleware — boot-gate identity probe (v0.1.600 stuck-boot 
       }),
     );
     expect(res.status).toBe(401);
+  });
+});
+
+describe('panelGateMiddleware preview resource grants', () => {
+  it.each(['/api/browser/proxy', '/api/panel/proxy'].flatMap(route =>
+    ['image.svg', 'style.css', 'classic.js'].map(resource => [route, resource]),
+  ))('%s admits signed no-Origin %s GETs only for their preview origin', (route, resource) => {
+    const target = new URL(`http://127.0.0.1:39001/${resource}`);
+    const access = createPreviewResourceAccess(target);
+    const url = new URL(route, 'http://localhost:3001');
+    url.searchParams.set('url', target.href);
+    url.searchParams.set('previewResource', access);
+    const headers = { host: url.host, 'sec-fetch-site': 'cross-site', 'sec-fetch-mode': 'no-cors' };
+    expect(panelGateMiddleware(gatedRequest(url.href, { headers })).headers.get('x-middleware-next')).toBe('1');
+    const expired = String(Date.now() - 1000);
+    const signature = createHmac('sha256', TEST_TOKEN).update(JSON.stringify(['preview-resource', target.origin, expired])).digest('hex');
+    for (const changed of [null, access.slice(0, -1) + (access.endsWith('0') ? '1' : '0'), `${expired}.${signature}`]) {
+      const denied = new URL(url);
+      if (changed === null) denied.searchParams.delete('previewResource');
+      else denied.searchParams.set('previewResource', changed);
+      expect(panelGateMiddleware(gatedRequest(denied.href, { headers })).status).toBe(401);
+    }
+    for (const target of [`http://127.0.0.1:39002/${resource}`, 'http://localhost:3001/api/leases']) {
+      const denied = new URL(url);
+      denied.searchParams.set('url', target);
+      expect(panelGateMiddleware(gatedRequest(denied.href, { headers })).status).toBe(401);
+    }
+    // A native write passes the browser boundary but the preview grant is read-only.
+    expect(panelGateMiddleware(gatedRequest(url.href, { method: 'POST', headers: { host: url.host } })).status).toBe(401);
+    expect(panelGateMiddleware(gatedRequest(url.href, { headers: { ...headers, origin: 'https://example.invalid' } })).status).toBe(401);
+    expect(panelGateMiddleware(gatedRequest(url.href, { headers: { ...headers, 'x-o8-client-addr': '192.0.2.1' } })).status).toBe(401);
+    const app = new URL('/api/leases', url);
+    app.search = url.search;
+    expect(panelGateMiddleware(gatedRequest(app.href, { headers })).status).toBe(401);
+  });
+
+  it.each(['/api/browser/proxy', '/api/panel/proxy'])('%s preserves Host and browser-write refusals before preview grants', async route => {
+    const target = new URL('http://127.0.0.1:39001/image.svg');
+    const url = new URL(route, 'http://localhost:3001');
+    url.searchParams.set('url', target.href);
+    url.searchParams.set('previewResource', createPreviewResourceAccess(target));
+    const headers = { host: url.host, 'sec-fetch-site': 'cross-site', 'sec-fetch-mode': 'no-cors' };
+    const write = panelGateMiddleware(gatedRequest(url.href, { method: 'POST', headers }));
+    expect(write.status).toBe(403);
+    expect(await write.json()).toEqual({ error: 'Origin is not allowed' });
+    const host = panelGateMiddleware(gatedRequest(url.href, { headers: { ...headers, host: 'untrusted.invalid:3001' } }));
+    expect(host.status).toBe(421);
+    expect(await host.json()).toEqual({ error: 'Misdirected Request' });
   });
 });

@@ -26,7 +26,7 @@ Shared screen layout rules, explicit agent readiness, independent project discov
 
 Direct tool sign-in recovery, explicit workspace continuation, restart intent, and focus and sound follow-through are implemented in [#3374](https://github.com/o8-run/o8/pull/3374). A ready discovery result enables continuation; opening a sign-in surface never starts authentication automatically. Source completion does not establish installed acceptance or a release; voice and mobile acceptance remain with their existing work.
 
-Update-service source work has closed. Closure does not establish deployed endpoint behavior, delivery in the installed updater, or trustworthy active-install counts. New-install usage analytics, existing opt-out preservation and matching privacy documentation remain a separate delivery gate. [#2882](https://github.com/o8-run/o8/issues/2882)
+Default-on usage analytics, with a first-run disclosure, preserved opt-outs and a matching privacy page, merged in [#3046](https://github.com/o8-run/o8/pull/3046) and ships with the next release. Update-service delivery in the installed updater and trustworthy active-install counts remain unverified.
 
 After first-run acceptance, verify paid-tier behavior through the installed app, then complete the existing Symon reliability review. Its scope includes sessions, models, tool results, interruptions, reconnect and approvals. Current Symon follow-ups retain their own prerequisite and acceptance evidence. [#2534](https://github.com/o8-run/o8/issues/2534)
 

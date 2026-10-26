@@ -1,0 +1,43 @@
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  tests/next-parity-harness-real-path.test.ts > reports signed numeric gaps, preserves missing measurements and never gates on a visual difference
+AssertionError: node:internal/modules/cjs/loader:1433
+  throw err;
+  ^
+
+Error: Cannot find module '<repo>/scripts/parity/next.mjs'
+    at Function._resolveFilename (node:internal/modules/cjs/loader:1430:15)
+    at defaultResolveImpl (node:internal/modules/cjs/loader:1040:19)
+    at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1045:22)
+    at Function._load (node:internal/modules/cjs/loader:1216:25)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:254:19)
+    at Function.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:171:5)
+    at node:internal/main/run_main_module:36:49 {
+  code: 'MODULE_NOT_FOUND',
+  requireStack: []
+}
+
+Node.js v22.23.4
+: expected 1 to be +0 // Object.is equality
+
+- Expected
++ Received
+
+- 0
++ 1
+
+ ❯ tests/next-parity-harness-real-path.test.ts:32:42
+     30|       images: { native: 'native.png', web: 'web.png', pair: 'pair.png'…
+     31|     const result = run('--compare', input, '--output', output);
+     32|     expect(result.status, result.stderr).toBe(0);
+       |                                          ^
+     33|     const report = JSON.parse(readFileSync(join(output, 'report.json')…
+     34|     const gaps = report.cases[0].elements.sidebar.gap;
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed (2)
+   Start at  16:38:18
+   Duration  300ms (transform 37ms, setup 52ms, import 15ms, tests 59ms, environment 0ms)

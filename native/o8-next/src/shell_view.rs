@@ -23,14 +23,16 @@ impl Render for Shell {
                     .and_then(|t| self.content.get(&self.key(t)))
                     .map(Content::element)
             });
-        let before_workspaces = registrations()
-            .iter()
-            .flat_map(|r| (r.nav)(self, NavPosition::BeforeWorkspaces, cx))
-            .collect::<Vec<_>>();
-        let after_workspaces = registrations()
-            .iter()
-            .flat_map(|r| (r.nav)(self, NavPosition::AfterWorkspaces, cx))
-            .collect::<Vec<_>>();
+        let mut style = gpui::StyleRefinement::default();
+        style.size.width = Some(gpui::relative(1.).into());
+        style.flex_shrink = Some(0.);
+        let chrome = self.chrome.measured_view(
+            "shell-chrome",
+            style,
+            Self::render_chrome,
+            window.viewport_size().width,
+            cx,
+        );
         div()
             .size_full()
             .relative()
@@ -56,6 +58,65 @@ impl Render for Shell {
             })
             .on_action(cx.listener(Self::action))
             .when(self.system_glass, |view| view.child(material::veil()))
+            .child(chrome)
+            .when(self.shortcuts, |view| {
+                view.child(
+                    div()
+                        .id("shortcut-reference")
+                        .track_focus(&self.shortcuts_focus)
+                        .key_context("Shortcuts Modal")
+                        .debug_selector(|| "shortcut-reference".into())
+                        .max_h(px(300.))
+                        .overflow_y_scroll()
+                        .p(px(12.))
+                        .child("Shortcuts (? to close)")
+                        .children(
+                            crate::keymap::reference()
+                                .into_iter()
+                                .map(|row| div().child(row)),
+                        ),
+                )
+            })
+            .child(
+                registrations().iter().fold(
+                    div()
+                        .debug_selector(|| "shell-content".into())
+                        .flex_1()
+                        .min_h_0()
+                        .child(content.unwrap_or_else(|| {
+                            div().p(px(24.)).child(frame.empty).into_any_element()
+                        }))
+                        .into_any_element(),
+                    |content, registration| (registration.decorate)(self, content),
+                ),
+            )
+            .when(self.palette, |view| {
+                view.children(
+                    registry::extensions().find_map(|extension| extension.palette(self, cx)),
+                )
+            })
+            .child(canvas(|_, _, _| (), move |_, _, _, _| painted.set(revision)).size(px(1.)))
+    }
+}
+
+impl Shell {
+    fn render_chrome(&mut self, _: &mut Window, cx: &mut Context<Self>) -> gpui::AnyElement {
+        let frame = registry::extensions()
+            .find_map(|e| e.frame(self))
+            .unwrap_or_default();
+        let active = self.active();
+        let before_workspaces = registrations()
+            .iter()
+            .flat_map(|r| (r.nav)(self, NavPosition::BeforeWorkspaces, cx))
+            .collect::<Vec<_>>();
+        let after_workspaces = registrations()
+            .iter()
+            .flat_map(|r| (r.nav)(self, NavPosition::AfterWorkspaces, cx))
+            .collect::<Vec<_>>();
+        div()
+            .w_full()
+            .flex()
+            .flex_col()
             .child(
                 div()
                     .flex()
@@ -90,15 +151,7 @@ impl Render for Shell {
                                     .unwrap_or_else(|| "Workspaces".into()),
                             )
                             .on_click(cx.listener(|this, _, window, cx| {
-                                this.capture(window, cx);
-                                this.palette = true;
-                                this.workspace_picker = true;
-                                this.shortcuts = false;
-                                this.query.clear();
-                                this.choice = 0;
-                                this.palette_scroll.scroll_to_item(1);
-                                this.palette_input.update(cx, |input, cx| input.clear(cx));
-                                this.palette_input.read(cx).focus.focus(window);
+                                palette::open_commands(this, true, window, cx);
                                 cx.notify();
                             })),
                     )
@@ -106,7 +159,6 @@ impl Render for Shell {
                     .child(
                         div()
                             .id("shell-palette")
-                            .debug_selector(|| "shell-palette".into())
                             .cursor_pointer()
                             .p(px(6.))
                             .child(
@@ -115,15 +167,7 @@ impl Render for Shell {
                                     .child(frame.commands),
                             )
                             .on_click(cx.listener(|this, _, window, cx| {
-                                this.capture(window, cx);
-                                this.palette = true;
-                                this.workspace_picker = false;
-                                this.shortcuts = false;
-                                this.query.clear();
-                                this.choice = 0;
-                                this.palette_scroll.scroll_to_item(1);
-                                this.palette_input.update(cx, |input, cx| input.clear(cx));
-                                this.palette_input.read(cx).focus.focus(window);
+                                palette::open_commands(this, false, window, cx);
                                 this.revision += 1;
                                 cx.notify();
                             })),
@@ -132,7 +176,6 @@ impl Render for Shell {
                         view.child(
                             div()
                                 .id("shell-retry")
-                                .debug_selector(|| "shell-retry".into())
                                 .cursor_pointer()
                                 .p(px(6.))
                                 .child("Retry")
@@ -214,43 +257,7 @@ impl Render for Shell {
                             }),
                     ),
             )
-            .when(self.shortcuts, |view| {
-                view.child(
-                    div()
-                        .id("shortcut-reference")
-                        .track_focus(&self.shortcuts_focus)
-                        .key_context("Shortcuts Modal")
-                        .debug_selector(|| "shortcut-reference".into())
-                        .max_h(px(300.))
-                        .overflow_y_scroll()
-                        .p(px(12.))
-                        .child("Shortcuts (? to close)")
-                        .children(
-                            crate::keymap::reference()
-                                .into_iter()
-                                .map(|row| div().child(row)),
-                        ),
-                )
-            })
-            .child(
-                registrations().iter().fold(
-                    div()
-                        .debug_selector(|| "shell-content".into())
-                        .flex_1()
-                        .min_h_0()
-                        .child(content.unwrap_or_else(|| {
-                            div().p(px(24.)).child(frame.empty).into_any_element()
-                        }))
-                        .into_any_element(),
-                    |content, registration| (registration.decorate)(self, content),
-                ),
-            )
-            .when(self.palette, |view| {
-                view.children(
-                    registry::extensions().find_map(|extension| extension.palette(self, cx)),
-                )
-            })
-            .child(canvas(|_, _, _| (), move |_, _, _, _| painted.set(revision)).size(px(1.)))
+            .into_any_element()
     }
 }
 

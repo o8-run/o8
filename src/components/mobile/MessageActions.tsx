@@ -9,6 +9,7 @@
 
 import { memo, useCallback, useEffect, useState } from 'react';
 import { ttsEngine, type PlaybackState } from '@/lib/tts/engine';
+import { edgeVoiceNotice, type EdgeVoiceError } from '@/lib/tts/edge-voice-error';
 import { useTheme } from './ThemeContext';
 
 interface MessageActionsProps {
@@ -28,12 +29,14 @@ export const MessageActions = memo(function MessageActions({
   const [copied, setCopied] = useState(false);
   const [ttsState, setTtsState] = useState<PlaybackState>('idle');
   const [isThisMessage, setIsThisMessage] = useState(false);
+  const [voiceError, setVoiceError] = useState<EdgeVoiceError | null>(null);
 
   useEffect(() => {
     return ttsEngine.subscribe((state) => {
       const active = state.activeMessageId === messageId;
       setIsThisMessage(active);
       setTtsState(active ? state.state : 'idle');
+      setVoiceError(active ? state.voiceError : null);
     });
   }, [messageId]);
 
@@ -66,6 +69,7 @@ export const MessageActions = memo(function MessageActions({
   }, [messageText]);
 
   const playActive = isThisMessage && ttsState !== 'idle';
+  const voiceNotice = edgeVoiceNotice(voiceError);
 
   // Inline SVG icons (no Lucide for Tauri compat)
   const playIcon = ttsState === 'playing'
@@ -109,6 +113,7 @@ export const MessageActions = memo(function MessageActions({
       }}
     >
       <button type="button" aria-label={playActive ? 'Pause spoken playback' : 'Play spoken playback'}
+        title={voiceNotice ?? 'Play spoken playback'}
         onClick={handlePlay}
         onTouchEnd={(e) => { e.preventDefault(); e.stopPropagation(); handlePlay(); }}
         style={{
@@ -118,6 +123,7 @@ export const MessageActions = memo(function MessageActions({
         }}>
         {playIcon}
       </button>
+      {voiceNotice ? <span role="status" style={{ fontSize: 11, fontWeight: 300, color: colors.textSecondary }}>{voiceNotice}</span> : null}
 
       {playActive ? (
         <button type="button" aria-label="Stop playback"

@@ -33,6 +33,7 @@ export const MACOS_REQUIRED_BINARIES = Object.freeze([
   'Contents/MacOS/speech_recognizer',
   'Contents/MacOS/speech-local',
   'Contents/MacOS/o8-pi-write',
+  'Contents/MacOS/o8-next',
 ]);
 
 function architectureForCpuType(cpuType) {
@@ -115,6 +116,17 @@ export function readMachOArchitectures(path) {
 // Compare executable payloads across thinning/re-signing. Code signatures and
 // their two load-command size fields may change; executable bytes may not.
 export function macosExecutablePayloadSha256(path, architecture) {
+  return executablePayloadIdentity(path, architecture).sha256;
+}
+
+// A build receipt must also survive the first signature on an unsigned slice.
+// Record the original payload length to distinguish its bytes from alignment
+// padding added before the signature; never discard executable content.
+export function macosBuildPayloadIdentity(path, architecture, payloadBytes) {
+  return executablePayloadIdentity(path, architecture, true, payloadBytes);
+}
+
+function executablePayloadIdentity(path, architecture, normalizeFirstSignature = false, expectedBytes) {
   assertMacosArchitecture(architecture);
   if (!readMachOArchitectures(path).includes(architecture)) throw new Error(`missing ${architecture} slice`);
   let bytes = readFileSync(path);
@@ -141,11 +153,14 @@ export function macosExecutablePayloadSha256(path, architecture) {
   assertReadableRange(bytes, 32, commandBytes, 'Mach-O load commands');
   let offset = 32;
   let payloadEnd = bytes.length;
+  let signatureCommand;
   for (let index = 0; index < count; index += 1) {
     const command = readUInt32(bytes, offset, little);
     const size = readUInt32(bytes, offset + 4, little);
     if (size < 8 || offset + size > 32 + commandBytes) throw new Error('invalid Mach-O load command');
     if (command === 0x1d) {
+      if (signatureCommand !== undefined) throw new Error('duplicate Mach-O signature command');
+      signatureCommand = offset;
       if (size !== 16) throw new Error('invalid Mach-O signature command');
       payloadEnd = readUInt32(bytes, offset + 8, little);
       const signatureBytes = readUInt32(bytes, offset + 12, little);
@@ -162,7 +177,22 @@ export function macosExecutablePayloadSha256(path, architecture) {
     offset += size;
   }
   if (offset !== 32 + commandBytes) throw new Error('Mach-O load-command count mismatch');
-  return createHash('sha256').update(bytes.subarray(0, payloadEnd)).digest('hex');
+  if (normalizeFirstSignature && signatureCommand !== undefined) {
+    bytes.copy(bytes, signatureCommand, signatureCommand + 16, 32 + commandBytes);
+    bytes.fill(0, 32 + commandBytes - 16, 32 + commandBytes);
+    const write = (value, at) => little ? bytes.writeUInt32LE(value, at) : bytes.writeUInt32BE(value, at);
+    write(count - 1, 16);
+    write(commandBytes - 16, 20);
+  }
+  if (expectedBytes !== undefined) {
+    if (!Number.isSafeInteger(expectedBytes) || expectedBytes < 32 + commandBytes
+      || expectedBytes > payloadEnd || payloadEnd - expectedBytes > 15
+      || bytes.subarray(expectedBytes, payloadEnd).some(byte => byte !== 0)) {
+      throw new Error('Mach-O payload length does not match the current build');
+    }
+    payloadEnd = expectedBytes;
+  }
+  return { sha256: createHash('sha256').update(bytes.subarray(0, payloadEnd)).digest('hex'), payloadBytes: payloadEnd };
 }
 
 export function resolveMacosReleaseArtifacts(root, version) {
@@ -287,7 +317,7 @@ export function bundleContentSha256(appPath, excludedPaths = []) {
   return digest.digest('hex');
 }
 
-// Only the four native slices and the outer signature/notarization metadata
+// Only the required native slices and the outer signature/notarization metadata
 // may differ. All runtime resources, modes and internal links stay identical.
 export function macosSharedResourcesSha256(appPath) {
   return bundleContentSha256(appPath, [

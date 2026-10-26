@@ -12,12 +12,12 @@ pub(super) const REGISTRATION: Registration = Registration {
 };
 struct Palette;
 #[derive(Clone)]
-enum Entry {
+pub(super) enum Entry {
     Surface(Command),
     Workspace(String),
 }
 impl Entry {
-    fn label(&self, sessions: &[Session]) -> String {
+    pub(super) fn label(&self, sessions: &[Session]) -> String {
         match self {
             Self::Workspace(path) => format!(
                 "Switch workspace: {}",
@@ -40,19 +40,19 @@ impl Entry {
             Self::Surface(command) => format!("surface:{}", command.registration().command_label),
         }
     }
-    fn run(self, shell: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
+    pub(super) fn run(self, shell: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
         match self {
             Self::Surface(command) => shell.execute(command, window, cx),
             Self::Workspace(path) => shell.switch(path, window, cx),
         }
     }
 }
-fn entries(shell: &Shell) -> Vec<Entry> {
+pub(super) fn entries(shell: &Shell) -> Vec<Entry> {
     let mut entries = if shell.workspace_picker {
         Vec::new()
     } else {
         shell
-            .commands()
+            .surface_commands()
             .into_iter()
             .map(Entry::Surface)
             .collect::<Vec<_>>()
@@ -66,18 +66,24 @@ fn entries(shell: &Shell) -> Vec<Entry> {
         .filter(|entry| entry.label(&shell.sessions).to_lowercase().contains(&query))
         .collect()
 }
-fn toggle(shell: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
-    if !shell.palette {
+fn set_open(shell: &mut Shell, opened: bool, workspace_picker: bool, window: &mut Window, cx: &mut Context<Shell>) {
+    if opened && !shell.palette {
         shell.capture(window, cx);
     }
-    shell.palette = !shell.palette;
-    shell.workspace_picker = false;
+    shell.palette = opened;
+    shell.workspace_picker = workspace_picker;
     shell.shortcuts = false;
     shell.query.clear();
     shell.palette_input.update(cx, |input, cx| input.clear(cx));
     shell.choice = 0;
     shell.palette_scroll.scroll_to_item(1);
     shell.restore_focus(window, cx);
+}
+pub(super) fn open_commands(shell: &mut Shell, workspace_picker: bool, window: &mut Window, cx: &mut Context<Shell>) {
+    set_open(shell, true, workspace_picker, window, cx);
+}
+fn toggle(shell: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
+    set_open(shell, !shell.palette, false, window, cx);
 }
 impl ShellExtension for Palette {
     fn action(

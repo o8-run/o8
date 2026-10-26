@@ -215,3 +215,6 @@ fn review_registered_raw_hook_composes_and_respects_focus(cx: &mut gpui::TestApp
         "legacy hooks cannot preempt a field"
     );
 }
+
+#[path = "fake/parity_tests.rs"]
+mod parity_tests;

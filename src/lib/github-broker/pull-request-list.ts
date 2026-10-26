@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { githubInstallationFetch, hasGitHubBrokerAccess } from './auth';
+import { githubInstallationFetch } from './auth';
 import type { PullRequestListPage, PullRequestListState, PullRequestListSort } from './pull-request-list.types';
 
 interface GitHubListPull {
@@ -38,16 +38,14 @@ const STATS_QUERY = `query PullRequestListStats($ids: [ID!]!) {
 }`;
 
 /** List pages stay lightweight; the detail panel loads only the selected PR. */
-export async function fetchPullRequestListPage(repo: string, state: PullRequestListState, page: number, signal?: AbortSignal, sort: PullRequestListSort = 'updated'): Promise<PullRequestListPage> {
+export async function fetchPullRequestListPage(repo: string, state: PullRequestListState, page: number, signal?: AbortSignal, sort: PullRequestListSort = 'updated', fresh = false): Promise<PullRequestListPage> {
   const params = new URLSearchParams({ state, page: String(page), per_page: '100', sort: sort === 'newest' ? 'created' : 'updated', direction: sort === 'oldest' ? 'asc' : 'desc' });
   const path = `/repos/${repo}/pulls?${params}`;
   const timeout = AbortSignal.timeout(15_000);
-  const init = { signal: signal ? AbortSignal.any([signal, timeout]) : timeout };
+  const init = { signal: signal ? AbortSignal.any([signal, timeout]) : timeout, ...(fresh ? { cache: 'reload' as const } : {}) };
   // Public repositories can be read without connecting an account. Private
   // repositories continue to use the existing GitHub connection and broker.
-  const response = hasGitHubBrokerAccess()
-    ? (await githubInstallationFetch(repo, path, init)).response
-    : await fetch(`https://api.github.com${path}`, { ...init, headers: { Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' }, cache: 'no-store' });
+  const { response, anonymous } = await githubInstallationFetch(repo, path, init, { share: true });
   if (!response.ok) {
     if (response.status === 401 || response.status === 403 || response.status === 404) {
       throw new Error('Pull requests are unavailable. Check this repository’s GitHub connection in Settings, then retry.');
@@ -56,7 +54,7 @@ export async function fetchPullRequestListPage(repo: string, state: PullRequestL
   }
   const pulls = await response.json() as GitHubListPull[];
   const stats = new Map<number, PullStats>();
-  if (pulls.length > 0 && hasGitHubBrokerAccess()) {
+  if (pulls.length > 0 && !anonymous) {
     try {
       const result = await githubInstallationFetch(repo, '/graphql', {
         ...init, method: 'POST', headers: { 'Content-Type': 'application/json' },

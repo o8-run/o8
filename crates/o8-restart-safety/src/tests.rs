@@ -2,6 +2,13 @@ use super::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 fn fixture() -> (PathBuf, RestartSafety, Arc<AtomicUsize>) {
+    // Each test has its own probe on its test thread, before the platform cache.
+    lease_owner::IDENTITY_PROBE.with(|probe| {
+        probe.set(Some(|pid| {
+            Some(serde_json::json!({"version":1,"platform":"fixture",
+                "bootId":"fixture-boot","startId":pid.to_string()}))
+        }));
+    });
     let root = std::env::temp_dir().join(format!("o8-restart-safety-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let calls = Arc::new(AtomicUsize::new(0));
@@ -116,6 +123,26 @@ fn reservation_survives_checks_until_native_commit() {
     state.before_restart(Some(&id)).unwrap();
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     assert!(state.cancel(&id).is_err());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn reservation_persists_fixture_identity_before_native_cleanup() {
+    let (root, state, calls) = fixture();
+    let id = state.prepare().unwrap();
+    let operation = read_operation(&root.join(DIRECTORY)).unwrap();
+    assert_eq!(operation.id, id);
+    assert!(
+        operation.owner_identity["bootId"] == "fixture-boot",
+        "reservation must use the fixture probe instead of the platform probe"
+    );
+    assert_eq!(
+        operation.owner_identity["startId"],
+        std::process::id().to_string()
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    state.before_restart(Some(&id)).unwrap();
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
     fs::remove_dir_all(root).unwrap();
 }
 

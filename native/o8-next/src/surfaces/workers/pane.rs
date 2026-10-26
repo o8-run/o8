@@ -14,6 +14,7 @@ pub struct Workers {
     pub cards: HashMap<String, Entity<Card>>,
     order: Vec<String>,
     pub filter: usize,
+    rendered_filter: usize,
     pub compact: bool,
     pub selected: Option<String>,
     pub scroll: [ScrollHandle; 3],
@@ -32,6 +33,7 @@ impl Workers {
             cards: HashMap::new(),
             order: vec![],
             filter: 0,
+            rendered_filter: 0,
             compact: false,
             selected: None,
             scroll: std::array::from_fn(|_| ScrollHandle::new()),
@@ -45,23 +47,39 @@ impl Workers {
         this.load(cx);
         this
     }
-    fn select(&mut self, id: String, cx: &mut Context<Self>) {
+    fn select(&mut self, id: Option<String>, cx: &mut Context<Self>) {
         if let Some(previous) = self.selected.as_ref().and_then(|id| self.cards.get(id)) {
             previous.update(cx, |card, cx| {
                 card.selected = false;
                 cx.notify();
             });
         }
-        if let Some(card) = self.cards.get(&id) {
+        if let Some(card) = id.as_ref().and_then(|id| self.cards.get(id)) {
             card.update(cx, |card, cx| {
                 card.selected = true;
                 cx.notify();
             });
         }
-        self.selected = Some(id);
+        self.selected = id;
     }
     fn key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.focus.is_focused(window) {
+        if event.keystroke.modifiers.control
+            || event.keystroke.modifiers.platform
+            || event.keystroke.modifiers.alt
+        {
+            return;
+        }
+        if event.keystroke.key == "escape" && self.focus.contains_focused(window, cx) {
+            self.focus.focus(window);
+            cx.stop_propagation();
+            return;
+        }
+        let focused_card = self
+            .cards
+            .iter()
+            .find_map(|(id, card)| card.read(cx).focus.is_focused(window).then(|| id.clone()));
+        let card_focused = focused_card.is_some();
+        if !self.focus.is_focused(window) && !card_focused {
             return;
         }
         match event.keystroke.key.as_str() {
@@ -81,17 +99,28 @@ impl Workers {
                     .cloned()
                     .collect();
                 if !ids.is_empty() {
-                    let position = self
-                        .selected
+                    let position = focused_card
                         .as_ref()
+                        .or(self.selected.as_ref())
                         .and_then(|id| ids.iter().position(|v| v == id));
                     let next = match (position, event.keystroke.key.as_str()) {
                         (Some(i), "up") => i.saturating_sub(1),
                         (Some(i), _) => (i + 1).min(ids.len() - 1),
                         _ => 0,
                     };
-                    self.select(ids[next].clone(), cx);
+                    self.select(Some(ids[next].clone()), cx);
+                    if card_focused {
+                        self.cards[&ids[next]].read(cx).focus.focus(window);
+                    }
                     self.scroll[self.filter].scroll_to_item(next);
+                }
+            }
+            "enter" | "space" => {
+                if let Some(card) = self.selected.as_ref().and_then(|id| self.cards.get(id)) {
+                    card.update(cx, |card, cx| {
+                        card.focus.focus(window);
+                        card.toggle_activity(cx);
+                    });
                 }
             }
             "f5" => self.load(cx),
@@ -132,7 +161,9 @@ impl Workers {
                             } else {
                                 this.cards.insert(
                                     task.id.clone(),
-                                    cx.new(|_| Card::new(task, this.compact)),
+                                    cx.new(|cx| {
+                                        Card::new(this.client.clone(), task, this.compact, cx)
+                                    }),
                                 );
                             }
                         }
@@ -193,7 +224,27 @@ impl Workers {
     }
 }
 impl Render for Workers {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.filter != self.rendered_filter {
+            self.rendered_filter = self.filter;
+            self.focus.focus(window);
+            let selected = self
+                .selected
+                .as_ref()
+                .filter(|id| {
+                    self.cards
+                        .get(*id)
+                        .is_some_and(|card| card.read(cx).task.filter == self.filter)
+                })
+                .cloned()
+                .or_else(|| {
+                    self.order
+                        .iter()
+                        .find(|id| self.cards[*id].read(cx).task.filter == self.filter)
+                        .cloned()
+                });
+            self.select(selected, cx);
+        }
         let counts: [usize; 3] = std::array::from_fn(|f| {
             self.cards
                 .values()
@@ -281,9 +332,14 @@ impl Render for Workers {
             list = list.child(
                 div()
                     .id(SharedString::from(format!("worker-select-{id}")))
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.select(select.clone(), cx);
-                    }))
+                    .capture_any_mouse_down(cx.listener(
+                        move |this, event: &gpui::MouseDownEvent, window, cx| {
+                            if event.button == gpui::MouseButton::Left {
+                                this.select(Some(select.clone()), cx);
+                                this.cards[&select].read(cx).focus.focus(window);
+                            }
+                        },
+                    ))
                     .child(self.cards[id].clone()),
             );
         }

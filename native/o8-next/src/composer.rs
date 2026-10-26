@@ -4,10 +4,13 @@ use gpui::{prelude::*, *};
 use std::ops::Range;
 use unicode_segmentation::UnicodeSegmentation;
 
+pub(crate) mod controls;
+
 #[derive(Clone)]
 struct Snapshot {
     text: String,
     selection: Range<usize>,
+    anchor: usize,
 }
 pub struct Submit(pub bool);
 impl EventEmitter<Submit> for Composer {}
@@ -28,13 +31,17 @@ pub struct Composer {
     height: Pixels,
     scroll: ScrollHandle,
     reveal_cursor: bool,
+    typing: Option<std::time::Instant>,
+    pub(crate) placeholder: String,
+    pub(crate) framed: bool,
+    pub(crate) controls: controls::State,
 }
 impl Composer {
     pub fn new(cx: &mut Context<Self>) -> Self {
         crate::keymap::install(cx);
         Self {
-            context: "TextInput",
             focus: cx.focus_handle(),
+            context: "TextInput",
             text: String::new(),
             selection: 0..0,
             anchor: 0,
@@ -49,6 +56,10 @@ impl Composer {
             height: px(crate::theme::TYPE.body_line),
             scroll: ScrollHandle::new(),
             reveal_cursor: true,
+            typing: None,
+            placeholder: String::new(),
+            framed: true,
+            controls: controls::State::default(),
         }
     }
     pub fn composing(&self) -> bool {
@@ -58,17 +69,20 @@ impl Composer {
         Snapshot {
             text: self.text.clone(),
             selection: self.selection.clone(),
+            anchor: self.anchor,
         }
     }
     fn restore(&mut self, snapshot: Snapshot, cx: &mut Context<Self>) {
         self.text = snapshot.text;
         self.selection = snapshot.selection;
-        self.anchor = self.selection.start;
+        self.anchor = snapshot.anchor;
         self.marked = None;
         self.composition = None;
+        self.typing = None;
         self.changed(cx);
     }
     pub fn clear(&mut self, cx: &mut Context<Self>) {
+        self.typing = None;
         self.text.clear();
         self.selection = 0..0;
         self.anchor = 0;
@@ -79,6 +93,7 @@ impl Composer {
         self.changed(cx);
     }
     pub fn set_text(&mut self, text: &str, cx: &mut Context<Self>) {
+        self.typing = None;
         self.undo.push(self.snapshot());
         self.redo.clear();
         self.text = text.to_owned();
@@ -136,6 +151,20 @@ impl Composer {
             .map(|(i, _)| i)
             .unwrap_or(0)
     }
+    fn previous_word(&self, cursor: usize) -> usize {
+        self.text[..cursor]
+            .unicode_word_indices()
+            .next_back()
+            .map(|(i, _)| i)
+            .unwrap_or(0)
+    }
+    fn next_word(&self, cursor: usize) -> usize {
+        self.text[cursor..]
+            .unicode_word_indices()
+            .next()
+            .map(|(i, word)| cursor + i + word.len())
+            .unwrap_or(self.text.len())
+    }
     fn next(&self, cursor: usize) -> usize {
         cursor
             + self.text[cursor..]
@@ -162,51 +191,53 @@ impl Composer {
         }
         self.text.len()
     }
-    pub(crate) fn action(
-        &mut self,
-        action: &crate::keymap::Shortcut,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        use crate::keymap::{Edit, Shortcut};
-        if self.composing() && matches!(action, Shortcut::Edit { .. } | Shortcut::IssueRemoveLabel)
-        {
+    fn key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        self.edit_key(&event.keystroke, window, cx);
+    }
+    fn edit_key(&mut self, key: &Keystroke, window: &mut Window, cx: &mut Context<Self>) {
+        // IME owns confirmation, arrows and deletion while a marked range exists.
+        if self.composing() {
+            cx.stop_propagation();
             return;
         }
-        let Shortcut::Edit {
-            operation,
-            select,
-            boundary,
-        } = *action
-        else {
-            cx.propagate();
-            return;
+        let command = key.modifiers.control || key.modifiers.platform;
+        if command || key.key.chars().count() != 1 {
+            self.typing = None;
+        }
+        let mac_command = cfg!(target_os = "macos") && key.modifiers.platform;
+        let word = if cfg!(target_os = "macos") {
+            key.modifiers.alt
+        } else {
+            key.modifiers.control
         };
-        let mac_command = boundary;
         let cursor = self.cursor();
         let line_start = self.text[..cursor].rfind('\n').map(|i| i + 1).unwrap_or(0);
         let line_end = self.text[cursor..]
             .find('\n')
             .map(|i| cursor + i)
             .unwrap_or(self.text.len());
-        match operation {
-            Edit::Steer => cx.emit(Submit(true)),
-            Edit::Submit => cx.emit(Submit(false)),
-            Edit::Newline => self.replace_text_in_range(None, "\n", window, cx),
-            Edit::SelectAll => {
+        match key.key.as_str() {
+            "enter" if command && key.modifiers.shift => cx.emit(Submit(true)),
+            "enter" if !key.modifiers.shift => cx.emit(Submit(false)),
+            "enter" => self.replace_text_in_range(None, "\n", window, cx),
+            "a" if command => {
                 self.anchor = 0;
                 self.selection = 0..self.text.len();
                 self.changed(cx);
             }
-            Edit::Copy | Edit::Cut => {
+            "c" | "x" if command => {
+                if self.selection.is_empty() {
+                    cx.stop_propagation();
+                    return;
+                }
                 cx.write_to_clipboard(ClipboardItem::new_string(
                     self.text[self.selection.clone()].into(),
                 ));
-                if operation == Edit::Cut {
+                if key.key == "x" {
                     self.replace_text_in_range(None, "", window, cx);
                 }
             }
-            Edit::Paste => {
+            "v" if command => {
                 if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
                     self.replace_text_in_range(
                         None,
@@ -216,8 +247,8 @@ impl Composer {
                     );
                 }
             }
-            Edit::Undo | Edit::Redo => {
-                let redo = operation == Edit::Redo;
+            "z" | "y" if command => {
+                let redo = key.modifiers.shift || key.key == "y";
                 let snapshot = if redo {
                     self.redo.pop()
                 } else {
@@ -233,38 +264,38 @@ impl Composer {
                     self.restore(snapshot, cx);
                 }
             }
-            Edit::Left => self.move_to(
+            "left" => self.move_to(
                 if mac_command {
                     line_start
-                } else if !select && !self.selection.is_empty() {
+                } else if word {
+                    self.previous_word(cursor)
+                } else if !key.modifiers.shift && !self.selection.is_empty() {
                     self.selection.start
                 } else {
                     self.previous(cursor)
                 },
-                select,
+                key.modifiers.shift,
                 cx,
             ),
-            Edit::Right => self.move_to(
+            "right" => self.move_to(
                 if mac_command {
                     line_end
-                } else if !select && !self.selection.is_empty() {
+                } else if word {
+                    self.next_word(cursor)
+                } else if !key.modifiers.shift && !self.selection.is_empty() {
                     self.selection.end
                 } else {
                     self.next(cursor)
                 },
-                select,
+                key.modifiers.shift,
                 cx,
             ),
-            Edit::Up | Edit::Down if mac_command => self.move_to(
-                if operation == Edit::Up {
-                    0
-                } else {
-                    self.text.len()
-                },
-                select,
+            "up" | "down" if mac_command => self.move_to(
+                if key.key == "up" { 0 } else { self.text.len() },
+                key.modifiers.shift,
                 cx,
             ),
-            Edit::Up | Edit::Down => {
+            "up" | "down" => {
                 let position = self.layout.iter().find_map(|(offset, line, origin)| {
                     (cursor >= *offset && cursor <= offset + line.len())
                         .then(|| {
@@ -278,28 +309,36 @@ impl Composer {
                 });
                 if let Some(position) = position {
                     let next = self.index_at(
-                        position + point(px(0.), px(if operation == Edit::Up { -1. } else { 21. })),
+                        position + point(px(0.), px(if key.key == "up" { -1. } else { 21. })),
                     );
-                    self.move_to(next, select, cx);
+                    self.move_to(next, key.modifiers.shift, cx);
                 }
             }
-            Edit::Home => self.move_to(if boundary { 0 } else { line_start }, select, cx),
-            Edit::End => self.move_to(
-                if boundary { self.text.len() } else { line_end },
-                select,
+            "home" => self.move_to(
+                if command { 0 } else { line_start },
+                key.modifiers.shift,
                 cx,
             ),
-            Edit::Backspace | Edit::Delete => {
+            "end" => self.move_to(
+                if command { self.text.len() } else { line_end },
+                key.modifiers.shift,
+                cx,
+            ),
+            "backspace" | "delete" => {
                 if self.selection.is_empty() {
-                    self.selection = if operation == Edit::Backspace {
+                    self.selection = if key.key == "backspace" {
                         (if mac_command {
                             line_start
+                        } else if word {
+                            self.previous_word(cursor)
                         } else {
                             self.previous(cursor)
                         })..cursor
                     } else {
                         cursor..(if mac_command {
                             line_end
+                        } else if word {
+                            self.next_word(cursor)
                         } else {
                             self.next(cursor)
                         })
@@ -307,6 +346,7 @@ impl Composer {
                 }
                 self.replace_text_in_range(None, "", window, cx);
             }
+            _ => return,
         }
         cx.stop_propagation();
     }
@@ -358,8 +398,17 @@ impl EntityInputHandler for Composer {
             .map(|r| self.range(r))
             .or(self.marked.clone())
             .unwrap_or(self.selection.clone());
-        let snapshot = self.composition.take().unwrap_or_else(|| self.snapshot());
-        self.undo.push(snapshot);
+        let typing = self.marked.is_none() && text.chars().count() == 1 && text != "\n";
+        let coalesce = range.is_empty()
+            && typing
+            && self
+                .typing
+                .is_some_and(|last| last.elapsed().as_secs_f32() < 1.);
+        if !coalesce {
+            let snapshot = self.composition.take().unwrap_or_else(|| self.snapshot());
+            self.undo.push(snapshot);
+        }
+        self.typing = typing.then(std::time::Instant::now);
         self.redo.clear();
         self.replace(range, text);
         self.marked = None;
@@ -376,6 +425,7 @@ impl EntityInputHandler for Composer {
         if self.composition.is_none() {
             self.composition = Some(self.snapshot());
         }
+        self.typing = None;
         let range = range
             .map(|r| self.range(r))
             .or(self.marked.clone())
@@ -397,17 +447,32 @@ impl EntityInputHandler for Composer {
         _: &mut Window,
         _: &mut Context<Self>,
     ) -> Option<Bounds<Pixels>> {
-        let index = self.range(range).start;
+        let range = self.range(range);
+        let index = range.start;
         self.layout.iter().find_map(|(offset, line, origin)| {
-            (index >= *offset && index <= offset + line.len())
-                .then(|| line.position_for_index(index - offset, px(crate::theme::TYPE.body_line)))
-                .flatten()
-                .map(|position| {
-                    Bounds::new(
-                        *origin + position,
-                        size(px(1.), px(crate::theme::TYPE.body_line)),
-                    )
-                })
+            if index < *offset || index > offset + line.len() {
+                return None;
+            }
+            let start =
+                line.position_for_index(index - offset, px(crate::theme::TYPE.body_line))?;
+            let end = line.position_for_index(
+                range.end.min(offset + line.len()) - offset,
+                px(crate::theme::TYPE.body_line),
+            )?;
+            // The platform asks for the first visual line's rectangle. A range
+            // can run in either direction after shaping, or cross a soft wrap.
+            let end_x = if end.y == start.y {
+                end.x
+            } else {
+                line.wrap_width.unwrap_or(line.unwrapped_layout.width)
+            };
+            Some(Bounds::new(
+                *origin + point(start.x.min(end_x), start.y),
+                size(
+                    (end_x - start.x).abs().max(px(1.)),
+                    px(crate::theme::TYPE.body_line),
+                ),
+            ))
         })
     }
     fn character_index_for_point(
@@ -420,7 +485,11 @@ impl EntityInputHandler for Composer {
     }
 }
 impl Render for Composer {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if !self.focus.is_focused(window) {
+            self.selecting = false;
+            self.typing = None;
+        }
         let input = cx.entity();
         let height = self.height;
         div()
@@ -428,26 +497,58 @@ impl Render for Composer {
             .debug_selector(|| "composer-input".into())
             .track_focus(&self.focus)
             .key_context(self.context)
+            .tab_stop(true)
             .cursor(CursorStyle::IBeam)
-            .max_h(px(176.))
+            .max_h(px(if self.framed { 176. } else { 52. }))
             .overflow_y_scroll()
             .track_scroll(&self.scroll)
-            .border_1()
+            .when(self.framed, |d| d.border_1())
             .border_color(theme().border)
             .rounded(px(crate::theme::GEOMETRY.row_radius))
             .p(px(8.))
+            .when(!self.framed, |d| {
+                d.min_h(px(52.)).pt(px(11.)).px(px(14.)).pb(px(4.))
+            })
             .on_action(cx.listener(Self::action))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, event: &MouseDownEvent, window, cx| {
                     this.focus.focus(window);
                     this.selecting = true;
-                    this.move_to(this.index_at(event.position), event.modifiers.shift, cx);
+                    this.typing = None;
+                    let cursor = this.index_at(event.position);
+                    let range = match event.click_count {
+                        2 => this
+                            .text
+                            .split_word_bound_indices()
+                            .find(|(i, word)| *i <= cursor && cursor < i + word.len())
+                            .map(|(i, word)| i..i + word.len()),
+                        3.. => Some(
+                            this.text[..cursor].rfind('\n').map(|i| i + 1).unwrap_or(0)
+                                ..this.text[cursor..]
+                                    .find('\n')
+                                    .map(|i| cursor + i + 1)
+                                    .unwrap_or(this.text.len()),
+                        ),
+                        _ => None,
+                    };
+                    if let Some(range) = range {
+                        this.anchor = range.start;
+                        this.selection = range;
+                        this.changed(cx);
+                    } else {
+                        this.move_to(cursor, event.modifiers.shift, cx);
+                    }
                 }),
             )
-            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _, cx| {
-                if this.selecting {
+            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
+                if this.selecting
+                    && this.focus.is_focused(window)
+                    && event.pressed_button == Some(MouseButton::Left)
+                {
                     this.move_to(this.index_at(event.position), true, cx);
+                } else {
+                    this.selecting = false;
                 }
             }))
             .on_mouse_up(
@@ -462,7 +563,7 @@ impl Render for Composer {
                 canvas(
                     |_, _, _| (),
                     move |bounds, _, window, cx| {
-                        let (text, marked, selection, cursor, focus) = {
+                        let (text, marked, selection, cursor, focus, placeholder) = {
                             let i = input.read(cx);
                             (
                                 i.text.clone(),
@@ -470,6 +571,7 @@ impl Render for Composer {
                                 i.selection.clone(),
                                 i.cursor(),
                                 i.focus.clone(),
+                                i.placeholder.clone(),
                             )
                         };
                         window.handle_input(
@@ -482,26 +584,64 @@ impl Render for Composer {
                         let mut y = bounds.top();
                         let mut layouts = vec![];
                         // Hard lines retain their byte offsets; wrapped positions stay native.
-                        for part in text.split('\n') {
+                        let display_text = if text.is_empty() {
+                            placeholder.as_str()
+                        } else {
+                            text.as_str()
+                        };
+                        for part in display_text.split('\n') {
                             let display: SharedString = if part.is_empty() {
                                 " ".into()
                             } else {
                                 part.to_owned().into()
                             };
-                            let run = TextRun {
-                                len: display.len(),
-                                font: style.font(),
-                                color: style.color,
-                                background_color: None,
-                                underline: None,
-                                strikethrough: None,
-                            };
+                            // Decorations belong to shaped runs. Looking up
+                            // every selected character's wrapped position is
+                            // quadratic for long single-line pastes and loses
+                            // the visual direction of right-to-left clusters.
+                            let mut boundaries = vec![0, display.len()];
+                            for range in [Some(&selection), marked.as_ref()].into_iter().flatten() {
+                                for endpoint in [range.start, range.end] {
+                                    if endpoint > offset && endpoint < offset + part.len() {
+                                        boundaries.push(endpoint - offset);
+                                    }
+                                }
+                            }
+                            boundaries.sort_unstable();
+                            boundaries.dedup();
+                            let runs: Vec<_> = boundaries
+                                .windows(2)
+                                .map(|span| {
+                                    let index = offset + span[0];
+                                    TextRun {
+                                        len: span[1] - span[0],
+                                        font: style.font(),
+                                        color: if text.is_empty() {
+                                            theme().text_muted.into()
+                                        } else {
+                                            style.color
+                                        },
+                                        background_color: (!text.is_empty()
+                                            && selection.contains(&index))
+                                        .then(|| theme().selection.into()),
+                                        underline: marked
+                                            .as_ref()
+                                            .is_some_and(|r| r.contains(&index))
+                                            .then_some(UnderlineStyle {
+                                                thickness: px(1.),
+                                                color: None,
+                                                wavy: false,
+                                            }),
+                                        strikethrough: None,
+                                    }
+                                })
+                                .collect();
                             let lines = window
                                 .text_system()
                                 .shape_text(
                                     display,
                                     px(crate::theme::TYPE.body),
-                                    &[run],
+                                    &runs,
                                     Some(bounds.size.width),
                                     None,
                                 )
@@ -509,38 +649,15 @@ impl Render for Composer {
                             for line in lines {
                                 let origin = point(bounds.left(), y);
                                 let end = offset + part.len();
-                                for index in part.char_indices().map(|(i, _)| offset + i) {
-                                    if selection.contains(&index)
-                                        || marked.as_ref().is_some_and(|r| r.contains(&index))
-                                    {
-                                        if let Some(position) = line.position_for_index(
-                                            index - offset,
-                                            px(crate::theme::TYPE.body_line),
-                                        ) {
-                                            let next = text[index..]
-                                                .chars()
-                                                .next()
-                                                .map(char::len_utf8)
-                                                .unwrap_or(0);
-                                            let right = line
-                                                .position_for_index(
-                                                    index + next - offset,
-                                                    px(crate::theme::TYPE.body_line),
-                                                )
-                                                .unwrap_or(position + point(px(8.), px(0.)));
-                                            window.paint_quad(fill(
-                                                Bounds::new(
-                                                    origin + position,
-                                                    size(
-                                                        (right.x - position.x).max(px(2.)),
-                                                        px(crate::theme::TYPE.body_line),
-                                                    ),
-                                                ),
-                                                theme().selection,
-                                            ));
-                                        }
-                                    }
-                                }
+                                line.paint_background(
+                                    origin,
+                                    px(crate::theme::TYPE.body_line),
+                                    TextAlign::Left,
+                                    Some(bounds),
+                                    window,
+                                    cx,
+                                )
+                                .expect("paint selection");
                                 line.paint(
                                     origin,
                                     px(crate::theme::TYPE.body_line),
@@ -594,7 +711,9 @@ impl Render for Composer {
                                     let cursor_y = position.y - bounds.top();
                                     let top = -scroll.y;
                                     // The viewport excludes the input's padding and border.
-                                    let visible = height.min(px(158.));
+                                    let visible = (input.scroll.bounds().size.height
+                                        - px(if input.framed { 18. } else { 15. }))
+                                    .max(px(20.));
                                     let bottom = top + visible;
                                     let next = if cursor_y < top {
                                         -cursor_y
@@ -622,3 +741,10 @@ impl Render for Composer {
 #[cfg(test)]
 #[path = "input_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "composer/native_tests.rs"]
+mod native_tests;
+
+#[path = "composer/keymap.rs"]
+mod focused_keymap;

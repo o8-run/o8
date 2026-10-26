@@ -72,7 +72,10 @@ fn glass_shell_probe(cx: &mut TestAppContext) {
             cx.notify();
         });
         draw(cx);
-        let workspace = cx.debug_bounds("workspace-1").unwrap();
+        let switcher = cx.debug_bounds("workspace-switcher").unwrap();
+        cx.simulate_click(switcher.center(), gpui::Modifiers::default());
+        draw(cx);
+        let workspace = cx.debug_bounds("command-1").unwrap();
         cx.simulate_click(workspace.center(), gpui::Modifiers::default());
         ready(&shell, cx);
         assert_eq!(
@@ -109,6 +112,349 @@ fn glass_shell_probe(cx: &mut TestAppContext) {
     if let Ok(directory) = std::env::var("O8_NEXT_GLASS_EVIDENCE") {
         fs::write(PathBuf::from(directory).join(if glass { "glass.json" } else { "plain.json" }), serde_json::to_vec_pretty(&json!({"endpoint":"headless production GPUI shell; no raster or compositor capture", "requested":if glass { "glass" } else { "plain" }, "nativeMaterialInstalled":false,"opaqueFallback":true,"surfaceAlpha":theme.surface.a,"raisedAlpha":theme.surface_raised.a,"restoredSize":[900,700],"paletteFocusAndCloseRace":true})).unwrap()).unwrap();
     }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+#[ignore = "requires an owned isolated X11 display, Vulkan software driver and PNG capture tool"]
+fn correction_native_screenshots() {
+    let directory = fs::canonicalize(
+        std::env::var("O8_NEXT_SCREENSHOT_DIR").expect("explicit screenshot directory"),
+    )
+    .unwrap();
+    let binary =
+        fs::canonicalize(std::env::var("O8_NEXT_NATIVE_BINARY").expect("built native X11 binary"))
+            .unwrap();
+    let width = std::env::var("O8_NEXT_SCREENSHOT_WIDTH")
+        .unwrap()
+        .parse::<f32>()
+        .unwrap();
+    let height = if width < 1000. { 700. } else { 816. };
+    let fixture = Fixture::start_mode(false, "--shell-many");
+    let file = fixture.root.join("screenshots.json");
+    let mut state = State::default();
+    state.bounds = [0., 0., width, height];
+    state.save(&file).unwrap();
+    let mut child = Process::new(binary)
+        .args([
+            "--enable-next",
+            "--app-shell",
+            "--server",
+            &fixture.origin,
+            "--shell-state",
+        ])
+        .arg(file)
+        .env("O8_NEXT_API_TOKEN", "fixture-shell-bearer")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let output = directory.join(if width < 1000. {
+        "narrow.png"
+    } else {
+        "default.png"
+    });
+    let mut captured = false;
+    for _ in 0..50 {
+        std::thread::sleep(Duration::from_millis(200));
+        let capture = Process::new("import")
+            .args([
+                "-screen",
+                "-window",
+                "o8 next",
+                "-crop",
+                &format!("{}x{}+0+0", width as u32, height as u32),
+            ])
+            .arg(&output)
+            .output()
+            .unwrap();
+        if capture.status.success()
+            && fs::metadata(&output).is_ok_and(|metadata| metadata.len() > 5000)
+        {
+            captured = true;
+            break;
+        }
+        if child.try_wait().unwrap().is_some() {
+            break;
+        }
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+    assert!(
+        captured,
+        "native CLI must paint text pixels before capture on the owned display"
+    );
+}
+
+#[gpui::test]
+fn correction_refresh_recovers_initial_history_503(cx: &mut TestAppContext) {
+    let fixture = Fixture::start_mode(false, "--history-fail-once");
+    let (shell, mut visual) = open(
+        fixture.client.clone(),
+        fixture.root.join("recovery.json"),
+        State::default(),
+        cx,
+    );
+    let cx = &mut visual;
+    for _ in 0..4 {
+        cx.run_until_parked();
+        draw(cx);
+    }
+    shell.read_with(cx, |s, cx| {
+        let Content::Session(session) = s.content.get(&s.key(&s.active().unwrap())).unwrap() else {
+            panic!("session")
+        };
+        assert!(
+            session.read(cx).shell_issue_state(cx)["notice"]
+                .as_str()
+                .unwrap()
+                .contains("503")
+        );
+    });
+    cx.simulate_keystrokes("cmd-k");
+    cx.simulate_keystrokes("r e f r e s h enter");
+    cx.run_until_parked();
+    draw(cx);
+    shell.read_with(cx, |s, cx| {
+        let Content::Session(session) = s.content.get(&s.key(&s.active().unwrap())).unwrap() else {
+            panic!("session")
+        };
+        assert!(
+            session.read(cx).shell_ready(),
+            "palette Refresh must reload a failed initial history after HTTP recovery"
+        );
+    });
+}
+
+#[gpui::test]
+fn correction_fifteenth_workspace_scrolls_into_view(cx: &mut TestAppContext) {
+    let fixture = Fixture::start_mode(false, "--shell-many");
+    let (shell, mut visual) = open(
+        fixture.client.clone(),
+        fixture.root.join("scroll.json"),
+        State::default(),
+        cx,
+    );
+    let cx = &mut visual;
+    ready(&shell, cx);
+    for (width, height) in [(1200., 816.), (900., 700.)] {
+        cx.simulate_resize(size(px(width), px(height)));
+        draw(cx);
+        let switcher = cx.debug_bounds("workspace-switcher").unwrap();
+        cx.simulate_click(switcher.center(), gpui::Modifiers::default());
+        draw(cx);
+        for _ in 0..14 {
+            cx.simulate_keystrokes("down");
+            draw(cx);
+        }
+        assert_eq!(shell.read_with(cx, |s, _| s.choice), 14);
+        let palette = cx.debug_bounds("command-palette").unwrap();
+        let selected = cx.debug_bounds("command-14").unwrap();
+        assert!(
+            selected.top() >= palette.top() && selected.bottom() <= palette.bottom(),
+            "keyboard-selected workspace 15 must stay inside the visible palette: row={selected:?}, palette={palette:?}"
+        );
+        println!("workspace 15 at {width}x{height}: row={selected:?}, palette={palette:?}");
+        cx.simulate_click(selected.center(), gpui::Modifiers::default());
+        ready(&shell, cx);
+        assert_eq!(
+            shell.read_with(cx, |s, _| s.state.selected.clone()),
+            shell.read_with(cx, |s, _| Some(s.workspaces[14].clone()))
+        );
+    }
+}
+
+#[gpui::test]
+fn correction_palette_brain_resumes_the_session_draft(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    let (shell, mut visual) = open(
+        fixture.client.clone(),
+        fixture.root.join("brain-resume.json"),
+        State::default(),
+        cx,
+    );
+    let cx = &mut visual;
+    ready(&shell, cx);
+    let active = shell.read_with(cx, |s, _| s.active());
+    cx.simulate_keystrokes("cmd-k");
+    draw(cx);
+    assert!(
+        shell.read_with(cx, |s, _| s.palette),
+        "Cmd+K opens the shell palette"
+    );
+    cx.simulate_keystrokes("escape");
+    cx.simulate_keystrokes("cmd-e");
+    draw(cx);
+    cx.simulate_input("Retained Brain draft");
+    cx.simulate_keystrokes("escape");
+    draw(cx);
+    cx.simulate_keystrokes("cmd-shift-p");
+    draw(cx);
+    assert!(shell.read_with(cx, |s, _| s.palette));
+    assert!(cx.debug_bounds("command-palette").is_some());
+    cx.simulate_keystrokes("b r a i n enter");
+    draw(cx);
+    assert!(!shell.read_with(cx, |s, _| s.palette));
+    assert_eq!(
+        shell.read_with(cx, |s, _| s.active()),
+        active,
+        "palette Brain and Cmd+E must use the same retained session conversation"
+    );
+    cx.simulate_input(" via palette");
+    shell.read_with(cx, |s, cx| {
+        let Content::Session(session) = s.content.get(&s.key(&s.active().unwrap())).unwrap() else {
+            panic!("session")
+        };
+        assert_eq!(
+            session.read(cx).shell_issue_state(cx)["brainDraft"],
+            "Retained Brain draft via palette"
+        );
+    });
+    cx.simulate_keystrokes("cmd-shift-p");
+    draw(cx);
+    assert!(shell.read_with(cx, |s, _| s.palette));
+    assert!(cx.debug_bounds("command-palette").is_some());
+    cx.simulate_keystrokes("n e w enter");
+    draw(cx);
+    assert!(!shell.read_with(cx, |s, _| s.palette));
+    cx.simulate_input("Main draft");
+    shell.read_with(cx, |s, cx| {
+        let Content::Session(session) = s.content.get(&s.key(&s.active().unwrap())).unwrap() else {
+            panic!("session")
+        };
+        assert_eq!(
+            session.read(cx).shell_issue_state(cx)["draft"],
+            "Main draft",
+            "New message must still focus the main composer beside an open Brain"
+        );
+    });
+}
+
+#[gpui::test]
+fn shell_chrome_fifteen_workspaces_keeps_one_switcher(cx: &mut TestAppContext) {
+    let fixture = Fixture::start_mode(false, "--shell-many");
+    let (shell, mut visual) = open(
+        fixture.client.clone(),
+        fixture.root.join("chrome.json"),
+        State::default(),
+        cx,
+    );
+    let cx = &mut visual;
+    ready(&shell, cx);
+    assert_eq!(shell.read_with(cx, |s, _| s.workspaces.len()), 15);
+    assert!(
+        cx.debug_bounds("workspace-switcher").is_some(),
+        "15 workspaces must share one switcher"
+    );
+    assert!(
+        cx.debug_bounds("workspace-0").is_none(),
+        "workspace choices stay out of permanent chrome"
+    );
+    assert!(
+        shell.read_with(cx, |s, _| s.notice.is_empty()),
+        "connected shell has no permanent hints"
+    );
+    assert!(
+        cx.debug_bounds("session-refresh").is_none(),
+        "embedded session has no duplicate header"
+    );
+    let mut layouts = vec![];
+    for (width, height) in [(900., 700.), (1680., 1050.)] {
+        cx.simulate_resize(size(px(width), px(height)));
+        draw(cx);
+        let bounds = cx.debug_bounds("workspace-switcher").unwrap();
+        assert!(bounds.right() <= px(width));
+        assert!(bounds.size.height <= px(40.));
+        layouts.push(json!({"viewport":[width,height], "switcher":[f32::from(bounds.origin.x),f32::from(bounds.origin.y),f32::from(bounds.size.width),f32::from(bounds.size.height)]}));
+        cx.simulate_click(bounds.center(), gpui::Modifiers::default());
+        draw(cx);
+        assert_eq!(shell.read_with(cx, |s, _| s.commands().len()), 15);
+        cx.simulate_keystrokes("escape");
+    }
+    if let Ok(file) = std::env::var("O8_NEXT_CHROME_EVIDENCE") {
+        fs::write(file, serde_json::to_vec_pretty(&json!({"endpoint":"headless GPUI layout; no raster or compositor capture", "workspaces":15,"permanentWorkspaceControls":1,"layouts":layouts})).unwrap()).unwrap();
+    }
+}
+
+#[gpui::test]
+fn chrome_switcher_cancel_restores_composer_with_platform_shortcut(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    let (shell, mut visual) = open(
+        fixture.client.clone(),
+        fixture.root.join("focus.json"),
+        State::default(),
+        cx,
+    );
+    let cx = &mut visual;
+    ready(&shell, cx);
+    cx.simulate_keystrokes("cmd-k");
+    draw(cx);
+    assert!(
+        shell.read_with(cx, |s, _| s.palette),
+        "Cmd+K opens the shell palette"
+    );
+    cx.simulate_keystrokes("n e w enter");
+    ready(&shell, cx);
+    draw(cx);
+    cx.simulate_input("Draft");
+    let switcher = cx.debug_bounds("workspace-switcher").unwrap();
+    cx.simulate_click(switcher.center(), gpui::Modifiers::default());
+    draw(cx);
+    cx.simulate_keystrokes("escape");
+    draw(cx);
+    cx.simulate_input(" retained");
+    cx.simulate_keystrokes("cmd-shift-p");
+    draw(cx);
+    assert!(shell.read_with(cx, |s, _| s.palette));
+    assert!(cx.debug_bounds("command-palette").is_some());
+    cx.simulate_keystrokes("r e f r e s h enter");
+    ready(&shell, cx);
+    draw(cx);
+    assert!(!shell.read_with(cx, |s, _| s.palette));
+    cx.simulate_input(" refreshed");
+    shell.read_with(cx, |s, cx| {
+        let Content::Session(session) = s.content.get(&s.key(&s.active().unwrap())).unwrap() else {
+            panic!("session")
+        };
+        assert_eq!(
+            session.read(cx).shell_issue_state(cx)["draft"],
+            "Draft retained refreshed"
+        );
+    });
+}
+
+#[gpui::test]
+fn chrome_refresh_keeps_workspace_selected_during_load(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    let (shell, mut visual) = open(
+        fixture.client.clone(),
+        fixture.root.join("refresh.json"),
+        State::default(),
+        cx,
+    );
+    let cx = &mut visual;
+    ready(&shell, cx);
+    let target = shell.read_with(cx, |s, _| s.workspaces[1].clone());
+    shell.update_in(cx, |s, window, cx| {
+        // Start the production palette command and switch before its background
+        // inventory response can run on the foreground executor.
+        s.execute(Command::Refresh, window, cx);
+        assert!(s.loading);
+        s.switch(target.clone(), window, cx);
+    });
+    ready(&shell, cx);
+    cx.run_until_parked();
+    assert_eq!(
+        shell.read_with(cx, |s, _| s.state.selected.clone()),
+        Some(target)
+    );
+    cx.simulate_keystrokes("ctrl-k");
+    cx.simulate_keystrokes("s h o r t c u t s enter");
+    draw(cx);
+    assert!(cx.debug_bounds("shortcut-reference").is_some());
+    cx.simulate_keystrokes("escape");
+    assert!(!shell.read_with(cx, |s, _| s.shortcuts));
 }
 
 #[gpui::test]
@@ -159,7 +505,7 @@ fn shell_palette_switch_restart_and_server_down(cx: &mut TestAppContext) {
     cx.simulate_keystrokes("escape");
     // Explicit command control remains reachable while the editor owns its keys.
     draw(cx);
-    let commands = cx.debug_bounds("shell-palette").unwrap();
+    let commands = cx.debug_bounds("Commands").unwrap();
     cx.simulate_click(commands.center(), gpui::Modifiers::default());
     assert!(shell.read_with(cx, |s, _| s.palette));
     cx.simulate_keystrokes("escape");
@@ -394,10 +740,11 @@ fn keymap_composer_focus_survives_surface_switch_and_reconnect(cx: &mut TestAppC
     cx.simulate_input("unsent focus fixture");
     let composer_focus = cx.update(|window, cx| window.focused(cx).unwrap());
     draw(cx);
-    let commands = cx.debug_bounds("shell-palette").unwrap();
+    let commands = cx.debug_bounds("Commands").unwrap();
     cx.simulate_click(commands.center(), gpui::Modifiers::default());
     cx.simulate_keystrokes("g r i d enter");
     ready(&shell, cx);
+    assert_eq!(shell.read_with(cx, |s, _| s.active()), Some(Tab::Grid));
     let first_tab = cx.debug_bounds("surface-tab-0").unwrap();
     cx.simulate_click(first_tab.center(), gpui::Modifiers::default());
     ready(&shell, cx);
@@ -405,8 +752,8 @@ fn keymap_composer_focus_survives_surface_switch_and_reconnect(cx: &mut TestAppC
         cx.update(|window, _| composer_focus.is_focused(window)),
         "returning to a surface must restore its focused field"
     );
-    let retry = cx.debug_bounds("shell-retry").unwrap();
-    cx.simulate_click(retry.center(), gpui::Modifiers::default());
+    cx.simulate_keystrokes("ctrl-shift-p r e f r e s h enter");
+    ready(&shell, cx);
     cx.run_until_parked();
     draw(cx);
     assert!(shell.read_with(cx, |s, _| s.connected && !s.loading));
@@ -462,12 +809,12 @@ fn keymap_composer_keeps_focus_through_real_socket_reconnect(cx: &mut TestAppCon
             cx.update(|window, _| focus.is_focused(window)),
             "socket progress must never steal composer focus"
         );
-        if interrupted && notice.starts_with("Live") {
+        if interrupted && notice.is_empty() {
             break;
         }
         assert!(
             Instant::now() < deadline,
-            "owned replay must disconnect and reconnect"
+            "owned replay must disconnect and reconnect (saw_disconnect={interrupted}, status={notice:?})"
         );
         std::thread::sleep(Duration::from_millis(10));
     }

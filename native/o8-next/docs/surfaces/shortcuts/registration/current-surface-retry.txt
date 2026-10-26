@@ -1,0 +1,10 @@
+running 6 tests
+test shell::issues::tests::review_tests::round1_repository_switch_survives_a_frame_between_mouse_events ... ok
+test shell::shortcuts::tests::review::shortcuts_control_alt_arrows_belong_to_grid_panes ... ok
+test shell::shortcuts::tests::review::shortcuts_focused_grid_terminal_keeps_question_and_close_keys ... ok
+test shell::shortcuts::tests::review::shortcuts_focused_text_field_keeps_help_and_close_keys ... ok
+test shell::shortcuts::tests::review::shortcuts_reopen_retains_list_scroll ... ok
+test shell::shortcuts::tests::shortcuts_overlay_bindings_dismissal_and_typing ... O8_NEXT_SHORTCUTS_EVIDENCE {"endpoint":"headless GPUI CPU scene; no GPU/compositor","openToFirstFrameMs":21.184393,"interactionToFrameMs":26.553922}
+ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 81 filtered out; finished in 32.15s

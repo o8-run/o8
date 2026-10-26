@@ -49,6 +49,21 @@ fn shell_pull_requests_opens_from_palette(cx: &mut TestAppContext) {
     prs.update_in(&mut visual, |s, window, _| s.focus.focus(window));
     draw(&mut visual);
     visual.simulate_keystrokes("ctrl-w");
+    assert_ne!(
+        shell.read_with(&visual, |s, _| s.active()),
+        Some(Tab::PullRequests),
+        "the non-editing close chord must actually close the tab"
+    );
+    visual.simulate_keystrokes("ctrl-k p u l l enter");
+    ready(&shell, &mut visual);
+    shell.update_in(&mut visual, |s, window, _| s.focus.focus(window));
+    draw(&mut visual);
+    visual.simulate_keystrokes("ctrl-w");
+    assert_ne!(
+        shell.read_with(&visual, |s, _| s.active()),
+        Some(Tab::PullRequests),
+        "the shell-focused close chord must close the tab too"
+    );
     visual.simulate_keystrokes("ctrl-k");
     visual.simulate_keystrokes("p u l l enter");
     ready(&shell, &mut visual);

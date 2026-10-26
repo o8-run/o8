@@ -20,6 +20,8 @@ interface UseDefaultComposerSendBufferOptions {
   threadId: string | null;
   repoPath: string | null;
   attachedImages: ThoughtsAttachedImage[];
+  uploadError?: string | null;
+  uploading?: boolean;
   latestInputRef: MutableRefObject<string>;
   inputRef: RefObject<HTMLTextAreaElement | null>;
   setInput: (text: string) => void;
@@ -41,6 +43,8 @@ export function useDefaultComposerSendBuffer({
   threadId,
   repoPath,
   attachedImages,
+  uploadError = null,
+  uploading = false,
   latestInputRef,
   inputRef,
   setInput,
@@ -69,6 +73,8 @@ export function useDefaultComposerSendBuffer({
     return () => { queueOwnerRef.current = null; };
   }, [repoPath, threadId]);
   const imagesRef = useRef(attachedImages); imagesRef.current = attachedImages;
+  const uploadStateRef = useRef({ uploading, uploadError });
+  useLayoutEffect(() => { uploadStateRef.current = { uploading, uploadError }; }, [uploading, uploadError]);
   const durable = useDurableComposerQueue(active && threadId && repoPath ? { repoPath, threadId } : null, busy, capabilityBackend);
   const restoreDraft = useCallback((text: string, images: ComposerSendImage[]) => {
     setInput(text);
@@ -81,9 +87,13 @@ export function useDefaultComposerSendBuffer({
     requestAnimationFrame(() => inputRef.current?.focus());
   }, [addAttachedImage, clearAttachments, inputRef, latestInputRef, setInput]);
 
+  const dispatched = useRef<OrchestratorSendHandle | null>(null);
+  const trackedDispatch = useCallback((text: string, images: ComposerSendImage[]) => {
+    const handle = dispatch(text, images); dispatched.current = handle; return handle;
+  }, [dispatch]);
   const sendBuffer = useComposerSendBuffer<OrchestratorSendHandle>({
     busy: active && busy,
-    dispatch,
+    dispatch: trackedDispatch,
     interrupt,
     restore: restoreDraft,
     truncate: undoSend,
@@ -99,7 +109,7 @@ export function useDefaultComposerSendBuffer({
   }, [clearSendBuffer, repoPath, threadId]);
 
   const submit = useCallback((intent: 'send-next' | 'steer-now') => {
-    if (savingRef.current) return;
+    if (savingRef.current || uploading || uploadError) return;
     const draft = latestInputRef.current;
     const text = latestInputRef.current.trim() || (attachedImages.length > 0 ? '[Image attached]' : '');
     if (!text) return;
@@ -147,10 +157,28 @@ export function useDefaultComposerSendBuffer({
     }
 
     if (!sendBuffer.send(text, images)) return;
+    const admission = dispatched.current?.admission;
+    if (images.length && admission) {
+      const owner = queueOwnerRef.current;
+      const attachmentDraft = imagesRef.current;
+      savingRef.current = true; setSaving(true);
+      void admission.then(result => {
+        if (queueOwnerRef.current !== owner) return;
+        if (result.status === 'accepted') {
+          if (latestInputRef.current === draft && imagesRef.current === attachmentDraft && !uploadStateRef.current.uploading && !uploadStateRef.current.uploadError) {
+            setInput(''); latestInputRef.current = ''; clearAttachments();
+          }
+        } else if (result.status !== 'cancelled') {
+          setAttachmentError(result.status === 'rejected' ? `Image was not sent. ${result.error ?? 'The attachment was refused.'} Fix the error or reattach the image, then send again.`
+            : 'Image delivery is unconfirmed. Check the conversation and use Retry there before sending another turn.');
+        }
+      }).finally(() => { if (queueOwnerRef.current === owner) { savingRef.current = false; setSaving(false); } });
+      return;
+    }
     setInput('');
     latestInputRef.current = '';
     clearAttachments();
-  }, [active, attachedImages, backend, busy, captureQueuedSend, clearAttachments, durable, latestInputRef, sendBuffer, sendUnbuffered, setInput, shouldBypass]);
+  }, [active, attachedImages, backend, busy, uploading, uploadError, captureQueuedSend, clearAttachments, durable, latestInputRef, sendBuffer, sendUnbuffered, setInput, shouldBypass]);
 
   const handleSend = useCallback(() => submit('send-next'), [submit]);
   const supportsSteer = durable.canSteer;
@@ -163,6 +191,6 @@ export function useDefaultComposerSendBuffer({
   return {
     durable,
     sendBuffer: { ...sendBuffer, queued, cancelQueued: id => { void durable.cancel(id); } },
-    handleSend, handleSteer, saving, attachmentError: attachmentError ?? durable.error,
+    handleSend, handleSteer, saving: saving || uploading, attachmentError: uploadError ?? (uploading ? 'Wait for the image upload to finish before sending.' : attachmentError ?? durable.error),
   };
 }

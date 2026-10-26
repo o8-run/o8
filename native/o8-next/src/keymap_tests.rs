@@ -29,6 +29,8 @@ fn origin(row: &Binding) -> &'static str {
         }
         PaletteCancel | PaletteMove(_) | PaletteAccept => "Global Palette",
         ToggleBrain | BrainCancel | BrainFind => "Global Session Brain",
+        ComposerFocus(_) => "Global Session ComposerCard",
+        ComposerCancel => "Global Session ComposerCard ComposerPicker",
         SessionFocus | SessionSelect(_) | SessionSteer | SessionRemove => "Global Session",
         GridNeighbor { .. }
         | GridSize(_)
@@ -63,10 +65,9 @@ fn allowed(action: &Shortcut, focus: &str) -> bool {
         GridNeighbor { .. } | GridSize(_) | GridClose | GridChoose | GridToggle | GridZoom => {
             focus != "text"
         }
-        PaletteCancel | PaletteMove(_) | PaletteAccept | ToggleBrain | BrainCancel | BrainFind
-        | SessionFocus | SettingsCancel | SettingsFind | FocusNext(_) | IssueCancel => {
-            focus != "terminal"
-        }
+        ComposerFocus(_) | ComposerCancel | PaletteCancel | PaletteMove(_) | PaletteAccept
+        | ToggleBrain | BrainCancel | BrainFind | SessionFocus | SettingsCancel | SettingsFind
+        | FocusNext(_) | IssueCancel => focus != "terminal",
         _ => focus == "list",
     }
 }

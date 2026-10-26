@@ -4,6 +4,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { recordLaneEvent } from '@/lib/lane/events';
+import { withoutOwnedStartAdmission } from '@/lib/runtimes/shared/owned-session/action-admission';
 import { packetSpendCapBreach, type PacketSpendCap, type PacketSpendTelemetry } from '@/lib/orchestrator/metered-spend';
 import type { OwnedSessionRecord } from '@/lib/runtimes/shared/owned-session/types';
 
@@ -201,7 +202,7 @@ async function ensureServer(): Promise<{ port: number }> {
   if (serverPromise) return serverPromise;
   serverPromise = new Promise((resolve, reject) => {
     const server = createServer((request, response) => {
-      void relay(request, response).catch((error) => {
+      void withoutOwnedStartAdmission(() => relay(request, response)).catch((error) => {
         console.error('[metered-gateway] Relay failed.', error);
         if (!response.headersSent) response.writeHead(502);
         response.end('Metered gateway relay failed closed.');

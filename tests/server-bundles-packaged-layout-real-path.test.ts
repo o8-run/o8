@@ -67,8 +67,8 @@ async function stop(child: ChildProcess) {
 beforeAll(async () => {
   mkdirSync(state);
   report = bundleServers({ root: process.cwd(), outDir: serverDir });
-  // Only native externals are installed. All JavaScript dependencies must come
-  // from the generated entries/chunks, with no checkout node_modules above them.
+  // The build stages the shared compiler runtime; add only host native addons.
+  // No checkout node_modules directory exists above this generated package.
   stagePackagedNativeAddons({ projectRoot: process.cwd(), serverRoot: serverDir });
   cpSync('src/lib/lane/orchestrator.md', join(serverDir, 'orchestrator.md'));
   api = createServer((request, response) => {
@@ -125,6 +125,7 @@ describe('shared server bundles in the packaged layout', () => {
     const absentNextPort = await freePort();
     const token = 'packaged-native-fixture-credential';
     writeFileSync(join(state, 'ws-token'), token);
+    const started = performance.now();
     const { child } = launch('ws-server', { O8_NEXT_O8D: '1', O8_WS_O8D: '1', O8D_BINARY: binary,
       O8_WS_PORT: String(wsPort), NEXT_ORIGIN: `http://127.0.0.1:${absentNextPort}` });
     const origin = `http://127.0.0.1:${wsPort}`;
@@ -143,6 +144,7 @@ describe('shared server bundles in the packaged layout', () => {
         expect(response.headers.get('content-type')).toContain('application/json');
         await response.arrayBuffer();
       })));
+      expect(performance.now() - started).toBeLessThan(5_000);
       const brain = await fetch(origin + '/api/cortex/ask', { method: 'POST',
         headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: '{}' });
       expect(brain.status).toBe(400);

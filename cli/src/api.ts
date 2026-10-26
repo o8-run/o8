@@ -322,7 +322,9 @@ export async function apiFetch<T = unknown>(
         'forbidden',
         `Server refused this operation (403)${detail ? `: ${detail}` : '.'}`,
         EXIT.UNAUTHORIZED,
-        cfg.source.token === 'worker'
+        cfg.source.token === 'worker' && cfg.token?.startsWith('o8br_')
+          ? 'Use Brain reads for the assigned project. Ask the operator to link the repository before starting a new turn.'
+          : cfg.source.token === 'worker'
           ? 'Use scoped operations for your assigned packet; ask the lead to reconcile global mission or contract state.'
           : spectatorDenied
           ? 'Check O8_SPECTATOR_TOKEN and the repository grants attached to that bearer.'
@@ -335,6 +337,8 @@ export async function apiFetch<T = unknown>(
       EXIT.UNAUTHORIZED,
       spectatorDenied
         ? 'Check O8_SPECTATOR_TOKEN and the repository grants attached to that bearer.'
+        : cfg.source.token === 'worker'
+        ? 'The worker credential was refused or expired. Start a new authorized turn; do not substitute an operator credential.'
         : cfg.token
         ? 'Token did not match ~/.o8/ws-token on the server. Refresh O8_API_TOKEN or rerun from a loopback host.'
         : 'Set O8_API_TOKEN or ensure ~/.o8/ws-token is readable; cross-origin callers require the bearer token.',

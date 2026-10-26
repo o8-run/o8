@@ -1,0 +1,31 @@
+Command: npx vitest run tests/next-parity-render-failure-real-path.test.ts -t "pageerror on a named"
+Before render-error guards; fixture action confirmed after hydration.
+
+ FAIL  tests/next-parity-render-failure-real-path.test.ts > the capture CLI rejects pageerror on a named fixture surface
+AssertionError: Capturing session 1024x720
+Capturing session 1440x900
+Local diagnostics retained under <local-temp>
+2 captures; 0 crashes; visual differences do not gate
+: expected +0 to be 1 // Object.is equality
+
+- Expected
++ Received
+
+- 1
++ 0
+
+ ❯ tests/next-parity-render-failure-real-path.test.ts:67:60
+     65|       const result = f.run();
+     66|       if (['pageerror', 'console', 'boundary', 'late-http500'].include…
+     67|       expect(result.status, result.stdout + result.stderr).toBe(1);
+       |                                                            ^
+     68|       expect(result.stderr).toContain('session');
+     69|       const report = JSON.parse(readFileSync(join(f.output, 'report.js…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 8 skipped (9)
+   Start at  22:30:54
+   Duration  16.69s (transform 34ms, setup 47ms, import 379ms, tests 16.06s, environment 0ms)

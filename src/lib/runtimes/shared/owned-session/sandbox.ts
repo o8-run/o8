@@ -235,6 +235,8 @@ export interface SeatbeltProfileInput {
   finalDenyWritePaths?: string[];
   /** Files kept immutable after a narrow mutable state root is re-opened. */
   finalImmutableWritePaths?: string[];
+  /** Exact directory objects kept immutable; their contents retain existing grants. */
+  finalImmutableAncestorPaths?: string[];
   /** Exact files re-opened for reads after a parent subtree is denied. */
   finalAllowReadPaths?: string[];
   /** Exact executables re-opened after a parent subtree is exec-denied. */
@@ -353,6 +355,8 @@ export function buildSeatbeltProfile(input: SeatbeltProfileInput): string {
     ...(input.finalImmutableWritePaths ?? []),
   ]);
   const finalAllowReadPaths = uniq(input.finalAllowReadPaths ?? []);
+  const finalImmutableAncestors = uniq(input.finalImmutableAncestorPaths ?? []);
+  if (finalImmutableAncestors.some(p => !path.isAbsolute(p))) throw new SandboxUnavailableError('Immutable ancestor paths must be absolute.');
   const finalAllowExecPaths = uniq(input.finalAllowExecPaths ?? []);
   const readOnlyDenyWritePaths = uniq(input.readOnlyDenyWritePaths ?? []);
   const policy = input.finalCredentialPolicy;
@@ -511,6 +515,12 @@ export function buildSeatbeltProfile(input: SeatbeltProfileInput): string {
       `(allow file-write-data (literal ${sbplString(policy.lockPath)}))`,
       `(deny file-write-create file-write-unlink file-write-mode file-write-owner file-write-acl file-write-flags file-link file-clone (literal ${sbplString(policy.lockPath)}))`,
     ] : []),
+    ...(finalImmutableAncestors.length ? [
+      ';; keep verified CLI ancestors immutable without denying their contents',
+      '(deny file-write* file-write-mode file-write-owner file-write-acl file-write-flags file-link file-clone',
+      ...finalImmutableAncestors.map(p => `  (literal ${sbplString(p)})`),
+      ')',
+    ] : []),
     ...(readOnlyDenyWritePaths.length ? [
       // DEAD LAST, deliberately. SBPL is last-match-wins, so emitting the
       // read-only denial after EVERY allow — including the narrow re-opens
@@ -575,6 +585,7 @@ export interface PrepareWorkerSandboxInput {
   finalDenyReadBasenames?: string[];
   finalDenyWritePaths?: string[];
   finalImmutableWritePaths?: string[];
+  finalImmutableAncestorPaths?: string[];
   finalAllowReadPaths?: string[];
   finalAllowExecPaths?: string[];
   /**
@@ -710,6 +721,7 @@ export async function prepareWorkerSandbox(input: PrepareWorkerSandboxInput): Pr
   const finalImmutableWrite = await resolveAll([
     ...(input.finalImmutableWritePaths ?? []), ...projectConfigPaths,
   ]);
+  const finalImmutableAncestors = await resolveAll(input.finalImmutableAncestorPaths ?? []);
   const finalAllowRead = await resolveAll([
     ...(input.finalAllowReadPaths ?? []), ...projectConfigPaths,
   ]);
@@ -760,6 +772,7 @@ export async function prepareWorkerSandbox(input: PrepareWorkerSandboxInput): Pr
     finalDenyReadBasenames,
     finalDenyWritePaths: finalDenyWrite,
     finalImmutableWritePaths: finalImmutableWrite,
+    finalImmutableAncestorPaths: finalImmutableAncestors,
     finalAllowReadPaths: finalAllowRead,
     finalAllowExecPaths: finalAllowExec,
     readOnlyDenyWritePaths: readOnlyDenyWrite,

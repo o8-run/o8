@@ -32,7 +32,8 @@ export function providerCanonicalName(input: Record<string, string | undefined>,
 }
 
 export type SpawnOptions = { inject?: boolean; clearInherited?: boolean; runtimeId?: string; runtimeLaunch?: boolean; onlyExisting?: boolean; omitEnv?: readonly string[] };
-type Context = SpawnOptions & { deniedValues?: readonly string[]; policy?: string; transport?: Record<string, string>; brokerKey?: string };
+export interface ChildMetadataRedaction { names: readonly string[]; redact(value: string): string }
+type Context = SpawnOptions & { metadataRedaction?: ChildMetadataRedaction; deniedValues?: readonly string[]; policy?: string; transport?: Record<string, string>; brokerKey?: string };
 const contexts = new WeakMap<object, Context>();
 const observedSecrets = new Set<string>();
 const digest = (value: string) => createHash('sha256').update(value).digest('hex');
@@ -129,6 +130,12 @@ export function refreshChildEnvironment(env?: Record<string, string | undefined>
   if (context?.brokerKey) { result.O8_MASTER_KEY = context.brokerKey; contexts.get(result)!.brokerKey = context.brokerKey; }
   for (const [name, value] of Object.entries(env ?? {})) if (value === '') result[name] = '';
   return result;
+}
+
+/** In-memory only: saved local credentials must not enter process receipts. */
+export function retainChildMetadataRedaction(env: Record<string, string>, redaction: ChildMetadataRedaction): void {
+  const context = contexts.get(env);
+  if (context) context.metadataRedaction = redaction;
 }
 
 /** Explicit local subscription transport, never a managed provider key. */
