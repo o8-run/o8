@@ -86,12 +86,15 @@ beforeEach(() => {
 });
 afterEach(async () => {
   await act(async () => root.unmount()); host.remove();
+  if (vi.isFakeTimers()) { vi.clearAllTimers(); vi.useRealTimers(); }
   localStorage.clear(); sessionStorage.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals();
   resetComposerDraftMemoryForTests();
 });
 
 describe('ordinary workspace drafts through the mounted composer', () => {
   it('migrates a saved thread draft across pane and repository aliases without reviving cleared text', async () => {
+    // Keep debounced history saves inside this case's fetch fixture.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     const legacyKey = 'o8:composer-draft:v1:' + JSON.stringify(['/repo/previous', ['thread', 'thoughts-moved']]);
     localStorage.setItem(legacyKey, JSON.stringify({ input: draft, images: [], files: [] }));
     await mount('/repo/current', 'reopened-pane', true, 'thoughts-moved');

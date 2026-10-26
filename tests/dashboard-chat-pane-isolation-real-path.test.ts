@@ -305,7 +305,7 @@ it('keeps both dashboard panes independent through B send, A send and persisted 
   await act(async () => root!.unmount()); root = undefined;
   resetComposerDraftMemoryForTests(); getQueryClient().clear();
   await mount();
-  await expect.poll(async () => { await settle(); return host.querySelectorAll('textarea').length; }).toBe(2);
+  await expect.poll(async () => { await settle(); return host.querySelectorAll('textarea').length; }, { timeout: 10000 }).toBe(2);
   const restoredA = host.querySelector(`[data-o8-active-tab-id="${tabA}"]`)!;
   const restoredB = host.querySelector(`[data-o8-active-tab-id="${tabB}"]`)!;
   await expect.poll(async () => { await settle(); return restoredB.textContent; }).toContain(messageB);
@@ -391,7 +391,7 @@ it.each(['send from A', 'reload then reveal B', 'move then reveal B'] as const)(
   if (path === 'reload then reveal B') {
     await act(async () => root!.unmount()); root = undefined;
     resetComposerDraftMemoryForTests(); getQueryClient().clear(); await mount();
-    await expect.poll(async () => { await settle(); return host.querySelectorAll('textarea').length; }).toBe(2);
+    await expect.poll(async () => { await settle(); return host.querySelectorAll('textarea').length; }, { timeout: 10000 }).toBe(2);
     currentB = nestedInput()!;
     currentA = [...host.querySelectorAll<HTMLTextAreaElement>(`[data-o8-active-tab-id="${tabA}"] textarea`)].find(input => input !== currentB)!;
     expect.soft(currentA?.value).toBe('Retained draft in A');

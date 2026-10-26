@@ -6,7 +6,7 @@ import { useTextChatTabs } from './use-text-chat-tabs';
 import { useWorkspaceThreadBindings } from './useWorkspaceThreadBindings';
 import { useWorkspaceInspectorTabs } from './useWorkspaceInspectorTabs';
 
-import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type ForwardedRef, type MouseEvent as ReactMouseEvent } from 'react';
+import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type ForwardedRef, type MouseEvent as ReactMouseEvent } from 'react';
 import {
   buildRepoStateScope,
   loadTabState,
@@ -162,6 +162,7 @@ export function useWorkspaceTerminalController(
   const activeChatSessionChangeRef = useRef(onActiveChatSessionChange);
   const reportedChatSessionsSignatureRef = useRef('');
   const reportedActiveChatSessionKeyRef = useRef<string | null>(null);
+  // eslint-disable-next-line react-hooks/refs -- construction stores getTabs; only record() reads it after render.
   const terminalActivity = useMemo(() => createTerminalActivityTracker({ getTabs: () => tabsRef.current, setTabs }), []);
   useEffect(() => () => terminalActivity.dispose(), [terminalActivity]);
   const landTerminalTabs = useCallback((site: string, nextTabs: TerminalTab[]) => {
@@ -249,7 +250,9 @@ export function useWorkspaceTerminalController(
   // workspace instance — so a "New session did nothing" report shows whether
   // the tab was ever appended, where it went, and what the restore did.
   const introspectRef = useRef({ tabs, activeTabId, effectiveActiveTabId, restoreCompletedKey, stateScope });
-  introspectRef.current = { tabs, activeTabId, effectiveActiveTabId, restoreCompletedKey, stateScope };
+  useLayoutEffect(() => {
+    introspectRef.current = { tabs, activeTabId, effectiveActiveTabId, restoreCompletedKey, stateScope };
+  }, [tabs, activeTabId, effectiveActiveTabId, restoreCompletedKey, stateScope]);
   useEffect(() => {
     const instance = `tabs:${Math.random().toString(36).slice(2, 8)}`;
     return registerIntrospectionContributor(instance, () => {
@@ -1271,7 +1274,7 @@ export function useWorkspaceTerminalController(
     }
     return () => { timers.forEach((id) => window.clearTimeout(id)); };
   }, [archiveWorkspaceTab, effectiveActiveTabId, tabs, terminalActivity]);
-  usePendingCliCommands(tabs, pendingCliCommands.current, tabsRef, setTabs, sendTerminalInput);
+  usePendingCliCommands(tabs, pendingCliCommands, tabsRef, setTabs, sendTerminalInput);
 
   const handleDragStart = useCallback((event: ReactMouseEvent) => {
     event.preventDefault();
