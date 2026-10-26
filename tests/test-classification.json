@@ -3738,6 +3738,12 @@
       ]
     },
     {
+      "path": "tests/mcp-agent-experience-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/mcp-deferred-tools-real-path.test.ts",
       "reasons": [
         "network-listener",
@@ -3779,6 +3785,14 @@
     {
       "path": "tests/mcp-result-pages-real-path.test.ts",
       "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/mcp-schema-compatibility-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
         "real-path"
       ]
     },
