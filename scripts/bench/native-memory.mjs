@@ -14,6 +14,7 @@ import { computeArtifactDigest, descendantPids, snapshotProcesses, webkitPids } 
 import { buildFixturePlan, materializeFixture } from './interactions/fixtures.mjs';
 import { exerciseSessionWorkload, verifySessionWorkload } from './session-memory.mjs';
 import { countSandboxDenials } from './session-memory-workers.mjs';
+import { inspector } from '../speed/memory.mjs';
 
 const round = n => Math.round(n * 100) / 100;
 const edit = 'Launch input check';
@@ -22,7 +23,10 @@ export const COMPOSER_PROBE_JS = `(() => {
   const editor = document.querySelector('textarea[data-o8-active-composer="true"]')
     || document.querySelector('[data-o8-composer-root] textarea');
   const box = editor?.getBoundingClientRect();
-  const visible = Boolean(box && box.width > 0 && box.height > 0 && document.visibilityState === 'visible');
+  const hit = box && document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+  const visible = Boolean(box && box.width > 0 && box.height > 0 && document.visibilityState === 'visible'
+    && (hit === editor || editor.contains(hit)) && getComputedStyle(editor).visibility === 'visible');
+  if (editor?.readOnly) return JSON.stringify({ state: 'pending', readOnly: true });
   if (!editor || !visible || editor.disabled) return JSON.stringify({ state: 'pending', editor: Boolean(editor), visible, disabled: editor?.disabled });
   const text = ${JSON.stringify(edit)};
   if (!editor.dataset.o8LaunchEdit) {
@@ -44,6 +48,23 @@ export const COMPOSER_PROBE_JS = `(() => {
     navigation: navigation ? { requestStart: navigation.requestStart, responseStart: navigation.responseStart,
       responseEnd: navigation.responseEnd, domContentLoaded: navigation.domContentLoadedEventEnd } : null });
 })()`;
+
+async function captureIdleHeaps(dataDir, output) {
+  const results = {};
+  for (const name of ['next', 'ws']) {
+    const client = await inspector({ logPath: path.join(dataDir, 'logs', name + '-server.log') });
+    const file = path.join(output, name + '-after-idle.heapsnapshot');
+    try { await client.snapshot(file); } finally { client.close(); }
+    // Analyze in a separate process so the first parsed heap cannot remain
+    // resident while the second snapshot is collected. Raw heaps stay private.
+    const code = "const {retainedOwners}=await import(process.argv[1]);process.stdout.write(JSON.stringify(retainedOwners(process.argv[2])));";
+    results[name] = JSON.parse(execFileSync(process.execPath,
+      ['--max-old-space-size=4096', '--input-type=module', '-e', code,
+        new URL('./standalone-heap.mjs', import.meta.url).href, file],
+      { encoding: 'utf8', maxBuffer: 4 * 1024 * 1024, timeout: 180_000 }));
+  }
+  return results;
+}
 
 function wholeAppRss(rootPid) {
   const processes = snapshotProcesses();
@@ -89,7 +110,7 @@ function childEnvironment(dataDir, repoDir, socketPath) {
   return { ...env, CORTEX_IDE_OWNED_CODEX_ROOT: path.join(dataDir, 'owned-memory-workers'), O8_DATA_DIR: dataDir, CORTEX_IDE_DATA_DIR: dataDir,
     CORTEX_IDE_DB_PATH: path.join(dataDir, 'fixture.db'), CORTEX_IDE_REPO_ROOT: repoDir,
     CORTEX_IDE_REVIEW_REPO_ROOT: repoDir, O8_TAURI_MCP_SOCKET: socketPath,
-    O8_FORCE_BUNDLED_SERVERS: '1', O8_BOOT_TRACE: '1',
+    O8_FORCE_BUNDLED_SERVERS: '1', O8_BOOT_TRACE: '1', NODE_OPTIONS: '--inspect=127.0.0.1:0',
     CODEX_HOME: path.join(dataDir, 'provider-profile'), CLAUDE_CONFIG_DIR: path.join(dataDir, 'provider-config') };
 }
 
@@ -109,7 +130,7 @@ export async function measureNativeMemory({ app, output, sourceSha, samples = 1 
   const receipt = { schema: 'o8/native-idle-memory/v1', platform: process.platform, arch: process.arch,
     osVersion: execFileSync('sw_vers', ['-productVersion'], { encoding: 'utf8' }).trim(), sourceSha, artifactDigest,
     method: 'normal release app; private profile; chat/worker history and project workload; no forced collection',
-    pollMs: 10, limitBytes: 500_000_000, sessions: 24, workerSessions: 48, transcriptMiB: 4, idleMs: 600_000, samples: [] };
+    pollMs: 10, inspectorEnabled: true, heapSnapshotsAfterRss: true, limitBytes: 500_000_000, sessions: 24, workerSessions: 48, transcriptMiB: 4, idleMs: 600_000, samples: [] };
   try {
     runner = prepareNativeRunner('ai.o8.desktop.memorybench', stageRoot);
     receipt.privacyPrecondition = runner.services.map(service => `${service}: denied`);
@@ -230,6 +251,8 @@ export async function measureNativeMemory({ app, output, sourceSha, samples = 1 
         sampleReceipt.workload.sandboxDenials = countSandboxDenials(workload.workers);
         assert.equal(sampleReceipt.workload.sandboxDenials, 1, 'Sandbox diagnostics must remain visible');
         assert(sampleReceipt.workload.persistedOutputUnchanged, 'Persisted fixture output changed');
+        try { sampleReceipt.heaps = await captureIdleHeaps(seeded.dataDir, output); }
+        catch { sampleReceipt.heapEvidenceError = 'idle_heap_capture_failed'; }
       } catch (error) {
         receipt.failure = { sample, message: String(error.message).replaceAll(stageRoot, '<fixture>'),
           lastProbe, nativeWindow, nativeStages: [...nativeStages], exitCode: child?.exitCode, signal: child?.signalCode };
