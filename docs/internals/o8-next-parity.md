@@ -20,7 +20,13 @@ node scripts/parity/checklist.mjs work/next-parity/report.json
 ```
 
 Use `--browser /absolute/path` for an existing headless browser or `--only session`
-to inspect a single surface. Set `VK_ICD_FILENAMES` to the installed software
+to inspect a single surface. An unknown `--only` exits 1 before starting a host.
+Capture and inventory commands name any registered surface missing from
+`scripts/parity/surfaces.json`; `--compare` can still process an existing report
+when the registration inventory has grown. Host startup and capture share the
+same cleanup, including when native test compilation fails.
+
+Set `VK_ICD_FILENAMES` to the installed software
 Vulkan ICD, as the Linux workflow does. Use a private Xvfb display. The runner
 never sends input to the active desktop. Native pixels come from an X11 window
 owned by the launched child; current-UI pixels come from the actual Next route.
@@ -81,7 +87,13 @@ The checked-in [measurement snapshot](../../native/o8-next/evidence/parity/repor
 contains 28 captures with zero crashes. Image paths inside it refer to the full
 CI artifact layout. Representative pairs are saved at
 [1024×720](../../native/o8-next/evidence/parity/session-1024x720.png) and
-[1440×900](../../native/o8-next/evidence/parity/session-1440x900.png).
+[1440×900](../../native/o8-next/evidence/parity/session-1440x900.png). The original
+52 numeric gaps remain unchanged. The added Workers mapping uses the existing
+`--workers` route fixture; its [two-size report](../../native/o8-next/evidence/parity/review-2/workers-report.json)
+and [paired capture](../../native/o8-next/evidence/parity/review-2/workers-1024x720.png)
+are recorded separately. Its current-UI opener remains unavailable, so the
+Workers rows remain unmeasured. The [round 2 receipts](../../native/o8-next/evidence/parity/review-2/verification.md)
+cover mapping drift, process cleanup and the expanded capture.
 
 <!-- parity-table:start -->
 | Surface | Element | Status | Owner | Measured gap (native − current UI, px) |
@@ -97,6 +109,17 @@ CI artifact layout. Representative pairs are saved at
 | session | files | Missing | [#4711](https://github.com/o8-run/o8/issues/4711) | 1024×720: unmeasured; 1440×900: unmeasured |
 | session | diff | Partial | [#4711](https://github.com/o8-run/o8/issues/4711) | 1024×720: unmeasured; 1440×900: unmeasured |
 | session | terminal | Partial | [#4711](https://github.com/o8-run/o8/issues/4711) | 1024×720: unmeasured; 1440×900: unmeasured |
+| workers | sidebar | Partial | [#4736](https://github.com/o8-run/o8/issues/4736) | 1024×720: unmeasured; 1440×900: unmeasured |
+| workers | rail | Missing | [#4736](https://github.com/o8-run/o8/issues/4736) | 1024×720: unmeasured; 1440×900: unmeasured |
+| workers | top bar | Partial | [#4736](https://github.com/o8-run/o8/issues/4736) | 1024×720: unmeasured; 1440×900: unmeasured |
+| workers | worker pane | Partial | [#4736](https://github.com/o8-run/o8/issues/4736) | 1024×720: unmeasured; 1440×900: unmeasured |
+| workers | transcript | Partial | [#4736](https://github.com/o8-run/o8/issues/4736) | 1024×720: unmeasured; 1440×900: unmeasured |
+| workers | composer | Partial | [#4736](https://github.com/o8-run/o8/issues/4736) | 1024×720: unmeasured; 1440×900: unmeasured |
+| workers | palette | Partial | [#4736](https://github.com/o8-run/o8/issues/4736) | 1024×720: unmeasured; 1440×900: unmeasured |
+| workers | settings | Partial | [#4736](https://github.com/o8-run/o8/issues/4736) | 1024×720: unmeasured; 1440×900: unmeasured |
+| workers | files | Missing | [#4736](https://github.com/o8-run/o8/issues/4736) | 1024×720: unmeasured; 1440×900: unmeasured |
+| workers | diff | Partial | [#4736](https://github.com/o8-run/o8/issues/4736) | 1024×720: unmeasured; 1440×900: unmeasured |
+| workers | terminal | Partial | [#4736](https://github.com/o8-run/o8/issues/4736) | 1024×720: unmeasured; 1440×900: unmeasured |
 | brain | sidebar | Partial | [#4548](https://github.com/o8-run/o8/issues/4548) | 1024×720: unmeasured; 1440×900: unmeasured |
 | brain | rail | Missing | [#4548](https://github.com/o8-run/o8/issues/4548) | 1024×720: unmeasured; 1440×900: unmeasured |
 | brain | top bar | Partial | [#4548](https://github.com/o8-run/o8/issues/4548) | 1024×720: unmeasured; 1440×900: unmeasured |

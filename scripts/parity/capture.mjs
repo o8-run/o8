@@ -65,6 +65,8 @@ function testBinary(options) {
   return files[0];
 }
 export async function capture(manifest, options) {
+  const selected = options.only ? manifest.surfaces.filter(row => row.id === options.only) : manifest.surfaces;
+  if (!selected.length) throw new CaptureError(`Unknown surface: ${options.only}`);
   if (!process.env.DISPLAY || !existsSync(options.binary)) throw new Error('Build o8 next and run inside a private Xvfb display');
   mkdirSync(options.output, { recursive: true });
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'o8-parity-')));
@@ -74,21 +76,21 @@ export async function capture(manifest, options) {
   const env = environment(root, token);
   const data = join(root, 'web-data');
   mkdirSync(data);
-  const web = launch(process.execPath, ['--import', 'tsx', options.webHost], {
-    ...env, NODE_ENV: 'development', NEXT_PHASE: 'phase-production-build', O8_DATA_DIR: data,
-    CORTEX_IDE_DATA_DIR: data, CORTEX_IDE_DB_PATH: join(data, 'web.db'),
-  }, join(logs, 'web.log'), true);
-  const webReceipt = receipt(web);
+  let web;
+  let webReceipt;
   let browser;
   const captures = [];
-  const selected = options.only ? manifest.surfaces.filter(row => row.id === options.only) : manifest.surfaces;
-  if (!selected.length) throw new Error('Unknown surface');
   const failed = (scenario, size, error) => {
     const reason = `${scenario.id} ${size.join('x')}: ${error instanceof CaptureError ? error.reason : 'capture process, route or measurement failed'}`;
     console.error(reason);
     return reason;
   };
   try {
+    web = launch(process.execPath, ['--import', 'tsx', options.webHost], {
+      ...env, NODE_ENV: 'development', NEXT_PHASE: 'phase-production-build', O8_DATA_DIR: data,
+      CORTEX_IDE_DATA_DIR: data, CORTEX_IDE_DB_PATH: join(data, 'web.db'),
+    }, join(logs, 'web.log'), true);
+    webReceipt = receipt(web);
     const binary = testBinary(options);
     await until(web, () => webReceipt.value.webOrigin, 120_000);
     browser = await chromium.launch({ executablePath: options.browser || chromium.executablePath(), headless: true,
@@ -159,9 +161,9 @@ export async function capture(manifest, options) {
     return selected.flatMap(scenario => manifest.sizes.map(size => ({ surface: scenario.id, size,
       crash: failed(scenario, size, error) })));
   } finally {
-    webReceipt.close();
-    if (browser) await browser.close();
-    await stop(web);
+    webReceipt?.close();
+    try { if (browser) await browser.close(); }
+    finally { await stop(web); }
     // Raw diagnostics stay local; they are never uploaded in the public artifact.
     console.log(`Local diagnostics retained under ${logs}`);
   }

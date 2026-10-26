@@ -1,5 +1,8 @@
 # Parity capture verification
 
+The latest rebase, Workers mapping and process-cleanup correction are recorded in
+[review round 2](review-2/verification.md).
+
 For the rebased review correction and clean full native run, see
 [review round 1](review-1/verification.md). The results below preserve the
 original submission history.

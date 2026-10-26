@@ -75,6 +75,22 @@
       ]
     },
     {
+      "id": "workers",
+      "tab": "Workers",
+      "flags": [
+        "--workers"
+      ],
+      "webRoute": "/dashboard",
+      "webEvent": "o8:open-inbox-tab",
+      "webClick": "[aria-label='Open right panel tab picker']",
+      "webText": "Threads",
+      "nativeSelectors": [
+        "workers-pane",
+        "workers-list"
+      ],
+      "remaining": "Current-UI thread grouping and native worker filters are not yet equivalent"
+    },
+    {
       "id": "brain",
       "tab": "Brain",
       "flags": [

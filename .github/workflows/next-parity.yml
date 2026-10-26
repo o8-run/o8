@@ -8,6 +8,7 @@ on:
       - 'scripts/parity/**'
       - 'tests/next-parity-harness-real-path.test.ts'
       - 'tests/next-parity-render-failure-real-path.test.ts'
+      - 'tests/next-parity-preflight-real-path.test.ts'
       - '.github/actions/next-linux-setup/**'
       - '.github/workflows/next-parity.yml'
   workflow_dispatch:
@@ -33,8 +34,8 @@ jobs:
       - uses: ./.github/actions/next-linux-setup
         with:
           browser: 'true'
-      - name: Reject render failures through the capture CLI
-        run: npx vitest run tests/next-parity-render-failure-real-path.test.ts
+      - name: Reject invalid surfaces and render failures through the capture CLI
+        run: npx vitest run tests/next-parity-preflight-real-path.test.ts tests/next-parity-render-failure-real-path.test.ts
       - name: Build native renderer and test context
         run: |
           cargo build --locked --manifest-path native/o8-next/Cargo.toml

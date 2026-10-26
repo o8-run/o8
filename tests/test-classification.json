@@ -4143,6 +4143,16 @@
       ]
     },
     {
+      "path": "tests/next-parity-preflight-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "native-build",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/next-parity-render-failure-real-path.test.ts",
       "reasons": [
         "child-process",

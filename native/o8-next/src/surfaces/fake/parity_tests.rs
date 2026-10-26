@@ -92,7 +92,12 @@ fn parity_capture_real_shell(cx: &mut TestAppContext) {
                 if let Some(tab) = s.active()
                     && let Some(content) = s.content.get(&s.key(&tab))
                 {
-                    content.tick(false, cx);
+                    // Workers loads its initial snapshot on creation. Repeatedly
+                    // draining its live three-second poll would turn this geometry
+                    // probe into a two-minute event-stream test.
+                    if !matches!(content, Content::Workers(_)) {
+                        content.tick(false, cx);
+                    }
                 }
             });
         }
@@ -119,6 +124,11 @@ fn parity_capture_real_shell(cx: &mut TestAppContext) {
                     .map(|_| text)
             })
             .collect::<Vec<_>>();
+        if id == "workers" {
+            assert!(present.contains(&"workers-pane"));
+            assert!(present.contains(&"workers-list"));
+            assert!(visual.debug_bounds("worker-card-worker-running").is_some());
+        }
         let mut errors = render_errors(&mut visual);
         shell.read_with(&visual, |s, cx| {
             if let Some(Content::PullRequests(view)) =
@@ -139,7 +149,7 @@ fn parity_capture_real_shell(cx: &mut TestAppContext) {
             "provenance": "GPUI TestAppContext bounds; test text system, separate from pixel capture",
         })).unwrap()).unwrap();
     } else {
-        assert!(visual.debug_bounds("workspace-0").is_some());
+        assert!(visual.debug_bounds("workspace-switcher").is_some());
     }
 }
 
