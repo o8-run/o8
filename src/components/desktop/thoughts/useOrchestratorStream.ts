@@ -1,6 +1,7 @@
 'use client';
 
 import { useImageSendAdmissions } from './use-orchestrator-stream/image-send-admission';
+import { useOrchestratorThreadBinding } from './use-orchestrator-stream/thread-binding';
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { stopRunningTools } from '@/components/desktop/transcript/activity';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
@@ -109,14 +110,7 @@ export function useOrchestratorStream(
   const projectIdRef = useRef<string | null>(options?.projectId ?? null);
   projectIdRef.current = options?.projectId ?? null;
   const threadId = options?.threadId ?? null;
-  const threadIdRef = useRef<string | null>(threadId);
-  const allowUnboundRecoveryRef = useRef(options?.allowUnboundRecovery !== false);
-  allowUnboundRecoveryRef.current = options?.allowUnboundRecovery !== false;
-  // Only mirror the parent-supplied threadId when it is set. If the hook has
-  // already minted an id inside send() (because the parent's state hadn't
-  // landed yet), don't wipe it on the next render — the parent's eventual
-  // setThreadId call will replace it with the same value via onThreadIdMint.
-  if (threadId) threadIdRef.current = threadId;
+  const { threadIdRef, allowUnboundRecoveryRef } = useOrchestratorThreadBinding(threadId, options?.allowUnboundRecovery);
   const onThreadIdMintRef = useRef(options?.onThreadIdMint);
   onThreadIdMintRef.current = options?.onThreadIdMint;
   const onSettledAssistantMissingRef = useRef(options?.onSettledAssistantMissing);

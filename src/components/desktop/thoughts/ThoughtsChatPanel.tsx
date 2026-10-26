@@ -44,7 +44,7 @@ import {
   repoPathLabel,
   resolveThreadLoadPlan,
 } from './utils';
-import { useOrchestratorStream } from './useOrchestratorStream';
+import { useWorkspaceOrchestratorStream } from './chat-panel/useWorkspaceOrchestratorStream';
 import { useSlashOrchestration } from './useSlashOrchestration';
 import type { OrchestratorSendOptions } from './use-orchestrator-stream/types';
 import { useOrchestratorStatusFeed } from './useOrchestratorStatusFeed';
@@ -422,10 +422,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, ThoughtsCha
   const soloOrchestrator = operatorDefaults.readyRuntimeCount === 1 && lockedMode !== 'single' && !isChatMode;
   const isOrchestratorMode = !isSingleMode && !isChatMode && (targetAgentKey === '__claude__' || !sessionTargets.some((s) => s.key === targetAgentKey));
 
-  const orchStream = useOrchestratorStream(isOrchestratorMode && orchestrationSettingsLoaded && !isChatMode ? resolvedRepoPath : null, {
-    projectId: threadProjectId, visible: open,
-    // A fresh workspace must not adopt another conversation from its repo subscription.
-    allowUnboundRecovery: !scopeTabId || !suppressAutoRestore,
+  const orchStream = useWorkspaceOrchestratorStream(isOrchestratorMode && orchestrationSettingsLoaded && !isChatMode ? resolvedRepoPath : null, {
+    projectId: threadProjectId, visible: open, scopeTabId, suppressAutoRestore,
     seededPlanText: planText,
     hasHistory: chatMessages.some(message => !message.voice),
     threadId,
