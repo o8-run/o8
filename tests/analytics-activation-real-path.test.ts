@@ -1,4 +1,4 @@
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { NextRequest } from 'next/server';
@@ -48,33 +48,72 @@ afterEach(async () => {
 });
 
 describe('activation analytics through real routes and persisted state', () => {
-  const runProbe = (mode: string) => {
-    const child = spawnSync(process.execPath, [
+  const runProbe = (mode: string, signal: AbortSignal) => new Promise<unknown>((resolve, reject) => {
+    const started = performance.now();
+    let ready = false;
+    let active = false;
+    let completed = 0;
+    let budgetMs = 0;
+    let output = '';
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const child = spawn(process.execPath, [
       '--import=./scripts/register-server-only-stub.mjs', '--import=tsx',
       'tests/fixtures/analytics-state-probe.mjs', mode,
-    ], { cwd: process.cwd(), encoding: 'utf8', timeout: 8_000, env: {
+    ], { cwd: process.cwd(), stdio: ['ignore', 'pipe', 'ignore', 'ipc'], env: {
       PATH: process.env.PATH, NODE_ENV: 'test', CORTEX_IDE_DATA_DIR: dataDir, O8_DATA_DIR: dataDir,
     } });
-    // Never include arbitrary route diagnostics or request headers in a red tail.
-    const timedOut = (child.error as NodeJS.ErrnoException | undefined)?.code === 'ETIMEDOUT';
-    expect({ completed: child.status === 0 && !child.error, timedOut }).toEqual({ completed: true, timedOut: false });
-    const line = child.stdout.split('\n').find((line) => line.startsWith('ANALYTICS_STATE_PROBE:'));
-    expect(Boolean(line)).toBe(true);
-    return JSON.parse(line!.slice('ANALYTICS_STATE_PROBE:'.length));
-  };
+    const fail = (message: string) => {
+      clearTimeout(timer);
+      child.kill('SIGKILL');
+      reject(new Error(message));
+    };
+    const abort = () => fail('Analytics probe cancelled by its test.');
+    signal.addEventListener('abort', abort, { once: true });
+    child.stdout!.setEncoding('utf8').on('data', (chunk: string) => { output += chunk; });
+    child.on('message', (message: { type?: string }) => {
+      if (message.type === 'ready' && !ready) {
+        ready = true;
+        // Imports and cold transforms are outside the operation budget. Calibrate
+        // the blocking guard to this child's observed startup on the current host.
+        budgetMs = Math.max(1000, Math.ceil((performance.now() - started) * 3));
+        child.send({ type: 'run' }, error => { if (error) fail('Analytics probe could not acknowledge readiness.'); });
+      } else if (message.type === 'case_started' && ready && !active) {
+        active = true;
+        timer = setTimeout(() => fail('Analytics marker operation exceeded its calibrated budget.'), budgetMs);
+      } else if (message.type === 'case_completed' && active) {
+        clearTimeout(timer);
+        active = false;
+        completed++;
+      } else fail('Analytics probe sent an invalid readiness sequence.');
+    });
+    child.once('error', () => fail('Analytics probe could not start.'));
+    child.once('close', (code) => {
+      clearTimeout(timer);
+      signal.removeEventListener('abort', abort);
+      // Never include arbitrary route diagnostics or request headers in a red tail.
+      if (code !== 0 || !ready || active || completed !== (mode === 'off' ? 5 : 6)) {
+        reject(new Error('Analytics probe did not complete its readiness sequence.')); return;
+      }
+      const line = output.split('\n').find(line => line.startsWith('ANALYTICS_STATE_PROBE:'));
+      if (!line) { reject(new Error('Analytics probe result is missing.')); return; }
+      try { resolve(JSON.parse(line.slice('ANALYTICS_STATE_PROBE:'.length))); }
+      catch { reject(new Error('Analytics probe result is invalid.')); }
+    });
+    if (signal.aborted) abort();
+  });
 
-  it('leaves analytics state untouched on opted-out launch, startup and shutdown', () => {
+  it('leaves analytics state untouched on opted-out launch, startup and shutdown', async ({ signal }) => {
     const cases = [
       ...['launch', 'startup'].flatMap((entry) => [false, true].map((existing) => ({ entry, existing }))),
       { entry: 'shutdown', existing: true },
     ];
-    expect(runProbe('off')).toEqual(cases.map((item) => ({
+    expect(await runProbe('off', signal)).toEqual(cases.map((item) => ({
       ...item, status: 200, accesses: [], egress: 0, unchanged: true,
     })));
   });
 
-  it('launches with every live regular, FIFO and directory marker without blocking', () => {
-    const results = runProbe('markers');
+  it('launches with every live regular, FIFO and directory marker without blocking', async ({ signal }) => {
+    const results = await runProbe('markers', signal) as Array<{ enabled: boolean; kind: string; status: number; markerScans: number; egress: number; regularUpdated: boolean | null }>;
     expect(results.map(({ enabled, kind }: { enabled: boolean; kind: string }) => ({ enabled, kind })))
       .toEqual([false, true].flatMap((enabled) => ['regular', 'fifo', 'directory'].map((kind) => ({ enabled, kind }))));
     for (const result of results) {
