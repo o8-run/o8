@@ -3748,6 +3748,12 @@
       ]
     },
     {
+      "path": "tests/mcp-result-pages-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/mcp-source-boot.test.ts",
       "reasons": [
         "child-process",
