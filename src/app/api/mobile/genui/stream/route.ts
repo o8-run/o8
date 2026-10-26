@@ -53,11 +53,18 @@ interface GenUiRequestBody {
   max_tokens?: unknown;
 }
 
-function jsonError(message: string, status: number, headers?: HeadersInit) {
+function jsonError(message: string, status: number, headers?: HeadersInit, code?: string) {
   return NextResponse.json(
-    { error: { message, type: 'invalid_request_error' } },
+    { error: { message, type: 'invalid_request_error', ...(code ? { code } : {}) } },
     { status, headers },
   );
+}
+
+function generationError(error: unknown) {
+  const message = error instanceof Error ? error.message : 'Generation failed.';
+  const effortRefused = /effort/i.test(message)
+    && /unsupported|not supported|does not support|doesn't support|invalid|not valid|must be|expected|only supports|not allowed|not permitted/i.test(message);
+  return jsonError(message, effortRefused ? 400 : 502, undefined, effortRefused ? 'effort_unsupported' : undefined);
 }
 
 function managedFallback(message: string) {
@@ -169,6 +176,20 @@ function completionBody(id: string, created: number, model: string, text: string
   };
 }
 
+function completionResponse(id: string, created: number, model: string, text: string, stream: boolean, headers: Record<string, string>) {
+  if (!stream) return NextResponse.json(completionBody(id, created, model, text), { headers });
+  const encoder = new TextEncoder();
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(encoder.encode(chunkFrame(id, created, model, { role: 'assistant', content: text }, null)));
+      controller.enqueue(encoder.encode(chunkFrame(id, created, model, {}, 'stop')));
+      controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+      controller.close();
+    },
+  });
+  return new Response(body, { headers: { ...sseHeaders(), ...headers } });
+}
+
 // ── Handler ──────────────────────────────────────────────────────────────────
 
 export async function GET() {
@@ -217,52 +238,19 @@ export async function POST(req: NextRequest) {
     const binary = state.claudeBinary;
     if (!binary) return managedFallback('Claude Code is unavailable; use managed Ask.');
 
-    if (!wantStream) {
-      try {
-        const text = await askClaudeWarm(prompt, {
-          binary,
-          model: routeSelection.cliModel,
-          effort: routeSelection.effort,
-          timeoutMs: CLI_TIMEOUT_MS,
-        });
-        return NextResponse.json(completionBody(id, created, routeSelection.cliModel, text), { headers: receiptHeaders });
-      } catch (error) {
-        console.error('[genui] Claude completion failed:', error instanceof Error ? error.message : 'unknown');
-        return jsonError(error instanceof Error ? error.message : 'Generation failed.', 502);
-      }
+    // Wait for the terminal verdict before committing HTTP status. A worker
+    // may emit text before refusing an effort; that request must still be 400.
+    try {
+      const text = await askClaudeWarm(prompt, {
+        binary,
+        model: routeSelection.cliModel,
+        effort: routeSelection.effort,
+        timeoutMs: CLI_TIMEOUT_MS,
+      });
+      return completionResponse(id, created, routeSelection.cliModel, text, wantStream, receiptHeaders);
+    } catch (error) {
+      return generationError(error);
     }
-
-    const encoder = new TextEncoder();
-    const stream = new ReadableStream<Uint8Array>({
-      start(controller) {
-        controller.enqueue(encoder.encode(chunkFrame(id, created, routeSelection.cliModel, { role: 'assistant', content: '' }, null)));
-        askClaudeWarm(prompt, {
-          binary,
-          model: routeSelection.cliModel,
-          effort: routeSelection.effort,
-          timeoutMs: CLI_TIMEOUT_MS,
-          onDelta: (text) => {
-            try {
-              controller.enqueue(encoder.encode(chunkFrame(id, created, routeSelection.cliModel, { content: text }, null)));
-            } catch { /* client went away mid-stream */ }
-          },
-        })
-          .then(() => {
-            controller.enqueue(encoder.encode(chunkFrame(id, created, routeSelection.cliModel, {}, 'stop')));
-            controller.enqueue(encoder.encode('data: [DONE]\n\n'));
-            controller.close();
-          })
-          .catch((error) => {
-            console.error('[genui] Claude stream failed:', error instanceof Error ? error.message : 'unknown');
-            try {
-              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: { message: error instanceof Error ? error.message : 'Generation failed.' } })}\n\n`));
-              controller.enqueue(encoder.encode('data: [DONE]\n\n'));
-              controller.close();
-            } catch { /* already closed */ }
-          });
-      },
-    });
-    return new Response(stream, { headers: { ...sseHeaders(), ...receiptHeaders } });
   }
 
   if (routeSelection.kind === 'codex') {
@@ -277,22 +265,9 @@ export async function POST(req: NextRequest) {
         timeoutMs: CLI_TIMEOUT_MS,
       });
     } catch (error) {
-      console.error('[genui] Codex completion failed:', error instanceof Error ? error.message : 'unknown');
-      return jsonError(error instanceof Error ? error.message : 'Generation failed.', 502);
+      return generationError(error);
     }
-    if (!wantStream) {
-      return NextResponse.json(completionBody(id, created, routeSelection.cliModel, text), { headers: receiptHeaders });
-    }
-    const encoder = new TextEncoder();
-    const synthesized = new ReadableStream<Uint8Array>({
-      start(controller) {
-        controller.enqueue(encoder.encode(chunkFrame(id, created, routeSelection.cliModel, { role: 'assistant', content: text }, null)));
-        controller.enqueue(encoder.encode(chunkFrame(id, created, routeSelection.cliModel, {}, 'stop')));
-        controller.enqueue(encoder.encode('data: [DONE]\n\n'));
-        controller.close();
-      },
-    });
-    return new Response(synthesized, { headers: { ...sseHeaders(), ...receiptHeaders } });
+    return completionResponse(id, created, routeSelection.cliModel, text, wantStream, receiptHeaders);
   }
 
   // Hosted tier — managed plan proxy (founder fast path) → local → BYO OpenRouter.

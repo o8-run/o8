@@ -36,3 +36,8 @@ point, and routing modules, then records arguments from actual fixture workers.
 Worker rejection reasons reach both JSON and streaming generation responses.
 Result errors and bounded startup diagnostics are retained so an unsupported
 effort reports its real reason instead of a generic generation failure.
+An unsupported worker effort returns HTTP 400 with `effort_unsupported`, matching
+the text-session refusal. Generation waits for the worker's terminal result
+before sending success headers, including for streaming requests; successful
+streams deliver the completed answer as SSE. A refusal returns a JSON error
+without success chunks or a completion marker. Other worker failures retain 502.

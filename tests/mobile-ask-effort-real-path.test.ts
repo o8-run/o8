@@ -51,6 +51,12 @@ process.stdin.on('end', () => {
   fs.appendFileSync(${JSON.stringify(capture)}, JSON.stringify({ args: process.argv.slice(2), prompt }) + '\\n');
   const mode = fs.existsSync(${JSON.stringify(rejection)}) ? fs.readFileSync(${JSON.stringify(rejection)}, 'utf8') : '';
   if (mode === 'stderr') { process.stderr.write(${JSON.stringify(rejectionReason)}); process.exit(2); }
+  if (mode === 'crash') { process.stderr.write('Fixture worker storage is unavailable.'); process.exit(2); }
+  if (mode === 'partial-refusal') {
+    console.log(JSON.stringify({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Partial fixture text' } } }));
+    console.log(JSON.stringify({ type: 'result', subtype: 'error_during_execution', is_error: true, result: ${JSON.stringify(rejectionReason)} }));
+    return;
+  }
   if (mode === 'result') {
     console.log(JSON.stringify({ type: 'result', subtype: 'error_during_execution', is_error: true, result: ${JSON.stringify(rejectionReason)} }));
     return;
@@ -115,11 +121,40 @@ function sessions(): string | null {
 }
 
 describe.skipIf(process.platform === 'win32')('phone Ask effort through routes, persisted sessions and actual worker launch', () => {
+  it.each([
+    { label: 'first adapter JSON', model: selectedModel, stream: false },
+    { label: 'first adapter streaming', model: selectedModel, stream: true },
+    { label: 'second adapter JSON', model: MOBILE_ASK_MODEL_IDS[5], stream: false },
+  ])('returns the effort refusal status before success ($label)', async ({ model, stream }) => {
+    const modes = model === selectedModel ? ['stderr', 'result', 'errors', 'partial-refusal'] : ['stderr'];
+    for (const mode of modes) {
+      writeFileSync(rejection, mode);
+      const response = await generate(generation('xhigh', stream, model));
+      const text = await response.text();
+      expect(response.status).toBe(400);
+      expect(response.headers.get('Content-Type')).toContain('application/json');
+      expect(JSON.parse(text).error).toMatchObject({ code: 'effort_unsupported', message: expect.stringContaining(rejectionReason) });
+      expect(text).not.toContain('Partial fixture text');
+      expect(text).not.toContain('[DONE]');
+      resetWarmReplPool();
+    }
+  });
+
   it.each(['stderr', 'result', 'errors'])('returns the worker effort rejection reason from %s in JSON and streaming responses', async (mode) => {
     writeFileSync(rejection, mode);
     for (const stream of [false, true]) {
       const response = await generate(generation('xhigh', stream));
       expect(await response.text()).toContain(rejectionReason);
+      resetWarmReplPool();
+    }
+  });
+
+  it('keeps unrelated worker failures as upstream errors on JSON and streaming requests', async () => {
+    writeFileSync(rejection, 'crash');
+    for (const stream of [false, true]) {
+      const response = await generate(generation('high', stream));
+      expect(response.status).toBe(502);
+      expect((await response.json()).error.message).toContain('Fixture worker storage is unavailable.');
       resetWarmReplPool();
     }
   });
