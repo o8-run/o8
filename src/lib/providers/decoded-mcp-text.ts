@@ -18,7 +18,8 @@ export function decodedMcpText(text: string): string {
   const strings = (value: unknown): string[] => typeof value === 'string' ? [value]
     : Array.isArray(value) ? value.flatMap(strings)
       : value && typeof value === 'object' ? Object.entries(value).flatMap(([key, item]) => [key, ...strings(item)]) : [];
-  for (const parser of [JSON.parse, parse]) {
+  const parsers: Array<(value: string) => unknown> = [value => JSON.parse(value), value => parse(value)];
+  for (const parser of parsers) {
     try { decoded += `\n${strings(parser(structured)).join('')}`; break; } catch { /* Ordinary argument or URL. */ }
   }
   return decoded;
