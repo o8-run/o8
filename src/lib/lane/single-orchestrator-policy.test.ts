@@ -1,17 +1,28 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { execFileSync, spawn } from 'node:child_process';
-import { chmodSync, copyFileSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, linkSync, mkdirSync, mkdtempSync, openSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, join } from 'node:path';
 import { SANDBOX_EXEC_PATH } from '@/lib/runtimes/shared/owned-session/sandbox';
 import { codexComposerImagePaths, persistComposerImages } from '@/lib/mobile/orchestrator-image-media';
 import { prepareSingleOrchestratorLaunch, singleOrchestratorEnvironment } from './single-orchestrator-policy';
 
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>();
+  return { ...actual, openSync: vi.fn(actual.openSync), readFileSync: vi.fn(actual.readFileSync) };
+});
+
 const tempRoots: string[] = [];
 const originalDataDir = process.env.CORTEX_IDE_DATA_DIR;
 const originalMediaRoot = process.env.CORTEX_IDE_MEDIA_ROOT;
-const bundledCodex = '/Applications/ChatGPT.app/Contents/Resources/codex';
-const bundledCodeModeHost = '/Applications/ChatGPT.app/Contents/Resources/codex-code-mode-host';
+const bundledCodex = [
+  '/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex',
+  '/Applications/ChatGPT.app/Contents/Resources/codex',
+].find(existsSync) ?? '/Applications/ChatGPT.app/Contents/Resources/codex';
+const bundledCodeModeHost = [
+  '/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex-code-mode-host',
+  '/Applications/ChatGPT.app/Contents/Resources/codex-code-mode-host',
+].find(existsSync) ?? '/Applications/ChatGPT.app/Contents/Resources/codex-code-mode-host';
 const installedCodex = (process.env.PATH ?? '')
   .split(delimiter)
   .map((entry) => join(entry, 'codex'))
@@ -384,6 +395,123 @@ describe('Single orchestrator process boundary', () => {
     }
   });
 
+  it.skipIf(process.platform !== 'darwin').each(['legacy', 'current'])(
+    'allows a distinct workspace tool host from the %s layout while denying the CLI', async (layout) => {
+      const fakeHome = realpathSync(tempRoot('o8-single-layout-home-'));
+      const resources = join(fakeHome, 'Applications', 'ChatGPT.app', 'Contents', 'Resources',
+        ...(layout === 'current' ? ['codex-cli', 'bin'] : []));
+      mkdirSync(resources, { recursive: true });
+      const host = join(resources, 'codex-code-mode-host');
+      writeFileSync(host, '#!/bin/sh\nprintf tool-host\n', { mode: 0o700 });
+      const installation = tempRoot('o8-single-layout-cli-');
+      const binary = join(installation, 'codex');
+      writeFileSync(binary, '#!/bin/sh\nprintf protected-cli\n', { mode: 0o700 });
+      const prepared = await prepareSingleOrchestratorLaunch({
+        repoPath: process.cwd(), codexHome: tempRoot('o8-single-layout-state-'),
+        binary, args: ['--version'], env: { ...process.env, HOME: fakeHome },
+      });
+      try {
+        expect(execFileSync(SANDBOX_EXEC_PATH, ['-f', prepared.profilePath, host],
+          { env: prepared.env, encoding: 'utf8' })).toBe('tool-host');
+        expect(() => execFileSync(SANDBOX_EXEC_PATH,
+          ['-f', prepared.profilePath, binary], { env: prepared.env })).toThrow();
+      } finally { prepared.cleanup(); }
+    },
+  );
+
+  it.skipIf(process.platform !== 'darwin').each([
+    ['legacy', -1], ['legacy', 0], ['legacy', 1],
+    ['current', -1], ['current', 0], ['current', 1],
+  ] as const)('discovers the %s helper without opening a protected CLI (size delta %s)', async (layout, delta) => {
+    const fakeHome = realpathSync(tempRoot('o8-single-metadata-home-'));
+    const resources = join(fakeHome, 'Applications', 'ChatGPT.app', 'Contents', 'Resources',
+      ...(layout === 'current' ? ['codex-cli', 'bin'] : []));
+    mkdirSync(resources, { recursive: true });
+    const host = join(resources, 'codex-code-mode-host');
+    const binary = join(realpathSync(tempRoot('o8-single-metadata-cli-')), 'codex');
+    const cli = '#!/bin/sh\nprintf protected-cli\n';
+    writeFileSync(binary, cli, { mode: 0o700 });
+    writeFileSync(host, '#!/bin/sh\nprintf helper\n'.padEnd(cli.length + delta, ' '), { mode: 0o700 });
+    vi.mocked(openSync).mockClear();
+    vi.mocked(readFileSync).mockClear();
+    const prepared = await prepareSingleOrchestratorLaunch({
+      repoPath: process.cwd(), codexHome: tempRoot('o8-single-metadata-state-'),
+      binary, args: ['--version'], env: { ...process.env, HOME: fakeHome },
+    });
+    try {
+      expect(vi.mocked(openSync).mock.calls.filter(([file]) => file === binary)).toEqual([]);
+      expect(vi.mocked(readFileSync).mock.calls.filter(([file]) => file === binary)).toEqual([]);
+      if (delta === 0) {
+        expect(prepared).toHaveProperty('diagnostics', expect.arrayContaining([
+          `Solo tool host unavailable: ${host} (same size as a protected CLI). Workspace tools using this host may fail.`,
+        ]));
+        expect(() => execFileSync(SANDBOX_EXEC_PATH,
+          ['-f', prepared.profilePath, host], { env: prepared.env })).toThrow();
+      } else {
+        expect(execFileSync(SANDBOX_EXEC_PATH, ['-f', prepared.profilePath, host],
+          { env: prepared.env, encoding: 'utf8' })).toBe('helper');
+      }
+      expect(() => execFileSync(SANDBOX_EXEC_PATH,
+        ['-f', prepared.profilePath, binary], { env: prepared.env })).toThrow();
+    } finally { prepared.cleanup(); }
+  });
+
+  it.skipIf(process.platform !== 'darwin').each(['missing', 'dangling'] as const)(
+    'reports each %s app host while a valid host still executes', async (kind) => {
+      const fakeHome = realpathSync(tempRoot('o8-single-diagnostic-home-'));
+      const resources = join(fakeHome, 'Applications', 'ChatGPT.app', 'Contents', 'Resources');
+      const unavailable = [join(resources, 'codex-code-mode-host'),
+        join(resources, 'codex-cli', 'bin', 'codex-code-mode-host')];
+      for (const host of unavailable) {
+        mkdirSync(dirname(host), { recursive: true });
+        if (kind === 'dangling') symlinkSync(join(fakeHome, 'absent-host'), host);
+      }
+      const goodHost = join(fakeHome, 'Applications', 'Codex.app', 'Contents', 'Resources', 'codex-code-mode-host');
+      mkdirSync(dirname(goodHost), { recursive: true });
+      writeFileSync(goodHost, '#!/bin/sh\nprintf working-helper\n', { mode: 0o700 });
+      const binary = join(tempRoot('o8-single-diagnostic-cli-'), 'codex');
+      writeFileSync(binary, '#!/bin/sh\nprintf protected\n', { mode: 0o700 });
+      const prepared = await prepareSingleOrchestratorLaunch({
+        repoPath: process.cwd(), codexHome: tempRoot('o8-single-diagnostic-state-'),
+        binary, args: ['--version'], env: { ...process.env, HOME: fakeHome },
+      });
+      try {
+        expect(prepared).toHaveProperty('diagnostics', expect.arrayContaining(unavailable.map((host) =>
+          `Solo tool host unavailable: ${host} (${kind === 'dangling' ? 'dangling symlink' : 'missing'}). Workspace tools using this host may fail.`)));
+        expect(execFileSync(SANDBOX_EXEC_PATH, ['-f', prepared.profilePath, goodHost],
+          { env: prepared.env, encoding: 'utf8' })).toBe('working-helper');
+        expect(() => execFileSync(SANDBOX_EXEC_PATH,
+          ['-f', prepared.profilePath, binary], { env: prepared.env })).toThrow();
+      } finally { prepared.cleanup(); }
+    },
+  );
+
+  it.skipIf(process.platform !== 'darwin').each([
+    ['legacy', 'symlink'], ['legacy', 'hardlink'], ['legacy', 'copy'],
+    ['current', 'symlink'], ['current', 'hardlink'], ['current', 'copy'],
+  ] as const)('denies a %s tool host that is a %s of the protected CLI', async (layout, alias) => {
+    const fakeHome = realpathSync(tempRoot('o8-single-host-alias-home-'));
+    const resources = join(fakeHome, 'Applications', 'ChatGPT.app', 'Contents', 'Resources',
+      ...(layout === 'current' ? ['codex-cli', 'bin'] : []));
+    mkdirSync(resources, { recursive: true });
+    const binary = join(tempRoot('o8-single-host-alias-cli-'), 'codex');
+    writeFileSync(binary, '#!/bin/sh\nprintf forbidden-cli\n', { mode: 0o700 });
+    const host = join(resources, 'codex-code-mode-host');
+    if (alias === 'symlink') symlinkSync(binary, host);
+    else if (alias === 'hardlink') linkSync(binary, host);
+    else copyFileSync(binary, host);
+    const prepared = await prepareSingleOrchestratorLaunch({
+      repoPath: process.cwd(), codexHome: tempRoot('o8-single-host-alias-state-'),
+      binary, args: ['--version'], env: { ...process.env, HOME: fakeHome },
+    });
+    try {
+      expect(() => execFileSync(SANDBOX_EXEC_PATH,
+        ['-f', prepared.profilePath, host], { env: prepared.env })).toThrow();
+      expect(() => execFileSync(SANDBOX_EXEC_PATH,
+        ['-f', prepared.profilePath, binary], { env: prepared.env })).toThrow();
+    } finally { prepared.cleanup(); }
+  });
+
   it.skipIf(process.platform !== 'darwin' || !installedCodex || !existsSync(bundledCodeModeHost))(
     'allows the installed tool host while Codex CLI relaunch remains denied', async () => {
       const codexHome = tempRoot('o8-single-tool-host-');
@@ -408,10 +536,10 @@ describe('Single orchestrator process boundary', () => {
     },
   );
 
-  it.skipIf(process.platform !== 'darwin' || !installedCodex || !existsSync(bundledCodex))(
-    'does not allow a forged tool-host symlink to relaunch the protected CLI', async () => {
-      const fakeHome = tempRoot('o8-single-forged-home-');
-      const resources = join(fakeHome, 'Applications', 'ChatGPT.app', 'Contents', 'Resources');
+  it.skipIf(process.platform !== 'darwin' || !installedCodex || !existsSync(bundledCodex)).each(['legacy', 'current'])(
+    'does not allow a forged tool-host symlink in the %s layout to relaunch the protected CLI', async (layout) => {
+      const fakeHome = realpathSync(tempRoot('o8-single-forged-home-'));
+      const resources = join(fakeHome, 'Applications', 'ChatGPT.app', 'Contents', 'Resources', ...(layout === 'current' ? ['codex-cli', 'bin'] : []));
       mkdirSync(resources, { recursive: true });
       const forgedHost = join(resources, 'codex-code-mode-host');
       symlinkSync(bundledCodex, forgedHost);
