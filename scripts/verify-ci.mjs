@@ -29,7 +29,7 @@ function run(step) {
     if (selected.status !== 0) return Promise.resolve(false);
     const files = selected.stdout.trim().split('\n').filter(Boolean);
     if (!files.length) return Promise.resolve(true);
-    if (step.requiresFile && !files.includes(step.requiresFile)) return Promise.resolve(true);
+    if (step.requiresFile && !files.join(' ').toLowerCase().includes(step.requiresFile.toLowerCase())) return Promise.resolve(true);
     if (step.selectedFiles) command += files.map(file => ` '${file.replaceAll("'", "'\"'\"'")}'`).join('');
     console.log(`[verify:ci] selected ${files.length} changed integration files against origin/main`);
   }

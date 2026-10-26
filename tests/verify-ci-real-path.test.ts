@@ -115,8 +115,10 @@ describe('local CI verification through its command entry point', () => {
     expect(result.status, result.stderr).toBe(0);
   });
 
-  it('runs the conditional prerequisite before the selected integration file through the verifier entry point', () => {
-    const directory = path.join(root, 'browser-selection');
+  it.each(['tests/next-parity-route-ownership-real-path.test.ts',
+    'tests/next-parity-route-ownership-real-path.test.ts-extra.test.ts',
+    'tests/NEXT-PARITY-ROUTE-OWNERSHIP-REAL-PATH.test.ts'])('runs the CI conditional prerequisite for %s through the verifier entry point', selectedFile => {
+    const directory = mkdtempSync(path.join(root, 'browser-selection-'));
     const files = ['scripts/verify-ci.mjs', 'scripts/lib/verify-ci.mjs', 'scripts/ci/check-verify-ci.mjs',
       'scripts/ci/resource-owning-changed.mjs', 'scripts/ci/review-dependency-changes.mjs', '.github/workflows/ci.yml'];
     for (const file of files) {
@@ -128,7 +130,7 @@ describe('local CI verification through its command entry point', () => {
       writeFileSync(path.join(directory, file), 'process.exit(0);\n');
     }
     mkdirSync(path.join(directory, 'tests'));
-    const browserFile = 'tests/next-parity-route-ownership-real-path.test.ts';
+    const browserFile = selectedFile;
     writeFileSync(path.join(directory, browserFile), 'base\n');
     writeFileSync(path.join(directory, 'tests/test-classification.json'), JSON.stringify({ resourceOwning: [{ path: browserFile }] }));
     writeFileSync(path.join(directory, 'package.json'), JSON.stringify(manifest));
