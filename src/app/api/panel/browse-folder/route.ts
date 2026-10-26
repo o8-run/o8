@@ -1,35 +1,14 @@
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
-import { execSync } from '@/lib/providers/child-process';
+import { pickNativePath } from '@/lib/desktop/native-picker';
 
 /**
  * POST /api/panel/browse-folder
- * Opens a native folder picker dialog (macOS Finder via osascript).
- * Returns { path: "/selected/folder" } or { path: null } if cancelled.
+ * Opens a native folder picker (osascript on macOS, zenity or kdialog on Linux).
+ * Returns { path: "/selected/folder" }, { path: null } if cancelled, or
+ * { path: null, unavailable: true } when this host has no picker program.
  */
 export async function POST() {
-  try {
-    const script = `
-      tell application "System Events"
-        activate
-        set theFolder to choose folder with prompt "Select a project folder"
-        return POSIX path of theFolder
-      end tell
-    `;
-
-    const result = execSync(`osascript -e '${script.replace(/'/g, "'\\''")}'`, {
-      windowsHide: true,
-      encoding: 'utf-8',
-      timeout: 60000, // 60s to give user time to browse
-    }).trim();
-
-    // Remove trailing slash if present
-    const cleanPath = result.endsWith('/') ? result.slice(0, -1) : result;
-
-    return NextResponse.json({ path: cleanPath });
-  } catch {
-    // User cancelled or osascript failed
-    return NextResponse.json({ path: null });
-  }
+  return NextResponse.json(await pickNativePath('folder', 'Select a project folder', { timeoutMs: 60_000 }));
 }

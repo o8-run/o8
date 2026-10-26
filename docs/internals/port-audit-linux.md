@@ -4,13 +4,13 @@ Scope: greenfield Linux blockers and structural seams in the current o8 implemen
 
 ## Linux surface support table
 
-Three surfaces are macOS-native code paths with no Linux implementation. Each has an in-app fallback rather than a crash — the feature reads as unavailable, not broken.
+Two surfaces are macOS-native code paths with no Linux implementation; the third, the file and folder picker, now has a Linux path. Each has an in-app fallback rather than a crash — the feature reads as unavailable, not broken.
 
 | Surface | Status on Linux | Why | Fallback |
 | --- | --- | --- | --- |
 | Voice dictation (Symon push-to-talk, `Fn`/right-`Option` hotkeys, on-device Apple transcription) | Unsupported | The Symon capture stack is a native macOS Swift binary driven through the Accessibility API; it is not built for Linux at all. The composer's own mic-button dictation path (`useDictation.ts`) additionally depends on WebKitGTK's `MediaRecorder`/`getUserMedia`/`SpeechRecognition` support, which is unverified on this platform (see "Web mic and recorder APIs need Linux WebKitGTK validation" below). | Type directly into the composer; there is no voice input path today on Linux. |
 | Native browser pane (embedded Browser tab / canvas browser cards, agent-grab) | Unsupported | `src-tauri/src/browser_view.rs` builds the pane as a native AppKit child window; the `#[cfg(not(target_os = "macos"))]` stubs for `open`/`eval`/`navigate` compile to no-ops (`open` returns `Ok(())` with no window ever created, `eval` returns `false`, `eval_result` returns the literal error `"native browser-view is macOS-only"`). | The pane's own "Open in Browser tab" / external-open control (`openExternal` in `src/components/desktop/O8BrowserPane.tsx`, backed by `openExternalUrl`) opens the same URL in the system default browser instead of the embedded webview. |
-| Folder/file picker (`osascript`-backed native chooser) | Unsupported | `src/app/api/panel/browse-folder/route.ts` and the `pick` action in `src/app/api/panel/file-io/route.ts` shell out to `osascript`/AppleScript. On Linux `osascript` does not exist, so the `execSync`/`execFileAsync` call throws `ENOENT`; both routes catch that and return `{ path: null }` — the same shape as a user cancelling. | Callers (`pickRepoFolder.ts`, `AddRepoDialog.tsx`, `OnboardingReposStep.tsx`) treat a null path as "no native picker available" and fall through to a manual path-entry prompt (`requestPrompt`) — the operator types the absolute folder/file path directly. |
+| Folder/file picker | Supported with zenity or kdialog | The webview tries `@tauri-apps/plugin-dialog` first. When that fails, `src/app/api/panel/browse-folder/route.ts` and the `pick` action in `src/app/api/panel/file-io/route.ts` call `src/lib/desktop/native-picker.ts`, which uses `osascript` on macOS and zenity, then kdialog, on Linux. | With no picker program installed the routes return `{ path: null, unavailable: true }`, and callers (`pickRepoFolder.ts`, `AddRepoDialog.tsx`, `useGlobalRepoState.ts`, `O8SpecTargetPicker.tsx`) fall back to a typed-path prompt (`requestPrompt`). |
 
 ## Executive Top 10 Greenfield Findings
 
