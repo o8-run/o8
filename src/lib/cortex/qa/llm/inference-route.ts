@@ -39,7 +39,9 @@ const LOCAL_LIVENESS_TIMEOUT_MS = 1_500;
  * On the managed route the hosted endpoint serves it on paid plans and on the
  * free plan up to its daily allowance, then answers with its $0 model.
  */
-export const O8_MANAGED_TEXT_MODEL = 'openai/gpt-6-luna';
+// Local patch: O8_OPENROUTER_TEXT_MODEL overrides the text model (server env),
+// so a direct OpenRouter key can run on a cheap model instead of the default.
+export const O8_MANAGED_TEXT_MODEL = (typeof process !== 'undefined' && process.env?.O8_OPENROUTER_TEXT_MODEL?.trim()) || 'openai/gpt-6-luna';
 
 /** The $0 model callers fall back to when the managed text model fails. */
 export const O8_MANAGED_ZERO_COST_MODEL = 'nvidia/nemotron-3.5-lightning:free';
