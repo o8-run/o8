@@ -32,7 +32,8 @@ export async function resolveDelegationSelection(body: Record<string, unknown>, 
   }
   const inheritedEffort = runtime === 'codex' ? defaults.codexWorkerEffort : runtime === 'claude-code' ? defaults.claudeWorkerEffort : null;
   const requestedEffort = aliases.requestedEffort ?? inheritedEffort;
-  const pin = resolveEffortPin({ runtime, model, explicitModel, requestedEffort });
+  const pin = resolveEffortPin({ runtime, model, explicitModel, requestedEffort,
+    modelEfforts: catalog.models.find(row => row.id === model)?.efforts });
   if (!pin.ok) throw new DelegationSelectionError(pin.code, pin.message);
   const executionCarrier = runtime === 'codex' ? defaults.workerExecutionCarrier ?? null : null;
   try {

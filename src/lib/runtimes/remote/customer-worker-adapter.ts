@@ -83,7 +83,7 @@ export class CustomerWorkerAdapter extends RemoteRuntimeAdapter {
   };
 
   protected async buildLaunchRequest(opts: LaunchOptions, runId: string): Promise<LaunchRequest> {
-    assertRuntimeEffortPin(this.id, opts.model, opts.effort);
+    await assertRuntimeEffortPin(this.id, opts.model, opts.effort);
     const repoUrl = await gitStdout(opts.cwd, ['config', '--get', 'remote.origin.url']);
     if (!repoUrl) {
       throw new Error('remote.origin.url is not configured');

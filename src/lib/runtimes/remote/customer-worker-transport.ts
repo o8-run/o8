@@ -33,7 +33,7 @@ function parsePayload(payloadJson: string, eventType: string) {
 
 export class CustomerWorkerTransport implements Transport {
   async sendLaunch(req: LaunchRequest): Promise<LaunchResponse> {
-    assertRuntimeEffortPin('remote-customer', req.modelHint, req.effort);
+    await assertRuntimeEffortPin('remote-customer', req.modelHint, req.effort);
     const now = new Date().toISOString();
 
     if (!req.laneId) {

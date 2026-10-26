@@ -8,6 +8,7 @@ import {
   type ThinkingEffort,
 } from '@/lib/orchestrator/thinking-effort';
 import type { OrchestratorRuntime, WorkerModelDisposition } from '@/lib/orchestrator/types';
+import { museWorkerModelContext, probeMuseModels } from '@/lib/muse/models';
 
 /**
  * Explicit mission reasoning-effort pinning.
@@ -117,6 +118,8 @@ export interface ResolveEffortPinInput {
   modelDisposition?: WorkerModelDisposition;
   /** Present when the launch boundary has resolved the installed executable. */
   installedCliVersion?: string | null;
+  /** Fresh model/list evidence from the account that will run this selection. */
+  modelEfforts?: readonly string[] | null;
 }
 
 export function resolveEffortPin(input: ResolveEffortPinInput): ResolveEffortPinResult {
@@ -169,6 +172,10 @@ export function resolveEffortPin(input: ResolveEffortPinInput): ResolveEffortPin
       message: `This o8 mission route cannot honor effort "${raw}" because ${requested} is not compatible with runtime "${input.runtime}" and the launch would silently fall back to a different model. Pin a compatible model or omit --effort.`,
     };
   }
+  if (input.runtime === 'muse' && (!actualModel || !input.modelEfforts?.includes(raw))) {
+    return { ok: false, code: 'effort_unsupported_model',
+      message: `Cannot honor effort "${raw}" for model "${actualModel ?? 'runtime default'}": its current account catalog does not establish that selection. Choose a listed model and effort or omit effort.` };
+  }
   const applied = resolveAdapterEffort(input.runtime, actualModel, raw);
   if (applied !== raw) {
     return {
@@ -186,7 +193,19 @@ export function resolveEffortPin(input: ResolveEffortPinInput): ResolveEffortPin
 }
 
 /** Shared last admission boundary for owned launch, cold resume and automatic retries. */
-export function assertRuntimeEffortPin(runtime: string, model: string | null | undefined, effort: unknown): void {
-  const pin = resolveEffortPin({ runtime, model: model ?? null, requestedEffort: effort });
+export async function resolveRuntimeEffortPin(input: ResolveEffortPinInput, context: { cwd?: string; runtimeConfig?: Record<string, string> } = {}): Promise<ResolveEffortPinResult> {
+  if (input.runtime !== 'muse' || !isThinkingEffort(input.requestedEffort) || input.requestedEffort === 'adaptive') return resolveEffortPin(input);
+  try {
+    const config = await museWorkerModelContext(context.runtimeConfig);
+    const catalog = await probeMuseModels(context.cwd ?? process.cwd(), true, config);
+    return resolveEffortPin({ ...input, modelEfforts: catalog.models.find(row => row.id === input.model)?.efforts });
+  } catch {
+    return { ok: false, code: 'effort_unsupported_model', message: 'Cannot verify this model effort with the selected account. Refresh the model catalog or omit effort; no worker was started.' };
+  }
+}
+
+export async function assertRuntimeEffortPin(runtime: string, model: string | null | undefined, effort: unknown,
+  context?: { cwd?: string; runtimeConfig?: Record<string, string> }): Promise<void> {
+  const pin = await resolveRuntimeEffortPin({ runtime, model: model ?? null, requestedEffort: effort }, context);
   if (!pin.ok) throw new EffortPinRejectionError(pin.code, pin.message);
 }

@@ -10,6 +10,8 @@ import { createMuseEventMapper, museRecord, museTerminalEvent } from '@/lib/muse
 import { requestMuseApproval } from '@/lib/muse/approval';
 import { createMuseApprovalStages } from '@/lib/muse/approval-stages';
 import { captureMuseRuntimeConfig, museRoot } from '@/lib/muse/roots';
+import { decodeMuseModels } from '@/lib/muse/models';
+import { EffortPinRejectionError, resolveEffortPin } from '@/lib/orchestrator/effort-pin';
 import type { OrchestratorEvent } from '@/lib/lane/orchestrator-stream-events';
 import type { OrchestratorBackend, OrchestratorTurnOptions } from './types';
 
@@ -42,6 +44,13 @@ export function createMuseBackend(deps: {
   const stateRoot = deps.stateRoot ?? (() => join(getDataDir(), 'muse', 'orchestrator'));
   const nameFor = (repo: string, thread?: string | null) => `muse:${createHash('sha256').update(`${repo}\0${thread ?? ''}`).digest('hex')}`;
   const fileFor = (name: string) => join(stateRoot(), `${name.slice(5)}.json`);
+  async function admitEffort(host: MuseHost, model: string | null, effort: OrchestratorTurnOptions['thinkingEffort']) {
+    if (!effort || effort === 'adaptive') return;
+    const models = decodeMuseModels(await boundedMuseRequest(host.connection.request('model/list', {}), host));
+    const pin = resolveEffortPin({ runtime: 'muse', model, requestedEffort: effort,
+      modelEfforts: models.find(row => row.id === model)?.efforts });
+    if (!pin.ok) throw new EffortPinRejectionError(pin.code, pin.message);
+  }
   async function close(name: string) {
     const resident = residents.get(name);
     if (!resident) return;
@@ -65,7 +74,10 @@ export function createMuseBackend(deps: {
     const profile = readOnly ? 'propose' : options.toolProfile ?? 'full';
     const existing = residents.get(name);
     if (existing?.blocked || existing?.closing) throw new Error('Muse shutdown is unresolved. The conversation remains held.');
-    if (existing?.readOnly === readOnly && existing.profile === profile) { clearTimeout(existing.idle); return existing; }
+    if (existing?.readOnly === readOnly && existing.profile === profile) {
+      await admitEffort(existing.host, options.model ?? existing.model, options.thinkingEffort);
+      clearTimeout(existing.idle); return existing;
+    }
     if (existing) await close(name);
     const canonical = await realpath(repoPath);
     let metadataPresent = true;
@@ -80,6 +92,7 @@ export function createMuseBackend(deps: {
     const dataRoot = museRoot(roots.museDataRoot, metadataPresent, canonical);
     const host = await (deps.openHost ?? createMuseHost)({ cwd: canonical, readOnly, signal: options.signal, configRoot, dataRoot });
     try {
+      await admitEffort(host, options.model ?? (typeof stored.model === 'string' ? stored.model : null), options.thinkingEffort);
       const registry = toOpenclawJson(buildToolRegistry(canonical, { profile, threadId: options.threadId }));
       const servers = Object.fromEntries(Object.entries(registry.servers).map(([key, value]) => [key, { ...museRecord(value), transport: 'stdio' }]));
       if (!host.initializeResult.grantedCapabilities.includes('sessionMcp')) throw new Error('Muse did not grant the required o8 tool connection.');
@@ -144,6 +157,7 @@ export function createMuseBackend(deps: {
           resident.model = options.model;
           await save(name, resident, await realpath(repo));
         }
+        await admitEffort(resident.host, resident.model, options.thinkingEffort);
         options.signal?.throwIfAborted();
         const current = resident;
         current.approvals = createMuseApprovalStages({ approve: deps.approve ?? requestMuseApproval,
@@ -174,7 +188,8 @@ export function createMuseBackend(deps: {
         onEvent(museTerminalEvent(await terminal));
       } catch (error) {
         console.warn('[muse-orchestrator] turn failed:', error);
-        onEvent({ type: 'error', error: options.signal?.aborted ? 'Muse turn cancelled.' : 'Muse could not start or resume this turn. Check its connection and selected model. The conversation is retained.' });
+        onEvent({ type: 'error', error: options.signal?.aborted ? 'Muse turn cancelled.' : error instanceof EffortPinRejectionError
+          ? error.message : 'Muse could not start or resume this turn. Check its connection and selected model. The conversation is retained.' });
         teardown ??= close(name);
       } finally {
         clearTimeout(watchdog); options.signal?.removeEventListener('abort', abort);

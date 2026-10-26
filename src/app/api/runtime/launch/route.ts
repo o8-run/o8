@@ -18,7 +18,7 @@ import { findOwnedLaunchByMutationId } from '@/lib/runtimes/shared/owned-session
 import { isClaudeCodeModelSource } from '@/lib/claude-code/worker-profile-types';
 import { normalizePacketSpendCap } from '@/lib/orchestrator/metered-spend';
 import { assertSingleAttemptLaunch } from '@/lib/runtime/single-attempt-launch';
-import { EFFORT_CHOICE_LIST, resolveEffortPin } from '@/lib/orchestrator/effort-pin';
+import { EFFORT_CHOICE_LIST, resolveRuntimeEffortPin } from '@/lib/orchestrator/effort-pin';
 import { isThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import { resolveDefaultDispatchModelSync } from '@/lib/operator/defaults';
 import { knowledgeSourceWriteRefusal } from '@/lib/cortex/knowledge/sources';
@@ -99,12 +99,12 @@ export async function POST(request: NextRequest) {
   // A concrete pin must survive the adapter's mapping. Validate before the
   // receipt binding so a rejected selection can be corrected with the same ID.
   if (launchRequest.effort && launchRequest.effort !== 'adaptive') {
-    const effortPin = resolveEffortPin({
+    const effortPin = await resolveRuntimeEffortPin({
       requestedEffort: launchRequest.effort,
       runtime: runtimeName,
       model: launchRequest.model
         ?? (runtimeName === 'codex' ? resolveDefaultDispatchModelSync() || null : null),
-    });
+    }, { cwd: launchRequest.cwd ?? launchRequest.repoPath });
     if (!effortPin.ok) {
       return NextResponse.json({ error: effortPin.message, code: effortPin.code }, { status: 400 });
     }

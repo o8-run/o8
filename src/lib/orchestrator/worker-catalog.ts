@@ -13,7 +13,7 @@ import { SUPPORTED_MODEL_IDS } from '@/lib/models';
 import { getThreecodeModelCatalogue } from '@/lib/runtimes/threecode-model-catalogue';
 import { resolveAcpLaunch } from '@/lib/lane/orchestrator-backends/acp';
 import { probeAcpModels } from './acp-model-probe';
-import { probeMuseModels } from '@/lib/muse/models';
+import { museWorkerModelContext, probeMuseModels } from '@/lib/muse/models';
 import { getRuntimeCapability, type OrchestratorRuntime } from './runtime-capabilities';
 import { resolveEffortPin } from './effort-pin';
 import { THINKING_EFFORTS, type ThinkingEffort } from './thinking-effort';
@@ -46,6 +46,7 @@ export async function workerModelCatalog(runtime: OrchestratorRuntime, repoPath:
   let ids: string[] = [];
   let source = 'runtime-default';
   let carrier: ClaudeCodeModelSource | null = null;
+  let modelEfforts: Map<string, string[] | null> | undefined;
   if (runtime === 'claude-code') {
     const configured = resolveClaudeCodeWorkerSelection();
     carrier = configured.source;
@@ -83,14 +84,16 @@ export async function workerModelCatalog(runtime: OrchestratorRuntime, repoPath:
     defaultModel ??= catalog.currentModel;
     source = catalog.source;
   } else if (runtime === 'muse') {
-    const catalog = await probeMuseModels(repoPath, false);
+    const catalog = await probeMuseModels(repoPath, true, await museWorkerModelContext());
     ids = catalog.models.map(model => model.id);
+    modelEfforts = new Map(catalog.models.map(model => [model.id, model.efforts]));
+    defaultModel ??= catalog.models.find(model => model.isDefault)?.id ?? null;
     source = catalog.source;
   } else {
     ids = defaultModel ? [defaultModel] : [];
   }
   return {
-    models: [...new Set(ids)].map(id => ({ id, efforts: THINKING_EFFORTS.filter(effort => resolveEffortPin({ runtime, model: id, requestedEffort: effort }).ok) })),
+    models: [...new Set(ids)].map(id => ({ id, efforts: THINKING_EFFORTS.filter(effort => resolveEffortPin({ runtime, model: id, requestedEffort: effort, modelEfforts: modelEfforts?.get(id) }).ok) })),
     defaultModel, carrier, source, observedAt: new Date().toISOString(),
   };
 }

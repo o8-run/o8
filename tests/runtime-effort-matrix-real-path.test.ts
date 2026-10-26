@@ -46,7 +46,8 @@ const rows: Row[] = [
     ...SUPPORTED_MODEL_IDS.filter(model => runtime === 'gemini' && model.startsWith('gemini-')),
     ...(runtime === 'opencode' ? ['provider/model', 'provider/model/high'] : []),
   ])].map(model => ({ runtime, model, supported: [] }))),
-  ...[undefined, 'muse-catalog-fixture'].map(model => ({ runtime: 'muse' as const, model, supported: ALL })),
+  // Without live account/model evidence only the runtime default is selectable.
+  ...[undefined, 'muse-catalog-fixture'].map(model => ({ runtime: 'muse' as const, model, supported: [] })),
 ];
 const vectors = rows.flatMap(row => [undefined, 'adaptive', ...ALL, 'disabled'].map(effort => ({ ...row, effort })));
 
