@@ -8941,16 +8941,21 @@ pub fn run() {
                     // platform read (#1743) — the pre-paint theme stamp needs
                     // it in <head>, long before any IPC exists, to pick opaque
                     // chrome off macOS. See lib/desktop/host-platform.ts.
+                    let linux_glass = cfg!(target_os = "linux")
+                        && std::env::var("O8_LINUX_GLASS").map(|v| v.trim() == "1").unwrap_or(false);
                     let init_script = format!(
-                        "window.__O8_PORT_HINT__ = {}; window.__O8_EXPECTED_BOOT_ID__ = {}; window.__O8_HTML_TRAFFIC_LIGHTS__ = {}; window.__O8_HOST_PLATFORM__ = {:?}; window.__O8_LINUX_GLASS__ = {};",
+                        "window.__O8_PORT_HINT__ = {}; window.__O8_EXPECTED_BOOT_ID__ = {}; window.__O8_HTML_TRAFFIC_LIGHTS__ = {}; window.__O8_HOST_PLATFORM__ = {:?}; window.__O8_LINUX_GLASS__ = {}; window.__O8_LINUX_GLASS_BACKDROP__ = {};",
                         api_port,
                         serde_json::to_string(&boot_identity.boot_id)
                             .unwrap_or_else(|_| "\"\"".into()),
                         html_traffic_lights,
                         std::env::consts::OS,
                         // Local Linux patch: opt-in painted glass look (O8_LINUX_GLASS=1).
-                        cfg!(target_os = "linux")
-                            && std::env::var("O8_LINUX_GLASS").map(|v| v.trim() == "1").unwrap_or(false),
+                        linux_glass,
+                        // Local Linux patch: O8_LINUX_GLASS_BACKDROP=<image path>
+                        // replaces the painted gradient with that image.
+                        serde_json::to_string(&linux_glass_backdrop_data_url(linux_glass))
+                            .unwrap_or_else(|_| "null".into()),
                     );
                     tauri::WebviewWindowBuilder::from_config(app, config)?
                         .initialization_script(init_script)
@@ -9355,4 +9360,50 @@ pub fn run() {
             }
             _ => {}
         });
+}
+
+/// Local Linux patch: read `O8_LINUX_GLASS_BACKDROP=<path>` (jpg/png/webp,
+/// at most 8 MiB) into a `data:` URL for the glass backdrop. The webview loads
+/// from http://localhost, so a file:// URL would be blocked; inlining avoids
+/// widening the asset protocol scope. Returns None (gradient backdrop) when
+/// glass is off, the variable is unset, or the file is unusable.
+fn linux_glass_backdrop_data_url(linux_glass: bool) -> Option<String> {
+    use base64::Engine;
+    const MAX_BYTES: u64 = 8 * 1024 * 1024;
+    if !linux_glass {
+        return None;
+    }
+    let raw = std::env::var_os("O8_LINUX_GLASS_BACKDROP")?;
+    let path = std::path::PathBuf::from(raw);
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+        .unwrap_or_default();
+    let mime = match ext.as_str() {
+        "jpg" | "jpeg" => "image/jpeg",
+        "png" => "image/png",
+        "webp" => "image/webp",
+        _ => {
+            log::warn!("[linux-glass] O8_LINUX_GLASS_BACKDROP must be a .jpg, .png or .webp file; using the gradient");
+            return None;
+        }
+    };
+    match std::fs::metadata(&path) {
+        Ok(meta) if meta.is_file() && meta.len() <= MAX_BYTES => {}
+        Ok(_) => {
+            log::warn!("[linux-glass] O8_LINUX_GLASS_BACKDROP is not a file of at most 8 MiB; using the gradient");
+            return None;
+        }
+        Err(err) => {
+            log::warn!("[linux-glass] O8_LINUX_GLASS_BACKDROP unreadable ({err}); using the gradient");
+            return None;
+        }
+    }
+    let bytes = std::fs::read(&path).ok()?;
+    log::info!("[linux-glass] backdrop image loaded ({} bytes, {mime})", bytes.len());
+    Some(format!(
+        "data:{mime};base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(bytes)
+    ))
 }

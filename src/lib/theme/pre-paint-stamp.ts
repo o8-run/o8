@@ -60,6 +60,12 @@ export const PRE_PAINT_THEME_STAMP = `
       if (noVibrancy) surface = 'solid';
       var el = document.documentElement;
       if (linuxGlass) el.dataset.linuxGlass = 'true';
+      // Local Linux patch: O8_LINUX_GLASS_BACKDROP inlines an image as a data: URL.
+      var backdrop = window.__O8_LINUX_GLASS_BACKDROP__;
+      if (linuxGlass && typeof backdrop === 'string' && backdrop.indexOf('data:image/') === 0) {
+        el.style.setProperty('--o8-linux-glass-backdrop', 'url("' + backdrop + '")');
+        el.dataset.linuxGlassBackdrop = 'image';
+      }
       el.dataset.theme = pal;
       el.dataset.palette = pal;
       el.dataset.surface = surface;

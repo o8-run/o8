@@ -138,6 +138,16 @@ html[data-tauri='true'][data-linux-glass='true'] {
   background-attachment: fixed !important;
 }
 
+/* Local Linux patch: O8_LINUX_GLASS_BACKDROP=<image> swaps the gradient for a
+ * photo (stamped as --o8-linux-glass-backdrop by the pre-paint script), with a
+ * light scrim so text on the glass keeps its contrast. */
+html[data-tauri='true'][data-linux-glass='true'][data-linux-glass-backdrop='image'] {
+  background:
+    linear-gradient(180deg, rgba(10, 12, 26, 0.12) 0%, rgba(10, 12, 26, 0.38) 100%),
+    var(--o8-linux-glass-backdrop) center / cover no-repeat !important;
+  background-attachment: fixed !important;
+}
+
 /* Tauri vibrancy — boost text contrast on frosted glass (light + glass surface only).
  * Solid surface mode keeps chrome opaque so these overrides would only fight
  * the registry tokens. Selectors are gated on data-surface='glass'. */
