@@ -1,0 +1,25 @@
+[package]
+name = "o8-linux-voice"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Linux voice backends for o8: a whisper.cpp speech helper that speaks the speech_recognizer protocol, a spd-say/espeak-ng/piper TTS fallback, and pactl ducking."
+
+# The library has no native dependencies, so the desktop shell can link it on
+# Linux without a C++ toolchain. Only the speech helper binary pulls
+# whisper.cpp (built from source by whisper-rs-sys; needs cmake and libclang).
+[features]
+default = []
+whisper = ["dep:whisper-rs"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+hound = "3.5"
+whisper-rs = { version = "0.16", optional = true }
+
+[[bin]]
+name = "o8-speech-recognizer"
+path = "src/bin/o8-speech-recognizer.rs"
+required-features = ["whisper"]

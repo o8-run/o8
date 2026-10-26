@@ -36,6 +36,8 @@ mod voice_input;
 mod managed_voice_window;
 mod launch_updater;
 mod update_ping;
+#[cfg(target_os = "linux")]
+mod linux_voice;
 #[cfg(target_os = "macos")]
 mod live_dictation;
 #[cfg(target_os = "macos")]
@@ -8214,6 +8216,12 @@ pub fn run() {
             tts_set_speed,
             #[cfg(target_os = "macos")]
             tts_is_active,
+            #[cfg(target_os = "linux")]
+            linux_voice::system_tts_speak,
+            #[cfg(target_os = "linux")]
+            linux_voice::system_tts_stop,
+            #[cfg(target_os = "linux")]
+            linux_voice::system_tts_backend,
             #[cfg(target_os = "macos")]
             dock_set_expanded,
             dock_set_hit_rect,

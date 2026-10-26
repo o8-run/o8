@@ -515,6 +515,11 @@ jobs:
       - name: Experimental o8d delivery bus
         if: steps.native.outputs.changed == 'true'
         run: cargo test --locked --manifest-path crates/o8d/Cargo.toml --all-features
+      # Fake-tool tests only; the whisper.cpp helper (`--features whisper`)
+      # needs cmake + libclang and is not built here.
+      - name: Linux voice backends
+        if: steps.native.outputs.changed == 'true'
+        run: cargo test --locked --manifest-path crates/o8-linux-voice/Cargo.toml
 
   roadmap-check:
     name: Roadmap Drift Check
