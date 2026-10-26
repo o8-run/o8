@@ -10,7 +10,7 @@ import { createRetainedGeneratedOutputFixture } from './generated-output-fixture
 const source = process.cwd();
 const require = createRequire(import.meta.url);
 
-it.each([false, true])('journals postship disposal and preserves mid-build foreign output=%s', async foreign => {
+it.each([false, true, 'cache'] as const)('journals postship disposal and preserves mid-build foreign output=%s', async foreign => {
   const root = await createRetainedGeneratedOutputFixture('o8-postship-lifecycle-');
   const repo = path.join(root, 'repo');
   const home = path.join(root, 'home');
@@ -37,7 +37,13 @@ it.each([false, true])('journals postship disposal and preserves mid-build forei
     writeFileSync(path.join(scripts, name), readFileSync(path.join(source, 'scripts', name)));
   }
   for (const name of ['build-speech-local.mjs', 'build-pi-write.mjs']) {
-    writeFileSync(path.join(scripts, name), 'process.exit(0);');
+    writeFileSync(path.join(scripts, name), name === 'build-speech-local.mjs' ? `
+      if (process.env.O8_FIXTURE_FOREIGN_OUTPUT === 'cache') {
+        const fs = await import('node:fs');
+        fs.mkdirSync('.next/cache', { recursive: true });
+        fs.writeFileSync('.next/cache/operator-note.txt', 'foreign early-build bytes');
+      }
+    ` : 'process.exit(0);');
   }
   writeFileSync(path.join(scripts, 'tauri-export.mjs'), `
     const fs = await import('node:fs');
@@ -92,7 +98,7 @@ it.each([false, true])('journals postship disposal and preserves mid-build forei
     const result = spawnSync('git', args, { cwd: repo, encoding: 'utf8' });
     expect(result.status, result.stderr).toBe(0);
   }
-  const env = { ...process.env, HOME: home, O8_FIXTURE_FOREIGN_OUTPUT: foreign ? '1' : '0', O8_RELEASE_BUILD_CACHE_DIR: path.join(root, 'cache'),
+  const env = { ...process.env, HOME: home, O8_FIXTURE_FOREIGN_OUTPUT: foreign === 'cache' ? 'cache' : foreign ? '1' : '0', O8_RELEASE_BUILD_CACHE_DIR: path.join(root, 'cache'),
     O8_RELEASE_BUILD_CACHE_MAX_BYTES: '10485760', O8_RELEASE_LOCK_PATH: path.join(root, 'release.lock'),
     O8_RELEASE_BROADCAST_CLI: 'true', TSX_TSCONFIG_PATH: path.join(source, 'tsconfig.json') };
   for (const key of ['O8_DATA_DIR', 'CORTEX_IDE_DATA_DIR', 'CORTEX_IDE_DB_PATH', 'O8_OPERATOR_DATA_DIR',
@@ -135,7 +141,13 @@ it.each([false, true])('journals postship disposal and preserves mid-build forei
     return completed;
   }
   // Retain the first output to exercise interrupted disposal before the next ship.
-  const first = ship(foreign);
+  const first = ship(Boolean(foreign));
+  if (foreign === 'cache') {
+    expect(readFileSync(path.join(repo, '.next/cache/operator-note.txt'), 'utf8')).toBe('foreign early-build bytes');
+    expect(first.status).not.toBe(0);
+    expect(first.stdout).not.toContain('[release] publish started');
+    return;
+  }
   expect(first.status, first.stderr + first.stdout).toBe(0);
   if (foreign) {
     expect(JSON.parse(readFileSync(path.join(repo, '.fixture/ownership-before-build.json'), 'utf8'))).toEqual({ state: 'reserved', reserved: true });

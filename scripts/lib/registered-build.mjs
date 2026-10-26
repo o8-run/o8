@@ -5,7 +5,7 @@ import { resolveReleaseConfig } from './release-config.mjs';
 import { assertTauriExportInputsSafe } from './tauri-export-safety.mjs';
 
 /** Invoked only after generated-output exclusion and producer reservation. */
-export async function runRegisteredBuild(run) {
+export async function runRegisteredBuild(run, { restoredCache = false } = {}) {
   const root = process.cwd();
   const require = createRequire(join(root, 'package.json'));
   const heapMiB = process.env.O8_BUILD_HEAP_MIB === undefined ? 24576 : Number(process.env.O8_BUILD_HEAP_MIB);
@@ -29,7 +29,10 @@ export async function runRegisteredBuild(run) {
     if (distDir !== '.next/.o8-release-build') throw new Error('Build output reservation is invalid.');
     env.O8_RELEASE_NEXT_DIST_DIR = distDir;
     const cache = join(root, '.next/cache');
-    if (existsSync(cache)) renameSync(cache, join(buildOutput, 'cache'));
+    if (existsSync(cache)) {
+      if (!restoredCache) throw new Error('Preserved unowned entries in .next/cache; no verified cache restoration owns them.');
+      renameSync(cache, join(buildOutput, 'cache'));
+    }
   }
   if (!run.buildOutput) delete env.O8_RELEASE_NEXT_DIST_DIR;
   env.NODE_ENV = 'production';
