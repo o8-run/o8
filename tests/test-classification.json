@@ -1814,6 +1814,7 @@
       "reasons": [
         "child-process",
         "executable-fixture",
+        "network-listener",
         "real-path"
       ]
     },
