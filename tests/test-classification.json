@@ -5413,6 +5413,14 @@
       ]
     },
     {
+      "path": "tests/release-update-warmup-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/remote-governed-squash-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -6605,6 +6613,12 @@
         "child-process",
         "network-listener",
         "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/update-current-recheck-real-path.test.ts",
+      "reasons": [
         "real-path"
       ]
     },
