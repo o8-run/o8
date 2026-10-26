@@ -37,7 +37,8 @@ export const COMPOSER_PROBE_JS = `(() => {
   const visible = Boolean(box && box.width > 0 && box.height > 0 && document.visibilityState === 'visible'
     && (hit === editor || editor.contains(hit)) && getComputedStyle(editor).visibility === 'visible');
   if (editor?.readOnly) return JSON.stringify({ state: 'pending', readOnly: true });
-  if (!editor || !visible || editor.disabled) return JSON.stringify({ state: 'pending', editor: Boolean(editor), visible, disabled: editor?.disabled });
+  if (!editor || !visible || editor.disabled) return JSON.stringify({ state: 'pending', editor: Boolean(editor), visible, disabled: editor?.disabled,
+    hit: hit?.tagName, coveringLayer: hit?.parentElement ? getComputedStyle(hit.parentElement).zIndex : null });
   const text = ${JSON.stringify(edit)};
   if (!editor.dataset.o8LaunchEdit) {
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(editor, text);
@@ -158,7 +159,8 @@ export async function measureNativeLaunch({ app, output, sourceSha, samples = 3 
         }
       };
       const epoch = Date.now(), started = performance.now();
-      const send = client.send.bind(client), controlCalls = [];
+      const send = client.send.bind(client), controlCalls = [], phases = [];
+      let previousPhase;
       let probeTimeouts = 0;
       client.send = async (command, payload) => {
         const at = performance.now();
@@ -179,8 +181,9 @@ export async function measureNativeLaunch({ app, output, sourceSha, samples = 3 
         } finally {
           clearTimeout(timer);
           const durationMs = round(performance.now() - at);
-          if (controlCalls.length < 64 && (outcome !== 'ok' || durationMs > 100)) {
+          if (outcome !== 'ok' || durationMs > 100) {
             controlCalls.push({ command, atMs: round(at - started), durationMs, outcome });
+            if (controlCalls.length > 64) controlCalls.shift();
           }
         }
       };
@@ -213,12 +216,20 @@ export async function measureNativeLaunch({ app, output, sourceSha, samples = 3 
                 nativeWindow = main && { visible: main.visible, focused: main.focused };
               }
               lastProbe = JSON.parse(await executeJs(client, COMPOSER_PROBE_JS));
+              const phase = Object.fromEntries(['state', 'editor', 'visible', 'disabled', 'readOnly', 'focused', 'acknowledged', 'hit', 'coveringLayer']
+                .filter(key => lastProbe[key] !== undefined).map(key => [key, lastProbe[key]]));
+              const phaseKey = JSON.stringify(phase);
+              if (phaseKey !== previousPhase) {
+                previousPhase = phaseKey;
+                phases.push({ atMs: round(performance.now() - started), ...phase });
+                if (phases.length > 32) phases.shift();
+              }
               if (editorSeenMs === undefined && (lastProbe.state === 'edit-sent' || lastProbe.acknowledged)) editorSeenMs = round(performance.now() - started);
               if (editAcknowledgedMs === undefined && lastProbe.acknowledged) editAcknowledgedMs = round(performance.now() - started);
               if (lastProbe.state === 'ready') {
                 const interactiveComposerMs = round(performance.now() - started);
                 receipt.samples.push({ sample, interactiveComposerMs, socketReadyMs, acknowledged: lastProbe.acknowledged,
-                  focused: lastProbe.focused, hydrated: lastProbe.hydrated, probeTimeouts, controlCalls: [...controlCalls], editorSeenMs, editAcknowledgedMs, marks: lastProbe.marks, resources: lastProbe.resources, optionalStartupRequests: lastProbe.optionalStartupRequests, nativeStages: [...nativeStages],
+                  focused: lastProbe.focused, hydrated: lastProbe.hydrated, probeTimeouts, controlCalls: [...controlCalls], phases: [...phases], editorSeenMs, editAcknowledgedMs, marks: lastProbe.marks, resources: lastProbe.resources, optionalStartupRequests: lastProbe.optionalStartupRequests, nativeStages: [...nativeStages],
                   documentStartMs: round(lastProbe.timeOrigin - epoch), navigation: lastProbe.navigation });
                 break;
               }
