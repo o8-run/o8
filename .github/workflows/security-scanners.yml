@@ -1,0 +1,36 @@
+name: Dependency Findings
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  schedule:
+    - cron: '23 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: Dependency Findings (optional)
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install -g "$(node -p 'require("./package.json").packageManager')"
+      - name: Collect dependency advisories
+        run: npm audit --json > dependency-audit.json || test "$?" = 1
+      - name: Apply dated accepted findings
+        run: node scripts/ci/security-audit.mjs dependency-audit.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dependency-audit
+          path: dependency-audit.json
+          retention-days: 7

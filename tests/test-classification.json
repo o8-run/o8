@@ -5955,6 +5955,13 @@
       ]
     },
     {
+      "path": "tests/security-scanner-ci-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/selective-forget-real-path.test.ts",
       "reasons": [
         "child-process",
