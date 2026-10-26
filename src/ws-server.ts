@@ -1,3 +1,4 @@
+import { startProductSession, endProductSession } from '@/lib/analytics/session';
 import { mutationToLaneLifecyclePayload } from '@/lib/realtime/lane-lifecycle';
 import { assertOrchestratorPermissionMode, resolveOrchestratorPermissionMode } from '@/lib/orchestrator/permission-mode';
 import { managedCommandLaunch } from './lib/terminal/managed-command-launch';
@@ -9997,7 +9998,9 @@ async function bootstrapWsServer() {
 }
 
 let shuttingDown = false;
-const wsStartupReady = bootstrapWsServer().catch(() => {
+const wsStartupReady = bootstrapWsServer().then(() => {
+  if (!shuttingDown) void startProductSession();
+}).catch(() => {
   console.error('[ws-server] Startup initialization failed.');
   shutdown('startup-failed', 1);
 });
@@ -10063,16 +10066,20 @@ async function shutdown(signal: string, exitCode = 0) {
     exitCode = 1;
   }
 
+  // Force exit after 3s if something hangs
+  const forceShutdownTimer = setTimeout(() => {
+    exitCode ||= 1;
+    void endProductSession(false).finally(() => process.exit(exitCode || 1));
+  }, 3000).unref();
+
   // Close HTTP + WS server, then exit
   wss.close(() => {
     httpServer.close(() => {
+      clearTimeout(forceShutdownTimer);
       console.log('[ws-server] Clean shutdown complete');
-      process.exit(exitCode);
+      void endProductSession(exitCode === 0).finally(() => process.exit(exitCode));
     });
   });
-
-  // Force exit after 3s if something hangs
-  setTimeout(() => process.exit(exitCode), 3000).unref();
 }
 
 process.on('SIGTERM', () => shutdown('SIGTERM'));

@@ -1,0 +1,1 @@
+- Usage analytics count the first successful worker launch, first completed merge, and clean or unclean backend session endings. The existing opt-out and first-run gate apply to every event; no content or new identity fields are sent.
