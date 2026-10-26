@@ -10,7 +10,7 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { join, sep } from 'node:path';
+import { dirname, join, sep } from 'node:path';
 import { NextRequest } from 'next/server';
 
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -19,18 +19,32 @@ import { declarativeLaunchDeadlineTest } from './fixtures/declarative-launch-dea
 import type { OrchestratorMissionState, OrchestratorPacket } from '@/lib/orchestrator/types';
 
 const queueProbe = vi.hoisted(() => ({ entered: 0 }));
-const artifactRace = vi.hoisted(() => ({ file: '', reads: 0, continuous: false }));
+const artifactRace = vi.hoisted(() => ({ file: '', accounting: false, injected: false, continuous: false }));
 
 vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs/promises')>();
   return {
     ...actual,
-    lstat: async (...args: Parameters<typeof actual.lstat>) => {
-      if (String(args[0]) === artifactRace.file
-        && (++artifactRace.reads === 2 || (artifactRace.continuous && artifactRace.reads % 2 === 0))) {
-        await actual.appendFile(artifactRace.file, 'writer update\n');
+    opendir: async (...args: Parameters<typeof actual.opendir>) => {
+      const directory = await actual.opendir(...args);
+      // Artifact accounting enumerates this directory; ownership validation
+      // can stat the same file before that traversal starts.
+      if (artifactRace.file && String(args[0]) === dirname(artifactRace.file)) {
+        artifactRace.accounting = true;
       }
-      return actual.lstat(...args);
+      return directory;
+    },
+    lstat: async (...args: Parameters<typeof actual.lstat>) => {
+      const stat = await actual.lstat(...args);
+      if (artifactRace.accounting && String(args[0]) === artifactRace.file) {
+        artifactRace.accounting = false;
+        if (!artifactRace.injected || artifactRace.continuous) {
+          // Change the measured file after its snapshot, before verification.
+          await actual.appendFile(artifactRace.file, 'writer update\n');
+          artifactRace.injected = true;
+        }
+      }
+      return stat;
     },
   };
 });
@@ -455,7 +469,8 @@ describe('declarative packet dispatch worktree reachability', () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })));
     mkdirSync(ownedRoot, { recursive: true });
     artifactRace.file = join(realpathSync(ownedRoot), 'active-writer.log');
-    artifactRace.reads = 0;
+    artifactRace.accounting = false;
+    artifactRace.injected = false;
     writeFileSync(artifactRace.file, 'initial writer output\n');
     const repoPath = createRemoteBackedRepo();
     await import('@/lib/repos/registry').then(({ addRepo }) => addRepo(repoPath));
@@ -488,7 +503,8 @@ describe('declarative packet dispatch worktree reachability', () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })));
     mkdirSync(ownedRoot, { recursive: true });
     artifactRace.file = join(realpathSync(ownedRoot), 'continuous-writer.log');
-    artifactRace.reads = 0;
+    artifactRace.accounting = false;
+    artifactRace.injected = false;
     artifactRace.continuous = true;
     writeFileSync(artifactRace.file, 'initial writer output\n');
     const repoPath = createRemoteBackedRepo();
