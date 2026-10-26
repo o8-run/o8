@@ -1,0 +1,20 @@
+{
+  "platform": "Linux",
+  "profile": "debug",
+  "samplesPerRun": 100,
+  "endpoint": "GPUI TestAppContext input dispatch through two CPU scene draws and editor paint acknowledgement; test text system; no GPU/compositor or physical input timing",
+  "before": {
+    "p50Ms": 0.537339,
+    "p95Ms": 0.641293
+  },
+  "after": {
+    "p50Ms": 0.552561,
+    "p95Ms": 0.7409
+  },
+  "singleLineMiB": {
+    "bytes": 1048576,
+    "beforeCommandTimeoutSeconds": 60,
+    "beforeExitStatus": 124,
+    "afterTestSeconds": 1.41
+  }
+}

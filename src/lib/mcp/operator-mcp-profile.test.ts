@@ -16,7 +16,7 @@ describe('operator MCP process profiles', () => {
     expect(names).toContain('o8_view_type');
     expect(names).toContain('o8_view_click');
     expect(names).toContain('o8_view_console_errors');
-    expect(names.every((name) => name.startsWith('o8_view_'))).toBe(true);
+    expect(names.every((name) => name.startsWith('o8_view_') || name === 'o8_result_page')).toBe(true);
     expect(names).not.toContain('o8_task_create');
     expect(names).not.toContain('create_mission');
     expect(names).not.toContain('dispatch_mission');

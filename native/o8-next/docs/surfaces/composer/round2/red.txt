@@ -1,0 +1,42 @@
+Loaded session scene isolation, before the fix
+running 1 test
+test ui::conversation::card_tests::native_composer_loaded_typing_invalidates_only_editor ...
+thread 'ui::conversation::card_tests::native_composer_loaded_typing_invalidates_only_editor' (93888) panicked at src/composer/card_tests.rs:480:9:
+typing must reuse the transcript scene, without laying out or painting its rows
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    ui::conversation::card_tests::native_composer_loaded_typing_invalidates_only_editor
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 187 filtered out; finished in 1.33s
+
+error: test failed, to rerun pass `--bin o8-next`
+
+Draft growth before the fixed viewport
+thread 'ui::conversation::card_tests::native_composer_loaded_wrapping_keeps_transcript_geometry' (109613) panicked at src/composer/card_tests.rs:563:5:
+assertion `left == right` failed: growing a draft must scroll inside the composer, without resizing the conversation
+  left: Bounds { origin: Point { x: 274px, y: 583px }, size: Size { 902px × 216px } }
+ right: Bounds { origin: Point { x: 274px, y: 707px }, size: Size { 902px × 92px } }
+FAILED
+
+Focused-keymap outer cache before the composition port
+running 1 test
+test shell::session::loaded_shell_tests::native_composer_loaded_shell_typing_benchmark ...
+thread 'shell::session::loaded_shell_tests::native_composer_loaded_shell_typing_benchmark' (131546) panicked at src/surfaces/../composer/loaded_shell_tests.rs:76:13:
+assertion `left == right` failed: shell typing must reuse unchanged session regions
+  left: Array [Array [String("footer"), Number(14)], Array [String("header"), Number(14)], Array [String("sidebar"), Number(14)], Array [String("transcript"), Number(14)]]
+ right: Array [Array [String("footer"), Number(13)], Array [String("header"), Number(13)], Array [String("sidebar"), Number(13)], Array [String("transcript"), Number(13)]]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    shell::session::loaded_shell_tests::native_composer_loaded_shell_typing_benchmark
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 176 filtered out; finished in 4.16s
+
+error: test failed, to rerun pass `--bin o8-next`

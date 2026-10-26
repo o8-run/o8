@@ -10,7 +10,7 @@
  * absolutely-positioned sibling of the container so React preserves
  * component state across split/resize/close changes.
  */
-import { useLayoutEffect, useMemo, useRef, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { projectLiveSessionMeshParticipants } from '@/components/desktop/workspace-terminal/LiveSessionMesh';
 import { useSplitResize } from '../hooks/useSplitResize';
 import { SESSION_PANE_INSET } from './SessionPaneFrame';
@@ -60,11 +60,20 @@ export function SessionTileSurface({
   renderSessionPane,
 }: SessionTileSurfaceProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const [collapsedLeaves, setCollapsedLeaves] = useState<ReadonlySet<string>>(() => new Set());
   const { leaves, leafRects, splitFrames } = useMemo(() => {
     const { leafRects, splitFrames } = computeSessionTileLayout(layout.root);
     const leaves = collectAllLeaves(layout.root);
     return { leaves, leafRects, splitFrames };
   }, [layout.root]);
+  const collapseCallbacks = useMemo(() => new Map(leaves.map(leaf => [leaf.id, (collapsed: boolean) => {
+    setCollapsedLeaves(previous => {
+      if (previous.has(leaf.id) === collapsed) return previous;
+      const next = new Set(previous);
+      if (collapsed) next.add(leaf.id); else next.delete(leaf.id);
+      return next;
+    });
+  }])), [leaves]);
   const workerGroup = useMemo(() => {
     const root = layout.root;
     if (root.type !== 'split' || root.direction !== 'vertical'
@@ -74,6 +83,8 @@ export function SessionTileSurface({
       ? { chat: root.children[0], workers, ratio: root.ratio }
       : null;
   }, [layout.root]);
+  const hasCollapsedWorkers = layout.root.type === 'split' && !layout.root.manualOverride
+    && (workerGroup?.workers.some(leaf => collapsedLeaves.has(leaf.id)) ?? false);
 
   // FLIP morph (motion audit 003): the percentage rect stays the resting
   // layout — untransitioned, so a live terminal never relayouts mid-tween —
@@ -133,6 +144,8 @@ export function SessionTileSurface({
     const rect = leafRects.get(leaf.id);
     if (!rect) return null;
     const inWorkerGroup = workerGroup !== null && leaf.kind === 'session';
+    const stacked = inWorkerGroup && hasCollapsedWorkers;
+    const collapsed = stacked && collapsedLeaves.has(leaf.id);
     const left = inWorkerGroup ? (rect.left - workerGroup.ratio) / (1 - workerGroup.ratio) : rect.left;
     const width = inWorkerGroup ? rect.width / (1 - workerGroup.ratio) : rect.width;
     return (
@@ -144,11 +157,12 @@ export function SessionTileSurface({
               else leafNodesRef.current.delete(leaf.id);
             }}
             style={{
-              position: 'absolute',
-              left: `${left * 100}%`,
-              top: `${rect.top * 100}%`,
-              width: `${width * 100}%`,
-              height: `${rect.height * 100}%`,
+              position: stacked ? 'relative' : 'absolute',
+              left: stacked ? 0 : `${left * 100}%`,
+              top: stacked ? 0 : `${rect.top * 100}%`,
+              width: stacked ? '100%' : `${width * 100}%`,
+              height: stacked ? 'auto' : `${rect.height * 100}%`,
+              flex: stacked ? collapsed ? '0 0 auto' : '1 0 240px' : undefined,
               display: 'flex',
               flexDirection: 'column',
               minWidth: 0,
@@ -216,6 +230,7 @@ export function SessionTileSurface({
                     focused={focusedSessionKey === leaf.sessionKey}
                     onFocus={onFocusSession}
                     onClose={() => onCloseLeaf(leaf.id)}
+                    onCollapsedChange={collapseCallbacks.get(leaf.id)}
                   />
                 )}
               </div>
@@ -239,26 +254,26 @@ export function SessionTileSurface({
       {workerGroup ? [renderLeaf(workerGroup.chat)] : leaves.map(renderLeaf)}
       {workerGroup ? (
         <div
-          data-session-worker-scroll={workerScrollRows > 0 ? 'true' : undefined}
-          tabIndex={workerScrollRows > 0 ? 0 : undefined}
-          aria-label={workerScrollRows > 0 ? 'Worker panes' : undefined}
+          data-session-worker-scroll={workerScrollRows > 0 || hasCollapsedWorkers ? 'true' : undefined}
+          tabIndex={workerScrollRows > 0 || hasCollapsedWorkers ? 0 : undefined}
+          aria-label={workerScrollRows > 0 || hasCollapsedWorkers ? 'Worker panes' : undefined}
           style={{
             position: 'absolute',
             left: `${workerGroup.ratio * 100}%`,
             top: 0,
             width: `${(1 - workerGroup.ratio) * 100}%`,
             height: '100%',
-            overflowY: workerScrollRows > 0 ? 'auto' : 'hidden',
+            overflowY: workerScrollRows > 0 || hasCollapsedWorkers ? 'auto' : 'hidden',
             overflowX: 'hidden',
             overscrollBehavior: 'contain',
           }}
         >
-          <div style={{ position: 'relative', width: '100%', height: '100%', minHeight: workerScrollRows > 0 ? workerScrollRows * 240 : undefined }}>
+          <div style={{ position: 'relative', width: '100%', height: '100%', display: hasCollapsedWorkers ? 'flex' : undefined, flexDirection: 'column', minHeight: !hasCollapsedWorkers && workerScrollRows > 0 ? workerScrollRows * 240 : undefined }}>
             {workerGroup.workers.map(renderLeaf)}
           </div>
         </div>
       ) : null}
-      {!disableResizeHandles && splitFrames.map((frame) => (
+      {!disableResizeHandles && splitFrames.filter(frame => !hasCollapsedWorkers || frame.id === layout.root.id).map((frame) => (
         <SessionResizeHandle
           key={frame.id}
           frame={frame}

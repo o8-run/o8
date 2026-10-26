@@ -1,0 +1,16 @@
+test result: FAILED. 225 passed; 7 failed; 6 ignored; 0 measured; 0 filtered out; finished in 1207.63s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+Failures in this complete run:
+shell::activity::tests::activity_empty_local_auth_and_scoped_retention
+shell::brain::tests::brain_fixture_errors_cancel_retention_and_workspace_isolation
+shell::issues::tests::review_tests::round1_symlink_worker_survives_real_refresh_and_send
+shell::shortcuts::tests::review::shortcuts_focused_text_field_keeps_help_and_close_keys
+shell::tests::glass_and_plain_open_through_the_production_shell
+shell::tests::look::placement_shell_tabs_use_compact_rows
+shell::tests::look::shell_chrome_fifteen_workspaces_keeps_one_switcher

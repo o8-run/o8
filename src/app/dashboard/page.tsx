@@ -7,7 +7,7 @@ import { usePaletteFileSelection } from './hooks/usePaletteFileSelection';
 import { isTauri, canUseTauriEvents, browserViewHide } from '@/lib/tauri/bridge';
 import { isNonMacShell } from '@/lib/desktop/host-platform';
 import { subscribeTauriEvent } from '@/lib/tauri/events';
-import { track } from '@/lib/analytics/track';
+import { useAppOpenedTelemetry } from '@/lib/analytics/startup';
 import { AnimatePresence, motion } from 'framer-motion';
 import { DashboardFrame as SmoothCorners } from './DashboardFrame';
 import { ChatListCard } from './ChatListCard';
@@ -335,12 +335,11 @@ function DashboardInner() {
   const effectiveGlassSurface = chromeMounted && isGlassSurface;
 
   const [inTauri, setInTauri] = useState(false);
+  useAppOpenedTelemetry();
   useEffect(() => {
     logDashboardBootTiming();
     startWebVitalsObserver();
     setInTauri(isTauri());
-    // Coarse DAU signal (analytics epic #1249). Fire-and-forget, opt-out-aware.
-    track('app.opened');
     // tauri-plugin-mcp no longer needs JS-side init — the eval_and_await
     // protocol shipped in #932 phase 2 invokes JS from Rust per call.
     // Schedule the "interactive" mark after React has flushed the initial

@@ -1,0 +1,4 @@
+cargo fmt --check --manifest-path native/o8-next/Cargo.toml: exit 1
+Existing main differences: diagnostics/macos_repaint.rs, src/conversation.rs, src/shell.rs (module declaration order), src/ui.rs.
+All four sources match main, except the single shell registration line.
+Touched-source rustfmt --check with skip_children=true,reorder_modules=false: exit 0.

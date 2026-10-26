@@ -851,6 +851,45 @@ fn bind_ephemeral_port(skip: Option<u16>) -> u16 {
     0
 }
 
+/// Bind host for the bundled Next server (and, via the inherited
+/// `O8_LAN_ACCESS`, the ws-server — see src/lib/panel/listen-host.ts).
+/// Loopback by default: every desktop caller uses 127.0.0.1, and a wildcard
+/// bind exposes the API to the whole LAN/VPN. `O8_LAN_ACCESS=1` opts in to
+/// 0.0.0.0 so a phone can reach this machine directly for mobile pairing.
+fn sidecar_listen_host() -> &'static str {
+    listen_host_for(std::env::var("O8_LAN_ACCESS").ok().as_deref())
+}
+
+fn listen_host_for(lan_access: Option<&str>) -> &'static str {
+    match lan_access
+        .map(|value| value.trim().to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("1" | "true" | "yes" | "on") => "0.0.0.0",
+        _ => "127.0.0.1",
+    }
+}
+
+#[cfg(test)]
+mod listen_host_tests {
+    use super::listen_host_for;
+
+    #[test]
+    fn bundled_servers_bind_loopback_by_default() {
+        assert_eq!(listen_host_for(None), "127.0.0.1");
+        for value in ["", "0", "false", "no", "off", "0.0.0.0"] {
+            assert_eq!(listen_host_for(Some(value)), "127.0.0.1", "{value:?}");
+        }
+    }
+
+    #[test]
+    fn lan_access_opt_in_binds_all_interfaces() {
+        for value in ["1", "true", "TRUE", " yes ", "on"] {
+            assert_eq!(listen_host_for(Some(value)), "0.0.0.0", "{value:?}");
+        }
+    }
+}
+
 #[cfg(test)]
 mod port_allocation_tests {
     use super::{bundled_sidecar_port_available, find_free_port};
@@ -6940,7 +6979,7 @@ impl BundledNextSpawn {
             .env("CORTEX_IDE_DATA_DIR", &self.data_dir)
             .no_window()
             .env("PORT", self.api_port.to_string())
-            .env("HOSTNAME", "0.0.0.0")
+            .env("HOSTNAME", sidecar_listen_host())
             .env("NODE_ENV", "production")
             .env("O8_PACKAGED_APP", "1")
             .env("O8_NODE_BIN", &self.node_bin)
@@ -6957,6 +6996,13 @@ impl BundledNextSpawn {
         if let Some(path) = self.bundled_operator_mcp.as_ref() {
             command.env("O8_BUNDLED_MCP_DIR", &self.server_dir);
             command.env("O8_BUNDLED_MCP_PATH", path);
+        }
+        // Tauri externalBin lives beside the app executable. Pass only its path;
+        // the local server supplies its own operator credential at spawn time.
+        if let Ok(executable) = std::env::current_exe() {
+            if let Some(directory) = executable.parent() {
+                command.env("O8_NEXT_BIN", directory.join("o8-next"));
+            }
         }
         if let Some(path) = self.codebase_memory_bin.as_ref() {
             command.env("O8_CODEBASE_MEMORY_BIN", path);

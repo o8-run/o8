@@ -29,7 +29,7 @@ export async function POST(request: Request): Promise<Response> {
   } catch {
     return jsonRpcError('Parse error', 400);
   }
-  const protocol = prepareMcpHttp(payload, request.headers);
+  const protocol = prepareMcpHttp(payload, request.headers, new URL(request.url).protocol);
   if (protocol.refusal) return NextResponse.json(protocol.refusal, { status: protocol.status ?? 400 });
 
   const isBatch = Array.isArray(payload);

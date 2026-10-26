@@ -1,6 +1,15 @@
 //! Narrow embedding API. The shell uses the production Surface and composer.
 use super::*;
 impl Surface {
+    #[cfg(test)]
+    pub(crate) fn shell_loaded_probe(&mut self, load_older: bool, cx: &mut Context<Self>) -> Value {
+        if load_older {
+            self.load_older(cx);
+        }
+        let editor = self.composer.read(cx);
+        json!({"rows":self.rows.len(), "text":editor.text, "revision":editor.revision,
+            "painted":editor.painted, "regions":self.regions.renders(cx)})
+    }
     pub(crate) fn shell_linked_issue(&self) -> Option<crate::issues::LinkedIssue> {
         self.selected
             .as_ref()
