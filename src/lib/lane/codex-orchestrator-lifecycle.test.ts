@@ -142,6 +142,7 @@ describe('Codex orchestrator process lifecycle', () => {
       guardPath: '/tmp/o8-single-bin/codex',
       launchBinaryPath: '/tmp/o8-single-bin/.codex-main',
       supervisorPath: '/tmp/o8-single-bin/.single-supervisor.mjs',
+      diagnostics: [],
       cleanup: vi.fn(),
     }));
   });
@@ -267,6 +268,34 @@ describe('Codex orchestrator process lifecycle', () => {
     await turn;
     const prepared = await prepareSingleMock.mock.results[0].value;
     expect(prepared.cleanup).toHaveBeenCalledOnce();
+  });
+
+  it('shows each unavailable Solo host diagnostic before launching a usable turn', async () => {
+    const diagnostics = [
+      'Solo tool host unavailable: /fixture/legacy/codex-code-mode-host (missing). Workspace tools using this host may fail.',
+      'Solo tool host unavailable: /fixture/current/codex-code-mode-host (dangling symlink). Workspace tools using this host may fail.',
+    ];
+    const prepare = prepareSingleMock.getMockImplementation()!;
+    prepareSingleMock.mockImplementation(async input => ({ ...await prepare(input), diagnostics }));
+    const session = ensureCodexOrchestratorSession(process.cwd(), `solo-host-diagnostics-${Date.now()}`);
+    const proc = useFakeProc();
+    const events: OrchestratorEvent[] = [];
+    spawnMock.mockImplementationOnce(() => {
+      for (const text of diagnostics) expect(events).toContainEqual({ type: 'thinking', text: `${text}\n` });
+      return proc;
+    });
+    const turn = sendToCodexOrchestrator(session, 'work alone', event => events.push(event), {
+      orchestrationMode: 'single',
+    });
+    try {
+      await waitForSpawn();
+      for (const text of diagnostics) expect(events).toContainEqual({ type: 'thinking', text: `${text}\n` });
+      expect(events.some(event => event.type === 'error')).toBe(false);
+    } finally {
+      proc.exitCode = 0;
+      proc.emit('close', 0);
+      await turn;
+    }
   });
 
   it('passes composer images to a Codex Solo turn as image files', async () => {

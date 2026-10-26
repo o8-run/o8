@@ -2,14 +2,11 @@ import { randomUUID } from 'node:crypto';
 import {
   accessSync,
   chmodSync,
-  closeSync,
   constants as fsConstants,
   copyFileSync,
   existsSync,
   lstatSync,
   mkdirSync,
-  openSync,
-  readSync,
   realpathSync,
   rmSync,
   statSync,
@@ -179,7 +176,7 @@ function discoverCodexInstallations(binaries: string[], env: NodeJS.ProcessEnv):
   };
 }
 
-function discoverCodexToolHosts(env: NodeJS.ProcessEnv, protectedBinaries: string[]): string[] {
+function discoverCodexToolHosts(env: NodeJS.ProcessEnv, protectedBinaries: string[]): { hosts: string[]; diagnostics: string[] } {
   const userApplications = env.HOME ? join(env.HOME, 'Applications') : null;
   const candidates = [
     '/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex-code-mode-host',
@@ -191,46 +188,37 @@ function discoverCodexToolHosts(env: NodeJS.ProcessEnv, protectedBinaries: strin
       join(userApplications, 'Codex.app', 'Contents', 'Resources', 'codex-code-mode-host'),
     ] : []),
   ];
-  return candidates.filter((candidate) => {
-    try {
-      // Exact helper grants follow the CLI denials, so no alias or copy may
-      // reopen a protected executable through a tool-host name.
-      const host = lstatSync(candidate);
-      return host.isFile() && Boolean(host.mode & 0o111) && realpathSync(candidate) === candidate
-        && !protectedBinaries.some((binary) => hasSameExecutableBytes(candidate, binary));
-    } catch {
+  const diagnostics: string[] = [];
+  const hosts = candidates.filter((candidate) => {
+    const unavailable = (reason: string) => {
+      diagnostics.push(`Solo tool host unavailable: ${candidate} (${reason}). Workspace tools using this host may fail.`);
       return false;
+    };
+    try {
+      const host = lstatSync(candidate);
+      if (host.isSymbolicLink()) return unavailable(existsSync(candidate) ? 'symlink' : 'dangling symlink');
+      if (!host.isFile()) return unavailable('not a regular file');
+      if (!(host.mode & 0o111)) return unavailable('not executable');
+      if (realpathSync(candidate) !== candidate) return unavailable('noncanonical path');
+      const conflict = protectedExecutableConflict(candidate, protectedBinaries);
+      return conflict ? unavailable(conflict) : true;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      return unavailable(code === 'ENOENT' ? 'missing' : `metadata unavailable: ${code ?? 'unknown error'}`);
     }
   });
+  return { hosts, diagnostics };
 }
 
-function hasSameExecutableBytes(host: string, protectedBinary: string): boolean {
+/** Metadata only: an equal-size copy cannot be excluded without reading a protected CLI. */
+function protectedExecutableConflict(host: string, protectedBinaries: string[]): string | null {
   const hostStat = statSync(host);
-  const binaryStat = statSync(protectedBinary);
-  if (hostStat.dev === binaryStat.dev && hostStat.ino === binaryStat.ino) return true;
-  if (hostStat.size !== binaryStat.size) return false;
-
-  const hostFd = openSync(host, 'r');
-  try {
-    const binaryFd = openSync(protectedBinary, 'r');
-    try {
-      const hostChunk = Buffer.allocUnsafe(64 * 1024);
-      const binaryChunk = Buffer.allocUnsafe(hostChunk.length);
-      for (let offset = 0; offset < hostStat.size; offset += hostChunk.length) {
-        const length = Math.min(hostChunk.length, hostStat.size - offset);
-        if (readSync(hostFd, hostChunk, 0, length, offset) !== length ||
-            readSync(binaryFd, binaryChunk, 0, length, offset) !== length) {
-          throw new Error('Codex executable changed during helper validation');
-        }
-        if (!hostChunk.subarray(0, length).equals(binaryChunk.subarray(0, length))) return false;
-      }
-      return true;
-    } finally {
-      closeSync(binaryFd);
-    }
-  } finally {
-    closeSync(hostFd);
+  for (const binary of protectedBinaries) {
+    const binaryStat = statSync(binary);
+    if (hostStat.dev === binaryStat.dev && hostStat.ino === binaryStat.ino) return 'aliases a protected CLI';
+    if (hostStat.size === binaryStat.size) return 'same size as a protected CLI';
   }
+  return null;
 }
 
 function selectedCodexToolHost(nativeBinary: string, protectedBinaries: string[]): string | null {
@@ -238,9 +226,9 @@ function selectedCodexToolHost(nativeBinary: string, protectedBinaries: string[]
   if (!existsSync(host)) return null;
   const hostStat = lstatSync(host);
   // The selected CLI may be reached through a wrapper, but its adjacent host
-  // must be a distinct regular executable, never an alias or copy of a CLI.
+  // must be a distinct regular executable, with no metadata ambiguity against a CLI.
   if (!hostStat.isFile() || realpathSync(host) !== host || !(hostStat.mode & 0o111) ||
-      protectedBinaries.some((binary) => hasSameExecutableBytes(host, binary))) {
+      protectedExecutableConflict(host, protectedBinaries)) {
     throw new Error('Invalid code-mode host beside selected Codex executable');
   }
   return host;
@@ -263,6 +251,7 @@ export async function prepareSingleOrchestratorLaunch(input: {
   guardPath: string;
   launchBinaryPath: string;
   supervisorPath: string;
+  diagnostics: string[];
   cleanup: () => void;
 }> {
   const launchId = `${process.pid}-${randomUUID()}`;
@@ -296,7 +285,7 @@ export async function prepareSingleOrchestratorLaunch(input: {
     const source = resolvePrivateCodexSource(binary);
     // The originally selected binary stays denied even when Solo runs another.
     const installations = discoverCodexInstallations([binary, input.binary], input.env);
-    const toolHosts = discoverCodexToolHosts(input.env, installations.nativeBinaries);
+    const { hosts: toolHosts, diagnostics } = discoverCodexToolHosts(input.env, installations.nativeBinaries);
     const selectedToolHost = selectedCodexToolHost(source.nativeBinary, installations.nativeBinaries);
     copyFileSync(source.nativeBinary, launchBinaryPath, fsConstants.COPYFILE_FICLONE);
     chmodSync(launchBinaryPath, 0o700);
@@ -304,7 +293,7 @@ export async function prepareSingleOrchestratorLaunch(input: {
       // Code mode resolves this sibling relative to argv[0] after relocation.
       copyFileSync(selectedToolHost, launchToolHostPath, fsConstants.COPYFILE_FICLONE);
       chmodSync(launchToolHostPath, 0o500);
-      if (installations.nativeBinaries.some((binary) => hasSameExecutableBytes(launchToolHostPath, binary))) {
+      if (protectedExecutableConflict(launchToolHostPath, installations.nativeBinaries)) {
         throw new Error('Invalid code-mode host beside selected Codex executable');
       }
     }
@@ -415,6 +404,7 @@ export async function prepareSingleOrchestratorLaunch(input: {
       guardPath,
       launchBinaryPath,
       supervisorPath,
+      diagnostics,
       cleanup,
     };
   } catch (error) {

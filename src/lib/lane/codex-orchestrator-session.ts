@@ -465,6 +465,7 @@ async function sendToCodexOrchestratorAttempt(
       spawnArgs = prepared.args;
       spawnEnv = prepared.env;
       cleanupSingleLaunch = prepared.cleanup;
+      for (const diagnostic of prepared.diagnostics) onEvent({ type: 'thinking', text: `${diagnostic}\n` });
     } catch (err) {
       session.status = 'dead';
       onEvent({ type: 'error', error: `Single mode unavailable: ${err instanceof Error ? err.message : String(err)}` });
