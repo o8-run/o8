@@ -4039,6 +4039,13 @@
       ]
     },
     {
+      "path": "tests/mock-module-transport-real-path.test.ts",
+      "reasons": [
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/muse-host-real-path.test.ts",
       "reasons": [
         "child-process",
