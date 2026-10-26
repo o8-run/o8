@@ -97,7 +97,7 @@ jobs:
           retention-days: 1
       - name: Measure main three times before the fix
         continue-on-error: true
-        run: node harness/scripts/bench/native-launch.mjs --app=${{ env.SAVED_MAIN_RUN_ID != '' && 'main-artifact/o8.app' || 'main/src-tauri/target/release/bundle/macos/o8.app' }} --sha=${{ steps.base.outputs.sha }} --samples=3 --check --output="$RUNNER_TEMP/o8-launch-before"
+        run: node harness/scripts/bench/native-launch.mjs --app=${{ env.SAVED_MAIN_RUN_ID != '' && 'main-artifact/o8.app' || 'main/src-tauri/target/release/bundle/macos/o8.app' }} --sha=${{ steps.base.outputs.sha }} --samples=${{ contains(github.event.head_commit.message, '[baseline-only]') && '1' || '3' }} --check --output="$RUNNER_TEMP/o8-launch-before"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -105,14 +105,17 @@ jobs:
           path: ${{ runner.temp }}/o8-launch-before/receipt.json
           retention-days: 1
       - name: Require real composer measurements
+        env:
+          EXPECTED_SAMPLES: ${{ contains(github.event.head_commit.message, '[baseline-only]') && '1' || '3' }}
         run: |
           node - <<'JS'
           const fs = require('node:fs');
           const report = JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP + '/o8-launch-before/receipt.json', 'utf8'));
-          if (!report.teardownVerified || report.samples.length !== 3 || report.samples.some(sample => !sample.acknowledged)) process.exit(1);
+          if (!report.teardownVerified || report.samples.length !== Number(process.env.EXPECTED_SAMPLES) || report.samples.some(sample => !sample.acknowledged)) process.exit(1);
           JS
 
   candidate:
+    if: ${{ !contains(github.event.head_commit.message, '[baseline-only]') }}
     needs: baseline
     runs-on: ubuntu-latest
     timeout-minutes: 55

@@ -38,6 +38,8 @@ export const COMPOSER_PROBE_JS = `(() => {
   const navigation = performance.getEntriesByType('navigation')[0];
   return JSON.stringify({ state: 'ready', acknowledged: true, focused: document.hasFocus(),
     timeOrigin: performance.timeOrigin, pageNow: performance.now(),
+    marks: performance.getEntriesByType('mark').filter(row => /^o8:dashboard:/.test(row.name)).map(row => ({ name: row.name, atMs: row.startTime })),
+    resources: performance.getEntriesByType('resource').map(row => ({ type: row.initiatorType, startMs: row.startTime, durationMs: row.duration, path: new URL(row.name, location.href).pathname })).filter(row => new RegExp('^/api/[a-z0-9/-]+$').test(row.path) || row.type === 'script').sort((a, b) => b.durationMs - a.durationMs).slice(0, 15),
     hydrated: document.documentElement.getAttribute('data-o8-dashboard-hydrated') === '1',
     navigation: navigation ? { requestStart: navigation.requestStart, responseStart: navigation.responseStart,
       responseEnd: navigation.responseEnd, domContentLoaded: navigation.domContentLoadedEventEnd } : null });
@@ -124,7 +126,7 @@ export async function measureNativeLaunch({ app, output, sourceSha, samples = 3 
       const seeded = materializeFixture(plan, { root: sampleRoot });
       const socketPath = path.join(sampleRoot, 'control.sock');
       const client = new WebviewSocketClient(socketPath);
-      let child, lastProbe, socketReadyMs, activated = false, lastActivation = 0, nativeWindow;
+      let child, lastProbe, socketReadyMs, activated = false, lastActivation = 0, nativeWindow, editorSeenMs, editAcknowledgedMs;
       const nativeStages = [], seen = new Set();
       let logTail = '';
       const capture = chunk => {
@@ -166,10 +168,12 @@ export async function measureNativeLaunch({ app, output, sourceSha, samples = 3 
                 nativeWindow = main && { visible: main.visible, focused: main.focused };
               }
               lastProbe = JSON.parse(await executeJs(client, COMPOSER_PROBE_JS));
+              if (editorSeenMs === undefined && (lastProbe.state === 'edit-sent' || lastProbe.acknowledged)) editorSeenMs = round(performance.now() - started);
+              if (editAcknowledgedMs === undefined && lastProbe.acknowledged) editAcknowledgedMs = round(performance.now() - started);
               if (lastProbe.state === 'ready') {
                 const interactiveComposerMs = round(performance.now() - started);
                 receipt.samples.push({ sample, interactiveComposerMs, socketReadyMs, acknowledged: lastProbe.acknowledged,
-                  focused: lastProbe.focused, hydrated: lastProbe.hydrated, nativeStages: [...nativeStages],
+                  focused: lastProbe.focused, hydrated: lastProbe.hydrated, editorSeenMs, editAcknowledgedMs, marks: lastProbe.marks, resources: lastProbe.resources, nativeStages: [...nativeStages],
                   documentStartMs: round(lastProbe.timeOrigin - epoch), navigation: lastProbe.navigation });
                 break;
               }
