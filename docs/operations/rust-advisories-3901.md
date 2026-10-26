@@ -24,7 +24,7 @@ Direct `cargo update -p zbus --precise 6.0.0` attempts fail in both app graphs w
 
 Only RUSTSEC-2026-0370, RUSTSEC-2026-0371 and RUSTSEC-2026-0372 are added to the ignore list. Each entry is a standalone-crate maintenance notice. The entries are dated 2026-10-25, require review by 2026-11-25, and name #3901/#3902/#3903 as the follow-up for consumer migration and removal.
 
-The pinned CI audit action invokes `cargo audit --json --file src-tauri/Cargo.lock` from the repository root. Therefore `.cargo/audit.toml` covers that real CI entry point. `src-tauri/.cargo/audit.toml` and `native/o8-next/.cargo/audit.toml` apply the same scoped policy to audits launched inside either workspace. All three arrays were checked to contain exactly those three IDs. Existing CLI ignores in the workflow and all other findings remain unchanged.
+The pinned CI audit action invokes `cargo audit --json --file src-tauri/Cargo.lock` from the repository root. Therefore `.cargo/audit.toml` covers that real CI entry point and supplies one shared policy for both graphs. Launch audits from the repository root with `cargo audit --file src-tauri/Cargo.lock` or `cargo audit --file native/o8-next/Cargo.lock`; the audit tool does not search parent directories for this configuration when launched inside a workspace. The array was checked to contain exactly those three IDs. Existing CLI ignores in the workflow and all other findings remain unchanged.
 
 A targeted check drives the real `cargo audit` command and reads its JSON report. It was written and run before the policy change:
 
@@ -41,7 +41,16 @@ Targeted maintenance audit check passed; other findings remain separately report
 exit=0
 ```
 
-Separate local-workspace audit invocations also report zero matching maintenance records. The shell's standalone audit still exits 1 on unrelated findings without the workflow's existing exceptions; this verifies that the scoped policy does not suppress those findings. No runtime exposure or full dependency retirement is claimed.
+Audits of both workspace lockfiles from the repository root also report zero matching maintenance records. The shell audit still exits 1 on unrelated findings without the workflow's existing exceptions; this verifies that the scoped policy does not suppress those findings. No runtime exposure or full dependency retirement is claimed.
+
+The final two-file scope also passes `scripts/next/check-surface-boundary.mjs --select-only` through a committed local fixture tree:
+
+```text
+o8 next surface boundary: no scoped changes
+o8 next surface boundary wall=0.013 s
+
+exit=0
+```
 
 ## Advisory comparison
 
@@ -65,7 +74,7 @@ Full `cargo audit` reports were also recorded. The advisory-only comparison uses
 | `npm run typecheck:fast` | exit 0 |
 | `npm run test:classify` | [test-classification] 1247 hermetic, 934 resource-owning |
 | focused tests | Test Files  6 passed (6); Tests  39 passed (39) |
-| full `npm test` with the required runtime | Test Files  1251 passed \| 3 skipped (1254); Tests  9165 passed \| 5 skipped (9170) |
+| full `npm test` with the required runtime | Test Files  1251 passed \| 3 skipped (1254); Tests  9168 passed \| 5 skipped (9173) |
 
 Focused test files: `tests/ci-gates-real-path.test.ts`, `tests/update-ping-entry-points.test.ts`, `tests/product-telemetry-entry-points.test.ts`, `tests/product-telemetry-toggle.test.ts`, `tests/auth-native-logging.test.ts`, `tests/workflow-policy.test.ts`.
 
@@ -93,8 +102,8 @@ Focused test files: `tests/ci-gates-real-path.test.ts`, `tests/update-ping-entry
 
 | Command | Result |
 | --- | --- |
-| `cargo test --locked --manifest-path tests/native-codex/Cargo.toml` | exit 0; test result: ok. 26 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.32s; test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s; exit=0 |
-| `cargo test --locked --manifest-path crates/o8d/Cargo.toml --all-features` | exit 0; test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.24s; test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s; exit=0 |
+| `cargo test --locked --manifest-path tests/native-codex/Cargo.toml` | exit 0; test result: ok. 26 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.86s; test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s |
+| `cargo test --locked --manifest-path crates/o8d/Cargo.toml --all-features` | exit 0; test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.85s; test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.24s; test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s |
 | `cargo build --locked --manifest-path src-tauri/Cargo.toml` | exit 101; exit=101 |
 
 ## Retained audit receipts
@@ -109,12 +118,10 @@ Focused test files: `tests/ci-gates-real-path.test.ts`, `tests/update-ping-entry
 | `native_o8-next-audit-after.json` | `d3b2968be3bdb3d6726369b911b7e6711a3dfd45c52a43e8f666c6e4044654b5` |
 | `native_o8-next-audit-before-advisories.json` | `981c1c8396dd2803a582273974f228255f49cd7f149f06b39ab4b04a111f729a` |
 | `native_o8-next-audit-before.json` | `981c1c8396dd2803a582273974f228255f49cd7f149f06b39ab4b04a111f729a` |
-| `native_o8-next-local-audit-after.json` | `8ad5b2c43766a77924578768fc09c8dfecacade4864726c26708c1c0fab8d0b8` |
 | `src-tauri-audit-after-advisories.json` | `dbe3dd73066db43eee5775a73dbab9cb5da14b424a6b51b9615da51905913e96` |
 | `src-tauri-audit-after.json` | `0633d25cb67bf7f0ae56f2b49a41b4304a45a15b5673d0057728931e813e3238` |
 | `src-tauri-audit-before-advisories.json` | `f3466fce54a3686c91554b9d0c0fd2435946f69214edb2125f5398022977e59c` |
 | `src-tauri-audit-before.json` | `eced4484bdad4da3138be8d5dcd58397306e2c2ec6fec16e9595f3bf9dffd463` |
-| `src-tauri-local-audit-after.json` | `3a1de9f4e97dd733d81342e09f9cc9e90325cf57eba57f606ddcb67849ee739a` |
 | `src-tauri_sidecars_pi-write-audit-after-advisories.json` | `4f91b606a36cc4d259ed45895e67f702ca060ef904890dc2e4519eaf61af1ced` |
 | `src-tauri_sidecars_pi-write-audit-after.json` | `4f91b606a36cc4d259ed45895e67f702ca060ef904890dc2e4519eaf61af1ced` |
 | `src-tauri_sidecars_pi-write-audit-before-advisories.json` | `11b0d35a3540076527c824adeb3ebbc1312d726f87b1f5ab22a45538cfd8f586` |
