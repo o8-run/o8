@@ -43,17 +43,17 @@ export const COMPOSER_PROBE_JS = `(() => {
       responseEnd: navigation.responseEnd, domContentLoaded: navigation.domContentLoadedEventEnd } : null });
 })()`;
 
-function wholeAppRss(rootPid, webkitBaseline) {
+function wholeAppRss(rootPid) {
   const processes = snapshotProcesses();
   const owned = new Set([...descendantPids(processes, rootPid),
-    ...[...webkitPids(processes)].filter(pid => !webkitBaseline.has(pid))]);
+    ...webkitPids(processes)]);
   const rows = execFileSync('ps', ['-axo', 'pid=,rss='], { encoding: 'utf8' });
   let bytes = 0, count = 0;
   for (const row of rows.trim().split('\n')) {
     const match = row.trim().match(/^(\d+)\s+(\d+)$/);
     if (match && owned.has(Number(match[1]))) { count++; bytes += Number(match[2]) * 1024; }
   }
-  return { bytes, count, includes: 'native shell, server descendants and new webview helpers' };
+  return { bytes, count, includes: 'native shell, server descendants and all webview helpers on the disposable runner' };
 }
 
 function requireDisposableRunner(app) {
@@ -112,7 +112,7 @@ export async function measureNativeMemory({ app, output, sourceSha, samples = 1 
       const seeded = materializeFixture(plan, { root: sampleRoot });
       const socketPath = path.join(sampleRoot, 'control.sock');
       const client = new WebviewSocketClient(socketPath);
-      let child, lastProbe, socketReadyMs;
+      let child, lastProbe, socketReadyMs, activated = false;
       const nativeStages = [], seen = new Set();
       let logTail = '';
       const capture = chunk => {
@@ -124,7 +124,6 @@ export async function measureNativeMemory({ app, output, sourceSha, samples = 1 
           if (!seen.has(id)) { seen.add(id); nativeStages.push({ stage, atMs: Number(match[2]) }); }
         }
       };
-      const webkitBaseline = webkitPids(snapshotProcesses());
       const epoch = Date.now(), started = performance.now();
       try {
         child = spawn(path.join(stagedApp, 'Contents/MacOS/o8'), [], { cwd: stageRoot, detached: true,
@@ -139,10 +138,13 @@ export async function measureNativeMemory({ app, output, sourceSha, samples = 1 
             try {
               if (socketReadyMs === undefined) {
                 await client.connectOnly(); socketReadyMs = round(performance.now() - started);
+              }
+              if (!activated) {
                 await client.send('manage_window', { window_label: 'main', operation: 'focus' });
                 const activation = spawnSync('/usr/bin/osascript', ['-e',
                   `tell application ${JSON.stringify(stagedApp)} to activate`], { stdio: 'ignore', timeout: 10_000 });
                 assert.equal(activation.status, 0, 'Foreground activation failed');
+                activated = true;
               }
               lastProbe = JSON.parse(await executeJs(client, COMPOSER_PROBE_JS));
               if (lastProbe.state === 'ready') {
@@ -182,14 +184,14 @@ export async function measureNativeMemory({ app, output, sourceSha, samples = 1 
           const ledger = await read('/api/panel/projects', { name });
           projectIds.push(ledger.projects.find(project => project.name === name).id);
         }
-        sampleReceipt.rss = { start: wholeAppRss(child.pid, webkitBaseline) };
+        sampleReceipt.rss = { start: wholeAppRss(child.pid) };
         const workload = await exerciseSessionWorkload({ data: seeded.dataDir, repo: seeded.repoDir,
           env, apiPort, wsPort, token, read, sessions: 24, workerSessions: 48, transcriptMiB: 4, projectIds });
         sampleReceipt.workload = { completedSessions: workload.completedSessions, completedWorkers: workload.completedWorkers,
           transcriptDigest: workload.transcriptDigest, payloadUtf8Bytes: workload.payloadUtf8Bytes };
-        sampleReceipt.rss.afterRun = wholeAppRss(child.pid, webkitBaseline);
+        sampleReceipt.rss.afterRun = wholeAppRss(child.pid);
         await sleep(600_000);
-        sampleReceipt.rss.afterIdle = wholeAppRss(child.pid, webkitBaseline);
+        sampleReceipt.rss.afterIdle = wholeAppRss(child.pid);
         sampleReceipt.workload.persistedOutputUnchanged = verifySessionWorkload(workload);
         assert(sampleReceipt.workload.persistedOutputUnchanged, 'Persisted fixture output changed');
       } catch (error) {
