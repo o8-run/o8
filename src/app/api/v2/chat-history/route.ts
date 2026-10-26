@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { existsSync, readFileSync, mkdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { extractPlanFromTranscript } from '@/lib/llm/plan-extractor';
@@ -396,11 +396,20 @@ export async function PATCH(request: NextRequest) {
 
   const saved = readPersistedLlmChat(body.tabId);
   const workspace = mutationWorkspace(request);
-  if (!saved || !matchesMutationWorkspace(workspace, saved.history.repoPath)
+  // The composer selects a repository before its first transcript save. Only
+  // that explicit selection may create a record; unknown archive/pin ids may not.
+  const selectionFields = new Set(['tabId', 'repoPath', 'repoName', 'repoBranch', 'remoteUrl']);
+  const newSelection = !saved && typeof body.tabId === 'string' && body.tabId.startsWith('thoughts-')
+    && !existsSync(safePath(body.tabId))
+    && typeof body.repoPath === 'string' && isAbsolute(body.repoPath)
+    && Object.keys(body).every(key => selectionFields.has(key))
+    && matchesMutationWorkspace(workspace, body.repoPath);
+  if ((!saved && !newSelection) || (saved && !matchesMutationWorkspace(workspace, saved.history.repoPath))
     || (body.repoPath !== undefined && !matchesMutationWorkspace(workspace, body.repoPath))) {
     return NextResponse.json({ error: 'History was not found' }, { status: 404 });
   }
-  const data: Record<string, unknown> = { ...saved.history };
+  const data: Record<string, unknown> = saved ? { ...saved.history }
+    : { messages: [], savedAt: new Date().toISOString(), starred: false, projectId: null };
 
   if (body.starred !== undefined) data.starred = body.starred;
   if (body.pinned !== undefined) data.pinned = body.pinned;

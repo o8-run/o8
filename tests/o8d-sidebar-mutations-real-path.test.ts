@@ -45,6 +45,13 @@ function request(path: string, method: string, workspace: string, body?: unknown
   return fetch(url, { method, headers: { authorization: `Bearer ${server.token}`, 'content-type': 'application/json' },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
 }
+async function nativeArchive(workspace: string, id: string, mutation: string) {
+  const result = await promisify(execFile)('cargo', ['run', '--quiet', '--locked', '--manifest-path',
+    'native/o8-next/test-support/sidebar-client/Cargo.toml', '--', origin, workspace, id, mutation], {
+    env: { ...process.env, O8_NEXT_API_TOKEN: server.token }, timeout: 120_000,
+  });
+  return JSON.parse(result.stdout.trim()) as { ok: boolean; error?: string };
+}
 async function originalRoute(path: string, method: string, workspace: string, body?: unknown) {
   const route = path.startsWith('/api/runtime/archive') ? './src/app/api/runtime/archive/route.ts' : './src/app/api/v2/chat-history/route.ts';
   const url = new URL('http://127.0.0.1' + path);
@@ -137,4 +144,51 @@ it('enforces the same workspace refusal in the original runtime archive handler'
   const body = { sessionKey: `codex-owned:${id}`, clientMutationId: 'round1-archive-original' };
   expect(await originalRoute('/api/runtime/archive', 'POST', workspaceA, body)).toBe(404);
   expect(existsSync(join(directory, 'session.json'))).toBe(true);
+});
+
+it.each(['selected', 'missing'])('binds the production rail mutation client before archiving (%s workspace)', async (scope) => {
+  const id = `round2-production-client-${scope}`;
+  const directory = owned(id, workspaceB);
+  const before = readFileSync(join(directory, 'session.json'), 'utf8');
+  const refused = await nativeArchive(scope === 'selected' ? workspaceA : '', `codex-owned:${id}`, id);
+  expect(refused.ok).toBe(false);
+  expect(refused.error).toContain(scope === 'selected' ? '404' : 'workspace');
+  expect(readFileSync(join(directory, 'session.json'), 'utf8')).toBe(before);
+  expect(existsSync(join(`${ownedRoot}-archive`, id))).toBe(false);
+  expect(await nativeArchive(workspaceB, `codex-owned:${id}`, id)).toEqual({ ok: true });
+  expect(existsSync(directory)).toBe(false);
+  expect(existsSync(join(`${ownedRoot}-archive`, id, 'session.json'))).toBe(true);
+}, 120_000);
+
+it('refuses an archive without workspace at the bridge before changing persisted state', async () => {
+  const id = 'round2-unscoped-bridge';
+  const directory = owned(id, workspaceB);
+  const before = readFileSync(join(directory, 'session.json'), 'utf8');
+  const response = await fetch(`${origin}/api/runtime/archive`, { method: 'POST',
+    headers: { authorization: `Bearer ${server.token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ sessionKey: `codex-owned:${id}`, clientMutationId: 'round2-unscoped-bridge' }) });
+  expect(response.status).toBe(400);
+  expect(readFileSync(join(directory, 'session.json'), 'utf8')).toBe(before);
+  expect(existsSync(join(`${ownedRoot}-archive`, id))).toBe(false);
+});
+
+it('creates only an explicit new repository selection within its supplied workspace', async () => {
+  const id = 'thoughts-round2-new-selection';
+  const file = join(server.directory, 'chat-history', `${id}.json`);
+  for (const body of [{ repoPath: workspaceB }, { repoPath: workspaceA, archivedAt: '2026-01-01T00:00:00.000Z' }]) {
+    expect((await request('/api/v2/chat-history', 'PATCH', workspaceA, { tabId: id, ...body })).status).toBe(404);
+    expect(existsSync(file)).toBe(false);
+  }
+  expect((await request('/api/v2/chat-history', 'PATCH', workspaceA, { tabId: id, repoPath: workspaceA })).status).toBe(200);
+  expect(JSON.parse(readFileSync(file, 'utf8'))).toMatchObject({ repoPath: workspaceA, messages: [] });
+});
+
+it('does not reassign an existing unreadable history as a new repository selection', async () => {
+  const id = 'thoughts-round2-existing-unreadable';
+  const file = join(server.directory, 'chat-history', `${id}.json`);
+  for (const before of ['{invalid', JSON.stringify({ repoPath: workspaceB, messages: null })]) {
+    writeFileSync(file, before);
+    expect((await request('/api/v2/chat-history', 'PATCH', workspaceA, { tabId: id, repoPath: workspaceA })).status).toBe(404);
+    expect(readFileSync(file, 'utf8')).toBe(before);
+  }
 });

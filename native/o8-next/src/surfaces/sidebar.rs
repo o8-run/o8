@@ -5,6 +5,8 @@ use crate::projects_model::Ledger;
 mod thread_list;
 #[path = "sidebar/thread_list_client.rs"]
 mod thread_list_client;
+#[path = "sidebar/thread_mutations_client.rs"]
+mod thread_mutations_client;
 use thread_list::{Event as ThreadEvent, ThreadList};
 pub(super) type Slice = EmptyState;
 #[derive(Default)]
