@@ -9,6 +9,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { WebviewSocketClient, executeJs } from '../preship-webview-gate.mjs';
 import { cleanupGate } from '../lib/preship-gate-cleanup.mjs';
+import { prepareNativeRunner } from './native-runner-preconditions.mjs';
 import { computeArtifactDigest, descendantPids, snapshotProcesses, webkitPids } from '../lib/footprint-budget.mjs';
 import { buildFixturePlan, materializeFixture } from './interactions/fixtures.mjs';
 import { exerciseSessionWorkload, verifySessionWorkload } from './session-memory.mjs';
@@ -104,12 +105,15 @@ export async function measureNativeMemory({ app, output, sourceSha, samples = 1 
   const artifactDigest = computeArtifactDigest(app, { version, gitSha: sourceSha });
   const stageRoot = fs.mkdtempSync(path.join(fs.realpathSync('/tmp'), 'o8-launch-'));
   const stagedApp = path.join(stageRoot, 'o8.app');
-  let preserveFixture = false;
+  let preserveFixture = false, runner;
   const receipt = { schema: 'o8/native-idle-memory/v1', platform: process.platform, arch: process.arch,
     osVersion: execFileSync('sw_vers', ['-productVersion'], { encoding: 'utf8' }).trim(), sourceSha, artifactDigest,
     method: 'normal release app; private profile; chat/worker history and project workload; no forced collection',
     pollMs: 10, limitBytes: 500_000_000, sessions: 24, workerSessions: 48, transcriptMiB: 4, idleMs: 600_000, samples: [] };
   try {
+    runner = prepareNativeRunner('ai.o8.desktop.memorybench', stageRoot);
+    receipt.privacyPrecondition = runner.services.map(service => `${service}: denied`);
+    receipt.privacySetupError = runner.privacySetupError ?? null;
     execFileSync('ditto', [app, stagedApp], { stdio: 'pipe' });
     execFileSync('codesign', ['--verify', '--deep', '--strict', stagedApp], { stdio: 'pipe' });
     assert.equal(computeArtifactDigest(stagedApp, { version, gitSha: sourceSha }), artifactDigest);
@@ -151,8 +155,8 @@ export async function measureNativeMemory({ app, output, sourceSha, samples = 1 
               }
               if (!activated) {
                 await client.send('manage_window', { window_label: 'main', operation: 'focus' });
-                const activation = spawnSync('/usr/bin/osascript', ['-e',
-                  `tell application ${JSON.stringify(stagedApp)} to activate`], { stdio: 'ignore', timeout: 10_000 });
+                const activation = spawnSync(runner.executable, [String(child.pid), 'ai.o8.desktop.memorybench'],
+                  { stdio: 'ignore', timeout: 3000 });
                 assert.equal(activation.status, 0, 'Foreground activation failed');
                 activated = true;
               }
@@ -220,6 +224,7 @@ export async function measureNativeMemory({ app, output, sourceSha, samples = 1 
     receipt.maxIdleRssBytes = Math.max(...receipt.samples.map(row => row.rss.afterIdle.bytes));
     return receipt;
   } finally {
+    runner?.restore();
     receipt.teardownVerified = !preserveFixture && receipt.samples.length === samples && !receipt.failure;
     fs.writeFileSync(path.join(output, 'receipt.json'), JSON.stringify(receipt, null, 2) + '\n');
     console.log(JSON.stringify(receipt));

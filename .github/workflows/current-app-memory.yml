@@ -1,10 +1,19 @@
 name: Current app idle memory measurements
 
 on:
+  push:
+    branches: [fix/4581-idle-memory-budget]
   workflow_dispatch:
+    inputs:
+      main_artifact_run:
+        description: Optional run containing a previously built main app
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   build:
@@ -20,6 +29,7 @@ jobs:
       NEXT_TELEMETRY_DISABLED: '1'
       O8_RELEASE_BUILD_CACHE: 'off'
       APPLE_SIGNING_IDENTITY: '-'
+      SAVED_MAIN_RUN_ID: ${{ github.event.inputs.main_artifact_run || (contains(github.event.head_commit.message, '[reuse-main]') && '40360755738') || '' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -31,6 +41,7 @@ jobs:
           echo "base=$(git -C harness merge-base origin/main HEAD)" >> "$GITHUB_OUTPUT"
           echo "head=$(git -C harness rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v4
+        if: env.SAVED_MAIN_RUN_ID == ''
         with:
           ref: ${{ steps.source.outputs.base }}
           path: main
@@ -38,22 +49,33 @@ jobs:
         with:
           node-version: 22.23.4
           cache: npm
-          cache-dependency-path: main/package-lock.json
+          cache-dependency-path: harness/package-lock.json
       - name: Install build tools
         run: |
           npm install -g npm@11.21.1
           rustup toolchain install stable --profile minimal
           rustup default stable
       - run: npm ci --prefer-offline
+        if: env.SAVED_MAIN_RUN_ID == ''
         working-directory: main
       - run: node harness/scripts/bench/native-memory-config.mjs main
+        if: env.SAVED_MAIN_RUN_ID == ''
       - name: Build main from the clean checkout
+        if: env.SAVED_MAIN_RUN_ID == ''
         uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5
         with:
           projectPath: main
           args: --features dev-mcp-plugin --bundles app --config work/native-memory.json
       - name: Preserve main's exact artifact
+        if: env.SAVED_MAIN_RUN_ID == ''
         run: tar -C main/src-tauri/target/release/bundle/macos -cf "$RUNNER_TEMP/main-app.tar" o8.app
+      - uses: actions/download-artifact@v4
+        if: env.SAVED_MAIN_RUN_ID != ''
+        with:
+          name: current-app-memory-main-app
+          run-id: ${{ env.SAVED_MAIN_RUN_ID }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}
       - uses: actions/upload-artifact@v4
         with:
           name: current-app-memory-main-app
