@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   buildMobileAskModelCatalog,
+  MOBILE_ASK_MODEL_IDS,
   normalizeMobileAskEffort,
   normalizeMobileAskModelId,
   resolveMobileAskEffort,
@@ -134,26 +135,27 @@ describe('mobile Ask model routing', () => {
       cliModel: 'claude-fable-5',
       effort: 'high',
     });
-    expect(resolveMobileAskRoute('codex-sol-xhigh', { claude: true, codex: true }, 'bogus')).toMatchObject({
-      kind: 'codex',
-      cliModel: 'gpt-6.1-sol',
-      effort: 'xhigh',
-    });
+    expect(() => resolveMobileAskRoute(MOBILE_ASK_MODEL_IDS[7], { claude: true, codex: true }, 'bogus')).toThrow();
   });
 
-  it('clamps only Claude Opus low to medium', () => {
-    expect(resolveMobileAskEffort('claude-opus', 'low')).toBe('medium');
+  it('preserves a valid low pin on the selected model', () => {
+    expect(resolveMobileAskEffort('low')).toBe('low');
     expect(resolveMobileAskRoute('claude-opus', { claude: true, codex: true }, 'low')).toMatchObject({
       kind: 'claude',
       cliModel: 'claude-opus-5',
-      effort: 'medium',
+      effort: 'low',
     });
 
-    expect(resolveMobileAskEffort('claude-opus', 'medium')).toBe('medium');
-    expect(resolveMobileAskEffort('claude-sonnet', 'low')).toBe('low');
-    expect(resolveMobileAskEffort('claude-fable', 'medium')).toBe('medium');
-    expect(resolveMobileAskEffort('codex-astra-xhigh', 'medium')).toBe('medium');
-    expect(resolveMobileAskEffort('codex-sol-xhigh', 'medium')).toBe('medium');
+    expect(resolveMobileAskEffort('medium')).toBe('medium');
+  });
+
+  it('normalizes stale saved effort separately when the selected model changes', () => {
+    for (const model of MOBILE_ASK_MODEL_IDS) {
+      expect(normalizeMobileAskEffort('stale')).toBe('xhigh');
+      const route = resolveMobileAskRoute(model, { claude: true, codex: true }, normalizeMobileAskEffort('low'));
+      if (route.kind !== 'managed') expect(route.effort).toBe('low');
+      expect(() => resolveMobileAskRoute(model, { claude: true, codex: true }, 'stale')).toThrow();
+    }
   });
 
   it('never crosses from an unavailable explicit CLI selection to the other CLI', () => {
