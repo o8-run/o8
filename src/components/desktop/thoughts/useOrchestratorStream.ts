@@ -110,6 +110,8 @@ export function useOrchestratorStream(
   projectIdRef.current = options?.projectId ?? null;
   const threadId = options?.threadId ?? null;
   const threadIdRef = useRef<string | null>(threadId);
+  const allowUnboundRecoveryRef = useRef(options?.allowUnboundRecovery !== false);
+  allowUnboundRecoveryRef.current = options?.allowUnboundRecovery !== false;
   // Only mirror the parent-supplied threadId when it is set. If the hook has
   // already minted an id inside send() (because the parent's state hadn't
   // landed yet), don't wipe it on the next render — the parent's eventual
@@ -538,6 +540,7 @@ export function useOrchestratorStream(
       eventCountRef,
       snapshotSeenRef,
       threadIdRef,
+      allowUnboundRecoveryRef,
       finalizeFirstTurnPlanCapture,
       firstTurnPlanChunksRef,
       firstTurnPlanStartedRef,

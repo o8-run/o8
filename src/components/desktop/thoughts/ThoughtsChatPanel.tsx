@@ -424,6 +424,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, ThoughtsCha
 
   const orchStream = useOrchestratorStream(isOrchestratorMode && orchestrationSettingsLoaded && !isChatMode ? resolvedRepoPath : null, {
     projectId: threadProjectId, visible: open,
+    // A fresh workspace must not adopt another conversation from its repo subscription.
+    allowUnboundRecovery: !scopeTabId || !suppressAutoRestore,
     seededPlanText: planText,
     hasHistory: chatMessages.some(message => !message.voice),
     threadId,
