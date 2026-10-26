@@ -389,6 +389,12 @@
       ]
     },
     {
+      "path": "src/lib/chatgpt-plan/native-secret-service.test.ts",
+      "reasons": [
+        "child-process"
+      ]
+    },
+    {
       "path": "src/lib/chatgpt-plan/plan-entry.test.ts",
       "reasons": [
         "child-process"
