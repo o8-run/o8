@@ -6,8 +6,15 @@ import type { OwnedChildExitOutcome, ParsedRunLog } from './types';
 const DEFAULT_STDERR_TAIL_BYTES = 500;
 
 /** Durable input failures override even a provider's successful partial result. */
-export function withStagedStdinOutcome(parsed: ParsedRunLog, stderr: string): ParsedRunLog {
-  const message = stderr.match(/^O8_STDIN_DELIVERY_FAILED: (.+)$/m)?.[1];
+export function withStagedStdinOutcome(parsed: ParsedRunLog, deliveryRaw: string): ParsedRunLog {
+  if (!deliveryRaw.trim()) return parsed;
+  let message: string | undefined;
+  try {
+    const delivery = JSON.parse(deliveryRaw.trim().split('\n').at(-1)!);
+    if (delivery.error || delivery.deliveredBytes !== delivery.stagedBytes) {
+      message = `stdin delivery failed: ${delivery.error || 'incomplete input'} (${delivery.deliveredBytes}/${delivery.stagedBytes} bytes delivered)`;
+    }
+  } catch { message = 'stdin delivery failed: unreadable delivery record'; }
   return message ? { ...parsed, outcome: 'failed', completedTurn: false,
     providerFailure: { subtype: 'stdin_delivery_failed', message } } : parsed;
 }

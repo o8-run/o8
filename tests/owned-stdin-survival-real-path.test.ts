@@ -108,16 +108,45 @@ describe.skipIf(process.platform === 'win32')('worker-owned stdin across server 
     expect((await request('inspect', session.surfaceId)).recentRuns[0].outcome).toBe('failed');
   }, 40_000);
 
+  it.each(['reject-mid-unterminated', 'reject-mid-newline'])(
+    'cold recovery fails truncated delivery with its delivery reason (%s)', async mode => {
+      setup();
+      await startParent(mode);
+      const session = await request('launch');
+      run = session.recentRuns[0];
+      await waitFor(() => existsSync(file('mid-write')), 'provider paused during delivery');
+      await stopParent('SIGKILL');
+      writeFileSync(file('continue'), 'reject');
+      await waitFor(() => { try { process.kill(run!.pid, 0); return false; } catch { return true; } }, 'relay exited');
+      expect(JSON.parse(readFileSync(file('rejected.json'), 'utf8')).bytes).toBeLessThan(readFileSync(run.stdinPath!).length);
+      expect(readFileSync(run.stdoutPath, 'utf8')).toContain('complete');
+      if (mode === 'reject-mid-unterminated') {
+        expect(readFileSync(run.stderrPath, 'utf8')).toContain('provider final stderrO8_STDIN_DELIVERY_FAILED:');
+      }
+      // Recovery must use the relay receipt even if stderr contains no marker.
+      writeFileSync(run.stderrPath, 'provider final stderr');
+      await startParent(mode);
+      const recovered = await request('inspect', session.surfaceId);
+      expect(recovered.recentRuns[0].outcome).toBe('failed');
+      expect(recovered.latestSummary).toMatch(/stdin delivery failed.*EPIPE/i);
+      const delivery = JSON.parse(readFileSync(`${run.stdinPath!}.delivery.jsonl`, 'utf8').trim());
+      expect(delivery).toMatchObject({ stagedBytes: readFileSync(run.stdinPath!).length, error: expect.stringContaining('EPIPE') });
+      expect(delivery.deliveredBytes).toBeLessThan(delivery.stagedBytes);
+      expect(recovered.latestSummary).toContain(`${delivery.deliveredBytes}/${delivery.stagedBytes} bytes delivered`);
+    }, 40_000);
+
   it('refuses a truncated staged descriptor before starting the provider', async () => {
     setup();
     const stagedPath = file('input');
     writeFileSync(stagedPath, 'partial');
     const stdin = openSync(stagedPath, 'r');
+    const delivery = openSync(`${stagedPath}.delivery.jsonl`, 'wx', 0o600);
     const invocation = workerOwnedStdinInvocation({ command: process.execPath,
       args: ['-e', 'require("node:fs").writeFileSync(process.argv[1], "started")', file('started')] }, 1000);
-    const child = spawn(invocation.command, invocation.args, { stdio: [stdin, 'ignore', 'pipe'],
+    const child = spawn(invocation.command, invocation.args, { stdio: [stdin, 'ignore', 'pipe', delivery],
       env: { NODE_ENV: 'test', PATH: process.env.PATH } });
     closeSync(stdin);
+    closeSync(delivery);
     let stderr = '';
     child.stderr!.on('data', chunk => { stderr += String(chunk); });
     const [code] = await once(child, 'close');

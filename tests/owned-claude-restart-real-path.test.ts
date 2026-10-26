@@ -65,7 +65,7 @@ const state = () => api<{ alive?: boolean; lane: { sessionKey: string; status: s
 const transcript = (cursor?: string) => api<{ transcript: Array<{ id: string; text: string }> }>(`/api/runtime/transcript?sessionKey=${encodeURIComponent(surfaceId)}&limit=1000${cursor ? `&sinceId=${encodeURIComponent(cursor)}` : ''}`);
 
 beforeAll(async () => {
-  helper = buildPiWriteHelper();
+  helper = process.env.O8_PI_WRITE_BIN || buildPiWriteHelper();
   mkdirSync(repo); mkdirSync(join(root, 'operator-fixture'));
   writeFileSync(join(root, 'ws-token'), 'offline-claude-restart-token', { mode: 0o600 });
   const git = (...args: string[]) => execFileSync('git', args, { cwd: repo, stdio: 'pipe' });

@@ -30,6 +30,12 @@ process.stdin.on('end', () => {
 let ticks = 0;
 const timer = setInterval(() => {
   fs.writeFileSync(file('heartbeat'), String(++ticks));
+  if (mode.startsWith('reject-mid') && fs.existsSync(file('continue'))) {
+    fs.writeFileSync(file('rejected.json'), JSON.stringify({ bytes }));
+    fs.writeSync(2, 'provider final stderr' + (mode.endsWith('newline') ? '\n' : ''));
+    fs.writeSync(1, 'complete\n');
+    process.exit(0);
+  }
   if (fs.existsSync(file('continue'))) process.stdin.resume();
   if (fs.existsSync(file('exit'))) { clearInterval(timer); process.exit(0); }
 }, 20);
