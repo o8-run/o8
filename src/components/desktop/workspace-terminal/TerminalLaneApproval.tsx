@@ -44,10 +44,10 @@ export function TerminalLaneApproval({ terminalSession, evidence, active, readOn
     return () => { controller.abort(); if (generation.current === current) generation.current += 1; };
   }, [eligible, owner, reload, runtime, sessionKey, terminalSession]);
 
-  const current = eligible && view?.key === owner ? view : null;
+  const current = eligible && view?.key === owner && view.generation === generation.current ? view : null;
   const adapter = current?.adapter;
   const resolve = async (action: 'approve' | 'reject') => {
-    if (!adapter || pending.current) return;
+    if (!adapter || pending.current || current?.generation !== generation.current) return;
     const requestGeneration = generation.current;
     pending.current = true;
     setBusyRequest({ key: owner, generation: requestGeneration, action });
