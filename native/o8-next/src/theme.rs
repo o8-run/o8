@@ -7,6 +7,7 @@ use std::sync::LazyLock;
 pub enum Appearance {
     Dark,
     Light,
+    Glass,
 }
 
 pub struct Theme {
@@ -39,10 +40,88 @@ pub struct Theme {
 
 // This is the only appearance selection. A future system-appearance hook can
 // replace it without changing any view's choice of semantic tokens.
-static CURRENT: LazyLock<Theme> = LazyLock::new(|| Theme::for_appearance(Appearance::Dark));
+static SELECTED: LazyLock<Appearance> =
+    LazyLock::new(|| match std::env::var("O8_NEXT_APPEARANCE").as_deref() {
+        Ok("glass") => Appearance::Glass,
+        Ok("plain") => Appearance::Dark,
+        _ if cfg!(target_os = "macos") && std::env::args().any(|arg| arg == "--app-shell") => {
+            Appearance::Glass
+        }
+        _ => Appearance::Dark,
+    });
+static CURRENT: LazyLock<Theme> = LazyLock::new(|| Theme::for_appearance(*SELECTED));
 pub fn current() -> &'static Theme {
     &CURRENT
 }
+pub fn glass() -> bool {
+    matches!(*SELECTED, Appearance::Glass)
+}
+pub fn plain_background() -> Rgba {
+    Theme::for_appearance(Appearance::Dark).background
+}
+
+// src/lib/theme/glass-material.ts: the only window-wide fill in All Glass.
+pub const GLASS_VEIL: [(f32, f32); 3] = [(0., 0.78), (0.55, 0.44), (1., 0.06)];
+pub fn veil_color(alpha: f32) -> Rgba {
+    translucent(0x0a0c12, alpha)
+}
+
+// Locked chrome roles from docs/design/hurttlocker.md. GPUI's text API does
+// not expose CSS letter spacing; native tracking remains a verification gap.
+pub struct Typography {
+    pub chrome: f32,
+    pub row_title: f32,
+    pub row_meta: f32,
+    pub section: f32,
+    pub body: f32,
+    pub body_line: f32,
+    pub empty: f32,
+    pub chrome_line: f32,
+    pub weight: gpui::FontWeight,
+    pub meta_weight: gpui::FontWeight,
+}
+pub const TYPE: Typography = Typography {
+    chrome: 12.,
+    row_title: 13.5,
+    row_meta: 9.5,
+    section: 10.,
+    body: 13.,
+    body_line: 20.,
+    empty: 28.,
+    chrome_line: 1.25,
+    weight: gpui::FontWeight(300.),
+    meta_weight: gpui::FontWeight(260.),
+};
+pub struct Geometry {
+    pub header: f32,
+    pub tab_height: f32,
+    pub tab_radius: f32,
+    pub row_height: f32,
+    pub row_radius: f32,
+    pub card_radius: f32,
+    pub composer_radius: f32,
+    pub composer_width: f32,
+    pub sidebar_width: f32,
+    pub right_width: f32,
+    pub inset: f32,
+    pub gap: f32,
+    pub content_inset: f32,
+}
+pub const GEOMETRY: Geometry = Geometry {
+    header: 40.,
+    tab_height: 26.,
+    tab_radius: 7.,
+    row_height: 28.,
+    row_radius: 8.,
+    card_radius: 14.,
+    composer_radius: 18.,
+    composer_width: 720.,
+    sidebar_width: 250.,
+    right_width: 440.,
+    inset: 4.,
+    gap: 8.,
+    content_inset: 24.,
+};
 
 // GPUI takes one native family, not a CSS fallback stack. These are members of
 // --font-sans-system / --font-mono-system; .AppleSystemUIFont is -apple-system.
@@ -84,6 +163,21 @@ impl Theme {
         // --blue-soft, --green-soft and --red-soft in globals.css.
         // Code and syntax colors extend those variables where CSS has no token.
         match appearance {
+            Appearance::Glass => {
+                let mut theme = Self::for_appearance(Appearance::Dark);
+                // WORKSPACE_GLASS_OVERRIDES in src/lib/theme/context.tsx.
+                theme.background = translucent(0x000000, 0.);
+                theme.surface = theme.background;
+                theme.code_background = theme.background;
+                theme.surface_raised = translucent(0xffffff, 0.05);
+                theme.text = rgb(0xffffff);
+                theme.text_secondary = translucent(0xffffff, 0.78);
+                theme.text_muted = translucent(0xffffff, 0.66);
+                theme.text_faint = translucent(0xffffff, 0.5);
+                theme.hover = translucent(0xffffff, 0.04);
+                theme.selection = translucent(0xffffff, 0.06);
+                theme
+            }
             Appearance::Dark => Self {
                 background: rgb(0x1c1c1e),
                 surface: translucent(0x1c1c1e, 0.82),

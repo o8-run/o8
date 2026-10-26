@@ -58,7 +58,9 @@ async function main() {
   }
   if (process.argv.includes('--shell') && !process.argv.includes('--inbox-empty')) {
     const { seedShellWorkspace } = await import('./shell-fixture');
-    seeds.push(seedShellWorkspace(dataDir, root));
+    for (let index = 1; index < (process.argv.includes('--shell-many') ? 15 : 2); index++) {
+      seeds.push(seedShellWorkspace(dataDir, root, index));
+    }
   }
   const composer = process.argv.includes('--composer');
   const transcriptFixtures = process.argv.includes('--transcript');
@@ -68,7 +70,7 @@ async function main() {
       seeds.push({ id, title: id, messages: [] });
       writeFileSync(join(dataDir, 'chat-history', `${id}.json`), JSON.stringify({
         title: id, repoPath: repo, backend: 'pi', model: id.endsWith('-legacy') ? null : 'pi', orchestratorVisible: true,
-        savedAt: '2026-10-01T00:00:00.000Z', messages: [{ id: 'initial', role: 'assistant', content: 'Fixture ready',
+        savedAt: '2026-10-01T00:00:00.000Z', messages: process.argv.includes('--composer-empty') ? [] : [{ id: 'initial', role: 'assistant', content: 'Fixture ready',
           timestamp: 1790812800000, receipt: { permissionMode: 'plan' } }],
       }));
     }
@@ -117,7 +119,9 @@ async function main() {
   });
   const terminal = process.argv.includes('--terminal');
   const wsToken = getOrCreateWsToken();
+  const surfaceSocket = surfaces.find(surface => surface.socket)?.socket;
   const closeSockets = terminal ? () => {}
+    : surfaceSocket ? await surfaceSocket(server, wsToken, requests)
     : (transcriptFixtures ? attachTranscriptSocket : attachReplaySocket)(server, wsToken, requests);
   let closeTerminal = async () => {};
   server.listen(Number(process.env.O8_NEXT_FIXTURE_PORT || 0), '127.0.0.1', async () => {

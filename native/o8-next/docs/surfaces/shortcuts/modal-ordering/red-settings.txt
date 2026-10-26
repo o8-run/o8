@@ -1,0 +1,16 @@
+running 1 test
+
+thread 'shell::shortcuts::tests::modal::shortcuts_settings_control_w_preserves_live_and_persisted_tabs' panicked at src/surfaces/shortcuts/modal_tests.rs:31:5:
+assertion `left == right` failed: Settings owns Ctrl+W; its underlying tab must survive
+  left: ([], 0)
+ right: ([Session("thoughts-long")], 0)
+test shell::shortcuts::tests::modal::shortcuts_settings_control_w_preserves_live_and_persisted_tabs ... FAILED
+
+failures:
+
+failures:
+    shell::shortcuts::tests::modal::shortcuts_settings_control_w_preserves_live_and_persisted_tabs
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 178 filtered out; finished in 12.60s
+
+error: test failed, to rerun pass `--bin o8-next`

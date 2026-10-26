@@ -38,7 +38,7 @@ function collapseInternalSelfReview(text: string) {
   });
 }
 
-function redactSensitiveTranscriptText(text: string) {
+export function redactSensitiveTranscriptText(text: string) {
   let next = text;
   next = next.replace(/(\bAuthorization\s*:\s*)Bearer\s+[A-Za-z0-9._~+/=-]{8,}/gi, '$1Bearer [redacted]');
   next = next.replace(/\bBearer\s+[A-Za-z0-9._~+/=-]{8,}\b/gi, 'Bearer [redacted]');

@@ -11,6 +11,8 @@ import { serializeTranscriptForStorage, deserializeStoredTranscript } from '@/li
 import { visibleVoiceTranscript } from '@/lib/transcripts/voice-captions';
 import { dedupeDisplayMessages } from '@/components/desktop/thoughts/chat-panel/dedupe-display-messages';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
+import { persistRuntimeSessionHandoff, readRuntimeSessionHandoff } from '@/lib/lane/runtime-session-handoff';
+import { writePersistedLlmChat } from '@/lib/llm/chat-history-store';
 
 // End-to-end verify for #1282: the real chat-history route must merge by default
 // (a partial POST can't drop a stored turn) and full-replace only on replace:true.
@@ -61,6 +63,19 @@ afterAll(async () => {
 });
 
 describe('chat-history route merge (#1282)', () => {
+  it.each(['route', 'store'] as const)('preserves a pending runtime handoff through a stale %s save', async writer => {
+    const id = `${tabId}-handoff-${writer}`;
+    try {
+      await post({ tabId: id, messages: [user, assistant], repoPath: process.cwd() });
+      const state = { previousThreadId: 'missing-thread', replacementThreadId: 'empty-thread', inputAccepted: false };
+      persistRuntimeSessionHandoff(id, state);
+      if (writer === 'route') expect((await post({ tabId: id, messages: [user] })).ok).toBe(true);
+      else writePersistedLlmChat(id, { messages: [{ ...user, role: 'user' }] });
+      expect(readRuntimeSessionHandoff(id)).toEqual(state);
+    } finally {
+      await DELETE(new NextRequest(`http://localhost/api/v2/chat-history?tabId=${id}`));
+    }
+  });
   it('persists streamed voice, its exact send link and separate spoken replies across stale writes and reload', async () => {
     let captions: MobileTranscriptEntry[] = [];
     const projection = new LiveCaptions('voice-session', updates => { captions = dedupeDisplayMessages([...captions, ...updates]); });

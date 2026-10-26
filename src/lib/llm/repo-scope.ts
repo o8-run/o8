@@ -31,7 +31,7 @@ export async function resolveRegisteredRepoScope(requestedPath?: string | null):
     return { repoRoot: null, repo: null };
   }
 
-  const normalized = path.resolve(requestedPath.trim());
+  const normalized = path.resolve(requestedPath);
   const repo = await findRepoByLocalPath(normalized).catch(() => null);
   if (!repo) {
     return { repoRoot: null, repo: null };

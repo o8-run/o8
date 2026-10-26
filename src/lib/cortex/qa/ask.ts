@@ -1,3 +1,4 @@
+import { assertKnowledgeAnswerCurrent } from '@/lib/cortex/knowledge/answer-validity';
 /**
  * Cortex Q&A public API (epic #915 sub-2).
  *
@@ -18,6 +19,7 @@
  */
 
 import 'server-only';
+import { requestProjectScopeKey } from '@/lib/repos/request-project-scope';
 import { readMemoryRevision } from '@/lib/cortex/memory-revision';
 
 import { createHash } from 'node:crypto';
@@ -75,7 +77,7 @@ interface CacheEntry {
 const answerCache = new Map<string, CacheEntry>();
 
 function scopeKey(repoPath: string | undefined, projectId: string | undefined, terse = false): string {
-  return `${readMemoryRevision()}\x00${brainRouteCacheKeySync()}\x00${repoPath ?? ''}\x00${projectId ?? ''}${terse ? '\x00terse' : ''}`;
+  return `${readMemoryRevision()}\x00${brainRouteCacheKeySync()}\x00${repoPath ?? ''}\x00${projectId ?? ''}${terse ? '\x00terse' : ''}\x00${requestProjectScopeKey()}`;
 }
 
 /**
@@ -151,7 +153,7 @@ function cacheKey(
   terse = false,
 ): string {
   return createHash('sha256')
-    .update(`${readMemoryRevision()}\x00${brainRouteCacheKeySync()}\x00${normalizeQuestionForCache(question)}\x00${repoPath ?? ''}\x00${projectId ?? ''}${terse ? '\x00terse' : ''}`)
+    .update(`${readMemoryRevision()}\x00${brainRouteCacheKeySync()}\x00${normalizeQuestionForCache(question)}\x00${repoPath ?? ''}\x00${projectId ?? ''}${terse ? '\x00terse' : ''}\x00${requestProjectScopeKey()}`)
     .digest('hex');
 }
 
@@ -398,7 +400,9 @@ async function runAskCortexUncached(
   let answer = '';
   const citations: Citation[] = [];
 
+  const assertKnowledgeCurrent = () => assertKnowledgeAnswerCurrent(topRows, memoryRevision);
   const emit: SseEmit = (name, payload) => {
+    assertKnowledgeCurrent();
     if (name === 'token') {
       answer += (payload as { text: string }).text ?? '';
     } else if (name === 'citation') {
@@ -409,6 +413,7 @@ async function runAskCortexUncached(
         title?: string;
         excerpt?: string;
         url?: string;
+        sourcePath?: string;
       };
       citations.push({
         kind: p.kind,
@@ -417,6 +422,7 @@ async function runAskCortexUncached(
         title: p.title,
         excerpt: p.excerpt,
         url: p.url,
+        ...(p.sourcePath ? { sourcePath: p.sourcePath } : {}),
       });
     }
   };
@@ -427,6 +433,7 @@ async function runAskCortexUncached(
     await composeClassB(question, repoPath, topRows, emit, composeOptions);
   }
 
+  assertKnowledgeCurrent();
   const result: AskCortexResult = {
     answer: answer.trim(),
     citations,
@@ -560,7 +567,9 @@ export async function runAskPipeline(
   let cachedAnswer = '';
   const cachedCitations: Citation[] = [];
 
+  const assertKnowledgeCurrent = () => assertKnowledgeAnswerCurrent(topRows, memoryRevision);
   const trackingEmit: SseEmit = (name, payload) => {
+    assertKnowledgeCurrent();
     if (name === 'token') {
       cachedAnswer += (payload as { text: string }).text ?? '';
     } else if (name === 'citation') {
@@ -571,6 +580,7 @@ export async function runAskPipeline(
         title?: string;
         excerpt?: string;
         url?: string;
+        sourcePath?: string;
       };
       cachedCitations.push({
         kind: p.kind,
@@ -579,6 +589,7 @@ export async function runAskPipeline(
         title: p.title,
         excerpt: p.excerpt,
         url: p.url,
+        ...(p.sourcePath ? { sourcePath: p.sourcePath } : {}),
       });
     }
     emit(name, payload);
@@ -590,6 +601,7 @@ export async function runAskPipeline(
     await composeClassB(question, repoPath, topRows, trackingEmit, options);
   }
 
+  assertKnowledgeCurrent();
   // Store in cache for follow-up identical questions.
   if (cachedAnswer.trim() && memoryRevision === readMemoryRevision()) {
     setCache(key, {

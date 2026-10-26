@@ -70,7 +70,7 @@ export function handleCodexJsonLine(
   line: string,
   state: CodexLineHandlerState,
   onEvent: (event: OrchestratorEvent) => void,
-  options: { isLocalModel: boolean; model?: string; onActivity?: () => void },
+  options: { isLocalModel: boolean; model?: string; onActivity?: () => void; onInputAccepted?: () => void },
 ): boolean {
   if (!line.trim()) return false;
   try {
@@ -80,6 +80,10 @@ export function handleCodexJsonLine(
 
     if (type === 'thread.started' && typeof parsed.thread_id === 'string') {
       state.threadId = parsed.thread_id;
+      return true;
+    }
+    if (type === 'turn.started') {
+      options.onInputAccepted?.();
       return true;
     }
 

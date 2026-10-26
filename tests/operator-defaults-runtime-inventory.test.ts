@@ -110,11 +110,12 @@ describe('operator-defaults dispatchable runtime inventory', () => {
   });
 
   it('applies the same compatibility guard to direct settings.toml saves', async () => {
+    const { getOrCreateWsToken } = await import('@/lib/ws-auth');
     const before = await operatorDefaultsRoute.GET(new Request('http://127.0.0.1/api/panel/operator-defaults'));
     const payload = await before.json();
     const response = await operatorDefaultsRoute.POST(new Request('http://127.0.0.1/api/panel/operator-defaults', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getOrCreateWsToken()}` },
       body: JSON.stringify({
         settingsToml: serializeOperatorDefaultsToml({
           ...payload.values,

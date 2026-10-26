@@ -13,7 +13,7 @@
  * be copied into such a process if ever needed.
  */
 
-import { execSync } from 'node:child_process';
+import { execSync } from '@/lib/providers/child-process';
 import { existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';

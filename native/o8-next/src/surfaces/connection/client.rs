@@ -15,6 +15,7 @@ pub struct Client {
     transport: Arc<RwLock<transport::Client>>,
     workspace: Option<String>,
     desktop_session: Option<String>,
+    wake: Option<async_channel::Sender<()>>,
 }
 impl Client {
     pub fn new(origin: &str) -> Result<Self, String> {
@@ -28,13 +29,26 @@ impl Client {
             )?)),
             workspace: None,
             desktop_session: None,
+            wake: None,
         })
     }
     fn snapshot(&self) -> transport::Client {
-        self.transport
+        let client = self
+            .transport
             .read()
             .unwrap_or_else(|error| error.into_inner())
-            .clone()
+            .clone();
+        match &self.wake {
+            Some(wake) => client.with_wakeup(wake.clone()),
+            None => client,
+        }
+    }
+    pub(crate) fn with_wakeup(mut self, wake: async_channel::Sender<()>) -> Self {
+        self.wake = Some(wake);
+        self
+    }
+    pub(crate) fn wake(&self) {
+        self.snapshot().wake();
     }
     pub(crate) fn refresh_bearer(&self, token: Option<String>) -> Result<(), String> {
         let origin = self.url("/").map_err(|_| "Invalid server URL")?;

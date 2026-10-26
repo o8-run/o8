@@ -1,0 +1,4 @@
+---- shell::issues::tests::review_tests::round1_symlink_worker_survives_real_refresh_and_send stdout ----
+
+thread 'shell::issues::tests::review_tests::round1_symlink_worker_survives_real_refresh_and_send' (168268) panicked at src/surfaces/../issue_review_tests.rs:197:53:
+called `Option::unwrap()` on a `None` value

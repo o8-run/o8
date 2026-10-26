@@ -1,3 +1,4 @@
+import { assertRuntimeEffortPin } from '@/lib/orchestrator/effort-pin';
 import { execFile } from '@/lib/providers/child-process';
 import { promisify } from 'node:util';
 import type {
@@ -82,6 +83,7 @@ export class CustomerWorkerAdapter extends RemoteRuntimeAdapter {
   };
 
   protected async buildLaunchRequest(opts: LaunchOptions, runId: string): Promise<LaunchRequest> {
+    assertRuntimeEffortPin(this.id, opts.model, opts.effort);
     const repoUrl = await gitStdout(opts.cwd, ['config', '--get', 'remote.origin.url']);
     if (!repoUrl) {
       throw new Error('remote.origin.url is not configured');
@@ -100,6 +102,7 @@ export class CustomerWorkerAdapter extends RemoteRuntimeAdapter {
       remoteBranch: `agent/remote-${runId.slice(0, 8)}`,
       packetPrompt: opts.prompt,
       modelHint: opts.model,
+      effort: opts.effort,
     };
   }
 

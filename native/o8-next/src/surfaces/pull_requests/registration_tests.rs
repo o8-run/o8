@@ -67,14 +67,14 @@ fn pull_requests_single_registration_owns_the_request_adapter() {
     fs::copy(original.join("Cargo.lock"), scratch.0.join("Cargo.lock")).unwrap();
     // Keep the exact dependency graph and the original immutable vendor source.
     // Only the temporary manifest's relative vendor path needs relocation.
-    let manifest = fs::read_to_string(original.join("Cargo.toml")).unwrap();
-    let vendor = serde_json::to_string(&original.join("vendor/taffy")).unwrap();
-    assert!(manifest.contains("path = \"vendor/taffy\""));
-    fs::write(
-        scratch.0.join("Cargo.toml"),
-        manifest.replacen("path = \"vendor/taffy\"", &format!("path = {vendor}"), 1),
-    )
-    .unwrap();
+    let mut manifest = fs::read_to_string(original.join("Cargo.toml")).unwrap();
+    for dependency in ["taffy", "gpui"] {
+        let relative = format!("path = \"vendor/{dependency}\"");
+        let vendor = serde_json::to_string(&original.join("vendor").join(dependency)).unwrap();
+        assert!(manifest.contains(&relative));
+        manifest = manifest.replacen(&relative, &format!("path = {vendor}"), 1);
+    }
+    fs::write(scratch.0.join("Cargo.toml"), manifest).unwrap();
     // Separate from the outer cargo-test target lock; retain dependency metadata
     // within CARGO_TARGET_DIR for subsequent red/green/full runs.
     let check_target = target.join("pull-request-registration-target");

@@ -45,7 +45,7 @@ function persistValidToken(owner = OWNER, token = 'ghs_managed_test_token') {
     token,
     expiresAt: new Date(Date.now() + 55 * 60 * 1000).toISOString(),
     installationId: 4242,
-    accountLogin: 'chris-example',
+    accountLogin: 'someone',
     ownerClerkUserId: owner,
   });
 }
@@ -81,7 +81,7 @@ describe('managed GitHub App broker seam', () => {
 
     const installation = await getInstallationForRepo('someone/some-repo');
     expect(installation.id).toBe(4242);
-    expect(installation.account?.login).toBe('chris-example');
+    expect(installation.account?.login).toBe('someone');
     expect(await getInstallationToken(installation.id)).toBe('ghs_managed_test_token');
   });
 

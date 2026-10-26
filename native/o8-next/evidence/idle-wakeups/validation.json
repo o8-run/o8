@@ -1,0 +1,58 @@
+{
+  "typescript": {
+    "exit": 0,
+    "command": "NODE_OPTIONS=--max-old-space-size=8192 npx --no-install tsc --noEmit"
+  },
+  "hermeticWebSuite": {
+    "passed": 9057,
+    "failed": 1,
+    "skipped": 5,
+    "failedFile": "tests/desktop-account-identity.test.ts",
+    "isolatedRetry": {
+      "passed": 3,
+      "failed": 1
+    }
+  },
+  "nativeSuite": {
+    "passed": 128,
+    "failed": 6,
+    "ignored": 3,
+    "failures": [
+      "shell::activity::tests::activity_palette_reaches_native_pane",
+      "shell::issues::tests::issues_worker_receives_linked_context_through_stream",
+      "shell::issues::tests::review_tests::round1_repository_drafts_survive_a_b_a",
+      "shell::pull_requests::registration_tests::pull_requests_single_registration_owns_the_request_adapter",
+      "ui::o8d_read_tests::saved_history_surface_with_only_o8d",
+      "ui::tests::worker_tests::worker_send_steer_queue_promote_remove_and_streaming_latency"
+    ]
+  },
+  "nativeRetries": {
+    "linkedIssueContext": "passed",
+    "repositoryDrafts": "failed: issue-view-17 did not reach CPU paint",
+    "workerStream": "failed: first worker transcript timeout",
+    "registrationVendorRelocation": "passed: registered and removed application builds plus missing-adapter failure"
+  },
+  "eventPumpTests": {
+    "passed": 2
+  },
+  "frameClockTests": {
+    "passed": 4
+  },
+  "clippy": {
+    "application": "passed with existing warnings",
+    "gpui": "passed"
+  },
+  "nativeRepaint": {
+    "passed": 12,
+    "failed": 0,
+    "testSupport": false
+  },
+  "licenseAudit": {
+    "gplPackages": 0
+  },
+  "remainingLimits": [
+    "Required o8d binary absent for saved-history test",
+    "Measured app shell saved-session mode; connected-terminal and standalone-conversation idle not established",
+    "Minimize and restore tested with simulated occlusion notifications"
+  ]
+}

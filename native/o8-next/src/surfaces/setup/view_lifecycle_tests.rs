@@ -31,8 +31,10 @@ fn onboarding_module_owns_busy_navigation_and_does_not_reopen_after_close(cx: &m
     draw(cx);
     click(cx, "shell-settings");
     assert!(shell.read_with(cx, |s, _| s.surfaces.settings.view.is_none()), "busy setup must intercept shell navigation without a registry veto");
-    cx.simulate_keystrokes("ctrl-k");
-    assert!(!shell.read_with(cx, |s, _| s.palette));
+    for chord in ["ctrl-k", "cmd-k", "ctrl-shift-p", "cmd-shift-p"] {
+        cx.simulate_keystrokes(chord);
+        assert!(!shell.read_with(cx, |s, _| s.palette), "busy setup must block palette navigation: {chord}");
+    }
     click(cx, "setup-close");
     assert!(shell.read_with(cx, |s, _| s.surfaces.setup.view.is_some()));
     setup.update(cx, |s, cx| { s.busy = false; cx.notify(); });
@@ -44,4 +46,6 @@ fn onboarding_module_owns_busy_navigation_and_does_not_reopen_after_close(cx: &m
     assert!(shell.read_with(cx, |s, _| s.surfaces.setup.view.is_none()), "closing setup is retained for this shell lifetime");
     click(cx, "shell-settings");
     assert!(shell.read_with(cx, |s, _| s.surfaces.settings.view.is_some()), "idle navigation remains available");
+    cx.simulate_keystrokes("ctrl-shift-p");
+    assert!(shell.read_with(cx, |s, _| s.palette), "idle global palette navigation remains available");
 }

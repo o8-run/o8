@@ -1,0 +1,11 @@
+running 5 tests
+test shell::shortcuts::tests::review::shortcuts_control_alt_arrows_belong_to_grid_panes ... ok
+test shell::shortcuts::tests::review::shortcuts_focused_grid_terminal_keeps_question_and_close_keys ... ok
+test shell::shortcuts::tests::review::shortcuts_focused_text_field_keeps_help_and_close_keys ... ok
+test shell::shortcuts::tests::shortcuts_overlay_bindings_dismissal_and_typing ... O8_NEXT_SHORTCUTS_EVIDENCE {"endpoint":"headless GPUI CPU scene; no GPU/compositor","openToFirstFrameMs":39.401908999999996,"interactionToFrameMs":51.044397}
+ok
+test terminal::tests::production_pty_to_gpui_terminal ... terminal viewport=768x584 content=Bounds { origin: Point { x: 14px, y: 40px }, size: Size { 742px × 532px } } kernel-pty=Size(92, 29)
+terminal viewport=793x607 content=Bounds { origin: Point { x: 14px, y: 40px }, size: Size { 767px × 555px } } kernel-pty=Size(95, 30)
+ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 81 filtered out; finished in 67.19s

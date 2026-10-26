@@ -1,0 +1,28 @@
+   × pages the same 2,000 persisted threads as the desktop history route in recency order 1103ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/next-sidebar-real-path.test.ts > pages the same 2,000 persisted threads as the desktop history route in recency order
+AssertionError: expected [ { …(15) }, { …(15) }, …(2498) ] to have a length of 2000 but got 2500
+
+- Expected
++ Received
+
+- 2000
++ 2500
+
+ ❯ tests/next-sidebar-real-path.test.ts:40:18
+     38|   const response = await fetch(`${origin}/api/v2/chat-history/list?inc…
+     39|   const desktop = (await response.json()).conversations as Array<{ tab…
+     40|   expect(actual).toHaveLength(2000);
+       |                  ^
+     41|   expect(actual.map(thread => thread.id)).toEqual(desktop.filter(row =…
+     42|   expect(new Set(actual.map(thread => thread.repoPath)).size).toBe(2);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 passed (2)
+   Start at  18:20:36
+   Duration  29.90s (transform 1.56s, setup 2.03s, import 107ms, tests 25.43s, environment 0ms)

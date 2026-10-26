@@ -1,0 +1,7 @@
+running 2 tests
+test shell::tests::placement_shell_tabs_use_compact_rows ... ok
+test shell::tests::shell_palette_switch_restart_and_server_down ... O8_NEXT_SHELL_EVIDENCE {"endpoint":"GPUI TestAppContext CPU scene paint; test text system; no GPU/compositor","platform":"linux","launchToInteractiveMs":377.204683,"paletteOpenToFrameMs":[19.759318,14.930893000000001,40.666875999999995,19.859106,15.415711,44.884296,40.309298,53.228524,26.317322,21.101124,25.680149999999998,26.967365,47.648197,22.610816999999997,47.704058,53.265089,50.431115,18.421639,23.480865,49.95497],"workspaceSwitchMs":[43.345269,21.735933,51.053947,67.101112,80.64811800000001,65.480954,70.328477,56.254200999999995,42.713454999999996,108.537978],"idleMemoryMiB":39.953125,"workspaces":2,"restoredSurfaces":3}
+ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 135 filtered out; finished in 8.53s
+

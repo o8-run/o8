@@ -37,6 +37,52 @@ interface ReapDashSessionsOptions extends DashGcOptions {
   beforeKill: (sessionName: string) => void;
 }
 
+function retireSession(session: DashSessionInventory, owner: string, interrupt = false): boolean {
+  if (!/^\$\d+$/.test(session.sessionId) || !/^[1-9]\d*$/.test(session.serverPid)
+    || !Number.isSafeInteger(session.createdMs) || session.createdMs <= 0) return false;
+  const guard = `#{&&:#{==:#{pid},${session.serverPid}},#{&&:#{==:#{session_created},${session.createdMs / 1000}},#{==:#{${DASH_PROFILE_OWNER_OPTION}},${owner}}}}`;
+  try {
+    const output = execFileSync(resolveTmuxBinary(), dashTmuxArgs('if-shell', '-F', '-t', session.sessionId, guard,
+      `${interrupt ? 'send-keys' : 'kill-session'} -t '${session.sessionId}'${interrupt ? ' C-c' : ''} ; display-message -p o8-session-signalled`, ''), {
+      windowsHide: true, timeout: 3000, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], env: sanitizePtyEnv() as NodeJS.ProcessEnv,
+    });
+    return output.trim() === 'o8-session-signalled';
+  } catch { return false; }
+}
+
+/** Resolve native selectors on the explicit dashboard server, never an inherited socket. */
+function resolveDashTmuxSelector(selector: string): DashSessionInventory | null {
+  // tmux interprets semicolons in argv as command separators even without a shell.
+  if (!selector.trim() || /[;\0\r\n]/u.test(selector)) return null;
+  try {
+    // list-panes fails on missing/ambiguous targets; display-message may return
+    // success with an empty or fallback context. Multiple panes share one row.
+    const output = execFileSync(resolveTmuxBinary(), dashTmuxArgs('list-panes', '-t', selector, '-F',
+      `#{session_name}\t#{session_created}\t#{${DASH_PROFILE_OWNER_OPTION}}\t#{session_id}\t#{pid}`), {
+      windowsHide: true, timeout: 3000, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], env: sanitizePtyEnv() as NodeJS.ProcessEnv,
+    });
+    const rows = [...new Set(output.trim().split('\n'))];
+    if (rows.length !== 1) return null;
+    const fields = rows[0].split('\t');
+    if (fields.length !== 5 || !fields[0]) return null;
+    const [name, created, profileOwner, sessionId, serverPid] = fields;
+    return { name, createdMs: Number(created) * 1000, profileOwner, sessionId, serverPid };
+  } catch { return null; }
+}
+
+/** Every selector must resolve to one owned session before the guarded action. */
+export function signalOwnedDashTmuxSession(selector: string, signal: string): { sessionName: string } | null {
+  const session = resolveDashTmuxSelector(selector);
+  if (!session) return null;
+  try {
+    const owner = dashProfileOwnerId();
+    if (session.profileOwner === owner && retireSession(session, owner, signal === 'SIGINT')) {
+      return { sessionName: session.name };
+    }
+  } catch { /* An unresolved profile has no retirement authority. */ }
+  return null;
+}
+
 /** The bridge's real collector, including durable references and tmux I/O. */
 export function reapOrphanDashTmuxSessions(options: ReapDashSessionsOptions): number {
   const dataDir = options.dataDir ?? getDataDir();
@@ -63,17 +109,9 @@ export function reapOrphanDashTmuxSessions(options: ReapDashSessionsOptions): nu
     if (!session || !/^\$\d+$/.test(session.sessionId) || !/^[1-9]\d*$/.test(session.serverPid)
       || session.createdMs <= 0) continue;
     options.beforeKill(name);
-    try {
-      // Reused names and restarted servers are new work. Evaluate ownership
-      // and the inventoried identity inside tmux's command queue, then retire
-      // that session id only, never whichever session now has its old name.
-      const guard = `#{&&:#{==:#{pid},${session.serverPid}},#{&&:#{==:#{session_created},${session.createdMs / 1000}},#{==:#{${DASH_PROFILE_OWNER_OPTION}},${owner}}}}`;
-      const output = execFileSync(resolveTmuxBinary(), dashTmuxArgs('if-shell', '-F', '-t', session.sessionId, guard,
-        `kill-session -t '${session.sessionId}' ; display-message -p o8-gc-retired`, ''), {
-        windowsHide: true, timeout: 3000, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], env: sanitizePtyEnv() as NodeJS.ProcessEnv,
-      });
-      if (output.trim() === 'o8-gc-retired') killed += 1;
-    } catch { /* already gone */ }
+    // Reused names and restarted servers are new work. Retire only the
+    // inventoried server/session identity inside tmux's command queue.
+    if (retireSession(session, owner)) killed += 1;
   }
   return killed;
 }

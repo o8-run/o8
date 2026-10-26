@@ -1,0 +1,44 @@
+final-js
+ Test Files  7 passed (7)
+      Tests  38 passed (38)
+
+final-native
+test result: ok. 34 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 175.55s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.17s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+final-native-cli
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+final-sidebar
+Sidebar cases from the final full native run:
+test shell::tests::shell_retains_sidebar_selection_and_view_identity ... ok
+test shell::tests::sidebar_real_path_matches_desktop_and_opens_session ... ok
+test shell::tests::sidebar_tests::sidebar_2000_thread_first_paint_and_scroll_measurement ... ok
+test shell::tests::sidebar_tests::sidebar_group_order_search_keyboard_rename_archive_and_live_events ... ok
+test shell::tests::sidebar_tests::sidebar_search_matches_desktop_message_text_route ... ok
+test shell::tests::sidebar_tests::sidebar_unassigned_thread_opens_session ... ok
+test shell::tests::sidebar_tests::sidebar_worker_archive_real_path ... ok
+
+o8d-tests
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.05s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.65s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.24s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+Required static checks
+{
+  "tsc": 0,
+  "typecheck-fast": 0,
+  "eslint": 0,
+  "rule-check": 0,
+  "classification": 0
+}

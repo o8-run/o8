@@ -1,0 +1,58 @@
+{
+  "stage": "after",
+  "endpoint": "Linux real CLI; four owned inactive virtual-display windows; process CPU excludes fixture and display server",
+  "measurements": [
+    {
+      "appearance": "plain",
+      "viewport": [
+        900,
+        700
+      ],
+      "wallSeconds": 60.29220357799932,
+      "processCpuSeconds": 5.03,
+      "oneCoreCpuPercent": 8.34270386799306,
+      "captureBytes": 33700,
+      "captureColors": 680,
+      "captureCandidate": true
+    },
+    {
+      "appearance": "plain",
+      "viewport": [
+        1680,
+        1050
+      ],
+      "wallSeconds": 60.47276145199976,
+      "processCpuSeconds": 9.870000000000001,
+      "oneCoreCpuPercent": 16.321397870732778,
+      "captureBytes": 38921,
+      "captureColors": 680,
+      "captureCandidate": true
+    },
+    {
+      "appearance": "glass",
+      "viewport": [
+        900,
+        700
+      ],
+      "wallSeconds": 60.930197376999786,
+      "processCpuSeconds": 5.13,
+      "oneCoreCpuPercent": 8.419470510260478,
+      "captureBytes": 33700,
+      "captureColors": 680,
+      "captureCandidate": true
+    },
+    {
+      "appearance": "glass",
+      "viewport": [
+        1680,
+        1050
+      ],
+      "wallSeconds": 61.10583728700112,
+      "processCpuSeconds": 9.81,
+      "oneCoreCpuPercent": 16.05411272563784,
+      "captureBytes": 38921,
+      "captureColors": 680,
+      "captureCandidate": true
+    }
+  ]
+}

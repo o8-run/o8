@@ -1,0 +1,55 @@
+running 11 tests
+test shell::tests::look::chrome_refresh_keeps_workspace_selected_during_load ...
+thread 'shell::tests::look::chrome_refresh_keeps_workspace_selected_during_load' (141051) panicked at src/shell.rs:25:1:
+internal error: entered unreachable code: shell command
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+test shell::tests::look::chrome_switcher_cancel_restores_composer_with_platform_shortcut ...
+thread 'shell::tests::look::chrome_switcher_cancel_restores_composer_with_platform_shortcut' (141076) panicked at src/shell.rs:25:1:
+internal error: entered unreachable code: shell command
+FAILED
+test shell::tests::look::correction_fifteenth_workspace_scrolls_into_view ...
+thread 'shell::tests::look::correction_fifteenth_workspace_scrolls_into_view' (141099) panicked at src/shell.rs:25:1:
+internal error: entered unreachable code: shell command
+FAILED
+test shell::tests::look::correction_native_screenshots ... ignored, requires an owned isolated X11 display, Vulkan software driver and PNG capture tool
+test shell::tests::look::correction_palette_brain_resumes_the_session_draft ...
+thread 'shell::tests::look::correction_palette_brain_resumes_the_session_draft' (141195) panicked at src/shell_look_tests.rs:205:9:
+assertion `left == right` failed
+  left: String("Retained Brain draft")
+ right: "Retained Brain draft via palette"
+FAILED
+test shell::tests::look::correction_placement_uses_the_single_shell_header ...
+thread 'shell::tests::look::correction_placement_uses_the_single_shell_header' (141218) panicked at src/shell.rs:25:1:
+internal error: entered unreachable code: shell command
+FAILED
+test shell::tests::look::correction_rebase_keeps_header_without_secondary_labels ... ok
+test shell::tests::look::correction_refresh_recovers_initial_history_503 ...
+thread 'shell::tests::look::correction_refresh_recovers_initial_history_503' (141264) panicked at src/shell.rs:25:1:
+internal error: entered unreachable code: shell command
+FAILED
+test shell::tests::look::placement_shell_tabs_use_compact_rows ... ok
+test shell::tests::look::shell_chrome_fifteen_workspaces_keeps_one_switcher ...
+thread 'shell::tests::look::shell_chrome_fifteen_workspaces_keeps_one_switcher' (141336) panicked at src/shell.rs:25:1:
+internal error: entered unreachable code: shell command
+FAILED
+test shell::tests::shell_palette_switch_restart_and_server_down ...
+thread 'shell::tests::shell_palette_switch_restart_and_server_down' (141398) panicked at src/shell.rs:25:1:
+internal error: entered unreachable code: shell command
+FAILED
+
+failures:
+
+failures:
+    shell::tests::look::chrome_refresh_keeps_workspace_selected_during_load
+    shell::tests::look::chrome_switcher_cancel_restores_composer_with_platform_shortcut
+    shell::tests::look::correction_fifteenth_workspace_scrolls_into_view
+    shell::tests::look::correction_palette_brain_resumes_the_session_draft
+    shell::tests::look::correction_placement_uses_the_single_shell_header
+    shell::tests::look::correction_refresh_recovers_initial_history_503
+    shell::tests::look::shell_chrome_fifteen_workspaces_keeps_one_switcher
+    shell::tests::shell_palette_switch_restart_and_server_down
+
+test result: FAILED. 2 passed; 8 failed; 1 ignored; 0 measured; 171 filtered out; finished in 13.42s
+
+error: test failed, to rerun pass `--bin o8-next`

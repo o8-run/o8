@@ -1,5 +1,23 @@
 use super::*;
 use crate::shell::test_support::*;
+// Drive main's retained sidebar lifecycle too: a streamed update can fence an
+// in-flight HTTP load, which is retried by the normal shell tick.
+fn settled(shell: &Entity<Shell>, cx: &mut VisualTestContext) {
+    let started = Instant::now();
+    loop {
+        shell.update_in(cx, |s, window, cx| s.tick(false, window, cx));
+        cx.run_until_parked();
+        draw(cx);
+        if !shell.read_with(cx, |s, _| s.loading) {
+            return;
+        }
+        assert!(
+            started.elapsed() < Duration::from_secs(30),
+            "connection load must settle"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
 // Real shell, production HTTP handlers, and an actual stopped/restarted host.
 #[gpui::test]
 fn shell_recovers_from_down_and_restart_without_reopening(cx: &mut TestAppContext) {
@@ -14,12 +32,12 @@ fn shell_recovers_from_down_and_restart_without_reopening(cx: &mut TestAppContex
         cx,
     );
     let cx = &mut visual;
-    cx.run_until_parked();
-    draw(cx);
+    settled(&shell, cx);
     assert_eq!(shell.read_with(cx, |s, _| s.notice.clone()), "Server down");
     let _restarted = Fixture::on_port(url::Url::parse(&origin).unwrap().port().unwrap());
     shell.update_in(cx, |s, window, cx| s.tick(true, window, cx));
     ready(&shell, cx);
+    settled(&shell, cx);
     assert!(shell.read_with(cx, |s, _| s.connected));
     let selected = shell.read_with(cx, |s, _| s.state.selected.clone());
     let tab = shell.read_with(cx, |s, _| s.active().unwrap());
@@ -29,8 +47,7 @@ fn shell_recovers_from_down_and_restart_without_reopening(cx: &mut TestAppContex
     });
     drop(_restarted);
     shell.update_in(cx, |s, window, cx| s.tick(true, window, cx));
-    cx.run_until_parked();
-    draw(cx);
+    settled(&shell, cx);
     assert!(!shell.read_with(cx, |s, _| s.connected));
     cx.simulate_keystrokes("ctrl-w");
     assert_eq!(
@@ -52,6 +69,7 @@ fn shell_recovers_from_down_and_restart_without_reopening(cx: &mut TestAppContex
     let _again = Fixture::on_port(url::Url::parse(&origin).unwrap().port().unwrap());
     shell.update_in(cx, |s, window, cx| s.tick(true, window, cx));
     ready(&shell, cx);
+    settled(&shell, cx);
     assert!(shell.read_with(cx, |s, _| s.connected));
 }
 
@@ -68,8 +86,7 @@ fn shell_names_missing_and_rejected_tokens_without_leaking_them(cx: &mut TestApp
             State::default(),
             cx,
         );
-        visual.run_until_parked();
-        draw(&mut visual);
+        settled(&shell, &mut visual);
         assert_eq!(shell.read_with(&visual, |s, _| s.notice.clone()), problem);
         assert!(!shell.read_with(&visual, |s, _| s.connected));
         assert!(visual.debug_bounds("shell-retry").is_some());
@@ -87,6 +104,7 @@ fn shell_connection_checks_are_single_flight_and_keep_current_view(cx: &mut Test
     );
     let cx = &mut visual;
     ready(&shell, cx);
+    settled(&shell, cx);
     shell.update_in(cx, |s, window, cx| s.tick(false, window, cx));
     let before = shell.read_with(cx, |s, _| serde_json::to_value(&s.state).unwrap());
     shell.update_in(cx, |s, window, cx| {
@@ -95,8 +113,7 @@ fn shell_connection_checks_are_single_flight_and_keep_current_view(cx: &mut Test
         }
         assert!(s.loading);
     });
-    cx.run_until_parked();
-    draw(cx);
+    settled(&shell, cx);
     assert_eq!(
         shell.read_with(cx, |s, _| serde_json::to_value(&s.state).unwrap()),
         before
@@ -145,8 +162,7 @@ fn round1_late_token_child(cx: &mut TestAppContext) {
         State::default(),
         cx,
     );
-    visual.run_until_parked();
-    draw(&mut visual);
+    settled(&shell, &mut visual);
     assert!(!shell.read_with(&visual, |s, _| s.connected));
     fs::write(
         std::env::var("O8_NEXT_TOKEN_FILE").unwrap(),
@@ -154,8 +170,7 @@ fn round1_late_token_child(cx: &mut TestAppContext) {
     )
     .unwrap();
     visual.simulate_keystrokes("f5");
-    visual.run_until_parked();
-    draw(&mut visual);
+    settled(&shell, &mut visual);
     assert!(!shell.read_with(&visual, |s, _| s.connected));
     assert_eq!(
         shell.read_with(&visual, |s, _| s.notice.clone()),
@@ -167,8 +182,7 @@ fn round1_late_token_child(cx: &mut TestAppContext) {
     )
     .unwrap();
     visual.simulate_keystrokes("f5");
-    visual.run_until_parked();
-    draw(&mut visual);
+    settled(&shell, &mut visual);
     assert!(
         shell.read_with(&visual, |s, _| s.connected),
         "Retry must reread the newly created token file"
@@ -186,8 +200,10 @@ fn round1_reconnect_keeps_composer_focus_draft_and_queue(cx: &mut TestAppContext
     );
     let cx = &mut visual;
     ready(&shell, cx);
+    settled(&shell, cx);
     cx.simulate_keystrokes("ctrl-k n e w enter");
     ready(&shell, cx);
+    settled(&shell, cx);
     cx.simulate_input("retained draft");
     let (view, session) = shell.read_with(cx, |s, _| {
         let Some(Tab::Session(id)) = s.active() else {
@@ -206,22 +222,33 @@ fn round1_reconnect_keeps_composer_focus_draft_and_queue(cx: &mut TestAppContext
         )
     });
     let queue = fixture.client.queue(&session).unwrap();
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let dead =
-        Client::authenticated(&format!("http://{}", listener.local_addr().unwrap()), None).unwrap();
-    drop(listener);
-    shell.update_in(cx, |s, _, cx| {
-        s.client = dead;
-        s.load(cx);
-    });
-    cx.run_until_parked();
-    draw(cx);
+    // Retained sidebar clients deliberately keep their selected origin. Pause
+    // that actual host so recovery preserves its persisted queue and identity.
+    struct ResumeHost(u32);
+    impl Drop for ResumeHost {
+        fn drop(&mut self) {
+            let _ = Process::new("kill")
+                .arg("-CONT")
+                .arg(self.0.to_string())
+                .status();
+        }
+    }
+    let resume = ResumeHost(fixture.server.id());
+    assert!(
+        Process::new("kill")
+            .arg("-STOP")
+            .arg(fixture.server.id().to_string())
+            .status()
+            .unwrap()
+            .success()
+    );
+    shell.update_in(cx, |s, _, cx| s.load(cx));
+    settled(&shell, cx);
     assert!(!shell.read_with(cx, |s, _| s.connected));
-    shell.update_in(cx, |s, _, cx| {
-        s.client = fixture.client.clone();
-        s.load(cx);
-    });
+    drop(resume);
+    shell.update_in(cx, |s, _, cx| s.load(cx));
     ready(&shell, cx);
+    settled(&shell, cx);
     cx.simulate_input(" after reconnect");
     assert_eq!(
         view.read_with(cx, |v, cx| v.shell_issue_state(cx)["draft"].clone()),
@@ -240,8 +267,7 @@ fn round1_connection_is_a_registered_module(cx: &mut TestAppContext) {
         State::default(),
         cx,
     );
-    visual.run_until_parked();
-    draw(&mut visual);
+    settled(&shell, &mut visual);
     assert!(!shell.read_with(&visual, |s, _| s.connected));
     assert!(
         visual.debug_bounds("connection-state").is_some(),
@@ -309,18 +335,24 @@ fn round2_rotation_reaches_retained_composer_and_request_clones() {
 fn round2_rotation_child(cx: &mut TestAppContext) {
     let origin = std::env::var("O8_NEXT_CORRECTION_ORIGIN").unwrap();
     let token_file = PathBuf::from(std::env::var("O8_NEXT_TOKEN_FILE").unwrap());
+    let (wake, wakeups) = async_channel::bounded(1);
     let (shell, mut visual) = open(
-        Client::authenticated(&origin, None).unwrap(),
+        Client::authenticated(&origin, None)
+            .unwrap()
+            .with_wakeup(wake),
         PathBuf::from(std::env::var("O8_NEXT_CORRECTION_STATE").unwrap()),
         State::default(),
         cx,
     );
     let cx = &mut visual;
     ready(&shell, cx);
+    settled(&shell, cx);
     cx.simulate_keystrokes("ctrl-k c o m p o s e r - f i r s t enter");
     ready(&shell, cx);
+    settled(&shell, cx);
     cx.simulate_keystrokes("ctrl-k n e w enter");
     ready(&shell, cx);
+    settled(&shell, cx);
     let (view, session, retained) = shell.read_with(cx, |s, _| {
         let Some(Tab::Session(id)) = s.active() else {
             panic!("session")
@@ -347,15 +379,13 @@ fn round2_rotation_child(cx: &mut TestAppContext) {
         fs::rename(&replacement, file).unwrap();
     }
     shell.update_in(cx, |s, w, cx| s.tick(true, w, cx));
-    cx.run_until_parked();
-    draw(cx);
+    settled(&shell, cx);
     assert!(
         shell.read_with(cx, |s, _| s.connected),
         "the shell must reconnect with the rotated credential"
     );
     cx.simulate_keystrokes("enter");
-    cx.run_until_parked();
-    draw(cx);
+    settled(&shell, cx);
     let state = view.read_with(cx, |view, cx| view.shell_issue_state(cx));
     assert_eq!(
         state["draft"],
@@ -370,6 +400,12 @@ fn round2_rotation_child(cx: &mut TestAppContext) {
     assert!(
         retained.websocket().is_ok(),
         "WebSocket-info reacquisition must use the refreshed authority"
+    );
+    while wakeups.try_recv().is_ok() {}
+    retained.wake();
+    assert!(
+        wakeups.try_recv().is_ok(),
+        "credential rotation must preserve retained client wakeups"
     );
     let queue = retained.queue(&session).unwrap();
     assert!(
@@ -392,8 +428,7 @@ fn round2_rotation_child(cx: &mut TestAppContext) {
     });
     fs::write(&token_file, "invalid\ncredential").unwrap();
     shell.update_in(cx, |s, _, cx| s.load(cx));
-    cx.run_until_parked();
-    draw(cx);
+    settled(&shell, cx);
     assert!(!shell.read_with(cx, |s, _| s.connected));
     assert!(
         retained.sessions().is_err(),
@@ -401,8 +436,7 @@ fn round2_rotation_child(cx: &mut TestAppContext) {
     );
     fs::remove_file(&token_file).unwrap();
     shell.update_in(cx, |s, _, cx| s.load(cx));
-    cx.run_until_parked();
-    draw(cx);
+    settled(&shell, cx);
     assert!(!shell.read_with(cx, |s, _| s.connected));
     assert!(
         retained.sessions().is_err(),
@@ -410,8 +444,7 @@ fn round2_rotation_child(cx: &mut TestAppContext) {
     );
     fs::write(&token_file, rotated).unwrap();
     shell.update_in(cx, |s, _, cx| s.load(cx));
-    cx.run_until_parked();
-    draw(cx);
+    settled(&shell, cx);
     assert!(shell.read_with(cx, |s, _| s.connected));
     assert!(retained.sessions().is_ok());
 }
@@ -465,10 +498,40 @@ fn round2_legacy_child(cx: &mut TestAppContext) {
         State::default(),
         cx,
     );
-    visual.run_until_parked();
-    draw(&mut visual);
+    settled(&shell, &mut visual);
     assert!(
         shell.read_with(&visual, |s, _| s.connected),
         "reload must resolve the valid legacy candidate instead of reporting Token missing"
     );
+}
+
+#[gpui::test]
+fn reconnect_preserves_main_palette_recovery_and_shortcut_commands(cx: &mut TestAppContext) {
+    let mut fixture = Fixture::new();
+    fixture.server.kill().unwrap();
+    fixture.server.wait().unwrap();
+    let (shell, mut visual) = open(
+        fixture.client.clone(),
+        fixture.root.join("offline-main-commands.json"),
+        State::default(),
+        cx,
+    );
+    let cx = &mut visual;
+    settled(&shell, cx);
+    cx.simulate_keystrokes("ctrl-shift-p");
+    draw(cx);
+    assert!(cx.debug_bounds("command-palette").is_some());
+    assert!(shell.read_with(cx, |s, _| {
+        s.commands()
+            .iter()
+            .any(|entry| matches!(entry, palette::Entry::Surface(Command::Refresh)))
+    }));
+    shell.update_in(cx, |s, window, cx| s.execute(Command::Refresh, window, cx));
+    settled(&shell, cx);
+    assert_eq!(shell.read_with(cx, |s, _| s.notice.clone()), "Server down");
+    shell.update_in(cx, |s, window, cx| {
+        s.execute(Command::Shortcuts, window, cx)
+    });
+    draw(cx);
+    assert!(cx.debug_bounds("shortcut-reference").is_some());
 }

@@ -1,0 +1,28 @@
+running 1 test
+test diff_cli_is_explicit_and_documents_both_targets ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+
+     Running tests/pane_grid_cli.rs (/workspace/o8/native/o8-next/target/debug/deps/pane_grid_cli-ece9d8f10e992069)
+
+running 3 tests
+test grid_rejects_conflicting_terminal_mode_and_invalid_slot_views ... ok
+test pane_grid_is_an_explicit_native_opt_in ... ok
+test pane_grid_rejects_invalid_persistence_before_window_startup ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+
+     Running tests/shell_cli.rs (/workspace/o8/native/o8-next/target/debug/deps/shell_cli-f1806f84ade4805e)
+
+running 2 tests
+test app_shell_is_explicit_and_documents_persistence ... ok
+test invalid_shell_state_is_retained_through_native_entrypoint ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running tests/terminal_cli.rs (/workspace/o8/native/o8-next/target/debug/deps/terminal_cli-bb0b48f7e693bf68)
+
+running 1 test
+test terminal_pane_is_an_explicit_native_opt_in ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s

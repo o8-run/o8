@@ -59,6 +59,13 @@ afterEach(async () => {
 });
 
 describe('Canvas CI shared run-list snapshots through the real viewer', () => {
+  it('shows the organization coverage state returned by the CI route', async () => {
+    await render();
+    fetchMock.mockImplementation(async () => Response.json({ code: 'github_org_not_covered', error: "GitHub sign-in doesn't cover organization repos yet", runs: [] }, { status: 422 }));
+    await invalidate();
+    expect(host.textContent).toContain("GitHub sign-in doesn't cover organization repos yet");
+    expect(host.textContent).not.toContain('Known run');
+  });
   it('shares one list read across five mounted viewers', async () => {
     await render(5); expect(rows()).toHaveLength(10); expect(lists()).toHaveLength(1);
     expect(host.textContent?.match(/Known run/g)).toHaveLength(5);

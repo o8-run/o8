@@ -107,6 +107,7 @@ export interface OperatorDefaults {
   experimentalGemini: boolean;
   experimentalChat: boolean;
   experimentalCanvas: boolean;
+  experimentalNext: boolean;
   nativeBrowserView: boolean;
   classAComposer: ClassAComposer;
   inAppOrchestratorEnabled: boolean;
@@ -132,7 +133,7 @@ export interface OperatorDefaults {
   targetingAction: TargetingTierUI;
   updateAutoApply: UpdateAutoApply;
   collideAggregator: CollideAggregator;
-  productTelemetryEnabled: boolean;
+  productTelemetryEnabled: boolean | null;
   telemetryConsentAnswered: boolean;
   telemetryOptIn: boolean;
   telemetryIngestUrl: string;
@@ -167,6 +168,7 @@ export interface OperatorDefaultsResponse {
     revision: string;
     error: string | null;
   };
+  nextWindowError?: string | null;
   cliAuth?: {
     statuses: Record<RuntimeAuthHouse, {
       installed: boolean;

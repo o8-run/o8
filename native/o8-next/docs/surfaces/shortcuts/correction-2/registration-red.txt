@@ -1,0 +1,10 @@
+error[E0560]: struct `registry::Registration` has no field named `pass_key`
+  --> src/surfaces/shortcuts.rs:22:5
+   |
+22 |     pass_key: |s, event, window, cx| {
+   |     ^^^^^^^^ `registry::Registration` does not have this field
+   |
+   = note: available fields are: `tab_label`, `command_label`, `command`, `open`, `create` ... and 8 others
+
+For more information about this error, try `rustc --explain E0560`.
+error: could not compile `o8-next` (bin "o8-next") due to 1 previous error

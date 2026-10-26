@@ -4,6 +4,15 @@ version = "0.0.0"
 edition = "2024"
 license = "Apache-2.0"
 publish = false
+default-run = "o8-next"
+
+[features]
+macos-diagnostics = ["gpui/frame-diagnostics"]
+
+[[bin]]
+name = "o8-next-macos-check"
+path = "diagnostics/macos_repaint.rs"
+required-features = ["macos-diagnostics"]
 
 [dependencies]
 async-channel = "=2.5.0"
@@ -23,11 +32,25 @@ tree-sitter-rust = "=0.24.0"
 tree-sitter-json = "=0.24.8"
 tree-sitter-md = "=0.5.3"
 
+# Shell work: the release app needs the real Linux renderer, not the test platform.
+[target.'cfg(target_os = "linux")'.dependencies]
+gpui = { version = "=0.2.2", default-features = false, features = ["font-kit", "x11"] }
+
 [dev-dependencies]
 gpui = { version = "=0.2.2", default-features = false, features = ["font-kit", "test-support"] }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+cocoa = "=0.26.0"
+objc = "=0.2.7"
+raw-window-handle = "=0.6.2"
+
 [workspace]
+
+[[example]]
+name = "window-occlusion"
+path = "test-support/window_occlusion.rs"
 
 # Published GPUI pins Taffy exactly; backport its internal Grid security update.
 [patch.crates-io]
+gpui = { path = "vendor/gpui" }
 taffy = { path = "vendor/taffy" }

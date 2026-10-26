@@ -1,0 +1,7 @@
+running 3 tests
+test shell::tests::glass_and_plain_open_through_the_production_shell ... ok
+test shell::tests::glass_shell_probe ... ignored, isolated appearance probe, invoked by glass_and_plain_open_through_the_production_shell
+test shell::tests::shell_palette_switch_restart_and_server_down ... O8_NEXT_SHELL_EVIDENCE {"endpoint":"GPUI TestAppContext CPU scene paint; test text system; no GPU/compositor","platform":"linux","launchToInteractiveMs":371.46858399999996,"paletteOpenToFrameMs":[15.527511,18.925944,13.984316999999999,43.546774000000006,14.210865,14.022535,13.754066,33.131982,13.236987000000001,16.717201,14.761543,46.901199999999996,31.884918,15.045675999999998,13.113994,16.88516,14.097857,12.638828,59.924448999999996,13.518796],"workspaceSwitchMs":[35.869742,30.271299000000003,24.673517999999998,58.618268,11.014213,12.831815,43.787751,27.583092999999998,16.922746,29.077445],"idleMemoryMiB":36.74609375,"workspaces":2,"restoredSurfaces":3}
+ok
+
+test result: ok. 2 passed; 0 failed; 1 ignored; 0 measured; 155 filtered out; finished in 15.00s

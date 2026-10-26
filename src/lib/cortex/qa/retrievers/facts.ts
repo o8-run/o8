@@ -1,3 +1,4 @@
+import { knowledgeProvenance } from '@/lib/cortex/knowledge';
 /**
  * Facts retriever — Engineering Brain Indexer surface (#915 north star #1).
  *
@@ -292,7 +293,8 @@ export async function retrieveFacts(input: RetrieverInput): Promise<RetrieverRes
       if (rows.length >= limit) break;
       const record = byId.get(id);
       if (!record) continue;
-      if (!factRepoInScope(record.repo_path, scopedRepoScope.repoPaths)) continue;
+      const knowledge = record.source_kind === 'knowledge' ? knowledgeProvenance(record.source_id) : null;
+      if (record.source_kind === 'knowledge' ? !knowledge : !factRepoInScope(record.repo_path, scopedRepoScope.repoPaths)) continue;
       if (record.confidence < CONFIDENCE_FLOOR) continue;
 
       const hit = hits.get(id)!;
@@ -303,9 +305,11 @@ export async function retrieveFacts(input: RetrieverInput): Promise<RetrieverRes
           kind: 'fact',
           rowId: record.id,
           table: 'facts',
+          ...(knowledge ? { sourcePath: knowledge.sourcePath, title: knowledge.title } : {}),
           excerpt,
         },
         fields: {
+          ...(knowledge ?? {}),
           factKind: record.kind,
           content: record.content,
           sourceKind: record.source_kind,

@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -23,9 +23,9 @@ async function freePort(): Promise<number> {
 
 /** Same real WS process / fixture Next HTTP boundary as the negotiation integration test. */
 export async function startParityReference(options: {
-  logLimit?: number; o8d?: boolean; binary?: string; stallFixture?: boolean;
+  logLimit?: number; o8d?: boolean; binary?: string; stallFixture?: boolean; nativeHttp?: boolean; entry?: string;
 } = {}) {
-  const directory = mkdtempSync(join(tmpdir(), 'o8-ws-parity-'));
+  const directory = realpathSync(mkdtempSync(join(tmpdir(), 'o8-ws-parity-')));
   const token = 'ws-parity-fixture-credential';
   writeFileSync(join(directory, 'ws-token'), token, { mode: 0o600 });
   // Startup performs Git maintenance; point it at an owned empty repository.
@@ -70,13 +70,17 @@ export async function startParityReference(options: {
   const port = await freePort();
   const child = execFile(process.execPath, [
     ...(options.stallFixture ? ['--import=./tests/fixtures/ws-stall-preload.mjs'] : []),
-    '--import=./scripts/register-server-only-stub.mjs',
-    '--import=tsx', 'src/ws-server.ts'], {
+    ...(options.nativeHttp ? ['--require=./scripts/next/brain-runtime.cjs'] : []),
+    ...(options.entry ? [options.entry] : ['--import=./scripts/register-server-only-stub.mjs',
+      '--import=tsx', 'src/ws-server.ts'])], {
     cwd: process.cwd(), env: { ...process.env, NODE_ENV: 'test',
+      HOME: directory, USERPROFILE: directory,
       O8_DATA_DIR: undefined, CORTEX_IDE_DATA_DIR: directory,
+      CORTEX_IDE_DB_PATH: join(directory, 'cortex-ide.db'),
       CORTEX_IDE_REVIEW_REPO_ROOT: directory, WS_TOKEN: token,
       O8_API_PORT: String(address.port), O8_WS_PORT: String(port),
       O8_WS_O8D: (options.o8d ?? process.env.O8_WS_PARITY_O8D === '1') ? '1' : '0',
+      O8_NEXT_O8D: options.nativeHttp ? '1' : '0',
       O8D_BINARY: options.binary ?? process.env.O8D_TEST_BINARY,
       O8_REALTIME_LOG_LIMIT: String(options.logLimit ?? 4), NEXT_ORIGIN: apiUrl },
   });
@@ -88,7 +92,7 @@ export async function startParityReference(options: {
       await exited;
       clearTimeout(timer);
     }
-    await new Promise<void>((resolve) => api.close(() => resolve()));
+    if (api.listening) await new Promise<void>((resolve) => api.close(() => resolve()));
     rmSync(directory, { recursive: true, force: true });
   };
   // Consume output without exposing incidental background-service diagnostics.
@@ -100,7 +104,8 @@ export async function startParityReference(options: {
       if (child.exitCode !== null) throw new Error('reference WS process exited');
       try {
         if ((await fetch(`http://127.0.0.1:${port}/health`)).ok) {
-          return { url: `ws://127.0.0.1:${port}/ws`, apiUrl, token, pid: child.pid!, stop };
+          return { url: `ws://127.0.0.1:${port}/ws`, apiUrl, token, pid: child.pid!, directory, stop,
+            stopNext: async () => { api.closeAllConnections(); await new Promise<void>(resolve => api.close(() => resolve())); } };
         }
       } catch { /* Wait for the real entry point. */ }
       await new Promise((resolve) => setTimeout(resolve, 25));

@@ -1,0 +1,6 @@
+note: to see what the problems were, use the option `--future-incompat-report`, or run `cargo report future-incompatibilities --id 1`
+     Running tests/window_occlusion_cli.rs (/workspace/o8/work/glass-target/debug/deps/window_occlusion_cli-392382ee2130aa0b)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s

@@ -1,0 +1,8 @@
+{
+  "files": 2,
+  "passedAssertions": 7,
+  "gateExitCode": 1,
+  "filesWithUnconfirmedProcessCleanup": 2,
+  "retry": "same result after npm completed",
+  "allReportedProcessesAbsentAtRecheck": true
+}

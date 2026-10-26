@@ -111,6 +111,14 @@ it('accepts an authoritative successful empty list', async () => {
   await render(); reply = repo => Response.json({ repo, runs: [] });
   await settle(120_000); await settle(); expect(reads()).toHaveLength(2); expect(values()).toEqual(['No runs']);
 });
+it('hides retained CI status when organization access is uncovered', async () => {
+  await render(); expect(values()[0]).toMatch(/^Failing/);
+  reply = () => Response.json({ code: 'github_org_not_covered', error: "GitHub sign-in doesn't cover organization repos yet" }, { status: 422 });
+  await settle(120_000); await settle();
+  expect(values()[0]).toMatch(/^CI unavailable/);
+  expect(values()[0]).not.toContain('Failing');
+  expect(host.textContent).not.toContain('Last known CI status');
+});
 it('isolates repository switches and ignores obsolete late results', async () => {
   await render(); const pending = deferred(); reply = repo => repo === repoB ? pending.promise : Response.json(payload(repo));
   await render([{ githubSlug: repoB }]); expect(values()[0]).not.toContain('Failing');

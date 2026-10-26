@@ -185,15 +185,42 @@ async function processRequest(registration: Registration, request: IncomingMessa
     if (!response.headersSent) reply(response, 403); else response.end();
   } finally { if (poll) clearInterval(poll); }
 }
+
+async function modelCatalog(registration: Registration, response: ServerResponse): Promise<void> {
+  try {
+    const draft = findTaskDraft(registration.session.controlledTask!.taskId, operatorAccount().accountId);
+    await withTaskDraftAccountAdmission(operatorAccount(), draft.account, async () => {
+      await current(registration);
+      // This gateway can serve only the sealed model. Discovery is metadata,
+      // so it neither forwards a provider request nor consumes inference limits.
+      const model = { id: CONTROLLED_OPENROUTER_MODEL, type: 'model',
+        display_name: CONTROLLED_OPENROUTER_MODEL, created_at: registration.session.createdAt };
+      response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' })
+        .end(JSON.stringify({ data: [model], has_more: false, first_id: model.id, last_id: model.id }));
+    });
+  } catch {
+    close(registration, 'model_catalog_refused');
+    if (!response.headersSent) reply(response, 403); else response.end();
+  }
+}
+
 async function ensureServer(): Promise<number> {
   serverPromise ??= new Promise((resolve, reject) => {
     const server = createServer((request, response) => {
       const url = new URL(request.url ?? '/', 'http://127.0.0.1');
       const [, token, ...suffix] = url.pathname.split('/');
       const registration = registrations.get(token);
-      if (!registration || request.method !== 'POST' || suffix.join('/') !== 'v1/messages'
-        || [...url.searchParams].some(([key, value]) => key !== 'beta' || value !== 'true')
+      if (!registration
         || (!validToken(request.headers['x-api-key'], token) && !validToken(request.headers.authorization, `Bearer ${token}`))) {
+        reply(response, 403); return;
+      }
+      if (request.method === 'GET' && suffix.join('/') === 'v1/models'
+        && [...url.searchParams].every(([key, value]) => key === 'limit' && /^[1-9]\d{0,3}$/.test(value) && Number(value) <= 1000)) {
+        registration.queue = registration.queue.then(() => modelCatalog(registration, response));
+        return;
+      }
+      if (request.method !== 'POST' || suffix.join('/') !== 'v1/messages'
+        || [...url.searchParams].some(([key, value]) => key !== 'beta' || value !== 'true')) {
         reply(response, 403); return;
       }
       const previous = registration.queue;

@@ -313,10 +313,13 @@ const LAN = '192.168.1.50:3001';
 const LOOPBACK = 'localhost:3001';
 
 function status(pathname: string, method: string, host: string, bearer?: string): number {
-  const req = new NextRequest(`http://${host.split(':')[0]}:3001${pathname}`, {
+  // Keep route-capability checks behind the new authority boundary while
+  // retaining the caller's remote or loopback transport identity.
+  const req = new NextRequest(`http://${LOOPBACK}${pathname}`, {
     method,
     headers: {
-      host,
+      host: LOOPBACK,
+      'x-o8-client-addr': host === LAN ? 'o8-relay-forward' : '127.0.0.1',
       ...(bearer ? { authorization: `Bearer ${bearer}` } : {}),
     },
   });
@@ -333,6 +336,11 @@ describe('route-coverage — every /api route resolves to an explicit middleware
   it.each(routes.map((r) => [r.pathname, r.file] as const))(
     'classifies %s and the middleware agrees',
     (pathname) => {
+      for (const method of ['GET', 'POST']) {
+        const foreignHost = new NextRequest(`http://${LAN}${pathname}`, { method,
+          headers: { host: LAN, authorization: `Bearer ${TEST_TOKEN}` } });
+        expect(panelGateMiddleware(foreignHost).status).toBe(421);
+      }
       const policy = expectedPolicy(pathname);
       const getLan = status(pathname, 'GET', LAN);
       const postLan = status(pathname, 'POST', LAN);

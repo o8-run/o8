@@ -23,13 +23,12 @@ import {
   resolveRepoRelativeFilePath,
 } from '@/lib/files/operator-config-docs';
 import { contentHash } from '@/lib/markdown/transport';
+import { assertNotKnowledgeSource, KnowledgeSourceWriteError, normalizeKnowledgeWritePath } from '@/lib/cortex/knowledge/sources';
 
 async function resolveRoot(workspace?: string | null) {
   if (!workspace) return getDefaultLlmRepoRoot();
 
-  const requestedPath = workspace.startsWith('~')
-    ? workspace.replace('~', homedir())
-    : workspace;
+  const requestedPath = normalizeKnowledgeWritePath(workspace);
 
   const { repoRoot } = await resolveRegisteredRepoScope(requestedPath);
   return repoRoot;
@@ -71,6 +70,9 @@ async function resolveFileTarget(filePath: string, workspace?: string | null) {
 }
 
 function fileError(error: unknown) {
+  if (error instanceof KnowledgeSourceWriteError) {
+    return NextResponse.json({ error: error.message, code: 'knowledge_source_read_only' }, { status: 403 });
+  }
   if (isWorkspaceFileError(error)) {
     return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
   }
@@ -128,6 +130,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'path and content required' }, { status: 400 });
     }
 
+    assertNotKnowledgeSource(workspace || getDefaultLlmRepoRoot());
     const target = await resolveFileTarget(path, workspace);
     if ('error' in target) {
       return NextResponse.json({ error: target.error, code: target.code }, { status: target.status });

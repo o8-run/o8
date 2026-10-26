@@ -1,0 +1,2 @@
+o8 next surface boundary: exempt (label shell-work)
+o8 next surface boundary wall=0.019 s

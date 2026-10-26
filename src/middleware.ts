@@ -38,15 +38,17 @@ import { getDataDir, migrateDataDirOnce } from '@/lib/data-dir-migration';
 // this does NOT pull better-sqlite3 into the middleware bundle — it is pure fs.
 import { readActiveTokenHashes } from '@/lib/mobile/device-token-file';
 import { isLocalWorkerToken } from '@/lib/auth/worker-token';
+import { isBrainReadWorkerBearer, resolveBrainReadWorkerToken } from '@/lib/auth/brain-read-worker-token';
 import { readActiveSpectatorTokenHashes } from '@/lib/broadcast/spectator-token-file';
 import { O8_BROADCAST_SURFACE_HEADER } from '@/lib/broadcast/surface';
 import { resolvePluginToken } from '@/lib/auth/plugin-token';
+import { browserWriteAllowed, isAllowedLocalHost } from '../scripts/lib/http-request-boundary.cjs';
 
 migrateDataDirOnce();
 
 // Middleware must run in Node runtime to read the ws-token file.
 export const config = {
-  matcher: ['/api/:path*', '/broadcast/:path*'],
+  matcher: ['/:path*'],
   runtime: 'nodejs',
 };
 
@@ -382,10 +384,27 @@ function optionalEnv(name: string): string | undefined {
   return value || undefined;
 }
 
+function localRequestRefusal(req: NextRequest): NextResponse | null {
+  // Next supplies a canonical URL to direct route callers without raw headers.
+  // The production wrapper validates the raw Host against its socket port first.
+  const host = req.headers.get('host') ?? req.nextUrl.host;
+  const port = Number(req.nextUrl.port) || (req.nextUrl.protocol === 'https:' ? 443 : 80);
+  if (!isAllowedLocalHost(host, port)) {
+    return NextResponse.json({ error: 'Misdirected Request' }, { status: 421 });
+  }
+  if (!browserWriteAllowed(req.method, name => req.headers.get(name), req.nextUrl.protocol)) {
+    return NextResponse.json({ error: 'Origin is not allowed' }, { status: 403 });
+  }
+
+  return null;
+}
+
 /** Exported for the vitest gate suite (tests/middleware-gate.test.ts). */
 export function panelGateMiddleware(req: NextRequest): NextResponse {
   const { pathname } = req.nextUrl;
   const method = req.method.toUpperCase();
+  const boundary = localRequestRefusal(req);
+  if (boundary) return boundary;
 
   // Broadcast HTML is an unprivileged shell. Stamp the request so RootLayout
   // omits every operator bootstrap, then let its client present a spectator
@@ -395,6 +414,7 @@ export function panelGateMiddleware(req: NextRequest): NextResponse {
     requestHeaders.set(O8_BROADCAST_SURFACE_HEADER, '1');
     return NextResponse.next({ request: { headers: requestHeaders } });
   }
+  if (!pathname.startsWith('/api/')) return NextResponse.next();
 
   // A recognized spectator bearer is a strict capability, even on routes that
   // are otherwise public or self-authenticating. It never inherits an ambient
@@ -402,6 +422,13 @@ export function panelGateMiddleware(req: NextRequest): NextResponse {
   // credential handshake there.
   const auth = req.headers.get('authorization');
   const bearer = auth?.startsWith('Bearer ') ? auth.slice(7).trim() : '';
+  if (isBrainReadWorkerBearer(bearer)) {
+    if (!resolveBrainReadWorkerToken(bearer)) {
+      return NextResponse.json({ error: 'Invalid or expired Brain read credential.' }, { status: 401 });
+    }
+    if (pathname === '/api/cortex/ask/answer' && method === 'POST') return NextResponse.next();
+    return NextResponse.json({ error: 'Brain read credential is not authorized for this endpoint.' }, { status: 403 });
+  }
   if (bearer.startsWith('o8ro_')) {
     return NextResponse.json({ error: 'Read-only worker has no API capability.' }, { status: 403 });
   }
@@ -483,6 +510,8 @@ const clerkSecretKey = optionalEnv('CLERK_SECRET_KEY');
 // /api/v2/chat still fail closed inside their own handlers.
 let hostedMiddleware: Promise<NextMiddleware> | undefined;
 export default async function middleware(req: NextRequest, event?: NextFetchEvent) {
+  const boundary = localRequestRefusal(req);
+  if (boundary) return boundary;
   if (!clerkPublishableKey || !clerkSecretKey) return panelGateMiddleware(req);
   hostedMiddleware ??= import('@clerk/nextjs/server').then(({ clerkMiddleware }) =>
     clerkMiddleware((_auth, request) => panelGateMiddleware(request), {

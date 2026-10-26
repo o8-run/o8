@@ -1,23 +1,36 @@
 import { execFile } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { cpSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { once } from 'node:events';
 import { createConnection } from 'node:net';
 import { request as httpRequest } from 'node:http';
 import { promisify } from 'node:util';
-import { beforeAll, expect, it } from 'vitest';
+import { afterAll, beforeAll, expect, it } from 'vitest';
+import { bundleServers } from '../scripts/lib/server-bundles.mjs';
+import { stagePackagedNativeAddons } from './helpers/packaged-native-addons';
 import { runRecordedSession, type RecordedSession } from '../scripts/lib/ws-parity-session';
 import { startParityReference } from './fixtures/ws-parity-server';
 import { cutoverClient, cutoverHealth, publishCutoverMutation, waitForTransport } from './fixtures/ws-cutover-client';
 
 const binary = process.env.O8D_TEST_BINARY ?? join(process.cwd(), 'crates/o8d/target/debug/o8d');
+const bundleRoot = mkdtempSync(join(tmpdir(), 'o8-cutover-bundle-'));
+const entry = join(bundleRoot, 'ws-server.mjs');
+const startCutoverReference = (options: Parameters<typeof startParityReference>[0]) =>
+  startParityReference({ ...options, entry });
+afterAll(() => rmSync(bundleRoot, { recursive: true, force: true }));
 beforeAll(async () => {
   if (!process.env.O8D_TEST_BINARY) await promisify(execFile)('cargo', ['build', '--locked',
     '--manifest-path', 'crates/o8d/Cargo.toml', '--features', 'experimental-ws']);
+  // Use the production build and launcher once, rather than retranspiling the
+  // complete source graph in every fresh worker. State and workers stay isolated.
+  bundleServers({ root: process.cwd(), outDir: bundleRoot });
+  stagePackagedNativeAddons({ projectRoot: process.cwd(), serverRoot: bundleRoot });
+  cpSync('src/lib/lane/orchestrator.md', join(bundleRoot, 'orchestrator.md'));
 }, 120_000);
 
 it('keeps the TypeScript transport and protocol with the flag off', async () => {
-  const server = await startParityReference({ o8d: false, binary });
+  const server = await startCutoverReference({ o8d: false, binary });
   try {
     expect((await cutoverHealth(server)).delivery).toBeUndefined();
     const recording = JSON.parse(readFileSync('tests/fixtures/ws-parity/control.json', 'utf8')) as RecordedSession;
@@ -26,7 +39,7 @@ it('keeps the TypeScript transport and protocol with the flag off', async () => 
 });
 
 it.each(['control', 'replay', 'gap', 'incompatible'])('serves the live %s recording through o8d', async (name) => {
-  const server = await startParityReference({ o8d: true, binary });
+  const server = await startCutoverReference({ o8d: true, binary });
   try {
     const health = await fetch(server.url.replace('ws:', 'http:').replace('/ws', '/health')).then((r) => r.json());
     expect(health.delivery?.transport).toBe('o8d');
@@ -38,7 +51,7 @@ it.each(['control', 'replay', 'gap', 'incompatible'])('serves the live %s record
 });
 
 it('rejects unmarked private upgrades after HTTP keepalive, even with spoofed peer headers', async () => {
-  const server = await startParityReference({ o8d: true, binary });
+  const server = await startCutoverReference({ o8d: true, binary });
   const endpoint = new URL(server.url);
   const socket = createConnection({ host: endpoint.hostname, port: Number(endpoint.port) });
   try {
@@ -57,7 +70,7 @@ it('rejects unmarked private upgrades after HTTP keepalive, even with spoofed pe
 });
 
 it('falls back when the binary is missing, through the unchanged app URL', async () => {
-  const server = await startParityReference({ o8d: true, binary: join(process.cwd(), 'missing-o8d-fixture') });
+  const server = await startCutoverReference({ o8d: true, binary: join(process.cwd(), 'missing-o8d-fixture') });
   try {
     await waitForTransport(server, 'typescript');
     const client = await cutoverClient(server.url, server.token);
@@ -69,21 +82,29 @@ it('falls back when the binary is missing, through the unchanged app URL', async
 });
 
 it('bounds the producer pipe and replays an oversized publication after falling back', async () => {
-  const server = await startParityReference({ o8d: true, binary });
+  const started = performance.now();
+  const server = await startCutoverReference({ o8d: true, binary, logLimit: 400 });
   try {
     const first = await cutoverClient(server.url, server.token);
     await publishCutoverMutation(server, 'pipe-overflow', 1024 * 1024 + 1);
     await waitForTransport(server, 'typescript');
+    // Background publications must not evict the cutover event before resubscribe.
+    for (let index = 0; index < 6; index++) await publishCutoverMutation(server, `during-handoff-${index}`);
     const fallback = await cutoverClient(server.url, server.token, { since: first.since, epoch: first.epoch });
     try {
       await fallback.delivered('pipe-overflow');
-      expect(fallback.events().filter((event) => event.data?.mutation?.mutationId === 'pipe-overflow')).toHaveLength(1);
+      const replayed = fallback.events().filter((event) => event.data?.mutation?.mutationId === 'pipe-overflow');
+      expect(replayed).toHaveLength(1);
+      expect(replayed[0].data?.mutation?.note).toHaveLength(1024 * 1024 + 1);
+      const elapsed = performance.now() - started;
+      console.info(`Oversized replay completed in ${Math.round(elapsed)} ms`);
+      expect(elapsed).toBeLessThan(3_000);
     } finally { await fallback.close(); await first.close(); }
   } finally { await server.stop(); }
 });
 
 it('completes accepted HTTP ingress across a pipe-triggered handoff to TypeScript', async () => {
-  const server = await startParityReference({ o8d: true, binary, logLimit: 400 });
+  const server = await startCutoverReference({ o8d: true, binary, logLimit: 400 });
   const first = await cutoverClient(server.url, server.token);
   const body = JSON.stringify({ kind: 'mutation', mutation: { mutationId: 'accepted-before-drain',
     source: 'server', action: 'cutover-fixture', status: 'completed', createdAt: '2026-01-01T00:00:00.000Z' } });
@@ -116,7 +137,7 @@ it('completes accepted HTTP ingress across a pipe-triggered handoff to TypeScrip
 });
 
 it('replays every event across exit, TS fallback publication and a Rust restart', async () => {
-  const server = await startParityReference({ o8d: true, binary, logLimit: 400 });
+  const server = await startCutoverReference({ o8d: true, binary, logLimit: 400 });
   try {
     const first = await cutoverClient(server.url, server.token);
     const resume = { since: first.since, epoch: first.epoch };

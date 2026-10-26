@@ -5,7 +5,7 @@ const string = { type: 'string', minLength: 1, maxLength: 256 };
 /** Hosted preparation and controlled-task result schemas; dispatch stays local. */
 export const TASK_DRAFT_TOOLS = [
   {
-    name: 'o8_task_options', title: 'Choose an o8 task draft workspace',
+    name: 'o8_task_options', title: 'List o8 task draft workspace choices',
     description: 'List registered repository/project choices. Use only the project and objective supplied or confirmed by the user in this conversation; if unclear, ask before selecting IDs. Never choose them from personal memory or switch registrations after a refused snapshot. Then request a fresh clean-workspace snapshot with the selected IDs. Runtime/model entries are catalog metadata; availability is not proven. Does not launch a worker.',
     inputSchema: { type: 'object', properties: { machineId: string, repoId: string, projectId: string },
       required: ['machineId'], additionalProperties: false },

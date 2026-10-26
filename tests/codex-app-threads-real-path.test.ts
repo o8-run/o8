@@ -10,6 +10,7 @@ import { formatSessionRulesBlock } from '@/lib/orchestrator/session-rules-prompt
 import { withOrchestratorTurnReceiptContext } from '@/lib/orchestrator/turn-receipt-context';
 import { applyOrchestrationMode } from '@/lib/lane/orchestrator-backends/orchestration-mode';
 import { withOperatingAgreement } from '@/lib/operator/operating-agreement';
+import { writePersistedLlmChat } from '@/lib/llm/chat-history-store';
 
 // #3573. Only the Codex executable and unrelated prewarm/readiness calls are
 // stubbed. The setting store, session, bridge process, spec file and argv are real.
@@ -43,14 +44,13 @@ const userConfig = [
 writeFileSync(join(userCodexHome, 'config.toml'), userConfig);
 vi.stubEnv('O8_CODEX_APP_TEST_HOME', home);
 vi.stubEnv('O8_CODEX_BIN', binary);
-vi.stubEnv('O8_FAKE_CODEX_LOG', log);
 vi.stubEnv('O8_CRASH_SURVIVABLE_ORCHESTRATOR', '0');
 writeFileSync(binary, `#!/usr/bin/env node
 import { appendFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 const args = process.argv.slice(2);
 if (args.includes('--version')) { console.log('codex-cli 0.161.0'); process.exit(0); }
-const record = (entry) => appendFileSync(process.env.O8_FAKE_CODEX_LOG, JSON.stringify({ ...entry, codexHome: process.env.CODEX_HOME }) + '\\n');
+const record = (entry) => appendFileSync(${JSON.stringify(log)}, JSON.stringify({ ...entry, codexHome: process.env.CODEX_HOME }) + '\\n');
 if (args[0] !== 'app-server') {
   record({ argv: args });
   console.log(JSON.stringify({ type: 'thread.started', thread_id: 'exec-thread' }));
@@ -250,15 +250,26 @@ describe.skipIf(process.platform === 'win32')('Codex orchestrator chats in the C
 
   it('starts a fresh Codex app thread when the saved one is gone', async () => {
     const cwd = repo('gone-thread');
-    await turn(cwd, 'First');
-    getCodexOrchestratorSession(cwd)!.threadId = 'thread-from-the-private-home';
+    const threadId = 'thoughts-missing-app-session';
+    await turn(cwd, 'First', { threadId });
+    writePersistedLlmChat(threadId, { repoPath: cwd, messages: [
+      { id: 'prior-user', role: 'user', content: 'The identifier is widget-731 and the accent is copper.', timestamp: 1 },
+      { id: 'prior-assistant', role: 'assistant', content: 'Both facts are retained.', timestamp: 2 },
+      { id: 'current-user', role: 'user', content: 'Second', timestamp: 3 },
+    ] });
+    getCodexOrchestratorSession(cwd, threadId)!.threadId = 'thread-from-the-private-home';
     const start = calls().length;
-    const events = await turn(cwd, 'Second');
+    const events = await turn(cwd, 'Second', { threadId, rawMessage: 'Second' });
     const methods = since(start).map((call) => call.method).filter(Boolean);
     expect(methods).toContain('thread/resume');
     expect(methods.indexOf('thread/start')).toBeGreaterThan(methods.indexOf('thread/resume'));
     expect(events.filter((event) => event.type === 'error')).toEqual([]);
     expect(events).toContainEqual({ type: 'text', text: 'Answer from the Codex app thread' });
+    const recovered = since(start).find(call => call.method === 'thread/start')!;
+    expect(recovered.params!.developerInstructions).toContain('widget-731');
+    expect(recovered.params!.developerInstructions).toContain('copper');
+    expect(since(start).find(call => call.method === 'turn/start')!.params!.input)
+      .toEqual([{ type: 'text', text: 'Second', text_elements: [] }]);
   }, 60_000);
 
   it('interrupts the Codex app turn when the operator stops it', async () => {

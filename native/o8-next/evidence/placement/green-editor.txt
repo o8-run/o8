@@ -1,0 +1,10 @@
+running 4 tests
+test composer::tests::composer_height_bounds_follow_content ... composer empty height: 38px
+composer heights: empty=38px three=78px cap=176px
+ok
+test composer::tests::ime_multiline_paste_undo ... ok
+test composer::tests::long_multiline_paste_keeps_caret_reachable ... ok
+test composer::tests::utf16_selection_and_composition_at_nonzero_offset ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 133 filtered out; finished in 10.52s
+

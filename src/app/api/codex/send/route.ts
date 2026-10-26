@@ -1,13 +1,13 @@
 import { childEnvironment } from '@/lib/providers/spawn-environment';
 import { NextRequest } from 'next/server';
 import { spawn } from '@/lib/providers/child-process';
-import os from 'os';
 
 import { assertOrchestratorRepoPath } from '@/lib/lane/repo-preflight';
 import { formatMissingCliError } from '@/lib/runtimes/shared/cli-unavailable';
 import { CliNotFoundError, resolveCli } from '@/lib/runtimes/shared/cli-resolver';
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 import { providerSpawnEnvironment } from '@/lib/providers/spawn-environment';
+import { assertNotKnowledgeSource, normalizeKnowledgeWritePath } from '@/lib/cortex/knowledge/sources';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -88,17 +88,18 @@ export async function POST(req: NextRequest) {
   }
 
   // Expand tilde in workspace paths
-  const expandedCwd = cwd?.replace(/^~/, os.homedir());
-  const workingDir = expandedCwd || process.cwd();
-  if (expandedCwd) {
-    try {
-      assertOrchestratorRepoPath(expandedCwd);
-    } catch (error) {
-      return Response.json({
-        error: `[repo] ${error instanceof Error ? error.message : 'The workspace is unavailable.'}`,
-        code: 'repo_unavailable',
-      }, { status: 400 });
-    }
+  let workingDir: string;
+  try {
+    assertNotKnowledgeSource(cwd);
+    const expandedCwd = cwd?.trim() ? normalizeKnowledgeWritePath(cwd) : undefined;
+    workingDir = expandedCwd || process.cwd();
+    assertNotKnowledgeSource(workingDir);
+    if (expandedCwd) assertOrchestratorRepoPath(expandedCwd);
+  } catch (error) {
+    return Response.json({
+      error: `[repo] ${error instanceof Error ? error.message : 'The workspace is unavailable.'}`,
+      code: 'repo_unavailable',
+    }, { status: 400 });
   }
 
   const cliSpec = {
@@ -141,6 +142,12 @@ export async function POST(req: NextRequest) {
     args.push('--model', model);
   }
 
+  // CLI resolution can await; a newly configured source must still refuse the spawn.
+  try {
+    assertNotKnowledgeSource(workingDir);
+  } catch (error) {
+    return Response.json({ error: error instanceof Error ? error.message : 'The workspace is unavailable.', code: 'repo_unavailable' }, { status: 400 });
+  }
   const encoder = new TextEncoder();
 
   let markClientGone: (() => void) | null = null;

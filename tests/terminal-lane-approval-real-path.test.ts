@@ -1,11 +1,22 @@
+// @vitest-environment jsdom
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { NextRequest } from 'next/server';
+import { act, createElement, type ComponentProps } from 'react';
+import { createRoot } from 'react-dom/client';
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { TerminalLaneApproval } from '@/components/desktop/workspace-terminal/TerminalLaneApproval';
 
-const h = vi.hoisted(() => ({ launch: vi.fn(), perform: vi.fn(), afterHead: undefined as (() => void) | undefined, beforeClaim: undefined as (() => void) | undefined }));
+const h = vi.hoisted(() => ({ launch: vi.fn(), perform: vi.fn(), afterHead: undefined as (() => void) | undefined, beforeClaim: undefined as (() => void) | undefined, clicks: new Map<string, () => void>() }));
+vi.mock('@/components/desktop/settings/RamsButton', async importOriginal => {
+  const actual = await importOriginal<typeof import('@/components/desktop/settings/RamsButton')>();
+  return { ...actual, RamsButton: (props: ComponentProps<typeof actual.RamsButton>) => {
+    if (typeof props.children === 'string' && props.onClick) h.clicks.set(props.children, props.onClick);
+    return createElement(actual.RamsButton, props);
+  } };
+});
 vi.mock('@/lib/runtime/actions', () => ({ launchRuntimeSurface: h.launch, performRuntimeAction: h.perform }));
 vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: vi.fn(async () => {}) }));
 vi.mock('@/lib/approvals/resolution', async importOriginal => {
@@ -95,10 +106,94 @@ beforeEach(() => {
   h.perform.mockReset();
   h.afterHead = undefined;
   h.beforeClaim = undefined;
+  h.clicks.clear();
 });
 afterAll(() => { closeDb(); rmSync(root, { recursive: true, force: true }); });
 
 describe('terminal lane approval through the shared route and persisted state', () => {
+  it.each(['approve', 'reject'] as const)('refuses cached %s controls and callbacks after runtime A -> B -> A until a fresh read', async action => {
+    const f = fixture();
+    h.perform.mockResolvedValue({ ok: true, note: 'continued the reviewed session' });
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    let holdReads = false;
+    const held: Array<{ signal: AbortSignal; release: () => Promise<void> }> = [];
+    const posts: Array<Promise<Response>> = [];
+    vi.stubGlobal('fetch', vi.fn((input: string, init?: RequestInit) => {
+      const url = new URL(input, 'http://localhost');
+      expect(url.pathname).toBe('/api/panel/approvals');
+      const request = new NextRequest(url, { ...init, signal: init?.signal ?? undefined, headers: {
+        'content-type': 'application/json', authorization: `Bearer ${getOrCreateWsToken()}`,
+      } });
+      if (init?.method === 'POST') {
+        const response = POST(request);
+        posts.push(response);
+        return response;
+      }
+      if (!holdReads) return GET(request);
+      return new Promise<Response>(finish => held.push({ signal: init!.signal as AbortSignal,
+        release: async () => { finish(await GET(request)); } }));
+    }));
+    const host = document.createElement('div');
+    document.body.append(host);
+    const mounted = createRoot(host);
+    const evidence = { sessionId: f.sessionKey, runtime: 'codex' as const, state: 'blocked' as const,
+      authority: 'lane-state' as const, observedAt: '2026-10-24T00:00:00Z', summary: 'Approval required', evidence: [] };
+    const renderRuntime = async (runtime: 'codex' | 'claude-code') => {
+      await act(async () => mounted.render(createElement(TerminalLaneApproval, {
+        terminalSession: f.terminalSession, evidence: { ...evidence, runtime }, active: true,
+      })));
+    };
+    const decisionButtons = () => Array.from(host.querySelectorAll('button'))
+      .filter(button => button.textContent === 'Resume lane' || button.textContent === 'Reject decision');
+    try {
+      await renderRuntime('codex');
+      await vi.waitFor(async () => {
+        await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+        expect(decisionButtons()).toHaveLength(2);
+      });
+      const label = action === 'approve' ? 'Resume lane' : 'Reject decision';
+      const abandonedClick = h.clicks.get(label)!;
+      expect(abandonedClick).toBeTypeOf('function');
+      holdReads = true;
+      await renderRuntime('claude-code');
+      await renderRuntime('codex');
+      expect(held).toHaveLength(2);
+      expect(held[0].signal.aborted).toBe(true);
+      expect(held[1].signal.aborted).toBe(false);
+      const returnedControls = decisionButtons();
+      await act(async () => {
+        returnedControls.find(button => button.textContent === label)?.click();
+        // An already captured callback must also lose its decision authority.
+        abandonedClick();
+        await Promise.all(posts);
+      });
+      expect.soft(returnedControls).toHaveLength(0);
+      closeDb();
+      expect.soft(getApproval(f.approval.id)?.status).toBe('pending');
+      expect.soft(listApprovalEvents(f.approval.id).some(event => event.type === 'approved' || event.type === 'rejected')).toBe(false);
+      expect.soft(h.perform).not.toHaveBeenCalled();
+      expect.soft(h.launch).not.toHaveBeenCalled();
+      expect(posts).toHaveLength(0);
+
+      await act(async () => held[1].release());
+      await vi.waitFor(async () => {
+        await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+        expect(decisionButtons()).toHaveLength(2);
+      });
+      await act(async () => {
+        decisionButtons().find(button => button.textContent === label)!.click();
+        await Promise.all(posts);
+      });
+      expect(posts).toHaveLength(1);
+      closeDb();
+      expect(getApproval(f.approval.id)?.status).toBe(action === 'approve' ? 'approved' : 'rejected');
+    } finally {
+      await act(async () => mounted.unmount());
+      host.remove();
+      vi.unstubAllGlobals();
+    }
+  });
+
   it.each(['codex', 'claude-code'] as const)('refuses a %s owned-session rebind at the atomic decision claim', async runtime => {
     const f = fixture(runtime);
     const adapter = await projection(f);

@@ -50,6 +50,7 @@ export async function startWorkerServer() {
   const { GET: history } = await import('../../src/app/api/mobile/history/route');
   const { GET: wsInfo } = await import('../../src/app/api/panel/ws-info/route');
   const { GET: context } = await import('../../src/app/api/v2/chat-history/route');
+  const { GET: historyList } = await import('../../src/app/api/v2/chat-history/list/route');
   const { GET: state } = await import('../../src/app/api/orchestrator/state/route');
   const { GET: status } = await import('../../src/app/api/panel/status/route');
   const { POST: sync } = await import('../../src/app/api/mobile/sync/route');
@@ -59,6 +60,7 @@ export async function startWorkerServer() {
     ...issues?.gets,
     '/api/mobile/orchestrator/threads': sessions, '/api/mobile/history': history, '/api/panel/ws-info': wsInfo,
     '/api/v2/chat-history': context, '/api/orchestrator/state': state, '/api/orchestrator/composer-queue': queue.GET,
+    '/api/v2/chat-history/list': historyList,
     '/api/panel/status': status, '/api/runtime/inventory': inventory,
   };
   const mutations: Record<string, (request: NextRequest) => Promise<Response>> = { POST: queue.POST, PATCH: queue.PATCH, DELETE: queue.DELETE };

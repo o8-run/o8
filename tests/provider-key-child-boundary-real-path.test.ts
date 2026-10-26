@@ -50,10 +50,10 @@ it('rejects historical credential values retained in prepared arguments after a 
   const fresh = await import('@/lib/providers/child-process');
   expect(() => fresh.spawnSync(process.execPath, [script, '--header=Bearer fixture-boundary-key'])).toThrow(/arguments contain/);
 });
-it('preserves API mode at the actual process boundary', () => {
+it('preserves API mode without copying an unlisted ambient alias at the actual process boundary', () => {
   saveRuntimeBillingMode('gemini', 'api');
   cp.execFileSync(process.execPath, [script], { env: childEnvironment({ runtimeId: 'gemini' }) });
-  expect(JSON.parse(readFileSync(output, 'utf8'))).toEqual(['fixture-boundary-key', 'fixture-boundary-key']);
+  expect(JSON.parse(readFileSync(output, 'utf8'))).toEqual(['fixture-boundary-key', null]);
 });
 it.each(['api', 'subscription'] as const)('preserves work admission and credential policy in %s', async mode => {
   saveRuntimeBillingMode('gemini', mode);
@@ -67,7 +67,7 @@ it.each(['api', 'subscription'] as const)('preserves work admission and credenti
   await new Promise<void>((resolve, reject) => {
     child.once('error', reject); child.once('exit', code => code === 0 ? resolve() : reject(new Error(`exit ${code}`)));
   });
-  expect(JSON.parse(readFileSync(output, 'utf8'))).toEqual(mode === 'api' ? ['fixture-boundary-key', 'fixture-boundary-key'] : [null, null]);
+  expect(JSON.parse(readFileSync(output, 'utf8'))).toEqual(mode === 'api' ? ['fixture-boundary-key', null] : [null, null]);
   expect(readdirSync(leases)).toEqual([]);
 });
 

@@ -90,6 +90,14 @@ impl ShellExtension for Connection {
             }
         };
         shell.client = client.clone();
+        // Main's registered catalog loader owns the retained sidebar. Its client
+        // clones share the refreshed transport, so recovery must use that loader.
+        if registrations()
+            .iter()
+            .any(|registration| (registration.load)(shell, cx))
+        {
+            return true;
+        }
         shell.loading = true;
         let missing = client
             .request("GET", &client.url("/").unwrap())
@@ -158,6 +166,25 @@ impl ShellExtension for Connection {
         true
     }
     fn prepare(&self, s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
+        if !s.loading {
+            if !s.connected && s.notice.starts_with("Local server unavailable:") {
+                s.notice = if s.notice.contains("HTTP 401") || s.notice.contains("HTTP 403") {
+                    if s.client
+                        .request("GET", &s.client.url("/").unwrap())
+                        .header("Authorization")
+                        .is_none()
+                    {
+                        "Token missing"
+                    } else {
+                        "Token rejected"
+                    }
+                } else {
+                    "Server down"
+                }
+                .into();
+            }
+            report_startup(s.connected);
+        }
         if !s.connected && !management(s) {
             if !s.surfaces.connection.hidden {
                 s.capture(window, cx);
@@ -210,15 +237,15 @@ impl ShellExtension for Connection {
     }
     fn frame(&self, s: &Shell) -> Option<Frame> {
         Some(Frame {
-            brand: None,
-            commands: "Commands",
             status: s.connected && !s.notice.is_empty(),
             retry: false,
-            empty: "",
+            ..Frame::default()
         })
     }
     fn allow_command(&self, s: &Shell, command: &Command) -> bool {
-        s.connected || command.registration().overlay_command
+        s.connected
+            || matches!(command, Command::Refresh | Command::Shortcuts)
+            || command.registration().overlay_command
     }
     fn allow_switch(&self, s: &Shell) -> bool {
         s.connected

@@ -532,7 +532,7 @@ function emitClassAAnswer(
       table: row.citation.table,
       title: rowDisplayTitle(row),
       excerpt: row.citation.excerpt,
-      url: row.citation.url,
+      url: row.citation.url, sourcePath: row.citation.sourcePath,
     });
   }
   emit('done', {});

@@ -1,5 +1,6 @@
 import { CONVERSATION_PR_TOOLS, handleConversationPrs } from './operator-handlers/conversation-prs';
 import { PR_STACK_TOOLS, handlePrStack } from './operator-handlers/pr-stack';
+import { THREAD_TOOLS, handleThreadsList } from './operator-handlers/threads';
 import { safeErrorText } from '@/lib/mcp/api-error';
 import { discoverMcp, isModernMcpRequest, modernMcpCall, modernMcpError, modernMcpResult } from './operator-mcp-protocol';
 import { nativeReadGeneration } from '@/lib/mcp/native-read-publication';
@@ -16,7 +17,7 @@ import { TASK_ARTIFACT_TOOLS, handleTaskArtifact } from '@/lib/mcp/operator-hand
 import { VISUALIZATION_TOOLS, handleHtmlPreview, handleHtmlRender, handleVisualizationRead } from '@/lib/mcp/operator-handlers/visualization';
 import { BROADCAST_TOOLS, handleBroadcastPost, handleBroadcastSay, handleBroadcastToken } from '@/lib/mcp/operator-handlers/broadcast';
 import { CLOSE_PACKET_TOOLS, handleClosePacketUnmerged } from '@/lib/mcp/operator-handlers/close-packet';
-import { CORTEX_TOOLS, handleAsk, handleProposeObservation } from '@/lib/mcp/operator-handlers/cortex';
+import { CORTEX_TOOLS, CORTEX_HANDLERS } from '@/lib/mcp/operator-handlers/cortex';
 import { DIGEST_TOOLS, handleDigest, handleFetchRaw } from '@/lib/mcp/operator-handlers/digest';
 import { PROBLEM_TOOLS, handleProblemGet, handleProblemList } from '@/lib/mcp/operator-handlers/problems';
 import {
@@ -122,6 +123,7 @@ import { getDataDir } from '@/lib/data-dir-migration';
 import { DEVICE_TOOLS, handleDevice } from './operator-handlers/devices';
 import type { DeviceControllerContext } from '@/lib/devices/controller-store';
 import { DeviceError } from '@/lib/devices/types';
+import { boundOperatorResult, readOperatorResultPage, RESULT_PAGE_TOOL } from './operator-result-pages';
 
 export interface OperatorMcpRequest {
   jsonrpc: '2.0';
@@ -275,6 +277,7 @@ async function handleUserContext(): Promise<McpToolResult> {
 }
 
 const TOOLS: McpTool[] = [
+  ...THREAD_TOOLS,
   ...CONVERSATION_PR_TOOLS,
   ...STATUS_TOOLS.filter((tool) => tool.name === 'o8_send'),
   ...STATUS_TOOLS.filter((tool) => tool.name === 'o8_status'),
@@ -348,16 +351,21 @@ const DOGFOOD_TOOL_NAMES = new Set([
 ]);
 
 export function operatorToolsForProfile(profile = process.env.O8_OPERATOR_MCP_PROFILE): McpTool[] {
-  if (!profile || profile === 'full') return TOOLS;
-  if (profile === 'dogfood') return TOOLS.filter((tool) => DOGFOOD_TOOL_NAMES.has(tool.name));
-  if (profile === 'visualizations') return VISUALIZATION_TOOLS;
-  if (profile === 'devices') return DEVICE_TOOLS;
+  let tools: McpTool[];
+  if (!profile || profile === 'full') tools = TOOLS;
+  else if (profile === 'dogfood') tools = TOOLS.filter((tool) => DOGFOOD_TOOL_NAMES.has(tool.name));
+  else if (profile === 'visualizations') tools = VISUALIZATION_TOOLS;
+  else if (profile === 'devices') tools = DEVICE_TOOLS;
   // An explicitly requested but unknown profile fails closed. A typo in a
   // safety launcher must not silently restore approvals or task tools.
-  return [];
+  else return [];
+  return [...tools.map((tool) => ({ ...tool,
+    description: `${tool.description} Text results over 20 KB return a summary and saved pages; follow nextArguments with o8_result_page without repeating the action.`,
+  })), RESULT_PAGE_TOOL];
 }
 
 const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<McpToolResult>> = {
+  o8_threads_list: handleThreadsList,
   o8_send: handleSend,
   o8_status: handleStatus,
   o8_approve: handleApprove,
@@ -369,8 +377,7 @@ const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<M
   steer_packet: handleSteerPacket,
   o8_operator_defaults: handleOperatorDefaults,
   o8_setup: handleSetup,
-  cortex_propose_observation: handleProposeObservation,
-  cortex_ask: handleAsk,
+  ...CORTEX_HANDLERS,
   o8_feature_list: handleFeatureList,
   o8_feature_next: handleFeatureNext,
   o8_feature_add: handleFeatureAdd,
@@ -525,10 +532,14 @@ async function dispatchOperatorMcpMessage(message: OperatorMcpRequest, requested
         result: textResult(`Tool unavailable in operator MCP profile ${profile}: ${toolName}`, true),
       };
     }
+    const resultScope = JSON.stringify([getDataDir(), process.env.O8_OPERATOR_MCP_PROFILE || 'full', requestedProfile || '', deviceContext ?? null]);
+    if (toolName === RESULT_PAGE_TOOL.name) {
+      return { jsonrpc: '2.0', id, result: readOperatorResultPage(toolArgs, resultScope, new Set(activeTools.map((tool) => tool.name))) };
+    }
     const handler = toolName === 'o8_device' ? (args: Record<string, unknown>) => handleDevice(args, deviceContext) : TOOL_HANDLERS[toolName];
     if (!handler) return { jsonrpc: '2.0', id, result: textResult(`Unknown tool: ${toolName}`, true) };
     try {
-      return { jsonrpc: '2.0', id, result: await handler(toolArgs) };
+      return { jsonrpc: '2.0', id, result: boundOperatorResult(toolName, resultScope, await handler(toolArgs)) };
     } catch (error) {
       if (error instanceof DeviceError) return { jsonrpc: '2.0', id, result: jsonResult({ error: { code: error.code, message: error.message } }, true) };
       return { jsonrpc: '2.0', id, result: textResult(`Tool error: ${safeErrorText(error)}`, true) };

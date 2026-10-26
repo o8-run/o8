@@ -8,14 +8,13 @@ import { collectPersistedTmuxSessions } from '@/lib/terminal/state-store';
 import { DASH_PROFILE_OWNER_OPTION, dashProfileOwnerId } from '@/lib/terminal/dash-session-owner';
 import { listDashTmuxSessionsWithAge, reapOrphanDashTmuxSessions } from '@/lib/ws-server/dash-terminal-gc';
 import { createDashTmuxSessionSync, dashTmuxArgs } from '@/lib/ws-server/dash-terminal-persistence';
+import { tmuxIntegrationAvailable } from './helpers/tmux-prerequisite';
 
 const root = mkdtempSync(join(tmpdir(), 'o8-profile-gc-'));
 const profileA = join(root, 'a');
 const profileB = join(root, 'b');
 const server = `o8-profile-gc-${process.pid}-${randomUUID().slice(0, 8)}`;
-const tmuxAvailable = process.platform !== 'win32' && (() => {
-  try { execFileSync('tmux', ['-V'], { stdio: 'ignore' }); return true; } catch { return false; }
-})();
+const tmuxAvailable = tmuxIntegrationAvailable();
 
 function create(profile: string, name: string) {
   vi.stubEnv('O8_DATA_DIR', profile);

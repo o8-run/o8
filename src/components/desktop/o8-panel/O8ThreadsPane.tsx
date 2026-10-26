@@ -11,12 +11,14 @@ import { NewTaskComposer } from '../repo-focus/tabs/control-room/NewTaskComposer
 import { createTaskRequest, type TaskExecutionRuntime } from '../repo-focus/tabs/control-room/create-task-request';
 import { taskSessionKey, taskTimeLabel } from '../repo-focus/tabs/control-room/helpers';
 import type { TaskAction, TaskMutationPayload, TaskPoolTask } from '../repo-focus/tabs/control-room/types';
-import { THREAD_GROUPS, resolveThreadProject, scopeThreadAgents, scopeThreads, threadModelLabel, threadStatusLine } from './threads-model';
+import { THREAD_GROUPS, resolveThreadProject, scopeThreads, threadModelLabel, threadStatusLine } from './threads-model';
 import { useThreadsTasks } from './useThreadsTasks';
 import { useThreadDetailNavigation } from './useThreadNavigation';
 import { useThreadRepos } from './useThreadRepos';
 import { ThreadDetail } from './ThreadDetail';
 import { ThreadActions, ThreadActionButton } from './ThreadActions';
+import { ThreadActivity } from './ThreadActivity';
+import { ThreadProjectView } from './ThreadProjectView';
 
 const smallButtonStyle: React.CSSProperties = { height: 26, border: 0, borderRadius: 7, paddingLeft: 9, paddingRight: 9, fontSize: 12, fontWeight: 300, fontFamily: 'inherit', letterSpacing: '-0.1px', cursor: 'pointer', color: 'var(--t-text-muted)', background: 'transparent' };
 
@@ -37,8 +39,7 @@ export function O8ThreadsPane({ active, repoPath, repos, allRepos = false, initi
   const pool = useThreadsTasks(active && !projects.loading, scopeKey);
   const registeredRepos = useThreadRepos(active, repoPath, repos);
   const tasks = useMemo(() => scopeThreads(pool.tasks, scope), [pool.tasks, scope]);
-  const agents = useMemo(() => scopeThreadAgents(context?.agents ?? [], tasks, scope), [context?.agents, scope, tasks]);
-  const [view, setView] = useState(initialView);
+  const [view, setView] = useState<'threads' | 'agents' | 'library' | 'merges' | 'history'>(initialView);
   const [selection, setSelection] = useState<{ scopeKey: string; id: string } | null>(null);
   const [collapsed, setCollapsed] = useState<string[]>(['done']);
   const [composerOpen, setComposerOpen] = useState(false);
@@ -110,7 +111,7 @@ export function O8ThreadsPane({ active, repoPath, repos, allRepos = false, initi
         {boundSessionKey ? <>
           <button type="button" onClick={backToThreads} style={{ ...smallButtonStyle, flexShrink: 0 }}>Threads</button>
           <span title={selected?.title} style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12, fontWeight: 300 }}>{selected?.title}</span>
-        </> : (['threads', 'agents'] as const).map((tab) => <button key={tab} role="tab" aria-selected={view === tab} onClick={() => { setView(tab); if (tab === 'threads') backToThreads(); }} style={{ ...smallButtonStyle, background: view === tab ? 'var(--t-input-bg)' : 'transparent', color: view === tab ? 'var(--t-text)' : 'var(--t-text-muted)' }}>{tab === 'threads' ? 'Threads' : 'Agents'}</button>)}
+        </> : (['threads', 'library', 'merges', 'history', 'agents'] as const).map((tab) => <button key={tab} role="tab" aria-selected={view === tab} onClick={() => { setView(tab); if (tab === 'threads') backToThreads(); }} style={{ ...smallButtonStyle, background: view === tab ? 'var(--t-input-bg)' : 'transparent', color: view === tab ? 'var(--t-text)' : 'var(--t-text-muted)' }}>{tab[0].toUpperCase() + tab.slice(1)}</button>)}
         <span style={{ flex: 1 }} />
         <button type="button" onClick={pool.refresh} disabled={pool.loading} style={{ ...smallButtonStyle, flexShrink: 0 }}>Refresh</button>
         {!boundSessionKey ? <button type="button" aria-label="Create task" disabled={!canCreate || Boolean(busyKey)} onClick={(event) => { composerOpener.current = event.currentTarget; if (composerOpen) event.currentTarget.focus(); setView('threads'); setSelection(null); setComposerOpen((open) => !open); }} style={smallButtonStyle}>+</button> : null}
@@ -128,9 +129,10 @@ export function O8ThreadsPane({ active, repoPath, repos, allRepos = false, initi
             <div style={{ marginTop: 6, marginBottom: 20, fontSize: 12, fontWeight: 300, color: 'var(--t-text-muted)' }}>{projects.loading || pool.loading && !tasks.length ? 'Reading project threads…' : waiting ? `${waiting} thread${waiting === 1 ? ' is' : 's are'} waiting on you.` : 'Nothing is waiting on you.'}</div>
             {composerOpen && canCreate ? <NewTaskComposer titleInputRef={composerTitle} repos={availableRepos} selectedRepo={availableRepos.find((repo) => repo.localPath === repoPath)} title={title} summary={summary} repoPath={currentTargetRepo} workerIntent={intent} busy={busyKey === 'create'} onTitleChange={setTitle} onSummaryChange={setSummary} onRepoPathChange={setTargetRepo} onWorkerIntentChange={setIntent} onCancel={() => { setComposerOpen(false); composerOpener.current?.focus(); }} onCreate={(runtime, model, effort) => { void create(false, runtime, model, effort); }} onCreateAndDispatch={(runtime, model, effort) => { void create(true, runtime, model, effort); }} /> : null}
             {pool.loading && !tasks.length ? <p style={{ fontSize: 12, color: 'var(--t-text-muted)' }}>Reading project threads…</p> : null}
-            {!pool.loading && !pool.error && !tasks.length ? <p style={{ fontSize: 13, lineHeight: 1.5, color: 'var(--t-text-muted)' }}>Save a task here or start work from your conversation. Tasks appear as threads with their recorded status.</p> : null}
+            {!pool.loading && !pool.error && !tasks.length ? <p style={{ fontSize: 13, lineHeight: 1.5, color: 'var(--t-text-muted)' }}>Start work from your conversation or save a task here. Workers can run commands locally on this machine. Recorded work appears here for review.</p> : null}
+            <ThreadActivity tasks={tasks} />
             {THREAD_GROUPS.map((group) => {
-              const entries = tasks.filter((task) => task.group === group.id);
+              const entries = tasks.filter((task) => task.group === group.id || group.id === 'running' && task.group === 'ready');
               if (!entries.length) return null;
               const open = !collapsed.includes(group.id);
               return <section key={group.id} style={{ marginTop: 14 }}>
@@ -143,28 +145,20 @@ export function O8ThreadsPane({ active, repoPath, repos, allRepos = false, initi
                   <span style={{ flex: 1, minWidth: 0 }}>
                     <span style={{ display: 'block', fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.25 }}>{task.title}</span>
                     <span style={{ display: 'block', marginTop: 4, fontSize: 12, lineHeight: 1.4, fontWeight: 300, color: 'var(--t-text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{threadStatusLine(task)}</span>
-                    <span style={{ display: 'block', marginTop: 4, fontSize: 9.5, fontWeight: 260, letterSpacing: '-0.4px', color: 'var(--t-text-faint)' }}>{threadModelLabel(task)}</span>
+                    <span style={{ display: 'block', marginTop: 4, fontSize: 9.5, fontWeight: 260, letterSpacing: '-0.4px', color: 'var(--t-text-faint)' }}>{threadModelLabel(task)}{task.thread ? ` · ${task.thread.workers.length} workers · ${task.thread.merges.length} PRs` : ''}</span>
                   </span>
                   <span style={{ fontSize: 9.5, fontWeight: 260, color: 'var(--t-text-faint)', whiteSpace: 'nowrap', paddingTop: 2 }}>{taskTimeLabel(task)}</span>
                 </button>) : null}
               </section>;
             })}
-          </> : <>
-            <div style={{ fontSize: 18, fontWeight: 400 }}>Agents in this scope</div>
-            <p style={{ fontSize: 12, lineHeight: 1.5, color: 'var(--t-text-muted)' }}>Live workers and their recorded models.</p>
-            {agents.map((agent) => <div key={agent.sessionKey || agent.name} style={{ display: 'flex', gap: 10, borderTop: '1px solid var(--t-divider-subtle)', paddingTop: 12, paddingBottom: 12 }}>
-              <AgentStatusDot state={agentStatusToDotState(agent.status)} />
-              <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontSize: 13.5, fontWeight: 300 }}>{agent.name || agent.currentTask || 'Worker'}</div><div style={{ marginTop: 4, fontSize: 9.5, fontWeight: 260, color: 'var(--t-text-faint)' }}>{[agent.runtime, agent.model, agent.status].filter(Boolean).join(' · ')}</div>{agent.activity?.headline ? <p style={{ fontSize: 12, lineHeight: 1.4, color: 'var(--t-text-muted)' }}>{agent.activity.headline}</p> : null}</div>
-            </div>)}
-            {!agents.length ? <p style={{ fontSize: 13, color: 'var(--t-text-muted)' }}>No live agents recorded in this scope.</p> : null}
-          </>}
+          </> : <ThreadProjectView view={view} tasks={tasks} onOpen={(task) => { setSelection({ scopeKey, id: task.id }); setView('threads'); }} />}
         </div>
       )}
       {confirmation?.scopeKey === scopeKey ? <div role="group" aria-label="Confirm thread action" style={{ paddingTop: 12, paddingRight: 12, paddingBottom: 12, paddingLeft: 12, borderTop: '1px solid var(--t-divider-subtle)', fontSize: 12 }}>
         <p style={{ marginTop: 0 }}>{confirmation.action === 'prune' ? 'Permanently prune' : confirmation.action === 'archive' ? 'Archive' : 'Un-queue'} “{confirmation.task.title}”?</p>
         <div style={{ display: 'flex', gap: 8 }}><ThreadActionButton label="Cancel" disabled={Boolean(busyKey)} onClick={() => setConfirmation(null)} /><ThreadActionButton label={busyKey ? 'Updating…' : confirmation.action === 'prune' ? 'Prune permanently' : confirmation.action === 'archive' ? 'Archive thread' : 'Un-queue thread'} danger={confirmation.action === 'prune'} disabled={Boolean(busyKey)} onClick={() => { void mutate(confirmation.task, confirmation.action, confirmation.body).then((ok) => { if (ok) setConfirmation(null); }); }} /></div>
       </div> : null}
-      <div style={{ display: 'flex', gap: 12, paddingTop: 12, paddingRight: 12, paddingBottom: 12, paddingLeft: 12, fontSize: 10, fontWeight: 260, color: 'var(--t-text-faint)', borderTop: '1px solid var(--t-divider-subtle)' }}><span>{working} working</span><span>{resolved} resolved</span><span style={{ marginLeft: 'auto' }}>{tasks.length} threads</span></div>
+      <div style={{ display: 'flex', gap: 12, paddingTop: 12, paddingRight: 12, paddingBottom: 12, paddingLeft: 12, fontSize: 10, fontWeight: 260, color: 'var(--t-text-faint)', borderTop: '1px solid var(--t-divider-subtle)' }}><span>{working} working</span><span>{tasks.filter(task => task.group === 'ready').length} queued</span><span>{resolved} resolved</span><span style={{ marginLeft: 'auto' }}>{tasks.length} threads</span></div>
     </div>
   );
 }

@@ -38,6 +38,10 @@ export function resolveMacosCpuArtifacts(root: string, version: string, architec
 export function bundleContentSha256(appPath: string, excludedPaths?: readonly string[]): string;
 export function macosSharedResourcesSha256(appPath: string): string;
 export function macosExecutablePayloadSha256(path: string, architecture: MacosArchitecture): string;
+export function macosBuildPayloadIdentity(path: string, architecture: MacosArchitecture, payloadBytes?: number): {
+  sha256: string;
+  payloadBytes: number;
+};
 export function verifyMacCpuApp(appPath: string, architecture: MacosArchitecture): MacosCpuArtifactIdentity;
 export function verifyMacCpuUpdaterArchive(appPath: string, archivePath: string, architecture: MacosArchitecture): MacosCpuArtifactIdentity & {
   bundleSha256: string;

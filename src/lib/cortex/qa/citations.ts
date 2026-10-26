@@ -92,7 +92,7 @@ export function rowDisplayTitle(row: TypedRow): string {
       title = pick('title', 'relPath');
       break;
     case 'fact':
-      title = pick('content').split('\n')[0] ?? '';
+      title = fields?.sourceKind === 'knowledge' ? `${pick('sourceName')} · ${pick('title')}` : pick('content').split('\n')[0] ?? '';
       break;
     case 'symbol':
       title = [pick('kind'), pick('symbol')].filter(Boolean).join(' ');
