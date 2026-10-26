@@ -3783,6 +3783,12 @@
       ]
     },
     {
+      "path": "tests/mcp-launch-payer-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/mcp-project-install.test.ts",
       "reasons": [
         "child-process",
