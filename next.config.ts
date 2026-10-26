@@ -76,6 +76,9 @@ const nextConfig: NextConfig = {
     // Runtime response caches must not mutate the signed standalone app.
     // Compiled responses remain readable and the in-memory cache stays enabled.
     isrFlushToDisk: false,
+    // Local Linux build: O8_NEXT_BUILD_WORKER=1 compiles in a worker process that
+    // exits before the TypeScript phase, so a 16 GB box does not hold both at once.
+    ...(process.env.O8_NEXT_BUILD_WORKER === '1' ? { webpackBuildWorker: true } : {}),
   },
   async headers() {
     return [
