@@ -37,7 +37,8 @@ describe('panel preview proxy confinement', () => {
       },
     ));
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(302);
+    expect(response.headers.get('location')).toBe('http://localhost:3005/');
     const headers = fetchMock.mock.calls[0]?.[1]?.headers as Headers;
     expect(headers.get('authorization')).toBeNull();
     expect(headers.get('cookie')).toBeNull();

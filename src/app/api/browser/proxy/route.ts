@@ -1,26 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { resolvePortInfo } from '@/lib/panel/api-port';
+import { PREVIEW_DOCUMENT_CSP } from '@/lib/panel/preview-proxy-security';
 
 export const dynamic = 'force-dynamic';
 
-/**
- * Same-origin live proxy for the embedded Browser pane (#1232).
- *
- * Grab + the in-page agent need contentDocument access, and localhost dev
- * servers on other ports are cross-origin by port. This route fetches a
- * LOCAL page server-side and re-serves it from our origin with a <base>
- * tag pointed at the original server, so assets/links still resolve there
- * while the document itself becomes inspectable (and grabbable).
- *
- * Fallback: when the server-side fetch can't proxy the page (e.g. an auth
- * redirect loop from a Clerk-gated dev app, whose cookieless fetch loops),
- * we 302 to the DIRECT url so the iframe still RENDERS it in the browser
- * context — viewable, just cross-origin (not grabbable). Only a genuine
- * connection failure (server down) shows the "is it running?" hint.
- *
- * Localhost targets only — this is a dev-inspection tool, not an open
- * fetch relay.
- */
+/** Local preview documents navigate at their source origin without app authority. */
 
 const LOCAL_TARGET = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?([/?#]|$)/i;
 
@@ -84,23 +68,16 @@ export async function GET(request: NextRequest) {
       return NextResponse.redirect(url, 302);
     }
     const type = upstream.headers.get('content-type') ?? 'text/html';
-    if (!type.toLowerCase().includes('text/html')) {
+    const contentType = type.toLowerCase();
+    if (!contentType.includes('text/html') && !contentType.includes('application/xhtml+xml')) {
       const body = await upstream.arrayBuffer();
-      return new NextResponse(body, { status: upstream.status, headers: { 'content-type': type } });
+      return new NextResponse(body, { status: upstream.status, headers: {
+        'content-type': type,
+        'content-security-policy': PREVIEW_DOCUMENT_CSP,
+        'x-content-type-options': 'nosniff',
+      } });
     }
-    let html = await upstream.text();
-    const target = new URL(url);
-    const dir = target.pathname.endsWith('/') ? target.pathname : target.pathname.replace(/[^/]*$/, '');
-    const baseTag = `<base href="${target.origin}${dir}">`;
-    // First <head> wins; headless fragments get the tag prepended so
-    // relative URLs still resolve against the original server.
-    html = /<head[^>]*>/i.test(html)
-      ? html.replace(/<head[^>]*>/i, (match) => `${match}${baseTag}`)
-      : `${baseTag}${html}`;
-    return new NextResponse(html, {
-      status: upstream.status,
-      headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' },
-    });
+    return NextResponse.redirect(url, 302);
   } catch (error) {
     // The server RESPONDED but we couldn't proxy it (most often a Clerk-style
     // auth redirect loop our cookieless fetch can't satisfy) — hand the iframe
