@@ -33,7 +33,7 @@ export const COMPOSER_PROBE_JS = `(() => {
   // The native value setter alone cannot change defaultValue. This requires a
   // controlled textarea commit, rather than an unhydrated HTML input.
   if (editor.value !== text || editor.defaultValue !== text || document.activeElement !== editor || !document.hasFocus()) {
-    return JSON.stringify({ state: 'awaiting-edit-commit', focused: document.hasFocus(), acknowledged: editor.defaultValue === text });
+    return JSON.stringify({ state: 'awaiting-edit-commit', focused: document.hasFocus(), acknowledged: editor.defaultValue === text, click: { x: Math.round(box.x + box.width / 2), y: Math.round(box.y + box.height / 2) } });
   }
   const navigation = performance.getEntriesByType('navigation')[0];
   return JSON.stringify({ state: 'ready', acknowledged: true, focused: document.hasFocus(),
@@ -124,7 +124,7 @@ export async function measureNativeLaunch({ app, output, sourceSha, samples = 3 
       const seeded = materializeFixture(plan, { root: sampleRoot });
       const socketPath = path.join(sampleRoot, 'control.sock');
       const client = new WebviewSocketClient(socketPath);
-      let child, lastProbe, socketReadyMs, activated = false;
+      let child, lastProbe, socketReadyMs, activated = false, lastActivation = 0, nativeWindow;
       const nativeStages = [], seen = new Set();
       let logTail = '';
       const capture = chunk => {
@@ -151,12 +151,19 @@ export async function measureNativeLaunch({ app, output, sourceSha, samples = 3 
               if (socketReadyMs === undefined) {
                 await client.connectOnly(); socketReadyMs = round(performance.now() - started);
               }
-              if (!activated) {
+              if (!activated || (lastProbe?.focused === false && performance.now() - lastActivation > 250)) {
                 await client.send('manage_window', { window_label: 'main', operation: 'focus' });
                 const activation = spawnSync(runner.executable, [String(child.pid), 'ai.o8.desktop.launchbench'],
                   { stdio: 'ignore', timeout: 3000 });
                 assert.equal(activation.status, 0, 'Foreground activation failed');
                 activated = true;
+                lastActivation = performance.now();
+                if (lastProbe?.click) {
+                  await client.send('mouse_movement', { windowLabel: 'main', ...lastProbe.click, click: true });
+                }
+                const info = await client.send('get_app_info', {});
+                const main = info.windows?.find(window => window.label === 'main');
+                nativeWindow = main && { visible: main.visible, focused: main.focused };
               }
               lastProbe = JSON.parse(await executeJs(client, COMPOSER_PROBE_JS));
               if (lastProbe.state === 'ready') {
@@ -176,7 +183,7 @@ export async function measureNativeLaunch({ app, output, sourceSha, samples = 3 
         receipt.samples.at(-1).idleRss = wholeAppRss(child.pid);
       } catch (error) {
         receipt.failure = { sample, message: String(error.message).replaceAll(stageRoot, '<fixture>'),
-          lastProbe, nativeStages: [...nativeStages], exitCode: child?.exitCode, signal: child?.signalCode };
+          lastProbe, nativeWindow, nativeStages: [...nativeStages], exitCode: child?.exitCode, signal: child?.signalCode };
         throw error;
       } finally {
         try {
