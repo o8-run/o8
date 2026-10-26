@@ -10,7 +10,7 @@ import { classifyTestSource } from '../scripts/lib/test-classification.mjs';
 const classificationScript = fileURLToPath(new URL('../scripts/classify-tests.mjs', import.meta.url));
 const vitestPackage = dirname(createRequire(import.meta.url).resolve('vitest/package.json'));
 
-function runClassification(root: string, mode: '--check' | '--check-manifest' | '--write', preload?: string) {
+function runClassification(root: string, mode: '--check' | '--check-manifest' | '--write' | '--dated-fixtures', preload?: string) {
   return spawnSync(process.execPath, [...(preload ? ['--import', pathToFileURL(preload).href] : []), classificationScript, mode], {
     cwd: root,
     encoding: 'utf8',
@@ -108,10 +108,49 @@ function datedFixture(testSource: string, contractSource = 'export const contrac
     ${testSource}
     ${restoreClock ? 'afterEach(() => vi.useRealTimers());' : ''}
   `);
+  const result = runClassification(root, '--write');
+  expect(result.status, result.stderr).toBe(0);
   return root;
 }
 
 describe('dated fixture PR gate', () => {
+  it('writes the manifest without probing a bad dated fixture and keeps the check gate', () => {
+    const root = datedFixture("it('valid', () => check());");
+    try {
+      rmSync(join(root, 'tests/test-classification.json'));
+      const writeResult = runClassification(root, '--write');
+      expect(writeResult.status, writeResult.stderr).toBe(0);
+      expect(writeResult.stdout).not.toContain('[dated-fixtures]');
+      expect(writeResult.stderr).not.toContain('[dated-fixtures]');
+      const manifest = readFileSync(join(root, 'tests/test-classification.json'), 'utf8');
+      expect(JSON.parse(manifest)).toMatchObject({ schema: 'o8/test-classification/v1', resourceOwning: [] });
+
+      const checkResult = runClassification(root, '--check');
+      expect(checkResult.status, checkResult.stderr).toBe(1);
+      expect(checkResult.stderr).toContain('[dated-fixtures] tests/clock.test.ts');
+      expect(checkResult.stderr).toContain('pin Date');
+      expect(readFileSync(join(root, 'tests/test-classification.json'), 'utf8')).toBe(manifest);
+
+      const manifestResult = runClassification(root, '--check-manifest');
+      expect(manifestResult.status, manifestResult.stderr).toBe(0);
+      expect(manifestResult.stderr).not.toContain('[dated-fixtures]');
+      writeFileSync(join(root, 'tests/test-classification.json'), '{}\n');
+      expect(runClassification(root, '--check-manifest').stderr).toContain('manifest drifted');
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it('probes locally without reading or rewriting the manifest', () => {
+    const root = datedFixture("it('valid', () => { vi.useFakeTimers({ now: 0 }); check(); });");
+    try {
+      const manifestPath = join(root, 'tests/test-classification.json');
+      writeFileSync(manifestPath, '{}\n');
+      const result = runClassification(root, '--dated-fixtures');
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout).toContain('1 isolated tests passed');
+      expect(readFileSync(manifestPath, 'utf8')).toBe('{}\n');
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
   it('rejects a fixture validation masked by a leaking pin in an unrelated suite', () => {
     const root = datedFixture(`
       describe('unrelated suite', () => {
@@ -124,7 +163,7 @@ describe('dated fixture PR gate', () => {
       afterAll(() => vi.useRealTimers());
     `, undefined, false);
     try {
-      const result = runClassification(root, '--write');
+      const result = runClassification(root, '--check');
       expect(result.status, result.stderr).toBe(1);
       expect(result.stderr).toContain('[dated-fixtures] tests/clock.test.ts');
       expect(result.stderr).toContain('validates without its own pin');
@@ -134,6 +173,7 @@ describe('dated fixture PR gate', () => {
   it('leaves the dated-fixture probe to the PR gate when only the manifest is checked', () => {
     const root = datedFixture("it('valid', () => { vi.setSystemTime(0); check(); });", undefined, false);
     try {
+      writeFileSync(join(root, 'tests/test-classification.json'), '{}\n');
       const gate = runClassification(root, '--check');
       expect(gate.status, gate.stderr).toBe(1);
       expect(gate.stderr).toContain('[dated-fixtures] tests/clock.test.ts');
@@ -148,7 +188,7 @@ describe('dated fixture PR gate', () => {
   it('requires a fixture clock pin to be restored after the isolated test', () => {
     const root = datedFixture("it('valid', () => { vi.setSystemTime(0); check(); });", undefined, false);
     try {
-      const result = runClassification(root, '--write');
+      const result = runClassification(root, '--check');
       expect(result.status, result.stderr).toBe(1);
       expect(result.stderr).toContain('restore');
     } finally { rmSync(root, { recursive: true, force: true }); }
@@ -166,7 +206,7 @@ describe('dated fixture PR gate', () => {
       afterAll(() => vi.useRealTimers());
     `, undefined, false);
     try {
-      const result = runClassification(root, '--write');
+      const result = runClassification(root, '--check');
       expect(result.status, result.stderr).toBe(1);
       expect(result.stderr).toContain('validates without its own pin');
     } finally { rmSync(root, { recursive: true, force: true }); }
@@ -187,7 +227,7 @@ describe('dated fixture PR gate', () => {
       });
     `, undefined, false);
     try {
-      const result = runClassification(root, '--write');
+      const result = runClassification(root, '--check');
       expect(result.status, result.stderr).toBe(0);
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
@@ -204,7 +244,7 @@ describe('dated fixture PR gate', () => {
         const helper = join(root, 'tests/fixtures/check.ts');
         writeFileSync(helper, readFileSync(helper, 'utf8') + '\ncheck();\n');
       }
-      const result = runClassification(root, '--write');
+      const result = runClassification(root, '--check');
       expect(result.status, result.stderr).toBe(1);
       expect(result.stderr).toContain('[dated-fixtures] tests/clock.test.ts');
     } finally { rmSync(root, { recursive: true, force: true }); }
@@ -221,7 +261,7 @@ describe('dated fixture PR gate', () => {
         const contract = { expiresAt: Date.UTC(2040, 0, 1) };
         if (contract.expiresAt <= Date.now()) throw new Error('later contract expired');
       `);
-      const result = runClassification(root, '--write');
+      const result = runClassification(root, '--check');
       expect(result.status, result.stderr).toBe(1);
       expect(result.stderr).toContain('[dated-fixtures] tests/clock.test.ts');
     } finally { rmSync(root, { recursive: true, force: true }); }
@@ -238,7 +278,7 @@ describe('dated fixture PR gate', () => {
     try {
       const helper = join(root, 'tests/fixtures/check.ts');
       writeFileSync(helper, readFileSync(helper, 'utf8') + '\ncheck();\n');
-      const result = runClassification(root, '--write');
+      const result = runClassification(root, '--check');
       expect(result.status, result.stderr).toBe(0);
       expect(result.stdout).toContain('passed with Date after');
     } finally { rmSync(root, { recursive: true, force: true }); }
@@ -272,7 +312,7 @@ describe('dated fixture PR gate', () => {
       });
     `);
     try {
-      const result = runClassification(root, '--write');
+      const result = runClassification(root, '--check');
       expect(result.status, result.stderr).toBe(0);
       expect(result.stdout).toContain('passed with Date after');
     } finally { rmSync(root, { recursive: true, force: true }); }
@@ -283,7 +323,7 @@ describe('dated fixture PR gate', () => {
       it.each([1, 2])('same title', () => { vi.setSystemTime(0); check(); });
     `);
     try {
-      const result = runClassification(root, '--write');
+      const result = runClassification(root, '--check');
       expect(result.status, result.stderr).toBe(0);
       expect(result.stdout).toContain('2 isolated tests passed');
     } finally { rmSync(root, { recursive: true, force: true }); }
@@ -302,7 +342,7 @@ describe('dated fixture PR gate', () => {
   ])('rejects %s through the classification entry point', (_name, source) => {
     const root = datedFixture(source);
     try {
-      for (const mode of ['--write', '--check'] as const) {
+      for (const mode of ['--check', '--dated-fixtures'] as const) {
         const result = runClassification(root, mode);
         expect(result.status, result.stderr).toBe(1);
         expect(result.stderr).toContain('[dated-fixtures] tests/clock.test.ts');
@@ -324,7 +364,7 @@ describe('dated fixture PR gate', () => {
 
   it('accepts a relative expiry without confusing it with a dated contract', () => {
     const root = datedFixture("it('valid', () => check());", 'export const contract = { expiresAt: Date.now() + 60_000 };');
-    try { expect(runClassification(root, '--write').status).toBe(0); }
+    try { expect(runClassification(root, '--check').status).toBe(0); }
     finally { rmSync(root, { recursive: true, force: true }); }
   });
 
@@ -336,7 +376,7 @@ describe('dated fixture PR gate', () => {
   ])('finds fixed expiry syntax through an imported fixture', (contract) => {
     const root = datedFixture("it('valid', () => check());", contract);
     try {
-      const result = runClassification(root, '--write');
+      const result = runClassification(root, '--check');
       expect(result.status, result.stderr).toBe(1);
       expect(result.stderr).toContain('fixed expiry in src/contract.ts');
     } finally { rmSync(root, { recursive: true, force: true }); }
@@ -355,7 +395,7 @@ describe('dated fixture PR gate', () => {
     `, 'export const contract = { expiresAt: Date.now() + 60_000 };');
     try {
       writeFileSync(join(root, 'tests/fixtures/token.json'), '{"expiresAt":"2030-01-09T00:00:00Z"}');
-      const result = runClassification(root, '--write');
+      const result = runClassification(root, '--check');
       expect(result.status, result.stderr).toBe(1);
       expect(result.stderr).toContain('fixed expiry in tests/fixtures/token.json');
     } finally { rmSync(root, { recursive: true, force: true }); }
@@ -487,7 +527,7 @@ describe('dated fixture clock ownership matrix', () => {
             if (${read} >= contract.expiresAt) throw new Error('expired');
           }
         `);
-        const result = runClassification(root, '--write');
+        const result = runClassification(root, '--check');
         const allowed = owner === 'test restored' || owner === 'describe restored';
         expect(result.status, `${name} / ${owner}\n${result.stderr}`).toBe(allowed ? 0 : 1);
         if (allowed) expect(result.stdout).toContain('passed with Date after');

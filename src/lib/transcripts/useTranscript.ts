@@ -51,9 +51,11 @@ function createTranscriptPresentation(sessionKey: string | null | undefined, vis
       const update = (next: TranscriptSlice) => {
         if (next === snapshot) return;
         latest = next;
-        // Reuse the store's text-only boundary so questions, receipts,
-        // errors and new turns can never wait behind a background timer.
-        if (foreground() || !isAssistantTextEdit(snapshot, next)) {
+        // Only prose and freshness can wait. Questions, receipts, errors
+        // and new turns must bypass the background timer.
+        const unchangedContent = snapshot.messages === next.messages
+          && snapshot.status === next.status && snapshot.error === next.error;
+        if (foreground() || !(unchangedContent || isAssistantTextEdit(snapshot, next))) {
           cancel(); snapshot = next; listener();
         } else if (timer === null) {
           timer = setTimeout(() => { timer = null; snapshot = latest; listener(); }, 1000);

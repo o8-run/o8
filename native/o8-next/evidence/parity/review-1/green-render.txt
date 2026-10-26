@@ -1,0 +1,29 @@
+Command: npx vitest run tests/next-parity-render-failure-real-path.test.ts tests/next-parity-harness-real-path.test.ts
+
+ ✓ tests/next-parity-render-failure-real-path.test.ts > the capture CLI rejects pageerror on a named fixture surface 29917ms
+ ✓ tests/next-parity-render-failure-real-path.test.ts > the capture CLI rejects console on a named fixture surface 16920ms
+ ✓ tests/next-parity-render-failure-real-path.test.ts > the capture CLI rejects boundary on a named fixture surface 16780ms
+ ✓ tests/next-parity-render-failure-real-path.test.ts > the capture CLI rejects boundary-reset on a named fixture surface 17821ms
+ ✓ tests/next-parity-render-failure-real-path.test.ts > the capture CLI rejects http404 on a named fixture surface 2272ms
+ ✓ tests/next-parity-render-failure-real-path.test.ts > the capture CLI rejects http500 on a named fixture surface 2559ms
+ ✓ tests/next-parity-render-failure-real-path.test.ts > the capture CLI rejects late-http500 on a named fixture surface 13999ms
+ ✓ tests/next-parity-render-failure-real-path.test.ts > the capture CLI rejects surface-fetch500 on a named fixture surface 18984ms
+ ✓ tests/next-parity-render-failure-real-path.test.ts > the capture CLI rejects native-blank on a named fixture surface 14285ms
+ ✓ tests/next-parity-render-failure-real-path.test.ts > the capture CLI rejects native-error on a named fixture surface 10892ms
+ ✓ tests/next-parity-render-failure-real-path.test.ts > the capture CLI rejects native-receipt-error on a named fixture surface 10984ms
+ ✓ tests/next-parity-render-failure-real-path.test.ts > keeps a healthy fixture surface successful through the same CLI and real browser 20365ms
+ ✓ tests/next-parity-harness-real-path.test.ts > discovers every production registration and both viewport sizes through the harness CLI 102ms
+ ✓ tests/next-parity-harness-real-path.test.ts > reports signed numeric gaps, preserves missing measurements and never gates on a visual difference 134ms
+ ✓ tests/next-parity-harness-real-path.test.ts > recomputes all 52 recorded numeric gaps without changing the accepted measurements 182ms
+ ✓ tests/next-parity-harness-real-path.test.ts > serves the same persisted history and selected desktop tab through production fixture routes 5153ms
+
+ Test Files  2 passed (2)
+      Tests  16 passed (16)
+   Start at  22:42:27
+   Duration  183.06s (transform 138ms, setup 148ms, import 776ms, tests 181.39s, environment 0ms)
+
+Final rerun after the quoted-error-text healthy fixture was added:
+ Test Files  2 passed (2)
+      Tests  16 passed (16)
+   Start at  22:53:50
+   Duration  106.87s (transform 59ms, setup 58ms, import 384ms, tests 106.16s, environment 0ms)

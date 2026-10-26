@@ -1916,6 +1916,17 @@
       ]
     },
     {
+      "path": "tests/chat-image-delivery-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "network-listener",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/ci-gates-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -4135,6 +4146,33 @@
       ]
     },
     {
+      "path": "tests/next-parity-harness-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/next-parity-preflight-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "native-build",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/next-parity-render-failure-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/next-playwright-runtime-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -5463,6 +5501,14 @@
       ]
     },
     {
+      "path": "tests/repo-remote-refresh-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/repo-repoint-contract.test.ts",
       "reasons": [
         "child-process",
@@ -6486,6 +6532,12 @@
         "git-cli",
         "real-path",
         "worktree"
+      ]
+    },
+    {
+      "path": "tests/tts-edge-installed.integration.test.ts",
+      "reasons": [
+        "child-process"
       ]
     },
     {

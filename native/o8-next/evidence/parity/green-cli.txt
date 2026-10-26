@@ -1,0 +1,23 @@
+npm warn Unknown project config "min-release-age". This will stop working in the next major version of npm.
+(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+  - ESM syntax in a file loaded as CommonJS (vitest.config.ts:1:1). Use a `.mjs` extension or set `"type": "module"` in the closest package.json
+  - ESM syntax in a file loaded as CommonJS (config/vitest/vitest.shared.ts:1:1). Use a `.mjs` extension or set `"type": "module"` in the closest package.json
+Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+
+ RUN  v4.1.11 /workspace/o8
+
+[fixture-cleanup] Reclaimed 0 fixture bytes from 0 stale o8-* directories; detached 0 orphaned o8-apfs-* images; skipped 0 mounted directories; held 0 live, 0 retained and 0 unknown or changed owners; receipt /tmp/o8-test-data-run-8HKkCz/.o8-fixture-sweep-ojxE3y/receipt.json.
+ ✓ tests/next-parity-harness-real-path.test.ts > discovers every production registration and both viewport sizes through the harness CLI 56ms
+ ✓ tests/next-parity-harness-real-path.test.ts > reports signed numeric gaps, preserves missing measurements and never gates on a visual difference 103ms
+ ✓ tests/next-parity-harness-real-path.test.ts > serves the same persisted history and selected desktop tab through production fixture routes 2462ms
+
+ Test Files  1 passed (1)
+      Tests  3 passed (3)
+   Start at  17:06:50
+   Duration  3.02s (transform 43ms, setup 53ms, import 18ms, tests 2.63s, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.9.0 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

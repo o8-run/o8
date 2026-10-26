@@ -196,6 +196,7 @@ fn round1_symlink_worker_survives_real_refresh_and_send(cx: &mut TestAppContext)
     );
     cx.simulate_keystrokes("ctrl-k");
     cx.simulate_keystrokes("r e f r e s h enter");
+    cx.run_until_parked();
     draw(cx);
     assert_eq!(
         worker_state(&shell, cx)["selected"],
