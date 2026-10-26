@@ -1,3 +1,4 @@
+import { viewerJson } from '@/lib/viewers/response';
 /**
  * GET /api/orchestrator/review-state?packetId=<id>
  *
@@ -12,7 +13,7 @@
  *     the gate is computed on-demand — it reads the diff so it requires
  *     a lane with a worktree)
  */
-import { NextResponse, type NextRequest } from 'next/server';
+import { type NextRequest } from 'next/server';
 import { listApprovalsForContext } from '@/lib/approvals/store';
 import type { ApprovalRecord } from '@/lib/approvals/types';
 import type { LaneSpokenDiffFacts } from '@/lib/lane/lane-diff-facts';
@@ -49,7 +50,7 @@ const LOG_PREFIX = '[review-state]';
 const JSON_HEADERS = { 'Cache-Control': 'no-store, max-age=0' };
 
 function errorResponse(code: string, message: string, status = 500) {
-  return NextResponse.json({ error: { code, message } }, { status, headers: JSON_HEADERS });
+  return viewerJson({ error: { code, message } }, { status, headers: JSON_HEADERS });
 }
 
 function toOrchestratorReview(review: {
@@ -397,7 +398,7 @@ export async function GET(request: NextRequest) {
       mergeGate,
     });
 
-    return NextResponse.json({
+    return viewerJson({
       packetId,
       state,
       stateChangedAt,

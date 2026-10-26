@@ -1,6 +1,6 @@
+import { viewerJson } from '@/lib/viewers/response';
 export const dynamic = 'force-dynamic';
 
-import { NextResponse } from 'next/server';
 import { execFileSync } from '@/lib/providers/child-process';
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -50,16 +50,16 @@ export async function GET(
   const root = resolveRoot(searchParams.get('workspace'));
 
   if (!/^[a-f0-9]{7,40}$/i.test(hash)) {
-    return NextResponse.json({ error: 'Invalid commit hash' }, { status: 400 });
+    return viewerJson({ error: 'Invalid commit hash' }, { status: 400 });
   }
 
   if (!filePath) {
-    return NextResponse.json({ error: 'path param required' }, { status: 400 });
+    return viewerJson({ error: 'path param required' }, { status: 400 });
   }
 
   const absoluteFilePath = safeRepoPath(root, filePath);
   if (!absoluteFilePath) {
-    return NextResponse.json({ error: 'Path outside repository' }, { status: 400 });
+    return viewerJson({ error: 'Path outside repository' }, { status: 400 });
   }
 
   try {
@@ -119,7 +119,7 @@ export async function GET(
       note = 'Using the current workspace file because the exact commit snapshot is unavailable.';
     }
 
-    return NextResponse.json({
+    return viewerJson({
       file: {
         path: filePath,
         status,
@@ -132,6 +132,6 @@ export async function GET(
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return viewerJson({ error: message }, { status: 500 });
   }
 }
