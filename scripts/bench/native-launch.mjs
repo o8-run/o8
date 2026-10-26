@@ -129,7 +129,8 @@ export async function measureNativeLaunch({ app, output, sourceSha, samples = 3 
     osVersion: execFileSync('sw_vers', ['-productVersion'], { encoding: 'utf8' }).trim(), sourceSha, artifactDigest,
     benchmarkSha: execFileSync('git', ['-C', fileURLToPath(new URL('../..', import.meta.url)), 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
     method: 'normal release startup, private app data and incognito webview; spawn, foreground activation and controlled composer edit acknowledgment',
-    pollMs: 10, probeDeadlineMs: 250, limitMs: 1000, samples: [] };
+    pollMs: 10, probeDeadlineMs: 250, limitMs: 1000,
+    fixture: 'configured private profile, one fresh composer, no bound thread', samples: [] };
   try {
     runner = prepareNativeRunner('ai.o8.desktop.launchbench', stageRoot);
     receipt.privacyPrecondition = runner.services.map(service => `${service}: denied`);
@@ -142,8 +143,11 @@ export async function measureNativeLaunch({ app, output, sourceSha, samples = 3 
         'An app process is still running; refusing a normal-startup measurement');
       const sampleRoot = fs.mkdtempSync(path.join(stageRoot, 'profile-'));
       const plan = buildFixturePlan(1, 4581);
-      plan.tabs = plan.tabs.filter(tab => tab.kind === 'orchestrator');
+      // Open a fresh composer without a pending history restore.
+      plan.tabs = plan.tabs.filter(tab => tab.kind === 'orchestrator')
+        .map(tab => ({ ...tab, orchestratorThreadId: undefined }));
       const seeded = materializeFixture(plan, { root: sampleRoot });
+      fs.rmSync(path.join(seeded.dataDir, 'chat-history', 'thoughts-interaction-fixture.json'));
       const socketPath = path.join(sampleRoot, 'control.sock');
       const client = new WebviewSocketClient(socketPath);
       let child, lastProbe, socketReadyMs, activated = false, lastActivation = 0, nativeWindow, editorSeenMs, editAcknowledgedMs;
