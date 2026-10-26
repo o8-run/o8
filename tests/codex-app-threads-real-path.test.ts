@@ -95,6 +95,7 @@ process.stdin.on('data', (chunk) => {
       notify('thread/tokenUsage/updated', { tokenUsage: { last: { inputTokens: 1000, cachedInputTokens: 200, outputTokens: 50 } } });
       notify('turn/completed', { turn: { id: 'turn-1', status: 'completed' } });
     }
+    if (message.method === 'thread/inject_items') send({ id: message.id, result: {} });
     if (message.method === 'turn/interrupt') {
       send({ id: message.id, result: {} });
       notify('turn/completed', { turn: { id: 'turn-1', status: 'interrupted' } });
@@ -151,10 +152,23 @@ describe.skipIf(process.platform === 'win32')('Codex orchestrator chats in the C
       const last = requests.at(-1)!.body;
       const input = last.input as Array<{ role: string; content: unknown }>;
       const developer = JSON.stringify(input.filter(item => item.role === 'developer'));
-      for (const marker of [`OWNER_${phase}`, `PROJECT_${phase}`, `MIDDLE_${phase}`, `MODE_${phase}`, `RECEIPT_${phase}`]) {
+      const expectedPhase = phase === 'resumed' || phase === 'compacted' ? 'fresh'
+        : phase === 'midturn' || phase === 'post-auto' ? 'updated' : phase;
+      for (const marker of [`OWNER_${expectedPhase}`, `PROJECT_${expectedPhase}`, `MIDDLE_${expectedPhase}`, `MODE_${expectedPhase}`, `RECEIPT_${expectedPhase}`]) {
         expect.soft(developer).toContain(marker);
       }
-      expect.soft(developer).toContain(context.replaceAll('\n', '\\n'));
+      expect.soft(developer.includes(context.replaceAll('\n', '\\n'))).toBe(true);
+      const answer = `Project: fixture-${expectedPhase}\nScope: src/${expectedPhase}\nRules: review-${expectedPhase}`;
+      expect.soft(result.answers[phase]).toContain(answer);
+      const occurrences = developer.split(context.replaceAll('\n', '\\n')).length - 1;
+      const turnText = `Turn receipt: ${phase}\n\n${result.messages[phase]}`;
+      const turnContext = JSON.stringify(turnText).slice(1, -1);
+      const turnCopies = developer.split(turnContext).length - 1;
+      expect.soft(turnCopies).toBe(1);
+      const baseBytes = occurrences * Buffer.byteLength(context);
+      const turnBytes = turnCopies * Buffer.byteLength(turnText);
+      process.stdout.write(`[context-bytes] ${phase}: base=${baseBytes} turn=${turnBytes} total=${baseBytes + turnBytes}; copies=${occurrences}/${turnCopies}\n`);
+      expect.soft(occurrences).toBe(1);
     }
     const history = result.history.thread as { turns: Array<{ items: Array<{ type: string; content?: unknown }> }> };
     const items = history.turns.flatMap(turn => turn.items);
@@ -257,10 +271,15 @@ describe.skipIf(process.platform === 'win32')('Codex orchestrator chats in the C
         const turnStart = made.find((call) => call.method === 'turn/start')!;
         expect(made.find(call => call.method === 'initialize')!.params!.capabilities).toEqual({ experimentalApi: true });
         expect.soft(turnStart.params!.input).toEqual([{ type: 'text', text: operatorMessage, text_elements: [] }]);
-        expect.soft(thread.params!.developerInstructions).toBeUndefined();
-        expect.soft(turnStart.params!.collaborationMode).toMatchObject({
-          mode: 'default', settings: { developer_instructions: expectedPrompt },
-        });
+        const marker = '\n\n## USER MESSAGE\n\n';
+        const at = expectedPrompt.indexOf(marker);
+        expect.soft(thread.params!.developerInstructions).toContain(expectedPrompt.slice(0, at));
+        expect.soft(thread.params!.developerInstructions).toContain(expectedPrompt.slice(at + marker.length));
+        expect.soft(turnStart.params!.collaborationMode).toBeUndefined();
+        const injected = made.find(call => call.method === 'thread/inject_items');
+        if (index === 0) expect(injected).toBeUndefined();
+        else expect((injected!.params!.items as Array<{ content: Array<{ text: string }> }>)
+          .flatMap(item => item.content).map(part => part.text).join('\n\n')).toBe(thread.params!.developerInstructions);
       }
     } finally {
       rmSync(agreementPath, { force: true });
@@ -288,8 +307,8 @@ describe.skipIf(process.platform === 'win32')('Codex orchestrator chats in the C
     await turn(cwd, 'Plan this change', { rawMessage: 'Plan this change', permissionMode: 'plan' });
     const made = since(start);
     expect(made.find(call => call.method === 'thread/resume')!.params!.sandbox).toBe('read-only');
-    expect(made.find(call => call.method === 'turn/start')!.params!.collaborationMode)
-      .toMatchObject({ mode: 'plan', settings: { developer_instructions: expect.stringContaining('Plan this change') } });
+    expect(made.find(call => call.method === 'turn/start')!.params!.collaborationMode).toBeUndefined();
+    expect(made.find(call => call.method === 'thread/resume')!.params!.developerInstructions).toContain('Plan this change');
   }, 60_000);
 
   it('starts a fresh Codex app thread when the saved one is gone', async () => {
@@ -309,10 +328,9 @@ describe.skipIf(process.platform === 'win32')('Codex orchestrator chats in the C
     expect(methods.indexOf('thread/start')).toBeGreaterThan(methods.indexOf('thread/resume'));
     expect(events.filter((event) => event.type === 'error')).toEqual([]);
     expect(events).toContainEqual({ type: 'text', text: 'Answer from the Codex app thread' });
-    const recovered = since(start).find(call => call.method === 'turn/start')!;
-    const settings = (recovered.params!.collaborationMode as { settings: { developer_instructions: string } } | undefined)?.settings;
-    expect(settings?.developer_instructions).toContain('widget-731');
-    expect(settings?.developer_instructions).toContain('copper');
+    const recovered = since(start).find(call => call.method === 'thread/start')!;
+    expect(recovered.params!.developerInstructions).toContain('widget-731');
+    expect(recovered.params!.developerInstructions).toContain('copper');
     expect(since(start).find(call => call.method === 'turn/start')!.params!.input)
       .toEqual([{ type: 'text', text: 'Second', text_elements: [] }]);
   }, 60_000);

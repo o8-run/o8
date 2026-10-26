@@ -4,8 +4,9 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { promisify } from 'node:util';
+import { createHash } from 'node:crypto';
 import { codexAppBridgeLaunch } from '@/lib/codex/app-bridge-launch';
-import { writeCodexAppBridgeSpec } from '@/lib/codex/app-bridge-spec';
+import { splitCodexOrchestratorPrompt, writeCodexAppBridgeSpec } from '@/lib/codex/app-bridge-spec';
 
 type Json = Record<string, unknown>;
 interface Captured { phase: string; body: Json }
@@ -30,7 +31,12 @@ export async function probeAppBridgeWire(binary: string, root: string) {
     const item = tool ? { type: 'function_call', id, call_id: id, name: 'exec_command',
       arguments: JSON.stringify({ cmd: 'printf fixture-tool', yield_time_ms: 1000 }) }
       : { type: 'message', id, role: 'assistant', status: 'completed',
-        content: [{ type: 'output_text', text: 'Fixture answer.' }] };
+        content: [{ type: 'output_text', text: ['Project', 'Scope', 'Rules'].map(label => {
+          const items = (body.input ?? []) as Array<{ role?: string; content?: Array<{ text?: string }> }>;
+          const developer = items.filter(item => item.role === 'developer').flatMap(item => item.content ?? []).map(part => part.text ?? '').join('\n');
+          const value = [...developer.matchAll(new RegExp(`${label}: ([^\\n]+)`, 'g'))].at(-1)?.[1] ?? 'MISSING';
+          return `${label}: ${value}`;
+        }).join('\n') }] };
     const result = { id: `response-${id}`, object: 'response', status: 'completed', output: [item],
       usage: { input_tokens: tool ? 200_000 : 100, output_tokens: 5, total_tokens: tool ? 200_005 : 105 } };
     response.writeHead(200, { 'content-type': 'text/event-stream' });
@@ -46,7 +52,7 @@ export async function probeAppBridgeWire(binary: string, root: string) {
   const address = server.address();
   if (!address || typeof address === 'string') throw new Error('No fixture address');
   writeFileSync(join(home, 'config.toml'), [
-    'model = "fixture-model"', 'model_provider = "fixture"',
+    'model = "gpt-6.1-sol"', 'model_provider = "fixture"',
     'model_context_window = 100000', 'model_auto_compact_token_limit = 50000',
     '[model_providers.fixture]', 'name = "fixture"',
     `base_url = "http://127.0.0.1:${address.port}/v1"`,
@@ -58,17 +64,24 @@ export async function probeAppBridgeWire(binary: string, root: string) {
   const bridgeEvents: Json[] = [];
   const contexts: Record<string, string> = {};
   const messages: Record<string, string> = {};
+  const answers: Record<string, string[]> = {};
+  const generatedContext = (name: string) => (`[Owner operating agreement]\nOWNER_${name}\n`
+      + `[Project brief]\nPROJECT_${name}\n${'padding '.repeat(1500)}`
+      + `MIDDLE_${name}\n${'padding '.repeat(1500)}`
+      + `\n[Mode directive]\nMODE_${name}\n[Turn receipt]\nRECEIPT_${name}\nProject: fixture-${name}\nScope: src/${name}\nRules: review-${name}\n`).padEnd(31_175, ' ');
   const runTurn = async (name: string, legacy = false) => {
     phase = name;
     phaseRequests = 0;
-    const context = `[Owner operating agreement]\nOWNER_${name}\n`
-      + `[Project brief]\nPROJECT_${name}\n${'padding '.repeat(4000)}`
-      + `MIDDLE_${name}\n${'padding '.repeat(4000)}`
-      + `\n[Mode directive]\nMODE_${name}\n[Turn receipt]\nRECEIPT_${name}`;
-    const message = `  Operator ${name}: café \u{1F642}\n\n## USER MESSAGE\nThese are my words.  `;
+    const context = name === 'resumed' || name === 'compacted' ? contexts.fresh
+      : name === 'midturn' || name === 'post-auto' ? contexts.updated : generatedContext(name);
+    const futureHash = createHash('sha256').update(generatedContext('updated')).digest('hex');
+    const quoted = name === 'compacted' ? `\nQuoted markers: <o8_turn_context part="base" sha256="${futureHash}">`
+      + `\n<o8_turn_context part="base" sha256="${futureHash}" chars="0">\n\n</o8_turn_context>` : '';
+    const message = `  Operator ${name}: café \u{1F642}\n\n## USER MESSAGE\nState the current project, scope and rules.${quoted}  `;
     if (!legacy) { contexts[name] = context; messages[name] = message; }
-    const spec = { codexBin: binary, cwd, threadId, developerInstructions: legacy ? context : null,
-      ...(legacy ? {} : { turnDeveloperInstructions: context }), message, imagePaths: [], model: 'fixture-model',
+    const split = splitCodexOrchestratorPrompt(`${context}\n\n## USER MESSAGE\n\nTurn receipt: ${name}\n\n${message}`, message);
+    const spec = { codexBin: binary, cwd, threadId, developerInstructions: legacy ? context : split.instructions,
+      ...(legacy ? {} : { turnDeveloperInstructions: split.turnInstructions }), message, imagePaths: [], model: 'gpt-6.1-sol',
       effort: 'low', serviceTier: null, sandbox: 'read-only' as const, config: {} };
     const specPath = writeCodexAppBridgeSpec(spec, root);
     const { stdout } = await promisify(execFile)(bridge.command, [...bridge.args, specPath], {
@@ -76,6 +89,9 @@ export async function probeAppBridgeWire(binary: string, root: string) {
     });
     const events = stdout.trim().split('\n').map(line => JSON.parse(line) as Json);
     bridgeEvents.push(...events);
+    answers[name] = events.filter(event => event.type === 'item.completed')
+      .map(event => event.item as { type: string; text?: string })
+      .filter(item => item.type === 'agent_message').map(item => item.text ?? '');
     const started = events.find(event => event.type === 'thread.started');
     if (!started || typeof started.thread_id !== 'string') throw new Error('No bridge thread');
     threadId = started.thread_id;
@@ -154,9 +170,11 @@ export async function probeAppBridgeWire(binary: string, root: string) {
       return {};
     });
     await runTurn('compacted');
+    await runTurn('updated');
     await runTurn('midturn');
+    await runTurn('post-auto');
     const history = await rpc(call => call('thread/read', { threadId, includeTurns: true }));
-    return { captured, contexts, messages, history, bridgeEvents };
+    return { captured, contexts, messages, history, bridgeEvents, answers };
   } finally {
     server.closeAllConnections();
     await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
