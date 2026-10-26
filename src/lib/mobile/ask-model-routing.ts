@@ -116,17 +116,28 @@ export function normalizeMobileAskModelId(value: unknown): MobileAskModelId {
     : 'auto';
 }
 
-/** Unknown and omitted values retain the historical xhigh Ask behavior. */
+/** Saved selections use the historical xhigh fallback for stale values. */
 export function normalizeMobileAskEffort(value: unknown): MobileAskEffort {
   return typeof value === 'string' && MOBILE_ASK_EFFORT_SET.has(value)
     ? value as MobileAskEffort
     : 'xhigh';
 }
 
+/** Explicit request pins are validated separately from saved-selection migration. */
+export function mobileAskEffortError(model: unknown, effort: unknown): string | null {
+  if (effort === undefined) return null;
+  if (typeof effort !== 'string' || !MOBILE_ASK_EFFORT_SET.has(effort)) {
+    return 'effort must be low, medium, high, or xhigh when provided.';
+  }
+  if (normalizeMobileAskModelId(model) === 'claude-opus' && effort === 'low') {
+    return 'The selected Ask model does not support low effort. Choose another effort or model.';
+  }
+  return null;
+}
+
 /**
- * Opus 5 currently stalls at low through the Claude Code REPL. Clamp only that
- * live-hit combination; every other allow-listed model keeps the validated
- * effort unchanged.
+ * Normalize a saved choice after a model change. The request boundary refuses
+ * this unsupported low combination rather than silently migrating an explicit pin.
  */
 export function resolveMobileAskEffort(
   model: MobileAskModelId,

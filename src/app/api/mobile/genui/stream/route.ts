@@ -28,7 +28,9 @@ import { callCodex } from '@/lib/cortex/qa/llm/codex-adapter';
 import { resolveOpenRouterRoute } from '@/lib/cortex/qa/llm/inference-route';
 import {
   buildMobileAskModelCatalog,
+  mobileAskEffortError,
   resolveMobileAskRoute,
+  type MobileAskEffort,
   type MobileAskReadiness,
 } from '@/lib/mobile/ask-model-routing';
 import { MODEL_IDS } from '@/lib/models';
@@ -149,12 +151,13 @@ function chunkFrame(id: string, created: number, model: string, delta: Record<st
   })}\n\n`;
 }
 
-function sseHeaders() {
+function sseHeaders(effort?: MobileAskEffort) {
   return {
     'Content-Type': 'text/event-stream; charset=utf-8',
     'Cache-Control': 'no-store, no-transform',
     Connection: 'keep-alive',
     'X-Accel-Buffering': 'no',
+    ...(effort ? { 'X-O8-Ask-Effort': effort } : {}),
   };
 }
 
@@ -184,6 +187,9 @@ export async function POST(req: NextRequest) {
   } catch {
     return jsonError('Invalid JSON body.', 400);
   }
+
+  const effortError = mobileAskEffortError(body.model, body.effort);
+  if (effortError) return jsonError(effortError, 400);
 
   if (!Array.isArray(body.messages) || body.messages.length === 0) {
     return jsonError('messages array is required.', 400);
@@ -220,7 +226,9 @@ export async function POST(req: NextRequest) {
           effort: routeSelection.effort,
           timeoutMs: CLI_TIMEOUT_MS,
         });
-        return NextResponse.json(completionBody(id, created, routeSelection.cliModel, text));
+        return NextResponse.json(completionBody(id, created, routeSelection.cliModel, text), {
+          headers: { 'X-O8-Ask-Effort': routeSelection.effort },
+        });
       } catch (error) {
         console.error('[genui] Claude completion failed:', error instanceof Error ? error.message : 'unknown');
         return jsonError('Generation failed on the Claude CLI tier.', 502);
@@ -257,7 +265,7 @@ export async function POST(req: NextRequest) {
           });
       },
     });
-    return new Response(stream, { headers: sseHeaders() });
+    return new Response(stream, { headers: sseHeaders(routeSelection.effort) });
   }
 
   if (routeSelection.kind === 'codex') {
@@ -276,7 +284,9 @@ export async function POST(req: NextRequest) {
       return jsonError('Generation failed on the Codex CLI tier.', 502);
     }
     if (!wantStream) {
-      return NextResponse.json(completionBody(id, created, routeSelection.cliModel, text));
+      return NextResponse.json(completionBody(id, created, routeSelection.cliModel, text), {
+        headers: { 'X-O8-Ask-Effort': routeSelection.effort },
+      });
     }
     const encoder = new TextEncoder();
     const synthesized = new ReadableStream<Uint8Array>({
@@ -287,7 +297,7 @@ export async function POST(req: NextRequest) {
         controller.close();
       },
     });
-    return new Response(synthesized, { headers: sseHeaders() });
+    return new Response(synthesized, { headers: sseHeaders(routeSelection.effort) });
   }
 
   // Hosted tier — managed plan proxy (founder fast path) → local → BYO OpenRouter.

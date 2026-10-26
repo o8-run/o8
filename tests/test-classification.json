@@ -4018,6 +4018,12 @@
       ]
     },
     {
+      "path": "tests/mobile-ask-effort-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/mobile-chat-send-effort-real-path.test.ts",
       "reasons": [
         "real-path"
