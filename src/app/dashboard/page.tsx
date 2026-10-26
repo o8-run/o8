@@ -105,7 +105,6 @@ import {
 } from '@/lib/events/o8-panel-focus';
 import { fetchOnce, fetchSWRJson } from '@/lib/panel/fetch-cache';
 import { safeCancelIdleCallback, safeRequestIdleCallback } from '@/lib/util/webview-safe';
-import { prefetchConnectedAutomations } from '@/components/desktop/automations-page/connected-cache';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
 import type { WorktreeInfo } from '@/lib/worktree/types';
 import type { MobileInboxSnapshot, MobileOrchestratorThread } from '@/lib/mobile/types';
@@ -1008,19 +1007,12 @@ function DashboardInner() {
     sidebarManualIntentRef,
   });
 
-  // ── Prefetch heavy lazy chunks on idle so Suspense fallbacks are never visible ──
-  // Workspace + side-panel chunks are deferred off the critical path so the
-  // initial render is small. We then warm them on the first idle frame so
-  // when the user actually clicks (or the right rail mounts), the chunk is
-  // already parsed.
+  // Warm the default workspace and composer while saved state loads.
+  // An idle frame can occur before startup requests have settled.
   useEffect(() => {
     const prefetch = () => {
       import('@/components/desktop/WorkspaceTerminal');
-      import('@/components/desktop/Canvas');
       import('@/components/desktop/workspace-terminal/OrchestratorTab');
-      import('@/components/desktop/O8Panel');
-      import('@/components/desktop/AutomationsPage');
-      prefetchConnectedAutomations();
     };
     const id = safeRequestIdleCallback(prefetch, { fallbackDelayMs: 100 });
     return () => safeCancelIdleCallback(id);

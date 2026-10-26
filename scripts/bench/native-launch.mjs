@@ -124,6 +124,7 @@ export async function measureNativeLaunch({ app, output, sourceSha, samples = 3 
   const stagedApp = path.join(stageRoot, 'o8.app');
   let preserveFixture = false, runner;
   const receipt = { schema: 'o8/native-launch/v1', platform: process.platform, arch: process.arch,
+    cpuCount: os.cpus().length, totalMemoryBytes: os.totalmem(),
     osVersion: execFileSync('sw_vers', ['-productVersion'], { encoding: 'utf8' }).trim(), sourceSha, artifactDigest,
     benchmarkSha: execFileSync('git', ['-C', fileURLToPath(new URL('../..', import.meta.url)), 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
     method: 'normal release startup, private app data and incognito webview; spawn, foreground activation and controlled composer edit acknowledgment',

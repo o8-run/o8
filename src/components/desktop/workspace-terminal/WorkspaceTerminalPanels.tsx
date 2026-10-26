@@ -6,8 +6,6 @@ import type { CanvasTab } from '@/components/desktop/Canvas';
 import { TerminalStatusEvidenceDisclosure } from '@/components/desktop/TerminalStatusEvidenceRows';
 import { TerminalLaneApproval } from './TerminalLaneApproval';
 import type { WorkspaceAttachedTerminalSession } from '@/components/desktop/workspace-terminal/terminal-mode';
-// The default composer belongs to the initial document chunk graph.
-import { OrchestratorTab } from '@/components/desktop/workspace-terminal/OrchestratorTab';
 import { WorkspaceChatPane } from '@/components/desktop/workspace-terminal/WorkspaceChatPane';
 import type { RegisteredRepo, TerminalTab } from '@/components/desktop/workspace-terminal/types';
 import { repoSlugFromRemote, shortenPath } from '@/components/desktop/workspace-terminal/utils';
@@ -27,6 +25,7 @@ import { useWsConnectionEpoch } from '@/components/desktop/hooks/DesktopWebSocke
 // through OrchestratorTab now (chat tabs run with lockedMode='chat'),
 // so the standalone LLMChat surface is no longer mounted from here.
 const LazyCanvas = retryingLazy(() => import('@/components/desktop/Canvas').then((module) => ({ default: module.Canvas })), { label: 'Canvas' });
+const LazyOrchestratorTab = retryingLazy(() => import('@/components/desktop/workspace-terminal/OrchestratorTab').then((module) => ({ default: module.OrchestratorTab })), { label: 'Orchestrator tab' });
 const LazyFleetCanvasTab = retryingLazy(() => import('@/components/desktop/workspace-terminal/FleetCanvasTab').then((module) => ({ default: module.FleetCanvasTab })), { label: 'Fleet canvas' });
 const LazyChatGPTPlanChat = retryingLazy(() => import('@/components/desktop/workspace-terminal/ChatGPTPlanChat').then((module) => ({ default: module.ChatGPTPlanChat })), { label: 'ChatGPT plan chat' });
 
@@ -449,7 +448,7 @@ const OrchestratorResidentPanel = memo(function OrchestratorResidentPanel({
   if (tab.kind === 'llm-chat') {
     return (
       <Suspense fallback={null}>
-        <OrchestratorTab
+        <LazyOrchestratorTab
           tabId={tab.id}
           workspaceId={workspaceId}
           active={active}
@@ -468,7 +467,7 @@ const OrchestratorResidentPanel = memo(function OrchestratorResidentPanel({
   }
   return (
     <Suspense fallback={active ? <WorkspaceBootLoaderClaim /> : null}>
-      <OrchestratorTab
+      <LazyOrchestratorTab
         tabId={tab.id}
         workspaceId={workspaceId}
         active={active}
