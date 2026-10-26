@@ -3841,6 +3841,13 @@
       ]
     },
     {
+      "path": "tests/metrics-daily-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/mission-cost-real-path.test.ts",
       "reasons": [
         "real-path"
