@@ -27,7 +27,8 @@ export interface InstallInfo {
 
 export type UpdateAction =
   | { kind: 'restart' }
-  | { kind: 'download'; url: string };
+  /** `packageManager`: a deb/rpm install, updated with apt or dnf; `url` is the release page. */
+  | { kind: 'download'; url: string; packageManager?: true };
 
 const RELEASES_BASE = 'https://github.com/o8-run/o8/releases';
 
@@ -76,6 +77,20 @@ export function isSelfUpdatableInstall(info: InstallInfo): boolean {
 }
 
 /**
+ * A Linux install that is not an AppImage came from a .deb or .rpm. Its
+ * package manager owns the files, so the update card points at the release
+ * page and the package manager instead of a download that replaces nothing.
+ */
+export function isPackageManagedInstall(info: InstallInfo): boolean {
+  return info.platform === 'linux' && !info.appImagePath;
+}
+
+export function releasePageUrl(version: string | null): string {
+  const bare = version?.trim().replace(/^v/, '') ?? '';
+  return bare ? `${RELEASES_BASE}/tag/v${bare}` : RELEASES_LATEST_URL;
+}
+
+/**
  * Where a non-self-updatable install sends the operator. The release pipeline
  * publishes one signed x86_64 AppImage per release, and the publish-preview
  * job re-uploads it under a name that differs from the local build's basename
@@ -96,5 +111,6 @@ export function releaseDownloadUrl(info: InstallInfo, version: string | null): s
 /** The single decision every update surface renders and acts on. */
 export function resolveUpdateAction(info: InstallInfo | null, version: string | null): UpdateAction {
   if (!info || isSelfUpdatableInstall(info)) return { kind: 'restart' };
+  if (isPackageManagedInstall(info)) return { kind: 'download', url: releasePageUrl(version), packageManager: true };
   return { kind: 'download', url: releaseDownloadUrl(info, version) };
 }

@@ -66,11 +66,12 @@ describe('install-info route decides the update action (seam A)', () => {
     else process.env.APPIMAGE = realAppImage;
   });
 
-  it('offers a download on a Linux install with no AppImage path (deb/rpm)', async () => {
+  it('points a Linux install with no AppImage path (deb/rpm) at its package manager', async () => {
     stubInstall('linux', 'x64', null);
     await expect(actionForRunningInstall('0.1.726')).resolves.toEqual({
       kind: 'download',
-      url: 'https://github.com/o8-run/o8/releases/download/v0.1.726/o8_0.1.726_linux_amd64_preview.AppImage',
+      url: 'https://github.com/o8-run/o8/releases/tag/v0.1.726',
+      packageManager: true,
     });
   });
 
