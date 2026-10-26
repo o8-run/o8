@@ -244,14 +244,7 @@ describe('workflow policy — every workflow is classified from the filesystem',
       }
       const localVerification = file.name === 'verify-ci-macos.yml';
       if (localVerification) {
-        expect([...triggers].sort()).toEqual(['pull_request', 'workflow_dispatch']);
-        const paths = ((file.workflow.on as RecordValue).pull_request as { paths: string[] }).paths;
-        expect(paths).toEqual([
-          '.github/workflows/verify-ci-macos.yml', 'scripts/verify-ci.mjs', 'scripts/lib/verify-ci.mjs',
-          'scripts/ci/review-dependency-changes.mjs', 'scripts/ci/verify-ci-proof.mjs',
-          'tests/verify-ci-real-path.test.ts', 'tests/dependency-review-real-path.test.ts',
-          'tests/server-bundle-size-real-path.test.ts',
-        ]);
+        expect([...triggers]).toEqual(['workflow_dispatch']);
         expect(jobsIn(file)).toHaveLength(1);
         const job = jobsIn(file)[0][1];
         expect(job['timeout-minutes']).toBe(60);

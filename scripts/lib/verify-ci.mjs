@@ -55,7 +55,8 @@ function runStep(step, job, shard) {
     command = smoke[3];
     temporaryData = true;
   }
-  return { command, env, timeoutMs, temporaryData };
+  const testProcess = /\bvitest\b|npm run test:(?:unit|integration|classification:check)\b|scripts\/ci\/check-hermetic-shards\.mjs/.test(command);
+  return { command, env, timeoutMs, temporaryData, testProcess };
 }
 function selectedSteps(job, shard) {
   return job.steps.filter(step => {
@@ -112,14 +113,15 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
   const classification = selectedSteps(shardJob, 1).filter(step => step.run === 'npm run test:classification:check');
   requireCondition(classification.length === 1, 'CI must check test classification exactly once');
   const checks = [];
+  const dependencies = job => [job.needs ?? []].flat().map(id => id === 'test-shards' ? 'test' : id);
   const appendJob = id => {
     const steps = selectedSteps(jobs[id]).map(step => runStep(step, jobs[id]));
     requireCondition(steps.length > 0, `${id} has no local checks`);
-    checks.push({ name: jobs[id].name, steps });
+    checks.push({ id, after: dependencies(jobs[id]), name: jobs[id].name, steps });
   };
   appendJob('typecheck');
   appendJob('lint');
-  checks.push({ name: classification[0].name ?? 'Test Classification',
+  checks.push({ id: 'classification', after: dependencies(shardJob), name: classification[0].name ?? 'Test Classification',
     steps: classification.map(step => runStep(step, shardJob, 1)) });
   const unitSteps = shards.flatMap(shard => selectedSteps(shardJob, shard)
     .filter(step => step.run !== classification[0].run)
@@ -128,7 +130,7 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
       return { ...unit, env: { NODE_ENV: 'test', ...unit.env } };
     }));
   requireCondition(unitSteps.some(step => step.command.startsWith('npm run test:unit -- ')), 'CI must execute its hermetic unit entry point');
-  checks.push({ name: jobs.test.name, steps: unitSteps });
+  checks.push({ id: 'test', after: ['classification'], name: jobs.test.name, steps: unitSteps });
   appendJob('server-bundle-size');
   const integration = jobs['integration-changed'];
   const selection = integration.steps.find(step => step.id === 'select');
@@ -151,7 +153,7 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
       && (bootstrapCommands.has(step.run.trim()) || step.run.trim() === prerequisites || step === integrationRun)),
     'integration step needs a verify:ci equivalent');
   }
-  checks.push({ name: integration.name, steps: [
+  checks.push({ id: 'integration-changed', after: dependencies(integration), name: integration.name, steps: [
     ...browserSteps.map(step => ({ ...runStep(step, integration), requiresFile: browserFile })),
     { ...runStep({ ...integrationRun, run: 'npm run test:integration --' }, integration), selectedFiles: true },
   ] });
@@ -160,12 +162,17 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
   const ignores = String(audit.with?.ignore ?? '').split(',').map(value => value.trim()).filter(Boolean);
   requireCondition(ignores.every(value => /^RUSTSEC-\d{4}-\d{4}$/.test(value)), 'native audit ignore list is malformed');
   const auditFile = path.posix.join(audit.with?.['working-directory'] ?? '.', 'Cargo.lock');
-  checks.push({ name: jobs.security.name, steps: [
+  checks.push({ id: 'security', after: dependencies(jobs.security), name: jobs.security.name, steps: [
     ...selectedSteps(jobs.security).map(step => runStep(step, jobs.security)),
     { command: `cargo-audit audit --file ${quote(auditFile)}${ignores.map(value => ` --ignore ${quote(value)}`).join('')}`,
       env: {}, timeoutMs: jobs.security['timeout-minutes'] * 60_000 },
   ] });
   appendJob('governance-smoke');
+  const scheduled = new Set();
+  for (const check of checks) {
+    requireCondition(check.after.every(id => scheduled.has(id)), `${check.id} needs an unsupported local dependency order`);
+    scheduled.add(check.id);
+  }
   const nodeVersions = new Set(localJobs.flatMap(id => jobs[id].steps
     .filter(step => step.uses?.startsWith('actions/setup-node@'))
     .map(step => String(step.with?.['node-version']))));

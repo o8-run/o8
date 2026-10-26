@@ -8,6 +8,7 @@ import { readVerificationPlan } from './lib/verify-ci.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 let interrupted = false;
+let testQueue = Promise.resolve();
 
 function environment() {
   const env = { ...process.env };
@@ -63,28 +64,42 @@ function run(step) {
   });
 }
 
+async function runStep(step) {
+  if (!step.testProcess) return interrupted ? false : run(step);
+  const previous = testQueue;
+  let release;
+  testQueue = new Promise(resolve => { release = resolve; });
+  await previous;
+  try { return interrupted ? false : await run(step); }
+  finally { release(); }
+}
+
 try {
   const plan = readVerificationPlan(root);
   if (process.versions.node.split('.')[0] !== plan.nodeMajor) throw new Error(`Use Node ${plan.nodeMajor} to match CI.`);
   const expectedNpm = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8')).packageManager.split('@')[1];
   const npm = spawnSync('npm --version', { shell: true, encoding: 'utf8', env: environment() });
   if (npm.status !== 0 || npm.stdout.trim() !== expectedNpm) throw new Error(`Use npm ${expectedNpm} from packageManager to match CI.`);
-  let failed = false;
+  const tasks = new Map();
   for (const check of plan.checks) {
-    console.log(`[verify:ci] RUN ${check.name}`);
-    let passed = true;
-    for (const step of check.steps) {
-      console.log(`[verify:ci] ${step.command}`);
-      if (!await run(step)) passed = false;
-      if (interrupted) break;
-    }
-    console.log(`[verify:ci] ${passed ? 'PASS' : 'FAIL'} ${check.name}`);
-    if (!passed) failed = true;
-    if (interrupted) break;
+    tasks.set(check.id, (async () => {
+      await Promise.all(check.after.map(id => tasks.get(id)));
+      if (interrupted) return false;
+      console.log(`[verify:ci] RUN ${check.name}`);
+      let passed = true;
+      for (const step of check.steps) {
+        console.log(`[verify:ci] ${step.command}`);
+        if (!await runStep(step)) passed = false;
+        if (interrupted) break;
+      }
+      console.log(`[verify:ci] ${passed ? 'PASS' : 'FAIL'} ${check.name}`);
+      return passed;
+    })());
   }
+  const results = await Promise.all(tasks.values());
   for (const note of plan.notes) console.log(`[verify:ci] ${note}`);
   console.log(`[verify:ci] Hosted lanes: ${Object.keys(plan.hostedJobs).join(', ')}`);
-  process.exitCode = interrupted ? 130 : failed ? 1 : 0;
+  process.exitCode = interrupted ? 130 : results.every(Boolean) ? 0 : 1;
 } catch (error) {
   console.error(`[verify:ci] ${error.message}`);
   process.exitCode = 1;

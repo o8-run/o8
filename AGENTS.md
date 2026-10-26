@@ -39,6 +39,8 @@ It sets `CI=true`, uses the CI test configuration and environment, gives type ch
 an 8192 MiB heap, and runs the smoke in a fresh temporary data directory with its CI
 timeout. Each check prints PASS or FAIL under its CI name; any failed command makes
 the final exit status non-zero. Audit failures also block CI.
+Independent checks run concurrently; governance waits for Type Check. Test commands
+share one local execution queue so their module caches and worker pools do not collide.
 
 Dependency changes use the same credential-free lockfile audit in CI and locally:
 added package versions fail at low severity, while unchanged baseline findings remain

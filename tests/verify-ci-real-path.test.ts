@@ -23,7 +23,34 @@ fs.appendFileSync(process.env.VERIFY_FIXTURE_RECEIPT, JSON.stringify({
   tool: '${name}', args, ci: process.env.CI, nodeEnv: process.env.NODE_ENV,
   nodeOptions: process.env.NODE_OPTIONS, dataDir: process.env.CORTEX_IDE_DATA_DIR,
 }) + '\\n');
-console.log('fixture command completed');
+const barrier = process.env.VERIFY_FIXTURE_BARRIER;
+if (barrier) {
+  const path = require('node:path');
+  const wait = () => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+  const unit = args.includes('test:unit') && args.includes('--shard=1/4');
+  if (args.includes('lint') || unit) {
+    fs.writeFileSync(path.join(barrier, unit ? 'unit' : 'lint'), 'started');
+    const deadline = Date.now() + 5000;
+    while (!fs.existsSync(path.join(barrier, unit ? 'lint' : 'unit')) && Date.now() < deadline) wait();
+    if (!fs.existsSync(path.join(barrier, unit ? 'lint' : 'unit'))) process.exit(9);
+  }
+  const testCommand = args.includes('vitest') || args.includes('test:unit') || args.includes('test:integration') || args.includes('test:classification:check');
+  if (testCommand) {
+    const lock = path.join(barrier, 'test-process');
+    try { fs.writeFileSync(lock, 'active', { flag: 'wx' }); } catch { process.exit(8); }
+    process.on('exit', () => fs.unlinkSync(lock));
+    wait();
+  }
+  if (args.includes('tests/release-channel-real-path.test.ts')) fs.writeFileSync(path.join(barrier, 'typecheck-complete'), 'done');
+  if (args.includes('scripts/smoke-merge-requires-review.ts') && !fs.existsSync(path.join(barrier, 'typecheck-complete'))) process.exit(8);
+}
+if ('${name}' === 'npm' && args[0] === 'audit') {
+  if (args.includes('--json')) console.log(JSON.stringify({ auditReportVersion: 2, vulnerabilities: {}, metadata: {
+    vulnerabilities: { info: 0, low: 0, moderate: 0, high: 0, critical: 0, total: 0 },
+    dependencies: { prod: 2, dev: 0, optional: 0, peer: 0, peerOptional: 0, total: 1 },
+  } }));
+  else console.log('found 0 vulnerabilities');
+} else console.log('fixture command completed');
 process.exit(process.env.VERIFY_FIXTURE_FAIL && (args.includes(process.env.VERIFY_FIXTURE_FAIL)
   || ('${name}' === 'cargo-audit' && process.env.VERIFY_FIXTURE_FAIL === 'audit')) ? 7 : 0);
 `);
@@ -31,13 +58,14 @@ process.exit(process.env.VERIFY_FIXTURE_FAIL && (args.includes(process.env.VERIF
 }
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
-function execute(fail = '') {
+function execute(fail = '', parallel = false) {
   const receipt = path.join(root, `receipt-${(fail || 'pass').replace(/[^a-zA-Z0-9-]/g, '_')}.jsonl`);
   writeFileSync(receipt, '');
   const result = spawnSync(process.execPath, [runner], {
     cwd: repo, encoding: 'utf8', timeout: 60_000, maxBuffer: 4 * 1024 * 1024,
     env: { ...process.env, PATH: bin + path.delimiter + process.env.PATH, CI: '', NODE_ENV: 'development',
-      VERIFY_FIXTURE_RECEIPT: receipt, VERIFY_FIXTURE_FAIL: fail },
+      VERIFY_FIXTURE_RECEIPT: receipt, VERIFY_FIXTURE_FAIL: fail,
+      VERIFY_FIXTURE_BARRIER: parallel ? mkdtempSync(path.join(root, 'parallel-')) : '' },
   });
   const calls = readFileSync(receipt, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
   return { ...result, calls };
@@ -47,6 +75,52 @@ function coverage(workflow: object) {
   const fixture = path.join(root, 'ci.yml');
   writeFileSync(fixture, stringify(workflow));
   return spawnSync(process.execPath, [guard, '--workflow', fixture], { cwd: repo, encoding: 'utf8' });
+}
+function executeFixture(selectedFile: string, nestedDependency = false) {
+  const directory = mkdtempSync(path.join(root, 'verifier-fixture-'));
+  const files = ['scripts/verify-ci.mjs', 'scripts/lib/verify-ci.mjs', 'scripts/ci/check-verify-ci.mjs',
+    'scripts/ci/resource-owning-changed.mjs', 'scripts/ci/review-dependency-changes.mjs', '.github/workflows/ci.yml'];
+  for (const file of files) {
+    mkdirSync(path.dirname(path.join(directory, file)), { recursive: true });
+    copyFileSync(path.join(repo, file), path.join(directory, file));
+  }
+  symlinkSync(path.join(repo, 'node_modules'), path.join(directory, 'node_modules'), 'junction');
+  for (const file of ['scripts/ci/check-hermetic-shards.mjs', 'scripts/check-server-bundle-size.mjs']) {
+    writeFileSync(path.join(directory, file), 'process.exit(0);\n');
+  }
+  mkdirSync(path.join(directory, 'tests'));
+  const browserFile = selectedFile;
+  writeFileSync(path.join(directory, browserFile), 'base\n');
+  writeFileSync(path.join(directory, 'tests/test-classification.json'), JSON.stringify({ resourceOwning: [{ path: browserFile }] }));
+  writeFileSync(path.join(directory, 'package.json'), JSON.stringify(manifest));
+  const git = (...args: string[]) => {
+    const result = spawnSync('git', args, { cwd: directory, encoding: 'utf8' });
+    expect(result.status, result.stderr).toBe(0);
+  };
+  git('init', '-q', '-b', 'main');
+  git('config', 'user.name', 'CI Fixture');
+  git('config', 'user.email', 'fixture@example.invalid');
+  git('add', 'scripts', '.github', 'tests', 'package.json');
+  git('commit', '-qm', 'fixture base');
+  git('update-ref', 'refs/remotes/origin/main', 'HEAD');
+  writeFileSync(path.join(directory, browserFile), 'changed\n');
+  if (nestedDependency) {
+    const nested = path.join(directory, 'nested');
+    mkdirSync(nested);
+    writeFileSync(path.join(nested, 'package.json'), JSON.stringify({ name: 'safe-fixture', version: '1.0.0', dependencies: { 'is-number': '7.0.0' } }));
+    writeFileSync(path.join(nested, 'package-lock.json'), JSON.stringify({ name: 'safe-fixture', version: '1.0.0', lockfileVersion: 3,
+      packages: { '': { name: 'safe-fixture', version: '1.0.0', dependencies: { 'is-number': '7.0.0' } },
+        'node_modules/is-number': { version: '7.0.0' } } }));
+  }
+
+  const receipt = path.join(root, 'browser-receipt.jsonl');
+  writeFileSync(receipt, '');
+  const result = spawnSync(process.execPath, [path.join(directory, 'scripts/verify-ci.mjs')], {
+    cwd: directory, encoding: 'utf8', timeout: 60_000,
+    env: { ...process.env, PATH: bin + path.delimiter + process.env.PATH, VERIFY_FIXTURE_RECEIPT: receipt, VERIFY_FIXTURE_FAIL: '' },
+  });
+  const calls = readFileSync(receipt, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+  return { ...result, calls };
 }
 
 describe('local CI verification through its command entry point', () => {
@@ -76,13 +150,22 @@ describe('local CI verification through its command entry point', () => {
   }, 60_000);
 
   it.each([['lint', 'Lint'], ['audit', 'Security Audit'], ['--shard=2/4', 'Hermetic Unit Tests'],
-    ['test:integration', 'Integration Tests (changed files)']])('reports failure and continues the remaining checks after %s fails', (fail, name) => {
+    ['test:integration', 'Integration Tests (changed files)'], ['typecheck', 'Type Check'],
+    ['tests/server-bundle-size-real-path.test.ts', 'Server Bundle Size']])('reports failure and continues the remaining checks after %s fails', (fail, name) => {
     const result = execute(fail);
     expect(result.error).toBeUndefined();
     expect(result.status).toBe(1);
     expect(result.stdout).toContain(`FAIL ${name}`);
     expect(result.stdout).toContain('PASS Governance Smoke');
     expect(result.calls.filter(call => call.args.includes('test:unit'))).toHaveLength(4);
+  }, 60_000);
+
+  it('overlaps independent checks while isolating test processes and respecting the governance dependency', () => {
+    const result = execute('', true);
+    expect(result.status, result.stderr + result.stdout).toBe(0);
+    expect(result.stdout).toContain('PASS Lint');
+    expect(result.stdout).toContain('PASS Hermetic Unit Tests');
+    expect(result.stdout).toContain('PASS Governance Smoke');
   }, 60_000);
 
   it('rejects a newly added CI check before running verification work', () => {
@@ -118,46 +201,22 @@ describe('local CI verification through its command entry point', () => {
   it.each(['tests/next-parity-route-ownership-real-path.test.ts',
     'tests/next-parity-route-ownership-real-path.test.ts-extra.test.ts',
     'tests/NEXT-PARITY-ROUTE-OWNERSHIP-REAL-PATH.test.ts'])('runs the CI conditional prerequisite for %s through the verifier entry point', selectedFile => {
-    const directory = mkdtempSync(path.join(root, 'browser-selection-'));
-    const files = ['scripts/verify-ci.mjs', 'scripts/lib/verify-ci.mjs', 'scripts/ci/check-verify-ci.mjs',
-      'scripts/ci/resource-owning-changed.mjs', 'scripts/ci/review-dependency-changes.mjs', '.github/workflows/ci.yml'];
-    for (const file of files) {
-      mkdirSync(path.dirname(path.join(directory, file)), { recursive: true });
-      copyFileSync(path.join(repo, file), path.join(directory, file));
-    }
-    symlinkSync(path.join(repo, 'node_modules'), path.join(directory, 'node_modules'), 'junction');
-    for (const file of ['scripts/ci/check-hermetic-shards.mjs', 'scripts/check-server-bundle-size.mjs']) {
-      writeFileSync(path.join(directory, file), 'process.exit(0);\n');
-    }
-    mkdirSync(path.join(directory, 'tests'));
-    const browserFile = selectedFile;
-    writeFileSync(path.join(directory, browserFile), 'base\n');
-    writeFileSync(path.join(directory, 'tests/test-classification.json'), JSON.stringify({ resourceOwning: [{ path: browserFile }] }));
-    writeFileSync(path.join(directory, 'package.json'), JSON.stringify(manifest));
-    const git = (...args: string[]) => {
-      const result = spawnSync('git', args, { cwd: directory, encoding: 'utf8' });
-      expect(result.status, result.stderr).toBe(0);
-    };
-    git('init', '-q', '-b', 'main');
-    git('config', 'user.name', 'CI Fixture');
-    git('config', 'user.email', 'fixture@example.invalid');
-    git('add', 'scripts', '.github', 'tests', 'package.json');
-    git('commit', '-qm', 'fixture base');
-    git('update-ref', 'refs/remotes/origin/main', 'HEAD');
-    writeFileSync(path.join(directory, browserFile), 'changed\n');
-    const receipt = path.join(root, 'browser-receipt.jsonl');
-    writeFileSync(receipt, '');
-    const result = spawnSync(process.execPath, [path.join(directory, 'scripts/verify-ci.mjs')], {
-      cwd: directory, encoding: 'utf8', timeout: 60_000,
-      env: { ...process.env, PATH: bin + path.delimiter + process.env.PATH, VERIFY_FIXTURE_RECEIPT: receipt, VERIFY_FIXTURE_FAIL: '' },
-    });
+    const result = executeFixture(selectedFile);
     expect(result.status, result.stderr + result.stdout).toBe(0);
-    const calls = readFileSync(receipt, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+    const calls = result.calls;
     const prerequisite = calls.findIndex(call => call.args.includes('playwright-core'));
     const integration = calls.findIndex(call => call.args.includes('test:integration'));
     expect(prerequisite).toBeGreaterThanOrEqual(0);
     expect(calls[prerequisite].args).toEqual(['--no-install', 'playwright-core', 'install', '--with-deps', 'chromium']);
     expect(integration).toBeGreaterThan(prerequisite);
+  }, 60_000);
+
+
+  it('accepts a safe nested is-number dependency addition through the verifier entry point', () => {
+    const result = executeFixture('tests/fixture.test.ts', true);
+    expect(result.status, result.stderr + result.stdout).toBe(0);
+    expect(result.stdout).toContain('PASS Security Audit');
+    expect(result.calls.some(call => call.args[0] === 'audit' && call.args.includes('--json'))).toBe(true);
   }, 60_000);
 
   it.each(['aggregate', 'compound setup', 'step directory', 'step shell', 'job defaults', 'workflow defaults'])('rejects uncovered execution changes: %s', (change) => {
