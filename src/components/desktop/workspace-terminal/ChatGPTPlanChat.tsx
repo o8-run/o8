@@ -91,7 +91,7 @@ export function ChatGPTPlanChat({ tabId, active = true }: { tabId: string; activ
       if (!status?.planEnabled || !status.selection || status.activeId !== view.status.activeId || !selected) throw new Error('The ChatGPT connection changed. Review the connection and send again.');
       const model: ModelOption = { id: `chatgpt:${selected.id}`, label: selected.label, provider: 'chatgpt', backend: 'api', color: 'var(--t-text)', description: 'ChatGPT plan' };
       const userMessage: LLMMessage = { id: crypto.randomUUID(), role: 'user', content: input, timestamp: Date.now() };
-      write(generation, (previous) => ({ ...previous, messages: [...previous.messages, userMessage], input: '' }));
+      write(generation, (previous) => ({ ...previous, messages: [...previous.messages, userMessage], input: previous.input === view.input ? '' : previous.input }));
       const result = await streamAssistantResponse({ controller, model, messageForModel: input, messages: view.messages, tabId, planSelection: status.selection, planTextOnly: true, approvedToolsSet: new Set(), disableTools: true, preferredRepo: null, linkedIssue: null, showTypingIndicator: false, onPendingApproval: noop, onThinking: noop, onToolCalls: noop, onTypingIndicatorChange: noop, onStreamContent: (stream) => { if (!controller.signal.aborted) write(generation, (previous) => ({ ...previous, stream })); } });
       if (controller.signal.aborted || !current(generation)) return;
       write(generation, (previous) => ({ ...previous, messages: [...previous.messages, result.assistantMessage], stream: '' }));

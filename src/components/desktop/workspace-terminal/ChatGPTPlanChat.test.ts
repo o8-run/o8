@@ -297,3 +297,23 @@ it('keeps the draft and selected model when model discovery removes that model b
   await send();
   expect(requestBodies).toHaveLength(0);
 });
+
+it('keeps a newer draft while the original send is rechecking its plan model', async () => {
+  const originalFetch = globalThis.fetch;
+  let statusReads = 0; let release = () => {};
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input) === '/api/panel/models/chatgpt' && init?.method !== 'POST' && ++statusReads === 2) await gate;
+    return originalFetch(input, init);
+  });
+  await mount(); await send();
+  const input = container.querySelector('textarea')!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, 'A newer draft');
+    input.dispatchEvent(new Event('input', { bubbles: true })); release();
+  });
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 60)); });
+  expect(requestBodies).toHaveLength(1);
+  expect(requestBodies[0]).toMatchObject({ messages: [{ role: 'user', content: 'Add 17 and 23' }] });
+  expect(input.value).toBe('A newer draft');
+});
