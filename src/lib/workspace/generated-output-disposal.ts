@@ -64,11 +64,22 @@ export async function disposeSuccessfulPrebuildOutput(workspacePath: string, ver
         || !child.observedClosed || child.exitCode !== 0 || child.signal)) {
       throw new Error('Postship output lacks disposable successful prebuild authority.');
     }
-    const recipe = collectReleaseArtifactRecipe(workspace.canonicalPath, version, { env: process.env });
-    if (!verifyReleaseArtifactManifest(workspace.canonicalPath, recipe).reusable) {
+    let claim = readExactWorkspaceClaim('generated-output-retirement', workspace.canonicalPath, resource.resourceId);
+    // A pending claim already binds the original artifact recipe (including its
+    // release version). A later version bump must not strand that exact claim.
+    // New disposals still require the current clean recipe and build environment.
+    const recordedRecipe = claim?.authority?.artifactRecipeSha256;
+    if (claim && (claim.authority?.purpose !== 'postship'
+      || typeof recordedRecipe !== 'string' || !/^[a-f0-9]{64}$/.test(recordedRecipe))) {
+      throw new Error('Postship disposal claim has no recorded artifact recipe.');
+    }
+    const recipe = claim ? { recipeSha256: recordedRecipe as string }
+      : collectReleaseArtifactRecipe(workspace.canonicalPath, version, { env: process.env });
+    const artifact = verifyReleaseArtifactManifest(workspace.canonicalPath, recipe);
+    if (!artifact.reusable || (claim?.authority?.releaseVersion
+      && claim.authority.releaseVersion !== artifact.manifest?.recipe.version)) {
       throw new Error('Postship disposal requires a preserved verified release artifact.');
     }
-    let claim = readExactWorkspaceClaim('generated-output-retirement', workspace.canonicalPath, resource.resourceId);
     const verify = async (captured?: CapturedPurgeProcessWitness) => {
       await assertLinkedGitBuildCustody(workspace, resource.creationAuthority!.linkedGit);
       await assertWorktreeMaterializationIdentity(workspace.canonicalPath, resource.workspace);
@@ -116,7 +127,7 @@ export async function disposeSuccessfulPrebuildOutput(workspacePath: string, ver
         worktreeId: resource.resourceId, operationId: randomUUID(), expectedPath: outputPath,
         sourcePath: outputPath, claimPath: outputPath, parentIdentity: workspace, sourceIdentity: resource.output,
         contentDigest: manifest.fingerprint, authority: { purpose: 'postship', resourceId: resource.resourceId,
-          resourceVersion: resource.version, artifactRecipeSha256: recipe.recipeSha256, purgeManifest: manifest } });
+          resourceVersion: resource.version, releaseVersion: version, artifactRecipeSha256: recipe.recipeSha256, purgeManifest: manifest } });
     }
     if (claim.kind !== 'generated-output-retirement' || claim.repositoryPath !== workspace.canonicalPath
       || claim.worktreeId !== resource.resourceId || claim.sourcePath !== outputPath || claim.expectedPath !== outputPath

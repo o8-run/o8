@@ -30,7 +30,7 @@ it('journals postship disposal and reuses the verified artifact across later pre
   const releaseConfig = JSON.stringify({ clerkPublishableKey: publicClientKey });
   writeFileSync(releaseConfigPath, releaseConfig);
   writeFileSync(path.join(repo, 'package.json'), JSON.stringify({ name: 'o8', version: '0.0.0',
-    scripts: { build: `${JSON.stringify(process.execPath)} ${JSON.stringify(path.join(source, 'scripts/build.mjs'))}` } }));
+    scripts: { ship: `${JSON.stringify(process.execPath)} ${JSON.stringify(path.join(source, 'scripts/release.mjs'))} --ship`, build: `${JSON.stringify(process.execPath)} ${JSON.stringify(path.join(source, 'scripts/build.mjs'))}` } }));
   // Real callers, guard, recipe, manifest, cache and native producer; only expensive
   // compiler/export/smoke payloads are stand-ins. No containing manager is seeded.
   for (const name of ['preship-cleanup.mjs', 'bust-stale-patch-cache.mjs']) {
@@ -94,7 +94,33 @@ it('journals postship disposal and reuses the verified artifact across later pre
     return result;
   }
   const prebuild = [process.env.O8_PREBUILD_TEST_SCRIPT || path.join(source, 'scripts/tauri-prebuild.mjs')];
-  const first = run(prebuild);
+  const benchmark = path.join(scripts, 'bench');
+  mkdirSync(benchmark);
+  writeFileSync(path.join(benchmark, 'quick.mjs'), `console.log('O8_BENCH_QUICK_RECEIPT=' + JSON.stringify({
+    schema: 'o8/benchmark-quick-preflight/v1', status: 'ok', regressions: [], missing: [] }));`);
+  const preflightScript = path.join(scripts, 'fixture-preflight.mjs');
+  writeFileSync(preflightScript, `import { runQuickBenchmarkPreflight } from ${JSON.stringify(pathToFileURL(path.join(source, 'scripts/lib/ship-preflight.mjs')).href)};
+    runQuickBenchmarkPreflight({ root: process.cwd() });`);
+  // Commit the complete fixture before the real producer derives its artifact recipe.
+  expect(spawnSync('git', ['add', '.'], { cwd: repo }).status).toBe(0);
+  expect(spawnSync('git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
+    '-c', 'commit.gpgsign=false', '-c', 'core.hooksPath=/dev/null', 'commit', '-m', 'fixture ship'], { cwd: repo }).status).toBe(0);
+  const planPath = path.join(root, 'ship-plan.json');
+  const command = (args: string[]) => ({ command: process.execPath, args });
+  const postshipScript = process.env.O8_POSTSHIP_TEST_SCRIPT || path.join(source, 'scripts/postship-cleanup.mjs');
+  function ship(cleanup: boolean) {
+    writeFileSync(planPath, JSON.stringify({ preflight: command([preflightScript]), prepare: [],
+      build: command(prebuild), notarize: command(['-e', 'process.exit(0)']),
+      publish: command(['-e', 'process.exit(0)']), alwaysCleanup: [],
+      successOnlyCleanup: cleanup ? [command([postshipScript])] : [] }));
+    const completed = spawnSync('npm', ['run', 'ship'], { cwd: repo, encoding: 'utf8', timeout: 180_000,
+      env: { ...env, npm_config_cache: path.join(root, 'npm-cache'), npm_config_update_notifier: 'false', O8_RELEASE_TEST_MODE: '1', O8_RELEASE_TEST_PLAN: planPath } });
+    writeFileSync(path.join(root, `ship-${++invocation}.json`), JSON.stringify({ status: completed.status,
+      stdout: completed.stdout, stderr: completed.stderr }, null, 2));
+    return completed;
+  }
+  // Retain the first output to exercise interrupted disposal before the next ship.
+  const first = ship(false);
   expect(first.status, first.stderr + first.stdout).toBe(0);
   for (const name of ['.env', '.env.production']) {
     expect(existsSync(path.join(repo, '.next/standalone', name))).toBe(false);
@@ -201,6 +227,8 @@ it('journals postship disposal and reuses the verified artifact across later pre
       renameSync(path.join(outputPath, 'returned'), path.join(repo, '.fixture/retained-returned'));
     }
   }
+  const originalPackage = readFileSync(path.join(repo, 'package.json'), 'utf8');
+  writeFileSync(path.join(repo, 'package.json'), originalPackage.replace('0.0.0', '0.0.1'));
   const cleaned = run(postship);
   expect(cleaned.status, cleaned.stderr + cleaned.stdout).toBe(0);
   expect(cleaned.stdout).toContain('refused=0');
@@ -211,6 +239,7 @@ it('journals postship disposal and reuses the verified artifact across later pre
   expect(readFileSync(path.join(repo, 'package.json'), 'utf8')).toContain('"name":"o8"');
   expect(readFileSync(path.join(outside, 'keep'), 'utf8')).toBe('outside sentinel');
   for (const name of ['.env', '.env.production']) expect(readFileSync(path.join(repo, name), 'utf8')).toBe('SYNTHETIC_FIXTURE=preserve-source');
+  writeFileSync(path.join(repo, 'package.json'), originalPackage);
   const reused = run(prebuild);
   expect(reused.status, reused.stderr + reused.stdout).toBe(0);
   expect(reused.stdout).toContain('reused verified artifact');
@@ -226,23 +255,36 @@ it('journals postship disposal and reuses the verified artifact across later pre
   expect(readFileSync(path.join(repo, '.fixture/compiler-calls'), 'utf8')).toBe('build\n');
   // Output corruption must create a new producer generation without rewriting successful history.
   writeFileSync(path.join(repo, 'out/server.js'), 'invalidated artifact');
-  const rebuilt = run(prebuild);
+  const rebuilt = ship(true);
   expect(rebuilt.status, rebuilt.stderr + rebuilt.stdout).toBe(0);
   expect(resources()).toHaveLength(2);
   expect(resources()[0]).toEqual(retired);
   const current = resources()[1];
   expect(current.resourceId).not.toBe(retired.resourceId);
-  expect(current.state).toBe('succeeded');
+  expect(current.state).toBe('retired');
+  expect(existsSync(outputPath)).toBe(false);
+  expect(readFileSync(artifactPath, 'utf8')).toBe(originalArtifact);
+  writeFileSync(path.join(repo, 'package.json'), originalPackage.replace('0.0.0', '0.0.1'));
+  expect(spawnSync('git', ['add', 'package.json'], { cwd: repo }).status).toBe(0);
+  expect(spawnSync('git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
+    '-c', 'commit.gpgsign=false', '-c', 'core.hooksPath=/dev/null', 'commit', '-m', 'fixture next version'], { cwd: repo }).status).toBe(0);
+  const nextShip = ship(true);
+  expect(nextShip.status, nextShip.stderr + nextShip.stdout).toBe(0);
+  expect(nextShip.stdout).toContain('[release] build started');
+  expect(existsSync(outputPath)).toBe(false);
+  const nextRelease = resources()[2];
+  expect(nextRelease.state).toBe('retired');
+  expect(resources()).toEqual([retired, current, nextRelease]);
   // A real failed child remains held, even though a previous generation succeeded.
   writeFileSync(path.join(repo, 'out/server.js'), 'force another build');
   const failed = run(prebuild, { O8_FIXTURE_BUILD_FAILURE: '1' });
   expect(failed.status).not.toBe(0);
-  const failedResource = resources()[1];
+  const failedResource = resources()[3];
   expect(failedResource.state).toBe('failed-held');
   expect(failedResource.attempt.children.some((child: { exitCode: number; observedClosed: boolean }) =>
     child.exitCode === 42 && child.observedClosed)).toBe(true);
   expect(run(postship).status).not.toBe(0);
-  expect(resources()).toEqual([retired, failedResource]);
+  expect(resources()).toEqual([retired, current, nextRelease, failedResource]);
   writeFileSync(path.join(root, 'product-state.json'), JSON.stringify({ profile, databasePath,
     resources: resources() }, null, 2));
 }, 900_000);
