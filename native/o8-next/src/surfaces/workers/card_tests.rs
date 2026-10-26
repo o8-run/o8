@@ -152,6 +152,81 @@ fn workers_clicked_activity_selects_card_before_enter_and_down(cx: &mut TestAppC
 }
 
 #[gpui::test]
+fn workers_clicked_card_right_down_selects_visible_peer(cx: &mut TestAppContext) {
+    let (_fixture, view, mut visual) = review_open("--workers --workers-navigation", cx);
+    super::tests::click(&mut visual, "worker-card-worker-running");
+    visual.simulate_keystrokes("right");
+    draw(&mut visual);
+    let after_filter = view.read_with(&visual, |v, _| v.selected.clone());
+    visual.simulate_keystrokes("down");
+    draw(&mut visual);
+    assert_eq!(
+        view.read_with(&visual, |v, _| v.selected.clone())
+            .as_deref(),
+        Some("worker-review-next"),
+        "click Working card, Right, Down must select the second visible review card"
+    );
+    assert_eq!(after_filter.as_deref(), Some("worker-review"));
+    assert!(
+        visual
+            .debug_bounds("worker-card-worker-review-next")
+            .is_some()
+    );
+    view.read_with(&visual, |v, cx| {
+        let hidden = v.cards["worker-running"].read(cx);
+        assert_ne!(hidden.task.filter, v.filter);
+        assert!(!hidden.selected);
+        assert!(v.cards["worker-review-next"].read(cx).selected);
+    });
+    assert!(visual.update(|window, cx| view.read(cx).focus.is_focused(window)));
+}
+
+#[gpui::test]
+fn workers_filter_paths_return_focus_and_select_visible_cards(cx: &mut TestAppContext) {
+    let (_fixture, view, mut visual) = review_open("--workers --workers-navigation", cx);
+    for path in ["left", "click", "programmatic"] {
+        view.update(&mut visual, |v, cx| {
+            v.filter = 0;
+            cx.notify();
+        });
+        super::tests::click(&mut visual, "worker-card-worker-running");
+        match path {
+            "left" => visual.simulate_keystrokes("left"),
+            "click" => super::tests::click(&mut visual, "workers-filter-2"),
+            _ => view.update(&mut visual, |v, cx| {
+                v.filter = 2;
+                cx.notify();
+            }),
+        }
+        draw(&mut visual);
+        assert_eq!(
+            view.read_with(&visual, |v, _| v.selected.clone())
+                .as_deref(),
+            Some("worker-blocked"),
+            "{path} must select the first visible card"
+        );
+        assert!(visual.update(|window, cx| view.read(cx).focus.is_focused(window)));
+        visual.simulate_keystrokes("left");
+        draw(&mut visual);
+        visual.simulate_keystrokes("down");
+        draw(&mut visual);
+        assert_eq!(
+            view.read_with(&visual, |v, _| v.selected.clone())
+                .as_deref(),
+            Some("worker-review-next"),
+            "{path} must retain navigation among visible cards"
+        );
+    }
+    super::tests::click(&mut visual, "workers-filter-1");
+    assert_eq!(
+        view.read_with(&visual, |v, _| v.selected.clone())
+            .as_deref(),
+        Some("worker-review-next"),
+        "the selected card stays selected while still visible"
+    );
+}
+
+#[gpui::test]
 fn workers_escape_returns_focus_to_list(cx: &mut TestAppContext) {
     let (_fixture, view, mut visual) = review_open("--workers", cx);
     visual.simulate_keystrokes("down enter");
