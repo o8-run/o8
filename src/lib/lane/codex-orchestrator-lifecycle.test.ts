@@ -3,6 +3,7 @@ import { mutateProviderKey } from '@/lib/providers/key-store';
 import { saveRuntimeBillingMode } from '@/lib/providers/runtime-billing';
 import { listOrchestratorTurnsForThread } from './orchestrator-crash-survival';
 import { EventEmitter } from 'node:events';
+import { Writable } from 'node:stream';
 import type { ChildProcess } from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -67,6 +68,7 @@ function persistRecoveryHistory(threadId: string, current: string) {
 }
 
 class FakeCodexProc extends EventEmitter {
+  stdin = new Writable({ write(_chunk, _encoding, callback) { callback(); } });
   stdout = new EventEmitter();
   stderr = new EventEmitter();
   pid = process.pid;
@@ -352,7 +354,7 @@ describe('Codex orchestrator process lifecycle', () => {
     expect(spawnMock.mock.calls[1][1]).not.toContain('resume');
     expect(backendSessions.get(`${historyThreadId}:codex`)).toBe('stale-codex-thread');
 
-    freshProc.stdout.emit('data', Buffer.from('{"type":"thread.started","thread_id":"fresh-codex-thread"}\n'));
+    freshProc.stdout.emit('data', Buffer.from('{"type":"thread.started","thread_id":"fresh-codex-thread"}\n{"type":"turn.started"}\n'));
     freshProc.exitCode = 0;
     freshProc.emit('close', 0);
     await turn;
@@ -386,7 +388,7 @@ describe('Codex orchestrator process lifecycle', () => {
 
     await vi.waitFor(() => expect(spawnMock).toHaveBeenCalledTimes(2));
     expect(spawnMock.mock.calls[1][1]).not.toContain('resume');
-    freshProc.stdout.emit('data', Buffer.from('{"type":"thread.started","thread_id":"replacement-thread"}\n'));
+    freshProc.stdout.emit('data', Buffer.from('{"type":"thread.started","thread_id":"replacement-thread"}\n{"type":"turn.started"}\n'));
     freshProc.exitCode = 0;
     freshProc.emit('close', 0);
     await turn;

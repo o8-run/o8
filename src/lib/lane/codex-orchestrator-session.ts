@@ -259,15 +259,16 @@ export async function sendToCodexOrchestrator(
       return;
     }
     const missingThreadId = session.threadId;
+    const recovery = { inputAccepted: false };
     session.threadId = null;
     session.status = 'ready';
     onEvent({ type: 'turn_retry', attempt: 2, reason: 'runtime-session-recovered', notice: 'The saved runtime session was unavailable. Continuing in a new session with the earlier conversation restored.' });
     try {
-      await sendToCodexOrchestratorAttempt(session, recoveredMessage, onEvent, options);
+      await sendToCodexOrchestratorAttempt(session, recoveredMessage, onEvent, options, undefined, recovery);
     } finally {
       // Cancellation or startup failure must not turn the next send into a
-      // context-free first turn. Keep recovery required until a new thread exists.
-      if (!session.threadId) {
+      // context-free first turn. Allocation alone does not accept the carried input.
+      if (!recovery.inputAccepted) {
         session.threadId = missingThreadId;
         session.status = 'ready';
         writeOrchestratorBackendSessionId(session.historyThreadId, 'codex', missingThreadId);
@@ -285,6 +286,7 @@ async function sendToCodexOrchestratorAttempt(
   onEvent: (event: OrchestratorEvent) => void,
   options: SendToCodexOrchestratorOptions = {},
   onActivity?: () => void,
+  recovery?: { inputAccepted: boolean },
 ): Promise<void> {
   // Fable is Claude-only — its native-tool lockout + BYO-key path live in the
   // Claude REPL (orchestrator-session.ts). The registry routes 'fable' to
@@ -416,6 +418,7 @@ async function sendToCodexOrchestratorAttempt(
   // app-server bridge in the operator's own Codex home, so the Codex app lists
   // it. Solo keeps its sandboxed private home; local models keep exec's --oss path.
   const codexApp = options.orchestrationMode !== 'single' && !isLocalModel && resolveCodexAppThreadsSync();
+  const messageOnStdin = Boolean(recovery) && !codexApp;
 
   // First-turn launch vs resume.
   const isResume = Boolean(session.threadId);
@@ -435,7 +438,7 @@ async function sendToCodexOrchestratorAttempt(
         'tools.image_generation=false',
         ...imagePaths.flatMap((path) => ['--image', path]),
         '--',
-        message,
+        messageOnStdin ? '-' : message,
       ]
     : [
         'exec',
@@ -450,7 +453,7 @@ async function sendToCodexOrchestratorAttempt(
         session.repoPath,
         ...imagePaths.flatMap((path) => ['--image', path]),
         '--',
-        message,
+        messageOnStdin ? '-' : message,
       ];
 
   const overrides = { PATH: pathWithNodeRuntime(), FORCE_COLOR: '0', NO_COLOR: '1', O8_MANAGED_SESSION: '1', CODEX_HOME: codexHome };
@@ -532,8 +535,8 @@ async function sendToCodexOrchestratorAttempt(
         env: options.orchestrationMode === 'single' ? spawnEnv : codexApp ? internalBrokerEnvironment(providerSpawnEnvironment(spawnEnv, { runtimeId: 'codex' })) : providerSpawnEnvironment(spawnEnv, { runtimeId: 'codex' }),
         detached: crashEnabled || singleProcessGroup,
         stdio: crashEnabled && stdoutFd !== null && stderrFd !== null
-          ? ['ignore', stdoutFd, stderrFd, ...(codexApp ? ['ipc' as const] : [])]
-          : ['ignore', 'pipe', 'pipe', ...(codexApp ? ['ipc' as const] : [])],
+          ? [messageOnStdin ? 'pipe' : 'ignore', stdoutFd, stderrFd, ...(codexApp ? ['ipc' as const] : [])]
+          : [messageOnStdin ? 'pipe' : 'ignore', 'pipe', 'pipe', ...(codexApp ? ['ipc' as const] : [])],
       });
     } catch (err) {
       if (stdoutFd !== null) closeSync(stdoutFd);
@@ -574,7 +577,8 @@ async function sendToCodexOrchestratorAttempt(
     let sawFirstEvent = false;
     const handleCodexLine = (line: string) => {
       if (codexApp) noteCodexAppTurnLine(line, { tabId: session.historyThreadId, repoPath: session.repoPath });
-      const parsed = handleCodexJsonLine(line, lineState, onEvent, { isLocalModel, model, onActivity });
+      const parsed = handleCodexJsonLine(line, lineState, onEvent, { isLocalModel, model, onActivity,
+        onInputAccepted: recovery ? () => { recovery.inputAccepted = true; } : undefined });
       if (parsed) {
         sawFirstEvent = true;
         if (firstEventTimeout) {
@@ -606,12 +610,13 @@ async function sendToCodexOrchestratorAttempt(
       else cleanupSingleLaunch();
       detachUserAbortListener();
       session.proc = null;
-      if (lineState.threadId) session.threadId = lineState.threadId;
+      const acceptedThreadId = recovery && !recovery.inputAccepted ? null : lineState.threadId;
+      if (acceptedThreadId) session.threadId = acceptedThreadId;
       session.status = status;
       if (error) onEvent({ type: 'error', error });
       onEvent({
         type: 'done', terminalOutcome: options.signal?.aborted ? 'unconfirmed' : lineState.terminalOutcome ?? 'unconfirmed',
-        sessionId: lineState.threadId,
+        sessionId: acceptedThreadId,
         cost: lineState.cost,
         ...(lineState.usage ? { usage: lineState.usage } : {}),
       });
@@ -712,6 +717,14 @@ async function sendToCodexOrchestratorAttempt(
     };
     if (userAbortSignal?.aborted) userAbortListener();
     else userAbortSignal?.addEventListener('abort', userAbortListener, { once: true });
+    if (messageOnStdin && !settled) {
+      proc.stdin!.on('error', (error: NodeJS.ErrnoException) => {
+        if (error.code === 'EPIPE' || error.code === 'ERR_STREAM_DESTROYED') return;
+        settle('dead', 'Unable to deliver the recovered conversation input.');
+        terminate(2_000);
+      });
+      proc.stdin!.end(message);
+    }
   });
 }
 

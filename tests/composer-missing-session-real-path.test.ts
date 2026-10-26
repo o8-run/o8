@@ -17,7 +17,7 @@ const auth = randomUUID();
 const firstMessage = 'Remember: the sample identifier is widget-731 and its accent is copper. Reply briefly.';
 const followup = 'What identifier and accent did we choose earlier?';
 type History = { repoPath: string; messages: Array<{ role: string; content: string; model?: string }>; orchestratorSessionIds: Record<string, string> };
-type WireEvent = { event?: string; data?: { threadId?: string; status?: string; error?: string } };
+type WireEvent = { event?: string; data?: { threadId?: string; status?: string; error?: string; reason?: string } };
 let api: Server;
 let worker: ChildProcess;
 let socket: WebSocket;
@@ -34,7 +34,7 @@ async function until(check: () => boolean, description: string, timeout = 30_000
 }
 function historyPath(threadId: string) { return join(root, 'chat-history', `${threadId}.json`); }
 function history(threadId: string): History { return JSON.parse(readFileSync(historyPath(threadId), 'utf8')); }
-function calls(): Array<{ resume: boolean; threadId: string; message: string; model: string }> {
+function calls(): Array<{ resume: boolean; threadId: string; message: string; model: string; transport: string }> {
   const path = join(sessions, 'calls.jsonl');
   return existsSync(path) ? readFileSync(path, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line)) : [];
 }
@@ -113,6 +113,7 @@ describe('composer recovery from a missing persisted runtime session', () => {
     expect(received).toHaveLength(scenario === 'healthy-control' ? 1 : 2);
     expect(received.every(call => call.model === selectedModel)).toBe(true);
     expect(received[0]).toMatchObject({ resume: true, threadId: savedSession });
+    expect(received[0].transport).toBe('argv');
     if (scenario !== 'healthy-control') {
       expect.soft(received[1].message).toContain('widget-731');
       expect.soft(received[1].message).toContain('copper');
@@ -181,6 +182,43 @@ describe('composer recovery from a missing persisted runtime session', () => {
     expect.soft(history(threadId).orchestratorSessionIds.codex).toBe(savedSession);
     rmSync(join(sessions, 'control.json'));
     await send(threadId, followup, MODEL_IDS.raw.openAiGpt55);
+    expect(history(threadId).messages.filter(message => message.role === 'assistant').at(-1)?.content).toBe('widget-731 / copper');
+  }, 60_000);
+
+  it.each(['failure', 'cancelled'] as const)('keeps recovery pending after allocation but before input acceptance: %s', async scenario => {
+    const threadId = `thoughts-recovery-pre-input-${scenario}`;
+    await send(threadId, firstMessage, MODEL_IDS.raw.openAiGpt55);
+    await send(threadId, 'Keep both choices available.', MODEL_IDS.raw.openAiGpt55);
+    const savedSession = history(threadId).orchestratorSessionIds.codex;
+    rmSync(join(sessions, savedSession + '.json'));
+    writeFileSync(join(sessions, 'control.json'), JSON.stringify({ allocateWithoutInput: scenario }));
+    const start = calls().length;
+    const pending = send(threadId, followup, MODEL_IDS.raw.openAiGpt55);
+    if (scenario === 'cancelled') {
+      await until(() => calls().length === start + 2, 'replacement allocation before input acceptance');
+      socket.send(JSON.stringify({ type: 'orchestrator-interrupt', repoPath, threadId, backend: 'codex' }));
+    }
+    await pending;
+    expect.soft(history(threadId).orchestratorSessionIds.codex).toBe(savedSession);
+    rmSync(join(sessions, 'control.json'));
+    const continued = await send(threadId, followup, MODEL_IDS.raw.openAiGpt55);
+    expect.soft(continued.some(event => event.event === 'retry' && event.data?.reason === 'runtime-session-recovered')).toBe(true);
+    expect(history(threadId).messages.filter(message => message.role === 'assistant').at(-1)?.content).toBe('widget-731 / copper');
+  }, 60_000);
+
+  it('delivers a permitted 140150-character earlier message without the process argument limit', async () => {
+    const threadId = 'thoughts-recovery-long-input';
+    await send(threadId, firstMessage, MODEL_IDS.raw.openAiGpt55);
+    const saved = history(threadId);
+    saved.messages[0].content = firstMessage.padEnd(140_150, 'x');
+    writeFileSync(historyPath(threadId), JSON.stringify(saved));
+    rmSync(join(sessions, saved.orchestratorSessionIds.codex + '.json'));
+    const start = calls().length;
+    const result = await send(threadId, followup, MODEL_IDS.raw.openAiGpt55);
+    expect.soft(result.filter(event => event.event === 'error')).toEqual([]);
+    const replacement = calls().slice(start).find(call => !call.resume);
+    expect.soft(replacement?.transport).toBe('stdin');
+    expect.soft(replacement?.message.includes(saved.messages[0].content)).toBe(true);
     expect(history(threadId).messages.filter(message => message.role === 'assistant').at(-1)?.content).toBe('widget-731 / copper');
   }, 60_000);
 });
