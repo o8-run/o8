@@ -7,7 +7,7 @@ import { expect, it } from 'vitest';
 
 const browser = [process.env.O8_PARITY_BROWSER, chromium.executablePath(), '/usr/bin/chromium', '/usr/bin/google-chrome'].find(path => path && existsSync(path));
 
-it.each(['normal', 'pending', 'disposed', 'unavailable'])(
+it.each(['startup', 'normal', 'pending', 'disposed', 'unavailable'])(
   'handles each Settings request once with overlapping routes (%s)', mode => {
     expect(browser, 'Install the parity browser').toBeTruthy();
     const root = mkdtempSync(join(tmpdir(), 'o8-parity-routes-'));
@@ -17,10 +17,15 @@ it.each(['normal', 'pending', 'disposed', 'unavailable'])(
         { encoding: 'utf8', timeout: 30_000 });
       const data = JSON.parse(readFileSync(receipt, 'utf8')) as {
         overlap: number; forwarded: number; blockedForwarded: number; errors: string[];
+        stages: Array<{ name: string; ms: number }>;
         upstream: Array<{ method: string; path: string; authorized: boolean }>;
         requests: Array<{ path: string; method: string; attempts: number; fulfilled: number; continued: number; status: number | null }>;
       };
-      expect(data.requests.length, result.stderr).toBe(4);
+      const diagnostic = result.stderr + JSON.stringify(data.stages);
+      expect(data.requests.length, diagnostic).toBe(4);
+      const stages = data.stages.map(stage => stage.name);
+      expect(stages.indexOf('server listening')).toBeLessThan(stages.indexOf('browser launched'));
+      expect(stages.indexOf('overlapping routes registered')).toBeLessThan(stages.indexOf('document served'));
       expect(data.overlap).toBe(4);
       expect(data.requests.map(request => request.attempts), result.stderr).toEqual([1, 1, 1, 1]);
       expect(data.requests.map(request => request.continued)).toEqual([0, 0, 0, 0]);
