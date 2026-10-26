@@ -1,0 +1,15 @@
+Linux debug; 200 messages, 100 inputs per benchmark; app crate rebuilt before each side
+BEFORE ref=8b1b41169bcce8d04527d4b3192dfca65486305c profile=debug
+test shell::session::loaded_shell_tests::native_composer_loaded_shell_typing_benchmark ... LOADED_SHELL_CPU_SCENE platform=linux profile=debug messages=200 inputs=100 p50_ms=4.115266 p95_ms=4.180614
+test ui::conversation::card_tests::native_composer_loaded_typing_benchmark ... LOADED_COMPOSER_CPU_SCENE platform=linux profile=debug messages=200 inputs=100 p50_ms=3.478851 p95_ms=3.816322
+AFTER profile=debug
+test shell::session::loaded_shell_tests::native_composer_loaded_shell_typing_benchmark ... LOADED_SHELL_CPU_SCENE platform=linux profile=debug messages=200 inputs=100 p50_ms=1.324879 p95_ms=1.407502
+test ui::conversation::card_tests::native_composer_loaded_typing_benchmark ... LOADED_COMPOSER_CPU_SCENE platform=linux profile=debug messages=200 inputs=100 p50_ms=1.047677 p95_ms=1.205091
+
+Linux release; 200 messages, 100 inputs per benchmark; app crate rebuilt before each side
+BEFORE ref=8b1b41169bcce8d04527d4b3192dfca65486305c profile=release
+test shell::session::loaded_shell_tests::native_composer_loaded_shell_typing_benchmark ... LOADED_SHELL_CPU_SCENE platform=linux profile=release messages=200 inputs=100 p50_ms=0.387566 p95_ms=0.435247
+test ui::conversation::card_tests::native_composer_loaded_typing_benchmark ... LOADED_COMPOSER_CPU_SCENE platform=linux profile=release messages=200 inputs=100 p50_ms=0.295609 p95_ms=0.379474
+AFTER profile=release
+test shell::session::loaded_shell_tests::native_composer_loaded_shell_typing_benchmark ... LOADED_SHELL_CPU_SCENE platform=linux profile=release messages=200 inputs=100 p50_ms=0.088541 p95_ms=0.122602
+test ui::conversation::card_tests::native_composer_loaded_typing_benchmark ... LOADED_COMPOSER_CPU_SCENE platform=linux profile=release messages=200 inputs=100 p50_ms=0.064856 p95_ms=0.089573

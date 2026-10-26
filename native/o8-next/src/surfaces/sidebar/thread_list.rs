@@ -4,7 +4,7 @@
 use crate::{
     client::{Client, Session},
     composer::{Composer, Submit},
-    projects_model::Ledger,
+    projects_model::{Action, Ledger, WorkspaceChange},
     sidebar,
     transport::{self, Incoming, Subscription},
 };
@@ -27,6 +27,7 @@ pub enum Event {
     Refreshed(Vec<Session>, Option<Ledger>),
     Selected(String),
     Error(String),
+    Workspace(Option<String>, Ledger),
 }
 #[derive(Clone, Debug, Serialize, PartialEq)]
 pub struct Row {
@@ -120,6 +121,10 @@ fn label(path: &str) -> String {
 
 pub struct ThreadList {
     client: Client,
+    header: project_header::HeaderSnapshot,
+    workspace: Option<String>,
+    header_busy: bool,
+    header_menu: Option<bool>,
     pub sessions: Vec<Session>,
     pub rows: Rc<Vec<Row>>,
     pub selected: Option<String>,
@@ -154,7 +159,7 @@ impl EventEmitter<Event> for ThreadList {}
 impl ThreadList {
     #[cfg(test)]
     pub(crate) fn diagnostic(&self) -> serde_json::Value {
-        json!({"notice":self.notice,"rename":self.rename,"editing":self.editing,"saving":self.saving,"loading":self.loading,"selected":self.selected,"choice":self.choice_row()})
+        json!({"headerMenu":self.header_menu,"project":self.header.ledger.active_project_id,"notice":self.notice,"rename":self.rename,"editing":self.editing,"saving":self.saving,"loading":self.loading,"selected":self.selected,"choice":self.choice_row()})
     }
     pub fn new(client: Client, cx: &mut Context<Self>) -> Self {
         let editor = cx.new(Composer::new);
@@ -176,6 +181,10 @@ impl ThreadList {
         Self {
             subscription: transport::subscribe_global(client.clone()),
             client,
+            header: project_header::HeaderSnapshot::default(),
+            workspace: None,
+            header_busy: false,
+            header_menu: None,
             sessions: vec![],
             rows: Rc::new(vec![]),
             selected: None,
@@ -235,8 +244,9 @@ impl ThreadList {
         let client = self.client.clone();
         let task = cx.background_executor().spawn(async move {
             let sessions = client.sidebar_sessions()?;
-            let ledger = client.get::<Ledger>("/api/panel/projects", &[]).ok();
-            Ok::<_, String>((sessions, ledger))
+            let header = project_header::HeaderSnapshot::load(&client).ok();
+            let ledger = header.as_ref().map(|header| header.ledger.clone());
+            Ok::<_, String>((sessions, ledger, header))
         });
         cx.spawn(async move |this, cx| {
             let result = task.await;
@@ -249,7 +259,10 @@ impl ThreadList {
                 this.last_load = Instant::now();
                 this.last_inventory = Instant::now();
                 match result {
-                    Ok((mut sessions, ledger)) => {
+                    Ok((mut sessions, ledger, header)) => {
+                        if let Some(header) = header {
+                            this.header = header;
+                        }
                         let previous: HashMap<_, _> =
                             this.sessions.iter().map(|s| (s.id.as_str(), s)).collect();
                         for s in &mut sessions {
@@ -576,13 +589,14 @@ impl ThreadList {
         let draft_owner = self.rename.clone();
         let renaming = draft_owner.as_ref() == Some(&id) && patch["title"].is_string();
         let client = self.client.clone();
-        let task = cx.background_executor().spawn(async move {
-            if id.contains(':') {
-                client.archive_worker(&id, patch["clientMutationId"].as_str().unwrap())
-            } else {
-                client.patch_thread(&id, patch)
-            }
-        });
+        let workspace = self
+            .sessions
+            .iter()
+            .find(|session| session.id == id)
+            .and_then(|session| session.repo_path.clone());
+        let task = cx
+            .background_executor()
+            .spawn(async move { client.mutate_sidebar(workspace.as_deref(), &id, patch) });
         cx.spawn(async move |this, cx| {
             let result = task.await;
             let _ = this.update(cx, |this, cx| {
@@ -611,9 +625,13 @@ impl ThreadList {
         .detach();
     }
     fn key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if self.header_key(event, window, cx) {
+            return;
+        }
         let key = event.keystroke.key.as_str();
         match key {
             "escape" => {
+                self.header_menu = None;
                 self.edit_generation += 1;
                 if let Some(id) = self.rename.take() {
                     self.rename_drafts.remove(&id);
@@ -679,3 +697,6 @@ mod view;
 #[cfg(test)]
 #[path = "race_tests.rs"]
 mod races;
+
+#[path = "project_header.rs"]
+mod project_header;

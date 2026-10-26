@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { isSavedConnectivityCheck } from '@/lib/orchestrator/connectivity-check';
 import { resolveRepoGithubIdentity } from '@/lib/repos/github-identity';
 import type { MobileOrchestratorThread } from '@/lib/mobile/types';
 import { projectOrchestratorThread, type OrchestratorHistoryRecord } from './orchestrator-thread-projection';
@@ -53,7 +54,7 @@ class ThreadSummaryCache {
     }
     this.delete(stat.filePath);
     const record = JSON.parse(readFileSync(stat.filePath, 'utf8')) as OrchestratorHistoryRecord;
-    const thread = record.archivedAt ? null : projectOrchestratorThread(stat.tabId, record, stat.modifiedAt);
+    const thread = record.archivedAt || isSavedConnectivityCheck(record) ? null : projectOrchestratorThread(stat.tabId, record, stat.modifiedAt);
     const remoteUrl = typeof record.remoteUrl === 'string' ? record.remoteUrl : null;
     // Serialization also detaches title/agent substrings from larger source
     // strings, so charged bytes bound the retained allocation itself.

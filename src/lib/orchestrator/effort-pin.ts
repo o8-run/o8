@@ -109,7 +109,7 @@ export function isHonoredEffortPin(
 export interface ResolveEffortPinInput {
   /** Raw caller value. Omitted / null => no pin (parity). */
   requestedEffort: unknown;
-  runtime: OrchestratorRuntime;
+  runtime: string;
   /** The model that will actually launch (selected, or the runtime default). */
   model: string | null;
   /** The caller's explicit model identity, BEFORE any routing normalization. */
@@ -135,7 +135,7 @@ export function resolveEffortPin(input: ResolveEffortPinInput): ResolveEffortPin
     // Explicit reset: not a concrete pin, so the runtime default applies.
     return { ok: true, requestedEffort: null, selectedEffort: null };
   }
-  if (!getRuntimeCapability(input.runtime).reasoningEffort) {
+  if (!isOrchestratorRuntime(input.runtime) || !getRuntimeCapability(input.runtime).reasoningEffort) {
     return {
       ok: false,
       code: 'effort_unsupported_runtime',
@@ -187,7 +187,6 @@ export function resolveEffortPin(input: ResolveEffortPinInput): ResolveEffortPin
 
 /** Shared last admission boundary for owned launch, cold resume and automatic retries. */
 export function assertRuntimeEffortPin(runtime: string, model: string | null | undefined, effort: unknown): void {
-  if (!isOrchestratorRuntime(runtime)) return;
   const pin = resolveEffortPin({ runtime, model: model ?? null, requestedEffort: effort });
   if (!pin.ok) throw new EffortPinRejectionError(pin.code, pin.message);
 }

@@ -3,14 +3,17 @@
 // Mirrors the standalone-bundle pattern in scripts/tauri-export.mjs.
 
 import * as esbuild from 'esbuild';
-import { execSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { chmodSync, mkdirSync, readFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const entry = join(__dirname, 'src', 'index.ts');
-const outFile = join(__dirname, 'dist', 'o8.mjs');
+const workerOutputIndex = process.argv.indexOf('--worker-output');
+const workerOutput = workerOutputIndex < 0 ? null : process.argv[workerOutputIndex + 1];
+if (workerOutputIndex >= 0 && !workerOutput) throw new Error('--worker-output requires a destination');
+const outFile = workerOutput ? resolve(workerOutput) : join(__dirname, 'dist', 'o8.mjs');
+mkdirSync(dirname(outFile), { recursive: true });
 
 // Inject the app version (repo-root package.json, kept in sync by
 // scripts/sync-version.mjs) so the bundled `o8 version` reports what it
@@ -44,7 +47,9 @@ await esbuild.build({
   outfile: outFile,
 });
 
-execSync(`chmod +x ${outFile}`);
+chmodSync(outFile, 0o755);
+// Worker launches build only their run-owned CLI from current source inputs.
+if (workerOutput) process.exit(0);
 // Keep the private PTY setup flow in a separate bundle. It can use the server's
 // encrypted storage implementation without adding native modules to every CLI command.
 await esbuild.build({
