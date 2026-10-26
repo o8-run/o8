@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { WebviewSocketClient, executeJs } from '../preship-webview-gate.mjs';
 import { cleanupGate } from '../lib/preship-gate-cleanup.mjs';
 import { prepareNativeRunner } from './native-runner-preconditions.mjs';
@@ -20,7 +20,10 @@ export const COMPOSER_PROBE_JS = `(() => {
   const editor = document.querySelector('textarea[data-o8-active-composer="true"]')
     || document.querySelector('[data-o8-composer-root] textarea');
   const box = editor?.getBoundingClientRect();
-  const visible = Boolean(box && box.width > 0 && box.height > 0 && document.visibilityState === 'visible');
+  const hit = box && document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+  const visible = Boolean(box && box.width > 0 && box.height > 0 && document.visibilityState === 'visible'
+    && (hit === editor || editor.contains(hit)) && getComputedStyle(editor).visibility === 'visible');
+  if (editor?.readOnly) return JSON.stringify({ state: 'pending', readOnly: true });
   if (!editor || !visible || editor.disabled) return JSON.stringify({ state: 'pending', editor: Boolean(editor), visible, disabled: editor?.disabled });
   const text = ${JSON.stringify(edit)};
   if (!editor.dataset.o8LaunchEdit) {
@@ -108,6 +111,7 @@ export async function measureNativeLaunch({ app, output, sourceSha, samples = 3 
   let preserveFixture = false, runner;
   const receipt = { schema: 'o8/native-launch/v1', platform: process.platform, arch: process.arch,
     osVersion: execFileSync('sw_vers', ['-productVersion'], { encoding: 'utf8' }).trim(), sourceSha, artifactDigest,
+    benchmarkSha: execFileSync('git', ['-C', fileURLToPath(new URL('../..', import.meta.url)), 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
     method: 'normal release startup, private app data and incognito webview; spawn, foreground activation and controlled composer edit acknowledgment',
     pollMs: 10, limitMs: 1000, samples: [] };
   try {

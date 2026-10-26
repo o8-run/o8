@@ -173,6 +173,14 @@ jobs:
         with:
           projectPath: head
           args: --features dev-mcp-plugin --bundles app --config work/native-launch.json
+      - name: Preserve the exact candidate artifact
+        run: tar -C head/src-tauri/target/release/bundle/macos -cf "$RUNNER_TEMP/head-app.tar" o8.app
+      - uses: actions/upload-artifact@v4
+        with:
+          name: current-app-launch-head-app
+          path: ${{ runner.temp }}/head-app.tar
+          compression-level: 0
+          retention-days: 1
       - uses: actions/download-artifact@v4
         with:
           name: current-app-launch-main-app
