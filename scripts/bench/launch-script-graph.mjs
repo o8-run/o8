@@ -30,15 +30,6 @@ if (!initial.length && fs.existsSync(path.join(root, 'app-build-manifest.json'))
 }
 if (!initial.length) throw new Error('Initial dashboard script graph is empty');
 const initialScripts = new Set(initial);
-const modules = [];
-for (const name of ['WorkspaceTerminalPanels', 'OrchestratorTab', 'ThoughtsChatPanel', 'ComposerArea']) {
-  const entries = Object.entries(manifest.clientModules).filter(([file]) => file.endsWith('/' + name + '.tsx'));
-  for (const [, value] of entries) {
-    const files = scripts(value.chunks);
-    modules.push({ name, async: value.async, files, initial: files.filter(file => initialScripts.has(file)),
-      deferred: files.filter(file => !initialScripts.has(file)) });
-  }
-}
 let composerLoader = null;
 const labels = ['label:"Orchestrator tab"', "label:'Orchestrator tab'"];
 for (const file of initialScripts) {
@@ -55,7 +46,4 @@ for (const file of initialScripts) {
   composerLoader = { file, chunkIds: ids, files, deferred: files.filter(name => !initialScripts.has(name)) };
 }
 console.log(JSON.stringify({ schema: 'o8/launch-script-graph/v1', graphSource,
-  initialScriptCount: initialScripts.size, modules, composerLoader }));
-if (process.argv.includes('--require-initial-composer') && composerLoader?.deferred.length) {
-  throw new Error('Default composer requires deferred scripts');
-}
+  initialScriptCount: initialScripts.size, composerLoader }));

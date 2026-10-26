@@ -1,7 +1,5 @@
 name: Inspect current app launch scripts
 on:
-  push:
-    branches: [perf/current-app-launch]
   workflow_dispatch:
     inputs:
       artifact_run:
@@ -13,11 +11,10 @@ permissions:
   actions: read
 jobs:
   inspect:
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[inspect-launch]')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      ARTIFACT_RUN: ${{ github.event.inputs.artifact_run || '40355401137' }}
+      ARTIFACT_RUN: ${{ github.event.inputs.artifact_run }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
