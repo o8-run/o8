@@ -271,7 +271,7 @@ describe.sequential('Devices controller handoff through panel routes and MCP too
   it('automatically attaches the Devices-only tool transport through the owned worker launch entry point', async () => {
     const { claudeCodeOwnedAdapter } = await import('@/lib/claude-code/owned');
     const { prepareOwnedLaunchArgs } = await import('@/lib/runtimes/shared/owned-session/launch-args');
-    const sessionDir = join(root, 'worker-session'); mkdirSync(sessionDir);
+    const sessionDir = join(physicalData, 'owned-fixture', 'worker-session'); mkdirSync(sessionDir, { recursive: true });
     const session = { surfaceId: 'claude-code-owned:fixture-device', packetId: 'fixture-device-packet', sessionDir,
       cwd: root, repoPath: root, branch: 'fixture', title: 'Fixture worker', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
       threadId: 'fixture-parent-conversation', initialPrompt: 'Fixture', latestPrompt: 'Fixture', latestSummary: '', recentRuns: [] };

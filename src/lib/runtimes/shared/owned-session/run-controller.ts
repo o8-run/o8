@@ -15,6 +15,7 @@ import { ownedSpawnEnvironment } from './restricted-spawn-env';
 import { withControlledTaskSpawn } from '@/lib/mcp/task-execution-admission';
 import { assertOwnedActionAdmission } from './action-admission';
 import { withOwnedArtifactAdmission } from './artifact-admission';
+import { cleanupWorkerO8Cli } from './worker-o8-cli-cleanup';
 import { createFailureRetry } from './failure-retry';
 import { assertOwnedSingleAttemptSpawn, assertDurableOwnedSpawn } from './execution-policy';
 import type { ChildProcess } from 'node:child_process';
@@ -40,7 +41,7 @@ import { tmuxSessionName } from '@/lib/terminal/tmux';
 import { pathWithNodeRuntime } from '@/lib/util/node-on-path';
 import { crashSurvivableWorkersEnabled } from './crash-survival';
 import { assertOwnedSessionProcessIdentity, captureOwnedRunIdentity } from './process-identity';
-import { emitRuntimeFallbackNotification } from './run-notifications';
+import { emitRuntimeFallbackNotification, notifySupervisorOfCleanExit } from './run-notifications';
 import { observeChildExit, readAbnormalStderrTail } from './exit-outcome';
 import { prepareOwnedLaunchArgs } from './launch-args';
 import { WorkerO8CliUnavailableError } from './worker-o8-cli';
@@ -241,7 +242,7 @@ export function createOwnedRunController({
     let sandboxDenial: OwnedRunRecord['sandboxDenial'];
     let artifacts: Awaited<ReturnType<typeof readRunArtifacts>> | null = null;
     await withSurfaceLock(surfaceId, async () => {
-      const current = await io.findSession(surfaceId);
+      const current = await io.findSession(surfaceId) ?? await io.findArchivedSession(surfaceId);
       if (!current) return;
       laneId = current.laneId;
       const currentRun = current.recentRuns.find((run) => run.id === runId);
@@ -284,6 +285,7 @@ export function createOwnedRunController({
       if (finishedClean) current.capacityResumeCount = 0;
       if (!current.threadId && artifacts?.parsed.threadId) current.threadId = artifacts.parsed.threadId;
       if (dirty) await io.saveSession(current);
+      await cleanupWorkerO8Cli(root, current, runId).catch(() => {});
     });
     invalidateFleetCache();
 
@@ -317,24 +319,6 @@ export function createOwnedRunController({
 
     if (finishedClean) {
       void notifySupervisorOfCleanExit(surfaceId, runId);
-    }
-  }
-
-  async function notifySupervisorOfCleanExit(surfaceId: string, runId: string): Promise<void> {
-    try {
-      const [{ resolvePortInfo }, { getOrCreateWsToken }] = await Promise.all([
-        import('@/lib/panel/api-port'),
-        import('@/lib/ws-auth'),
-      ]);
-      const { wsPort } = resolvePortInfo();
-      await fetch(`http://127.0.0.1:${wsPort}/supervisor/completed`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getOrCreateWsToken()}` },
-        body: JSON.stringify({ surfaceId, runId }),
-        signal: AbortSignal.timeout(3000),
-      });
-    } catch (err) {
-      console.warn(`[owned-session] completion push failed for ${surfaceId} (salvage nets remain):`, err);
     }
   }
 
@@ -428,6 +412,7 @@ export function createOwnedRunController({
       await io.saveSession(session);
     }
 
+    await cleanupWorkerO8Cli(root, session).catch(() => {});
     if (allowRetry && !session.activeRun && session.recentRuns[0]?.outcome === 'failed') {
       const handleFailure = async () => {
         await handleWorkerFailure(session.surfaceId, session.recentRuns[0].id);
@@ -518,6 +503,7 @@ export function createOwnedRunController({
         mode,
         sandboxEnabled,
         humanLabel,
+        artifactRoot: root,
       });
     } catch (error) {
       if (!(error instanceof WorkerO8CliUnavailableError)) throw error;
@@ -527,12 +513,15 @@ export function createOwnedRunController({
     }
     const { args, stdinPayload, workerMcp, workerO8BinDir, workerO8ReadPaths } = preparedLaunch;
     // Prepare the exact isolated config root before Seatbelt is built.
-    const adapterEnv: Record<string, string> = adapter.extraSpawnEnv
-      ? await adapter.extraSpawnEnv(session)
-      : {};
-    const runtimeState = preparedRuntimeStateSandboxPolicy(adapter, session, adapterEnv);
+    const { adapterEnv, runtimeState, carrierLaunch } = await (async () => {
+      const adapterEnv: Record<string, string> = adapter.extraSpawnEnv
+        ? await adapter.extraSpawnEnv(session)
+        : {};
+      const runtimeState = preparedRuntimeStateSandboxPolicy(adapter, session, adapterEnv);
 
-    const carrierLaunch = await resolveExecutionCarrierInvocation({ runtime: runtimeId as OrchestratorRuntime, runtimeConfig: session.runtimeConfig, runtimeBinary: binary, runtimeArgs: args });
+      const carrierLaunch = await resolveExecutionCarrierInvocation({ runtime: runtimeId as OrchestratorRuntime, runtimeConfig: session.runtimeConfig, runtimeBinary: binary, runtimeArgs: args });
+      return { adapterEnv, runtimeState, carrierLaunch };
+    })().catch(async error => { await preparedLaunch.workerO8?.cleanupUnstarted(true).catch(() => {}); throw error; });
     let spawnBinary = carrierLaunch.command;
     let spawnArgs = carrierLaunch.args;
     const sandboxEnvExtra: Record<string, string> = {};
@@ -565,6 +554,7 @@ export function createOwnedRunController({
         sandboxEnvExtra.O8_API_PORT = String(apiPort);
         sandboxEnvExtra.O8_WS_PORT = String(wsPort);
       } catch (error) {
+        await preparedLaunch.workerO8?.cleanupUnstarted(true);
         const why = readOnlySandbox.enforced
           ? 'this is a read-only packet, which requires an OS-enforced sandbox'
           : 'worker sandbox is enabled (O8_WORKER_SANDBOX)';
@@ -579,6 +569,7 @@ export function createOwnedRunController({
     }
 
     let pid = 0;
+    let spawnSubmitted = false;
     let stdinPath: string | undefined;
     let terminalSessionName: string | undefined;
     let detachMode: 'bridge' | 'detached' = 'bridge';
@@ -668,6 +659,7 @@ export function createOwnedRunController({
           if (!hasOwnedActionFence() && !useSupervisor && !hasProviderCredentials && !workerMcp.configPath && workerMcp.servers.length === 0 && process.platform !== 'win32' && session.executionPolicy === undefined && !carrierLaunch.carried && !crashSurvivableWorkersEnabled()) {
             try {
               preparedLaunch.workerO8?.assertCurrent();
+              spawnSubmitted = true;
               const result = await spawnBridgeTerminalSession({
                 sessionName: bridgeSessionName,
                 shellCommand: shellCmd,
@@ -701,6 +693,7 @@ export function createOwnedRunController({
                 stdinFd, stdoutFd, stderrFd, mcpConfigPath: workerMcp.configPath, mcpServers: workerMcp.servers,
                 materializationIdentity,
                 assertWorkerO8Current: preparedLaunch.workerO8?.assertCurrent,
+                onSubmit: () => { spawnSubmitted = true; },
               };
               if (useSupervisor) {
                 supervised = await spawnCredentialCheckedSupervised({ ...launchInput, stdoutPath, stderrPath, stdinPath });
@@ -779,9 +772,11 @@ export function createOwnedRunController({
       });
     } catch (error) {
       if (session.executionPolicy !== undefined) revokeReadOnlyWorkerToken(runId);
+      if (pid === 0) await preparedLaunch.workerO8?.cleanupUnstarted(!spawnSubmitted);
       if (error instanceof WorkerO8CliUnavailableError) {
         const held = await stageOwnedLaunchFailure({ session, runId, mode, prompt, stdoutPath, stderrPath, message: error.message });
         await io.saveSession(session);
+        await cleanupWorkerO8Cli(root, session, runId).catch(() => {});
         return held;
       }
       throw error;

@@ -6061,6 +6061,7 @@
         "executable-fixture",
         "git-cli",
         "network-listener",
+        "process-signal",
         "real-path",
         "worktree-api"
       ]
