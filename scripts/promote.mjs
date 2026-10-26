@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DEFAULT_REPOS } from './lib/linux-appimage-signature.mjs';
 import { acquireUpdateFeedLock, compareReleaseVersions, feedAnchor } from './lib/update-feeds.mjs';
+import { warmUpdatePublication } from './lib/release-update-warmup.mjs';
 
 function options(args) {
   let version;
@@ -69,10 +70,11 @@ async function main() {
       const tag = feedAnchor(repo);
       const stable = download(repo, tag, 'latest.json', dir);
       validateStable(beta, stable);
-      targets.push({ repo, tag });
+      targets.push({ repo, tag, previousVersion: stable.version });
     }
     const manifest = join(dir, 'latest.json');
     writeFileSync(manifest, `${JSON.stringify(candidate, null, 2)}\n`);
+    const publishedAt = new Date().toISOString();
     for (const { repo, tag } of targets) {
       // Re-read inside the lock immediately before each stable write.
       validateStable(candidate, download(repo, tag, 'latest.json', dir));
@@ -80,6 +82,14 @@ async function main() {
       execFileSync('gh', ['release', 'upload', tag, manifest, '--clobber', '--repo', repo], { stdio: 'inherit', timeout: 60_000 });
     }
     console.log(`[promote] Stable now serves ${version} using the beta artifacts.`);
+    try {
+      const receipt = await warmUpdatePublication({ root: process.cwd(), version,
+        previousVersion: targets[0].previousVersion, publishedAt });
+      const timing = receipt.publishToOfferMs === null ? 'unverified' : `${receipt.publishToOfferMs}ms`;
+      console.log(`[promote] update publication ${receipt.status}; publish-to-offer ${timing}; within-five-minutes=${receipt.withinPublishToOfferBudget ?? 'unverified'}`);
+    } catch {
+      console.warn('[promote] update publication verification unavailable; no fresh-offer receipt was recorded.');
+    }
   } finally {
     if (dir) rmSync(dir, { recursive: true, force: true });
     lock.release();

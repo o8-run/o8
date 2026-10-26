@@ -1,0 +1,4 @@
+Command: cargo test --locked --manifest-path native/o8-next/Cargo.toml native_single_line_megabyte -- --nocapture --test-threads=1
+Command limit: 60 seconds; exit status: 124
+running 1 test
+test composer::native_tests::native_single_line_megabyte_selection_copy_and_undo ...

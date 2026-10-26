@@ -6958,6 +6958,13 @@ impl BundledNextSpawn {
             command.env("O8_BUNDLED_MCP_DIR", &self.server_dir);
             command.env("O8_BUNDLED_MCP_PATH", path);
         }
+        // Tauri externalBin lives beside the app executable. Pass only its path;
+        // the local server supplies its own operator credential at spawn time.
+        if let Ok(executable) = std::env::current_exe() {
+            if let Some(directory) = executable.parent() {
+                command.env("O8_NEXT_BIN", directory.join("o8-next"));
+            }
+        }
         if let Some(path) = self.codebase_memory_bin.as_ref() {
             command.env("O8_CODEBASE_MEMORY_BIN", path);
         }

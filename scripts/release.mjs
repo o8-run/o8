@@ -30,6 +30,7 @@ import { contributorCreditLine, creditsForSubjects, ghCreditLookups } from './li
 import { publishFixed } from './publish-fixed.mjs';
 import { syncReports } from './sync-reports.mjs';
 import { verifyNativeBundle } from './native-bundle.mjs';
+import { verifyNextAppSidecar } from './next/verify-app-bundle.mjs';
 import { runShipWorkflow } from './lib/ship-broadcast.mjs';
 import { buildReleaseManifest } from './lib/release-manifest.mjs';
 import {
@@ -230,6 +231,7 @@ for (const path of [DMG, APP_TAR, APP_SIG]) {
 let darwinIdentity;
 try {
   darwinIdentity = verifyUniversalMacUpdaterArchive(artifacts.app, APP_TAR);
+  verifyNextAppSidecar(artifacts.app);
   console.log('[release] universal macOS updater archive gate passed', JSON.stringify(darwinIdentity));
 } catch (error) {
   console.error(`[release] FATAL: ${error.message}`);

@@ -1,0 +1,16 @@
+Reviewed executable: 2fe766898749020298481e6d5f7f720c7fa67acb
+Real X11/software-Vulkan renderer, scripts/next/linux-headless.mjs.
+Main maximum warm idle RSS: 101.11 MiB; comparison budget: 106.11 MiB.
+
+node scripts/next/linux-headless.mjs --check before/measurements.json --budget main-plus-five.json
+run 1 idleRssMiB 125.04 exceeds 106.11
+run 2 idleRssMiB 124.67 exceeds 106.11
+run 3 idleRssMiB 124.77 exceeds 106.11
+exit 1
+
+Headless real Surface/HTTP fixture, before replacing the stroked microphone:
+native_composer_idle_card_avoids_viewport_path_targets
+assertion `left == right` failed: an idle composer must not activate viewport-sized path/MSAA targets
+  left: 1
+ right: 0
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 270 filtered out; finished in 1.33s

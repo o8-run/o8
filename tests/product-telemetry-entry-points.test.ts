@@ -85,7 +85,9 @@ describe.sequential('product telemetry gates real entry points', () => {
     await repoRegistry.addRepo(makeRepo('repo-off'));
     expect(telemetryCalls(fetchMock)).toHaveLength(0);
 
-    await operatorDefaults!.updateOperatorDefaults({ productTelemetryEnabled: true });
+    await operatorDefaults!.updateOperatorDefaults({
+      productTelemetryEnabled: true, crashReportsEnabled: false, telemetryConsentAnswered: true,
+    });
     await repoRegistry.addRepo(makeRepo('repo-on'));
     expect(telemetryCalls(fetchMock)).toHaveLength(1);
     expect(telemetryCalls(fetchMock)[0]?.[1]).toMatchObject({
@@ -127,7 +129,9 @@ describe.sequential('product telemetry gates real entry points', () => {
     await launch('off');
     expect(telemetryCalls(fetchMock)).toHaveLength(0);
 
-    await operatorDefaults!.updateOperatorDefaults({ productTelemetryEnabled: true });
+    await operatorDefaults!.updateOperatorDefaults({
+      productTelemetryEnabled: true, crashReportsEnabled: false, telemetryConsentAnswered: true,
+    });
     await launch('on');
     expect(telemetryCalls(fetchMock)).toHaveLength(1);
     expect(telemetryCalls(fetchMock)[0]?.[1]).toMatchObject({

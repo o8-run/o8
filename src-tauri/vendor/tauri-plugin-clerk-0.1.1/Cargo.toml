@@ -72,7 +72,7 @@ version = "2"
 version = "2"
 
 [dependencies.tokio]
-version = "1"
+version = "1.54.1"
 features = ["sync"]
 
 [dependencies.tracing]

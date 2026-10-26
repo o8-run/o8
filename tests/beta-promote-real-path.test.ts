@@ -2,6 +2,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, wr
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
+import { createServer } from 'node:http';
 import { afterEach, expect, it } from 'vitest';
 
 const roots: string[] = [];
@@ -56,6 +57,52 @@ it('promotes exactly the beta manifest without a build or artifact upload', () =
   expect(calls.filter(a => a[1] === 'upload')).toHaveLength(1);
   expect(calls.find(a => a[1] === 'upload')).toContain('v0.1.800');
   expect(calls.some(a => ['create', 'edit'].includes(a[1]))).toBe(false);
+});
+it('warms stable update routes after every promotion upload and records the promotion time', async () => {
+  const f = fixture();
+  const profile = mkdtempSync(join(tmpdir(), 'o8-promote-profile-'));
+  roots.push(profile);
+  const visits: string[] = [];
+  const uploadCounts: number[] = [];
+  const server = createServer((request, response) => {
+    visits.push(request.url!);
+    const calls: string[][] = readFileSync(join(f.root, 'calls.jsonl'), 'utf8').trim().split('\n').map(line => JSON.parse(line));
+    uploadCounts.push(calls.filter(args => args[1] === 'upload').length);
+    response.setHeader('Content-Type', 'application/json');
+    response.end(readFileSync(join(f.root, 'latest.json')));
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('fixture did not bind');
+  mkdirSync(join(f.root, 'src-tauri'));
+  writeFileSync(join(f.root, 'src-tauri/tauri.conf.json'), JSON.stringify({ plugins: { updater: { endpoints: [
+    `http://127.0.0.1:${address.port}/primary/{{target}}/{{arch}}/{{current_version}}`,
+    `http://127.0.0.1:${address.port}/latest.json`,
+  ] } } }));
+  const started = Date.now();
+  try {
+    const child = spawn(process.execPath, [script, '--version', f.manifest.version,
+      '--repo', 'o8-run/o8', '--repo', 'hurttlocker/o8-releases'], {
+      cwd: f.root, stdio: 'pipe', env: { ...process.env, HOME: f.root,
+        PATH: `${join(f.root, 'bin')}:${process.env.PATH}`, O8_PROMOTE_FIXTURE: f.root,
+        O8_PROMOTE_LOCK_PATH: join(f.root, 'promote.lock'), O8_RELEASE_BUILD_DATA_DIR: profile },
+    });
+    let errors = '';
+    child.stderr.on('data', chunk => { errors += chunk; });
+    child.stdout.resume();
+    const code = await new Promise<number | null>(resolve => child.on('close', resolve));
+    expect(code, errors).toBe(0);
+    const receipt = JSON.parse(readFileSync(join(profile, 'update-publication/v0.1.900.json'), 'utf8'));
+    expect(receipt).toMatchObject({ version: '0.1.900', previousVersion: '0.1.800', status: 'offered' });
+    expect(Date.parse(receipt.publishedAt)).toBeGreaterThanOrEqual(started);
+    expect(visits).toContain('/primary/darwin/aarch64/0.1.800');
+    expect(visits).toContain('/primary/darwin/x86_64/0.1.800');
+    expect(visits).toContain('/latest.json');
+    expect(uploadCounts).toEqual([2, 2, 2, 2]);
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+  }
 });
 it.each(['0.1.901', '0.1.700'])('refuses mismatched candidate %s before writing stable', version => {
   const f = fixture();
