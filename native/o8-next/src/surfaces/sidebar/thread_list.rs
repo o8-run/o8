@@ -4,7 +4,7 @@
 use crate::{
     client::{Client, Session},
     composer::{Composer, Submit},
-    projects_model::{Action, Ledger, Snapshot, WorkspaceChange},
+    projects_model::{Action, Ledger, WorkspaceChange},
     sidebar,
     transport::{self, Incoming, Subscription},
 };
@@ -121,7 +121,7 @@ fn label(path: &str) -> String {
 
 pub struct ThreadList {
     client: Client,
-    header: Snapshot,
+    header: project_header::HeaderSnapshot,
     workspace: Option<String>,
     header_busy: bool,
     header_menu: Option<bool>,
@@ -181,7 +181,7 @@ impl ThreadList {
         Self {
             subscription: transport::subscribe_global(client.clone()),
             client,
-            header: Snapshot::default(),
+            header: project_header::HeaderSnapshot::default(),
             workspace: None,
             header_busy: false,
             header_menu: None,
@@ -244,7 +244,7 @@ impl ThreadList {
         let client = self.client.clone();
         let task = cx.background_executor().spawn(async move {
             let sessions = client.sidebar_sessions()?;
-            let header = Snapshot::load(&client).ok();
+            let header = project_header::HeaderSnapshot::load(&client).ok();
             let ledger = header.as_ref().map(|header| header.ledger.clone());
             Ok::<_, String>((sessions, ledger, header))
         });
