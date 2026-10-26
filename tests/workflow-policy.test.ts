@@ -210,6 +210,8 @@ describe('workflow policy — every workflow is classified from the filesystem',
   });
 
   it('limits macOS runners to manual work and the bounded native regression checks', () => {
+    const prebuild = workflowFiles.find(file => file.name === 'macos-prebuild-profile.yml');
+    expect(prebuild, 'prebuild lifetime fixtures need a bounded native macOS check').toBeDefined();
     const violations: string[] = [];
     for (const file of workflowFiles) {
       const triggers = triggerNames(file.workflow);
@@ -250,8 +252,26 @@ describe('workflow policy — every workflow is classified from the filesystem',
         expect(job.strategy).toBeUndefined();
         expect(job.steps).toHaveLength(2);
       }
+      const prebuildProfile = file.name === 'macos-prebuild-profile.yml';
+      if (prebuildProfile) {
+        expect([...triggers].sort()).toEqual(['pull_request', 'workflow_dispatch']);
+        expect((file.workflow.on as RecordValue).pull_request).toEqual({ branches: ['main'], paths: [
+          'tests/tauri-prebuild-profile.test.ts',
+          'scripts/lib/generated-output-launch.mjs',
+          'scripts/lib/prebuild-continuation.mjs',
+          'scripts/lib/release-build-profile.mjs',
+          'src/lib/workspace/generated-output-producer.ts',
+          '.github/workflows/macos-prebuild-profile.yml',
+        ] });
+        expect(jobsIn(file)).toHaveLength(1);
+        const job = jobsIn(file)[0][1];
+        expect(job['runs-on']).toBe('macos-15-intel');
+        expect(job['timeout-minutes']).toBe(15);
+        expect(job.strategy).toBeUndefined();
+        expect(stringsIn(job.steps).some(value => value.includes("env -u CI npx vitest run tests/tauri-prebuild-profile.test.ts -t 'retains linked'"))).toBe(true);
+      }
       for (const [jobName, job] of jobsIn(file)) {
-        if (usesMacOsRunner(job) && !manualOnly && !weeklyResources && !minimumOsDmg) {
+        if (usesMacOsRunner(job) && !manualOnly && !weeklyResources && !minimumOsDmg && !prebuildProfile) {
           violations.push(`${file.name}: jobs.${jobName}`);
         }
       }
