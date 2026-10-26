@@ -108,6 +108,15 @@ it.each(['subscription', 'api'] as const)('keeps nested encoded credentials out 
   });
   expect(JSON.parse(result)).toEqual({ key: mode === 'api', hidden: false, benign });
 });
+it.each(['subscription', 'api'] as const)('retains existing split-credential protection for ordinary %s CLI children', mode => {
+  saveRuntimeBillingMode('gemini', mode);
+  const saved = 'fixture-boundary-key';
+  const config = JSON.stringify({ first: Buffer.from(saved.slice(0, 13)).toString('base64'), second: Buffer.from(saved.slice(13)).toString('base64') });
+  const result = cp.execFileSync(process.execPath, ['-e', 'process.stdout.write(JSON.stringify({key:!!process.env.OPENAI_API_KEY,config:!!process.env.SERVICE_AUTH_CONFIG}))'], {
+    encoding: 'utf8', env: childEnvironment({ runtimeId: 'gemini', env: { SERVICE_AUTH_CONFIG: config } }),
+  });
+  expect(JSON.parse(result)).toEqual({ key: mode === 'api', config: false });
+});
 it('inspects ordered query values independently of query names before child launch', () => {
   const value = 'fixture-boundary-key';
   const hidden = 'https://example.invalid/?first=' + encodeURIComponent(value.slice(0, 11)) + '&second=' + encodeURIComponent(value.slice(11));
@@ -140,7 +149,7 @@ it('rechecks encoded subscription transport values at the actual child boundary'
 });
 it('does not restore an encoded credential name with an empty value at raw spawn', () => {
   const name = Buffer.from('fixture-boundary-key').toString('base64url');
-  const result = cp.execFileSync(process.execPath, ['-e', 'process.stdout.write(String(Object.keys(process.env).some(name=>name!=="NODE_ENV")))'], {
+  const result = cp.execFileSync(process.execPath, ['-e', 'process.stdout.write(String(Object.keys(process.env).some(name=>name!=="NODE_ENV"&&name!=="__CF_USER_TEXT_ENCODING")))'], {
     encoding: 'utf8', env: { NODE_ENV: 'test', [name]: '' },
   });
   expect(result).toBe('false');

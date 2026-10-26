@@ -12,7 +12,7 @@ export function mcpRuntimeId(command: string): string | undefined {
 }
 
 export function mcpLaunchEnvironment(command: string, env: Record<string, string> = {}) {
-  return childEnvironment({ runtimeId: mcpRuntimeId(command), env });
+  return childEnvironment({ runtimeId: mcpRuntimeId(command), env, subscriptionSettings: Object.keys(env) });
 }
 
 export function assertMcpTransport(input: unknown): void {

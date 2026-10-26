@@ -63,6 +63,8 @@ export interface CliResolverSpec {
   /** Args to pass when probing for the version, defaults to ['--version']. */
   versionArgs?: string[];
   versionTimeoutMs?: number;
+  /** Prepared child boundary for isolated discovery and version probes. */
+  probeEnvironment?: NodeJS.ProcessEnv;
   /** Regex to extract a semver-like version from the version output. */
   versionPattern?: RegExp;
   /**
@@ -221,7 +223,7 @@ async function probeVersion(
       windowsHide: true,
       timeout: spec.versionTimeoutMs ?? 5_000,
       maxBuffer: 64 * 1024,
-      env: childEnvironment({ runtimeId: spec.runtimeId, env: { PATH: pathWithNodeRuntime(), FORCE_COLOR: '0', NO_COLOR: '1', ...(spec.runtimeId === 'muse' ? { MUSE_NO_AUTO_UPDATE: '1' } : {}) } }),
+      env: spec.probeEnvironment ?? childEnvironment({ runtimeId: spec.runtimeId, env: { PATH: pathWithNodeRuntime(), FORCE_COLOR: '0', NO_COLOR: '1', ...(spec.runtimeId === 'muse' ? { MUSE_NO_AUTO_UPDATE: '1' } : {}) } }),
     });
     const combined = `${stdout}\n${stderr}`;
     const match = combined.match(pattern);
@@ -293,6 +295,7 @@ async function resolveViaWhich(
       const { stdout } = await execFileAsync(pathLookupProgram(), [name], {
         windowsHide: true,
         timeout: 3_000,
+        env: spec.probeEnvironment,
       });
       const found = pickLookupResult(stdout);
       if (!found) continue;
@@ -336,7 +339,7 @@ async function resolveViaLoginShell(
         const { stdout } = await execFileAsync(sh, ['-l', '-c', `command -v ${name}`], {
           windowsHide: true,
           timeout: 10_000,
-          env: childEnvironment({ runtimeId: spec.runtimeId, env: { FORCE_COLOR: '0', NO_COLOR: '1' } }),
+          env: spec.probeEnvironment ?? childEnvironment({ runtimeId: spec.runtimeId, env: { FORCE_COLOR: '0', NO_COLOR: '1' } }),
         });
         const found = stdout.trim();
         if (!found) continue;

@@ -12,10 +12,10 @@ vi.stubGlobal('fetch', vi.fn(async () => Response.json({ data: {} })));
 const keys = await import('@/app/api/v2/keys/route');
 const { testMcpConnection } = await import('@/lib/mcp/test-connection');
 afterAll(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); rmSync(state.dir, { recursive: true, force: true }); });
-it('does not inherit a saved provider key at the deferred MCP entry point and keeps explicit service auth', async () => {
+it('does not inherit a saved provider key at the deferred MCP entry point and omits declared service secrets under subscription billing', async () => {
   expect((await keys.POST(new NextRequest('http://localhost/api/v2/keys', { method: 'POST', headers: { host: 'localhost' }, body: JSON.stringify({ provider: 'openai', key: 'fixture-deferred-provider' }) }))).status).toBe(200);
   const peer = `const send=m=>process.stdout.write(JSON.stringify(m)+'\\n');require('node:readline').createInterface({input:process.stdin}).on('line',line=>{const m=JSON.parse(line);if(m.id)send({jsonrpc:'2.0',id:m.id,result:m.method==='tools/list'?{tools:[{name:'fixture',description:JSON.stringify({key:process.env.OPENAI_API_KEY,service:process.env.BRAVE_API_KEY})}]}:{}});});`;
   const result = await testMcpConnection({ transport: 'stdio', command: process.execPath, args: ['-e', peer], env: { BRAVE_API_KEY: 'fixture-brave' } });
   expect(result.ok).toBe(true);
-  if (result.ok) expect(JSON.parse(result.tools[0].description!)).toEqual({ service: 'fixture-brave' });
+  if (result.ok) expect(JSON.parse(result.tools[0].description!)).toEqual({});
 });

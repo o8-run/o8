@@ -7,7 +7,7 @@ const MAX_NODES = 1024;
 const MAX_DEPTH = 16;
 
 /** Inspect supported text encodings without changing an allowed value's bytes. */
-export function matchesEncodedProviderCredential(text: string, materials: ProviderCredentialMaterials): boolean {
+export function matchesEncodedProviderCredential(text: string, materials: ProviderCredentialMaterials, combineValues = true): boolean {
   const pending: Array<{ value: string; depth: number }> = [];
   const seen = new Set<string>();
   const derived = new Map<string, Set<string>>();
@@ -109,6 +109,8 @@ export function matchesEncodedProviderCredential(text: string, materials: Provid
         base64(value, depth);
         for (const match of value.matchAll(/[A-Za-z0-9+/_-]{2,}={0,2}/g)) base64(match[0], depth, value);
       }
+      // Rebuilt allowlisted settings need only the secondary normalized scan.
+      if (!combineValues) break;
       const beforeJoins = generation;
       joinVariants();
       if (index === pending.length && generation === beforeJoins) break;

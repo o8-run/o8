@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { stripVTControlCharacters } from 'node:util';
-import { workerParentEnvironment } from '../src/lib/providers/worker-environment';
+import { subscriptionEnvironment } from '../src/lib/providers/subscription-environment';
 import { providerSpawnEnvironment } from '../src/lib/providers/spawn-environment';
 import { withChildEnvironment } from '../src/lib/providers/child-process';
 
@@ -17,17 +17,17 @@ async function main(): Promise<void> {
   if (process.platform !== 'darwin') throw new Error('Mac acceptance required.');
   if (process.env.O8_WORKER_TOKEN || process.env.O8_WORKER_PACKET_ID || process.env.O8_SPECTATOR_TOKEN
     || /(?:^|[/\\])\.cortex-worktrees[/\\]packet-/.test(process.cwd())) throw new Error('Operator context required.');
-  const binary = await resolveCli({ runtimeId: 'claude-code', binaryName: 'claude', envOverride: 'O8_CLAUDE_CODE_BIN' });
   const { spawn } = createRequire(import.meta.url)('node-pty') as typeof import('node-pty');
   const configDir = await mkdtemp(path.join(os.tmpdir(), 'o8-worker-login-'));
   const env = providerSpawnEnvironment({
-    ...workerParentEnvironment(process.env, undefined, false),
+    ...subscriptionEnvironment(process.env, []),
     CLAUDE_CONFIG_DIR: configDir,
     CLAUDE_SECURESTORAGE_CONFIG_DIR: configDir,
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
     FORCE_COLOR: '0', NO_COLOR: '1',
-  }, { runtimeId: 'claude-code', inject: false });
+  }, { runtimeId: 'claude-code', inject: false, subscriptionSettings: ['CLAUDE_CONFIG_DIR', 'CLAUDE_SECURESTORAGE_CONFIG_DIR', 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC'] });
   try {
+    const binary = await resolveCli({ runtimeId: 'claude-code', binaryName: 'claude', envOverride: 'O8_CLAUDE_CODE_BIN', probeEnvironment: env });
     await new Promise<void>((resolve, reject) => {
       const child = withChildEnvironment(env, [binary.path, 'setup-token'], fresh =>
         spawn(binary.path, ['setup-token'], { cwd: configDir, env: fresh, cols: 1000, rows: 40 }), false, configDir);

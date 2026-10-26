@@ -66,8 +66,9 @@ let config=process.env.SERVICE_AUTH_CONFIG||'';
 try{config=decodeURIComponent(config);}catch{}
 try{const parsed=JSON.parse(config);config=parsed.credential||Object.values(parsed).map(value=>Buffer.from(value,'base64').toString('utf8')).join('');}catch{}
 const candidates=[config,Buffer.from(config,'base64').toString('utf8')];
+let safeConfig;try{safeConfig=JSON.parse(process.env.SERVICE_AUTH_CONFIG);}catch{}
 const known=${JSON.stringify(Object.values(keys))};
-fs.writeFileSync('mcp-receipt.json',JSON.stringify({anthropic:!!process.env.ANTHROPIC_API_KEY,openai:!!process.env.OPENAI_API_KEY,alias:!!process.env.NPM_TOKEN,service:process.env.SERVICE_AUTH,configPresent:!!process.env.SERVICE_AUTH_CONFIG,decodedSavedKey:candidates.some(value=>known.some(key=>value.includes(key))),argvSecret:known.some(key=>process.argv.join('').includes(key))}));
+fs.writeFileSync('mcp-receipt.json',JSON.stringify({anthropic:!!process.env.ANTHROPIC_API_KEY,openai:!!process.env.OPENAI_API_KEY,alias:!!process.env.NPM_TOKEN,service:process.env.SERVICE_NAME,configPresent:!!process.env.SERVICE_AUTH_CONFIG,safeConfig,proxyPresent:!!process.env.HTTP_PROXY,automaticEncoding:process.env.__CF_USER_TEXT_ENCODING,exactApiKey:process.env.ANTHROPIC_API_KEY===known[0],unlisted:!!process.env.UNLISTED_CONFIG,decodedSavedKey:candidates.some(value=>known.some(key=>value.includes(key))),argvSecret:known.some(key=>process.argv.join('').includes(key))}));
 console.log(JSON.stringify({jsonrpc:'2.0',id:1,result:{tools:[]}}));
 `, { mode: 0o755 });
 });
@@ -98,7 +99,7 @@ async function receipt(cwd:string) {
   return JSON.parse(readFileSync(join(cwd,'worker-result.json'),'utf8'));
 }
 it('keeps saved credentials out of a subscription worker config and MCP child',async()=>{
-  const {cwd}=await launch('claude-code',join(peerDir,'claude'),{ANTHROPIC_API_KEY:keys.anthropic,NPM_TOKEN:keys.anthropic,SERVICE_AUTH:'fixture-service'});
+  const {cwd}=await launch('claude-code',join(peerDir,'claude'),{ANTHROPIC_API_KEY:keys.anthropic,NPM_TOKEN:keys.anthropic,SERVICE_NAME:'fixture-service'});
   const report=await receipt(cwd);
   expect(report).toMatchObject({argvSecret:false,configSecret:false,outputSecret:false,childOk:true});
   expect(JSON.parse(readFileSync(join(cwd,'mcp-receipt.json'),'utf8'))).toMatchObject({anthropic:false,openai:false,alias:false,service:'fixture-service',argvSecret:false});
@@ -117,18 +118,38 @@ it.each(['unicode-json', 'percent', 'base64', 'split-base64-json'] as const)('dr
       : encoding === 'base64' ? Buffer.from(saved).toString('base64')
         : JSON.stringify({ first: Buffer.from(saved.slice(0, 13)).toString('base64'), second: Buffer.from(saved.slice(13)).toString('base64') });
   const { cwd } = await launch('claude-code', join(peerDir, 'claude'), {
-    SERVICE_AUTH_CONFIG: config, SERVICE_AUTH: 'fixture-service',
+    SERVICE_AUTH_CONFIG: config, SERVICE_NAME: 'fixture-service',
   });
   expect(await receipt(cwd)).toMatchObject({ childOk: true, argvSecret: false, configSecret: false, outputSecret: false });
   expect(JSON.parse(readFileSync(join(cwd, 'mcp-receipt.json'), 'utf8'))).toMatchObject({
     anthropic: false, configPresent: false, decodedSavedKey: false, service: 'fixture-service',
   });
 });
+it.each(['claude', 'codex'] as const)('allowlists subscription %s MCP settings and rebuilds mixed service config', async name => {
+  const saved = name === 'claude' ? keys.anthropic : keys.openai;
+  const { cwd } = await launch('codex', join(peerDir, name), {
+    SERVICE_AUTH_CONFIG: JSON.stringify({ first: Buffer.from(saved.slice(0, 13)).toString('base64'), region: 'x', second: Buffer.from(saved.slice(13)).toString('base64') }),
+    HTTP_PROXY: `http://user:${Buffer.from(saved).toString('hex')}@proxy.invalid:8080`,
+    UNLISTED_CONFIG: Buffer.from(saved).toString('hex'),
+    __CF_USER_TEXT_ENCODING: '0x1F5:0x0:0x0',
+  });
+  expect(await receipt(cwd)).toMatchObject({ childOk: true, configSecret: false, argvSecret: false });
+  expect(JSON.parse(readFileSync(join(cwd, 'mcp-receipt.json'), 'utf8'))).toMatchObject({
+    safeConfig: { region: 'x' }, decodedSavedKey: false, proxyPresent: false,
+    unlisted: false, automaticEncoding: '0x1F5:0x0:0x0',
+  });
+});
+it.each(['claude', 'codex'] as const)('preserves eight ordinary service fields in the subscription %s MCP child', async name => {
+  const config = { region: 'west', mode: 'read', format: 'json', team: 'team', project: 'prod', scope: 'read', host: 'host', user: 'user' };
+  const { cwd } = await launch('codex', join(peerDir, name), { SERVICE_AUTH_CONFIG: JSON.stringify(config) });
+  expect(await receipt(cwd)).toMatchObject({ childOk: true });
+  expect(JSON.parse(readFileSync(join(cwd, 'mcp-receipt.json'), 'utf8'))).toMatchObject({ safeConfig: config, decodedSavedKey: false });
+});
 it('delivers API credentials only at the MCP child boundary, with no config or argv copy',async()=>{
   saveRuntimeBillingMode('claude-code','api');
   const {cwd}=await launch('codex',join(peerDir,'claude'),{ANTHROPIC_API_KEY:keys.anthropic});
   expect(await receipt(cwd)).toMatchObject({argvSecret:false,configSecret:false,childOk:true,outputSecret:false});
-  expect(JSON.parse(readFileSync(join(cwd,'mcp-receipt.json'),'utf8')).anthropic).toBe(true);
+  expect(JSON.parse(readFileSync(join(cwd,'mcp-receipt.json'),'utf8'))).toMatchObject({ anthropic: true, exactApiKey: true });
 });
 it('rereads payer settings after worker launch and before the delayed MCP launch',async()=>{
   saveRuntimeBillingMode('claude-code','api'); writeFileSync(gate,'wait');

@@ -1,3 +1,4 @@
+import { subscriptionEnvironment } from './subscription-environment';
 import { decodedMcpText } from './decoded-mcp-text';
 import { workerParentEnvironment } from './worker-environment';
 import { createHash } from 'node:crypto';
@@ -32,7 +33,7 @@ export function providerCanonicalName(input: Record<string, string | undefined>,
   return Object.entries(PROVIDER_KEY_ALIASES).find(([, aliases]) => aliases.includes(name))?.[0] ?? (providerCredentialName(name) ? name : null);
 }
 
-export type SpawnOptions = { inject?: boolean; clearInherited?: boolean; runtimeId?: string; runtimeLaunch?: boolean; onlyExisting?: boolean; omitEnv?: readonly string[] };
+export type SpawnOptions = { inject?: boolean; clearInherited?: boolean; runtimeId?: string; runtimeLaunch?: boolean; onlyExisting?: boolean; omitEnv?: readonly string[]; subscriptionSettings?: readonly string[] };
 type Context = SpawnOptions & { deniedValues?: readonly string[]; policy?: string; transport?: Record<string, string>; brokerKey?: string };
 const contexts = new WeakMap<object, Context>();
 const observedSecrets = new Set<string>();
@@ -52,8 +53,11 @@ function resolvedEnvironment(input: Record<string, string | undefined>, inject: 
   const canonical = new Set<string>([...PROVIDER_ENV_KEYS, ...Object.keys(input).filter(name => providerCredentialName(name) && !aliases.includes(name))]);
   const credentials = new Set([...canonical, ...aliases]);
   const materials = credentialMaterials(input);
-  const env = Object.fromEntries(Object.entries(input).filter((entry): entry is [string, string] => entry[1] !== undefined && !credentials.has(entry[0]) && entry[0] !== 'O8_MASTER_KEY'
-    && !matchesEncodedProviderCredential(entry[0], materials) && !matchesEncodedProviderCredential(entry[1], materials)));
+  const subscription = options.subscriptionSettings && !inject;
+  const selected = subscription ? subscriptionEnvironment(input, options.subscriptionSettings!) : input;
+  const matches = (text: string) => matchesEncodedProviderCredential(text, materials, !subscription);
+  const env = Object.fromEntries(Object.entries(selected).filter((entry): entry is [string, string] => entry[1] !== undefined && !credentials.has(entry[0]) && entry[0] !== 'O8_MASTER_KEY'
+    && !matches(entry[0]) && !matches(entry[1])));
   if (options.clearInherited) for (const name of credentials) env[name] = '';
   if (inject) {
     for (const name of canonical) {
@@ -100,7 +104,8 @@ export function providerConfigEnvironment(input: Record<string, string>, runtime
 export function childEnvironment(options: SpawnOptions & { env?: Record<string, string | undefined>; inherit?: boolean } = {}): ReturnType<typeof resolvedEnvironment> {
   let parent: Record<string, string | undefined> = {};
   if (options.inherit !== false) {
-    parent = workerParentEnvironment(process.env, options.runtimeId);
+    parent = options.subscriptionSettings && (options.inject === false || !permitsApiCredentials(options.runtimeId))
+      ? subscriptionEnvironment(process.env, []) : workerParentEnvironment(process.env, options.runtimeId);
     // Credentials still enter only through the existing runtime billing/injection policy.
     if (permitsApiCredentials(options.runtimeId)) {
       parent = { ...parent };
@@ -128,7 +133,7 @@ export function refreshChildEnvironment(env?: Record<string, string | undefined>
       && !matchesEncodedProviderCredential(value, providerCredentialName(name) ? denied : materials)) result[name] = value;
   }
   if (context?.brokerKey) { result.O8_MASTER_KEY = context.brokerKey; contexts.get(result)!.brokerKey = context.brokerKey; }
-  for (const [name, value] of Object.entries(env ?? {})) if (value === '' && !matchesEncodedProviderCredential(name, materials)) result[name] = '';
+  for (const [name, value] of Object.entries(env ?? {})) if (value === '' && (!context?.subscriptionSettings || Object.hasOwn(result, name)) && !matchesEncodedProviderCredential(name, materials)) result[name] = '';
   return result;
 }
 
