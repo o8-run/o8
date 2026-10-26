@@ -27,6 +27,7 @@ import { resolveRequestPrincipal } from '@/lib/auth/principal';
 import { mobileE2eeEnabled } from '@/lib/mobile/e2ee-flag';
 import { createEnrollCode } from '@/lib/mobile/device-registry';
 import { getServerIdentityPublicKey } from '@/lib/mobile/e2ee-identity';
+import { lanAccessEnabled } from '@/lib/panel/listen-host';
 
 interface MobilePairingResponse {
   /** Protocol version the phone reads to pick the enroll vs legacy-token path. */
@@ -42,6 +43,12 @@ interface MobilePairingResponse {
   hosts: string[];
   apiPort: number;
   wsPort: number;
+  /**
+   * Whether o8's local servers accept non-loopback connections. They bind
+   * 127.0.0.1 unless the operator launched o8 with O8_LAN_ACCESS=1, so when
+   * this is false no advertised host is reachable from the phone directly.
+   */
+  lanAccess: boolean;
   /** Shared ws-token — kept during transition; a new (enroll-aware) app ignores it. */
   token: string;
   /** Single-use enroll code (E2EE mode only) — the phone POSTs it to /api/mobile/enroll. */
@@ -78,6 +85,7 @@ export async function GET(request: NextRequest) {
         .filter((h): h is string => h !== null),
       apiPort,
       wsPort,
+      lanAccess: lanAccessEnabled(),
       // Operator/loopback QR needs the real ws-token; a device gets an empty
       // string (its own device token authenticates it, and its client ignores
       // this field) so the operator credential never crosses to a device.

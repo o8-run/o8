@@ -202,7 +202,7 @@ function resolveApiBase(): string {
   if (process.env.O8_API_PORT) {
     return `http://127.0.0.1:${process.env.O8_API_PORT}`;
   }
-  return `http://localhost:${DEFAULT_API_PORT}`;
+  return `http://127.0.0.1:${DEFAULT_API_PORT}`;
 }
 
 const API_BASE = resolveApiBase();

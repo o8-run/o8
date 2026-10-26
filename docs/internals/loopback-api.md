@@ -6,11 +6,19 @@ coverage: `tests/middleware-gate.test.ts` (run with `npm test`).
 
 ## Why this exists
 
-The Next.js backend binds `0.0.0.0` so the mobile surface can reach it over
-LAN/Tailscale. That means **every device on the network can open a TCP
-connection** to the API — and the gated families can dispatch agents, approve
+The Next.js backend (47100 block) and the ws-server (47105 block) bind
+`127.0.0.1` by default, so nothing off-host can open a TCP connection to them.
+Phone pairing over LAN/Tailscale needs them reachable, so the operator can opt
+in with `O8_LAN_ACCESS=1` in o8's launch environment, which binds `0.0.0.0`
+(`src/lib/panel/listen-host.ts`, `sidecar_listen_host()` in
+`src-tauri/src/lib.rs`). The managed mobile relay dials out and replays to
+`127.0.0.1`, so it keeps working without the opt-in.
+
+With the opt-in on, **every device on the network can open a TCP
+connection** to the API, and the gated families can dispatch agents, approve
 merges, read transcripts, and spend the operator's LLM keys. The middleware is
-the only thing standing between a LAN device and that surface.
+the only thing standing between a LAN device and that surface, and it is
+enforced the same way whether or not the opt-in is set.
 
 ## The decision ladder
 

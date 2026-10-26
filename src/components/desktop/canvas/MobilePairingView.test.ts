@@ -12,7 +12,7 @@ const { openExternalUrl, toDataURL } = vi.hoisted(() => ({
 vi.mock('@/lib/desktop/open-external', () => ({ openExternalUrl }));
 vi.mock('qrcode', () => ({ toDataURL }));
 
-import { MobilePairingView } from './MobilePairingView';
+import { LAN_ACCESS_OFF_MESSAGE, MobilePairingView } from './MobilePairingView';
 import { IPHONE_APP_INSTALL_URL } from './mobile-app-link';
 
 function pairingPayload() {
@@ -85,5 +85,54 @@ describe('MobilePairingView — where to get the iPhone app', () => {
     // Tauri shell opens it in the default browser (window.open is a no-op here).
     expect(click.defaultPrevented).toBe(true);
     expect(openExternalUrl).toHaveBeenCalledWith(IPHONE_APP_INSTALL_URL);
+  });
+});
+
+describe('MobilePairingView — loopback-only servers', () => {
+  let container: HTMLDivElement;
+  let root: Root;
+
+  beforeEach(() => {
+    (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean })
+      .IS_REACT_ACT_ENVIRONMENT = true;
+    container = document.createElement('div');
+    document.body.append(container);
+    root = createRoot(container);
+    toDataURL.mockClear();
+  });
+
+  afterEach(() => {
+    act(() => root.unmount());
+    container.remove();
+    vi.unstubAllGlobals();
+  });
+
+  it('explains the O8_LAN_ACCESS opt-in instead of showing an unreachable QR', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ ...pairingPayload(), lanAccess: false }),
+    })));
+    await act(async () => {
+      root.render(createElement(MobilePairingView));
+    });
+
+    expect(container.textContent).toContain(LAN_ACCESS_OFF_MESSAGE);
+    expect(LAN_ACCESS_OFF_MESSAGE).toContain('O8_LAN_ACCESS=1');
+    expect(toDataURL).not.toHaveBeenCalled();
+  });
+
+  it('renders the QR when the operator opted in to LAN access', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ ...pairingPayload(), lanAccess: true }),
+    })));
+    await act(async () => {
+      root.render(createElement(MobilePairingView));
+    });
+
+    expect(container.textContent).not.toContain(LAN_ACCESS_OFF_MESSAGE);
+    expect(toDataURL).toHaveBeenCalledTimes(1);
   });
 });

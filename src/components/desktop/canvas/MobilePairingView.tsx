@@ -25,6 +25,12 @@ import { OPEN_SETTINGS_TAB_EVENT, type OpenSettingsTabDetail } from '@/lib/deskt
 import { openExternalUrl } from '@/lib/desktop/open-external';
 import { IPHONE_APP_INSTALL_URL } from './mobile-app-link';
 
+// o8's local servers bind 127.0.0.1 by default, so a phone can't reach them
+// directly until the operator opts in (src/lib/panel/listen-host.ts).
+export const LAN_ACCESS_OFF_MESSAGE =
+  'Phone pairing needs local network access, which is off by default: o8 only listens on 127.0.0.1. '
+  + 'Quit o8, relaunch it with O8_LAN_ACCESS=1 in its environment, then retry.';
+
 const APP_FONT = 'var(--font-sans-system)';
 const MONO_FONT = '"iA Writer Mono", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace';
 
@@ -35,6 +41,8 @@ interface PairingPayload {
   hosts?: string[];
   apiPort: number;
   wsPort: number;
+  /** false when o8's servers are loopback-only (O8_LAN_ACCESS not set). */
+  lanAccess?: boolean;
   token: string;
   /** Single-use enroll code (E2EE mode only) — POSTed to /api/mobile/enroll. */
   enroll?: string;
@@ -61,6 +69,15 @@ export function MobilePairingView() {
         const data = (await res.json().catch(() => null)) as PairingPayload | null;
         if (!res.ok || !data) {
           throw new Error(data?.error || `Pairing endpoint returned ${res.status}`);
+        }
+        if (data.lanAccess === false) {
+          if (!cancelled) {
+            setState({
+              status: 'error',
+              message: LAN_ACCESS_OFF_MESSAGE,
+            });
+          }
+          return;
         }
         if (!data.host) {
           if (!cancelled) {

@@ -74,7 +74,7 @@ function resolveApiBase(): string {
       }
     }
   } catch { /* fall through */ }
-  return `http://localhost:${DEFAULT_API_PORT}`;
+  return `http://127.0.0.1:${DEFAULT_API_PORT}`;
 }
 
 // ── Types ──

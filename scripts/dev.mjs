@@ -180,9 +180,17 @@ async function all() {
   }
 }
 
+function devListenHost(source) {
+  return ['1', 'true', 'yes', 'on'].includes(String(source.O8_LAN_ACCESS ?? '').trim().toLowerCase())
+    ? '0.0.0.0'
+    : '127.0.0.1';
+}
+
 const mode = process.argv[2] || 'all';
 if (mode === 'cleanup') await cleanup();
-else if (mode === 'next') run('dev:next', 'next', ['dev', '-p', env.PORT]);
+// Loopback unless O8_LAN_ACCESS opts in (mirrors src/lib/panel/listen-host.ts);
+// `next dev` would otherwise listen on every interface.
+else if (mode === 'next') run('dev:next', 'next', ['dev', '-p', env.PORT, '-H', devListenHost(env)]);
 else if (mode === 'ws') {
   env.NODE_OPTIONS = withServerOnlyStubNodeOptions(env.NODE_OPTIONS);
   run('dev:ws', 'tsx', ['src/ws-server.ts']);

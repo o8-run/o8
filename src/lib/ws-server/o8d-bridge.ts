@@ -19,7 +19,13 @@ export class O8dBridge {
   private readonly fallback: Server;
   private transport: 'typescript' | 'o8d' = 'typescript';
 
-  constructor(private readonly server: Server, private readonly port: number, private readonly epoch: string) {
+  constructor(
+    private readonly server: Server,
+    private readonly port: number,
+    private readonly epoch: string,
+    /** Public bind host — loopback unless the operator opted in via O8_LAN_ACCESS. */
+    private readonly host: string = '127.0.0.1',
+  ) {
     this.fallback = createServer((req, res) => server.emit('request', req, res));
     this.fallback.on('upgrade', (req, socket, head) => server.emit('upgrade', req, socket, head));
     this.fallback.on('error', () => this.stop());
@@ -68,7 +74,7 @@ export class O8dBridge {
     if (this.fallback.listening) this.fallback.close();
     const binary = process.env.O8D_BINARY ?? join(process.cwd(), 'crates/o8d/target/release',
       process.platform === 'win32' ? 'o8d.exe' : 'o8d');
-    const child = spawn(binary, ['--experimental-ws', '--listen', `0.0.0.0:${this.port}`,
+    const child = spawn(binary, ['--experimental-ws', '--listen', `${this.host}:${this.port}`,
       '--app-upstream', this.upstream], {
       env: childEnvironment({ inherit: false, env: {
         O8D_BRIDGE_KEY: this.key, O8D_EPOCH: this.epoch,
@@ -87,7 +93,7 @@ export class O8dBridge {
         if (this.child !== child) return;
         this.child = null;
         this.transport = 'typescript';
-        if (!this.stopped && !this.fallback.listening) this.fallback.listen(this.port, '0.0.0.0');
+        if (!this.stopped && !this.fallback.listening) this.fallback.listen(this.port, this.host);
         if (!this.stopped) this.retry = setTimeout(() => { void this.launch(); }, 2_000);
         if (!ready) resolve();
       };
@@ -98,7 +104,7 @@ export class O8dBridge {
           const message = JSON.parse(line);
           if (ready && message.draining === true && this.child === child) {
             this.transport = 'typescript';
-            if (!this.stopped && !this.fallback.listening) this.fallback.listen(this.port, '0.0.0.0');
+            if (!this.stopped && !this.fallback.listening) this.fallback.listen(this.port, this.host);
             return;
           }
           if (ready || typeof message.listening !== 'string') throw new Error('invalid readiness');
