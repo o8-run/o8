@@ -1,6 +1,7 @@
 import { runPrStack } from './commands/pr-stack.js';
 import { runBrainSources } from './commands/brain-sources.js';
 import { runThreads } from './commands/threads.js';
+import { runWorkspaceCleanup } from './commands/workspace-cleanup.js';
 import { runNext } from './commands/next.js';
 import { runSetup } from './commands/setup.js';
 import { commandUsage } from './command-help.js';
@@ -318,6 +319,8 @@ commands:
   pr-stack --repo owner/repo --number N  read native PR layers, revisions and provenance
   threads list         project work grouped by waiting/review/working/resolved (--repo path, --state, --offset, --limit)
   threads show <id>    exact recorded thread evidence (--repo path)
+  workspace-cleanup preview --repo <path>  review completed owned work and retained recovery
+  workspace-cleanup execute --plan <id> --approve <fingerprint> --entry <id>  execute that exact selection; status --plan <id> reads its receipt
   problem list         recurring problems detected across independent work (--all includes suppressed)
   problem show <id>    full evidence, remedy, and closure state for one problem dossier
   plugin list          list reviewed executable actions [--plugin ID]
@@ -515,6 +518,8 @@ async function dispatch(args: ParsedArgs): Promise<number> {
       return runPrStack(args.mode, singleLevelArgs(secondary, args.rest, args.secondaryBeforeRest));
     case 'threads':
       return runThreads(args.mode, secondary, args.rest);
+    case 'workspace-cleanup':
+      return runWorkspaceCleanup(args.mode, secondary, args.rest);
     case 'problem':
       return runProblem(args.mode, secondary, args.rest);
     case 'plugin':
