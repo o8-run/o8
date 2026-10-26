@@ -1,33 +1,39 @@
-# Stable and preview releases
+# Release channels
 
-`main` is the integration branch. Pull requests must be up to date, resolve review conversations, and pass the seven required CI checks from the GitHub Actions app: Type Check, Lint, Hermetic Unit Tests, Security Audit, Governance Smoke, and both Rust Compile Gates. The rules apply to administrators. A second human approval is not required; merge approval remains an operator decision. Force pushes and branch deletion remain blocked.
+`main` is the integration branch. Use a short-lived branch and reviewed pull
+request for each change. Required checks, resolved conversations and an up-to-date
+branch remain mandatory. Publication requires a separate operator decision.
 
-## Development and nightly verification
+## Installed channels
 
-Develop in a short-lived feature or fix branch, preferably in its own worktree. Open a pull request against `main`, retain the required checks, and merge only after approval. There is no permanent `dev` or `nightly` branch to keep synchronized. A development branch does not isolate application data. Source dev servers must use a disposable `CORTEX_IDE_DATA_DIR` and `O8_DATA_DIR` when testing state-changing behavior beside the installed app, with separate API and WebSocket ports.
+Settings > General > Updates offers Stable (default) and Beta. Both use the same
+application identity and existing data. The channel chooses the update manifest;
+it does not create a second installation or isolate daily application data.
+Returning to Stable waits for a newer stable version and never downgrades.
 
-The `Nightly Verification` workflow checks the default branch once a day at 06:23 UTC. It skips a commit that already passed this workflow; manual dispatch reruns the checks. A single job has a 20-minute ceiling, read-only repository permissions, and runs protocol, TypeScript, classification, and hermetic unit checks. The existing weekly resource-owning integration and security lane remains separate.
+See [Beta and stable update feeds](beta-updates.md) for publication and promotion.
+The existing stable endpoint remains unchanged. Its `latest.json` and the rolling
+`beta.json` live beside each other. Normal `X.Y.Z` releases ship to beta first;
+stable advances only through the explicit promote command using the same signed
+artifacts. No promotion rebuilds, retags or signs an artifact.
 
-This is nightly source verification, not a downloadable nightly app or installed Mac acceptance. It creates no installer, tag, release, updater manifest, or announcement. The schedule becomes active only when its reviewed workflow reaches the default branch. Installable nightlies require the preview identity and data-isolation work described below, followed by an explicit publication-policy decision.
+## Explicit previews
 
-## Stable
+The separate preview path requires a unique `X.Y.Z-preview.N` version and
+`O8_RELEASE_CHANNEL=preview`. Its dry run prints the publication policy.
+A separately approved ship creates immutable prereleases with `preview.json`
+and signed installers. It advances neither installed channel and skips stable
+feeds, report receipts and announcements. Preview candidates cannot be clobbered.
 
-The installed app uses the public mirror's `releases/latest/download/latest.json`. Keep that endpoint unchanged for normal users. `npm run ship` remains the explicitly approved stable publication path and requires a plain `X.Y.Z` version. Version changes go through a PR before tagging the merged commit. Release-note archives also go through a PR; publication never pushes archive commits to main.
+The manual hosted fallback remains preview-only and stages a draft prerelease.
+Neither scheduled verification nor a branch push publishes an installer.
 
-## Preview publishing
+## Source verification
 
-Preview publishing requires a separate operator decision. It does not run on a schedule or on every push, and it does not create another permanent development branch.
+Nightly source verification is separate from installed acceptance. It does not
+create installers, tags, releases, manifests or announcements. Development
+servers that change state must use disposable `O8_DATA_DIR` and
+`CORTEX_IDE_DATA_DIR` locations and separate API and socket ports.
 
-1. Prepare a unique version such as `0.1.741-preview.1`, keeping all manifests synchronized. Review and merge the version PR before tagging the exact commit.
-2. Inspect the publication policy with `O8_RELEASE_CHANNEL=preview node scripts/release.mjs --dry-run`. This does not build or publish.
-3. After approval, use `O8_RELEASE_CHANNEL=preview npm run ship`. Signing, notarization, and the normal preflight still apply.
-4. Verify that both repository releases are prereleases, neither is latest stable, and the tag contains `preview.json` plus signed installers. Preview publication does not upload `latest.json` or `fixed.json`, publish the stable changelog, archive release notes, reconcile report receipts, or post stable announcements.
-5. Verify that the public latest stable release and its updater manifest remain unchanged. Preserve the candidate's test and install receipts.
-
-Preview versions cannot use the clobber override. A repeated or failed candidate needs a fresh version; never replace an existing candidate's bytes. The manual Actions fallback only accepts preview-version tags and stages a draft prerelease. It does not publish a stable release or launch on a nightly timer.
-
-## Boundaries still to implement
-
-This is a publishing boundary, not an installed preview channel. Preview artifacts are reached explicitly by tag. The app does not yet offer a preview selector or a rolling preview feed, and stable and preview installs still share the application identity and user data. Do not install them side by side or use a preview to migrate the daily database as an acceptance shortcut.
-
-Stable promotion requires a separate operator approval and verified installed acceptance. This path does not rename preview versions, retag artifacts, or promote automatically. A stable-number build needs its own exact signed-artifact receipt. App-side channel selection and data isolation must be reviewed separately before promising seamless preview enrollment.
+Version changes and release-note archives retain their existing review gates.
+Publication never commits archives to protected main or changes its permissions.

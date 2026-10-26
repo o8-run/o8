@@ -4,7 +4,10 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
 };
-use std::{path::Path, time::Duration};
+use std::{
+    path::{Path, PathBuf},
+    time::Duration,
+};
 use tauri::{AppHandle, Manager, Runtime, Webview};
 use tauri_plugin_store::StoreExt;
 use tauri_plugin_updater::{Update, UpdaterExt};
@@ -14,6 +17,69 @@ const SERVICE_TIMEOUT: Duration = Duration::from_secs(2);
 const FALLBACK_TIMEOUT: Duration = Duration::from_secs(15);
 
 struct UpdateIdentity(String);
+struct UpdateSettingsPath(PathBuf);
+
+fn selected_channel<R: Runtime>(app: &AppHandle<R>) -> String {
+    if let Some(path) = app.try_state::<UpdateSettingsPath>() {
+        if let Ok(store) = app.store(&path.0) {
+            if let Some(channel) = store
+                .get("channel")
+                .and_then(|value| value.as_str().map(str::to_owned))
+            {
+                return if channel == "beta" { "beta" } else { "stable" }.into();
+            }
+        }
+    }
+    if app
+        .package_info()
+        .version
+        .pre
+        .as_str()
+        .starts_with("preview.")
+    {
+        "preview".into()
+    } else {
+        "stable".into()
+    }
+}
+
+#[tauri::command]
+pub fn get_update_channel<R: Runtime>(app: AppHandle<R>) -> String {
+    if selected_channel(&app) == "beta" {
+        "beta"
+    } else {
+        "stable"
+    }
+    .into()
+}
+
+#[tauri::command]
+pub fn set_update_channel<R: Runtime>(
+    app: AppHandle<R>,
+    channel: String,
+) -> Result<String, String> {
+    if channel != "stable" && channel != "beta" {
+        return Err("Update channel must be stable or beta.".into());
+    }
+    let path = app
+        .try_state::<UpdateSettingsPath>()
+        .ok_or("Update preferences unavailable.")?;
+    let store = app
+        .store(&path.0)
+        .map_err(|_| "Update preferences unavailable.")?;
+    let previous = store.get("channel");
+    store.set("channel", serde_json::json!(channel));
+    if store.save().is_err() {
+        match previous {
+            Some(value) => store.set("channel", value),
+            None => {
+                store.delete("channel");
+            }
+        }
+        return Err("Update channel could not be saved.".into());
+    }
+    Ok(channel)
+}
 
 pub(crate) struct RestartRefused(pub String);
 
@@ -23,6 +89,7 @@ pub fn initialize<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
 }
 
 pub fn initialize_at<R: Runtime>(app: &AppHandle<R>, path: &Path) -> Result<(), String> {
+    app.manage(UpdateSettingsPath(path.to_path_buf()));
     let store = app
         .store_builder(path)
         .disable_auto_save()
@@ -71,7 +138,28 @@ fn macos_version() -> Option<String> {
 }
 
 pub async fn check<R: Runtime>(app: &AppHandle<R>) -> Result<Option<Update>, String> {
-    check_with(app, Arc::new(AtomicBool::new(false))).await
+    let channel = selected_channel(app);
+    let mut result = check_with(app, Arc::new(AtomicBool::new(false))).await?;
+    if let Some(update) = result.as_mut() {
+        update.raw_json["_o8Channel"] = serde_json::json!(channel);
+    }
+    Ok(result)
+}
+
+pub(crate) fn ensure_update_channel<R: Runtime>(
+    app: &AppHandle<R>,
+    update: &Update,
+) -> Result<(), String> {
+    if let Some(channel) = update
+        .raw_json
+        .get("_o8Channel")
+        .and_then(|value| value.as_str())
+    {
+        if channel != selected_channel(app) {
+            return Err("Update channel changed; check for updates again.".into());
+        }
+    }
+    Ok(())
 }
 
 fn guarded_builder<R: Runtime>(
@@ -110,18 +198,23 @@ async fn check_with<R: Runtime>(
         .endpoints
         .split_first()
         .ok_or("updater endpoints missing")?;
+    let channel = selected_channel(app);
+    let fallback = fallback
+        .iter()
+        .map(|endpoint| {
+            let mut endpoint = endpoint.clone();
+            if channel != "stable" {
+                let path = endpoint
+                    .path()
+                    .strip_suffix("latest.json")
+                    .ok_or("Channel fallback must have a stable manifest sibling.")?;
+                let path = format!("{path}{channel}.json");
+                endpoint.set_path(&path);
+            }
+            Ok(endpoint)
+        })
+        .collect::<Result<Vec<_>, String>>()?;
     if let Some(identity) = app.try_state::<UpdateIdentity>() {
-        let channel = if app
-            .package_info()
-            .version
-            .pre
-            .as_str()
-            .starts_with("preview.")
-        {
-            "preview"
-        } else {
-            "stable"
-        };
         let primary_host = service.host_str().unwrap_or_default().to_owned();
         let mut builder = app
             .updater_builder()
@@ -131,7 +224,7 @@ async fn check_with<R: Runtime>(
             .timeout(SERVICE_TIMEOUT)
             .header("X-O8-Install-Id", identity.0.as_str())
             .map_err(|e| e.to_string())?
-            .header("X-O8-Channel", channel)
+            .header("X-O8-Channel", channel.as_str())
             .map_err(|e| e.to_string())?
             // A service redirect means fail over locally, without forwarding the ID.
             // Artifact download redirects still use the updater's normal transport.
@@ -159,28 +252,51 @@ async fn check_with<R: Runtime>(
             .map_err(|e| e.to_string())?;
         // Also bound response-body parsing, including a stalled successful response.
         if let Ok(Ok(result)) = tokio::time::timeout(SERVICE_TIMEOUT, updater.check()).await {
-            return Ok(result.map(|mut update| {
-                update.headers.clear();
-                update
-            }));
+            if channel != selected_channel(app) {
+                return Err("Update channel changed during check; retry.".into());
+            }
+            // An older service may ignore enrollment, including returning no update.
+            // Require beta identity before trusting it; otherwise read the beta mirror.
+            let channel_proven = channel != "beta"
+                || result
+                    .as_ref()
+                    .is_some_and(|update| update.raw_json["channel"] == "beta");
+            if channel_proven {
+                return Ok(result.map(|mut update| {
+                    update.headers.clear();
+                    update
+                }));
+            }
         }
     }
-    guarded_builder(app, app.updater_builder(), force)
+    let result = guarded_builder(app, app.updater_builder(), force)
         .clear_headers()
-        .endpoints(fallback.to_vec())
+        .endpoints(fallback)
         .map_err(|e| e.to_string())?
         .timeout(FALLBACK_TIMEOUT)
         .build()
         .map_err(|e| e.to_string())?
         .check()
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    if channel != selected_channel(app) {
+        return Err("Update channel changed during check; retry.".into());
+    }
+    if channel == "beta"
+        && result
+            .as_ref()
+            .is_some_and(|update| update.raw_json["channel"] != "beta")
+    {
+        return Err("Beta manifest identity is missing.".into());
+    }
+    Ok(result)
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateMetadata {
     rid: tauri::ResourceId,
+    channel: String,
     current_version: String,
     version: String,
     date: Option<String>,
@@ -191,6 +307,7 @@ pub struct UpdateMetadata {
 
 pub(crate) struct CheckedUpdate {
     pub update: Update,
+    channel: String,
     force: Arc<AtomicBool>,
     installing: Mutex<()>,
 }
@@ -207,10 +324,12 @@ pub async fn check_app_update<R: Runtime>(
     webview: Webview<R>,
 ) -> Result<Option<UpdateMetadata>, String> {
     let force = Arc::new(AtomicBool::new(false));
+    let channel = selected_channel(webview.app_handle());
     let Some(update) = check_with(webview.app_handle(), force.clone()).await? else {
         return Ok(None);
     };
     let metadata = UpdateMetadata {
+        channel: channel.clone(),
         current_version: update.current_version.clone(),
         version: update.version.clone(),
         date: update
@@ -223,6 +342,7 @@ pub async fn check_app_update<R: Runtime>(
         install_exits: cfg!(target_os = "windows"),
         rid: webview.resources_table().add(CheckedUpdate {
             update,
+            channel,
             force,
             installing: Mutex::new(()),
         }),
@@ -254,6 +374,9 @@ pub async fn download_app_update<R: Runtime>(
         .resources_table()
         .take::<CheckedUpdate>(rid)
         .map_err(|error| error.to_string())?;
+    if checked.channel != selected_channel(webview.app_handle()) {
+        return Err("Update channel changed; check for updates again.".into());
+    }
     let mut started = false;
     let bytes = crate::launch_updater::scheduler::auto_apply::download(
         &checked.update,
@@ -296,6 +419,9 @@ pub async fn install_app_update<R: Runtime>(
         .resources_table()
         .take::<DownloadedUpdate>(rid)
         .map_err(|error| error.to_string())?;
+    if downloaded.checked.channel != selected_channel(webview.app_handle()) {
+        return Err("Update channel changed; check for updates again.".into());
+    }
     let _installing = downloaded
         .checked
         .installing

@@ -8127,6 +8127,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             update_ping::check_app_update,
+            update_ping::get_update_channel,
+            update_ping::set_update_channel,
             update_ping::download_app_update,
             update_ping::discard_app_update_download,
             update_ping::install_app_update,

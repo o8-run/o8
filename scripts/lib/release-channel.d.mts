@@ -1,8 +1,8 @@
 export interface ReleaseChannel {
-  channel: 'stable' | 'preview';
+  channel: 'beta' | 'preview';
   preview: boolean;
   tag: string;
-  manifestName: 'latest.json' | 'preview.json';
+  manifestName: 'beta.json' | 'preview.json';
   githubFlags: string[];
   publishStableEffects: boolean;
 }

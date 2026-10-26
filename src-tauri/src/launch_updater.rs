@@ -21,6 +21,7 @@ static RUNNING_BUNDLE_INTEGRITY: OnceLock<BundleIntegrityStatus> = OnceLock::new
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct LaunchUpdatePayload {
+    channel: String,
     version: String,
     current_version: String,
     notes: Option<String>,
@@ -32,6 +33,7 @@ struct LaunchUpdatePayload {
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct LaunchUpdateCheckPayload {
+    channel: String,
     outcome: &'static str,
     checked_at: String,
     error: Option<String>,
@@ -214,6 +216,7 @@ pub(super) async fn run_check<R: Runtime>(app: &AppHandle<R>) -> serde_json::Val
     match crate::update_ping::check(app).await {
         Ok(Some(update)) => {
             let payload = LaunchUpdatePayload {
+                channel: crate::update_ping::get_update_channel(app.clone()),
                 version: update.version.clone(),
                 current_version: update.current_version.clone(),
                 notes: update.body.clone(),
@@ -222,7 +225,7 @@ pub(super) async fn run_check<R: Runtime>(app: &AppHandle<R>) -> serde_json::Val
                 checked_at: checked_at(),
             };
             let report = serde_json::json!({ "updatePending": true, "version": payload.version,
-                    "checkOutcome": "available", "checkedAt": payload.checked_at, "info": payload });
+                    "channel": payload.channel, "checkOutcome": "available", "checkedAt": payload.checked_at, "info": payload });
             if let Err(err) = app.emit(UPDATE_AVAILABLE_EVENT, payload) {
                 log::warn!("[launch-updater] emit update-available failed: {}", err);
             }
@@ -242,11 +245,12 @@ fn emit_clear<R: Runtime>(
     error: Option<String>,
 ) -> serde_json::Value {
     let payload = LaunchUpdateCheckPayload {
+        channel: crate::update_ping::get_update_channel(app.clone()),
         outcome,
         checked_at: checked_at(),
         error,
     };
-    let report = serde_json::json!({ "updatePending": false, "checkOutcome": outcome,
+    let report = serde_json::json!({ "updatePending": false, "channel": payload.channel, "checkOutcome": outcome,
         "checkedAt": payload.checked_at, "checkError": payload.error });
     if let Err(err) = app.emit(UPDATE_CLEAR_EVENT, payload) {
         log::warn!("[launch-updater] emit update-clear failed: {}", err);

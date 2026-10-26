@@ -143,6 +143,7 @@ export function execFileSync(command, args = [], options = {}) {
     return value + '\\n';
   }
   if (command === 'gh' && args[0] === 'release' && args[1] === 'view') {
+    if (args.includes('--json') && args.includes('tagName')) return 'v0.1.800';
     if (args.includes('--json')) return '2026-09-07T00:00:00Z';
     if (process.env.O8_CHANNEL_TEST_EXISTING === '1') return '{}';
     throw new Error('release not found');
@@ -153,7 +154,10 @@ export function execFileSync(command, args = [], options = {}) {
   if (command === 'git' && args[0] === 'log') return args.includes('--format=%H%x09%s') ? 'a'.repeat(40) + '\\tfix: improve workspace feedback' : 'fix: improve workspace feedback';
   return '';
 }
-export const spawn = () => { throw new Error('unexpected spawn'); };
+export const spawn = (...args) => {
+  if (process.env.O8_CHANNEL_TEST_SHIP === '1') return realChildProcess.spawn(...args);
+  throw new Error('unexpected spawn');
+};
 export function spawnSync(command, args) {
   if (command !== '/usr/bin/codesign') throw new Error('unexpected spawnSync');
   if (args.includes('--verbose=4')) return { status: 0, stdout: '', stderr: 'Identifier=fixture\\nTeamIdentifier=not set\\nCodeDirectory flags=0x10000(runtime)\\nRuntime Version=15.0.0' };
@@ -257,8 +261,43 @@ afterEach(() => {
 });
 
 describe('release channels through the publication entry point', () => {
+  it('runs the ship command to beta through its publication subprocess', () => {
+    const f = fixture('0.1.900');
+    const noop = { command: process.execPath, args: ['-e', ''] };
+    const buildProfile = realpathSync(mkdtempSync(join(tmpdir(), 'o8-beta-build-profile-')));
+    roots.push(buildProfile);
+    const plan = join(f.root, 'ship-plan.json');
+    writeFileSync(plan, JSON.stringify({ preflight: noop, build: noop, notarize: noop,
+      publish: { command: process.execPath, args: ['--import', join(f.root, 'register.mjs'), releaseScript] } }));
+    const result = run(f, '', ['--ship'], {
+      O8_RELEASE_TEST_MODE: '1', O8_RELEASE_TEST_PLAN: plan, O8_CHANNEL_TEST_SHIP: '1',
+      O8_RELEASE_BUILD_DATA_DIR: buildProfile,
+      O8_RELEASE_LOCK_PATH: join(f.root, 'ship.lock'), O8_RELEASE_BROADCAST_CLI: join(f.root, 'absent-broadcast'),
+    });
+    expect(result.status, result.stderr).toBe(0);
+    expect(existsSync(join(f.bundle, 'macos/beta.json'))).toBe(true);
+    expect(existsSync(join(f.bundle, 'macos/latest.json'))).toBe(false);
+    expect(effects(f).filter(c => c.name === 'gh' && c.args[1] === 'create')).toHaveLength(2);
+  });
+
+  it('ships a normal version to beta only and advances the rolling beta feed', () => {
+    const f = fixture('0.1.900');
+    const result = run(f, 'beta');
+    expect(result.status, result.stderr).toBe(0);
+    const manifest = JSON.parse(readFileSync(join(f.bundle, 'macos/beta.json'), 'utf8'));
+    expect(manifest.version).toBe(f.version);
+    const calls = effects(f);
+    for (const call of calls.filter(c => c.name === 'gh' && c.args[1] === 'create')) {
+      expect(call.args).toContain('--prerelease');
+      expect(call.args).toContain('--latest=false');
+    }
+    expect(calls.filter(c => c.name === 'gh' && c.args[1] === 'upload' && c.args.includes('v0.1.800'))).toHaveLength(2);
+    expect(calls.some(c => c.args.some(arg => arg.endsWith('/latest.json') || arg.endsWith('/fixed.json')))).toBe(false);
+    expect(calls.some(c => ['syncReports', 'publishFixed', 'announceRelease', 'bash'].includes(c.name))).toBe(false);
+  });
+
   it.each([
-    { channel: 'stable', version: '0.1.741', manifest: 'latest.json' },
+    { channel: 'beta', version: '0.1.741', manifest: 'beta.json' },
     { channel: 'preview', version: '0.1.741-preview.1', manifest: 'preview.json' },
   ])('publishes Intel-only delivery through the $channel fixture without requiring an arm64 package', ({ channel, version, manifest }) => {
     const f = fixture(version);
@@ -283,9 +322,9 @@ describe('release channels through the publication entry point', () => {
     const env = { ...addCpuFixtures(f), O8_MACOS_CPU_PACKAGES: 'x86_64' };
     const arm = resolveMacosCpuArtifacts(f.root, f.version, 'arm64');
     writeFileSync(arm.updaterSignature, 'unaccepted arm64 package');
-    const result = run(f, 'stable', [], env);
+    const result = run(f, 'beta', [], env);
     expect(result.status, result.stderr).toBe(0);
-    const plan = JSON.parse(readFileSync(join(f.bundle, 'macos/latest.json'), 'utf8'));
+    const plan = JSON.parse(readFileSync(join(f.bundle, 'macos/beta.json'), 'utf8'));
     expect(plan.platforms['darwin-aarch64'].url).toMatch(/\/o8\.app\.tar\.gz$/);
     expect(effects(f).some(c => c.args.some(arg => arg.includes('/cpu/arm64/')))).toBe(false);
   });
@@ -299,14 +338,14 @@ describe('release channels through the publication entry point', () => {
     if (failure === 'changed-runtime') writeFileSync(join(cpu.app, 'Contents/runtime.txt'), 'changed runtime');
     if (failure === 'bad-signature') writeFileSync(cpu.updaterSignature, 'invalid signature');
     if (failure === 'not-notarized') env.O8_CHANNEL_TEST_FAIL_CPU_NOTARY = '1';
-    const result = run(f, 'stable', [], env);
+    const result = run(f, 'beta', [], env);
     expect(result.status, result.stderr).toBe(1);
     expect(result.stderr).toContain('CPU package verification failed');
     expectNoPublicationMutation(f);
   });
 
   it.each([
-    { channel: 'stable', version: '0.1.741', manifest: 'latest.json' },
+    { channel: 'beta', version: '0.1.741', manifest: 'beta.json' },
     { channel: 'preview', version: '0.1.741-preview.1', manifest: 'preview.json' },
   ])('publishes verified CPU entries through the $channel fixture path and keeps universal uploads', ({ channel, version, manifest }) => {
     const f = fixture(version);
@@ -323,7 +362,7 @@ describe('release channels through the publication entry point', () => {
   });
 
   it.each([
-    { channel: 'stable', version: '0.1.741', manifest: 'latest.json' },
+    { channel: 'beta', version: '0.1.741', manifest: 'beta.json' },
     { channel: 'preview', version: '0.1.741-preview.1', manifest: 'preview.json' },
   ])('generates the $channel feed from all three macOS distributions and retains every download', ({ channel, version, manifest }) => {
     const f = fixture(version);
@@ -346,7 +385,7 @@ describe('release channels through the publication entry point', () => {
   });
 
   it.each([
-    { channel: 'stable', version: '0.1.741', manifest: 'latest.json' },
+    { channel: 'beta', version: '0.1.741', manifest: 'beta.json' },
     { channel: 'preview', version: '0.1.741-preview.1', manifest: 'preview.json' },
   ])('generates an Apple Silicon-only $channel feed without requiring an Intel package', ({ channel, version, manifest }) => {
     const f = fixture(version);
@@ -376,7 +415,7 @@ describe('release channels through the publication entry point', () => {
     if (failure === 'changed-runtime') writeFileSync(join(cpu.app, 'Contents/runtime.txt'), 'changed runtime');
     if (failure === 'bad-signature') writeFileSync(cpu.updaterSignature, 'invalid signature');
     if (failure === 'not-notarized') env.O8_CHANNEL_TEST_FAIL_CPU_NOTARY = '1';
-    const result = run(f, 'stable', [], env);
+    const result = run(f, 'beta', [], env);
     expect(result.status, result.stderr).toBe(1);
     expect(result.stderr).toContain('CPU package verification failed');
     expectNoPublicationMutation(f);
@@ -409,29 +448,25 @@ describe('release channels through the publication entry point', () => {
     expect(result.stdout).not.toContain('installed o8.app will pick up');
   });
 
-  it('retains stable publication, receipts and announcements without pushing source archives', () => {
+  it('defaults normal publication to beta and leaves stable effects untouched', () => {
     const f = fixture('0.1.741');
-    mkdirSync(join(f.root, 'release-notes'));
-    writeFileSync(join(f.root, 'release-notes', 'next.md'), '- Improve workspace feedback.\n');
-    const result = run(f, 'stable');
+    const result = run(f, '');
     expect(result.status, result.stderr).toBe(0);
     const calls = effects(f);
     expect(calls.filter(c => c.name === 'gh' && c.args[1] === 'create')).toHaveLength(2);
-    expect(calls.some(c => c.args.includes('--prerelease'))).toBe(false);
+    expect(calls.some(c => c.args.includes('--prerelease'))).toBe(true);
     for (const name of ['syncReports', 'resolveNewFixes', 'publishFixed', 'announceRelease', 'bash']) {
-      expect(calls.some(c => c.name === name), name).toBe(true);
+      expect(calls.some(c => c.name === name), name).toBe(false);
     }
-    expect(existsSync(join(f.bundle, 'macos', 'latest.json'))).toBe(true);
-    expect(existsSync(join(f.bundle, 'macos', 'fixed.json'))).toBe(true);
-    expect(existsSync(join(f.root, 'release-notes', 'next.md'))).toBe(true);
-    expect(calls.some(c => c.name === 'git' && ['add', 'commit', 'push'].includes(c.args[0]))).toBe(false);
+    expect(existsSync(join(f.bundle, 'macos/beta.json'))).toBe(true);
+    expect(existsSync(join(f.bundle, 'macos/latest.json'))).toBe(false);
   });
 
   it('refuses publication when the app backing the arm64 updater entry is x86_64-only', () => {
     const f = fixture('0.1.741');
     writeFileSync(join(f.bundle, 'macos', 'o8.app', 'Contents', 'MacOS', 'o8'), thinMachO(CPU_TYPE_X86_64));
 
-    const result = run(f, 'stable');
+    const result = run(f, 'beta');
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('missing required Mach-O architecture arm64');
     expect(effects(f).some(c => c.name === 'gh' && ['create', 'edit', 'upload'].includes(c.args[1])))
@@ -447,7 +482,7 @@ describe('release channels through the publication entry point', () => {
     if (archive.status !== 0) throw new Error(`failed to replace updater fixture: ${archive.stderr}`);
     writeFileSync(main, universalMachO());
 
-    const result = run(f, 'stable');
+    const result = run(f, 'beta');
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('archived Contents/MacOS/o8 is missing required Mach-O architecture arm64');
     expect(effects(f).some(c => c.name === 'gh' && ['create', 'edit', 'upload'].includes(c.args[1])))
@@ -458,7 +493,7 @@ describe('release channels through the publication entry point', () => {
     const f = fixture('0.1.741');
     writeFileSync(join(f.bundle, 'macos', 'o8.app', 'Contents', 'release-identity.txt'), 'new build');
 
-    const result = run(f, 'stable');
+    const result = run(f, 'beta');
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('updater archive contents do not match the inspected macOS app bundle');
     expect(effects(f).some(c => c.name === 'gh' && ['create', 'edit', 'upload'].includes(c.args[1])))
@@ -469,7 +504,7 @@ describe('release channels through the publication entry point', () => {
     const f = fixture('0.1.741');
     writeFileSync(join(f.bundle, 'macos', 'o8.app.tar.gz.sig'), 'not-a-signature');
 
-    const result = run(f, 'stable');
+    const result = run(f, 'beta');
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('updater signature does not verify against the configured public key');
     expectNoPublicationMutation(f);
@@ -486,7 +521,7 @@ describe('release channels through the publication entry point', () => {
     if (archive.status !== 0) throw new Error(`failed to replace updater fixture: ${archive.stderr}`);
     expect(readFileSync(archivePath)).not.toEqual(previousArchive);
 
-    const result = run(f, 'stable');
+    const result = run(f, 'beta');
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('updater signature does not verify against the configured public key');
     expectNoPublicationMutation(f);
@@ -496,7 +531,7 @@ describe('release channels through the publication entry point', () => {
     const f = fixture('0.1.741');
     writeFileSync(join(f.dmgApp, 'Contents', 'MacOS', 'o8'), thinMachO(CPU_TYPE_X86_64));
 
-    const result = run(f, 'stable');
+    const result = run(f, 'beta');
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('DMG Contents/MacOS/o8 is missing required Mach-O architecture arm64');
     expectNoPublicationMutation(f);
@@ -506,7 +541,7 @@ describe('release channels through the publication entry point', () => {
     const f = fixture('0.1.741');
     writeFileSync(join(f.dmgApp, 'Contents', 'installer-only.txt'), 'stale installer');
 
-    const result = run(f, 'stable');
+    const result = run(f, 'beta');
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('DMG app contents do not match the inspected macOS app bundle');
     expectNoPublicationMutation(f);
@@ -587,8 +622,8 @@ describe('release channels through the publication entry point', () => {
     expect(effects(f).some(c => ['publishFixed', 'announceRelease', 'bash'].includes(c.name))).toBe(false);
   });
 
-  it('keeps ordinary stable versions as the default policy', () => {
-    expect(resolveReleaseChannel('0.1.741', {})).toMatchObject({ channel: 'stable', githubFlags: [], manifestName: 'latest.json' });
+  it('keeps normal versions on the beta publication policy', () => {
+    expect(resolveReleaseChannel('0.1.741', {})).toMatchObject({ channel: 'beta', githubFlags: ['--prerelease', '--latest=false'], manifestName: 'beta.json' });
   });
 
   it('keeps the manual hosted fallback draft-only and preview-only', () => {

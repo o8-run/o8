@@ -61,6 +61,9 @@ export async function POST(request: Request) {
   if (typeof body.checkOutcome !== 'string' || !CHECK_OUTCOMES.has(body.checkOutcome as AppUpdateCheckOutcome)) {
     return invalidState('invalid_check_outcome', 'checkOutcome must be never, available, current, or failed.');
   }
+  if (body.channel !== undefined && body.channel !== 'stable' && body.channel !== 'beta' && body.channel !== 'preview') {
+    return invalidState('invalid_update_channel', 'channel must be stable or beta.');
+  }
   const checkOutcome = body.checkOutcome as AppUpdateCheckOutcome;
   if (checkOutcome === 'available' && !body.updatePending) {
     return invalidState('invalid_update_state', 'available requires updatePending to be true.');
@@ -77,6 +80,7 @@ export async function POST(request: Request) {
     updatePending: body.updatePending,
     version: typeof body.version === 'string' && body.version.trim() ? body.version.trim() : null,
     checkOutcome,
+    channel: body.channel,
     checkedAt: typeof body.checkedAt === 'string' ? body.checkedAt : null,
     info: isRecord(body.info) ? body.info : null,
     checkError: typeof body.checkError === 'string' ? body.checkError : null,

@@ -31,7 +31,10 @@ export interface AppUpdateInstallState {
 
 export type AppUpdateCheckOutcome = 'never' | 'available' | 'current' | 'failed';
 
+export type AppUpdateCheckChannel = 'stable' | 'beta' | 'preview';
+
 export interface AppUpdateCheckState {
+  channel?: AppUpdateCheckChannel;
   outcome: AppUpdateCheckOutcome;
   checkedAt: string | null;
   errorCode: 'update_check_not_run' | 'update_check_failed' | null;
@@ -64,6 +67,7 @@ export function setAppUpdateState(update: {
   updatePending: boolean;
   version?: string | null;
   checkOutcome?: AppUpdateCheckOutcome;
+  channel?: AppUpdateCheckChannel;
   checkedAt?: string | null;
   checkError?: string | null;
 }): AppUpdateState {
@@ -89,6 +93,7 @@ export function setAppUpdateState(update: {
     version: update.updatePending ? update.version ?? null : null,
     updatedAt: new Date().toISOString(),
     check: {
+      ...(update.channel ? { channel: update.channel } : state.check.channel ? { channel: state.check.channel } : {}),
       outcome,
       checkedAt,
       errorCode: outcome === 'never'

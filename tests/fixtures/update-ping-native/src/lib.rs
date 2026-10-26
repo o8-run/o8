@@ -11,6 +11,7 @@ fn resolve_ws_token() -> String {
 
 #[cfg(test)]
 mod tests {
+    mod beta_channel_tests;
     mod auto_apply_failure_tests;
     mod download_timeout_tests;
     mod install_journal_tests;
@@ -32,7 +33,7 @@ mod tests {
     use tauri::test::{get_ipc_response, mock_builder, mock_context, noop_assets, INVOKE_KEY};
     use tauri::{Manager, WebviewWindowBuilder};
 
-    const MANIFEST: &str = r#"{"version":"0.2.0","notes":"fixture","pub_date":"2026-09-30T12:00:00Z","url":"https://github.com/hurttlocker/o8-releases/releases/download/v0.2.0/o8.app.tar.gz","signature":"fixture-signature"}"#;
+    const MANIFEST: &str = r#"{"channel":"beta","version":"0.2.0","notes":"fixture","pub_date":"2026-09-30T12:00:00Z","url":"https://github.com/hurttlocker/o8-releases/releases/download/v0.2.0/o8.app.tar.gz","signature":"fixture-signature"}"#;
 
     struct Server {
         url: String,
@@ -82,6 +83,11 @@ mod tests {
                         "HTTP/1.1 302 Found\r\nLocation: {redirect}\r\nContent-Length: 0\r\n\r\n"
                     ),
                     "malformed" => "HTTP/1.1 200 OK\r\nContent-Length: 1\r\n\r\n{".into(),
+                    "stable" | "current" => {
+                        let body = MANIFEST.replace("\"channel\":\"beta\",", "");
+                        let body = if mode == "current" { body.replace("0.2.0", "0.0.1") } else { body };
+                        format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{}", body.len(), body)
+                    }
                     "slow" => {
                         // Stall AFTER headers to prove response parsing is bounded too.
                         socket
@@ -133,6 +139,8 @@ mod tests {
             .plugin(tauri_plugin_updater::Builder::new().build())
             .invoke_handler(tauri::generate_handler![
                 update_ping::check_app_update,
+                update_ping::get_update_channel,
+                update_ping::set_update_channel,
                 update_ping::download_app_update,
                 update_ping::install_app_update,
                 update_ping::discard_app_update_download

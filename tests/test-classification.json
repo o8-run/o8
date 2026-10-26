@@ -1782,6 +1782,20 @@
       ]
     },
     {
+      "path": "tests/beta-promote-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/beta-update-route-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/blocked-reason-truth.test.ts",
       "reasons": [
         "child-process",

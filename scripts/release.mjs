@@ -42,6 +42,7 @@ import {
 import { assertCpuPreparationCurrent, macosCpuPackageArchitectures } from './lib/macos-cpu-packages.mjs';
 import { verifyUpdaterSignature } from './lib/updater-signature.mjs';
 import { buildLatestShip, scrubPublicText } from './lib/public-release.mjs';
+import { publishBetaFeed } from './lib/update-feeds.mjs';
 import { resolveReleaseChannel } from './lib/release-channel.mjs';
 import { formatReleaseSummary, prepareReleaseSummary } from './lib/release-summary.mjs';
 
@@ -142,7 +143,7 @@ if (nodeMajor !== 22) {
 
 if (dryRun) {
   try {
-    if (releaseChannel.preview) {
+    if (!releaseChannel.publishStableEffects) {
       console.log(JSON.stringify(releaseChannel, null, 2));
       process.exit(0);
     }
@@ -158,7 +159,7 @@ if (dryRun) {
   }
 }
 
-if (releaseChannel.preview && (process.argv.includes('--announce') || process.argv.includes('--announce-preview'))) {
+if (!releaseChannel.publishStableEffects && (process.argv.includes('--announce') || process.argv.includes('--announce-preview'))) {
   console.error('[release] Stable announcements are disabled for preview releases.');
   process.exit(1);
 }
@@ -360,6 +361,7 @@ const { latestJson, uploadArgs } = buildReleaseManifest({
   baseUploadAssets: [DMG, APP_TAR, APP_SIG],
   trailingUploadAssets: [latestJsonPath, ...(releaseChannel.publishStableEffects ? [fixedJsonPath] : [])],
 });
+if (releaseChannel.channel === 'beta') latestJson.channel = 'beta';
 writeFileSync(latestJsonPath, JSON.stringify(latestJson, null, 2));
 console.log(`[release] wrote ${latestJsonPath}`);
 
@@ -513,6 +515,10 @@ try {
     console.log('[release] Preview published for explicit tag downloads; the stable updater and announcements are unchanged.');
     process.exit(0);
   }
+  publishBetaFeed(latestJsonPath, [REPO, PUBLIC_MIRROR]);
+  console.log('[release] Beta feed advanced; use promote after verification.');
+  process.exit(0);
+
   // Publish the page feeds from one local mirror checkout and one mirror commit.
   // This runs only after the updater assets are available on the public mirror.
   let publicFeedPublished = false;

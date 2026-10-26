@@ -128,9 +128,10 @@ impl<R: Runtime> NativeEffects<R> {
         let installed = journal.install_if_admitted(
             version,
             || match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                update.install(bytes)
+                crate::update_ping::ensure_update_channel(&self.app, &update)?;
+                update.install(bytes).map_err(|error| error.to_string())
             })) {
-                Ok(result) => result.map(|_| true).map_err(|error| error.to_string()),
+                Ok(result) => result.map(|_| true),
                 Err(error) if error.is::<crate::update_ping::RestartRefused>() => Ok(false),
                 Err(_) => Err("Native installer stopped unexpectedly.".into()),
             },

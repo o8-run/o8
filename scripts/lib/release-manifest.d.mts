@@ -4,6 +4,7 @@ export interface ReleaseUpdaterPlatform {
 }
 
 export interface ReleaseUpdaterManifest {
+  channel?: 'beta';
   version: string;
   notes: string;
   pub_date: string;
