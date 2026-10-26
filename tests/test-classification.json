@@ -5469,6 +5469,13 @@
       ]
     },
     {
+      "path": "tests/remote-worker-effort-launch-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/repo-inventory-realtime-real-path.test.ts",
       "reasons": [
         "child-process",

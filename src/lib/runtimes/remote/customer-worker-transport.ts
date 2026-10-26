@@ -1,3 +1,4 @@
+import { assertRuntimeEffortPin } from '@/lib/orchestrator/effort-pin';
 import type { GetBranchResponse, LaunchRequest, LaunchResponse, PollEvent, Transport } from './protocol';
 
 interface TokenRow {
@@ -32,6 +33,7 @@ function parsePayload(payloadJson: string, eventType: string) {
 
 export class CustomerWorkerTransport implements Transport {
   async sendLaunch(req: LaunchRequest): Promise<LaunchResponse> {
+    assertRuntimeEffortPin('remote-customer', req.modelHint, req.effort);
     const now = new Date().toISOString();
 
     if (!req.laneId) {
