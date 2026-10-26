@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterAll, beforeAll, expect, it } from 'vitest';
@@ -62,9 +62,6 @@ it('persists Setup conversation creation through its existing handler with Next 
   const history = await saved.json();
   expect(history).toMatchObject({ backend: 'pi', model: 'pi', messages: [] });
   expect(realpathSync(history.repoPath)).toBe(realpathSync(server.directory));
-  const removed = await fetch(`${origin}/api/v2/chat-history?tabId=thoughts-native-setup`, { method: 'DELETE', headers });
-  expect(removed.status).toBe(200);
-  expect(existsSync(join(server.directory, 'chat-history', 'thoughts-native-setup.json'))).toBe(false);
 });
 
 it('walks every production surface registration and its HTTP routes', async () => {

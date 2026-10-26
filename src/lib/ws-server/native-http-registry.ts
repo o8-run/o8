@@ -14,7 +14,7 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/orchestrator/state', 'GET PATCH', () => import('./native-http-handlers').then(handlers => handlers.api_orchestrator_state)),
     route('/api/runtime/inventory', 'GET', () => import('./native-http-handlers').then(handlers => handlers.api_runtime_inventory)),
     route('/api/mobile/history', 'GET', () => import('./native-http-handlers').then(handlers => handlers.api_mobile_history)),
-    route('/api/v2/chat-history', 'GET POST DELETE', () => import('./native-http-handlers').then(handlers => handlers.api_v2_chat_history)),
+    route('/api/v2/chat-history', 'GET POST PATCH', () => import('./native-http-handlers').then(handlers => handlers.api_v2_chat_history)),
     route('/api/orchestrator/composer-queue', 'GET POST PATCH DELETE', () => import('./native-http-handlers').then(handlers => handlers.api_orchestrator_composer_queue)),
     route('/api/panel/ws-info', 'GET', () => import('./native-http-handlers').then(handlers => handlers.api_panel_ws_info)),
   ],
@@ -40,7 +40,7 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/orchestrator/state', 'GET', () => import('./native-http-handlers').then(handlers => handlers.api_orchestrator_state)),
     route('/api/runtime/inventory', 'GET', () => import('./native-http-handlers').then(handlers => handlers.api_runtime_inventory)),
     route('/api/v2/chat-history/list', 'GET', () => import('./native-http-handlers').then(handlers => handlers.api_v2_chat_history_list)),
-    route('/api/v2/chat-history', 'GET POST DELETE', () => import('./native-http-handlers').then(handlers => handlers.api_v2_chat_history)),
+    route('/api/v2/chat-history', 'GET POST PATCH', () => import('./native-http-handlers').then(handlers => handlers.api_v2_chat_history)),
     route('/api/runtime/archive', 'POST', () => import('./native-http-handlers').then(handlers => handlers.api_runtime_archive)),
   ],
   workers: [

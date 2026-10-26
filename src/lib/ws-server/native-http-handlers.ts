@@ -6,7 +6,7 @@ import { GET as api_orchestrator_lane_events_GET } from '@/app/api/orchestrator/
 import { GET as api_runtime_inventory_GET } from '@/app/api/runtime/inventory/route';
 import { GET as api_mobile_history_GET } from '@/app/api/mobile/history/route';
 import { GET as api_mobile_terminal_sessions_GET } from '@/app/api/mobile/terminal-sessions/route';
-import { GET as api_v2_chat_history_GET, POST as api_v2_chat_history_POST, DELETE as api_v2_chat_history_DELETE } from '@/app/api/v2/chat-history/route';
+import { GET as api_v2_chat_history_GET, POST as api_v2_chat_history_POST, PATCH as api_v2_chat_history_PATCH } from '@/app/api/v2/chat-history/route';
 import { GET as api_v2_chat_history_list_GET } from '@/app/api/v2/chat-history/list/route';
 import { POST as api_runtime_archive_POST } from '@/app/api/runtime/archive/route';
 import { GET as api_setup_config_GET, POST as api_setup_config_POST } from '@/app/api/setup/config/route';
@@ -66,7 +66,7 @@ export const api_orchestrator_lane_events = { GET: api_orchestrator_lane_events_
 export const api_runtime_inventory = { GET: api_runtime_inventory_GET };
 export const api_mobile_history = { GET: api_mobile_history_GET };
 export const api_mobile_terminal_sessions = { GET: api_mobile_terminal_sessions_GET };
-export const api_v2_chat_history = { GET: api_v2_chat_history_GET, POST: api_v2_chat_history_POST, DELETE: api_v2_chat_history_DELETE };
+export const api_v2_chat_history = { GET: api_v2_chat_history_GET, POST: api_v2_chat_history_POST, PATCH: api_v2_chat_history_PATCH };
 export const api_v2_chat_history_list = { GET: api_v2_chat_history_list_GET };
 export const api_runtime_archive = { POST: api_runtime_archive_POST };
 export const api_setup_config = { GET: api_setup_config_GET, POST: api_setup_config_POST };

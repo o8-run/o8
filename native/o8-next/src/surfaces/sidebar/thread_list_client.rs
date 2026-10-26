@@ -197,7 +197,10 @@ impl Client {
         self.patch_metadata(body)
     }
     pub(crate) fn patch_metadata(&self, body: Value) -> Result<(), String> {
-        let url = self.url("/api/v2/chat-history").unwrap();
+        let mut url = self.url("/api/v2/chat-history").unwrap();
+        if let Some(workspace) = self.workspace() {
+            url.query_pairs_mut().append_pair("workspace", workspace);
+        }
         let request = self.request("PATCH", &url);
         let response = request.send_json(body).map_err(|error| match error {
             ureq::Error::Status(code, _) => format!("Thread update rejected (HTTP {code})."),
@@ -210,7 +213,10 @@ impl Client {
         Ok(())
     }
     pub(crate) fn archive_worker(&self, id: &str, mutation: &str) -> Result<(), String> {
-        let url = self.url("/api/runtime/archive").unwrap();
+        let mut url = self.url("/api/runtime/archive").unwrap();
+        if let Some(workspace) = self.workspace() {
+            url.query_pairs_mut().append_pair("workspace", workspace);
+        }
         let request = self.request("POST", &url);
         let response = request
             .send_json(json!({"sessionKey":id,"clientMutationId":mutation}))

@@ -7,7 +7,7 @@ export const dynamic = 'force-dynamic';
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { readFileSync, mkdirSync } from 'node:fs';
+import { existsSync, readFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { getDataDir } from '@/lib/data-dir-migration';
@@ -23,10 +23,12 @@ import {
   deleteCanonicalChatHistoryRecord,
   getCanonicalChatHistoryPath,
   persistCanonicalChatHistoryRecord,
+  readPersistedLlmChat,
   withCanonicalChatHistoryLock,
 } from '@/lib/llm/chat-history-store';
 import { resolveRepoGithubIdentity } from '@/lib/repos/github-identity';
 import { resolveThreadRepoMetadata } from '@/lib/llm/thread-repo-metadata';
+import { matchesMutationWorkspace, mutationWorkspace } from '@/lib/repos/mutation-workspace';
 import { normalizePersistedChatTitle, resolvePersistedChatHistoryTitle } from '@/lib/llm/chat-history-title';
 import type { MobilePendingTurnWorkers } from '@/lib/mobile/types';
 import { consumePendingTurnWorkers } from '@/lib/mobile/turn-receipt';
@@ -217,6 +219,13 @@ export async function POST(request: NextRequest) {
   ensureDir();
   const filePath = safePath(body.tabId);
 
+  const workspace = mutationWorkspace(request);
+  const prior = readPersistedLlmChat(body.tabId);
+  if ((existsSync(filePath) && !matchesMutationWorkspace(workspace, prior?.history.repoPath))
+    || ((body.repoPath !== undefined || !prior) && !matchesMutationWorkspace(workspace, body.repoPath))) {
+    return NextResponse.json({ error: 'History was not found' }, { status: 404 });
+  }
+
   // Don't save images in history (too large) — strip data URIs
   const messages = ensureStableChatMessageIds(body.messages.map((m: Record<string, unknown>) => ({
     ...m,
@@ -384,23 +393,14 @@ export async function PATCH(request: NextRequest) {
   // racing a turn-receipt write would put the pre-race snapshot back on disk.
   return withCanonicalChatHistoryLock(body.tabId, () => {
   ensureDir();
-  const filePath = safePath(body.tabId);
 
-  // Upsert — if the chat hasn't been saved yet (no messages have flowed
-  // through POST), create a metadata-only record. Lets the operator
-  // rename / archive / pin a fresh chat without having to send a message
-  // first.
-  let data: Record<string, unknown>;
-  try {
-    data = JSON.parse(readFileSync(filePath, 'utf-8'));
-  } catch {
-    data = {
-      messages: [],
-      savedAt: new Date().toISOString(),
-      starred: false,
-      projectId: null,
-    };
+  const saved = readPersistedLlmChat(body.tabId);
+  const workspace = mutationWorkspace(request);
+  if (!saved || !matchesMutationWorkspace(workspace, saved.history.repoPath)
+    || (body.repoPath !== undefined && !matchesMutationWorkspace(workspace, body.repoPath))) {
+    return NextResponse.json({ error: 'History was not found' }, { status: 404 });
   }
+  const data: Record<string, unknown> = { ...saved.history };
 
   if (body.starred !== undefined) data.starred = body.starred;
   if (body.pinned !== undefined) data.pinned = body.pinned;
@@ -437,7 +437,12 @@ export async function DELETE(request: NextRequest) {
   const tabId = request.nextUrl.searchParams.get('tabId');
   if (!tabId) return NextResponse.json({ error: 'tabId required' }, { status: 400 });
 
+  return withCanonicalChatHistoryLock(tabId, () => {
   try {
+    const saved = readPersistedLlmChat(tabId);
+    if (!saved || !matchesMutationWorkspace(mutationWorkspace(request), saved.history.repoPath)) {
+      return NextResponse.json({ error: 'History was not found' }, { status: 404 });
+    }
     deleteCanonicalChatHistoryRecord(tabId);
     return NextResponse.json({ ok: true });
   } catch (error) {
@@ -448,4 +453,5 @@ export async function DELETE(request: NextRequest) {
     console.error('[chat-history] DELETE failed', { tabId, message });
     return NextResponse.json({ ok: false, error: message }, { status: 500 });
   }
+  });
 }
