@@ -11,11 +11,13 @@ application identity and existing data. The channel chooses the update manifest;
 it does not create a second installation or isolate daily application data.
 Returning to Stable waits for a newer stable version and never downgrades.
 
-See [Beta and stable update feeds](beta-updates.md) for publication and promotion.
-The existing stable endpoint remains unchanged. Its `latest.json` and the rolling
-`beta.json` live beside each other. Normal `X.Y.Z` releases ship to beta first;
-stable advances only through the explicit promote command using the same signed
-artifacts. No promotion rebuilds, retags or signs an artifact.
+See [Beta and stable update feeds](beta-updates.md) for publication details.
+Stable remains the default release workflow, including report reconciliation,
+`fixed.json`, update warmup, the changelog and announcements. An explicitly
+selected `O8_RELEASE_CHANNEL=beta` creates a prerelease and advances only
+`beta.json`, without writing stable assets or feeds. A later stable release
+includes report fixes from intervening betas. Promotion is tracked separately
+in [#4857](https://github.com/o8-run/o8/issues/4857).
 
 ## Explicit previews
 

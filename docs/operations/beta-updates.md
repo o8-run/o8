@@ -11,61 +11,48 @@ newer available version on the primary endpoint or its mirror fallback. Returnin
 to Stable retains the installed version until stable advertises a higher version. It never installs an older
 stable build automatically.
 
-## Publish and promote
+## Publication
 
-A separately authorized `npm run ship` publishes the new version as a candidate,
-uploads `beta.json` and an identical tag-local `latest.json` compatibility alias
-with the signed artifacts, then advances the rolling
-`beta.json` beside `latest.json` on each repository's existing latest release.
-The existing stable release remains the feed anchor. Do not change that anchor
-with a manual latest-release edit: updater URLs resolve through it.
+Stable remains the default publication channel. A separately authorized
+`O8_RELEASE_CHANNEL=beta npm run ship` publishes an immutable prerelease with
+signed artifacts and `beta.json`, then advances only rolling `beta.json` on
+each repository's existing stable feed anchor. Beta never uploads `latest.json`
+or `fixed.json`, changes the latest stable release, reconciles report receipts,
+publishes the stable changelog, or posts stable announcements.
 
-The default publication channel is beta. Direct stable publication is refused.
-The existing explicit preview path remains separate and does not advance beta.
-Signing, notarization, version tags and publication credentials retain their
-existing controls.
+A separately authorized normal stable release retains the full stable workflow:
+report intake reconciliation, cumulative `fixed.json`, source and mirror assets,
+stable update warmup, public changelog, report announcements and release
+announcements. Its metadata range starts at the previous published stable
+ancestor, so fixes first included in an intervening beta still receive receipts.
+The explicit preview path remains separate and advances neither feed.
+Signing, notarization, version tags and credentials retain their existing controls.
 
-For Linux, run the port build and mirror-copy steps for the candidate tag, then
-`npm run ship:linux-sig -- --tag vX.Y.Z` on the release host. The existing signer
-reads the candidate tag's `latest.json`; completion updates both tag-local
-`latest.json` and `beta.json`, then patches only the Linux entry in rolling beta when its version still matches.
-Late completion never advances or rolls back a rolling feed: completing 0.1.900
-while beta serves 0.1.902 leaves beta at 0.1.902, even if stable is 0.1.901.
-The older candidate remains available on its own tag. Check
-that beta contains every supported platform before verification. The stable
-feed anchor's `latest.json` remains unchanged until promotion. See
+Linux completion reads the candidate's `beta.json`, adds only its signed Linux
+entry, and uploads the signature and `beta.json` to the candidate tag. It patches
+rolling beta only when that feed still matches the candidate version. Older or
+newer rolling versions stay unchanged. Stable Linux completion retains
+`latest.json`; beta completion never writes it. See
 [Linux mirror publication](linux-updater-mirror-publish.md).
 
-After verifying the beta candidate, a separately authorized
-`npm run promote -- --version X.Y.Z` reads its tagged `beta.json` in every target
-repository, checks version and artifact consistency, then replaces only
-`latest.json` at each stable feed anchor. It preserves all artifact URLs and
-signatures and performs no build, signing or tag changes. Promotion refuses a
-stable downgrade, conflicting artifacts for an already-promoted version, or
-any candidate missing a platform advertised by stable. All candidate platform
-entries, including Linux, are copied unchanged; promotion never fills a gap
-with an older artifact. Finish the Linux completion step before retrying.
+Beta publication and Linux completion share an exclusive channel lock across
+versions and destinations, held through every write. An overlapping command
+fails. Use one release host, or set `O8_UPDATE_FEED_LOCK_PATH` to the same shared
+filesystem lock. Locks are removed only by their owner on exit. After an
+interrupted process, confirm no channel writer is running before removing its
+stale lock. Publication refuses beta downgrades and conflicting same-version
+artifacts. Platform completion requires matching version and channel and preserves
+all other entries and metadata.
 
-Ship, Linux completion and promotion take the same exclusive channel lock
-across all versions and destinations before reading or publishing manifests.
-Each holds it through every write and rechecks the destination immediately
-before upload. Ship refuses a beta downgrade or replacement of an existing
-version. Promotion refuses a stable downgrade. Platform completion requires
-the destination's existing version and channel to match, and changes only that
-platform entry, preserving every other entry and manifest field. An overlapping
-command fails; retry it after the owner exits.
-A retry of an older version must fail once a newer version is stable. Run all
-channel writers on one release host (or set `O8_PROMOTE_LOCK_PATH` to the same shared
-filesystem lock). Do not run independent channel writers with separate locks.
-Locks are removed only by their owner on exit. After an interrupted process,
-confirm no channel writer is running before removing its stale lock.
+Promotion is outside this change and is tracked in
+[#4857](https://github.com/o8-run/o8/issues/4857). There is no promotion command.
 
 Feed writes across repositories are sequential. A failure can leave one mirror
-advanced. Retry `npm run release` (or `node scripts/release.mjs`) in the retained
+advanced. Retry `O8_RELEASE_CHANNEL=beta npm run release` in the retained
 release checkout with the original version, artifacts and signature files to
 finish reconciliation. Do not rerun `npm run ship`, which builds artifacts and
 has a separate published-version preflight. Before writing any local manifest or
-publishing assets, publication checks both feeds at every destination and refuses
+publishing assets, beta publication checks both feeds at every destination and refuses
 an older version or conflicting content for the same version. It then downloads
 existing candidate assets and verifies the complete asset set, artifact bytes,
 signature bytes and manifest fields. The original publication date is retained.

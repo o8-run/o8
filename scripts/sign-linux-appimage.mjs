@@ -29,7 +29,6 @@ import {
   signLinuxAppImage,
 } from './lib/linux-appimage-signature.mjs';
 
-import { execFileSync } from 'node:child_process';
 import { acquireUpdateFeedLock, downloadFeed, publishBetaFeed, withCompletedPlatform } from './lib/update-feeds.mjs';
 
 const LOG = '[sign-linux-appimage]';
@@ -80,13 +79,34 @@ async function main() {
     mkdirSync(readDir);
     const deps = createLinuxSignatureDeps();
     const upload = deps.uploadAssets;
-    // Keep the existing signer unchanged; publication merges only the Linux entry.
+    const fetchRelease = deps.fetchRelease;
+    const manifests = new Map();
+    deps.fetchRelease = (options) => {
+      const release = fetchRelease(options);
+      if (release) {
+        // Stable anchors can also carry rolling beta. Prefer their stable asset;
+        // recognize the old beta compatibility alias without ever rewriting it.
+        let name = release.assets.includes('latest.json') ? 'latest.json' : 'beta.json';
+        if (name === 'latest.json' && downloadFeed(options.repo, options.tag, name, readDir).channel === 'beta') name = 'beta.json';
+        manifests.set(options.repo, name);
+      }
+      return release;
+    };
+    deps.fetchLatestJson = ({ repo, tag, destDir }) => {
+      const name = manifests.get(repo);
+      const current = downloadFeed(repo, tag, name, destDir);
+      if ((name === 'beta.json') !== (current.channel === 'beta')) throw new Error('Manifest channel does not match its asset.');
+      return current;
+    };
+    // The signer constructs a local manifest; upload it only under its channel's name.
     deps.uploadAssets = ({ repo, tag, files }) => {
       const path = files.find(file => file.endsWith('/latest.json'));
       const candidate = JSON.parse(readFileSync(path, 'utf8'));
-      const current = downloadFeed(repo, tag, 'latest.json', readDir);
-      writeFileSync(path, `${JSON.stringify(withCompletedPlatform(current, candidate, 'linux-x86_64'), null, 2)}\n`);
-      return upload({ repo, tag, files });
+      const name = manifests.get(repo);
+      const current = downloadFeed(repo, tag, name, readDir);
+      const output = join(workDir, name);
+      writeFileSync(output, `${JSON.stringify(withCompletedPlatform(current, candidate, 'linux-x86_64'), null, 2)}\n`);
+      return upload({ repo, tag, files: files.map(file => file === path ? output : file) });
     };
     const result = await signLinuxAppImage({
       tag: options.tag,
@@ -98,15 +118,9 @@ async function main() {
     // Complete beta publication after the existing signing operation.
     if (result.latest.channel === 'beta') {
       const betaPath = join(workDir, 'beta.json');
-      for (const repo of result.repos) {
-        const current = downloadFeed(repo, options.tag, 'beta.json', readDir);
-        const completed = withCompletedPlatform(current, result.latest, 'linux-x86_64');
-        writeFileSync(betaPath, `${JSON.stringify(completed, null, 2)}\n`);
-        execFileSync('gh', ['release', 'upload', options.tag, betaPath, '--clobber', '--repo', repo], { stdio: 'inherit', timeout: 60_000 });
-      }
       publishBetaFeed(betaPath, result.repos, { lock, platform: 'linux-x86_64' });
     }
-    console.log(`${LOG} published ${result.assetName}.sig and latest.json for ${options.tag}`);
+    console.log(`${LOG} published ${result.assetName}.sig and ${result.latest.channel === 'beta' ? 'beta.json' : 'latest.json'} for ${options.tag}`);
     console.log(`${LOG} linux-x86_64 url: ${result.latest.platforms['linux-x86_64'].url}`);
   } finally {
     if (workDir) rmSync(workDir, { recursive: true, force: true });

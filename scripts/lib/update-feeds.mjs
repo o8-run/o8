@@ -6,9 +6,9 @@ import { isDeepStrictEqual } from 'node:util';
 
 const heldLocks = new WeakSet();
 
-/** Shared by ship, platform completion and promote, across both channels. */
+/** Shared by beta publication and platform completion. */
 export function acquireUpdateFeedLock() {
-  const path = process.env.O8_PROMOTE_LOCK_PATH || join(tmpdir(), 'o8-promote.lock');
+  const path = process.env.O8_UPDATE_FEED_LOCK_PATH || join(tmpdir(), 'o8-update-feed.lock');
   const fd = openSync(path, 'wx', 0o600);
   const lock = { release() {
     if (!heldLocks.delete(lock)) return;

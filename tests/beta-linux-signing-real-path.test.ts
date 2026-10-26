@@ -16,7 +16,7 @@ function fixture() {
     'darwin-x86_64': { url: `https://github.com/o8-run/o8/releases/download/${tag}/o8.app.tar.gz`, signature: 'darwin-fixture' },
   } };
   for (const release of [tag, 'v0.1.800']) mkdirSync(join(root, release));
-  for (const name of ['beta.json', 'latest.json']) writeFileSync(join(root, tag, name), JSON.stringify(manifest));
+  writeFileSync(join(root, tag, 'beta.json'), JSON.stringify(manifest));
   const stable = JSON.stringify({ version: '0.1.800', platforms: {} });
   writeFileSync(join(root, 'v0.1.800/latest.json'), stable);
   writeFileSync(join(root, 'v0.1.800/beta.json'), JSON.stringify(manifest));
@@ -25,8 +25,8 @@ function fixture() {
   writeFileSync(gh, `#!${process.execPath}
 const fs=require('node:fs'),path=require('node:path'),a=process.argv.slice(2),root=process.env.O8_LINUX_FIXTURE;
 fs.appendFileSync(path.join(root,'calls.jsonl'),JSON.stringify(a)+'\\n');
-if(a[1]==='view')process.stdout.write(a.includes('--jq')?'v0.1.800':JSON.stringify({isDraft:false,assets:[{name:${JSON.stringify(asset)}},{name:'beta.json'},{name:'latest.json'}]}));
-if(a[1]==='download'){const name=a[a.indexOf('--pattern')+1];fs.copyFileSync(path.join(root,a[2],name),path.join(a[a.indexOf('--dir')+1],name));if(name==='latest.json'&&process.env.O8_LINUX_PAUSE){fs.writeFileSync(path.join(root,'paused'),'');const start=Date.now();while(!fs.existsSync(path.join(root,'resume'))&&Date.now()-start<8000)Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,10);}}
+if(a[1]==='view')process.stdout.write(a.includes('--jq')?'v0.1.800':JSON.stringify({isDraft:false,assets:fs.readdirSync(path.join(root,a[2])).map(name=>({name})).concat(a[2]==='v0.1.800'?[{name:'beta.json'}]:[])}));
+if(a[1]==='download'){const name=a[a.indexOf('--pattern')+1];fs.copyFileSync(path.join(root,a[2],name),path.join(a[a.indexOf('--dir')+1],name));if(name==='beta.json'&&process.env.O8_LINUX_PAUSE){fs.writeFileSync(path.join(root,'paused'),'');const start=Date.now();while(!fs.existsSync(path.join(root,'resume'))&&Date.now()-start<8000)Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,10);}}
 if(a[1]==='upload')for(const file of a.slice(3)){if(file.startsWith('--'))break;fs.copyFileSync(file,path.join(root,a[2],path.basename(file)));}
 `);
   const cargo = join(root, 'bin/cargo');
@@ -39,7 +39,7 @@ const fs=require('node:fs');fs.writeFileSync(process.env.O8_LINUX_FIXTURE+'/sign
 function run(f: ReturnType<typeof fixture>, extra: Record<string, string> = {}) {
   return spawnSync(process.execPath, [join(process.cwd(), 'scripts/sign-linux-appimage.mjs'), '--tag', f.tag, '--repo', 'o8-run/o8'], {
     encoding: 'utf8', timeout: 15_000,
-    env: { ...process.env, CI: '', TAURI_SIGNING_PRIVATE_KEY: 'fixture', PATH: `${join(f.root, 'bin')}:${process.env.PATH}`, O8_LINUX_FIXTURE: f.root, O8_PROMOTE_LOCK_PATH: join(f.root, 'feeds.lock'), ...extra },
+    env: { ...process.env, CI: '', TAURI_SIGNING_PRIVATE_KEY: 'fixture', PATH: `${join(f.root, 'bin')}:${process.env.PATH}`, O8_LINUX_FIXTURE: f.root, O8_UPDATE_FEED_LOCK_PATH: join(f.root, 'feeds.lock'), ...extra },
   });
 }
 it('completes the beta Linux manifest through ship:linux-sig without changing rolling stable', () => {
@@ -50,7 +50,7 @@ it('completes the beta Linux manifest through ship:linux-sig without changing ro
   const beta = JSON.parse(readFileSync(join(root, tag, 'beta.json'), 'utf8'));
   expect(beta.platforms['linux-x86_64']).toMatchObject({ signature: 'linux-fixture' });
   expect(beta.platforms['darwin-x86_64']).toEqual(manifest.platforms['darwin-x86_64']);
-  expect(JSON.parse(readFileSync(join(root, tag, 'latest.json'), 'utf8'))).toEqual(beta);
+  expect(existsSync(join(root, tag, 'latest.json'))).toBe(false);
   expect(JSON.parse(readFileSync(join(root, 'v0.1.800/beta.json'), 'utf8'))).toEqual(beta);
   expect(readFileSync(join(root, 'v0.1.800/latest.json'), 'utf8')).toBe(stable);
 });
@@ -87,11 +87,11 @@ it('refuses a conflicting channel lock before signing or publication', () => {
   expect(existsSync(join(f.root, 'signed'))).toBe(false);
   expect(readFileSync(join(f.root, 'feeds.lock'), 'utf8')).toBe('held');
 });
-it('serializes Linux completion with the real promote command', async () => {
+it('serializes overlapping Linux completion commands', async () => {
   const f = fixture();
   const child = spawn(process.execPath, [join(process.cwd(), 'scripts/sign-linux-appimage.mjs'), '--tag', f.tag, '--repo', 'o8-run/o8'], {
     stdio: 'pipe', env: { ...process.env, CI: '', TAURI_SIGNING_PRIVATE_KEY: 'fixture', PATH: `${join(f.root, 'bin')}:${process.env.PATH}`,
-      O8_LINUX_FIXTURE: f.root, O8_PROMOTE_LOCK_PATH: join(f.root, 'feeds.lock'), O8_LINUX_PAUSE: '1' },
+      O8_LINUX_FIXTURE: f.root, O8_UPDATE_FEED_LOCK_PATH: join(f.root, 'feeds.lock'), O8_LINUX_PAUSE: '1' },
   });
   let errors = '';
   child.stderr.on('data', chunk => { errors += chunk; });
@@ -100,9 +100,9 @@ it('serializes Linux completion with the real promote command', async () => {
     const deadline = Date.now() + 8000;
     while (!existsSync(join(f.root, 'paused')) && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 10));
     expect(existsSync(join(f.root, 'paused')), errors).toBe(true);
-    const overlap = spawnSync(process.execPath, [join(process.cwd(), 'scripts/promote.mjs'), '--version', '0.1.900', '--repo', 'o8-run/o8'], {
+    const overlap = spawnSync(process.execPath, [join(process.cwd(), 'scripts/sign-linux-appimage.mjs'), '--tag', f.tag, '--repo', 'o8-run/o8'], {
       encoding: 'utf8', timeout: 10000, env: { ...process.env, PATH: `${join(f.root, 'bin')}:${process.env.PATH}`,
-        O8_LINUX_FIXTURE: f.root, O8_PROMOTE_LOCK_PATH: join(f.root, 'feeds.lock') },
+        O8_LINUX_FIXTURE: f.root, O8_UPDATE_FEED_LOCK_PATH: join(f.root, 'feeds.lock') },
     });
     writeFileSync(join(f.root, 'resume'), '');
     expect(await completed, errors).toBe(0);
@@ -114,6 +114,8 @@ it('serializes Linux completion with the real promote command', async () => {
 it('patches only Linux in a matching stable tag and leaves beta unchanged', () => {
   const f = fixture();
   const stable = { version: '0.1.900', notes: 'retained stable metadata', platforms: f.manifest.platforms };
+  const taggedBeta = JSON.stringify({ ...f.manifest, version: '0.1.902' });
+  writeFileSync(join(f.root, f.tag, 'beta.json'), taggedBeta);
   writeFileSync(join(f.root, f.tag, 'latest.json'), JSON.stringify(stable));
   const beta = readFileSync(join(f.root, 'v0.1.800/beta.json'), 'utf8');
   const result = run(f);
@@ -122,11 +124,13 @@ it('patches only Linux in a matching stable tag and leaves beta unchanged', () =
   const { ['linux-x86_64']: linux, ...retained } = completed.platforms;
   expect(linux.signature).toBe('linux-fixture');
   expect({ ...completed, platforms: retained }).toEqual(stable);
+  expect(readFileSync(join(f.root, f.tag, 'beta.json'), 'utf8')).toBe(taggedBeta);
   expect(readFileSync(join(f.root, 'v0.1.800/beta.json'), 'utf8')).toBe(beta);
 });
 it('refuses a tag manifest whose stable version has already advanced', () => {
   const f = fixture();
   const stable = JSON.stringify({ version: '0.1.901', platforms: f.manifest.platforms });
+  rmSync(join(f.root, f.tag, 'beta.json'));
   writeFileSync(join(f.root, f.tag, 'latest.json'), stable);
   expect(run(f).status).toBe(1);
   expect(readFileSync(join(f.root, f.tag, 'latest.json'), 'utf8')).toBe(stable);

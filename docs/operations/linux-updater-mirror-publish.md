@@ -40,28 +40,21 @@ before it signs it. The existing signing key and invocation stay unchanged.
 
 ## Order of operations for a full Linux updater publish
 
-1. Ship the macOS candidate to beta. Its tag contains `beta.json` and an
-   identical tag-local `latest.json` compatibility alias for Linux completion.
-   The rolling stable manifest stays on the existing stable feed anchor.
+1. Publish the macOS candidate with `O8_RELEASE_CHANNEL=beta`. Its tag
+   contains `beta.json` and signed artifacts. The rolling stable manifest stays
+   on the existing stable feed anchor.
 2. Dispatch `Port Build` for that candidate tag with `publish_target: linux`
    or `both`, then copy the AppImage to the mirror with `publish_to_mirror`.
    Both repositories must hold the same candidate's AppImage before signing.
-3. Run `npm run ship:linux-sig -- --tag vX.Y.Z` on the release host. The
-   existing signer adds the signed Linux entry to the tag-local `latest.json`.
-   Completion copies the full manifest to tag-local `beta.json` in every
-   repository, then patches the rolling beta feed beside stable only if its version still
-   matches the completed candidate. Older or newer rolling versions are left
-   unchanged; completion never advances a channel. Darwin
-   entries are preserved. No re-dispatch is needed for the signature copy.
-4. Verify the completed beta candidate on every platform, run installed-build
-   smoke acceptance, then use `npm run promote -- --version X.Y.Z`. Promotion
-   copies every signed candidate platform unchanged and refuses a candidate
-   missing any platform already served by stable. Never promote the macOS-only
-   intermediate manifest when stable also serves Linux.
-5. Ship, Linux completion and promotion share the same release-host channel
-   lock. A completion only adds or replaces the Linux entry in a matching
-   manifest version, preserving all other entries. Serialize all writers with
-   that common lock. An overlapping
-   command fails and may be retried after the owner exits. A candidate older
-   than stable is refused, including after a concurrent newer promotion.
-   See [beta and stable feeds](beta-updates.md) for lock recovery and retries.
+3. Run `npm run ship:linux-sig -- --tag vX.Y.Z` on the release host.
+   Beta completion reads and updates tag-local `beta.json`, then patches only
+   the Linux entry in rolling beta if its version still matches the candidate.
+   Older or newer rolling versions stay unchanged. It never writes `latest.json`
+   or changes stable assets. Stable completion continues to use `latest.json`.
+4. Verify the completed beta candidate on every platform and run installed-build
+   smoke acceptance. Promotion is a separate follow-up in
+   [#4857](https://github.com/o8-run/o8/issues/4857).
+5. Beta publication and Linux completion share the release-host channel lock.
+   Completion requires a matching manifest version and channel and preserves
+   all other entries. An overlapping command fails and can be retried after
+   its owner exits. See [beta and stable feeds](beta-updates.md) for recovery.

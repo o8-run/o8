@@ -1810,15 +1810,6 @@
       ]
     },
     {
-      "path": "tests/beta-promote-real-path.test.ts",
-      "reasons": [
-        "child-process",
-        "executable-fixture",
-        "network-listener",
-        "real-path"
-      ]
-    },
-    {
       "path": "tests/beta-update-route-real-path.test.ts",
       "reasons": [
         "real-path"

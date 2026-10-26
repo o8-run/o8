@@ -17,6 +17,7 @@ import { spawnSync } from 'node:child_process';
 import { afterEach, describe, expect, it } from 'vitest';
 import { resolveReleaseChannel } from '../scripts/lib/release-channel.mjs';
 import { bundleContentSha256, macosExecutablePayloadSha256, resolveMacosCpuArtifacts } from '../scripts/lib/macos-release-artifacts.mjs';
+import { verifyBetaBuildWorkflow, verifyStableAfterBeta } from './fixtures/release-after-beta';
 import { releaseCandidateProvider } from './fixtures/release-candidate-provider';
 
 const roots: string[] = [];
@@ -124,6 +125,9 @@ import { basename, join } from 'node:path';
 const realChildProcess = process.getBuiltinModule('node:child_process');
 ${releaseCandidateProvider}
 export function execFileSync(command, args = [], options = {}) {
+  if (command === 'git' && args[0] === 'rev-parse' && args[1] === 'HEAD') return 'a'.repeat(40);
+  if (command === 'git' && process.env.O8_CHANNEL_TEST_REAL_REPORTS === '1' && args[0] !== 'ls-remote') return realChildProcess.execFileSync(command, args, options);
+  if (command === 'gh' && args[0] === 'api' && process.env.O8_CHANNEL_TEST_REAL_REPORTS === '1') return readFileSync(join(process.cwd(), 'release-evidence.jsonl'), 'utf8');
   if (command === 'tar') return realChildProcess.execFileSync(command, args, options);
   record(command, args);
   if (command === 'gh' && args[0] === 'release' && process.env.O8_CHANNEL_TEST_RELEASES) return candidateRelease(args);
@@ -188,6 +192,7 @@ export function spawnSync(command, args) {
 }`;
   const modules: Record<string, string> = {
     'node:child_process': childProcess,
+    '/scripts/lib/release-update-warmup.mjs': `${prelude}\nexport async function warmUpdatePublication() { record('warmUpdatePublication'); return { status: 'offered', publishToOfferMs: 1 }; }`,
     '/scripts/native-bundle.mjs': 'export function verifyNativeBundle() {}',
     '/scripts/sync-reports.mjs': `${prelude}\nexport async function syncReports() { record('syncReports'); return { status: 'disabled', fresh: [] }; }`,
     '/scripts/publish-fixed.mjs': `${prelude}\nexport async function publishFixed() { record('publishFixed'); }`,
@@ -201,13 +206,14 @@ export const buildManifest = (fixed) => ({ fixed });`,
   // channel policy, manifest writer, and publication control flow run unchanged.
   writeFileSync(join(root, 'loader.mjs'), `const modules = ${JSON.stringify(modules)};
 export async function load(url, context, nextLoad) {
+  if (process.env.O8_CHANNEL_TEST_REAL_REPORTS === '1' && (url.endsWith('/scripts/lib/fixed-reports.mjs') || url.endsWith('/scripts/publish-fixed.mjs'))) return nextLoad(url, context);
   const key = Object.keys(modules).find(key => url === key || url.endsWith(key));
   return key ? { format: 'module', shortCircuit: true, source: modules[key] } : nextLoad(url, context);
 }`);
   writeFileSync(join(root, 'register.mjs'), `${prelude}
 import { register } from 'node:module';
 register(new URL('./loader.mjs', import.meta.url));
-globalThis.fetch = async () => { record('announceRelease'); return { ok: true }; };`);
+globalThis.fetch = async (url, options) => { record(url.includes('/fixed') ? 'fixedAnnouncement' : 'announceRelease', [options?.body || '']); return { ok: true }; };`);
   return { root, bundle, dmgApp, log, version };
 }
 
@@ -223,7 +229,7 @@ function run(f: ReturnType<typeof fixture>, channel: string, args: string[] = []
       O8_DATA_DIR: join(f.root, 'data'),
       CORTEX_IDE_DATA_DIR: join(f.root, 'data'),
       O8_RELEASE_CHANNEL: channel,
-      O8_PROMOTE_LOCK_PATH: join(f.root, 'feeds.lock'),
+      O8_UPDATE_FEED_LOCK_PATH: join(f.root, 'feeds.lock'),
       O8_RELEASE_SUMMARY_CACHE_DIR: join(f.root, 'summary-cache'),
       O8_CHANNEL_TEST_VERSION: f.version,
       O8_CHANNEL_TEST_LOG: f.log,
@@ -284,26 +290,39 @@ afterEach(() => {
   while (roots.length) rmSync(roots.pop()!, { recursive: true, force: true });
 });
 
-describe('release channels through the publication entry point', () => {
-  it('runs the ship command to beta through its publication subprocess', () => {
-    const f = fixture('0.1.900');
-    const noop = { command: process.execPath, args: ['-e', ''] };
-    const buildProfile = realpathSync(mkdtempSync(join(tmpdir(), 'o8-beta-build-profile-')));
-    roots.push(buildProfile);
-    const plan = join(f.root, 'ship-plan.json');
-    writeFileSync(plan, JSON.stringify({ preflight: noop, build: noop, notarize: noop,
-      publish: { command: process.execPath, args: ['--import', join(f.root, 'register.mjs'), releaseScript] } }));
-    const result = run(f, '', ['--ship'], {
-      O8_RELEASE_TEST_MODE: '1', O8_RELEASE_TEST_PLAN: plan, O8_CHANNEL_TEST_SHIP: '1',
-      O8_RELEASE_BUILD_DATA_DIR: buildProfile,
-      O8_RELEASE_LOCK_PATH: join(f.root, 'ship.lock'), O8_RELEASE_BROADCAST_CLI: join(f.root, 'absent-broadcast'),
-    });
-    expect(result.status, result.stderr).toBe(0);
-    expect(existsSync(join(f.bundle, 'macos/beta.json'))).toBe(true);
-    expect(existsSync(join(f.bundle, 'macos/latest.json'))).toBe(true);
-    expect(effects(f).filter(c => c.name === 'gh' && c.args[1] === 'create')).toHaveLength(2);
-  });
+it('has no promotion entry point', () => {
+  expect(existsSync(join(process.cwd(), 'scripts/promote.mjs'))).toBe(false);
+  expect(JSON.parse(readFileSync(join(process.cwd(), 'package.json'), 'utf8')).scripts).not.toHaveProperty('promote');
+});
 
+it.each(['', 'stable'])('matches main stable release steps for channel "%s"', channel => {
+  const f = fixture('0.1.903');
+  const relevant = () => effects(f).filter(c => ['syncReports', 'resolveNewFixes', 'readPublished',
+    'warmUpdatePublication', 'publishFixed', 'announceRelease', 'bash'].includes(c.name)
+    || (c.name === 'gh' && ['create', 'edit', 'upload'].includes(c.args[1])));
+  // Recorded from main at 1959acc989, whose stable path is unchanged in c0049e34c7.
+  const expectedSteps = ['syncReports', 'resolveNewFixes', 'readPublished', 'gh', 'gh',
+    'warmUpdatePublication', 'bash', 'publishFixed', 'announceRelease'];
+  const actual = run(f, channel);
+  expect(actual.status, actual.stderr).toBe(0);
+  expect(relevant().map(c => c.name)).toEqual(expectedSteps);
+  for (const call of relevant().filter(c => c.name === 'gh')) {
+    expect(call.args.slice(0, 3)).toEqual(['release', 'create', `v${f.version}`]);
+    expect(call.args).toEqual(expect.arrayContaining([join(f.bundle, 'macos/latest.json'), join(f.bundle, 'macos/fixed.json')]));
+    expect(call.args).not.toContain('--prerelease');
+    expect(call.args).not.toContain('--latest=false');
+  }
+});
+
+it('reconciles every report since stable, including fixes first published in beta', () => {
+  verifyStableAfterBeta(fixture, run, effects);
+});
+
+it('runs the ship command to beta through its publication subprocess', () => {
+  verifyBetaBuildWorkflow(fixture('0.1.900'), run, effects, releaseScript);
+});
+
+describe('release channels through the publication entry point', () => {
   it('ships a normal version to beta only and advances the rolling beta feed', () => {
     const f = fixture('0.1.900');
     const result = run(f, 'beta');
@@ -316,10 +335,8 @@ describe('release channels through the publication entry point', () => {
       expect(call.args).toContain('--latest=false');
     }
     expect(calls.filter(c => c.name === 'gh' && c.args[1] === 'upload' && c.args.includes('v0.1.800'))).toHaveLength(2);
-    const compatibility = join(f.bundle, 'macos/latest.json');
-    expect(JSON.parse(readFileSync(compatibility, 'utf8'))).toEqual(manifest);
-    expect(calls.filter(c => c.name === 'gh' && c.args[1] === 'create').every(c => c.args.includes(compatibility))).toBe(true);
-    expect(calls.filter(c => c.name === 'gh' && c.args[1] === 'upload').some(c => c.args.includes(compatibility))).toBe(false);
+    expect(existsSync(join(f.bundle, 'macos/latest.json'))).toBe(false);
+    expect(calls.filter(c => c.name === 'gh' && ['create', 'upload', 'edit'].includes(c.args[1])).some(c => c.args.some(arg => arg.endsWith('/latest.json') || arg.endsWith('/fixed.json')))).toBe(false);
     expect(calls.some(c => c.args.some(arg => arg.endsWith('/fixed.json')))).toBe(false);
     expect(calls.some(c => ['syncReports', 'publishFixed', 'announceRelease', 'bash'].includes(c.name))).toBe(false);
   });
@@ -515,20 +532,6 @@ describe('release channels through the publication entry point', () => {
     expect(result.stdout).not.toContain('installed o8.app will pick up');
   });
 
-  it('defaults normal publication to beta and leaves stable effects untouched', () => {
-    const f = fixture('0.1.741');
-    const result = run(f, '');
-    expect(result.status, result.stderr).toBe(0);
-    const calls = effects(f);
-    expect(calls.filter(c => c.name === 'gh' && c.args[1] === 'create')).toHaveLength(2);
-    expect(calls.some(c => c.args.includes('--prerelease'))).toBe(true);
-    for (const name of ['syncReports', 'resolveNewFixes', 'publishFixed', 'announceRelease', 'bash']) {
-      expect(calls.some(c => c.name === name), name).toBe(false);
-    }
-    expect(existsSync(join(f.bundle, 'macos/beta.json'))).toBe(true);
-    expect(existsSync(join(f.bundle, 'macos/latest.json'))).toBe(true);
-  });
-
   it('refuses publication when the app backing the arm64 updater entry is x86_64-only', () => {
     const f = fixture('0.1.741');
     writeFileSync(join(f.bundle, 'macos', 'o8.app', 'Contents', 'MacOS', 'o8'), thinMachO(CPU_TYPE_X86_64));
@@ -689,8 +692,8 @@ describe('release channels through the publication entry point', () => {
     expect(effects(f).some(c => ['publishFixed', 'announceRelease', 'bash'].includes(c.name))).toBe(false);
   });
 
-  it('keeps normal versions on the beta publication policy', () => {
-    expect(resolveReleaseChannel('0.1.741', {})).toMatchObject({ channel: 'beta', githubFlags: ['--prerelease', '--latest=false'], manifestName: 'beta.json' });
+  it('keeps normal versions on the stable publication policy', () => {
+    expect(resolveReleaseChannel('0.1.741', {})).toMatchObject({ channel: 'stable', githubFlags: [], manifestName: 'latest.json', publishStableEffects: true });
   });
 
   it('keeps the manual hosted fallback draft-only and preview-only', () => {
@@ -787,7 +790,7 @@ it.each(['o8_0.1.900_universal.dmg', 'o8.app.tar.gz', 'o8.app.tar.gz.sig', 'beta
   expect(run(f, 'beta', [], { ...f.env, O8_CHANNEL_TEST_FAIL_MIRROR: '1' }).status).toBe(1);
   const published = join(f.directory(f.repos[0], `v${f.version}`), asset);
   writeFileSync(published, 'changed existing content');
-  for (const name of ['beta.json', 'latest.json']) rmSync(join(f.bundle, 'macos', name));
+  for (const name of ['beta.json']) rmSync(join(f.bundle, 'macos', name));
   writeFileSync(f.log, '');
   const result = run(f, 'beta', [], f.env);
   expect(result.status, result.stderr).toBe(1);

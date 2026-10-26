@@ -26,7 +26,7 @@ Shared screen layout rules, explicit agent readiness, independent project discov
 
 Direct tool sign-in recovery, explicit workspace continuation, restart intent, and focus and sound follow-through are implemented in [#3374](https://github.com/o8-run/o8/pull/3374). A ready discovery result enables continuation; opening a sign-in surface never starts authentication automatically. Source completion does not establish installed acceptance or a release; voice and mobile acceptance remain with their existing work.
 
-Beta enrollment and manifest-only promotion are under review in [#4798](https://github.com/o8-run/o8/issues/4798). Stable remains the default. Source checks do not establish primary-service deployment, installed acceptance or release.
+Beta enrollment is under review in [#4798](https://github.com/o8-run/o8/issues/4798). Promotion is tracked separately in [#4857](https://github.com/o8-run/o8/issues/4857). Stable remains the default. Source checks do not establish primary-service deployment, installed acceptance or release.
 
 Default-on usage analytics, with a first-run disclosure, preserved opt-outs and a matching privacy page, merged in [#3046](https://github.com/o8-run/o8/pull/3046) and ships with the next release. Update-service delivery in the installed updater and trustworthy active-install counts remain unverified.
 
