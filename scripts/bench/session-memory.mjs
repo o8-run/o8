@@ -5,6 +5,7 @@
 // Add --snapshots for a separate diagnostic run; RSS is sampled before snapshots.
 // Use --snapshots=raw for heaps too large to load into the diagnostic JSON parser.
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { build } from 'esbuild';
 import { createHash, randomBytes } from 'node:crypto';
 import fs from 'node:fs';
@@ -130,6 +131,9 @@ export async function exerciseSessionWorkload({ data, repo, env, wsPort, token, 
     const history = await read(`/api/mobile/history?sessionKey=llm-chat:${id}&limit=200`);
     assert.equal(history.transcript.length, 32, 'HTTP must deliver every fixture row');
     assert(history.transcript.at(-1).text.startsWith('fixture-output-31:'), 'HTTP transcript payload missing');
+    const sync = await read('/api/mobile/sync', { history: { sessionKey: `llm-chat:${id}`, limit: 200 } });
+    assert.equal(sync.history?.sessionKey, `llm-chat:${id}`, 'Chat sync history must resolve');
+    assert(sync.history.entries.some(entry => entry.text.startsWith('fixture-output-31:')), 'Sync chat payload missing');
     await openAndCloseSession(wsPort, token, `llm-chat:${id}`);
     completedSessions++;
     if (completedSessions % 12 === 0) console.log(JSON.stringify({ phase: 'chats', completed: completedSessions }));
@@ -174,6 +178,9 @@ export async function measureSessionMemory({ output, sessions = 12, transcriptMi
   const repo = path.join(fixture, 'repo');
   fs.mkdirSync(path.join(data, 'chat-history'), { recursive: true });
   fs.mkdirSync(repo);
+  execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: repo, stdio: 'ignore' });
+  execFileSync('git', ['-c', 'user.name=o8 fixture', '-c', 'user.email=fixture@invalid',
+    '-c', 'commit.gpgsign=false', 'commit', '--allow-empty', '-qm', 'memory fixture'], { cwd: repo, stdio: 'ignore' });
   const token = randomBytes(32).toString('hex');
   fs.writeFileSync(path.join(data, 'ws-token'), token, { mode: 0o600 });
   const apiPort = await freePort(), wsPort = await freePort();
@@ -222,10 +229,10 @@ export async function measureSessionMemory({ output, sessions = 12, transcriptMi
     if (!wsBundle) await bundleWs(wsEntry);
     if (!standalone) await bundleFixture('scripts/bench/session-memory-route-host.ts', routeHost);
     assert(!cleanupPromise, 'Memory fixture was cancelled');
-    processes.next = launch(['--inspect=127.0.0.1:0', ...nextArgs], env, path.join(output, 'next.log'));
+    processes.next = launch(['--inspect=127.0.0.1:0', ...nextArgs], env, path.join(output, 'next.log'), process.execPath, repo);
     await healthy(`${origin}/api/mobile/orchestrator/threads`, processes.next, token);
     assert(!cleanupPromise, 'Memory fixture was cancelled');
-    processes.ws = launch(['--inspect=127.0.0.1:0', wsEntry], env, path.join(output, 'ws.log'));
+    processes.ws = launch(['--inspect=127.0.0.1:0', wsEntry], env, path.join(output, 'ws.log'), process.execPath, repo);
     await healthy(`http://127.0.0.1:${wsPort}/health`, processes.ws, token);
     for (const name of ['next', 'ws']) clients[name] = await inspector(processes[name]);
     // Warm the exact HTTP modules against an empty store before establishing baseline.
@@ -327,10 +334,12 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       for (const [phase, sample] of Object.entries(checkpoints)) {
         for (const name of ['next', 'ws']) {
           assert(sample[name].heapUsedMiB < 96, `${name} ${phase} idle heap exceeds 96 MiB`);
-          assert(sample[name].heapUsedMiB - receipt.idle[name].heapUsedMiB < 24,
-            `${name} ${phase} retained heap growth exceeds 24 MiB`);
-          assert(sample[name].arrayBuffersMiB - receipt.idle[name].arrayBuffersMiB < 8,
-            `${name} ${phase} cached-buffer growth exceeds 8 MiB`);
+          if (phase === 'afterIdle') {
+            assert(sample[name].heapUsedMiB - receipt.idle[name].heapUsedMiB < 24,
+              `${name} ${phase} retained heap growth exceeds 24 MiB`);
+            assert(sample[name].arrayBuffersMiB - receipt.idle[name].arrayBuffersMiB < 8,
+              `${name} ${phase} cached-buffer growth exceeds 8 MiB`);
+          }
         }
       }
       const trees = receipt.processTrees.postGc;

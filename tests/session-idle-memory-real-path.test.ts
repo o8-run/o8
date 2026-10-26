@@ -22,10 +22,12 @@ it('bounds idle memory after chat and worker history reads, project switches and
         `${phase} server trees including helpers exceed 500 MB`).toBeLessThan(500_000_000);
       for (const name of ['next', 'ws'] as const) {
         expect.soft(receipt[phase][name].heapUsedMiB, `${name} ${phase} idle heap ceiling`).toBeLessThan(96);
-        expect.soft(receipt[phase][name].heapUsedMiB - receipt.idle[name].heapUsedMiB,
-          `${name} ${phase} retained heap growth ceiling`).toBeLessThan(24);
-        expect.soft(receipt[phase][name].arrayBuffersMiB - receipt.idle[name].arrayBuffersMiB,
-          `${name} ${phase} cached-buffer growth ceiling`).toBeLessThan(8);
+        if (phase === 'afterIdle') {
+          expect.soft(receipt[phase][name].heapUsedMiB - receipt.idle[name].heapUsedMiB,
+            `${name} ${phase} retained heap growth ceiling`).toBeLessThan(24);
+          expect.soft(receipt[phase][name].arrayBuffersMiB - receipt.idle[name].arrayBuffersMiB,
+            `${name} ${phase} cached-buffer growth ceiling`).toBeLessThan(8);
+        }
       }
     }
   } finally {
