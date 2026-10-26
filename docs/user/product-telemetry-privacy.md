@@ -20,19 +20,24 @@ The complete usage event list is:
   whether it was pushed, recorded as yes or no.
 - repo.added: a project was added; only whether it has a remote and whether it
   is a version-controlled project, recorded as yes or no.
-- worker.first_launched: the first successful worker launch; no extra fields.
-- merge.first_completed: the first completed merge; no extra fields.
+- worker.first_launched: the first successful worker launch observed while
+  sharing is on; no extra fields.
+- merge.first_completed: the first completed merge observed while sharing is
+  on; no extra fields.
 - session.ended: an o8 backend session ended; only the clean field, a yes-or-no
-  value saying whether its exit was clean.
+  value saying whether a clean exit was recorded.
 
-First-step markers stay on this installation across restarts and updates. Older
-activity is not reconstructed. A step
-that first happens while sharing is off is never replayed after sharing is
-turned on. Delivery is best effort. A graceful backend shutdown is clean; an
-interrupted backend is counted as unclean at the next launch. A session with
-no enabled usage activity is not recovered for reporting. Live sibling backends
-are not treated as interrupted sessions. No session or process identifier is
-sent.
+While sharing is off, o8 does not read or write usage analytics files, including
+first-step and backend session markers. First steps are counted from activity
+observed while sharing is on. Those markers stay on this installation across
+restarts and updates. Off activity is not stored, queued, or reconstructed
+after sharing is turned on. Delivery is best effort. A graceful backend shutdown
+reported while sharing is on is clean. An enabled session marker left by a
+process that is now gone is counted as unclean at the next enabled launch.
+While sharing is off, existing markers are left untouched and session endings
+are not recorded. A marker without enabled usage is not recovered for reporting.
+Live sibling backends are not treated as interrupted sessions. No session or
+process identifier is sent.
 
 Unknown events and invalid fields are rejected. Extra fields are removed.
 Usage payloads never contain code, prompts, repository names, file paths, diffs,

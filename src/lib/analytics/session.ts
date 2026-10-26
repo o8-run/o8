@@ -5,6 +5,8 @@ import { emitProductEvent, isProductTelemetryEnabled } from './server';
 import { productAnalyticsDir, productSessionFile, readProductSessionMarker, writeProductSession } from './state';
 
 let activeFile: string | null = null;
+// A backend lifetime can begin while off without creating analytics files.
+let sessionStarted = false;
 function isGone(pid: number): boolean {
   try { process.kill(pid, 0); return false; }
   catch (error) { return (error as NodeJS.ErrnoException).code === 'ESRCH'; }
@@ -14,7 +16,9 @@ function isGone(pid: number): boolean {
  * reported on the next launch; live sibling backends are left alone. */
 export async function startProductSession(): Promise<void> {
   if (activeFile) return;
+  sessionStarted = true;
   try {
+    if (!isProductTelemetryEnabled()) return;
     const pending: boolean[] = [];
     const root = productAnalyticsDir();
     const entries = (() => { try { return readdirSync(root); } catch { return []; } })();
@@ -34,7 +38,7 @@ export async function startProductSession(): Promise<void> {
         pending.push(marker.enabled);
       } catch { /* Missing, corrupt, or already claimed: fail closed. */ }
     }
-    writeProductSession(isProductTelemetryEnabled());
+    writeProductSession(true);
     activeFile = productSessionFile();
     for (const enabled of pending) {
       if (enabled) await emitProductEvent('session.ended', { clean: false });
@@ -44,14 +48,16 @@ export async function startProductSession(): Promise<void> {
   }
 }
 
-/** Consume the marker before sending so repeated shutdown callbacks cannot
- * report twice. A forced shutdown is unclean; no process details leave here. */
+/** Consume eligible markers before sending so repeated shutdown callbacks
+ * cannot report twice. While off, leave every analytics file untouched. */
 export async function endProductSession(clean: boolean): Promise<void> {
   const marker = activeFile;
-  if (!marker) return;
+  if (!sessionStarted) return;
+  sessionStarted = false;
   activeFile = null;
   try {
-    rmSync(marker, { force: true });
+    if (!isProductTelemetryEnabled()) return;
+    if (marker) rmSync(marker, { force: true });
     await emitProductEvent('session.ended', { clean });
   } catch {
     // Telemetry must not affect shutdown.
