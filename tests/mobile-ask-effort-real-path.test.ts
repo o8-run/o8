@@ -31,6 +31,8 @@ import { POST as runTurn } from '@/app/api/mobile/symon/text-turn/route';
 
 const root = mkdtempSync(join(tmpdir(), 'o8-mobile-ask-effort-'));
 const capture = join(root, 'launches.jsonl');
+const rejection = join(root, 'rejection.txt');
+const rejectionReason = 'The selected model does not support effort xhigh; use low, medium, or high.';
 const selectedModel = MOBILE_ASK_MODEL_IDS[3];
 const route = resolveMobileAskRoute(selectedModel, { claude: true, codex: true }, 'high');
 if (route.kind === 'managed') throw new Error('Fixture model must have a local route.');
@@ -47,6 +49,18 @@ process.stdin.setEncoding('utf8');
 process.stdin.on('data', chunk => { prompt += chunk; });
 process.stdin.on('end', () => {
   fs.appendFileSync(${JSON.stringify(capture)}, JSON.stringify({ args: process.argv.slice(2), prompt }) + '\\n');
+  const mode = fs.existsSync(${JSON.stringify(rejection)}) ? fs.readFileSync(${JSON.stringify(rejection)}, 'utf8') : '';
+  if (mode === 'stderr') { process.stderr.write(${JSON.stringify(rejectionReason)}); process.exit(2); }
+  if (mode === 'result') {
+    console.log(JSON.stringify({ type: 'result', subtype: 'error_during_execution', is_error: true, result: ${JSON.stringify(rejectionReason)} }));
+    return;
+  }
+  if (mode === 'errors') {
+    console.log(JSON.stringify({ type: 'result', subtype: 'error_during_execution', is_error: true, errors: [${JSON.stringify(rejectionReason)}] }));
+    return;
+  }
+  const outputIndex = process.argv.indexOf('--output-last-message');
+  if (outputIndex >= 0) fs.writeFileSync(process.argv[outputIndex + 1], 'Fixture answer');
   console.log(JSON.stringify({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Fixture answer' } } }));
   console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'Fixture answer' }));
 });
@@ -55,6 +69,7 @@ process.stdin.on('end', () => {
 });
 
 beforeEach(() => {
+  rmSync(rejection, { force: true });
   writeFileSync(capture, '');
   writeSymonTextBrainMode('planner');
   h.reportedEffort = null;
@@ -88,8 +103,8 @@ function request(path: string, body: object): NextRequest {
     body: JSON.stringify(body),
   });
 }
-function generation(effort?: unknown, stream = false) {
-  return request('genui/stream', { model: selectedModel, effort, stream, messages: [{ role: 'user', content: 'Fixture question' }] });
+function generation(effort?: unknown, stream = false, model: string = selectedModel) {
+  return request('genui/stream', { model, effort, stream, messages: [{ role: 'user', content: 'Fixture question' }] });
 }
 function launches(): Array<{ args: string[]; prompt: string }> {
   return readFileSync(capture, 'utf8').trim().split('\n').filter(Boolean).map((line) => JSON.parse(line));
@@ -100,6 +115,34 @@ function sessions(): string | null {
 }
 
 describe.skipIf(process.platform === 'win32')('phone Ask effort through routes, persisted sessions and actual worker launch', () => {
+  it.each(['stderr', 'result', 'errors'])('returns the worker effort rejection reason from %s in JSON and streaming responses', async (mode) => {
+    writeFileSync(rejection, mode);
+    for (const stream of [false, true]) {
+      const response = await generate(generation('xhigh', stream));
+      expect(await response.text()).toContain(rejectionReason);
+      resetWarmReplPool();
+    }
+  });
+
+  it('returns the second local adapter rejection reason', async () => {
+    writeFileSync(rejection, 'stderr');
+    const response = await generate(generation('xhigh', false, MOBILE_ASK_MODEL_IDS[5]));
+    expect(await response.text()).toContain(rejectionReason);
+  });
+
+  const generationCases = MOBILE_ASK_MODEL_IDS.filter((model) => model !== 'auto' && model !== 'managed-free')
+    .flatMap((model) => ['low', 'medium', 'high'].map((effort) => [model, effort]));
+  it.each(generationCases)('preserves the generation CLI pin for %s at %s', async (model, effort) => {
+    const response = await generate(generation(effort, false, model));
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain('Fixture answer');
+    const [launch] = launches();
+    const passed = launch.args.includes('--effort')
+      ? launch.args[launch.args.indexOf('--effort') + 1]
+      : launch.args.find((arg) => arg.startsWith('model_reasoning_effort='))?.split('=')[1];
+    expect(passed).toBe(effort);
+    expect(response.headers.get('X-O8-Ask-Effort')).toBe(effort);
+  });
   it.each([false, true])('keeps an explicit low pin in worker arguments and the response receipt (stream %s)', async (stream) => {
     const response = await generate(generation('low', stream));
     expect(response.status).toBe(200);

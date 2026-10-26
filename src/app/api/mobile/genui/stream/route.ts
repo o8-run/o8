@@ -228,7 +228,7 @@ export async function POST(req: NextRequest) {
         return NextResponse.json(completionBody(id, created, routeSelection.cliModel, text), { headers: receiptHeaders });
       } catch (error) {
         console.error('[genui] Claude completion failed:', error instanceof Error ? error.message : 'unknown');
-        return jsonError('Generation failed on the Claude CLI tier.', 502);
+        return jsonError(error instanceof Error ? error.message : 'Generation failed.', 502);
       }
     }
 
@@ -255,7 +255,7 @@ export async function POST(req: NextRequest) {
           .catch((error) => {
             console.error('[genui] Claude stream failed:', error instanceof Error ? error.message : 'unknown');
             try {
-              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: { message: 'Generation failed on the Claude CLI tier.' } })}\n\n`));
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: { message: error instanceof Error ? error.message : 'Generation failed.' } })}\n\n`));
               controller.enqueue(encoder.encode('data: [DONE]\n\n'));
               controller.close();
             } catch { /* already closed */ }
@@ -278,7 +278,7 @@ export async function POST(req: NextRequest) {
       });
     } catch (error) {
       console.error('[genui] Codex completion failed:', error instanceof Error ? error.message : 'unknown');
-      return jsonError('Generation failed on the Codex CLI tier.', 502);
+      return jsonError(error instanceof Error ? error.message : 'Generation failed.', 502);
     }
     if (!wantStream) {
       return NextResponse.json(completionBody(id, created, routeSelection.cliModel, text), { headers: receiptHeaders });
