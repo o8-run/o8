@@ -26,6 +26,10 @@ vi.mock('@/lib/runtime/actions', async (importOriginal) => {
   const original = await importOriginal<typeof import('@/lib/runtime/actions')>();
   return { ...original, launchRuntimeSurface: h.launch };
 });
+vi.mock('@/lib/codex/service-tier-catalogue', () => ({ getCodexSpeedCatalogue: async () => ({
+  models: { 'gpt-6.1-sol': [], 'gpt-6-luna': [] }, defaultModel: 'gpt-6.1-sol',
+  reasoningEfforts: { 'gpt-6.1-sol': ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'], 'gpt-6-luna': ['low', 'medium', 'high', 'xhigh', 'max'] },
+}) }));
 vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: h.publish }));
 vi.mock('@/lib/command-center/snapshot', () => ({ invalidateCommandCenterSnapshotCaches: vi.fn() }));
 vi.mock('@/lib/mobile/inbox', () => ({ invalidateInboxCache: vi.fn() }));
@@ -34,6 +38,22 @@ const dataDir = mkdtempSync(join(os.tmpdir(), 'o8-runtime-launch-idempotency-'))
 process.env.O8_DATA_DIR = dataDir;
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
 process.env.CORTEX_IDE_OWNED_CODEX_ROOT = join(dataDir, 'owned-codex');
+
+const modelFile = join(dataDir, 'models.json');
+const museBinary = join(dataDir, 'muse.cjs');
+vi.stubEnv('O8_MUSE_BIN', museBinary);
+vi.stubEnv('XDG_CONFIG_HOME', join(dataDir, 'config'));
+vi.stubEnv('XDG_DATA_HOME', join(dataDir, 'native-data'));
+writeFileSync(museBinary, `#!${process.execPath}
+if(process.argv.includes('--version')){console.log('1.4.7');process.exit(0);}
+require('node:readline').createInterface({input:process.stdin}).on('line',line=>{
+ const m=JSON.parse(line);if(!m.id)return;
+ let result={};
+ if(m.method==='initialize')result={schema:{version:1,fingerprint:'fixture'},grantedCapabilities:['sessionMcp'],museHome:${JSON.stringify(join(dataDir, 'native-data', 'muse'))}};
+ if(m.method==='model/list')result={providerId:'meta',profileId:null,source:'fixture',models:JSON.parse(require('node:fs').readFileSync(${JSON.stringify(modelFile)},'utf8'))};
+ console.log(JSON.stringify({jsonrpc:'2.0',id:m.id,result}));
+}).on('close',()=>process.exit(0));
+`, { mode: 0o700 });
 
 const route = await import('@/app/api/runtime/launch/route');
 const idempotency = await import('@/lib/orchestrator/idempotency-store');
@@ -64,6 +84,7 @@ function successfulResult(request: RuntimeLaunchRequest): RuntimeLaunchResult {
 
 afterAll(() => {
   closeDb();
+  vi.unstubAllEnvs();
   rmSync(dataDir, { recursive: true, force: true });
 });
 
@@ -72,6 +93,7 @@ describe('runtime launch persisted idempotency through the real route', () => {
     h.launch.mockReset();
     h.launch.mockImplementation(async (request) => successfulResult(request));
     h.publish.mockClear();
+    writeFileSync(modelFile, JSON.stringify([{ providerId: 'meta', modelId: 'muse-wonder', variants: ['high'] }]));
     idempotency.__resetIdempotencyStoreForTests();
   });
 
@@ -172,6 +194,15 @@ describe('runtime launch persisted idempotency through the real route', () => {
     }));
     expect(response.status).toBe(200);
     expect(h.launch).toHaveBeenCalledExactlyOnceWith(expect.objectContaining(selection));
+  });
+
+  it('refuses a previously supported choice after its discovered model evidence changes', async () => {
+    writeFileSync(modelFile, JSON.stringify([{ providerId: 'meta', modelId: 'muse-wonder', variants: ['low'] }]));
+    const response = await route.POST(post({ runtime: 'muse', model: 'muse-wonder', effort: 'high',
+      prompt: 'Inspect the fixture.', cwd: dataDir, clientMutationId: 'refused-discovered-effort' }));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ code: 'effort_unsupported_model' });
+    expect(h.launch).not.toHaveBeenCalled();
   });
 
   it.each([

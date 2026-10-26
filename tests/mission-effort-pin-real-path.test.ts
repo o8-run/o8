@@ -1,3 +1,4 @@
+import { codexModelListFixtureScript } from './helpers/codex-model-list-fixture';
 /**
  * Mission reasoning-effort pin (#2519) — real path.
  *
@@ -284,6 +285,7 @@ if (args.includes('--version')) {
   process.stdout.write('codex-cli 0.145.0\\n');
   process.exit(0);
 }
+${codexModelListFixtureScript()}
 appendFileSync(${JSON.stringify(argsPath)}, JSON.stringify(args) + '\\n');
 const outputIndex = args.indexOf('--output-last-message');
 if (outputIndex >= 0 && args[outputIndex + 1]) {
@@ -292,7 +294,7 @@ if (outputIndex >= 0 && args[outputIndex + 1]) {
 }
 process.stdout.write(JSON.stringify({ type: 'thread.started', thread_id: 'worker-' + process.pid }) + '\\n');
 process.stdout.write(JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 1, output_tokens: 1 } }) + '\\n');
-`;
+}`;
   writeFileSync(fakeCodexPath, fixture, 'utf8');
   chmodSync(fakeCodexPath, 0o755);
   stubExternalFetch();

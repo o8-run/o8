@@ -1,6 +1,6 @@
 import { providerFromConfig } from './controlled-provider';
 import { assertOwnedActionFence } from './action-fence';
-import { assertRuntimeEffortPin } from '@/lib/orchestrator/effort-pin';
+import { assertRuntimeEffortPin, EffortPinRejectionError, resolveEffortPin } from '@/lib/orchestrator/effort-pin';
 import { ownedSupervisorClient } from '@/lib/runtime/o8d-supervisor';
 /**
  * createOwnedSessionStore — the generic primitive.
@@ -156,7 +156,14 @@ export function createOwnedSessionStore(
 
   async function launch(request: OwnedLaunchRequest): Promise<OwnedLaunchResponse> {
     const executionPolicy = createOwnedExecutionPolicy(request, runtimeId);
-    await assertRuntimeEffortPin(runtimeId, request.model ?? adapter.defaultModel, request.effort, { cwd: request.cwd, runtimeConfig: request.runtimeConfig });
+    if (runtimeId === 'codex' && request.packetId) {
+      // The durable packet account is resolved below. Do not judge its model
+      // against a different account selected for future workers.
+      const pin = resolveEffortPin({ runtime: runtimeId, model: request.model ?? adapter.defaultModel ?? null, requestedEffort: request.effort });
+      if (!pin.ok) throw new EffortPinRejectionError(pin.code, pin.message);
+    } else {
+      await assertRuntimeEffortPin(runtimeId, request.model ?? adapter.defaultModel, request.effort, { cwd: request.cwd, runtimeConfig: request.runtimeConfig });
+    }
     const prompt = request.prompt.trim();
     if (!prompt) {
       throw new Error('prompt is required');
@@ -218,7 +225,7 @@ export function createOwnedSessionStore(
     }
 
     const runtimeConfig = adapter.captureRuntimeConfig ? adapter.captureRuntimeConfig(request.runtimeConfig) : request.runtimeConfig;
-    if (runtimeId === 'muse') await assertRuntimeEffortPin(runtimeId, request.model, request.effort, { cwd: repoPath,
+    if (runtimeId === 'muse' || runtimeId === 'codex') await assertRuntimeEffortPin(runtimeId, request.model, request.effort, { cwd: repoPath, configHome: selectedIdentity?.configHomeRef,
       runtimeConfig: { ...runtimeConfig, ...(selectedIdentity ? { museConfigRoot: selectedIdentity.configHomeRef } : {}) } });
     const createdAt = nowIso();
     const session = {
@@ -305,7 +312,7 @@ export function createOwnedSessionStore(
   async function resumeInner(surfaceId: string, prompt: string) {
     let session = await io.findSession(surfaceId);
     await assertOwnedActionFence(surfaceId, session);
-    if (session) await assertRuntimeEffortPin(runtimeId, session.model, session.effort, { cwd: session.repoPath, runtimeConfig: { ...session.runtimeConfig, ...(session.identity ? { museConfigRoot: session.identity.configHomeRef } : {}) } });
+    if (session) await assertRuntimeEffortPin(runtimeId, session.model, session.effort, { cwd: session.repoPath, configHome: session.identity?.configHomeRef ?? (runtimeId === 'codex' ? adapter.defaultConfigHome?.() : undefined), runtimeConfig: { ...session.runtimeConfig, ...(session.identity ? { museConfigRoot: session.identity.configHomeRef } : {}) } });
     assertOwnedActionAdmission(session);
     refuseOwnedSingleAttemptResume(session);
     const automaticRunId = requestedAutomaticRecoveryRun(surfaceId);
@@ -320,7 +327,7 @@ export function createOwnedSessionStore(
 
     if (!session) {
       const archived = await io.findArchivedSession(surfaceId);
-      if (archived) await assertRuntimeEffortPin(runtimeId, archived.model, archived.effort, { cwd: archived.repoPath, runtimeConfig: { ...archived.runtimeConfig, ...(archived.identity ? { museConfigRoot: archived.identity.configHomeRef } : {}) } });
+      if (archived) await assertRuntimeEffortPin(runtimeId, archived.model, archived.effort, { cwd: archived.repoPath, configHome: archived.identity?.configHomeRef ?? (runtimeId === 'codex' ? adapter.defaultConfigHome?.() : undefined), runtimeConfig: { ...archived.runtimeConfig, ...(archived.identity ? { museConfigRoot: archived.identity.configHomeRef } : {}) } });
       refuseOwnedSingleAttemptResume(archived);
       if (archived?.threadId) {
         const restore = await restoreArchivedOwnedSessionDir(root, surfaceId, surfacePrefix);

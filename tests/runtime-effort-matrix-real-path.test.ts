@@ -13,6 +13,8 @@ const h = vi.hoisted(() => ({ launch: vi.fn<(request: RuntimeLaunchRequest) => P
 vi.mock('@/lib/runtime/actions', async importOriginal => ({
   ...await importOriginal<typeof import('@/lib/runtime/actions')>(), launchRuntimeSurface: h.launch,
 }));
+vi.mock('@/lib/codex/service-tier-catalogue', () => ({ getCodexSpeedCatalogue: async () =>
+  (await import('./helpers/codex-model-list-fixture')).codexEffortCatalogFixture }));
 vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: vi.fn(async () => {}) }));
 vi.mock('@/lib/command-center/snapshot', () => ({ invalidateCommandCenterSnapshotCaches: vi.fn() }));
 vi.mock('@/lib/mobile/inbox', () => ({ invalidateInboxCache: vi.fn() }));

@@ -1,3 +1,7 @@
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import { getCodexSpeedCatalogue } from '@/lib/codex/service-tier-catalogue';
+import { getSelectedRuntimeIdentity } from '@/lib/runtime/identity-catalog';
 import { codexCliSupportsUltraEfforts, resolveCodexReasoningEffort } from '@/lib/codex/reasoning-effort';
 import { parseLocalModel } from '@/lib/codex/local-model';
 import { getRuntimeCapability, isOrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
@@ -172,7 +176,8 @@ export function resolveEffortPin(input: ResolveEffortPinInput): ResolveEffortPin
       message: `This o8 mission route cannot honor effort "${raw}" because ${requested} is not compatible with runtime "${input.runtime}" and the launch would silently fall back to a different model. Pin a compatible model or omit --effort.`,
     };
   }
-  if (input.runtime === 'muse' && (!actualModel || !input.modelEfforts?.includes(raw))) {
+  if ((input.runtime === 'muse' || (input.runtime === 'codex' && Object.hasOwn(input, 'modelEfforts')))
+    && (!actualModel || !input.modelEfforts?.includes(raw))) {
     return { ok: false, code: 'effort_unsupported_model',
       message: `Cannot honor effort "${raw}" for model "${actualModel ?? 'runtime default'}": its current account catalog does not establish that selection. Choose a listed model and effort or omit effort.` };
   }
@@ -193,8 +198,22 @@ export function resolveEffortPin(input: ResolveEffortPinInput): ResolveEffortPin
 }
 
 /** Shared last admission boundary for owned launch, cold resume and automatic retries. */
-export async function resolveRuntimeEffortPin(input: ResolveEffortPinInput, context: { cwd?: string; runtimeConfig?: Record<string, string> } = {}): Promise<ResolveEffortPinResult> {
-  if (input.runtime !== 'muse' || !isThinkingEffort(input.requestedEffort) || input.requestedEffort === 'adaptive') return resolveEffortPin(input);
+export async function resolveRuntimeEffortPin(input: ResolveEffortPinInput, context: { cwd?: string; runtimeConfig?: Record<string, string>; configHome?: string } = {}): Promise<ResolveEffortPinResult> {
+  if (!isThinkingEffort(input.requestedEffort) || input.requestedEffort === 'adaptive') return resolveEffortPin(input);
+  if (input.runtime !== 'muse' && input.runtime !== 'codex') return resolveEffortPin(input);
+  if (input.runtime === 'codex') {
+    const transport = resolveEffortPin(input);
+    if (!transport.ok) return transport;
+    try {
+      const identity = context.configHome ? null : await getSelectedRuntimeIdentity('codex');
+      const home = context.configHome ?? identity?.configHomeRef ?? (process.env.CODEX_HOME?.trim() || join(homedir(), '.codex'));
+      const catalog = await getCodexSpeedCatalogue(home, true);
+      const model = input.model ?? catalog.defaultModel ?? null;
+      return resolveEffortPin({ ...input, model, modelEfforts: model ? catalog.reasoningEfforts?.[model] ?? null : null });
+    } catch {
+      return { ok: false, code: 'effort_unsupported_model', message: 'Cannot verify this model effort with the selected account. Refresh the model catalog or omit effort; no worker was started.' };
+    }
+  }
   try {
     const config = await museWorkerModelContext(context.runtimeConfig);
     const catalog = await probeMuseModels(context.cwd ?? process.cwd(), true, config);
@@ -205,7 +224,7 @@ export async function resolveRuntimeEffortPin(input: ResolveEffortPinInput, cont
 }
 
 export async function assertRuntimeEffortPin(runtime: string, model: string | null | undefined, effort: unknown,
-  context?: { cwd?: string; runtimeConfig?: Record<string, string> }): Promise<void> {
+  context?: { cwd?: string; runtimeConfig?: Record<string, string>; configHome?: string }): Promise<void> {
   const pin = await resolveRuntimeEffortPin({ runtime, model: model ?? null, requestedEffort: effort }, context);
   if (!pin.ok) throw new EffortPinRejectionError(pin.code, pin.message);
 }
