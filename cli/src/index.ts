@@ -397,7 +397,7 @@ async function dispatch(args: ParsedArgs): Promise<number> {
   // untrusted trees.
   if (process.platform === 'win32') process.env.NoDefaultCurrentDirectoryInExePath = '1';
   const [primary, secondary] = args.command;
-  if (args.version && !primary) return runVersion(args.mode);
+  if (args.version && !primary) return runVersion(args.mode, args.rest.includes('--offline'));
   // `run` owns all flag parsing for its wrapped command (extractRunCommand reads
   // raw argv), so a `--help`/`-h` meant for the wrapped tool must NOT trigger o8's
   // global help here — otherwise `o8 run node --help` prints o8 USAGE + exit 0.
@@ -417,7 +417,7 @@ async function dispatch(args: ParsedArgs): Promise<number> {
       if (args.jsonExplicit) throw new CliError('invalid_args', 'o8 chat is interactive. Use o8 lead or o8 history for JSON.', EXIT.INVALID_ARGS);
       return runChat(process.argv.slice(2).filter((arg) => !['--human', '--verbose', '-v'].includes(arg)).slice(1));
     case 'version':
-      return runVersion(args.mode);
+      return runVersion(args.mode, args.rest.includes('--offline'));
     case 'doctor':
       return runDoctor(args.mode, args.rest);
     case 'status':

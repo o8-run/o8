@@ -43,6 +43,8 @@ import { assertOwnedSessionProcessIdentity, captureOwnedRunIdentity } from './pr
 import { emitRuntimeFallbackNotification } from './run-notifications';
 import { observeChildExit, readAbnormalStderrTail } from './exit-outcome';
 import { prepareOwnedLaunchArgs } from './launch-args';
+import { WorkerO8CliUnavailableError } from './worker-o8-cli';
+import { stageOwnedLaunchFailure } from './launch-failure';
 import { detectSandboxDenial, detectRunSandboxDenial, sandboxDenialOperatorMessage } from './sandbox-denial';
 import {
   RUNS_DIR,
@@ -506,15 +508,24 @@ export function createOwnedRunController({
     const readOnlySandbox = resolveReadOnlySandboxPlan(session);
     const sandboxEnabled = workerSandboxEnabled() || readOnlySandbox.enforced;
     const credentialPolicy = credentialPolicyFingerprint(runtimeId);
-    const { args, stdinPayload, workerMcp } = await prepareOwnedLaunchArgs({
-      adapter,
-      session,
-      runId,
-      prompt,
-      mode,
-      sandboxEnabled,
-      humanLabel,
-    });
+    let preparedLaunch;
+    try {
+      preparedLaunch = await prepareOwnedLaunchArgs({
+        adapter,
+        session,
+        runId,
+        prompt,
+        mode,
+        sandboxEnabled,
+        humanLabel,
+      });
+    } catch (error) {
+      if (!(error instanceof WorkerO8CliUnavailableError)) throw error;
+      const held = await stageOwnedLaunchFailure({ session, runId, mode, prompt, stdoutPath, stderrPath, message: error.message });
+      await io.saveSession(session);
+      return held;
+    }
+    const { args, stdinPayload, workerMcp, workerO8BinDir, workerO8ReadPaths } = preparedLaunch;
     // Prepare the exact isolated config root before Seatbelt is built.
     const adapterEnv: Record<string, string> = adapter.extraSpawnEnv
       ? await adapter.extraSpawnEnv(session)
@@ -539,7 +550,7 @@ export function createOwnedRunController({
           extraReadPaths: executionCarrierSandboxReadPaths(workerMcp.sandboxReadPaths, carrierLaunch),
           readBackingProjectConfig: runtimeId === 'codex',
           readOwnerInstructions: !controlledSandbox,
-          finalAllowReadPaths: [...(controlledSandbox?.finalAllowReadPaths ?? []), ...(workerMcp.configPath ? [workerMcp.configPath] : [])],
+          finalAllowReadPaths: [...(controlledSandbox?.finalAllowReadPaths ?? []), ...(workerMcp.configPath ? [workerMcp.configPath] : []), ...workerO8ReadPaths],
           // Read-only: repo stays readable, kernel refuses every write. Deny
           // paths come from the SAME git probe prepareWorkerSandbox uses to
           // grant access, and it throws if that probe resolves nothing.
@@ -560,24 +571,7 @@ export function createOwnedRunController({
           ? `${humanLabel} dispatch refused: ${why} but it could not be provided — ${error.message}`
           : `${humanLabel} dispatch refused: worker sandbox preparation failed — ${(error as Error).message}`;
         console.error(`[owned-session] ${runtimeId} sandbox prep failed (fail-closed):`, error);
-        await writeFile(stderrPath, `${message}\n`, 'utf8').catch(() => {});
-        const failedRun: OwnedRunRecord = {
-          id: runId,
-          mode,
-          prompt,
-          startedAt: nowIso(),
-          finishedAt: nowIso(),
-          pid: 0,
-          stdoutPath,
-          stderrPath,
-          outcome: 'failed',
-        };
-        session.latestPrompt = prompt;
-        session.latestSummary = message;
-        session.reviewDisposition = 'watching';
-        session.reviewDispositionUpdatedAt = nowIso();
-        session.activeRun = undefined;
-        prependOwnedRun(session, failedRun);
+        const failedRun = await stageOwnedLaunchFailure({ session, runId, mode, prompt, stdoutPath, stderrPath, message });
         await io.saveSession(session);
         return failedRun;
       }
@@ -604,7 +598,7 @@ export function createOwnedRunController({
       // the spawned process cwd. Keep both values aligned so a worker cannot
       // silently operate in the o8 server's own checkout.
       PWD: session.repoPath,
-      PATH: executionCarrierSpawnPath(pathWithNodeRuntime(), carrierLaunch),
+      PATH: [workerO8BinDir, executionCarrierSpawnPath(pathWithNodeRuntime(), carrierLaunch)].filter(Boolean).join(path.delimiter),
       NODE_ENV: 'development' as const,
       FORCE_COLOR: '0',
       NO_COLOR: '1',

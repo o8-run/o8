@@ -1,4 +1,5 @@
 import { prepareOwnedWorkerMcpConfig, type PreparedOwnedWorkerMcpConfig } from './worker-mcp-config';
+import { prepareWorkerO8Cli } from './worker-o8-cli';
 import type {
   OwnedRunMode,
   OwnedRuntimeAdapter,
@@ -9,6 +10,8 @@ export interface PreparedOwnedLaunchArgs {
   args: string[];
   stdinPayload: string | null;
   workerMcp: PreparedOwnedWorkerMcpConfig;
+  workerO8BinDir?: string;
+  workerO8ReadPaths: string[];
 }
 
 export async function prepareOwnedLaunchArgs({
@@ -28,6 +31,8 @@ export async function prepareOwnedLaunchArgs({
   sandboxEnabled: boolean;
   humanLabel: string;
 }): Promise<PreparedOwnedLaunchArgs> {
+  const workerO8 = await prepareWorkerO8Cli(session, runId);
+  if (workerO8) prompt += '\n\nThe o8 command on PATH is verified for this run. Use o8 packet commands directly; do not construct source-loader wrappers.';
   const workerMcp = await prepareOwnedWorkerMcpConfig({
     adapter,
     session,
@@ -35,6 +40,7 @@ export async function prepareOwnedLaunchArgs({
     mode,
     sandboxEnabled,
   });
+  workerMcp.sandboxReadPaths.push(...(workerO8?.readPaths ?? []));
 
   if (mode === 'launch') {
     return {
@@ -55,6 +61,8 @@ export async function prepareOwnedLaunchArgs({
         effort: session.effort,
       }) ?? null,
       workerMcp,
+      workerO8BinDir: workerO8?.binDir,
+      workerO8ReadPaths: workerO8?.readPaths ?? [],
     };
   }
 
@@ -82,5 +90,7 @@ export async function prepareOwnedLaunchArgs({
       effort: session.effort,
     }) ?? null,
     workerMcp,
+    workerO8BinDir: workerO8?.binDir,
+    workerO8ReadPaths: workerO8?.readPaths ?? [],
   };
 }

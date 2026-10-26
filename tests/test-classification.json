@@ -6055,6 +6055,17 @@
       ]
     },
     {
+      "path": "tests/source-worker-o8-command-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "network-listener",
+        "real-path",
+        "worktree-api"
+      ]
+    },
+    {
       "path": "tests/spawn-prompt-count-real-path.test.ts",
       "reasons": [
         "child-process",
