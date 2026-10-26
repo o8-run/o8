@@ -468,7 +468,7 @@ export const MISSION_TOOLS: McpTool[] = [
   {
     name: 'submit_review',
     description:
-      'Required: packetId, findings, approved. Each finding requires file, severity (bug, rule_violation, note), description, and status (fixed, accepted, deferred). USE THIS WHEN a packet is awaiting_review and you\'ve inspected the diff (via o8_merge_preview or by reading the worktree). approved:true unlocks the F18 auto-merge path; approved:false sends the packet back to the agent with findings as feedback. Findings are relayed to downstream dependent packets. Use status for the finding enum (fixed, accepted, deferred); put free-text fix details in description or fixSuggestion. Example: submit_review({packetId: "pkt-abc", approved: false, findings: [{file: "src/foo.ts", severity: "rule_violation", description: "CSS shorthand used", status: "fixed", fixSuggestion: "Use paddingTop and paddingLeft instead."}]})',
+      'Required: packetId, findings, approved. Each finding requires file, severity, description, and either status or resolution (fixed, accepted, deferred); prefer status. Canonical severity values are bug, rule_violation, and note; legacy aliases remain accepted. USE THIS WHEN a packet is awaiting_review and you\'ve inspected the diff (via o8_merge_preview or by reading the worktree). approved:true unlocks the F18 auto-merge path; approved:false sends the packet back to the agent with findings as feedback. Findings are relayed to downstream dependent packets. Use status for the finding enum (fixed, accepted, deferred); put free-text fix details in description or fixSuggestion. Example: submit_review({packetId: "pkt-abc", approved: false, findings: [{file: "src/foo.ts", severity: "rule_violation", description: "CSS shorthand used", status: "fixed", fixSuggestion: "Use paddingTop and paddingLeft instead."}]})',
     inputSchema: {
       type: 'object',
       properties: {
@@ -478,18 +478,18 @@ export const MISSION_TOOLS: McpTool[] = [
         },
         findings: {
           type: 'array',
-          description: 'Review findings to persist.',
+          description: 'Review findings to persist. Each entry needs file, severity, description, and either status or resolution; prefer status.',
           items: {
             type: 'object',
             properties: {
               file: { type: 'string' },
               line: { type: 'number' },
-              severity: { type: 'string', enum: ['bug', 'rule_violation', 'note'], description: 'bug for defects, rule_violation for policy failures, note for observations. Legacy severity aliases remain accepted.' },
+              severity: { type: 'string', description: 'Prefer bug for defects, rule_violation for policy failures, or note for observations. Also accepts high, critical, error, medium, warning, policy, low, and info; matching ignores case and surrounding whitespace.' },
               description: { type: 'string' },
               status: {
                 type: 'string',
                 enum: ['fixed', 'accepted', 'deferred'],
-                description: 'Finding status enum. Use fixSuggestion or description for free-text fix details.',
+                description: 'Provide status or resolution. Preferred values: fixed, accepted, deferred. Use fixSuggestion or description for free-text fix details.',
               },
               resolution: {
                 type: 'string',
@@ -501,7 +501,7 @@ export const MISSION_TOOLS: McpTool[] = [
                 description: 'Optional free-text fix narrative.',
               },
             },
-            required: ['file', 'severity', 'description', 'status'],
+            required: ['file', 'severity', 'description'],
           },
         },
         approved: {

@@ -3754,6 +3754,14 @@
       ]
     },
     {
+      "path": "tests/mcp-schema-compatibility-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/mcp-source-boot.test.ts",
       "reasons": [
         "child-process",

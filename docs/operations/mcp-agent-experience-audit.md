@@ -11,8 +11,8 @@ are objects. Names are valid protocol identifiers; callers must use the exact di
 
 | Task or seam | Before | Change |
 | --- | --- | --- |
-| Record review findings | `status` was required by the handler but absent from nested schema requirements. Severity had no allowed values. | Require status in discovery, list canonical severity values, and give corrective severity errors. Legacy aliases remain accepted. |
-| Prepare a mission | A numeric issue example contradicted string-only item schemas; dispatch default was prose-only. | Use string references in examples, state the task-list requirement, add minItems and the dispatch default. |
+| Record review findings | The handler requires status or resolution, but the alternatives and severity aliases were not clearly named. | Name status-or-resolution requirements in discovery, list canonical severity values and legacy aliases, and give corrective severity errors. The schema retains the original accepted inputs. |
+| Prepare a mission | A numeric issue example contradicted string-only item schemas; dispatch default was prose-only. | Use string references in examples, state the task-list requirement, and publish the dispatch default while allowing empty optional arrays. |
 | Acquire a lease | No field descriptions, TTL default, or complete example; a string wait flag was silently treated as false. | Publish units and defaults; reject a non-boolean wait before acquiring a claim. |
 | Repair a missing field | Errors only said the field was required. | Name the field and request a non-empty string. |
 | Repair a wrong tool name | Profile rejection offered no next step. | Direct the caller to tools/list and an exact available name. |
@@ -21,6 +21,45 @@ are objects. Names are valid protocol identifiers; callers must use the exact di
 The route-level regression set changed from 0/7 passing to 7/7 passing;
 these are deterministic contract checks. They cover discovery and actual POST calls.
 The focused lease and review-input checks also pass.
+
+## Schema compatibility replay
+
+A review of the first audit head found client-validation regressions introduced
+by narrowing severity, requiring status despite the resolution alias, and adding
+minimum lengths to optional mission arrays. These schema restrictions are removed;
+the required-field guidance, allowed-value descriptions, defaults, examples, and
+corrective errors remain.
+
+The same 22 calls run against the production MCP POST entrypoint on main
+`a12ba06ce453961a57472a81fa2bd52f8edffd70` and this branch. They create prepared
+missions through the production service and submit authenticated rejected reviews
+through the production review route, checking persisted state. Dispatch is disabled
+and merges are held. Strict keyword/default schema checks compile the live
+tools/list definitions with coercion, default injection, and property removal disabled.
+
+Coverage includes all eleven severity spellings, mixed case and surrounding
+whitespace, three resolution-only verdicts, status precedence, empty findings,
+inline missions with omitted or empty issues, and an empty comparison list.
+
+| Replay result | Calls |
+| --- | ---: |
+| Successful on main | 22/22 |
+| Valid against first-head schemas | 5/22 |
+| Valid against corrected schemas and successful at runtime | 22/22 |
+
+Red tail, recorded before the correction:
+
+```text
+Test Files  1 failed (1)
+     Tests  17 failed | 5 passed (22)
+```
+
+Green tail, including the existing guidance, lease, and review checks:
+
+```text
+Test Files  4 passed (4)
+     Tests  36 passed (36)
+```
 
 ## Evaluation-agent trial
 

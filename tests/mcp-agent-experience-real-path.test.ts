@@ -12,12 +12,14 @@ async function rpc(method: string, params?: Record<string, unknown>) {
 }
 
 describe('agent call guidance through MCP discovery and calls', () => {
-  it('publishes every required review finding field and its allowed severity values', async () => {
+  it('names review requirements and allowed values without restricting legacy calls', async () => {
     const { tools } = await rpc('tools/list');
     const review = tools.find((tool: { name: string }) => tool.name === 'submit_review');
     const finding = review.inputSchema.properties.findings.items;
-    expect(finding.required).toEqual(['file', 'severity', 'description', 'status']);
-    expect(finding.properties.severity.enum).toEqual(['bug', 'rule_violation', 'note']);
+    expect(finding.required).toEqual(['file', 'severity', 'description']);
+    expect(finding.properties.severity.enum).toBeUndefined();
+    expect(finding.properties.severity.description).toContain('warning');
+    expect(finding.properties.status.description).toContain('status or resolution');
     expect(review.description).toContain('Required: packetId, findings, approved');
   });
 
@@ -34,8 +36,10 @@ describe('agent call guidance through MCP discovery and calls', () => {
     const { tools } = await rpc('tools/list');
     const mission = tools.find((tool: { name: string }) => tool.name === 'create_mission');
     expect(mission.inputSchema.required).toEqual(['repoPath']);
-    expect(mission.inputSchema.properties.issues).toMatchObject({ minItems: 1, items: { type: 'string' } });
-    expect(mission.inputSchema.properties.issues_inline.minItems).toBe(1);
+    expect(mission.inputSchema.properties.issues).toMatchObject({ items: { type: 'string' } });
+    expect(mission.inputSchema.properties.issues.minItems).toBeUndefined();
+    expect(mission.inputSchema.properties.issues_inline.minItems).toBeUndefined();
+    expect(mission.inputSchema.properties.comparisonModels.minItems).toBeUndefined();
     expect(mission.inputSchema.properties.dispatch.default).toBe(true);
     expect(mission.description).toContain('issues: ["495", "496"]');
     expect(mission.description).toContain('dispatch:false');

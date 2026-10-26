@@ -12,13 +12,11 @@ export const CREATE_MISSION_TOOL: McpTool = {
     properties: {
       issues: {
         type: 'array',
-        minItems: 1,
         items: { type: 'string' },
-        description: 'Issue references as strings. Accepts any format: "495", "#495", or "https://github.com/org/repo/issues/495" (pass numbers as strings). Fetches the complete referenced issue.',
+        description: 'Issue references as strings. An empty list is accepted when issues_inline supplies tasks. Accepts any format: "495", "#495", or "https://github.com/org/repo/issues/495" (pass numbers as strings). Fetches the complete referenced issue.',
       },
       issues_inline: {
         type: 'array',
-        minItems: 1,
         items: {
           type: 'object',
           properties: {
@@ -77,7 +75,6 @@ export const CREATE_MISSION_TOOL: McpTool = {
       readOnly: { type: 'boolean', description: 'When true, the worker inspects and reports without editing. A clean zero-diff exit is recorded as a successful read-only completion.' },
       comparisonModels: {
         type: 'array',
-        minItems: 1,
         items: { type: 'string' },
         description: 'Best-of-N — race the task across N candidates (one per model string), each in its own isolated worktree. The operator then compares the N diffs side-by-side and merges the winner through the review gate, archiving the losers. Same model repeated (["codex","codex","codex"]) runs N attempts of one runtime; mix runtimes (["codex","gemini"]) to compare them. Max 4. Omit for a single packet. Use when a task is worth a bake-off — risky, ambiguous, or when you want the best of several attempts.',
       },
