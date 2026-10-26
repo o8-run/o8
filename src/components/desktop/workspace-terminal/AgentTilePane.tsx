@@ -5,6 +5,7 @@ import {
   memo,
   useCallback,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -43,6 +44,7 @@ import { transcriptStore } from '@/lib/transcripts/store';
 import { useTranscript } from '@/lib/transcripts/useTranscript';
 import { SessionTransformMenu } from './SessionTransformMenu';
 import { WorkerPaneSummary } from './WorkerPaneSummary';
+import { WorkerOutcomeCard, workerOutcomeState } from './WorkerOutcomeCard';
 import { hasWorkerReviewAction, WorkerReviewAction } from './WorkerReviewAction';
 import type { TerminalStatusState } from '@/lib/terminal-status/resolve';
 
@@ -54,6 +56,7 @@ interface AgentTilePaneProps {
   onClose: (sessionKey: string) => void;
   onFocus: (sessionKey: string) => void;
   onOpenReview?: () => void;
+  onCollapsedChange?: (collapsed: boolean) => void;
 }
 
 type VisualStatus = 'running' | 'waiting' | 'review' | 'idle' | 'error';
@@ -268,7 +271,7 @@ export function canSteerAgentState(
   return packetStatus === 'blocked' && (blockedReason === 'huddle_ready' || blockedReason === 'worker_question');
 }
 
-function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocus, onOpenReview }: AgentTilePaneProps) {
+function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocus, onOpenReview, onCollapsedChange }: AgentTilePaneProps) {
   const { paneRef, compact } = useWorkerPaneSize();
   const peerExchange = useAgentPeerMessages(sessionKey);
   const slice = useTranscript(sessionKey);
@@ -314,12 +317,21 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
     name,
     packet?.issue?.body ? { id: packet.id, text: packet.issue.body } : null,
   ), [entries, name, packet?.id, packet?.issue?.body]);
+  const outcomeState = workerOutcomeState(packet);
+  const outcomeKey = `${sessionKey}:${packet?.id}:${packet?.status}`;
+  const [expandedOutcome, setExpandedOutcome] = useState<string | null>(null);
+  const collapsed = Boolean(outcomeState && expandedOutcome !== outcomeKey);
+  useEffect(() => { if (!outcomeState) setExpandedOutcome(null); }, [outcomeState]);
+  const transcriptId = useId();
+  const outcomeSummary = packet?.completionSummary?.trim()
+    || [...entries].reverse().find(entry => entry.role === 'assistant' && entry.text?.trim() && !entry.toolCalls?.length)?.text?.trim()
+    || '';
+  useEffect(() => { onCollapsedChange?.(collapsed); }, [collapsed, onCollapsedChange]);
   const runtime = packet
     ? resolveDisplayRuntime(packet)
     : inferRuntime(sessionKey, agent?.runtime);
   const resolvedModel = packet?.lane?.model ?? agent?.model ?? packet?.model ?? packet?.workerRouting?.selectedModel ?? packet?.assignedModel;
   const modelLabel = resolvedModel?.trim() || null;
-  const taskLabel = agent?.currentTask?.trim() || packet?.title?.trim() || packet?.summary?.trim() || null;
   const attention = workerAttention(packet?.status ?? agent?.status, packet?.blockedReason);
   const statusEvidence = packet ? packet.statusEvidence : agent?.statusEvidence;
   const status = useMemo(
@@ -474,7 +486,7 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
       data-compact={compact}
       onMouseDown={() => onFocus(sessionKey)}
       style={{
-        flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column',
+        flex: collapsed ? '0 0 auto' : 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column',
         // Paint the frame inside the pane without shifting the shared composer baseline.
         borderRadius: 14, outlineWidth: 1, outlineStyle: 'solid', outlineOffset: -1,
         outlineColor: focused ? 'var(--t-border-hover, var(--t-border))' : 'var(--t-border)',
@@ -484,11 +496,11 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
       }}
     >
       <WorkerPaneHeader title={displayTitle} branch={packet?.branchTarget} issueNumber={packet?.issue?.number}
-        runtime={getRuntimeCapability(runtime).label} model={modelLabel} compact={compact} status={status}
+        runtime={getRuntimeCapability(runtime).label} model={modelLabel} compact={compact} status={status} outcome={Boolean(outcomeState)}
         statusLabel={statusEvidence ? terminalStatusCaption(statusEvidence)
           : packet?.status === 'archived' ? 'Archived' : packet?.status === 'released' ? 'Complete' : STATUS_META[status].label}
         actions={<>
-          <WorkerReviewAction packet={packet} onOpenReview={onOpenReview} size={24} />
+          {!outcomeState ? <WorkerReviewAction packet={packet} onOpenReview={onOpenReview} size={24} /> : null}
           <SessionTransformMenu runtimeId={runtime} sessionKey={sessionKey} size={24} />
           <button type="button" aria-label={`Hide ${displayTitle} pane`} title="Hide pane · worker stays available in Agents"
             onClick={event => { event.stopPropagation(); onClose(sessionKey); }} style={WORKER_ICON_BUTTON}>
@@ -496,13 +508,17 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
           </button>
         </>} />
 
-      {statusEvidence ? (
+      {!collapsed && statusEvidence ? (
         <TerminalStatusEvidenceDisclosure evidence={statusEvidence} />
       ) : null}
 
-      <WorkerPaneSummary packet={packet} onOpenReview={hasWorkerReviewAction(packet) ? undefined : onOpenReview} onReply={canSteer ? () => textareaRef.current?.focus() : undefined} />
+      {outcomeState ? <WorkerOutcomeCard state={outcomeState} summary={outcomeSummary} expanded={!collapsed} transcriptId={transcriptId}
+        onToggle={() => setExpandedOutcome(collapsed ? outcomeKey : null)} onOpenReview={onOpenReview} />
+        : <WorkerPaneSummary packet={packet} onOpenReview={hasWorkerReviewAction(packet) ? undefined : onOpenReview} onReply={canSteer ? () => textareaRef.current?.focus() : undefined} />}
 
-      <div
+      {!collapsed ? <div
+        id={transcriptId}
+        data-worker-transcript
         ref={scrollRef}
         onScroll={handleScroll}
         className="cortex-scroll-fade-y cortex-themed-scroll"
@@ -513,10 +529,6 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
           background: 'transparent',
         }}
       >
-        {taskLabel ? <div data-worker-task title={taskLabel} style={{ width: '100%', maxWidth: 'var(--cortex-chat-column-max)', marginRight: 'auto', marginBottom: 16, marginLeft: 'auto' }}>
-          <div style={{ color: 'var(--t-text-faint)', fontSize: 10, marginBottom: 5 }}>TASK</div>
-          <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--t-text)', fontSize: 12.5, fontWeight: 500 }}>{taskLabel}</div>
-        </div> : null}
         {displayEntries.length === 0 && peerExchange.messages.length === 0 ? (
           <div
             ref={contentRef}
@@ -548,9 +560,9 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
             />
           </div>
         )}
-      </div>
+      </div> : null}
 
-      {showJumpToLatest ? <div style={{ position: 'relative', height: 0, flexShrink: 0 }}>
+      {!collapsed && showJumpToLatest ? <div style={{ position: 'relative', height: 0, flexShrink: 0 }}>
         <button type="button" onClick={jumpToLatest}
           style={{ position: 'absolute', right: 12, bottom: 8, border: '1px solid var(--t-border)', borderRadius: 8,
             paddingTop: 5, paddingRight: 9, paddingBottom: 5, paddingLeft: 9, background: 'var(--t-panel)',
@@ -559,7 +571,7 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
         </button>
       </div> : null}
 
-      {canSteer || attention || steerReceipt === 'unknown' ? (
+      {!collapsed && (canSteer || attention || steerReceipt === 'unknown') ? (
         <form onSubmit={handleFormSubmit} style={{ flexShrink: 0, background: 'transparent' }}>
           <SessionCacheIndicator session={sessionKey} runtime={runtime} model={modelLabel} entries={slice.messages.length ? slice.messages : entries} running={status === 'running'} />
           <WorkerPaneComposer key={sessionKey} textareaRef={textareaRef} scopeKey={sessionKey}

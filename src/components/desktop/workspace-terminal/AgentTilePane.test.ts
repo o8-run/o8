@@ -339,7 +339,7 @@ describe('AgentTilePane worker identity', () => {
 
     expect(host?.querySelector('[data-worker-model]')?.textContent).toBe('· gpt-6-sol');
     expect(host?.querySelector('[data-worker-title]')?.textContent).toBe('Trace the handoff');
-    expect(host?.querySelector('[data-worker-task]')?.textContent).toContain('Trace the handoff');
+    expect(host?.querySelector('[data-worker-task]')).toBeNull();
     expect(host?.querySelector('[data-o8-composer-root]')).not.toBeNull();
     expect(host?.querySelector('[data-brain-dock-tab]')).toBeNull();
     expect(host?.querySelector('[data-testid="composer-send-control"]')).not.toBeNull();
@@ -365,8 +365,8 @@ describe('AgentTilePane worker identity', () => {
       }));
     });
 
-    expect(host?.querySelector('[data-worker-attention]')?.textContent).toContain('Review the finished work');
-    expect(host?.querySelector('[data-worker-outcome]')?.textContent).toContain('3 files');
+    expect(host?.querySelector('[data-worker-outcome-card]')?.textContent).toContain('Needs review');
+    expect(host?.querySelector('[data-worker-outcome]')?.textContent).toBe('The implementation is ready.');
     act(() => host?.querySelector<HTMLButtonElement>('[data-worker-open-review]')?.click());
     expect(openReview).toHaveBeenCalledOnce();
   });
@@ -566,7 +566,7 @@ describe('canSteerAgentState', () => {
   });
 });
 
-it('opens review from the matching worker header with its exact lane and repository, without merging', async () => {
+it('opens review from the matching outcome card with its exact lane and repository, without merging', async () => {
   const openReview = vi.fn(); const request = vi.fn(async (_input: RequestInfo | URL) => Response.json({})); vi.stubGlobal('fetch', request);
   const packets = ['alpha', 'beta'].map(id => ({ id, title: `Work ${id}`, status: 'awaiting_review',
     lane: { laneId: `lane-${id}`, sessionKey: `session-${id}`, repoPath: `/projects/${id}` },
@@ -574,7 +574,7 @@ it('opens review from the matching worker header with its exact lane and reposit
   context.value = { agents: [], missionState: { packets }, onOpenO8Panel: openReview } as unknown as OrchestratorDataValue;
   try {
     act(() => root?.render(createElement('div', null, ...packets.map(packet => createElement(SessionTranscriptPane, { key: packet.id, sessionKey: packet.lane!.sessionKey! })))));
-    const headers = host!.querySelectorAll('[data-worker-pane-header]');
+    const headers = host!.querySelectorAll('[data-worker-outcome-card]');
     expect(headers).toHaveLength(2);
     act(() => headers[1].querySelector<HTMLButtonElement>('[data-worker-open-review]')!.click());
     expect(openReview).toHaveBeenCalledExactlyOnceWith({ tab: 'review', reviewLaneId: 'lane-beta', repoPath: '/projects/beta' });
@@ -598,10 +598,15 @@ it.each([
   context.value = { agents: [], missionState: { packets: [packet] }, onOpenO8Panel: openPanel } as unknown as OrchestratorDataValue;
   try {
     act(() => root?.render(createElement(SessionTranscriptPane, { sessionKey: 'session-state-action' })));
-    const row = host!.querySelector('[data-worker-state-row]')!;
-    expect([...row.querySelectorAll('button')].map(button => button.textContent)).toEqual([label, 'Stop']);
-    expect(row.textContent).not.toContain('Resume');
-    act(() => row.querySelector<HTMLButtonElement>(`[data-worker-state-action="${label}"]`)!.click());
+    if (status === 'awaiting_review') {
+      expect(host!.querySelector('[data-worker-state-row]')).toBeNull();
+      act(() => host!.querySelector<HTMLButtonElement>('[data-worker-outcome-card] [data-worker-open-review]')!.click());
+    } else {
+      const row = host!.querySelector('[data-worker-state-row]')!;
+      expect([...row.querySelectorAll('button')].map(button => button.textContent)).toEqual([label, 'Stop']);
+      expect(row.textContent).not.toContain('Resume');
+      act(() => row.querySelector<HTMLButtonElement>(`[data-worker-state-action="${label}"]`)!.click());
+    }
     expect(openPanel).toHaveBeenCalledExactlyOnceWith({ tab: 'review', reviewLaneId: 'lane-state-action', repoPath: '/projects/frame' });
   } finally { context.value = null; }
 });
@@ -646,4 +651,55 @@ it.each(['codex', 'claude-code'])('shows an honest cache estimate beside the %s 
     focused: true, onClose() {}, onFocus() {},
   })));
   expect(host!.querySelector('[data-session-cache]')?.textContent).toContain('Cache unknown · estimate');
+});
+
+
+it('collapses finished work to its written outcome, expands the transcript and hides without archiving', async () => {
+  const fetcher = vi.fn(async () => Response.json({ agents: [] }));
+  vi.stubGlobal('fetch', fetcher);
+  const close = vi.fn();
+  const review = vi.fn();
+  const packet = { id: 'outcome', title: 'Repair split input', branchTarget: 'inline/123-repair-split-input',
+    status: 'running', lane: { sessionKey: 'worker-outcome' },
+    completionSummary: 'Preserved exact input through resize.\n[PR](https://example.test/pull/42) [Receipt](https://example.test/receipts/42)',
+  } as OrchestratorPacket;
+  const render = () => act(() => root!.render(createElement(AgentTilePane, {
+    sessionKey: 'worker-outcome', agent: null, packet, focused: true, onClose: close, onFocus() {}, onOpenReview: review,
+  })));
+  render();
+  expect(host!.querySelector('[data-worker-title]')?.textContent).toBe('Repair split input');
+  expect(host!.querySelector('[data-worker-title]')?.getAttribute('title')).toBe(packet.branchTarget);
+  expect(host!.querySelector('[data-worker-outcome-card]')).toBeNull();
+  packet.status = 'awaiting_review';
+  render();
+  const card = host!.querySelector('[data-worker-outcome-card]')!;
+  expect(card).not.toBeNull();
+  expect(card.textContent).toContain('Needs review');
+  expect(card.querySelector('[data-worker-outcome]')?.textContent).toBe('Preserved exact input through resize.');
+  expect(card.querySelector('a[href="https://example.test/pull/42"]')?.textContent).toBe('PR');
+  expect(card.querySelector('a[href="https://example.test/receipts/42"]')?.textContent).toBe('Receipt');
+  expect(host!.querySelector('[data-worker-transcript]')).toBeNull();
+  const toggle = card.querySelector<HTMLButtonElement>('[aria-expanded]')!;
+  expect(toggle.getAttribute('aria-expanded')).toBe('false');
+  act(() => toggle.click());
+  expect(host!.querySelector('[data-worker-transcript]')).not.toBeNull();
+  expect(toggle.getAttribute('aria-expanded')).toBe('true');
+  act(() => card.querySelector<HTMLButtonElement>('[data-worker-open-review]')!.click());
+  expect(review).toHaveBeenCalledOnce();
+  act(() => host!.querySelector<HTMLButtonElement>('[aria-label="Hide Repair split input pane"]')!.click());
+  expect(close).toHaveBeenCalledExactlyOnceWith('worker-outcome');
+  expect(fetcher.mock.calls.every(call => !((call as unknown[])[1] as RequestInit | undefined)?.method)).toBe(true);
+  packet.status = 'running'; render();
+  expect(host!.querySelector('[data-worker-outcome-card]')).toBeNull();
+  expect(host!.querySelector('[data-worker-transcript]')).not.toBeNull();
+  packet.status = 'awaiting_review'; render();
+  expect(host!.querySelector('[data-worker-transcript]')).toBeNull();
+  packet.status = 'failed'; packet.completionSummary = ''; render();
+  expect(host!.querySelector('[data-worker-outcome-card]')?.textContent).toContain('Failed');
+  expect(host!.querySelector('[data-worker-outcome]')).toBeNull();
+  expect(host!.querySelector('[data-worker-transcript]')).toBeNull();
+  packet.status = 'archived'; packet.completionSummary = '# Outcome\n\nKept commands intact.\n[Receipt](https://example.test/results)\nhttps://example.test/docs'; render();
+  expect(host!.querySelector('[data-worker-outcome]')?.textContent).toBe('Kept commands intact.');
+  expect(host!.querySelector('a[href="https://example.test/results"]')).not.toBeNull();
+  expect(host!.querySelector('a[href="https://example.test/docs"]')).toBeNull();
 });
