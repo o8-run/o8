@@ -24,6 +24,7 @@ let stateRoute: typeof import('@/app/api/panel/terminal-state/route');
 let recentRoute: typeof import('@/app/api/v2/chat-history/list/route');
 let restore: typeof import('@/components/desktop/workspace-terminal/terminal-restore');
 let threads: typeof import('@/lib/mobile/orchestrator-thread-history');
+let tabState: typeof import('@/lib/terminal/tab-state');
 
 async function until(check: () => boolean, description: string) {
   const deadline = Date.now() + 30_000;
@@ -82,6 +83,7 @@ console.log(JSON.stringify({type: 'turn.completed', usage: {input_tokens: 1, out
   recentRoute = await import('@/app/api/v2/chat-history/list/route');
   restore = await import('@/components/desktop/workspace-terminal/terminal-restore');
   threads = await import('@/lib/mobile/orchestrator-thread-history');
+  tabState = await import('@/lib/terminal/tab-state');
 }, 60_000);
 afterAll(async () => {
   if (worker?.exitCode === null) { worker.kill('SIGTERM'); await Promise.race([once(worker, 'exit'), new Promise(resolve => setTimeout(resolve, 5000))]); }
@@ -156,5 +158,35 @@ describe('terminal chat checks through real entry points and persisted workspace
     expect.soft(recent.conversations.map((entry: { tabId: string }) => entry.tabId)).toContain('thoughts-renamed');
     expect.soft(threads.listMobileOrchestratorThreads().map(thread => thread.id)).not.toContain('thoughts-saved-probe');
     expect(threads.listMobileOrchestratorRevealRequests(null).map(request => request.thread.id)).not.toContain('thoughts-saved-probe');
+  });
+
+  it.each(['orchestrator', 'llm-chat', 'chat'] as const)('keeps a probe-titled %s tab and its focus after real user work on load and save', async kind => {
+    const real = { id: 'orchestrator-real', kind: 'orchestrator' as const, label: 'Real work', cliAgent: 'codex', repoPath, orchestratorThreadId: 'thoughts-real' };
+    const continued = { ...real, kind, id: `${kind}-continued`, label: probe, orchestratorThreadId: `thoughts-continued-${kind}`,
+      chatSessionKey: 'codex:continued-thread' };
+    const check = { ...real, id: 'orchestrator-check-only', label: probe, orchestratorThreadId: 'thoughts-check-only' };
+    const state: PersistedTabState = { version: 1, activeTabId: continued.id, tabs: [real, check, continued], savedAt: new Date().toISOString() };
+    for (const [id, realWork] of [[continued.orchestratorThreadId, true], [check.orchestratorThreadId, false]] as const) {
+      writeFileSync(join(root, 'chat-history', `${id}.json`), JSON.stringify({ repoPath, title: probe, messages: [
+        { id: 'check-user', role: 'user', content: probe, timestamp: 1 },
+        { id: 'check-answer', role: 'assistant', content: 'terminal chat is connected', timestamp: 2 },
+        ...(realWork ? [{ id: 'work-user', role: 'user', content: 'Inspect the failing build and repair it.', timestamp: 3 }] : []),
+      ] }));
+    }
+    writeFileSync(join(root, 'terminal-states', 'tile-root.json'), JSON.stringify(state));
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const request = new Request(new URL(String(input), 'http://localhost'), init);
+      return init?.method === 'POST' ? stateRoute.POST(request) : stateRoute.GET(request);
+    }));
+    const loaded = await tabState.loadTabState('tile-root');
+    expect.soft(loaded?.activeTabId).toBe(continued.id);
+    expect.soft(loaded?.tabs.map(tab => tab.id)).toEqual([real.id, continued.id]);
+    const initial = await restore.loadInitialTabState({ stateScope: 'tile-root', defaultTab: 'orchestrator', splitCreated: false, preferredRepoPath: repoPath }, () => false);
+    expect.soft(initial?.activeTabId).toBe(continued.id);
+    expect.soft(initial?.tabs.some(tab => tab.id === continued.id)).toBe(true);
+    await tabState.saveTabState(state, 'tile-root');
+    expect.soft(savedState().activeTabId).toBe(continued.id);
+    expect.soft(savedState().tabs.map(tab => tab.id)).toEqual([real.id, continued.id]);
+    expect((await tabState.loadTabState('tile-root'))?.activeTabId).toBe(continued.id);
   });
 });

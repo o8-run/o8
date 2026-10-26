@@ -163,7 +163,7 @@ export function stripPersistedTabs<T extends {
   kind?: string;
   label?: string;
   orchestrationPacket?: { packetId?: string; branchTarget?: string | null } | null;
-}>(tabs: T[]): T[] {
+}>(tabs: T[], isConnectivityCheckOnly?: (tab: T) => boolean): T[] {
   return tabs.filter((tab) => {
     if (!tab || typeof tab !== 'object') return false;
     const id = typeof tab.id === 'string' ? tab.id : '';
@@ -172,9 +172,10 @@ export function stripPersistedTabs<T extends {
     if (kind !== 'orchestrator' && id.startsWith('orchestrator-')) return false;
     // Shape 2 (#1293): best-of-N comparison candidate chat tabs.
     const pkt = tab.orchestrationPacket;
-    // Shape 3: the legacy connectivity probe was saved as a conversation tab.
+    // A probe title is only a candidate. The server must verify the saved
+    // conversation before removing it; client-only state cannot prove this.
     if (!pkt && ['orchestrator', 'llm-chat', 'chat'].includes(kind)
-      && isTerminalChatConnectivityPrompt(tab.label)) return false;
+      && isTerminalChatConnectivityPrompt(tab.label) && isConnectivityCheckOnly?.(tab)) return false;
     if (pkt && (COMPARISON_CANDIDATE_RE.test(pkt.packetId ?? '') || COMPARISON_CANDIDATE_RE.test(pkt.branchTarget ?? ''))) {
       return false;
     }
