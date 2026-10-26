@@ -14,6 +14,7 @@ export default async function register({ dataDir, root, seeds, fixtureToken, tra
   if (!enabled) return { routes: { 'GET /api/v2/chat-history/list': historyList } };
   const fixture = await import('../sidebar-fixture');
   seeds.push(...fixture.seedSidebar(dataDir, root));
+  if (process.argv.includes('--sidebar-markers')) await (await import('./sidebar-markers')).seedSidebarMarkers(join(root, 'sidebar-alpha'));
   await fixture.installSidebarRuntime(dataDir, join(root, 'sidebar-alpha'));
   const { GET: sessions } = await import('../../../src/app/api/mobile/orchestrator/threads/route');
   const { GET: history } = await import('../../../src/app/api/mobile/history/route');
