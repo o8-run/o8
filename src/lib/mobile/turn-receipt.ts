@@ -20,6 +20,7 @@ export function mergeMobileTurnReceipts(
     ...existing,
     ...incoming,
     effortSource: incoming.effortSource,
+    serviceTier: incoming.serviceTier,
     ...(existing.terminal && existing.terminal.outcome !== 'unconfirmed' ? { terminal: existing.terminal } : {}),
     ...(workers.size > 0 ? { workers: Array.from(workers.values()) } : {}),
   };

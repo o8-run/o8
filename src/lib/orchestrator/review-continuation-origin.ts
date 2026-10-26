@@ -1,3 +1,4 @@
+import { isUnmappedEffortLead } from '@/lib/lane/orchestrator-backends/unmapped-effort';
 import { realpathSync } from 'node:fs';
 import { getSqlite } from '@/lib/db';
 import { readPersistedLlmChat } from '@/lib/llm/chat-history-store';
@@ -88,7 +89,7 @@ export function resolveChatTurnOrigin({ threadId, turnId, repoPath }: {
     return { kind: 'refused', reason: 'Review chat routing choice changed.' };
   }
   return { kind: 'bound', origin: { threadId, turnId, backend: turn.backend, model: receipt.leadModel,
-    effort: receipt.effortSource === 'service-tier' || receipt.effortSource === 'runtime-default' ? 'adaptive' : receipt.effort,
+    effort: isUnmappedEffortLead(turn.backend) || receipt.effortSource === 'service-tier' || receipt.effortSource === 'runtime-default' ? 'adaptive' : receipt.effort,
     ...(receipt.permissionMode ? { permissionMode: receipt.permissionMode } : {}),
     ...(receipt.pickedMode ? { pickedMode: receipt.pickedMode } : {}),
     ...(typeof history.projectId === 'string' ? { projectId: history.projectId } : {}),

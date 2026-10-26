@@ -5,6 +5,15 @@ import { afterAll, afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { MANUAL_THINKING_EFFORTS } from '@/lib/orchestrator/thinking-effort';
 import type { OrchestratorEvent } from '@/lib/lane/orchestrator-stream-events';
 
+const processStarts = vi.hoisted(() => [] as import('node:child_process').ChildProcess[]);
+vi.mock('node:child_process', async original => {
+  const actual = await original<typeof import('node:child_process')>();
+  return { ...actual, spawn: (...args: Parameters<typeof actual.spawn>) => {
+    const child = actual.spawn(...args);
+    if (Array.isArray(args[1]) && args[1].some(arg => arg.endsWith('/peer.cjs'))) processStarts.push(child);
+    return child;
+  } };
+});
 vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: async () => {} }));
 const root = realpathSync(mkdtempSync(join(tmpdir(), 'o8-lead-effort-transport-')));
 const repo = join(root, 'repo'), capture = join(root, 'acp.jsonl'), peer = join(root, 'peer.cjs');
@@ -59,7 +68,14 @@ beforeEach(() => {
     return new Response('data: {"type":"content","text":"Fixture answer"}\n\ndata: [DONE]\n\n');
   }));
 });
-afterEach(async () => { await Promise.all(piBackends.splice(0).map(backend => backend.closeAll())); vi.unstubAllGlobals(); });
+afterEach(async () => {
+  await Promise.all(piBackends.splice(0).map(backend => backend.closeAll()));
+  await Promise.all(processStarts.splice(0).map(child => new Promise<void>(resolve => {
+    if (child.exitCode !== null || child.signalCode !== null) { resolve(); return; }
+    child.once('exit', () => resolve()); child.kill();
+  })));
+  vi.unstubAllGlobals();
+});
 afterAll(async () => { (await import('@/lib/db')).closeDb(); vi.unstubAllEnvs(); rmSync(root, { recursive: true, force: true }); });
 
 it.each(['acp', 'sdk', 'built-in'] as const)('refuses every independent concrete pin before %s submits a turn', async kind => {
@@ -96,7 +112,7 @@ it('labels a managed text-only service tier separately from provider reasoning',
   const events: OrchestratorEvent[] = [];
   await textOnly().sendTurn(repo, 'Fixture task', event => events.push(event), { threadId: 'managed-default' });
   expect(requests[0].thinkingEffort).toBe('low');
-  expect(events).toContainEqual(expect.objectContaining({ type: 'turn_receipt', effort: 'low', effortSource: 'service-tier' }));
+  expect(events).toContainEqual(expect.objectContaining({ type: 'turn_receipt', effort: 'adaptive', effortSource: 'runtime-default', serviceTier: 'low' }));
 });
 
 it('continues a persisted service-tier receipt without turning it into a reasoning pin', async () => {
@@ -116,4 +132,43 @@ it('continues a persisted service-tier receipt without turning it into a reasoni
   expect(requests).toHaveLength(1);
   expect(resolveChatTurnOrigin({ threadId, turnId: 'tier-origin', repoPath: repo }))
     .toMatchObject({ kind: 'bound', origin: { effort: 'adaptive' } });
+});
+
+it('keeps protocol session reservation lazy until the turn effort has been validated', async () => {
+  const backend = acp(), threadId = 'reserved-refused-pin';
+  const info = backend.ensureSession(repo, undefined, threadId);
+  expect(backend.ensureSession(repo, undefined, threadId)).toEqual(info);
+  const events: OrchestratorEvent[] = [];
+  await backend.sendTurn(repo, 'Fixture task', event => events.push(event), { thinkingEffort: 'high', threadId });
+  expect(events).toContainEqual(expect.objectContaining({ type: 'error', code: 'effort_unsupported_runtime' }));
+  expect(processStarts).toHaveLength(0);
+  const accepted: OrchestratorEvent[] = [];
+  await backend.sendTurn(repo, 'Fixture task', event => accepted.push(event), { threadId });
+  expect(processStarts).toHaveLength(1);
+  expect(accepted.some(event => event.type === 'text')).toBe(true);
+});
+it('continues a legacy stored default without turning its tier into an independent pin', async () => {
+  const { writePersistedLlmChat } = await import('@/lib/llm/chat-history-store');
+  const { resolveMobileTurnSelection } = await import('@/lib/ws-server/mobile-turn-selection');
+  const { resolveChatTurnOrigin } = await import('@/lib/orchestrator/review-continuation-origin');
+  const threadId = 'thoughts-legacy-default';
+  writePersistedLlmChat(threadId, { repoPath: repo, messages: [{ id: 'legacy-origin', role: 'assistant',
+    backend: 'o8', model: 'o8-free', content: 'Fixture answer', timestamp: 1,
+    receipt: { leadModel: 'o8-free', effort: 'low', mode: 'solo' },
+  }] });
+  const options = resolveMobileTurnSelection({ surface: 'mobile' }, repo, threadId, 'o8');
+  expect(options).not.toHaveProperty('thinkingEffort');
+  const events: OrchestratorEvent[] = [];
+  await textOnly().sendTurn(repo, 'Continue', event => events.push(event), options);
+  expect(events.some(event => event.type === 'error')).toBe(false);
+  expect(requests).toHaveLength(1);
+  expect(resolveChatTurnOrigin({ threadId, turnId: 'legacy-origin', repoPath: repo }))
+    .toMatchObject({ kind: 'bound', origin: { effort: 'adaptive' } });
+});
+it('records a managed service tier in its own field while reasoning remains at runtime default', async () => {
+  const events: OrchestratorEvent[] = [];
+  await textOnly().sendTurn(repo, 'Fixture task', event => events.push(event), { threadId: 'separate-tier' });
+  expect(requests[0].thinkingEffort).toBe('low');
+  expect(events).toContainEqual(expect.objectContaining({ type: 'turn_receipt', effort: 'adaptive',
+    effortSource: 'runtime-default', serviceTier: 'low' }));
 });

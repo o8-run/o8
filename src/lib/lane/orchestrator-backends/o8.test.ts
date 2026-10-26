@@ -90,7 +90,7 @@ describe('o8 backend event mapping', () => {
     await o8Backend.sendTurn('/repo', 'hi', onEvent, { threadId: 'thoughts-1' });
 
     expect(events).toEqual([
-      { type: 'turn_receipt', leadModel: 'o8-free', effort: 'low', effortSource: 'service-tier' },
+      { type: 'turn_receipt', leadModel: 'o8-free', effort: 'adaptive', effortSource: 'runtime-default', serviceTier: 'low' },
       NOTICE,
       { type: 'text', text: 'Hel' },
       { type: 'text', text: 'lo' },
@@ -124,7 +124,7 @@ describe('o8 backend event mapping', () => {
 
     await o8Backend.sendTurn('/repo', 'hi', onEvent, { threadId: 'thoughts-1' });
 
-    expect(events[0]).toEqual({ type: 'turn_receipt', leadModel: 'o8-free', effort: 'low', effortSource: 'service-tier' });
+    expect(events[0]).toEqual({ type: 'turn_receipt', leadModel: 'o8-free', effort: 'adaptive', effortSource: 'runtime-default', serviceTier: 'low' });
     expect(events[1]).toEqual(NOTICE);
     expect(events[2]).toEqual({ type: 'text', text: 'partial' });
     expect(events[3]).toEqual({ type: 'error', error: 'model exploded' });
@@ -140,7 +140,7 @@ describe('o8 backend event mapping', () => {
     await o8Backend.sendTurn('/repo', 'hi', onEvent, { threadId: 'thoughts-1', signal: controller.signal });
 
     expect(events).toEqual([
-      { type: 'turn_receipt', leadModel: 'o8-free', effort: 'low', effortSource: 'service-tier' },
+      { type: 'turn_receipt', leadModel: 'o8-free', effort: 'adaptive', effortSource: 'runtime-default', serviceTier: 'low' },
       NOTICE,
       { type: 'done', sessionId: expect.any(String), cost: 0 },
     ]);
@@ -280,7 +280,7 @@ describe('o8 text-only fallback where Pi cannot start', () => {
       expect(events[0]).toMatchObject({ type: 'error', code: 'effort_unsupported_runtime' });
     } else {
       expect((bodyOf() as { thinkingEffort?: string }).thinkingEffort).toBe('low');
-      expect(events[0]).toMatchObject({ type: 'turn_receipt', effort: 'low', effortSource: 'service-tier' });
+      expect(events[0]).toMatchObject({ type: 'turn_receipt', effort: 'adaptive', effortSource: 'runtime-default', serviceTier: 'low' });
     }
   });
 

@@ -21,6 +21,18 @@ describe('TurnSummaryCard', () => {
       expect(html).not.toContain('medium');
     }
   });
+  it('keeps the managed tier separate from reasoning effort after transcript reload', () => {
+    const receipt = parseTerminalTurnReceipt({ leadModel: 'o8-free', effort: 'adaptive', effortSource: 'runtime-default',
+      serviceTier: 'low', mode: 'solo' });
+    expect(receipt).toMatchObject({ effort: 'adaptive', serviceTier: 'low' });
+    const [persistedEntry] = deserializeStoredTranscript(serializeTranscriptForStorage([{
+      id: 'separate-tier', role: 'assistant', text: 'Complete.', receipt,
+    }]));
+    expect(persistedEntry.receipt).toMatchObject({ effort: 'adaptive', serviceTier: 'low' });
+    const html = renderToStaticMarkup(createElement(TurnSummaryCard, { persistedEntry }));
+    expect(html).toContain('runtime default');
+    expect(html).toContain('low service tier');
+  });
   it('keeps the outside-workspace grant visible after receipt parsing and transcript reload', () => {
     const receipt = parseTerminalTurnReceipt({ leadModel: 'pi', effort: 'medium', mode: 'solo', permissionMode: 'outside-workspace' });
     expect(receipt?.permissionMode).toBe('outside-workspace');

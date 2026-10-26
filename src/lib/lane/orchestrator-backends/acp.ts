@@ -80,6 +80,7 @@ interface AcpSession {
 }
 
 const sessions = new Map<string, AcpSession>();
+const reserved = new Set<string>();
 let acpRealtimeSeq = 0;
 
 /**
@@ -231,6 +232,7 @@ export function makeAcpBackend(config: AcpBackendConfig): OrchestratorBackend {
         requestTimeoutMs: config.requestTimeoutMs,
       }),
     };
+    reserved.delete(key);
     sessions.set(key, session);
     return session;
   }
@@ -323,11 +325,17 @@ export function makeAcpBackend(config: AcpBackendConfig): OrchestratorBackend {
     label,
     peekSession(repoPath, _agent, threadId): OrchestratorSessionInfo | null {
       const session = sessions.get(sessionKey(id, repoPath, threadId));
-      return session && session.client.alive ? { sessionName: session.sessionName, status: session.status } : null;
+      return session && session.client.alive ? { sessionName: session.sessionName, status: session.status }
+        : reserved.has(sessionKey(id, repoPath, threadId)) ? { sessionName: sessionKey(id, repoPath, threadId), status: 'ready' } : null;
     },
     ensureSession(repoPath, _agent, threadId): OrchestratorSessionInfo {
-      const session = ensureSync(repoPath, threadId);
-      return { sessionName: session.sessionName, status: session.status };
+      const key = sessionKey(id, repoPath, threadId);
+      const session = sessions.get(key);
+      if (session?.client.alive && session.status !== 'dead') return { sessionName: key, status: session.status };
+      // Reserving a conversation must not start a process before turn options
+      // have passed admission. sendTurn performs the actual launch.
+      reserved.add(key);
+      return { sessionName: key, status: 'ready' };
     },
     async sendTurn(repoPath, message, onEvent, options?: OrchestratorTurnOptions): Promise<void> {
       const effortError = unmappedEffortError(options?.thinkingEffort);

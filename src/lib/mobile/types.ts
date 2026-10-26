@@ -345,6 +345,7 @@ export interface MobileTurnReceipt {
   leadModel: string;
   effort: ThinkingEffort;
   effortSource?: import('@/lib/orchestrator/thinking-effort').EffortReceiptSource;
+  serviceTier?: import('@/lib/orchestrator/thinking-effort').LeadServiceTier;
   mode: 'solo' | 'multitask' | 'fast' | 'moa' | 'fusion';
   pickedMode?: 'solo' | 'multitask' | 'fast' | 'moa' | 'fusion';
   workers?: Array<{

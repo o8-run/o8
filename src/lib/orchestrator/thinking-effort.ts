@@ -10,6 +10,12 @@ export function isEffortReceiptSource(value: unknown): value is EffortReceiptSou
   return value === 'transport' || value === 'runtime-default' || value === 'service-tier';
 }
 
+/** Managed inference tier, separate from provider reasoning effort. */
+export type LeadServiceTier = 'low' | 'high';
+export function isLeadServiceTier(value: unknown): value is LeadServiceTier {
+  return value === 'low' || value === 'high';
+}
+
 export type ManualThinkingEffort = Exclude<ThinkingEffort, 'adaptive'>;
 
 export const THINKING_EFFORTS: ThinkingEffort[] = ['adaptive', 'low', 'medium', 'high', 'max', 'xhigh', 'ultra'];

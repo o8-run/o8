@@ -10,3 +10,8 @@ export function unmappedEffortError(effort: ThinkingEffort | undefined): Orchest
     error: `This lead cannot apply the independent thinking effort "${effort}": its transport has no verified mapping. Omit the effort pin or select a supported model-encoded variant.`,
   };
 }
+
+/** These leads have no independent reasoning-effort transport, including legacy receipts. */
+export function isUnmappedEffortLead(backend: string): boolean {
+  return ['acp', 'hermes', 'opencode', 'pi', 'o8'].includes(backend);
+}

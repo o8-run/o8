@@ -1,3 +1,4 @@
+import { isUnmappedEffortLead } from '@/lib/lane/orchestrator-backends/unmapped-effort';
 import { resolve } from 'node:path';
 import { readPersistedLlmChat } from '@/lib/llm/chat-history-store';
 import { isComposerWireMode } from '@/lib/orchestrator/composer-wire';
@@ -23,7 +24,7 @@ export function resolveMobileTurnSelection(
   const leadModel = normalizeObservedOrchestratorTurnModel(backend, receipt?.leadModel)
     ?? normalizeObservedOrchestratorTurnModel(backend, previous.model);
   if (typeof leadModel === 'string') inherited.model = leadModel;
-  if ((!receipt?.effortSource || receipt.effortSource === 'transport') && isManualThinkingEffort(receipt?.effort)) inherited.thinkingEffort = receipt.effort;
+  if (!isUnmappedEffortLead(backend) && (!receipt?.effortSource || receipt.effortSource === 'transport') && isManualThinkingEffort(receipt?.effort)) inherited.thinkingEffort = receipt.effort;
   if (receipt?.permissionMode === 'plan' || receipt?.permissionMode === 'full') {
     inherited.permissionMode = receipt.permissionMode;
   }

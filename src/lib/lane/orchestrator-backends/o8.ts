@@ -193,7 +193,7 @@ async function sendTextOnlyTurn(
       ? prior
       : [...prior, { role: 'user', content: message }];
   const tier = O8_FALLBACK_TIER;
-  onEvent({ type: 'turn_receipt', leadModel: o8ReceiptModel(options), effort: tier, effortSource: 'service-tier' });
+  onEvent({ type: 'turn_receipt', leadModel: o8ReceiptModel(options), effort: 'adaptive', effortSource: 'runtime-default', serviceTier: tier });
   // Say why before anything streams, so a text-only answer is never mistaken for the agent.
   onEvent({ type: 'text', text: `${blocker}, so this reply is text only, without o8 commands, file edits or tools.\n\n` });
   const messages: ProxyMessage[] = [{ role: 'system', content: o8SystemPrompt(tier) }, ...history];

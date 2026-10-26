@@ -127,6 +127,7 @@ function TurnReceiptLine({ receipt }: { receipt: MobileTurnReceipt }) {
           : receipt.leadModel === 'o8-free' ? null : ` · ${THINKING_EFFORT_LABELS[receipt.effort].short}`} · {pickedMode
           ? `ran as ${mode}, picked ${pickedMode}`
           : mode}
+        {receipt.serviceTier ? ` · ${receipt.serviceTier} service tier` : null}
         {receipt.permissionMode === 'outside-workspace' ? ' · Outside workspace' : null}
       </div>
       {workers.map((worker) => (

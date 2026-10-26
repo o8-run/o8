@@ -1,7 +1,7 @@
 import type { MobileTranscriptEntry, MobileTurnReceipt } from '@/lib/mobile/types';
 import { isComposerWireMode } from '@/lib/orchestrator/composer-wire';
 import { isOrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
-import { isEffortReceiptSource, isThinkingEffort } from '@/lib/orchestrator/thinking-effort';
+import { isEffortReceiptSource, isLeadServiceTier, isThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import { isOrchestratorPermissionMode } from '@/lib/orchestrator/permission-mode';
 
 export function parseTerminalUsage(value: unknown): MobileTranscriptEntry['tokens'] | undefined {
@@ -32,6 +32,8 @@ export function parseTerminalTurnReceipt(value: unknown): MobileTurnReceipt | un
 
   if (receipt.effortSource !== undefined && !isEffortReceiptSource(receipt.effortSource)) return undefined;
 
+  if (receipt.serviceTier !== undefined && !isLeadServiceTier(receipt.serviceTier)) return undefined;
+
   let workers: MobileTurnReceipt['workers'];
   if (receipt.workers !== undefined) {
     if (!Array.isArray(receipt.workers)) return undefined;
@@ -49,6 +51,7 @@ export function parseTerminalTurnReceipt(value: unknown): MobileTurnReceipt | un
   return {
     leadModel: receipt.leadModel,
     effort: receipt.effort,
+    ...(isLeadServiceTier(receipt.serviceTier) ? { serviceTier: receipt.serviceTier } : {}),
     ...(isEffortReceiptSource(receipt.effortSource) ? { effortSource: receipt.effortSource } : {}),
     mode: receipt.mode,
     ...(isOrchestratorPermissionMode(receipt.permissionMode) ? { permissionMode: receipt.permissionMode } : {}),
