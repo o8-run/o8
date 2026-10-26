@@ -350,7 +350,7 @@ describe('Codex orchestrator process lifecycle', () => {
     await vi.waitFor(() => expect(spawnMock).toHaveBeenCalledTimes(2));
     expect(spawnMock.mock.calls[1][1]).toEqual(expect.arrayContaining(['exec', '--json']));
     expect(spawnMock.mock.calls[1][1]).not.toContain('resume');
-    expect(backendSessions.has(`${historyThreadId}:codex`)).toBe(false);
+    expect(backendSessions.get(`${historyThreadId}:codex`)).toBe('stale-codex-thread');
 
     freshProc.stdout.emit('data', Buffer.from('{"type":"thread.started","thread_id":"fresh-codex-thread"}\n'));
     freshProc.exitCode = 0;

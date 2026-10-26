@@ -162,5 +162,25 @@ describe('composer recovery from a missing persisted runtime session', () => {
     if (scenario === 'streamed-output') {
       expect(history(threadId).messages.filter(message => message.role === 'assistant').at(-1)?.content).toContain('Partial answer');
     }
+    rmSync(join(sessions, 'control.json'));
+    await send(threadId, followup, MODEL_IDS.raw.openAiGpt55);
+    expect(history(threadId).messages.filter(message => message.role === 'assistant').at(-1)?.content).toBe('widget-731 / copper');
+  }, 60_000);
+
+  it('keeps recovery required if cancellation happens before the replacement session starts', async () => {
+    const threadId = 'thoughts-recovery-cancelled-replacement';
+    await send(threadId, firstMessage, MODEL_IDS.raw.openAiGpt55);
+    const savedSession = history(threadId).orchestratorSessionIds.codex;
+    rmSync(join(sessions, savedSession + '.json'));
+    writeFileSync(join(sessions, 'control.json'), JSON.stringify({ waitOnFresh: true }));
+    const start = calls().length;
+    const pending = send(threadId, followup, MODEL_IDS.raw.openAiGpt55);
+    await until(() => calls().length === start + 2, 'replacement runtime launch');
+    socket.send(JSON.stringify({ type: 'orchestrator-interrupt', repoPath, threadId, backend: 'codex' }));
+    await pending;
+    expect.soft(history(threadId).orchestratorSessionIds.codex).toBe(savedSession);
+    rmSync(join(sessions, 'control.json'));
+    await send(threadId, followup, MODEL_IDS.raw.openAiGpt55);
+    expect(history(threadId).messages.filter(message => message.role === 'assistant').at(-1)?.content).toBe('widget-731 / copper');
   }, 60_000);
 });

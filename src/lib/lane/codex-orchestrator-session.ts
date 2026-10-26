@@ -258,11 +258,22 @@ export async function sendToCodexOrchestrator(
       for (const event of deferredTerminalEvents) onEvent(event);
       return;
     }
+    const missingThreadId = session.threadId;
     session.threadId = null;
     session.status = 'ready';
-    writeOrchestratorBackendSessionId(session.historyThreadId, 'codex', null);
     onEvent({ type: 'turn_retry', attempt: 2, reason: 'runtime-session-recovered', notice: 'The saved runtime session was unavailable. Continuing in a new session with the earlier conversation restored.' });
-    return sendToCodexOrchestratorAttempt(session, recoveredMessage, onEvent, options);
+    try {
+      await sendToCodexOrchestratorAttempt(session, recoveredMessage, onEvent, options);
+    } finally {
+      // Cancellation or startup failure must not turn the next send into a
+      // context-free first turn. Keep recovery required until a new thread exists.
+      if (!session.threadId) {
+        session.threadId = missingThreadId;
+        session.status = 'ready';
+        writeOrchestratorBackendSessionId(session.historyThreadId, 'codex', missingThreadId);
+      }
+    }
+    return;
   }
 
   for (const event of deferredTerminalEvents) onEvent(event);

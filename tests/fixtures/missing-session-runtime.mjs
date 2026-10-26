@@ -16,6 +16,10 @@ const message = args.at(-1);
 appendFileSync(join(root, 'calls.jsonl'), JSON.stringify({ resume, threadId, message, model: args.find(arg => arg.startsWith('model='))?.slice(6) }) + '\n');
 const controlPath = join(root, 'control.json');
 const control = existsSync(controlPath) ? JSON.parse(readFileSync(controlPath, 'utf8')) : {};
+if (!resume && control.waitOnFresh) {
+  setInterval(() => {}, 1000);
+  await new Promise(() => {});
+}
 if ((resume && !existsSync(path)) || control.refuseFresh) {
   if (control.streamFirst) console.log(JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'Partial answer' } }));
   if (control.waitForInterrupt) {
