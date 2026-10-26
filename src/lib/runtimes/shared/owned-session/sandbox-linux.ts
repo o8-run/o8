@@ -53,7 +53,11 @@ export interface BwrapPolicyContext {
 const BASE_ARGS = [
   '--die-with-parent', '--new-session', '--unshare-pid',
   '--ro-bind', '/', '/',
-  '--dev-bind', '/dev', '/dev',
+  // Synthetic minimal /dev (null, zero, random, tty, a private devpts, the
+  // std-fd symlinks) rather than --dev-bind, which would hand the worker the
+  // host's real device nodes read-write. A CLI agent only needs the standard
+  // nodes and its own ptys; already-open stdio fds survive the namespace.
+  '--dev', '/dev',
   '--proc', '/proc',
 ] as const;
 
