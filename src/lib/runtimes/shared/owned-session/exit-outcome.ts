@@ -25,6 +25,11 @@ export function childExitOutcome(
   };
 }
 
+/** Operator-facing text for a worker that exited 0 without any output. */
+export function silentCleanExitMessage(humanLabel: string): string {
+  return `${humanLabel} exited without producing any output, so no work was done. Retry the worker; if it keeps happening, check that its CLI is installed and signed in.`;
+}
+
 export async function readAbnormalStderrTail(
   stderrPath: string,
   outcome: OwnedChildExitOutcome,

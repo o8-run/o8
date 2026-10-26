@@ -42,7 +42,7 @@ import { pathWithNodeRuntime } from '@/lib/util/node-on-path';
 import { crashSurvivableWorkersEnabled } from './crash-survival';
 import { assertOwnedSessionProcessIdentity, captureOwnedRunIdentity } from './process-identity';
 import { emitRuntimeFallbackNotification, notifySupervisorOfCleanExit } from './run-notifications';
-import { observeChildExit, readAbnormalStderrTail } from './exit-outcome';
+import { observeChildExit, readAbnormalStderrTail, silentCleanExitMessage } from './exit-outcome';
 import { prepareOwnedLaunchArgs } from './launch-args';
 import { WorkerO8CliUnavailableError } from './worker-o8-cli';
 import { stageOwnedLaunchFailure } from './launch-failure';
@@ -247,6 +247,19 @@ export function createOwnedRunController({
       laneId = current.laneId;
       const currentRun = current.recentRuns.find((run) => run.id === runId);
       artifacts = currentRun ? await readRunArtifacts({ ...currentRun, childExit }).catch(() => null) : null;
+      // A worker that exits 0 without writing a byte did no work (for example
+      // a CLI that ignored its input). Surface that instead of a silent success
+      // unless the runtime's own parser recognized a completed turn.
+      const silentCleanExit = Boolean(artifacts) && childExit.classification === 'clean-exit'
+        && !artifacts!.parsed.completedTurn
+        && !currentRun?.interruptRequestedAt && currentRun?.outcome !== 'interrupted'
+        && !artifacts!.stdoutRaw.trim() && !artifacts!.stderrRaw.trim();
+      if (silentCleanExit) {
+        const message = silentCleanExitMessage(humanLabel);
+        artifacts = { ...artifacts!, parsed: { ...artifacts!.parsed, outcome: 'failed', completedTurn: false,
+          providerFailure: { subtype: 'empty_output', message } } };
+        current.latestSummary = message;
+      }
       let dirty = false;
       const finishedAt = nowIso();
       const applyExit = (run: OwnedRunRecord): OwnedRunRecord => {

@@ -249,6 +249,48 @@ describe('createOwnedSessionStore child exit recording', () => {
     });
   }, 20_000);
 
+  it('delivers staged stdin through a pipe, not a regular file, on the detached path', async () => {
+    // Claude Code stream-json exits 0 with no output when fd 0 is a regular
+    // file; this child mimics that so a regression fails loudly here.
+    const { createOwnedSessionStore } = await import('./store');
+    const store = createOwnedSessionStore(testAdapter('stdin-echo'));
+
+    const launched = await store.launch({ cwd: repoPath, prompt: 'pipe me' });
+    const session = await waitForRecordedExit(launched.surfaceId);
+    const run = session.recentRuns[0];
+
+    expect(run.detachMode).toBe('detached');
+    expect(run.stdinPath).toBeTruthy();
+    const stdout = await readFile(run.stdoutPath, 'utf8');
+    expect(stdout).toContain('stdin-kind:pipe');
+    expect(stdout).toContain('"content":"pipe me"');
+    expect(run).toMatchObject({ outcome: 'finished', childExit: { code: 0, classification: 'clean-exit' } });
+  }, 20_000);
+
+  it('surfaces a clean exit with no output as a failure instead of a silent success', async () => {
+    const [{ createLane, getLaneEvents }, { createOwnedSessionStore }] = await Promise.all([
+      import('@/lib/lane/registry'),
+      import('./store'),
+    ]);
+    const lane = createLane({ repoPath, branch: 'main', runtime: 'claude-code', label: 'silent clean exit' });
+    const store = createOwnedSessionStore(testAdapter('silent-exit'));
+
+    const launched = await store.launch({ cwd: repoPath, prompt: 'do nothing', laneId: lane.id });
+    const session = await waitForRecordedExit(launched.surfaceId);
+    const event = await waitForLaneEvent(lane.id, 'runtime_process_exit', getLaneEvents);
+
+    expect(session.recentRuns[0]).toMatchObject({
+      outcome: 'failed',
+      childExit: { code: 0, classification: 'clean-exit' },
+    });
+    expect(session.latestSummary).toContain('exited without producing any output');
+    expect(event.payload).toMatchObject({
+      exitCode: 0,
+      runtimeOutcome: 'failed',
+      providerFailure: { subtype: 'empty_output' },
+    });
+  }, 20_000);
+
   it('reconciles a stored successful bridge run through tail and review using provider failure', async () => {
     const { createOwnedSessionStore } = await import('./store');
     const { deriveRunOutcome } = await import('./helpers');
@@ -509,7 +551,9 @@ describe('createOwnedSessionStore child exit recording', () => {
   });
 });
 
-function testAdapter(kind: 'exit-1' | 'sigkill' | 'sandbox-denial' | 'provider-error' | 'auth-failure'): OwnedRuntimeAdapter {
+type ChildKind = 'exit-1' | 'sigkill' | 'provider-error' | 'auth-failure' | 'stdin-echo' | 'silent-exit';
+
+function testAdapter(kind: ChildKind | 'sandbox-denial'): OwnedRuntimeAdapter {
   return {
     runtimeId: `test-child-${kind}`,
     surfaceIdPrefix: `test-child-${kind}:`,
@@ -522,6 +566,7 @@ function testAdapter(kind: 'exit-1' | 'sigkill' | 'sandbox-denial' | 'provider-e
     launchArgs: () => kind === 'sandbox-denial'
       ? [process.env.O8_TEST_SANDBOX_DENIED_PATH ?? '/missing-denial-path']
       : ['-e', childScript(kind)],
+    ...(kind === 'stdin-echo' ? { launchStdin: ({ prompt }: { prompt: string }) => `${JSON.stringify({ type: 'user', message: { role: 'user', content: prompt } })}\n` } : {}),
     resumeArgs: () => kind === 'sandbox-denial'
       ? [process.env.O8_TEST_SANDBOX_DENIED_PATH ?? '/missing-denial-path']
       : ['-e', childScript(kind)],
@@ -536,7 +581,16 @@ function testAdapter(kind: 'exit-1' | 'sigkill' | 'sandbox-denial' | 'provider-e
   };
 }
 
-function childScript(kind: 'exit-1' | 'sigkill' | 'provider-error' | 'auth-failure') {
+function childScript(kind: ChildKind) {
+  if (kind === 'stdin-echo') {
+    // Like Claude Code stream-json: silently ignore a regular-file stdin.
+    return `const fs = require('node:fs');
+if (fs.fstatSync(0).isFile()) process.exit(0);
+let input = '';
+process.stdin.on('data', (chunk) => { input += chunk; });
+process.stdin.on('end', () => { process.stdout.write('stdin-kind:pipe ' + input); process.exit(0); });`;
+  }
+  if (kind === 'silent-exit') return 'process.exit(0);';
   const stderrLine = 'rmcp session-delete 404 from fake child\\n';
   if (kind === 'exit-1') {
     return `process.stderr.write(${JSON.stringify(stderrLine)}); process.exit(1);`;
