@@ -94,6 +94,7 @@ export async function measureNativeMemory({ app, output, sourceSha, samples = 1 
   const artifactDigest = computeArtifactDigest(app, { version, gitSha: sourceSha });
   const stageRoot = fs.mkdtempSync(path.join(fs.realpathSync('/tmp'), 'o8-launch-'));
   const stagedApp = path.join(stageRoot, 'o8.app');
+  let preserveFixture = false;
   const receipt = { schema: 'o8/native-idle-memory/v1', platform: process.platform, arch: process.arch,
     osVersion: execFileSync('sw_vers', ['-productVersion'], { encoding: 'utf8' }).trim(), sourceSha, artifactDigest,
     method: 'normal release app; private profile; chat/worker history and project workload; no forced collection',
@@ -136,7 +137,13 @@ export async function measureNativeMemory({ app, output, sourceSha, samples = 1 
           assert(child.exitCode === null && child.signalCode === null, 'The app exited before accepting input');
           if (fs.existsSync(socketPath)) {
             try {
-              if (socketReadyMs === undefined) { await client.connectOnly(); socketReadyMs = round(performance.now() - started); }
+              if (socketReadyMs === undefined) {
+                await client.connectOnly(); socketReadyMs = round(performance.now() - started);
+                await client.send('manage_window', { window_label: 'main', operation: 'focus' });
+                const activation = spawnSync('/usr/bin/osascript', ['-e',
+                  `tell application ${JSON.stringify(stagedApp)} to activate`], { stdio: 'ignore', timeout: 10_000 });
+                assert.equal(activation.status, 0, 'Foreground activation failed');
+              }
               lastProbe = JSON.parse(await executeJs(client, COMPOSER_PROBE_JS));
               if (lastProbe.state === 'ready') {
                 const interactiveComposerMs = round(performance.now() - started);
@@ -190,15 +197,19 @@ export async function measureNativeMemory({ app, output, sourceSha, samples = 1 
           lastProbe, nativeStages: [...nativeStages], exitCode: child?.exitCode, signal: child?.signalCode };
         throw error;
       } finally {
-        await cleanupGate({ client, child, dataDir: seeded.dataDir, socketPath });
-        fs.rmSync(sampleRoot, { recursive: true, force: true });
+        try {
+          await cleanupGate({ client, child, dataDir: seeded.dataDir, socketPath });
+          fs.rmSync(sampleRoot, { recursive: true, force: true });
+        } catch (error) { preserveFixture = true; throw error; }
       }
     }
     receipt.maxIdleRssBytes = Math.max(...receipt.samples.map(row => row.rss.afterIdle.bytes));
     return receipt;
   } finally {
+    receipt.teardownVerified = !preserveFixture && receipt.samples.length === samples && !receipt.failure;
     fs.writeFileSync(path.join(output, 'receipt.json'), JSON.stringify(receipt, null, 2) + '\n');
-    fs.rmSync(stageRoot, { recursive: true, force: true });
+    console.log(JSON.stringify(receipt));
+    if (!preserveFixture) fs.rmSync(stageRoot, { recursive: true, force: true });
   }
 }
 
@@ -208,7 +219,6 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   }));
   const receipt = await measureNativeMemory({ app: String(args.app), output: String(args.output),
     sourceSha: String(args.sha), samples: Number(args.samples ?? 1) });
-  console.log(JSON.stringify(receipt));
   if (args.check) assert(receipt.maxIdleRssBytes < receipt.limitBytes,
     `Whole-app idle RSS exceeds 500 MB (${receipt.maxIdleRssBytes} bytes)`);
 }

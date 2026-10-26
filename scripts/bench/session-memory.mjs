@@ -1,7 +1,7 @@
 // Disposable session workload. Raw logs/snapshots stay in work/; receipts contain no paths.
 // Production: npm run build, then node scripts/bench/session-memory.mjs
 //   --standalone --sessions=96 --worker-sessions=48 --transcript-mib=4
-//   --idle-ms=600000 --output=work/session-memory
+//   --idle-ms=600000 --passive --check --output=work/session-memory
 // Add --snapshots for a separate diagnostic run; RSS is sampled before snapshots.
 // Use --snapshots=raw for heaps too large to load into the diagnostic JSON parser.
 import assert from 'node:assert/strict';
