@@ -30,6 +30,7 @@ import { useArchitectureDelta } from './useArchitectureDelta';
 import { useArchitectureAttention } from './useArchitectureAttention';
 import { ArchitectureDeltaCard } from './panel/ArchitectureDeltaCard';
 import { reviewPathCandidates, reviewRowPathForSourcePath } from './panel/review-paths';
+import { useDiffModeAnchor } from './useDiffModeAnchor';
 
 /**
  * ReviewPanel — the dedicated Review surface for the right panel's `review`
@@ -76,6 +77,7 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath, registeredRepos
   const [focusSignal, setFocusSignal] = useState<{ path: string | null; nonce: number }>({ path: null, nonce: 0 });
   const [lastTurnPaths, setLastTurnPaths] = useState<Set<string>>(new Set());
   const rowRefs = useRef(new Map<string, HTMLDivElement>());
+  const { capture: captureDiffAnchor } = useDiffModeAnchor(mode, rowRefs);
 
   // Close the header menus on outside-click or Escape.
   useEffect(() => {
@@ -355,7 +357,10 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath, registeredRepos
           <ToolbarButton
             title={mode === 'unified' ? 'Switch to split diff' : 'Switch to unified diff'}
             active={mode === 'side'}
-            onClick={() => setMode((current) => (current === 'unified' ? 'side' : 'unified'))}
+            onClick={() => {
+              captureDiffAnchor();
+              setMode((current) => (current === 'unified' ? 'side' : 'unified'));
+            }}
           >
             {mode === 'unified' ? <IconSplit size={14} /> : <IconUnified size={14} />}
           </ToolbarButton>
