@@ -152,7 +152,7 @@ describe('default-on usage analytics through persisted routes and first-run UI',
     const example = Array.from(document.querySelectorAll('pre')).find((item) => item.textContent?.includes('repo.added'))!;
     expect(example.closest('details:not([open])')).toBeNull();
     expect(JSON.parse(example.textContent!)).toEqual({ event: 'repo.added', props: { hasRemote: true, isGitRepo: true } });
-    for (const event of ['app.opened', 'brain.asked', 'orchestrator.message', 'dispatch.started', 'merge.approved', 'repo.added']) {
+    for (const event of ['app.opened', 'brain.asked', 'orchestrator.message', 'dispatch.started', 'merge.approved', 'repo.added', 'worker.first_launched', 'merge.first_completed', 'session.ended']) {
       expect(document.body.textContent).toContain(event);
     }
     for (const never of ['Code', 'prompts', 'repo names', 'file paths', 'file contents']) expect(document.body.textContent).toContain(never);

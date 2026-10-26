@@ -1020,19 +1020,22 @@ describe('worktree-side merge with real git repos', () => {
       writeFileSync(join(dataDir, 'entitlement.json'), JSON.stringify({ licenseKey: 'header.payload.signature' }));
       process.env.O8_PROXY_URL = 'https://telemetry.example.test';
       fetchSpy.mockResolvedValue(Response.json({ ok: true }));
-      await updateOperatorDefaults({ productTelemetryEnabled: false });
-      await mergeOnce('off');
-      expect(fetchSpy.mock.calls.filter(([input]) => String(input).endsWith('/v1/telemetry'))).toHaveLength(0);
-
+      rmSync(join(dataDir, 'usage-analytics'), { recursive: true, force: true });
       await updateOperatorDefaults({
         productTelemetryEnabled: true, crashReportsEnabled: false, telemetryConsentAnswered: true,
       });
       await mergeOnce('on');
-      const telemetry = fetchSpy.mock.calls.filter(([input]) => String(input).endsWith('/v1/telemetry'));
-      expect(telemetry).toHaveLength(1);
-      expect(telemetry[0]?.[1]).toMatchObject({
-        body: JSON.stringify({ event: 'merge.approved', props: { runtime: 'codex', pushed: true } }),
-      });
+      const telemetry = () => fetchSpy.mock.calls.filter(([input]) => String(input).endsWith('/v1/telemetry'));
+      const payloads = () => telemetry().map(([, init]) => JSON.parse(String(init?.body)));
+      expect(payloads()).toContainEqual({ event: 'merge.first_completed' });
+      expect(payloads()).toContainEqual({ event: 'merge.approved', props: { runtime: 'codex', pushed: true } });
+      expect(existsSync(join(dataDir, 'usage-analytics', 'merge.first_completed'))).toBe(true);
+      await mergeOnce('repeat');
+      expect(payloads().filter((payload) => payload.event === 'merge.first_completed')).toHaveLength(1);
+      await updateOperatorDefaults({ productTelemetryEnabled: false });
+      fetchSpy.mockClear();
+      await mergeOnce('off');
+      expect(telemetry()).toHaveLength(0);
     } finally {
       try {
         await updateOperatorDefaults({ productTelemetryEnabled: false });

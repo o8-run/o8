@@ -20,6 +20,19 @@ The complete usage event list is:
   whether it was pushed, recorded as yes or no.
 - repo.added: a project was added; only whether it has a remote and whether it
   is a version-controlled project, recorded as yes or no.
+- worker.first_launched: the first successful worker launch; no extra fields.
+- merge.first_completed: the first completed merge; no extra fields.
+- session.ended: an o8 backend session ended; only whether its exit was clean,
+  recorded as yes or no.
+
+First-step markers stay on this installation across restarts and updates. Older
+activity is not reconstructed. A step
+that first happens while sharing is off is never replayed after sharing is
+turned on. Delivery is best effort. A graceful backend shutdown is clean; an
+interrupted backend is counted as unclean at the next launch. A session with
+no enabled usage activity is not recovered for reporting. Live sibling backends
+are not treated as interrupted sessions. No session or process identifier is
+sent.
 
 Unknown events and invalid fields are rejected. Extra fields are removed.
 Usage payloads never contain code, prompts, repository names, file paths, diffs,
@@ -70,6 +83,8 @@ The wire allowlist is intentionally complete and small:
 - `dispatch.started` carries only a known worker-runtime enum.
 - `merge.approved` carries only a known worker-runtime enum and `pushed` boolean.
 - `repo.added` carries only `hasRemote` and `isGitRepo` booleans.
+- `worker.first_launched` and `merge.first_completed` carry no properties.
+- `session.ended` carries only a `clean` boolean.
 
 Unknown events or invalid fields are rejected, and extra fields are discarded.
 Code, prompts, repository names, paths, diffs, transcripts, file contents,
