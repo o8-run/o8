@@ -51,7 +51,7 @@ it('recovers a registered repo after a lost response and retries only the failed
 
   await act(async () => {
     root.render(createElement(AddRepoDialog, {
-      open: true,
+      open: true, initialMode: 'scratch',
       projects: [{ id: 'default', name: 'Default', repoPaths: [], createdAt: '' }],
       activeProjectId: 'default',
       onClose,
@@ -66,15 +66,15 @@ it('recovers a registered repo after a lost response and retries only the failed
     input?.dispatchEvent(new Event('input', { bubbles: true }));
   });
   await act(async () => {
-    [...document.querySelectorAll('button')].find((button) => button.textContent === 'Add to Default')?.click();
+    [...document.querySelectorAll('button')].find((button) => button.textContent === 'Open')?.click();
   });
 
-  expect(document.body.textContent).toContain('Repository registered, but linking to Default failed');
-  expect(document.body.textContent).toContain('Retry project link');
+  expect(document.body.textContent).toContain('Folder added, but the project could not be updated');
+  expect(document.body.textContent).toContain('Try again to finish opening it');
   expect(onRepoAdded).not.toHaveBeenCalled();
 
   await act(async () => {
-    [...document.querySelectorAll('button')].find((button) => button.textContent === 'Retry project link')?.click();
+    [...document.querySelectorAll('button')].find((button) => button.textContent === 'Open')?.click();
   });
 
   expect(fetchMock.mock.calls.filter(([url, init]) => (

@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { REQUEST_ADD_REPO_EVENT } from '@/lib/desktop/events';
+import { dispatchFocusRepoWorkspaceTab, REQUEST_ADD_REPO_EVENT } from '@/lib/desktop/events';
 import { AddRepoDialog } from './AddRepoDialog';
 import type { RepoRegistryEntry } from './shared';
 import { useProjects } from './useProjects';
@@ -19,7 +19,7 @@ export function AddRepoFlowHost({
   onOpenChange?: (open: boolean) => void;
 }) {
   const projects = useProjects();
-  const [intent, setIntent] = useState<{ mode?: AddRepoMode } | null>(null);
+  const [intent, setIntent] = useState<{ mode?: AddRepoMode; localPath?: string } | null>(null);
   const openRef = useRef(false);
   const returnFocusRef = useRef<HTMLElement | null>(null);
   const onOpenChangeRef = useRef(onOpenChange);
@@ -33,8 +33,9 @@ export function AddRepoFlowHost({
       if (openRef.current) return;
       openRef.current = true;
       returnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-      const mode = (event as CustomEvent<{ mode?: AddRepoMode }>).detail?.mode;
-      setIntent({ mode: mode === 'scratch' || mode === 'existing' ? mode : undefined });
+      const detail = (event as CustomEvent<{ mode?: AddRepoMode; localPath?: string }>).detail;
+      const mode = detail?.mode;
+      setIntent({ mode: mode === 'scratch' || mode === 'existing' ? mode : undefined, localPath: detail?.localPath });
       onOpenChangeRef.current?.(true);
     };
     window.addEventListener('o8:open-add-repo-flow', open);
@@ -59,11 +60,14 @@ export function AddRepoFlowHost({
   }, []);
 
   const handleRepoAdded = useCallback(async (repo: RepoRegistryEntry) => {
-    await projects.refresh();
     await onRepoAdded?.(repo);
     onSelectRepo?.(repo.id);
     window.dispatchEvent(new CustomEvent('o8:repos-changed'));
-  }, [onRepoAdded, onSelectRepo, projects]);
+    if (dispatchFocusRepoWorkspaceTab({ repoId: repo.id, repoPath: repo.localPath })) {
+      // A claimed workspace handoff owns focus; closing must not steal it.
+      returnFocusRef.current = null;
+    }
+  }, [onRepoAdded, onSelectRepo]);
 
   return (
     <AddRepoDialog
@@ -71,6 +75,7 @@ export function AddRepoFlowHost({
       projects={projects.ledger?.projects ?? []}
       activeProjectId={projects.ledger?.activeProjectId ?? null}
       initialMode={intent?.mode}
+      initialPath={intent?.localPath}
       onClose={close}
       onRepoAdded={handleRepoAdded}
       onProjectsChanged={projects.refresh}

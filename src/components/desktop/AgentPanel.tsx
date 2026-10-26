@@ -185,9 +185,9 @@ export const AgentPanel = memo<AgentPanelProps>(function AgentPanel(props: Agent
     setProjectsMenuOpen(false);
     onOpenProjectManagement?.();
   }, [onOpenProjectManagement]);
-  const handleOpenAddRepoDialog = useCallback(() => {
+  const handleOpenAddRepoDialog = useCallback((localPath?: string) => {
     setProjectsMenuOpen(false);
-    window.dispatchEvent(new CustomEvent('o8:open-add-repo-flow'));
+    window.dispatchEvent(new CustomEvent('o8:open-add-repo-flow', { detail: { localPath } }));
   }, []);
   // Clicking a repo selects that specific repo so the right side shows it — no
   // auto control room, and the drawer stays open for repo-to-repo navigation.
@@ -509,7 +509,7 @@ function MiniAgentPanelHeader({
   onProjectSelect: (project: ProjectRecord) => Promise<boolean>;
   onOpenProject: (project: ProjectRecord) => void;
   onManageProjects: () => void;
-  onAddRepo: () => void;
+  onAddRepo: (localPath?: string) => void;
   onRepositoryConnected: (repo: RepoRegistryEntry) => Promise<void>;
 }) {
   const [sessionMenuOpen, setSessionMenuOpen] = useState(false);

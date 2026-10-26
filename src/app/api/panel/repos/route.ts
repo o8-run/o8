@@ -15,6 +15,7 @@ import {
   validateRepo,
 } from '@/lib/repos/registry';
 import { cloneRepoToDefaultLocation, RepoCloneError } from '@/lib/repos/clone';
+import { RepoFolderError } from '@/lib/repos/folder-error';
 import { assertNotKnowledgeSource, KnowledgeSourceWriteError, normalizeKnowledgeWritePath } from '@/lib/cortex/knowledge/sources';
 import { removeRepoPathFromProjects, repointRepoPathInProjects } from '@/lib/repos/project-path-mutations';
 import { removeRepoFromPool } from '@/lib/repos/remove';
@@ -362,6 +363,9 @@ async function handlePOST(request: Request) {
     }
   } catch (error) {
     console.error('[api] panel/repos failed:', error);
+    if (error instanceof RepoFolderError) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
     if (error instanceof KnowledgeSourceWriteError) {
       return NextResponse.json({ error: error.message, code: 'knowledge_source_read_only' }, { status: 400 });
     }

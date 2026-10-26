@@ -28,8 +28,9 @@ export async function POST() {
     const cleanPath = result.endsWith('/') ? result.slice(0, -1) : result;
 
     return NextResponse.json({ path: cleanPath });
-  } catch {
-    // User cancelled or osascript failed
-    return NextResponse.json({ path: null });
+  } catch (error) {
+    const reason = error instanceof Error ? `${error.message} ${'stderr' in error ? error.stderr : ''}` : '';
+    if (/\(-128\)|user cancel(?:ed|led)/i.test(reason)) return NextResponse.json({ path: null });
+    return NextResponse.json({ error: 'Could not open the folder picker. Paste a folder path or Git URL.' }, { status: 503 });
   }
 }

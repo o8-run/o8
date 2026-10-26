@@ -1,0 +1,217 @@
+{
+  "report": "PQCHBW",
+  "base": "c43a59c0fd3200f762ca48acb9bc87fc42a00ced",
+  "scope": "Current add-repo UI components against the real repository route, project route, and persisted registry. Timer ends after the selection callback completes and the dialog closes. Workspace focus and tab reuse are verified separately by the host and workspace tests.",
+  "limits": "Controlled picker response; one picker confirmation is counted. Manual folder-search time and native desktop timing are excluded. Full dashboard development compilation exceeded the environment memory limit, so these are component-flow measurements, not native end-to-end ready-project timings.",
+  "method": "Five measured samples per theme after one warm-up. Same isolated runtime and empty local Git fixtures for before and after. No artificial API delay. Viewports: 900 x 700 and 1680 x 1050.",
+  "before": {
+    "appClicks": 4,
+    "pickerConfirmClicks": 1,
+    "totalClicks": 5,
+    "medianSeconds": 0.31558717049999985
+  },
+  "after": {
+    "appClicks": 1,
+    "pickerConfirmClicks": 1,
+    "totalClicks": 2,
+    "medianSeconds": 0.12781482699999924
+  },
+  "samples": {
+    "before": [
+      {
+        "theme": "light",
+        "sample": 0,
+        "warmup": true,
+        "seconds": 0.5681938729999999,
+        "appClicks": 4,
+        "pickerConfirmClicks": 1
+      },
+      {
+        "theme": "light",
+        "sample": 1,
+        "warmup": false,
+        "seconds": 0.346936095,
+        "appClicks": 4,
+        "pickerConfirmClicks": 1
+      },
+      {
+        "theme": "light",
+        "sample": 2,
+        "warmup": false,
+        "seconds": 0.3161864039999998,
+        "appClicks": 4,
+        "pickerConfirmClicks": 1
+      },
+      {
+        "theme": "light",
+        "sample": 3,
+        "warmup": false,
+        "seconds": 0.304097937,
+        "appClicks": 4,
+        "pickerConfirmClicks": 1
+      },
+      {
+        "theme": "light",
+        "sample": 4,
+        "warmup": false,
+        "seconds": 0.31123608800000013,
+        "appClicks": 4,
+        "pickerConfirmClicks": 1
+      },
+      {
+        "theme": "light",
+        "sample": 5,
+        "warmup": false,
+        "seconds": 0.317314468,
+        "appClicks": 4,
+        "pickerConfirmClicks": 1
+      },
+      {
+        "theme": "dark",
+        "sample": 0,
+        "warmup": true,
+        "seconds": 0.31283050800000045,
+        "appClicks": 4,
+        "pickerConfirmClicks": 1
+      },
+      {
+        "theme": "dark",
+        "sample": 1,
+        "warmup": false,
+        "seconds": 0.31865533999999934,
+        "appClicks": 4,
+        "pickerConfirmClicks": 1
+      },
+      {
+        "theme": "dark",
+        "sample": 2,
+        "warmup": false,
+        "seconds": 0.3149879369999999,
+        "appClicks": 4,
+        "pickerConfirmClicks": 1
+      },
+      {
+        "theme": "dark",
+        "sample": 3,
+        "warmup": false,
+        "seconds": 0.3292072840000001,
+        "appClicks": 4,
+        "pickerConfirmClicks": 1
+      },
+      {
+        "theme": "dark",
+        "sample": 4,
+        "warmup": false,
+        "seconds": 0.30060672199999955,
+        "appClicks": 4,
+        "pickerConfirmClicks": 1
+      },
+      {
+        "theme": "dark",
+        "sample": 5,
+        "warmup": false,
+        "seconds": 0.30311620500000025,
+        "appClicks": 4,
+        "pickerConfirmClicks": 1
+      }
+    ],
+    "after": [
+      {
+        "theme": "light",
+        "sample": 0,
+        "warmup": true,
+        "seconds": 0.22958446600000024,
+        "appClicks": 1,
+        "pickerConfirmClicks": 1
+      },
+      {
+        "theme": "light",
+        "sample": 1,
+        "warmup": false,
+        "seconds": 0.12651034399999936,
+        "appClicks": 1,
+        "pickerConfirmClicks": 1
+      },
+      {
+        "theme": "light",
+        "sample": 2,
+        "warmup": false,
+        "seconds": 0.12826182299999983,
+        "appClicks": 1,
+        "pickerConfirmClicks": 1
+      },
+      {
+        "theme": "light",
+        "sample": 3,
+        "warmup": false,
+        "seconds": 0.12525573299999995,
+        "appClicks": 1,
+        "pickerConfirmClicks": 1
+      },
+      {
+        "theme": "light",
+        "sample": 4,
+        "warmup": false,
+        "seconds": 0.22356744499999967,
+        "appClicks": 1,
+        "pickerConfirmClicks": 1
+      },
+      {
+        "theme": "light",
+        "sample": 5,
+        "warmup": false,
+        "seconds": 0.11809751200000028,
+        "appClicks": 1,
+        "pickerConfirmClicks": 1
+      },
+      {
+        "theme": "dark",
+        "sample": 0,
+        "warmup": true,
+        "seconds": 0.1283724829999992,
+        "appClicks": 1,
+        "pickerConfirmClicks": 1
+      },
+      {
+        "theme": "dark",
+        "sample": 1,
+        "warmup": false,
+        "seconds": 0.12610834799999976,
+        "appClicks": 1,
+        "pickerConfirmClicks": 1
+      },
+      {
+        "theme": "dark",
+        "sample": 2,
+        "warmup": false,
+        "seconds": 0.12795449799999914,
+        "appClicks": 1,
+        "pickerConfirmClicks": 1
+      },
+      {
+        "theme": "dark",
+        "sample": 3,
+        "warmup": false,
+        "seconds": 0.21078678200000103,
+        "appClicks": 1,
+        "pickerConfirmClicks": 1
+      },
+      {
+        "theme": "dark",
+        "sample": 4,
+        "warmup": false,
+        "seconds": 0.12767515599999935,
+        "appClicks": 1,
+        "pickerConfirmClicks": 1
+      },
+      {
+        "theme": "dark",
+        "sample": 5,
+        "warmup": false,
+        "seconds": 0.13131283199999963,
+        "appClicks": 1,
+        "pickerConfirmClicks": 1
+      }
+    ]
+  }
+}

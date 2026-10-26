@@ -6,12 +6,12 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { AgentPanel } from '../AgentPanel';
 import { AddRepoFlowHost } from './AddRepoFlowHost';
 import { open as pickDirectory } from '@tauri-apps/plugin-dialog';
-import { REQUEST_ADD_REPO_EVENT } from '@/lib/desktop/events';
+import { FOCUS_REPO_WORKSPACE_TAB_EVENT, REQUEST_ADD_REPO_EVENT } from '@/lib/desktop/events';
 import type { OrchestratorWorkspaceTarget } from '@/lib/orchestrator/types';
 import { ComposerContextRow } from '../thoughts/chat-panel/ComposerContextRow';
 
 vi.mock('../hooks/DesktopWebSocketContext', () => ({ useSharedDesktopWs: () => ({ isConnected: false }) }));
-vi.mock('@/lib/tauri/bridge', () => ({ isTauri: () => false }));
+vi.mock('@/lib/tauri/bridge', () => ({ isTauri: () => false, canUseTauriEvents: () => false }));
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn(async () => null) }));
 vi.mock('@/lib/panel/fetch-cache', () => ({
   fetchOnce: (url: string) => fetch(url),
@@ -159,7 +159,7 @@ it.each(['Enter', ' '] as const)('shares the sidebar + flow with keyboard %s and
   expect(document.querySelector('#add-repo-path')).toBe(input);
   await act(async () => button('Cancel').click());
   expect(document.activeElement).toBe(document.querySelector('[aria-label="Add repository"]'));
-  expect(pickDirectory).not.toHaveBeenCalled();
+  expect(pickDirectory).toHaveBeenCalledOnce();
 });
 
 it('restores focus to the sidebar + after a mouse open and Cancel', async () => {
@@ -219,7 +219,7 @@ it('ignores duplicate open requests without resetting the form or duplicating re
   const reposChanged = vi.fn();
   window.addEventListener('o8:repos-changed', reposChanged);
   try {
-    await act(async () => button('Add to Default').click());
+    await act(async () => button('Open').click());
     expect(fetchMock.mock.calls.filter(([, init]) => init?.body && JSON.parse(String(init.body)).action === 'add')).toHaveLength(1);
     expect(fetchMock.mock.calls.filter(([url, init]) => String(url) === '/api/panel/projects/default' && init?.method === 'PATCH')).toHaveLength(1);
     expect(onRepoAdded).toHaveBeenCalledExactlyOnceWith(repo);
@@ -228,7 +228,7 @@ it('ignores duplicate open requests without resetting the form or duplicating re
     expect(document.querySelector('#add-repo-path')).toBeNull();
     expect(document.activeElement).toBe(trigger());
     await act(async () => document.querySelector<HTMLElement>('[aria-label="Add repository"]')?.click());
-    expect(pickDirectory).toHaveBeenCalledOnce(); // Composer's mode must not stick to sidebar requests.
+    expect(pickDirectory).toHaveBeenCalledTimes(2); // Every entry point opens the same picker.
     expect(document.querySelector<HTMLInputElement>('#add-repo-path')?.value).toBe('');
   } finally {
     window.removeEventListener('o8:repos-changed', reposChanged);
@@ -251,4 +251,38 @@ it('waits for the first Project popup to become visible before moving keyboard f
   });
   expect(getComputedStyle(document.querySelector('[data-composer-overlay]')!).visibility).toBe('visible');
   expect(document.activeElement).toBe(button('Add repository…'));
+});
+
+it('opens the selected repository workspace from the sidebar without a second confirmation', async () => {
+  await render('expanded');
+  vi.mocked(pickDirectory).mockResolvedValueOnce(repo.localPath);
+  const composer = document.createElement('textarea');
+  document.body.append(composer);
+  const focused = vi.fn((event: Event) => { event.preventDefault(); composer.focus(); });
+  window.addEventListener(FOCUS_REPO_WORKSPACE_TAB_EVENT, focused);
+  try {
+    await act(async () => document.querySelector<HTMLElement>('[aria-label="Add repository"]')!.click());
+    expect(pickDirectory).toHaveBeenCalledOnce();
+    expect(onRepoAdded).toHaveBeenCalledExactlyOnceWith(repo);
+    expect(onSelectRepo).toHaveBeenCalledExactlyOnceWith(repo.id);
+    expect(focused).toHaveBeenCalledOnce();
+    expect((focused.mock.calls[0][0] as CustomEvent).detail).toEqual({ repoId: repo.id, repoPath: repo.localPath });
+    expect(document.querySelector('#add-repo-path')).toBeNull();
+    expect(document.activeElement).toBe(composer);
+  } finally { window.removeEventListener(FOCUS_REPO_WORKSPACE_TAB_EVENT, focused); composer.remove(); }
+});
+
+it('opens a dropped folder from the desktop Add entry without invoking the picker', async () => {
+  await act(async () => root.render(createElement(Fragment, null,
+    createElement(AddRepoFlowHost, { onRepoAdded, onSelectRepo }),
+    createElement(AgentPanel, { onRepoAdded, onSelectRepo, navigationRail: true }),
+  )));
+  const drop = new Event('drop', { bubbles: true, cancelable: true });
+  Object.defineProperty(drop, 'dataTransfer', { value: {
+    files: [], getData: (type: string) => type === 'text/uri-list' ? `file://${repo.localPath}` : '',
+  } });
+  await act(async () => button('Add repository').dispatchEvent(drop));
+  expect(pickDirectory).not.toHaveBeenCalled();
+  expect(onRepoAdded).toHaveBeenCalledExactlyOnceWith(repo);
+  expect(onSelectRepo).toHaveBeenCalledExactlyOnceWith(repo.id);
 });

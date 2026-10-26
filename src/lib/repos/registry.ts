@@ -1,5 +1,6 @@
 import { assertNotKnowledgeSource, normalizeKnowledgeWritePath } from '@/lib/cortex/knowledge/sources';
 import 'server-only';
+import { RepoFolderError } from './folder-error';
 
 import { execFile } from '@/lib/providers/child-process';
 import { randomUUID } from 'node:crypto';
@@ -304,16 +305,16 @@ async function detectSetupConfig(repoRoot: string): Promise<RepoSetupConfig> {
 async function resolveRepoRoot(inputPath: string) {
   const expanded = inputPath.replace(/^~(?=\/|$)/, os.homedir());
   if (!expanded.trim()) {
-    throw new Error('Repository path is required.');
+    throw new RepoFolderError('Choose a folder or paste its full path.');
   }
 
   const resolved = normalizeKnowledgeWritePath(expanded);
   const stats = await stat(resolved).catch(() => null);
   if (!stats) {
-    throw new Error('Path not found.');
+    throw new RepoFolderError('Folder not found. Choose an existing folder or check the pasted path.');
   }
   if (!stats.isDirectory()) {
-    throw new Error('Path must point to a local folder.');
+    throw new RepoFolderError('This is a file. Choose the folder containing your project.');
   }
 
   try {

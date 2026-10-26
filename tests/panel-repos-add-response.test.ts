@@ -58,6 +58,22 @@ function postAdd() {
   }));
 }
 
+it('explains a missing folder and a file selection through the real add route', async () => {
+  const filePath = path.join(home, 'selected-file');
+  writeFileSync(filePath, 'fixture');
+  for (const [localPath, expected] of [
+    [path.join(home, 'missing'), 'Choose an existing folder'],
+    [filePath, 'Choose the folder containing your project'],
+  ]) {
+    const response = await reposRoute.POST(new Request('http://localhost/api/panel/repos', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'add', localPath }),
+    }));
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toContain(expected);
+  }
+});
+
 it('returns after persistence without waiting for readiness, then retries and links the same repo', async () => {
   readinessGate.hold = true;
   const firstPending = postAdd();
