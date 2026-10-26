@@ -21,7 +21,7 @@ export class WebviewBridgeError extends Error {
 export function nativeWebviewError(error: unknown): WebviewBridgeError {
   const message = typeof error === 'string' ? error : '';
   if (message === 'Authentication failed: invalid or missing auth token') return new WebviewBridgeError('webview_auth_rejected');
-  if (/^Window not found[:.]/i.test(message)) return new WebviewBridgeError('webview_window_missing');
+  if (/^(?:Webview )?Window not found(?:[:.]|$)/i.test(message)) return new WebviewBridgeError('webview_window_missing');
   if (/not allowed.*permissions|permission (?:denied|required)/i.test(message)) return new WebviewBridgeError('webview_permission_denied');
   if (/timeout waiting for .* response|request timed out/i.test(message)) return new WebviewBridgeError('webview_bridge_unresponsive');
   return new WebviewBridgeError('webview_command_failed');

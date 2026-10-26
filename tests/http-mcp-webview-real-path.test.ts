@@ -205,6 +205,19 @@ describe('authenticated POST /api/mcp webview reads', () => {
     expect(JSON.stringify(result)).not.toContain(message);
   });
 
+  it.each(['o8_view_eval', 'o8_view_surface_state'].flatMap(name =>
+    ['Webview window not found', 'Webview window not found: private-window'].map(message => [name, message] as const),
+  ))('preserves the missing-window diagnosis for %s (%s)', async (name, message) => {
+    fault = message;
+    const result = await call(name, name === 'o8_view_eval' ? { code: 'document.readyState' } : {});
+    expect(result.isError).toBe(true);
+    const body = payload(result);
+    expect(name === 'o8_view_eval' ? body.error.code : body.code).toBe('webview_window_missing');
+    expect(JSON.stringify(body)).toContain('No target app window');
+    expect(JSON.stringify(result)).not.toContain(message);
+    expect(frames).toHaveLength(1);
+  });
+
   it('keeps scroll acknowledgement timeout handling without replay', async () => {
     fault = 'Timeout waiting for scroll_page response';
     const result = await call('o8_view_scroll', { direction: 'down' });
