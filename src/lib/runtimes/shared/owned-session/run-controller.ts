@@ -42,7 +42,7 @@ import { pathWithNodeRuntime } from '@/lib/util/node-on-path';
 import { crashSurvivableWorkersEnabled } from './crash-survival';
 import { assertOwnedSessionProcessIdentity, captureOwnedRunIdentity } from './process-identity';
 import { emitRuntimeFallbackNotification, notifySupervisorOfCleanExit } from './run-notifications';
-import { observeChildExit, readAbnormalStderrTail, silentCleanExitMessage } from './exit-outcome';
+import { observeChildExit, readAbnormalStderrTail, silentCleanExitMessage, withStagedStdinOutcome } from './exit-outcome';
 import { prepareOwnedLaunchArgs } from './launch-args';
 import { WorkerO8CliUnavailableError } from './worker-o8-cli';
 import { stageOwnedLaunchFailure } from './launch-failure';
@@ -194,12 +194,12 @@ export function createOwnedRunController({
       key,
       stdoutRaw: withinRawCap ? stdoutRaw : null,
       stderrRaw: withinRawCap ? stderrRaw : null,
-      parsed: adapter.parseRunLog(
+      parsed: withStagedStdinOutcome(adapter.parseRunLog(
         stdoutRaw,
         run,
         stdoutKey === 'absent' ? undefined
           : new Date(Number(stdoutKey.slice(stdoutKey.indexOf(':') + 1))).toISOString(),
-      ),
+      ), stderrRaw),
     };
     runArtifactCache.set(run.id, entry);
     while (runArtifactCache.size > RUN_ARTIFACT_CACHE_MAX) {
@@ -647,7 +647,7 @@ export function createOwnedRunController({
           pid: 0,
           ...(useSupervisor ? { supervisor: { id: runId, owner: session.surfaceId, epoch: '', cursor: 0 } } : {}),
           processIdentityRequired: crashSurvivableWorkersEnabled() && Boolean(session.packetId) && process.platform !== 'win32',
-          commandIdentity: executionCarrierCommandIdentity(carrierLaunch, spawnBinary),
+          commandIdentity: process.platform === 'win32' && stdinPayload && !useSupervisor ? process.execPath : executionCarrierCommandIdentity(carrierLaunch, spawnBinary),
           processMarker: runId,
           spawnState: 'prepared',
           stdoutPath,
@@ -703,7 +703,7 @@ export function createOwnedRunController({
               const launchInput = {
                 session, runtimeId, policy: credentialPolicy, runId,
                 binary: spawnBinary, args: spawnArgs, env: spawnEnv,
-                stdinFd, stdoutFd, stderrFd, mcpConfigPath: workerMcp.configPath, mcpServers: workerMcp.servers,
+                stdinFd, stdinBytes: stdinPayload ? Buffer.byteLength(stdinPayload) : undefined, stdoutFd, stderrFd, mcpConfigPath: workerMcp.configPath, mcpServers: workerMcp.servers,
                 materializationIdentity,
                 assertWorkerO8Current: preparedLaunch.workerO8?.assertCurrent,
                 onSubmit: () => { spawnSubmitted = true; },

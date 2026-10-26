@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { truncateSync } from 'node:fs';
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -265,6 +266,27 @@ describe('createOwnedSessionStore child exit recording', () => {
     expect(stdout).toContain('stdin-kind:pipe');
     expect(stdout).toContain('"content":"pipe me"');
     expect(run).toMatchObject({ outcome: 'finished', childExit: { code: 0, classification: 'clean-exit' } });
+  }, 20_000);
+
+  it('records truncated staged input as failure before the provider can read a partial prompt', async () => {
+    const [{ createOwnedSessionStore }, credentials] = await Promise.all([import('./store'), import('./credential-spawn')]);
+    const spawn = credentials.spawnCredentialCheckedChild;
+    const intercepted = vi.spyOn(credentials, 'spawnCredentialCheckedChild').mockImplementationOnce(input => {
+      truncateSync(path.join(input.session.sessionDir, 'runs', `${input.runId}.jsonl.stdin`), 10);
+      return spawn(input);
+    });
+    const store = createOwnedSessionStore(testAdapter('stdin-echo'));
+    try {
+      const launched = await store.launch({ cwd: repoPath, prompt: 'must never become a partial prompt' });
+      const session = await waitForRecordedExit(store, launched.surfaceId);
+      const run = session.recentRuns[0];
+      expect(run).toMatchObject({ outcome: 'failed', childExit: { code: 74, classification: 'nonzero-exit' } });
+      expect(await readFile(run.stderrPath, 'utf8')).toContain('staged input was truncated');
+      expect(await readFile(run.stdoutPath, 'utf8')).toBe('');
+      expect((await store.getReviewPacket(launched.surfaceId)).lastRun?.outcome).toBe('failed');
+      const persisted = JSON.parse(await readFile(path.join(session.sessionDir, 'session.json'), 'utf8')) as OwnedSessionRecord;
+      expect(persisted.recentRuns[0].outcome).toBe('failed');
+    } finally { intercepted.mockRestore(); }
   }, 20_000);
 
   it('surfaces a clean exit with no output as a failure instead of a silent success', async () => {
@@ -556,7 +578,7 @@ type ChildKind = 'exit-1' | 'sigkill' | 'provider-error' | 'auth-failure' | 'std
 function testAdapter(kind: ChildKind | 'sandbox-denial'): OwnedRuntimeAdapter {
   return {
     runtimeId: `test-child-${kind}`,
-    surfaceIdPrefix: `test-child-${kind}:`,
+    surfaceIdPrefix: kind === 'stdin-echo' ? `test-child-${kind}-owned:` : `test-child-${kind}:`,
     rootEnvVar: 'O8_TEST_CHILD_EXIT_ROOT',
     rootDefault: path.join(os.tmpdir(), 'o8-test-child-exit'),
     binaryName: 'node',

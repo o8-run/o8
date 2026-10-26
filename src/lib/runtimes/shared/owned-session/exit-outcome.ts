@@ -1,9 +1,16 @@
 import type { ChildProcess } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 
-import type { OwnedChildExitOutcome } from './types';
+import type { OwnedChildExitOutcome, ParsedRunLog } from './types';
 
 const DEFAULT_STDERR_TAIL_BYTES = 500;
+
+/** Durable input failures override even a provider's successful partial result. */
+export function withStagedStdinOutcome(parsed: ParsedRunLog, stderr: string): ParsedRunLog {
+  const message = stderr.match(/^O8_STDIN_DELIVERY_FAILED: (.+)$/m)?.[1];
+  return message ? { ...parsed, outcome: 'failed', completedTurn: false,
+    providerFailure: { subtype: 'stdin_delivery_failed', message } } : parsed;
+}
 
 export function classifyChildExit(
   code: number | null,

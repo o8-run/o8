@@ -48,6 +48,8 @@ describe('native shutdown registration boundary for detached packet workers', ()
     expect(worker).toContain('const child = spawnCredentialCheckedChild(launchInput);');
     expect(launch).toContain('detached: true,');
     expect(launch).toContain("stdio: [input.stdinFd ?? 'ignore', input.stdoutFd, input.stderrFd]");
+    expect(launch).toContain('workerOwnedStdinInvocation(launch, input.stdinBytes ?? fstatSync(input.stdinFd).size)');
+    expect(launch).not.toContain('child.stdin');
     expect(worker).toContain('child.unref()');
     expect(`${worker}\n${launch}`).not.toContain('register_child');
   });
