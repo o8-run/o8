@@ -56,7 +56,7 @@ describe('local CI verification through its command entry point', () => {
     expect(result.error).toBeUndefined();
     expect(result.status, result.stderr + result.stdout).toBe(0);
     for (const name of ['Type Check', 'Lint', 'Hermetic Unit Tests', 'Test Classification',
-      'Governance Smoke', 'Security Audit', 'Server Bundle Size']) {
+      'Governance Smoke', 'Security Audit', 'Server Bundle Size', 'Integration Tests (changed files)']) {
       expect(result.stdout).toContain(`PASS ${name}`);
     }
     const shards = result.calls.filter(call => call.args.includes('test:unit'));
@@ -74,7 +74,8 @@ describe('local CI verification through its command entry point', () => {
     for (const ignore of ignores) expect(audit.args).toContain(ignore);
   }, 60_000);
 
-  it.each([['lint', 'Lint'], ['audit', 'Security Audit'], ['--shard=2/4', 'Hermetic Unit Tests']])('reports failure and continues the remaining checks after %s fails', (fail, name) => {
+  it.each([['lint', 'Lint'], ['audit', 'Security Audit'], ['--shard=2/4', 'Hermetic Unit Tests'],
+    ['test:integration', 'Integration Tests (changed files)']])('reports failure and continues the remaining checks after %s fails', (fail, name) => {
     const result = execute(fail);
     expect(result.error).toBeUndefined();
     expect(result.status).toBe(1);
@@ -122,5 +123,36 @@ describe('local CI verification through its command entry point', () => {
     expect(workflow.jobs.typecheck.steps.some((step: { run?: string }) => step.run === 'node scripts/ci/check-verify-ci.mjs')).toBe(true);
     const audit = workflow.jobs.security.steps.find((step: { name?: string }) => step.name === 'Audit root dependencies');
     expect(audit['continue-on-error']).not.toBe(true);
+  });
+
+  it('uses the CI merge-base selector for committed, staged, unstaged and untracked classified files', () => {
+    const directory = path.join(root, 'selection');
+    mkdirSync(path.join(directory, 'tests'), { recursive: true });
+    const git = (...args: string[]) => {
+      const result = spawnSync('git', args, { cwd: directory, encoding: 'utf8' });
+      expect(result.status, result.stderr).toBe(0);
+      return result.stdout.trim();
+    };
+    git('init', '-q', '-b', 'main');
+    git('config', 'user.name', 'CI Fixture');
+    git('config', 'user.email', 'fixture@example.invalid');
+    const files = ['committed', 'staged', 'unstaged', 'untracked'].map(name => `tests/${name}.test.ts`);
+    writeFileSync(path.join(directory, 'tests/test-classification.json'), JSON.stringify({ resourceOwning: files.map(file => ({ path: file })) }));
+    for (const file of files.slice(0, 3)) writeFileSync(path.join(directory, file), 'base\n');
+    git('add', '.');
+    git('commit', '-qm', 'fixture base');
+    git('update-ref', 'refs/remotes/origin/main', 'HEAD');
+    writeFileSync(path.join(directory, files[0]), 'committed\n');
+    git('add', files[0]);
+    git('commit', '-qm', 'fixture committed assertion');
+    for (const file of files.slice(1)) writeFileSync(path.join(directory, file), 'changed\n');
+    git('add', files[1]);
+    const selector = path.join(repo, 'scripts/ci/resource-owning-changed.mjs');
+    const selected = spawnSync(process.execPath, [selector, 'origin/main', '--worktree'], { cwd: directory, encoding: 'utf8' });
+    expect(selected.status, selected.stderr).toBe(0);
+    expect(selected.stdout.trim().split('\n')).toEqual([...files].sort());
+    const ci = spawnSync(process.execPath, [selector, 'origin/main', 'HEAD'], { cwd: directory, encoding: 'utf8' });
+    expect(ci.status, ci.stderr).toBe(0);
+    expect(ci.stdout.trim()).toBe(files[0]);
   });
 });

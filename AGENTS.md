@@ -28,14 +28,21 @@ the npm version in `packageManager`, installed dependencies, and `bash` and `car
 access but no account credentials.
 
 The command reads `.github/workflows/ci.yml` for Type Check, Lint, Test Classification,
-all Hermetic Unit Tests shards, Server Bundle Size, Governance Smoke, and Security Audit.
+all Hermetic Unit Tests shards, Server Bundle Size, Integration Tests (changed files),
+Governance Smoke, and Security Audit. Fetch `origin/main` before running. Changed
+integration files use CI's merge-base selector, including staged, unstaged and untracked
+classified tests locally, and the same integration configuration and baseline as CI.
+Install `ripgrep` and the system secure-shell tools for resource-owning tests.
 It sets `CI=true`, uses the CI test configuration and environment, gives type checking
 an 8192 MiB heap, and runs the smoke in a fresh temporary data directory with its CI
 timeout. Each check prints PASS or FAIL under its CI name; any failed command makes
 the final exit status non-zero. Audit failures also block CI.
 
-Dependency-change review, hosted reporting, native target builds and resource-owning
-integration lanes remain hosted checks. The CI coverage guard rejects an unclassified
+Dependency changes use the same credential-free lockfile audit in CI and locally:
+added package versions fail at low severity, while unchanged baseline findings remain
+the responsibility of the full audits. Nested package and native lockfiles are included.
+Hosted reporting, native target builds and weekly integration lanes remain hosted
+checks. The CI coverage guard rejects an unclassified
 job or an unsupported action in a local check. Update the local implementation or its
 explicit hosted classification whenever CI changes; unknown checks never silently pass.
 

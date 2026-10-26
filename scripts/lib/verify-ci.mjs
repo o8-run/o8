@@ -6,7 +6,6 @@ import { parse } from 'yaml';
 // jobs fail closed, including jobs added without updating a separate inventory.
 const hostedJobs = {
   'typecheck-parity': 'weekly comparison',
-  'integration-changed': 'resource-owning integration lane',
   'integration-weekly': 'weekly integration lane',
   'integration-weekly-report': 'hosted reporting',
   'integration-weekly-watch': 'hosted scheduling',
@@ -15,11 +14,10 @@ const hostedJobs = {
   'rust-check-linux': 'native target runner',
   'roadmap-check': 'authenticated issue inventory',
 };
-const localJobs = ['typecheck', 'server-bundle-size', 'lint', 'test-shards', 'test', 'security', 'governance-smoke'];
+const localJobs = ['typecheck', 'server-bundle-size', 'lint', 'test-shards', 'test', 'security', 'governance-smoke', 'integration-changed'];
 const setupActions = ['actions/checkout@', 'actions/setup-node@', 'actions/cache/restore@',
   'actions/cache/save@', 'actions/upload-artifact@'];
 const auditAction = 'rustsec/audit-check@';
-const reviewAction = 'actions/dependency-review-action@';
 const bootstrapCommands = new Set([
   'npm ci --prefer-offline',
   `npm install -g "$(node -p 'require("./package.json").packageManager')"`,
@@ -32,7 +30,11 @@ function quote(value) {
   return `'${String(value).replaceAll("'", "'\"'\"'")}'`;
 }
 function expand(value, shard) {
-  const result = String(value).replaceAll('${{ matrix.shard }}', String(shard));
+  const refs = {
+    '${{ github.event.merge_group.base_sha || github.event.pull_request.base.sha || github.event.before }}': 'origin/main',
+    '${{ github.event.merge_group.head_sha || github.event.pull_request.head.sha || github.sha }}': '--worktree',
+  };
+  const result = (refs[String(value)] ?? String(value)).replaceAll('${{ matrix.shard }}', String(shard));
   requireCondition(!result.includes('${{'), 'unsupported hosted expression in a local command or environment');
   return result;
 }
@@ -90,7 +92,7 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
     for (const step of job.steps ?? []) {
       if (!step.uses) continue;
       const supported = setupActions.some(prefix => step.uses.startsWith(prefix))
-        || (id === 'security' && (step.uses.startsWith(auditAction) || step.uses.startsWith(reviewAction)));
+        || (id === 'security' && step.uses.startsWith(auditAction));
       requireCondition(supported, `action ${step.uses} in ${id} has no verify:ci equivalent`);
     }
   }
@@ -128,6 +130,25 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
   requireCondition(unitSteps.some(step => step.command.startsWith('npm run test:unit -- ')), 'CI must execute its hermetic unit entry point');
   checks.push({ name: jobs.test.name, steps: unitSteps });
   appendJob('server-bundle-size');
+  const integration = jobs['integration-changed'];
+  const selection = integration.steps.find(step => step.id === 'select');
+  requireCondition(selection?.run === 'node scripts/ci/resource-owning-changed.mjs "$BASE_REF" "$HEAD_REF"',
+    'integration selection needs a verify:ci equivalent');
+  requireCondition(JSON.stringify(selection.env) === JSON.stringify({
+    BASE_REF: "${{ github.event.merge_group.base_sha || (github.event_name == 'pull_request' && format('origin/{0}', github.base_ref)) || inputs.integration_base }}",
+    HEAD_REF: '${{ github.event.merge_group.head_sha || github.sha }}',
+  }), 'integration comparison refs need a verify:ci equivalent');
+  const integrationRun = integration.steps.find(step => step.run === 'npm run test:integration -- ${{ steps.select.outputs.files }}');
+  requireCondition(integrationRun?.if === "steps.select.outputs.count != '0'", 'integration command changed');
+  const prerequisites = 'sudo apt-get update\nsudo apt-get install -y ripgrep openssh-server\nrg --version';
+  for (const step of integration.steps.filter(step => step.run)) {
+    requireCondition(step.shell === undefined && step['working-directory'] === undefined, 'unsupported integration execution metadata');
+    requireCondition(step === selection || (step.if === "steps.select.outputs.count != '0'"
+      && (bootstrapCommands.has(step.run.trim()) || step.run.trim() === prerequisites || step === integrationRun)),
+    'integration step needs a verify:ci equivalent');
+  }
+  checks.push({ name: integration.name, steps: [{ ...runStep({ ...integrationRun,
+    run: 'npm run test:integration --' }, integration), selectedFiles: true }] });
   const audit = jobs.security.steps.find(step => step.uses?.startsWith(auditAction));
   requireCondition(audit, 'native dependency audit is missing');
   const ignores = String(audit.with?.ignore ?? '').split(',').map(value => value.trim()).filter(Boolean);
@@ -145,6 +166,5 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
   requireCondition(nodeVersions.size === 1, 'local checks must use one supported runtime version');
   const nodeMajor = [...nodeVersions][0];
   requireCondition(/^\d+$/.test(nodeMajor), 'CI runtime version must identify a major version');
-  return { checks, hostedJobs, nodeMajor,
-    notes: ['Dependency-change review and hosted check publication require runner credentials.'] };
+  return { checks, hostedJobs, nodeMajor, notes: ['Hosted check publication remains on the runner.'] };
 }

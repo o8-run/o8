@@ -340,19 +340,14 @@ jobs:
       issues: write
     steps:
       - uses: actions/checkout@v4
-      # The dependency-review API is Advanced-Security-gated on private repos
-      # (live 403, first CI run 2026-07-30). Self-arms at the public flip.
-      - name: Review dependency changes
-        if: (github.event_name == 'pull_request' || github.event_name == 'merge_group') && !github.event.repository.private
-        uses: actions/dependency-review-action@v4
         with:
-          base-ref: ${{ github.event.merge_group.base_sha || github.event.pull_request.base.sha }}
-          head-ref: ${{ github.event.merge_group.head_sha || github.event.pull_request.head.sha }}
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
       - run: npm install -g "$(node -p 'require("./package.json").packageManager')"
+      - run: npm ci --prefer-offline
       - name: Audit root dependencies
         run: npm audit --audit-level=high
       - name: Audit Rust dependencies
@@ -368,6 +363,13 @@ jobs:
           # RUSTSEC-2026-0049: rustls-webpki 0.102.8 is pinned by sentry 0.34.0 through rustls 0.22.4.
           # RUSTSEC-2026-0235: rkyv >=0.8.17 is blocked by rust_decimal 1.40.0 (rkyv 0.7 line) via byte-unit 5.2.0; o8 never deserializes rkyv archives.
           ignore: RUSTSEC-2026-0195,RUSTSEC-2026-0194,RUSTSEC-2026-0104,RUSTSEC-2026-0098,RUSTSEC-2026-0099,RUSTSEC-2026-0049,RUSTSEC-2026-0235
+      # One credential-free addition audit and threshold on both entry points.
+      - name: Review dependency changes
+        run: node scripts/ci/review-dependency-changes.mjs "$BASE_REF" "$HEAD_REF"
+        env:
+          BASE_REF: ${{ github.event.merge_group.base_sha || github.event.pull_request.base.sha || github.event.before }}
+          HEAD_REF: ${{ github.event.merge_group.head_sha || github.event.pull_request.head.sha || github.sha }}
+          DEPENDENCY_REVIEW_FAIL_ON_SEVERITY: low
 
   governance-smoke:
     name: Governance Smoke

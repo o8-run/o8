@@ -20,8 +20,20 @@ function environment() {
 function run(step) {
   const dataDir = step.temporaryData ? mkdtempSync(path.join(tmpdir(), 'o8-verify-ci-smoke-')) : null;
   const env = { ...environment(), ...step.env, ...(dataDir ? { CORTEX_IDE_DATA_DIR: dataDir } : {}) };
+  let command = step.command;
+  if (step.selectedFiles) {
+    const selected = spawnSync(process.execPath, ['scripts/ci/resource-owning-changed.mjs', 'origin/main', '--worktree'], {
+      cwd: root, env, encoding: 'utf8', timeout: step.timeoutMs, maxBuffer: 4 * 1024 * 1024,
+    });
+    if (selected.stderr) process.stderr.write(selected.stderr);
+    if (selected.status !== 0) return Promise.resolve(false);
+    const files = selected.stdout.trim().split('\n').filter(Boolean);
+    if (!files.length) return Promise.resolve(true);
+    command += files.map(file => ` '${file.replaceAll("'", "'\"'\"'")}'`).join('');
+    console.log(`[verify:ci] selected ${files.length} changed integration files against origin/main`);
+  }
   return new Promise(resolve => {
-    const child = spawn('bash', ['--noprofile', '--norc', '-e', '-c', step.command], {
+    const child = spawn('bash', ['--noprofile', '--norc', '-e', '-c', command], {
       cwd: root, env, stdio: 'inherit', detached: process.platform !== 'win32',
     });
     let timedOut = false;
