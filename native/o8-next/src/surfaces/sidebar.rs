@@ -58,7 +58,14 @@ pub(super) const REGISTRATION: Registration = Registration {
             .flex()
             .flex_1()
             .min_h_0()
-            .child(shell.surfaces.sidebar.view.as_ref().unwrap().clone())
+            .child(
+                gpui::AnyView::from(shell.surfaces.sidebar.view.as_ref().unwrap().clone()).cached(
+                    gpui::StyleRefinement::default()
+                        .w(px(280.))
+                        .h_full()
+                        .flex_shrink_0(),
+                ),
+            )
             .child(div().flex().flex_col().flex_1().min_w_0().child(content))
             .into_any_element()
     },
@@ -192,12 +199,7 @@ impl Shell {
             }
         }
         if self.connected {
-            self.notice = if self.workspaces.is_empty() {
-                "Connected. No saved workspace sessions."
-            } else {
-                "Connected · Ctrl+F: search threads · F8: sidebar · Ctrl+K: commands"
-            }
-            .into();
+            self.notice.clear();
         }
         for content in self.content.values() {
             if let Content::Grid(grid) = content {

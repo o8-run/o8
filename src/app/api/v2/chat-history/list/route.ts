@@ -15,6 +15,7 @@ import { getDataDir } from '@/lib/data-dir-migration';
 import { orchestratorDisplayTitle, stableNewThreadTitle, stableOrchestratorThreadTitleForId } from '@/lib/orchestrator/thread-title';
 import { isOrchestratorBackendId, type OrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
 import { deleteCanonicalChatHistoryRecord } from '@/lib/llm/chat-history-store';
+import { isSavedConnectivityCheck } from '@/lib/orchestrator/connectivity-check';
 
 // Empty placeholder files (#597 mint-on-open pattern) get garbage-collected
 // after this window — gives the operator time to come back to a fresh tab
@@ -104,6 +105,7 @@ export async function GET(request: NextRequest) {
         const stat = statSync(filePath);
         const raw = readFileSync(filePath, 'utf-8');
         const data = JSON.parse(raw);
+        if (isSavedConnectivityCheck(data)) continue;
 
         if (!data.messages) continue;
 

@@ -1,0 +1,13 @@
+[advisories]
+# Added 2026-10-25; review by 2026-11-25. The Linux notification and
+# single-instance consumers, and the native renderer's portal/credential
+# consumers, still require the 5.x bus types in their current stable releases.
+# These are the three standalone-crate maintenance notices, not vulnerability
+# exceptions. Keep other findings visible. Follow up in #3901, #3902 and #3903:
+# migrate consumers to the maintained 6.x modules, then remove these entries.
+# CI invokes cargo audit from the repository root with --file src-tauri/Cargo.lock.
+ignore = [
+  "RUSTSEC-2026-0370", # zvariant moved into the maintained bus crate's wire module.
+  "RUSTSEC-2026-0371", # zbus_names moved into its names module.
+  "RUSTSEC-2026-0372", # zvariant_derive macros moved into the maintained bus crate.
+]
