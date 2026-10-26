@@ -77,7 +77,7 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath, registeredRepos
   const [focusSignal, setFocusSignal] = useState<{ path: string | null; nonce: number }>({ path: null, nonce: 0 });
   const [lastTurnPaths, setLastTurnPaths] = useState<Set<string>>(new Set());
   const rowRefs = useRef(new Map<string, HTMLDivElement>());
-  const { capture: captureDiffAnchor } = useDiffModeAnchor(mode, rowRefs);
+  const { capture: captureDiffAnchor, selectFile: selectDiffAnchor } = useDiffModeAnchor(mode, rowRefs);
 
   // Close the header menus on outside-click or Escape.
   useEffect(() => {
@@ -137,11 +137,12 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath, registeredRepos
     else rowRefs.current.delete(path);
   }, []);
   const jumpToFile = useCallback((path: string) => {
+    selectDiffAnchor(path);
     setFocusSignal((signal) => ({ path, nonce: signal.nonce + 1 }));
     window.setTimeout(() => {
       rowRefs.current.get(path)?.scrollIntoView({ block: 'start', behavior: 'smooth' });
     }, 40);
-  }, []);
+  }, [selectDiffAnchor]);
   const currentRepo = registeredRepos.find((repo) => repo.localPath === repoPath);
   const repoLabel = currentRepo?.name ?? (repoPath ? (repoPath.split('/').filter(Boolean).pop() ?? 'Repo') : 'Repo');
   const changedFilesKey = useMemo(() => changes.files.map((file) => file.path).join('\n'), [changes.files]);

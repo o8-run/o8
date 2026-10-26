@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, type RefObject } from 'react';
+import { useCallback, useLayoutEffect, useRef, type RefObject } from 'react';
 import type { DiffMode } from './panel/types';
 
 type Anchor = { path: string; line: string | null; offset: number };
@@ -24,9 +24,21 @@ function anchorLine(row: HTMLElement, key: string): HTMLElement | undefined {
 export function useDiffModeAnchor(mode: DiffMode, rows: RefObject<Map<string, HTMLDivElement>>) {
   const pending = useRef<Anchor | null>(null);
   const retained = useRef<Anchor | null>(null);
+  const selection = useRef<string | null>(null);
   const reading = useRef<{ scroll: HTMLElement; top: number; width: number; height: number } | null>(null);
   const cancel = useRef<(() => void) | null>(null);
   const reader = useRef<{ scroll: HTMLElement; dispose: () => void } | null>(null);
+  const reset = useCallback(() => {
+    pending.current = null;
+    retained.current = null;
+    selection.current = null;
+    reading.current = null;
+    cancel.current?.();
+  }, []);
+  const selectFile = useCallback((path: string) => {
+    reset();
+    selection.current = path;
+  }, [reset]);
   useLayoutEffect(() => () => { reader.current?.dispose(); }, []);
   const capture = () => {
     cancel.current?.();
@@ -38,15 +50,10 @@ export function useDiffModeAnchor(mode: DiffMode, rows: RefObject<Map<string, HT
     if (!scroll) return;
     if (reader.current?.scroll !== scroll) {
       reader.current?.dispose();
-      const interrupt = () => {
-        retained.current = null;
-        reading.current = null;
-        cancel.current?.();
-      };
       const events = ['wheel', 'touchstart', 'pointerdown', 'keydown'];
-      for (const event of events) scroll.addEventListener(event, interrupt, { passive: true });
+      for (const event of events) scroll.addEventListener(event, reset, { passive: true });
       reader.current = { scroll, dispose: () => {
-        for (const event of events) scroll.removeEventListener(event, interrupt);
+        for (const event of events) scroll.removeEventListener(event, reset);
       } };
     }
     const position = reading.current;
@@ -59,6 +66,14 @@ export function useDiffModeAnchor(mode: DiffMode, rows: RefObject<Map<string, HT
     }
     reading.current = { scroll, top: scroll.scrollTop, width: scroll.clientWidth, height: scroll.clientHeight };
     const viewport = scroll.getBoundingClientRect();
+    const selectedPath = selection.current;
+    const selectedRow = selectedPath ? rows.current.get(selectedPath) : null;
+    selection.current = null;
+    if (selectedPath && selectedRow) {
+      pending.current = { path: selectedPath, line: null, offset: selectedRow.getBoundingClientRect().top - viewport.top };
+      retained.current = pending.current;
+      return;
+    }
     const ordered = [...rows.current].map(([path, row]) => ({ path, row, box: row.getBoundingClientRect() }))
       .sort((a, b) => a.box.top - b.box.top);
     for (const { path, row, box } of ordered) {
@@ -106,5 +121,5 @@ export function useDiffModeAnchor(mode: DiffMode, rows: RefObject<Map<string, HT
     cancel.current = stop;
     return stop;
   }, [mode, rows]);
-  return { capture };
+  return { capture, selectFile };
 }

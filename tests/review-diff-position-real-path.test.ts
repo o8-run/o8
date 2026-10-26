@@ -30,6 +30,12 @@ let bundle: string;
 let page: Page;
 const settle = () => page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
 const fileRow = () => page.locator('button[title="file-12.txt"][aria-expanded]').locator('..');
+const waitForPatches = (exactAddition = true) => page.waitForFunction(exact => {
+  const headers = [...document.querySelectorAll('button[title^="file-"][aria-expanded="true"]')];
+  const target = document.querySelector('button[title="file-12.txt"][aria-expanded]')?.parentElement;
+  return headers.length === 18 && headers.every(button => button.parentElement?.querySelector('[data-review-line="R:102"]'))
+    && Boolean(target?.querySelector('[data-review-line="R:70"]')) === exact;
+}, exactAddition);
 
 beforeAll(async () => {
   const executablePath = resolveBrowserPath();
@@ -158,6 +164,55 @@ it.each([{ label: 'normal', width: 440, height: 600 }, { label: 'maximized', wid
   } finally { await page.close(); }
 }, 60_000);
 
+it.each(['click', 'Enter', 'Space'])
+('replaces a retained anchor after a resize and Files drawer selection by %s', async input => {
+  page = await browser.newPage({ viewport: { width: 440, height: 600 } });
+  try {
+    await page.setContent('<html><body style="margin:0"><div id="root" style="width:100vw;height:100vh"></div></body></html>');
+    await page.addScriptTag({ content: bundle });
+    await page.locator('button[title="View options"]').click();
+    await page.getByRole('menuitem', { name: 'Expand all' }).click();
+    await waitForPatches();
+    const inspected = page.locator('button[title="file-9.txt"][aria-expanded]').locator('..').locator('[data-review-line="R:70"]');
+    await inspected.evaluate(node => {
+      let scroll = node.parentElement;
+      while (scroll && getComputedStyle(scroll).overflowY !== 'auto') scroll = scroll.parentElement;
+      if (!scroll) throw new Error('Review scroller missing');
+      scroll.scrollTop += node.getBoundingClientRect().top - scroll.getBoundingClientRect().top + 3;
+    });
+    await settle();
+    await page.locator('button[title="Switch to split diff"]').click();
+    await settle();
+    // Resize after the temporary mode-switch observer has relinquished control.
+    await page.waitForTimeout(550);
+    await page.setViewportSize({ width: 520, height: 650 });
+    await page.locator('button[title="Show files"]').click();
+    const selected = page.getByRole('complementary', { name: 'Review files' }).locator('button[title="file-2.txt"]');
+    if (input === 'click') await selected.click();
+    else { await selected.focus(); await selected.press(input); }
+    // Wait for the actual smooth selection scroll to reach its requested margin.
+    await page.waitForFunction(() => {
+      const row = document.querySelector('button[title="file-2.txt"][aria-expanded]')?.parentElement;
+      const scroll = row?.parentElement;
+      return row && scroll && Math.abs(row.getBoundingClientRect().top - scroll.getBoundingClientRect().top
+        - parseFloat(getComputedStyle(row).scrollMarginTop)) < 1;
+    });
+    await page.getByRole('button', { name: 'Close files drawer' }).click();
+    await settle();
+    const header = page.locator('button[title="file-2.txt"][aria-expanded]');
+    const before = await header.boundingBox();
+    if (!before) throw new Error('Selected file missing');
+    for (const mode of ['unified', 'split', 'unified']) {
+      await page.locator(`button[title="Switch to ${mode} diff"]`).click();
+      await settle();
+      const after = await header.boundingBox();
+      console.info('review-drawer-selection', JSON.stringify({ input, mode, before: before.y, after: after?.y }));
+      expect(after?.y).toBeGreaterThanOrEqual(before.y - 2);
+      expect(after?.y).toBeLessThanOrEqual(before.y + 2);
+    }
+  } finally { await page.close(); }
+}, 60_000);
+
 it('uses the nearest line on the original side only while the exact addition is absent', async () => {
   page = await browser.newPage({ viewport: { width: 440, height: 600 } });
   try {
@@ -167,7 +222,8 @@ it('uses the nearest line on the original side only while the exact addition is 
     await page.locator('button[title="View options"]').click();
     await page.getByRole('menuitem', { name: 'Expand all' }).click();
     const line = (key: string) => fileRow().locator(`[data-review-line="${key}"]`);
-    await line('R:70').waitFor();
+    await waitForPatches();
+    await settle();
     await line('R:70').evaluate(node => {
       let scroll = node.parentElement;
       while (scroll && getComputedStyle(scroll).overflowY !== 'auto') scroll = scroll.parentElement;
@@ -181,7 +237,8 @@ it('uses the nearest line on the original side only while the exact addition is 
     await settle();
     await page.locator('button[title="View options"]').click();
     await page.getByRole('menuitem', { name: 'Hide whitespace' }).click();
-    await line('R:69').waitFor();
+    // All reloaded rows contribute to the selected line's layout, including earlier files.
+    await waitForPatches(false);
     await settle();
     expect(await line('R:70').count()).toBe(0);
     expect(await line('L:70').count()).toBe(1);
@@ -194,7 +251,8 @@ it('uses the nearest line on the original side only while the exact addition is 
     }
     await page.locator('button[title="View options"]').click();
     await page.getByRole('menuitem', { name: 'Hide whitespace' }).click();
-    await line('R:70').waitFor();
+    await waitForPatches();
+    await settle();
     await page.locator('button[title="Switch to unified diff"]').click();
     await settle();
     const exact = await line('R:70').boundingBox();
