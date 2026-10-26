@@ -39,12 +39,15 @@ export class RunArtifactCache {
     return JSON.parse(entry.payload.toString('utf8')) as RunArtifacts;
   }
 
-  set(id: string, value: RunArtifacts): void {
+  set(id: string, value: RunArtifacts): RunArtifacts {
     this.expire();
     this.delete(id);
-    const payload = Buffer.from(JSON.stringify(value), 'utf8');
+    const json = JSON.stringify(value);
+    // First-read callers can retain previews too, so detach before returning.
+    const detached = JSON.parse(json) as RunArtifacts;
+    const payload = Buffer.from(json, 'utf8');
     const bytes = payload.byteLength + 2 * id.length + 256;
-    if (bytes > this.maxBytes) return;
+    if (bytes > this.maxBytes) return detached;
     while (this.entries.size >= this.maxEntries || this.bytes + bytes > this.maxBytes) {
       const oldest = this.entries.keys().next().value;
       if (oldest === undefined) break;
@@ -53,6 +56,7 @@ export class RunArtifactCache {
     this.entries.set(id, { payload, bytes, expiresAt: Date.now() + this.ttlMs });
     this.bytes += bytes;
     if (!this.expiryTimer) this.scheduleExpiry();
+    return detached;
   }
 
   private scheduleExpiry(): void {

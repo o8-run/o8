@@ -54,9 +54,9 @@ export function createRunArtifactReader(adapter: Pick<OwnedRuntimeAdapter, 'pars
     ]);
     const parsed = adapter.parseRunLog(stdoutRaw, run, stdoutKey === 'absent' ? undefined
       : new Date(Number(stdoutKey.slice(stdoutKey.indexOf(':') + 1))).toISOString());
-    cache.set(cacheId, { key, parsed,
+    const detached = cache.set(cacheId, { key, parsed,
       stdoutRaw: stdoutRaw.length + stderrRaw.length <= rawRetentionMax ? stdoutRaw : null,
       stderrRaw: stderrRaw.length <= rawRetentionMax ? stderrRaw : null });
-    return { stdoutRaw: includeStdout ? stdoutRaw : '', stderrRaw, parsed };
+    return { stdoutRaw: includeStdout ? stdoutRaw : '', stderrRaw, parsed: detached.parsed };
   });
 }

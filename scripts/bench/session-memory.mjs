@@ -270,6 +270,13 @@ export async function measureSessionMemory({ output, sessions = 12, transcriptMi
   }
 }
 
+export function assertIdleRssBudget(receipt) {
+  const trees = receipt.processTrees.natural.afterIdle;
+  assert(trees, 'An idle checkpoint is required');
+  const bytes = Object.values(trees).reduce((sum, server) => sum + server.rssMiB, 0) * 1024 * 1024;
+  assert(bytes < 500_000_000, `Idle server trees exceed 500 MB (${Math.round(bytes)} bytes)`);
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const args = Object.fromEntries(process.argv.slice(2).map(arg => {
     const [key, value] = arg.replace(/^--/, '').split('=');
@@ -287,6 +294,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     sessions: Number(args.sessions ?? 96), transcriptMiB: Number(args['transcript-mib'] ?? 4) });
   console.log(JSON.stringify(receipt));
   if (args.check) {
+    if (receipt.idleMs) assertIdleRssBudget(receipt);
     const checkpoints = { afterRun: receipt.after, ...(receipt.idleMs ? { afterIdle: receipt.afterIdle } : {}) };
     for (const [phase, sample] of Object.entries(checkpoints)) {
       for (const name of ['next', 'ws']) {

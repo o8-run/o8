@@ -14,6 +14,7 @@ it('bounds idle memory after chat and worker history reads, project switches and
     expect(receipt.completedSessions).toBe(12);
     expect(receipt.completedWorkers).toBe(12);
     expect(receipt.persistedOutputUnchanged).toBe(true);
+    // This source host includes a compiler; the standalone CLI also checks unforced idle RSS.
     for (const phase of ['after', 'afterIdle'] as const) {
       const trees = receipt.processTrees.postGc[phase === 'after' ? 'afterRun' : 'afterIdle'];
       const servers = Object.values(trees) as Array<{ rssMiB: number }>;
