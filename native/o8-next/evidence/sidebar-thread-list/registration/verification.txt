@@ -1,0 +1,54 @@
+Surface registration follow-up for PR #4642
+
+The sidebar registration, runtime, keyboard hooks, live loading and tests live in
+src/surfaces/sidebar.rs and its sidebar/ directory. Fixture routing, admission,
+message-between-pages injection and socket ownership live in
+scripts/next/surfaces/25-sidebar.surface.ts. Docs live in docs/surfaces/sidebar.md.
+That document lists the shared lifecycle and existing integration exceptions.
+
+Real-entry-point red before restoring the sidebar fixture registration:
+FAIL tests/next-sidebar-real-path.test.ts
+AssertionError: expected 404 to be 200
+Test Files 1 failed (1)
+Tests 2 failed (2)
+
+Real-entry-point red during extraction of content decoration:
+shell::brain::tests::brain_opens_from_the_real_shell_palette
+selected fixture history must reach CPU scene paint through the existing surface
+Test result: FAILED. 62 passed; 28 failed; 3 ignored
+The decorator's inner content wrapper now retains a flex column. The real paint,
+input and persistence assertions were retained; shell_test_support.rs is unchanged.
+
+Green after extraction:
+cargo +1.97.1 test --release --locked --manifest-path native/o8-next/Cargo.toml -- --nocapture --test-threads=1
+test result: ok. 90 passed; 0 failed; 3 ignored
+CLI tests: 7 passed; 0 failed
+
+The previous pushed head had 88 native passes and 3 ignored workloads; this run
+has 90 passes and the same 3 ignored workloads. The main registration probe and a
+sidebar-owned retained-selection assertion account for the two added tests.
+All previous test function names remain: test-inventory.json records the comparison.
+The between-page message still retains 2,000 unique chats. A repeating full page
+still returns 500 available unique chats without aborting the sidebar.
+
+npx vitest run tests/mobile-orchestrator-threads-route.test.ts tests/next-sidebar-real-path.test.ts tests/o8-next-shell-real-path.test.ts tests/next-render-parity.test.ts tests/next-stream-parity.test.ts tests/o8-next-grid-terminal-real-path.test.ts tests/next-brain-real-path.test.ts tests/next-settings-real-path.test.ts tests/next-issues-real-path.test.ts tests/next-issues-account-real-path.test.ts tests/next-surface-registration-real-path.test.ts tests/next-diff-review-real-path.test.ts tests/next-terminal-real-path.test.ts tests/next-history-real-path.test.ts
+Test Files 14 passed (14)
+Tests 44 passed (44)
+Previously recorded touched-JavaScript coverage: 10 files / 38 tests.
+
+cargo +1.97.1 clippy --release --locked --manifest-path native/o8-next/Cargo.toml --all-targets --message-format=json
+Exit 0. No sidebar diagnostics or diagnostics in the new shared registration hooks.
+Four existing warnings remain in unchanged functions in client.rs, conversation.rs
+and ui.rs. Details are in clippy.json; no adjacent cleanup was performed.
+
+NODE_OPTIONS=--max-old-space-size=8192 npm run typecheck:fast: exit 0
+NODE_OPTIONS=--max-old-space-size=8192 npx tsc --noEmit: exit 0
+Touched-file ESLint: exit 0 (10 TypeScript files)
+npm run rule-check -- --base=origin/main: exit 0, zero violations
+npm run test:classify: 1238 hermetic, 900 resource-owning
+
+Headless 2,000-thread measurement: run-1.json
+10 first-paint samples; 500 scroll frames; at most 22 materialized rows.
+First paint p50/p95: 365.370389 / 552.087680 ms.
+Scroll frame p50/p95: 3.166780 / 5.463567 ms.
+GPUI TestAppContext CPU scene paint, test text system, no GPU/compositor timing.

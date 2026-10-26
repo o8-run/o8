@@ -18,6 +18,7 @@ import { removeProjectRepositories } from './project-removal';
 import { resolveProjectIdentity, sqliteProjectForLedger } from './project-identity';
 import { reconcileSqliteProjectRepos } from './project-membership';
 import { isVirtualRepoProjectId, virtualRepoProjectId } from './virtual-project-id';
+import { requestProjectScope } from './request-project-scope';
 
 const PROJECTS_DIR = getDataDir();
 const PROJECTS_PATH = path.join(PROJECTS_DIR, 'projects.json');
@@ -439,6 +440,8 @@ export interface ActiveProjectScope {
 }
 
 export function getActiveProjectScopeForRepoSync(repoPath?: string | null): ActiveProjectScope {
+  const requestScope = requestProjectScope();
+  if (requestScope) return requestScope;
   const ledger = getProjectsLedgerSync();
   const activeProject = resolveActiveProject(ledger);
   const project = repoPath
@@ -457,6 +460,8 @@ export function getActiveProjectScopeForRepoSync(repoPath?: string | null): Acti
 }
 
 export async function getActiveProjectScopeForRepo(repoPath?: string | null): Promise<ActiveProjectScope> {
+  const requestScope = requestProjectScope();
+  if (requestScope) return requestScope;
   const ledger = await getProjectsLedger();
   const activeProject = resolveActiveProject(ledger);
   const project = repoPath

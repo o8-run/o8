@@ -253,7 +253,10 @@ fn activity_packet_hold_release_and_stop_mission(cx: &mut TestAppContext) {
     assert!(origin["repo"].is_string());
 }
 
-pub(super) fn activity_view(shell: &Entity<Shell>, cx: &mut VisualTestContext) -> Entity<ActivityPane> {
+pub(super) fn activity_view(
+    shell: &Entity<Shell>,
+    cx: &mut VisualTestContext,
+) -> Entity<ActivityPane> {
     shell.read_with(cx, |s, _| {
         match s.content.get(&s.key(&Tab::Activity)).unwrap() {
             Content::Activity(a) => a.clone(),
@@ -340,7 +343,8 @@ fn activity_empty_local_auth_and_scoped_retention(cx: &mut TestAppContext) {
     );
     // An unregistered local-only workspace never acquires the previous remote feed.
     view.update(cx, |v, _| v.client = fixture.client.clone());
-    activity_click(cx, "workspace-1");
+    activity_click(cx, "workspace-switcher");
+    activity_click(cx, "command-1");
     ready(&shell, cx);
     cx.simulate_keystrokes("ctrl-k");
     cx.simulate_keystrokes("a c t i v i t y enter");

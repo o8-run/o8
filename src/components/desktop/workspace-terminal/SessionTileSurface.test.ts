@@ -18,8 +18,8 @@ import { SessionTileSurface } from './SessionTileSurface';
 vi.mock('@/components/desktop/SessionTranscriptPane', async () => {
   const React = await import('react');
   return {
-    SessionTranscriptPane: ({ sessionKey }: { sessionKey: string }) => (
-      React.createElement('div', { 'data-manual-transcript': sessionKey }, sessionKey)
+    SessionTranscriptPane: ({ sessionKey, onCollapsedChange }: { sessionKey: string; onCollapsedChange?: (collapsed: boolean) => void }) => (
+      React.createElement('button', { 'data-manual-transcript': sessionKey, onClick: () => onCollapsedChange?.(true) }, sessionKey)
     ),
   };
 });
@@ -113,6 +113,31 @@ describe('SessionTileSurface manual split geometry', () => {
     expect(workerScroll?.querySelectorAll('[data-manual-transcript]')).toHaveLength(10);
     expect(workerScroll?.contains(host.querySelector('[data-chat-slot]'))).toBe(false);
     expect(host.querySelectorAll('[data-session-resize-handle]')).toHaveLength(0);
+  });
+
+  it('reclaims automatic stack space when a finished pane collapses', async () => {
+    const source = ['automatic:one', 'automatic:two'].reduce((current, key) => addSessionToLayout(current, key), createDefaultSessionTileLayout());
+    const layout = projectResponsiveAutomaticSessionTiles(source, 'balanced');
+    await act(async () => root.render(createElement(SessionTileSurface, {
+      layout, focusedSessionKey: null, chatSlot: createElement('div'),
+      onResizeSplit: vi.fn(), onCloseLeaf: vi.fn(), onFocusSession: vi.fn(),
+    })));
+    const pane = host.querySelector<HTMLButtonElement>('[data-manual-transcript="automatic:one"]')!;
+    await act(async () => pane.click());
+    const leaf = pane.closest<HTMLElement>('[data-session-tile-leaf-id]')!;
+    expect(leaf.style.position).toBe('relative');
+    expect(leaf.style.flex).toBe('0 0 auto');
+    expect(leaf.style.height).toBe('auto');
+    expect(host.querySelectorAll('[data-session-resize-handle]')).toHaveLength(1);
+    if (layout.root.type !== 'split') throw new Error('Expected worker split');
+    const manualRoot = { ...layout.root, manualOverride: true, ratio: 0.6 };
+    await act(async () => root.render(createElement(SessionTileSurface, {
+      layout: { ...layout, root: manualRoot },
+      focusedSessionKey: null, chatSlot: createElement('div'),
+      onResizeSplit: vi.fn(), onCloseLeaf: vi.fn(), onFocusSession: vi.fn(),
+    })));
+    expect(leaf.style.position).toBe('absolute');
+    expect(host.querySelector('[data-session-resize-handle]')?.getAttribute('aria-valuenow')).toBe('60');
   });
 
   it('mounts explicit session splits as independent panes with authored ratio and resize handle', async () => {

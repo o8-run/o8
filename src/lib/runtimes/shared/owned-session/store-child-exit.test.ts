@@ -8,9 +8,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DispatchBackendWaitResult } from '@/lib/runtimes/shared/dispatch-readiness';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import type { OwnedRuntimeAdapter, OwnedSessionRecord, ParsedRunLog } from './types';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 const ensureDispatchBackendReadyMock = vi.hoisted(() => vi.fn());
 const fetchRuntimeLaunchMock = vi.hoisted(() => vi.fn());
+const handleWorkerFailureSpy = vi.hoisted(() => vi.fn());
 
 vi.mock('@/lib/runtimes/shared/dispatch-readiness', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/runtimes/shared/dispatch-readiness')>();
@@ -20,6 +22,16 @@ vi.mock('@/lib/runtimes/shared/dispatch-readiness', async (importOriginal) => {
   };
 });
 vi.mock('@/lib/ws-server/next-fetch', () => ({ fetchRuntimeLaunch: fetchRuntimeLaunchMock }));
+vi.mock('./worker-failure', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./worker-failure')>();
+  return { ...actual, createWorkerFailureHandler: (...args: Parameters<typeof actual.createWorkerFailureHandler>) => {
+    const handle = actual.createWorkerFailureHandler(...args);
+    return async (...runArgs: Parameters<typeof handle>) => {
+      handleWorkerFailureSpy(...runArgs);
+      return handle(...runArgs);
+    };
+  } };
+});
 
 describe('createOwnedSessionStore child exit recording', () => {
   let tempRoot: string;
@@ -30,7 +42,7 @@ describe('createOwnedSessionStore child exit recording', () => {
   let priorCodexRoot: string | undefined;
 
   beforeEach(async () => {
-    tempRoot = await mkdtemp(path.join(process.cwd(), '.tmp-owned-child-exit-'));
+    tempRoot = await mkdtemp(path.join(getDataDir(), '.tmp-owned-child-exit-'));
     repoPath = path.join(tempRoot, 'repo');
     execFileSync('git', ['init', '-q', '-b', 'main', repoPath]);
     priorRoot = process.env.O8_TEST_CHILD_EXIT_ROOT;
@@ -45,6 +57,7 @@ describe('createOwnedSessionStore child exit recording', () => {
   });
 
   afterEach(async () => {
+    handleWorkerFailureSpy.mockReset();
     ensureDispatchBackendReadyMock.mockReset();
     fetchRuntimeLaunchMock.mockReset();
     if (priorRoot === undefined) delete process.env.O8_TEST_CHILD_EXIT_ROOT;
@@ -80,7 +93,7 @@ describe('createOwnedSessionStore child exit recording', () => {
     { kind: 'auth-failure' as const, expected: 'held' as const },
     { kind: 'exit-1' as const, expected: 'launched' as const },
   ])('handles a real Codex child $kind without misclassifying other exits', async ({ kind, expected }) => {
-    const [{ appendEvent, attachSession, createLane, getLane, getLaneEvents, setLaneStatus }, { createOwnedSessionStore }, { relaunchSupervisedAgent }, { buildDomainLaneSummaries }, { createEmptyOrchestratorMissionState, reconcileOrchestratorMissionState }, { acceptedLaunchAttachmentProvenance }, { runSilentExitTriageForLane }] = await Promise.all([
+    const [{ appendEvent, attachSession, createLane, getLane, getLaneEvents, setLaneStatus }, { createOwnedSessionStore }, { relaunchSupervisedAgent }, { buildDomainLaneSummaries, writeOrchestratorControlPlaneState }, { createEmptyOrchestratorMissionState, reconcileOrchestratorMissionState }, { acceptedLaunchAttachmentProvenance }, { runSilentExitTriageForLane }] = await Promise.all([
       import('@/lib/lane/registry'), import('./store'),
       import('@/lib/supervisor/relaunch-agent'), import('@/lib/orchestrator/control-plane'),
       import('@/lib/orchestrator/store'), import('@/lib/lane/current-auth-exit'),
@@ -116,6 +129,16 @@ describe('createOwnedSessionStore child exit recording', () => {
     expect(provenance).not.toBeNull();
     attachSession(lane.id, launched.surfaceId, 'system', provenance ?? {});
     setLaneStatus(lane.id, 'running', 'system', 'session_launched');
+    // Recovery now requires a durable active packet; a lane alone is not admission.
+    writeOrchestratorControlPlaneState({
+      ...createEmptyOrchestratorMissionState(),
+      packets: [{
+        id: packetId, referenceLabel: 'auth-check', title: 'auth-check', summary: 'auth-check',
+        status: 'running', queueState: 'queued', releaseState: 'pending', runtime: 'codex',
+        dependencyPacketIds: [], dependencyLabels: [], blockedReason: null, lane: null, review: null,
+        workspaceTargetPath: repoPath, branchTarget: 'agent/auth-failure',
+      } satisfies OrchestratorPacket],
+    });
     await waitForRecordedExit(launched.surfaceId);
     const supervisor = await import('@/lib/supervisor/agent-supervisor');
     const updates = vi.fn();
@@ -129,6 +152,7 @@ describe('createOwnedSessionStore child exit recording', () => {
     supervisor.registerWatchedAgent(launched.surfaceId, repoPath, 'auth-check', 'Add a note');
     supervisor.getWatchedAgents(repoPath)[0].nextPollAt = 0;
     await supervisor.runSupervisorTickForTesting();
+    expect(relaunch).toHaveBeenCalledTimes(1);
     const result = await relaunch.mock.results[0].value;
     supervisor.stopSupervisorLoop();
     for (const watch of supervisor.getWatchedAgents()) supervisor.unregisterWatchedAgent(watch.surfaceId);
@@ -304,7 +328,8 @@ describe('createOwnedSessionStore child exit recording', () => {
     expect((await store.getRuntimeTail(launched.surfaceId)).groups[0]?.outcome).toBe('failed');
   }, 20_000);
 
-  it.skipIf(process.platform !== 'darwin')('persists a readable lane event from a real sandbox-exec denial', async () => {
+  it.skipIf(process.platform !== 'darwin').each([false, true])(
+    'distinguishes wrapper refusal from a real sandbox-exec denial (valid identity: %s)', async (validIdentity) => {
     const deniedPath = path.join(tempRoot, 'outside-packet.txt');
     await writeFile(deniedPath, 'must stay outside the packet\n', 'utf8');
     process.env.O8_WORKER_SANDBOX = '1';
@@ -356,7 +381,9 @@ describe('createOwnedSessionStore child exit recording', () => {
       runtime: 'codex',
       packetId,
     });
-    const store = createOwnedSessionStore(testAdapter('sandbox-denial'));
+    const store = createOwnedSessionStore({ ...testAdapter('sandbox-denial'),
+      // Credential policies infer runtime identity from the real owned-surface convention.
+      surfaceIdPrefix: validIdentity ? 'test-child-sandbox-denial-owned:' : 'test-child-sandbox-denial:' });
 
     const launched = await store.launch({
       cwd: worktreePath,
@@ -364,7 +391,21 @@ describe('createOwnedSessionStore child exit recording', () => {
       laneId: lane.id,
       packetId,
     });
+    expect(launched.ok, launched.note).toBe(true);
     const session = await waitForRecordedExit(launched.surfaceId);
+    expect(session.recentRuns[0]).toMatchObject({
+      outcome: 'failed', sandboxed: true, childExit: { code: 1, classification: 'nonzero-exit' },
+    });
+    if (!validIdentity) {
+      expect(await readFile(session.recentRuns[0].stderrPath, 'utf8')).toContain('credential policy is invalid');
+      expect(session.recentRuns[0].childExit?.stderrTail).not.toContain('Operation not permitted');
+      expect(session.recentRuns[0].sandboxDenial).toBeUndefined();
+      await waitForLaneEvent(lane.id, 'runtime_process_exit', getLaneEvents);
+      await vi.waitFor(() => expect(handleWorkerFailureSpy).toHaveBeenCalledTimes(1));
+      expect(getLaneEvents(lane.id, 50).filter((event) => event.verb === 'sandbox_denied')).toEqual([]);
+      return;
+    }
+    expect(session.recentRuns[0].childExit?.stderrTail).toContain(`cat: ${deniedPath}: Operation not permitted`);
     const denialEvent = await waitForLaneEvent(lane.id, 'sandbox_denied', getLaneEvents);
 
     expect(session.recentRuns[0]).toMatchObject({
@@ -374,6 +415,11 @@ describe('createOwnedSessionStore child exit recording', () => {
     expect(session.latestSummary).toContain(`blocked file-read access to ${deniedPath}`);
     expect(denialEvent.payload).toMatchObject({ operation: 'file-read', resource: deniedPath });
     expect(denialEvent.payload.message).toContain(`blocked file-read access to ${deniedPath}`);
+    // A sandbox denial must bypass quota/fallback recovery, which could change the launch.
+    expect(handleWorkerFailureSpy).not.toHaveBeenCalled();
+    expect(fetchRuntimeLaunchMock).not.toHaveBeenCalled();
+    expect(session.activeRun).toBeUndefined();
+    expect(session.recentRuns).toHaveLength(1);
   }, 20_000);
 
   it('sweeps an old active owned session when no lane references its surface id', async () => {

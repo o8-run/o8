@@ -1,0 +1,21 @@
+   Compiling o8-next v0.0.0 ([repository]/native/o8-next)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 7.48s
+warning: the following packages contain code that will be rejected by a future version of Rust: proc-macro-error2 v2.0.1
+note: to see what the problems were, use the option `--future-incompat-report`, or run `cargo report future-incompatibilities --id 1`
+     Running unittests src/main.rs (native/o8-next/target/debug/deps/o8_next-be2c49ceb219bb10)
+
+running 1 test
+test shell::tests::sidebar_tests::sidebar_worker_archive_real_path ...
+thread 'shell::tests::sidebar_tests::sidebar_worker_archive_real_path' (22028) panicked at src/sidebar_tests.rs:124:5:
+native event and HTTP result must become visible: {"notice":"","rename":null,"editing":false,"saving":false,"loading":false,"selected":"pi-owned:grid-runtime","choice":{"kind":"thread","workspace":"[fixture root]/sidebar-alpha","id":"pi-owned:grid-runtime","title":"Grid runtime worker","status":"running","unread":false,"running":true}}
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    shell::tests::sidebar_tests::sidebar_worker_archive_real_path
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 31 filtered out; finished in 15.11s
+
+error: test failed, to rerun pass `--bin o8-next`

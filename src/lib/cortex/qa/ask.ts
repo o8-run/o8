@@ -19,6 +19,7 @@ import { assertKnowledgeAnswerCurrent } from '@/lib/cortex/knowledge/answer-vali
  */
 
 import 'server-only';
+import { requestProjectScopeKey } from '@/lib/repos/request-project-scope';
 import { readMemoryRevision } from '@/lib/cortex/memory-revision';
 
 import { createHash } from 'node:crypto';
@@ -76,7 +77,7 @@ interface CacheEntry {
 const answerCache = new Map<string, CacheEntry>();
 
 function scopeKey(repoPath: string | undefined, projectId: string | undefined, terse = false): string {
-  return `${readMemoryRevision()}\x00${brainRouteCacheKeySync()}\x00${repoPath ?? ''}\x00${projectId ?? ''}${terse ? '\x00terse' : ''}`;
+  return `${readMemoryRevision()}\x00${brainRouteCacheKeySync()}\x00${repoPath ?? ''}\x00${projectId ?? ''}${terse ? '\x00terse' : ''}\x00${requestProjectScopeKey()}`;
 }
 
 /**
@@ -152,7 +153,7 @@ function cacheKey(
   terse = false,
 ): string {
   return createHash('sha256')
-    .update(`${readMemoryRevision()}\x00${brainRouteCacheKeySync()}\x00${normalizeQuestionForCache(question)}\x00${repoPath ?? ''}\x00${projectId ?? ''}${terse ? '\x00terse' : ''}`)
+    .update(`${readMemoryRevision()}\x00${brainRouteCacheKeySync()}\x00${normalizeQuestionForCache(question)}\x00${repoPath ?? ''}\x00${projectId ?? ''}${terse ? '\x00terse' : ''}\x00${requestProjectScopeKey()}`)
     .digest('hex');
 }
 

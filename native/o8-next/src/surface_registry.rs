@@ -95,6 +95,11 @@ pub(super) struct Registration {
     pub before_tab: fn(&mut Shell),
     pub after_tab: fn(&mut Shell),
     pub workspaces: fn(&Client, &mut WorkspaceLoad),
+    pub initialize: fn(&mut Shell, &mut Window, &mut Context<Shell>),
+    pub load: fn(&mut Shell, &mut Context<Shell>) -> bool,
+    pub tick: fn(&mut Shell, &mut Window, &mut Context<Shell>),
+    pub decorate: fn(&Shell, AnyElement) -> AnyElement,
+    pub catalog_changed: fn(&mut Shell, &mut Context<Shell>),
 }
 impl Registration {
     pub const fn new(
@@ -122,6 +127,11 @@ impl Registration {
             before_tab: |_| {},
             after_tab: |_| {},
             workspaces: |_, _| {},
+            initialize: |_, _, _| {},
+            load: |_, _| false,
+            tick: |_, _, _| {},
+            decorate: |_, content| content,
+            catalog_changed: |_, _| {},
         }
     }
 }

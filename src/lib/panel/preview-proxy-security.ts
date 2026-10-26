@@ -1,6 +1,9 @@
 import { resolvePortInfo } from '@/lib/panel/api-port';
 
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '0.0.0.0', '::1']);
+// Preview documents can execute their own scripts but have no app origin.
+// Enforce this on the response even when an embedding frame grants same-origin.
+export { PREVIEW_DOCUMENT_CSP } from './preview-document-policy';
 const SENSITIVE_REQUEST_HEADERS = new Set([
   'authorization',
   'cookie',

@@ -1,3 +1,5 @@
+import { WebviewBridgeError } from '@/lib/mcp/o8-webview-error';
+
 const MAX_ERROR_LENGTH = 200;
 // A 4xx `error` is text a route wrote for its caller, such as a storage hold
 // with the space to free. It gets more room; a 5xx never passes through (#3657).
@@ -74,6 +76,7 @@ export function safeErrorText(error: unknown): string {
   console.error('[mcp] Tool failure:', error);
   if (error instanceof O8ApiError) return error.summary;
   if (error instanceof McpInputError) return error.message;
+  if (error instanceof WebviewBridgeError) return error.message;
   if (error instanceof Error || typeof error !== 'object' || error === null) return 'o8 operation failed';
   const result = error as { error?: unknown; note?: unknown };
   const nested = typeof result.error === 'object' && result.error !== null ? (result.error as { message?: unknown }).message : undefined;

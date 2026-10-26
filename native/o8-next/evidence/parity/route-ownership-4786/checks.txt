@@ -1,0 +1,38 @@
+Checks on a branch from origin/main at fbe95283d. Every command below exited 0.
+
+settings-final:
+Capturing settings 1024x720
+Capturing settings 1440x900
+2 captures; 0 crashes; visual differences do not gate
+
+gpui:
+test shell::fake::parity_tests::parity_capture_real_shell ... ok
+test shell::fake::parity_tests::parity_native_error_receipt_follows_real_surface_error ... ok
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 241 filtered out; finished in 10.70s
+
+native-cli:
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+clippy:
+    Finished `dev` profile [unoptimized] target(s) in 10.68s
+
+retained:
+ Test Files  2 passed (2)
+      Tests  27 passed (27)
+
+npm-test-final:
+ Test Files  1251 passed | 3 skipped (1254)
+      Tests  9165 passed | 5 skipped (9170)
+
+classify:
+[test-classification] 1247 hermetic, 935 resource-owning
+
+rule-check:
+[rule-check] OK — scanned 0 file(s), zero violations vs origin/main
+
+NODE_OPTIONS=--max-old-space-size=8192 npx tsc --noEmit: exit 0
+npm run typecheck:fast: exit 0
+Touched TypeScript and JavaScript ESLint: exit 0

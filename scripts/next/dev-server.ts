@@ -119,7 +119,9 @@ async function main() {
   });
   const terminal = process.argv.includes('--terminal');
   const wsToken = getOrCreateWsToken();
+  const surfaceSocket = surfaces.find(surface => surface.socket)?.socket;
   const closeSockets = terminal ? () => {}
+    : surfaceSocket ? await surfaceSocket(server, wsToken, requests)
     : (transcriptFixtures ? attachTranscriptSocket : attachReplaySocket)(server, wsToken, requests);
   let closeTerminal = async () => {};
   server.listen(0, '127.0.0.1', async () => {

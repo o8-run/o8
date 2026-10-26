@@ -6,6 +6,7 @@ import { transcriptStore } from '@/lib/transcripts/store';
 import { OutsideConversationPane } from './OutsideConversationPane';
 import type { TerminalTab } from './types';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
+import * as markdown from '@/components/desktop/LLMMarkdown';
 
 const keys = ['codex-discovered:background-one', 'codex-discovered:background-two'];
 let host: HTMLDivElement;
@@ -131,4 +132,48 @@ it('isolates source changes and cancels queued commits on unmount', async () => 
   await act(async () => root.unmount());
   expect(vi.getTimerCount()).toBe(0);
   root = createRoot(host);
+});
+
+it('reuses closed rendered messages during hidden flushes and tab returns', async () => {
+  const history: MobileTranscriptEntry[] = Array.from({ length: 20 }, (_, index) => ({
+    id: `history-${index}`, role: index % 2 ? 'assistant' : 'user', text: `Closed history ${index}`, timestamp: 1,
+  }));
+  const publishHistory = (text: string) => transcriptStore.setSlice(keys[0], { status: 'fresh', lastUpdated: 1,
+    messages: [...history.map(message => ({ ...message })), entry(text)] });
+  publishHistory('Initial live tail');
+  await render(false);
+  const original = host.querySelector('[data-outside-transcript-entry="history-1"]');
+  const renderMarkdown = vi.spyOn(markdown, 'renderLLMMarkdown');
+  await act(async () => publishHistory('Changed live tail'));
+  await advance(1000);
+  expect(host.textContent).toContain('Changed live tail');
+  for (const active of [true, false, true]) await render(active);
+  expect(host.querySelector('[data-outside-transcript-entry="history-1"]')).toBe(original);
+  expect(renderMarkdown.mock.calls.filter(([text]) => text.startsWith('Closed history'))).toHaveLength(0);
+});
+
+it('coalesces hidden freshness-only snapshots while keeping the cache current', async () => {
+  await render(false); commits = 0;
+  for (let tick = 0; tick < 10; tick++) {
+    await act(async () => transcriptStore.setSlice(keys[0], { status: 'fresh', lastUpdated: tick + 2,
+      messages: [{ ...entry(`Initial ${keys[0]}`) }] }));
+    await advance(50);
+  }
+  expect(transcriptStore.getSlice(keys[0]).lastUpdated).toBe(11);
+  expect(commits).toBe(0);
+  await advance(500);
+  expect(commits).toBe(1);
+});
+
+it('updates changed historical details immediately while the pane is hidden', async () => {
+  const previous: MobileTranscriptEntry = { id: 'history', role: 'assistant', text: 'Closed history', timestamp: 1 };
+  const tail = entry('Current tail');
+  transcriptStore.setSlice(keys[0], { status: 'fresh', lastUpdated: 1, messages: [previous, tail] });
+  await render(false);
+  const original = host.querySelector('[data-outside-transcript-entry="history"]');
+  await act(async () => transcriptStore.setSlice(keys[0], { status: 'fresh', lastUpdated: 2, messages: [
+    { ...previous, toolCalls: [{ name: 'AskUserQuestion', args: { question: 'Updated question?' }, status: 'running' }] }, tail,
+  ] }));
+  expect(host.textContent).toContain('Updated question?');
+  expect(host.querySelector('[data-outside-transcript-entry="history"]')).toBe(original);
 });

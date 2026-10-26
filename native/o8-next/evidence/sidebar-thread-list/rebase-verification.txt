@@ -1,0 +1,43 @@
+Rebase onto origin/main 752e54db2c2d93e1f10821beda18345e9fe31498.
+Preserves the existing sidebar/paging correction plus main theme, Brain, Inbox, Settings, Issues and Projects behavior and tests.
+
+Integration changes:
+- Worker fixture exposes the production archived-history list used by sidebar discovery.
+- Full sidebar snapshots include the desktop project ledger; registered repositories without chats and the active project retain their startup context.
+- Projects changes update the cached ledger and fence older discovery responses; streamed thread updates preserve explicit workspace selection.
+- Selecting a thread leaves Settings/Projects while retaining the existing session surface and draft state. Settings keeps its own Ctrl+F handling.
+- Issues fixture controls retain their assertions and use a bounded 10-second I/O wait instead of a 40-frame race.
+
+Real-path regressions:
+sidebar_bootstrap_keeps_registered_active_workspace: real project/repository API registration -> native shell bootstrap.
+sidebar_selection_leaves_projects_and_settings: real panel and thread-row clicks -> retained session surface.
+Both prior paging regressions remain present and green.
+
+Red evidence:
+red-issues-worker
+real control did not reach CPU paint: issue-ready
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 72 filtered out; finished in 7.56s
+red-catalog
+sidebar bootstrap must retain registered repositories without chats
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 90 filtered out; finished in 3.02s
+red-panels-current-test
+selecting a thread must display its session surface
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 90 filtered out; finished in 10.14s
+
+Green native tails:
+cargo +1.97.1 test --release --locked --manifest-path native/o8-next/Cargo.toml -- --nocapture --test-threads=1
+test result: ok. 88 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 439.47s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+Touched JavaScript:
+ Test Files  10 passed (10)
+      Tests  38 passed (38)
+
+Requested gates:
+npm run test:classify: 1237 hermetic, 893 resource-owning; exit 0.
+NODE_OPTIONS=--max-old-space-size=8192 npm run typecheck:fast: heap limit 8192 MiB; exit 0.
+Touched-file ESLint and rule-check: exit 0.
+Release build: cargo +1.97.1 build --release --locked; exit 0.

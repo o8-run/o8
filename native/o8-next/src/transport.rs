@@ -84,7 +84,7 @@ fn emit(
 }
 fn run(
     client: &Client,
-    key: &str,
+    stream: &str,
     sender: &SyncSender<Incoming>,
     cancel: &Cancel,
     backoff: &mut u64,
@@ -113,7 +113,13 @@ fn run(
         .map_err(|_| ())?;
     // Omitting since, including after reconnect, requests a fresh checkpoint,
     // exactly as DesktopWebSocketContext does for a reopened transport.
-    socket.send(Message::Text(json!({"type":"realtime-subscribe","subscriptions":[{"stream":format!("session:{key}")}]}).to_string().into())).map_err(|_| ())?;
+    socket
+        .send(Message::Text(
+            json!({"type":"realtime-subscribe","subscriptions":[{"stream":stream}]})
+                .to_string()
+                .into(),
+        ))
+        .map_err(|_| ())?;
     if !emit(sender, cancel, client, Incoming::Status("Live · read-only")) {
         return Ok(());
     }
@@ -150,13 +156,19 @@ fn run(
     Ok(())
 }
 pub fn subscribe(client: Client, key: String) -> Subscription {
+    subscribe_stream(client, format!("session:{key}"))
+}
+pub fn subscribe_global(client: Client) -> Subscription {
+    subscribe_stream(client, "global".into())
+}
+fn subscribe_stream(client: Client, stream: String) -> Subscription {
     let (sender, receiver) = mpsc::sync_channel(64);
     let cancel = Arc::new(Cancel::default());
     let stopped = cancel.clone();
     thread::spawn(move || {
         let mut backoff = 1;
         while !stopped.is_stopped() {
-            let _ = run(&client, &key, &sender, &stopped, &mut backoff);
+            let _ = run(&client, &stream, &sender, &stopped, &mut backoff);
             if stopped.is_stopped() {
                 break;
             }

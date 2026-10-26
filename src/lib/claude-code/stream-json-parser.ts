@@ -323,7 +323,10 @@ export function createClaudeCodeStreamJsonParser(
     const isError = event.is_error === true
       || (isResult && subtype !== undefined && subtype !== 'success');
     const explicitResult = asString(event.result);
-    const resultText = explicitResult?.trim() ? explicitResult : state.fullResponse;
+    const errorText = isError && Array.isArray(event.errors)
+      ? event.errors.filter((value): value is string => typeof value === 'string').join('\n')
+      : '';
+    const resultText = explicitResult?.trim() ? explicitResult : errorText || state.fullResponse;
     const doneEvent: ClaudeCodeStreamJsonParserEvent = {
       type: 'done',
       text: resultText,

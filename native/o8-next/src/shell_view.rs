@@ -23,14 +23,16 @@ impl Render for Shell {
                     .and_then(|t| self.content.get(&self.key(t)))
                     .map(Content::element)
             });
-        let before_workspaces = registrations()
-            .iter()
-            .flat_map(|r| (r.nav)(self, NavPosition::BeforeWorkspaces, cx))
-            .collect::<Vec<_>>();
-        let after_workspaces = registrations()
-            .iter()
-            .flat_map(|r| (r.nav)(self, NavPosition::AfterWorkspaces, cx))
-            .collect::<Vec<_>>();
+        let mut style = gpui::StyleRefinement::default();
+        style.size.width = Some(gpui::relative(1.).into());
+        style.flex_shrink = Some(0.);
+        let chrome = self.chrome.measured_view(
+            "shell-chrome",
+            style,
+            Self::render_chrome,
+            window.viewport_size().width,
+            cx,
+        );
         div()
             .size_full()
             .flex()
@@ -48,6 +50,41 @@ impl Render for Shell {
             .track_focus(&self.focus)
             .capture_key_down(cx.listener(Self::key_down))
             .when(self.system_glass, |view| view.child(material::veil()))
+            .child(chrome)
+            .child(
+                registrations().iter().fold(
+                    div()
+                        .flex_1()
+                        .min_h_0()
+                        .child(content.unwrap_or_else(|| {
+                            div().p(px(24.)).child(frame.empty).into_any_element()
+                        }))
+                        .into_any_element(),
+                    |content, registration| (registration.decorate)(self, content),
+                ),
+            )
+            .child(canvas(|_, _, _| (), move |_, _, _, _| painted.set(revision)).size(px(1.)))
+    }
+}
+
+impl Shell {
+    fn render_chrome(&mut self, _: &mut Window, cx: &mut Context<Self>) -> gpui::AnyElement {
+        let frame = registry::extensions()
+            .find_map(|e| e.frame(self))
+            .unwrap_or_default();
+        let active = self.active();
+        let before_workspaces = registrations()
+            .iter()
+            .flat_map(|r| (r.nav)(self, NavPosition::BeforeWorkspaces, cx))
+            .collect::<Vec<_>>();
+        let after_workspaces = registrations()
+            .iter()
+            .flat_map(|r| (r.nav)(self, NavPosition::AfterWorkspaces, cx))
+            .collect::<Vec<_>>();
+        div()
+            .w_full()
+            .flex()
+            .flex_col()
             .child(
                 div()
                     .flex()
@@ -187,7 +224,7 @@ impl Render for Shell {
                                 })
                                 .child(command.label(&self.sessions))
                                 .on_click(cx.listener(move |this, _, window, cx| {
-                                    this.execute(command.clone(), window, cx)
+                                    command.clone().run(this, window, cx)
                                 }))
                         })),
                 )
@@ -258,10 +295,7 @@ impl Render for Shell {
                             }),
                     ),
             )
-            .child(div().flex_1().min_h_0().child(
-                content.unwrap_or_else(|| div().p(px(24.)).child(frame.empty).into_any_element()),
-            ))
-            .child(canvas(|_, _, _| (), move |_, _, _, _| painted.set(revision)).size(px(1.)))
+            .into_any_element()
     }
 }
 

@@ -1,7 +1,7 @@
 import { spawn, execFileSync, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import { randomUUID } from 'node:crypto';
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import { devNull, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -103,6 +103,8 @@ it('serves compiled WS health and ping before Next, and fences first use until e
   // exporter ships, including its generated launcher and sibling chunks.
   mkdirSync(join(root, 'src'));
   mkdirSync(join(root, 'scripts'));
+  mkdirSync(join(root, 'scripts/lib'));
+  cpSync(resolve('scripts/lib/next-server-exports.mjs'), join(root, 'scripts/lib/next-server-exports.mjs'));
   symlinkSync(resolve('src/lib'), join(root, 'src/lib'), 'junction');
   writeFileSync(join(root, 'tsconfig.json'), readFileSync(resolve('tsconfig.json')));
   writeFileSync(join(root, 'scripts/server-only-stub.js'), readFileSync(resolve('scripts/server-only-stub.js')));
@@ -122,6 +124,7 @@ ${contents}`;
   // The compile-time dependency link must never become the packaged runtime.
   unlinkSync(join(root, 'node_modules'));
   stagePackagedNativeAddons({ projectRoot: process.cwd(), serverRoot: root });
+  cpSync(resolve('node_modules/typescript'), join(root, 'node_modules/typescript'), { recursive: true });
   const apiPort = await freePort();
   const wsPort = await freePort();
   api = createServer((request, response) => {

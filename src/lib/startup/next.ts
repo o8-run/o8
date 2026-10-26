@@ -18,6 +18,7 @@ async function initialize(): Promise<void> {
     } catch {
       console.warn('[auto-review] Queue startup failed.');
     }
+    void import('@/lib/next/app-window').then(({ restoreNextWindow }) => restoreNextWindow()).catch(() => {});
   }
   try {
     const { startTelemetryUploadLoop } = await import('@/lib/telemetry/uploader');

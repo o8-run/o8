@@ -54,9 +54,11 @@ export async function GET(request: NextRequest) {
   // rail passes a higher ceiling so long histories aren't silently truncated.
   const rawLimit = Number.parseInt(request.nextUrl.searchParams.get('limit') ?? '', 10);
   const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(rawLimit, 1), 500) : undefined;
+  const rawOffset = Number.parseInt(request.nextUrl.searchParams.get('offset') ?? '', 10);
+  const offset = Number.isFinite(rawOffset) ? Math.max(rawOffset, 0) : undefined;
 
   try {
-    const threads = listMobileOrchestratorThreads({ backend, limit });
+    const threads = listMobileOrchestratorThreads({ backend, limit, ...(offset === undefined ? {} : { offset }) });
     return NextResponse.json({ threads }, { headers: NO_STORE });
   } catch (error) {
     console.log('[mobile-orchestrator] thread list failed', error);

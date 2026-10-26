@@ -491,7 +491,7 @@ export interface OwnedSessionStore {
   getReviewPacket(surfaceId: string): Promise<RuntimeReviewPacket>;
   getFleetAdditions(options?: { fresh?: boolean }): Promise<OwnedFleetAdditions>;
   sessionState(surfaceId: string): Promise<OwnedSessionState>;
-  archiveSession(surfaceId: string): Promise<OwnedArchiveResponse>;
+  archiveSession(surfaceId: string, workspace?: string): Promise<OwnedArchiveResponse>;
   setDetachedSession?(surfaceId: string, reason: string | null): Promise<{
     updated: boolean;
     previouslyDetached: boolean;

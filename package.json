@@ -1,6 +1,6 @@
 {
   "name": "o8",
-  "version": "0.1.808",
+  "version": "0.1.811",
   "description": "o8 — governance layer for autonomous engineering teams. Approvals, audit, organizational memory.",
   "license": "MIT",
   "productName": "o8",
@@ -88,6 +88,7 @@
     "test:unit": "vitest run --config config/vitest/vitest.unit.config.ts",
     "test:integration": "node scripts/integration-test-gate.mjs",
     "test:classify": "node scripts/classify-tests.mjs --write",
+    "test:dated-fixtures": "node scripts/classify-tests.mjs --dated-fixtures",
     "test:classification:check": "node scripts/classify-tests.mjs --check",
     "test:watch": "vitest",
     "protocol:generate": "node scripts/generate-realtime-protocol.mjs",
@@ -157,6 +158,7 @@
     "d3-shape": "3.2.0",
     "dompurify": "^3.4.17",
     "drizzle-orm": "^0.45.2",
+    "entities": "8.0.0",
     "framer-motion": "^12.36.0",
     "iconoir-react": "^7.11.0",
     "ink": "6.8.0",
@@ -171,6 +173,7 @@
     "micromark-extension-gfm": "3.0.0",
     "monaco-editor": "^0.55.1",
     "next": "^16.4.1",
+    "parse5": "8.0.1",
     "playwright-core": "^1.60.0",
     "prosemirror-commands": "1.7.2",
     "prosemirror-history": "1.5.0",
@@ -183,6 +186,7 @@
     "qrcode": "^1.5.4",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
+    "saxes": "6.0.0",
     "server-only": "^0.0.1",
     "smol-toml": "^1.9.0",
     "string-width": "7.2.0",
@@ -215,7 +219,7 @@
     "tsrs": "0.18.0-ts7.1.0-dev.20260929",
     "tsx": "^4.21.0",
     "typescript": "5.8.2",
-    "vitest": "^4.1.11"
+    "vitest": "^4.1.12"
   },
   "overrides": {
     "@earendil-works/pi-coding-agent": {

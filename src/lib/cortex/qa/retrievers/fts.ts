@@ -19,7 +19,7 @@
 
 import 'server-only';
 
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import path, { basename, join } from 'node:path';
 
 import { parseDirectiveFile, type ParsedDirective } from '@/lib/cortex/directives/parse';
@@ -32,6 +32,8 @@ import { getDataDir } from '@/lib/data-dir-migration';
 import { getSqlite } from '@/lib/db';
 import { isFts5Available } from '@/lib/db/v14-fts5-migration';
 import { getActiveProjectScopeForRepoSync } from '@/lib/repos/projects';
+import { parseGithubRemoteIdentity } from '@/lib/repos/github-identity';
+import { requestProjectSnapshot, requestRepositoryNames } from '@/lib/repos/request-project-scope';
 
 const PER_INDEX_LIMIT = 20;
 // Comments compete with the rest of the indexes inside the FTS retriever's
@@ -163,6 +165,7 @@ interface CommentRow {
 /** docs has a real parent table (`docs`) — pull metadata from there. */
 interface DocRow {
   id: string;
+  repo_path: string | null;
   repo_name: string;
   rel_path: string;
   kind: string;
@@ -178,6 +181,24 @@ function buildScope(input: RetrieverInput) {
     ? (active.repoInActiveProject ? projectRepoPaths : [])
     : projectRepoPaths;
   const repoNames = new Set(repoPaths.map((repoPath) => basename(repoPath).toLowerCase()));
+  const grantedNames = requestRepositoryNames();
+  const repoFullNames = new Set<string>(grantedNames);
+  let primaryRepoFullName: string | null = null;
+  try {
+    const registry = JSON.parse(readFileSync(join(getDataDir(), 'repos.json'), 'utf8')) as {
+      repos: Array<{ localPath: string; remoteUrl?: string | null }>;
+    };
+    for (const repo of registry.repos) {
+      const canonical = existsSync(repo.localPath) ? realpathSync(repo.localPath) : path.resolve(repo.localPath);
+      if (!repoPaths.includes(canonical)) continue;
+      const identity = parseGithubRemoteIdentity(repo.remoteUrl);
+      if (identity.githubOwner && identity.githubRepo) {
+        const fullName = `${identity.githubOwner}/${identity.githubRepo}`.toLowerCase();
+        if (!grantedNames) repoFullNames.add(fullName);
+        if (canonical === normalizedExplicitRepoPath) primaryRepoFullName = fullName;
+      }
+    }
+  } catch { /* Unknown repository identity grants no remote rows. */ }
   const primaryRepoPath = active.repoInActiveProject ? normalizedExplicitRepoPath : null;
   const primaryRepoName = primaryRepoPath ? basename(primaryRepoPath).toLowerCase() : null;
   const directiveScope: DirectiveProjectScope = {
@@ -185,7 +206,7 @@ function buildScope(input: RetrieverInput) {
     projectSlugs: new Set([active.projectSlug.toLowerCase()]),
     repoInActiveProject: active.repoInActiveProject,
   };
-  return { repoPaths: new Set(repoPaths), repoNames, primaryRepoPath, primaryRepoName, directiveScope };
+  return { repoPaths: new Set(repoPaths), repoNames, repoFullNames, primaryRepoPath, primaryRepoName, primaryRepoFullName, directiveScope };
 }
 
 function pathInScope(repoPath: string | null | undefined, scopedPaths: Set<string>): boolean {
@@ -202,8 +223,7 @@ function repoFullNameInScope(fullName: string | null | undefined, repoNames: Set
   if (repoNames.size === 0) return false;
   const normalized = fullName?.trim().toLowerCase();
   if (!normalized) return false;
-  const name = normalized.split('/').pop() ?? normalized;
-  return repoNames.has(name);
+  return repoNames.has(normalized);
 }
 
 function repoPathScoreMultiplier(
@@ -226,8 +246,7 @@ function repoNameScoreMultiplier(
   if (!scope.primaryRepoName) return 1;
   const normalized = repoName?.trim().toLowerCase();
   if (!normalized) return 1;
-  const name = normalized.split('/').pop() ?? normalized;
-  return name === scope.primaryRepoName ? 1.2 : 0.88;
+  return normalized === (normalized.includes('/') ? scope.primaryRepoFullName : scope.primaryRepoName) ? 1.2 : 0.88;
 }
 
 /**
@@ -267,6 +286,13 @@ function readDirective(id: string): ParsedDirective | null {
 function directiveInScope(id: string, input: RetrieverInput, projectScope: DirectiveProjectScope): boolean {
   const parsed = readDirective(id);
   if (!parsed) return false;
+  const snapshot = requestProjectSnapshot();
+  if (snapshot && !['global', '', 'project'].includes(parsed.scope.toLowerCase())) {
+    const selectors = [parsed.repoName?.toLowerCase(), parsed.scope.toLowerCase() !== 'repo' ? parsed.scope.toLowerCase() : null];
+    return selectors.some(selector => selector && (selector.includes('/')
+      ? snapshot.repositoryNames.includes(selector)
+      : !snapshot.ambiguousRepoNames.includes(selector) && selector === basename(input.repoPath ?? '').toLowerCase()));
+  }
   if (input.repoPath?.trim()) {
     return directiveAppliesToRepo(parsed, input.repoPath, projectScope);
   }
@@ -436,7 +462,7 @@ export async function ftsRetriever(input: RetrieverInput): Promise<RetrieverResu
           )
           .all(...intIds) as PrRow[];
         const byId = new Map(records
-          .filter((record) => repoFullNameInScope(record.repo_full_name, scope.repoNames))
+          .filter((record) => repoFullNameInScope(record.repo_full_name, scope.repoFullNames))
           .map((r) => [String(r.pull_request_id), r]));
         sortedIds.forEach((id, idx) => {
           const record = byId.get(id);
@@ -479,7 +505,7 @@ export async function ftsRetriever(input: RetrieverInput): Promise<RetrieverResu
           )
           .all(...intIds) as IssueRow[];
         const byId = new Map(records
-          .filter((record) => repoFullNameInScope(record.repo_full_name, scope.repoNames))
+          .filter((record) => repoFullNameInScope(record.repo_full_name, scope.repoFullNames))
           .map((r) => [String(r.issue_id), r]));
         sortedIds.forEach((id, idx) => {
           const record = byId.get(id);
@@ -517,12 +543,12 @@ export async function ftsRetriever(input: RetrieverInput): Promise<RetrieverResu
         .slice(0, DOCS_PER_INDEX_LIMIT);
       const records = sqlite
         .prepare(
-          `SELECT id, repo_name, rel_path, kind, title FROM docs
+          `SELECT id, repo_path, repo_name, rel_path, kind, title FROM docs
            WHERE id IN (${sortedIds.map(() => '?').join(',')})`,
         )
         .all(...sortedIds) as DocRow[];
       const byId = new Map(records
-        .filter((record) => scope.repoNames.has(record.repo_name.toLowerCase()))
+        .filter((record) => pathInScope(record.repo_path, scope.repoPaths))
         .map((r) => [r.id, r]));
       sortedIds.forEach((id, idx) => {
         const record = byId.get(id);
@@ -620,7 +646,7 @@ export async function ftsRetriever(input: RetrieverInput): Promise<RetrieverResu
           )
           .all(...sortedIds) as CommentRow[];
         const byId = new Map(records
-          .filter((record) => repoFullNameInScope(record.repo_full_name, scope.repoNames))
+          .filter((record) => repoFullNameInScope(record.repo_full_name, scope.repoFullNames))
           .map((r) => [r.id, r]));
         sortedIds.forEach((id, idx) => {
           const record = byId.get(id);
