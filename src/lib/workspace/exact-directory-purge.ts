@@ -656,6 +656,23 @@ export async function captureExactDirectoryManifest(
   return { fingerprint: match[1], entries: entries as ExactDirectoryManifestEntry[] };
 }
 
+/** Release only a prior compiler inventory, retaining the registered output root. */
+export async function clearExactDirectoryContents(
+  candidatePath: string,
+  identity: { device: number; inode: number },
+  manifest: ExactDirectoryManifest,
+  beforeCapture: (candidatePath: string) => Promise<void>,
+  afterTreeCapture: AfterTreeCapture,
+): Promise<void> {
+  if (!manifest.entries.length) throw new Error('Compiler replacement requires its prior ownership inventory.');
+  const namespace = await capturePurgeNamespace(candidatePath, identity);
+  await beforeCapture(candidatePath);
+  await assertPurgeNamespace(namespace, identity);
+  await runCapturedPurge(candidatePath, identity, manifest.fingerprint, manifest.entries,
+    afterTreeCapture, namespace, true);
+  await assertPurgeNamespace(namespace, identity);
+}
+
 /** Release receipted file bytes and namespace entries through captured cwd boundaries. */
 export async function purgeExactDirectory(
   candidatePath: string,

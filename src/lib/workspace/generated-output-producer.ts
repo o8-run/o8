@@ -134,11 +134,11 @@ async function runReservedProducer(workspace: WorktreeMaterializationIdentity, r
   const owner = await probeMetadataLockProcessIdentity(process.pid);
   if (owner.state !== 'live') throw new Error('Generated-output producer identity is unknown.');
   const previousState = resource.state;
+  const previousBuildOwnership = resource.buildOwnership;
+  const reservedBuild = !resource.owner && resource.creationAuthority && input.mode === 'build';
   resource = saveGeneratedOutputResource(resource, { state: 'active', revision: await generatedOutputRevision(workspace),
+    ...(reservedBuild ? { buildOwnership: undefined } : {}),
     attempt: { id: randomUUID(), mode: input.mode, ownerPid: process.pid, ownerIdentity: owner.identity, children: [] } });
-  if (!resource.owner && resource.creationAuthority && input.mode === 'build') {
-    resource = saveGeneratedOutputResource(resource, { buildOwnership: await reserveBuildOutput(resource) });
-  }
   let activeChild: ReturnType<typeof spawn> | null = null;
   let activeRun: Promise<number> | null = null;
   let abortRequested = false;
@@ -206,14 +206,6 @@ async function runReservedProducer(workspace: WorktreeMaterializationIdentity, r
       () => { if (activeRun === pending) activeRun = null; });
     return pending;
   };
-  if (resource.buildOwnership?.state === 'reserved') {
-    run.buildOutput = { directory: resource.buildOwnership.scope.canonicalPath, complete: async () => {
-      if (activeRun || activeChild || resource.buildOwnership?.state !== 'reserved') {
-        throw new Error('Build output publication requires closed compiler children and its original reservation.');
-      }
-      resource = saveGeneratedOutputResource(resource, { buildOwnership: await publishBuildOutput(resource) });
-    } };
-  }
   const settleFailedRun = async () => {
     abortRequested = true;
     const unsettled = activeRun;
@@ -221,6 +213,16 @@ async function runReservedProducer(workspace: WorktreeMaterializationIdentity, r
     if (unsettled) await unsettled.catch(() => {});
   };
   try {
+    if (reservedBuild) {
+      const ownership = await reserveBuildOutput(resource, previousBuildOwnership);
+      resource = saveGeneratedOutputResource(resource, { buildOwnership: ownership });
+      run.buildOutput = { directory: ownership.scope.canonicalPath, complete: async () => {
+        if (activeRun || activeChild || resource.buildOwnership?.state !== 'reserved') {
+          throw new Error('Build output publication requires closed compiler children and its original reservation.');
+        }
+        resource = saveGeneratedOutputResource(resource, { buildOwnership: await publishBuildOutput(resource) });
+      } };
+    }
     const code = await input.operation(run);
     if (activeRun || activeChild || !resource.attempt!.children.length || resource.attempt!.children.some(child => !child.observedClosed)) {
       throw new Error('Generated-output attempt lacks complete observed child exits.');

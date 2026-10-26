@@ -10,7 +10,7 @@ import { createRetainedGeneratedOutputFixture } from './generated-output-fixture
 const source = process.cwd();
 const require = createRequire(import.meta.url);
 
-it.each([false, true, 'cache'] as const)('journals postship disposal and preserves mid-build foreign output=%s', async foreign => {
+it.each([false, true, 'cache', 'rebuild', 'blocked-rebuild'] as const)('journals postship disposal and preserves mid-build foreign output=%s', async foreign => {
   const root = await createRetainedGeneratedOutputFixture('o8-postship-lifecycle-');
   const repo = path.join(root, 'repo');
   const home = path.join(root, 'home');
@@ -98,7 +98,7 @@ it.each([false, true, 'cache'] as const)('journals postship disposal and preserv
     const result = spawnSync('git', args, { cwd: repo, encoding: 'utf8' });
     expect(result.status, result.stderr).toBe(0);
   }
-  const env = { ...process.env, HOME: home, O8_FIXTURE_FOREIGN_OUTPUT: foreign === 'cache' ? 'cache' : foreign ? '1' : '0', O8_RELEASE_BUILD_CACHE_DIR: path.join(root, 'cache'),
+  const env = { ...process.env, HOME: home, O8_FIXTURE_FOREIGN_OUTPUT: foreign === 'cache' ? 'cache' : foreign === true ? '1' : '0', O8_RELEASE_BUILD_CACHE_DIR: path.join(root, 'cache'),
     O8_RELEASE_BUILD_CACHE_MAX_BYTES: '10485760', O8_RELEASE_LOCK_PATH: path.join(root, 'release.lock'),
     O8_RELEASE_BROADCAST_CLI: 'true', TSX_TSCONFIG_PATH: path.join(source, 'tsconfig.json') };
   for (const key of ['O8_DATA_DIR', 'CORTEX_IDE_DATA_DIR', 'CORTEX_IDE_DB_PATH', 'O8_OPERATOR_DATA_DIR',
@@ -141,7 +141,7 @@ it.each([false, true, 'cache'] as const)('journals postship disposal and preserv
     return completed;
   }
   // Retain the first output to exercise interrupted disposal before the next ship.
-  const first = ship(Boolean(foreign));
+  const first = ship(foreign === true || foreign === 'cache');
   if (foreign === 'cache') {
     expect(readFileSync(path.join(repo, '.next/cache/operator-note.txt'), 'utf8')).toBe('foreign early-build bytes');
     expect(first.status).not.toBe(0);
@@ -149,7 +149,7 @@ it.each([false, true, 'cache'] as const)('journals postship disposal and preserv
     return;
   }
   expect(first.status, first.stderr + first.stdout).toBe(0);
-  if (foreign) {
+  if (foreign === true) {
     expect(JSON.parse(readFileSync(path.join(repo, '.fixture/ownership-before-build.json'), 'utf8'))).toEqual({ state: 'reserved', reserved: true });
     expect(readFileSync(path.join(repo, '.next/operator-note.txt'), 'utf8')).toBe('foreign mid-build bytes');
     expect(existsSync(path.join(repo, '.next/BUILD_ID'))).toBe(false);
@@ -176,6 +176,44 @@ it.each([false, true, 'cache'] as const)('journals postship disposal and preserv
   }
   const original = resources()[0];
   expect(original.state).toBe('succeeded');
+  if (foreign === 'rebuild' || foreign === 'blocked-rebuild') {
+    // A retained successful compiler tree must support another real prebuild.
+    // Invalidate only the exported artifact so the ordinary caller must rebuild.
+    writeFileSync(path.join(repo, 'out/server.js'), 'force retained-output rebuild');
+    if (foreign === 'blocked-rebuild') {
+      const note = path.join(repo, '.next/.o8-release-build/operator-note.txt');
+      writeFileSync(note, 'foreign reserved-directory bytes');
+      const refused = run(prebuild);
+      expect(refused.status).not.toBe(0);
+      expect(resources()[0].state, refused.stderr + refused.stdout).toBe('failed-held');
+      expect(readFileSync(note, 'utf8')).toBe('foreign reserved-directory bytes');
+      expect(readFileSync(path.join(repo, '.fixture/compiler-calls'), 'utf8')).toBe('build\n');
+      return;
+    }
+    // Cover both an otherwise empty registered root and one with foreign output.
+    for (const foreignNote of [false, true]) {
+      writeFileSync(path.join(repo, 'out/server.js'), 'force retained-output rebuild');
+      if (foreignNote) writeFileSync(path.join(repo, '.next/operator-note.txt'), 'foreign before rebuild');
+      const before = resources()[0];
+      const rebuilt = run(prebuild);
+      const after = resources()[0];
+      expect(after.state, rebuilt.stderr + rebuilt.stdout).not.toBe('active');
+      expect(rebuilt.status, rebuilt.stderr + rebuilt.stdout).toBe(0);
+      expect(after.state).toBe('succeeded');
+      expect(after.attempt.id).not.toBe(before.attempt.id);
+      expect(after.output).toEqual(original.output);
+      expect(after.buildOwnership.state).toBe('complete');
+    }
+    expect(resources()).toHaveLength(1);
+    expect(readFileSync(path.join(repo, '.fixture/compiler-calls'), 'utf8')).toBe('build\nbuild\nbuild\n');
+    expect(readFileSync(path.join(repo, '.next/operator-note.txt'), 'utf8')).toBe('foreign before rebuild');
+    expect(readFileSync(path.join(repo, 'out/server.js'), 'utf8')).toBe('fixture artifact');
+    const cleaned = run([postshipScript]);
+    expect(cleaned.status, cleaned.stderr + cleaned.stdout).toBe(0);
+    expect(existsSync(path.join(repo, '.next/BUILD_ID'))).toBe(false);
+    expect(readFileSync(path.join(repo, '.next/operator-note.txt'), 'utf8')).toBe('foreign before rebuild');
+    return;
+  }
   expect(original.attempt.children.every((child: { identity: unknown; observedClosed: boolean; exitCode: number }) =>
     child.identity && child.observedClosed && child.exitCode === 0)).toBe(true);
   const postship = [process.env.O8_POSTSHIP_TEST_SCRIPT || path.join(source, 'scripts/postship-cleanup.mjs')];

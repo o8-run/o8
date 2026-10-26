@@ -10,7 +10,7 @@ import { createRetainedGeneratedOutputFixture } from './generated-output-fixture
 const exec = promisify(execFile);
 const require = createRequire(import.meta.url);
 
-it('builds and normalizes a real standalone compiler output from a pre-build reservation', async () => {
+it('builds and rebuilds retained real standalone output from pre-build reservations', async () => {
   const source = process.cwd();
   const root = await createRetainedGeneratedOutputFixture('o8-private-build-');
   const repo = path.join(root, 'repo');
@@ -34,15 +34,19 @@ it('builds and normalizes a real standalone compiler output from a pre-build res
     await (producer.default ?? producer).runGeneratedOutputPrebuild({ workspacePath: process.cwd(), preflight() {},
       operation: context => context.runBuild(run => build.runRegisteredBuild(run)) });
   `;
-  const result = await exec(process.execPath, ['--import', path.join(source, 'scripts/register-server-only-stub.mjs'),
-    '--import', require.resolve('tsx'), '--input-type=module', '-e', script], { cwd: repo, timeout: 180_000,
-    maxBuffer: 2 * 1024 ** 2, env: { ...process.env, O8_DATA_DIR: data, CORTEX_IDE_DATA_DIR: data,
-      CORTEX_IDE_DB_PATH: path.join(data, 'fixture.db'), TSX_TSCONFIG_PATH: path.join(source, 'tsconfig.json'),
-      O8_BUILD_HEAP_MIB: '1024', NEXT_TELEMETRY_DISABLED: '1' } });
-  writeFileSync(path.join(root, 'compiler.log'), result.stdout + result.stderr);
-  expect(readFileSync(path.join(repo, '.next/BUILD_ID'), 'utf8').trim()).not.toBe('');
-  const entry = readFileSync(path.join(repo, '.next/standalone/server.js'), 'utf8');
-  expect(entry).toContain('"distDir":".next"');
-  expect(entry).not.toMatch(/"distDir":"\.next\/\.o8-release-/);
-  expect(readFileSync(path.join(repo, '.next/standalone/.next/BUILD_ID'), 'utf8').trim()).not.toBe('');
-}, 240_000);
+  for (const generation of [1, 2]) {
+    writeFileSync(path.join(repo, 'app/page.js'), `export default function Page() { return <main>Release fixture ${generation}</main>; }`);
+    const result = await exec(process.execPath, ['--import', path.join(source, 'scripts/register-server-only-stub.mjs'),
+      '--import', require.resolve('tsx'), '--input-type=module', '-e', script], { cwd: repo, timeout: 180_000,
+      maxBuffer: 2 * 1024 ** 2, env: { ...process.env, O8_DATA_DIR: data, CORTEX_IDE_DATA_DIR: data,
+        CORTEX_IDE_DB_PATH: path.join(data, 'fixture.db'), TSX_TSCONFIG_PATH: path.join(source, 'tsconfig.json'),
+        O8_BUILD_HEAP_MIB: '1024', NEXT_TELEMETRY_DISABLED: '1' } });
+    writeFileSync(path.join(root, `compiler-${generation}.log`), result.stdout + result.stderr);
+    expect(readFileSync(path.join(repo, '.next/BUILD_ID'), 'utf8').trim()).not.toBe('');
+    const entry = readFileSync(path.join(repo, '.next/standalone/server.js'), 'utf8');
+    expect(entry).toContain('"distDir":".next"');
+    expect(entry).not.toMatch(/"distDir":"\.next\/\.o8-release-/);
+    expect(readFileSync(path.join(repo, '.next/standalone/.next/BUILD_ID'), 'utf8').trim()).not.toBe('');
+    expect(readFileSync(path.join(repo, '.next/server/app/index.html'), 'utf8')).toContain(`Release fixture ${generation}`);
+  }
+}, 420_000);
