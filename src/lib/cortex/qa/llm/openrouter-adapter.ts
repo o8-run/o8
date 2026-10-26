@@ -53,7 +53,7 @@ import {
   recordBrainOpenRouterSpend,
   type OpenRouterUsage,
 } from '@/lib/cortex/qa/llm/brain-spend';
-import { managedTextModelOptions, O8_MANAGED_TEXT_MODEL, resolveOpenRouterRoute } from '@/lib/cortex/qa/llm/inference-route';
+import { managedTextModelOptions, O8_MANAGED_TEXT_MODEL, openRouterTextModels, resolveOpenRouterRoute } from '@/lib/cortex/qa/llm/inference-route';
 
 // ── Public API ───────────────────────────────────────────────────────────────
 
@@ -188,7 +188,7 @@ export async function callOpenRouter(
   if (route.via === 'direct') await assertUnderBrainDailyCap();
 
   const timeoutMs = opts.timeoutMs ?? 10_000;
-  const primary = route.model ?? opts.model ?? OPENROUTER_PRIMARY_MODEL;
+  const primary = route.model ?? opts.model ?? openRouterTextModels(route.via)[0];
   const fallbacks = route.model ? [] : opts.fallbackModels ?? OPENROUTER_FALLBACK_MODELS;
 
   // OpenRouter accepts `model` (primary) + `models[]` (in-call fallback).

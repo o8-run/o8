@@ -168,4 +168,20 @@ describe('openrouter-adapter managed text model', { timeout: 10_000 }, () => {
     expect(body.reasoning_effort).toBe('none');
     expect((body.models as string[])[0]).toBe('google/gemini-2.5-flash-lite');
   });
+
+  it('leads with O8_OPENROUTER_TEXT_MODEL on a direct key, without the Luna-only reasoning field', async () => {
+    vi.stubEnv('O8_OPENROUTER_TEXT_MODEL', 'deepseek/deepseek-v4-flash');
+    try {
+      fetchMock.mockImplementation(async () => jsonResponse(200, okBody));
+      await callOpenRouter('Say OK');
+      const chat = fetchMock.mock.calls.find(([url]) => String(url).endsWith('/chat/completions'));
+      expect(String(chat![0])).toBe('https://openrouter.ai/api/v1/chat/completions');
+      const body = JSON.parse(String((chat![1] as RequestInit).body)) as Record<string, unknown>;
+      expect(body.model).toBe('deepseek/deepseek-v4-flash');
+      expect(body).not.toHaveProperty('reasoning_effort');
+      expect((body.models as string[])[0]).toBe('google/gemini-2.5-flash-lite');
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
 });
