@@ -85,8 +85,7 @@ fn terminal_shell_with_peer(
             "./scripts/register-server-only-stub.mjs",
             "--import",
             "tsx",
-            "scripts/next/grid-dev-server.ts",
-            "--terminals",
+            "native/o8-next/src/surfaces/shortcuts/fixtures/grid_host.ts",
         ])
         .env("O8_NEXT_API_TOKEN", "fixture-grid-bearer")
         // Keep the host's inventory paths canonical across macOS /var aliases.
@@ -244,7 +243,7 @@ fn shortcuts_focused_text_field_keeps_help_and_close_keys(cx: &mut TestAppContex
     );
     let cx = &mut visual;
     ready(&shell, cx);
-    cx.simulate_keystrokes("cmd-k");
+    cx.simulate_keystrokes("cmd-shift-p");
     cx.simulate_keystrokes("b r a i n enter");
     ready(&shell, cx);
     cx.simulate_keystrokes("?");

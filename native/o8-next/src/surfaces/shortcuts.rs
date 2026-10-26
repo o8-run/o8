@@ -11,38 +11,41 @@ pub(super) struct Runtime {
     subscription: Option<gpui::Subscription>,
     inputs: input::Inputs,
 }
-pub(super) const REGISTRATION: Registration = Registration {
-    overlay_command: true,
-    overlay: |s| {
-        s.surfaces
-            .shortcuts
-            .view
-            .as_ref()
-            .map(|v| v.clone().into_any_element())
-    },
-    overlay_open: |s| s.surfaces.shortcuts.view.is_some(),
-    key_down: keys,
-    nav: |s, position, cx| {
-        s.surfaces.shortcuts.inputs.watch(cx);
-        if position != NavPosition::AfterWorkspaces {
-            return vec![];
-        }
-        vec![
-            div()
-                .id("shortcuts-open")
-                .debug_selector(|| "shortcuts-open".into())
-                .p(px(6.))
-                .cursor_pointer()
-                .child("Shortcuts")
-                .on_click(cx.listener(|s, _, window, cx| s.execute(Command::Shortcuts, window, cx)))
-                .into_any_element(),
-        ]
-    },
-    ..Registration::new("", "Open keyboard shortcuts", |s, _, window, cx| {
-        s.set_help(true, window, cx);
-        None
-    })
-};
+pub(super) const REGISTRATION: Registration =
+    Registration {
+        overlay_command: true,
+        overlay: |s| {
+            s.surfaces
+                .shortcuts
+                .view
+                .as_ref()
+                .map(|v| v.clone().into_any_element())
+        },
+        overlay_open: |s| s.surfaces.shortcuts.view.is_some(),
+        key_down: keys,
+        nav: |s, position, cx| {
+            s.surfaces.shortcuts.inputs.watch(cx);
+            if position != NavPosition::AfterWorkspaces {
+                return vec![];
+            }
+            vec![
+                div()
+                    .id("shortcuts-open")
+                    .debug_selector(|| "shortcuts-open".into())
+                    .p(px(6.))
+                    .cursor_pointer()
+                    .child("Shortcuts")
+                    .on_click(cx.listener(|s, _, window, cx| {
+                        s.execute(Command::ShortcutReference, window, cx)
+                    }))
+                    .into_any_element(),
+            ]
+        },
+        ..Registration::new("", "Open keyboard shortcuts", |s, _, window, cx| {
+            s.set_help(true, window, cx);
+            None
+        })
+    };
 impl Shell {
     fn set_help(&mut self, open: bool, window: &mut Window, cx: &mut Context<Self>) {
         if open == self.surfaces.shortcuts.view.is_some() {
@@ -128,6 +131,26 @@ fn keys(s: &mut Shell, event: &KeyDownEvent, window: &mut Window, cx: &mut Conte
         cx.notify();
         return true;
     }
+    let select_tab = command
+        && !m.shift
+        && ((m.platform && !m.control && m.alt && ["left", "right"].contains(&key))
+            || (!m.alt && key.parse::<usize>().is_ok_and(|i| (1..=9).contains(&i))));
+    let close_tab = command && !m.alt && !m.shift && key == "w";
+    let cycle_tab = m.control && !m.alt && !m.platform && key == "tab";
+    if (select_tab || close_tab || cycle_tab)
+        && (s.palette || s.shortcuts || registrations().iter().any(|r| (r.overlay_open)(s)))
+    {
+        // An open surface owns these keys before any underlying tab action.
+        // Preserve focused editor input; otherwise let the surface close itself.
+        if !s.palette && !editing(s, window, cx) {
+            for registration in registrations() {
+                if (registration.overlay_open)(s) && (registration.key_down)(s, event, window, cx) {
+                    break;
+                }
+            }
+        }
+        return true;
+    }
     let terminal = s.surfaces.shortcuts.inputs.terminal(window, cx);
     if let Some(terminal) = terminal
         && input::core_chord(event)
@@ -145,11 +168,7 @@ fn keys(s: &mut Shell, event: &KeyDownEvent, window: &mut Window, cx: &mut Conte
         s.set_help(true, window, cx);
         return true;
     }
-    if command
-        && !m.shift
-        && ((m.platform && !m.control && m.alt && ["left", "right"].contains(&key))
-            || (!m.alt && key.parse::<usize>().is_ok_and(|i| (1..=9).contains(&i))))
-    {
+    if select_tab {
         s.capture(window, cx);
         if let Some(saved) = s
             .state
@@ -178,7 +197,7 @@ fn keys(s: &mut Shell, event: &KeyDownEvent, window: &mut Window, cx: &mut Conte
         cx.notify();
         return true;
     }
-    if command && !m.alt && !m.shift && key == "w" {
+    if close_tab {
         if let Some(tab) = s.active() {
             s.content.remove(&s.key(&tab));
             let saved = s

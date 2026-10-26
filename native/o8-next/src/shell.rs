@@ -37,7 +37,7 @@ register_surfaces! {
         #[cfg(test)] fake: Fake = "surfaces/fake.rs";
     }
     commands {
-        shortcuts: Shortcuts = "surfaces/shortcuts.rs";
+        shortcuts: ShortcutReference = "surfaces/shortcuts.rs";
         sidebar: Sidebar = "surfaces/sidebar.rs";
         settings: Settings = "surfaces/settings.rs";
         projects: Projects = "surfaces/projects.rs";

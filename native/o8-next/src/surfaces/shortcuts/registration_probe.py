@@ -20,7 +20,7 @@ with tempfile.TemporaryDirectory(prefix="o8-shortcuts-registration-") as directo
     shutil.copytree(surface / "shortcuts", native / "src/surfaces/shortcuts", dirs_exist_ok=True)
     shell = native / "src/shell.rs"
     text = shell.read_text()
-    line = '        shortcuts: Shortcuts = "surfaces/shortcuts.rs";\n'
+    line = '        shortcuts: ShortcutReference = "surfaces/shortcuts.rs";\n'
     assert text.count(line) <= 1
     if line not in text:
         assert "    commands {\n" in text

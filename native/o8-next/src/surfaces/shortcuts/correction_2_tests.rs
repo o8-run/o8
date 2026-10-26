@@ -71,6 +71,8 @@ fn shortcuts_every_binding_respects_the_focused_secret_field(cx: &mut TestAppCon
         "ctrl-/".into(),
         "cmd-w".into(),
         "ctrl-w".into(),
+        "ctrl-tab".into(),
+        "ctrl-shift-tab".into(),
         "cmd-k".into(),
         "ctrl-k".into(),
         "cmd-alt-left".into(),
@@ -119,29 +121,20 @@ fn shortcuts_every_binding_respects_the_focused_secret_field(cx: &mut TestAppCon
 #[gpui::test]
 fn shortcuts_text_fields_pass_palette_chords(cx: &mut TestAppContext) {
     let fixture = Fixture::start(true);
-    for (case, binding) in [
-        "cmd-shift-p",
-        "ctrl-shift-p",
-        "cmd-,",
-        "ctrl-,",
-        "ctrl-tab",
-        "ctrl-shift-tab",
-    ]
-    .into_iter()
-    .enumerate()
+    for (case, binding) in ["cmd-shift-p", "ctrl-shift-p", "cmd-,", "ctrl-,"]
+        .into_iter()
+        .enumerate()
     {
         let (shell, mut visual) = field_shell(&fixture, case, cx);
         visual.simulate_keystrokes(binding);
         shortcuts_draw(&mut visual);
         assert!(
-            shell.read_with(&visual, |s, _| if binding.ends_with("tab") {
-                matches!(s.active(), Some(Tab::Session(_))) && s.surfaces.settings.view.is_some()
-            } else if binding.ends_with(',') {
+            shell.read_with(&visual, |s, _| if binding.ends_with(',') {
                 s.surfaces.settings.view.is_none() && s.active() == Some(Tab::Grid)
             } else {
                 s.palette
             }),
-            "text fields pass palette, Settings and legacy tab-cycle chords: {binding}"
+            "text fields pass palette and Settings chords: {binding}"
         );
         visual.update(|window, _| window.remove_window());
     }
