@@ -56,6 +56,15 @@ import {
 } from './codex-orchestrator-session';
 import { writeOrchestratorBackendSessionId } from '@/lib/mobile/orchestrator-thread-history';
 import type { OrchestratorEvent } from './orchestrator-stream-events';
+import { writePersistedLlmChat } from '@/lib/llm/chat-history-store';
+
+function persistRecoveryHistory(threadId: string, current: string) {
+  writePersistedLlmChat(threadId, { repoPath: process.cwd(), messages: [
+    { id: 'earlier-user', role: 'user', content: 'Retain the earlier requirement.', timestamp: 1 },
+    { id: 'earlier-assistant', role: 'assistant', content: 'Requirement retained.', timestamp: 2 },
+    { id: 'current-user', role: 'user', content: current, timestamp: 3 },
+  ] });
+}
 
 class FakeCodexProc extends EventEmitter {
   stdout = new EventEmitter();
@@ -317,6 +326,7 @@ describe('Codex orchestrator process lifecycle', () => {
 
   it('retries a missing persisted Codex rollout once as a fresh thread', async () => {
     const historyThreadId = `thoughts-stale-resume-${Date.now()}`;
+    persistRecoveryHistory(historyThreadId, 'recover me');
     writeOrchestratorBackendSessionId(historyThreadId, 'codex', 'stale-codex-thread');
     const session = ensureCodexOrchestratorSession(process.cwd(), historyThreadId);
     const staleProc = new FakeCodexProc();
@@ -326,7 +336,7 @@ describe('Codex orchestrator process lifecycle', () => {
       .mockReturnValueOnce(freshProc as unknown as ChildProcess);
     const events: OrchestratorEvent[] = [];
 
-    const turn = sendToCodexOrchestrator(session, 'recover me', (event) => events.push(event));
+    const turn = sendToCodexOrchestrator(session, 'recover me', (event) => events.push(event), { rawMessage: 'recover me' });
     await vi.waitFor(() => expect(spawnMock).toHaveBeenCalledTimes(1));
     expect(spawnMock.mock.calls[0][1]).toEqual(expect.arrayContaining([
       'exec', 'resume', 'stale-codex-thread', '--json',
@@ -355,6 +365,7 @@ describe('Codex orchestrator process lifecycle', () => {
 
   it('retries a no-rollout resume response after long startup warnings as a fresh thread', async () => {
     const historyThreadId = `thoughts-no-rollout-resume-${Date.now()}`;
+    persistRecoveryHistory(historyThreadId, 'recover the production error');
     writeOrchestratorBackendSessionId(historyThreadId, 'codex', '019ffcb1-3d86-7ba3-af64-0ca2a66660e9');
     const session = ensureCodexOrchestratorSession(process.cwd(), historyThreadId);
     const staleProc = new FakeCodexProc();
@@ -364,7 +375,7 @@ describe('Codex orchestrator process lifecycle', () => {
       .mockReturnValueOnce(freshProc as unknown as ChildProcess);
     const events: OrchestratorEvent[] = [];
 
-    const turn = sendToCodexOrchestrator(session, 'recover the production error', (event) => events.push(event));
+    const turn = sendToCodexOrchestrator(session, 'recover the production error', (event) => events.push(event), { rawMessage: 'recover the production error' });
     await vi.waitFor(() => expect(spawnMock).toHaveBeenCalledTimes(1));
     staleProc.stderr.emit('data', Buffer.from(
       'WARN catalog request timed out\n'.repeat(30)

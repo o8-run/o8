@@ -42,6 +42,7 @@ import { codexComposerImagePaths, type ComposerImageAttachment } from '@/lib/mob
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 import { getCodexSpeedCatalogue } from '@/lib/codex/service-tier-catalogue';
 import { serviceTierForTurn, type OrchestratorServiceTier } from '@/lib/orchestrator/service-tier';
+import { recoverRuntimeSessionMessage, SESSION_CONTEXT_UNAVAILABLE } from './runtime-session-recovery';
 import {
   ensureRegisteredSession,
   getRegisteredSession,
@@ -244,11 +245,24 @@ export async function sendToCodexOrchestrator(
   const missingRollout = terminalError?.type === 'error'
     && isMissingCodexRolloutResumeError(terminalError.error);
   if (resumed && !streamed && missingRollout && !options.signal?.aborted) {
-    console.warn(`[codex-orchestrator-session] Saved Codex thread is gone; retrying ${session.sessionName} fresh`);
+    let recoveredMessage: string;
+    try {
+      recoveredMessage = recoverRuntimeSessionMessage({ ...session, message, rawMessage: options.rawMessage });
+    } catch {
+      session.status = 'ready';
+      onEvent({ type: 'error', error: SESSION_CONTEXT_UNAVAILABLE });
+      onEvent({ type: 'done', terminalOutcome: 'failed', sessionId: session.threadId, cost: null });
+      return;
+    }
+    if (options.signal?.aborted) {
+      for (const event of deferredTerminalEvents) onEvent(event);
+      return;
+    }
     session.threadId = null;
     session.status = 'ready';
     writeOrchestratorBackendSessionId(session.historyThreadId, 'codex', null);
-    return sendToCodexOrchestratorAttempt(session, message, onEvent, options);
+    onEvent({ type: 'turn_retry', attempt: 2, reason: 'runtime-session-recovered', notice: 'The saved runtime session was unavailable. Continuing in a new session with the earlier conversation restored.' });
+    return sendToCodexOrchestratorAttempt(session, recoveredMessage, onEvent, options);
   }
 
   for (const event of deferredTerminalEvents) onEvent(event);
