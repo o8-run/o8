@@ -1,12 +1,13 @@
-"""Exercise the real composer with the explicit focused-keymap revision."""
+"""Replay the reviewed composer/keymap composition at explicit source revisions."""
 import argparse
 import pathlib
-import shutil
 import subprocess
 import tempfile
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--peer-ref", required=True)
+parser.add_argument("--source-ref", default="6811d3f442e6348b46758871e6be0b13aa48b63f",
+                    help="composer snapshot to replay; defaults to the reviewed round 2 head")
 parser.add_argument("--unported", action="store_true")
 parser.add_argument("--test", default="composer")
 args = parser.parse_args()
@@ -17,17 +18,22 @@ def git(*arguments):
     return subprocess.check_output(["git", *arguments], cwd=repository)
 
 
+def source_file(relative):
+    return git("show", f"{args.source_ref}:{relative}")
+
+
 with tempfile.TemporaryDirectory(prefix="o8-composer-composition-") as temporary:
     root = pathlib.Path(temporary).resolve() / "checkout"
     subprocess.run(["git", "worktree", "add", "--detach", str(root), args.peer_ref], cwd=repository, check=True)
     try:
         (root / "node_modules").symlink_to(repository / "node_modules", target_is_directory=True)
         prefix = pathlib.Path("native/o8-next")
+        print(f"Composer source={args.source_ref}; focused keymap={args.peer_ref}", flush=True)
         peer_ui = git("show", f"{args.peer_ref}:{prefix}/src/ui.rs").decode()
         peer_shell = git("show", f"{args.peer_ref}:{prefix}/src/shell_view.rs").decode()
         for relative in ["src/composer.rs", "src/conversation.rs", "src/surfaces/session.rs", "src/worker_tests.rs",
                          "src/ui.rs", "src/shell_session.rs", "src/render_region.rs", "src/speed_receipt.rs"]:
-            shutil.copyfile(repository / prefix / relative, root / prefix / relative)
+            (root / prefix / relative).write_bytes(source_file(prefix / relative))
         # Retain the peer's actual focused session and shell listeners while
         # porting these retained sibling boundaries. Do not replace its actions
         # with the raw-key hooks from this branch.
@@ -76,9 +82,12 @@ with tempfile.TemporaryDirectory(prefix="o8-composer-composition-") as temporary
         source = session.read_text().replace('impl ShellView for Surface {',
             'impl ShellView for Surface {\n    fn element(view: &Entity<Self>) -> gpui::AnyElement { view.clone().into_any_element() }', 1)
         session.write_text(source)
-        shutil.copytree(repository / prefix / "src/composer", root / prefix / "src/composer", dirs_exist_ok=True)
+        for relative in git("ls-tree", "-r", "--name-only", args.source_ref, "--", str(prefix / "src/composer")).decode().splitlines():
+            destination = root / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(source_file(relative))
         fixture = pathlib.Path("scripts/next/surfaces/70-composer.surface.ts")
-        shutil.copyfile(repository / fixture, root / fixture)
+        (root / fixture).write_bytes(source_file(fixture))
         composer = root / prefix / "src/composer.rs"
         source = composer.read_text()
         source = source.replace("pub focus: FocusHandle,", "pub focus: FocusHandle,\n    pub context: &'static str,", 1) if "pub context:" not in source else source

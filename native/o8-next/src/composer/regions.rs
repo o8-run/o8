@@ -106,6 +106,6 @@ impl Surface {
 
 pub(super) fn footer_style() -> StyleRefinement {
     let mut style = header_style();
-    style.size.height = Some(px(38.).into());
+    style.size.height = None;
     style
 }

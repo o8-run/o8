@@ -68,6 +68,13 @@ with tempfile.TemporaryDirectory(prefix="o8-composer-typing-") as temporary:
         source = source.replace('    let chrome = shell.read_with(&cx, |s, cx| s.chrome.renders(cx));\n', '')
         source, count = re.subn(r'        assert_eq!\(\n            shell.read_with\(&cx, \|s, cx\| s.chrome.renders\(cx\)\),\n            chrome,\n            "typing must reuse the shell chrome scene"\n        \);\n', '', source)
         assert count == 1, "baseline removes only the unavailable shell counter assertion"
+        # The old shell predates the workspace thread rail. Its paint observer
+        # belongs only to the current checkout, alongside the new rail itself.
+        start = source.index('    let rail_painted =')
+        end = source.index('    let mut samples =', start)
+        source = source[:start] + source[end:]
+        source, count = re.subn(r'        assert_eq!\(\n            rail_painted.get\(\),\n            usize::MAX,\n            "typing must reuse the workspace thread sidebar scene"\n        \);\n', '', source)
+        assert count == 1, "baseline removes only the unavailable workspace rail observer"
         (root / prefix / tests).write_text(source)
         for profile in args.profile or ["debug", "release"]:
             print(f"BEFORE ref={args.before} profile={profile}", flush=True)

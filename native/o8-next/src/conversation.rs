@@ -56,7 +56,14 @@ impl Surface {
             return;
         };
         let draft = self.composer.read(cx).text.clone();
-        let text = draft.trim().to_owned();
+        // Match the default composer's attachment-only queue payload.
+        let text = if draft.trim().is_empty() && !self.composer.read(cx).controls.images.is_empty()
+        {
+            "[Image attached]"
+        } else {
+            draft.trim()
+        }
+        .to_owned();
         let fresh = !self.pending.contains_key(&session.id);
         let (method, body) = if let Some(id) = promote {
             (
@@ -257,26 +264,31 @@ impl Surface {
         })
         .detach();
     }
-    pub(super) fn composer_panel(&mut self, cx: &mut Context<Self>) -> gpui::AnyElement {
+    pub(super) fn composer_panel(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> gpui::AnyElement {
         let enabled = self.queue_ready && !self.saving;
         let queue = self.queue["items"].as_array().cloned().unwrap_or_default();
         let queue = queue
             .into_iter()
-            .filter(|item| item["status"] != "applied" && item["status"] != "cancelled");
+            .filter(|item| item["status"] != "applied" && item["status"] != "cancelled")
+            .collect::<Vec<_>>();
         div()
             .w_full()
             .max_w(px(crate::theme::GEOMETRY.composer_width))
             .mx_auto()
             .flex()
             .flex_col()
-            .gap(px(8.))
-            .child(self.composer_card(cx))
+            .gap(px(if queue.is_empty() { 0. } else { 8. }))
+            .child(self.composer_card(window, cx))
             .child(
                 div()
                     .id("composer-queue")
                     .max_h(px(120.))
                     .overflow_y_scroll()
-                    .children(queue.map(|item| {
+                    .children(queue.into_iter().map(|item| {
                         let id = item["id"].as_str().unwrap_or("").to_owned();
                         let remove_id = id.clone();
                         let cancellable = enabled

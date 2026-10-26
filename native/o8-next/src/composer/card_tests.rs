@@ -365,6 +365,78 @@ fn native_composer_card_controls_fit_compact_and_wide_windows(cx: &mut TestAppCo
 }
 
 #[gpui::test]
+fn native_composer_review_image_only_send_persists_through_real_route(cx: &mut TestAppContext) {
+    let fixture = Fixture::start(true);
+    let (surface, cx) = open(cx, &fixture);
+    let image = json!({"name":"pixel.png", "dataUri":"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jpAAAAABJRU5ErkJggg=="});
+    let session = surface.read_with(cx, |s, _| {
+        s.sessions
+            .iter()
+            .find(|s| s.id == "thoughts-composer-first")
+            .unwrap()
+            .clone()
+    });
+    let mut sent_ids = BTreeSet::<String>::new();
+    // First prove this exact attachment is accepted with text. Subsequent sends
+    // use the same real button/client/POST path, followed by a fresh queue GET.
+    for (index, draft) in ["Image control", "", "   "].into_iter().enumerate() {
+        surface.update_in(cx, |s, window, cx| {
+            s.routing.as_mut().unwrap()["backend"] = json!("codex");
+            s.send_next = true;
+            s.composer.update(cx, |i, cx| {
+                i.controls.images.push(image.clone());
+                cx.notify();
+            });
+            s.composer.read(cx).focus.focus(window);
+            cx.notify();
+        });
+        cx.simulate_input(draft);
+        if index == 2 {
+            cx.simulate_keystrokes("enter");
+            cx.run_until_parked();
+        } else {
+            click("send", cx);
+        }
+        let queue = fixture.client.queue(&session).unwrap();
+        let items = queue["items"].as_array().unwrap();
+        assert_eq!(
+            items.len(),
+            index + 1,
+            "image-only Send must persist an attachment-only queue item, just like image plus text"
+        );
+        let expected = if draft.trim().is_empty() {
+            "[Image attached]"
+        } else {
+            draft
+        };
+        let item = items
+            .iter()
+            .find(|item| !sent_ids.contains(item["id"].as_str().unwrap()))
+            .unwrap();
+        sent_ids.insert(item["id"].as_str().unwrap().to_owned());
+        assert_eq!(item["payload"]["text"], expected);
+        assert_eq!(item["payload"]["images"], json!([image.clone()]));
+        assert_eq!(item["threadId"], session.id);
+        assert_eq!(item["status"], "queued");
+        production_wire_oracle(&item["payload"]);
+        surface.read_with(cx, |s, cx| {
+            assert!(s.composer.read(cx).text.is_empty());
+            assert!(s.composer.read(cx).controls.images.is_empty());
+        });
+    }
+    cx.simulate_keystrokes("enter");
+    cx.run_until_parked();
+    assert_eq!(
+        fixture.client.queue(&session).unwrap()["items"]
+            .as_array()
+            .unwrap()
+            .len(),
+        3,
+        "an empty draft without attachments must still queue nothing"
+    );
+}
+
+#[gpui::test]
 fn native_composer_card_send_preserves_images_added_after_the_request(cx: &mut TestAppContext) {
     let fixture = Fixture::start(true);
     let (surface, cx) = open(cx, &fixture);

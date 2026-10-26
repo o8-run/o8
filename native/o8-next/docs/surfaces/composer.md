@@ -1,7 +1,8 @@
 # Composer controls and text input
 
 The existing session surface owns the composer card in `src/composer/card.rs`,
-included by `conversation.rs`. It adds no shell or surface registration changes.
+included by `conversation.rs`. Retained sibling scenes isolate typing from the
+surrounding conversation and shell.
 The generic native input handler remains in `src/composer.rs`.
 
 The footer places mode, access and attach on the left; model, effort, microphone
@@ -68,4 +69,5 @@ UTF-16, composition and selection behavior, CPU paint acknowledgement and compac
 wide bounds. Real font shaping, visual bidirectional layout, macOS execution and
 GPU/compositor presentation remain unverified in Linux Cloud.
 
-See [verification receipts](composer/verification.md).
+See [verification receipts](composer/verification.md) and the
+[final image-only Send review](composer/final/verification.md).

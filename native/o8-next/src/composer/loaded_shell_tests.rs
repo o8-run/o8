@@ -58,6 +58,22 @@ fn native_composer_loaded_shell_typing_benchmark(cx: &mut TestAppContext) {
         s.shell_loaded_probe(false, cx)["regions"].clone()
     });
     let chrome = shell.read_with(&cx, |s, cx| s.chrome.renders(cx));
+    let rail_painted = shell.read_with(&cx, |s, cx| {
+        s.surfaces
+            .sidebar
+            .view
+            .as_ref()
+            .unwrap()
+            .read(cx)
+            .painted
+            .clone()
+    });
+    assert_ne!(
+        rail_painted.get(),
+        usize::MAX,
+        "workspace thread rows must have painted"
+    );
+    rail_painted.set(usize::MAX);
     let mut samples = Vec::with_capacity(100);
     for count in 1..=100 {
         let started = Instant::now();
@@ -86,6 +102,11 @@ fn native_composer_loaded_shell_typing_benchmark(cx: &mut TestAppContext) {
             shell.read_with(&cx, |s, cx| s.chrome.renders(cx)),
             chrome,
             "typing must reuse the shell chrome scene"
+        );
+        assert_eq!(
+            rail_painted.get(),
+            usize::MAX,
+            "typing must reuse the workspace thread sidebar scene"
         );
     }
     samples.sort_by(f64::total_cmp);

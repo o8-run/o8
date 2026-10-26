@@ -498,7 +498,7 @@ impl Render for Surface {
                                     .when(!empty, |view| view.flex_shrink_0())
                                     .px(px(geometry.content_inset))
                                     .pb(px(if empty { 0. } else { geometry.gap * 2. }))
-                                    .child(self.composer_panel(cx)),
+                                    .child(self.composer_panel(window, cx)),
                             ),
                     )
                     .child(self.brain_panel(px(right_width), cx)),

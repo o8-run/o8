@@ -12,14 +12,11 @@ impl Surface {
             "Full access"
         };
         let enabled = self.queue_ready && !self.saving && !self.composer.read(cx).controls.busy;
-        div()
+        let leading = div()
             .flex()
+            .flex_wrap()
             .items_center()
             .gap(px(6.))
-            .min_h(px(36.))
-            .pt(px(4.))
-            .px(px(8.))
-            .pb(px(8.))
             .child(
                 self.composer_button("composer-mode", mode, enabled, cx, |s, w, cx| {
                     s.open_composer_picker("mode", w, cx)
@@ -52,8 +49,11 @@ impl Surface {
                         cx.notify();
                     },
                 ))
-            })
-            .child(div().flex_1().min_w(px(0.)))
+            });
+        let trailing = div()
+            .flex()
+            .items_center()
+            .gap(px(6.))
             .child(
                 self.composer_button(
                     "composer-model",
@@ -114,7 +114,20 @@ impl Surface {
                 )
                 .bg(theme().accent)
                 .text_color(theme().background),
-            )
+            );
+        div()
+            .flex()
+            .flex_wrap()
+            .items_center()
+            .justify_end()
+            .gap(px(6.))
+            .min_h(px(36.))
+            .pt(px(4.))
+            .px(px(8.))
+            .pb(px(8.))
+            .child(leading)
+            .child(div().flex_1().min_w(px(0.)))
+            .child(trailing)
             .into_any_element()
     }
 
@@ -362,7 +375,11 @@ impl Surface {
             });
         }).detach();
     }
-    pub(super) fn composer_card(&mut self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn composer_card(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let routing = self.composer_routing(cx).unwrap_or(Value::Null);
         let mode = mode_label(routing["pickedMode"].as_str().unwrap_or("solo"));
         let (open, busy, error, model, images) = self.composer.update(cx, |i, cx| {
@@ -380,10 +397,11 @@ impl Surface {
                 i.controls.images.clone(),
             )
         });
-        let footer = self.regions.view(
+        let footer = self.regions.measured_view(
             "footer",
             composer_regions::footer_style(),
             Self::composer_footer,
+            window.viewport_size().width,
             cx,
         );
         let mut card = div()
