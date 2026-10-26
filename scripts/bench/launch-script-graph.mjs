@@ -39,5 +39,23 @@ for (const name of ['WorkspaceTerminalPanels', 'OrchestratorTab', 'ThoughtsChatP
       deferred: files.filter(file => !initialScripts.has(file)) });
   }
 }
+let composerLoader = null;
+const labels = ['label:"Orchestrator tab"', "label:'Orchestrator tab'"];
+for (const file of initialScripts) {
+  const source = fs.readFileSync(path.join(root, file), 'utf8');
+  const label = labels.find(value => source.includes(value));
+  if (!label) continue;
+  const at = source.indexOf(label);
+  const start = source.lastIndexOf('()=>', at);
+  if (start < 0 || at - start > 4000) throw new Error('Composer loader expression was not recognized');
+  const ids = [...source.slice(start, at).matchAll(new RegExp('[.]e[(]([0-9]+)[)]', 'g'))].map(match => match[1]);
+  const files = fs.readdirSync(path.join(root, 'static/chunks'), { recursive: true })
+    .filter(name => name.endsWith('.js') && ids.some(id => path.basename(name).startsWith(id + '.') || path.basename(name).startsWith(id + '-')))
+    .map(name => 'static/chunks/' + name.split(path.sep).join('/'));
+  composerLoader = { file, chunkIds: ids, files, deferred: files.filter(name => !initialScripts.has(name)) };
+}
 console.log(JSON.stringify({ schema: 'o8/launch-script-graph/v1', graphSource,
-  initialScriptCount: initialScripts.size, modules }));
+  initialScriptCount: initialScripts.size, modules, composerLoader }));
+if (process.argv.includes('--require-initial-composer') && composerLoader?.deferred.length) {
+  throw new Error('Default composer requires deferred scripts');
+}
