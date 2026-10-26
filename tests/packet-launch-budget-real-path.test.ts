@@ -12,7 +12,7 @@ vi.mock('@/lib/workspace/dependency-materializer', async original => {
   const actual = await original<typeof import('@/lib/workspace/dependency-materializer')>();
   return { ...actual, materializeDependencyInstall: (workspace: string, command: string, options: Parameters<typeof actual.materializeDependencyInstall>[2]) => {
     return actual.materializeDependencyInstall(workspace, command, process.env.O8_SPEED_SHRINKWRAP === '1'
-      ? { ...options, platform: 'darwin', useDependencyPool: false } : options);
+      ? { ...options, platform: 'darwin', useDependencyPool: process.env.O8_SPEED_DEPENDENCY_DEFECT ? options?.useDependencyPool !== false : false } : options);
   } };
 });
 vi.mock('@/lib/worktree/materialization-leaf-io', async original => {
@@ -21,9 +21,20 @@ vi.mock('@/lib/worktree/materialization-leaf-io', async original => {
     if (process.env.O8_SPEED_SHRINKWRAP !== '1' || process.platform === 'darwin') return actual.clonePinnedWorkspaceDirectory(...args);
     const { cp, lstat } = await import('node:fs/promises');
     const target = path.join(args[0], args[2]);
-    await cp(args[3], target, { recursive: true, errorOnExist: true, force: false });
+    await cp(args[3], target, { recursive: true, errorOnExist: true, force: false, verbatimSymlinks: true });
     const stat = await lstat(target);
     return { disposition: 'created' as const, device: stat.dev, inode: stat.ino, sourceChanged: false };
+  } };
+});
+
+vi.mock('@/lib/workspace/dependency-pool-publication', async original => {
+  const actual = await original<typeof import('@/lib/workspace/dependency-pool-publication')>();
+  return { ...actual, publishDependencyPoolTree: async (...args: Parameters<typeof actual.publishDependencyPoolTree>) => {
+    if (!process.env.O8_SPEED_DEPENDENCY_DEFECT || process.platform === 'darwin') return actual.publishDependencyPoolTree(...args);
+    const { rename, lstat } = await import('node:fs/promises');
+    const target = path.join(args[0], 'node_modules');
+    await expect(lstat(target)).rejects.toMatchObject({ code: 'ENOENT' });
+    await rename(path.join(args[2].canonicalPath, 'node_modules'), target);
   } };
 });
 
@@ -94,7 +105,7 @@ function git(...args: string[]): string {
   return execFileSync('git', args, { cwd: repo, encoding: 'utf8', stdio: 'pipe' }).trim();
 }
 
-interface OutputObservation { cwd: string; prepared: boolean; outputAt: number; startedAt: string }
+interface OutputObservation { pid?: number; cwd: string; prepared: boolean; outputAt: number; startedAt: string }
 function observeOutput(workspace: string): OutputObservation | undefined {
   const ownedRoot = path.join(root, 'owned-qoder');
   if (!existsSync(ownedRoot)) return undefined;
@@ -118,6 +129,7 @@ function observeOutput(workspace: string): OutputObservation | undefined {
 }
 
 afterAll(async () => {
+  if (process.env.O8_SPEED_DEPENDENCY_DEFECT) await (await import('@/lib/workspace/dependency-directory-pool')).waitForDependencyDirectoryPool();
   if (warmVisitor && warmVisitor.exitCode === null && warmVisitor.signalCode === null) {
     const exited = new Promise<void>(resolve => warmVisitor!.once('close', () => resolve()));
     warmVisitor.kill();
@@ -190,8 +202,14 @@ it('dispatches through a matching warm worktree without dependency preparation',
   }
   mkdirSync(path.join(repo, 'node_modules', 'fixture'), { recursive: true });
   writeFileSync(path.join(repo, 'node_modules', 'fixture', 'index.js'), 'module.exports = 42;\n');
-  writeFileSync(path.join(repo, 'node_modules', 'fixture', 'package.json'), '{"name":"fixture","version":"1.0.0"}\n');
+  writeFileSync(path.join(repo, 'node_modules', 'fixture', 'package.json'), JSON.stringify({ name: 'fixture', version: '1.0.0', ...(process.env.O8_SPEED_DEPENDENCY_DEFECT ? { main: 'index.js', bin: 'bin.js' } : {}) }));
+  if (process.env.O8_SPEED_DEPENDENCY_DEFECT) {
+    mkdirSync(path.join(repo, 'node_modules/.bin'));
+    writeFileSync(path.join(repo, 'node_modules/fixture/bin.js'), '#!/usr/bin/env node\n');
+    symlinkSync('../fixture/bin.js', path.join(repo, 'node_modules/.bin/o8-fixture'));
+  }
   writeFileSync(path.join(repo, 'node_modules', '.package-lock.json'), JSON.stringify({ lockfileVersion: 3, packages: installedPackages }));
+  if (process.env.O8_SPEED_SHRINKWRAP === '1') await (await import('./fixtures/dependency-payload-launch.fixture')).installPayloadBaseline(repo, npmVersion);
   if (process.env.O8_SPEED_SHRINKWRAP_STALE === 'lockfile') {
     const lock = path.join(repo, 'npm-shrinkwrap.json');
     writeFileSync(lock, readFileSync(lock, 'utf8') + '\n');
@@ -219,6 +237,10 @@ it('dispatches through a matching warm worktree without dependency preparation',
     ...(slowRefill ? [`if (require('node:path').basename(process.cwd()).startsWith('warm-')) { fs.writeFileSync(${JSON.stringify(installing)}, 'ready'); while (fs.existsSync(${JSON.stringify(hold)})) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20); }`] : []),
     "if (payload) fs.cpSync(payload, 'node_modules', { recursive: true, verbatimSymlinks: true, mode: fs.constants.COPYFILE_FICLONE });",
     "fs.mkdirSync('node_modules/fixture', { recursive: true });",
+    ...(process.env.O8_SPEED_DEPENDENCY_DEFECT ? [
+      `fs.writeFileSync('node_modules/.package-lock.json', ${JSON.stringify(JSON.stringify({ lockfileVersion: 3, packages: installedPackages }))});`,
+      `fs.writeFileSync('node_modules/fixture/package.json', ${JSON.stringify(JSON.stringify({ name: 'fixture', version: '1.0.0', main: 'index.js', bin: 'bin.js' }))});`,
+    ] : []),
     "for (let i = 0; i < 64; i++) fs.writeFileSync('node_modules/fixture/data-' + i, 'fixture');",
     "const path = require('node:path');",
     "const contained = path.relative(process.cwd(), process.env.HOME).startsWith('.o8-install-runtime/');",
@@ -233,10 +255,13 @@ it('dispatches through a matching warm worktree without dependency preparation',
   writeFileSync(path.join(bin, 'qodercli'), [
     '#!/usr/bin/env node',
     "if (process.argv.includes('--version')) { console.log('qodercli 1.0.0'); process.exit(0); }",
-    "console.log(JSON.stringify({ type: 'assistant', message: { content: 'SPEED_READY' }, fixture: { cwd: process.cwd(), prepared: require('node:fs').existsSync('generated.ready'), outputAt: Date.now() } }));",
+    ...(process.env.O8_SPEED_DEPENDENCY_DEFECT ? ["if (require(require('node:path').join(process.cwd(), 'node_modules/fixture')) !== 42) throw new Error('Required dependency payload is corrupt');"] : []),
+    "console.log(JSON.stringify({ type: 'assistant', message: { content: 'SPEED_READY' }, fixture: { pid: process.pid, cwd: process.cwd(), prepared: require('node:fs').existsSync('generated.ready'), outputAt: Date.now() } }));",
     // Keep the fixture signalable until the real owned runtime records its PID.
     // Test cleanup interrupts only the session returned by this dispatch.
-    'setInterval(() => {}, 1000);',
+    ...(process.env.O8_SPEED_DEPENDENCY_DEFECT ? [
+      "const fs = require('node:fs'); let written = false; setInterval(() => { if (!written && fs.existsSync('write-payload')) { fs.writeFileSync('node_modules/fixture/index.js', 'module.exports = 99;\\n'); fs.writeFileSync('payload-written', 'done'); written = true; } }, 10);",
+    ] : ['setInterval(() => {}, 1000);']),
   ].join('\n'));
   chmodSync(path.join(bin, 'qodercli'), 0o755);
   vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })));
@@ -524,11 +549,13 @@ it('dispatches through a matching warm worktree without dependency preparation',
       return child;
     });
   }
+  if (process.env.O8_SPEED_DEPENDENCY_DEFECT) await (await import('./fixtures/dependency-payload-launch.fixture')).preparePayloadPool(root, repo, npmVersion);
   const hit = warm && !invalidation && !nonRelocatable && !slowRefill;
   const launchBudgetMs = hit ? 3_000 : 60_000;
   const dispatchStartedAt = Date.now();
   const started = performance.now();
-  const result = await runDispatchTick(state, { launchBudget: { maxLaunches: concurrent ? 2 : 1 } });
+  let result = await runDispatchTick(state, { launchBudget: { maxLaunches: concurrent && !process.env.O8_SPEED_DEPENDENCY_DEFECT ? 2 : 1 } });
+  if (concurrent && process.env.O8_SPEED_DEPENDENCY_DEFECT) result = await runDispatchTick(result, { launchBudget: { maxLaunches: 1 } });
   if (slowRefill) {
     expect(preparationFinished).toBe(false);
     rmSync(hold);
@@ -558,6 +585,10 @@ it('dispatches through a matching warm worktree without dependency preparation',
         throw error;
       }
     }
+    if (process.env.O8_SPEED_DEPENDENCY_DEFECT) await (await import('./fixtures/dependency-payload-launch.fixture')).assertPayloadWorkers({
+      source: repo, workers: paths, observe: observeOutput,
+      selections: packets.flatMap(row => lanes.getLaneEvents(lanes.findLatestLaneByPacket(row.id)!.id, 200).filter(event => event.verb === 'worktree_preparation_timing').map(event => event.payload)),
+    });
     return;
   }
   const elapsedMs = Math.round(performance.now() - started);

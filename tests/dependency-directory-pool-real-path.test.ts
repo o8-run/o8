@@ -17,7 +17,12 @@ afterEach(async () => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-function fixture() {
+async function installBaseline(source: string, command = 'npm ci --ignore-scripts') {
+  await materializeDependencyInstall(source, command, { platform: 'darwin', resolveVersion: async () => '11.8.0',
+    env: { O8_APFS_DEPENDENCY_IMAGES: '0' }, run: async () => {} });
+}
+
+async function fixture() {
   const root = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'o8-directory-clone-')));
   roots.push(root);
   const source = path.join(root, 'source');
@@ -40,6 +45,7 @@ function fixture() {
   writeFileSync(path.join(source, 'node_modules', '.package-lock.json'), JSON.stringify({ lockfileVersion: 3, packages }));
   writeFileSync(path.join(source, 'node_modules', 'tool.js'), 'private\n');
   symlinkSync('../tool.js', path.join(source, 'node_modules', '.bin', 'tool'));
+  await installBaseline(source);
   return { root, source, workspace };
 }
 
@@ -56,7 +62,7 @@ async function warm(source: string, root: string) {
 }
 
 it.skipIf(process.platform !== 'darwin')('consumes distinct validated trees once and refills within the slot and byte bounds', async () => {
-  const { source, workspace, root } = fixture();
+  const { source, workspace, root } = await fixture();
   await warm(source, root);
   expect(await dependencyDirectoryPoolStatus()).toMatchObject({ state: 'ready', readyTrees: 2 });
   const second = path.join(root, 'second');
@@ -81,7 +87,7 @@ it.skipIf(process.platform !== 'darwin')('consumes distinct validated trees once
 }, 180_000);
 
 it.skipIf(process.platform !== 'darwin').each(['lockfile', 'lifecycle'])('refuses a ready tree after changed %s inputs through materialization', async (kind) => {
-  const { source, workspace, root } = fixture();
+  const { source, workspace, root } = await fixture();
   await warm(source, root);
   if (kind === 'lockfile') writeFileSync(path.join(workspace, 'package-lock.json'), '{"lockfileVersion":3,"packages":{}}');
   else {
@@ -99,7 +105,7 @@ it.skipIf(process.platform !== 'darwin').each(['lockfile', 'lifecycle'])('refuse
 }, 180_000);
 
 it.skipIf(process.platform !== 'darwin')('reuses ready trees across source-only commits with the declared lifecycle identity', async () => {
-  const { source, workspace, root } = fixture();
+  const { source, workspace, root } = await fixture();
   await warm(source, root);
   writeFileSync(path.join(source, 'README.md'), 'source-only change');
   execFileSync('git', ['add', 'README.md'], { cwd: source });
@@ -111,7 +117,7 @@ it.skipIf(process.platform !== 'darwin')('reuses ready trees across source-only 
 }, 180_000);
 
 it.skipIf(process.platform !== 'darwin')('recovers a slot claimed by an exited consumer and refills it', async () => {
-  const { source, workspace, root } = fixture();
+  const { source, workspace, root } = await fixture();
   await warm(source, root);
   const slot = path.join(getDataDir(), 'dependency-directory-pool-v1/slot-0');
   execFileSync(process.execPath, ['--import', './scripts/register-server-only-stub.mjs', '--import', 'tsx', '--input-type=module', '-e', `
@@ -128,7 +134,7 @@ it.skipIf(process.platform !== 'darwin')('recovers a slot claimed by an exited c
 }, 180_000);
 
 it.skipIf(process.platform !== 'darwin')('preserves an occupied destination during pool publication', async () => {
-  const { source, workspace, root } = fixture();
+  const { source, workspace, root } = await fixture();
   await warm(source, root);
   let inode: number | undefined;
   await expect(materializeDependencyInstall(workspace, 'npm ci --ignore-scripts', {
@@ -143,7 +149,7 @@ it.skipIf(process.platform !== 'darwin')('preserves an occupied destination duri
 }, 180_000);
 
 it.skipIf(process.platform !== 'darwin')('holds an unreceipted slot and exposes reduced pool capacity without deleting it', async () => {
-  const { source, root } = fixture();
+  const { source, root } = await fixture();
   const slot = path.join(getDataDir(), 'dependency-directory-pool-v1/slot-0');
   mkdirSync(slot, { recursive: true, mode: 0o700 });
   writeFileSync(path.join(slot, 'preserve.txt'), 'unproved ownership');
@@ -153,7 +159,7 @@ it.skipIf(process.platform !== 'darwin')('holds an unreceipted slot and exposes 
 }, 180_000);
 
 it.skipIf(process.platform !== 'darwin')('keeps dispatch on the current clone path when pool storage is held', async () => {
-  const { source, workspace, root } = fixture();
+  const { source, workspace, root } = await fixture();
   vi.spyOn(storage, 'measureHostVolume').mockImplementation(async (targetPath) => ({
     accountingStatus: 'observed', probePath: targetPath, availableBytes: 0, freeBytes: 0,
     totalBytes: 100_000_000_000, error: null,

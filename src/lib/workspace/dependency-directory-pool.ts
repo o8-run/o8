@@ -16,6 +16,7 @@ import { validateDependencyCloneGraph } from './dependency-clone-validation';
 import { probeDependencyCloneNativeFiles } from './dependency-clone-lifecycle';
 import { publishDependencyPoolTree } from './dependency-pool-publication';
 import { reserveStorage, releaseStorageReservation } from './storage-admission';
+import { DependencyPayloadRefusal, inspectDependencyPayload, readDependencyPayloadReceipt, sealDependencyPayload, type DependencyPayloadReceipt } from './dependency-payload';
 
 export const DEPENDENCY_POOL_POLICY = { maxTrees: 2, maxTreeBytes: 3 * 1024 ** 3 } as const;
 type Graph = NonNullable<Awaited<ReturnType<typeof validateDependencyCloneGraph>>>;
@@ -26,6 +27,7 @@ interface ReadyTree {
   tree: { device: number; inode: number };
   graph: Graph;
   logicalBytes: number;
+  payload?: DependencyPayloadReceipt;
 }
 const refills = new Map<string, Promise<void>>();
 const status = new Map<string, { state: string; reason: string | null }>();
@@ -61,8 +63,10 @@ async function claim(record: ReadyTree): Promise<boolean> {
 /** No scanning or deletion of foreign paths: only two fixed, receipted slots. */
 export async function takeDependencyDirectoryPoolTree(input: {
   key: string; workspace: string; identity: WorktreeMaterializationIdentity;
+  recipe: DependencyInstallRecipe;
+  graph: Graph;
   onSelected: () => Promise<void>;
-}): Promise<{ device: number; inode: number; sourceChanged: boolean } | null> {
+}): Promise<{ device: number; inode: number; sourceChanged: boolean; payload: DependencyPayloadReceipt } | null> {
   let rootIdentity: WorktreeMaterializationIdentity;
   try { rootIdentity = await captureWorktreeMaterializationIdentity(poolRoot()); }
   catch { return null; }
@@ -76,11 +80,13 @@ export async function takeDependencyDirectoryPoolTree(input: {
     // Once claimed, nobody else can consume this tree, including another process.
     let publishing = false;
     try {
-      if (!await dependencyCloneSnapshotMatches(slot, ready.graph.snapshot)) continue;
+      if (!ready.payload) throw new DependencyPayloadRefusal('payload-unsealed');
+      await readDependencyPayloadReceipt(slot, ready.parent, input.recipe, input.graph, ready.payload);
+      if (!await dependencyCloneSnapshotMatches(slot, ready.graph.snapshot)) throw new DependencyPayloadRefusal('payload-changed');
       await input.onSelected();
       publishing = true;
       await publishDependencyPoolTree(input.workspace, input.identity, ready.parent, ready.tree);
-      return { ...ready.tree, sourceChanged: false };
+      return { ...ready.tree, sourceChanged: false, payload: ready.payload };
     } catch (error) {
       if (!publishing) throw error;
       // A publication error cannot safely become an install over an occupied name.
@@ -94,13 +100,13 @@ export async function takeDependencyDirectoryPoolTree(input: {
   return null;
 }
 
-async function refill(sourceWorkspace: string, recipe: DependencyInstallRecipe, sourceIdentity: WorktreeMaterializationIdentity, graph: Graph): Promise<void> {
+async function refill(sourceWorkspace: string, recipe: DependencyInstallRecipe, sourceIdentity: WorktreeMaterializationIdentity, graph: Graph, keyIdentity: WorktreeMaterializationIdentity): Promise<void> {
   const root = poolRoot();
   await mkdir(root, { recursive: true, mode: 0o700 });
   const rootIdentity = await captureWorktreeMaterializationIdentity(root);
   const mode = await lstat(root);
   if ((mode.mode & 0o077) !== 0) throw new Error('Dependency pool root is not private.');
-  const key = dependencyDirectoryPoolKey(recipe, sourceIdentity, graph.digest);
+  const key = dependencyDirectoryPoolKey(recipe, keyIdentity, graph.digest);
   const matches = dependencyCloneSourceMatcher(sourceWorkspace, sourceIdentity, recipe,
     recipe.lifecycleScripts === 'enabled' && recipe.cloneLifecycleInputs === undefined);
   for (let index = 0; index < DEPENDENCY_POOL_POLICY.maxTrees; index += 1) {
@@ -109,7 +115,7 @@ async function refill(sourceWorkspace: string, recipe: DependencyInstallRecipe, 
     await recoverDependencyPoolSlot(slot, rootIdentity);
     const previous = await readReady(slot);
     if (previous && previous.parent.canonicalPath !== path.join(rootIdentity.canonicalPath, `slot-${index}`)) continue;
-    if (previous?.key === key) continue;
+    if (previous?.key === key && previous.payload) continue;
     if (previous && await claim(previous)) {
       await assertWorktreeMaterializationIdentity(root, rootIdentity);
       await purgeExactDirectory(slot, previous.parent);
@@ -133,6 +139,7 @@ async function refill(sourceWorkspace: string, recipe: DependencyInstallRecipe, 
       await assertWorktreeMaterializationIdentity(sourceWorkspace, sourceIdentity);
       if (parent.device !== sourceIdentity.device || !await matches()
         || !await dependencyCloneSnapshotMatches(sourceWorkspace, graph.snapshot)) throw new Error('Dependency pool source changed.');
+      const sourcePayload = await readDependencyPayloadReceipt(sourceWorkspace, sourceIdentity, recipe, graph);
       const measured = await measureDirectoryStorage(path.join(sourceWorkspace, 'node_modules'));
       if (measured.logicalBytes === null || measured.logicalBytes > DEPENDENCY_POOL_POLICY.maxTreeBytes) throw new Error('Dependency pool tree exceeds its byte budget or cannot be measured.');
       const admitted = await reserveStorage({ mutationId: id, reservationId: id, targetPath: slot,
@@ -150,11 +157,17 @@ async function refill(sourceWorkspace: string, recipe: DependencyInstallRecipe, 
       const target = await validateDependencyCloneGraph(slot, recipe.lockfile.path);
       if (!target || target.digest !== graph.digest || !await matches()
         || !await dependencyCloneSnapshotMatches(sourceWorkspace, graph.snapshot)) throw new Error('Dependency pool validation changed.');
+      const captured = await inspectDependencyPayload(slot, parent, target.entrypoints);
+      if (captured.contents !== sourcePayload.contents || captured.device !== cloned.device || captured.inode !== cloned.inode) throw new DependencyPayloadRefusal('payload-changed');
       await probeDependencyCloneNativeFiles(slot, parent, target.nativeFiles);
       if (!await dependencyCloneSnapshotMatches(slot, target.snapshot)) throw new Error('Dependency pool native validation changed.');
+      const payload = await sealDependencyPayload(slot, parent, recipe, target, captured, cloned);
+      const recordedGraph = await validateDependencyCloneGraph(slot, recipe.lockfile.path);
+      if (!recordedGraph || recordedGraph.digest !== graph.digest) throw new DependencyPayloadRefusal('payload-changed');
+      await readDependencyPayloadReceipt(sourceWorkspace, sourceIdentity, recipe, graph, sourcePayload);
       const finalSize = await measureDirectoryStorage(path.join(slot, 'node_modules'));
       if (finalSize.logicalBytes === null || finalSize.logicalBytes > DEPENDENCY_POOL_POLICY.maxTreeBytes) throw new Error('Dependency pool clone exceeds its byte budget.');
-      record = { schema: 'o8/dependency-directory-pool/v1', key, parent, tree: cloned, graph: target, logicalBytes: finalSize.logicalBytes };
+      record = { schema: 'o8/dependency-directory-pool/v1', key, parent, tree: cloned, graph: recordedGraph, payload, logicalBytes: finalSize.logicalBytes };
     } finally {
       if (reservation) {
         const released = await releaseStorageReservation({ mutationId: `${reservation.reservationId}:release`, reservationId: reservation.reservationId,
@@ -169,11 +182,11 @@ async function refill(sourceWorkspace: string, recipe: DependencyInstallRecipe, 
 }
 
 /** Cold misses keep the existing path. Refill never delays or rejects dispatch. */
-export function queueDependencyDirectoryPoolRefill(sourceWorkspace: string, recipe: DependencyInstallRecipe, sourceIdentity: WorktreeMaterializationIdentity, graph: Graph): void {
+export function queueDependencyDirectoryPoolRefill(sourceWorkspace: string, recipe: DependencyInstallRecipe, sourceIdentity: WorktreeMaterializationIdentity, graph: Graph, keyIdentity = sourceIdentity): void {
   const root = poolRoot();
   if (refills.has(root)) return;
   status.set(root, { state: 'refilling', reason: null });
-  const pending = new Promise<void>((resolve) => setImmediate(resolve)).then(() => refill(sourceWorkspace, recipe, sourceIdentity, graph))
+  const pending = new Promise<void>((resolve) => setImmediate(resolve)).then(() => refill(sourceWorkspace, recipe, sourceIdentity, graph, keyIdentity))
     .catch((error: unknown) => { status.set(root, { state: 'held', reason: error instanceof Error ? error.message : 'refill-failed' }); })
     .finally(() => { refills.delete(root); });
   refills.set(root, pending);

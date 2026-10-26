@@ -32,6 +32,7 @@ import {
 import { resolveApfsDependencyImagesOverride } from './dependency-image-policy';
 import { tryCloneDependencyDirectory, type DependencySelection } from './dependency-directory-clone';
 import { profileDependencyClone } from './dependency-clone-profile';
+import { recordInstalledDependencyPayload } from './dependency-installed-pool';
 
 export { APFS_DEPENDENCY_IMAGES_ENV } from './dependency-image-policy';
 
@@ -268,7 +269,7 @@ async function runNativeMaterialization(
   workspacePath: string,
   installCommand: string,
   recipe: DependencyInstallRecipe,
-  identity: { device: number; inode: number },
+  identity: WorktreeMaterializationIdentity,
   options: DependencyMaterializerOptions,
   queuePublication: boolean,
 ): Promise<DependencyMaterializationResult> {
@@ -321,6 +322,7 @@ async function runNativeMaterialization(
     });
   }
   await options.persistReceipt?.(receipt);
+  await recordInstalledDependencyPayload(workspacePath, identity, recipe, options);
   return { receipt, installReceipt };
 }
 
@@ -382,7 +384,8 @@ export async function materializeDependencyInstall(
   }
   const onSelection = options.onSelection;
   options = { ...options, onSelection: (selection) => onSelection?.({ ...selection, reason: fallbackReason }) ?? Promise.resolve() };
-  if ((!enabled && !imageRequired) || platform !== 'darwin'
+  const invalidClone = fallbackReason === 'installed-graph-ineligible' || /^(?:pool-)?payload-/.test(fallbackReason);
+  if (invalidClone || (!enabled && !imageRequired) || platform !== 'darwin'
     || !await isDependencyImageRecipeEligible(workspace, recipe)) {
     if (imageRequired) {
       throw new DependencyMaterializationRefusalError(

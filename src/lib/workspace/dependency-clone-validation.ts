@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { createRequire } from 'node:module';
 import { readdir, realpath } from 'node:fs/promises';
 import path from 'node:path';
 
@@ -24,7 +25,7 @@ function permits(values: string[] | undefined, actual: string): boolean {
 }
 
 /** npm's installed lock is independent evidence of the installed resolution. */
-export async function validateDependencyCloneGraph(workspace: string, lockfilePath = 'package-lock.json'): Promise<{ digest: string; nativeFiles: string[]; snapshot: DependencyCloneSnapshot } | null> {
+export async function validateDependencyCloneGraph(workspace: string, lockfilePath = 'package-lock.json'): Promise<{ digest: string; nativeFiles: string[]; entrypoints: string[]; snapshot: DependencyCloneSnapshot } | null> {
   if (!['package-lock.json', 'npm-shrinkwrap.json'].includes(lockfilePath)) return null;
   try {
     const capture = dependencyCloneSnapshot(workspace);
@@ -32,7 +33,7 @@ export async function validateDependencyCloneGraph(workspace: string, lockfilePa
       lockfileVersion?: number; packages?: Record<string, LockedPackage>;
     };
     const [lock, installed, manifest] = await Promise.all([read(lockfilePath), read('node_modules/.package-lock.json'), read('package.json')]);
-    if (installed.lockfileVersion !== 3 || !lock.packages || !installed.packages) return null;
+    if (!lock || !installed || !manifest || installed.lockfileVersion !== 3 || !lock.packages || !installed.packages) return null;
     const inspectModules = async (relative: string): Promise<boolean> => {
       let entries;
       try {
@@ -57,6 +58,7 @@ export async function validateDependencyCloneGraph(workspace: string, lockfilePa
     if (!await inspectModules('node_modules')) return null;
     const hash = createHash('sha256').update(JSON.stringify(lock)).update(JSON.stringify(installed)).update(JSON.stringify(manifest));
     const nativeFiles: string[] = [];
+    const entrypoints = new Set<string>();
     const canonicalRoot = await realpath(workspace);
     const contained = (target: string) => { const relative = path.relative(canonicalRoot, target); return relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative); };
     const bins = new Set<string>();
@@ -71,11 +73,27 @@ export async function validateDependencyCloneGraph(workspace: string, lockfilePa
       const bytes = await capture.read(`${name}/package.json`);
       hash.update(name).update(bytes);
       const manifest = JSON.parse(bytes) as LockedPackage & { bin?: string | Record<string, string> };
-      if (manifest.version !== entry.version) return null;
+      if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest) || manifest.version !== entry.version
+        || manifest.main !== undefined && typeof manifest.main !== 'string'
+        || manifest.bin !== undefined && typeof manifest.bin !== 'string' && (manifest.bin === null || typeof manifest.bin !== 'object' || Array.isArray(manifest.bin))) return null;
       for (const target of typeof manifest.bin === 'string' ? [manifest.bin] : Object.values(manifest.bin ?? {})) {
+        if (typeof target !== 'string') return null;
         const bin = await realpath(path.join(workspace, name, target));
         if (!contained(bin)) return null;
         bins.add(bin);
+        entrypoints.add(path.relative(path.join(canonicalRoot, 'node_modules'), bin));
+      }
+      if (manifest.main) {
+        let main: string;
+        try { main = createRequire(path.join(workspace, name, 'package.json')).resolve(path.resolve(workspace, name, manifest.main)); }
+        catch { return null; }
+        if (!contained(main) || !main.startsWith(path.join(canonicalRoot, 'node_modules') + path.sep)) return null;
+        const declared = path.resolve(workspace, name, manifest.main);
+        for (const candidate of [declared, ...['.js', '.json', '.node'].map(ext => declared + ext), path.join(declared, 'index.js')]) {
+          try { if (await realpath(candidate) === main) { main = candidate; break; } }
+          catch (error) { if (!['ENOENT', 'ENOTDIR'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error; }
+        }
+        entrypoints.add(path.relative(path.join(workspace, 'node_modules'), main));
       }
       nativeFiles.push(...await dependencyCloneNativeFiles({ workspace, name, manifest,
         lockNative: Boolean(entry.hasInstallScript || wanted.hasInstallScript || entry.os || entry.cpu || wanted.os || wanted.cpu), capture,
@@ -127,7 +145,7 @@ export async function validateDependencyCloneGraph(workspace: string, lockfilePa
     const native = [...new Set(nativeFiles)].sort();
     const snapshot = capture.receipt();
     if (!await dependencyCloneSnapshotMatches(workspace, snapshot)) return null;
-    return { digest: hash.update(JSON.stringify(native)).digest('hex'), nativeFiles: native, snapshot };
+    return { digest: hash.update(JSON.stringify(native)).digest('hex'), nativeFiles: native, entrypoints: [...entrypoints].sort(), snapshot };
   } catch (error) {
     if (error instanceof DependencyCloneSourceChanged || error instanceof SyntaxError || (error as NodeJS.ErrnoException).code === 'ENOENT') return null;
     throw error;

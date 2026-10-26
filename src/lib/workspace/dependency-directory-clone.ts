@@ -15,6 +15,7 @@ import { dependencyCloneSnapshotMatches } from './dependency-clone-snapshot';
 import { profileDependencyClone as profile } from './dependency-clone-profile';
 import { dependencyCloneSourceMatcher } from './dependency-clone-source';
 import { dependencyDirectoryPoolKey, dependencyDirectoryPoolStatus, queueDependencyDirectoryPoolRefill, takeDependencyDirectoryPoolTree } from './dependency-directory-pool';
+import { DependencyPayloadRefusal, inspectDependencyPayload, readDependencyPayloadReceipt, sealDependencyPayload, type DependencyPayloadReceipt } from './dependency-payload';
 
 export interface DependencySelection {
   path: 'directory-clone' | 'dependency-pool' | 'native-install' | 'image';
@@ -22,7 +23,7 @@ export interface DependencySelection {
   pool?: Awaited<ReturnType<typeof dependencyDirectoryPoolStatus>>;
 }
 
-/** Clone a trusted installed npm tree; validate its recipe/metadata, not payload bytes. */
+/** Reuse only an installed payload with a recorded private baseline. */
 export async function tryCloneDependencyDirectory(input: {
   sourceWorkspace: string;
   usePool?: boolean;
@@ -58,28 +59,48 @@ export async function tryCloneDependencyDirectory(input: {
   const graph = await profile('source-manifests', () => validateDependencyCloneGraph(sourceWorkspace, recipe.lockfile.path));
   if (!graph || await readPinnedWorkspaceFile(workspace, identity, 'binding.gyp') !== null) return fallback('installed-graph-ineligible');
   await assertWorktreeMaterializationIdentity(sourceWorkspace, sourceIdentity);
-  const pooled = input.usePool ? await profile('dependency-pool-publication', () => takeDependencyDirectoryPoolTree({
-    key: dependencyDirectoryPoolKey(recipe, sourceIdentity, graph.digest), workspace, identity,
-    onSelected: async () => { await input.onDecision?.({ path: 'dependency-pool', reason: 'matching-inputs', pool: await dependencyDirectoryPoolStatus() }); },
-  })) : null;
+  let pooled: Awaited<ReturnType<typeof takeDependencyDirectoryPoolTree>> = null;
+  try {
+    if (input.usePool) pooled = await profile('dependency-pool-publication', () => takeDependencyDirectoryPoolTree({
+      key: dependencyDirectoryPoolKey(recipe, sourceIdentity, graph.digest), workspace, identity, recipe, graph,
+      onSelected: async () => { await input.onDecision?.({ path: 'dependency-pool', reason: 'matching-inputs', pool: await dependencyDirectoryPoolStatus() }); },
+    }));
+  } catch (error) {
+    if (error instanceof DependencyPayloadRefusal) return fallback(`pool-${error.reason}`);
+    throw error;
+  }
+  let expectedPayload: DependencyPayloadReceipt;
+  try { expectedPayload = pooled?.payload ?? await readDependencyPayloadReceipt(sourceWorkspace, sourceIdentity, recipe, graph); }
+  catch (error) { if (error instanceof DependencyPayloadRefusal) return fallback(error.reason); throw error; }
   if (!pooled) await input.onDecision?.({ path: 'directory-clone', reason: 'matching-inputs', ...(input.usePool ? { pool: await dependencyDirectoryPoolStatus() } : {}) });
   const clone = pooled ? { disposition: 'created' as const, ...pooled }
     : await profile('directory-clone-publication', () => clonePinnedWorkspaceDirectory(workspace, identity, 'node_modules', sourcePath));
   if (clone.disposition === 'unsupported') return fallback('directory-clone-unsupported');
   if (clone.disposition !== 'created') throw new Error('Dependency clone destination already exists.');
-  const discard = async () => {
+  const discard = async (reason = 'source-changed') => {
     await assertWorktreeMaterializationIdentity(workspace, identity);
     await purgeExactDirectory(path.join(workspace, 'node_modules'), clone);
     await assertWorktreeMaterializationIdentity(workspace, identity);
-    return fallback('source-changed');
+    return fallback(reason);
   };
   await input.afterClone?.();
   await assertWorktreeMaterializationIdentity(sourceWorkspace, sourceIdentity);
   await assertWorktreeMaterializationIdentity(workspace, identity);
-  const sourceUnchanged = async () => await dependencyCloneSnapshotMatches(sourceWorkspace, graph.snapshot) && await sourceMatches();
-  if (clone.sourceChanged || !await profile('source-recipe-recheck', sourceUnchanged)) return discard();
+  let sourceRefusal = 'source-changed';
+  const sourceUnchanged = async () => {
+    if (!await dependencyCloneSnapshotMatches(sourceWorkspace, graph.snapshot) || !await sourceMatches()) return false;
+    if (!pooled) try { await readDependencyPayloadReceipt(sourceWorkspace, sourceIdentity, recipe, graph, expectedPayload); }
+    catch (error) { if (error instanceof DependencyPayloadRefusal) { sourceRefusal = error.reason; return false; } throw error; }
+    return true;
+  };
+  if (clone.sourceChanged || !await profile('source-recipe-recheck', sourceUnchanged)) return discard(sourceRefusal);
   const target = await profile('target-manifests', () => validateDependencyCloneGraph(workspace, recipe.lockfile.path));
-  if (!target || target.digest !== graph.digest) throw new Error('Dependency clone installed graph changed.');
+  if (!target || target.digest !== graph.digest) return discard('installed-graph-ineligible');
+  try {
+    const payload = await inspectDependencyPayload(workspace, identity, target.entrypoints);
+    if (payload.device !== clone.device || payload.inode !== clone.inode || payload.contents !== expectedPayload.contents
+      || pooled && payload.identity !== expectedPayload.identity) return discard('payload-changed');
+  } catch (error) { if (error instanceof DependencyPayloadRefusal) return discard(error.reason); throw error; }
   await finishDependencyClone({ workspace, identity, recipe, options });
   const final = await profile('final-manifests', () => validateDependencyCloneGraph(workspace, recipe.lockfile.path));
   if (!final) throw new Error('Dependency clone lifecycle changed its installed graph.');
@@ -87,6 +108,10 @@ export async function tryCloneDependencyDirectory(input: {
   if (!await dependencyCloneSnapshotMatches(workspace, final.snapshot)) throw new Error('Dependency clone changed during native validation.');
   if (!await profile('source-final-recheck', sourceUnchanged)) throw new Error('Dependency clone source changed after lifecycle; refusing to replay setup.');
   await assertWorktreeMaterializationIdentity(workspace, identity);
-  if (input.usePool) queueDependencyDirectoryPoolRefill(sourceWorkspace, recipe, sourceIdentity, graph);
+  try { await sealDependencyPayload(workspace, identity, recipe, final, undefined, clone); }
+  catch (error) { if (error instanceof DependencyPayloadRefusal) return discard(error.reason); throw error; }
+  const recordedGraph = await validateDependencyCloneGraph(workspace, recipe.lockfile.path);
+  if (!recordedGraph || recordedGraph.digest !== final.digest) return discard('installed-graph-ineligible');
+  if (input.usePool) queueDependencyDirectoryPoolRefill(workspace, recipe, identity, recordedGraph, sourceIdentity);
   return true;
 }
