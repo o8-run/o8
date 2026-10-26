@@ -69,10 +69,25 @@ pub fn is_system_origin() -> bool {
     SYSTEM_DICTATION_ORIGIN.load(Ordering::SeqCst)
 }
 
-#[cfg(not(target_os = "macos"))]
+/// Linux: set by X11 push-to-talk (`linux_ptt.rs`), read by `run_finalize`.
+#[cfg(target_os = "linux")]
+static SYSTEM_DICTATION_ORIGIN: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+#[cfg(target_os = "linux")]
+pub fn set_system_origin(on: bool) {
+    SYSTEM_DICTATION_ORIGIN.store(on, std::sync::atomic::Ordering::SeqCst);
+}
+
+#[cfg(target_os = "linux")]
+pub fn is_system_origin() -> bool {
+    SYSTEM_DICTATION_ORIGIN.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 pub fn set_system_origin(_on: bool) {}
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 pub fn is_system_origin() -> bool {
     false
 }

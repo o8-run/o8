@@ -102,6 +102,14 @@ pub fn config_string(key: &str) -> Option<String> {
         .map(ToOwned::to_owned)
 }
 
+/// Read a numeric pref (a JSON number or a numeric string).
+#[cfg(target_os = "linux")]
+pub fn config_f64(key: &str) -> Option<f64> {
+    config()
+        .get(key)
+        .and_then(|v| v.as_f64().or_else(|| v.as_str()?.trim().parse().ok()))
+}
+
 /// Read a boolean pref — accepts real JSON bools or `"true"/"1"/"yes"` strings.
 /// Returns `default` when the key is absent or unparseable.
 pub fn config_bool(key: &str, default: bool) -> bool {

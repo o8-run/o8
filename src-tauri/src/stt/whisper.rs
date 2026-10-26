@@ -144,7 +144,17 @@ const LOCAL_READY_MARKER: &str = "local-stt-ready";
 const LOCAL_TRANSCRIBE_TIMEOUT_MS: u64 = 15_000;
 
 fn local_marker_path() -> std::path::PathBuf {
-    crate::agent::agent_data_dir().join(LOCAL_READY_MARKER)
+    #[cfg(target_os = "macos")]
+    let dir = crate::agent::agent_data_dir();
+    // Same resolution as `agent::agent_data_dir`, whose module is macOS-only.
+    #[cfg(not(target_os = "macos"))]
+    let dir = std::env::var("O8_DATA_DIR")
+        .or_else(|_| std::env::var("CORTEX_IDE_DATA_DIR"))
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| {
+            std::path::PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".o8")
+        });
+    dir.join(LOCAL_READY_MARKER)
 }
 
 pub fn local_stt_supported() -> bool {
