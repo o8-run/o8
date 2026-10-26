@@ -1,7 +1,13 @@
 import type { NextConfig } from 'next';
 
+const releaseDistDir = process.env.O8_RELEASE_NEXT_DIST_DIR;
+if (releaseDistDir && releaseDistDir !== '.next/.o8-release-build') {
+  throw new Error('Release output namespace is invalid.');
+}
+
 const nextConfig: NextConfig = {
   output: 'standalone',
+  distDir: releaseDistDir || '.next',
   // Repository instructions are maintained by the operator, not dev startup.
   agentRules: false,
   outputFileTracingRoot: __dirname,
@@ -23,6 +29,8 @@ const nextConfig: NextConfig = {
       // Build cache can enter route traces through filesystem reads. Keep it
       // available to the compiler, but never copy it into the runtime bundle.
       './.next/cache/**/*',
+      './.next/.o8-release-*/{cache,dev}/**/*',
+      './.next/.o8-release-*/{trace,trace-build}',
       './.next/dev/**/*',
       './.next/trace',
       './.next/trace-build',

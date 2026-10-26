@@ -1,7 +1,7 @@
 import { childEnvironment } from '@/lib/providers/spawn-environment';
 import { hasCloseProcessObservation, settleCloseObservedHelper } from '@/lib/runtime/close-process-observation';
 import { spawn } from '@/lib/providers/child-process';
-import { lstat, realpath } from 'node:fs/promises';
+import { lstat, readdir, realpath } from 'node:fs/promises';
 import path from 'node:path';
 
 import { readProcessCwdSnapshot, type ProcessCwdSnapshot } from '@/lib/runtime/process-cwd-snapshot';
@@ -395,6 +395,7 @@ async function releaseContent(manifest) {
   if (manifest.some((entry) => entry.kind === 'other')) {
     throw new Error('Exact purge refuses non-file workspace entries.');
   }
+  const preserveUnlisted = process.env.O8_PURGE_PRESERVE_UNLISTED === '1';
   const expectedChildNames = childNamesByParent(manifest);
   const byPath = new Map(manifest.map(entry => [entry.relative, entry]));
   beginPhase('preflight');
@@ -410,7 +411,7 @@ async function releaseContent(manifest) {
     if (expected.kind === 'directory') {
       const actualNames = (await inDirectory(expected.relative, byPath, () => fsp.readdir('.'))).sort();
       const expectedNames = expectedChildNames.get(expected.relative) || [];
-      if (JSON.stringify(actualNames) !== JSON.stringify(expectedNames)) {
+      if (JSON.stringify(preserveUnlisted ? actualNames.filter(name => expectedNames.includes(name)) : actualNames) !== JSON.stringify(expectedNames)) {
         throw new Error('Exact purge directory entries changed after capture.');
       }
     }
@@ -443,7 +444,9 @@ async function releaseContent(manifest) {
           throw new Error('Exact purge file changed during descriptor verification.');
         }
         verifyLocation();
-        if (expected.kind === 'directory') fs.rmdirSync(name);
+        if (expected.kind === 'directory') {
+          if (!preserveUnlisted || fs.readdirSync(name).length === 0) fs.rmdirSync(name);
+        }
         else fs.unlinkSync(name);
         if (handle) releasedNames.set(key, (releasedNames.get(key) || 0) + 1);
       } finally { if (handle) await handle.close(); }
@@ -456,7 +459,7 @@ async function releaseContent(manifest) {
       process.kill(process.pid, 'SIGSTOP');
     }
   }
-  if ((await fsp.readdir('.')).length !== 0) {
+  if (!preserveUnlisted && (await fsp.readdir('.')).length !== 0) {
     throw new Error('Exact purge namespace release left unexpected entries.');
   }
   progress(releasedEntries, true);
@@ -480,7 +483,10 @@ async function main() {
   const rootHandle = await fsp.open('.', fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW);
   directories.push({ relative: '.', entry: { device: captured.dev, inode: captured.ino, kind: 'directory' }, handle: rootHandle });
   beginPhase('capture');
-  const manifest = await manifestAt();
+  const capturedManifest = await manifestAt();
+  const owned = new Set(expectedManifest.map(entry => entry.relative));
+  const manifest = process.env.O8_PURGE_PRESERVE_UNLISTED === '1'
+    ? capturedManifest.filter(entry => owned.has(entry.relative)) : capturedManifest;
   const fingerprint = crypto.createHash('sha256').update(JSON.stringify(manifest)).digest('hex');
   const expectedFingerprint = process.env.O8_PURGE_EXPECTED_FINGERPRINT || '';
   if (expectedManifest.length > 0) {
@@ -512,10 +518,11 @@ async function runCapturedPurge(
   expectedManifest: ExactDirectoryManifestEntry[] | undefined,
   afterTreeCapture: AfterTreeCapture | undefined,
   namespace: PurgeNamespace,
+  preserveUnlisted = false,
 ): Promise<void> {
   const child = spawn(process.execPath, ['-e', PURGE_CAPTURE_SCRIPT], {
     cwd: namespace.canonicalPath,
-    env: childEnvironment({ env: { O8_PURGE_EXPECTED_DEVICE: String(identity.device), O8_PURGE_EXPECTED_INODE: String(identity.inode), ...(expectedFingerprint ? { O8_PURGE_EXPECTED_FINGERPRINT: expectedFingerprint } : {}) } }),
+    env: childEnvironment({ env: { O8_PURGE_PRESERVE_UNLISTED: preserveUnlisted ? '1' : '0', O8_PURGE_EXPECTED_DEVICE: String(identity.device), O8_PURGE_EXPECTED_INODE: String(identity.inode), ...(expectedFingerprint ? { O8_PURGE_EXPECTED_FINGERPRINT: expectedFingerprint } : {}) } }),
     stdio: ['pipe', 'pipe', 'pipe'],
     windowsHide: true,
   });
@@ -658,6 +665,7 @@ export async function purgeExactDirectory(
   afterContentRelease?: (candidatePath: string) => Promise<void>,
   expectedFingerprint?: string,
   expectedManifest?: ExactDirectoryManifestEntry[],
+  preserveUnlisted = false,
 ): Promise<void> {
   const namespace = await capturePurgeNamespace(candidatePath, identity);
   await beforeCapture?.(candidatePath);
@@ -669,7 +677,9 @@ export async function purgeExactDirectory(
     expectedManifest,
     afterTreeCapture,
     namespace,
+    preserveUnlisted,
   );
+  if (preserveUnlisted && (await readdir(namespace.canonicalPath)).length > 0) return;
   await afterContentRelease?.(candidatePath);
   await assertPurgeNamespace(namespace, identity);
   // The caller already journals this exact namespace. Keep it replayable until

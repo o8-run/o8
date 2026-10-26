@@ -5311,6 +5311,14 @@
       ]
     },
     {
+      "path": "tests/release-build-namespace-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/release-channel-real-path.test.ts",
       "reasons": [
         "apfs-tool",

@@ -131,6 +131,9 @@ export async function cleanupPostshipOutputs(repoRoot = process.cwd(), symbolsOp
         const completed = await runFile(invocation.command, invocation.args, { cwd: root,
           env: { ...env, TSX_TSCONFIG_PATH: fileURLToPath(new URL('../tsconfig.json', import.meta.url)) },
           maxBuffer: 2 * 1024 ** 2 });
+        if (completed.stdout.includes('Preserved unowned entries in .next;')) {
+          console.info('[postship-cleanup] Preserved unowned entries in .next; release-owned cleanup left them in place.');
+        }
         const status = /\[postship-generated-output\] (removed|skipped)\s*$/.exec(completed.stdout)?.[1];
         if (!status) throw new Error('Postship output has no completed lifecycle receipt.');
         result[status].push(relativePath);

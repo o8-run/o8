@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { validateLinkedGitBuildCustody } from './linked-git-build-custody';
 import { validateGeneratedOutputBank } from './generated-output-bank';
 import type { GeneratedOutputResource } from './generated-output-state';
@@ -93,6 +94,19 @@ export function validateGeneratedOutputResource(resource: GeneratedOutputResourc
     }
   }
   if (resource.state === 'active' && !resource.attempt) throw new Error('Active generated output has no producer authority.');
+  if (resource.buildOwnership) {
+    const ownership = resource.buildOwnership;
+    if (!resource.creationAuthority || resource.owner || !resource.attempt || !resource.output
+      || !identity(ownership.scope) || ownership.scope.device !== resource.output.device
+      || ownership.scope.canonicalPath !== path.join(outputPath, '.o8-release-build')
+      || !['reserved', 'complete'].includes(ownership.state)
+      || (ownership.state === 'complete' && (!ownership.manifest?.entries.length || !sha.test(ownership.manifest.fingerprint)
+        || createHash('sha256').update(JSON.stringify(ownership.manifest.entries)).digest('hex') !== ownership.manifest.fingerprint
+        || ownership.manifest.entries.some(entry => entry.relative !== '.' && (path.isAbsolute(entry.relative)
+          || entry.relative.split('/').some(part => !part || part === '..' || part === '.')))))) {
+      throw new Error('Generated-output build namespace has no original reservation.');
+    }
+  }
   if (resource.bankCapture) {
     const capture = resource.bankCapture;
     if (!uuid.test(capture.operationId) || !identity(capture.parent) || !absolute(capture.path)

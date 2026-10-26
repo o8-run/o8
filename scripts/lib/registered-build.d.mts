@@ -1,3 +1,3 @@
 export function runRegisteredBuild(
-  run: (command: string, args: string[], env?: NodeJS.ProcessEnv) => Promise<number>,
+  run: import('../../src/lib/workspace/generated-output-producer').GeneratedOutputSpawn,
 ): Promise<number>;

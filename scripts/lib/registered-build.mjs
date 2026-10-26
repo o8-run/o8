@@ -1,6 +1,6 @@
 import { createRequire } from 'node:module';
-import { lstatSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, lstatSync, readFileSync, renameSync, rmdirSync, rmSync, writeFileSync } from 'node:fs';
+import { join, relative } from 'node:path';
 import { resolveReleaseConfig } from './release-config.mjs';
 import { assertTauriExportInputsSafe } from './tauri-export-safety.mjs';
 
@@ -23,13 +23,25 @@ export async function runRegisteredBuild(run) {
   for (const key of ['TURBOPACK', 'NEXT_DEPLOYMENT_ID', '__NEXT_PRIVATE_ORIGIN', '__NEXT_PRIVATE_STANDALONE_CONFIG']) {
     delete env[key];
   }
+  const buildOutput = run.buildOutput?.directory || join(root, '.next');
+  if (run.buildOutput) {
+    const distDir = relative(root, buildOutput).split('\\').join('/');
+    if (distDir !== '.next/.o8-release-build') throw new Error('Build output reservation is invalid.');
+    env.O8_RELEASE_NEXT_DIST_DIR = distDir;
+    const cache = join(root, '.next/cache');
+    if (existsSync(cache)) renameSync(cache, join(buildOutput, 'cache'));
+  }
+  if (!run.buildOutput) delete env.O8_RELEASE_NEXT_DIST_DIR;
   env.NODE_ENV = 'production';
   env.NODE_OPTIONS = `--max-old-space-size=${heapMiB}`;
   const code = await run(process.execPath, [require.resolve('next/dist/bin/next'), 'build', '--webpack'], env);
   if (code !== 0) return code;
-  const standalone = join(root, '.next', 'standalone');
-  if (!lstatSync(standalone, { throwIfNoEntry: false })) return 0;
-  for (const path of [join(root, '.next'), standalone]) {
+  const standalone = join(buildOutput, 'standalone');
+  if (!lstatSync(standalone, { throwIfNoEntry: false })) {
+    await run.buildOutput?.complete();
+    return 0;
+  }
+  for (const path of [buildOutput, standalone]) {
     const entry = lstatSync(path);
     if (!entry.isDirectory() || entry.isSymbolicLink()) throw new Error('Standalone output must be an isolated generated directory.');
   }
@@ -42,6 +54,27 @@ export async function runRegisteredBuild(run) {
     if (!entry.isFile() || entry.isSymbolicLink()) throw new Error('Standalone environment copy must be a regular generated file.');
     rmSync(path);
   }
+  if (run.buildOutput) {
+    // Normalize the private compiler layout before packaging its own output.
+    const nested = join(standalone, env.O8_RELEASE_NEXT_DIST_DIR);
+    if (existsSync(nested)) {
+      const normalized = join(standalone, '.next-runtime');
+      renameSync(nested, normalized);
+      rmdirSync(join(standalone, '.next'));
+      renameSync(normalized, join(standalone, '.next'));
+    }
+    const server = join(standalone, 'server.js');
+    if (existsSync(server)) writeFileSync(server, readFileSync(server, 'utf8')
+      .replaceAll(JSON.stringify(env.O8_RELEASE_NEXT_DIST_DIR), JSON.stringify('.next'))
+      .replaceAll(JSON.stringify('./' + env.O8_RELEASE_NEXT_DIST_DIR), JSON.stringify('.next')));
+    const required = join(buildOutput, 'required-server-files.json');
+    if (existsSync(required)) {
+      const manifest = JSON.parse(readFileSync(required, 'utf8'));
+      manifest.config.distDir = '.next';
+      writeFileSync(required, JSON.stringify(manifest));
+    }
+  }
   assertTauriExportInputsSafe(standalone);
+  await run.buildOutput?.complete();
   return 0;
 }

@@ -10,7 +10,7 @@ import { createRetainedGeneratedOutputFixture } from './generated-output-fixture
 const source = process.cwd();
 const require = createRequire(import.meta.url);
 
-it('journals postship disposal and reuses the verified artifact across later prebuilds', async () => {
+it.each([false, true])('journals postship disposal and preserves mid-build foreign output=%s', async foreign => {
   const root = await createRetainedGeneratedOutputFixture('o8-postship-lifecycle-');
   const repo = path.join(root, 'repo');
   const home = path.join(root, 'home');
@@ -60,15 +60,30 @@ it('journals postship disposal and reuses the verified artifact across later pre
   const next = path.join(repo, 'node_modules/next/dist/bin');
   mkdirSync(next, { recursive: true });
   symlinkSync(path.dirname(require.resolve('better-sqlite3/package.json')), path.join(repo, 'node_modules/better-sqlite3'), 'dir');
+  const donor = path.join(repo, 'node_modules/donor');
+  mkdirSync(donor); writeFileSync(path.join(donor, 'valuable'), 'preserve dependency');
   writeFileSync(path.join(next, 'next'), `
     const fs = require('node:fs');
     if (process.env.O8_FIXTURE_BUILD_FAILURE) process.exit(42);
-    fs.mkdirSync('.next/cache', { recursive: true });
-    fs.writeFileSync('.next/cache/proof.bin', 'fixture cache');
-    fs.writeFileSync('.next/BUILD_ID', 'native fixture');
-    fs.mkdirSync('.next/standalone/.next/server', { recursive: true });
-    for (const name of ['.env', '.env.production']) fs.copyFileSync(name, '.next/standalone/' + name);
-    fs.writeFileSync('.next/standalone/.next/server/runtime.js', 'runtime');
+    if (process.env.O8_FIXTURE_FOREIGN_OUTPUT === '1') {
+      const database = require('better-sqlite3')(require('node:path').join(process.env.O8_DATA_DIR, 'cortex-ide.db'), { readonly: true });
+      const row = database.prepare('SELECT payload_json FROM workspace_generated_outputs ORDER BY created_at DESC, rowid DESC LIMIT 1').get();
+      const ownership = JSON.parse(row.payload_json).buildOwnership;
+      database.close();
+      fs.writeFileSync('.fixture/ownership-before-build.json', JSON.stringify({ state: ownership.state,
+        reserved: ownership.scope.canonicalPath.endsWith(process.env.O8_RELEASE_NEXT_DIST_DIR) }));
+      require('node:child_process').execFileSync(process.execPath, ['-e',
+        "require('node:fs').writeFileSync('.next/operator-note.txt', 'foreign mid-build bytes')"]);
+    }
+    const output = process.env.O8_RELEASE_NEXT_DIST_DIR || '.next';
+    fs.mkdirSync(output + '/cache', { recursive: true });
+    fs.writeFileSync(output + '/cache/proof.bin', 'fixture cache');
+    fs.writeFileSync(output + '/BUILD_ID', 'native fixture');
+    fs.mkdirSync(output + '/server', { recursive: true });
+    fs.symlinkSync(require('node:path').join(process.cwd(), 'node_modules/donor'), output + '/server/donor', 'dir');
+    fs.mkdirSync(output + '/standalone/.next/server', { recursive: true });
+    for (const name of ['.env', '.env.production']) fs.copyFileSync(name, output + '/standalone/' + name);
+    fs.writeFileSync(output + '/standalone/.next/server/runtime.js', 'runtime');
     fs.appendFileSync('.fixture/compiler-calls', 'build\\n');
   `);
   for (const args of [['init', '--initial-branch=main'], ['add', '.'],
@@ -77,7 +92,7 @@ it('journals postship disposal and reuses the verified artifact across later pre
     const result = spawnSync('git', args, { cwd: repo, encoding: 'utf8' });
     expect(result.status, result.stderr).toBe(0);
   }
-  const env = { ...process.env, HOME: home, O8_RELEASE_BUILD_CACHE_DIR: path.join(root, 'cache'),
+  const env = { ...process.env, HOME: home, O8_FIXTURE_FOREIGN_OUTPUT: foreign ? '1' : '0', O8_RELEASE_BUILD_CACHE_DIR: path.join(root, 'cache'),
     O8_RELEASE_BUILD_CACHE_MAX_BYTES: '10485760', O8_RELEASE_LOCK_PATH: path.join(root, 'release.lock'),
     O8_RELEASE_BROADCAST_CLI: 'true', TSX_TSCONFIG_PATH: path.join(source, 'tsconfig.json') };
   for (const key of ['O8_DATA_DIR', 'CORTEX_IDE_DATA_DIR', 'CORTEX_IDE_DB_PATH', 'O8_OPERATOR_DATA_DIR',
@@ -120,8 +135,19 @@ it('journals postship disposal and reuses the verified artifact across later pre
     return completed;
   }
   // Retain the first output to exercise interrupted disposal before the next ship.
-  const first = ship(false);
+  const first = ship(foreign);
   expect(first.status, first.stderr + first.stdout).toBe(0);
+  if (foreign) {
+    expect(JSON.parse(readFileSync(path.join(repo, '.fixture/ownership-before-build.json'), 'utf8'))).toEqual({ state: 'reserved', reserved: true });
+    expect(readFileSync(path.join(repo, '.next/operator-note.txt'), 'utf8')).toBe('foreign mid-build bytes');
+    expect(existsSync(path.join(repo, '.next/BUILD_ID'))).toBe(false);
+    expect(first.stdout).toContain('Preserved unowned entries in .next');
+    const replay = run([postshipScript]);
+    expect(replay.status, replay.stderr + replay.stdout).toBe(0);
+    expect(replay.stdout).toContain('Preserved unowned entries in .next');
+    expect(readFileSync(path.join(repo, '.next/operator-note.txt'), 'utf8')).toBe('foreign mid-build bytes');
+    return;
+  }
   for (const name of ['.env', '.env.production']) {
     expect(existsSync(path.join(repo, '.next/standalone', name))).toBe(false);
     expect(readFileSync(path.join(repo, name), 'utf8')).toBe('SYNTHETIC_FIXTURE=preserve-source');
@@ -205,9 +231,7 @@ it('journals postship disposal and reuses the verified artifact across later pre
   `);
   expect(releasedHold.status, releasedHold.stderr).toBe(0);
   // Internal links are unlinked without following the dependency donor.
-  const donor = path.join(repo, 'node_modules/donor');
-  mkdirSync(donor); writeFileSync(path.join(donor, 'valuable'), 'preserve dependency');
-  symlinkSync(donor, path.join(outputPath, 'donor'), 'dir');
+  expect(readFileSync(path.join(donor, 'valuable'), 'utf8')).toBe('preserve dependency');
   const disposalModule = pathToFileURL(path.join(source, 'src/lib/workspace/generated-output-disposal.ts')).href;
   for (const hook of ['afterFinalAdmission', 'afterFinalRemoval']) {
     const interrupted = stateCommand(`

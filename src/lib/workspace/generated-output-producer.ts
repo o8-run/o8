@@ -6,13 +6,16 @@ import path from 'node:path';
 import { assertWorktreeMaterializationIdentity, captureWorktreeMaterializationIdentity, type WorktreeMaterializationIdentity } from '@/lib/worktree/materialization-identity';
 import { probeMetadataLockProcessIdentity } from '@/lib/worktree/metadata-lock-process-identity';
 import { assertWorkspaceRetentionReleased } from './retention-holds';
+import { reserveBuildOutput, publishBuildOutput } from './generated-output-build-ownership';
 import { retainedFailedPrebuild } from './failed-prebuild-parking';
 import { assertLinkedGitBuildCustody, captureLinkedGitBuildCustody } from './linked-git-build-custody';
 import { assertGeneratedOutputClaimsReleased, generatedOutputOwner, generatedOutputRevision,
   currentGeneratedOutputResource, registerGeneratedOutputLocked, saveGeneratedOutputResource, withGeneratedOutputExclusion,
   lastDisposedPrebuildOutput, type GeneratedOutputResource } from './generated-output-state';
 
-export type GeneratedOutputSpawn = (command: string, args: string[], env?: NodeJS.ProcessEnv) => Promise<number>;
+export type GeneratedOutputSpawn = ((command: string, args: string[], env?: NodeJS.ProcessEnv) => Promise<number>) & {
+  buildOutput?: { directory: string; complete: () => Promise<void> };
+};
 
 // Pause before the real producer executes, including commands too short to
 // probe after ordinary spawn. The parent's durable acknowledgement owns it.
@@ -133,6 +136,9 @@ async function runReservedProducer(workspace: WorktreeMaterializationIdentity, r
   const previousState = resource.state;
   resource = saveGeneratedOutputResource(resource, { state: 'active', revision: await generatedOutputRevision(workspace),
     attempt: { id: randomUUID(), mode: input.mode, ownerPid: process.pid, ownerIdentity: owner.identity, children: [] } });
+  if (!resource.owner && resource.creationAuthority && input.mode === 'build') {
+    resource = saveGeneratedOutputResource(resource, { buildOwnership: await reserveBuildOutput(resource) });
+  }
   let activeChild: ReturnType<typeof spawn> | null = null;
   let activeRun: Promise<number> | null = null;
   let abortRequested = false;
@@ -200,6 +206,14 @@ async function runReservedProducer(workspace: WorktreeMaterializationIdentity, r
       () => { if (activeRun === pending) activeRun = null; });
     return pending;
   };
+  if (resource.buildOwnership?.state === 'reserved') {
+    run.buildOutput = { directory: resource.buildOwnership.scope.canonicalPath, complete: async () => {
+      if (activeRun || activeChild || resource.buildOwnership?.state !== 'reserved') {
+        throw new Error('Build output publication requires closed compiler children and its original reservation.');
+      }
+      resource = saveGeneratedOutputResource(resource, { buildOwnership: await publishBuildOutput(resource) });
+    } };
+  }
   const settleFailedRun = async () => {
     abortRequested = true;
     const unsettled = activeRun;
