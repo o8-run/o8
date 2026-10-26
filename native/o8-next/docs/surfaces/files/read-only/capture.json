@@ -1,0 +1,14 @@
+{
+  "native": "real GPUI X11/Vulkan window",
+  "current": "production React FileViewer and bundled Monaco",
+  "fixture": "identical owned TypeScript source",
+  "nativeViewport": [
+    1200,
+    816
+  ],
+  "currentViewport": [
+    1200,
+    816
+  ],
+  "mutations": 0
+}
