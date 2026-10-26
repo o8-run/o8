@@ -1,7 +1,10 @@
 # Owned session artifact admission
 
 New owned runs share a 4 GiB and 10,000-entry admission threshold across each
-resolved runtime's active root and archive sibling. Launch, resume, automatic
+resolved runtime's active root and archive sibling, plus the shared protected worker CLI tree.
+The CLI tree is charged to each runtime's existing budget, including legacy, unknown
+and in-progress copies; overlapping roots are measured once. Its common lease and
+namespace binding prevent independent lifecycle databases from sharing admission. Launch, resume, automatic
 retry and missing-CLI diagnostics pass admission before creating a run directory,
 prepared run or output writer. A refusal returns the existing unsuccessful store
 response with an actionable artifact-admission note and no new run side effect.
@@ -25,7 +28,7 @@ a stable observation is possible. The binding itself is outside artifact account
 This is admission control, not a hard cap on already running output. An admitted
 run can grow afterward, and initial session/config metadata can cross the threshold
 before the next admission. No provider is killed, no transcript is truncated, and
-no expiry or automatic deletion is introduced. Required recovery, failure, release
+no expiry or automatic deletion of retained session evidence is introduced. Required recovery, failure, release
 and acceptance evidence is exempt from deletion, never from accounting.
 
 Read and stop do not require admission. Supported archive and exact archived-session
@@ -33,3 +36,12 @@ recovery share synchronization but do not require free budget. Archive is a dire
 rename, not reclaimed storage. External provider history is outside these roots and
 still uses its provider-supported retention controls. The independent portable
 [workspace preservation bank policy](workspace-preservation-budget.md) is unchanged.
+
+Verified worker CLI copies are rebuildable launch inputs. Each session has one stable
+slot, rebuilt from current source bytes or a matching packaged entry. New bytes are
+measured before dispatch. Confirmed terminal owners release their copies; preparation
+failures reclaim unpublished copies. Code is reused in place only after a fresh byte
+comparison when previous process trees remain unconfirmed. Every owner reference is
+retained in protected storage and must clear before removal; missing process evidence
+keeps those bytes accounted. A changed CLI is held while an earlier owner is uncertain.
+Stop and archive can reclaim confirmed owners even when the budget is full.
