@@ -26,8 +26,9 @@ vi.mock('@/lib/transcripts/useTranscript', () => ({
 }));
 
 vi.mock('./SessionTransformMenu', () => ({ SessionTransformMenu: () => null }));
+const packetTranscriptMock = vi.hoisted(() => ({ entries: [] as MobileTranscriptEntry[], activity: null }));
 vi.mock('./use-packet-transcript-poll', () => ({
-  usePacketTranscriptPoll: () => ({ entries: [], activity: null }),
+  usePacketTranscriptPoll: () => packetTranscriptMock,
 }));
 vi.mock('./WorkspaceTranscript', () => ({
   WorkspaceTranscript: ({ entries }: { entries: MobileTranscriptEntry[] }) => createElement(
@@ -58,6 +59,7 @@ function flushAnimationFrame() {
 }
 
 beforeEach(() => {
+  packetTranscriptMock.entries = [];
   localStorage.clear();
   resetComposerDraftMemoryForTests();
   animationFrames = new Map();
@@ -676,8 +678,8 @@ it('collapses finished work to its written outcome, expands the transcript and h
   expect(card).not.toBeNull();
   expect(card.textContent).toContain('Needs review');
   expect(card.querySelector('[data-worker-outcome]')?.textContent).toBe('Preserved exact input through resize.');
-  expect(card.querySelector('a[href="https://example.test/pull/42"]')?.textContent).toBe('PR');
-  expect(card.querySelector('a[href="https://example.test/receipts/42"]')?.textContent).toBe('Receipt');
+  expect(card.querySelector('a[href="https://example.test/pull/42"]')?.getAttribute('aria-label')).toBe('Open PR');
+  expect(card.querySelector('a[href="https://example.test/receipts/42"]')?.getAttribute('aria-label')).toBe('Open receipt');
   expect(host!.querySelector('[data-worker-transcript]')).toBeNull();
   const toggle = card.querySelector<HTMLButtonElement>('[aria-expanded]')!;
   expect(toggle.getAttribute('aria-expanded')).toBe('false');
@@ -702,4 +704,46 @@ it('collapses finished work to its written outcome, expands the transcript and h
   expect(host!.querySelector('[data-worker-outcome]')?.textContent).toBe('Kept commands intact.');
   expect(host!.querySelector('a[href="https://example.test/results"]')).not.toBeNull();
   expect(host!.querySelector('a[href="https://example.test/docs"]')).toBeNull();
+});
+
+
+it('keeps the last assistant outcome after tool output when no summary was saved', () => {
+  vi.stubGlobal('fetch', vi.fn(async () => Response.json({ agents: [] })));
+  packetTranscriptMock.entries = [
+    { id: 'progress', role: 'assistant', text: 'Inspecting input.' },
+    { id: 'tool', role: 'tool', text: 'Checks passed.', toolCalls: [{ name: 'shell', args: { command: 'verify' }, status: 'done' }] },
+    { id: 'final', role: 'assistant', text: '  Kept input exact.  \nFull verification details.\n[PR](https://example.test/pull/42)',
+      toolCalls: [{ name: 'shell', args: { command: 'verify' }, status: 'done' }] },
+  ];
+  const packet = { id: 'fallback', title: 'Preserve input', status: 'running' } as OrchestratorPacket;
+  const render = () => act(() => root!.render(createElement(AgentTilePane, {
+    sessionKey: 'fallback', agent: null, packet, focused: false, onClose() {}, onFocus() {},
+  })));
+  render();
+  packet.status = 'awaiting_review'; render();
+  expect(host!.querySelector('[data-worker-outcome]')?.textContent).toBe('Kept input exact.');
+  expect(host!.querySelector('a[href="https://example.test/pull/42"]')).not.toBeNull();
+  act(() => host!.querySelector<HTMLButtonElement>('[aria-expanded="false"]')!.click());
+  expect(host!.querySelector('[data-worker-transcript]')?.textContent).toContain('Full verification details.');
+  expect(packetTranscriptMock.entries).toHaveLength(3);
+});
+
+it('keeps one review action and state without a composer or cache helper when a finished card expands', () => {
+  vi.stubGlobal('fetch', vi.fn(async () => Response.json({ agents: [] })));
+  const review = vi.fn();
+  packetTranscriptMock.entries = [{ id: 'final', role: 'assistant', text: 'Kept input exact.' }];
+  act(() => root!.render(createElement(AgentTilePane, {
+    sessionKey: 'expanded-outcome', agent: null,
+    packet: { id: 'expanded', title: 'Preserve input', status: 'awaiting_review', completionSummary: 'Kept input exact.' } as OrchestratorPacket,
+    focused: false, onClose() {}, onFocus() {}, onOpenReview: review,
+  })));
+  act(() => host!.querySelector<HTMLButtonElement>('[aria-expanded="false"]')!.click());
+  expect(host!.querySelector('[data-worker-transcript]')?.textContent).toContain('Kept input exact.');
+  expect(host!.querySelector('form')).toBeNull();
+  expect(host!.querySelector('[data-session-cache]')).toBeNull();
+  expect(host!.querySelector('[data-worker-state-row]')).toBeNull();
+  expect(host!.textContent?.match(/Needs review/g)).toHaveLength(1);
+  expect(host!.querySelectorAll('[data-worker-open-review]')).toHaveLength(1);
+  act(() => host!.querySelector<HTMLButtonElement>('[data-worker-open-review]')!.click());
+  expect(review).toHaveBeenCalledOnce();
 });

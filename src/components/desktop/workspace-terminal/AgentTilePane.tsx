@@ -272,7 +272,7 @@ export function canSteerAgentState(
 }
 
 function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocus, onOpenReview, onCollapsedChange }: AgentTilePaneProps) {
-  const { paneRef, compact } = useWorkerPaneSize();
+  const { paneRef, compact, narrow } = useWorkerPaneSize();
   const peerExchange = useAgentPeerMessages(sessionKey);
   const slice = useTranscript(sessionKey);
   const transcriptUnsupportedReason = agent?.transcriptUnsupportedReason?.trim() || null;
@@ -324,7 +324,7 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
   useEffect(() => { if (!outcomeState) setExpandedOutcome(null); }, [outcomeState]);
   const transcriptId = useId();
   const outcomeSummary = packet?.completionSummary?.trim()
-    || [...entries].reverse().find(entry => entry.role === 'assistant' && entry.text?.trim() && !entry.toolCalls?.length)?.text?.trim()
+    || [...entries].reverse().find(entry => entry.role === 'assistant' && entry.text?.trim())?.text?.trim()
     || '';
   useEffect(() => { onCollapsedChange?.(collapsed); }, [collapsed, onCollapsedChange]);
   const runtime = packet
@@ -486,7 +486,7 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
       data-compact={compact}
       onMouseDown={() => onFocus(sessionKey)}
       style={{
-        flex: collapsed ? '0 0 auto' : 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column',
+        flex: collapsed ? '0 1 auto' : 1, minWidth: 0, minHeight: 0, maxHeight: '100%', display: 'flex', flexDirection: 'column',
         // Paint the frame inside the pane without shifting the shared composer baseline.
         borderRadius: 14, outlineWidth: 1, outlineStyle: 'solid', outlineOffset: -1,
         outlineColor: focused ? 'var(--t-border-hover, var(--t-border))' : 'var(--t-border)',
@@ -508,11 +508,11 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
           </button>
         </>} />
 
-      {!collapsed && statusEvidence ? (
+      {!outcomeState && statusEvidence ? (
         <TerminalStatusEvidenceDisclosure evidence={statusEvidence} />
       ) : null}
 
-      {outcomeState ? <WorkerOutcomeCard state={outcomeState} summary={outcomeSummary} expanded={!collapsed} transcriptId={transcriptId}
+      {outcomeState ? <WorkerOutcomeCard state={outcomeState} summary={outcomeSummary} expanded={!collapsed} transcriptId={transcriptId} compact={narrow}
         onToggle={() => setExpandedOutcome(collapsed ? outcomeKey : null)} onOpenReview={onOpenReview} />
         : <WorkerPaneSummary packet={packet} onOpenReview={hasWorkerReviewAction(packet) ? undefined : onOpenReview} onReply={canSteer ? () => textareaRef.current?.focus() : undefined} />}
 
@@ -557,6 +557,7 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
               packetId={packet?.id}
               laneId={packet?.lane?.laneId}
               onOpenReview={onOpenReview}
+              showHandback={!outcomeState}
             />
           </div>
         )}
@@ -571,7 +572,7 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
         </button>
       </div> : null}
 
-      {!collapsed && (canSteer || attention || steerReceipt === 'unknown') ? (
+      {!outcomeState && (canSteer || attention || steerReceipt === 'unknown') ? (
         <form onSubmit={handleFormSubmit} style={{ flexShrink: 0, background: 'transparent' }}>
           <SessionCacheIndicator session={sessionKey} runtime={runtime} model={modelLabel} entries={slice.messages.length ? slice.messages : entries} running={status === 'running'} />
           <WorkerPaneComposer key={sessionKey} textareaRef={textareaRef} scopeKey={sessionKey}

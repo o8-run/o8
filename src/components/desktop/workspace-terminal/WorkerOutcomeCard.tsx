@@ -21,10 +21,20 @@ const actionStyle: CSSProperties = {
   display: 'inline-flex', alignItems: 'center',
 };
 
+function OutcomeIcon({ action }: { action: 'pr' | 'receipt' | 'review' | 'transcript' }) {
+  const paths = {
+    pr: 'M14 3h7v7M21 3 10 14M10 3H3v18h18v-7',
+    receipt: 'M6 3h9l3 3v15H6zM9 10h6M9 14h6',
+    review: 'M6 3v18M18 3v6a6 6 0 0 1-6 6H6',
+    transcript: 'M4 6h16M4 12h16M4 18h10',
+  };
+  return <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d={paths[action]} /></svg>;
+}
+
 /** Only worker-authored completion text supplies the outcome and destinations. */
-export function WorkerOutcomeCard({ state, summary, expanded, transcriptId, onToggle, onOpenReview }: {
+export function WorkerOutcomeCard({ state, summary, expanded, transcriptId, onToggle, onOpenReview, compact = false }: {
   state: string; summary: string; expanded: boolean; transcriptId: string;
-  onToggle: () => void; onOpenReview?: () => void;
+  onToggle: () => void; onOpenReview?: () => void; compact?: boolean;
 }) {
   const line = summary.split('\n').map(value => value.trim()).find(value => value
     && !/^#{1,6}\s|^\[.*\]\(https?:|^(?:\*\*)?(?:outcome|summary):?(?:\*\*)?$/i.test(value));
@@ -32,13 +42,19 @@ export function WorkerOutcomeCard({ state, summary, expanded, transcriptId, onTo
   const writtenReceipts = [...summary.matchAll(/\[(?:receipt|evidence)\]\((https?:\/\/[^\s)]+)\)/gi)].map(match => match[1]);
   const links = [...new Set([...(summary.match(/https?:\/\/[^\s<>\])]+/g) ?? [])
     .filter(url => /\/pull\/\d+|\/(?:receipts?|artifacts?|reports?|evidence)(?:\/|[-_?#])/i.test(url)), ...writtenReceipts])];
-  return <section data-worker-outcome-card style={{ paddingTop: 12, paddingRight: 12, paddingBottom: 12, paddingLeft: 12, color: 'var(--t-text)', flexShrink: 0 }}>
-    <div style={{ fontSize: 12, fontWeight: 300 }}>{state}</div>
+  const controlStyle: CSSProperties = compact ? { ...actionStyle, width: 26, paddingRight: 0, paddingLeft: 0, justifyContent: 'center' } : actionStyle;
+  const transcriptAction = expanded ? 'Hide transcript' : 'Show transcript';
+  return <section data-worker-outcome-card style={{ paddingTop: 8, paddingRight: 8, paddingBottom: 8, paddingLeft: 8, color: 'var(--t-text)', minHeight: 0, flexShrink: 1, overflowY: 'auto', boxSizing: 'border-box' }}>
+    <div style={{ fontSize: 12, fontWeight: 300, lineHeight: 1.25 }}>{state}</div>
     {outcome ? <div data-worker-outcome title={summary} style={{ marginTop: 4, fontSize: 13.5, fontWeight: 300, lineHeight: 1.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{outcome}</div> : null}
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
-      {links.map(url => <a key={url} href={url} target="_blank" rel="noopener noreferrer" style={actionStyle}>{/\/pull\/\d+/.test(url) ? 'PR' : 'Receipt'}</a>)}
-      {state === 'Needs review' && onOpenReview ? <button type="button" data-worker-open-review onClick={onOpenReview} style={actionStyle}>Review merge</button> : null}
-      <button type="button" aria-expanded={expanded} aria-controls={expanded ? transcriptId : undefined} onClick={onToggle} style={actionStyle}>{expanded ? 'Hide transcript' : 'Show transcript'}</button>
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+      {links.map(url => {
+        const pr = /\/pull\/\d+/.test(url);
+        const label = pr ? 'Open PR' : 'Open receipt';
+        return <a key={url} href={url} target="_blank" rel="noopener noreferrer" aria-label={label} title={compact ? label : undefined} style={controlStyle}>{compact ? <OutcomeIcon action={pr ? 'pr' : 'receipt'} /> : pr ? 'PR' : 'Receipt'}</a>;
+      })}
+      {state === 'Needs review' && onOpenReview ? <button type="button" data-worker-open-review aria-label="Review merge" title={compact ? 'Review merge' : undefined} onClick={onOpenReview} style={controlStyle}>{compact ? <OutcomeIcon action="review" /> : 'Review merge'}</button> : null}
+      <button type="button" aria-label={transcriptAction} title={compact ? transcriptAction : undefined} aria-expanded={expanded} aria-controls={expanded ? transcriptId : undefined} onClick={onToggle} style={controlStyle}>{compact ? <OutcomeIcon action="transcript" /> : transcriptAction}</button>
     </div>
   </section>;
 }
