@@ -3707,6 +3707,7 @@ dependencies = [
  "rusqlite",
  "screencapturekit",
  "security-framework",
+ "semver",
  "sentry",
  "sentry-rust-minidump",
  "serde",

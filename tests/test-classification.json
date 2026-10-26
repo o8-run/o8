@@ -1782,6 +1782,15 @@
       ]
     },
     {
+      "path": "tests/beta-linux-signing-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "native-build",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/beta-promote-real-path.test.ts",
       "reasons": [
         "child-process",

@@ -1,7 +1,7 @@
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { afterEach, expect, it } from 'vitest';
 
 const roots: string[] = [];
@@ -23,11 +23,18 @@ fs.appendFileSync(path.join(root, 'calls.jsonl'), JSON.stringify(a) + '\\n');
 if (a[1] === 'view') process.stdout.write('v0.1.800');
 if (a[1] === 'download') {
  const name = a[a.indexOf('--pattern') + 1], dest = a[a.indexOf('--dir') + 1];
- fs.copyFileSync(path.join(root, name), path.join(dest, name));
+ const versioned = path.join(root, a[2] + '-' + name);
+ fs.copyFileSync(fs.existsSync(versioned) ? versioned : path.join(root, name), path.join(dest, name));
+ if (name === 'latest.json' && process.env.O8_PROMOTE_PAUSE) {
+  fs.writeFileSync(path.join(root, 'paused'), '');
+  const start = Date.now();
+  while (!fs.existsSync(path.join(root, 'resume')) && Date.now() - start < 8000) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+ }
 }
 if (a[1] === 'upload') {
  const source = a.find(v => v.endsWith('/latest.json'));
  fs.copyFileSync(source, path.join(root, 'promoted.json'));
+ fs.copyFileSync(source, path.join(root, 'latest.json'));
 }
 `);
   chmodSync(gh, 0o700);
@@ -36,7 +43,7 @@ if (a[1] === 'upload') {
 function run(f: ReturnType<typeof fixture>, version = '0.1.900', extra: string[] = []) {
   return spawnSync(process.execPath, [script, '--version', version, '--repo', 'o8-run/o8', ...extra], {
     cwd: f.root, encoding: 'utf8', timeout: 10_000,
-    env: { ...process.env, PATH: `${join(f.root, 'bin')}:${process.env.PATH}`, O8_PROMOTE_FIXTURE: f.root },
+    env: { ...process.env, PATH: `${join(f.root, 'bin')}:${process.env.PATH}`, O8_PROMOTE_FIXTURE: f.root, O8_PROMOTE_LOCK_PATH: join(f.root, 'promote.lock') },
   });
 }
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -57,3 +64,52 @@ it.each(['0.1.901', '0.1.700'])('refuses mismatched candidate %s before writing 
   expect(result.stderr).toMatch(/beta|version/);
   expect(existsSync(join(f.root, 'promoted.json'))).toBe(false);
 });
+
+it('refuses a candidate missing any stable platform before writing', () => {
+  const f = fixture();
+  writeFileSync(join(f.root, 'latest.json'), JSON.stringify({ version: '0.1.800', platforms: {
+    'darwin-aarch64': { url: 'https://example.invalid/old', signature: 'old' },
+    ...f.manifest.platforms,
+  } }));
+  const result = run(f);
+  expect(result.status, result.stderr).toBe(1);
+  expect(existsSync(join(f.root, 'promoted.json'))).toBe(false);
+});
+it('carries all signed candidate platforms into stable unchanged', () => {
+  const f = fixture();
+  const manifest = { ...f.manifest, platforms: { ...f.manifest.platforms,
+    'darwin-x86_64': { url: new URL('o8.app.tar.gz', f.manifest.platforms['linux-x86_64'].url).href, signature: 'darwin-fixture' },
+  } };
+  writeFileSync(join(f.root, 'beta.json'), JSON.stringify(manifest));
+  writeFileSync(join(f.root, 'latest.json'), JSON.stringify({ ...manifest, version: '0.1.800' }));
+  const result = run(f);
+  expect(result.status, result.stderr).toBe(0);
+  expect(JSON.parse(readFileSync(join(f.root, 'promoted.json'), 'utf8')).platforms).toEqual(manifest.platforms);
+});
+it('serializes overlapping commands and refuses a later downgrade', async () => {
+  const f = fixture();
+  const newer = JSON.parse(JSON.stringify(f.manifest).replaceAll('0.1.900', '0.1.901'));
+  writeFileSync(join(f.root, 'v0.1.901-beta.json'), JSON.stringify(newer));
+  const child = spawn(process.execPath, [script, '--version', '0.1.900', '--repo', 'o8-run/o8'], {
+    cwd: f.root, stdio: 'pipe', env: { ...process.env, PATH: `${join(f.root, 'bin')}:${process.env.PATH}`,
+      O8_PROMOTE_FIXTURE: f.root, O8_PROMOTE_LOCK_PATH: join(f.root, 'promote.lock'), O8_PROMOTE_PAUSE: '1' },
+  });
+  let errors = '';
+  child.stderr.on('data', chunk => { errors += chunk; });
+  const completed = new Promise<number | null>(resolve => child.on('close', resolve));
+  try {
+    const deadline = Date.now() + 8000;
+    while (!existsSync(join(f.root, 'paused')) && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 10));
+    expect(existsSync(join(f.root, 'paused')), errors).toBe(true);
+    const overlap = run(f, '0.1.901');
+    writeFileSync(join(f.root, 'resume'), '');
+    expect(await completed, errors).toBe(0);
+    expect(overlap.status, overlap.stderr).toBe(1);
+    expect(run(f, '0.1.901').status).toBe(0);
+    expect(run(f, '0.1.900').status).toBe(1);
+    expect(JSON.parse(readFileSync(join(f.root, 'latest.json'), 'utf8')).version).toBe('0.1.901');
+  } finally {
+    writeFileSync(join(f.root, 'resume'), '');
+    await completed;
+  }
+}, 20_000);

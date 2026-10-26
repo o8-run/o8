@@ -3,6 +3,7 @@ export interface ReleaseChannel {
   preview: boolean;
   tag: string;
   manifestName: 'beta.json' | 'preview.json';
+  compatibilityManifestName: 'latest.json' | null;
   githubFlags: string[];
   publishStableEffects: boolean;
 }

@@ -76,13 +76,24 @@ mod tests {
                     }
                     request.extend_from_slice(&buffer[..count]);
                 }
-                tx.send(String::from_utf8(request).unwrap()).unwrap();
+                let request = String::from_utf8(request).unwrap();
+                let beta_request = request.to_lowercase().contains("x-o8-channel: beta")
+                    || request.starts_with("GET /beta.json ");
+                tx.send(request).unwrap();
                 let response = match mode {
                     "failure" => "HTTP/1.1 503 Unavailable\r\nContent-Length: 0\r\n\r\n".into(),
                     "redirect" => format!(
                         "HTTP/1.1 302 Found\r\nLocation: {redirect}\r\nContent-Length: 0\r\n\r\n"
                     ),
                     "malformed" => "HTTP/1.1 200 OK\r\nContent-Length: 1\r\n\r\n{".into(),
+                    "stable-ahead" | "beta-ahead" => {
+                        let body = if beta_request {
+                            MANIFEST.replace("0.2.0", if mode == "beta-ahead" { "0.4.0" } else { "0.2.0" })
+                        } else {
+                            MANIFEST.replace("\"channel\":\"beta\",", "").replace("0.2.0", "0.3.0")
+                        };
+                        format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{}", body.len(), body)
+                    }
                     "stable" | "current" => {
                         let body = MANIFEST.replace("\"channel\":\"beta\",", "");
                         let body = if mode == "current" { body.replace("0.2.0", "0.0.1") } else { body };

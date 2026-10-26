@@ -32,26 +32,31 @@ existing public release tag with `publish_to_mirror` enabled. The
   release for that tag does not exist yet, or the AppImage itself is not on
   the source release yet.
 
-Copying an asset is not the same as advertising it: only `latest.json`
-advertises a platform to the updater, and this job never touches it. That
-manifest is written exclusively by `scripts/lib/linux-appimage-signature.mjs`
-via the operator's local `npm run ship:linux-sig` step, because the minisign
-updater key never leaves the ship machine. That step requires the AppImage to
-already be present on every target repository — including the mirror —
-before it will sign anything, which is exactly what this job exists to
-provide.
+Copying an asset is not the same as advertising it: `beta.json` advertises
+candidate platforms, and the stable feed anchor's `latest.json` advertises
+stable platforms. This job never updates either feed. The operator's local
+`npm run ship:linux-sig` step requires the AppImage on every target repository
+before it signs it. The existing signing key and invocation stay unchanged.
 
 ## Order of operations for a full Linux updater publish
 
-1. Dispatch `Port Build` with `release_tag` set (and `publish_target: linux`
-   or `both`) — the `publish-preview` job publishes the AppImage to the
-   source release.
-2. Dispatch `Port Build` again with `release_tag` set and
-   `publish_to_mirror: true` — the `publish-mirror` job copies the
-   (still-unsigned) AppImage to the mirror release for the same tag.
-3. Run, on the release host: `npm run ship:linux-sig -- --tag vX.Y.Z`. This
-   signs the AppImage with the updater key and uploads the `.sig` to both the
-   source repo and the mirror, then regenerates `latest.json` on the mirror
-   with a `linux-x86_64` entry.
-4. No re-dispatch of step 2 is needed — step 3 uploads the `.sig` to the
-   mirror itself.
+1. Ship the macOS candidate to beta. Its tag contains `beta.json` and an
+   identical tag-local `latest.json` compatibility alias for Linux completion.
+   The rolling stable manifest stays on the existing stable feed anchor.
+2. Dispatch `Port Build` for that candidate tag with `publish_target: linux`
+   or `both`, then copy the AppImage to the mirror with `publish_to_mirror`.
+   Both repositories must hold the same candidate's AppImage before signing.
+3. Run `npm run ship:linux-sig -- --tag vX.Y.Z` on the release host. The
+   existing signer adds the signed Linux entry to the tag-local `latest.json`.
+   Completion copies the full manifest to tag-local `beta.json` in every
+   repository, then refreshes the rolling beta feed beside stable. Darwin
+   entries are preserved. No re-dispatch is needed for the signature copy.
+4. Verify the completed beta candidate on every platform, run installed-build
+   smoke acceptance, then use `npm run promote -- --version X.Y.Z`. Promotion
+   copies every signed candidate platform unchanged and refuses a candidate
+   missing any platform already served by stable. Never promote the macOS-only
+   intermediate manifest when stable also serves Linux.
+5. Serialize promotions with the common release-host lock. An overlapping
+   command fails and may be retried after the owner exits. A candidate older
+   than stable is refused, including after a concurrent newer promotion.
+   See [beta and stable feeds](beta-updates.md) for lock recovery and retries.

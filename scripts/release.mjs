@@ -359,10 +359,17 @@ const { latestJson, uploadArgs } = buildReleaseManifest({
   darwinArtifact: { signature, identity: darwinIdentity },
   darwinCpuArtifacts,
   baseUploadAssets: [DMG, APP_TAR, APP_SIG],
-  trailingUploadAssets: [latestJsonPath, ...(releaseChannel.publishStableEffects ? [fixedJsonPath] : [])],
+  trailingUploadAssets: [latestJsonPath,
+    ...(releaseChannel.compatibilityManifestName ? [join(BUNDLE, 'macos', releaseChannel.compatibilityManifestName)] : []),
+    ...(releaseChannel.publishStableEffects ? [fixedJsonPath] : [])],
 });
 if (releaseChannel.channel === 'beta') latestJson.channel = 'beta';
 writeFileSync(latestJsonPath, JSON.stringify(latestJson, null, 2));
+// The Linux completion command reads the candidate tag's compatibility manifest.
+// This alias is uploaded only to the candidate, never the rolling stable anchor.
+if (releaseChannel.compatibilityManifestName) {
+  writeFileSync(join(BUNDLE, 'macos', releaseChannel.compatibilityManifestName), JSON.stringify(latestJson, null, 2));
+}
 console.log(`[release] wrote ${latestJsonPath}`);
 
 // fixed.json — the receipt manifest, shipped next to latest.json.

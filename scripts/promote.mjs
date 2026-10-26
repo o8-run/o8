@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, mkdtempSync, openSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DEFAULT_REPOS } from './lib/linux-appimage-signature.mjs';
@@ -42,10 +42,24 @@ function validateCandidate(candidate, version) {
   }
 }
 
+function validateStable(candidate, stable) {
+  if (compareReleaseVersions(candidate.version, stable.version) < 0) throw new Error('Promotion cannot downgrade stable.');
+  if (stable.version === candidate.version && JSON.stringify(stable) !== JSON.stringify(candidate)) throw new Error('Stable version already has different artifacts.');
+  for (const platform of Object.keys(stable.platforms ?? {})) {
+    if (!Object.hasOwn(candidate.platforms, platform)) throw new Error('The beta candidate is missing a stable platform.');
+  }
+}
+
 async function main() {
   const { version, repos } = options(process.argv.slice(2));
-  const dir = mkdtempSync(join(tmpdir(), 'o8-promote-'));
+  // One lock across all versions and destinations, held through the last write.
+  // Fail closed on existing locks; never remove another command's live lock.
+  const lock = process.env.O8_PROMOTE_LOCK_PATH || join(tmpdir(), 'o8-promote.lock');
+  const owner = openSync(lock, 'wx', 0o600);
+  let dir;
   try {
+    writeFileSync(owner, JSON.stringify({ pid: process.pid }));
+    dir = mkdtempSync(join(tmpdir(), 'o8-promote-'));
     let candidate;
     const targets = [];
     // Validate every destination before the first stable write.
@@ -56,23 +70,27 @@ async function main() {
       candidate = beta;
       const tag = feedAnchor(repo);
       const stable = download(repo, tag, 'latest.json', dir);
-      if (compareReleaseVersions(version, stable.version) < 0) throw new Error('Promotion cannot downgrade stable.');
-      if (stable.version === version && JSON.stringify(stable) !== JSON.stringify(beta)) throw new Error('Stable version already has different artifacts.');
+      validateStable(beta, stable);
       targets.push({ repo, tag });
     }
     const manifest = join(dir, 'latest.json');
     writeFileSync(manifest, `${JSON.stringify(candidate, null, 2)}\n`);
     for (const { repo, tag } of targets) {
+      // Re-read inside the lock immediately before each stable write.
+      validateStable(candidate, download(repo, tag, 'latest.json', dir));
+      writeFileSync(manifest, `${JSON.stringify(candidate, null, 2)}\n`);
       execFileSync('gh', ['release', 'upload', tag, manifest, '--clobber', '--repo', repo], { stdio: 'inherit', timeout: 60_000 });
     }
     console.log(`[promote] Stable now serves ${version} using the beta artifacts.`);
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    if (dir) rmSync(dir, { recursive: true, force: true });
+    closeSync(owner);
+    unlinkSync(lock);
   }
 }
 
 main().catch(() => {
   // Provider errors can include local paths or credentials. Keep public output bounded.
-  console.error('[promote] Promotion failed: check the beta version, signed manifest, stable feed and repository access.');
+  console.error('[promote] Promotion failed: check the beta version, signed manifest, stable platforms, promotion lock and repository access.');
   process.exitCode = 1;
 });

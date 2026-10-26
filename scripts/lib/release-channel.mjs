@@ -22,6 +22,7 @@ export function resolveReleaseChannel(version, env = process.env) {
     preview,
     tag: `v${version}`,
     manifestName: preview ? 'preview.json' : 'beta.json',
+    compatibilityManifestName: preview ? null : 'latest.json',
     githubFlags: ['--prerelease', '--latest=false'],
     publishStableEffects: false,
   });

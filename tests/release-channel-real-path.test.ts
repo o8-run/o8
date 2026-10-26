@@ -276,7 +276,7 @@ describe('release channels through the publication entry point', () => {
     });
     expect(result.status, result.stderr).toBe(0);
     expect(existsSync(join(f.bundle, 'macos/beta.json'))).toBe(true);
-    expect(existsSync(join(f.bundle, 'macos/latest.json'))).toBe(false);
+    expect(existsSync(join(f.bundle, 'macos/latest.json'))).toBe(true);
     expect(effects(f).filter(c => c.name === 'gh' && c.args[1] === 'create')).toHaveLength(2);
   });
 
@@ -292,7 +292,11 @@ describe('release channels through the publication entry point', () => {
       expect(call.args).toContain('--latest=false');
     }
     expect(calls.filter(c => c.name === 'gh' && c.args[1] === 'upload' && c.args.includes('v0.1.800'))).toHaveLength(2);
-    expect(calls.some(c => c.args.some(arg => arg.endsWith('/latest.json') || arg.endsWith('/fixed.json')))).toBe(false);
+    const compatibility = join(f.bundle, 'macos/latest.json');
+    expect(JSON.parse(readFileSync(compatibility, 'utf8'))).toEqual(manifest);
+    expect(calls.filter(c => c.name === 'gh' && c.args[1] === 'create').every(c => c.args.includes(compatibility))).toBe(true);
+    expect(calls.filter(c => c.name === 'gh' && c.args[1] === 'upload').some(c => c.args.includes(compatibility))).toBe(false);
+    expect(calls.some(c => c.args.some(arg => arg.endsWith('/fixed.json')))).toBe(false);
     expect(calls.some(c => ['syncReports', 'publishFixed', 'announceRelease', 'bash'].includes(c.name))).toBe(false);
   });
 
@@ -459,7 +463,7 @@ describe('release channels through the publication entry point', () => {
       expect(calls.some(c => c.name === name), name).toBe(false);
     }
     expect(existsSync(join(f.bundle, 'macos/beta.json'))).toBe(true);
-    expect(existsSync(join(f.bundle, 'macos/latest.json'))).toBe(false);
+    expect(existsSync(join(f.bundle, 'macos/latest.json'))).toBe(true);
   });
 
   it('refuses publication when the app backing the arm64 updater entry is x86_64-only', () => {

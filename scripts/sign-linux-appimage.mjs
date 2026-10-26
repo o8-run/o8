@@ -20,7 +20,7 @@
  *   npm run ship:linux-sig -- --tag v0.1.724 --repo o8-run/o8 --repo hurttlocker/o8-releases
  */
 
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -28,6 +28,9 @@ import {
   createLinuxSignatureDeps,
   signLinuxAppImage,
 } from './lib/linux-appimage-signature.mjs';
+
+import { execFileSync } from 'node:child_process';
+import { publishBetaFeed } from './lib/update-feeds.mjs';
 
 const LOG = '[sign-linux-appimage]';
 
@@ -78,6 +81,15 @@ async function main() {
       deps: createLinuxSignatureDeps(),
       log: (message) => console.log(`${LOG} ${message}`),
     });
+    // Complete beta publication after the existing signing operation.
+    if (result.latest.channel === 'beta') {
+      const betaPath = join(workDir, 'beta.json');
+      writeFileSync(betaPath, `${JSON.stringify(result.latest, null, 2)}\n`);
+      for (const repo of result.repos) {
+        execFileSync('gh', ['release', 'upload', options.tag, betaPath, '--clobber', '--repo', repo], { stdio: 'inherit', timeout: 60_000 });
+      }
+      publishBetaFeed(betaPath, result.repos);
+    }
     console.log(`${LOG} published ${result.assetName}.sig and latest.json for ${options.tag}`);
     console.log(`${LOG} linux-x86_64 url: ${result.latest.platforms['linux-x86_64'].url}`);
   } finally {

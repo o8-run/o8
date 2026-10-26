@@ -185,6 +185,50 @@ async fn check_with<R: Runtime>(
     app: &AppHandle<R>,
     force: Arc<AtomicBool>,
 ) -> Result<Option<Update>, String> {
+    let enrollment = selected_channel(app);
+    if enrollment != "beta" {
+        return check_channel(app, force, &enrollment, &enrollment).await;
+    }
+    // Beta enrollment includes stable fixes. Check both feeds before choosing,
+    // preserving enrollment for stale-resource and channel-change guards.
+    let beta_app = app.clone();
+    let beta_force = force.clone();
+    let beta = tauri::async_runtime::spawn(async move {
+        check_channel(&beta_app, beta_force, "beta", "beta").await
+    });
+    let stable = check_channel(app, force, "stable", "beta").await;
+    let beta = beta.await.map_err(|e| e.to_string())?;
+    if selected_channel(app) != enrollment {
+        return Err("Update channel changed during check; retry.".into());
+    }
+    match (beta, stable) {
+        (Ok(Some(beta)), Ok(Some(stable))) => {
+            let beta_version: semver::Version = beta
+                .version
+                .parse()
+                .map_err(|e: semver::Error| e.to_string())?;
+            let stable_version: semver::Version = stable
+                .version
+                .parse()
+                .map_err(|e: semver::Error| e.to_string())?;
+            Ok(Some(if beta_version > stable_version {
+                beta
+            } else {
+                stable
+            }))
+        }
+        (Ok(Some(update)), _) | (_, Ok(Some(update))) => Ok(Some(update)),
+        (Ok(None), Ok(None)) => Ok(None),
+        (Err(error), _) | (_, Err(error)) => Err(error),
+    }
+}
+
+async fn check_channel<R: Runtime>(
+    app: &AppHandle<R>,
+    force: Arc<AtomicBool>,
+    channel: &str,
+    enrollment: &str,
+) -> Result<Option<Update>, String> {
     let config: tauri_plugin_updater::Config = serde_json::from_value(
         app.config()
             .plugins
@@ -198,7 +242,6 @@ async fn check_with<R: Runtime>(
         .endpoints
         .split_first()
         .ok_or("updater endpoints missing")?;
-    let channel = selected_channel(app);
     let fallback = fallback
         .iter()
         .map(|endpoint| {
@@ -224,7 +267,7 @@ async fn check_with<R: Runtime>(
             .timeout(SERVICE_TIMEOUT)
             .header("X-O8-Install-Id", identity.0.as_str())
             .map_err(|e| e.to_string())?
-            .header("X-O8-Channel", channel.as_str())
+            .header("X-O8-Channel", channel)
             .map_err(|e| e.to_string())?
             // A service redirect means fail over locally, without forwarding the ID.
             // Artifact download redirects still use the updater's normal transport.
@@ -252,7 +295,7 @@ async fn check_with<R: Runtime>(
             .map_err(|e| e.to_string())?;
         // Also bound response-body parsing, including a stalled successful response.
         if let Ok(Ok(result)) = tokio::time::timeout(SERVICE_TIMEOUT, updater.check()).await {
-            if channel != selected_channel(app) {
+            if enrollment != selected_channel(app) {
                 return Err("Update channel changed during check; retry.".into());
             }
             // An older service may ignore enrollment, including returning no update.
@@ -279,7 +322,7 @@ async fn check_with<R: Runtime>(
         .check()
         .await
         .map_err(|e| e.to_string())?;
-    if channel != selected_channel(app) {
+    if enrollment != selected_channel(app) {
         return Err("Update channel changed during check; retry.".into());
     }
     if channel == "beta"
