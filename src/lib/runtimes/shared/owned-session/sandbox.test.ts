@@ -249,15 +249,8 @@ describe('prepareWorkerSandbox — the exact wrapper store.ts spawns', () => {
   });
 
   it('is FAIL-CLOSED — throws SandboxUnavailableError when the profile cannot be written', async () => {
-    if (!isDarwin) {
-      // On a non-darwin host the platform guard is the fail-closed trigger.
-      await expect(prepareWorkerSandbox({
-        runId: 'r', profileDir: '/tmp', cwd: '/tmp', repoPath: '/tmp',
-        binary: '/bin/echo', args: [],
-      })).rejects.toBeInstanceOf(SandboxUnavailableError);
-      return;
-    }
-    // darwin: an unwritable profile dir must refuse, never spawn unsandboxed.
+    // An unwritable profile dir must refuse, never spawn unsandboxed. Hosts
+    // without a sandbox backend (or without bwrap on Linux) refuse earlier.
     await expect(prepareWorkerSandbox({
       runId: 'r',
       profileDir: '/this/path/does/not/exist/and/is/unwritable',

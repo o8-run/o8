@@ -38,6 +38,20 @@ Seatbelt applies one policy to the model CLI and every process it spawns. It can
 
 The profile also allows broad process execution and network access. A normal packet can choose any repository tool, run tests that spawn helpers, reach a dynamic local o8 port, and download through changing DNS/CDN endpoints. Restricting those operations to a static executable or host list would make the profile brittle without creating a trustworthy intent boundary. The profile still protects o8's operator credential/database, the gh credential store, webview control sockets, existing tmux servers, and files outside the admitted packet/toolchain roots.
 
+## Linux backend (bubblewrap)
+
+On Linux, `O8_WORKER_SANDBOX` renders the same policy with `bwrap` (`src/lib/runtimes/shared/owned-session/sandbox-linux.ts`). The root filesystem is mounted read-only; HOME, `/tmp`, and the session runtime directory (`/run/user/<uid>`, which holds the D-Bus and keyring sockets) are replaced by empty tmpfs mounts; toolchain read roots are bound back read-only; and the worktree, Git metadata, TMPDIR, and the cache/state roots above are bound read-write. Secret roots are hidden, and immutable credential files and read-only packet paths are bound read-only last. The worker shares the host network, gets its own PID namespace (so `/proc` does not expose other processes' environments) and its own session (so it cannot inject keystrokes into the launching terminal).
+
+The launch probes bwrap first and refuses with a clear error when bwrap is missing or the kernel denies unprivileged user namespaces (for example Ubuntu's AppArmor userns restriction).
+
+Known differences from the macOS profile:
+
+- Reads outside HOME, `/tmp`, and `/run/user/<uid>` are allowed (the macOS profile only admits listed system roots).
+- `/tmp` is private to the worker; a TMPDIR outside `/tmp` is shared read-write.
+- Missing cache directories cannot be created by the worker, because HOME is read-only outside the granted roots.
+- Executable denials, executable-name denials, basename read denials, and the credential lock policy have no mount-namespace equivalent. Launches that need them (controlled-provider tasks, the single-orchestrator Codex policy) are refused on Linux.
+- Denials surface as `EROFS`/`ENOENT` rather than seatbelt reports, so they do not produce `sandbox_denied` lane events yet.
+
 ## Dogfood exit criteria
 
 Run a full dispatch cycle with `O8_WORKER_SANDBOX=1` on both Apple Silicon and Intel macOS. Include Node with npm and pnpm, a Cargo packet, Codex and Claude Code workers, a packet that invokes `o8 packet scope/report/commit/approve-merge`, dependency installation, a worktree commit, and a deliberate denied read outside the packet.

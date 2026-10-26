@@ -3444,6 +3444,14 @@
       ]
     },
     {
+      "path": "tests/linux-worker-sandbox-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/live-process-guard-deletion-seam.test.ts",
       "reasons": [
         "child-process",
