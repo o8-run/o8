@@ -5247,6 +5247,17 @@
       ]
     },
     {
+      "path": "tests/preship-producer-preflight-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "native-build",
+        "process-signal",
+        "real-path",
+        "terminal-tool"
+      ]
+    },
+    {
       "path": "tests/preview-next-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -5581,8 +5592,11 @@
     {
       "path": "tests/release-preflight.test.ts",
       "reasons": [
+        "child-process",
         "git-cli",
-        "native-build"
+        "native-build",
+        "process-signal",
+        "terminal-tool"
       ]
     },
     {
