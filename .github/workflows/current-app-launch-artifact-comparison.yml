@@ -1,0 +1,75 @@
+name: Current app launch artifact comparison
+
+on:
+  workflow_dispatch:
+    inputs:
+      artifact_run:
+        description: Run containing both preserved launch app artifacts
+        required: true
+        type: string
+      main_sha:
+        description: Source commit of the preserved clean main app
+        required: true
+        type: string
+      head_sha:
+        description: Source commit of the preserved candidate app
+        required: true
+        type: string
+  push:
+    branches: [perf/current-app-launch]
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  compare:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    env:
+      APP_ARTIFACT_RUN: ${{ inputs.artifact_run || '40395085469' }}
+      MAIN_SOURCE_SHA: ${{ inputs.main_sha || 'c43a59c0fd3200f762ca48acb9bc87fc42a00ced' }}
+      HEAD_SOURCE_SHA: ${{ inputs.head_sha || 'b47688c6becfc1adc9f9480daa455f5fce7812f2' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: harness
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.23.4
+          cache: npm
+          cache-dependency-path: harness/package-lock.json
+      - run: npm install -g npm@11.21.1
+      - run: npm ci --prefer-offline
+        working-directory: harness
+      - name: Check the measurement script
+        run: node --check harness/scripts/bench/native-launch.mjs
+      - uses: actions/download-artifact@v4
+        with:
+          name: current-app-launch-main-app
+          run-id: ${{ env.APP_ARTIFACT_RUN }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/main-artifact
+      - uses: actions/download-artifact@v4
+        with:
+          name: current-app-launch-head-app
+          run-id: ${{ env.APP_ARTIFACT_RUN }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/head-artifact
+      - name: Restore the exact built artifacts
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/main-artifact" "$GITHUB_WORKSPACE/head-artifact"
+          tar -C "$GITHUB_WORKSPACE/main-artifact" -xf "$RUNNER_TEMP/main-artifact/main-app.tar"
+          tar -C "$GITHUB_WORKSPACE/head-artifact" -xf "$RUNNER_TEMP/head-artifact/head-app.tar"
+      - name: Measure main and head back to back on this runner
+        run: |
+          node harness/scripts/bench/native-launch.mjs --app=main-artifact/o8.app --sha="$MAIN_SOURCE_SHA" --samples=3 --output="$RUNNER_TEMP/o8-launch-paired-main"
+          node harness/scripts/bench/native-launch.mjs --app=head-artifact/o8.app --sha="$HEAD_SOURCE_SHA" --samples=3 --check-startup-loads --check --output="$RUNNER_TEMP/o8-launch-paired-head"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: current-app-launch-probe-paired
+          path: |
+            ${{ runner.temp }}/o8-launch-paired-main/receipt.json
+            ${{ runner.temp }}/o8-launch-paired-head/receipt.json
+          retention-days: 1

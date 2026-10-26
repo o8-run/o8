@@ -128,7 +128,7 @@ export async function measureNativeLaunch({ app, output, sourceSha, samples = 3 
     osVersion: execFileSync('sw_vers', ['-productVersion'], { encoding: 'utf8' }).trim(), sourceSha, artifactDigest,
     benchmarkSha: execFileSync('git', ['-C', fileURLToPath(new URL('../..', import.meta.url)), 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
     method: 'normal release startup, private app data and incognito webview; spawn, foreground activation and controlled composer edit acknowledgment',
-    pollMs: 10, limitMs: 1000, samples: [] };
+    pollMs: 10, probeDeadlineMs: 250, limitMs: 1000, samples: [] };
   try {
     runner = prepareNativeRunner('ai.o8.desktop.launchbench', stageRoot);
     receipt.privacyPrecondition = runner.services.map(service => `${service}: denied`);
@@ -158,6 +158,32 @@ export async function measureNativeLaunch({ app, output, sourceSha, samples = 3 
         }
       };
       const epoch = Date.now(), started = performance.now();
+      const send = client.send.bind(client), controlCalls = [];
+      let probeTimeouts = 0;
+      client.send = async (command, payload) => {
+        const at = performance.now();
+        let timer, outcome = 'ok', timedOut = false;
+        try {
+          const pending = send(command, payload);
+          if (command !== 'execute_js') return await pending;
+          return await Promise.race([pending, new Promise((_, reject) => {
+            timer = setTimeout(() => {
+              timedOut = true; probeTimeouts++;
+              reject(new Error('Composer probe deadline exceeded'));
+              client.dispose();
+            }, 250);
+          })]);
+        } catch (error) {
+          outcome = timedOut ? 'deadline' : 'error';
+          throw error;
+        } finally {
+          clearTimeout(timer);
+          const durationMs = round(performance.now() - at);
+          if (controlCalls.length < 64 && (outcome !== 'ok' || durationMs > 100)) {
+            controlCalls.push({ command, atMs: round(at - started), durationMs, outcome });
+          }
+        }
+      };
       try {
         child = spawn(path.join(stagedApp, 'Contents/MacOS/o8'), [], { cwd: stageRoot, detached: true,
           env: childEnvironment(seeded.dataDir, seeded.repoDir, socketPath), stdio: ['ignore', 'pipe', 'pipe'] });
@@ -192,7 +218,7 @@ export async function measureNativeLaunch({ app, output, sourceSha, samples = 3 
               if (lastProbe.state === 'ready') {
                 const interactiveComposerMs = round(performance.now() - started);
                 receipt.samples.push({ sample, interactiveComposerMs, socketReadyMs, acknowledged: lastProbe.acknowledged,
-                  focused: lastProbe.focused, hydrated: lastProbe.hydrated, editorSeenMs, editAcknowledgedMs, marks: lastProbe.marks, resources: lastProbe.resources, optionalStartupRequests: lastProbe.optionalStartupRequests, nativeStages: [...nativeStages],
+                  focused: lastProbe.focused, hydrated: lastProbe.hydrated, probeTimeouts, controlCalls: [...controlCalls], editorSeenMs, editAcknowledgedMs, marks: lastProbe.marks, resources: lastProbe.resources, optionalStartupRequests: lastProbe.optionalStartupRequests, nativeStages: [...nativeStages],
                   documentStartMs: round(lastProbe.timeOrigin - epoch), navigation: lastProbe.navigation });
                 break;
               }
@@ -209,6 +235,7 @@ export async function measureNativeLaunch({ app, output, sourceSha, samples = 3 
           lastProbe, nativeWindow, nativeStages: [...nativeStages], exitCode: child?.exitCode, signal: child?.signalCode };
         throw error;
       } finally {
+        client.send = send;
         try {
           await cleanupGate({ client, child, dataDir: seeded.dataDir, socketPath });
           fs.rmSync(sampleRoot, { recursive: true, force: true });
