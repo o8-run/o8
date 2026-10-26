@@ -43,6 +43,7 @@ const missionState = { version: 2 as const, prompt: '', summary: '', packets: []
 let host: HTMLDivElement;
 let root: Root;
 let busyOwners = new Set<string>();
+const pendingTimers = new Set<ReturnType<typeof setTimeout>>();
 const trackBusy = (event: Event) => {
   const detail = (event as CustomEvent<{ tabId: string; busy: boolean }>).detail;
   if (detail.busy) busyOwners.add(detail.tabId);
@@ -87,6 +88,10 @@ async function type(input: HTMLTextAreaElement, value: string) {
 }
 async function settle() { await act(async () => { await new Promise(resolve => setTimeout(resolve, 60)); }); }
 beforeEach(() => {
+  const schedule = globalThis.setTimeout;
+  vi.spyOn(globalThis, 'setTimeout').mockImplementation((callback, delay, ...args) => {
+    const timer = schedule(callback, delay, ...args); pendingTimers.add(timer); return timer;
+  });
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
@@ -121,7 +126,7 @@ beforeEach(() => {
   }));
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
 });
-afterEach(async () => { window.removeEventListener('o8:orchestrator', trackBusy); await act(async () => root.unmount()); host.remove(); localStorage.clear(); resetComposerDraftMemoryForTests(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+afterEach(async () => { window.removeEventListener('o8:orchestrator', trackBusy); await act(async () => root.unmount()); for (const timer of pendingTimers) clearTimeout(timer); pendingTimers.clear(); host.remove(); localStorage.clear(); resetComposerDraftMemoryForTests(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 async function emitTurn(turn: Record<string, unknown>, answer: string) {
   const data = { threadId: turn.threadId, userMessageId: 'user-' + turn.clientMessageId,

@@ -243,7 +243,7 @@ export function useOrchestratorStream(
       telemetryTotalRef,
       isCurrent: () => mountedRef.current && repoPathRef.current === activeRepoPath && threadIdRef.current === compactThreadId,
     });
-  }, [syncMessages, updateRunningTotal]);
+  }, [syncMessages, threadIdRef, updateRunningTotal]);
 
   const estimateNextTurnTokens = useCallback((message: string) => (
     runningTotalRef.current
@@ -311,7 +311,7 @@ export function useOrchestratorStream(
     }
     clearQueuedOrchestratorSessionPrelude(repoPathRef.current, threadIdRef.current);
     emitTokenUsage({ repoPath: repoPathRef.current, tokenCount: 0, runningTotal: 0 });
-  }, [connected, resetFirstTurnPlanCapture, syncMessages, turnOptionResolution, updateRunningTotal]);
+  }, [connected, resetFirstTurnPlanCapture, syncMessages, threadIdRef, turnOptionResolution, updateRunningTotal]);
 
   const archiveMissionThread = useCallback(async (detail: OrchestratorMissionCompletedDetail) => {
     const activeRepoPath = repoPathRef.current;
@@ -584,7 +584,7 @@ export function useOrchestratorStream(
     ws.onerror = () => {
       // onclose will fire after this
     };
-  }, [finalizeFirstTurnPlanCapture, flushCurrentAssistant, scheduleFlushCurrentAssistant, healStaleBusyState, reconcileSnapshotTerminalTurn, settlePendingSend]);
+  }, [allowUnboundRecoveryRef, finalizeFirstTurnPlanCapture, flushCurrentAssistant, scheduleFlushCurrentAssistant, healStaleBusyState, reconcileSnapshotTerminalTurn, settlePendingSend, threadIdRef]);
 
   const setPendingStatusReady = useCallback(() => {
     const nextStatus = wsRef.current?.readyState === WebSocket.OPEN || connected ? 'ready' : 'connecting';
@@ -761,7 +761,7 @@ export function useOrchestratorStream(
       resumePrelude: primed.resumePrelude,
       tokensAfter: primed.nextTotal,
     };
-  }, [primeCompactedSession, requestCompaction]);
+  }, [primeCompactedSession, requestCompaction, threadIdRef]);
 
   // #624 — User clicked the stop pill. Fire-and-forget the interrupt message
   // to ws-server and optimistically flip status back to ready/connecting so
@@ -792,7 +792,7 @@ export function useOrchestratorStream(
       activeTurnRef.current = null;
       currentAssistantRef.current = null;
     }
-  }, [connected, syncMessages, turnOptionResolution]);
+  }, [connected, syncMessages, threadIdRef, turnOptionResolution]);
   const send = useCallback((message: string, options?: OrchestratorSendOptions) => {
     if (!canReadSessionContext(repoPathRef.current, threadIdRef.current, setMessages, messagesRef)) return null;
     suppressTurnEventsRef.current = false;
@@ -980,7 +980,7 @@ export function useOrchestratorStream(
       setPendingStatusBusy();
     });
     return sendHandle;
-  }, [connect, connected, durablePendingSend, imageAdmissions, estimateNextTurnTokens, primeCompactedSession, requestCompaction, setPendingStatusBusy, turnOptionResolution, updateRunningTotal]);
+  }, [connect, connected, durablePendingSend, imageAdmissions, estimateNextTurnTokens, primeCompactedSession, requestCompaction, setPendingStatusBusy, threadIdRef, turnOptionResolution, updateRunningTotal]);
 
   const undoSend = useCallback((handle: OrchestratorSendHandle) => {
     imageAdmissions.settle(handle.clientMessageId, { status: 'cancelled' });
