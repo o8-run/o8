@@ -39,8 +39,11 @@ export const PRE_PAINT_THEME_STAMP = `
       // Windows / Linux shells have no vibrancy material either (#1743), so
       // they take the same solid path. The global is stamped by the Rust
       // initialization script at document-start — see lib/desktop/host-platform.ts.
-      var nonMacShell = window.__O8_HOST_PLATFORM__ === 'windows'
-        || window.__O8_HOST_PLATFORM__ === 'linux';
+      // Local Linux patch: O8_LINUX_GLASS=1 (window.__O8_LINUX_GLASS__) keeps
+      // the glass styling on Linux over a painted backdrop.
+      var linuxGlass = window.__O8_HOST_PLATFORM__ === 'linux' && window.__O8_LINUX_GLASS__ === true;
+      var nonMacShell = (window.__O8_HOST_PLATFORM__ === 'windows'
+        || window.__O8_HOST_PLATFORM__ === 'linux') && !linuxGlass;
       var noVibrancy = webMachine || nonMacShell;
       // ALL GLASS mode overrides both axes wholesale (mirrors effectiveSurface /
       // getPalette('dark') in context.tsx: workspace glass forces the dark-glass
@@ -49,12 +52,14 @@ export const PRE_PAINT_THEME_STAMP = `
       var storedGlass = ls.getItem('cortex-workspace-glass');
       var freshMacGlass = window.__O8_HOST_PLATFORM__ === 'macos'
         && storedGlass === null && !hasPref;
+      if (linuxGlass && storedGlass === null) freshMacGlass = true;
       if (!noVibrancy && (storedGlass === 'true' || freshMacGlass)) {
         pal = 'dark';
         surface = 'glass';
       }
       if (noVibrancy) surface = 'solid';
       var el = document.documentElement;
+      if (linuxGlass) el.dataset.linuxGlass = 'true';
       el.dataset.theme = pal;
       el.dataset.palette = pal;
       el.dataset.surface = surface;

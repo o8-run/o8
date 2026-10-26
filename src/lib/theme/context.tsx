@@ -36,7 +36,7 @@ import {
   type ResolvedTheme,
 } from './registry';
 import { isWebMachineBrowserSurface } from '@/lib/connect/web-machine-surface';
-import { isNonMacShell } from '@/lib/desktop/host-platform';
+import { isLinuxGlassShell, shellLacksGlass } from '@/lib/desktop/host-platform';
 
 export type ReduceTransparency = 'on' | 'off' | 'system';
 
@@ -158,6 +158,8 @@ function readWorkspaceGlass(): boolean {
   try {
     const stored = localStorage.getItem(WORKSPACE_GLASS_STORAGE_KEY);
     if (stored !== null) return stored === 'true';
+    // Local Linux patch: O8_LINUX_GLASS=1 defaults All Glass on unless stored 'false'.
+    if (isLinuxGlassShell()) return true;
     const macShell = (window as unknown as { __O8_HOST_PLATFORM__?: unknown }).__O8_HOST_PLATFORM__ === 'macos';
     return macShell && !isWebMachineBrowserSurface() && !hasStoredThemePreference();
   } catch {
@@ -441,7 +443,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   // Windows / Linux shells have no vibrancy backdrop for glass to bleed
   // (#1743) — the same "nothing behind the chrome" condition as the relayed
   // browser surface, so it takes the same forceSolid path.
-  const nonMacShell = isNonMacShell();
+  const nonMacShell = shellLacksGlass();
 
   const [workspaceGlass, setWorkspaceGlassState] = useState<boolean>(() => readWorkspaceGlass());
 
