@@ -455,10 +455,17 @@ function stampClientAddr(server) {
       return true;
     };
     try {
-      if (!isAllowedLocalHost(req.headers.host, req.socket?.localPort)
-        || !requestTargetAllowed(req.url, req.socket?.localPort)) return refuse(421);
-      const get = (name) => typeof req.headers[name] === 'string' ? req.headers[name] : null;
-      if (!browserWriteAllowed(req.method, get, req.socket?.encrypted ? 'https:' : 'http:')) return refuse(403);
+      // PORT identifies Next's app listener, not auxiliary servers such as the
+      // authenticated browser egress proxy, whose Host names the destination.
+      // Keep the boundary enabled if the app port cannot be identified.
+      const appPort = Number(process.env.PORT);
+      if (!Number.isInteger(appPort) || appPort < 1 || appPort > 65535
+        || req.socket?.localPort === appPort) {
+        if (!isAllowedLocalHost(req.headers.host, req.socket.localPort)
+          || !requestTargetAllowed(req.url, req.socket.localPort)) return refuse(421);
+        const get = (name) => typeof req.headers[name] === 'string' ? req.headers[name] : null;
+        if (!browserWriteAllowed(req.method, get, req.socket?.encrypted ? 'https:' : 'http:')) return refuse(403);
+      }
       const peer = req.socket?.remoteAddress || '';
       const loopbackPeer = peer === '::1' || peer === '127.0.0.1' || peer.startsWith('127.') || peer.startsWith('::ffff:127.');
       const requestedRelaySurface = req.headers['x-o8-relay-surface'];

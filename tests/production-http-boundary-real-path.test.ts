@@ -1,12 +1,13 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
-import { copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { request as httpRequest } from 'node:http';
+import { copyFileSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer as createHttpServer, request as httpRequest } from 'node:http';
 import { connect, createServer, type Server, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runInNewContext } from 'node:vm';
+import { buildSync } from 'esbuild';
 import { NextRequest, NextResponse } from 'next/server';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterAll, beforeAll, beforeEach, expect, it, vi } from 'vitest';
@@ -33,6 +34,8 @@ let port: number;
 let nativeCalls = 0;
 let handlerCalls = 0;
 let setupError: unknown;
+let proxyOptions: { server: string; username: string; password: string };
+const egressHost = 'egress.fixture.invalid';
 
 function fixtureReady(serverChild: ChildProcess): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -83,13 +86,24 @@ async function prepareFixture() {
   writeFileSync(join(root, 'server.js'), wrapper);
   stagePackagedNativeAddons({ projectRoot: process.cwd(), serverRoot: root, platform: 'darwin' });
   copyFileSync('scripts/lib/http-request-boundary.cjs', join(root, 'http-request-boundary.cjs'));
+  buildSync({
+    entryPoints: ['src/lib/browser-engine/egress-proxy.ts'],
+    outfile: join(root, 'egress-proxy.cjs'), bundle: true, platform: 'node', format: 'cjs',
+    alias: { 'server-only': join(process.cwd(), 'tests/stubs/server-only.ts') },
+  });
   writeFileSync(join(root, 'server-impl.js'), `
 const http = require('node:http');
+const { BrowserEgressProxy } = require('./egress-proxy.cjs');
 let next = 0; const responses = new Map();
 process.on('message', message => { const res = responses.get(message.id); if (!res) return; responses.delete(message.id); res.writeHead(message.status, message.headers || {}); res.end(message.body); });
 const server = http.createServer(async (req, res) => { const chunks = []; for await (const chunk of req) chunks.push(chunk); const id = ++next; responses.set(id, res); process.send({ id, method: req.method, url: req.url, headers: req.headers, body: Buffer.concat(chunks).toString() }); });
 if (!process.env.O8_FIXTURE_NO_UPGRADE) server.on('upgrade', (_req, socket) => socket.end('HTTP/1.1 101 Switching Protocols\\r\\nConnection: Upgrade\\r\\nUpgrade: websocket\\r\\n\\r\\n'));
-server.listen(0, '127.0.0.1', () => process.send({ ready: true, port: server.address().port }));
+server.listen(0, '127.0.0.1', async () => {
+  // Next's production startServer records its selected port before routing.
+  process.env.PORT = String(server.address().port);
+  const proxy = await new BrowserEgressProxy().listen();
+  process.send({ ready: true, port: server.address().port, proxyOptions: proxy.contextOptions('capture') });
+});
 `);
   const { panelGateMiddleware, config } = await import('@/middleware');
   const { POST } = await import('@/app/api/mcp/route');
@@ -97,8 +111,8 @@ server.listen(0, '127.0.0.1', () => process.send({ ready: true, port: server.add
   child = spawn(process.execPath, [join(root, 'server.js')], { env: { ...process.env,
     O8_DATA_DIR: root, CORTEX_IDE_DATA_DIR: root }, stdio: ['ignore', 'ignore', 'pipe', 'ipc'] });
   const ready = fixtureReady(child);
-  child.on('message', async (message: Forwarded & { ready?: boolean; port?: number }) => {
-    if (message.ready) return;
+  child.on('message', async (message: Forwarded & { ready?: boolean; port?: number; proxyOptions: typeof proxyOptions }) => {
+    if (message.ready) { proxyOptions = message.proxyOptions; return; }
     handlerCalls++;
     try {
       const req = new NextRequest(new URL(message.url, `http://127.0.0.1:${port}`), { method: message.method,
@@ -139,14 +153,46 @@ afterAll(async () => {
   vi.unstubAllEnvs(); rmSync(root, { recursive: true, force: true });
 });
 
-function request(host: string, path = '/', options: { method?: string; headers?: Record<string, string>; body?: string } = {}) {
+function request(host: string, path = '/', options: { method?: string; headers?: Record<string, string>; body?: string; port?: number } = {}) {
   return new Promise<{ status: number; body: string }>((resolve, reject) => {
-    const req = httpRequest({ host: '127.0.0.1', port, path, method: options.method ?? 'GET',
+    const req = httpRequest({ host: '127.0.0.1', port: options.port ?? port, path, method: options.method ?? 'GET',
       headers: { host, ...options.headers } }, res => { let body = ''; res.setEncoding('utf8'); res.on('data', chunk => { body += chunk; }); res.on('end', () => resolve({ status: res.statusCode!, body })); });
     req.on('upgrade', (res, socket) => { socket.destroy(); resolve({ status: res.statusCode!, body: '' }); });
     req.setTimeout(10000, () => req.destroy(new Error('Fixture request timeout'))); req.on('error', reject); req.end(options.body);
   });
 }
+
+it.each(['GET', 'POST'])('preserves authenticated browser egress with a non-loopback Host (%s)', async method => {
+  const upstream = createHttpServer((req, res) => {
+    res.end(req.headers['proxy-authorization'] ? 'unexpected proxy credentials' : 'egress fixture reached');
+  });
+  await new Promise<void>(resolve => upstream.listen(0, '127.0.0.1', resolve));
+  try {
+    const address = upstream.address();
+    if (!address || typeof address === 'string') throw new Error('Missing upstream TCP port');
+    const target = `http://127.0.0.1:${address.port}/egress-fixture`;
+    const proxyPort = Number(new URL(proxyOptions.server).port);
+    const before = handlerCalls;
+    const response = await request(egressHost, target, { port: proxyPort, method, headers: {
+      'proxy-authorization': `Basic ${Buffer.from(`${proxyOptions.username}:${proxyOptions.password}`).toString('base64')}`,
+      origin: 'https://egress.fixture.invalid',
+    } });
+    expect(response.status).toBe(200);
+    expect(response.body).toBe('egress fixture reached');
+    expect((await request(egressHost, target, { port: proxyPort, method })).status).toBe(407);
+    expect(handlerCalls).toBe(before);
+  } finally { await new Promise<void>(resolve => upstream.close(() => resolve())); }
+});
+
+it('still refuses the egress Host on the app listener before dispatch', async () => {
+  const before = handlerCalls;
+  const response = await request(egressHost, '/', { headers: {
+    'proxy-authorization': `Basic ${Buffer.from(`${proxyOptions.username}:${proxyOptions.password}`).toString('base64')}`,
+  } });
+  expect(response.status).toBe(421);
+  expect(response.body).not.toContain(bearer);
+  expect(handlerCalls).toBe(before);
+});
 function bootstrapProbe(serverRoot: string) {
   return spawn(process.execPath, ['-e', `Object.defineProperty(process, 'platform', { value: 'darwin' }); require(${JSON.stringify(join(serverRoot, 'server.js'))});`], {
     env: { ...process.env, O8_DATA_DIR: root, CORTEX_IDE_DATA_DIR: root }, stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
@@ -250,6 +296,32 @@ it.each(['/api/mcp', '/api/fixture-write'])('refuses foreign or missing browser 
     expect(response.status).toBe(403); expect(nativeCalls).toBe(before);
   }
 });
+
+it('refuses foreign and null-Origin writes across the discovered app paths over TCP', async () => {
+  const paths = ['/', '/broadcast', ...readdirSync('src/app/api', { recursive: true })
+    .filter((file): file is string => typeof file === 'string' && /(^|[/\\])route\.tsx?$/.test(file))
+    .map(file => `/api/${file.split(/[/\\]/).slice(0, -1)
+      .filter(segment => !(segment.startsWith('(') && segment.endsWith(')')))
+      .map(segment => segment.startsWith('[') ? 'fixture' : segment).join('/')}`)];
+  expect(paths.length).toBeGreaterThan(100);
+  const beforeHandlers = handlerCalls;
+  const beforeNative = nativeCalls;
+  let probes = 0;
+  for (const path of paths) for (const method of ['POST', 'PUT', 'PATCH', 'DELETE']) {
+    for (const origin of ['https://untrusted.invalid', 'null']) {
+      const response = await request(`127.0.0.1:${port}`, path, { method, headers: {
+        authorization: `Bearer ${bearer}`, origin, 'sec-fetch-site': 'cross-site',
+        'content-type': 'application/json',
+      }, body: call });
+      expect(response.status, `${method} ${path} ${origin}`).toBe(403);
+      expect(response.body).not.toContain(bearer);
+      probes++;
+    }
+  }
+  expect(handlerCalls).toBe(beforeHandlers);
+  expect(nativeCalls).toBe(beforeNative);
+  console.info(`[http-request-boundary] Refused ${probes} authenticated foreign/null-Origin writes before dispatch`);
+}, 60000);
 
 it('retains authenticated native and same-origin browser MCP calls', async () => {
   const callers: Record<string, string>[] = [{}, { origin: `http://127.0.0.1:${port}`, 'sec-fetch-site': 'same-origin' }, { origin: 'tauri://localhost' }];
