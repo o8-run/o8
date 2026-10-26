@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { expect, it } from 'vitest';
-import { MacPlanStore } from './credential-store';
+import { OsPlanStore } from './credential-store';
 import { emptyPlanRecord } from './types';
 
 it.skipIf(process.platform !== 'darwin' || process.env.O8_TEST_KEYCHAIN_PLAN !== '1')('round-trips and replaces a large synthetic record in the actual OS store without credential files', async () => {
@@ -13,8 +13,8 @@ it.skipIf(process.platform !== 'darwin' || process.env.O8_TEST_KEYCHAIN_PLAN !==
   const accounts = new Set([createHash('sha256').update(owner).digest('hex')]);
   const directory = await mkdtemp(join(tmpdir(), 'o8-plan-keychain-fixture-'));
   const second = await mkdtemp(join(tmpdir(), 'o8-plan-keychain-fixture-'));
-  const store = new MacPlanStore(directory);
-  const other = new MacPlanStore(second);
+  const store = new OsPlanStore(directory);
+  const other = new OsPlanStore(second);
   const command = promisify(execFile);
   try {
     for (const profile of [store, other]) accounts.add(createHash('sha256').update(JSON.stringify(['v1', await profile.hostId(), owner])).digest('hex'));
@@ -24,10 +24,10 @@ it.skipIf(process.platform !== 'darwin' || process.env.O8_TEST_KEYCHAIN_PLAN !==
     expect(await other.read(owner)).toEqual(emptyPlanRecord(owner));
     const independent = emptyPlanRecord(owner); independent.generation = 17;
     await other.locked(owner, () => other.write(owner, independent));
-    expect(await new MacPlanStore(directory).read(owner)).toEqual(record);
+    expect(await new OsPlanStore(directory).read(owner)).toEqual(record);
     record.registrations[0].tokens = null; record.generation += 1;
-    await store.locked(owner, async () => { await store.write(owner, record); expect(await new MacPlanStore(directory).read(owner)).toEqual(record); });
-    expect(await new MacPlanStore(second).read(owner)).toEqual(independent);
+    await store.locked(owner, async () => { await store.write(owner, record); expect(await new OsPlanStore(directory).read(owner)).toEqual(record); });
+    expect(await new OsPlanStore(second).read(owner)).toEqual(independent);
     await writeFile(join(second, 'host-id'), await store.hostId());
     let entered = false;
     let pending: Promise<void> | undefined;

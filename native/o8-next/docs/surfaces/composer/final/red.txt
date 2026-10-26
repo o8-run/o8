@@ -1,0 +1,42 @@
+Reviewed head: 6811d3f442e6348b46758871e6be0b13aa48b63f
+Only the new real-path test was overlaid; no production fix.
+
+cargo test --locked --manifest-path native/o8-next/Cargo.toml --bin o8-next \
+  native_composer_review_image_only_send_persists_through_real_route \
+  -- --nocapture --test-threads=1
+
+assertion `left == right` failed: image-only Send must persist an attachment-only queue item, just like image plus text
+  left: 1
+ right: 2
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 193 filtered out; finished in 1.61s
+
+Rebased integration, before retaining the new workspace thread sidebar:
+
+assertion `left == right` failed: typing must reuse the workspace thread sidebar scene
+  left: 11
+ right: 18446744073709551615
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 251 filtered out; finished in 1.87s
+
+The expected value is the unchanged usize::MAX paint sentinel.
+
+Rebased integration, before allowing footer groups to wrap beside Brain:
+
+composer controls must fit beside the right panel
+test ui::tests::placement_empty_state_composer_and_right_panel ... FAILED
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 251 filtered out; finished in 1.42s
+
+Newer main's broker contract, before fixture responses were adapted:
+
+issues_create_enhance_preview_labels_and_success
+called `Result::unwrap()` on an `Err` value: "Server returned HTTP 404"
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 251 filtered out; finished in 5.58s
+
+Full rebased run before the fixture owner/comment changes:
+test result: FAILED. 225 passed; 21 failed; 6 ignored; 0 measured; 0 filtered out; finished in 603.18s
+
+Before staging the second fixture workspace's saved Git origin:
+real control did not reach CPU paint: issue-view-17
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 251 filtered out; finished in 12.57s
+
+The aggregate run at that point retained all tests:
+test result: FAILED. 242 passed; 4 failed; 6 ignored; 0 measured; 0 filtered out; finished in 588.74s

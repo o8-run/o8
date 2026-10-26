@@ -7,6 +7,7 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  renameSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
@@ -160,6 +161,53 @@ describe('buildSeatbeltProfile — policy shape', () => {
   });
 });
 
+describe('verified CLI ancestor protection', () => {
+  it('denies exact ancestor directory writes after mutable grants without denying their contents', () => {
+    const profile = buildSeatbeltProfile({
+      worktreePath: '/tmp/packet', repoPath: '/tmp/packet', homeDir: '/operator', tmpDir: '/tmp',
+      finalAllowReadWritePaths: ['/tmp/runtime'], finalImmutableWritePaths: ['/tmp/data/worker-cli'],
+      finalImmutableAncestorPaths: ['/tmp/data', '/tmp', '/'],
+    });
+    const block = profile.slice(profile.indexOf(';; keep verified CLI ancestors immutable'));
+    expect(block).toContain('(literal "/tmp/data")');
+    expect(block).toContain('(literal "/tmp")');
+    expect(block).toContain('(literal "/")');
+    expect(block).not.toContain('(subpath');
+    expect(profile.indexOf(';; keep verified CLI ancestors immutable')).toBeGreaterThan(profile.lastIndexOf('(allow file-read* file-write*'));
+  });
+
+  it.skipIf(!isDarwin)('refuses ancestor replacement and CLI changes while allowing sibling writes', () => {
+    const root = realpathSync(tmpRoot('o8-cli-ancestors-'));
+    const data = path.join(root, 'data');
+    const cli = path.join(data, 'worker-cli'); mkdirSync(cli, { recursive: true });
+    const bundle = path.join(cli, 'o8.mjs'); writeFileSync(bundle, 'verified');
+    const ancestors: string[] = [];
+    for (let current = data; ; current = path.dirname(current)) {
+      ancestors.push(current); if (current === path.dirname(current)) break;
+    }
+    const profile = buildSeatbeltProfile({ worktreePath: root, repoPath: root,
+      homeDir: os.homedir(), tmpDir: root, extraDenyPaths: [data],
+      finalAllowReadPaths: [cli, bundle], finalImmutableWritePaths: [cli], finalImmutableAncestorPaths: ancestors,
+    });
+    const result = JSON.parse(execFileSync(SANDBOX_EXEC_PATH, ['-p', profile, process.execPath, '-e', `
+      const fs = require('node:fs');
+      const denied = action => { try { action(); return false; } catch { return true; } };
+      fs.writeFileSync(${JSON.stringify(path.join(root, 'sibling.txt'))}, 'allowed');
+      console.log(JSON.stringify({
+        bundle: denied(() => fs.writeFileSync(${JSON.stringify(bundle)}, 'changed')),
+        rename: denied(() => fs.renameSync(${JSON.stringify(data)}, ${JSON.stringify(data + '-moved')})),
+        ancestor: denied(() => fs.renameSync(${JSON.stringify(root)}, ${JSON.stringify(root + '-moved')})),
+        symlink: denied(() => { fs.unlinkSync(${JSON.stringify(bundle)}); fs.symlinkSync(${JSON.stringify(root)}, ${JSON.stringify(bundle)}); }),
+      }));
+    `], { encoding: 'utf8' }));
+    if (existsSync(root + '-moved')) renameSync(root + '-moved', root);
+    if (existsSync(data + '-moved')) renameSync(data + '-moved', data);
+    expect(result).toEqual({ bundle: true, rename: true, ancestor: true, symlink: true });
+    expect(readFileSync(path.join(root, 'sibling.txt'), 'utf8')).toBe('allowed');
+    expect(readFileSync(bundle, 'utf8')).toBe('verified');
+  });
+});
+
 describe('prepareWorkerSandbox — the exact wrapper store.ts spawns', () => {
   it.skipIf(!isDarwin)('wraps binary+args with sandbox-exec -f <profile> (enabled path)', async () => {
     const worktree = tmpRoot('o8-sbx-wt-');
@@ -249,15 +297,8 @@ describe('prepareWorkerSandbox — the exact wrapper store.ts spawns', () => {
   });
 
   it('is FAIL-CLOSED — throws SandboxUnavailableError when the profile cannot be written', async () => {
-    if (!isDarwin) {
-      // On a non-darwin host the platform guard is the fail-closed trigger.
-      await expect(prepareWorkerSandbox({
-        runId: 'r', profileDir: '/tmp', cwd: '/tmp', repoPath: '/tmp',
-        binary: '/bin/echo', args: [],
-      })).rejects.toBeInstanceOf(SandboxUnavailableError);
-      return;
-    }
-    // darwin: an unwritable profile dir must refuse, never spawn unsandboxed.
+    // An unwritable profile dir must refuse, never spawn unsandboxed. Hosts
+    // without a sandbox backend (or without bwrap on Linux) refuse earlier.
     await expect(prepareWorkerSandbox({
       runId: 'r',
       profileDir: '/this/path/does/not/exist/and/is/unwritable',

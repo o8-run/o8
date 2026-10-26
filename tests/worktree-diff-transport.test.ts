@@ -121,9 +121,9 @@ describe('bounded worktree diff transport', () => {
     const absolute = await getDiff(request('diff', { worktreePath: cwd, file: '/etc/passwd' }));
 
     expect(traversal.status).toBe(400);
-    await expect(traversal.json()).resolves.toEqual({ error: 'invalid_file_path' });
+    await expect(traversal.json()).resolves.toEqual({ error: 'invalid_file_path', redaction: { version: 1, offsetEncoding: 'utf-8', spans: [] } });
     expect(absolute.status).toBe(400);
-    await expect(absolute.json()).resolves.toEqual({ error: 'invalid_file_path' });
+    await expect(absolute.json()).resolves.toEqual({ error: 'invalid_file_path', redaction: { version: 1, offsetEncoding: 'utf-8', spans: [] } });
   });
 
   it('returns a typed 409 when a selected diff is pinned to a stale HEAD', async () => {
@@ -162,7 +162,8 @@ describe('bounded worktree diff transport', () => {
     expect(selected.truncationReason).toBe('max_bytes');
     expect(selected.maxBytes).toBe(80);
     expect(Buffer.byteLength(selected.diff, 'utf8')).toBeLessThanOrEqual(80);
-    expect(selected.diff).toContain('[diff truncated at 80 bytes]');
+    expect(selected.diff).toMatch(/^\[redacted\]\n?$/);
+    expect(selected.redaction.spans).toContainEqual({ path: '/diff', start: 0, end: 10, kind: 'credential' });
     expect(selected.sizeBytes).toBeGreaterThan(80);
     expect(selected.sizeBytesExact).toBe(false);
 
@@ -186,7 +187,8 @@ describe('bounded worktree diff transport', () => {
     });
     expect(typeof legacy.diff).toBe('string');
     expect(Buffer.byteLength(legacy.diff, 'utf8')).toBeLessThanOrEqual(80);
-    expect(legacy.diff).toContain('[diff truncated at 80 bytes]');
+    expect(legacy.diff).toMatch(/^\[redacted\]\n?$/);
+    expect(legacy.redaction.spans).toContainEqual({ path: '/diff', start: 0, end: 10, kind: 'credential' });
   });
 
   it('keeps the legacy structured empty response for a missing worktree', async () => {

@@ -7,6 +7,7 @@ import path from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { withPacketLifecycleSpawnLock } from '@/lib/orchestrator/lifecycle-mutation-lock';
 import { WorkspaceLifecycleLeaseUnavailableError } from '@/lib/orchestrator/workspace-lifecycle-lease';
+import { workerO8CliRoot } from './worker-o8-cli-paths';
 
 export const OWNED_ARTIFACT_POLICY = { maxBytes: 4 * 1024 ** 3, maxEntries: 10_000 } as const;
 const heldRoots = new AsyncLocalStorage<Map<string, { active: boolean; admitted: boolean }>>();
@@ -114,8 +115,10 @@ async function measureArtifacts(root: string): Promise<void> {
       }
     }
   };
-  await visit(root, 0, true);
-  await visit(`${root}-archive`, 0, true);
+  const roots = [root, `${root}-archive`, workerO8CliRoot()];
+  for (const candidate of roots.filter((candidate, index) => !roots.some((parent, other) => (
+    (other < index && parent === candidate) || (other !== index && candidate.startsWith(parent + path.sep))
+  )))) await visit(candidate, 0, true);
   for (const [name, before] of observed) {
     const after = await optionalStat(name);
     if (!before ? after !== null : !after || !sameIdentity(before, after)
@@ -139,10 +142,14 @@ export async function withOwnedArtifactRootLock<T>(root: string, operation: () =
         if (error instanceof OwnedArtifactAdmissionError) throw error;
         throw new OwnedArtifactAdmissionError('the lifecycle store binding could not be verified');
       }
-      const authority = { active: true, admitted: false };
-      try {
-        return await heldRoots.run(new Map([...(heldRoots.getStore() ?? []), [canonical, authority]]), operation);
-      } finally { authority.active = false; }
+      const cliNamespace = path.join(await realpath(path.dirname(workerO8CliRoot())), 'worker-cli');
+      return withPacketLifecycleSpawnLock(`owned-cli-artifacts:${createHash('sha256').update(cliNamespace).digest('hex')}`, async () => {
+        await bindStore(cliNamespace);
+        const authority = { active: true, admitted: false };
+        try {
+          return await heldRoots.run(new Map([...(heldRoots.getStore() ?? []), [canonical, authority]]), operation);
+        } finally { authority.active = false; }
+      });
     });
   } catch (error) {
     if (error instanceof WorkspaceLifecycleLeaseUnavailableError) {
@@ -150,6 +157,11 @@ export async function withOwnedArtifactRootLock<T>(root: string, operation: () =
     }
     throw error;
   }
+}
+
+/** Recheck new CLI bytes even when initial admission is already held. */
+export async function assertOwnedArtifactBudget(root: string): Promise<void> {
+  return withOwnedArtifactRootLock(root, async () => measureArtifacts(await canonicalRoot(root)));
 }
 
 export async function withOwnedArtifactAdmission<T>(

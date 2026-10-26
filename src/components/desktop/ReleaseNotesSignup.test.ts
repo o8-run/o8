@@ -74,8 +74,8 @@ it('offers signup only on the final setup screen and can finish while signup is 
   await submit();
   expect(button('Subscribing…').disabled).toBe(true);
   await act(async () => button('Keep crash reports off').click());
-  await act(async () => button('Keep product usage off').click());
-  await act(async () => button('Save both choices').click());
+  await act(async () => button('Turn off').click());
+  await act(async () => button('Save privacy choices').click());
   expect(complete).toHaveBeenCalledWith(undefined);
 });
 

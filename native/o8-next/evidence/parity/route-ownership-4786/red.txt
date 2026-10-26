@@ -1,0 +1,71 @@
+✓ tests/next-parity-route-ownership-real-path.test.ts > handles each Settings request once with overlapping routes (normal) 1581ms
+ × tests/next-parity-route-ownership-real-path.test.ts > handles each Settings request once with overlapping routes (pending) 1618ms
+   → expected [ 503, 503 ] to deeply equal [ 200, 200 ]
+ × tests/next-parity-route-ownership-real-path.test.ts > handles each Settings request once with overlapping routes (disposed) 810ms
+   → route.fulfill: Route is already handled!
+    at route.fulfill (<repo>/tests/fixtures/next-parity-route-ownership.mjs:85:17)
+    at <repo>/scripts/parity/web.mjs:25:29
+    at async file://<repo>/tests/fixtures/next-parity-route-ownership.mjs:90:9
+: expected [ 2, 1, 1, 1 ] to deeply equal [ 1, 1, 1, 1 ]
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/next-parity-route-ownership-real-path.test.ts > handles each Settings request once with overlapping routes (pending)
+AssertionError: expected [ 503, 503 ] to deeply equal [ 200, 200 ]
+
+- Expected
++ Received
+
+  [
+-   200,
+-   200,
++   503,
++   503,
+  ]
+
+ ❯ tests/next-parity-route-ownership-real-path.test.ts:36:106
+     34|         expect(data.errors).toEqual([]);
+     35|         expect(data.requests.map(request => request.fulfilled)).toEqua…
+     36|         expect(data.requests.filter(request => request.method === 'GET…
+       |                                                                                                          ^
+     37|       }
+     38|     } finally { rmSync(root, { recursive: true, force: true }); }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  tests/next-parity-route-ownership-real-path.test.ts > handles each Settings request once with overlapping routes (disposed)
+AssertionError: route.fulfill: Route is already handled!
+    at route.fulfill (<repo>/tests/fixtures/next-parity-route-ownership.mjs:85:17)
+    at <repo>/scripts/parity/web.mjs:25:29
+    at async file://<repo>/tests/fixtures/next-parity-route-ownership.mjs:90:9
+: expected [ 2, 1, 1, 1 ] to deeply equal [ 1, 1, 1, 1 ]
+
+- Expected
++ Received
+
+  [
+-   1,
++   2,
+    1,
+    1,
+    1,
+  ]
+
+ ❯ route.fulfill tests/fixtures/next-parity-route-ownership.mjs:85:17
+ ❯ scripts/parity/web.mjs:25:29
+ ❯ tests/fixtures/next-parity-route-ownership.mjs:90:9
+ ❯ tests/next-parity-route-ownership-real-path.test.ts:24:77
+     22|       expect(data.requests.length, result.stderr).toBe(4);
+     23|       expect(data.overlap).toBe(4);
+     24|       expect(data.requests.map(request => request.attempts), result.st…
+       |                                                                             ^
+     25|       expect(data.requests.map(request => request.continued)).toEqual(…
+     26|       expect(data.forwarded).toBe(3);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 1 passed (3)
+   Start at  02:55:44
+   Duration  4.57s (transform 28ms, setup 40ms, import 339ms, tests 4.02s, environment 0ms)

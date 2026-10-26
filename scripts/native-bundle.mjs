@@ -21,6 +21,8 @@ import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
+import { verifyNextAppSidecar } from './next/verify-app-bundle.mjs';
+
 export const SUPPORTED_NODE_MAJORS = [22, 24];
 export const NATIVE_ABI_MANIFEST = 'native-addon-abis.json';
 const NODE_RELEASE_INDEX_URL = 'https://nodejs.org/dist/index.json';
@@ -390,6 +392,7 @@ function readNativeAbiManifest(serverRoot) {
 
 export function verifyNativeBundle(serverRoot, log = console.log) {
   const resolvedServerRoot = resolve(serverRoot);
+  verifyNextAppSidecar(resolve(resolvedServerRoot, '../../..'));
   const manifest = readNativeAbiManifest(resolvedServerRoot);
   const required = [];
   for (const major of SUPPORTED_NODE_MAJORS) {

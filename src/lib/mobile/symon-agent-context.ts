@@ -1,6 +1,7 @@
 import { resolve } from 'node:path';
 import { findRepoByLocalPath } from '@/lib/repos/registry';
 import type { SymonWorkspaceMode } from '@/lib/mobile/symon-agent-registry';
+import { isMobileAskEffort, type MobileAskEffort } from '@/lib/mobile/ask-model-routing';
 
 const CONTEXT_BODY_MAX_CHARS = 4_096;
 const CURRENT_ROUTE_MAX_CHARS = 160;
@@ -13,6 +14,9 @@ const PROMPT_CONTROL_PATTERN =
 
 export interface SymonAgentContext {
   model?: string;
+  effort?: MobileAskEffort;
+  invalidEffort?: boolean;
+  invalidBody?: boolean;
   workspaceMode?: 'o8' | 'code';
   launchKind?: 'repository-catch-up';
   currentRoute?: string;
@@ -97,12 +101,13 @@ function safeSurface(value: unknown): string | undefined {
 
 export async function readSymonAgentContext(request: Request): Promise<SymonAgentContext> {
   const declaredLength = Number(request.headers.get('content-length'));
-  if (Number.isFinite(declaredLength) && declaredLength > CONTEXT_BODY_MAX_CHARS) return {};
+  if (Number.isFinite(declaredLength) && declaredLength > CONTEXT_BODY_MAX_CHARS) return { invalidBody: true };
   try {
     const text = await request.text();
-    if (!text || text.length > CONTEXT_BODY_MAX_CHARS) return {};
+    if (!text) return {};
+    if (text.length > CONTEXT_BODY_MAX_CHARS) return { invalidBody: true };
     const body = JSON.parse(text) as unknown;
-    if (!body || typeof body !== 'object' || Array.isArray(body)) return {};
+    if (!body || typeof body !== 'object' || Array.isArray(body)) return { invalidBody: true };
     const record = body as Record<string, unknown>;
     const repoPath = safeRepoPath(record.repoPath);
     const threadId = safeIdentifier(record.threadId, 160);
@@ -111,6 +116,8 @@ export async function readSymonAgentContext(request: Request): Promise<SymonAgen
       model: typeof record.model === 'string' && record.model.length <= MODEL_ID_MAX_CHARS
         ? record.model
         : undefined,
+      effort: isMobileAskEffort(record.effort) ? record.effort : undefined,
+      invalidEffort: record.effort !== undefined && !isMobileAskEffort(record.effort),
       workspaceMode: record.workspaceMode === 'o8' || record.workspaceMode === 'code' ? record.workspaceMode : undefined,
       launchKind: record.launchKind === 'repository-catch-up' ? record.launchKind : undefined,
       currentRoute: safeRoute(record.currentRoute),
@@ -130,7 +137,7 @@ export async function readSymonAgentContext(request: Request): Promise<SymonAgen
       activeSurface: safeSurface(record.activeSurface),
     };
   } catch {
-    return {};
+    return { invalidBody: true };
   }
 }
 

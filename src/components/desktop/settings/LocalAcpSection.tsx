@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { RamsButton } from './shared';
 import { AcpRegistryPicker } from './AcpRegistryPicker';
 import { RuntimeBillingRow } from './RuntimeBillingRow';
+import { LocalAcpEnvironment } from './LocalAcpEnvironment';
 
 const fieldStyle = { width: '100%', boxSizing: 'border-box' as const, border: '1px solid var(--t-border)', borderRadius: 8, padding: 10, background: 'var(--t-input-bg)', color: 'var(--t-text)', fontFamily: 'var(--font-sans-system)', fontSize: 12 };
 export function LocalAcpSection() {
@@ -98,6 +99,7 @@ export function LocalAcpSection() {
       <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}><RamsButton variant="primary" busy={busy} disabled={!command.trim() || !name.trim()} onClick={() => void save()}>Save connection</RamsButton><RamsButton variant="ghost" disabled={!saved} onClick={() => void checkModels()}>Check connection</RamsButton></div>
     {configured ? <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>{confirmRemove ? <><span>Disconnect for new conversations? </span><RamsButton variant="ghost" onClick={() => setConfirmRemove(false)}>Cancel</RamsButton><RamsButton variant="ghost" onClick={() => void remove()}>Disconnect</RamsButton></> : <RamsButton variant="ghost" onClick={() => setConfirmRemove(true)}>Remove connection</RamsButton>}</div> : null}
     </fieldset>
+    {configured && !locked ? <LocalAcpEnvironment /> : null}
     {notice ? <p role="status">{notice}</p> : null}
     <p style={{ color: 'var(--t-text-muted)' }}>Check starts the agent and reads its capabilities without sending a prompt.</p>
   </div>;

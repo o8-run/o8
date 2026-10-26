@@ -43,6 +43,7 @@ interface WorkspaceTranscriptProps {
   isStreaming?: boolean;
   laneId?: string | null;
   onOpenReview?: () => void;
+  showHandback?: boolean;
   handback?: WorkerHandbackData;
   onRunInTerminal?: (command: string) => void;
   onPermissionDecision?: (request: PermissionRequest, decision: ClaudePermissionDecision) => Promise<void> | void;
@@ -132,6 +133,7 @@ export const WorkspaceTranscript = memo(function WorkspaceTranscript({
   laneId,
   onOpenReview,
   handback,
+  showHandback = true,
 }: WorkspaceTranscriptProps) {
   const renderItems = composeWorkspaceTranscriptWithPeers(entries, peerMessages, packetHeader);
   const references = useTranscriptVisualizations({ packetId, active, length: entries.length });
@@ -180,8 +182,8 @@ export const WorkspaceTranscript = memo(function WorkspaceTranscript({
         />
       );
     })}
-    {handback && markLast && !isStreaming ? <WorkerHandback data={handback} repoPath={repoPath} onReview={onOpenReview} />
-      : <PacketWorkerHandback laneId={laneId ?? packetId} repoPath={repoPath} finished={markLast && !isStreaming} revision={entries.at(-1)?.id ?? ''} onReview={onOpenReview} />}
+    {showHandback ? handback && markLast && !isStreaming ? <WorkerHandback data={handback} repoPath={repoPath} onReview={onOpenReview} />
+      : <PacketWorkerHandback laneId={laneId ?? packetId} repoPath={repoPath} finished={markLast && !isStreaming} revision={entries.at(-1)?.id ?? ''} onReview={onOpenReview} /> : null}
   </div>;
 });
 

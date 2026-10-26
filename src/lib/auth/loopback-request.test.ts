@@ -58,7 +58,7 @@ describe('headersIndicateLoopback', () => {
 
   it('trusts the socket-truth header when it carries a loopback address', () => {
     expect(
-      headersIndicateLoopback(headerGetter({ [O8_CLIENT_ADDR_HEADER]: '127.0.0.1' })),
+      headersIndicateLoopback(headerGetter({ host: 'localhost:3001', [O8_CLIENT_ADDR_HEADER]: '127.0.0.1' })),
     ).toBe(true);
   });
 

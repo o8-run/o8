@@ -1,10 +1,14 @@
 /** Named handler exports for the lazy native shell transport; retain existing route auth. */
 import { GET as api_mobile_orchestrator_threads_GET } from '@/app/api/mobile/orchestrator/threads/route';
 import { GET as api_orchestrator_state_GET, PATCH as api_orchestrator_state_PATCH } from '@/app/api/orchestrator/state/route';
+import { GET as api_lanes_GET } from '@/app/api/lanes/route';
+import { GET as api_orchestrator_lane_events_GET } from '@/app/api/orchestrator/lane-events/route';
 import { GET as api_runtime_inventory_GET } from '@/app/api/runtime/inventory/route';
 import { GET as api_mobile_history_GET } from '@/app/api/mobile/history/route';
 import { GET as api_mobile_terminal_sessions_GET } from '@/app/api/mobile/terminal-sessions/route';
-import { GET as api_v2_chat_history_GET, POST as api_v2_chat_history_POST } from '@/app/api/v2/chat-history/route';
+import { GET as api_v2_chat_history_GET, POST as api_v2_chat_history_POST, PATCH as api_v2_chat_history_PATCH } from '@/app/api/v2/chat-history/route';
+import { GET as api_v2_chat_history_list_GET } from '@/app/api/v2/chat-history/list/route';
+import { POST as api_runtime_archive_POST } from '@/app/api/runtime/archive/route';
 import { GET as api_setup_config_GET, POST as api_setup_config_POST } from '@/app/api/setup/config/route';
 import { GET as api_orchestrator_composer_queue_GET, POST as api_orchestrator_composer_queue_POST, PATCH as api_orchestrator_composer_queue_PATCH, DELETE as api_orchestrator_composer_queue_DELETE } from '@/app/api/orchestrator/composer-queue/route';
 import { GET as api_panel_ws_info_GET } from '@/app/api/panel/ws-info/route';
@@ -57,10 +61,14 @@ import { POST as api_review_auto_review_POST } from '@/app/api/review/auto-revie
 
 export const api_mobile_orchestrator_threads = { GET: api_mobile_orchestrator_threads_GET };
 export const api_orchestrator_state = { GET: api_orchestrator_state_GET, PATCH: api_orchestrator_state_PATCH };
+export const api_lanes = { GET: api_lanes_GET };
+export const api_orchestrator_lane_events = { GET: api_orchestrator_lane_events_GET };
 export const api_runtime_inventory = { GET: api_runtime_inventory_GET };
 export const api_mobile_history = { GET: api_mobile_history_GET };
 export const api_mobile_terminal_sessions = { GET: api_mobile_terminal_sessions_GET };
-export const api_v2_chat_history = { GET: api_v2_chat_history_GET, POST: api_v2_chat_history_POST };
+export const api_v2_chat_history = { GET: api_v2_chat_history_GET, POST: api_v2_chat_history_POST, PATCH: api_v2_chat_history_PATCH };
+export const api_v2_chat_history_list = { GET: api_v2_chat_history_list_GET };
+export const api_runtime_archive = { POST: api_runtime_archive_POST };
 export const api_setup_config = { GET: api_setup_config_GET, POST: api_setup_config_POST };
 export const api_orchestrator_composer_queue = { GET: api_orchestrator_composer_queue_GET, POST: api_orchestrator_composer_queue_POST, PATCH: api_orchestrator_composer_queue_PATCH, DELETE: api_orchestrator_composer_queue_DELETE };
 export const api_panel_ws_info = { GET: api_panel_ws_info_GET };

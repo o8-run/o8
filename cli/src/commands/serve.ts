@@ -26,6 +26,7 @@ import { validateReviewMode } from '../../../src/lib/lane/review-mode.js';
 import { renewServeToken } from './serve-token.js';
 import { CLI_VERSION } from './version.js';
 import { outputServeNotRunning, outputServeState, outputServeStopped } from './serve-output.js';
+import { resolveListenHost } from '../../../src/lib/panel/listen-host.js';
 
 const PROD_API_PORT_BLOCK = [47100, 47101, 47102, 47103, 47104] as const;
 const PROD_WS_PORT_BLOCK = [47105, 47106, 47107, 47108, 47109] as const;
@@ -370,7 +371,7 @@ function spawnService(
   apiPort: number,
 ): ChildProcess {
   const args = role === 'api' && plan.mode === 'development'
-    ? [...entry.args, '-p', String(apiPort)]
+    ? [...entry.args, '-p', String(apiPort), '-H', resolveListenHost(env)]
     : entry.args;
   return spawn(entry.command, args, {
     cwd: plan.root,
@@ -620,6 +621,9 @@ async function runDaemon(): Promise<number> {
     O8_WS_PORT: String(wsPort),
     PORT: String(apiPort),
     WS_PORT: String(wsPort),
+    // Next's standalone server binds HOSTNAME (default 0.0.0.0, and a login
+    // shell's HOSTNAME is the machine name). Loopback unless O8_LAN_ACCESS=1.
+    HOSTNAME: resolveListenHost(process.env),
     NEXT_ORIGIN: `http://127.0.0.1:${apiPort}`,
     O8_BOOT_ID: bootId,
     O8_INSTANCE_ID: instanceId,
