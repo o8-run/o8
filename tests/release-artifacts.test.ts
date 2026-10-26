@@ -146,7 +146,7 @@ describe('release updater manifest', () => {
       signature: `${architecture}-signature`,
       identity: {
         kind: 'macos-cpu-app' as const, architectures: [architecture] as ['x86_64' | 'arm64'], sourceBundleSha256: 'a'.repeat(64),
-        binaries: ['o8', 'speech_recognizer', 'speech-local', 'o8-pi-write'].map((name) => ({
+        binaries: ['o8', 'speech_recognizer', 'speech-local', 'o8-pi-write', 'o8-next'].map((name) => ({
           relativePath: `Contents/MacOS/${name}`, architectures: [architecture] as Array<'x86_64' | 'arm64'>, sha256: 'b'.repeat(64),
         })),
         updaterArchiveSha256: 'c'.repeat(64), bundleSha256: 'd'.repeat(64),

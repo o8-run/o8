@@ -93,7 +93,7 @@ function appFixture() {
   const root = mkdtempSync(join(tmpdir(), 'o8-universal-app-'));
   roots.push(root);
   const app = join(root, 'o8.app');
-  for (const name of ['o8', 'speech_recognizer', 'speech-local', 'o8-pi-write']) {
+  for (const name of ['o8', 'speech_recognizer', 'speech-local', 'o8-pi-write', 'o8-next']) {
     const path = join(app, 'Contents', 'MacOS', name);
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, universalMachO());
@@ -132,7 +132,7 @@ function signedAppFixture(version: string) {
   const app = join(root, 'o8.app');
   const macos = join(app, 'Contents', 'MacOS');
   mkdirSync(macos, { recursive: true });
-  for (const name of ['o8', 'speech_recognizer', 'speech-local', 'o8-pi-write']) {
+  for (const name of ['o8', 'speech_recognizer', 'speech-local', 'o8-pi-write', 'o8-next']) {
     const path = join(macos, name);
     copyFileSync('/usr/bin/true', path);
     chmodSync(path, 0o755);
@@ -204,6 +204,7 @@ describe('stable macOS release artifact identity', () => {
       'Contents/MacOS/speech_recognizer',
       'Contents/MacOS/speech-local',
       'Contents/MacOS/o8-pi-write',
+      'Contents/MacOS/o8-next',
     ]);
     expect(identity.binaries.every((binary) => binary.sha256.length === 64)).toBe(true);
     expect(readMachOArchitectures(join(app, 'Contents/MacOS/o8')))
@@ -251,7 +252,7 @@ describe('stable macOS release artifact identity', () => {
       for (const path of [app, join(app, 'Contents'), join(app, 'Contents/MacOS')]) {
         chmodSync(path, 0o755);
       }
-      for (const name of ['o8', 'speech_recognizer', 'speech-local', 'o8-pi-write']) {
+      for (const name of ['o8', 'speech_recognizer', 'speech-local', 'o8-pi-write', 'o8-next']) {
         chmodSync(join(app, 'Contents/MacOS', name), 0o755);
       }
       const resources = join(app, 'Contents/Resources');
