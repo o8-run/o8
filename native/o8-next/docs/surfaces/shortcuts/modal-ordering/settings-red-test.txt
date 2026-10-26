@@ -1,0 +1,41 @@
+use super::*;
+
+fn tabs(shell: &Entity<Shell>, cx: &VisualTestContext) -> (Vec<Tab>, usize) {
+    shell.read_with(cx, |s, _| {
+        let saved = s.current().unwrap();
+        (saved.tabs.clone(), saved.active)
+    })
+}
+
+fn saved_tabs(file: &std::path::Path, workspace: &str) -> (Vec<Tab>, usize) {
+    let state = State::load(file).unwrap();
+    let saved = &state.workspaces[workspace];
+    (saved.tabs.clone(), saved.active)
+}
+
+#[gpui::test]
+fn shortcuts_settings_control_w_preserves_live_and_persisted_tabs(cx: &mut TestAppContext) {
+    let fixture = Fixture::start(true);
+    let file = fixture.root.join("settings-close.json");
+    let (shell, mut visual) = open(fixture.client.clone(), file.clone(), State::default(), cx);
+    ready(&shell, &mut visual);
+    let workspace = shell.read_with(&visual, |s, _| s.state.selected.clone().unwrap());
+    let before = tabs(&shell, &visual);
+    assert_eq!(before.0.len(), 1);
+    assert_eq!(saved_tabs(&file, &workspace), before);
+    visual.simulate_keystrokes("cmd-,");
+    shortcuts_draw(&mut visual);
+    assert!(shell.read_with(&visual, |s, _| s.surfaces.settings.view.is_some()));
+    visual.simulate_keystrokes("ctrl-w");
+    shortcuts_draw(&mut visual);
+    assert_eq!(
+        tabs(&shell, &visual),
+        before,
+        "Settings owns Ctrl+W; its underlying tab must survive"
+    );
+    assert_eq!(
+        saved_tabs(&file, &workspace),
+        before,
+        "tab survives restart"
+    );
+}

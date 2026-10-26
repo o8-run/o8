@@ -1,0 +1,14 @@
+test shell::shortcuts::tests::bindings::shortcuts_every_displayed_chord_has_a_live_binding ... ok
+test shell::shortcuts::tests::modal::shortcuts_settings_control_w_preserves_live_and_persisted_tabs ... ok
+test shell::shortcuts::tests::review::correction_2::shortcuts_control_k_reaches_the_focused_grid_pty ... ok
+test shell::shortcuts::tests::review::correction_2::shortcuts_every_binding_respects_the_focused_secret_field ... ok
+test shell::shortcuts::tests::review::correction_2::shortcuts_restored_field_is_observed_before_its_first_key ... ok
+test shell::shortcuts::tests::review::correction_2::shortcuts_settings_chords_do_not_steal_pty_focus ... ok
+test shell::shortcuts::tests::review::correction_2::shortcuts_text_fields_pass_palette_chords ... ok
+test shell::shortcuts::tests::review::shortcuts_control_alt_arrows_belong_to_grid_panes ... ok
+test shell::shortcuts::tests::review::shortcuts_focused_grid_terminal_keeps_question_and_close_keys ... ok
+test shell::shortcuts::tests::review::shortcuts_focused_text_field_keeps_help_and_close_keys ... ok
+test shell::shortcuts::tests::review::shortcuts_reopen_retains_list_scroll ... ok
+test shell::shortcuts::tests::shortcuts_overlay_bindings_dismissal_and_typing ... ok
+test shell::shortcuts::tests::modal::shortcuts_modal_surfaces_keep_all_tab_chords_off_underlying_tabs ... ok
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 225 filtered out; finished in 233.32s
