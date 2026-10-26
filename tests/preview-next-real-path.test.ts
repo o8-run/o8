@@ -278,7 +278,12 @@ describe('preview security through Next response handling', () => {
       }, `${route}?url=${encodeURIComponent(`${upstream}/subresources?kind=${kind}`)}`);
       const request = await resource;
       const response = await request.response();
-      expect((await request.allHeaders()).origin).toBeUndefined();
+      const headers = await request.allHeaders();
+      const resourceUrl = new URL(request.url());
+      expect(headers.host).toBe(resourceUrl.host);
+      expect(['localhost', '127.0.0.1', '[::1]']).toContain(resourceUrl.hostname);
+      expect(resourceUrl.port).toBe(new URL(base).port);
+      expect(headers.origin).toBeUndefined();
       expect(response?.status()).toBe(200);
       const frame = page.frameLocator('#preview');
       if (kind === 'image') {
@@ -300,7 +305,7 @@ describe('preview security through Next response handling', () => {
     expect(match).not.toBeNull();
     const asset = new URL(match![1].replaceAll('&amp;', '&'));
     const access = asset.searchParams.get('previewResource')!;
-    const headers: Record<string, string> = { 'sec-fetch-site': 'cross-site', ...(origin ? { origin } : {}) };
+    const headers: Record<string, string> = { host: new URL(base).host, 'sec-fetch-site': 'cross-site', ...(origin ? { origin } : {}) };
     const allowed = await fetch(asset, { headers });
     expect(allowed.status).toBe(200);
     expect(allowed.headers.get('access-control-allow-origin')).toBe('*');
@@ -309,9 +314,10 @@ describe('preview security through Next response handling', () => {
     const sameOrigin = new URL(asset);
     sameOrigin.searchParams.set('url', `${upstream}/fixture-data`);
     expect(await (await fetch(sameOrigin, { headers })).text()).toBe('ready');
-    for (const presented of ['', access.slice(0, -1) + (access.endsWith('0') ? '1' : '0')]) {
+    for (const presented of [null, '', access.slice(0, -1) + (access.endsWith('0') ? '1' : '0')]) {
       const refused = new URL(asset);
-      refused.searchParams.set('previewResource', presented);
+      if (presented === null) refused.searchParams.delete('previewResource');
+      else refused.searchParams.set('previewResource', presented);
       expect((await fetch(refused, { headers })).status).toBe(401);
     }
     const expired = String(Date.now() - 1000);
@@ -325,7 +331,11 @@ describe('preview security through Next response handling', () => {
       expect((await fetch(refused, { headers })).status).toBe(401);
     }
     expect((await fetch(asset, { headers: { ...headers, origin: 'https://example.invalid' } })).status).toBe(401);
-    expect((await fetch(asset, { method: 'POST', headers })).status).toBe(401);
+    // Cross-site writes stop at the browser boundary; native writes reach auth.
+    const write = await fetch(asset, { method: 'POST', headers });
+    expect(write.status).toBe(403);
+    expect(await write.json()).toEqual({ error: 'Origin is not allowed' });
+    expect((await fetch(asset, { method: 'POST', headers: { host: new URL(base).host } })).status).toBe(401);
     expect((await fetch(asset, { headers: { ...headers, 'x-o8-client-addr': '192.0.2.1' } })).status).toBe(401);
     const otherApi = new URL('/api/leases', base);
     otherApi.search = asset.search;
