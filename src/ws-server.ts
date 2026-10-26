@@ -9533,7 +9533,9 @@ async function bootstrapWsServer() {
     });
   }
 
-  await waitForNextReady();
+  // Native producers use this listener. Its stateful requests await this
+  // bootstrap, so probing them here waits on ourselves until the timeout.
+  if (process.env.O8_NEXT_O8D !== '1') await waitForNextReady();
   if (shuttingDown) return;
   await terminalHostReady;
   if (shuttingDown) return;
