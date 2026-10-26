@@ -1,0 +1,6 @@
+sidebar_release_over_moved_thread_keeps_its_identity ... ok
+sidebar_release_over_replacement_does_not_open_it ... ok
+sidebar_save_result_preserves_another_threads_rename ... ok
+sidebar_save_result_preserves_new_search ... ok
+sidebar_save_result_preserves_same_threads_new_draft ... ok
+test result: ok. 5 passed; 0 failed; 93 filtered out

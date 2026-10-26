@@ -109,7 +109,7 @@ export function createConsentPreviewRequest(state: ConsentPreviewState) {
     if (state === 'error') {
       return jsonResponse({ error: 'Preview: choices could not be saved.' }, 500);
     }
-    return jsonResponse({ values: { telemetryConsentAnswered: true } });
+    return jsonResponse({ values: { ...JSON.parse(String(init.body ?? '{}')) } });
   };
 }
 
@@ -140,13 +140,7 @@ export function ConsentScenario({ state, request: injectedRequest }: {
         observer.disconnect();
         return;
       }
-      const secondChoice = findButton('Keep product usage off');
-      if (!secondChoice || secondChoice.disabled) return;
-      if (secondChoice.getAttribute('aria-pressed') !== 'true') {
-        secondChoice.click();
-        return;
-      }
-      const save = findButton('Save both choices');
+      const save = findButton('Save privacy choices');
       if (!save || save.disabled) return;
       submitted = true;
       observer.disconnect();

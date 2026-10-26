@@ -104,8 +104,8 @@ export const SHIPPED_DARK_FLAG_MANIFEST: Readonly<
   },
   productTelemetryEnabled: {
     landedRelease: '0.1.681',
-    lifecycle: 'deliberate-default-off',
-    rationale: 'Privacy consent: product telemetry only starts after an explicit opt-in.',
+    lifecycle: 'promoted',
+    rationale: 'Usage analytics default on after first-run disclosure; explicit opt-outs remain off.',
   },
   telemetryOptIn: {
     landedRelease: '0.1.681',

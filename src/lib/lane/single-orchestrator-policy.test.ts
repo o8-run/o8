@@ -27,22 +27,24 @@ function tempRoot(prefix: string): string {
 async function runPrepared(
   prepared: Awaited<ReturnType<typeof prepareSingleOrchestratorLaunch>>,
   cwd = process.cwd(),
+  input?: string,
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = spawn(prepared.binary, prepared.args, {
-      cwd, env: prepared.env, stdio: ['ignore', 'pipe', 'pipe'],
+      cwd, env: prepared.env, stdio: [input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
     });
     let stdout = '';
     let stderr = '';
-    child.stdout.on('data', (chunk: Buffer) => {
+    child.stdout!.on('data', (chunk: Buffer) => {
       stdout += chunk.toString('utf8');
     });
-    child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString('utf8'); });
+    child.stderr!.on('data', (chunk: Buffer) => { stderr += chunk.toString('utf8'); });
     child.on('error', reject);
     child.on('close', (code) => {
       if (code === 0) resolve(stdout);
       else reject(new Error(stderr || `sandboxed launch exited ${code}`));
     });
+    if (input !== undefined) child.stdin!.end(input);
   });
 }
 
@@ -85,6 +87,18 @@ afterEach(() => {
 });
 
 describe('Single orchestrator process boundary', () => {
+  it.skipIf(process.platform !== 'darwin')('forwards carried input through the generated supervisor', async () => {
+    const repo = tempRoot('o8-single-input-repo-');
+    const runtimeHome = tempRoot('o8-single-input-state-');
+    const binary = join(runtimeHome, 'fixture-launcher');
+    writeFileSync(binary, '#!/bin/sh\nexec /bin/cat\n', { mode: 0o700 });
+    const prepared = await prepareSingleOrchestratorLaunch({
+      repoPath: repo, codexHome: runtimeHome, binary, args: ['-'], env: process.env,
+    });
+    const input = 'carried-input'.padEnd(140_150, 'x');
+    try { expect(await runPrepared(prepared, repo, input)).toBe(input); }
+    finally { prepared.cleanup(); }
+  });
   it('removes inherited control-plane credentials and pins an invalid bearer', () => {
     const env = singleOrchestratorEnvironment({
       ...process.env,

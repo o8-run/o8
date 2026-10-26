@@ -17,6 +17,8 @@ import {
 import { invalidateRuntimeInventoryCache } from '@/lib/runtime/inventory';
 import { archiveOwnedRuntimeSession } from '@/lib/runtime/owned-session-archive';
 import type { OwnedSessionState } from '@/lib/runtimes/shared/owned-session';
+import { readOwnedSessionRecord } from '@/lib/runtimes/shared/owned-session-index';
+import { matchesMutationWorkspace, mutationWorkspace, MutationWorkspaceNotFoundError } from '@/lib/repos/mutation-workspace';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -42,10 +44,18 @@ class RuntimeArchiveRejectedError extends Error {
   }
 }
 
-function canonicalArchiveBody(target: RuntimeArchiveTarget): string {
-  return JSON.stringify(target.sessionKey
+function canonicalArchiveBody(target: RuntimeArchiveTarget, workspace: string | null | undefined): string {
+  const body = target.sessionKey
     ? { sessionKey: target.sessionKey }
-    : { laneId: target.laneId });
+    : { laneId: target.laneId };
+  return JSON.stringify({ ...body, ...(workspace !== undefined ? { workspace } : {}) });
+}
+
+async function assertArchiveWorkspace(target: RuntimeArchiveTarget, workspace: string | null | undefined) {
+  const record = target.sessionKey ? await readOwnedSessionRecord(target.sessionKey) : getLane(target.laneId!);
+  if (!record || !matchesMutationWorkspace(workspace, record.repoPath)) {
+    throw new RuntimeArchiveRejectedError(404, 'Archive target was not found');
+  }
 }
 
 async function readOwnedSessionState(sessionKey: string): Promise<OwnedSessionState> {
@@ -101,10 +111,14 @@ export async function POST(request: NextRequest) {
   }
 
   const target: RuntimeArchiveTarget = sessionKey ? { sessionKey } : { laneId: laneId! };
-  const canonicalBody = canonicalArchiveBody(target);
+  const workspace = mutationWorkspace(request);
+  const canonicalBody = canonicalArchiveBody(target, workspace);
   const scopeId = sessionKey ? `session:${sessionKey}` : `lane:${laneId!}`;
 
   try {
+    // Admission precedes receipt binding and replay: a receipt from another
+    // workspace cannot authorize this request or reserve its mutation identity.
+    await assertArchiveWorkspace(target, workspace);
     const binding = bindIdempotencyClientMutation({
       namespace: 'runtime_archive',
       clientKey: clientMutationId,
@@ -134,9 +148,10 @@ export async function POST(request: NextRequest) {
         scopeId,
       },
       async () => {
+        await assertArchiveWorkspace(target, workspace);
         if (laneId) {
           const lane = getLane(laneId);
-          if (!lane) {
+          if (!lane || !matchesMutationWorkspace(workspace, lane.repoPath)) {
             throw new RuntimeArchiveRejectedError(404, `Lane ${laneId} was not found`);
           }
           if (lane.sessionKey) {
@@ -166,7 +181,7 @@ export async function POST(request: NextRequest) {
         }
 
         const ownedSessionKey = sessionKey!;
-        const result = await archiveOwnedRuntimeSession(ownedSessionKey);
+        const result = await archiveOwnedRuntimeSession(ownedSessionKey, workspace ?? undefined);
         if (!result) {
           throw new RuntimeArchiveRejectedError(
             400,
@@ -227,6 +242,9 @@ export async function POST(request: NextRequest) {
       },
     });
   } catch (error) {
+    if (error instanceof MutationWorkspaceNotFoundError) {
+      return NextResponse.json({ ok: false, archived: false, error: 'Archive target was not found' }, { status: 404, headers: NO_STORE });
+    }
     if (error instanceof RuntimeArchiveRejectedError) {
       return NextResponse.json({
         ok: false,

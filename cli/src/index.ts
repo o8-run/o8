@@ -1,7 +1,9 @@
 import { runPrStack } from './commands/pr-stack.js';
 import { runBrainSources } from './commands/brain-sources.js';
+import { runThreads } from './commands/threads.js';
 import { runNext } from './commands/next.js';
 import { runSetup } from './commands/setup.js';
+import { commandUsage } from './command-help.js';
 /**
  * o8 CLI — agent-first wrapper over the local HTTP API.
  *
@@ -314,6 +316,8 @@ commands:
   project remove-repo <project> <repo>  detach it while preserving registration and disk
   project delete <target>               remove a project and exclusive repo registrations; disk is preserved
   pr-stack --repo owner/repo --number N  read native PR layers, revisions and provenance
+  threads list         project work grouped by waiting/review/working/resolved (--repo path, --state, --offset, --limit)
+  threads show <id>    exact recorded thread evidence (--repo path)
   problem list         recurring problems detected across independent work (--all includes suppressed)
   problem show <id>    full evidence, remedy, and closure state for one problem dossier
   plugin list          list reviewed executable actions [--plugin ID]
@@ -343,7 +347,7 @@ ${OPERATOR_PACKET_COMMAND_LINES}
   task create          add a project-backed task to the ready pool
   task brief <id>      project-backed task brief for a packet or lane
   task claim <id>      bind/reserve a task to a lane
-  task dispatch <id>   launch the claimed task through Codex-only routing
+  task dispatch <id>   launch the claimed task through the selected runtime
   task block <id>      mark a task blocked with --reason
   task report <id>     append a structured task progress event
   task archive <id>    prune/archive stale task-pool rows
@@ -360,7 +364,8 @@ env:
   O8_API_PORT          override port (set by dispatch for worker agents)
   O8_API_TOKEN         override bearer token (set by dispatch)
   O8_SPECTATOR_TOKEN   scoped spectator bearer preferred by o8 truth
-  CORTEX_IDE_DATA_DIR  override data dir (default ~/.o8, legacy ~/.cortex-ide)
+  O8_DATA_DIR          select a data profile (default ~/.o8)
+  CORTEX_IDE_DATA_DIR  legacy data-profile alias
 
 exit codes:
   0 ok   1 invalid args   2 connection refused
@@ -399,7 +404,7 @@ async function dispatch(args: ParsedArgs): Promise<number> {
   // raw argv), so a `--help`/`-h` meant for the wrapped tool must NOT trigger o8's
   // global help here — otherwise `o8 run node --help` prints o8 USAGE + exit 0.
   if (args.help && primary !== 'run') {
-    process.stdout.write((primary && groupUsage(primary)) || USAGE);
+    process.stdout.write((primary && commandUsage(primary, secondary)) || (primary && groupUsage(primary)) || USAGE);
     return 0;
   }
   if (!primary) {
@@ -508,6 +513,8 @@ async function dispatch(args: ParsedArgs): Promise<number> {
       return runProject(args.mode, secondary, args.rest);
     case 'pr-stack':
       return runPrStack(args.mode, singleLevelArgs(secondary, args.rest, args.secondaryBeforeRest));
+    case 'threads':
+      return runThreads(args.mode, secondary, args.rest);
     case 'problem':
       return runProblem(args.mode, secondary, args.rest);
     case 'plugin':

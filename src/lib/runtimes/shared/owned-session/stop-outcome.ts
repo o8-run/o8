@@ -1,7 +1,7 @@
 import type { InterruptEscalationResult } from '@/lib/runtime/interrupt-escalation';
 import type { OwnedActiveRun } from '../owned-session-index';
 import type { OwnedSessionIo } from './session-io';
-import { assertOwnedActionAdmission } from './action-admission';
+import { assertOwnedStopAdmission } from './action-admission';
 
 type StopOperation = () => Promise<InterruptEscalationResult>;
 type StopHandler = (
@@ -19,7 +19,7 @@ export function registerOwnedStopHandler(
 ): void {
   handlers.set(prefix, (surfaceId, expected, operation) => lock(surfaceId, async () => {
     const session = await io.findSession(surfaceId);
-    assertOwnedActionAdmission(session);
+    assertOwnedStopAdmission(session);
     const run = session?.activeRun;
     if (!run || !expected.id || run.id !== expected.id
       || run.pid !== expected.pid || run.tmuxSession !== expected.tmuxSession

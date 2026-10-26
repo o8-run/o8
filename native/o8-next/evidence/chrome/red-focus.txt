@@ -1,0 +1,17 @@
+running 1 test
+test shell::tests::chrome_switcher_cancel_restores_composer_with_platform_shortcut ... 
+thread 'shell::tests::chrome_switcher_cancel_restores_composer_with_platform_shortcut' (20066) panicked at src/shell_tests.rs:84:9:
+assertion `left == right` failed
+  left: String("Draft retained")
+ right: "Draft retained refreshed"
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    shell::tests::chrome_switcher_cancel_restores_composer_with_platform_shortcut
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 136 filtered out; finished in 1.66s
+
+error: test failed, to rerun pass `--bin o8-next`

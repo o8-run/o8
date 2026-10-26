@@ -1,3 +1,4 @@
+mod render_region;
 // Original Apache-2.0 native surface. All UI comes from the published gpui crate.
 mod activity;
 mod brain;
@@ -35,6 +36,7 @@ mod theme;
 mod theme_tests;
 mod transport;
 mod ui;
+mod wake;
 use crate::{
     client::Client,
     model::{History, render_tree},

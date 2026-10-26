@@ -14,7 +14,7 @@ import { ownedSupervisorClient } from '@/lib/runtime/o8d-supervisor';
 import path from 'node:path';
 import { registerOwnedSessionLifecycle } from '../owned-session-lifecycle';
 import { assertAutomaticRecoveryGeneration, requestedAutomaticRecoveryRun, registerOwnedRecoveryStore } from './automatic-recovery';
-import { assertOwnedActionAdmission, holdPendingOwnedCorrections } from './action-admission';
+import { assertOwnedActionAdmission, assertOwnedStopAdmission, holdPendingOwnedCorrections } from './action-admission';
 import { randomUUID } from 'node:crypto';
 import { OwnedArtifactAdmissionError, withOwnedArtifactAdmission } from './artifact-admission';
 
@@ -398,12 +398,12 @@ export function createOwnedSessionStore(
 
   async function interruptInner(surfaceId: string) {
     const session = await io.findSession(surfaceId);
-    assertOwnedActionAdmission(session);
+    assertOwnedStopAdmission(session);
     if (!session) {
       throw new Error(`Owned ${adapter.squadShortName} session was not found.`);
     }
     await runController.refreshSession(session, true, false);
-    assertOwnedActionAdmission(session);
+    assertOwnedStopAdmission(session);
 
     if (session.activeRun?.spawnState === 'prepared') {
       return {
@@ -773,7 +773,7 @@ export function createOwnedSessionStore(
     getReviewPacket: (surfaceId) => withSurfaceLock(surfaceId, () => reviewTailController.getReviewPacket(surfaceId)),
     getFleetAdditions,
     sessionState: (surfaceId) => readOwnedSessionState(root, surfaceId, surfacePrefix),
-    archiveSession: (surfaceId) => withSurfaceLock(surfaceId, () => io.archiveSession(surfaceId)),
+    archiveSession: (surfaceId, workspace) => withSurfaceLock(surfaceId, () => io.archiveSession(surfaceId, workspace)),
     setDetachedSession,
     sweepOrphanedSessions: fleetComputer.sweepOrphanedSessions,
     getTelemetrySources: reviewTailController.getTelemetrySources,

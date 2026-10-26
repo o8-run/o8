@@ -1,0 +1,29 @@
+     Running unittests src/main.rs (native/o8-next/target/release/deps/o8_next-2b2cbc623a428204)
+
+running 5 tests
+test shell::tests::shell_retains_sidebar_selection_and_view_identity ...
+thread 'shell::tests::shell_retains_sidebar_selection_and_view_identity' (49551) panicked at src/shell_tests.rs:403:9:
+assertion `left == right` failed: the shell sidebar selection must follow the retained session surface
+  left: None
+ right: Some("thoughts-tools")
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+test shell::tests::sidebar_real_path_matches_desktop_and_opens_session ... ok
+ok
+test shell::tests::sidebar_tests::sidebar_group_order_search_keyboard_rename_archive_and_live_events ...
+thread 'shell::tests::sidebar_tests::sidebar_group_order_search_keyboard_rename_archive_and_live_events' (49666) panicked at src/sidebar_tests.rs:124:5:
+assertion `left == right` failed
+  left: "thoughts-long"
+ right: "thoughts-sidebar-1999"
+FAILED
+test shell::tests::sidebar_tests::sidebar_worker_archive_real_path ... ok
+
+failures:
+
+failures:
+    shell::tests::shell_retains_sidebar_selection_and_view_identity
+    shell::tests::sidebar_tests::sidebar_group_order_search_keyboard_rename_archive_and_live_events
+
+test result: FAILED. 3 passed; 2 failed; 0 ignored; 0 measured; 27 filtered out; finished in 26.21s
+
+error: test failed, to rerun pass `--bin o8-next`

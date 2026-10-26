@@ -23,6 +23,30 @@ async function personalRoute(token: string, account: PilotAccount): Promise<Pers
   await verifyPersonalVoiceAccount(token, account);
   return { gateway };
 }
+type LiveAdmission = {
+  personal: PersonalRoute | null;
+  preview: ReturnType<typeof localVoicePreview>;
+  enabled: boolean;
+  entitled: boolean;
+  transport?: 'personal-webrtc' | 'local-preview';
+};
+/** Availability and new sessions share transport precedence and account admission. */
+async function liveAdmission(operator: boolean): Promise<LiveAdmission> {
+  const account = readAccountState(); const token = planToken();
+  const personal = await personalRoute(token ?? '', account ?? { accountId: null, epoch: null });
+  const current = Boolean(account && account.accountId && account.epoch && accountStateMatches(account)
+    && readAccountState()?.generation === account.generation && token && hash(token) === account.licenseDigest);
+  if (personal) {
+    if (!current) throw new Error('Account unavailable');
+    return { personal, preview: 'disabled', enabled: operator, entitled: operator, transport: 'personal-webrtc' };
+  }
+  const preview = localVoicePreview();
+  if (preview !== 'disabled') {
+    const enabled = operator && preview === 'enabled';
+    return { personal: null, preview, enabled, entitled: enabled, transport: 'local-preview' };
+  }
+  return { personal: null, preview, enabled: process.env.O8_MANAGED_LIVE_ENABLED === '1', entitled: current };
+}
 function owner(request: Request): string | null {
   const principal = resolveRequestPrincipal(request);
   if (principal !== 'operator' && principal !== 'device') return null;
@@ -41,20 +65,9 @@ export async function GET(request: Request) {
   }
   const byokAvailable = await byokVoiceAvailable(resolveRequestPrincipal(request) === 'operator');
   try {
-    const readiness = await withAccountStateAdmission(async () => {
-      const account = readAccountState(); const token = planToken();
-      const personal = await personalRoute(token ?? '', account ?? { accountId: null, epoch: null });
-      if (!personal) return null;
-      if (!account || !accountStateMatches(account) || readAccountState()?.generation !== account.generation
-        || !token || hash(token) !== account.licenseDigest) throw new Error('Account unavailable');
-      const enabled = resolveRequestPrincipal(request) === 'operator';
-      return NextResponse.json({ enabled, entitled: enabled, transport: 'personal-webrtc', byokAvailable }, { headers: { 'Cache-Control': 'no-store' } });
-    });
-    if (readiness) return readiness;
+    const admission = await withAccountStateAdmission(() => liveAdmission(resolveRequestPrincipal(request) === 'operator'));
+    return NextResponse.json({ enabled: admission.enabled, entitled: admission.entitled, transport: admission.transport, byokAvailable }, { headers: { 'Cache-Control': 'no-store' } });
   } catch { return NextResponse.json({ error: 'personal_voice_unavailable', enabled: false, byokAvailable }, { status: 503 }); }
-  const preview = localVoicePreview();
-  if (preview !== 'disabled') return NextResponse.json({ enabled: preview === 'enabled', entitled: preview === 'enabled', transport: 'local-preview', byokAvailable }, { headers: { 'Cache-Control': 'no-store' } });
-  return NextResponse.json({ enabled: process.env.O8_MANAGED_LIVE_ENABLED === '1', entitled: Boolean(planToken()), byokAvailable });
 }
 export async function POST(request: Request) {
   const principal = owner(request);
@@ -69,15 +82,29 @@ export async function POST(request: Request) {
   } catch { return NextResponse.json({ error: 'byok_voice_receipt_unavailable' }, { status: 503 }); }
   if (body.source !== undefined && body.source !== 'managed') return NextResponse.json({ error: 'invalid_voice_source' }, { status: 400 });
   try {
-    if (!personalVoiceGateway() && localVoicePreview() !== 'disabled' && (body.action === 'start' || !loadVoiceRelay(typeof body.id === 'string' ? body.id : ''))) {
+    if (body.action !== 'start' && !personalVoiceGateway() && localVoicePreview() !== 'disabled' && !loadVoiceRelay(typeof body.id === 'string' ? body.id : '')) {
       if (resolveRequestPrincipal(request) !== 'operator') return NextResponse.json({ error: 'local_voice_preview_operator_only' }, { status: 403 });
       return previewVoiceRequest(body, principal);
     }
   } catch { /* An expired personal marker must not prevent authenticated close. */ }
-  try { return await withAccountStateAdmission(() => relay(body, principal, resolveRequestPrincipal(request) === 'operator')); }
+  try { return await withAccountStateAdmission(async () => {
+    const operator = resolveRequestPrincipal(request) === 'operator';
+    if (body.action === 'start') {
+      let admission: LiveAdmission;
+      try { admission = await liveAdmission(operator); }
+      catch { return NextResponse.json({ error: 'personal_voice_unavailable' }, { status: 503 }); }
+      if (admission.personal && !operator) return NextResponse.json({ error: 'personal_voice_operator_only' }, { status: 403 });
+      if (admission.preview !== 'disabled') {
+        if (!operator) return NextResponse.json({ error: 'local_voice_preview_operator_only' }, { status: 403 });
+        return previewVoiceRequest(body, principal);
+      }
+      return relay(body, principal, operator, admission.personal);
+    }
+    return relay(body, principal, operator);
+  }); }
   catch { return NextResponse.json({ error: 'voice_account_unavailable' }, { status: 503 }); }
 }
-async function relay(body: Record<string, unknown>, principal: string, operator: boolean) {
+async function relay(body: Record<string, unknown>, principal: string, operator: boolean, selectedPersonal: PersonalRoute | null = null) {
   const account = readAccountState();
   if (!account || !accountStateMatches(account)) return NextResponse.json({ error: 'voice_account_unavailable' }, { status: 503 });
   const token = planToken();
@@ -86,7 +113,7 @@ async function relay(body: Record<string, unknown>, principal: string, operator:
   if (!account.accountId || !account.epoch) return NextResponse.json({ error: 'voice_account_unavailable' }, { status: 503 });
   let personal: PersonalRoute | null = null;
   if (body.action === 'start' || body.action === 'event') {
-    try { personal = await personalRoute(token, account); }
+    try { personal = body.action === 'start' ? selectedPersonal : await personalRoute(token, account); }
     catch { return NextResponse.json({ error: 'personal_voice_unavailable' }, { status: 503 }); }
     if (personal && !operator) return NextResponse.json({ error: 'personal_voice_operator_only' }, { status: 403 });
     if (!accountStateMatches(account) || readAccountState()?.generation !== account.generation) return NextResponse.json({ error: 'voice_account_changed' }, { status: 503 });

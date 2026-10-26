@@ -1,6 +1,6 @@
 /** Per-surface fixture routes. Discovery adds no application routes or auth bypasses. */
 import { readdirSync } from 'node:fs';
-import type { IncomingHttpHeaders } from 'node:http';
+import type { IncomingHttpHeaders, Server } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import type { NextRequest } from 'next/server';
 
@@ -32,6 +32,7 @@ export interface SurfaceRoutes {
   stream?: Route[];
   receipt?: Record<string, unknown>;
   close?: () => Promise<void> | void;
+  socket?: (server: Server, token: string, requests: string[]) => Promise<() => void>;
 }
 interface Entry {
   prepare?: (context: SurfaceContext) => Promise<SurfaceRoutes>;

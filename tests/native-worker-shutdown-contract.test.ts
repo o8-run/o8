@@ -45,7 +45,7 @@ describe('native shutdown registration boundary for detached packet workers', ()
     expect(read('src-tauri/src/restart_job_drain.rs')).toContain('cleanup();');
     const worker = read('src/lib/runtimes/shared/owned-session/run-controller.ts');
     const launch = read('src/lib/runtimes/shared/owned-session/credential-spawn.ts');
-    expect(worker).toContain('const child = spawnCredentialCheckedChild(launchInput);');
+    expect(worker).toMatch(/const child = [^\n]*spawnCredentialCheckedChild\(launchInput\)/);
     expect(launch).toContain('detached: true,');
     expect(launch).toContain("stdio: [input.stdinFd ?? 'ignore', input.stdoutFd, input.stderrFd]");
     expect(worker).toContain('child.unref()');

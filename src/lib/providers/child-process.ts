@@ -50,11 +50,11 @@ export function withChildEnvironment<T>(input: Record<string, string | undefined
     }
     const env = refreshChildEnvironment(input);
     assertChildArguments(args, input, env, allowDeferredMcp);
-    const profiles = context?.runtimeId || context?.runtimeLaunch ? assertLegacyRuntimeConfigSelection(context.runtimeId, env, args, cwd) : [];
+    const profiles = context?.runtimeId || context?.runtimeLaunch ? assertLegacyRuntimeConfigSelection(context.runtimeId, env, args, cwd, context.metadataRedaction) : [];
     stampChildPolicy(env);
     creationGuard.getStore()?.();
     const result = create(env);
-    recordRuntimeProfileChild(result, context?.runtimeId, profiles, env);
+    recordRuntimeProfileChild(result, context?.runtimeId, profiles, env, context?.metadataRedaction);
     return result;
   };
   return withProviderStoreLock(launch);

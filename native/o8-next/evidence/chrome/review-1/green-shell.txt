@@ -1,0 +1,14 @@
+running 8 tests
+test shell::tests::chrome_refresh_keeps_workspace_selected_during_load ... ok
+test shell::tests::chrome_switcher_cancel_restores_composer_with_platform_shortcut ... ok
+test shell::tests::correction_fifteenth_workspace_scrolls_into_view ... workspace 15 at 1200x816: row=Bounds { origin: Point { x: 12px, y: 316px }, size: Size { 1176px × 33px } }, palette=Bounds { origin: Point { x: 0px, y: 49px }, size: Size { 1200px × 300px } }
+workspace 15 at 900x700: row=Bounds { origin: Point { x: 12px, y: 316px }, size: Size { 876px × 33px } }, palette=Bounds { origin: Point { x: 0px, y: 49px }, size: Size { 900px × 300px } }
+ok
+test shell::tests::correction_native_screenshots ... ignored, requires an owned isolated X11 display, Vulkan software driver and PNG capture tool
+test shell::tests::correction_palette_brain_resumes_the_session_draft ... ok
+test shell::tests::correction_refresh_recovers_initial_history_503 ... ok
+test shell::tests::shell_chrome_fifteen_workspaces_keeps_one_switcher ... ok
+test shell::tests::shell_palette_switch_restart_and_server_down ... O8_NEXT_SHELL_EVIDENCE {"endpoint":"GPUI TestAppContext CPU scene paint; test text system; no GPU/compositor","platform":"linux","launchToInteractiveMs":267.608907,"paletteOpenToFrameMs":[11.97479,13.698751999999999,13.15206,38.104088000000004,11.830785,13.384866,20.184943,43.105804,12.298651000000001,11.947119,13.036027,12.588021,12.480893,14.49784,12.680589000000001,13.706783999999999,11.733751,11.489979000000002,25.824486,12.419861000000001],"workspaceSwitchMs":[16.693092999999998,11.435699000000001,14.444411,13.645443,10.926692,11.693071,9.505809000000001,11.911085,12.441282999999999,11.990832999999999],"idleMemoryMiB":38.88671875,"workspaces":2,"restoredSurfaces":3}
+ok
+
+test result: ok. 7 passed; 0 failed; 1 ignored; 0 measured; 155 filtered out; finished in 18.88s

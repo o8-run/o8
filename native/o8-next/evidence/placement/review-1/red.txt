@@ -1,0 +1,26 @@
+Excerpt: three review failures; four unrelated setup tests also passed.
+running 7 tests
+test shell::tests::correction_placement_uses_the_single_shell_header ...
+thread 'shell::tests::correction_placement_uses_the_single_shell_header' (118888) panicked at src/shell_tests.rs:21:9:
+embedded conversation must not restore its duplicate header or Refresh control
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+test ui::tests::correction_composer_has_no_shortcut_or_mode_helper ...
+thread 'ui::tests::correction_composer_has_no_shortcut_or_mode_helper' (118911) panicked at src/surface_tests.rs:121:5:
+composer must not render a permanent shortcut hint
+FAILED
+test ui::tests::correction_empty_conversation_has_no_tagline ...
+thread 'ui::tests::correction_empty_conversation_has_no_tagline' (118948) panicked at src/surface_tests.rs:100:9:
+empty conversations must not render a build tagline at 900x700
+FAILED
+
+failures:
+
+failures:
+    shell::tests::correction_placement_uses_the_single_shell_header
+    ui::tests::correction_composer_has_no_shortcut_or_mode_helper
+    ui::tests::correction_empty_conversation_has_no_tagline
+
+test result: FAILED. 4 passed; 3 failed; 0 ignored; 0 measured; 155 filtered out; finished in 9.13s
+
+error: test failed, to rerun pass `--bin o8-next`

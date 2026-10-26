@@ -1,0 +1,71 @@
+{
+  "nativeShortcutTests": {
+    "before": 11,
+    "after": 13,
+    "passed": 13
+  },
+  "newRegressionTests": {
+    "red": {
+      "passed": 0,
+      "failed": 2,
+      "base": "ee8681e26"
+    },
+    "green": {
+      "passed": 2,
+      "failed": 0
+    }
+  },
+  "fullNative": {
+    "unitPassed": 225,
+    "unitFailed": 7,
+    "ignored": 6,
+    "cliPassed": 7,
+    "frameClockPassed": 4,
+    "exitCode": 101
+  },
+  "residualNativeRetry": {
+    "passed": 1,
+    "failed": 5,
+    "note": "Brain passed serial retry; the shortcuts Brain assertion was separately aligned with main and all 13 shortcut tests passed."
+  },
+  "fullNpm": {
+    "passedFiles": 1246,
+    "passedTests": 9103,
+    "skippedFiles": 3,
+    "skippedTests": 5,
+    "exitCode": 0
+  },
+  "cargoCheck": 0,
+  "cargoClippyAllTargets": 0,
+  "typecheckFast8GiB": 0,
+  "tscNoEmit8GiB": 0,
+  "eslint": {
+    "errors": 0,
+    "ignoredRustFiles": 9
+  },
+  "ruleCheck": {
+    "files": 1,
+    "violations": 0
+  },
+  "testClassify": {
+    "exitCode": 0,
+    "manifestUnchanged": true,
+    "hermetic": 1242,
+    "resourceOwning": 928
+  },
+  "surfaceArchiveCompile": 0,
+  "officialSurfaceBoundaryCompile": 0,
+  "wholeCrateFormatting": {
+    "exitCode": 1,
+    "unchangedMainDifferences": 4
+  },
+  "touchedRustFormatting": 0,
+  "routeAssertions": {
+    "passed": 7,
+    "total": 7,
+    "gateExitCode": 1,
+    "cleanupUnconfirmedFiles": 2
+  },
+  "latestAuditedMain": "737c988ff951cd33fb9914f1856df8a92e80ba08",
+  "latestMainMergeAudit": "clean; no native source changes since the rebase base"
+}

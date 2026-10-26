@@ -1,0 +1,177 @@
+{
+  "tests": [
+    "terminal::tests::production_pty_to_gpui_terminal",
+    "shell::issues::tests::issues_view_search_link_clear_and_worker_task"
+  ],
+  "profile": "release",
+  "platform": "linux",
+  "build": "cargo build --release --locked --manifest-path native/o8-next/Cargo.toml --bin o8-next",
+  "buildJobs": 1,
+  "iterations": [
+    {
+      "iteration": 1,
+      "passed": 2,
+      "elapsedSeconds": 32.005,
+      "releaseBuildActiveBefore": true,
+      "releaseBuildActiveAfter": true,
+      "floodBytes": 50000012
+    },
+    {
+      "iteration": 2,
+      "passed": 2,
+      "elapsedSeconds": 31.194,
+      "releaseBuildActiveBefore": true,
+      "releaseBuildActiveAfter": true,
+      "floodBytes": 50000012
+    },
+    {
+      "iteration": 3,
+      "passed": 2,
+      "elapsedSeconds": 29.994,
+      "releaseBuildActiveBefore": true,
+      "releaseBuildActiveAfter": true,
+      "floodBytes": 50000012
+    },
+    {
+      "iteration": 4,
+      "passed": 2,
+      "elapsedSeconds": 30.561,
+      "releaseBuildActiveBefore": true,
+      "releaseBuildActiveAfter": true,
+      "floodBytes": 50000012
+    },
+    {
+      "iteration": 5,
+      "passed": 2,
+      "elapsedSeconds": 32.129,
+      "releaseBuildActiveBefore": true,
+      "releaseBuildActiveAfter": true,
+      "floodBytes": 50000012
+    },
+    {
+      "iteration": 6,
+      "passed": 2,
+      "elapsedSeconds": 28.658,
+      "releaseBuildActiveBefore": true,
+      "releaseBuildActiveAfter": true,
+      "floodBytes": 50000012
+    },
+    {
+      "iteration": 7,
+      "passed": 2,
+      "elapsedSeconds": 25.924,
+      "releaseBuildActiveBefore": true,
+      "releaseBuildActiveAfter": true,
+      "floodBytes": 50000012
+    },
+    {
+      "iteration": 8,
+      "passed": 2,
+      "elapsedSeconds": 26.111,
+      "releaseBuildActiveBefore": true,
+      "releaseBuildActiveAfter": true,
+      "floodBytes": 50000012
+    },
+    {
+      "iteration": 9,
+      "passed": 2,
+      "elapsedSeconds": 26.06,
+      "releaseBuildActiveBefore": true,
+      "releaseBuildActiveAfter": true,
+      "floodBytes": 50000012
+    },
+    {
+      "iteration": 10,
+      "passed": 2,
+      "elapsedSeconds": 26.235,
+      "releaseBuildActiveBefore": true,
+      "releaseBuildActiveAfter": true,
+      "floodBytes": 50000012
+    },
+    {
+      "iteration": 11,
+      "passed": 2,
+      "elapsedSeconds": 25.837,
+      "releaseBuildActiveBefore": true,
+      "releaseBuildActiveAfter": true,
+      "floodBytes": 50000012
+    },
+    {
+      "iteration": 12,
+      "passed": 2,
+      "elapsedSeconds": 25.815,
+      "releaseBuildActiveBefore": true,
+      "releaseBuildActiveAfter": true,
+      "floodBytes": 50000012
+    },
+    {
+      "iteration": 13,
+      "passed": 2,
+      "elapsedSeconds": 26.012,
+      "releaseBuildActiveBefore": true,
+      "releaseBuildActiveAfter": true,
+      "floodBytes": 50000012
+    },
+    {
+      "iteration": 14,
+      "passed": 2,
+      "elapsedSeconds": 25.684,
+      "releaseBuildActiveBefore": true,
+      "releaseBuildActiveAfter": true,
+      "floodBytes": 50000012
+    },
+    {
+      "iteration": 15,
+      "passed": 2,
+      "elapsedSeconds": 27.058,
+      "releaseBuildActiveBefore": true,
+      "releaseBuildActiveAfter": true,
+      "floodBytes": 50000012
+    },
+    {
+      "iteration": 16,
+      "passed": 2,
+      "elapsedSeconds": 27.202,
+      "releaseBuildActiveBefore": true,
+      "releaseBuildActiveAfter": true,
+      "floodBytes": 50000012
+    },
+    {
+      "iteration": 17,
+      "passed": 2,
+      "elapsedSeconds": 26.641,
+      "releaseBuildActiveBefore": true,
+      "releaseBuildActiveAfter": true,
+      "floodBytes": 50000012
+    },
+    {
+      "iteration": 18,
+      "passed": 2,
+      "elapsedSeconds": 26.806,
+      "releaseBuildActiveBefore": true,
+      "releaseBuildActiveAfter": true,
+      "floodBytes": 50000012
+    },
+    {
+      "iteration": 19,
+      "passed": 2,
+      "elapsedSeconds": 26.242,
+      "releaseBuildActiveBefore": true,
+      "releaseBuildActiveAfter": true,
+      "floodBytes": 50000012
+    },
+    {
+      "iteration": 20,
+      "passed": 2,
+      "elapsedSeconds": 28.134,
+      "releaseBuildActiveBefore": true,
+      "releaseBuildActiveAfter": true,
+      "floodBytes": 50000012
+    }
+  ],
+  "consecutivePairs": 20,
+  "passed": 40,
+  "releaseBuildActiveForEveryPair": true,
+  "releaseBuildStoppedAfterEvidence": true,
+  "releaseBuildExitCode": 130
+}

@@ -1,0 +1,7 @@
+Base: 9f44b02ea
+test shell::shortcuts::tests::review::shortcuts_control_alt_arrows_belong_to_grid_panes ... ok
+test shell::shortcuts::tests::review::shortcuts_focused_grid_terminal_keeps_question_and_close_keys ... ok
+test shell::shortcuts::tests::review::shortcuts_focused_text_field_keeps_help_and_close_keys ... ok
+test shell::shortcuts::tests::review::shortcuts_reopen_retains_list_scroll ... ok
+test shell::shortcuts::tests::shortcuts_overlay_bindings_dismissal_and_typing ... O8_NEXT_SHORTCUTS_EVIDENCE {"endpoint":"headless GPUI CPU scene; no GPU/compositor","openToFirstFrameMs":20.811229,"interactionToFrameMs":32.387018}
+ok

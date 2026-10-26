@@ -92,8 +92,8 @@ it('replaces cached models when the configured agent changes, including optional
   const first = localAcpProcessLaunch()!;
   expect((await probeAcpModels('acp', first, state.dir)).models[0].value).toBe('first');
   connect('second');
-  // An older in-flight probe may complete after save; its fingerprint cannot poison B.
-  await probeAcpModels('acp', first, state.dir, { force: true });
+  // A prepared probe for another connection must not launch after replacement.
+  await expect(probeAcpModels('acp', first, state.dir, { force: true })).rejects.toThrow(/environment changed/i);
   expect((await probeAcpModels('acp', localAcpProcessLaunch()!, state.dir)).models[0].value).toBe('second');
   connect('default');
   expect((await probeAcpModels('acp', localAcpProcessLaunch()!, state.dir)).models).toEqual([]);

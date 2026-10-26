@@ -1,5 +1,6 @@
 'use client';
 
+import { useImageSendAdmissions } from './use-orchestrator-stream/image-send-admission';
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { stopRunningTools } from '@/components/desktop/transcript/activity';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
@@ -151,6 +152,7 @@ export function useOrchestratorStream(
     data?: Record<string, unknown>;
     observedAt: number;
   }) => void>(() => {});
+  const imageAdmissions = useImageSendAdmissions(pendingActivityHandlerRef);
 
   // Server turn truth on subscribe snapshots is the primary reconciliation
   // seam. These elapsed/event refs remain only as a compatibility fallback
@@ -418,13 +420,7 @@ export function useOrchestratorStream(
     appendSnapshotTurnFailure(turn.id, setMessages, messagesRef);
   }, [healStaleBusyState]);
 
-  const settlePendingSend = useCallback((event: {
-    event: string;
-    data?: Record<string, unknown>;
-    observedAt: number;
-  }) => {
-    pendingActivityHandlerRef.current(event);
-  }, []);
+  const settlePendingSend = imageAdmissions.observe;
 
   const commitCurrentAssistant = useCallback(() => {
     const current = currentAssistantRef.current;
@@ -821,12 +817,13 @@ export function useOrchestratorStream(
       threadId: threadIdRef.current,
       backend: options?.backend ?? null,
       transcriptBeforeSend,
+      ...(options?.attachments?.length ? { admission: imageAdmissions.register(clientMessageId) } : {}),
     };
     lastSendAtRef.current = sentAtMs;
     lastEventAtRef.current = sentAtMs;
     setPendingStatusBusy();
 
-    void trackComposerSubmission(sendHandle.userMessageId, (receipt) => setVoiceTerminals(previous => ({ ...previous, [receipt.userMessageId]: receipt })), async (markDispatch) => {
+    void trackComposerSubmission(sendHandle.userMessageId, imageAdmissions.onFailure(clientMessageId, (receipt) => setVoiceTerminals(previous => ({ ...previous, [receipt.userMessageId]: receipt }))), async (markDispatch) => {
       const turnOptions = await turnOptionResolution.resolve(clientMessageId, options);
       if (turnOptions === null || repoPathRef.current !== repoPathAtSend || threadIdRef.current !== sendHandle.threadId) {
         activeTurnBackendRef.current = null;
@@ -986,9 +983,10 @@ export function useOrchestratorStream(
       setPendingStatusBusy();
     });
     return sendHandle;
-  }, [connect, connected, durablePendingSend, estimateNextTurnTokens, primeCompactedSession, requestCompaction, setPendingStatusBusy, turnOptionResolution, updateRunningTotal]);
+  }, [connect, connected, durablePendingSend, imageAdmissions, estimateNextTurnTokens, primeCompactedSession, requestCompaction, setPendingStatusBusy, turnOptionResolution, updateRunningTotal]);
 
   const undoSend = useCallback((handle: OrchestratorSendHandle) => {
+    imageAdmissions.settle(handle.clientMessageId, { status: 'cancelled' });
     turnOptionResolution.abort(handle.clientMessageId);
     const activeRepoPath = repoPathRef.current;
     durablePendingSend.cancelPending(handle.clientMessageId);
@@ -1018,7 +1016,7 @@ export function useOrchestratorStream(
       getWebSocket: () => wsRef.current,
       connect: () => { console.warn('[orchestrator-stream] WS not open, reconnecting to undo send...'); connect(); },
     });
-  }, [connect, connected, durablePendingSend, resetFirstTurnPlanCapture, syncMessages, turnOptionResolution]);
+  }, [connect, connected, durablePendingSend, imageAdmissions, resetFirstTurnPlanCapture, syncMessages, turnOptionResolution]);
 
   return {
     voiceTerminals,

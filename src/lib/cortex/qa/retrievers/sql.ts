@@ -28,6 +28,8 @@ import path from 'node:path';
 import type { RetrieverInput, RetrieverResult, TypedRow } from '@/lib/cortex/qa/types';
 import { getSqlite } from '@/lib/db';
 import { getActiveProjectScopeForRepoSync } from '@/lib/repos/projects';
+import { requestProjectSnapshot } from '@/lib/repos/request-project-scope';
+import { parseGithubRemoteIdentity } from '@/lib/repos/github-identity';
 import { getDataDir } from '@/lib/data-dir-migration';
 
 const DEFAULT_LIMIT = 20;
@@ -74,6 +76,7 @@ interface RegistryRepo {
   id: string;
   name: string;
   localPath: string;
+  remoteUrl?: string | null;
 }
 
 // ── Ownership intent detection ───────────────────────────────────────────────
@@ -180,7 +183,7 @@ function readRepoRegistrySync(): RegistryRepo[] {
           ? rec.path
           : null;
       if (!id || !name || !localPath) continue;
-      repos.push({ id, name, localPath });
+      repos.push({ id, name, localPath, remoteUrl: typeof rec.remoteUrl === 'string' ? rec.remoteUrl : null });
     }
     return repos;
   } catch (error) {
@@ -213,7 +216,8 @@ function emitProjectRows(
   rows: TypedRow[],
   limit: number,
 ): void {
-  const registry = readRepoRegistrySync();
+  const snapshot = requestProjectSnapshot();
+  const registry = snapshot?.repositories ?? readRepoRegistrySync();
   const repoById = new Map(registry.map((r) => [r.id, r]));
 
   // Resolve target project_ids: from explicit projectId, from repoPath, or
@@ -224,7 +228,7 @@ function emitProjectRows(
     targetProjectIds.add(input.projectId);
   }
 
-  if (input.repoPath) {
+  if (input.repoPath && !snapshot) {
     const target = path.resolve(input.repoPath);
     const repo = registry.find((r) => path.resolve(r.localPath) === target);
     if (repo) {
@@ -239,7 +243,9 @@ function emitProjectRows(
   // No specific scope — pull every project (capped). Useful for "list the
   // projects" / cross-repo questions that don't pin a single repo.
   let projects: ProjectRow[];
-  if (targetProjectIds.size > 0) {
+  if (snapshot) {
+    projects = [snapshot.project];
+  } else if (targetProjectIds.size > 0) {
     const ids = [...targetProjectIds];
     projects = sqlite
       .prepare(
@@ -258,7 +264,10 @@ function emitProjectRows(
   // Pre-fetch every project_repos row for the projects in scope (one round-
   // trip, not N) so the composer can describe membership without re-querying.
   const projectIds = projects.map((p) => p.id);
-  const links = sqlite
+  const links: ProjectRepoRow[] = snapshot ? snapshot.project.repos
+    .filter(link => snapshot.repositories.some(repo => repo.id === link.repoId))
+    .map(link => ({ project_id: link.projectId, repo_id: link.repoId, role: link.role,
+      suggestion_origin: link.suggestionOrigin })) : sqlite
     .prepare(
       `SELECT project_id, repo_id, role, suggestion_origin FROM project_repos
        WHERE project_id IN (${projectIds.map(() => '?').join(',')})`,
@@ -397,10 +406,17 @@ export async function sqlRetriever(input: RetrieverInput): Promise<RetrieverResu
       where.push("so.outcome = 'succeeded'");
     }
 
-    // LEFT JOIN to github_pull_requests via the head branch matching the
-    // outcome branch. Lossy by design — many outcomes don't have a PR yet
-    // and that's fine, the citation just lacks a pr_url. We pick `MAX(pr_id)`
-    // per outcome to deduplicate the join when multiple PRs share a head.
+    // A shared branch name is not repository identity. Resolve each outcome's
+    // full repository name before selecting its newest matching PR.
+    const joinParams: string[] = [];
+    const registry = requestProjectSnapshot()?.repositories ?? readRepoRegistrySync();
+    const repositoryCases = registry.flatMap(repo => {
+      const identity = parseGithubRemoteIdentity(repo.remoteUrl);
+      if (!identity.githubOwner || !identity.githubRepo) return [];
+      joinParams.push(canonicalRepoPathForScope(repo.localPath), `${identity.githubOwner}/${identity.githubRepo}`.toLowerCase());
+      return ['WHEN ? THEN ?'];
+    });
+    const repositoryCase = repositoryCases.length ? `CASE so.repo_path ${repositoryCases.join(' ')} END` : 'NULL';
     const sql = `
       SELECT
         so.id,
@@ -418,20 +434,17 @@ export async function sqlRetriever(input: RetrieverInput): Promise<RetrieverResu
         pr.url AS pr_url,
         pr.pull_request_id AS pr_id
       FROM session_outcomes so
-      LEFT JOIN (
-        SELECT pull_request_id, number, title, url, head_ref_name
-        FROM github_pull_requests
-        WHERE pull_request_id IN (
-          SELECT MAX(pull_request_id) FROM github_pull_requests GROUP BY head_ref_name
-        )
-      ) pr ON pr.head_ref_name = so.branch
+      LEFT JOIN github_pull_requests pr ON pr.pull_request_id = (
+        SELECT MAX(p.pull_request_id) FROM github_pull_requests p
+        WHERE p.head_ref_name = so.branch AND lower(p.repo_full_name) = ${repositoryCase}
+      )
       WHERE ${where.join(' AND ')}
       ORDER BY ${orderParams.length > 0 ? 'CASE WHEN so.repo_path = ? THEN 0 ELSE 1 END,' : ''} so.completed_at DESC
       LIMIT ?
     `;
     params.push(...orderParams, limit);
 
-    const records = sqlite.prepare(sql).all(...params) as OutcomeRow[];
+    const records = sqlite.prepare(sql).all(...joinParams, ...params) as OutcomeRow[];
 
     for (const record of records) {
       const excerpt = record.summary.length > 160

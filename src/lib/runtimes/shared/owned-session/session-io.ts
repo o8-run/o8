@@ -23,6 +23,7 @@ import type {
   OwnedArchiveResponse,
   OwnedSessionRecord,
 } from './types';
+import { matchesMutationWorkspace, MutationWorkspaceNotFoundError } from '@/lib/repos/mutation-workspace';
 
 export interface OwnedSessionIo {
   ensureRoot(): Promise<string>;
@@ -31,7 +32,7 @@ export interface OwnedSessionIo {
   saveSession(session: OwnedSessionRecord): Promise<void>;
   findSession(surfaceId: string): Promise<OwnedSessionRecord | null>;
   findArchivedSession(surfaceId: string): Promise<OwnedSessionRecord | null>;
-  archiveSession(surfaceId: string): Promise<OwnedArchiveResponse>;
+  archiveSession(surfaceId: string, workspace?: string): Promise<OwnedArchiveResponse>;
 }
 
 export function createOwnedSessionIo({
@@ -139,8 +140,12 @@ export function createOwnedSessionIo({
     };
   }
 
-  async function archiveSession(surfaceId: string): Promise<OwnedArchiveResponse> {
+  async function archiveSession(surfaceId: string, workspace?: string): Promise<OwnedArchiveResponse> {
     const session = await findSession(surfaceId);
+    if (workspace !== undefined) {
+      const target = session ?? await findArchivedSession(surfaceId);
+      if (!target || !matchesMutationWorkspace(workspace, target.repoPath)) throw new MutationWorkspaceNotFoundError();
+    }
     if (!session) {
       const archivePath = await archivedSessionPathForSurfaceId(root, surfaceId, surfacePrefix);
       if (archivePath) {

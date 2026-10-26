@@ -14,6 +14,15 @@ proxies. A worker launch keeps worker authority even if a native operator
 credential was inherited. An explicit different origin never receives the local
 configuration's disk credential. The normal explicit fixture modes remain available.
 
+The shell defaults to All Glass on macOS and plain dark elsewhere.
+`O8_NEXT_APPEARANCE=glass` or `O8_NEXT_APPEARANCE=plain` selects the appearance
+at process startup. On macOS, All Glass installs one window-owned
+NSVisualEffectView with FullScreenUI, BehindWindow blending and Active state.
+Its size follows the GPUI content view. The desktop's three-stop veil and panel
+alpha tokens come from the shared native theme. In-flow surfaces pass through
+to that material. Non-macOS and offscreen windows keep an opaque dark root;
+they do not emulate system blur. Hidden tests never request a native handle.
+
 The shell lists workspaces with saved sessions. Ctrl+K or Cmd+K opens searchable
 commands; arrows and Enter choose, Escape cancels. Open session, Open grid and
 New message use the existing views; New message focuses the selected session's
@@ -23,6 +32,23 @@ Ctrl+Tab cycles surfaces and Ctrl+W closes a surface. Grid shortcuts,
 including Ctrl+Alt+W to close one pane, reach the grid. Drafts remain in memory
 while switching workspaces and sessions. An unavailable local server has a clear
 error and Retry control.
+
+Workspaces use one searchable switcher, including with 15 or more saved
+workspaces. Brain, Refresh and Keyboard shortcuts are palette commands. The shortcut
+reference closes with Escape; key hints are absent from permanent chrome.
+Session tabs use their conversation titles. The embedded session shares the
+shell header. The composer action says Send next or Steer now; its adjacent
+disclosure switches the mode, as does Ctrl+Shift+Enter.
+
+Existing session surfaces use the shared typography and geometry in
+`src/theme.rs`: compact sidebar rows, top tab pills, and a composer card up to
+720 px wide. An empty saved conversation centres that card in the available
+column without a tagline or permanent composer hints. The existing per-session Brain dock occupies the right panel slot, with
+its draft and focus retained while resizing and switching sessions. Compact
+windows reduce the sidebar and right-slot widths without cropping the composer.
+The sidebar renderer lives in `src/session_sidebar.rs` to keep the session module
+within the repository file limit. Native tracking and raster/compositor
+comparison remain unverified; the pinned GPUI API exposes no letter spacing.
 
 Settings opens from the shell's Settings button, the Open settings command, or
 Ctrl+, / Cmd+,. This partial port edits shared server defaults, provider keys and

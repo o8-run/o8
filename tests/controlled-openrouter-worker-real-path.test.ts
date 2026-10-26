@@ -109,6 +109,15 @@ async function replayGateway(body = childReceipt().body, path = '/v1/messages?be
     request.on('error', reject); request.end(JSON.stringify(body));
   });
 }
+async function readCatalog(path = '/v1/models', headers = childReceipt().headers): Promise<{ status: number; body: Record<string, unknown> }> {
+  return new Promise((resolve, reject) => {
+    const request = httpRequest(childReceipt().base + path, { method: 'GET', headers }, response => {
+      let body = ''; response.on('data', chunk => { body += chunk; });
+      response.on('end', () => resolve({ status: response.statusCode!, body: JSON.parse(body) }));
+    });
+    request.on('error', reject); request.end();
+  });
+}
 async function launchedTask(config = {}) {
   childConfig(config); const prepared = await prepare(); expect(prepared.status).toBe(200);
   const draft = prepared.draft!; expect((await decision(draft.taskId, draft.contractHash)).status).toBe(200);
@@ -140,8 +149,22 @@ beforeEach(async () => {
     const headers={'content-type':'application/json','x-api-key':process.env.ANTHROPIC_API_KEY};
     const body={model:${JSON.stringify(model)},messages:[{role:'user',content:'Read value.txt'}],tools:[{name:'Read',input_schema:{type:'object'}}],max_tokens:99999,thinking:{type:'adaptive'},context_management:{edits:[{type:'clear_thinking_20251015'}]},...cfg.body};
     const base=process.env.ANTHROPIC_BASE_URL;if(!base.startsWith('http://127.0.0.1:'))process.exit(98);
+    let validation;
+    if(cfg.validateModels){
+      const requested=cfg.validationModel||body.model;let ids=[];let status=0;
+      if(process.env.CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY==='1'){
+        const catalog=await fetch(base+'/v1/models',{headers});status=catalog.status;
+        const data=await catalog.json();ids=(data.data||[]).map(item=>item.id);
+      }
+      validation={requested,ids,status};
+      if(!ids.includes(requested)){
+        const error='Unknown controlled model: '+requested+'. Available models: '+ids.join(', ');
+        fs.writeFileSync(${JSON.stringify(join(root, 'child.json'))},JSON.stringify({pid:process.pid,status:400,input,env:process.env,base,headers,body,validation,error}));
+        process.stderr.write(error+'\\n');process.exit(1);
+      }
+    }
     const statuses=await Promise.all(Array.from({length:cfg.requests||1},async()=>{const r=await fetch(base+(cfg.path||'/v1/messages?beta=true'),{method:'POST',headers,body:JSON.stringify(body)});await r.text();return r.status;}));
-    fs.writeFileSync(${JSON.stringify(join(root, 'child.json'))},JSON.stringify({pid:process.pid,status:statuses[0],statuses,input,env:process.env,base,headers,body}));
+    fs.writeFileSync(${JSON.stringify(join(root, 'child.json'))},JSON.stringify({pid:process.pid,status:statuses[0],statuses,input,env:process.env,base,headers,body,validation}));
     if(cfg.hold)setInterval(()=>{},1000);else{const answer=fs.readFileSync('value.txt','utf8').trim();const success=statuses.every(s=>s===200);
     process.stdout.write(JSON.stringify({type:'assistant',message:{role:'assistant',content:[{type:'text',text:'Observed '+answer}]}})+'\\n');
     process.stdout.write(JSON.stringify({type:'result',subtype:success?'success':'error',is_error:!success,result:'Observed '+answer})+'\\n');process.exit(success?0:1);}});`);
@@ -291,6 +314,63 @@ describe('controlled OpenRouter preparation, owned child and actual local gatewa
     expect(calls).toHaveLength(1); expect(session().runIdentityLedger.totalRuns).toBe(1);
   });
 
+  it('initializes CLI model validation from the controlled gateway catalog before inference', async () => {
+    const draft = await launchedTask({ validateModels: true });
+    expect(childReceipt().status, childReceipt().error).toBe(200);
+    expect(childReceipt().validation).toEqual({ requested: model, ids: [model], status: 200 });
+    expect(childReceipt().env.CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY).toBe('1');
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.body.model).toBe(model);
+    await vi.waitFor(async () => expect((await decision(draft.taskId, draft.contractHash, 'inspect')).body.execution.state)
+      .toBe('completed'), { timeout: 10_000 });
+    expect(readTaskExecution(draft)?.state).toBe('completed');
+    expect(session().runIdentityLedger.totalRuns).toBe(1);
+  });
+
+  it('keeps an unknown CLI model explicit and terminal with zero inference or fallback', async () => {
+    const unknown = 'fixture/unknown-model';
+    const draft = await launchedTask({ validateModels: true, validationModel: unknown });
+    expect(childReceipt().status).toBe(400);
+    expect(childReceipt().validation).toEqual({ requested: unknown, ids: [model], status: 200 });
+    expect(childReceipt().error).toContain(`Unknown controlled model: ${unknown}`);
+    expect(calls).toHaveLength(0);
+    await vi.waitFor(async () => expect((await decision(draft.taskId, draft.contractHash, 'inspect')).body.execution)
+      .toMatchObject({ state: 'blocked', errorCode: 'worker_failed' }), { timeout: 10_000 });
+    expect(readTaskExecution(draft)).toMatchObject({ state: 'blocked', errorCode: 'worker_failed' });
+    const saved = session();
+    expect(saved.recentRuns[0].childExit).toMatchObject({ code: 1, classification: 'nonzero-exit' });
+    expect(readFileSync(saved.recentRuns[0].stderrPath, 'utf8')).toContain(`Unknown controlled model: ${unknown}`);
+    expect(saved.runIdentityLedger.totalRuns).toBe(1);
+    expect((await decision(draft.taskId, draft.contractHash)).body.execution.replayed).toBe(true);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('keeps model discovery authenticated, bounded and revoked on Stop without consuming inference', async () => {
+    const draft = await launchedTask({ validateModels: true, hold: true });
+    const catalog = await readCatalog('/v1/models?limit=1000');
+    expect(catalog.status).toBe(200);
+    expect(catalog.body).toMatchObject({ data: [{ id: model, type: 'model', display_name: model }],
+      has_more: false, first_id: model, last_id: model });
+    expect((await readCatalog('/v1/models', { ...childReceipt().headers, 'x-api-key': randomUUID() })).status).toBe(403);
+    expect((await readCatalog('/v1/models?limit=1001')).status).toBe(403);
+    expect((await readCatalog('/v1/models?model=fixture')).status).toBe(403);
+    expect(calls).toHaveLength(1);
+    expect(JSON.parse(readFileSync(join(session().sessionDir, 'controlled-provider-usage.json'), 'utf8')).requests).toBe(1);
+    expect((await decision(draft.taskId, draft.contractHash, 'stop')).status).toBe(200);
+    expect((await readCatalog()).status).toBe(403);
+    expect(calls).toHaveLength(1);
+  });
+
+  it('refuses an unknown requested model before preparing or reserving an attempt', async () => {
+    const refused = await prepare({ model: 'fixture/unknown-model' });
+    expect(refused.status).toBe(400);
+    expect(refused.result).toMatchObject({ ok: false, code: 'model_incompatible',
+      message: expect.stringContaining('exact model') });
+    expect(listTaskDrafts(accountId)).toHaveLength(0);
+    expect(existsSync(join(taskDraftRoot(), 'executions'))).toBe(false);
+    expect(calls).toHaveLength(0);
+  });
+
   it('seals the payer and limits, runs once, and returns provider usage with the bound report', async () => {
     const prepared = await prepare(); expect(prepared.status).toBe(200);
     const draft = prepared.draft!; expect(draft.contract.provider).toEqual(provider);
@@ -369,6 +449,7 @@ describe('controlled OpenRouter preparation, owned child and actual local gatewa
 
   it('refuses further requests after switching accounts and conceals the prior report', async () => {
     const draft = await launchedTask({ hold: true }); await account('user_another_gateway_fixture');
+    expect((await readCatalog()).status).toBe(403);
     expect(await replayGateway()).toBe(403); expect(calls).toHaveLength(1);
     expect((await call('o8_task_result', { machineId: 'gateway-machine', taskId: draft.taskId }, 'user_another_gateway_fixture')).status).toBe(404);
   });

@@ -22,6 +22,7 @@ pub struct Client {
     token: Option<String>,
     desktop_session: Option<String>,
     workspace: Option<String>,
+    wake: Option<async_channel::Sender<()>>,
 }
 impl Client {
     pub fn new(origin: &str) -> Result<Self, String> {
@@ -55,6 +56,7 @@ impl Client {
         Ok(Self {
             origin,
             workspace: None,
+            wake: None,
             token: token.filter(|s| !s.trim().is_empty()),
             desktop_session: None,
             agent: ureq::AgentBuilder::new()
@@ -63,6 +65,16 @@ impl Client {
                 .timeout(Duration::from_secs(5))
                 .build(),
         })
+    }
+    pub(crate) fn with_wakeup(mut self, wake: async_channel::Sender<()>) -> Self {
+        self.wake = Some(wake);
+        self
+    }
+
+    pub(crate) fn wake(&self) {
+        if let Some(sender) = &self.wake {
+            let _ = sender.try_send(());
+        }
     }
     /// Explicit short-lived desktop identity for the selected server; never discovered or persisted.
     pub fn with_desktop_session(mut self, session: Option<String>) -> Result<Self, String> {

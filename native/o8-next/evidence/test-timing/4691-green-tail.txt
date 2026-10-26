@@ -1,0 +1,47 @@
+Focused regressions:
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 224 filtered out; finished in 40.06s
+
+Complete affected Rust groups:
+test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 210 filtered out; finished in 139.10s
+
+Route fixture tests:
+Test Files  3 passed (3)
+Tests  8 passed (8)
+Duration  36.55s (transform 254ms, setup 331ms, import 127ms, tests 34.84s, environment 0ms)
+
+Full npm test:
+Test Files  1246 passed | 3 skipped (1249)
+Tests  9103 passed | 5 skipped (9108)
+Duration  499.39s (transform 129.61s, setup 51.85s, import 744.81s, tests 537.45s, environment 401.32s)
+
+pair 01/20: 2 passed; elapsed=32.005s; release_build_active=true; flood_bytes=50000012
+pair 02/20: 2 passed; elapsed=31.194s; release_build_active=true; flood_bytes=50000012
+pair 03/20: 2 passed; elapsed=29.994s; release_build_active=true; flood_bytes=50000012
+pair 04/20: 2 passed; elapsed=30.561s; release_build_active=true; flood_bytes=50000012
+pair 05/20: 2 passed; elapsed=32.129s; release_build_active=true; flood_bytes=50000012
+pair 06/20: 2 passed; elapsed=28.658s; release_build_active=true; flood_bytes=50000012
+pair 07/20: 2 passed; elapsed=25.924s; release_build_active=true; flood_bytes=50000012
+pair 08/20: 2 passed; elapsed=26.111s; release_build_active=true; flood_bytes=50000012
+pair 09/20: 2 passed; elapsed=26.060s; release_build_active=true; flood_bytes=50000012
+pair 10/20: 2 passed; elapsed=26.235s; release_build_active=true; flood_bytes=50000012
+pair 11/20: 2 passed; elapsed=25.837s; release_build_active=true; flood_bytes=50000012
+pair 12/20: 2 passed; elapsed=25.815s; release_build_active=true; flood_bytes=50000012
+pair 13/20: 2 passed; elapsed=26.012s; release_build_active=true; flood_bytes=50000012
+pair 14/20: 2 passed; elapsed=25.684s; release_build_active=true; flood_bytes=50000012
+pair 15/20: 2 passed; elapsed=27.058s; release_build_active=true; flood_bytes=50000012
+pair 16/20: 2 passed; elapsed=27.202s; release_build_active=true; flood_bytes=50000012
+pair 17/20: 2 passed; elapsed=26.641s; release_build_active=true; flood_bytes=50000012
+pair 18/20: 2 passed; elapsed=26.806s; release_build_active=true; flood_bytes=50000012
+pair 19/20: 2 passed; elapsed=26.242s; release_build_active=true; flood_bytes=50000012
+pair 20/20: 2 passed; elapsed=28.134s; release_build_active=true; flood_bytes=50000012
+stress proof: 20 consecutive pairs, 40 passed, release build active throughout
+
+Passed checks:
+NODE_OPTIONS=--max-old-space-size=8192 npx tsc --noEmit
+npm run typecheck:fast
+Lint on touched fixture scripts
+Repository rule check
+Manifest comparison
+Format check on touched Rust files
+
+The release build used a separate target directory and one job. It was intentionally interrupted after all 20 pairs completed while it was still active.

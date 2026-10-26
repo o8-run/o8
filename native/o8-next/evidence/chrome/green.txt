@@ -1,0 +1,9 @@
+running 4 tests
+test shell::tests::chrome_refresh_keeps_workspace_selected_during_load ... ok
+test shell::tests::chrome_switcher_cancel_restores_composer_with_platform_shortcut ... ok
+test shell::tests::shell_chrome_fifteen_workspaces_keeps_one_switcher ... ok
+test shell::tests::shell_palette_switch_restart_and_server_down ... O8_NEXT_SHELL_EVIDENCE {"endpoint":"GPUI TestAppContext CPU scene paint; test text system; no GPU/compositor","platform":"linux","launchToInteractiveMs":155.062385,"paletteOpenToFrameMs":[15.02125,12.99028,13.035809,18.166977,14.219178000000001,13.275416,13.286291,12.184021999999999,12.169421999999999,12.197220999999999,11.857647,12.420504000000001,11.841173,11.520215,11.959468,17.454568000000002,16.930208,17.524272,11.935342,12.013859],"workspaceSwitchMs":[18.626179,13.056229,11.454417999999999,12.826397,10.32568,12.63347,10.405698999999998,13.887972999999999,10.632586,14.24175],"idleMemoryMiB":37.59765625,"workspaces":2,"restoredSurfaces":3}
+ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 133 filtered out; finished in 6.96s
+

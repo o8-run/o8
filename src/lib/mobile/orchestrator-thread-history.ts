@@ -9,6 +9,7 @@ import { ensureOrchestratorHistoryDir as ensureHistoryDir, ORCHESTRATOR_HISTORY_
 import { resolveOrchestratorThreadProjectId } from './orchestrator-thread-project';
 import { buildProjectBoundThreadRecord, type BindOrchestratorThreadProjectInput } from './orchestrator-thread-project-binding';
 import { nextOrchestratorThreadId } from './orchestrator-thread-id';
+import { isSavedConnectivityCheck } from '@/lib/orchestrator/connectivity-check';
 import { repairComposerPreambleHistory, repairFlippedTranscriptHistory } from './orchestrator-thread-history-repair';
 import { consumePendingTurnWorkers, mergeMobileTurnReceipts } from './turn-receipt';
 import { threadSummaryCache } from './orchestrator-thread-summary-cache';
@@ -270,6 +271,7 @@ export async function mobileOrchestratorThreadHistoryStatTokenAsync(): Promise<s
 export function listMobileOrchestratorThreads(options: {
   backend?: MobileOrchestratorBackend | null;
   limit?: number;
+  offset?: number;
 } = {}): MobileOrchestratorThread[] {
   const backendFilter = options.backend ?? null;
   const limit = options.limit ?? MAX_THREADS;
@@ -295,7 +297,8 @@ export function listMobileOrchestratorThreads(options: {
   threads.sort((left, right) => (
     new Date(right.lastMessageAt).getTime() - new Date(left.lastMessageAt).getTime()
   ));
-  return threads.slice(0, limit);
+  const offset = options.offset ?? 0;
+  return threads.slice(offset, offset + limit);
 }
 
 /**
@@ -730,6 +733,7 @@ export function listMobileOrchestratorRevealRequests(since: string | null): Orch
       const filePath = join(ORCHESTRATOR_HISTORY_DIR, file);
       const stat = statSync(filePath);
       const record = JSON.parse(readFileSync(filePath, 'utf-8')) as OrchestratorHistoryRecord;
+      if (isSavedConnectivityCheck(record)) continue;
       const requestedAt = typeof record.mobileRevealRequestedAt === 'string' ? record.mobileRevealRequestedAt : null;
       if (!requestedAt) continue;
       const requestedMs = Date.parse(requestedAt);

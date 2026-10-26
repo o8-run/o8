@@ -139,21 +139,22 @@ export function packetEventTime(packet: OrchestratorPacket): number {
   return Number.isFinite(time) ? time : 0;
 }
 
-/** Label for the elapsed slot — adjusts wording when the packet has
- *  finished (it's not elapsing anymore, it concluded). */
+/** Time since the last activity, with outcome wording for finished packets. */
 export function packetTimeLabel(packet: OrchestratorPacket): string {
   const release = (packet.releaseState ?? '').toLowerCase();
   const status = (packet.status ?? '').toLowerCase();
   const at = packet.lane?.lastEventAt ?? packet.lastEventAt;
   const elapsed = formatElapsed(at);
+  const activity = elapsed === 'now' ? 'now' : `${elapsed} ago`;
+  const finished = elapsed === 'now' ? 'just now' : activity;
   if (release === 'released' || status === 'released' || status === 'merged') {
-    return `merged ${elapsed} ago`;
+    return `merged ${finished}`;
   }
   if (release === 'archived' || status === 'archived') {
-    return `archived ${elapsed} ago`;
+    return `archived ${finished}`;
   }
-  if (status === 'failed') return `failed ${elapsed} ago`;
-  return `${elapsed} elapsed`;
+  if (status === 'failed') return `failed ${finished}`;
+  return activity;
 }
 
 export function missionLabel(missionState: { missionId?: string; prompt?: string } | undefined): string {

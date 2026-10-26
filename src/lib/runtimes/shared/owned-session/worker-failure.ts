@@ -2,7 +2,7 @@ import { correctionStopVersion } from '@/lib/db/worker-correction-fences';
 import { handleWorkerRuntimeFailure } from '@/lib/dispatch/worker-quota-fallback';
 import { buildWorkerHandoffContext } from '@/lib/dispatch/worker-handoff-context';
 import { getLane } from '@/lib/lane/registry';
-import { currentRecoveryRun, recoveryInterrupted } from './automatic-recovery';
+import { currentRecoveryRun, recoveryInterrupted, recoveryPacketHoldReason } from './automatic-recovery';
 import type { OwnedRunController } from './run-controller';
 import type { OwnedSessionIo } from './session-io';
 import type { OwnedRuntimeAdapter } from './types';
@@ -20,7 +20,7 @@ export function createWorkerFailureHandler(options: {
     const run = current && currentRecoveryRun(current);
     const lane = current?.laneId ? getLane(current.laneId) : null;
     if (!current || current.executionPolicy !== undefined || current.activeRun || current.detachedAt || current.orphanedAt
-      || recoveryInterrupted(current) || run?.id !== runId || run.outcome !== 'failed'
+      || recoveryInterrupted(current) || recoveryPacketHoldReason(current) || run?.id !== runId || run.outcome !== 'failed'
       || current.workerFailureHandledRunId === runId || !lane || lane.sessionKey !== surfaceId || lane.status !== 'running') return;
     const artifacts = await options.readRunArtifacts(run);
     const result = await handleWorkerRuntimeFailure({ laneId: lane.id, runtime: options.adapter.runtimeId,

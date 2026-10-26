@@ -1,0 +1,20 @@
+running 2 tests
+test ui::conversation::card_tests::native_composer_card_controls_persist_and_send_the_selected_routing ...
+thread 'ui::conversation::card_tests::native_composer_card_controls_persist_and_send_the_selected_routing' (12298) panicked at src/composer/card_tests.rs:55:48:
+composer-mode
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+test ui::conversation::card_tests::native_composer_card_restores_focus_and_keeps_each_session_choice ...
+thread 'ui::conversation::card_tests::native_composer_card_restores_focus_and_keeps_each_session_choice' (12355) panicked at src/composer/card_tests.rs:43:44:
+composer-mode
+FAILED
+
+failures:
+
+failures:
+    ui::conversation::card_tests::native_composer_card_controls_persist_and_send_the_selected_routing
+    ui::conversation::card_tests::native_composer_card_restores_focus_and_keeps_each_session_choice
+
+test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 141 filtered out; finished in 6.23s
+
+error: test failed, to rerun pass `--bin o8-next`

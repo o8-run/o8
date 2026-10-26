@@ -20,7 +20,6 @@ import { normalizePacketSpendCap } from '@/lib/orchestrator/metered-spend';
 import { assertSingleAttemptLaunch } from '@/lib/runtime/single-attempt-launch';
 import { EFFORT_CHOICE_LIST, resolveEffortPin } from '@/lib/orchestrator/effort-pin';
 import { isThinkingEffort } from '@/lib/orchestrator/thinking-effort';
-import { isOrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
 import { resolveDefaultDispatchModelSync } from '@/lib/operator/defaults';
 import { knowledgeSourceWriteRefusal } from '@/lib/cortex/knowledge/sources';
 
@@ -99,7 +98,7 @@ export async function POST(request: NextRequest) {
   const launchRequest = canonicalLaunchRequest(payload, runtimeName, clientMutationId);
   // A concrete pin must survive the adapter's mapping. Validate before the
   // receipt binding so a rejected selection can be corrected with the same ID.
-  if (isOrchestratorRuntime(runtimeName) && launchRequest.effort && launchRequest.effort !== 'adaptive') {
+  if (launchRequest.effort && launchRequest.effort !== 'adaptive') {
     const effortPin = resolveEffortPin({
       requestedEffort: launchRequest.effort,
       runtime: runtimeName,

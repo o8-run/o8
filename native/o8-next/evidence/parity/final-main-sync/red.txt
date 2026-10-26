@@ -1,0 +1,25 @@
+FAIL  tests/next-parity-harness-real-path.test.ts > maps every registered shell surface and names inventory drift in this one guard
+AssertionError: Unmapped registered surfaces: sidebar. Update scripts/parity/surfaces.json.
+: expected 1 to be +0 // Object.is equality
+
+- Expected
++ Received
+
+- 0
++ 1
+
+ ❯ tests/next-parity-harness-real-path.test.ts:25:40
+     23| it('maps every registered shell surface and names inventory drift in t…
+     24|   const result = run('--check-surfaces');
+     25|   expect(result.status, result.stderr).toBe(0);
+       |                                        ^
+     26|   const manifest = JSON.parse(result.stdout);
+     27|   const shell = readFileSync('native/o8-next/src/shell.rs', 'utf8');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 2 passed (3)
+      Tests  1 failed | 21 passed (22)
+   Start at  00:45:24
+   Duration  174.17s (transform 83ms, setup 119ms, import 593ms, tests 172.84s, environment 0ms)

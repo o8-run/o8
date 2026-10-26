@@ -7,7 +7,7 @@ import { usePaletteFileSelection } from './hooks/usePaletteFileSelection';
 import { isTauri, canUseTauriEvents, browserViewHide } from '@/lib/tauri/bridge';
 import { isNonMacShell } from '@/lib/desktop/host-platform';
 import { subscribeTauriEvent } from '@/lib/tauri/events';
-import { track } from '@/lib/analytics/track';
+import { useAppOpenedTelemetry } from '@/lib/analytics/startup';
 import { AnimatePresence, motion } from 'framer-motion';
 import { DashboardFrame as SmoothCorners } from './DashboardFrame';
 import { ChatListCard } from './ChatListCard';
@@ -56,6 +56,7 @@ import { RightPrTabs } from '@/components/desktop/pr-panel/RightPrTabs';
 import { rightPrTabId, useRightPrTabs, type RightPrTab } from '@/components/desktop/pr-panel/useRightPrTabs';
 import { DesktopCloseCoordinator } from '@/components/desktop/DesktopCloseCoordinator';
 import { TerminalCloseDialog } from '@/components/desktop/workspace-terminal/TerminalCloseDialog';
+import { readThreadPages } from '@/components/desktop/o8-panel/readThreadPages';
 import { useThreadWorkspaceNavigation } from '@/components/desktop/o8-panel/useThreadNavigation';
 import { threadPanelAvailability } from '@/components/desktop/o8-panel/thread-navigation';
 import { resolveThreadProject } from '@/components/desktop/o8-panel/threads-model';
@@ -343,12 +344,11 @@ function DashboardInner() {
   const effectiveGlassSurface = chromeMounted && isGlassSurface;
 
   const [inTauri, setInTauri] = useState(false);
+  useAppOpenedTelemetry();
   useEffect(() => {
     logDashboardBootTiming();
     startWebVitalsObserver();
     setInTauri(isTauri());
-    // Coarse DAU signal (analytics epic #1249). Fire-and-forget, opt-out-aware.
-    track('app.opened');
     // tauri-plugin-mcp no longer needs JS-side init — the eval_and_await
     // protocol shipped in #932 phase 2 invokes JS from Rust per call.
     // Schedule the "interactive" mark after React has flushed the initial
@@ -2135,6 +2135,7 @@ function DashboardInner() {
   }, [openRightPanelFromUser]);
 
   useThreadWorkspaceNavigation({
+    currentWorkspaceId: () => workspaceHeaderActive.workspaceId,
     availability: () => threadPanelAvailability(
       typeof window !== 'undefined' ? window.innerWidth : getResponsiveViewportWidth(),
       RESPONSIVE_RIGHT_PANEL_COLLAPSE_WIDTH,
@@ -2157,12 +2158,7 @@ function DashboardInner() {
         isActive: () => workspaceHeaderActive.workspaceId === target.workspaceId,
       };
     },
-    readTasks: async () => {
-      const response = await fetch('/api/tasks?includeBrief=false&includeDone=true', { cache: 'no-store', signal: AbortSignal.timeout(5000) });
-      if (!response.ok) throw new Error('Unable to read threads.');
-      const body = await response.json();
-      return body.tasks ?? [];
-    },
+    readTasks: () => readThreadPages({ projectId: null, repoPaths: globalRepoEntries.map(repo => repo.localPath) }, AbortSignal.timeout(5000)),
   });
 
   const handleToggleWorkspacePip = useCallback((surface: 'browser' | 'spec', repoPath?: string | null) => {

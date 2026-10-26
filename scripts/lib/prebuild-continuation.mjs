@@ -143,6 +143,7 @@ export async function runPrebuild({ runBuild, canReuse }) {
         console.log(`[tauri-prebuild] rebuilding artifact: ${verification.reason}`);
         await cachedPhase('speech', 'speech sidecar', process.execPath, ['scripts/build-speech-local.mjs']);
         await phase('Pi write helper', process.execPath, ['scripts/build-pi-write.mjs']);
+        await phase('o8 next sidecar', process.execPath, ['scripts/next/build-sidecar.mjs']);
         await cachedPhase('web', 'web build', 'npm', ['run', 'build']);
         await phase('Tauri export', process.execPath, ['scripts/tauri-export.mjs']);
         const builtRecipe = collectReleaseArtifactRecipe(root, version, { env });

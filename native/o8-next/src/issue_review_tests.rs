@@ -194,8 +194,10 @@ fn round1_symlink_worker_survives_real_refresh_and_send(cx: &mut TestAppContext)
         worker_state(&shell, cx)["selected"],
         "thoughts-composer-first"
     );
-    let center = cx.debug_bounds("session-refresh").unwrap().center();
-    cx.simulate_click(center, gpui::Modifiers::default());
+    // Embedded sessions share the shell's refresh command and have no header.
+    cx.simulate_keystrokes("ctrl-shift-p");
+    cx.simulate_keystrokes("r e f r e s h enter");
+    cx.run_until_parked();
     draw(cx);
     assert_eq!(
         worker_state(&shell, cx)["selected"],

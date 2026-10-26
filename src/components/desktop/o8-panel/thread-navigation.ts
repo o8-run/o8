@@ -31,6 +31,7 @@ interface TaskIdentity {
   project?: { id: string; panelProjectId?: string | null } | null;
 }
 export interface ThreadNavigatorOptions {
+  currentWorkspaceId?: () => string | null;
   availability?: () => PanelUnavailable | null;
   resolve: (target: ThreadNavigationTarget) => {
     projectId: string | null;
@@ -50,6 +51,11 @@ interface Pending {
   cancel: (reason: string) => void;
 }
 let pending: Pending | null = null;
+let openActiveThread: ((repoPath: string, taskId: string) => Promise<NavigationResult>) | null = null;
+/** A human card click uses the same verified navigation and mounted receipt as MCP. */
+export function openCurrentThread(repoPath: string, taskId: string): Promise<NavigationResult> {
+  return openActiveThread?.(repoPath, taskId) ?? Promise.resolve({ workspaceId: '', repoPath, taskId, ok: false, reason: 'thread_navigation_unavailable' });
+}
 const listeners = new Set<() => void>();
 const changed = () => { for (const listener of listeners) listener(); };
 export const readThreadSelection = () => pending?.target ?? null;
@@ -110,9 +116,12 @@ export function installThreadNavigator(options: ThreadNavigatorOptions) {
     finally { busy = false; }
   };
   window.__o8NavigateThread = navigate;
+  const openFromCard = (repoPath: string, taskId: string) => navigate({ workspaceId: options.currentWorkspaceId?.() ?? '', repoPath, taskId });
+  openActiveThread = openFromCard;
   return () => {
     disposed = true;
     pending?.cancel('navigation_unmounted');
     if (window.__o8NavigateThread === navigate) delete window.__o8NavigateThread;
+    if (openActiveThread === openFromCard) openActiveThread = null;
   };
 }

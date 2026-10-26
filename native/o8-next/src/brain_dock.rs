@@ -17,7 +17,7 @@ impl Surface {
             cx.stop_propagation();
         }
     }
-    fn toggle_brain(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn toggle_brain(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(session) = self
             .sessions
             .iter()
@@ -76,11 +76,20 @@ impl Surface {
             .on_click(cx.listener(|this, _, window, cx| this.toggle_brain(window, cx)))
             .into_any_element()
     }
-    pub(super) fn brain_panel(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
+    pub(super) fn brain_panel(
+        &self,
+        width: gpui::Pixels,
+        cx: &mut Context<Self>,
+    ) -> gpui::AnyElement {
         match self.selected.as_ref().and_then(|id| self.brains.get(id)) {
             Some(brain) if brain.read(cx).expanded => div()
-                .h(px(360.))
-                .max_h(gpui::relative(0.65))
+                .id("right-panel-slot")
+                .debug_selector(|| "right-panel-slot".into())
+                .w(width)
+                .h_full()
+                .min_w_0()
+                .overflow_hidden()
+                .rounded(px(crate::theme::GEOMETRY.card_radius))
                 .flex_shrink_0()
                 .child(brain.clone())
                 .into_any_element(),

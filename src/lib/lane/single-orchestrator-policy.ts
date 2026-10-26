@@ -18,6 +18,8 @@ import {
 } from 'node:fs';
 import { delimiter, dirname, join } from 'node:path';
 import { prepareWorkerSandbox } from '@/lib/runtimes/shared/owned-session/sandbox';
+import { mintBrainReadWorkerToken } from '@/lib/auth/brain-read-worker-token';
+import { getActiveProjectScopeForRepo } from '@/lib/repos/projects';
 
 const CONTROL_ENV_KEYS = [
   'O8_API_TOKEN',
@@ -332,7 +334,7 @@ export async function prepareSingleOrchestratorLaunch(input: {
       "import { chmodSync, rmSync } from 'node:fs';",
       "import { Transform } from 'node:stream';",
       'const [, , launchBinary, cleanupRoot, sandboxBinary, ...sandboxArgs] = process.argv;',
-      "const child = spawn(sandboxBinary, sandboxArgs, { stdio: ['ignore', 'pipe', 'pipe'], env: process.env });",
+      "const child = spawn(sandboxBinary, sandboxArgs, { stdio: [sandboxArgs.at(-1) === '-' ? 'inherit' : 'ignore', 'pipe', 'pipe'], env: process.env });",
       'let sealed = false;',
       'let sealFailed = false;',
       'const relay = new Transform({ transform(chunk, _encoding, callback) {',
@@ -393,6 +395,9 @@ export async function prepareSingleOrchestratorLaunch(input: {
       finalAllowExecPaths: [launchBinaryPath, ...(selectedToolHost ? [launchToolHostPath] : []), ...toolHosts],
     });
     const env = singleOrchestratorEnvironment(input.env, overlayHome);
+    const brainScope = await getActiveProjectScopeForRepo(realpathSync(input.repoPath));
+    env.O8_WORKER_TOKEN = mintBrainReadWorkerToken(input.repoPath,
+      brainScope.repoInActiveProject ? brainScope.project.sqliteProjectId ?? brainScope.projectId : null);
     env.CODEX_SQLITE_HOME = input.codexHome;
     env.PATH = `${guardBinDir}${delimiter}${env.PATH ?? ''}`;
     return {
