@@ -1,12 +1,12 @@
 import { execFileSync } from 'node:child_process';
 import { lstatSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { macosBuildPayloadIdentity } from '../lib/macos-release-artifacts.mjs';
+import { macosBuildPayloadIdentity, readMachOArchitectures } from '../lib/macos-release-artifacts.mjs';
 
 export const NEXT_BUILD_RECEIPT = 'o8-next-build.json';
 
 export function nextBuildIdentity(binary, commit) {
-  const payloads = ['x86_64', 'arm64'].map(architecture => [architecture, macosBuildPayloadIdentity(binary, architecture)]);
+  const payloads = readMachOArchitectures(binary).map(architecture => [architecture, macosBuildPayloadIdentity(binary, architecture)]);
   return {
     schema: 'o8/next-build/v1',
     commit,

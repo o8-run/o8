@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { macosExecutablePayloadSha256 } from '../scripts/lib/macos-release-artifacts.mjs';
+import { macosBuildPayloadIdentity, macosExecutablePayloadSha256 } from '../scripts/lib/macos-release-artifacts.mjs';
 import { afterEach, expect, it } from 'vitest';
 
 const sourceRoot = process.cwd();
@@ -61,9 +61,10 @@ it('builds and stages both release slices through the prebuild sidecar entry poi
   const { root } = fixture();
   const calls = join(root, 'build-calls.jsonl');
   rmSync(join(root, 'src-tauri/helpers/o8-next-build.json'));
-  for (const name of ['cargo', 'lipo']) writeFileSync(join(root, 'bin', name), `#!/usr/bin/env node
+  for (const name of ['cargo', 'lipo', 'strip']) writeFileSync(join(root, 'bin', name), `#!/usr/bin/env node
 const fs = require('node:fs'), path = require('node:path'); const args = process.argv.slice(2);
 fs.appendFileSync(${JSON.stringify(calls)}, JSON.stringify([${JSON.stringify(name)}, ...args]) + '\\n');
+if (${JSON.stringify(name)} === 'strip') process.exit(0);
 const at = key => args[args.indexOf(key) + 1];
 const dest = ${JSON.stringify(name)} === 'cargo' ? path.join(at('--target-dir'), at('--target'), 'release', 'o8-next') : at('-output');
 fs.mkdirSync(path.dirname(dest), { recursive: true }); fs.copyFileSync(${JSON.stringify(join(root, 'o8.app/Contents/MacOS/o8-next'))}, dest);
@@ -159,4 +160,55 @@ it.each([0, 8])('accepts a first signature that adds a load command and %s align
     expect(alignment.status).toBe(1);
     expect(alignment.stderr).toContain('payload length does not match the current build');
   }
+});
+
+
+it.each([
+  ['x86_64-apple-darwin', 'x86_64', 0x01000007],
+  ['aarch64-apple-darwin', 'arm64', 0x0100000c],
+] as const)('builds and verifies %s with only that target std installed', (triple, architecture, cpu) => {
+  const { root, app, run } = fixture();
+  const calls = join(root, 'target-calls.jsonl');
+  writeFileSync(join(root, 'bin/cargo'), `#!/usr/bin/env node
+const fs = require('node:fs'), path = require('node:path'); const args = process.argv.slice(2);
+fs.appendFileSync(${JSON.stringify(calls)}, JSON.stringify(['cargo', ...args]) + '\\n');
+const at = key => args[args.indexOf(key) + 1];
+if (at('--target') !== ${JSON.stringify(triple)}) {
+  console.error('error[E0463]: cannot find crate for std; target std is not installed'); process.exit(1);
+}
+const dest = path.join(at('--target-dir'), at('--target'), 'release/o8-next');
+const bytes = Buffer.alloc(32); bytes.writeUInt32LE(0xfeedfacf, 0); bytes.writeUInt32LE(${cpu}, 4);
+fs.mkdirSync(path.dirname(dest), { recursive: true }); fs.writeFileSync(dest, bytes);
+`, { mode: 0o755 });
+  writeFileSync(join(root, 'bin/strip'), `#!/usr/bin/env node
+const fs = require('node:fs'); const args = process.argv.slice(2);
+fs.appendFileSync(${JSON.stringify(calls)}, JSON.stringify(['strip', ...args]) + '\\n');
+const bytes = fs.readFileSync(args.at(-1)); bytes[28] = 1; fs.writeFileSync(args.at(-1), bytes);
+`, { mode: 0o755 });
+  writeFileSync(join(root, 'bin/lipo'), '#!/usr/bin/env node\nthrow new Error("unrequested universal build");', { mode: 0o755 });
+  const result = spawnSync(process.execPath, [join(sourceRoot, 'scripts/next/build-sidecar.mjs')], {
+    cwd: root, encoding: 'utf8', env: { ...process.env, PATH: `${join(root, 'bin')}:${process.env.PATH}`,
+      O8_TAURI_BUILD_TARGET: triple, TAURI_ENV_TARGET_TRIPLE: triple },
+  });
+  expect(result.status, result.stdout + result.stderr).toBe(0);
+  const invocations = readFileSync(calls, 'utf8').trim().split('\n').map(line => JSON.parse(line) as string[]);
+  expect(invocations.filter(call => call[0] === 'cargo').map(call => call[call.indexOf('--target') + 1])).toEqual([triple]);
+  const staged = join(root, 'src-tauri/helpers/o8-next');
+  const original = join(root, 'native/o8-next/target', triple, 'release/o8-next');
+  expect(readFileSync(original)[28]).toBe(0);
+  expect(readFileSync(staged)[28]).toBe(1);
+  expect(invocations.find(call => call[0] === 'strip')?.[1]).toBe('-x');
+  const receipt = JSON.parse(readFileSync(join(root, 'src-tauri/helpers/o8-next-build.json'), 'utf8'));
+  expect(Object.keys(receipt.payloadSha256)).toEqual([architecture]);
+  expect(receipt.payloadSha256[architecture]).toBe(macosBuildPayloadIdentity(staged, architecture).sha256);
+  for (const name of ['o8', 'o8-next']) writeFileSync(join(app, 'Contents/MacOS', name), readFileSync(staged));
+  writeFileSync(join(app, 'Contents/Resources/o8-next-build.json'), JSON.stringify(receipt));
+  const verified = run();
+  expect(verified.status, verified.stderr).toBe(0);
+});
+
+it('provisions and requests the same target in the preview build matrix', () => {
+  const workflow = readFileSync('.github/workflows/release.yml', 'utf8');
+  expect(workflow).toContain('targets: ${{ matrix.target }}');
+  expect(workflow).toContain('O8_TAURI_BUILD_TARGET: ${{ matrix.target }}');
 });
