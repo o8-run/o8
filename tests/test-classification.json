@@ -4443,6 +4443,7 @@
       "reasons": [
         "child-process",
         "executable-fixture",
+        "network-listener",
         "process-signal",
         "real-path"
       ]

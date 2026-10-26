@@ -63,7 +63,17 @@ impl Render for Shell {
                     |content, registration| (registration.decorate)(self, content),
                 ),
             )
-            .child(canvas(|_, _, _| (), move |_, _, _, _| painted.set(revision)).size(px(1.)))
+            .child(
+                canvas(
+                    |_, _, _| (),
+                    move |_, _, _, _| {
+                        if painted.replace(revision) == u64::MAX {
+                            report_startup();
+                        }
+                    },
+                )
+                .size(px(1.)),
+            )
     }
 }
 
@@ -158,6 +168,7 @@ impl Shell {
                         view.child(
                             div()
                                 .id("shell-retry")
+                                .debug_selector(|| "shell-retry".into())
                                 .cursor_pointer()
                                 .p(px(6.))
                                 .child("Retry")
