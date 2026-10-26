@@ -87,8 +87,12 @@ repeat in a later day or version cannot become another first step. Equal-time
 records use the event ID as a stable tie-breaker. No install or event IDs are
 printed.
 
-Unclean backend session endings are recovered on the next launch, subject to
-the privacy gate. They count according to the export's recorded timestamp;
+First-step totals cover activity observed while sharing is enabled. Off activity
+does not read or write analytics markers and is not reconstructed later.
+Unclean backend session endings are inferred from enabled-session markers left
+by processes that are now gone, subject to the current privacy gate. Sharing
+being off can leave a marker untouched even after a graceful exit. These events
+count according to the export's recorded timestamp;
 the client does not send an earlier end time. Earlier activity from before
 these first-step markers shipped is not reconstructed.
 
