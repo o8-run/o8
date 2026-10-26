@@ -769,7 +769,7 @@ export function createOwnedSessionStore(
     getReviewPacket: (surfaceId) => withSurfaceLock(surfaceId, () => reviewTailController.getReviewPacket(surfaceId)),
     getFleetAdditions,
     sessionState: (surfaceId) => readOwnedSessionState(root, surfaceId, surfacePrefix),
-    archiveSession: (surfaceId) => withSurfaceLock(surfaceId, () => io.archiveSession(surfaceId)),
+    archiveSession: (surfaceId, workspace) => withSurfaceLock(surfaceId, () => io.archiveSession(surfaceId, workspace)),
     setDetachedSession,
     sweepOrphanedSessions: fleetComputer.sweepOrphanedSessions,
     getTelemetrySources: reviewTailController.getTelemetrySources,

@@ -257,6 +257,18 @@
       "nativeSelectors": [
         "command-palette"
       ]
+    },
+    {
+      "id": "shortcuts",
+      "flags": [],
+      "nativeCommand": "Open keyboard shortcuts",
+      "webRoute": "/dashboard",
+      "webKeys": "Control+/",
+      "nativeSelectors": [
+        "keyboard-shortcuts",
+        "shortcuts-list"
+      ],
+      "remaining": "Shortcut row geometry and equivalent scroll position remain unmeasured"
     }
   ]
 }

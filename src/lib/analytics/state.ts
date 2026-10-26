@@ -1,5 +1,5 @@
 import {
-  closeSync, constants, ftruncateSync, mkdirSync, openSync, readFileSync,
+  closeSync, constants, fstatSync, ftruncateSync, mkdirSync, openSync, readSync,
   readdirSync, renameSync, writeFileSync, writeSync,
 } from 'node:fs';
 import { join } from 'node:path';
@@ -8,6 +8,26 @@ import { getDataDir } from '@/lib/data-dir-migration';
 
 export const productAnalyticsDir = () => join(getDataDir(), 'usage-analytics');
 export const productSessionFile = () => join(productAnalyticsDir(), `session-${process.pid}.json`);
+
+/** Never wait for a pipe peer, follow a symlink, or read unbounded marker data. */
+export function readProductSessionMarker(file: string, update?: { pid: number; enabled: boolean }): { pid?: unknown; enabled?: unknown } {
+  const descriptor = openSync(file, (update === undefined ? constants.O_RDONLY : constants.O_RDWR)
+    | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  try {
+    if (!fstatSync(descriptor).isFile()) throw new Error('Invalid session marker.');
+    const bytes = Buffer.alloc(129);
+    const count = readSync(descriptor, bytes, 0, bytes.length, 0);
+    if (count === bytes.length) throw new Error('Invalid session marker.');
+    const marker = JSON.parse(bytes.subarray(0, count).toString('utf8')) as { pid?: unknown; enabled?: unknown };
+    if (update && marker.pid === update.pid && typeof marker.enabled === 'boolean' && marker.enabled !== update.enabled) {
+      const content = JSON.stringify(update);
+      // An open descriptor never recreates a marker removed by shutdown.
+      writeSync(descriptor, content, 0, 'utf8');
+      ftruncateSync(descriptor, Buffer.byteLength(content));
+    }
+    return marker;
+  } finally { closeSync(descriptor); }
+}
 
 export function writeProductSession(enabled: boolean): void {
   mkdirSync(productAnalyticsDir(), { recursive: true });
@@ -20,6 +40,7 @@ export function writeProductSession(enabled: boolean): void {
 /** HTTP and backend processes share the persisted preference. Update live
  * backend markers when a gated event observes that preference changing. */
 export function noteProductSessionConsent(enabled: boolean): void {
+  if (!enabled) return;
   try {
     const root = productAnalyticsDir();
     for (const name of readdirSync(root)) {
@@ -27,18 +48,10 @@ export function noteProductSessionConsent(enabled: boolean): void {
       if (!match) continue;
       const pid = Number(match[1]);
       if (!Number.isSafeInteger(pid) || pid > 2147483647) continue;
-      let descriptor: number | undefined;
       try {
         process.kill(pid, 0);
-        descriptor = openSync(join(root, name), constants.O_RDWR | constants.O_NOFOLLOW);
-        const marker = JSON.parse(readFileSync(descriptor, 'utf8')) as { pid?: unknown; enabled?: unknown };
-        if (marker.pid !== pid || typeof marker.enabled !== 'boolean' || marker.enabled === enabled) continue;
-        const content = JSON.stringify({ pid, enabled });
-        // An open descriptor never recreates a marker removed by shutdown.
-        writeSync(descriptor, content, 0, 'utf8');
-        ftruncateSync(descriptor, Buffer.byteLength(content));
+        readProductSessionMarker(join(root, name), { pid, enabled });
       } catch { /* Missing, dead, corrupt, or inaccessible: fail closed. */ }
-      finally { if (descriptor !== undefined) closeSync(descriptor); }
     }
   } catch {
     // Local measurement must not affect application behavior.

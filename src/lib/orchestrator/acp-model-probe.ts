@@ -14,7 +14,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
-import { acpLaunchFingerprint } from '@/lib/acp/local-connection';
+import { acpLaunchFingerprint, localAcpOutputRedactor } from '@/lib/acp/local-connection';
 import { AcpClient } from '@/lib/acp/client';
 import { getDataDir } from '@/lib/data-dir-migration';
 import type { OrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
@@ -69,25 +69,27 @@ function writeCache(id: OrchestratorBackendId, result: AcpModelProbeResult, fing
  */
 export async function probeAcpModels(
   id: OrchestratorBackendId,
-  launch: { command: string; args: string[]; env?: Record<string, string>; omitEnv?: string[] },
+  launch: import('@/lib/lane/orchestrator-backends/acp').AcpLaunch,
   repoPath: string,
   options?: { force?: boolean },
 ): Promise<AcpModelProbeResult> {
   const fingerprint = acpLaunchFingerprint(launch);
+  const outputRedactor = localAcpOutputRedactor(launch.localEnvironment, launch.env);
   if (!options?.force) {
     const cached = readCache(id, fingerprint);
-    if (cached && Date.now() - cached.probedAt < CACHE_TTL_MS) return cached;
+    if (cached && Date.now() - cached.probedAt < CACHE_TTL_MS) return { ...cached,
+      models: outputRedactor.redact(cached.models), currentModel: outputRedactor.redact(cached.currentModel) };
   }
 
-  const client = new AcpClient({ runtimeId: id, command: launch.command, args: launch.args, cwd: repoPath, env: launch.env, omitEnv: launch.omitEnv });
+  const client = new AcpClient({ runtimeId: id, command: launch.command, args: launch.args, cwd: repoPath, env: launch.env, omitEnv: launch.omitEnv, localEnvironment: launch.localEnvironment });
   const timeout = setTimeout(() => client.kill(), PROBE_TIMEOUT_MS);
   try {
     await client.initialize();
     const created = await client.newSession(repoPath, []);
     const modelOption = created.configOptions.find((o) => o.id === 'model' || o.category === 'model');
     const result: AcpModelProbeResult = {
-      models: modelOption?.options ?? [],
-      currentModel: modelOption?.currentValue ?? null,
+      models: client.redactOutput(modelOption?.options ?? []),
+      currentModel: client.redactOutput(modelOption?.currentValue ?? null),
       probedAt: Date.now(),
       source: 'probe',
     };

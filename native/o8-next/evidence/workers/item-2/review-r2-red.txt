@@ -1,0 +1,17 @@
+running 1 test
+
+thread 'shell::workers::card_tests::workers_clicked_activity_selects_card_before_enter_and_down' (185872) panicked at src/surfaces/workers/card_tests.rs:135:5:
+assertion `left == right` failed: A selected, click B Activity, Enter, Down must select C
+  left: Some("worker-running-next")
+ right: Some("worker-running-third")
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test shell::workers::card_tests::workers_clicked_activity_selects_card_before_enter_and_down ... FAILED
+
+failures:
+
+failures:
+    shell::workers::card_tests::workers_clicked_activity_selects_card_before_enter_and_down
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 229 filtered out; finished in 2.94s
+
+error: test failed, to rerun pass `--bin o8-next`

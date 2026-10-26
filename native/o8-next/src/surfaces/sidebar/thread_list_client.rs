@@ -191,41 +191,4 @@ impl Client {
         }
         Ok(sessions)
     }
-    pub(crate) fn patch_thread(&self, id: &str, patch: Value) -> Result<(), String> {
-        let mut body = patch;
-        body["tabId"] = json!(id);
-        self.patch_metadata(body)
-    }
-    pub(crate) fn patch_metadata(&self, body: Value) -> Result<(), String> {
-        let url = self.url("/api/v2/chat-history").unwrap();
-        let request = self.request("PATCH", &url);
-        let response = request.send_json(body).map_err(|error| match error {
-            ureq::Error::Status(code, _) => format!("Thread update rejected (HTTP {code})."),
-            _ => "Thread update is unconfirmed. Refresh before retrying.".into(),
-        })?;
-        let result: Value = Self::read(response)?;
-        if result["ok"] != true {
-            return Err("Thread update was not confirmed.".into());
-        }
-        Ok(())
-    }
-    pub(crate) fn archive_worker(&self, id: &str, mutation: &str) -> Result<(), String> {
-        let url = self.url("/api/runtime/archive").unwrap();
-        let request = self.request("POST", &url);
-        let response = request
-            .send_json(json!({"sessionKey":id,"clientMutationId":mutation}))
-            .map_err(|error| match error {
-                ureq::Error::Status(code, _) => format!("Worker archive rejected (HTTP {code})."),
-                _ => {
-                    "Worker archive is unconfirmed. Retry retains the same action identity.".into()
-                }
-            })?;
-        let result: Value = Self::read(response)?;
-        if result["ok"] != true || result["archived"] != true {
-            return Err(
-                "Worker archive is not confirmed. Retry retains the same action identity.".into(),
-            );
-        }
-        Ok(())
-    }
 }

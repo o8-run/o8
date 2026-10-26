@@ -52,11 +52,13 @@ describe('desktop account identity', () => {
 
     afterEach(() => {
       mocks.user = null;
+      vi.restoreAllMocks();
       vi.unstubAllEnvs();
       vi.unstubAllGlobals();
     });
 
     it('shows and records the linked GitHub photo and email, not the sign-up snapshot', async () => {
+      const errors = vi.spyOn(console, 'error');
       mocks.user = clerkUser([{ provider: 'github', emailAddress: GITHUB_EMAIL, imageUrl: GITHUB_IMAGE }]);
       const { O8AuthProvider, useO8Auth } = await import('@/components/auth/O8AuthProvider');
       let state: O8AuthState | null = null;
@@ -66,11 +68,18 @@ describe('desktop account identity', () => {
         return null;
       };
       const root = createRoot(document.createElement('div'));
-      await act(async () => { root.render(createElement(O8AuthProvider, null, createElement(Probe))); });
-      await vi.waitFor(() => expect(provisioned).toHaveLength(1));
-      expect(state!.user).toMatchObject({ email: GITHUB_EMAIL, avatarUrl: GITHUB_IMAGE });
-      expect(provisioned[0]).toMatchObject({ clerkUserId: 'user_identity', email: GITHUB_EMAIL, avatarUrl: GITHUB_IMAGE });
-      await act(async () => { root.unmount(); });
+      try {
+        await act(async () => { root.render(createElement(O8AuthProvider, null, createElement(Probe))); });
+        // Account startup loads its session module from an effect. Settle that
+        // import inside act before asserting the resulting state and request.
+        await act(async () => { await vi.dynamicImportSettled(); });
+        expect(provisioned).toHaveLength(1);
+        expect(state!.user).toMatchObject({ email: GITHUB_EMAIL, avatarUrl: GITHUB_IMAGE });
+        expect(provisioned[0]).toMatchObject({ clerkUserId: 'user_identity', email: GITHUB_EMAIL, avatarUrl: GITHUB_IMAGE });
+      } finally {
+        await act(async () => { root.unmount(); });
+      }
+      expect(errors.mock.calls.filter(([message]) => String(message).includes('not wrapped in act'))).toEqual([]);
     });
   });
 });

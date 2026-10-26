@@ -57,9 +57,15 @@ fn settle(brain: &Entity<crate::brain::Brain>, cx: &mut VisualTestContext) {
 }
 fn open_brain(shell: &Entity<Shell>, cx: &mut VisualTestContext) -> Entity<crate::brain::Brain> {
     cx.simulate_keystrokes("ctrl-shift-p");
+    draw(cx);
+    assert!(shell.read_with(cx, |s, _| s.palette));
+    assert!(cx.debug_bounds("command-palette").is_some());
     cx.simulate_keystrokes("b r a i n enter");
     draw(cx);
-    brain(shell, cx)
+    assert!(!shell.read_with(cx, |s, _| s.palette));
+    let brain = brain(shell, cx);
+    assert!(brain.read_with(cx, |b, _| b.expanded));
+    brain
 }
 
 #[gpui::test]
@@ -205,7 +211,10 @@ fn brain_fixture_errors_cancel_retention_and_workspace_isolation(cx: &mut TestAp
             "new Brain composer receives native input"
         )
     });
-    cx.simulate_keystrokes("enter");
+    // Observe the synchronous submit before the fixture runtime can finish.
+    cx.update(|window, cx| {
+        window.dispatch_keystroke(gpui::Keystroke::parse("enter").unwrap(), cx);
+    });
     assert!(
         brain.read_with(cx, |b, _| b.busy),
         "keyboard submit starts Brain"

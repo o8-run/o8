@@ -999,9 +999,10 @@ describe('worktree-side merge with real git repos', () => {
   it('merge approval emits nothing while product telemetry is off and once while on', async () => {
     const previousProxyUrl = process.env.O8_PROXY_URL;
     const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    // Reuse the repository; each attempt still creates and merges a real branch.
+    const { repo } = makeRepo('o8-merge-telemetry');
 
     const mergeOnce = async (suffix: string) => {
-      const { repo } = makeRepo(`o8-merge-telemetry-${suffix}`);
       const worktree = await makeWorktree(repo, `pkt-telemetry-${suffix}`, `inline/telemetry-${suffix}`);
       writeFileSync(join(worktree.path, `${suffix}.txt`), `${suffix}\n`);
       commitAll(worktree.path, `${suffix} change`);

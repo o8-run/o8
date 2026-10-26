@@ -1,7 +1,7 @@
 import { execFileSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -11,7 +11,13 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { OwnedSessionRecord } from '@/lib/runtimes/shared/owned-session';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 
-const root = mkdtempSync(path.join(os.tmpdir(), 'o8-preservation-cli-real-path-'));
+const fixtureRoot = mkdtempSync(path.join(os.tmpdir(), 'o8-preservation-cli-real-path-'));
+const physicalRoot = path.join(fixtureRoot, 'physical');
+mkdirSync(physicalRoot);
+const aliasedRoot = path.join(fixtureRoot, 'alias');
+// Exercise aliased temporary directories on every host, including CI.
+symlinkSync(physicalRoot, aliasedRoot, process.platform === 'win32' ? 'junction' : 'dir');
+const root = realpathSync(mkdtempSync(path.join(aliasedRoot, 'fixture-')));
 const dataDir = path.join(root, 'data');
 const token = 'preservation-operator-test-token';
 const workerToken = 'preservation-worker-test-token';
@@ -162,7 +168,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   closeDb();
-  if (finished) rmSync(root, { recursive: true, force: true });
+  if (finished) rmSync(fixtureRoot, { recursive: true, force: true });
 });
 
 describe('workspace preservation compiled CLI and persisted owner', () => {

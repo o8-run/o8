@@ -54,6 +54,7 @@ import { basename, extname, isAbsolute, join, resolve } from 'node:path';
 import { execFile, execFileSync } from '@/lib/providers/child-process';
 import { createServer } from 'node:http';
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
+import { isTerminalChatConnectivityPrompt } from '@/lib/orchestrator/connectivity-check';
 import { homedir } from 'node:os';
 import { promisify } from 'node:util';
 import { getDataDir, migrateDataDirOnce } from '@/lib/data-dir-migration';
@@ -5173,6 +5174,14 @@ async function handleOrchestratorSendMsgAdmitted(client: ClientState, msg: Recor
 
   const correlationId = resolveOrchestratorCommandCorrelationId(msg);
   const threadId = resolveMsgThreadId(msg);
+  if (isTerminalChatConnectivityPrompt(msg.displayMessage ?? message)
+    && (!Array.isArray(msg.attachments) || msg.attachments.length === 0)) {
+    send(client, { channel: 'orchestrator', event: 'error', data: {
+      repoPath, threadId, error: 'Use o8 chat --check to check connectivity without creating a conversation.',
+      ...orchestratorCommandAckCorrelation(correlationId),
+    } });
+    return;
+  }
   let attachments: ComposerImageAttachment[] | undefined;
   try {
     attachments = 'attachments' in msg ? validateComposerImageAttachments(msg.attachments) : undefined;
