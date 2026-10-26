@@ -29,14 +29,14 @@ afterAll(() => {
 });
 
 describe.sequential('first-run telemetry consent — real operator-defaults route', () => {
-  it('starts unanswered with both sharing choices off', async () => {
+  it('starts unanswered with usage unset and crash reports off', async () => {
     const response = await GET(new Request('http://127.0.0.1/api/panel/operator-defaults'));
     const payload = await response.json();
 
     expect(response.status).toBe(200);
     expect(payload.values).toMatchObject({
       crashReportsEnabled: false,
-      productTelemetryEnabled: false,
+      productTelemetryEnabled: null,
       telemetryConsentAnswered: false,
     });
   });

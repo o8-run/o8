@@ -1,0 +1,27 @@
+running 22 tests
+test composer::native_tests::native_copy_cut_paste_megabyte_and_empty_copy ... ok
+test composer::native_tests::native_focus_change_ends_mouse_drag ... ok
+test composer::native_tests::native_ime_utf16_replacement_is_one_undo_and_never_submits ... ok
+ok
+test composer::native_tests::native_mouse_drag_double_word_triple_line_and_keyboard_selection ... ok
+test composer::native_tests::native_nonempty_input_range_exposes_selection_bounds ... ok
+test composer::native_tests::native_rtl_mixed_text_selection_clipboard_and_utf16_hit_testing ... ok
+test composer::native_tests::native_single_line_megabyte_selection_copy_and_undo ... ok
+test composer::native_tests::native_undo_redo_restores_reversed_selection ... ok
+test composer::native_tests::native_word_and_line_moves_select_and_delete ... ok
+test composer::tests::composer_height_bounds_follow_content ... composer empty height: 38px
+composer heights: empty=38px three=78px cap=176px
+ok
+test composer::tests::ime_multiline_paste_undo ... ok
+test composer::tests::long_multiline_paste_keeps_caret_reachable ... ok
+test composer::tests::utf16_selection_and_composition_at_nonzero_offset ... ok
+test ui::conversation::card_tests::native_composer_card_controls_fit_compact_and_wide_windows ... ok
+test ui::conversation::card_tests::native_composer_card_controls_persist_and_send_the_selected_routing ... ok
+test ui::conversation::card_tests::native_composer_card_rejected_model_retains_route_and_draft ... ok
+test ui::conversation::card_tests::native_composer_card_restores_focus_and_keeps_each_session_choice ... ok
+test ui::conversation::card_tests::native_composer_card_send_preserves_images_added_after_the_request ... ok
+test ui::conversation::card_tests::native_composer_review_canonical_receipt_accepts_temp_directory_alias ... ok
+test ui::conversation::card_tests::native_composer_review_escape_restores_chip_focus ... ok
+test ui::conversation::card_tests::native_composer_review_inflight_model_save_cannot_change_another_draft_or_focus ... ok
+
+test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 129 filtered out; finished in 19.91s

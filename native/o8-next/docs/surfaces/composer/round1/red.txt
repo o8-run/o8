@@ -1,0 +1,53 @@
+Send pointer focus
+running 1 test
+test ui::conversation::card_tests::native_composer_review_send_button_returns_focus_to_editor ...
+thread 'ui::conversation::card_tests::native_composer_review_send_button_returns_focus_to_editor' (69038) panicked at src/composer/card_tests.rs:410:9:
+successful pointer Send must return focus to the editor
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    ui::conversation::card_tests::native_composer_review_send_button_returns_focus_to_editor
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 173 filtered out; finished in 1.30s
+
+error: test failed, to rerun pass `--bin o8-next`
+
+Focused render-hook composition
+error[E0425]: cannot find type `KeyDownEvent` in this scope
+  --> src/composer/card.rs:68:55
+   |
+68 |             .on_key_down(cx.listener(move |s, event: &KeyDownEvent, window, cx| {
+   |                                                       ^^^^^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find type `KeyDownEvent` in this scope
+   --> src/composer/card.rs:381:55
+    |
+381 |             .capture_key_down(cx.listener(|s, event: &KeyDownEvent, window, cx| {
+    |                                                       ^^^^^^^^^^^^ not found in this scope
+
+For more information about this error, try `rustc --explain E0425`.
+error: could not compile `o8-next` (bin "o8-next") due to 2 previous errors
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `o8-next` (bin "o8-next" test) due to 2 previous errors
+
+Focused word dispatch
+running 1 test
+test composer::native_tests::native_review_word_dispatch_survives_focus_and_unicode ...
+thread 'composer::native_tests::native_review_word_dispatch_survives_focus_and_unicode' (70772) panicked at src/composer/native_tests.rs:282:5:
+assertion `left == right` failed: the active dispatcher must move by word after refocus
+  left: 24..24
+ right: 21..21
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    composer::native_tests::native_review_word_dispatch_survives_focus_and_unicode
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 170 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `--bin o8-next`
