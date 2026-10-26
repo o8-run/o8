@@ -1,0 +1,12 @@
+[advisories]
+# Added 2026-10-25; review by 2026-11-25. The renderer's portal and credential
+# dependencies still require the 5.x bus types in current stable releases.
+# The X11 renderer enables portals; credential storage is not an optional feature.
+# Scope: standalone-crate maintenance notices only. Follow up in #3901, #3902
+# and #3903; migrate consumers to the maintained 6.x modules and remove these.
+# Keep this local-workspace policy aligned with the repository-root CI policy.
+ignore = [
+  "RUSTSEC-2026-0370", # zvariant
+  "RUSTSEC-2026-0371", # zbus_names
+  "RUSTSEC-2026-0372", # zvariant_derive
+]
