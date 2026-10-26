@@ -3212,6 +3212,13 @@
       ]
     },
     {
+      "path": "tests/http-mcp-webview-real-path.test.ts",
+      "reasons": [
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/huddle-zero-diff-classification.test.ts",
       "reasons": [
         "child-process",
