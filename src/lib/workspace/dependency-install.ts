@@ -1,4 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { execDependencyInstallProcess } from './dependency-install-process';
+import { timedDependencyInstall } from './dependency-install-timing';
 import { execFile } from '@/lib/providers/child-process';
 import { lstat, readFile, readdir, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
@@ -610,12 +612,13 @@ async function defaultRun(
     invocation.args,
     identity ?? null,
   );
-  await execFileAsync(guarded.command, guarded.args, {
+  await execDependencyInstallProcess(guarded.command, guarded.args, {
     cwd: invocation.cwd,
     timeout: invocation.timeoutMs,
     maxBuffer: 8 * 1024 * 1024,
     windowsHide: true,
     env: invocation.env,
+    signal: invocation.signal,
   });
 }
 
@@ -741,8 +744,8 @@ export async function runDependencyInstall(
       workspacePath, recipe, authority, runtime, execution.executable,
     );
     executionStarted = true;
-    if (options.run) await options.run(invocation);
-    else await defaultRun(invocation, options.materializationIdentity);
+    await timedDependencyInstall((signal) => options.run
+      ? options.run({ ...invocation, signal }) : defaultRun({ ...invocation, signal }, options.materializationIdentity));
     executionFinished = true;
     await ensurePinnedWorkspaceDirectory(workspacePath, materializationIdentity, 'node_modules');
     await auditPrivateDependencyView(workspacePath);
