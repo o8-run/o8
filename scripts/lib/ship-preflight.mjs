@@ -6,6 +6,7 @@ import {
   lstatSync,
   openSync,
   readFileSync,
+  realpathSync,
   rmSync,
   statfsSync,
   writeFileSync,
@@ -16,6 +17,7 @@ import { inspectIntakeReconciliation } from './intake-reconciliation.mjs';
 import { resolveReleaseConfig } from './release-config.mjs';
 import { resolveNotarizationCredentials } from './notarization.mjs';
 import { parseReleaseNotes } from './public-release.mjs';
+import { assertNoProducer } from './generated-output-producer-check.mjs';
 
 const DEFAULT_MIN_FREE_GIB = 25;
 
@@ -185,6 +187,19 @@ export function performShipPreflight(options) {
   // Missing notes remain valid: the feed can be built from public commits.
   const notesPath = join(root, 'release-notes', 'next.md');
   parseReleaseNotes(existsSync(notesPath) ? readFileSync(notesPath, 'utf8') : '');
+  // Refuse a colliding producer before source/network checks or the advisory
+  // benchmark. Prebuild repeats this observation to catch later arrivals.
+  assertNoProducer(realpathSync(root), {
+    run(command, args, options) {
+      const receipt = run(command, args, { cwd: root, env,
+        timeoutMs: options.timeout, maxBuffer: options.maxBuffer });
+      if (receipt.status !== 0) {
+        throw Object.assign(new Error(`could not inspect producer: ${receipt.stderr.trim() || `exit ${receipt.status}`}`),
+          { status: receipt.status, stdout: receipt.stdout });
+      }
+      return receipt.stdout;
+    },
+  });
   const tag = `v${version}`;
   const head = requireSuccess(
     run('git', ['rev-parse', 'HEAD'], { cwd: root, env }),

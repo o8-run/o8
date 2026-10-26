@@ -5214,6 +5214,17 @@
       ]
     },
     {
+      "path": "tests/preship-producer-preflight-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "native-build",
+        "process-signal",
+        "real-path",
+        "terminal-tool"
+      ]
+    },
+    {
       "path": "tests/principal-authz.test.ts",
       "reasons": [
         "child-process",
