@@ -32,9 +32,8 @@ export async function emitProductEvent(
   props?: ProductEventProps,
 ): Promise<boolean> {
   try {
-    const enabled = isProductTelemetryEnabled();
-    noteProductSessionConsent(enabled);
-    if (!enabled) return false;
+    if (!isProductTelemetryEnabled()) return false;
+    noteProductSessionConsent(true);
 
     const payload = sanitizeProductEvent(event, props);
     if (!payload) return false;

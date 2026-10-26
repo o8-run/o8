@@ -22,8 +22,8 @@ The complete usage event list is:
   is a version-controlled project, recorded as yes or no.
 - worker.first_launched: the first successful worker launch; no extra fields.
 - merge.first_completed: the first completed merge; no extra fields.
-- session.ended: an o8 backend session ended; only whether its exit was clean,
-  recorded as yes or no.
+- session.ended: an o8 backend session ended; only the clean field, a yes-or-no
+  value saying whether its exit was clean.
 
 First-step markers stay on this installation across restarts and updates. Older
 activity is not reconstructed. A step

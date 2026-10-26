@@ -1,8 +1,8 @@
-import { readFileSync, readdirSync, renameSync, rmSync } from 'node:fs';
+import { readdirSync, renameSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { emitProductEvent, isProductTelemetryEnabled } from './server';
-import { productAnalyticsDir, productSessionFile, writeProductSession } from './state';
+import { productAnalyticsDir, productSessionFile, readProductSessionMarker, writeProductSession } from './state';
 
 let activeFile: string | null = null;
 function isGone(pid: number): boolean {
@@ -25,7 +25,7 @@ export async function startProductSession(): Promise<void> {
       if (!Number.isSafeInteger(pid) || pid > 2147483647 || !isGone(pid)) continue;
       const source = join(root, name);
       try {
-        const marker = JSON.parse(readFileSync(source, 'utf8')) as { pid?: unknown; enabled?: unknown };
+        const marker = readProductSessionMarker(source);
         if (marker.pid !== pid || typeof marker.enabled !== 'boolean') continue;
         // Only one concurrently starting backend may consume a stale marker.
         const claimed = `${source}.${randomUUID()}.claimed`;

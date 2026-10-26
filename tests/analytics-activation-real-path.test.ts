@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { NextRequest } from 'next/server';
@@ -48,6 +48,52 @@ afterEach(async () => {
 });
 
 describe('activation analytics through real routes and persisted state', () => {
+  it.each([false, true].flatMap((enabled) => ['regular', 'fifo', 'directory'].map((kind) => ({ enabled, kind }))))(
+    'launches with analytics $enabled and a live $kind session marker without blocking', async ({ enabled, kind }) => {
+      await choose(enabled);
+      mkdirSync(analyticsDir, { recursive: true });
+      const marker = join(analyticsDir, `session-${process.pid}.json`);
+      if (kind === 'fifo') execFileSync('mkfifo', [marker]);
+      else if (kind === 'directory') mkdirSync(marker);
+      else writeFileSync(marker, JSON.stringify({ pid: process.pid, enabled: !enabled }));
+      const child = spawnSync(process.execPath, [
+        '--import=./scripts/register-server-only-stub.mjs', '--import=tsx', '--input-type=module', '--eval', `
+        import fs from 'node:fs';
+        import { syncBuiltinESMExports } from 'node:module';
+        import { join } from 'node:path';
+        const load = async (path) => { const module = await import(path); return module.default ?? module; };
+        const { POST } = await load('./src/app/api/runtime/launch/route.ts');
+        const { getRuntime } = await load('./src/lib/runtimes/index.ts');
+        const { NextRequest } = await import('next/server.js');
+        getRuntime('cloud').launch = async () => ({ ok: true, sessionKey: 'cloud:marker-probe', note: 'Fixture launched.' });
+        let egress = 0;
+        globalThis.fetch = async (url) => { if (String(url).endsWith('/v1/telemetry')) egress++; return Response.json({ ok: true }); };
+        let markerScans = 0;
+        const readdir = fs.readdirSync;
+        fs.readdirSync = function (path, ...args) {
+          if (String(path) === join(process.env.O8_DATA_DIR, 'usage-analytics')) markerScans++;
+          return readdir.call(this, path, ...args);
+        };
+        syncBuiltinESMExports();
+        const response = await POST(new NextRequest('http://localhost/api/runtime/launch', {
+          method: 'POST', body: JSON.stringify({ runtime: 'cloud', prompt: 'Fixture', cwd: process.env.O8_DATA_DIR,
+            skipSetup: true, isolate: false, clientMutationId: 'marker-probe-' + process.pid }),
+        }));
+        console.log('MARKER_PROBE:' + JSON.stringify({ status: response.status, markerScans, egress }));
+        process.exit(0);
+      `], { cwd: process.cwd(), encoding: 'utf8', timeout: 8_000, env: {
+        PATH: process.env.PATH, NODE_ENV: 'test', CORTEX_IDE_DATA_DIR: dataDir, O8_DATA_DIR: dataDir,
+      } });
+      // Keep arbitrary route diagnostics and request headers out of failure output.
+      const timedOut = (child.error as NodeJS.ErrnoException | undefined)?.code === 'ETIMEDOUT';
+      expect({ completed: child.status === 0 && !child.error, timedOut }).toEqual({ completed: true, timedOut: false });
+      const result = JSON.parse(child.stdout.split('\n').find((line) => line.startsWith('MARKER_PROBE:'))!.slice('MARKER_PROBE:'.length));
+      expect(result.status).toBe(200);
+      if (!enabled) expect(result).toMatchObject({ markerScans: 0, egress: 0 });
+      if (enabled && kind === 'regular') expect(JSON.parse(readFileSync(marker, 'utf8')).enabled).toBe(true);
+    },
+  );
+
   it.each([
     { event: 'worker.first_launched' },
     { event: 'merge.first_completed' },
