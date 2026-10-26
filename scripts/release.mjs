@@ -42,7 +42,8 @@ import {
 import { assertCpuPreparationCurrent, macosCpuPackageArchitectures } from './lib/macos-cpu-packages.mjs';
 import { verifyUpdaterSignature } from './lib/updater-signature.mjs';
 import { buildLatestShip, scrubPublicText } from './lib/public-release.mjs';
-import { acquireUpdateFeedLock, publishBetaFeed } from './lib/update-feeds.mjs';
+import { acquireUpdateFeedLock, assertBetaPublicationCurrent, publishBetaFeed } from './lib/update-feeds.mjs';
+import { prepareCandidateRetry } from './lib/release-candidate.mjs';
 import { resolveReleaseChannel } from './lib/release-channel.mjs';
 import { formatReleaseSummary, prepareReleaseSummary } from './lib/release-summary.mjs';
 
@@ -347,7 +348,7 @@ const latestNotes = gateReleaseNote ? `o8 ${tag} — ${gateReleaseNote}` : `o8 $
 // the upload list. CPU delivery requires both independently verified packages.
 const latestJsonPath = join(BUNDLE, 'macos', releaseChannel.manifestName);
 const fixedJsonPath = join(BUNDLE, 'macos', 'fixed.json');
-const { latestJson, uploadArgs } = buildReleaseManifest({
+let { latestJson, uploadArgs } = buildReleaseManifest({
   // Linux preview artifacts are produced separately under the non-targeted
   // Cargo bundle directory. Keep discovering them there while macOS uses the
   // explicit universal target directory.
@@ -365,6 +366,40 @@ const { latestJson, uploadArgs } = buildReleaseManifest({
 });
 const feedLock = acquireUpdateFeedLock();
 if (releaseChannel.channel === 'beta') latestJson.channel = 'beta';
+try {
+  execFileSync('git', ['ls-remote', '--exit-code', 'origin', `refs/tags/${tag}`], { stdio: 'pipe' });
+  console.log(`[release] tag ${tag} present on origin`);
+} catch {
+  console.error(`[release] tag ${tag} is not on origin.`);
+  console.error(`[release] After the version PR merges, push its exact tag: git push origin refs/tags/${tag}:refs/tags/${tag}`);
+  process.exit(1);
+}
+
+let releaseExists = false;
+let existingCandidates = new Set();
+if (releaseChannel.preview) {
+  try {
+    execFileSync('gh', ['release', 'view', tag, '-R', REPO], { stdio: 'pipe' });
+    releaseExists = true;
+  } catch {}
+  if (releaseExists) {
+    console.error('[release] Preview artifacts already exist; use a new preview version.');
+    process.exit(1);
+  }
+} else {
+  try {
+    assertBetaPublicationCurrent(latestJson, [REPO, PUBLIC_MIRROR], { lock: feedLock });
+    const retry = prepareCandidateRetry(latestJson, uploadArgs, [REPO, PUBLIC_MIRROR],
+      [releaseChannel.manifestName, releaseChannel.compatibilityManifestName]);
+    latestJson = retry.manifest;
+    existingCandidates = retry.existing;
+    releaseExists = existingCandidates.has(REPO);
+  } catch (error) {
+    console.error(`[release] REFUSING: ${error.message}`);
+    process.exit(1);
+  }
+}
+
 writeFileSync(latestJsonPath, JSON.stringify(latestJson, null, 2));
 // The Linux completion command reads the candidate tag's compatibility manifest.
 // This alias is uploaded only to the candidate, never the rolling stable anchor.
@@ -407,38 +442,6 @@ if (releaseChannel.publishStableEffects) {
     for (const { id, commit } of unknownFixes) console.warn(`[release]   ${id} (${commit.sha})`);
   }
 }
-
-try {
-  execFileSync('git', ['ls-remote', '--exit-code', 'origin', `refs/tags/${tag}`], { stdio: 'pipe' });
-  console.log(`[release] tag ${tag} present on origin`);
-} catch {
-  console.error(`[release] tag ${tag} is not on origin.`);
-  console.error(`[release] After the version PR merges, push its exact tag: git push origin refs/tags/${tag}:refs/tags/${tag}`);
-  process.exit(1);
-}
-
-let releaseExists = false;
-try {
-  execFileSync('gh', ['release', 'view', tag, '-R', REPO], { stdio: 'pipe' });
-  releaseExists = true;
-} catch {}
-
-// #1486 — an existing release for the CURRENT version almost always means the
-// operator forgot `npm version patch`: silently replacing the published
-// assets under the same tag re-signs history and updaters never see a new
-// build (the 2026-07-08 #1499 incident). Refuse unless explicitly overridden.
-if (releaseExists && process.env.O8_RELEASE_CLOBBER !== '1') {
-  console.error(`[release] REFUSING: ${tag} is already published. Did you forget to bump?`);
-  console.error('[release]   Prepare a fresh version PR with npm version patch --no-git-tag-version.');
-  console.error('[release]   Merge after required checks, verify merged main, then create the exact version tag.');
-  console.error('[release]   release_version=$(node -p "require(\'./package.json\').version")');
-  console.error('[release]   git push origin "refs/tags/v${release_version}:refs/tags/v${release_version}"');
-  console.error('[release]   npm run ship');
-  console.error('[release] To deliberately replace the existing release assets in place:');
-  console.error('[release]   O8_RELEASE_CLOBBER=1 npm run ship');
-  process.exit(1);
-}
-
 let mirrorNotes = `o8 ${tag} is published. See the release history for details.`;
 try {
   const notesPath = join(root, 'release-notes', 'next.md');
@@ -451,19 +454,7 @@ try {
 if (gateReleaseNote) mirrorNotes += `\n\n${gateReleaseNote}`;
 
 if (releaseExists) {
-  console.log(`[release] ${tag} already exists — replacing assets (O8_RELEASE_CLOBBER=1)`);
-  execFileSync('gh', [
-    'release', 'edit', tag,
-    '--title', `o8 ${tag}`,
-    '--notes', releaseNotes,
-    ...releaseChannel.githubFlags,
-    '-R', REPO,
-  ], { stdio: 'inherit' });
-  execFileSync('gh', [
-    'release', 'upload', tag, ...uploadArgs,
-    '--clobber',
-    '-R', REPO,
-  ], { stdio: 'inherit' });
+  console.log(`[release] ${tag} already contains identical candidate assets; reusing them`);
 } else {
   console.log(`[release] creating ${tag}`);
   execFileSync('gh', [
@@ -480,32 +471,21 @@ console.log(`[release] published ${tag}`);
 // Mirror artifacts to the public repo so the Tauri updater can fetch
 // latest.json + the .app.tar.gz anonymously. The private REPO is the source
 // of truth for code + full release notes; PUBLIC_MIRROR only carries the
-// updater payload. Failures here are logged but non-fatal — the private
-// publish above already succeeded.
+// updater payload. A failure leaves the source intact and returns non-zero;
+// an identical retry resumes without replacing existing candidate assets.
 try {
-  let mirrorExists = false;
-  try {
-    execFileSync('gh', ['release', 'view', tag, '-R', PUBLIC_MIRROR], { stdio: 'pipe' });
-    mirrorExists = true;
-  } catch {}
-
+  let mirrorExists = existingCandidates.has(PUBLIC_MIRROR);
+  if (releaseChannel.preview) {
+    try {
+      execFileSync('gh', ['release', 'view', tag, '-R', PUBLIC_MIRROR], { stdio: 'pipe' });
+      mirrorExists = true;
+    } catch {}
+  }
   if (mirrorExists) {
     if (releaseChannel.preview) {
       throw new Error('Preview mirror artifacts already exist; use a new preview version.');
     }
-    console.log(`[release-mirror] ${tag} already exists on ${PUBLIC_MIRROR} — replacing assets`);
-    execFileSync('gh', [
-      'release', 'edit', tag,
-      '--title', `o8 ${tag}`,
-      '--notes', mirrorNotes,
-      ...releaseChannel.githubFlags,
-      '-R', PUBLIC_MIRROR,
-    ], { stdio: 'inherit' });
-    execFileSync('gh', [
-      'release', 'upload', tag, ...uploadArgs,
-      '--clobber',
-      '-R', PUBLIC_MIRROR,
-    ], { stdio: 'inherit' });
+    console.log(`[release-mirror] ${tag} already contains identical candidate assets; reusing them`);
   } else {
     console.log(`[release-mirror] creating ${tag} on ${PUBLIC_MIRROR}`);
     execFileSync('gh', [

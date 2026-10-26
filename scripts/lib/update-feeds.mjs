@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { closeSync, mkdtempSync, openSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 
 const heldLocks = new WeakSet();
 
@@ -71,6 +72,39 @@ function betaFeed(repo, tag, dir) {
   return current;
 }
 
+function assertBetaAdvance(candidate, current) {
+  if (current && (compareReleaseVersions(candidate.version, current.version) < 0
+    || (current.version === candidate.version
+      && !isDeepStrictEqual(current, { ...candidate, pub_date: current.pub_date })))) {
+    throw new Error('Beta publication cannot downgrade or replace an existing version.');
+  }
+}
+
+function assertStableCurrent(candidate, repo, tag, dir) {
+  const stable = downloadFeed(repo, tag, 'latest.json', dir);
+  if (compareReleaseVersions(candidate.version, stable.version) < 0
+    || (candidate.version === stable.version && !isDeepStrictEqual(candidate.platforms, stable.platforms))) {
+    throw new Error('Beta publication cannot downgrade or replace the stable version.');
+  }
+}
+
+/** Validate every destination before writing local manifests or release assets. */
+export function assertBetaPublicationCurrent(candidate, repos, { lock }) {
+  if (!heldLocks.has(lock)) throw new Error('A live channel lock is required.');
+  if (candidate.channel !== 'beta') throw new Error('The candidate is not beta.');
+  compareReleaseVersions(candidate.version, candidate.version);
+  const dir = mkdtempSync(join(tmpdir(), 'o8-feed-preflight-'));
+  try {
+    for (const repo of repos) {
+      const tag = feedAnchor(repo);
+      assertStableCurrent(candidate, repo, tag, dir);
+      assertBetaAdvance(candidate, betaFeed(repo, tag, dir));
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 /** Stable bytes stay in place. Platform completion never advances a channel. */
 export function publishBetaFeed(manifestPath, repos, { lock, platform } = {}) {
   const owner = lock ?? acquireUpdateFeedLock();
@@ -87,20 +121,19 @@ export function publishBetaFeed(manifestPath, repos, { lock, platform } = {}) {
         if (!current || current.version !== candidate.version) return null;
         return withCompletedPlatform(current, candidate, platform);
       }
-      if (current && (compareReleaseVersions(candidate.version, current.version) < 0
-        || (current.version === candidate.version && JSON.stringify(current) !== JSON.stringify(candidate)))) {
-        throw new Error('Beta publication cannot downgrade or replace an existing version.');
-      }
+      assertBetaAdvance(candidate, current);
       return candidate;
     };
     const targets = repos.map(repo => {
       const tag = feedAnchor(repo);
+      if (!platform) assertStableCurrent(candidate, repo, tag, dir);
       select(betaFeed(repo, tag, dir));
       return { repo, tag };
     });
     const path = join(dir, 'beta.json');
     for (const { repo, tag } of targets) {
       // Recheck immediately before upload, retaining any matching-version entries.
+      if (!platform) assertStableCurrent(candidate, repo, tag, dir);
       const manifest = select(betaFeed(repo, tag, dir));
       if (!manifest) continue;
       writeFileSync(path, `${JSON.stringify(manifest, null, 2)}\n`);

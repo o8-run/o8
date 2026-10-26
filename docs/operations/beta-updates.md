@@ -61,9 +61,24 @@ Locks are removed only by their owner on exit. After an interrupted process,
 confirm no channel writer is running before removing its stale lock.
 
 Feed writes across repositories are sequential. A failure can leave one mirror
-advanced; retry the exact candidate to finish reconciliation. Do not rebuild or
-replace its artifacts. Missing anchors or mismatched manifests require repair
-before retrying.
+advanced. Retry `npm run release` (or `node scripts/release.mjs`) in the retained
+release checkout with the original version, artifacts and signature files to
+finish reconciliation. Do not rerun `npm run ship`, which builds artifacts and
+has a separate published-version preflight. Before writing any local manifest or
+publishing assets, publication checks both feeds at every destination and refuses
+an older version or conflicting content for the same version. It then downloads
+existing candidate assets and verifies the complete asset set, artifact bytes,
+signature bytes and manifest fields. The original publication date is retained.
+Matching candidate releases are reused without editing or uploading their assets;
+missing releases are created and rolling beta is reconciled. A completed retry is
+safe to repeat. No clobber override is allowed.
+
+Do not rebuild, re-sign or replace candidate artifacts for a retry. Changed or
+incomplete candidate assets, missing anchors, unavailable reads and mismatched
+manifests fail closed before publication writes. Restore repository access or
+repair the incomplete release under the release controls before retrying; use a
+new version for different artifact content. A retry cannot restore an older beta
+after either feed has advanced past that version.
 
 The primary update service must select the matching manifest using
 `X-O8-Channel` and preserve its `channel: beta` marker. A primary response

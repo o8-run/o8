@@ -17,6 +17,7 @@ import { spawnSync } from 'node:child_process';
 import { afterEach, describe, expect, it } from 'vitest';
 import { resolveReleaseChannel } from '../scripts/lib/release-channel.mjs';
 import { bundleContentSha256, resolveMacosCpuArtifacts } from '../scripts/lib/macos-release-artifacts.mjs';
+import { releaseCandidateProvider } from './fixtures/release-candidate-provider';
 
 const roots: string[] = [];
 const releaseScript = join(process.cwd(), 'scripts/release.mjs');
@@ -111,12 +112,14 @@ function fixture(version = '0.1.741-preview.1') {
   const prelude = `import { appendFileSync } from 'node:fs';
 const record = (name, args = []) => appendFileSync(process.env.O8_CHANNEL_TEST_LOG, JSON.stringify({name, args}) + '\\n');`;
   const childProcess = `${prelude}
-import { cpSync, readFileSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 const realChildProcess = process.getBuiltinModule('node:child_process');
+${releaseCandidateProvider}
 export function execFileSync(command, args = [], options = {}) {
   if (command === 'tar') return realChildProcess.execFileSync(command, args, options);
   record(command, args);
+  if (command === 'gh' && args[0] === 'release' && process.env.O8_CHANNEL_TEST_RELEASES) return candidateRelease(args);
   if (command === 'codex') {
     writeFileSync(args[args.indexOf('--output-last-message') + 1], JSON.stringify({ summary: 'Clearer workspace feedback.', entries: [{ text: 'Workspace feedback is easier to follow.', sourceIndices: [0] }] }));
     return '';
@@ -144,13 +147,17 @@ export function execFileSync(command, args = [], options = {}) {
   }
   if (command === 'gh' && args[0] === 'release' && args[1] === 'view') {
     if (args.includes('--json') && args.includes('tagName')) return 'v0.1.800';
-    if (args.includes('assets')) return JSON.stringify({ assets: process.env.O8_CHANNEL_TEST_BETA_FILE ? [{ name: 'beta.json' }] : [] });
+    if (args.includes('assets') && args[2] === 'v0.1.800') return JSON.stringify({ assets: process.env.O8_CHANNEL_TEST_BETA_FILE ? [{ name: 'beta.json' }] : [] });
+    if (args.includes('assets')) throw new Error('release not found');
     if (args.includes('--json')) return '2026-09-07T00:00:00Z';
     if (process.env.O8_CHANNEL_TEST_EXISTING === '1') return '{}';
     throw new Error('release not found');
   }
   if (command === 'gh' && args[1] === 'download' && args.includes('beta.json')) {
     cpSync(process.env.O8_CHANNEL_TEST_BETA_FILE, join(args[args.indexOf('--dir') + 1], 'beta.json')); return '';
+  }
+  if (command === 'gh' && args[1] === 'download' && args.includes('latest.json')) {
+    writeFileSync(join(args[args.indexOf('--dir') + 1], 'latest.json'), JSON.stringify({ version: '0.1.700', platforms: {} })); return '';
   }
   if (command === 'gh' && args[1] === 'upload' && args.includes('v0.1.800') && process.env.O8_CHANNEL_TEST_BETA_FILE) {
     cpSync(args.find(v => v.endsWith('/beta.json')), process.env.O8_CHANNEL_TEST_BETA_FILE); return '';
@@ -668,4 +675,75 @@ it('refuses a ship channel lock before any publication', () => {
   const result = run(f, 'beta');
   expect(result.status).toBe(1);
   expect(effects(f).some(c => c.name === 'gh' && ['create', 'upload', 'edit'].includes(c.args[1]))).toBe(false);
+});
+
+function publicationFixture(version = '0.1.900') {
+  const f = fixture(version);
+  const releases = join(f.root, 'releases');
+  const repos = ['o8-run/o8', 'hurttlocker/o8-releases'];
+  const directory = (repo: string, tag = 'v0.1.800') => join(releases, repo.replaceAll('/', '-'), tag);
+  for (const repo of repos) {
+    mkdirSync(directory(repo), { recursive: true });
+    writeFileSync(join(directory(repo), 'latest.json'), JSON.stringify({ version: '0.1.700', platforms: {} }));
+  }
+  writeFileSync(join(releases, 'anchors.json'), JSON.stringify(Object.fromEntries(repos.map(repo => [repo, 'v0.1.800']))));
+  return { ...f, repos, directory, env: { O8_CHANNEL_TEST_RELEASES: releases } };
+}
+
+it.each([
+  { stable: '0.1.901', beta: '0.1.799' },
+  { stable: '0.1.799', beta: '0.1.902' },
+  { stable: '0.1.901', beta: '0.1.902' },
+])('rejects an anchored 0.1.800 publication before any manifest write with stable $stable and beta $beta', ({ stable: stableVersion, beta }) => {
+  const f = publicationFixture('0.1.800');
+  const sourceAnchor = join(f.root, 'releases/o8-run-o8/v0.1.700');
+  mkdirSync(sourceAnchor);
+  writeFileSync(join(sourceAnchor, 'latest.json'), JSON.stringify({ version: stableVersion, platforms: {} }));
+  writeFileSync(join(f.root, 'releases/anchors.json'), JSON.stringify({ 'o8-run/o8': 'v0.1.700', 'hurttlocker/o8-releases': 'v0.1.800' }));
+  rmSync(f.directory(f.repos[0]), { recursive: true });
+  const stable = JSON.stringify({ version: stableVersion, platforms: {} });
+  const current = JSON.stringify({ channel: 'beta', version: beta, platforms: {} });
+  writeFileSync(join(f.directory(f.repos[1]), 'latest.json'), stable);
+  writeFileSync(join(f.directory(f.repos[1]), 'beta.json'), current);
+  const result = run(f, 'beta', [], f.env);
+  expect(result.status, result.stdout + result.stderr).toBe(1);
+  expect(result.stderr).toMatch(/publication cannot downgrade/);
+  expect(readFileSync(join(f.directory(f.repos[1]), 'latest.json'), 'utf8')).toBe(stable);
+  expect(readFileSync(join(f.directory(f.repos[1]), 'beta.json'), 'utf8')).toBe(current);
+  expectNoPublicationMutation(f);
+  expect(existsSync(join(f.bundle, 'macos/beta.json'))).toBe(false);
+});
+
+it('retries identical candidate artifacts after a transient mirror failure without replacing the published source', () => {
+  const f = publicationFixture();
+  const first = run(f, 'beta', [], { ...f.env, O8_CHANNEL_TEST_FAIL_MIRROR: '1' });
+  expect(first.status, first.stderr).toBe(1);
+  const source = f.directory(f.repos[0], `v${f.version}`);
+  const published = readFileSync(join(source, 'beta.json'), 'utf8');
+  writeFileSync(f.log, '');
+  const retry = run(f, 'beta', [], f.env);
+  expect(retry.status, retry.stdout + retry.stderr).toBe(0);
+  expect(readFileSync(join(source, 'beta.json'), 'utf8')).toBe(published);
+  expect(readFileSync(join(f.directory(f.repos[1], `v${f.version}`), 'beta.json'), 'utf8')).toBe(published);
+  expect(effects(f).filter(c => c.name === 'gh' && ['edit', 'upload', 'create'].includes(c.args[1]) && c.args.includes(`v${f.version}`)))
+    .toEqual([expect.objectContaining({ args: expect.arrayContaining(['create', 'hurttlocker/o8-releases']) })]);
+  writeFileSync(f.log, '');
+  const repeated = run(f, 'beta', [], f.env);
+  expect(repeated.status, repeated.stderr).toBe(0);
+  expect(effects(f).some(c => c.name === 'gh' && ['edit', 'upload', 'create'].includes(c.args[1]) && c.args.includes(`v${f.version}`))).toBe(false);
+  for (const repo of f.repos) expect(JSON.parse(readFileSync(join(f.directory(repo), 'latest.json'), 'utf8')).version).toBe('0.1.700');
+});
+
+it.each(['o8_0.1.900_universal.dmg', 'o8.app.tar.gz', 'o8.app.tar.gz.sig', 'beta.json'])('refuses different existing candidate %s bytes before any manifest write', asset => {
+  const f = publicationFixture();
+  expect(run(f, 'beta', [], { ...f.env, O8_CHANNEL_TEST_FAIL_MIRROR: '1' }).status).toBe(1);
+  const published = join(f.directory(f.repos[0], `v${f.version}`), asset);
+  writeFileSync(published, 'changed existing content');
+  for (const name of ['beta.json', 'latest.json']) rmSync(join(f.bundle, 'macos', name));
+  writeFileSync(f.log, '');
+  const result = run(f, 'beta', [], f.env);
+  expect(result.status, result.stderr).toBe(1);
+  expect(readFileSync(published, 'utf8')).toBe('changed existing content');
+  expectNoPublicationMutation(f);
+  expect(existsSync(join(f.bundle, 'macos/beta.json'))).toBe(false);
 });
