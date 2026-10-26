@@ -5130,6 +5130,14 @@
       ]
     },
     {
+      "path": "tests/production-http-boundary-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/project-codebase-dispatch-real-path.test.ts",
       "reasons": [
         "child-process",

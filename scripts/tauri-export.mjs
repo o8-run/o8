@@ -437,10 +437,23 @@ if (process.platform === 'darwin') {
 
 const http = require('node:http');
 const https = require('node:https');
+const { isAllowedLocalHost, browserWriteAllowed } = require('./http-request-boundary.cjs');
 
 function stampClientAddr(server) {
-  server.prependListener('request', (req) => {
+  const emit = server.emit;
+  server.emit = function (event, ...args) {
+    if (event !== 'request' && event !== 'upgrade') return emit.call(this, event, ...args);
+    const [req, target] = args;
+    const refuse = (status) => {
+      const text = status === 421 ? 'Misdirected Request' : 'Origin is not allowed';
+      if (event === 'upgrade') target.end('HTTP/1.1 ' + status + ' ' + text + '\\r\\nConnection: close\\r\\nContent-Length: 0\\r\\n\\r\\n');
+      else { target.writeHead(status, { 'Connection': 'close', 'Content-Type': 'text/plain' }); target.end(text); }
+      return true;
+    };
     try {
+      if (!isAllowedLocalHost(req.headers.host, req.socket?.localPort)) return refuse(421);
+      const get = (name) => typeof req.headers[name] === 'string' ? req.headers[name] : null;
+      if (!browserWriteAllowed(req.method, get, req.socket?.encrypted ? 'https:' : 'http:')) return refuse(403);
       const peer = req.socket?.remoteAddress || '';
       const loopbackPeer = peer === '::1' || peer === '127.0.0.1' || peer.startsWith('127.') || peer.startsWith('::ffff:127.');
       const requestedRelaySurface = req.headers['x-o8-relay-surface'];
@@ -459,8 +472,9 @@ function stampClientAddr(server) {
       } else {
         req.headers['x-o8-client-addr'] = peer;
       }
-    } catch { /* never block a request over a stamp failure */ }
-  });
+    } catch { return refuse(421); }
+    return emit.call(this, event, ...args);
+  };
   return server;
 }
 
@@ -477,6 +491,7 @@ process.env.O8_PACKAGED_APP = '1';
 require('./server-impl.js');
 `);
 console.log('📦 Wrote server.js wrapper (socket-addr stamping) + server-impl.js');
+cpSync(join(root, 'scripts', 'lib', 'http-request-boundary.cjs'), join(server, 'http-request-boundary.cjs'));
 cpSync(nativeAddonRuntimePath, join(server, 'native-addon-runtime.cjs'));
 console.log('📦 Copied native addon runtime selector');
 
