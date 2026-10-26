@@ -17,6 +17,19 @@ const round = n => Math.round(n * 100) / 100;
 const edit = 'Launch input check';
 
 export const COMPOSER_PROBE_JS = `(() => {
+  if (!window.__o8StartupFetchObserved) {
+    window.__o8StartupFetchObserved = true;
+    window.__o8OptionalStartupRequests = 0;
+    const originalFetch = window.fetch;
+    window.fetch = function (...args) {
+      try {
+        const input = args[0];
+        const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url, location.href);
+        if (url.pathname === '/api/automations/connected') window.__o8OptionalStartupRequests++;
+      } catch {}
+      return originalFetch.apply(this, args);
+    };
+  }
   const editor = document.querySelector('textarea[data-o8-active-composer="true"]')
     || document.querySelector('[data-o8-composer-root] textarea');
   const box = editor?.getBoundingClientRect();
@@ -41,6 +54,7 @@ export const COMPOSER_PROBE_JS = `(() => {
   const navigation = performance.getEntriesByType('navigation')[0];
   return JSON.stringify({ state: 'ready', acknowledged: true, focused: document.hasFocus(),
     timeOrigin: performance.timeOrigin, pageNow: performance.now(),
+    optionalStartupRequests: Math.max(window.__o8OptionalStartupRequests, performance.getEntriesByType('resource').filter(row => new URL(row.name, location.href).pathname === '/api/automations/connected').length),
     marks: performance.getEntriesByType('mark').filter(row => /^o8:dashboard:/.test(row.name)).map(row => ({ name: row.name, atMs: row.startTime })),
     resources: performance.getEntriesByType('resource').map(row => ({ type: row.initiatorType, startMs: row.startTime, durationMs: row.duration, path: new URL(row.name, location.href).pathname })).filter(row => new RegExp('^/api/[a-z0-9/-]+$').test(row.path) || row.type === 'script').sort((a, b) => b.durationMs - a.durationMs).slice(0, 15),
     hydrated: document.documentElement.getAttribute('data-o8-dashboard-hydrated') === '1',
@@ -177,7 +191,7 @@ export async function measureNativeLaunch({ app, output, sourceSha, samples = 3 
               if (lastProbe.state === 'ready') {
                 const interactiveComposerMs = round(performance.now() - started);
                 receipt.samples.push({ sample, interactiveComposerMs, socketReadyMs, acknowledged: lastProbe.acknowledged,
-                  focused: lastProbe.focused, hydrated: lastProbe.hydrated, editorSeenMs, editAcknowledgedMs, marks: lastProbe.marks, resources: lastProbe.resources, nativeStages: [...nativeStages],
+                  focused: lastProbe.focused, hydrated: lastProbe.hydrated, editorSeenMs, editAcknowledgedMs, marks: lastProbe.marks, resources: lastProbe.resources, optionalStartupRequests: lastProbe.optionalStartupRequests, nativeStages: [...nativeStages],
                   documentStartMs: round(lastProbe.timeOrigin - epoch), navigation: lastProbe.navigation });
                 break;
               }
@@ -217,5 +231,12 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   }));
   const receipt = await measureNativeLaunch({ app: String(args.app), output: String(args.output),
     sourceSha: String(args.sha), samples: Number(args.samples ?? 3) });
+  if (args['check-startup-loads']) {
+    const counts = receipt.samples.map(sample => sample.optionalStartupRequests);
+    assert(counts.every(Number.isInteger), 'Missing startup request observations');
+    const count = counts.reduce((sum, value) => sum + value, 0);
+    console.log(JSON.stringify({ check: 'optional-startup-requests', count, limit: 0, passed: count === 0 }));
+    assert.equal(count, 0, 'Optional startup requests ran before the composer was interactive');
+  }
   if (args.check) assert(receipt.maxMs < 1000, `Launch budget exceeded: ${receipt.maxMs} ms >= 1000 ms`);
 }
