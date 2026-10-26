@@ -1,5 +1,6 @@
 import 'server-only';
 import type { AppUpdateBlockers } from './update-hub-client';
+import { updateCheckTicket, type UpdateCheckTicket } from './check-order';
 
 export interface AppUpdateAutoApplyState {
   attemptId: string | null;
@@ -31,7 +32,7 @@ export interface AppUpdateInstallState {
 
 export type AppUpdateCheckOutcome = 'never' | 'available' | 'current' | 'failed';
 
-export interface AppUpdateCheckState {
+export interface AppUpdateCheckState extends Partial<UpdateCheckTicket> {
   outcome: AppUpdateCheckOutcome;
   checkedAt: string | null;
   errorCode: 'update_check_not_run' | 'update_check_failed' | null;
@@ -40,6 +41,8 @@ export interface AppUpdateCheckState {
 
 const NEVER_CHECKED_MESSAGE = 'No updater check has completed since the app server started.';
 
+let orderedCheck: UpdateCheckTicket | null = null;
+const retiredCheckSessions = new Set<string>();
 let state: AppUpdateState = {
   autoApply: null,
   info: null,
@@ -66,14 +69,24 @@ export function setAppUpdateState(update: {
   checkOutcome?: AppUpdateCheckOutcome;
   checkedAt?: string | null;
   checkError?: string | null;
+  checkSequence?: number;
+  checkSession?: string;
+  channel?: UpdateCheckTicket['channel'];
+  generation?: number;
 }): AppUpdateState {
+  const ticket = updateCheckTicket(update);
+  if (!ticket && orderedCheck) return state;
+  const sameSession = ticket && orderedCheck?.checkSession === ticket.checkSession;
+  if (ticket && (retiredCheckSessions.has(ticket.checkSession)
+    || (sameSession && (ticket.checkSequence <= orderedCheck!.checkSequence
+      || ticket.generation < orderedCheck!.generation)))) return state;
   const outcome = update.checkOutcome ?? (update.updatePending ? 'available' : 'current');
   const checkedAt = outcome === 'never' ? null : update.checkedAt ?? new Date().toISOString();
   if (state.check.outcome !== 'never') {
     if (outcome === 'never') return state;
     const previousCheckMs = Date.parse(state.check.checkedAt ?? '');
     const nextCheckMs = Date.parse(checkedAt ?? '');
-    if (Number.isFinite(previousCheckMs) && Number.isFinite(nextCheckMs) && nextCheckMs < previousCheckMs) {
+    if (!sameSession && Number.isFinite(previousCheckMs) && Number.isFinite(nextCheckMs) && nextCheckMs < previousCheckMs) {
       return state;
     }
   }
@@ -82,6 +95,10 @@ export function setAppUpdateState(update: {
     : outcome === 'failed'
       ? update.checkError?.trim().slice(0, 1_000) || 'The updater check failed without an error message.'
       : null;
+  if (ticket) {
+    if (orderedCheck && !sameSession) retiredCheckSessions.add(orderedCheck.checkSession);
+    orderedCheck = ticket;
+  }
   state = {
     autoApply: state.autoApply,
     info: update.info ?? (update.updatePending ? state.info : null),
@@ -89,6 +106,7 @@ export function setAppUpdateState(update: {
     version: update.updatePending ? update.version ?? null : null,
     updatedAt: new Date().toISOString(),
     check: {
+      ...(ticket ?? {}),
       outcome,
       checkedAt,
       errorCode: outcome === 'never'

@@ -74,7 +74,7 @@
     "tauri:build:signed": "sh -c 'TAURI_SIGNING_PRIVATE_KEY=$(cat ~/.tauri/cortex-ide.key) TAURI_SIGNING_PRIVATE_KEY_PASSWORD= node scripts/tauri-build.mjs -- --features dev-mcp-plugin'",
     "gate:webview": "node scripts/preship-webview-gate.mjs",
     "release": "node scripts/release.mjs",
-    "ship": "node scripts/release.mjs --ship",
+    "ship": "node scripts/ship.mjs",
     "ship:linux-sig": "node scripts/sign-linux-appimage.mjs",
     "postinstall": "node scripts/postinstall.mjs",
     "tauri:prebuild": "node scripts/tauri-prebuild.mjs",

@@ -1,10 +1,15 @@
 import { readFileSync } from 'node:fs';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { invoke, check } = vi.hoisted(() => ({
-  invoke: vi.fn(async () => null),
-  check: vi.fn(async () => null),
-}));
+const { invoke, check, ticket } = vi.hoisted(() => {
+  const ticket = { checkSession: 'native-fixture', checkSequence: 1, generation: 0, channel: 'stable' };
+  return {
+    ticket,
+    invoke: vi.fn(async (command: string, _args?: unknown) =>
+      command === 'begin_update_check' || command === 'read_update_check_ticket' ? ticket : null),
+    check: vi.fn(async () => null),
+  };
+});
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke }));
 vi.mock('@tauri-apps/plugin-updater', () => ({ check }));
@@ -20,7 +25,9 @@ describe('desktop update ping entry points', () => {
 
   it('checks through the native ping command when installing an update', async () => {
     await expect(installUpdateAndRestart()).resolves.toEqual({ installed: false });
-    expect(invoke.mock.calls).toEqual([['check_app_update']]);
+    expect(invoke.mock.calls).toEqual([
+      ['begin_update_check'], ['check_app_update', { ticket }], ['read_update_check_ticket'],
+    ]);
     expect(check).not.toHaveBeenCalled();
   });
 

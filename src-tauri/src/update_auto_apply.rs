@@ -114,6 +114,7 @@ impl<R: Runtime> NativeEffects<R> {
                 }
             }
         }
+        crate::update_ping::ensure_update_channel(&self.app, &update)?;
         let bytes = download(&update, |_, _| {}, || {}).await?;
         let admission = control(
             &self.client,
@@ -125,6 +126,7 @@ impl<R: Runtime> NativeEffects<R> {
         if admission["allowed"].as_bool() != Some(true) {
             return Ok(false);
         }
+        crate::update_ping::ensure_update_channel(&self.app, &update)?;
         let installed = journal.install_if_admitted(
             version,
             || match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {

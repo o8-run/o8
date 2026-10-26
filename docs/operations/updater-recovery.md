@@ -52,3 +52,20 @@ If recovery fails, report the installed version, the exact updater or macOS
 message, and whether work is running or parked in the
 [updater recovery issue](https://github.com/o8-run/o8/issues/3807).
 Do not include private task content, credentials, or database files.
+
+## Channel identity and stale results
+
+Stable checks require a manifest explicitly marked `stable`; beta and fallback
+feeds apply the same identity rule. A missing marker is a publication migration
+problem, not permission to accept another channel. Verify the artifact's signed
+embedded build identity and the feed marker before investigating transport.
+Never use an environment channel override to retry a candidate through the
+stable publisher.
+
+A check carries its native session, sequence, channel and enrollment generation.
+A superseded completion must not clear a newer update or replace a current
+result with a stale failure. Switching Beta back to Stable invalidates pending
+checks and uses the usual version comparison, so a newer installed beta waits
+for a newer stable release. See [release channels](release-channels.md) for the
+independent beta mirror anchor, shared publication lock and Linux completion
+rules. Promotion remains outside this recovery path (#4857).

@@ -12,6 +12,8 @@ fn resolve_ws_token() -> String {
 #[cfg(test)]
 mod tests {
     mod auto_apply_failure_tests;
+    #[path = "channel_boundary_tests.rs"]
+    mod update_ping_channel_boundary_tests;
     mod download_timeout_tests;
     mod install_journal_tests;
     mod production_install_tests;
@@ -32,7 +34,7 @@ mod tests {
     use tauri::test::{get_ipc_response, mock_builder, mock_context, noop_assets, INVOKE_KEY};
     use tauri::{Manager, WebviewWindowBuilder};
 
-    const MANIFEST: &str = r#"{"version":"0.2.0","notes":"fixture","pub_date":"2026-09-30T12:00:00Z","url":"https://github.com/hurttlocker/o8-releases/releases/download/v0.2.0/o8.app.tar.gz","signature":"fixture-signature"}"#;
+    const MANIFEST: &str = r#"{"channel":"stable","version":"0.2.0","notes":"fixture","pub_date":"2026-09-30T12:00:00Z","url":"https://updates.invalid/v0.2.0/o8.app.tar.gz","signature":"fixture-signature"}"#;
 
     struct Server {
         url: String,
@@ -75,8 +77,65 @@ mod tests {
                     }
                     request.extend_from_slice(&buffer[..count]);
                 }
-                tx.send(String::from_utf8(request).unwrap()).unwrap();
+                let request = String::from_utf8(request).unwrap();
+                let beta = request.to_lowercase().contains("x-o8-channel: beta")
+                    || request
+                        .lines()
+                        .next()
+                        .unwrap()
+                        .split_whitespace()
+                        .nth(1)
+                        .unwrap()
+                        .ends_with("/beta.json");
+                let preview = request.to_lowercase().contains("x-o8-channel: preview")
+                    || request.starts_with("GET /preview.json ");
+                tx.send(request).unwrap();
                 let response = match mode {
+                    "channels" => {
+                        let body = if beta {
+                            MANIFEST
+                                .replace("\"stable\"", "\"beta\"")
+                                .replace("0.2.0", "0.3.0")
+                        } else {
+                            MANIFEST.to_owned()
+                        };
+                        format!(
+                            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{}",
+                            body.len(),
+                            body
+                        )
+                    }
+                    "stable-newer" | "wrong-beta-only" | "missing-beta" => {
+                        let body = if beta {
+                            match mode {
+                                "stable-newer" => MANIFEST
+                                    .replace("\"stable\"", "\"beta\"")
+                                    .replace("0.2.0", "0.3.0"),
+                                "wrong-beta-only" => MANIFEST.replace("0.2.0", "0.4.0"),
+                                _ => MANIFEST
+                                    .replace("\"channel\":\"stable\",", "")
+                                    .replace("0.2.0", "0.4.0"),
+                            }
+                        } else if mode == "stable-newer" {
+                            MANIFEST.replace("0.2.0", "0.4.0")
+                        } else {
+                            MANIFEST.to_owned()
+                        };
+                        format!(
+                            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{}",
+                            body.len(),
+                            body
+                        )
+                    }
+                    "beta" => {
+                        let body =
+                            MANIFEST.replace("\"channel\":\"stable\"", "\"channel\":\"beta\"");
+                        format!(
+                            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{}",
+                            body.len(),
+                            body
+                        )
+                    }
                     "failure" => "HTTP/1.1 503 Unavailable\r\nContent-Length: 0\r\n\r\n".into(),
                     "redirect" => format!(
                         "HTTP/1.1 302 Found\r\nLocation: {redirect}\r\nContent-Length: 0\r\n\r\n"
@@ -90,11 +149,18 @@ mod tests {
                         thread::sleep(Duration::from_secs(5));
                         continue;
                     }
-                    _ => format!(
-                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{}",
-                        MANIFEST.len(),
-                        MANIFEST
-                    ),
+                    _ => {
+                        let body = if preview {
+                            MANIFEST.replace("\"stable\"", "\"preview\"")
+                        } else {
+                            MANIFEST.to_owned()
+                        };
+                        format!(
+                            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{}",
+                            body.len(),
+                            body
+                        )
+                    }
                 };
                 let _ = socket.write_all(response.as_bytes());
             }
@@ -132,7 +198,11 @@ mod tests {
             .plugin(tauri_plugin_store::Builder::default().build())
             .plugin(tauri_plugin_updater::Builder::new().build())
             .invoke_handler(tauri::generate_handler![
+                update_ping::begin_update_check,
+                update_ping::read_update_check_ticket,
                 update_ping::check_app_update,
+                update_ping::read_update_channel,
+                update_ping::set_update_channel,
                 update_ping::download_app_update,
                 update_ping::install_app_update,
                 update_ping::discard_app_update_download

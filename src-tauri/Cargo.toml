@@ -49,6 +49,7 @@ default = []
 dev-mcp-plugin = ["dep:tauri-plugin-mcp"]
 
 [dependencies]
+semver = "1"
 o8-restart-safety = { path = "../crates/o8-restart-safety" }
 serde_json = "1.0"
 uuid = { version = "1", features = ["v4"] }

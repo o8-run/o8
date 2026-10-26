@@ -315,8 +315,9 @@ export function buildWorkflowEnv(buildDataDir, env = process.env) {
   };
 }
 
-export async function runShipWorkflow({ root, version }) {
+export async function runShipWorkflow({ root, version, publisher }) {
   const plan = readShipPlan(root);
+  if (publisher) plan.publish = { command: process.execPath, args: [join(root, 'scripts', publisher)] };
   const lock = acquireReleaseLock();
   let buildDataDir;
   try {
