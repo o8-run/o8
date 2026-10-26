@@ -40,7 +40,7 @@ The profile also allows broad process execution and network access. A normal pac
 
 ## Linux backend (bubblewrap)
 
-On Linux, `O8_WORKER_SANDBOX` renders the same policy with `bwrap` (`src/lib/runtimes/shared/owned-session/sandbox-linux.ts`). The root filesystem is mounted read-only; HOME, `/tmp`, and the session runtime directory (`/run/user/<uid>`, which holds the D-Bus and keyring sockets) are replaced by empty tmpfs mounts; toolchain read roots are bound back read-only; and the worktree, Git metadata, TMPDIR, and the cache/state roots above are bound read-write. Secret roots are hidden, and immutable credential files and read-only packet paths are bound read-only last. The worker shares the host network, gets its own PID namespace (so `/proc` does not expose other processes' environments) and its own session (so it cannot inject keystrokes into the launching terminal).
+On Linux, `O8_WORKER_SANDBOX` renders the same policy with `bwrap` (`src/lib/runtimes/shared/owned-session/sandbox-linux.ts`). The root filesystem is mounted read-only; HOME, `/tmp`, and the session runtime directory (`/run/user/<uid>`, which holds the D-Bus and keyring sockets) are replaced by empty tmpfs mounts; toolchain read roots are bound back read-only; and the worktree, Git metadata, TMPDIR, and the cache/state roots above are bound read-write. Secret roots are hidden, including the desktop app's WebKitGTK profile (`~/.config`, `~/.cache` and `~/.local/share` `ai.o8.desktop`, which hold its cookies and local storage), and immutable credential files and read-only packet paths are bound read-only last. The worker shares the host network, gets its own PID namespace (so `/proc` does not expose other processes' environments) and its own session (so it cannot inject keystrokes into the launching terminal).
 
 The launch probes bwrap first and refuses with a clear error when bwrap is missing or the kernel denies unprivileged user namespaces (for example Ubuntu's AppArmor userns restriction).
 
@@ -48,7 +48,7 @@ Known differences from the macOS profile:
 
 - Reads outside HOME, `/tmp`, and `/run/user/<uid>` are allowed (the macOS profile only admits listed system roots).
 - `/tmp` is private to the worker; a TMPDIR outside `/tmp` is shared read-write.
-- Missing cache directories cannot be created by the worker, because HOME is read-only outside the granted roots.
+- HOME is read-only outside the granted roots, so the worker cannot create a missing cache or CLI state directory itself. The launch creates the missing ones (`~/.npm`, `~/.cache`, `~/.codex`, `~/.claude`, …) as empty `0700` directories on the host first, which matches what the macOS profile lets the worker do.
 - Executable denials, executable-name denials, basename read denials, and the credential lock policy have no mount-namespace equivalent. Launches that need them (controlled-provider tasks, the single-orchestrator Codex policy) are refused on Linux.
 - Denials surface as `EROFS`/`ENOENT` rather than seatbelt reports, so they do not produce `sandbox_denied` lane events yet.
 

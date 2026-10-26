@@ -10,8 +10,8 @@
  * - Toolchain read roots inside a masked tree are bound back read-only.
  * - The worktree, repo, git metadata, TMPDIR and toolchain caches are bound
  *   read-write.
- * - Secret roots (`~/.o8`, `~/.tauri`, `~/.config/gh`, data dirs, …) are hidden
- *   wherever they would otherwise be visible.
+ * - Secret roots (`~/.o8`, `~/.tauri`, `~/.config/gh`, the desktop webview
+ *   profile, data dirs, …) are hidden wherever they would otherwise be visible.
  * - Narrow re-opens follow, then immutable files and read-only packet paths are
  *   bound read-only LAST, so they win over every grant above (the same
  *   last-match-wins order the seatbelt profile relies on).
@@ -26,7 +26,7 @@
  * need them are refused rather than run with a weaker policy.
  */
 
-import { stat, writeFile } from 'node:fs/promises';
+import { mkdir, stat, writeFile } from 'node:fs/promises';
 import { access, constants as fsConstants } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -83,6 +83,27 @@ export function assertBwrapExpressible(input: Pick<PrepareWorkerSandboxInput,
       + 'cannot enforce yet. Refusing to run it with a weaker policy.',
     );
   }
+}
+
+/**
+ * Tauri bundle identifier from `src-tauri/tauri.conf.json`. On Linux, Tauri and
+ * WebKitGTK keep the desktop app's webview profile (cookies, local storage,
+ * settings) in XDG dirs named after it. Those sit inside `~/.config`,
+ * `~/.cache` (read+write for workers) and `~/.local` (readable), so they must be
+ * hidden explicitly. macOS keeps the same data under `~/Library`, which the
+ * seatbelt profile never opens.
+ */
+const DESKTOP_APP_ID = 'ai.o8.desktop';
+
+/** HOME roots a worker must never see on Linux. */
+export function linuxSecretRoots(home: string): string[] {
+  return [
+    path.join(home, '.o8'), path.join(home, '.cortex-ide'), path.join(home, '.tauri'),
+    path.join(home, '.config', 'gh'),
+    path.join(home, '.config', DESKTOP_APP_ID),
+    path.join(home, '.cache', DESKTOP_APP_ID),
+    path.join(home, '.local', 'share', DESKTOP_APP_ID),
+  ];
 }
 
 type MountState = 'ro' | 'rw' | 'hidden';
@@ -156,8 +177,7 @@ export function buildBwrapArgs(policy: SeatbeltProfileInput, context: BwrapPolic
   }
 
   const secretRoots = uniq([
-    path.join(home, '.o8'), path.join(home, '.cortex-ide'), path.join(home, '.tauri'),
-    path.join(home, '.config', 'gh'),
+    ...linuxSecretRoots(home),
     ...(policy.extraDenyPaths ?? []), ...(policy.finalDenyPaths ?? []),
   ]);
   for (const p of secretRoots) {
@@ -195,8 +215,7 @@ export function bwrapPolicyPaths(policy: SeatbeltProfileInput, runtimeDir?: stri
     '/tmp', home, runtimeDir ?? '',
     ...Object.values(toolchain).flat(),
     policy.worktreePath, policy.repoPath, policy.tmpDir,
-    path.join(home, '.o8'), path.join(home, '.cortex-ide'), path.join(home, '.tauri'),
-    path.join(home, '.config', 'gh'),
+    ...linuxSecretRoots(home),
     ...[
       policy.extraReadWritePaths, policy.extraReadPaths, policy.pathReadRoots, policy.extraDenyPaths,
       policy.trustedReadWritePaths, policy.finalDenyPaths, policy.finalAllowReadWritePaths,
@@ -204,6 +223,25 @@ export function bwrapPolicyPaths(policy: SeatbeltProfileInput, runtimeDir?: stri
       policy.readOnlyDenyWritePaths,
     ].flatMap((list) => list ?? []),
   ]);
+}
+
+/**
+ * Create the toolchain cache and CLI state dirs that do not exist yet.
+ *
+ * The macOS profile grants these as `subpath` rules, so a worker can create
+ * `~/.npm` or `~/.codex` on first use. Here HOME is a read-only tmpfs and only
+ * existing paths can be bound, so a missing dir would stay unwritable for the
+ * whole run (npm cannot write its cache, Codex cannot create CODEX_HOME).
+ * Creating the same empty dirs on the host first keeps parity. Failures are
+ * ignored: the dir then simply stays unbound, as before.
+ */
+export async function ensureToolchainWriteDirs(home: string): Promise<void> {
+  if (!path.isAbsolute(home) || path.resolve(home) === '/') return;
+  const info = await stat(home).catch(() => null);
+  if (!info?.isDirectory()) return;
+  await Promise.all(homeToolchainPolicy(home).writeDirs.map(
+    (dir) => mkdir(dir, { recursive: true, mode: 0o700 }).catch(() => undefined),
+  ));
 }
 
 async function statKinds(paths: string[]): Promise<Map<string, PathKind>> {
@@ -267,6 +305,7 @@ export async function prepareBwrapSandbox(input: {
   args: string[];
 }): Promise<PreparedSandbox> {
   const runtimeDir = xdgRuntimeDir();
+  await ensureToolchainWriteDirs(input.policy.homeDir);
   const kinds = await statKinds(bwrapPolicyPaths(input.policy, runtimeDir));
   const bwrapArgs = buildBwrapArgs(input.policy, { kinds, runtimeDir });
   const args = [...bwrapArgs, '--chdir', input.cwd, '--', input.binary, ...input.args];

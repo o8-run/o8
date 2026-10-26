@@ -1,5 +1,10 @@
-import { describe, expect, it } from 'vitest';
-import { assertBwrapExpressible, buildBwrapArgs, bwrapPolicyPaths, type PathKind } from './sandbox-linux';
+import { afterEach, describe, expect, it } from 'vitest';
+import { existsSync, mkdtempSync, rmSync, statSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {
+  assertBwrapExpressible, buildBwrapArgs, bwrapPolicyPaths, ensureToolchainWriteDirs, type PathKind,
+} from './sandbox-linux';
 import { SandboxUnavailableError } from './sandbox-error';
 import type { SeatbeltProfileInput } from './sandbox';
 
@@ -73,6 +78,17 @@ describe('buildBwrapArgs — Linux worker sandbox policy', () => {
     expect(args).not.toContain(`${HOME}/.o8`);
   });
 
+  it('hides the desktop webview profile inside the readable and writable XDG dirs', () => {
+    const appDirs = [`${HOME}/.config/ai.o8.desktop`, `${HOME}/.cache/ai.o8.desktop`, `${HOME}/.local/share/ai.o8.desktop`];
+    const args = buildBwrapArgs(policy(), { kinds: kinds([...baseDirs, `${HOME}/.local`, ...appDirs]) });
+    for (const dir of appDirs) {
+      expect(mountIndex(args, '--tmpfs', dir)).toBeGreaterThan(-1);
+      expect(mountIndex(args, '--remount-ro', dir)).toBeGreaterThan(-1);
+    }
+    expect(mountIndex(args, '--tmpfs', `${HOME}/.cache/ai.o8.desktop`)).toBeGreaterThan(mountIndex(args, '--bind', `${HOME}/.cache`));
+    expect(bwrapPolicyPaths(policy())).toEqual(expect.arrayContaining(appDirs));
+  });
+
   it('re-opens a workspace that lives inside a hidden data root', () => {
     const data = '/srv/o8-data';
     const worktree = `${data}/worktrees/p1`;
@@ -113,5 +129,28 @@ describe('assertBwrapExpressible', () => {
   it('refuses exec and basename denials instead of weakening them', () => {
     expect(() => assertBwrapExpressible({ finalDenyExecNamePrefixes: ['codex'] })).toThrow(/executable-name denials/);
     expect(() => assertBwrapExpressible({ finalDenyReadBasenames: ['codex'] })).toThrow(SandboxUnavailableError);
+  });
+});
+
+describe('ensureToolchainWriteDirs', () => {
+  const roots: string[] = [];
+  afterEach(() => { while (roots.length) rmSync(roots.pop()!, { recursive: true, force: true }); });
+
+  it('creates missing cache and CLI state dirs so a fresh HOME can bind them read+write', async () => {
+    const home = mkdtempSync(path.join(os.tmpdir(), 'o8-sbx-fresh-home-'));
+    roots.push(home);
+    await ensureToolchainWriteDirs(home);
+    for (const dir of ['.npm', '.cache', '.codex', '.claude', path.join('.cargo', 'registry')]) {
+      expect(statSync(path.join(home, dir)).isDirectory()).toBe(true);
+    }
+    // Read-only toolchain prefixes and credentials are never created.
+    expect(existsSync(path.join(home, '.local'))).toBe(false);
+    expect(existsSync(path.join(home, '.codex', 'auth.json'))).toBe(false);
+  });
+
+  it('does nothing for a missing or root HOME', async () => {
+    await expect(ensureToolchainWriteDirs('/nonexistent-o8-home')).resolves.toBeUndefined();
+    expect(existsSync('/nonexistent-o8-home')).toBe(false);
+    await expect(ensureToolchainWriteDirs('/')).resolves.toBeUndefined();
   });
 });

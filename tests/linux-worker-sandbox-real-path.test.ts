@@ -57,6 +57,31 @@ describe.runIf(usable)('Linux worker sandbox confines a real child (bubblewrap)'
     for (const dir of [outsideTmp, outsideRepo, home]) expect(existsSync(path.join(dir, 'outside.txt'))).toBe(false);
   });
 
+  it('lets a fresh HOME create its caches and a linked worktree commit through its .git pointer', async () => {
+    const home = tempDir('/tmp', 'o8-sbx-home-');
+    const base = tempDir(os.tmpdir(), 'o8-sbx-repo-');
+    const repo = path.join(base, 'repo');
+    const worktree = path.join(base, 'wt');
+    const git = (cwd: string, ...args: string[]) => execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8' });
+    execFileSync('git', ['init', '-q', repo]);
+    git(repo, '-c', 'user.name=o8', '-c', 'user.email=o8@example.invalid', 'commit', '-q', '--allow-empty', '-m', 'init');
+    git(repo, 'worktree', 'add', '-q', '-b', 'packet', worktree);
+    const script = [
+      'exec 2>/dev/null',
+      'mkdir -p "$HOME/.npm/_cacache" "$HOME/.codex/sessions" && echo caches-ok',
+      'echo change > file.txt && git add file.txt',
+      'git -c user.name=o8 -c user.email=o8@example.invalid commit -q -m worker && echo commit-ok',
+      'exit 0',
+    ].join('\n');
+    const prepared = await prepareWorkerSandbox({
+      runId: 'run-wt', profileDir: tempDir(os.tmpdir(), 'o8-sbx-profile-'), cwd: worktree, repoPath: worktree,
+      homeDir: home, binary: '/bin/sh', args: ['-c', script, 'sh'],
+    });
+    const output = execFileSync(prepared.binary, prepared.args, { cwd: worktree, encoding: 'utf8', env: { ...process.env, HOME: home } });
+    expect(output).toBe('caches-ok\ncommit-ok\n');
+    expect(git(repo, 'log', '--format=%s', '-1', 'packet').trim()).toBe('worker');
+  });
+
   it('keeps read-only packets from writing the worktree', async () => {
     const home = tempDir('/tmp', 'o8-sbx-home-');
     const worktree = tempDir(os.tmpdir(), 'o8-sbx-wt-');
