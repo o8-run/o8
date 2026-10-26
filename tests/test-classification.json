@@ -3390,6 +3390,14 @@
       ]
     },
     {
+      "path": "tests/lead-effort-pins-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/lead-handoff-real-path.test.ts",
       "reasons": [
         "child-process",

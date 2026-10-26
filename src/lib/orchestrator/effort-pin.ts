@@ -1,4 +1,4 @@
-import { resolveCodexReasoningEffort } from '@/lib/codex/reasoning-effort';
+import { codexCliSupportsUltraEfforts, resolveCodexReasoningEffort } from '@/lib/codex/reasoning-effort';
 import { parseLocalModel } from '@/lib/codex/local-model';
 import { getRuntimeCapability, isOrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
 import {
@@ -49,7 +49,8 @@ export type EffortPinErrorCode =
   | 'effort_unsupported_runtime'
   | 'effort_model_incompatible'
   | 'effort_unsupported_model'
-  | 'effort_coerced';
+  | 'effort_coerced'
+  | 'effort_cli_incompatible';
 
 /** Thrown by dispatch/runtime seams so routes can return a typed 400. */
 export class EffortPinRejectionError extends Error {
@@ -114,6 +115,8 @@ export interface ResolveEffortPinInput {
   /** The caller's explicit model identity, BEFORE any routing normalization. */
   explicitModel?: string | null;
   modelDisposition?: WorkerModelDisposition;
+  /** Present when the launch boundary has resolved the installed executable. */
+  installedCliVersion?: string | null;
 }
 
 export function resolveEffortPin(input: ResolveEffortPinInput): ResolveEffortPinResult {
@@ -173,6 +176,11 @@ export function resolveEffortPin(input: ResolveEffortPinInput): ResolveEffortPin
       code: 'effort_coerced',
       message: `This o8 mission route cannot honor effort "${raw}" for runtime "${input.runtime}" model "${actualModel ?? 'runtime default'}": the current adapter would change it to "${applied}". Request a supported tier or omit --effort.`,
     };
+  }
+  if ((input.runtime === 'codex' || input.runtime === 'cloud') && Object.hasOwn(input, 'installedCliVersion')
+    && (raw === 'max' || raw === 'ultra') && !codexCliSupportsUltraEfforts(input.installedCliVersion)) {
+    return { ok: false, code: 'effort_cli_incompatible',
+      message: `Cannot honor effort "${raw}" on runtime "${input.runtime}" with installed CLI version "${input.installedCliVersion ?? 'unknown'}": compatibility would change the selection to "xhigh". Update the CLI or choose a supported effort.` };
   }
   return { ok: true, requestedEffort: raw, selectedEffort: raw };
 }
