@@ -6867,6 +6867,12 @@
       ]
     },
     {
+      "path": "tests/worker-pane-drafts-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/worker-pane-scroll-real-path.test.ts",
       "reasons": [
         "real-path"
