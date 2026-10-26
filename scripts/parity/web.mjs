@@ -8,21 +8,32 @@ export async function captureWeb(browser, origin, fixture, scenario, size, eleme
   const missing = [];
   const routes = new Map();
   const errors = [];
+  const pending = new Set();
   const surfacePath = new URL(scenario.webRoute, origin).pathname;
   try {
-    await context.route('**/api/**', async route => {
+    const handleApi = async route => {
       const request = route.request();
       const url = new URL(request.url());
       // Capture is read-only. Never start a worker, create a terminal or publish a decision.
       const viewState = request.method() === 'POST' && url.pathname === '/api/panel/terminal-state';
-      if (request.method() !== 'GET' && !viewState) { await route.fulfill({ status: 405, json: { error: 'Parity capture is read-only' } }); return; }
-      try {
-        const response = await context.request.fetch(fixture.origin + url.pathname + url.search,
-          { method: request.method(), data: request.postData() ?? undefined,
-            headers: { authorization: `Bearer ${fixture.token}`, 'content-type': 'application/json' }, timeout: 10_000 });
-        routes.set(url.pathname, response.status());
-        await route.fulfill({ response });
-      } catch { await route.fulfill({ status: 503, json: { error: 'Fixture unavailable' } }); }
+      let reply = { status: 405, json: { error: 'Parity capture is read-only' } };
+      if (request.method() === 'GET' || viewState) {
+        try {
+          const response = await context.request.fetch(fixture.origin + url.pathname + url.search,
+            { method: request.method(), data: request.postData() ?? undefined,
+              headers: { authorization: `Bearer ${fixture.token}`, 'content-type': 'application/json' }, timeout: 10_000 });
+          routes.set(url.pathname, response.status());
+          reply = { response };
+        } catch { reply = { status: 503, json: { error: 'Fixture unavailable' } }; }
+      }
+      // A dispatch failure may already have consumed the route. Only fetch
+      // failures get a 503; never retry fulfill or continue after dispatch.
+      await route.fulfill(reply);
+    };
+    await context.route('**/api/**', route => {
+      const handling = handleApi(route);
+      pending.add(handling);
+      return handling.finally(() => pending.delete(handling));
     });
     // Existing fixtures use replay peers; the browser may not discover a real runtime.
     await context.routeWebSocket(url => url.pathname === '/ws', socket => {
@@ -134,7 +145,13 @@ export async function captureWeb(browser, origin, fixture, scenario, size, eleme
     await healthy();
     return { measured, missing, routes: [...routes].map(([path, status]) => ({ path, status })), theme };
   } finally {
-    await context.close();
+    // Unregistering can release in-flight requests to the network. Drain our
+    // handlers first, while their fetched response bodies are still alive.
+    try {
+      while (pending.size) await Promise.allSettled([...pending]);
+      await context.unrouteAll({ behavior: 'wait' });
+    }
+    finally { await context.close(); }
     if (errors.length) throw errors[0];
   }
 }

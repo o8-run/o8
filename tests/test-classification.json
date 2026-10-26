@@ -4173,6 +4173,13 @@
       ]
     },
     {
+      "path": "tests/next-parity-route-ownership-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/next-playwright-runtime-real-path.test.ts",
       "reasons": [
         "child-process",
