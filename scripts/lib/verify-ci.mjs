@@ -140,15 +140,21 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
   }), 'integration comparison refs need a verify:ci equivalent');
   const integrationRun = integration.steps.find(step => step.run === 'npm run test:integration -- ${{ steps.select.outputs.files }}');
   requireCondition(integrationRun?.if === "steps.select.outputs.count != '0'", 'integration command changed');
+  const browserFile = 'tests/next-parity-route-ownership-real-path.test.ts';
+  const browserSteps = integration.steps.filter(step => step.if === `contains(steps.select.outputs.files, '${browserFile}')`
+    && step.run === 'npx --no-install playwright-core install --with-deps chromium');
+  requireCondition(browserSteps.length <= 1, 'duplicate integration browser prerequisites');
   const prerequisites = 'sudo apt-get update\nsudo apt-get install -y ripgrep openssh-server\nrg --version';
   for (const step of integration.steps.filter(step => step.run)) {
     requireCondition(step.shell === undefined && step['working-directory'] === undefined, 'unsupported integration execution metadata');
-    requireCondition(step === selection || (step.if === "steps.select.outputs.count != '0'"
+    requireCondition(step === selection || browserSteps.includes(step) || (step.if === "steps.select.outputs.count != '0'"
       && (bootstrapCommands.has(step.run.trim()) || step.run.trim() === prerequisites || step === integrationRun)),
     'integration step needs a verify:ci equivalent');
   }
-  checks.push({ name: integration.name, steps: [{ ...runStep({ ...integrationRun,
-    run: 'npm run test:integration --' }, integration), selectedFiles: true }] });
+  checks.push({ name: integration.name, steps: [
+    ...browserSteps.map(step => ({ ...runStep(step, integration), requiresFile: browserFile })),
+    { ...runStep({ ...integrationRun, run: 'npm run test:integration --' }, integration), selectedFiles: true },
+  ] });
   const audit = jobs.security.steps.find(step => step.uses?.startsWith(auditAction));
   requireCondition(audit, 'native dependency audit is missing');
   const ignores = String(audit.with?.ignore ?? '').split(',').map(value => value.trim()).filter(Boolean);

@@ -21,7 +21,7 @@ function run(step) {
   const dataDir = step.temporaryData ? mkdtempSync(path.join(tmpdir(), 'o8-verify-ci-smoke-')) : null;
   const env = { ...environment(), ...step.env, ...(dataDir ? { CORTEX_IDE_DATA_DIR: dataDir } : {}) };
   let command = step.command;
-  if (step.selectedFiles) {
+  if (step.selectedFiles || step.requiresFile) {
     const selected = spawnSync(process.execPath, ['scripts/ci/resource-owning-changed.mjs', 'origin/main', '--worktree'], {
       cwd: root, env, encoding: 'utf8', timeout: step.timeoutMs, maxBuffer: 4 * 1024 * 1024,
     });
@@ -29,7 +29,8 @@ function run(step) {
     if (selected.status !== 0) return Promise.resolve(false);
     const files = selected.stdout.trim().split('\n').filter(Boolean);
     if (!files.length) return Promise.resolve(true);
-    command += files.map(file => ` '${file.replaceAll("'", "'\"'\"'")}'`).join('');
+    if (step.requiresFile && !files.includes(step.requiresFile)) return Promise.resolve(true);
+    if (step.selectedFiles) command += files.map(file => ` '${file.replaceAll("'", "'\"'\"'")}'`).join('');
     console.log(`[verify:ci] selected ${files.length} changed integration files against origin/main`);
   }
   return new Promise(resolve => {

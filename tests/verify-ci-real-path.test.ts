@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
@@ -64,6 +64,7 @@ describe('local CI verification through its command entry point', () => {
     expect(shards.every(call => call.ci === 'true' && call.nodeEnv === 'test')).toBe(true);
     expect(shards.every(call => call.nodeOptions === undefined)).toBe(true);
     expect(result.calls.some(call => call.args.includes('test:classification:check'))).toBe(true);
+    expect(result.calls.some(call => call.args.includes('playwright-core'))).toBe(false);
     const smoke = result.calls.find(call => call.args.includes('scripts/smoke-merge-requires-review.ts'));
     expect(smoke?.nodeOptions).toBe('--conditions=react-server');
     expect(smoke?.dataDir).toBeTruthy();
@@ -100,6 +101,62 @@ describe('local CI verification through its command entry point', () => {
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('required-fixture');
   });
+
+  it('covers the conditional browser prerequisite added to the changed integration lane', () => {
+    const workflow = parse(readFileSync(workflowPath, 'utf8'));
+    workflow.jobs['integration-changed'].steps = workflow.jobs['integration-changed'].steps
+      .filter((step: { name?: string }) => step.name !== 'Install parity routing test browser');
+    workflow.jobs['integration-changed'].steps.splice(-1, 0, {
+      name: 'Install parity routing test browser',
+      if: "contains(steps.select.outputs.files, 'tests/next-parity-route-ownership-real-path.test.ts')",
+      run: 'npx --no-install playwright-core install --with-deps chromium',
+    });
+    const result = coverage(workflow);
+    expect(result.status, result.stderr).toBe(0);
+  });
+
+  it('runs the conditional prerequisite before the selected integration file through the verifier entry point', () => {
+    const directory = path.join(root, 'browser-selection');
+    const files = ['scripts/verify-ci.mjs', 'scripts/lib/verify-ci.mjs', 'scripts/ci/check-verify-ci.mjs',
+      'scripts/ci/resource-owning-changed.mjs', 'scripts/ci/review-dependency-changes.mjs', '.github/workflows/ci.yml'];
+    for (const file of files) {
+      mkdirSync(path.dirname(path.join(directory, file)), { recursive: true });
+      copyFileSync(path.join(repo, file), path.join(directory, file));
+    }
+    symlinkSync(path.join(repo, 'node_modules'), path.join(directory, 'node_modules'), 'junction');
+    for (const file of ['scripts/ci/check-hermetic-shards.mjs', 'scripts/check-server-bundle-size.mjs']) {
+      writeFileSync(path.join(directory, file), 'process.exit(0);\n');
+    }
+    mkdirSync(path.join(directory, 'tests'));
+    const browserFile = 'tests/next-parity-route-ownership-real-path.test.ts';
+    writeFileSync(path.join(directory, browserFile), 'base\n');
+    writeFileSync(path.join(directory, 'tests/test-classification.json'), JSON.stringify({ resourceOwning: [{ path: browserFile }] }));
+    writeFileSync(path.join(directory, 'package.json'), JSON.stringify(manifest));
+    const git = (...args: string[]) => {
+      const result = spawnSync('git', args, { cwd: directory, encoding: 'utf8' });
+      expect(result.status, result.stderr).toBe(0);
+    };
+    git('init', '-q', '-b', 'main');
+    git('config', 'user.name', 'CI Fixture');
+    git('config', 'user.email', 'fixture@example.invalid');
+    git('add', 'scripts', '.github', 'tests', 'package.json');
+    git('commit', '-qm', 'fixture base');
+    git('update-ref', 'refs/remotes/origin/main', 'HEAD');
+    writeFileSync(path.join(directory, browserFile), 'changed\n');
+    const receipt = path.join(root, 'browser-receipt.jsonl');
+    writeFileSync(receipt, '');
+    const result = spawnSync(process.execPath, [path.join(directory, 'scripts/verify-ci.mjs')], {
+      cwd: directory, encoding: 'utf8', timeout: 60_000,
+      env: { ...process.env, PATH: bin + path.delimiter + process.env.PATH, VERIFY_FIXTURE_RECEIPT: receipt, VERIFY_FIXTURE_FAIL: '' },
+    });
+    expect(result.status, result.stderr + result.stdout).toBe(0);
+    const calls = readFileSync(receipt, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+    const prerequisite = calls.findIndex(call => call.args.includes('playwright-core'));
+    const integration = calls.findIndex(call => call.args.includes('test:integration'));
+    expect(prerequisite).toBeGreaterThanOrEqual(0);
+    expect(calls[prerequisite].args).toEqual(['--no-install', 'playwright-core', 'install', '--with-deps', 'chromium']);
+    expect(integration).toBeGreaterThan(prerequisite);
+  }, 60_000);
 
   it.each(['aggregate', 'compound setup', 'step directory', 'step shell', 'job defaults', 'workflow defaults'])('rejects uncovered execution changes: %s', (change) => {
     const workflow = parse(readFileSync(workflowPath, 'utf8'));
