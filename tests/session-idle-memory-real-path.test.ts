@@ -7,14 +7,14 @@ it('bounds idle memory after chat and worker history reads, project switches and
   const evidence = process.env.O8_SESSION_MEMORY_EVIDENCE ?? mkdtempSync(join(tmpdir(), 'o8-session-memory-'));
   try {
     const modulePath = resolve('scripts/bench/session-memory.mjs');
-    const { measureSessionMemory } = await import(/* @vite-ignore */ modulePath);
+    const { measureSessionMemory, assertIdleRssBudget } = await import(/* @vite-ignore */ modulePath);
     const receipt = await measureSessionMemory({ output: evidence, sessions: 12, transcriptMiB: 4,
       workerSessions: 12, idleMs: 65_000, registerCleanup: onTestFinished });
     console.log(JSON.stringify(receipt));
     expect(receipt.completedSessions).toBe(12);
     expect(receipt.completedWorkers).toBe(12);
     expect(receipt.persistedOutputUnchanged).toBe(true);
-    // This source host includes a compiler; the standalone CLI also checks unforced idle RSS.
+    assertIdleRssBudget(receipt);
     for (const phase of ['after', 'afterIdle'] as const) {
       const trees = receipt.processTrees.postGc[phase === 'after' ? 'afterRun' : 'afterIdle'];
       const servers = Object.values(trees) as Array<{ rssMiB: number }>;

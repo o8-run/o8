@@ -12,9 +12,9 @@ export class RunArtifactCache {
   private readonly entries = new Map<string, { payload: Buffer; bytes: number; expiresAt: number }>();
   private bytes = 0;
   private expiryTimer: ReturnType<typeof setTimeout> | undefined;
-  private readonly maxBytes = 8 * 1024 * 1024;
-  private readonly maxEntries = 48;
   private readonly ttlMs = 60_000;
+
+  constructor(private readonly maxBytes = 8 * 1024 * 1024, private readonly maxEntries = 48) {}
 
   private delete(id: string): void {
     const entry = this.entries.get(id);

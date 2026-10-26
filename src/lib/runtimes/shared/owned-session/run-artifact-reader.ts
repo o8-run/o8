@@ -7,6 +7,9 @@ import type { OwnedRunRecord, OwnedRuntimeAdapter } from './types';
 let activeReads = 0;
 const waitingReads: Array<() => void> = [];
 const cache = new RunArtifactCache();
+// Polling needs outcome metadata, not transcript entries. Keep it independently
+// so scanning more logs than the transcript budget does not reread every file.
+const summaries = new RunArtifactCache(1024 * 1024, 256);
 let nextReaderId = 0;
 
 async function withReadSlot<T>(read: () => Promise<T>): Promise<T> {
@@ -34,13 +37,13 @@ export function createRunArtifactReader(adapter: Pick<OwnedRuntimeAdapter, 'pars
   // One byte budget per process; namespaces keep separate stores isolated.
   const namespace = `${nextReaderId++}:`;
   const rawRetentionMax = 2 * 1024 * 1024;
-  return (run: OwnedRunRecord, includeStdout = true) => withReadSlot(async () => {
+  return (run: OwnedRunRecord, includeStdout = true, includeEntries = true) => withReadSlot(async () => {
     const [stdoutKey, stderrKey] = await Promise.all([statKey(run.stdoutPath), statKey(run.stderrPath)]);
     const key = JSON.stringify([
       stdoutKey, stderrKey, run.outcome, run.finishedAt, run.interruptRequestedAt, run.childExit,
     ]);
     const cacheId = namespace + run.id;
-    const cached = cache.get(cacheId);
+    const cached = includeEntries ? cache.get(cacheId) : summaries.get(cacheId);
     if (cached?.key === key) {
       const [stdoutRaw, stderrRaw] = await Promise.all([
         includeStdout ? cached.stdoutRaw ?? (stdoutKey === 'absent' ? '' : readFile(run.stdoutPath, 'utf8').catch(() => '')) : '',
@@ -54,9 +57,12 @@ export function createRunArtifactReader(adapter: Pick<OwnedRuntimeAdapter, 'pars
     ]);
     const parsed = adapter.parseRunLog(stdoutRaw, run, stdoutKey === 'absent' ? undefined
       : new Date(Number(stdoutKey.slice(stdoutKey.indexOf(':') + 1))).toISOString());
-    const detached = cache.set(cacheId, { key, parsed,
+    const retained = { key, parsed,
       stdoutRaw: stdoutRaw.length + stderrRaw.length <= rawRetentionMax ? stdoutRaw : null,
-      stderrRaw: stderrRaw.length <= rawRetentionMax ? stderrRaw : null });
+      stderrRaw: stderrRaw.length <= rawRetentionMax ? stderrRaw : null };
+    const summary = summaries.set(cacheId, { ...retained, stdoutRaw: null,
+      parsed: { ...parsed, entries: [] } });
+    const detached = includeEntries ? cache.set(cacheId, retained) : summary;
     return { stdoutRaw: includeStdout ? stdoutRaw : '', stderrRaw, parsed: detached.parsed };
   });
 }

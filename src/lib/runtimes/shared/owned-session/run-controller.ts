@@ -302,7 +302,7 @@ export function createOwnedRunController({
       // A prepared journal is deliberately preserved until the binding path,
       // under the same surface lock as spawn, reconciles its durable marker.
       if (run.spawnState === 'prepared') continue;
-      const { stdoutRaw, stderrRaw, parsed } = await readRunArtifacts(run, Boolean(run.sandboxed && !run.sandboxDenial));
+      const { stdoutRaw, stderrRaw, parsed } = await readRunArtifacts(run, Boolean(run.sandboxed && !run.sandboxDenial), false);
 
       if (!session.threadId && parsed.threadId) {
         session.threadId = parsed.threadId;

@@ -1,0 +1,91 @@
+name: Current app idle memory measurements
+
+on:
+  push:
+    branches: [fix/4581-idle-memory-budget]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  measure:
+    runs-on: macos-latest
+    timeout-minutes: 240
+    concurrency:
+      group: current-app-idle-memory-measure
+      cancel-in-progress: true
+    env:
+      NEXT_TELEMETRY_DISABLED: '1'
+      O8_RELEASE_BUILD_CACHE: 'off'
+      APPLE_SIGNING_IDENTITY: '-'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: harness
+          fetch-depth: 0
+      - name: Pin main at the branch point
+        id: base
+        run: |
+          launch_base_sha=$(git -C harness merge-base origin/main HEAD)
+          echo "sha=$launch_base_sha" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.base.outputs.sha }}
+          path: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.23.4
+          cache: npm
+          cache-dependency-path: main/package-lock.json
+      - name: Install build tools
+        run: |
+          npm install -g npm@11.21.1
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+      - run: npm ci --prefer-offline
+        working-directory: main
+      - name: Prepare the isolated release configuration
+        run: |
+          node harness/scripts/bench/native-memory-config.mjs main
+          ln -s "$GITHUB_WORKSPACE/main/node_modules" harness/node_modules
+      - name: Build main from the clean checkout
+        uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5
+        with:
+          projectPath: main
+          args: --features dev-mcp-plugin --bundles app --config work/native-memory.json
+      - name: Pin the comparison head
+        id: candidate
+        run: echo "sha=$(git -C harness rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.candidate.outputs.sha }}
+          path: head
+      - run: npm ci --prefer-offline
+        working-directory: head
+      - run: node head/scripts/bench/native-memory-config.mjs head
+      - name: Build head from the clean checkout
+        uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5
+        with:
+          projectPath: head
+          args: --features dev-mcp-plugin --bundles app --config work/native-memory.json
+      - name: Measure main before head on this runner
+        continue-on-error: true
+        run: node head/scripts/bench/native-memory.mjs --app=main/src-tauri/target/release/bundle/macos/o8.app --sha=${{ steps.base.outputs.sha }} --check --output="$RUNNER_TEMP/o8-memory-main"
+      - name: Require the completed baseline workload
+        run: |
+          node - <<'JS'
+          const fs = require('node:fs');
+          const report = JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP + '/o8-memory-main/receipt.json', 'utf8'));
+          if (!report.samples[0]?.workload?.persistedOutputUnchanged || !report.samples[0]?.rss?.afterIdle) process.exit(1);
+          JS
+      - name: Measure head immediately after main
+        run: node head/scripts/bench/native-memory.mjs --app=head/src-tauri/target/release/bundle/macos/o8.app --sha=${{ steps.candidate.outputs.sha }} --check --output="$RUNNER_TEMP/o8-memory-head"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: current-app-idle-memory-paired
+          path: |
+            ${{ runner.temp }}/o8-memory-main/receipt.json
+            ${{ runner.temp }}/o8-memory-head/receipt.json
+          retention-days: 1
