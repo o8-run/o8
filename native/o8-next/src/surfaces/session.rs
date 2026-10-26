@@ -56,6 +56,11 @@ fn create(
     })))
 }
 impl ShellView for Surface {
+    fn element(view: &Entity<Self>) -> gpui::AnyElement {
+        // The session retains its own sibling regions. Caching their ancestor
+        // would refresh them all whenever the nested composer invalidates it.
+        view.clone().into_any_element()
+    }
     fn focus(view: &Entity<Self>, composer: bool, window: &mut Window, cx: &mut Context<Shell>) {
         view.read(cx).shell_focus(composer, window, cx);
     }
