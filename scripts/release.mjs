@@ -42,7 +42,7 @@ import {
 import { assertCpuPreparationCurrent, macosCpuPackageArchitectures } from './lib/macos-cpu-packages.mjs';
 import { verifyUpdaterSignature } from './lib/updater-signature.mjs';
 import { buildLatestShip, scrubPublicText } from './lib/public-release.mjs';
-import { publishBetaFeed } from './lib/update-feeds.mjs';
+import { acquireUpdateFeedLock, publishBetaFeed } from './lib/update-feeds.mjs';
 import { resolveReleaseChannel } from './lib/release-channel.mjs';
 import { formatReleaseSummary, prepareReleaseSummary } from './lib/release-summary.mjs';
 
@@ -363,6 +363,7 @@ const { latestJson, uploadArgs } = buildReleaseManifest({
     ...(releaseChannel.compatibilityManifestName ? [join(BUNDLE, 'macos', releaseChannel.compatibilityManifestName)] : []),
     ...(releaseChannel.publishStableEffects ? [fixedJsonPath] : [])],
 });
+const feedLock = acquireUpdateFeedLock();
 if (releaseChannel.channel === 'beta') latestJson.channel = 'beta';
 writeFileSync(latestJsonPath, JSON.stringify(latestJson, null, 2));
 // The Linux completion command reads the candidate tag's compatibility manifest.
@@ -522,7 +523,7 @@ try {
     console.log('[release] Preview published for explicit tag downloads; the stable updater and announcements are unchanged.');
     process.exit(0);
   }
-  publishBetaFeed(latestJsonPath, [REPO, PUBLIC_MIRROR]);
+  publishBetaFeed(latestJsonPath, [REPO, PUBLIC_MIRROR], { lock: feedLock });
   console.log('[release] Beta feed advanced; use promote after verification.');
   process.exit(0);
 
@@ -565,7 +566,7 @@ try {
 } catch (err) {
   console.error(`[release-mirror] failed to mirror ${tag} to ${PUBLIC_MIRROR}:`, err?.message ?? err);
   console.error(`[release-mirror] private publish above is unaffected — auto-update will not pick up this version until the mirror succeeds`);
-  if (releaseChannel.preview) process.exit(1);
+  process.exit(1);
 }
 
 console.log(`[release] the installed o8.app will pick up the update on next launch`);

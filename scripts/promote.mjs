@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 import { execFileSync } from 'node:child_process';
-import { closeSync, mkdtempSync, openSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DEFAULT_REPOS } from './lib/linux-appimage-signature.mjs';
-import { compareReleaseVersions, feedAnchor } from './lib/update-feeds.mjs';
+import { acquireUpdateFeedLock, compareReleaseVersions, feedAnchor } from './lib/update-feeds.mjs';
 
 function options(args) {
   let version;
@@ -54,11 +54,9 @@ async function main() {
   const { version, repos } = options(process.argv.slice(2));
   // One lock across all versions and destinations, held through the last write.
   // Fail closed on existing locks; never remove another command's live lock.
-  const lock = process.env.O8_PROMOTE_LOCK_PATH || join(tmpdir(), 'o8-promote.lock');
-  const owner = openSync(lock, 'wx', 0o600);
+  const lock = acquireUpdateFeedLock();
   let dir;
   try {
-    writeFileSync(owner, JSON.stringify({ pid: process.pid }));
     dir = mkdtempSync(join(tmpdir(), 'o8-promote-'));
     let candidate;
     const targets = [];
@@ -84,8 +82,7 @@ async function main() {
     console.log(`[promote] Stable now serves ${version} using the beta artifacts.`);
   } finally {
     if (dir) rmSync(dir, { recursive: true, force: true });
-    closeSync(owner);
-    unlinkSync(lock);
+    lock.release();
   }
 }
 

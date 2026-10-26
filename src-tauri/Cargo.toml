@@ -260,4 +260,5 @@ tauri-plugin-clerk = { path = "vendor/tauri-plugin-clerk-0.1.1" }
 clerk-fapi-rs = { path = "vendor/clerk-fapi-rs-0.2.0" }
 
 [dev-dependencies]
+tempfile = "3"
 tauri = { version = "2.10.3", features = ["test"] }

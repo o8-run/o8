@@ -28,7 +28,10 @@ existing controls.
 For Linux, run the port build and mirror-copy steps for the candidate tag, then
 `npm run ship:linux-sig -- --tag vX.Y.Z` on the release host. The existing signer
 reads the candidate tag's `latest.json`; completion updates both tag-local
-`latest.json` and `beta.json`, then refreshes only the rolling beta feed. Check
+`latest.json` and `beta.json`, then patches only the Linux entry in rolling beta when its version still matches.
+Late completion never advances or rolls back a rolling feed: completing 0.1.900
+while beta serves 0.1.902 leaves beta at 0.1.902, even if stable is 0.1.901.
+The older candidate remains available on its own tag. Check
 that beta contains every supported platform before verification. The stable
 feed anchor's `latest.json` remains unchanged until promotion. See
 [Linux mirror publication](linux-updater-mirror-publish.md).
@@ -43,14 +46,19 @@ any candidate missing a platform advertised by stable. All candidate platform
 entries, including Linux, are copied unchanged; promotion never fills a gap
 with an older artifact. Finish the Linux completion step before retrying.
 
-Promotion takes an exclusive lock across all versions and destinations before
-reading stable, holds it through every write, and rechecks stable immediately
-before each write. An overlapping command fails; retry it after the owner exits.
+Ship, Linux completion and promotion take the same exclusive channel lock
+across all versions and destinations before reading or publishing manifests.
+Each holds it through every write and rechecks the destination immediately
+before upload. Ship refuses a beta downgrade or replacement of an existing
+version. Promotion refuses a stable downgrade. Platform completion requires
+the destination's existing version and channel to match, and changes only that
+platform entry, preserving every other entry and manifest field. An overlapping
+command fails; retry it after the owner exits.
 A retry of an older version must fail once a newer version is stable. Run all
-promotions on one release host (or set `O8_PROMOTE_LOCK_PATH` to the same shared
-filesystem lock). Do not run independent promotion hosts with separate locks.
+channel writers on one release host (or set `O8_PROMOTE_LOCK_PATH` to the same shared
+filesystem lock). Do not run independent channel writers with separate locks.
 Locks are removed only by their owner on exit. After an interrupted process,
-confirm no promotion is running before removing its stale lock.
+confirm no channel writer is running before removing its stale lock.
 
 Feed writes across repositories are sequential. A failure can leave one mirror
 advanced; retry the exact candidate to finish reconciliation. Do not rebuild or

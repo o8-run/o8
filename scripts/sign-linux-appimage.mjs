@@ -20,7 +20,7 @@
  *   npm run ship:linux-sig -- --tag v0.1.724 --repo o8-run/o8 --repo hurttlocker/o8-releases
  */
 
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -30,7 +30,7 @@ import {
 } from './lib/linux-appimage-signature.mjs';
 
 import { execFileSync } from 'node:child_process';
-import { publishBetaFeed } from './lib/update-feeds.mjs';
+import { acquireUpdateFeedLock, downloadFeed, publishBetaFeed, withCompletedPlatform } from './lib/update-feeds.mjs';
 
 const LOG = '[sign-linux-appimage]';
 
@@ -72,28 +72,45 @@ async function main() {
   // The key is an operator secret; a CI runner must never reach the signer.
   if (process.env.CI) throw new Error('refusing to run on CI — the updater signing key stays on the ship machine');
 
-  const workDir = mkdtempSync(join(tmpdir(), 'o8-linux-appimage-sig-'));
+  const lock = acquireUpdateFeedLock();
+  let workDir;
   try {
+    workDir = mkdtempSync(join(tmpdir(), 'o8-linux-appimage-sig-'));
+    const readDir = join(workDir, 'current');
+    mkdirSync(readDir);
+    const deps = createLinuxSignatureDeps();
+    const upload = deps.uploadAssets;
+    // Keep the existing signer unchanged; publication merges only the Linux entry.
+    deps.uploadAssets = ({ repo, tag, files }) => {
+      const path = files.find(file => file.endsWith('/latest.json'));
+      const candidate = JSON.parse(readFileSync(path, 'utf8'));
+      const current = downloadFeed(repo, tag, 'latest.json', readDir);
+      writeFileSync(path, `${JSON.stringify(withCompletedPlatform(current, candidate, 'linux-x86_64'), null, 2)}\n`);
+      return upload({ repo, tag, files });
+    };
     const result = await signLinuxAppImage({
       tag: options.tag,
       repos: options.repos,
       workDir,
-      deps: createLinuxSignatureDeps(),
+      deps,
       log: (message) => console.log(`${LOG} ${message}`),
     });
     // Complete beta publication after the existing signing operation.
     if (result.latest.channel === 'beta') {
       const betaPath = join(workDir, 'beta.json');
-      writeFileSync(betaPath, `${JSON.stringify(result.latest, null, 2)}\n`);
       for (const repo of result.repos) {
+        const current = downloadFeed(repo, options.tag, 'beta.json', readDir);
+        const completed = withCompletedPlatform(current, result.latest, 'linux-x86_64');
+        writeFileSync(betaPath, `${JSON.stringify(completed, null, 2)}\n`);
         execFileSync('gh', ['release', 'upload', options.tag, betaPath, '--clobber', '--repo', repo], { stdio: 'inherit', timeout: 60_000 });
       }
-      publishBetaFeed(betaPath, result.repos);
+      publishBetaFeed(betaPath, result.repos, { lock, platform: 'linux-x86_64' });
     }
     console.log(`${LOG} published ${result.assetName}.sig and latest.json for ${options.tag}`);
     console.log(`${LOG} linux-x86_64 url: ${result.latest.platforms['linux-x86_64'].url}`);
   } finally {
-    rmSync(workDir, { recursive: true, force: true });
+    if (workDir) rmSync(workDir, { recursive: true, force: true });
+    lock.release();
   }
 }
 

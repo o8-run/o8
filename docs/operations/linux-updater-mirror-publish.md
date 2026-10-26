@@ -49,14 +49,19 @@ before it signs it. The existing signing key and invocation stay unchanged.
 3. Run `npm run ship:linux-sig -- --tag vX.Y.Z` on the release host. The
    existing signer adds the signed Linux entry to the tag-local `latest.json`.
    Completion copies the full manifest to tag-local `beta.json` in every
-   repository, then refreshes the rolling beta feed beside stable. Darwin
+   repository, then patches the rolling beta feed beside stable only if its version still
+   matches the completed candidate. Older or newer rolling versions are left
+   unchanged; completion never advances a channel. Darwin
    entries are preserved. No re-dispatch is needed for the signature copy.
 4. Verify the completed beta candidate on every platform, run installed-build
    smoke acceptance, then use `npm run promote -- --version X.Y.Z`. Promotion
    copies every signed candidate platform unchanged and refuses a candidate
    missing any platform already served by stable. Never promote the macOS-only
    intermediate manifest when stable also serves Linux.
-5. Serialize promotions with the common release-host lock. An overlapping
+5. Ship, Linux completion and promotion share the same release-host channel
+   lock. A completion only adds or replaces the Linux entry in a matching
+   manifest version, preserving all other entries. Serialize all writers with
+   that common lock. An overlapping
    command fails and may be retried after the owner exits. A candidate older
    than stable is refused, including after a concurrent newer promotion.
    See [beta and stable feeds](beta-updates.md) for lock recovery and retries.

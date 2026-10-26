@@ -144,9 +144,16 @@ export function execFileSync(command, args = [], options = {}) {
   }
   if (command === 'gh' && args[0] === 'release' && args[1] === 'view') {
     if (args.includes('--json') && args.includes('tagName')) return 'v0.1.800';
+    if (args.includes('assets')) return JSON.stringify({ assets: process.env.O8_CHANNEL_TEST_BETA_FILE ? [{ name: 'beta.json' }] : [] });
     if (args.includes('--json')) return '2026-09-07T00:00:00Z';
     if (process.env.O8_CHANNEL_TEST_EXISTING === '1') return '{}';
     throw new Error('release not found');
+  }
+  if (command === 'gh' && args[1] === 'download' && args.includes('beta.json')) {
+    cpSync(process.env.O8_CHANNEL_TEST_BETA_FILE, join(args[args.indexOf('--dir') + 1], 'beta.json')); return '';
+  }
+  if (command === 'gh' && args[1] === 'upload' && args.includes('v0.1.800') && process.env.O8_CHANNEL_TEST_BETA_FILE) {
+    cpSync(args.find(v => v.endsWith('/beta.json')), process.env.O8_CHANNEL_TEST_BETA_FILE); return '';
   }
   if (command === 'gh' && args[1] === 'create' && args.includes('hurttlocker/o8-releases') && process.env.O8_CHANNEL_TEST_FAIL_MIRROR === '1') throw new Error('mirror unavailable');
   if (command === 'git' && args[0] === 'describe') return 'v' + process.env.O8_CHANNEL_TEST_VERSION;
@@ -200,6 +207,7 @@ function run(f: ReturnType<typeof fixture>, channel: string, args: string[] = []
       O8_DATA_DIR: join(f.root, 'data'),
       CORTEX_IDE_DATA_DIR: join(f.root, 'data'),
       O8_RELEASE_CHANNEL: channel,
+      O8_PROMOTE_LOCK_PATH: join(f.root, 'feeds.lock'),
       O8_RELEASE_SUMMARY_CACHE_DIR: join(f.root, 'summary-cache'),
       O8_CHANNEL_TEST_VERSION: f.version,
       O8_CHANNEL_TEST_LOG: f.log,
@@ -641,4 +649,23 @@ describe('release channels through the publication entry point', () => {
     expect(workflow).toContain('prerelease: true');
     expect(workflow).not.toContain('schedule:');
   });
+});
+
+it.each(['0.1.900', '0.1.902'])('refuses replacing or rolling back existing beta %s through ship', version => {
+  const f = fixture('0.1.900');
+  const path = join(f.root, 'rolling-beta.json');
+  const current = JSON.stringify({ channel: 'beta', version, platforms: {
+    'linux-x86_64': { url: 'https://example.invalid/o8.AppImage', signature: 'retained' },
+  } });
+  writeFileSync(path, current);
+  const result = run(f, 'beta', [], { O8_CHANNEL_TEST_BETA_FILE: path });
+  expect(result.status).toBe(1);
+  expect(readFileSync(path, 'utf8')).toBe(current);
+});
+it('refuses a ship channel lock before any publication', () => {
+  const f = fixture('0.1.900');
+  writeFileSync(join(f.root, 'feeds.lock'), 'held');
+  const result = run(f, 'beta');
+  expect(result.status).toBe(1);
+  expect(effects(f).some(c => c.name === 'gh' && ['create', 'upload', 'edit'].includes(c.args[1]))).toBe(false);
 });

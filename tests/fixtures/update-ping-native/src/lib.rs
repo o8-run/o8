@@ -10,7 +10,8 @@ fn resolve_ws_token() -> String {
 }
 
 #[cfg(test)]
-mod tests {
+#[path = "tests"]
+mod update_ping_tests {
     mod beta_channel_tests;
     mod auto_apply_failure_tests;
     mod download_timeout_tests;
