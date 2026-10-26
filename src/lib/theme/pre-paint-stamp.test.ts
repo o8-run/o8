@@ -26,10 +26,17 @@ function stampHostPlatform(os: string): void {
   (window as unknown as { __O8_HOST_PLATFORM__?: string }).__O8_HOST_PLATFORM__ = os;
 }
 
+/** Mirrors the Rust initialization script's __O8_LINUX_GLASS__ stamp (O8_LINUX_GLASS=1). */
+function stampLinuxGlass(enabled: boolean): void {
+  (window as unknown as { __O8_LINUX_GLASS__?: boolean }).__O8_LINUX_GLASS__ = enabled;
+}
+
 describe('pre-paint theme stamp', () => {
   beforeEach(() => {
     localStorage.clear();
     delete (window as unknown as { __O8_HOST_PLATFORM__?: string }).__O8_HOST_PLATFORM__;
+    delete (window as unknown as { __O8_LINUX_GLASS__?: boolean }).__O8_LINUX_GLASS__;
+    document.documentElement.removeAttribute('data-linux-glass');
     document.head.querySelectorAll('meta').forEach((meta) => meta.remove());
     for (const attribute of ['theme', 'palette', 'surface']) {
       document.documentElement.removeAttribute(`data-${attribute}`);
@@ -94,6 +101,40 @@ describe('pre-paint theme stamp', () => {
 
     expect(document.documentElement.dataset.surface).toBe('solid');
     expect(document.documentElement.dataset.palette).toBe('light');
+  });
+
+  it('paints dark All Glass on a Linux shell launched with O8_LINUX_GLASS=1', () => {
+    stampHostPlatform('linux');
+    stampLinuxGlass(true);
+
+    runStamp();
+
+    expect(document.documentElement.dataset.surface).toBe('glass');
+    expect(document.documentElement.dataset.palette).toBe('dark');
+    expect(document.documentElement.dataset.linuxGlass).toBe('true');
+    expect(document.documentElement.style.getPropertyValue('--o8-boot-cover-bg')).toContain('linear-gradient');
+  });
+
+  it('keeps a stored All Glass opt-out on an opted-in Linux shell', () => {
+    stampHostPlatform('linux');
+    stampLinuxGlass(true);
+    localStorage.setItem('cortex-workspace-glass', 'false');
+
+    runStamp();
+
+    expect(document.documentElement.dataset.surface).toBe('solid');
+    expect(localStorage.getItem('cortex-workspace-glass')).toBe('false');
+  });
+
+  it('ignores the Linux glass flag on a Windows shell', () => {
+    stampHostPlatform('windows');
+    stampLinuxGlass(true);
+    localStorage.setItem('cortex-reduce-transparency', 'off');
+
+    runStamp();
+
+    expect(document.documentElement.dataset.surface).toBe('solid');
+    expect(document.documentElement.dataset.linuxGlass).toBeUndefined();
   });
 
   it('leaves the macOS shell stamp on the glass path', () => {

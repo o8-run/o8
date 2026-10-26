@@ -4,13 +4,13 @@ import { forwardRef, type CSSProperties, type HTMLAttributes } from 'react';
 import { SmoothCorners } from '@lisse/react';
 import { useTheme } from '@/lib/theme/context';
 import { isWebMachineBrowserSurface } from '@/lib/connect/web-machine-surface';
-import { isNonMacShell } from '@/lib/desktop/host-platform';
+import { shellLacksGlass } from '@/lib/desktop/host-platform';
 import { WORKSPACE_RAIL_CORNER_RADIUS, WORKSPACE_RAIL_CORNER_SMOOTHING } from './branch-rail-geometry';
 
 /** Material shared by floating surfaces that need their own corner geometry. */
 export function useFloatingSurfaceMaterial(glass?: boolean) {
   const { workspaceGlass, surface, paletteId } = useTheme();
-  const isGlass = glass ?? (!isWebMachineBrowserSurface() && !isNonMacShell() && (workspaceGlass || surface === 'glass'));
+  const isGlass = glass ?? (!isWebMachineBrowserSurface() && !shellLacksGlass() && (workspaceGlass || surface === 'glass'));
   const allGlass = isGlass && workspaceGlass;
   const frostStyle = {
     background: allGlass ? 'var(--t-glass-elevated)' : 'var(--t-popover-surface)',

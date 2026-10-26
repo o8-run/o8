@@ -125,6 +125,19 @@ html[data-tauri='true'] body {
   background-color: transparent !important;
 }
 
+/* Local Linux patch (O8_LINUX_GLASS=1): Linux/X11 has no NSVisualEffect
+ * vibrancy, so paint a blurred-wallpaper-style backdrop under the glass
+ * layers; the All Glass veil (body background) and translucent panels then
+ * composite over it like they do over the macOS material. */
+html[data-tauri='true'][data-linux-glass='true'] {
+  background:
+    radial-gradient(1200px 800px at 12% 18%, rgba(88, 101, 242, 0.55), transparent 60%),
+    radial-gradient(1000px 700px at 85% 25%, rgba(236, 72, 153, 0.38), transparent 60%),
+    radial-gradient(1100px 900px at 60% 95%, rgba(20, 184, 166, 0.45), transparent 60%),
+    linear-gradient(160deg, #1b2440 0%, #2a1f3d 45%, #10302f 100%) !important;
+  background-attachment: fixed !important;
+}
+
 /* Tauri vibrancy — boost text contrast on frosted glass (light + glass surface only).
  * Solid surface mode keeps chrome opaque so these overrides would only fight
  * the registry tokens. Selectors are gated on data-surface='glass'. */
