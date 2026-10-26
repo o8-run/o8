@@ -195,6 +195,12 @@
       ]
     },
     {
+      "path": "src/app/api/voice/live/availability-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "src/app/api/voice/live/byok-real-path.test.ts",
       "reasons": [
         "executable-fixture",
