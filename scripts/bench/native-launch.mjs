@@ -42,17 +42,17 @@ export const COMPOSER_PROBE_JS = `(() => {
       responseEnd: navigation.responseEnd, domContentLoaded: navigation.domContentLoadedEventEnd } : null });
 })()`;
 
-function wholeAppRss(rootPid, webkitBaseline) {
+function wholeAppRss(rootPid) {
   const processes = snapshotProcesses();
   const owned = new Set([...descendantPids(processes, rootPid),
-    ...[...webkitPids(processes)].filter(pid => !webkitBaseline.has(pid))]);
+    ...webkitPids(processes)]);
   const rows = execFileSync('ps', ['-axo', 'pid=,rss='], { encoding: 'utf8' });
   let bytes = 0, count = 0;
   for (const row of rows.trim().split('\n')) {
     const match = row.trim().match(/^(\d+)\s+(\d+)$/);
     if (match && owned.has(Number(match[1]))) { count++; bytes += Number(match[2]) * 1024; }
   }
-  return { bytes, count, includes: 'native shell, server descendants and new webview helpers' };
+  return { bytes, count, includes: 'native shell, server descendants and all webview helpers on the disposable runner' };
 }
 
 function requireDisposableRunner(app) {
@@ -111,7 +111,7 @@ export async function measureNativeLaunch({ app, output, sourceSha, samples = 3 
       const seeded = materializeFixture(plan, { root: sampleRoot });
       const socketPath = path.join(sampleRoot, 'control.sock');
       const client = new WebviewSocketClient(socketPath);
-      let child, lastProbe, socketReadyMs;
+      let child, lastProbe, socketReadyMs, activated = false;
       const nativeStages = [], seen = new Set();
       let logTail = '';
       const capture = chunk => {
@@ -123,7 +123,6 @@ export async function measureNativeLaunch({ app, output, sourceSha, samples = 3 
           if (!seen.has(id)) { seen.add(id); nativeStages.push({ stage, atMs: Number(match[2]) }); }
         }
       };
-      const webkitBaseline = webkitPids(snapshotProcesses());
       const epoch = Date.now(), started = performance.now();
       try {
         child = spawn(path.join(stagedApp, 'Contents/MacOS/o8'), [], { cwd: stageRoot, detached: true,
@@ -138,10 +137,13 @@ export async function measureNativeLaunch({ app, output, sourceSha, samples = 3 
             try {
               if (socketReadyMs === undefined) {
                 await client.connectOnly(); socketReadyMs = round(performance.now() - started);
+              }
+              if (!activated) {
                 await client.send('manage_window', { window_label: 'main', operation: 'focus' });
                 const activation = spawnSync('/usr/bin/osascript', ['-e',
                   `tell application ${JSON.stringify(stagedApp)} to activate`], { stdio: 'ignore', timeout: 10_000 });
                 assert.equal(activation.status, 0, 'Foreground activation failed');
+                activated = true;
               }
               lastProbe = JSON.parse(await executeJs(client, COMPOSER_PROBE_JS));
               if (lastProbe.state === 'ready') {
@@ -158,7 +160,7 @@ export async function measureNativeLaunch({ app, output, sourceSha, samples = 3 
         assert.equal(receipt.samples.length, sample, `Composer did not acknowledge input: ${JSON.stringify(lastProbe)}`);
         console.log(JSON.stringify({ sample, interactiveComposerMs: receipt.samples.at(-1).interactiveComposerMs }));
         await sleep(30_000);
-        receipt.samples.at(-1).idleRss = wholeAppRss(child.pid, webkitBaseline);
+        receipt.samples.at(-1).idleRss = wholeAppRss(child.pid);
       } catch (error) {
         receipt.failure = { sample, message: String(error.message).replaceAll(stageRoot, '<fixture>'),
           lastProbe, nativeStages: [...nativeStages], exitCode: child?.exitCode, signal: child?.signalCode };

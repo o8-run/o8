@@ -4,9 +4,16 @@ on:
   push:
     branches: [perf/current-app-launch]
   workflow_dispatch:
+    inputs:
+      main_artifact_run:
+        description: Optional run containing a previously built main app
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   baseline:
@@ -22,6 +29,7 @@ jobs:
       NEXT_TELEMETRY_DISABLED: '1'
       O8_RELEASE_BUILD_CACHE: 'off'
       APPLE_SIGNING_IDENTITY: '-'
+      SAVED_MAIN_RUN_ID: ${{ github.event.inputs.main_artifact_run || (contains(github.event.head_commit.message, '[reuse-main]') && '40355401137') || '' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -33,6 +41,7 @@ jobs:
           launch_base_sha=$(git -C harness merge-base origin/main HEAD)
           echo "sha=$launch_base_sha" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v4
+        if: env.SAVED_MAIN_RUN_ID == ''
         with:
           ref: ${{ steps.base.outputs.sha }}
           path: main
@@ -40,25 +49,46 @@ jobs:
         with:
           node-version: 22.23.4
           cache: npm
-          cache-dependency-path: main/package-lock.json
+          cache-dependency-path: harness/package-lock.json
       - name: Install build tools
         run: |
           npm install -g npm@11.21.1
-          rustup toolchain install stable --profile minimal
-          rustup default stable
+          if [ -z "$SAVED_MAIN_RUN_ID" ]; then
+            rustup toolchain install stable --profile minimal
+            rustup default stable
+          fi
       - run: npm ci --prefer-offline
+        if: env.SAVED_MAIN_RUN_ID == ''
         working-directory: main
+      - run: npm ci --prefer-offline
+        if: env.SAVED_MAIN_RUN_ID != ''
+        working-directory: harness
       - name: Prepare the isolated release configuration
+        if: env.SAVED_MAIN_RUN_ID == ''
         run: |
           node harness/scripts/bench/native-launch-config.mjs main
           ln -s "$GITHUB_WORKSPACE/main/node_modules" harness/node_modules
       - name: Build main from the clean checkout
+        if: env.SAVED_MAIN_RUN_ID == ''
         uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5
         with:
           projectPath: main
           args: --features dev-mcp-plugin --bundles app --config work/native-launch.json
       - name: Preserve the exact main artifact
+        if: env.SAVED_MAIN_RUN_ID == ''
         run: tar -C main/src-tauri/target/release/bundle/macos -cf "$RUNNER_TEMP/main-app.tar" o8.app
+      - uses: actions/download-artifact@v4
+        if: env.SAVED_MAIN_RUN_ID != ''
+        with:
+          name: current-app-launch-main-app
+          run-id: ${{ env.SAVED_MAIN_RUN_ID }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}
+      - name: Restore the preserved main app
+        if: env.SAVED_MAIN_RUN_ID != ''
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/main-artifact"
+          tar -C "$GITHUB_WORKSPACE/main-artifact" -xf "$RUNNER_TEMP/main-app.tar"
       - uses: actions/upload-artifact@v4
         with:
           name: current-app-launch-main-app
@@ -67,7 +97,7 @@ jobs:
           retention-days: 1
       - name: Measure main three times before the fix
         continue-on-error: true
-        run: node harness/scripts/bench/native-launch.mjs --app=main/src-tauri/target/release/bundle/macos/o8.app --sha=${{ steps.base.outputs.sha }} --samples=3 --check --output="$RUNNER_TEMP/o8-launch-before"
+        run: node harness/scripts/bench/native-launch.mjs --app=${{ env.SAVED_MAIN_RUN_ID != '' && 'main-artifact/o8.app' || 'main/src-tauri/target/release/bundle/macos/o8.app' }} --sha=${{ steps.base.outputs.sha }} --samples=3 --check --output="$RUNNER_TEMP/o8-launch-before"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -79,7 +109,7 @@ jobs:
           node - <<'JS'
           const fs = require('node:fs');
           const report = JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP + '/o8-launch-before/receipt.json', 'utf8'));
-          if (report.samples.length !== 3 || report.samples.some(sample => !sample.acknowledged)) process.exit(1);
+          if (!report.teardownVerified || report.samples.length !== 3 || report.samples.some(sample => !sample.acknowledged)) process.exit(1);
           JS
 
   candidate:
