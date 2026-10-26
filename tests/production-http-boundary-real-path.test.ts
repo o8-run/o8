@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
-import { existsSync, copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { request as httpRequest } from 'node:http';
 import { connect, createServer, type Server, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -9,7 +9,8 @@ import { join } from 'node:path';
 import { runInNewContext } from 'node:vm';
 import { NextRequest, NextResponse } from 'next/server';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { afterAll, beforeAll, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, beforeEach, expect, it, vi } from 'vitest';
+import { stagePackagedNativeAddons } from './helpers/packaged-native-addons';
 
 const context = vi.hoisted(() => ({ headers: undefined as Headers | undefined }));
 vi.mock('next/headers', () => ({ headers: async () => context.headers }));
@@ -21,7 +22,7 @@ vi.mock('@/components/security/ApiBearerBootstrap', () => ({ ApiBearerBootstrap:
 const root = mkdtempSync(join(tmpdir(), 'o8-http-boundary-'));
 const bearer = randomUUID();
 const nativeToken = randomUUID();
-const socketPath = join(root, 'native.sock');
+const socketPath = process.platform === 'win32' ? `\\\\.\\pipe\\o8-http-boundary-${randomUUID()}` : join(root, 'native.sock');
 const nativeState = { boundaryCount: 0 };
 const sockets = new Set<Socket>();
 let child: ChildProcess;
@@ -31,14 +32,33 @@ let native: Server;
 let port: number;
 let nativeCalls = 0;
 let handlerCalls = 0;
-let ready: Promise<void>;
+let setupError: unknown;
+
+function fixtureReady(serverChild: ChildProcess): Promise<number> {
+  return new Promise((resolve, reject) => {
+    let stderr = '';
+    const capture = (chunk: Buffer) => { stderr = (stderr + chunk.toString()).slice(-8192); };
+    const timer = setTimeout(() => { cleanup(); serverChild.kill(); reject(new Error('Production fixture readiness timed out')); }, 10000);
+    const cleanup = () => {
+      clearTimeout(timer); serverChild.off('message', onMessage); serverChild.off('error', onError); serverChild.off('exit', onExit);
+    };
+    const onMessage = (message: { ready?: boolean; port?: number }) => {
+      if (message.ready && message.port) { cleanup(); resolve(message.port); }
+    };
+    const onError = (error: Error) => { cleanup(); reject(error); };
+    const onExit = (code: number | null) => { cleanup(); reject(new Error(`Production fixture exited before readiness (${code}): ${stderr}`)); };
+    serverChild.stderr?.on('data', capture);
+    serverChild.on('message', onMessage); serverChild.once('error', onError); serverChild.once('exit', onExit);
+  });
+}
 
 type Forwarded = { id: number; method: string; url: string; headers: Record<string, string>; body: string };
 
-beforeAll(async () => {
+async function prepareFixture() {
   vi.stubEnv('CORTEX_IDE_DATA_DIR', root); vi.stubEnv('O8_DATA_DIR', root);
-  vi.stubEnv('O8_TAURI_MCP_SOCKET', socketPath); vi.stubEnv('TAURI_MCP_AUTH_TOKEN', '');
-  writeFileSync(join(root, 'ws-token'), bearer); writeFileSync(`${socketPath}.token`, nativeToken);
+  vi.stubEnv('O8_TAURI_MCP_SOCKET', socketPath); vi.stubEnv('TAURI_MCP_AUTH_TOKEN', process.platform === 'win32' ? nativeToken : '');
+  writeFileSync(join(root, 'ws-token'), bearer);
+  if (process.platform !== 'win32') writeFileSync(`${socketPath}.token`, nativeToken);
   native = createServer(socket => {
     sockets.add(socket); socket.on('close', () => sockets.delete(socket)); let buffer = '';
     socket.on('data', chunk => {
@@ -61,8 +81,8 @@ beforeAll(async () => {
     'RELEASE_ENV_STANZA', 'SENTRY_ENV_STANZA', 'APP_VERSION_STANZA', 'BUILD_GIT_SHA_STANZA', 'BOOT_CAPTURE_STANZA',
   ].map(name => [name, ''])));
   writeFileSync(join(root, 'server.js'), wrapper);
-  const policy = 'scripts/lib/http-request-boundary.cjs';
-  if (existsSync(policy)) copyFileSync(policy, join(root, 'http-request-boundary.cjs'));
+  stagePackagedNativeAddons({ projectRoot: process.cwd(), serverRoot: root, platform: 'darwin' });
+  copyFileSync('scripts/lib/http-request-boundary.cjs', join(root, 'http-request-boundary.cjs'));
   writeFileSync(join(root, 'server-impl.js'), `
 const http = require('node:http');
 let next = 0; const responses = new Map();
@@ -76,9 +96,9 @@ server.listen(0, '127.0.0.1', () => process.send({ ready: true, port: server.add
   const { default: RootLayout } = await import('@/app/layout');
   child = spawn(process.execPath, [join(root, 'server.js')], { env: { ...process.env,
     O8_DATA_DIR: root, CORTEX_IDE_DATA_DIR: root }, stdio: ['ignore', 'ignore', 'pipe', 'ipc'] });
-  let resolveReady!: () => void; ready = new Promise<void>(resolve => { resolveReady = resolve; });
+  const ready = fixtureReady(child);
   child.on('message', async (message: Forwarded & { ready?: boolean; port?: number }) => {
-    if (message.ready) { port = message.port!; resolveReady(); return; }
+    if (message.ready) return;
     handlerCalls++;
     try {
       const req = new NextRequest(new URL(message.url, `http://127.0.0.1:${port}`), { method: message.method,
@@ -97,15 +117,17 @@ server.listen(0, '127.0.0.1', () => process.send({ ready: true, port: server.add
       child.send({ id: message.id, status: response.status, headers: Object.fromEntries(response.headers), body: await response.text() });
     } catch { child.send({ id: message.id, status: 500, body: 'Fixture route failed' }); }
   });
-  await ready;
+  port = await ready;
   noUpgradeChild = spawn(process.execPath, [join(root, 'server.js')], { env: { ...process.env,
     O8_DATA_DIR: root, CORTEX_IDE_DATA_DIR: root, O8_FIXTURE_NO_UPGRADE: '1' }, stdio: ['ignore', 'ignore', 'pipe', 'ipc'] });
-  await new Promise<void>(resolve => noUpgradeChild.on('message', (message: { ready?: boolean; port?: number }) => {
-    if (message.ready) { noUpgradePort = message.port!; resolve(); }
-    else noUpgradeChild.send({ id: (message as { id?: number }).id, status: 500, body: 'Refused request reached the fixture app' });
-  }));
+  noUpgradePort = await fixtureReady(noUpgradeChild);
   vi.stubEnv('O8_API_PORT', String(port)); vi.stubEnv('PORT', String(port));
+}
+
+beforeAll(async () => {
+  try { await prepareFixture(); } catch (error) { setupError = error; }
 }, 60000);
+beforeEach(() => { if (setupError) throw setupError; });
 
 afterAll(async () => {
   for (const serverChild of [child, noUpgradeChild]) {
@@ -125,6 +147,31 @@ function request(host: string, path = '/', options: { method?: string; headers?:
     req.setTimeout(10000, () => req.destroy(new Error('Fixture request timeout'))); req.on('error', reject); req.end(options.body);
   });
 }
+function bootstrapProbe(serverRoot: string) {
+  return spawn(process.execPath, ['-e', `Object.defineProperty(process, 'platform', { value: 'darwin' }); require(${JSON.stringify(join(serverRoot, 'server.js'))});`], {
+    env: { ...process.env, O8_DATA_DIR: root, CORTEX_IDE_DATA_DIR: root }, stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
+  });
+}
+
+it('boots the production native bootstrap before accepting TCP requests on every host', async () => {
+  const probe = bootstrapProbe(root);
+  try {
+    const probePort = await fixtureReady(probe);
+    expect(await rawRequest('/', `untrusted.invalid:${probePort}`, false, probePort)).toMatch(/^HTTP\/1\.1 421 /);
+  } finally { if (probe.exitCode === null) { const closed = once(probe, 'exit'); probe.kill(); await closed; } }
+});
+
+it('fails readiness explicitly when a required production bootstrap is missing', async () => {
+  const missingRoot = mkdtempSync(join(tmpdir(), 'o8-http-missing-bootstrap-'));
+  copyFileSync(join(root, 'server.js'), join(missingRoot, 'server.js'));
+  const probe = bootstrapProbe(missingRoot);
+  try { await expect(fixtureReady(probe)).rejects.toThrow('native-addon-runtime.cjs'); }
+  finally {
+    if (probe.exitCode === null) { const closed = once(probe, 'exit'); probe.kill(); await closed; }
+    rmSync(missingRoot, { recursive: true, force: true });
+  }
+});
+
 function rawRequest(target: string, host: string, upgrade = false, socketPort = port): Promise<string> {
   return new Promise((resolve, reject) => {
     const socket = connect(socketPort, '127.0.0.1'); let response = '';
