@@ -148,7 +148,7 @@ describe('terminal chat checks through real entry points and persisted workspace
     expect.soft(state.tabs.map(tab => tab.id)).toEqual([real.id, similar.id, shell.id]);
     expect.soft(state.activeTabId).toBe(real.id);
     vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => stateRoute.GET(new Request(new URL(String(input), 'http://localhost')))));
-    const initial = await restore.loadInitialTabState({ stateScope: 'tile-root', defaultTab: 'orchestrator', splitCreated: false }, () => false);
+    const initial = await restore.loadInitialTabState({ stateScope: 'tile-root', defaultTab: 'orchestrator', splitCreated: false, preferredRepoPath: repoPath }, () => false);
     expect.soft(initial?.tabs.some(tab => tab.id === legacy.id)).toBe(false);
     const recent = await (await recentRoute.GET(new NextRequest('http://localhost/api/v2/chat-history/list?include=orchestrator'))).json();
     expect.soft(recent.conversations.map((entry: { tabId: string }) => entry.tabId)).not.toContain('thoughts-saved-probe');
