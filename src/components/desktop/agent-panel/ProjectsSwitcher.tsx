@@ -12,8 +12,10 @@ import { ProjectGlyph, ProjectIdentity } from './ProjectIdentity';
 import { ProjectGroupDialog } from './ProjectGroupDialog';
 import { ConnectRepositoryDialog } from './ConnectRepositoryDialog';
 import type { RepositorySource } from './repository-source-actions';
-import { GitHubIcon } from '../settings/shared';
 import { ProjectRepositories } from './ProjectRepositories';
+import { useTauriFileDrop } from '@/lib/hooks/use-tauri-file-drop';
+import { droppedRepoPath } from '../repo-registry/repo-folder-drop';
+import { isRepoUrl } from '../repo-registry/recent-repo-folders';
 
 const rowStyle = { display: 'flex', alignItems: 'center', gap: 10, width: '100%', minHeight: 34, paddingTop: 5, paddingRight: 9, paddingBottom: 5, paddingLeft: 9, border: 0, borderRadius: 9, color: 'var(--t-text)', background: 'transparent', cursor: 'pointer', textAlign: 'left' as const, fontFamily: 'var(--font-sans-system)', fontSize: 13, fontWeight: 300 };
 
@@ -26,13 +28,27 @@ export function ProjectsSwitcher({ projects, loading = false, activeProjectId, s
   onProjectSelect: (project: ProjectRecord) => Promise<boolean>;
   onRepoSelect: (project: ProjectRecord, repoPath: string) => void;
   onManageProjects: () => void;
-  onAddRepo: () => void;
+  onAddRepo: (localPath?: string) => void;
   onRepositoryConnected?: (repo: RepoRegistryEntry) => void | Promise<void>;
 }) {
   const anchor = useRef<HTMLButtonElement>(null);
   const addAnchor = useRef<HTMLButtonElement>(null);
+  useTauriFileDrop({ hostRef: addAnchor, onDrop: paths => {
+    if (paths.length === 1) onAddRepo(paths[0]);
+  } });
+  const addInput = {
+    onDragOver: (event: React.DragEvent) => event.preventDefault(),
+    onDrop: (event: React.DragEvent) => {
+      event.preventDefault();
+      const path = droppedRepoPath(event.dataTransfer);
+      onAddRepo(path ?? undefined);
+    },
+    onPaste: (event: React.ClipboardEvent) => {
+      const value = event.clipboardData.getData('text/plain').trim();
+      if (isRepoUrl(value)) { event.preventDefault(); onAddRepo(value); }
+    },
+  };
   const [open, setOpen] = useState(false);
-  const [adding, setAdding] = useState(false);
   const [query, setQuery] = useState('');
   const [busy, setBusy] = useState(false);
   const selecting = useRef(false);
@@ -59,22 +75,22 @@ export function ProjectsSwitcher({ projects, loading = false, activeProjectId, s
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not switch projects.'); }
     finally { selecting.current = false; setBusy(false); }
   };
-  const openDialog = (id: string) => { setOpen(false); setAdding(false); setDialog(id); };
-  const openSource = (value: RepositorySource) => { setAdding(false); setOpen(false); setSource(value); };
+  const openDialog = (id: string) => { setOpen(false); setDialog(id); };
+  const openSource = (value: RepositorySource) => { setOpen(false); setSource(value); };
   const dialogProject = dialog && dialog !== 'new' ? projects.find((project) => project.id === dialog) : undefined;
   const hover = (event: React.MouseEvent<HTMLButtonElement>, active = false) => { event.currentTarget.style.background = active ? 'var(--t-hover)' : 'transparent'; };
   return <>
     {empty ? <div data-project-switcher style={{ paddingLeft: 8, paddingRight: 5 }}>
       <button ref={anchor} type="button" onClick={() => openDialog('new')} onMouseEnter={event => hover(event, true)} onMouseLeave={event => hover(event)} style={rowStyle}><ProjectGlyph kind="add" /><span>New project</span></button>
-      <button ref={addAnchor} type="button" aria-haspopup="menu" aria-expanded={adding} onClick={() => { setOpen(false); setAdding(value => !value); }} onMouseEnter={event => hover(event, true)} onMouseLeave={event => hover(event, adding)} style={rowStyle}><ProjectGlyph kind="folder" /><span>Add repository</span></button>
+      <button {...addInput} ref={addAnchor} type="button" onClick={() => { addAnchor.current?.focus(); setOpen(false); onAddRepo(); }} onMouseEnter={event => hover(event, true)} onMouseLeave={event => hover(event)} style={rowStyle}><ProjectGlyph kind="folder" /><span>Add repository</span></button>
     </div> : <div data-project-switcher style={{ display: 'flex', alignItems: 'center', gap: 2, paddingLeft: 8, paddingRight: 5 }}>
-      <button ref={anchor} type="button" aria-label="Switch project" disabled={busy} aria-haspopup="menu" aria-expanded={open} onClick={() => { if (!open) refreshProjectsFromExternalMutation(); setAdding(false); setQuery(''); setError(''); setOpen((value) => !value); }} onMouseEnter={(event) => hover(event, true)} onMouseLeave={(event) => hover(event, open)} style={{ ...rowStyle, flex: 1, minWidth: 0, paddingLeft: 2, paddingRight: 4, minHeight: 32, background: open ? 'var(--t-hover)' : 'transparent' }}>
+      <button ref={anchor} type="button" aria-label="Switch project" disabled={busy} aria-haspopup="menu" aria-expanded={open} onClick={() => { if (!open) refreshProjectsFromExternalMutation(); setQuery(''); setError(''); setOpen((value) => !value); }} onMouseEnter={(event) => hover(event, true)} onMouseLeave={(event) => hover(event, open)} style={{ ...rowStyle, flex: 1, minWidth: 0, paddingLeft: 2, paddingRight: 4, minHeight: 32, background: open ? 'var(--t-hover)' : 'transparent' }}>
         <span aria-hidden style={{ display: 'inline-flex', flexShrink: 0, width: 17, height: 17, transform: 'translateX(-2px)' }}><ProjectIdentity name={current?.name ?? 'Projects'} color={current?.color} size={17} /></span>
         <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13.5 }}>{current?.name ?? 'Projects'}</span>
         {members.length > 1 ? <span style={{ fontSize: 10, color: 'var(--t-text-muted)' }}>{members.length}</span> : null}
         <span style={{ color: 'var(--t-text-faint)' }}><ProjectGlyph kind="chevron" size={13} /></span>
       </button>
-      <button ref={addAnchor} type="button" aria-label="Add repository" disabled={busy} title="Add repository or project" aria-haspopup="menu" aria-expanded={adding} onClick={() => { if (!adding) refreshProjectsFromExternalMutation(); setOpen(false); setAdding((value) => !value); }} onMouseEnter={(event) => hover(event, true)} onMouseLeave={(event) => hover(event, adding)} style={{ ...rowStyle, width: 28, minHeight: 28, padding: 6, background: adding ? 'var(--t-hover)' : 'transparent', color: 'var(--t-text-muted)' }}><ProjectGlyph kind="add" size={16} /></button>
+      <button {...addInput} ref={addAnchor} type="button" aria-label="Add repository" disabled={busy} title="Add repository" onClick={() => { addAnchor.current?.focus(); setOpen(false); onAddRepo(); }} onMouseEnter={event => hover(event, true)} onMouseLeave={event => hover(event)} style={{ ...rowStyle, width: 28, minHeight: 28, padding: 6, color: 'var(--t-text-muted)' }}><ProjectGlyph kind="add" size={16} /></button>
     </div>}
     <ComposerPopover anchorRef={anchor} open={open} align="start" onClose={() => setOpen(false)}>
       <motion.div initial={reduceMotion ? false : { y: -4 }} animate={{ y: 0 }} transition={{ duration: reduceMotion ? 0 : 0.18, ease: [0.22, 1, 0.36, 1] }}>
@@ -102,27 +118,16 @@ export function ProjectsSwitcher({ projects, loading = false, activeProjectId, s
             {!filtered.length ? <p style={{ paddingLeft: 9, fontSize: 12, color: 'var(--t-text-muted)' }}>No matching projects.</p> : null}
           </div>
           {error ? <p role="alert" style={{ fontSize: 11, lineHeight: 1.4, paddingLeft: 9, color: 'var(--t-text-secondary)' }}>{error}</p> : null}
-          <div role="menu" aria-label="Project actions" style={{ borderTop: '1px solid var(--t-divider-subtle)', marginTop: 4, paddingTop: 4 }}><button type="button" role="menuitem" disabled={busy} onClick={() => openDialog('new')} onMouseEnter={(event) => hover(event, true)} onMouseLeave={(event) => hover(event)} style={rowStyle}><ProjectGlyph kind="add" /><span>New project</span></button></div>
+          <div role="menu" aria-label="Project actions" style={{ borderTop: '1px solid var(--t-divider-subtle)', marginTop: 4, paddingTop: 4 }}><button type="button" role="menuitem" disabled={busy} onClick={() => openDialog('new')} onMouseEnter={(event) => hover(event, true)} onMouseLeave={(event) => hover(event)} style={rowStyle}><ProjectGlyph kind="add" /><span>New project</span></button>
+            <button type="button" role="menuitem" onClick={() => openSource('github')} onMouseEnter={event => hover(event, true)} onMouseLeave={event => hover(event)} style={rowStyle}><ProjectGlyph kind="link" /><span>Connected repositories</span></button>
+            <button type="button" role="menuitem" onClick={() => openSource('new')} onMouseEnter={event => hover(event, true)} onMouseLeave={event => hover(event)} style={rowStyle}><ProjectGlyph kind="add" /><span>New repository</span></button>
+          </div>
         </FloatingSurface>
       </motion.div>
     </ComposerPopover>
-    <ComposerPopover anchorRef={addAnchor} open={adding} align="end" onClose={() => setAdding(false)}>
-      <FloatingSurface overlay data-mcp-scope="navigation-menu" style={{ width: 'min(300px, calc(100vw - 24px))', borderRadius: 16 }} contentStyle={{ padding: 6 }}>
-        <div role="menu" aria-label="Add to workspace">
-          <div style={{ paddingTop: 7, paddingRight: 9, paddingBottom: 4, paddingLeft: 9, fontSize: 10, color: 'var(--t-text-muted)' }}>Repository sources</div>
-          <button type="button" role="menuitem" onClick={() => { setAdding(false); addAnchor.current?.focus(); onAddRepo(); }} onMouseEnter={(event) => hover(event, true)} onMouseLeave={(event) => hover(event)} style={{ ...rowStyle, minHeight: 42 }}><ProjectGlyph kind="folder" /><span><span style={{ display: 'block' }}>Local folder</span><span style={{ display: 'block', fontSize: 10.5, color: 'var(--t-text-muted)', marginTop: 2 }}>Choose a folder on this machine</span></span></button>
-          <button type="button" role="menuitem" onClick={() => openSource('github')} onMouseEnter={(event) => hover(event, true)} onMouseLeave={(event) => hover(event)} style={{ ...rowStyle, minHeight: 42 }}><GitHubIcon size={16} /><span><span style={{ display: 'block' }}>GitHub repository</span><span style={{ display: 'block', fontSize: 10.5, color: 'var(--t-text-muted)', marginTop: 2 }}>Browse connected repos or paste a URL</span></span></button>
-          <button type="button" role="menuitem" onClick={() => openSource('url')} onMouseEnter={(event) => hover(event, true)} onMouseLeave={(event) => hover(event)} style={{ ...rowStyle, minHeight: 42 }}><ProjectGlyph kind="link" /><span><span style={{ display: 'block' }}>Git URL</span><span style={{ display: 'block', fontSize: 10.5, color: 'var(--t-text-muted)', marginTop: 2 }}>GitLab, Bitbucket, Azure DevOps, SSH…</span></span></button>
-          <button type="button" role="menuitem" onClick={() => openSource('new')} onMouseEnter={(event) => hover(event, true)} onMouseLeave={(event) => hover(event)} style={{ ...rowStyle, minHeight: 42 }}><ProjectGlyph kind="add" /><span><span style={{ display: 'block' }}>New repository</span><span style={{ display: 'block', fontSize: 10.5, color: 'var(--t-text-muted)', marginTop: 2 }}>Start a Git repository in a new folder</span></span></button>
-          <div style={{ borderTop: '1px solid var(--t-divider-subtle)', marginTop: 4, paddingTop: 9, paddingRight: 9, paddingBottom: 4, paddingLeft: 9, fontSize: 10, color: 'var(--t-text-muted)' }}>Project groups</div>
-          {current && current.id !== 'default' && !isVirtualRepoProjectId(current.id) ? <button type="button" role="menuitem" onClick={() => openDialog(current.id)} onMouseEnter={(event) => hover(event, true)} onMouseLeave={(event) => hover(event)} style={{ ...rowStyle, minHeight: 46 }}><ProjectGlyph kind="settings" /><span><span style={{ display: 'block' }}>Group connected repos</span><span style={{ display: 'block', fontSize: 10.5, color: 'var(--t-text-muted)', marginTop: 2 }}>Add repos to {current.name}</span></span></button> : null}
-          <button type="button" role="menuitem" onClick={() => openDialog('new')} onMouseEnter={(event) => hover(event, true)} onMouseLeave={(event) => hover(event)} style={{ ...rowStyle, minHeight: 46 }}><ProjectGlyph kind="add" /><span><span style={{ display: 'block' }}>New project</span><span style={{ display: 'block', fontSize: 10.5, color: 'var(--t-text-muted)', marginTop: 2 }}>A collection of repositories</span></span></button>
-        </div>
-      </FloatingSurface>
-    </ComposerPopover>
     {members.length > 1 && current ? <ProjectRepositories repos={members} selectedRepoPath={selectedRepoPath}
       onSelect={path => onRepoSelect(current, path)} /> : null}
-    {dialog ? <ProjectGroupDialog key={dialog} repos={repos} project={dialogProject} projectId={dialog === 'new' ? undefined : dialog} onClose={() => { setDialog(null); anchor.current?.focus(); }} onAddRepo={() => { addAnchor.current?.focus(); setAdding(true); }} onSaved={async (saved) => {
+    {dialog ? <ProjectGroupDialog key={dialog} repos={repos} project={dialogProject} projectId={dialog === 'new' ? undefined : dialog} onClose={() => { setDialog(null); anchor.current?.focus(); }} onAddRepo={() => { addAnchor.current?.focus(); onAddRepo(); }} onSaved={async (saved) => {
       const record = { id: saved.id, name: saved.name, repoPaths: saved.repos.flatMap((link) => repos.find((repo) => repo.id === link.repoId)?.localPath ?? []), createdAt: String(saved.createdAt) };
       if (!await onProjectSelect(record)) throw new Error('Project saved. Could not open it; try again.');
     }} /> : null}

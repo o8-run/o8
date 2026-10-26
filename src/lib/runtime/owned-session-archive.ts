@@ -2,6 +2,8 @@ import type { OwnedArchiveResponse } from '@/lib/runtimes/shared/owned-session/t
 import { getRuntime } from '@/lib/runtimes';
 import { persistRuntimeSessionCost } from '@/lib/orchestrator/cost-persistence';
 import { runtimeIdFromSessionKey } from '@/lib/runtime/transcript';
+import { readOwnedSessionRecord } from '@/lib/runtimes/shared/owned-session-index';
+import { matchesMutationWorkspace, MutationWorkspaceNotFoundError } from '@/lib/repos/mutation-workspace';
 
 async function persistOwnedSessionCostBeforeArchive(sessionKey: string) {
   const runtimeId = runtimeIdFromSessionKey(sessionKey);
@@ -19,12 +21,18 @@ async function persistOwnedSessionCostBeforeArchive(sessionKey: string) {
 /** Archive any registered or built-in owned runtime session by its durable key. */
 export async function archiveOwnedRuntimeSession(
   sessionKey: string,
+  workspace?: string,
 ): Promise<OwnedArchiveResponse | null> {
   await import('@/lib/runtimes');
+  if (workspace !== undefined) {
+    const session = await readOwnedSessionRecord(sessionKey);
+    if (!session || !matchesMutationWorkspace(workspace, session.repoPath)) throw new MutationWorkspaceNotFoundError();
+  }
   await persistOwnedSessionCostBeforeArchive(sessionKey);
   const { getOwnedSessionLifecycle } = await import('@/lib/runtimes/shared/owned-session-lifecycle');
   const registered = getOwnedSessionLifecycle(sessionKey);
-  if (registered) return registered.archiveSession(sessionKey);
+  if (registered) return registered.archiveSession(sessionKey, workspace);
+  if (workspace !== undefined) throw new MutationWorkspaceNotFoundError();
   if (sessionKey.startsWith('codex-owned:')) {
     return import('@/lib/codex/owned').then(({ archiveOwnedCodexSession }) => archiveOwnedCodexSession(sessionKey));
   }

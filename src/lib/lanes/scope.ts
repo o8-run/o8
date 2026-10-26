@@ -11,8 +11,9 @@ import { appendEvent, getLane, getLaneEvents, listLanes } from '@/lib/lane/regis
 import type { Lane, LaneRuntime, LaneStatus } from '@/lib/lane/types';
 import { FILE_SIZE_BLOCK_THRESHOLD_LINES } from '@/lib/orchestrator/preservation-envelope';
 import { resolvePacketScope } from '@/lib/orchestrator/packet-scope-policy';
+import { resolvePacketWorkMode } from '@/lib/orchestrator/packet-launch-context';
 import { currentMissionState } from '@/lib/orchestrator/operator-mission-service/shared';
-import type { OrchestratorPacket, OrchestratorPacketStatus } from '@/lib/orchestrator/types';
+import type { OrchestratorPacket, OrchestratorPacketStatus, WorkerWorkMode } from '@/lib/orchestrator/types';
 import { buildProjectTaskBrief, getProjectContext, type ProjectContextRepo } from '@/lib/projects/context';
 import { listProjectLocks, type ProjectLock } from '@/lib/projects/locks';
 import { getRuntimeProcessForWorktree, type RuntimeProcessOwner } from '@/lib/runtime/registry';
@@ -99,6 +100,8 @@ export interface PacketScope {
   laneId: string;
   runtime: string;
   actualRuntime: LaneRuntime | null;
+  /** Durable packet pin, not an assertion about the running process's OS permissions. */
+  workMode: WorkerWorkMode | null;
   branch: string;
   baseBranch: string;
   headSha: string | null;
@@ -358,9 +361,11 @@ export async function getPacketScope(input: GetPacketScopeInput): Promise<Packet
   const laneIdInput = normalizeId(input.laneId);
   const lane = laneIdInput ? getLane(laneIdInput) : packetIdInput ? findLaneByPacketId(packetIdInput) : null;
   if (!lane) return null;
+  if (packetIdInput && lane.packetId !== packetIdInput) return null;
 
   const mission = currentMissionState();
   const packetId = packetIdInput ?? lane.packetId;
+  const workMode = packetId ? resolvePacketWorkMode(packetId) : { found: false } as const;
   const packet = packetId ? mission.packets.find((candidate) => candidate.id === packetId) ?? null : null;
   const repoPath = lane.worktreePath || lane.repoPath;
   const allowedPaths = packetAllowedPaths(packet);
@@ -397,6 +402,7 @@ export async function getPacketScope(input: GetPacketScopeInput): Promise<Packet
     laneId: lane.id,
     runtime: declaredRuntime,
     actualRuntime,
+    workMode: workMode.found ? workMode.workMode ?? 'edit' : null,
     branch: lane.branch,
     baseBranch: lane.baseBranch,
     headSha,

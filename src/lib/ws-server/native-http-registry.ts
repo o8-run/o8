@@ -1,3 +1,5 @@
+import { viewerHttpRoutes } from '@/lib/viewers/http-routes';
+
 /** Shared shell transport registrations; importing this module loads no handlers or middleware. */
 interface Route {
   path: string;
@@ -14,7 +16,7 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/orchestrator/state', 'GET PATCH', () => import('@/app/api/orchestrator/state/route')),
     route('/api/runtime/inventory', 'GET', () => import('@/app/api/runtime/inventory/route')),
     route('/api/mobile/history', 'GET', () => import('@/app/api/mobile/history/route')),
-    route('/api/v2/chat-history', 'GET POST', () => import('@/app/api/v2/chat-history/route')),
+    route('/api/v2/chat-history', 'GET POST PATCH', () => import('@/app/api/v2/chat-history/route')),
     route('/api/orchestrator/composer-queue', 'GET POST PATCH DELETE', () => import('@/app/api/orchestrator/composer-queue/route')),
     route('/api/panel/ws-info', 'GET', () => import('@/app/api/panel/ws-info/route')),
   ],
@@ -33,8 +35,23 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/orchestrator/merge-preview', 'GET', () => import('@/app/api/orchestrator/merge-preview/route')),
   ],
   grid: [],
+  shortcuts: [], // Local shortcut reference has no HTTP transport.
   terminal: [route('/api/mobile/terminal-sessions', 'GET', () => import('@/app/api/mobile/terminal-sessions/route'))],
   palette: [], // Local commands and workspace navigation reuse the selected surface's transport.
+  sidebar: [
+    route('/api/mobile/orchestrator/threads', 'GET', () => import('@/app/api/mobile/orchestrator/threads/route')),
+    route('/api/orchestrator/state', 'GET', () => import('@/app/api/orchestrator/state/route')),
+    route('/api/runtime/inventory', 'GET', () => import('@/app/api/runtime/inventory/route')),
+    route('/api/v2/chat-history/list', 'GET', () => import('@/app/api/v2/chat-history/list/route')),
+    route('/api/v2/chat-history', 'GET POST PATCH', () => import('@/app/api/v2/chat-history/route')),
+    route('/api/runtime/archive', 'POST', () => import('@/app/api/runtime/archive/route')),
+  ],
+  workers: [
+    route('/api/lanes', 'GET', () => import('@/app/api/lanes/route')),
+    route('/api/lanes/[id]', 'GET', () => import('@/app/api/lanes/[id]/route')),
+    route('/api/orchestrator/state', 'GET', () => import('@/app/api/orchestrator/state/route')),
+    route('/api/orchestrator/lane-events', 'GET', () => import('@/app/api/orchestrator/lane-events/route')),
+  ],
   settings: [
     route('/api/panel/operator-defaults', 'GET POST', () => import('@/app/api/panel/operator-defaults/route')),
     route('/api/v2/keys', 'GET POST PATCH DELETE', () => import('@/app/api/v2/keys/route')),
@@ -89,7 +106,7 @@ const producers = [
   route('/api/orchestrator/headless-tick', 'POST', () => import('@/app/api/orchestrator/headless-tick/route')),
   route('/api/review/auto-review', 'POST', () => import('@/app/api/review/auto-review/route')),
 ];
-const routes = [...Object.values(nativeSurfaceRoutes).flat(), ...producers];
+const routes = [...Object.values(nativeSurfaceRoutes).flat(), ...producers, ...viewerHttpRoutes];
 function parameters(pattern: string, pathname: string): Record<string, string> | null {
   const expected = pattern.split('/');
   const actual = pathname.split('/');

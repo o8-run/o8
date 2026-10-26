@@ -41,6 +41,8 @@ import { codexComposerImagePaths, type ComposerImageAttachment } from '@/lib/mob
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 import { getCodexSpeedCatalogue } from '@/lib/codex/service-tier-catalogue';
 import { serviceTierForTurn, type OrchestratorServiceTier } from '@/lib/orchestrator/service-tier';
+import { recoverRuntimeSessionMessage, SESSION_CONTEXT_UNAVAILABLE } from './runtime-session-recovery';
+import { readRuntimeSessionHandoff, persistRuntimeSessionHandoff, noteRuntimeSessionHandoff, clearRuntimeSessionHandoff, type RuntimeSessionHandoff } from './runtime-session-handoff';
 import {
   ensureRegisteredSession,
   getRegisteredSession,
@@ -122,7 +124,7 @@ export function ensureCodexOrchestratorSession(repoPath: string, threadId?: stri
       sessionName,
       repoPath: normalizedRepoPath,
       historyThreadId: normalizedThreadId,
-      threadId: readOrchestratorBackendSessionId(normalizedThreadId, 'codex'),
+      threadId: pendingHandoff(normalizedThreadId)?.previousThreadId ?? readOrchestratorBackendSessionId(normalizedThreadId, 'codex'),
       status: 'ready',
       proc: null,
       createdAt: Date.now(),
@@ -134,18 +136,24 @@ interface CodexOrchestratorRehydrateOptions {
   onReboundEvent?: (record: OrchestratorTurnRecord, event: OrchestratorEvent) => void;
 }
 
+function pendingHandoff(threadId: string | null): RuntimeSessionHandoff | undefined {
+  const handoff = readRuntimeSessionHandoff(threadId);
+  return handoff && !handoff.inputAccepted ? handoff : undefined;
+}
+
 export function rehydrateCodexOrchestratorTurns(options: CodexOrchestratorRehydrateOptions = {}): number {
   let count = 0;
   for (const record of listActiveOrchestratorTurns()) {
     if (record.backend !== 'codex') continue;
     const sessionName = record.sessionName || codexOrchestratorSessionName(record.repoPath, record.threadId);
+    const recovery = pendingHandoff(normalizeThoughtsThreadId(record.threadId));
     let session = sessions.get(sessionName);
     if (!session) {
       session = {
         sessionName,
         repoPath: normalizeRepoPath(record.repoPath),
         historyThreadId: normalizeThoughtsThreadId(record.threadId),
-        threadId: readOrchestratorBackendSessionId(normalizeThoughtsThreadId(record.threadId), 'codex'),
+        threadId: recovery?.previousThreadId ?? readOrchestratorBackendSessionId(normalizeThoughtsThreadId(record.threadId), 'codex'),
         status: 'busy',
         proc: null,
         createdAt: record.startedAt,
@@ -154,21 +162,23 @@ export function rehydrateCodexOrchestratorTurns(options: CodexOrchestratorRehydr
     } else {
       session.status = 'busy';
     }
-    const lineState: CodexLineHandlerState = { cost: null, threadId: session.threadId };
+    const lineState: CodexLineHandlerState = { cost: null, threadId: recovery ? null : session.threadId };
     const isLocalModel = typeof record.model === 'string' && !!parseLocalModel(record.model);
     const emit = (event: OrchestratorEvent) => {
       options.onReboundEvent?.(record, event);
     };
     const handleLine = (line: string) => {
-      handleCodexJsonLine(line, lineState, emit, { isLocalModel, model: record.model ?? undefined });
-      if (lineState.threadId) session!.threadId = lineState.threadId;
+      handleCodexJsonLine(line, lineState, emit, { isLocalModel, model: record.model ?? undefined,
+        onInputAccepted: recovery ? () => noteRuntimeSessionHandoff(session!.historyThreadId, recovery, lineState.threadId, true) : undefined });
+      noteRuntimeSessionHandoff(session!.historyThreadId, recovery, lineState.threadId);
+      if (lineState.threadId && (!recovery || recovery.inputAccepted)) session!.threadId = lineState.threadId;
     };
     const finishRecord = () => {
-      if (lineState.threadId) session!.threadId = lineState.threadId;
+      if (lineState.threadId && (!recovery || recovery.inputAccepted)) session!.threadId = lineState.threadId;
       session!.status = 'ready';
       emit({
         type: 'done', terminalOutcome: lineState.terminalOutcome ?? 'unconfirmed',
-        sessionId: lineState.threadId,
+        sessionId: session!.threadId,
         cost: lineState.cost,
         ...(lineState.usage ? { usage: lineState.usage } : {}),
       });
@@ -243,11 +253,37 @@ export async function sendToCodexOrchestrator(
   const missingRollout = terminalError?.type === 'error'
     && isMissingCodexRolloutResumeError(terminalError.error);
   if (resumed && !streamed && missingRollout && !options.signal?.aborted) {
-    console.warn(`[codex-orchestrator-session] Saved Codex thread is gone; retrying ${session.sessionName} fresh`);
+    let recoveredMessage: string;
+    try {
+      recoveredMessage = recoverRuntimeSessionMessage({ ...session, message, rawMessage: options.rawMessage });
+    } catch {
+      session.status = 'ready';
+      onEvent({ type: 'error', error: SESSION_CONTEXT_UNAVAILABLE });
+      onEvent({ type: 'done', terminalOutcome: 'failed', sessionId: session.threadId, cost: null });
+      return;
+    }
+    if (options.signal?.aborted) {
+      for (const event of deferredTerminalEvents) onEvent(event);
+      return;
+    }
+    const missingThreadId = session.threadId;
+    const recovery: RuntimeSessionHandoff = { previousThreadId: missingThreadId!, replacementThreadId: null, inputAccepted: false };
+    persistRuntimeSessionHandoff(session.historyThreadId, recovery);
     session.threadId = null;
     session.status = 'ready';
-    writeOrchestratorBackendSessionId(session.historyThreadId, 'codex', null);
-    return sendToCodexOrchestratorAttempt(session, message, onEvent, options);
+    onEvent({ type: 'turn_retry', attempt: 2, reason: 'runtime-session-recovered', notice: 'The saved runtime session was unavailable. Continuing in a new session with the earlier conversation restored.' });
+    try {
+      await sendToCodexOrchestratorAttempt(session, recoveredMessage, onEvent, options, undefined, recovery);
+    } finally {
+      // Cancellation or startup failure must not turn the next send into a
+      // context-free first turn. Allocation alone does not accept the carried input.
+      if (!recovery.inputAccepted) {
+        session.threadId = missingThreadId;
+        session.status = 'ready';
+        writeOrchestratorBackendSessionId(session.historyThreadId, 'codex', missingThreadId);
+      }
+    }
+    return;
   }
 
   for (const event of deferredTerminalEvents) onEvent(event);
@@ -259,6 +295,7 @@ async function sendToCodexOrchestratorAttempt(
   onEvent: (event: OrchestratorEvent) => void,
   options: SendToCodexOrchestratorOptions = {},
   onActivity?: () => void,
+  recovery?: RuntimeSessionHandoff,
 ): Promise<void> {
   // Fable is Claude-only — its native-tool lockout + BYO-key path live in the
   // Claude REPL (orchestrator-session.ts). The registry routes 'fable' to
@@ -386,6 +423,7 @@ async function sendToCodexOrchestratorAttempt(
   // app-server bridge in the operator's own Codex home, so the Codex app lists
   // it. Solo keeps its sandboxed private home; local models keep exec's --oss path.
   const codexApp = options.orchestrationMode !== 'single' && !isLocalModel && resolveCodexAppThreadsSync();
+  const messageOnStdin = Boolean(recovery) && !codexApp;
 
   // First-turn launch vs resume.
   const isResume = Boolean(session.threadId);
@@ -405,7 +443,7 @@ async function sendToCodexOrchestratorAttempt(
         'tools.image_generation=false',
         ...imagePaths.flatMap((path) => ['--image', path]),
         '--',
-        message,
+        messageOnStdin ? '-' : message,
       ]
     : [
         'exec',
@@ -420,7 +458,7 @@ async function sendToCodexOrchestratorAttempt(
         session.repoPath,
         ...imagePaths.flatMap((path) => ['--image', path]),
         '--',
-        message,
+        messageOnStdin ? '-' : message,
       ];
 
   const overrides = { PATH: pathWithNodeRuntime(), FORCE_COLOR: '0', NO_COLOR: '1', O8_MANAGED_SESSION: '1', CODEX_HOME: codexHome };
@@ -437,6 +475,7 @@ async function sendToCodexOrchestratorAttempt(
         cwd: session.repoPath,
         threadId: session.threadId,
         developerInstructions: prompt.instructions,
+        turnDeveloperInstructions: prompt.turnInstructions,
         message: prompt.message,
         imagePaths,
         model,
@@ -465,6 +504,7 @@ async function sendToCodexOrchestratorAttempt(
       spawnArgs = prepared.args;
       spawnEnv = prepared.env;
       cleanupSingleLaunch = prepared.cleanup;
+      for (const diagnostic of prepared.diagnostics) onEvent({ type: 'thinking', text: `${diagnostic}\n` });
     } catch (err) {
       session.status = 'dead';
       onEvent({ type: 'error', error: `Single mode unavailable: ${err instanceof Error ? err.message : String(err)}` });
@@ -502,8 +542,8 @@ async function sendToCodexOrchestratorAttempt(
         env: options.orchestrationMode === 'single' ? spawnEnv : codexApp ? internalBrokerEnvironment(providerSpawnEnvironment(spawnEnv, { runtimeId: 'codex' })) : providerSpawnEnvironment(spawnEnv, { runtimeId: 'codex' }),
         detached: crashEnabled || singleProcessGroup,
         stdio: crashEnabled && stdoutFd !== null && stderrFd !== null
-          ? ['ignore', stdoutFd, stderrFd, ...(codexApp ? ['ipc' as const] : [])]
-          : ['ignore', 'pipe', 'pipe', ...(codexApp ? ['ipc' as const] : [])],
+          ? [messageOnStdin ? 'pipe' : 'ignore', stdoutFd, stderrFd, ...(codexApp ? ['ipc' as const] : [])]
+          : [messageOnStdin ? 'pipe' : 'ignore', 'pipe', 'pipe', ...(codexApp ? ['ipc' as const] : [])],
       });
     } catch (err) {
       if (stdoutFd !== null) closeSync(stdoutFd);
@@ -544,7 +584,9 @@ async function sendToCodexOrchestratorAttempt(
     let sawFirstEvent = false;
     const handleCodexLine = (line: string) => {
       if (codexApp) noteCodexAppTurnLine(line, { tabId: session.historyThreadId, repoPath: session.repoPath });
-      const parsed = handleCodexJsonLine(line, lineState, onEvent, { isLocalModel, model, onActivity });
+      const parsed = handleCodexJsonLine(line, lineState, onEvent, { isLocalModel, model, onActivity,
+        onInputAccepted: recovery ? () => noteRuntimeSessionHandoff(session.historyThreadId, recovery, lineState.threadId, true) : undefined });
+      noteRuntimeSessionHandoff(session.historyThreadId, recovery, lineState.threadId);
       if (parsed) {
         sawFirstEvent = true;
         if (firstEventTimeout) {
@@ -576,12 +618,13 @@ async function sendToCodexOrchestratorAttempt(
       else cleanupSingleLaunch();
       detachUserAbortListener();
       session.proc = null;
-      if (lineState.threadId) session.threadId = lineState.threadId;
+      const acceptedThreadId = recovery && !recovery.inputAccepted ? null : lineState.threadId;
+      if (acceptedThreadId) session.threadId = acceptedThreadId;
       session.status = status;
       if (error) onEvent({ type: 'error', error });
       onEvent({
         type: 'done', terminalOutcome: options.signal?.aborted ? 'unconfirmed' : lineState.terminalOutcome ?? 'unconfirmed',
-        sessionId: lineState.threadId,
+        sessionId: acceptedThreadId,
         cost: lineState.cost,
         ...(lineState.usage ? { usage: lineState.usage } : {}),
       });
@@ -682,6 +725,14 @@ async function sendToCodexOrchestratorAttempt(
     };
     if (userAbortSignal?.aborted) userAbortListener();
     else userAbortSignal?.addEventListener('abort', userAbortListener, { once: true });
+    if (messageOnStdin && !settled) {
+      proc.stdin!.on('error', (error: NodeJS.ErrnoException) => {
+        if (error.code === 'EPIPE' || error.code === 'ERR_STREAM_DESTROYED') return;
+        settle('dead', 'Unable to deliver the recovered conversation input.');
+        terminate(2_000);
+      });
+      proc.stdin!.end(message);
+    }
   });
 }
 
@@ -702,6 +753,9 @@ export function requestCodexOrchestratorSessionReset(repoPath: string, threadId?
     resetExisting: (session) => {
       session.threadId = null;
     },
-    resetPersistedThread: (normalizedThreadId) => writeOrchestratorBackendSessionId(normalizedThreadId, 'codex', null),
+    resetPersistedThread: (normalizedThreadId) => {
+      clearRuntimeSessionHandoff(normalizedThreadId);
+      writeOrchestratorBackendSessionId(normalizedThreadId, 'codex', null);
+    },
   });
 }

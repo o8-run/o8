@@ -28,6 +28,7 @@ impl Render for ThreadList {
             .font_weight(gpui::FontWeight::LIGHT)
             .track_focus(&self.focus)
             .capture_key_down(cx.listener(Self::key))
+            .child(self.project_header(window, cx))
             .child(
                 div()
                     .id("thread-search")
@@ -36,9 +37,9 @@ impl Render for ThreadList {
                     .p(px(12.))
                     .text_size(px(11.))
                     .child(if self.rename.is_some() {
-                        "Rename thread · Enter saves · Escape cancels"
+                        "Rename thread"
                     } else {
-                        "Search threads · Ctrl+F · F8 to navigate"
+                        "Search"
                     })
                     .on_click(cx.listener(|this, _, window, cx| this.search(window, cx))),
             )

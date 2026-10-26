@@ -26,9 +26,11 @@
   "bundle": {
     "linux": {
       "deb": {
+        "desktopTemplate": "linux/o8.desktop",
         "recommends": ["nodejs (>= 22)"]
       },
       "rpm": {
+        "desktopTemplate": "linux/o8.desktop",
         "recommends": ["nodejs >= 22.0.0"]
       }
     }

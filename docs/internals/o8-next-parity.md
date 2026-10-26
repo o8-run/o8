@@ -60,8 +60,15 @@ stay in a local temporary directory printed by the runner. The
 record injected render failures and a successful capture of all 28 cases.
 
 The [final main synchronization](../../native/o8-next/evidence/parity/final-main-sync/verification.md)
-adds Sidebar to the existing fixture matrix, now 16 surfaces. Its row, type and
+adds Sidebar to the fixture matrix recorded there as 16 surfaces. Its row, type and
 full-column parity remain unmeasured under #4642.
+
+API routing selects one response before fulfillment. Capture drains its owned
+handlers before unregistering them or closing the browser context; dispatch
+errors never trigger a second fulfillment. The
+[request ownership receipts](../../native/o8-next/evidence/parity/route-ownership-4786/verification.md)
+include the fail-first overlap regression and both Settings window sizes.
+The current inventory includes Shortcuts, bringing the matrix to 17 surfaces.
 
 ## Measurement limits and remaining acceptance
 
@@ -281,4 +288,15 @@ cover mapping drift, process cleanup and the expanded capture.
 | palette | files | Missing | [#4702](https://github.com/o8-run/o8/issues/4702) | 1024×720: unmeasured; 1440×900: unmeasured |
 | palette | diff | Partial | [#4702](https://github.com/o8-run/o8/issues/4702) | 1024×720: unmeasured; 1440×900: unmeasured |
 | palette | terminal | Partial | [#4702](https://github.com/o8-run/o8/issues/4702) | 1024×720: unmeasured; 1440×900: unmeasured |
+| shortcuts | sidebar | Partial | [#4670](https://github.com/o8-run/o8/issues/4670) | No capture recorded |
+| shortcuts | rail | Missing | [#4670](https://github.com/o8-run/o8/issues/4670) | No capture recorded |
+| shortcuts | top bar | Partial | [#4670](https://github.com/o8-run/o8/issues/4670) | No capture recorded |
+| shortcuts | worker pane | Partial | [#4670](https://github.com/o8-run/o8/issues/4670) | No capture recorded |
+| shortcuts | transcript | Partial | [#4670](https://github.com/o8-run/o8/issues/4670) | No capture recorded |
+| shortcuts | composer | Partial | [#4670](https://github.com/o8-run/o8/issues/4670) | No capture recorded |
+| shortcuts | palette | Partial | [#4670](https://github.com/o8-run/o8/issues/4670) | No capture recorded |
+| shortcuts | settings | Partial | [#4670](https://github.com/o8-run/o8/issues/4670) | No capture recorded |
+| shortcuts | files | Missing | [#4670](https://github.com/o8-run/o8/issues/4670) | No capture recorded |
+| shortcuts | diff | Partial | [#4670](https://github.com/o8-run/o8/issues/4670) | No capture recorded |
+| shortcuts | terminal | Partial | [#4670](https://github.com/o8-run/o8/issues/4670) | No capture recorded |
 <!-- parity-table:end -->
