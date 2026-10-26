@@ -590,8 +590,8 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
   }
 
   if (body.productTelemetryEnabled !== undefined) {
-    if (typeof body.productTelemetryEnabled !== 'boolean') {
-      throw new Error('productTelemetryEnabled must be boolean.');
+    if (body.productTelemetryEnabled !== null && typeof body.productTelemetryEnabled !== 'boolean') {
+      throw new Error('productTelemetryEnabled must be boolean or null.');
     }
     update.productTelemetryEnabled = body.productTelemetryEnabled;
   }
@@ -602,7 +602,7 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
     }
     if (
       body.telemetryConsentAnswered
-      && (typeof body.productTelemetryEnabled !== 'boolean' || typeof body.crashReportsEnabled !== 'boolean')
+      && ((body.productTelemetryEnabled !== null && typeof body.productTelemetryEnabled !== 'boolean') || typeof body.crashReportsEnabled !== 'boolean')
     ) {
       throw new Error('Answering telemetry consent requires both productTelemetryEnabled and crashReportsEnabled.');
     }

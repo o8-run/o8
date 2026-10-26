@@ -1024,7 +1024,9 @@ describe('worktree-side merge with real git repos', () => {
       await mergeOnce('off');
       expect(fetchSpy.mock.calls.filter(([input]) => String(input).endsWith('/v1/telemetry'))).toHaveLength(0);
 
-      await updateOperatorDefaults({ productTelemetryEnabled: true });
+      await updateOperatorDefaults({
+        productTelemetryEnabled: true, crashReportsEnabled: false, telemetryConsentAnswered: true,
+      });
       await mergeOnce('on');
       const telemetry = fetchSpy.mock.calls.filter(([input]) => String(input).endsWith('/v1/telemetry'));
       expect(telemetry).toHaveLength(1);

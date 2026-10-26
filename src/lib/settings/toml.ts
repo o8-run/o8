@@ -337,7 +337,7 @@ export const OPERATOR_DEFAULTS_TOML_MAPPING = {
   targetingAction: targetingTierField('targeting', 'action'),
   updateAutoApply: enumField('operator', 'update_auto_apply', '"off" or "idle"', (value): value is OperatorDefaults['updateAutoApply'] => value === 'off' || value === 'idle'),
   collideAggregator: enumField('orchestrator', 'collide_aggregator', 'one of "auto", "claude", or "codex"', isCollideAggregator),
-  productTelemetryEnabled: booleanField('telemetry', 'product_enabled'),
+  productTelemetryEnabled: nullableField('telemetry', 'product_enabled', 'a boolean', (value): value is boolean => typeof value === 'boolean'),
   telemetryConsentAnswered: booleanField('telemetry', 'consent_answered'),
   telemetryOptIn: booleanField('telemetry', 'crash_log_opt_in'),
   telemetryIngestUrl: credentialSafeUrlField('telemetry', 'ingest_url'),
