@@ -15,7 +15,7 @@
  */
 
 import { spawn } from '@/lib/providers/child-process';
-import { childEnvironment } from '@/lib/providers/spawn-environment';
+import { mcpLaunchEnvironment, assertMcpTransport, redactMcpOutput, redactMcpResponse } from '@/lib/providers/mcp-launch-policy';
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 import { isNpxFamily } from './npx-detection';
 
@@ -80,7 +80,7 @@ interface ToolsListResult {
 }
 
 function shortenStderr(text: string): string {
-  const trimmed = text.trim();
+  const trimmed = redactMcpOutput(text).trim();
   if (trimmed.length <= STDERR_CAP) return trimmed;
   return `${trimmed.slice(0, STDERR_CAP)}… (${trimmed.length - STDERR_CAP} more bytes)`;
 }
@@ -107,8 +107,8 @@ async function testStdio(input: StdioTestInput, timeoutMs: number, npxFamily: bo
 
   return new Promise<McpTestResult>((resolve) => {
     let child: ReturnType<typeof spawn> | null = null;
-    const childEnv = childEnvironment({ env: input.env ?? {}, inject: false });
     try {
+      const childEnv = mcpLaunchEnvironment(input.command, input.env ?? {});
       // Most stdio MCP servers are configured as `npx …`, which on Windows is
       // `npx.cmd` — spawning it directly throws EINVAL and the user sees
       // "spawn failed" for a server that is installed and fine.
@@ -119,7 +119,7 @@ async function testStdio(input: StdioTestInput, timeoutMs: number, npxFamily: bo
         env: childEnv,
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = redactMcpOutput(error instanceof Error ? error.message : String(error));
       resolve({
         ok: false,
         transport: 'stdio',
@@ -169,7 +169,7 @@ async function testStdio(input: StdioTestInput, timeoutMs: number, npxFamily: bo
     });
 
     child.stderr?.on('data', (chunk: Buffer) => {
-      stderrBuf += chunk.toString('utf-8');
+      stderrBuf += redactMcpOutput(chunk.toString('utf-8'));
       if (stderrBuf.length > STDERR_CAP * 2) {
         stderrBuf = stderrBuf.slice(-STDERR_CAP * 2);
       }
@@ -202,7 +202,7 @@ async function testStdio(input: StdioTestInput, timeoutMs: number, npxFamily: bo
         newlineIdx = stdoutBuf.indexOf('\n');
         if (!line) continue;
         try {
-          const msg = JSON.parse(line) as JsonRpcResponse;
+          const msg = redactMcpResponse(JSON.parse(line)) as JsonRpcResponse;
           if (typeof msg.id === 'number' && pending.has(msg.id)) {
             const handler = pending.get(msg.id)!;
             pending.delete(msg.id);
@@ -230,7 +230,7 @@ async function testStdio(input: StdioTestInput, timeoutMs: number, npxFamily: bo
         child.stdin.write(JSON.stringify(req) + '\n');
         return true;
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
+        const message = redactMcpOutput(error instanceof Error ? error.message : String(error));
         finish({
           ok: false,
           transport: 'stdio',
@@ -316,6 +316,7 @@ async function testHttp(input: HttpTestInput, timeoutMs: number): Promise<McpTes
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
+    assertMcpTransport(input);
     const headers: Record<string, string> = {
       'content-type': 'application/json',
       accept: 'application/json, text/event-stream',
@@ -346,10 +347,10 @@ async function testHttp(input: HttpTestInput, timeoutMs: number): Promise<McpTes
       };
     }
 
-    const text = await res.text();
+    const text = redactMcpOutput(await res.text());
     let payload: JsonRpcResponse | null = null;
     try {
-      payload = JSON.parse(text) as JsonRpcResponse;
+      payload = redactMcpResponse(JSON.parse(text)) as JsonRpcResponse;
     } catch {
       // Some MCP HTTP servers reply as SSE. Grab the last `data:` chunk.
       const lines = text.split('\n').map((line) => line.trim()).filter(Boolean);
@@ -358,7 +359,7 @@ async function testHttp(input: HttpTestInput, timeoutMs: number): Promise<McpTes
         const data = lines[i].slice(5).trim();
         if (!data) continue;
         try {
-          payload = JSON.parse(data) as JsonRpcResponse;
+          payload = redactMcpResponse(JSON.parse(data)) as JsonRpcResponse;
           break;
         } catch {
           // Keep scanning.
@@ -395,7 +396,7 @@ async function testHttp(input: HttpTestInput, timeoutMs: number): Promise<McpTes
   } catch (error) {
     clearTimeout(timeout);
     const aborted = controller.signal.aborted;
-    const message = error instanceof Error ? error.message : String(error);
+    const message = redactMcpOutput(error instanceof Error ? error.message : String(error));
     return {
       ok: false,
       transport: 'http',

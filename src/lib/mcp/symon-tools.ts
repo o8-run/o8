@@ -1,7 +1,7 @@
 import 'server-only';
 
 import { spawn, type ChildProcessWithoutNullStreams } from '@/lib/providers/child-process';
-import { childEnvironment } from '@/lib/providers/spawn-environment';
+import { mcpLaunchEnvironment, assertMcpTransport, redactMcpResponse } from '@/lib/providers/mcp-launch-policy';
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 import {
   listEnabledExternalMcpServers,
@@ -129,7 +129,7 @@ class StdioSession implements McpSession {
     this.child = spawn(launch.command, launch.args, {
       windowsHide: true,
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: childEnvironment({ env: server.env ?? {}, inject: false }),
+      env: mcpLaunchEnvironment(server.command, server.env ?? {}),
     });
     this.child.stdout.on('data', (chunk: Buffer) => this.onStdout(chunk));
     this.child.stderr.on('data', () => {
@@ -243,7 +243,7 @@ class StdioSession implements McpSession {
       newline = this.stdout.indexOf('\n');
       if (!line) continue;
       try {
-        const response = JSON.parse(line) as JsonRpcResponse;
+        const response = redactMcpResponse(JSON.parse(line)) as JsonRpcResponse;
         if (typeof response.id !== 'number') continue;
         const pending = this.pending.get(response.id);
         if (!pending) continue;
@@ -326,9 +326,10 @@ class HttpSession implements McpSession {
   }
 
   private async post(body: Record<string, unknown>, expectResponse: boolean): Promise<JsonRpcResponse> {
+    const url = this.server.url || this.server.command;
+    assertMcpTransport({ url, token: this.server.oauthToken });
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-    const url = this.server.url || this.server.command;
     const headers: Record<string, string> = {
       accept: 'application/json, text/event-stream',
       'content-type': 'application/json',
@@ -359,12 +360,12 @@ class HttpSession implements McpSession {
 
 function parseHttpResponse(text: string): JsonRpcResponse {
   try {
-    return JSON.parse(text) as JsonRpcResponse;
+    return redactMcpResponse(JSON.parse(text)) as JsonRpcResponse;
   } catch {
     const dataLines = text.split(/\r?\n/).filter((line) => line.startsWith('data:'));
     for (let index = dataLines.length - 1; index >= 0; index -= 1) {
       try {
-        return JSON.parse(dataLines[index].slice(5).trim()) as JsonRpcResponse;
+        return redactMcpResponse(JSON.parse(dataLines[index].slice(5).trim())) as JsonRpcResponse;
       } catch {
         // Keep scanning earlier SSE events.
       }

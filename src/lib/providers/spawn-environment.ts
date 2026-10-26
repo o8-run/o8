@@ -1,3 +1,4 @@
+import { decodedMcpText } from './decoded-mcp-text';
 import { workerParentEnvironment } from './worker-environment';
 import { deferredMcpArgumentsForCheck } from './deferred-mcp-arguments';
 import { createHash } from 'node:crypto';
@@ -144,7 +145,7 @@ export function assertChildArguments(args: readonly string[], input: Record<stri
   const prepared = (input ? contexts.get(input)?.deniedValues ?? [] : []).filter(value => value && !allowed.has(value));
   const checked = allowDeferredMcp && input && contexts.get(input)?.runtimeId === 'codex'
     ? deferredMcpArgumentsForCheck(input, args) : args;
-  if (checked.some(arg => prepared.some(value => arg.includes(value)) || matchesProviderCredential(arg, denied))) throw new Error('Prepared child arguments contain revoked or unauthorized provider credentials.');
+  if (checked.some(arg => prepared.some(value => arg.includes(value)) || matchesProviderCredential(decodedMcpText(arg), denied))) throw new Error('Prepared child arguments contain revoked or unauthorized provider credentials.');
 }
 
 /** Trusted internal brokers reread encrypted policy; runtime children never inherit this key. */
