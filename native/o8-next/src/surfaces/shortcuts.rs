@@ -141,15 +141,27 @@ fn keys(s: &mut Shell, event: &KeyDownEvent, window: &mut Window, cx: &mut Conte
         && (s.palette || s.shortcuts || registrations().iter().any(|r| (r.overlay_open)(s)))
     {
         // An open surface owns these keys before any underlying tab action.
-        // Preserve focused editor input; otherwise let the surface close itself.
-        if !s.palette && !editing(s, window, cx) {
+        if s.palette || s.shortcuts || editing(s, window, cx) {
+            return true;
+        }
+        if close_tab {
             for registration in registrations() {
                 if (registration.overlay_open)(s) && (registration.key_down)(s, event, window, cx) {
                     break;
                 }
             }
+            return true;
         }
-        return true;
+        // Full surfaces such as Projects explicitly dismiss on navigation.
+        // A modal that stays open must keep navigation off its hidden tabs.
+        for registration in registrations() {
+            if (registration.overlay_open)(s) {
+                (registration.after_tab)(s);
+            }
+        }
+        if registrations().iter().any(|r| (r.overlay_open)(s)) {
+            return true;
+        }
     }
     let terminal = s.surfaces.shortcuts.inputs.terminal(window, cx);
     if let Some(terminal) = terminal

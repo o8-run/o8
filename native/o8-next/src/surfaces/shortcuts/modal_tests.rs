@@ -118,7 +118,22 @@ fn shortcuts_modal_surfaces_keep_all_tab_chords_off_underlying_tabs(cx: &mut Tes
                 );
                 visual.simulate_keystrokes(binding);
                 shortcuts_draw(&mut visual);
-                if tabs(&shell, &visual) != before || saved_tabs(&file, &workspace) != before {
+                let mut expected = before.clone();
+                let projects_navigation = surface == "projects" && !binding.ends_with('w');
+                if projects_navigation {
+                    expected.1 = usize::from(
+                        binding.ends_with("tab")
+                            || binding.ends_with("left")
+                            || binding.ends_with("right")
+                            || binding.ends_with("-2"),
+                    );
+                }
+                let dismissed = !projects_navigation
+                    || shell.read_with(&visual, |s, _| !s.surfaces.projects.open);
+                if tabs(&shell, &visual) != expected
+                    || saved_tabs(&file, &workspace) != expected
+                    || !dismissed
+                {
                     failures.push(format!("{surface}: {binding}"));
                 }
                 visual.update(|window, _| window.remove_window());
