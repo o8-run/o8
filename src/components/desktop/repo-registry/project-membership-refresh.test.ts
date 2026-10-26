@@ -33,7 +33,7 @@ function SidebarAdd() {
   return createElement('div', null,
     createElement('button', { onClick: () => setOpen(true) }, 'Add repository'),
     createElement(AddRepoDialog, {
-      open, onClose: () => setOpen(false), projects: projects.ledger?.projects ?? [],
+      open, initialMode: 'scratch', onClose: () => setOpen(false), projects: projects.ledger?.projects ?? [],
       activeProjectId: 'workspace', onProjectsChanged: projects.refresh,
     }),
   );
@@ -77,7 +77,7 @@ async function addRepository() {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, repo.localPath);
     input.dispatchEvent(new Event('input', { bubbles: true }));
   });
-  await act(async () => button('Add to Workspace').click());
+  await act(async () => button('Open').click());
 }
 
 async function expectRepositoryAvailable() {
@@ -118,6 +118,7 @@ beforeEach(async () => {
     if (url.pathname === '/api/panel/repos' && body.action === 'add') { registrations += 1; return Response.json({ repo }); }
     if (url.pathname === '/api/panel/projects/workspace' && init?.method === 'PATCH') {
       if (linkFailures-- > 0) return Response.json({ error: 'Temporary link failure' }, { status: 503 });
+      members = [repo.localPath];
       return Response.json({ ok: true });
     }
     if (url.pathname === '/api/projects') return Response.json({ projects: [{ id: 'workspace', name: 'Workspace' }] });
@@ -142,9 +143,9 @@ it('refreshes the retained Customize picker after retrying a failed repository l
   linkFailures = 1;
   await mount();
   await addRepository();
-  expect(document.body.textContent).toContain('Retry project link');
+  expect(document.body.textContent).toContain('Try again to finish opening it');
   expect(host.textContent).toContain('Workspace · 0 repositories');
-  await act(async () => button('Retry project link').click());
+  await act(async () => button('Open').click());
   await expectRepositoryAvailable();
   expect(registrations).toBe(1);
 });

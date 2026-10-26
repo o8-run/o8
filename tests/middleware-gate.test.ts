@@ -44,10 +44,16 @@ function gatedRequest(
   url: string,
   options: { method?: string; headers?: Record<string, string> } = {},
 ): NextRequest {
-  return new NextRequest(url, {
-    method: options.method ?? 'GET',
-    headers: options.headers,
-  });
+  // Remote-principal fixtures use the allowed local authority and retain
+  // their remote peer identity, as requests forwarded by the relay do.
+  const target = new URL(url);
+  const headers = { ...options.headers };
+  if (target.hostname === '192.168.1.50') {
+    headers['x-o8-client-addr'] ??= target.hostname;
+    target.hostname = 'localhost';
+    headers.host = target.host;
+  }
+  return new NextRequest(target, { method: options.method ?? 'GET', headers });
 }
 
 describe('panelGateMiddleware — Broadcast spectator capability', () => {
@@ -247,7 +253,7 @@ describe('panelGateMiddleware — loopback trust', () => {
         },
       }),
     );
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(403);
   });
 
   it('gates /api/orchestrator/steer-packet (extracted layer-3 steer mutation) against LAN', () => {
@@ -667,7 +673,7 @@ describe('panelGateMiddleware — allowlists and bypasses', () => {
         headers: { host: '192.168.1.50:3001', origin: 'https://example.com' },
       }),
     );
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(403);
   });
 
   it('still gates setup WRITES from LAN (config-write CSRF protection)', () => {

@@ -223,8 +223,10 @@ describe.skipIf(process.platform === 'win32')('phone Ask effort through routes, 
       planner: { engine: session.engine, model: session.model, effort: session.effort },
     });
     // The admitted device's socket server invokes this internal loopback hop.
+    turnRequest.headers.set('host', turnRequest.nextUrl.host);
     turnRequest.headers.set('x-o8-client-addr', '127.0.0.1');
     const answer = await runTurn(turnRequest);
+    expect(answer.status, await answer.clone().text()).toBe(200);
     expect(h.turn).toHaveBeenCalledWith(expect.objectContaining({ planner: expect.objectContaining({ effort: 'low', allowDefaultFallback: false }) }), expect.any(Number));
     expect((await answer.json()).result.effort).toBe('low');
   });
