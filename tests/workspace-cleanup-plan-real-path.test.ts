@@ -246,7 +246,15 @@ it.each(quarantineMatrix)('quarantine matrix $category $kind / $timing / crash $
     expect(readFileSync(outside, 'utf8')).toBe('outside survives');
     expect(readFileSync(path.join(unselected.path, 'README.md'), 'utf8')).toBe('preserved source\n');
     const fresh = await preview(f.repoPath);
-    expect(fresh.entries.find((item: {worktreeId: string}) => item.worktreeId === done.id)?.reason ?? '').not.toMatch(/existing exact lifecycle|retiring/i);
+    const renewed = fresh.entries.find((item: { worktreeId: string }) => item.worktreeId === done.id);
+    expect(renewed?.reason ?? '').not.toMatch(/existing exact lifecycle|retiring/i);
+    if (renewed?.reason?.startsWith('Retention hold:')) {
+      expect(renewed.eligible).toBe(false);
+      // A failed preservation attempt owns its persistent hold. Leave that
+      // generation untouched and create another fixture for the next case.
+      matrixFixture = undefined;
+      return;
+    }
     // Reuse this exact restored generation only after every safety assertion
     // passed. Each case starts a new preview; no metadata/journal is reset.
     for (const relative of new Set(['README.md', 'reviewed.log', changedPath])) {
@@ -344,7 +352,7 @@ it.each([...['workspace', 'generated-output'].flatMap(kind =>
   if (imageAfterCrash) {
     await withWorktreeMetaTransaction(f.repoPath, async transaction => {
       const current = (await transaction.readAll())[done.id]!;
-      await transaction.save(done.id, { ...current, dependencyMaterialization: {
+      await transaction.save(done.id, { ...current, dependencyRecipeKey: 'f'.repeat(64), dependencyMaterialization: {
         mode: 'image', status: 'mounted', installCommand: 'npm ci', recipeKey: 'f'.repeat(64),
         leaseId: 'unselected-new-image-lease', generation: 'unselected-new-generation',
         workspaceDevice: current.materializationIdentity!.device, workspaceInode: current.materializationIdentity!.inode,
