@@ -1,4 +1,5 @@
 import { useEffect, useRef, type RefObject } from 'react';
+import { isPaneOwnedThread } from '@/lib/orchestrator/pane-thread-registry';
 import { useWsConnectionState } from '@/components/desktop/hooks/DesktopWebSocketContext';
 import type { TerminalTabHandle } from '@/components/desktop/WorkspaceTerminal';
 import type { SavedChatRepoContext } from '@/lib/llm/chat-history';
@@ -39,6 +40,7 @@ export function useDashboardThreadReveals(
       // A send broadcasts a reveal too. Its owning pane already shows the
       // thread; routing it through primary-pane history navigation would
       // replace another conversation and discard that pane's draft.
+      if (isPaneOwnedThread(thread.id)) return;
       for (const handle of workspaceTerminalHandlesRef.current.values()) {
         if (handle.getTabsSnapshot().tabs.some(tab => tab.orchestratorThreadId === thread.id)) return;
       }
@@ -96,5 +98,4 @@ export function useDashboardThreadReveals(
       window.removeEventListener('o8:orchestrator-threads', handleThreadEvent);
     };
   }, [openHistoryChat, workspaceTerminalHandlesRef]);
-
 }

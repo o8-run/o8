@@ -3,6 +3,7 @@
 import { reorderTabs } from '@/lib/workspace-terminal/reorder-tabs';
 import { retargetWorkspaceTab } from './retarget-workspace-tab';
 import { useTextChatTabs } from './use-text-chat-tabs';
+import { useWorkspaceThreadBindings } from './useWorkspaceThreadBindings';
 import { useWorkspaceInspectorTabs } from './useWorkspaceInspectorTabs';
 
 import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type ForwardedRef, type MouseEvent as ReactMouseEvent } from 'react';
@@ -34,7 +35,6 @@ import {
   deriveNewOrchestratorRepo,
   generateLlmChatTabId,
   isReusableBlankOrchestratorTab,
-  WORKSPACE_THREAD_ID_EVENT,
 } from '@/components/desktop/workspace-terminal/utils';
 import type { XtermPanelHandle } from '@/components/desktop/workspace-terminal/XtermPanel';
 import { buildTerminalTabHandle, snapshotTerminalExit } from '@/components/desktop/workspace-terminal/terminal-imperative-handle';
@@ -379,6 +379,8 @@ export function useWorkspaceTerminalController(
   }, [effectiveActiveTabId, preferredRepo?.branch, preferredRepo?.localPath, stableRepoScope, stateScope, visibleTabs]);
 
   const persistTabsNow = useCallback((currentTabs: TerminalTab[], currentActiveId: string) => {
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = null;
     logTerminalBench('persist-tabs', {
       nullTerminalTabIds: currentTabs
         .filter((tab) => tab.kind === 'terminal' && tab.tmuxSession === null)
@@ -435,43 +437,9 @@ export function useWorkspaceTerminalController(
     // flushes the accumulated state exactly once.
   }, [effectiveActiveTabId, landTerminalTabs, persistTabs, restoreCompletedKey, tabs]);
 
-  // Capture each orchestrator tab's chat-history thread id so the exact
-  // conversation survives reload. OrchestratorTab broadcasts
-  // 'o8:workspace-thread-id' whenever its loaded thread settles; stamping it
-  // onto the tab (orchestratorThreadId) lets serializeTabsForPersistence
-  // persist it and the restore path reopen THIS thread per-tab — instead of
-  // every orchestrator tab collapsing onto the global last-active thread.
-  useEffect(() => {
-    const handler = (event: Event) => {
-      const detail = (event as CustomEvent<{ tabId?: string; threadId?: string | null }>).detail;
-      const tabId = detail?.tabId;
-      const threadId = detail?.threadId;
-      if (!tabId || !threadId) return;
-      // One orchestrator tab per thread. If another orchestrator tab already
-      // owns this thread, `tabId` is a duplicate that landed on it — e.g. a
-      // fresh/default tab that global-restored a conversation an existing tab
-      // already shows. Close the duplicate (keeps the original + its transcript)
-      // rather than leaving two copies of the same thread open.
-      const owner = tabsRef.current.find(
-        (t) => t.id !== tabId && t.kind === 'orchestrator' && t.orchestratorThreadId === threadId,
-      );
-      if (owner) {
-        handleCloseTabRef.current(tabId);
-        return;
-      }
-      setTabs((previous) => {
-        const idx = previous.findIndex((t) => t.id === tabId && t.kind === 'orchestrator');
-        if (idx < 0) return previous;
-        if (previous[idx]!.orchestratorThreadId === threadId) return previous;
-        const next = [...previous];
-        next[idx] = { ...next[idx]!, orchestratorThreadId: threadId, outsideWorkerHost: undefined };
-        tabsRef.current = next;
-        return next;
-      });
-    };
-    window.addEventListener(WORKSPACE_THREAD_ID_EVENT, handler as EventListener);
-    return () => window.removeEventListener(WORKSPACE_THREAD_ID_EVENT, handler as EventListener);
-  }, []);
+  const handleCloseTabRef = useRef<(tabId: string) => void>(() => undefined);
+  useWorkspaceThreadBindings({ tabsRef, activeTabIdRef: effectiveActiveTabIdRef,
+    closeTabRef: handleCloseTabRef, setTabs, persistTabsNow });
 
   // Both Project pickers re-bind their owning tab, including a background tab
   // in another workspace tile. The tab's repo is the split-worker claim and
@@ -1100,8 +1068,6 @@ export function useWorkspaceTerminalController(
     openWorkspaceInspectorTab(canvasTab, { repo: resolvedRepo });
   }, [openWorkspaceInspectorTab]);
 
-  const handleCloseTabRef = useRef<(tabId: string) => void>(() => undefined);
-
   const { openWorkspaceTerminalTab, openRemoteTerminalTab } = useTerminalTabLaunchers({
     tabsRef, pendingCliCommands, setTabs, setActiveTabIdFromUser, requestTerminalForTab,
   });
@@ -1289,7 +1255,6 @@ export function useWorkspaceTerminalController(
   });
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/immutability -- mutable handler ref backs imperative/event close bridges.
     handleCloseTabRef.current = handleCloseTab;
   }, [handleCloseTab]);
 

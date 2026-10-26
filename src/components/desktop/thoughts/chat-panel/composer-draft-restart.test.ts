@@ -91,6 +91,19 @@ afterEach(async () => {
 });
 
 describe('ordinary workspace drafts through the mounted composer', () => {
+  it('migrates a saved thread draft across pane and repository aliases without reviving cleared text', async () => {
+    const legacyKey = 'o8:composer-draft:v1:' + JSON.stringify(['/repo/previous', ['thread', 'thoughts-moved']]);
+    localStorage.setItem(legacyKey, JSON.stringify({ input: draft, images: [], files: [] }));
+    await mount('/repo/current', 'reopened-pane', true, 'thoughts-moved');
+    expect.soft(input().value).toBe(draft);
+    await act(async () => panelRef.current!.loadThread('thoughts-moved'));
+    expect.soft(input().value).toBe(draft);
+    await type('');
+    await act(async () => root.unmount()); resetComposerDraftMemoryForTests(); root = createRoot(host);
+    await mount('/repo/previous', 'restored-pane', true, 'thoughts-moved');
+    expect(input().value).toBe('');
+  });
+
   it('restores the image bytes alongside the unsent text', async () => {
     await mount(); await type(draft);
     await act(async () => dropImage()); await settleFiles();
