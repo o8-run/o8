@@ -4454,6 +4454,14 @@
       ]
     },
     {
+      "path": "tests/o8d-sidebar-mutations-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "native-build",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8d-supervisor-real-path.test.ts",
       "reasons": [
         "child-process",
