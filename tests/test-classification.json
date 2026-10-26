@@ -1014,6 +1014,12 @@
       ]
     },
     {
+      "path": "src/lib/runtimes/shared/owned-session/sandbox-linux.test.ts",
+      "reasons": [
+        "native-build"
+      ]
+    },
+    {
       "path": "src/lib/runtimes/shared/owned-session/sandbox.test.ts",
       "reasons": [
         "child-process",
@@ -3482,6 +3488,14 @@
     {
       "path": "tests/lifecycle-mcp-errors-real-path.test.ts",
       "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/linux-worker-sandbox-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
         "real-path"
       ]
     },
