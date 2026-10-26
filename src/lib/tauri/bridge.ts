@@ -57,6 +57,15 @@ export function canUseTauriEvents(): boolean {
   return isTauri() && currentWindowLabel() === 'main';
 }
 
+/**
+ * Whether the webview is running on a macOS host. The native browser-view
+ * Tauri commands are `#[cfg(target_os = "macos")]`, so invoking them elsewhere
+ * only logs "Command browser_view_* not found" (seen on Debian 13, v0.1.810).
+ */
+export function isMacHost(): boolean {
+  return typeof navigator !== 'undefined' && /mac/i.test(navigator.userAgent);
+}
+
 // #932 phase 2: tauri-plugin-mcp's old setupPluginListeners() init dance
 // was deleted. The eval_and_await protocol invokes JS from Rust per call
 // (via webview.eval()) instead of holding persistent JS-side listeners,
@@ -87,6 +96,8 @@ export type DesktopClosePreference = 'ask' | 'background' | 'quit';
  */
 async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T | null> {
   if (!isTauri()) return null;
+  // browser_view_* commands only exist in macOS builds — skip them elsewhere.
+  if (cmd.startsWith('browser_view_') && !isMacHost()) return null;
   try {
     const { invoke: tauriInvoke } = await import('@tauri-apps/api/core');
     return await tauriInvoke<T>(cmd, args);

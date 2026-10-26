@@ -1,4 +1,5 @@
 import type { NextConfig } from 'next';
+import { PREVIEW_DOCUMENT_CSP } from './src/lib/panel/preview-document-policy';
 
 const nextConfig: NextConfig = {
   output: 'standalone',
@@ -78,6 +79,12 @@ const nextConfig: NextConfig = {
             value: "frame-src http://localhost:* http://127.0.0.1:* 'self'; frame-ancestors 'self'",
           },
         ],
+      },
+      {
+        // Next applies configured headers after route response headers. Keep this
+        // exact preview rule last so the application policy cannot replace it.
+        source: '/api/:surface(browser|panel)/proxy',
+        headers: [{ key: 'Content-Security-Policy', value: PREVIEW_DOCUMENT_CSP }],
       },
     ];
   },

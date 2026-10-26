@@ -5,6 +5,8 @@ use crate::projects_model::Ledger;
 mod thread_list;
 #[path = "sidebar/thread_list_client.rs"]
 mod thread_list_client;
+#[path = "sidebar/thread_mutations_client.rs"]
+mod thread_mutations_client;
 use thread_list::{Event as ThreadEvent, ThreadList};
 pub(super) type Slice = EmptyState;
 #[derive(Default)]
@@ -38,6 +40,7 @@ pub(super) const REGISTRATION: Registration = Registration {
                 Content::Session(surface) => surface.read(cx).shell_selection(window, cx).0,
                 _ => None,
             });
+        let workspace = shell.state.selected.clone();
         shell
             .surfaces
             .sidebar
@@ -45,6 +48,7 @@ pub(super) const REGISTRATION: Registration = Registration {
             .as_ref()
             .unwrap()
             .update(cx, |sidebar, cx| {
+                sidebar.set_workspace(workspace);
                 if let Some(id) = selected {
                     sidebar.sync_selection(id, cx);
                 }
@@ -56,11 +60,23 @@ pub(super) const REGISTRATION: Registration = Registration {
             .flex()
             .flex_1()
             .min_h_0()
-            .child(shell.surfaces.sidebar.view.as_ref().unwrap().clone())
+            .child(
+                gpui::AnyView::from(shell.surfaces.sidebar.view.as_ref().unwrap().clone()).cached(
+                    gpui::StyleRefinement::default()
+                        .w(px(280.))
+                        .h_full()
+                        .flex_shrink_0(),
+                ),
+            )
             .child(div().flex().flex_col().flex_1().min_w_0().child(content))
             .into_any_element()
     },
     key_down: |shell, event, window, cx| {
+        if shell.surfaces.sidebar.view.as_ref().is_some_and(|view| {
+            view.update(cx, |sidebar, cx| sidebar.header_key(event, window, cx))
+        }) {
+            return true;
+        }
         let key = event.keystroke.key.as_str();
         let modifiers = event.keystroke.modifiers;
         let search = shell.surfaces.settings.view.is_none()
@@ -117,6 +133,20 @@ fn initialize(shell: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
                 ThreadEvent::Refreshed(sessions, ledger) => {
                     shell.surfaces.sidebar.workspace_ledger = ledger.clone();
                     shell.install_sessions(sessions.clone(), true, cx);
+                }
+                ThreadEvent::Workspace(path, ledger) => {
+                    shell
+                        .workspaces
+                        .extend(ledger.projects.iter().flat_map(|p| p.repo_paths.clone()));
+                    shell.workspaces.sort();
+                    shell.workspaces.dedup();
+                    shell.surfaces.sidebar.workspace_ledger = Some(ledger.clone());
+                    if let Some(path) = path {
+                        shell.switch(path.clone(), window, cx);
+                    } else {
+                        shell.state.selected = None;
+                        shell.persist();
+                    }
                 }
                 ThreadEvent::Selected(id) => shell.open_thread(id.clone(), window, cx),
                 ThreadEvent::Error(error) => {
@@ -190,12 +220,7 @@ impl Shell {
             }
         }
         if self.connected {
-            self.notice = if self.workspaces.is_empty() {
-                "Connected. No saved workspace sessions."
-            } else {
-                "Connected · Ctrl+F: search threads · F8: sidebar · Ctrl+K: commands"
-            }
-            .into();
+            self.notice.clear();
         }
         for content in self.content.values() {
             if let Content::Grid(grid) = content {

@@ -1,4 +1,5 @@
 import { userInfo } from 'node:os';
+import { WebviewBridgeError } from '@/lib/mcp/o8-webview-error';
 
 export function resolveO8WebviewSocketPath(
   env: Readonly<Record<string, string | undefined>> = process.env,
@@ -10,10 +11,7 @@ export function resolveO8WebviewSocketPath(
   }
 
   if (env.O8_DATA_DIR?.trim() || env.CORTEX_IDE_DATA_DIR?.trim()) {
-    throw new Error(
-      'O8_TAURI_MCP_SOCKET is required when O8_DATA_DIR or CORTEX_IDE_DATA_DIR is set; '
-      + 'refusing to fall back to the installed app WebView socket.',
-    );
+    throw new WebviewBridgeError('webview_socket_unconfigured');
   }
 
   return `/tmp/tauri-mcp-o8-${username}.sock`;
