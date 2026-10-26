@@ -34,17 +34,33 @@ export function neutralizePreviewRefresh(document: string, xhtml: boolean): stri
     });
     parser.write(document).close();
   } else {
-    const visit = (node: DefaultTreeAdapterTypes.Node) => {
-      if ('tagName' in node && node.tagName === 'meta'
-        && node.attrs.some(attr => attr.name === 'http-equiv' && attr.value.trim().toLowerCase() === 'refresh')
-        && node.sourceCodeLocation) {
-        spans.push({ start: node.sourceCodeLocation.startOffset, end: node.sourceCodeLocation.endOffset });
+    // Removing HTML can change its parse. Keep boundaries inert and only return
+    // a document after a fresh parse confirms that no refresh element remains.
+    for (let iteration = 0; iteration < 8; iteration++) {
+      spans.length = 0;
+      const visit = (node: DefaultTreeAdapterTypes.Node) => {
+        if ('tagName' in node && node.tagName === 'meta'
+          && node.attrs.some(attr => attr.name === 'http-equiv' && attr.value.trim().toLowerCase() === 'refresh')
+          && node.sourceCodeLocation) {
+          spans.push({ start: node.sourceCodeLocation.startOffset, end: node.sourceCodeLocation.endOffset });
+        }
+        if ('childNodes' in node) node.childNodes.forEach(visit);
+        // Inert template content can later be inserted by the preview itself.
+        if ('content' in node) visit(node.content);
+      };
+      visit(parse(document, { sourceCodeLocationInfo: true }));
+      if (spans.length === 0) return document;
+      let cursor = 0;
+      let result = '';
+      for (const { start, end } of spans.sort((a, b) => a.start - b.start)) {
+        if (start >= cursor) result += document.slice(cursor, start) + '<!---->';
+        cursor = Math.max(cursor, end);
       }
-      if ('childNodes' in node) node.childNodes.forEach(visit);
-      // Inert template content can later be inserted by the preview itself.
-      if ('content' in node) visit(node.content);
-    };
-    visit(parse(document, { sourceCodeLocationInfo: true }));
+      document = result + document.slice(cursor);
+    }
+    // Propagate to the proxy's structured error response instead of serving an
+    // unverified document when malformed HTML exhausts the parse budget.
+    throw new Error('Preview refresh neutralization did not converge');
   }
   let cursor = 0;
   let result = '';
