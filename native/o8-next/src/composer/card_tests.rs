@@ -114,6 +114,29 @@ if (composeComposerWireMessage(payload.text, payload.routing.pickedMode).wireMes
 }
 
 #[gpui::test]
+fn native_composer_idle_card_avoids_viewport_path_targets(cx: &mut TestAppContext) {
+    let fixture = Fixture::start(true);
+    let (_surface, cx) = open(cx, &fixture);
+    for (width, height) in [(900., 700.), (1440., 1024.)] {
+        cx.simulate_resize(gpui::size(px(width), px(height)));
+        draw(cx);
+        assert!(cx.debug_bounds("composer-microphone").is_some());
+        assert_eq!(
+            cx.debug_path_count(),
+            0,
+            "an idle composer must not activate viewport-sized path/MSAA targets"
+        );
+        cx.deactivate_window();
+        draw(cx);
+        assert_eq!(
+            cx.debug_path_count(),
+            0,
+            "blur must retain the bounded icon"
+        );
+    }
+}
+
+#[gpui::test]
 fn native_composer_card_controls_persist_and_send_the_selected_routing(cx: &mut TestAppContext) {
     let fixture = Fixture::start(true);
     let (surface, cx) = open(cx, &fixture);

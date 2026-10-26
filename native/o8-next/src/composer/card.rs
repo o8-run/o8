@@ -79,22 +79,38 @@ impl Surface {
                         canvas(
                             |_, _, _| (),
                             |bounds, _, window, _| {
-                                let p = |x, y| bounds.origin + point(px(x), px(y));
-                                let mut path = gpui::PathBuilder::stroke(px(1.3));
-                                path.move_to(p(4., 3.));
-                                path.line_to(p(4., 8.));
-                                path.curve_to(p(10., 8.), p(7., 14.));
-                                path.line_to(p(10., 3.));
-                                path.curve_to(p(4., 3.), p(7., -1.));
-                                path.move_to(p(1., 7.));
-                                path.curve_to(p(13., 7.), p(7., 20.));
-                                path.move_to(p(7., 14.));
-                                path.line_to(p(7., 18.));
-                                path.move_to(p(4., 18.));
-                                path.line_to(p(10., 18.));
-                                if let Ok(path) = path.build() {
-                                    window.paint_path(path, theme().text_secondary);
-                                }
+                                // A stroked path activates viewport-sized GPU/MSAA
+                                // targets. This small icon fits the existing quad pass.
+                                let rect = |x, y, w, h| {
+                                    Bounds::new(
+                                        bounds.origin + point(px(x), px(y)),
+                                        size(px(w), px(h)),
+                                    )
+                                };
+                                let color = theme().text_secondary;
+                                let stroke = px(1.3);
+                                window.paint_quad(
+                                    gpui::outline(rect(4., 1., 6., 11.), color, Default::default())
+                                        .corner_radii(px(3.))
+                                        .border_widths(stroke),
+                                );
+                                window.paint_quad(
+                                    gpui::outline(rect(1., 7., 12., 8.), color, Default::default())
+                                        .corner_radii(gpui::Corners {
+                                            top_left: px(0.),
+                                            top_right: px(0.),
+                                            bottom_right: px(6.),
+                                            bottom_left: px(6.),
+                                        })
+                                        .border_widths(gpui::Edges {
+                                            top: px(0.),
+                                            right: stroke,
+                                            bottom: stroke,
+                                            left: stroke,
+                                        }),
+                                );
+                                window.paint_quad(gpui::fill(rect(6.35, 14., 1.3, 4.), color));
+                                window.paint_quad(gpui::fill(rect(4., 17.35, 6., 1.3), color));
                             },
                         )
                         .w(px(14.))

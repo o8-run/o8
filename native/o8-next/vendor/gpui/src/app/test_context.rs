@@ -810,6 +810,11 @@ impl VisualTestContext {
         self.update(|window, _| window.rendered_frame.debug_bounds.get(selector).copied())
     }
 
+    /// Count vector paths in the last scene, including retained view scenes.
+    pub fn debug_path_count(&mut self) -> usize {
+        self.update(|window, _| window.rendered_frame.scene.paths.len())
+    }
+
     /// Draw an element to the window. Useful for simulating events or actions
     pub fn draw<E>(
         &mut self,
