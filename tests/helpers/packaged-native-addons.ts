@@ -26,12 +26,12 @@ export function stagePackagedNativeAddons(options: { projectRoot: string; server
 
   const ptyUtilsPath = require.resolve('node-pty/lib/utils');
   const { loadNativeModule } = require(ptyUtilsPath) as { loadNativeModule(name: string): { dir: string } };
-  const ptySource = resolve(dirname(ptyUtilsPath), loadNativeModule('pty').dir);
+  const ptySource = resolve(dirname(ptyUtilsPath), loadNativeModule(process.platform === 'win32' ? 'conpty' : 'pty').dir);
   const ptyHelper = join(projectRoot, 'node_modules/node-pty/prebuilds', `darwin-${process.arch}`, 'spawn-helper');
   for (const destination of [join(modules, 'node-pty', abiDirectory),
     join(modules, 'node-pty/prebuilds', `darwin-${process.arch}`)]) {
     mkdirSync(destination, { recursive: true });
-    cpSync(join(ptySource, 'pty.node'), join(destination, 'pty.node'));
+    cpSync(join(ptySource, process.platform === 'win32' ? 'conpty.node' : 'pty.node'), join(destination, 'pty.node'));
     cpSync(ptyHelper, join(destination, 'spawn-helper'));
   }
   // Match the export: macOS loads immutable prebuilds, never host build outputs.

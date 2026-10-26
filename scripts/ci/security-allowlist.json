@@ -1,0 +1,8 @@
+{
+  "accepted": [
+    { "id": "GHSA-238p-pmpm-9mq7", "package": "katex", "reason": "Requires prior prototype pollution; dependency parent migration pending.", "reviewBy": "2026-11-25" },
+    { "id": "GHSA-528h-pc64-c93x", "package": "stream-json", "reason": "Optional wallet dependency; no local server or worker import.", "reviewBy": "2026-11-25" },
+    { "id": "GHSA-hqr4-qq8f-hg3x", "package": "stream-json", "reason": "Locked 1.x parser has no JSONC implementation.", "reviewBy": "2026-11-25" },
+    { "id": "GHSA-mjw6-4jj6-33hc", "package": "stream-json", "reason": "Optional wallet dependency; no local server or worker import.", "reviewBy": "2026-11-25" }
+  ]
+}

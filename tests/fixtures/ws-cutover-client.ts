@@ -3,7 +3,7 @@ import { performance } from 'node:perf_hooks';
 import { WebSocket } from 'ws';
 
 export type Frame = { channel?: string; event?: string; data?: Record<string, unknown> };
-export type MutationEvent = { seq: number; data?: { mutation?: { mutationId?: string } } };
+export type MutationEvent = { seq: number; data?: { mutation?: { mutationId?: string; note?: string } } };
 
 /** Real app client, with no production-only or helper-only dispatch shortcuts. */
 export async function cutoverClient(url: string, token: string, resume?: { since: number; epoch: string }) {

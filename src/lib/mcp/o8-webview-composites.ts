@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { freshSessionScript } from '@/lib/mcp/o8-fresh-session-scripts';
 import type { FreshOrchestratorRequest } from '@/lib/desktop/fresh-orchestrator-action';
 import { O8WebviewClient } from '@/lib/mcp/o8-webview-client';
+import { WebviewBridgeError } from '@/lib/mcp/o8-webview-error';
 
 type TextContent = { type: 'text'; text: string };
 type McpToolResult = {
@@ -35,6 +36,7 @@ interface CompositeError {
   ok: false;
   step: CompositeStep;
   error: string;
+  code?: string;
   state?: unknown;
 }
 
@@ -57,6 +59,7 @@ function toolError(step: CompositeStep, error: unknown, state?: unknown): McpToo
     ok: false,
     step,
     error: safeErrorText(error),
+    ...(error instanceof WebviewBridgeError ? { code: error.code } : {}),
     ...(state !== undefined && isOk(state) ? { state } : {}),
   };
   return jsonResult(payload, true);
@@ -444,8 +447,8 @@ export function createO8WebviewCompositeHandlers(getClient: () => O8WebviewClien
     },
 
     o8_view_surface_state: async () => {
-      const client = getClient();
       try {
+        const client = getClient();
         const state = await evalJson(client, SURFACE_STATE_SCRIPT);
         if (!isOk(state)) return toolError('read_surface_state', typeof state.error === 'string' ? state.error : 'state eval failed', state);
         const publicState = { ...state };

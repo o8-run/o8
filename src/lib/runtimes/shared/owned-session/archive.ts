@@ -1,3 +1,4 @@
+import { cleanupWorkerO8Cli } from './worker-o8-cli-cleanup';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { withOwnedArtifactRootLock } from './artifact-admission';
@@ -176,6 +177,7 @@ async function archiveOwnedSessionDirLocked(
     };
   }
 
+  await cleanupWorkerO8Cli(root, session);
   await mkdir(archiveRoot, { recursive: true });
   await rename(session.sessionDir, archivePath);
 

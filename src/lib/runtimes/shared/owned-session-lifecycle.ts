@@ -15,7 +15,7 @@ export interface OwnedSessionLifecycleRegistration {
   detachedPacketIdentity?: boolean;
   resolveRoot(): string;
   sessionState(surfaceId: string): Promise<OwnedSessionState>;
-  archiveSession(surfaceId: string): Promise<OwnedArchiveResponse>;
+  archiveSession(surfaceId: string, workspace?: string): Promise<OwnedArchiveResponse>;
   setDetachedSession?(surfaceId: string, reason: string | null): Promise<{
     updated: boolean;
     previouslyDetached: boolean;
@@ -50,7 +50,7 @@ export function registerOwnedSessionLifecycle(options: {
     detachedPacketIdentity: true,
     resolveRoot: () => process.env[options.rootEnvVar] || options.rootDefault,
     sessionState: (surfaceId) => options.store.sessionState(surfaceId),
-    archiveSession: (surfaceId) => options.store.archiveSession(surfaceId),
+    archiveSession: (surfaceId, workspace) => options.store.archiveSession(surfaceId, workspace),
     ...(options.store.setDetachedSession ? {
       setDetachedSession: (surfaceId: string, reason: string | null) => (
         options.store.setDetachedSession!(surfaceId, reason)

@@ -1,3 +1,5 @@
+import path from 'node:path';
+import { cleanupWorkerO8Cli, recordWorkerO8CliStop } from './worker-o8-cli-cleanup';
 import type { InterruptEscalationResult } from '@/lib/runtime/interrupt-escalation';
 import type { OwnedActiveRun } from '../owned-session-index';
 import type { OwnedSessionIo } from './session-io';
@@ -35,7 +37,13 @@ export function registerOwnedStopHandler(
     const requestedAt = new Date().toISOString();
     const result = await operation();
     // An absent process or a denied signal is not an intentional interruption.
-    if (!result.steps.some((step) => step.sent)) return result;
+    if (!result.steps.some((step) => step.sent)) {
+      if (result.confirmedDead && session.packetId && typeof session.sessionDir === 'string') {
+        await recordWorkerO8CliStop(path.dirname(session.sessionDir), session, run.id, run.pid).catch(() => {});
+        await cleanupWorkerO8Cli(path.dirname(session.sessionDir), session, run.id).catch(() => {});
+      }
+      return result;
+    }
 
     // Tail refresh can settle a dead run while the ladder verifies its children.
     // Reload that state and label only the exact run whose signal was delivered.
@@ -49,6 +57,10 @@ export function registerOwnedStopHandler(
     current.recentRuns = current.recentRuns.map(stamp);
     if (current.activeRun) current.activeRun = stamp(current.activeRun);
     await io.saveSession(current);
+    if (result.confirmedDead && current.packetId && typeof current.sessionDir === 'string') {
+      await recordWorkerO8CliStop(path.dirname(current.sessionDir), current, run.id, run.pid).catch(() => {});
+      await cleanupWorkerO8Cli(path.dirname(current.sessionDir), current, run.id).catch(() => {});
+    }
     invalidate();
     return result;
   }));

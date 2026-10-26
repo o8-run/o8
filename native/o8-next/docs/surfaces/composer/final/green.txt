@@ -1,0 +1,88 @@
+Focused tests after the image-only fix and rebase integration:
+
+native_composer_review_image_only_send_persists_through_real_route
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 251 filtered out; finished in 1.89s
+
+native_composer_loaded_shell_typing_benchmark
+LOADED_SHELL_CPU_SCENE platform=linux profile=debug messages=200 inputs=100 p50_ms=1.771063 p95_ms=1.864752
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 251 filtered out; finished in 1.82s
+
+placement_empty_state_composer_and_right_panel
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 251 filtered out
+
+activity_empty_local_auth_and_scoped_retention
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 251 filtered out; finished in 2.77s
+
+round1_symlink_worker_survives_real_refresh_and_send
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 251 filtered out; finished in 2.29s
+
+placement_shell_tabs_use_compact_rows
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 251 filtered out; finished in 1.41s
+
+shell_chrome_fifteen_workspaces_keeps_one_switcher
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 251 filtered out; finished in 1.89s
+
+saved_history_surface_with_only_o8d
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 251 filtered out; finished in 0.70s
+
+correction_composer_has_no_shortcut_or_mode_helper
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 251 filtered out; finished in 1.29s
+
+Newer main fixture compatibility, through the existing native tests:
+issues_create_enhance_preview_labels_and_success
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 251 filtered out; finished in 3.42s
+pull_requests_real_server_actions_and_paint
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 251 filtered out; finished in 3.35s
+issues_errors_retry_stale_and_account_switch
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 251 filtered out; finished in 3.39s
+
+Node 22 completion checks:
+npm run typecheck:fast: exit 0
+NODE_OPTIONS=--max-old-space-size=8192 npx tsc --noEmit: exit 0
+npm run test:classify: 1247 hermetic, 933 resource-owning; unchanged manifest
+Touched-file ESLint: exit 0; Rust/Python/Markdown have no ESLint rules
+npm run rule-check -- --base=origin/main: scanned 3 files, zero violations
+Full npm test:
+Test Files  1251 passed | 3 skipped (1254)
+     Tests  9160 passed | 5 skipped (9165)
+  Duration  290.01s
+
+Native gates on c14b23bd7, after fixture compatibility changes:
+cargo fmt --manifest-path native/o8-next/Cargo.toml --check: exit 0
+cargo check --manifest-path native/o8-next/Cargo.toml: exit 0
+cargo test --manifest-path native/o8-next/Cargo.toml -- --test-threads=2:
+test result: ok. 246 passed; 0 failed; 6 ignored; 0 measured; 0 filtered out
+diff_cli.rs: 1 passed; 0 failed
+macos_frame_clock.rs: 4 passed; 0 failed
+pane_grid_cli.rs: 3 passed; 0 failed
+shell_cli.rs: 2 passed; 0 failed
+terminal_cli.rs: 1 passed; 0 failed
+window_occlusion_cli.rs: 0 tests on Linux
+
+Linux debug benchmarks before the parity-harness rebase:
+LOADED_SHELL_CPU_SCENE platform=linux profile=debug messages=200 inputs=100 p50_ms=1.785564 p95_ms=1.851682
+LOADED_COMPOSER_CPU_SCENE platform=linux profile=debug messages=200 inputs=100 p50_ms=1.076530 p95_ms=1.223058
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 250 filtered out; finished in 3.57s
+
+Linux release before the parity-harness rebase, reusing the retained dependency target:
+LOADED_SHELL_CPU_SCENE platform=linux profile=release messages=200 inputs=100 p50_ms=0.129753 p95_ms=0.149943
+LOADED_COMPOSER_CPU_SCENE platform=linux profile=release messages=200 inputs=100 p50_ms=0.069903 p95_ms=0.091807
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 250 filtered out; finished in 2.64s
+
+Final gates after rebasing onto cc29c1fc9, retaining both new parity tests:
+cargo fmt --manifest-path native/o8-next/Cargo.toml --check: exit 0
+cargo check --manifest-path native/o8-next/Cargo.toml: exit 0
+cargo test --manifest-path native/o8-next/Cargo.toml -- --test-threads=2:
+test result: ok. 248 passed; 0 failed; 6 ignored; 0 measured; 0 filtered out; finished in 594.06s
+CLI integration targets: 11 passed; 0 failed
+parity_capture_real_shell: passed
+parity_native_error_receipt_follows_real_surface_error: passed
+round1_symlink_worker_survives_real_refresh_and_send: passed
+
+Final isolated Linux measurements after the parity-harness rebase:
+LOADED_SHELL_CPU_SCENE platform=linux profile=debug messages=200 inputs=100 p50_ms=1.783871 p95_ms=2.021916
+LOADED_COMPOSER_CPU_SCENE platform=linux profile=debug messages=200 inputs=100 p50_ms=1.060396 p95_ms=1.199533
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 252 filtered out; finished in 3.65s
+LOADED_SHELL_CPU_SCENE platform=linux profile=release messages=200 inputs=100 p50_ms=0.134831 p95_ms=0.162832
+LOADED_COMPOSER_CPU_SCENE platform=linux profile=release messages=200 inputs=100 p50_ms=0.070264 p95_ms=0.088983
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 252 filtered out; finished in 2.71s
