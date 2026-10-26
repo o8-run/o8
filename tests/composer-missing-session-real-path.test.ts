@@ -1,7 +1,7 @@
-import { execFile, execFileSync, type ChildProcess } from 'node:child_process';
+import { execFile, execFileSync, type ChildProcess, type ExecFileOptionsWithStringEncoding } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import { join, resolve } from 'node:path';
 import { WebSocket } from 'ws';
@@ -16,12 +16,15 @@ const binary = join(root, 'fixture-runtime.mjs');
 const auth = randomUUID();
 const firstMessage = 'Remember: the sample identifier is widget-731 and its accent is copper. Reply briefly.';
 const followup = 'What identifier and accent did we choose earlier?';
-type History = { repoPath: string; messages: Array<{ role: string; content: string; model?: string }>; orchestratorSessionIds: Record<string, string> };
+type History = { repoPath: string; messages: Array<{ role: string; content: string; model?: string }>; orchestratorSessionIds: Record<string, string>;
+  codexSessionHandoff?: { previousThreadId: string; replacementThreadId: string | null; inputAccepted: boolean } };
 type WireEvent = { event?: string; data?: { threadId?: string; status?: string; error?: string; reason?: string } };
 let api: Server;
 let worker: ChildProcess;
 let socket: WebSocket;
 let serverOutput = '';
+let workerOptions: ExecFileOptionsWithStringEncoding;
+let wsPort: number;
 const events: WireEvent[] = [];
 
 async function until(check: () => boolean, description: string, timeout = 30_000) {
@@ -34,16 +37,40 @@ async function until(check: () => boolean, description: string, timeout = 30_000
 }
 function historyPath(threadId: string) { return join(root, 'chat-history', `${threadId}.json`); }
 function history(threadId: string): History { return JSON.parse(readFileSync(historyPath(threadId), 'utf8')); }
-function calls(): Array<{ resume: boolean; threadId: string; message: string; model: string; transport: string }> {
+function calls(): Array<{ resume: boolean; threadId: string; message: string; model: string; transport: string; pid: number }> {
   const path = join(sessions, 'calls.jsonl');
   return existsSync(path) ? readFileSync(path, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line)) : [];
 }
-async function send(threadId: string, message: string, model: string) {
-  const start = events.length;
+async function startWorker(crashSurvival = false) {
+  serverOutput = '';
+  const launchOptions: ExecFileOptionsWithStringEncoding = {
+    ...workerOptions, env: { ...process.env, ...workerOptions.env, O8_CRASH_SURVIVABLE_ORCHESTRATOR: crashSurvival ? '1' : '0' },
+  };
+  worker = execFile(process.execPath, ['--import=./scripts/register-server-only-stub.mjs', '--import=tsx', 'src/ws-server.ts'], launchOptions);
+  worker.stdout?.on('data', chunk => { serverOutput += String(chunk); });
+  worker.stderr?.on('data', chunk => { serverOutput += String(chunk); });
+  await until(() => serverOutput.includes('WebSocket server listening'), 'server launch', 60_000);
+  socket = new WebSocket(`ws://127.0.0.1:${wsPort}/ws?token=${encodeURIComponent(auth)}`);
+  socket.on('message', chunk => { events.push(JSON.parse(String(chunk))); });
+  await once(socket, 'open');
+}
+async function stopWorker(signal: NodeJS.Signals = 'SIGTERM') {
+  socket?.terminate();
+  if (worker?.exitCode === null && worker.signalCode === null) {
+    const exited = once(worker, 'exit');
+    worker.kill(signal);
+    await exited;
+  }
+}
+function submit(threadId: string, message: string, model: string) {
   socket.send(buildOrchestratorSendPayload({
     repoPath, threadId, clientMessageId: randomUUID(), wireMessage: message, displayMessage: message,
     backend: 'codex', model, permissionMode: 'plan', orchestrationMode: 'fleet', pinBackend: true,
   }));
+}
+async function send(threadId: string, message: string, model: string) {
+  const start = events.length;
+  submit(threadId, message, model);
   await until(() => events.slice(start).some(event => event.data?.threadId === threadId
     && event.event === 'status' && event.data.status === 'ready'), 'composer turn completion');
   return events.slice(start);
@@ -67,22 +94,18 @@ beforeAll(async () => {
   api.listen(0, '127.0.0.1'); await once(api, 'listening');
   const apiPort = (api.address() as { port: number }).port;
   const reservation = createServer(); reservation.listen(0, '127.0.0.1'); await once(reservation, 'listening');
-  const wsPort = (reservation.address() as { port: number }).port;
+  wsPort = (reservation.address() as { port: number }).port;
   await new Promise<void>(resolve => reservation.close(() => resolve()));
-  worker = execFile(process.execPath, ['--import=./scripts/register-server-only-stub.mjs', '--import=tsx', 'src/ws-server.ts'], {
+  workerOptions = {
+    encoding: 'utf8',
     cwd: process.cwd(), maxBuffer: 10 * 1024 * 1024,
     env: { ...process.env, O8_DATA_DIR: root, CORTEX_IDE_DATA_DIR: root, CORTEX_IDE_DB_PATH: join(root, 'state.db'),
       O8_WS_PORT: String(wsPort), O8_API_PORT: String(apiPort), NEXT_ORIGIN: `http://127.0.0.1:${apiPort}`,
       O8_CODEX_BIN: binary, O8_CLAUDE_CODE_BIN: binary,
       O8_CRASH_SURVIVABLE_ORCHESTRATOR: '0', O8_SUBSCRIPTION_PROFILE: 'both',
       CORTEX_IDE_OWNED_CODEX_ROOT: join(root, 'owned-runtime') },
-  });
-  worker.stdout?.on('data', chunk => { serverOutput += String(chunk); });
-  worker.stderr?.on('data', chunk => { serverOutput += String(chunk); });
-  await until(() => serverOutput.includes('WebSocket server listening'), 'server launch', 60_000);
-  socket = new WebSocket(`ws://127.0.0.1:${wsPort}/ws?token=${encodeURIComponent(auth)}`);
-  socket.on('message', chunk => { events.push(JSON.parse(String(chunk))); });
-  await once(socket, 'open');
+  };
+  await startWorker();
 }, 90_000);
 afterAll(async () => {
   socket?.terminate();
@@ -123,6 +146,15 @@ describe('composer recovery from a missing persisted runtime session', () => {
     expect.soft(continued.messages.filter(message => message.role === 'assistant').at(-1)?.content).toBe('widget-731 / copper');
     expect(continued.messages.filter(message => message.role === 'user').map(message => message.content)).toEqual([firstMessage, followup]);
     expect(continued.messages.filter(message => message.role === 'assistant').at(-1)?.model).toBe(selectedModel);
+    if (scenario === 'healthy-control') {
+      const elapsed: number[] = [];
+      for (let sample = 0; sample < 7; sample += 1) {
+        const started = performance.now();
+        await send(threadId, followup, selectedModel);
+        elapsed.push(performance.now() - started);
+      }
+      process.stdout.write(`Healthy composer send median: ${Math.round(elapsed.sort((a, b) => a - b)[3])} ms (7 sends)\n`);
+    }
   }, 60_000);
 
   it.each(['unavailable', 'oversized', 'media'] as const)('holds visibly when the earlier canonical conversation is %s', async reason => {
@@ -221,4 +253,55 @@ describe('composer recovery from a missing persisted runtime session', () => {
     expect.soft(replacement?.message.includes(saved.messages[0].content)).toBe(true);
     expect(history(threadId).messages.filter(message => message.role === 'assistant').at(-1)?.content).toBe('widget-731 / copper');
   }, 60_000);
+
+  it('retries the context handoff after a server restart before replacement input acceptance', async () => {
+    await stopWorker();
+    await startWorker(true);
+    const threadId = 'thoughts-recovery-restart-before-input';
+    await send(threadId, firstMessage, MODEL_IDS.raw.openAiGpt55);
+    await send(threadId, 'Keep both choices available.', MODEL_IDS.raw.openAiGpt55);
+    const savedSession = history(threadId).orchestratorSessionIds.codex;
+    rmSync(join(sessions, savedSession + '.json'));
+    writeFileSync(join(sessions, 'control.json'), JSON.stringify({ allocateWithoutInput: 'cancelled' }));
+    const start = calls().length;
+    submit(threadId, followup, MODEL_IDS.raw.openAiGpt55);
+    await until(() => calls().length === start + 2, 'replacement allocated before restart');
+    const replacement = calls().at(-1)!;
+    await until(() => history(threadId).codexSessionHandoff?.replacementThreadId === replacement.threadId, 'durable pending replacement');
+    expect(history(threadId).codexSessionHandoff).toEqual({
+      previousThreadId: savedSession, replacementThreadId: replacement.threadId, inputAccepted: false,
+    });
+    // Kill the server without its finally blocks, then the detached unaccepted runtime.
+    await stopWorker('SIGKILL');
+    process.kill(replacement.pid, 'SIGKILL');
+    // A container's init may retain the orphan as a zombie. Record the killed
+    // fixture as dead so replay does not mistake that zombie for a live turn.
+    for (const file of readdirSync(join(root, 'orchestrator-turns')).filter(file => file.endsWith('.json'))) {
+      const path = join(root, 'orchestrator-turns', file);
+      const turn = JSON.parse(readFileSync(path, 'utf8'));
+      if (turn.pid === replacement.pid) writeFileSync(path, JSON.stringify({ ...turn, pid: 0 }));
+    }
+    rmSync(join(sessions, 'control.json'));
+    await startWorker(true);
+    await until(() => serverOutput.includes('Re-bound 1 Codex orchestrator turn'), 'turn rehydration');
+    expect.soft(history(threadId).orchestratorSessionIds.codex).toBe(savedSession);
+    const nextStart = calls().length;
+    const result = await send(threadId, followup, MODEL_IDS.raw.openAiGpt55);
+    expect.soft(result.some(event => event.event === 'retry' && event.data?.reason === 'runtime-session-recovered')).toBe(true);
+    expect.soft(calls().slice(nextStart).some(call => call.message.includes('widget-731') && call.message.includes('copper'))).toBe(true);
+    expect(history(threadId).messages.filter(message => message.role === 'assistant').at(-1)?.content).toBe('widget-731 / copper');
+    const acceptedSession = history(threadId).orchestratorSessionIds.codex;
+    expect(history(threadId).codexSessionHandoff).toEqual({
+      previousThreadId: savedSession, replacementThreadId: acceptedSession, inputAccepted: true,
+    });
+    await stopWorker('SIGKILL');
+    await startWorker(true);
+    const acceptedStart = calls().length;
+    const acceptedResult = await send(threadId, followup, MODEL_IDS.raw.openAiGpt55);
+    expect(acceptedResult.some(event => event.event === 'retry')).toBe(false);
+    expect(calls().slice(acceptedStart)).toMatchObject([{ resume: true, threadId: acceptedSession }]);
+    expect(history(threadId).messages.filter(message => message.role === 'assistant').at(-1)?.content).toBe('widget-731 / copper');
+    await stopWorker();
+    await startWorker();
+  }, 150_000);
 });

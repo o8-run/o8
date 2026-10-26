@@ -43,6 +43,7 @@ import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 import { getCodexSpeedCatalogue } from '@/lib/codex/service-tier-catalogue';
 import { serviceTierForTurn, type OrchestratorServiceTier } from '@/lib/orchestrator/service-tier';
 import { recoverRuntimeSessionMessage, SESSION_CONTEXT_UNAVAILABLE } from './runtime-session-recovery';
+import { readRuntimeSessionHandoff, persistRuntimeSessionHandoff, noteRuntimeSessionHandoff, clearRuntimeSessionHandoff, type RuntimeSessionHandoff } from './runtime-session-handoff';
 import {
   ensureRegisteredSession,
   getRegisteredSession,
@@ -124,7 +125,7 @@ export function ensureCodexOrchestratorSession(repoPath: string, threadId?: stri
       sessionName,
       repoPath: normalizedRepoPath,
       historyThreadId: normalizedThreadId,
-      threadId: readOrchestratorBackendSessionId(normalizedThreadId, 'codex'),
+      threadId: pendingHandoff(normalizedThreadId)?.previousThreadId ?? readOrchestratorBackendSessionId(normalizedThreadId, 'codex'),
       status: 'ready',
       proc: null,
       createdAt: Date.now(),
@@ -136,18 +137,24 @@ interface CodexOrchestratorRehydrateOptions {
   onReboundEvent?: (record: OrchestratorTurnRecord, event: OrchestratorEvent) => void;
 }
 
+function pendingHandoff(threadId: string | null): RuntimeSessionHandoff | undefined {
+  const handoff = readRuntimeSessionHandoff(threadId);
+  return handoff && !handoff.inputAccepted ? handoff : undefined;
+}
+
 export function rehydrateCodexOrchestratorTurns(options: CodexOrchestratorRehydrateOptions = {}): number {
   let count = 0;
   for (const record of listActiveOrchestratorTurns()) {
     if (record.backend !== 'codex') continue;
     const sessionName = record.sessionName || codexOrchestratorSessionName(record.repoPath, record.threadId);
+    const recovery = pendingHandoff(normalizeThoughtsThreadId(record.threadId));
     let session = sessions.get(sessionName);
     if (!session) {
       session = {
         sessionName,
         repoPath: normalizeRepoPath(record.repoPath),
         historyThreadId: normalizeThoughtsThreadId(record.threadId),
-        threadId: readOrchestratorBackendSessionId(normalizeThoughtsThreadId(record.threadId), 'codex'),
+        threadId: recovery?.previousThreadId ?? readOrchestratorBackendSessionId(normalizeThoughtsThreadId(record.threadId), 'codex'),
         status: 'busy',
         proc: null,
         createdAt: record.startedAt,
@@ -156,21 +163,23 @@ export function rehydrateCodexOrchestratorTurns(options: CodexOrchestratorRehydr
     } else {
       session.status = 'busy';
     }
-    const lineState: CodexLineHandlerState = { cost: null, threadId: session.threadId };
+    const lineState: CodexLineHandlerState = { cost: null, threadId: recovery ? null : session.threadId };
     const isLocalModel = typeof record.model === 'string' && !!parseLocalModel(record.model);
     const emit = (event: OrchestratorEvent) => {
       options.onReboundEvent?.(record, event);
     };
     const handleLine = (line: string) => {
-      handleCodexJsonLine(line, lineState, emit, { isLocalModel, model: record.model ?? undefined });
-      if (lineState.threadId) session!.threadId = lineState.threadId;
+      handleCodexJsonLine(line, lineState, emit, { isLocalModel, model: record.model ?? undefined,
+        onInputAccepted: recovery ? () => noteRuntimeSessionHandoff(session!.historyThreadId, recovery, lineState.threadId, true) : undefined });
+      noteRuntimeSessionHandoff(session!.historyThreadId, recovery, lineState.threadId);
+      if (lineState.threadId && (!recovery || recovery.inputAccepted)) session!.threadId = lineState.threadId;
     };
     const finishRecord = () => {
-      if (lineState.threadId) session!.threadId = lineState.threadId;
+      if (lineState.threadId && (!recovery || recovery.inputAccepted)) session!.threadId = lineState.threadId;
       session!.status = 'ready';
       emit({
         type: 'done', terminalOutcome: lineState.terminalOutcome ?? 'unconfirmed',
-        sessionId: lineState.threadId,
+        sessionId: session!.threadId,
         cost: lineState.cost,
         ...(lineState.usage ? { usage: lineState.usage } : {}),
       });
@@ -259,7 +268,8 @@ export async function sendToCodexOrchestrator(
       return;
     }
     const missingThreadId = session.threadId;
-    const recovery = { inputAccepted: false };
+    const recovery: RuntimeSessionHandoff = { previousThreadId: missingThreadId!, replacementThreadId: null, inputAccepted: false };
+    persistRuntimeSessionHandoff(session.historyThreadId, recovery);
     session.threadId = null;
     session.status = 'ready';
     onEvent({ type: 'turn_retry', attempt: 2, reason: 'runtime-session-recovered', notice: 'The saved runtime session was unavailable. Continuing in a new session with the earlier conversation restored.' });
@@ -286,7 +296,7 @@ async function sendToCodexOrchestratorAttempt(
   onEvent: (event: OrchestratorEvent) => void,
   options: SendToCodexOrchestratorOptions = {},
   onActivity?: () => void,
-  recovery?: { inputAccepted: boolean },
+  recovery?: RuntimeSessionHandoff,
 ): Promise<void> {
   // Fable is Claude-only — its native-tool lockout + BYO-key path live in the
   // Claude REPL (orchestrator-session.ts). The registry routes 'fable' to
@@ -578,7 +588,8 @@ async function sendToCodexOrchestratorAttempt(
     const handleCodexLine = (line: string) => {
       if (codexApp) noteCodexAppTurnLine(line, { tabId: session.historyThreadId, repoPath: session.repoPath });
       const parsed = handleCodexJsonLine(line, lineState, onEvent, { isLocalModel, model, onActivity,
-        onInputAccepted: recovery ? () => { recovery.inputAccepted = true; } : undefined });
+        onInputAccepted: recovery ? () => noteRuntimeSessionHandoff(session.historyThreadId, recovery, lineState.threadId, true) : undefined });
+      noteRuntimeSessionHandoff(session.historyThreadId, recovery, lineState.threadId);
       if (parsed) {
         sawFirstEvent = true;
         if (firstEventTimeout) {
@@ -745,6 +756,9 @@ export function requestCodexOrchestratorSessionReset(repoPath: string, threadId?
     resetExisting: (session) => {
       session.threadId = null;
     },
-    resetPersistedThread: (normalizedThreadId) => writeOrchestratorBackendSessionId(normalizedThreadId, 'codex', null),
+    resetPersistedThread: (normalizedThreadId) => {
+      clearRuntimeSessionHandoff(normalizedThreadId);
+      writeOrchestratorBackendSessionId(normalizedThreadId, 'codex', null);
+    },
   });
 }

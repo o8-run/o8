@@ -13,7 +13,7 @@ const resume = args[1] === 'resume';
 const threadId = resume ? args[2] : randomUUID();
 const path = join(root, threadId + '.json');
 const argument = args.at(-1);
-const record = message => appendFileSync(join(root, 'calls.jsonl'), JSON.stringify({ resume, threadId, message,
+const record = message => appendFileSync(join(root, 'calls.jsonl'), JSON.stringify({ resume, threadId, message, pid: process.pid,
   transport: argument === '-' ? 'stdin' : 'argv', model: args.find(arg => arg.startsWith('model='))?.slice(6) }) + '\n');
 const controlPath = join(root, 'control.json');
 const control = existsSync(controlPath) ? JSON.parse(readFileSync(controlPath, 'utf8')) : {};

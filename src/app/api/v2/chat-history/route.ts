@@ -246,6 +246,7 @@ export async function POST(request: NextRequest) {
   let mobileRevealRequestedAt: string | null | undefined;
   let orchestratorSessionIds: Record<string, string | null> | undefined;
   let orchestratorSessionUpdatedAt: string | null | undefined;
+  let codexSessionHandoff: unknown;
   let pendingTurnWorkers: MobilePendingTurnWorkers | undefined;
   let model: string | undefined;
   let existingMessages: Array<Record<string, unknown>> = [];
@@ -276,6 +277,7 @@ export async function POST(request: NextRequest) {
     mobileRevealRequestedAt = normalizeNullableDate(existing.mobileRevealRequestedAt);
     orchestratorSessionIds = normalizeSessionIds(existing.orchestratorSessionIds);
     orchestratorSessionUpdatedAt = normalizeNullableDate(existing.orchestratorSessionUpdatedAt);
+    codexSessionHandoff = existing.codexSessionHandoff;
     pendingTurnWorkers = existing.pendingTurnWorkers;
   } catch { /* new file */ }
 
@@ -358,6 +360,7 @@ export async function POST(request: NextRequest) {
     mobileRevealRequestedAt,
     orchestratorSessionIds: nextSessionIds,
     orchestratorSessionUpdatedAt: normalizeNullableDate(body.orchestratorSessionUpdatedAt) ?? orchestratorSessionUpdatedAt ?? null,
+    codexSessionHandoff,
     pendingTurnWorkers: consumed.pending,
   };
   try {
