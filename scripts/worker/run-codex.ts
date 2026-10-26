@@ -34,7 +34,7 @@ function stopProcessTree(child: ChildProcess, signal: NodeJS.Signals): void {
 }
 
 export async function startCodex(opts: RunCodexOptions): Promise<RunningCodex> {
-  assertRuntimeEffortPin('cloud', opts.model, opts.effort);
+  await assertRuntimeEffortPin('cloud', opts.model, opts.effort);
   const codexArgs = ['exec', '--dangerously-bypass-approvals-and-sandbox', '--json'];
   codexArgs.push(...codexModelArgs(opts.model));
   if (opts.effort && opts.effort !== 'adaptive') {
