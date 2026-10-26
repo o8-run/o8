@@ -1,10 +1,12 @@
 import type { ParsedRunLog } from './types';
+import type { SandboxDenial } from './sandbox-denial';
 
 interface RunArtifacts {
   key: string;
   stdoutRaw: string | null;
   stderrRaw: string | null;
   parsed: ParsedRunLog;
+  sandboxDenial: SandboxDenial | null;
 }
 
 /** Serialized logs detach previews from large source strings and bound all retained bytes. */

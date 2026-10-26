@@ -17,7 +17,7 @@ import { evidencePath, freePort, healthy, launch, root, rss, sleep, stop, writeJ
 import { inspector, postGc, summarizeHeap } from '../speed/memory.mjs';
 import { retainedOwners } from './standalone-heap.mjs';
 import { bundleServers } from '../lib/server-bundles.mjs';
-import { seedWorkerSessions } from './session-memory-workers.mjs';
+import { seedWorkerSessions, countSandboxDenials } from './session-memory-workers.mjs';
 
 const mib = bytes => Math.round(bytes / 1024 / 1024 * 100) / 100;
 const digest = file => createHash('sha256').update(fs.readFileSync(file)).digest('hex');
@@ -272,6 +272,7 @@ export async function measureSessionMemory({ output, sessions = 12, transcriptMi
       workerPayloadUtf8Bytes: workers.reduce((sum, worker) => sum + fs.statSync(persistedFile(worker)).size, 0),
       workerTranscriptDigest: createHash('sha256').update(workers.map(worker => worker.hash).join('')).digest('hex'),
       completedSessions, completedWorkers, workerSessions, projects: projectIds.length,
+      sandboxedWorkers: workerSessions, sandboxDenials: countSandboxDenials(workers),
       archivedWorkers: workers.filter(worker => !fs.existsSync(worker.file) && fs.existsSync(worker.archivedFile)).length,
       settleMs, idleMs, gcPasses: passive ? 0 : 3, idle, after, afterIdle,
       processTrees: { natural, ...(passive ? { passive: trees } : { postGc: trees }) },
@@ -328,6 +329,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     sessions: Number(args.sessions ?? 96), transcriptMiB: Number(args['transcript-mib'] ?? 4) });
   console.log(JSON.stringify(receipt));
   if (args.check) {
+    assert(receipt.persistedOutputUnchanged, 'Persisted transcript output changed');
+    assert.equal(receipt.sandboxDenials, Number(receipt.workerSessions > 0), 'Sandbox diagnostics must remain visible');
     if (receipt.idleMs) assertIdleRssBudget(receipt);
     if (!args.passive) {
       const checkpoints = { afterRun: receipt.after, ...(receipt.idleMs ? { afterIdle: receipt.afterIdle } : {}) };

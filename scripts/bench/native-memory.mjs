@@ -12,6 +12,7 @@ import { cleanupGate } from '../lib/preship-gate-cleanup.mjs';
 import { computeArtifactDigest, descendantPids, snapshotProcesses, webkitPids } from '../lib/footprint-budget.mjs';
 import { buildFixturePlan, materializeFixture } from './interactions/fixtures.mjs';
 import { exerciseSessionWorkload, verifySessionWorkload } from './session-memory.mjs';
+import { countSandboxDenials } from './session-memory-workers.mjs';
 
 const round = n => Math.round(n * 100) / 100;
 const edit = 'Launch input check';
@@ -49,11 +50,20 @@ function wholeAppRss(rootPid) {
     ...webkitPids(processes)]);
   const rows = execFileSync('ps', ['-axo', 'pid=,rss='], { encoding: 'utf8' });
   let bytes = 0, count = 0;
+  const components = {};
   for (const row of rows.trim().split('\n')) {
     const match = row.trim().match(/^(\d+)\s+(\d+)$/);
-    if (match && owned.has(Number(match[1]))) { count++; bytes += Number(match[2]) * 1024; }
+    if (!match || !owned.has(Number(match[1]))) continue;
+    const pid = Number(match[1]), value = Number(match[2]) * 1024;
+    const command = processes.get(pid)?.command ?? '';
+    const component = pid === rootPid ? 'shell' : command.includes('/WebKit.framework/') ? 'webviewHelpers'
+      : command.includes('next-server') ? 'httpServer' : command.includes('ws-server') ? 'realtimeServer' : 'otherHelpers';
+    const group = components[component] ??= { bytes: 0, count: 0 };
+    group.bytes += value; group.count++;
+    count++; bytes += value;
   }
-  return { bytes, count, includes: 'native shell, server descendants and all webview helpers on the disposable runner' };
+  return { bytes, count, components,
+    includes: 'native shell, server descendants and all webview helpers on the disposable runner' };
 }
 
 function requireDisposableRunner(app) {
@@ -193,6 +203,8 @@ export async function measureNativeMemory({ app, output, sourceSha, samples = 1 
         await sleep(600_000);
         sampleReceipt.rss.afterIdle = wholeAppRss(child.pid);
         sampleReceipt.workload.persistedOutputUnchanged = verifySessionWorkload(workload);
+        sampleReceipt.workload.sandboxDenials = countSandboxDenials(workload.workers);
+        assert.equal(sampleReceipt.workload.sandboxDenials, 1, 'Sandbox diagnostics must remain visible');
         assert(sampleReceipt.workload.persistedOutputUnchanged, 'Persisted fixture output changed');
       } catch (error) {
         receipt.failure = { sample, message: String(error.message).replaceAll(stageRoot, '<fixture>'),

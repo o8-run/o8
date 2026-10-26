@@ -44,7 +44,7 @@ import { assertOwnedSessionProcessIdentity, captureOwnedRunIdentity } from './pr
 import { emitRuntimeFallbackNotification } from './run-notifications';
 import { observeChildExit, readAbnormalStderrTail } from './exit-outcome';
 import { prepareOwnedLaunchArgs } from './launch-args';
-import { detectSandboxDenial, detectRunSandboxDenial, sandboxDenialOperatorMessage } from './sandbox-denial';
+import { detectSandboxDenial, sandboxDenialOperatorMessage } from './sandbox-denial';
 import {
   RUNS_DIR,
   compactText,
@@ -302,7 +302,7 @@ export function createOwnedRunController({
       // A prepared journal is deliberately preserved until the binding path,
       // under the same surface lock as spawn, reconciles its durable marker.
       if (run.spawnState === 'prepared') continue;
-      const { stdoutRaw, stderrRaw, parsed } = await readRunArtifacts(run, Boolean(run.sandboxed && !run.sandboxDenial), false);
+      const { stderrRaw, parsed, sandboxDenial } = await readRunArtifacts(run, false, false);
 
       if (!session.threadId && parsed.threadId) {
         session.threadId = parsed.threadId;
@@ -323,7 +323,7 @@ export function createOwnedRunController({
       }
 
       if (run.sandboxed && !run.sandboxDenial) {
-        const denial = detectRunSandboxDenial(runtimeId, stdoutRaw, stderrRaw);
+        const denial = sandboxDenial;
         if (denial) {
           run.sandboxDenial = denial;
           session.latestSummary = sandboxDenialOperatorMessage(runtimeId, denial);

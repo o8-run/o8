@@ -1,5 +1,6 @@
 import { readFile, stat } from 'node:fs/promises';
 import { RunArtifactCache } from './run-artifact-cache';
+import { detectRunSandboxDenial } from './sandbox-denial';
 import type { OwnedRunRecord, OwnedRuntimeAdapter } from './types';
 
 // Discovery can refresh many completed logs together. Bound their source buffers
@@ -9,7 +10,7 @@ const waitingReads: Array<() => void> = [];
 const cache = new RunArtifactCache();
 // Polling needs outcome metadata, not transcript entries. Keep it independently
 // so scanning more logs than the transcript budget does not reread every file.
-const summaries = new RunArtifactCache(1024 * 1024, 256);
+const summaries = new RunArtifactCache(1024 * 1024, 2048);
 let nextReaderId = 0;
 
 async function withReadSlot<T>(read: () => Promise<T>): Promise<T> {
@@ -33,14 +34,14 @@ async function statKey(filePath: string): Promise<string> {
   }
 }
 
-export function createRunArtifactReader(adapter: Pick<OwnedRuntimeAdapter, 'parseRunLog'>) {
-  // One byte budget per process; namespaces keep separate stores isolated.
+export function createRunArtifactReader(adapter: Pick<OwnedRuntimeAdapter, 'parseRunLog' | 'runtimeId'>) {
+  // Process-wide byte budgets; namespaces keep separate stores isolated.
   const namespace = `${nextReaderId++}:`;
   const rawRetentionMax = 2 * 1024 * 1024;
   return (run: OwnedRunRecord, includeStdout = true, includeEntries = true) => withReadSlot(async () => {
     const [stdoutKey, stderrKey] = await Promise.all([statKey(run.stdoutPath), statKey(run.stderrPath)]);
     const key = JSON.stringify([
-      stdoutKey, stderrKey, run.outcome, run.finishedAt, run.interruptRequestedAt, run.childExit,
+      stdoutKey, stderrKey, run.outcome, run.finishedAt, run.interruptRequestedAt, run.childExit, run.sandboxed,
     ]);
     const cacheId = namespace + run.id;
     const cached = includeEntries ? cache.get(cacheId) : summaries.get(cacheId);
@@ -49,7 +50,7 @@ export function createRunArtifactReader(adapter: Pick<OwnedRuntimeAdapter, 'pars
         includeStdout ? cached.stdoutRaw ?? (stdoutKey === 'absent' ? '' : readFile(run.stdoutPath, 'utf8').catch(() => '')) : '',
         cached.stderrRaw ?? (stderrKey === 'absent' ? '' : readFile(run.stderrPath, 'utf8').catch(() => '')),
       ]);
-      return { stdoutRaw, stderrRaw, parsed: cached.parsed };
+      return { stdoutRaw, stderrRaw, parsed: cached.parsed, sandboxDenial: cached.sandboxDenial };
     }
     const [stdoutRaw, stderrRaw] = await Promise.all([
       stdoutKey === 'absent' ? '' : readFile(run.stdoutPath, 'utf8').catch(() => ''),
@@ -57,12 +58,15 @@ export function createRunArtifactReader(adapter: Pick<OwnedRuntimeAdapter, 'pars
     ]);
     const parsed = adapter.parseRunLog(stdoutRaw, run, stdoutKey === 'absent' ? undefined
       : new Date(Number(stdoutKey.slice(stdoutKey.indexOf(':') + 1))).toISOString());
-    const retained = { key, parsed,
+    // A stable log needs one denial scan, including successful sandboxed runs.
+    const sandboxDenial = run.sandboxDenial ?? (run.sandboxed
+      ? detectRunSandboxDenial(adapter.runtimeId, stdoutRaw, stderrRaw) : null);
+    const retained = { key, parsed, sandboxDenial,
       stdoutRaw: stdoutRaw.length + stderrRaw.length <= rawRetentionMax ? stdoutRaw : null,
       stderrRaw: stderrRaw.length <= rawRetentionMax ? stderrRaw : null };
     const summary = summaries.set(cacheId, { ...retained, stdoutRaw: null,
       parsed: { ...parsed, entries: [] } });
     const detached = includeEntries ? cache.set(cacheId, retained) : summary;
-    return { stdoutRaw: includeStdout ? stdoutRaw : '', stderrRaw, parsed: detached.parsed };
+    return { stdoutRaw: includeStdout ? stdoutRaw : '', stderrRaw, parsed: detached.parsed, sandboxDenial: detached.sandboxDenial };
   });
 }

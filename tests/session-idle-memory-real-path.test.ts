@@ -13,6 +13,8 @@ it('bounds idle memory after chat and worker history reads, project switches and
     console.log(JSON.stringify(receipt));
     expect(receipt.completedSessions).toBe(12);
     expect(receipt.completedWorkers).toBe(12);
+    expect(receipt.sandboxedWorkers).toBe(12);
+    expect(receipt.sandboxDenials).toBe(1);
     expect(receipt.persistedOutputUnchanged).toBe(true);
     assertIdleRssBudget(receipt);
     for (const phase of ['after', 'afterIdle'] as const) {
