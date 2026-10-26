@@ -21,6 +21,7 @@
  * public read endpoint, add it to ALLOWLIST_PATHS below.
  */
 
+import { hasPreviewResourceAccess } from '@/lib/panel/preview-resource-access';
 import type { NextFetchEvent, NextMiddleware } from 'next/server';
 import { NextResponse, type NextRequest } from 'next/server';
 import { createHash, timingSafeEqual } from 'node:crypto';
@@ -233,6 +234,16 @@ const LOOPBACK_READ_CAPABILITIES: RegExp[] = [
  */
 const SELF_AUTH_PREFIXES = ['/api/worker/', '/api/cloud/', '/api/github/webhook'];
 
+function isOpaquePreviewResourceRead(req: NextRequest): boolean {
+  const origin = req.headers.get('origin');
+  // Images, stylesheets and classic scripts omit Origin in no-cors mode.
+  // The same expiring preview-only grant is required with or without it.
+  return (req.method === 'GET' || req.method === 'HEAD')
+    && (origin === null || origin === 'null')
+    && /^\/api\/(browser|panel)\/proxy\/?$/.test(req.nextUrl.pathname)
+    && hasPreviewResourceAccess(req.nextUrl);
+}
+
 function isTrustedLocalRequest(req: NextRequest): boolean {
   // Tier 1 — socket truth. The bundled production server stamps the real TCP
   // peer address into x-o8-client-addr on EVERY request, overwriting anything
@@ -244,6 +255,7 @@ function isTrustedLocalRequest(req: NextRequest): boolean {
   if (clientAddr) {
     return isLoopbackAddress(clientAddr);
   }
+  if (isOpaquePreviewResourceRead(req) && isLoopbackHostname(req.nextUrl.hostname)) return true;
 
   // Tier 2 — dev fallback (next dev / dev-bridge run Next's stock server,
   // which doesn't stamp the header). Best-effort heuristics; a deliberate
@@ -305,6 +317,9 @@ function isTrustedLocalRequest(req: NextRequest): boolean {
 function readOriginIsLocalOrAbsent(req: NextRequest): boolean {
   const origin = req.headers.get('origin');
   if (!origin) return true;
+  // Sandboxed previews have an opaque origin. Only the confined, cookieless
+  // preview resource routes accept anonymous reads from that origin.
+  if (isOpaquePreviewResourceRead(req)) return true;
   // Shell boot-page origins: tauri://localhost (WebKit) or
   // http(s)://tauri.localhost (WebView2 on Windows) — exact-match set.
   if (isTauriShellOrigin(origin)) return true;

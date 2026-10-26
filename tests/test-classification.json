@@ -5214,6 +5214,22 @@
       ]
     },
     {
+      "path": "tests/preview-next-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/preview-origin-real-path.test.ts",
+      "reasons": [
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/principal-authz.test.ts",
       "reasons": [
         "child-process",
