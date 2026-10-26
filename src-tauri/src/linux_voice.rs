@@ -53,3 +53,27 @@ pub fn system_tts_stop() {
 pub fn system_tts_backend() -> Option<String> {
     speaker().backend().map(|b| b.name().to_string())
 }
+
+/// Speak `text` on a background thread with the system engine — the Linux
+/// counterpart of `tts::playback::play_thread` for the dictation "say …"
+/// command. Uses the saved `reading_speed`; failures are logged, never raised.
+pub(crate) fn speak_in_background(text: String) {
+    if text.trim().is_empty() {
+        return;
+    }
+    let speed = crate::stt::keys::config_f64("reading_speed")
+        .map(|v| v as f32)
+        .filter(|s| s.is_finite() && *s > 0.0)
+        .unwrap_or(1.0);
+    std::thread::spawn(move || match speaker().speak(&text, speed) {
+        Ok(SpeakOutcome::Failed(reason)) | Err(reason) => {
+            log::warn!("[tts] system speech failed: {reason}")
+        }
+        Ok(_) => {}
+    });
+}
+
+/// Silence system speech before the mic opens (push-to-talk barge-in).
+pub(crate) fn stop_speaking() {
+    speaker().stop();
+}
