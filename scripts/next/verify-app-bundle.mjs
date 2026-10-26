@@ -4,6 +4,7 @@ import { existsSync, lstatSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readMachOArchitectures } from '../lib/macos-release-artifacts.mjs';
+import { verifyNextBuildIdentity } from './build-identity.mjs';
 
 /** Release-only gate, after signing. The app's existing notary flow covers its sealed sidecars. */
 export function verifyNextAppSidecar(app) {
@@ -14,6 +15,7 @@ export function verifyNextAppSidecar(app) {
   const required = readMachOArchitectures(join(app, 'Contents/MacOS/o8'));
   const actual = readMachOArchitectures(binary);
   if (JSON.stringify(actual.slice().sort()) !== JSON.stringify(required.slice().sort())) throw new Error('o8 next sidecar architecture does not match the app');
+  const build = verifyNextBuildIdentity(app, actual);
   try {
     execFileSync('codesign', ['--verify', '--strict', '--verbose=2', binary], { stdio: 'pipe' });
     execFileSync('codesign', ['--verify', '--deep', '--strict', app], { stdio: 'pipe' });
@@ -28,7 +30,7 @@ export function verifyNextAppSidecar(app) {
       throw new Error('sidecar must use the app signing team and hardened runtime');
     }
   } catch { throw new Error('o8 next signing coverage verification failed'); }
-  return { architectures: actual, bytes: metadata.size };
+  return { architectures: actual, bytes: metadata.size, ...build };
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

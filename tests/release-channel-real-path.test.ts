@@ -16,7 +16,7 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { afterEach, describe, expect, it } from 'vitest';
 import { resolveReleaseChannel } from '../scripts/lib/release-channel.mjs';
-import { bundleContentSha256, resolveMacosCpuArtifacts } from '../scripts/lib/macos-release-artifacts.mjs';
+import { bundleContentSha256, macosExecutablePayloadSha256, resolveMacosCpuArtifacts } from '../scripts/lib/macos-release-artifacts.mjs';
 
 const roots: string[] = [];
 const releaseScript = join(process.cwd(), 'scripts/release.mjs');
@@ -97,6 +97,13 @@ function fixture(version = '0.1.741-preview.1') {
     writeFileSync(path, universalMachO(), { mode: 0o755 });
   }
   writeFileSync(join(bundle, 'macos', 'o8.app', 'Contents', 'Info.plist'), infoPlist(version));
+  const app = join(bundle, 'macos/o8.app');
+  const receipt = { schema: 'o8/next-build/v1', commit: 'a'.repeat(40), payloadBytes: { x86_64: 32, arm64: 32 }, payloadSha256: Object.fromEntries(
+    (['x86_64', 'arm64'] as const).map(arch => [arch, macosExecutablePayloadSha256(join(app, 'Contents/MacOS/o8-next'), arch)])) };
+  mkdirSync(join(root, 'src-tauri/helpers'), { recursive: true });
+  mkdirSync(join(app, 'Contents/Resources'));
+  writeFileSync(join(root, 'src-tauri/helpers/o8-next-build.json'), JSON.stringify(receipt));
+  writeFileSync(join(app, 'Contents/Resources/o8-next-build.json'), JSON.stringify(receipt));
   const archive = spawnSync('tar', ['czf', join(bundle, 'macos', 'o8.app.tar.gz'), '-C', join(bundle, 'macos'), 'o8.app']);
   if (archive.status !== 0) throw new Error(`failed to create updater fixture: ${archive.stderr}`);
   configureUpdaterSignature(
@@ -148,6 +155,7 @@ export function execFileSync(command, args = [], options = {}) {
     throw new Error('release not found');
   }
   if (command === 'gh' && args[1] === 'create' && args.includes('hurttlocker/o8-releases') && process.env.O8_CHANNEL_TEST_FAIL_MIRROR === '1') throw new Error('mirror unavailable');
+  if (command === 'git' && args[0] === 'rev-parse') return 'a'.repeat(40);
   if (command === 'git' && args[0] === 'describe') return 'v' + process.env.O8_CHANNEL_TEST_VERSION;
   if (command === 'git' && args[0] === 'ls-remote') return 'a'.repeat(40) + '\\trefs/tags/v' + process.env.O8_CHANNEL_TEST_VERSION;
   if (command === 'git' && args[0] === 'log') return args.includes('--format=%H%x09%s') ? 'a'.repeat(40) + '\\tfix: improve workspace feedback' : 'fix: improve workspace feedback';
@@ -155,6 +163,7 @@ export function execFileSync(command, args = [], options = {}) {
 }
 export const spawn = () => { throw new Error('unexpected spawn'); };
 export function spawnSync(command, args) {
+  if (command === 'codesign') return { status: 0, stdout: '', stderr: 'TeamIdentifier=FIXTURE\\nCodeDirectory flags=0x10000(runtime)' };
   if (command !== '/usr/bin/codesign') throw new Error('unexpected spawnSync');
   if (args.includes('--verbose=4')) return { status: 0, stdout: '', stderr: 'Identifier=fixture\\nTeamIdentifier=not set\\nCodeDirectory flags=0x10000(runtime)\\nRuntime Version=15.0.0' };
   return { status: 0, stdout: args.includes('-r') ? 'designated => identifier fixture' : '', stderr: '' };
@@ -271,6 +280,28 @@ describe('release channels through the publication entry point', () => {
     expect(result.status).toBe(1);
     const prefix = distribution === 'updater' ? 'archived ' : distribution === 'installer' ? 'DMG ' : '';
     expect(result.stderr).toContain(`${prefix}Contents/MacOS/o8-next is missing from the macOS app bundle`);
+    expectNoPublicationMutation(f);
+  });
+
+  it.each(['hash', 'commit'] as const)('refuses matching stale app, archive and DMG with an old sidecar %s before publication', kind => {
+    const f = fixture('0.1.741');
+    const app = join(f.bundle, 'macos/o8.app');
+    for (const copy of [app, f.dmgApp]) {
+      if (kind === 'hash') {
+        const binary = join(copy, 'Contents/MacOS/o8-next');
+        const bytes = readFileSync(binary); bytes[bytes.length - 1] ^= 1; writeFileSync(binary, bytes);
+      } else {
+        const path = join(copy, 'Contents/Resources/o8-next-build.json');
+        const receipt = JSON.parse(readFileSync(path, 'utf8')); receipt.commit = 'b'.repeat(40);
+        writeFileSync(path, JSON.stringify(receipt));
+      }
+    }
+    const archive = join(f.bundle, 'macos/o8.app.tar.gz');
+    expect(spawnSync('tar', ['czf', archive, '-C', join(f.bundle, 'macos'), 'o8.app']).status).toBe(0);
+    configureUpdaterSignature(f.root, archive, archive + '.sig');
+    const result = run(f, 'stable');
+    expect(result.status, result.stdout + result.stderr).toBe(1);
+    expect(result.stderr).toMatch(/o8 next.*current build/);
     expectNoPublicationMutation(f);
   });
 

@@ -1,6 +1,9 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "bundle": {
+    "resources": {
+      "helpers/o8-next-build.json": "o8-next-build.json"
+    },
     "externalBin": [
       "helpers/speech_recognizer",
       "helpers/speech-local",

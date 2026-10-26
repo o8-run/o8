@@ -4251,6 +4251,7 @@
       "reasons": [
         "child-process",
         "executable-fixture",
+        "git-cli",
         "native-build",
         "real-path"
       ]

@@ -23,6 +23,7 @@ const RECIPE_FILES = [
   'scripts/build-speech-local.mjs',
   'scripts/build-pi-write.mjs',
   'scripts/next/build-sidecar.mjs',
+  'scripts/next/build-identity.mjs',
   'native/o8-next/Cargo.lock',
   'src-tauri/sidecars/pi-write/Cargo.lock',
   'scripts/tauri-export.mjs',
@@ -50,7 +51,7 @@ const SPEECH_ARTIFACTS = [
   'src-tauri/helpers/speech-local-x86_64-apple-darwin',
 ];
 
-const NEXT_ARTIFACTS = ['', '-aarch64-apple-darwin', '-x86_64-apple-darwin', '-universal-apple-darwin']
+const NEXT_ARTIFACTS = ['', '-aarch64-apple-darwin', '-x86_64-apple-darwin', '-universal-apple-darwin', '-build.json']
   .map(suffix => `src-tauri/helpers/o8-next${suffix}`);
 
 const PI_WRITE_ARTIFACTS = [
