@@ -119,8 +119,10 @@ function AppUpdateCard({ quiet }: { quiet: boolean }) {
   const interruptWorkRef = useRef(false);
 
   useEffect(() => {
+    const action = resolveUpdateAction(installInfo, update?.version ?? null);
     publishAppUpdateView({ version: update?.version ?? null, currentVersion: update?.currentVersion ?? null, outcome: checkReport.outcome, installing,
-      message: blockedNote, error: installError || checkReport.error, downloadOnly: resolveUpdateAction(installInfo, update?.version ?? null).kind === 'download',
+      message: blockedNote, error: installError || checkReport.error, downloadOnly: action.kind === 'download',
+      packageManager: action.kind === 'download' && action.packageManager === true,
       progress, blockers });
   }, [update, checkReport, installing, blockedNote, installError, installInfo, progress, blockers]);
   useEffect(() => { void refreshCliUpdateView(); }, []);
@@ -138,7 +140,7 @@ function AppUpdateCard({ quiet }: { quiet: boolean }) {
   }, [installInfo]);
 
   // What the running install is capable of. Only the server can read
-  // process.platform + APPIMAGE; a deb/rpm Linux install can never
+  // process.platform, APPIMAGE and package ownership; a deb/rpm Linux install can never
   // restart-to-install, so the card points at the release page instead.
   useEffect(() => {
     fetch('/api/panel/app/install-info', { cache: 'no-store' })
@@ -363,7 +365,7 @@ function AppUpdateCard({ quiet }: { quiet: boolean }) {
     if (action.kind === 'download' && !request.userInitiated) {
       // Background applies (idle auto-apply, remote apply mutation) never open
       // a browser on the operator's behalf.
-      setBlockedNote(action.packageManager ? PACKAGE_MANAGER_NOTE : 'This install updates by download. o8 cannot replace it in place.');
+      setBlockedNote(action.packageManager ? 'Package-managed update available.' : 'This install updates by download. o8 cannot replace it in place.');
       return;
     }
     updateInstallInFlight = true;
@@ -506,7 +508,7 @@ function AppUpdateCard({ quiet }: { quiet: boolean }) {
   const action = resolveUpdateAction(installInfo, update.version);
   const packageManaged = action.kind === 'download' && action.packageManager === true;
   const actionLabel = packageManaged ? 'Release page' : action.kind === 'download' ? 'Download' : blockers?.live.length ? updateRestartLabel(blockers) : 'Restart';
-  const note = blockedNote ?? (packageManaged ? PACKAGE_MANAGER_NOTE : null);
+  const note = blockedNote ?? (packageManaged && expanded ? PACKAGE_MANAGER_NOTE : null);
 
   const cardStyle: CSSProperties = {
     flexShrink: 0,

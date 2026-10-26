@@ -82,12 +82,12 @@ describe('resolveUpdateAction', () => {
   });
 
   it('sends a deb/rpm Linux install to its package manager and the release page', () => {
-    expect(resolveUpdateAction(info({ platform: 'linux', arch: 'x64' }), '0.1.726')).toEqual({
+    expect(resolveUpdateAction(info({ platform: 'linux', arch: 'x64', packageManager: 'deb' }), '0.1.726')).toEqual({
       kind: 'download',
       url: 'https://github.com/o8-run/o8/releases/tag/v0.1.726',
       packageManager: true,
     });
-    expect(resolveUpdateAction(info({ platform: 'linux', arch: 'arm64' }), null)).toEqual({
+    expect(resolveUpdateAction(info({ platform: 'linux', arch: 'arm64', packageManager: 'rpm' }), null)).toEqual({
       kind: 'download',
       url: 'https://github.com/o8-run/o8/releases/latest',
       packageManager: true,

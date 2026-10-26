@@ -23,6 +23,8 @@ export interface InstallInfo {
   appImagePath: string | null;
   /** Updater verdict when the shell knows it; null when it has no opinion. */
   updaterSelfUpdatable: boolean | null;
+  /** Package database ownership of the running native shell, when verified. */
+  packageManager?: 'deb' | 'rpm' | null;
 }
 
 export type UpdateAction =
@@ -59,6 +61,8 @@ export function normalizeInstallInfo(payload: unknown): InstallInfo | null {
     platform: normalizeInstallPlatform(record.platform),
     arch,
     appImagePath,
+    ...(record.packageManager === 'deb' || record.packageManager === 'rpm'
+      ? { packageManager: record.packageManager } : {}),
     updaterSelfUpdatable: typeof record.updaterSelfUpdatable === 'boolean'
       ? record.updaterSelfUpdatable
       : null,
@@ -71,18 +75,18 @@ export function normalizeInstallInfo(payload: unknown): InstallInfo | null {
  * shipped macOS behaviour exactly as it was.
  */
 export function isSelfUpdatableInstall(info: InstallInfo): boolean {
+  if (isPackageManagedInstall(info)) return false;
   if (info.updaterSelfUpdatable === false) return false;
   if (info.platform === 'linux') return Boolean(info.appImagePath);
   return true;
 }
 
 /**
- * A Linux install that is not an AppImage came from a .deb or .rpm. Its
- * package manager owns the files, so the update card points at the release
- * page and the package manager instead of a download that replaces nothing.
+ * Only verified package ownership identifies a .deb/.rpm install. A tarball
+ * also has no APPIMAGE, and must retain its existing direct-download action.
  */
 export function isPackageManagedInstall(info: InstallInfo): boolean {
-  return info.platform === 'linux' && !info.appImagePath;
+  return info.platform === 'linux' && (info.packageManager === 'deb' || info.packageManager === 'rpm');
 }
 
 export function releasePageUrl(version: string | null): string {

@@ -24,6 +24,7 @@ vi.mock('@/lib/tauri/bridge', () => ({ isTauri: () => false, canUseTauriEvents: 
 vi.mock('@/components/shared/ConfirmToastHost', () => ({ requestConfirm: vi.fn(async () => false) }));
 
 const { UpdateCard } = await import('./UpdateCard');
+const { publishAppUpdateView } = await import('@/lib/app-update/update-hub-client');
 const { installUpdateAndRestart } = await import('@/lib/app-update/client-restart');
 
 describe('update card on a Linux package install', () => {
@@ -33,7 +34,7 @@ describe('update card on a Linux package install', () => {
   beforeEach(() => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => Response.json(String(input) === '/api/panel/app/install-info'
-      ? { platform: 'linux', arch: 'x64', appImagePath: null, updaterSelfUpdatable: null }
+      ? { platform: 'linux', arch: 'x64', appImagePath: null, updaterSelfUpdatable: null, packageManager: 'deb' }
       : { ok: true })));
     window.localStorage.clear();
     window.sessionStorage.clear();
@@ -59,10 +60,45 @@ describe('update card on a Linux package install', () => {
     expect(button?.textContent).toBe('Release page');
     expect(container.querySelector('[role="note"]')?.textContent).toContain('Update it with your package manager');
 
+    expect(publishAppUpdateView).toHaveBeenLastCalledWith(expect.objectContaining({ packageManager: true }));
     await act(async () => { button!.click(); });
     expect(installUpdateAndRestart).toHaveBeenCalledWith(
       'https://github.com/o8-run/o8/releases/tag/v0.1.811',
       expect.objectContaining({ selfUpdatable: false }),
     );
   });
+
+  it('keeps the collapsed package card to its state and release action', async () => {
+    await act(async () => root.render(createElement(UpdateCard)));
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('o8:update-found', { detail: { version: '0.1.811' } }));
+    });
+    const toggle = container.querySelector<HTMLElement>('[aria-label="Toggle update changelog"]')!;
+    await act(async () => toggle.click());
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(container.textContent).toContain('Update available');
+    expect(container.textContent).toContain('Release page');
+    expect(container.textContent).not.toContain('Update it with your package manager');
+    await act(async () => toggle.click());
+    expect(container.textContent).toContain('Update it with your package manager');
+  });
+
+  it('keeps a remote package update concise while the card is collapsed', async () => {
+    await act(async () => root.render(createElement(UpdateCard)));
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('o8:update-found', { detail: { version: '0.1.811' } }));
+    });
+    const toggle = container.querySelector<HTMLElement>('[aria-label="Toggle update changelog"]')!;
+    await act(async () => toggle.click());
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('o8:realtime', { detail: { data: { events: [{ data: { mutation: {
+        action: 'app-update-apply-requested', status: 'queued', mutationId: 'package-update-collapsed',
+      } } }] } } }));
+    });
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(container.textContent).not.toContain('Update it with your package manager');
+    expect(container.textContent).toContain('Release page');
+    expect(installUpdateAndRestart).not.toHaveBeenCalled();
+  });
+
 });
