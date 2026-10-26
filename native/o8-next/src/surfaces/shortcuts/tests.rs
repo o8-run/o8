@@ -4,6 +4,8 @@ mod review;
 use crate::shell::*;
 #[path = "binding_tests.rs"]
 mod bindings;
+#[path = "modal_tests.rs"]
+mod modal;
 
 fn shortcuts_draw(cx: &mut VisualTestContext) {
     cx.run_until_parked();
