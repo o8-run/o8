@@ -17,6 +17,7 @@ const routes = ['/api/browser/proxy', '/api/panel/proxy'];
 const token = 'preview-next-fixture-operator-token';
 const root = mkdtempSync(join(tmpdir(), 'o8-preview-next-'));
 const cookies: string[] = [];
+const outsideCookies: string[] = [];
 const servers: Server[] = [];
 let app: ChildProcess;
 let browser: Browser;
@@ -60,11 +61,61 @@ describe('preview security through Next response handling', () => {
       verifyClient: (info: { req: IncomingMessage }) => new URL(info.req.url!, socketBase).searchParams.get('token') === token,
     });
     sockets.on('connection', socket => { socketConnections++; socket.close(); });
-    otherUpstream = await listen(createServer((_req, res) => res.end('other preview')));
+    otherUpstream = await listen(createServer((req, res) => {
+      outsideCookies.push(req.headers.cookie ?? '');
+      res.setHeader('set-cookie', '__session=replaced; HttpOnly; Path=/');
+      res.end('other preview');
+    }));
     upstream = await listen(createServer((req, res) => {
       cookies.push(req.headers.cookie ?? '');
       res.setHeader('set-cookie', ['preview-canary=replaced; Path=/', 'preview-http-only=; Max-Age=0; Path=/']);
       res.setHeader('clear-site-data', '"cookies", "storage"');
+      const fixtureUrl = new URL(req.url!, upstream);
+      if (fixtureUrl.pathname === '/refresh') {
+        const kind = fixtureUrl.searchParams.get('kind');
+        const target = fixtureUrl.searchParams.get('target') === 'app'
+          ? `${base}/fixture-refresh-app` : `${otherUpstream}/refresh-endpoint`;
+        res.setHeader('content-type', kind?.startsWith('meta-xhtml') ? 'application/xhtml+xml' : 'text/html');
+        res.setHeader('set-cookie', '__session=replaced; HttpOnly; Path=/');
+        if (kind === 'header') res.setHeader('refresh', `0; url=${target}`);
+        if (kind?.startsWith('meta-encoding-')) {
+          res.setHeader('content-type', 'text/html; charset=utf-16le');
+          const document = `<html><head><meta http-equiv=refresh content="0;url=${target}"></head><body>refresh fixture</body></html>`;
+          res.end(Buffer.concat([Buffer.from(kind.endsWith('two') ? ' ' : ''), Buffer.from(document, 'utf16le')]));
+          return;
+        }
+        // Character references and a quoted > exercise browser HTML parsing.
+        const meta = kind === 'meta' ? `<meta data-note=">" content="0; URL=${target}" HTTP-EQUIV="r&#101;fresh">`
+          : kind === 'meta-base' ? `<base data="><meta http-equiv=refresh content='0;url=${target}'>">`
+          : kind === 'meta-xhtml-prefix' ? `<h:meta xmlns:h="http://www.w3.org/1999/xhtml" http-equiv="refresh" content="0;url=${target}"/>`
+          : kind === 'meta-xhtml-script' ? `<script/><meta http-equiv="refresh" content="0;url=${target}"/>` : '';
+        res.end(`<!DOCTYPE html><html xmlns="http://www.w3.org/1999/xhtml"><head>${meta}</head><body data-preview-ready="true">refresh fixture</body></html>`);
+        return;
+      }
+      if (fixtureUrl.pathname === '/subresources') {
+        const kind = fixtureUrl.searchParams.get('kind');
+        const resource = kind === 'image' ? '<img id="resource" src="/pixel.svg">'
+          : kind === 'stylesheet' ? '<link rel="stylesheet" href="/style.css">'
+          : '<script src="/classic.js"></script>';
+        res.setHeader('content-type', 'text/html');
+        res.end(`<!doctype html><html><head></head><body>${resource}</body></html>`);
+        return;
+      }
+      if (req.url === '/pixel.svg') {
+        res.setHeader('content-type', 'image/svg+xml');
+        res.end('<svg xmlns="http://www.w3.org/2000/svg" width="2" height="2"><rect width="2" height="2"/></svg>');
+        return;
+      }
+      if (req.url === '/style.css') {
+        res.setHeader('content-type', 'text/css');
+        res.end('body { color: rgb(12, 34, 56); }');
+        return;
+      }
+      if (req.url === '/classic.js') {
+        res.setHeader('content-type', 'text/javascript');
+        res.end('document.body.dataset.classic = "ready";');
+        return;
+      }
       if (req.url === '/interactive') {
         res.setHeader('content-type', 'text/html');
         res.end('<!doctype html><button id="count" onclick="this.textContent=1">0</button><script type="module" src="./module.js"></script>');
@@ -161,14 +212,95 @@ describe('preview security through Next response handling', () => {
     } finally { await page.close(); }
   });
 
-  it('confines opaque resource access through the real middleware and proxy', async () => {
+  it.each(routes.flatMap(route => [
+    [route, 'meta', 'outside'], [route, 'meta', 'app'],
+    [route, 'header', 'outside'], [route, 'header', 'app'],
+    [route, 'meta-encoding-one', 'outside'], [route, 'meta-encoding-two', 'outside'],
+    [route, 'meta-base', 'outside'], [route, 'meta-xhtml-prefix', 'outside'], [route, 'meta-xhtml-script', 'outside'],
+  ]))('%s neutralizes %s refresh to %s and isolates cookies', async (route, kind, target) => {
+    const context = await browser.newContext();
+    await context.addCookies([{ name: '__session', value: 'kept', url: base, httpOnly: true }]);
+    expect((await context.cookies(base)).find(cookie => cookie.name === '__session')?.httpOnly).toBe(true);
+    const page = await context.newPage();
+    const navigations: string[] = [];
+    page.on('framenavigated', frame => { if (frame.parentFrame()) navigations.push(frame.url()); });
+    cookies.length = 0;
+    outsideCookies.length = 0;
+    try {
+      await page.goto(`${base}/fixture-parent`);
+      const src = `${base}${route}?url=${encodeURIComponent(`${upstream}/refresh?kind=${kind}&target=${target}`)}`;
+      const response = page.waitForResponse(response => response.url() === src);
+      await page.evaluate(src => {
+        const frame = document.createElement('iframe');
+        frame.id = 'preview';
+        frame.sandbox.add('allow-scripts', 'allow-same-origin');
+        frame.src = src;
+        document.body.append(frame);
+      }, src);
+      const initial = await response;
+      await initial.finished();
+      // Give the fixture's immediate refresh time to run before checking its destination.
+      await page.waitForTimeout(500);
+      expect.soft(navigations).toEqual([src]);
+      if (kind.startsWith('meta-encoding-')) {
+        expect.soft(initial.headers()['content-type']).toBe('text/html; charset=utf-8');
+      } else {
+        expect.soft(await page.frameLocator('#preview').locator('body').textContent()).toContain('refresh fixture');
+      }
+      expect.soft(await page.frameLocator('#preview').locator('meta[http-equiv]').count()).toBe(0);
+      expect.soft(initial.headers()['refresh']).toBeUndefined();
+      expect.soft(cookies.length).toBeGreaterThan(0);
+      expect.soft(cookies.every(value => !value.includes('__session'))).toBe(true);
+      expect.soft(outsideCookies).toEqual([]);
+      expect((await context.cookies(base)).find(cookie => cookie.name === '__session')?.value).toBe('kept');
+    } finally { await context.close(); }
+  });
+
+  it.each(routes.flatMap(route => ['image', 'stylesheet', 'classic script'].map(kind => [route, kind])))('%s loads preview %s without Origin or app cookies', async (route, kind) => {
+    const context = await browser.newContext();
+    await context.addCookies([{ name: '__session', value: 'kept', url: base, httpOnly: true }]);
+    expect((await context.cookies(base)).find(cookie => cookie.name === '__session')?.httpOnly).toBe(true);
+    const page = await context.newPage();
+    cookies.length = 0;
+    try {
+      await page.goto(`${base}/fixture-parent`);
+      const path = kind === 'image' ? '/pixel.svg' : kind === 'stylesheet' ? '/style.css' : '/classic.js';
+      const resource = page.waitForRequest(request => {
+        const url = new URL(request.url());
+        return url.pathname === '/api/panel/proxy' && url.searchParams.get('url') === upstream + path;
+      });
+      await page.evaluate(src => {
+        const frame = document.createElement('iframe');
+        frame.id = 'preview';
+        frame.sandbox.add('allow-scripts', 'allow-same-origin');
+        frame.src = src;
+        document.body.append(frame);
+      }, `${route}?url=${encodeURIComponent(`${upstream}/subresources?kind=${kind}`)}`);
+      const request = await resource;
+      const response = await request.response();
+      expect((await request.allHeaders()).origin).toBeUndefined();
+      expect(response?.status()).toBe(200);
+      const frame = page.frameLocator('#preview');
+      if (kind === 'image') {
+        await expect.poll(() => frame.locator('#resource').evaluate(node => (node as HTMLImageElement).naturalWidth)).toBe(2);
+      } else if (kind === 'stylesheet') {
+        await expect.poll(() => frame.locator('body').evaluate(node => getComputedStyle(node).color)).toBe('rgb(12, 34, 56)');
+      } else {
+        await expect.poll(() => frame.locator('body').getAttribute('data-classic')).toBe('ready');
+      }
+      expect(cookies.every(value => !value.includes('__session'))).toBe(true);
+      expect((await context.cookies(base)).find(cookie => cookie.name === '__session')?.value).toBe('kept');
+    } finally { await context.close(); }
+  });
+
+  it.each(['null', undefined])('confines %s resource access through the real middleware and proxy', async origin => {
     const response = await fetch(`${base}/api/panel/proxy?url=${encodeURIComponent(`${upstream}/interactive`)}`);
     const document = await response.text();
     const match = /src="([^"]+)"/.exec(document);
     expect(match).not.toBeNull();
     const asset = new URL(match![1].replaceAll('&amp;', '&'));
     const access = asset.searchParams.get('previewResource')!;
-    const headers = { origin: 'null', 'sec-fetch-site': 'cross-site' };
+    const headers: Record<string, string> = { 'sec-fetch-site': 'cross-site', ...(origin ? { origin } : {}) };
     const allowed = await fetch(asset, { headers });
     expect(allowed.status).toBe(200);
     expect(allowed.headers.get('access-control-allow-origin')).toBe('*');

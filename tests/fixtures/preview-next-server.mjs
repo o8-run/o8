@@ -12,6 +12,10 @@ const handleRequest = (req, res) => {
   if (req.url === '/fixture-parent') {
     res.setHeader('content-type', 'text/html');
     res.end(readFileSync(process.env.PREVIEW_PARENT_FILE));
+  } else if (req.url === '/fixture-refresh-app') {
+    res.setHeader('content-type', 'text/html');
+    res.setHeader('set-cookie', '__session=replaced; HttpOnly; Path=/');
+    res.end('<html><body>application fixture</body></html>');
   } else {
     void handle(req, res);
   }

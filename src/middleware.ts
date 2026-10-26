@@ -234,8 +234,11 @@ const LOOPBACK_READ_CAPABILITIES: RegExp[] = [
 const SELF_AUTH_PREFIXES = ['/api/worker/', '/api/cloud/', '/api/github/webhook'];
 
 function isOpaquePreviewResourceRead(req: NextRequest): boolean {
+  const origin = req.headers.get('origin');
+  // Images, stylesheets and classic scripts omit Origin in no-cors mode.
+  // The same expiring preview-only grant is required with or without it.
   return (req.method === 'GET' || req.method === 'HEAD')
-    && req.headers.get('origin') === 'null'
+    && (origin === null || origin === 'null')
     && /^\/api\/(browser|panel)\/proxy\/?$/.test(req.nextUrl.pathname)
     && hasPreviewResourceAccess(req.nextUrl);
 }

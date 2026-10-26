@@ -39,6 +39,7 @@ writeFileSync(
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
 
 const { panelGateMiddleware } = await import('@/middleware');
+const { createPreviewResourceAccess } = await import('@/lib/panel/preview-resource-access');
 
 function gatedRequest(
   url: string,
@@ -1020,5 +1021,33 @@ describe('panelGateMiddleware — boot-gate identity probe (v0.1.600 stuck-boot 
       }),
     );
     expect(res.status).toBe(401);
+  });
+});
+
+describe('panelGateMiddleware preview resource grants', () => {
+  it.each(['/api/browser/proxy', '/api/panel/proxy'])('%s admits signed no-Origin subresource GETs only for their preview origin', route => {
+    const target = new URL('http://127.0.0.1:39001/image.svg');
+    const access = createPreviewResourceAccess(target);
+    const url = new URL(route, 'http://localhost:3001');
+    url.searchParams.set('url', target.href);
+    url.searchParams.set('previewResource', access);
+    const headers = { 'sec-fetch-site': 'cross-site', 'sec-fetch-mode': 'no-cors' };
+    expect(panelGateMiddleware(gatedRequest(url.href, { headers })).status).toBe(200);
+    for (const changed of ['', access.slice(0, -1) + (access.endsWith('0') ? '1' : '0')]) {
+      const denied = new URL(url);
+      denied.searchParams.set('previewResource', changed);
+      expect(panelGateMiddleware(gatedRequest(denied.href, { headers })).status).toBe(401);
+    }
+    for (const target of ['http://127.0.0.1:39002/image.svg', 'http://localhost:3001/api/leases']) {
+      const denied = new URL(url);
+      denied.searchParams.set('url', target);
+      expect(panelGateMiddleware(gatedRequest(denied.href, { headers })).status).toBe(401);
+    }
+    expect(panelGateMiddleware(gatedRequest(url.href, { method: 'POST', headers })).status).toBe(401);
+    expect(panelGateMiddleware(gatedRequest(url.href, { headers: { ...headers, origin: 'https://example.invalid' } })).status).toBe(401);
+    expect(panelGateMiddleware(gatedRequest(url.href, { headers: { ...headers, 'x-o8-client-addr': '192.0.2.1' } })).status).toBe(401);
+    const app = new URL('/api/leases', url);
+    app.search = url.search;
+    expect(panelGateMiddleware(gatedRequest(app.href, { headers })).status).toBe(401);
   });
 });

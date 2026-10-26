@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { PREVIEW_PROXY_ROUTE } from '@/lib/panel/preview';
 import { isSensitivePreviewRequestHeader, parseLocalPreviewTarget, PREVIEW_DOCUMENT_CSP } from '@/lib/panel/preview-proxy-security';
 import { createPreviewResourceAccess, hasPreviewResourceAccess, PREVIEW_RESOURCE_KEY } from '@/lib/panel/preview-resource-access';
+import { neutralizePreviewRefresh } from '@/lib/panel/neutralize-preview-refresh';
 import { rewritePreviewModule } from '@/lib/panel/rewrite-preview-module';
 
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '0.0.0.0', '::1']);
@@ -102,6 +103,8 @@ function rewriteHtml(html: string, currentUrl: URL, appOrigin: string, xhtml: bo
       return `${name}="${escapeAttribute(candidate ? appOrigin + buildProxyUrl(candidate, access) : value)}"`;
     },
   );
+  // Parse after compatibility rewriting so it cannot expose a new refresh tag.
+  const safeDocument = neutralizePreviewRefresh(rewritten, xhtml);
   const source = `(() => {
     const base = ${JSON.stringify(currentUrl.toString()).replaceAll('<', '\\u003c')};
     const origin = ${JSON.stringify(appOrigin)};
@@ -120,9 +123,9 @@ function rewriteHtml(html: string, currentUrl: URL, appOrigin: string, xhtml: bo
     XMLHttpRequest.prototype.open = function(method, url, ...rest) { return nativeOpen.call(this, method, resolve(url), ...rest); };
   })();`;
   const bootstrap = `<script>${xhtml ? `//<![CDATA[\n${source}\n//]]>` : source}</script>`;
-  return /<head\b[^>]*>/i.test(rewritten)
-    ? rewritten.replace(/<head\b[^>]*>/i, match => match + bootstrap)
-    : bootstrap + rewritten;
+  return /<head\b[^>]*>/i.test(safeDocument)
+    ? safeDocument.replace(/<head\b[^>]*>/i, match => match + bootstrap)
+    : bootstrap + safeDocument;
 }
 
 function buildUpstreamHeaders(req: NextRequest, targetUrl: URL): Headers {
@@ -190,6 +193,8 @@ async function proxyRequest(req: NextRequest): Promise<NextResponse> {
     headers.set('cache-control', 'no-store');
     headers.set('referrer-policy', 'no-referrer');
     headers.delete('set-cookie');
+    // Refresh is browser navigation on any response type, not an HTTP redirect.
+    headers.delete('refresh');
     headers.delete('clear-site-data');
     headers.delete('service-worker-allowed');
 
@@ -216,6 +221,8 @@ async function proxyRequest(req: NextRequest): Promise<NextResponse> {
       // Cookies are shared across ports. Never navigate the browser directly to
       // the source: that would bypass request and response cookie stripping.
       const html = rewriteHtml(await upstream.text(), targetUrl, req.nextUrl.origin, contentType.includes('application/xhtml+xml'), access);
+      // Match the browser's decoder to the text that was sanitized above.
+      headers.set('content-type', `${contentType.includes('application/xhtml+xml') ? 'application/xhtml+xml' : 'text/html'}; charset=utf-8`);
       headers.delete('content-length');
       headers.delete('content-encoding');
       return new NextResponse(html, { status: upstream.status, headers });
