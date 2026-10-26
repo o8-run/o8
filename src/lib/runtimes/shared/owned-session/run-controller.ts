@@ -40,7 +40,7 @@ import { guardedWorkspaceInvocation } from '@/lib/worktree/materialization-execu
 import { tmuxSessionName } from '@/lib/terminal/tmux';
 import { pathWithNodeRuntime } from '@/lib/util/node-on-path';
 import { crashSurvivableWorkersEnabled } from './crash-survival';
-import { assertOwnedSessionProcessIdentity, captureOwnedRunIdentity } from './process-identity';
+import { assertOwnedSessionProcessIdentity, captureOwnedRunIdentity, verifyStartedChildIdentity } from './process-identity';
 import { emitRuntimeFallbackNotification } from './run-notifications';
 import { observeChildExit, readAbnormalStderrTail } from './exit-outcome';
 import { prepareOwnedLaunchArgs } from './launch-args';
@@ -778,7 +778,8 @@ export function createOwnedRunController({
             console.warn(`[owned-store] ${runtimeId} child-exit recording failed for ${run.id}:`, err);
           });
         }
-        await runtimeLaunchStep(session, 'identity_proof', () => assertOwnedSessionProcessIdentity(session, runtimeId));
+        await verifyStartedChildIdentity(() => runtimeLaunchStep(session, 'identity_proof',
+          () => assertOwnedSessionProcessIdentity(session, runtimeId)), run, detachedChild, runPersisted);
         return run;
       });
     } catch (error) {

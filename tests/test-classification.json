@@ -4789,6 +4789,14 @@
       ]
     },
     {
+      "path": "tests/owned-stop-absent-run-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/packaged-server-smoke-real-path.test.ts",
       "reasons": [
         "child-process",

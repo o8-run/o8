@@ -11,6 +11,24 @@ import type { OwnedRuntimeAdapter, OwnedSessionRecord, ParsedRunLog } from './ty
 
 const ensureDispatchBackendReadyMock = vi.hoisted(() => vi.fn());
 const fetchRuntimeLaunchMock = vi.hoisted(() => vi.fn());
+const startupSweep = vi.hoisted(() => ({
+  observation: undefined as { root: string; resolve: (result: Promise<number>) => void } | undefined,
+}));
+vi.mock('./fleet', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./fleet')>();
+  return { ...actual, createFleetComputer: (input: Parameters<typeof actual.createFleetComputer>[0]) => {
+    const fleet = actual.createFleetComputer(input);
+    return { ...fleet, sweepOrphanedSessions: (...args: Parameters<typeof fleet.sweepOrphanedSessions>) => {
+      const result = fleet.sweepOrphanedSessions(...args);
+      if (startupSweep.observation?.root === input.root) {
+        const { resolve } = startupSweep.observation;
+        startupSweep.observation = undefined;
+        resolve(result);
+      }
+      return result;
+    } };
+  } };
+});
 const handleWorkerFailureSpy = vi.hoisted(() => vi.fn());
 
 vi.mock('@/lib/runtimes/shared/dispatch-readiness', async (importOriginal) => {
@@ -31,6 +49,19 @@ vi.mock('./worker-failure', async (importOriginal) => {
     };
   } };
 });
+
+async function readyStore(
+  create: typeof import('./store').createOwnedSessionStore,
+  ...args: Parameters<typeof create>
+) {
+  const root = process.env[args[0].rootEnvVar] || args[0].rootDefault;
+  const startup = new Promise<number>((resolve) => { startupSweep.observation = { root, resolve }; });
+  const store = create(...args);
+  // Finish the real startup sweep before launch/explicit-sweep fixtures race
+  // its I/O or teardown removes a root it can still write. No orphan is hidden.
+  await expect(startup).resolves.toBe(0);
+  return store;
+}
 
 describe('createOwnedSessionStore child exit recording', () => {
   let tempRoot: string;
@@ -56,6 +87,7 @@ describe('createOwnedSessionStore child exit recording', () => {
   });
 
   afterEach(async () => {
+    startupSweep.observation = undefined;
     handleWorkerFailureSpy.mockReset();
     ensureDispatchBackendReadyMock.mockReset();
     fetchRuntimeLaunchMock.mockReset();
@@ -74,7 +106,7 @@ describe('createOwnedSessionStore child exit recording', () => {
 
   it('records nonzero exit code and stderr tail from the real runner child', async () => {
     const { createOwnedSessionStore } = await import('./store');
-    const store = createOwnedSessionStore(testAdapter('exit-1'));
+    const store = await readyStore(createOwnedSessionStore, testAdapter('exit-1'));
 
     const launched = await store.launch({ cwd: repoPath, prompt: 'exit 1' });
     const session = await waitForRecordedExit(launched.surfaceId);
@@ -111,7 +143,7 @@ describe('createOwnedSessionStore child exit recording', () => {
       storageAdmissionReservationId: `reservation:${packetId}:1`,
     });
     process.env.CORTEX_IDE_OWNED_CODEX_ROOT = process.env.O8_TEST_CHILD_EXIT_ROOT;
-    const store = createOwnedSessionStore({ ...testAdapter(kind),
+    const store = await readyStore(createOwnedSessionStore, { ...testAdapter(kind),
       runtimeId: 'codex', surfaceIdPrefix: 'codex-owned:',
       rootEnvVar: 'CORTEX_IDE_OWNED_CODEX_ROOT' }, {
       workspaceSpawnGuard: async () => ({ status: 'available', source: 'no-snapshot' }),
@@ -201,7 +233,7 @@ describe('createOwnedSessionStore child exit recording', () => {
 
   it('records SIGKILL signal and stderr tail from the real runner child', async () => {
     const { createOwnedSessionStore } = await import('./store');
-    const store = createOwnedSessionStore(testAdapter('sigkill'));
+    const store = await readyStore(createOwnedSessionStore, testAdapter('sigkill'));
 
     const launched = await store.launch({ cwd: repoPath, prompt: 'sigkill' });
     const session = await waitForRecordedExit(launched.surfaceId);
@@ -215,6 +247,61 @@ describe('createOwnedSessionStore child exit recording', () => {
     expect(run.childExit?.stderrTail).toContain('rmcp session-delete 404');
   }, 20_000);
 
+  it.each(['exited', 'live'] as const)('retains real child truth when final identity observation is unknown (%s)', async (mode) => {
+    const { createOwnedSessionStore } = await import('./store');
+    const { probeOwnedRunProcessClaim } = await import('./run-process-proof');
+    process.env.CORTEX_IDE_OWNED_CODEX_ROOT = process.env.O8_TEST_CHILD_EXIT_ROOT;
+    const store = await readyStore(createOwnedSessionStore, { ...testAdapter('auth-failure'),
+      runtimeId: 'codex', surfaceIdPrefix: 'codex-owned:', rootEnvVar: 'CORTEX_IDE_OWNED_CODEX_ROOT',
+      launchArgs: mode === 'live' ? () => ['-e', 'setInterval(() => {}, 1000)'] : testAdapter('auth-failure').launchArgs,
+    }, { workspaceSpawnGuard: async () => ({ status: 'available', source: 'no-snapshot' }) });
+    const identityModule = await import('./process-identity');
+    const original = identityModule.assertOwnedSessionProcessIdentity;
+    let observed = false;
+    let observedPid = 0;
+    let observedMarker = '';
+    let observedSurface = '';
+    const identitySpy = vi.spyOn(identityModule, 'assertOwnedSessionProcessIdentity').mockImplementation(async (...args) => {
+      const run = args[0].activeRun;
+      if (!observed && run?.spawnState === 'started') {
+        observed = true; observedPid = run.pid; observedMarker = run.processMarker!;
+        if (mode === 'exited') await vi.waitFor(() => {
+          expect(() => process.kill(run.pid, 0)).toThrow();
+        });
+        throw new identityModule.OwnedProcessIdentityError('unknown');
+      }
+      return original(...args);
+    });
+    try {
+      const launched = await store.launch({ cwd: repoPath, prompt: 'Observe the actual child',
+        packetId: `identity-observation-${Date.now()}`, model: 'gpt-5.6-terra', effort: 'low' });
+      observedSurface = launched.surfaceId;
+      expect(observed).toBe(true);
+      expect(launched.ok, launched.note).toBe(mode === 'exited');
+      const sessionPath = path.join(process.env.O8_TEST_CHILD_EXIT_ROOT!, launched.surfaceId.split(':')[1], 'session.json');
+      if (mode === 'exited') {
+        const saved = await waitForRecordedExit(launched.surfaceId);
+        expect(saved.recentRuns).toHaveLength(1);
+        expect(saved.recentRuns[0].childExit).toMatchObject({ code: 1, classification: 'nonzero-exit' });
+        expect(saved.recentRuns[0].childExit?.stderrTail).toContain('refresh_token_reused');
+      } else {
+        expect(launched.note).toContain('process identity is unknown');
+        const saved = JSON.parse(await readFile(sessionPath, 'utf8')) as OwnedSessionRecord;
+        expect(saved.activeRun).toMatchObject({ pid: observedPid, spawnState: 'started' });
+        expect(saved.activeRun?.childExit).toBeUndefined();
+        expect(await probeOwnedRunProcessClaim({ pid: observedPid,
+          marker: observedMarker, rootPid: observedPid })).toEqual({ state: 'match' });
+      }
+    } finally {
+      identitySpy.mockRestore();
+      if (await probeOwnedRunProcessClaim({ pid: observedPid,
+        marker: observedMarker, rootPid: observedPid }).then(proof => proof.state === 'match')) {
+        process.kill(observedPid, 'SIGKILL');
+      }
+      if (observedSurface && observedPid) await waitForRecordedExit(observedSurface);
+    }
+  }, 20_000);
+
   it('persists provider failure truth when the real child exits zero', async () => {
     const [{ createLane, getLaneEvents }, { createOwnedSessionStore }] = await Promise.all([
       import('@/lib/lane/registry'),
@@ -226,7 +313,7 @@ describe('createOwnedSessionStore child exit recording', () => {
       runtime: 'claude-code',
       label: 'provider error child exit',
     });
-    const store = createOwnedSessionStore(testAdapter('provider-error'));
+    const store = await readyStore(createOwnedSessionStore, testAdapter('provider-error'));
 
     const launched = await store.launch({
       cwd: repoPath,
@@ -253,7 +340,7 @@ describe('createOwnedSessionStore child exit recording', () => {
     const { createOwnedSessionStore } = await import('./store');
     const { deriveRunOutcome } = await import('./helpers');
     const adapter = testAdapter('provider-error');
-    const store = createOwnedSessionStore(adapter);
+    const store = await readyStore(createOwnedSessionStore, adapter);
     const surfaceId = 'test-child-provider-error:bridge-failure';
     await writeSession(surfaceId, 'bridge-failure');
     const sessionPath = path.join(process.env.O8_TEST_CHILD_EXIT_ROOT!, 'bridge-failure', 'session.json');
@@ -298,7 +385,7 @@ describe('createOwnedSessionStore child exit recording', () => {
       });
     `;
     const parseRunLog = vi.fn(claudeCodeOwnedAdapter.parseRunLog);
-    const store = createOwnedSessionStore({
+    const store = await readyStore(createOwnedSessionStore, {
       ...testAdapter('provider-error'),
       launchArgs: () => ['-e', script],
       parseRunLog,
@@ -380,7 +467,7 @@ describe('createOwnedSessionStore child exit recording', () => {
       runtime: 'codex',
       packetId,
     });
-    const store = createOwnedSessionStore({ ...testAdapter('sandbox-denial'),
+    const store = await readyStore(createOwnedSessionStore, { ...testAdapter('sandbox-denial'),
       // Credential policies infer runtime identity from the real owned-surface convention.
       surfaceIdPrefix: validIdentity ? 'test-child-sandbox-denial-owned:' : 'test-child-sandbox-denial:' });
 
@@ -423,7 +510,7 @@ describe('createOwnedSessionStore child exit recording', () => {
 
   it('sweeps an old active owned session when no lane references its surface id', async () => {
     const { createOwnedSessionStore } = await import('./store');
-    const store = createOwnedSessionStore(testAdapter('exit-1'));
+    const store = await readyStore(createOwnedSessionStore, testAdapter('exit-1'));
     const surfaceId = 'test-child-exit-1:orphan-active';
     await writeSession(surfaceId, 'orphan-active');
 
@@ -456,7 +543,7 @@ describe('createOwnedSessionStore child exit recording', () => {
       }] },
     }) + '\n');
     await writeFile(sessionPath, JSON.stringify(session));
-    const store = createOwnedSessionStore(testAdapter('exit-1'));
+    const store = await readyStore(createOwnedSessionStore, testAdapter('exit-1'));
     await store.getRuntimeTail(surfaceId);
     await store.getReviewPacket(surfaceId);
     const persisted = JSON.parse(await readFile(sessionPath, 'utf8')) as OwnedSessionRecord;
@@ -487,7 +574,7 @@ describe('createOwnedSessionStore child exit recording', () => {
       type: 'user', message: { content: [{ type: 'tool_result', is_error: true, content: diagnostic }] },
     }) + '\n' : '') + success + '\n');
     await writeFile(sessionPath, JSON.stringify(session));
-    const store = createOwnedSessionStore({ ...testAdapter('exit-1'), runtimeId: 'claude-code',
+    const store = await readyStore(createOwnedSessionStore, { ...testAdapter('exit-1'), runtimeId: 'claude-code',
       parseRunLog: claudeCodeOwnedAdapter.parseRunLog });
     await store.getRuntimeTail(surfaceId);
     await store.getReviewPacket(surfaceId);
@@ -500,7 +587,7 @@ describe('createOwnedSessionStore child exit recording', () => {
 
   it('keeps an old active owned session when a lane references its surface id', async () => {
     const { createOwnedSessionStore } = await import('./store');
-    const store = createOwnedSessionStore(testAdapter('exit-1'));
+    const store = await readyStore(createOwnedSessionStore, testAdapter('exit-1'));
     const surfaceId = 'test-child-exit-1:lane-bound-active';
     await writeSession(surfaceId, 'lane-bound-active');
 

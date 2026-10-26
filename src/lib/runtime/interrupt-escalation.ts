@@ -11,10 +11,11 @@ import {
   pidCommandLine,
 } from '@/lib/runtimes/shared/owned-session/helpers';
 import { getOwnedSessionLifecycle } from '@/lib/runtimes/shared/owned-session-lifecycle';
-import { withOwnedStopOutcome } from '@/lib/runtimes/shared/owned-session/stop-outcome';
+import { withOwnedStopOutcome, withOwnedRunAbsenceProof } from '@/lib/runtimes/shared/owned-session/stop-outcome';
 import { probeOwnedSignalIdentity, type OwnedProcessEvidence } from '@/lib/runtimes/shared/owned-session/process-identity';
 import {
   probeOwnedRunProcessClaim,
+  probeOwnedRunMarker,
   resolveSpawnedProcessGroupId,
 } from '@/lib/runtimes/shared/owned-session/run-process-proof';
 
@@ -597,6 +598,25 @@ export async function escalateInterruptOwnedSurface(surfaceId: string): Promise<
 
   if (!activeRun.tmuxSession && (activeRun.processIdentityRequired || activeRun.processIdentity)) {
     const proof = await probeOwnedSignalIdentity(activeRun);
+    if (proof.state === 'absent' && process.platform !== 'win32'
+      && Number.isSafeInteger(activeRun.processGroupId) && activeRun.processGroupId! > 0
+      && /^[A-Za-z0-9._-]{1,160}$/.test(activeRun.processMarker ?? '')) {
+      return withOwnedRunAbsenceProof(surfaceId, activeRun, async () => {
+        // An exited leader cannot authorize a signal to a reused group. It
+        // can be confirmed absent only with fresh, complete group AND marker
+        // clearance, including descendants that escaped the original group.
+        const clear = (await probeOwnedSignalIdentity(activeRun)).state === 'absent'
+          && probePosixSignalTarget(activeRun.pid!) === 'dead'
+          && probePosixProcessGroup(activeRun.processGroupId!) === 'dead'
+          && await probeOwnedRunMarker(activeRun.processMarker) === 'clear'
+          && (await probeOwnedSignalIdentity(activeRun)).state === 'absent'
+          && probePosixSignalTarget(activeRun.pid!) === 'dead'
+          && probePosixProcessGroup(activeRun.processGroupId!) === 'dead';
+        return { attempted: false, confirmedDead: clear, alreadyDead: clear, steps: [], pid: activeRun.pid,
+          note: clear ? 'The owned leader, process group and run marker are absent.'
+            : 'Owned run absence could not be confirmed; no process was signaled.' };
+      });
+    }
     if (proof.state !== 'match') {
       return { attempted: false, confirmedDead: false, alreadyDead: false, steps: [], pid: activeRun.pid,
         note: 'Worker start identity changed or is unavailable; the run remains held and no process was signaled.' };

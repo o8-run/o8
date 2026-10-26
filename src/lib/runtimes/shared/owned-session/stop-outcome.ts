@@ -6,6 +6,7 @@ import { assertOwnedStopAdmission } from './action-admission';
 type StopOperation = () => Promise<InterruptEscalationResult>;
 type StopHandler = (
   surfaceId: string, expected: OwnedActiveRun, operation: StopOperation,
+  readOnly?: boolean,
 ) => Promise<InterruptEscalationResult>;
 
 const handlers = new Map<string, StopHandler>();
@@ -17,10 +18,10 @@ export function registerOwnedStopHandler(
   lock: <T>(surfaceId: string, operation: () => Promise<T>) => Promise<T>,
   invalidate: () => void,
 ): void {
-  handlers.set(prefix, (surfaceId, expected, operation) => lock(surfaceId, async () => {
+  handlers.set(prefix, (surfaceId, expected, operation, readOnly = false) => lock(surfaceId, async () => {
     const session = await io.findSession(surfaceId);
     assertOwnedStopAdmission(session);
-    const run = session?.activeRun;
+    const run = session?.activeRun ?? (readOnly ? session?.recentRuns[0] : undefined);
     if (!run || !expected.id || run.id !== expected.id
       || run.pid !== expected.pid || run.tmuxSession !== expected.tmuxSession
       || run.processMarker !== expected.processMarker
@@ -34,6 +35,7 @@ export function registerOwnedStopHandler(
     }
     const requestedAt = new Date().toISOString();
     const result = await operation();
+    if (readOnly) return result;
     // An absent process or a denied signal is not an intentional interruption.
     if (!result.steps.some((step) => step.sent)) return result;
 
@@ -60,4 +62,14 @@ export function withOwnedStopOutcome(
   const handler = [...handlers.entries()].find(([prefix]) => surfaceId.startsWith(prefix))?.[1];
   // ACP stores have a separate lifecycle and do not use shared run outcomes.
   return handler ? handler(surfaceId, expected, operation) : operation();
+}
+
+/** An absence observation cannot signal or relabel a settled historical run. */
+export function withOwnedRunAbsenceProof(
+  surfaceId: string, expected: OwnedActiveRun, proof: StopOperation,
+): Promise<InterruptEscalationResult> {
+  const handler = [...handlers.entries()].find(([prefix]) => surfaceId.startsWith(prefix))?.[1];
+  if (!handler) return Promise.resolve({ attempted: false, confirmedDead: false, alreadyDead: false,
+    steps: [], note: 'Owned run absence has no session-lock authority.' });
+  return handler(surfaceId, expected, proof, true);
 }
