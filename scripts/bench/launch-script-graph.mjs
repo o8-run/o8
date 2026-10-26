@@ -19,6 +19,11 @@ function scripts(value) {
 let initial = scripts(manifest.entryJSFiles);
 let graphSource = 'client-reference entryJSFiles';
 if (!initial.length) {
+  const page = Object.entries(manifest.clientModules).find(([file]) => file.endsWith('/app/dashboard/page.tsx'));
+  initial = scripts(page?.[1].chunks);
+  graphSource = 'dashboard page client reference';
+}
+if (!initial.length && fs.existsSync(path.join(root, 'app-build-manifest.json'))) {
   const build = JSON.parse(fs.readFileSync(path.join(root, 'app-build-manifest.json'), 'utf8'));
   initial = ['/layout', '/dashboard/layout', '/dashboard/page'].flatMap(key => scripts(build.pages[key]));
   graphSource = 'app-build-manifest route entries';
