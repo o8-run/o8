@@ -5,6 +5,7 @@ export interface ReleaseUpdaterPlatform {
 
 export interface ReleaseUpdaterManifest {
   channel?: 'beta';
+  installers?: Array<{ url: string; sha256: string }>;
   version: string;
   notes: string;
   pub_date: string;

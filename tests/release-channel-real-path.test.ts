@@ -286,6 +286,11 @@ describe('release channels through the publication entry point', () => {
     expect(result.status, result.stderr).toBe(0);
     const manifest = JSON.parse(readFileSync(join(f.bundle, 'macos/beta.json'), 'utf8'));
     expect(manifest.version).toBe(f.version);
+    const installer = `o8_${f.version}_universal.dmg`;
+    expect(manifest.installers).toEqual([{
+      url: new URL(installer, manifest.platforms['darwin-x86_64'].url).href,
+      sha256: createHash('sha256').update(readFileSync(join(f.bundle, 'dmg', installer))).digest('hex'),
+    }]);
     const calls = effects(f);
     for (const call of calls.filter(c => c.name === 'gh' && c.args[1] === 'create')) {
       expect(call.args).toContain('--prerelease');

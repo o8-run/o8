@@ -4,20 +4,23 @@ import { closeSync, mkdtempSync, openSync, readFileSync, rmSync, unlinkSync, wri
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DEFAULT_REPOS } from './lib/linux-appimage-signature.mjs';
+import { requireSmokeReceipts } from './lib/smoke-receipt.mjs';
 import { compareReleaseVersions, feedAnchor } from './lib/update-feeds.mjs';
 
 function options(args) {
   let version;
   const repos = [];
+  const receipts = [];
   for (let i = 0; i < args.length; i++) {
     const value = args[++i];
     if (!value || value.startsWith('--')) throw new Error('Expected --version <version> and optional --repo <repository>.');
-    if (args[i - 1] === '--version') version = value;
+    if (args[i - 1] === '--smoke-receipt') receipts.push(value);
+    else if (args[i - 1] === '--version') version = value;
     else if (args[i - 1] === '--repo' && /^[\w.-]+\/[\w.-]+$/.test(value)) repos.push(value);
     else throw new Error('Unknown promote option.');
   }
   compareReleaseVersions(version, version);
-  return { version, repos: repos.length ? [...new Set(repos)] : DEFAULT_REPOS };
+  return { version, receipts, repos: repos.length ? [...new Set(repos)] : DEFAULT_REPOS };
 }
 
 function download(repo, tag, name, dir) {
@@ -51,7 +54,7 @@ function validateStable(candidate, stable) {
 }
 
 async function main() {
-  const { version, repos } = options(process.argv.slice(2));
+  const { version, repos, receipts } = options(process.argv.slice(2));
   // One lock across all versions and destinations, held through the last write.
   // Fail closed on existing locks; never remove another command's live lock.
   const lock = process.env.O8_PROMOTE_LOCK_PATH || join(tmpdir(), 'o8-promote.lock');
@@ -73,6 +76,7 @@ async function main() {
       validateStable(beta, stable);
       targets.push({ repo, tag });
     }
+    requireSmokeReceipts(candidate, receipts);
     const manifest = join(dir, 'latest.json');
     writeFileSync(manifest, `${JSON.stringify(candidate, null, 2)}\n`);
     for (const { repo, tag } of targets) {
@@ -91,6 +95,6 @@ async function main() {
 
 main().catch(() => {
   // Provider errors can include local paths or credentials. Keep public output bounded.
-  console.error('[promote] Promotion failed: check the beta version, signed manifest, stable platforms, promotion lock and repository access.');
+  console.error('[promote] Promotion failed: check the smoke receipt, beta version, signed manifest, stable platforms, promotion lock and repository access.');
   process.exitCode = 1;
 });

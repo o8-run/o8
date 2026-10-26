@@ -76,6 +76,7 @@
     "release": "node scripts/release.mjs",
     "ship": "node scripts/release.mjs --ship",
     "promote": "node scripts/promote.mjs",
+    "smoke:installed": "node scripts/smoke-installed.mjs",
     "ship:linux-sig": "node scripts/sign-linux-appimage.mjs",
     "postinstall": "node scripts/postinstall.mjs",
     "tauri:prebuild": "node scripts/tauri-prebuild.mjs",

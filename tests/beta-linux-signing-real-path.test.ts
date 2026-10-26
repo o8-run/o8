@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -12,7 +13,9 @@ it('completes the beta Linux manifest through ship:linux-sig without changing ro
   roots.push(root);
   mkdirSync(join(root, 'bin'));
   const version = '0.1.900', tag = `v${version}`, asset = publishedLinuxAssetName(version);
-  const manifest = { channel: 'beta', version, platforms: {
+  const manifest = { channel: 'beta', version, installers: [{
+    url: `https://github.com/o8-run/o8/releases/download/${tag}/o8.dmg`, sha256: 'a'.repeat(64),
+  }], platforms: {
     'darwin-x86_64': { url: `https://github.com/o8-run/o8/releases/download/${tag}/o8.app.tar.gz`, signature: 'darwin-fixture' },
   } };
   for (const release of [tag, 'v0.1.800']) mkdirSync(join(root, release));
@@ -39,6 +42,10 @@ const fs=require('node:fs');fs.writeFileSync(process.argv.at(-1)+'.sig','linux-f
   });
   expect(result.status, result.stderr).toBe(0);
   const beta = JSON.parse(readFileSync(join(root, tag, 'beta.json'), 'utf8'));
+  expect(beta.installers).toEqual([...manifest.installers, {
+    url: beta.platforms['linux-x86_64'].url,
+    sha256: createHash('sha256').update('fixture artifact bytes').digest('hex'),
+  }]);
   expect(beta.platforms['linux-x86_64']).toMatchObject({ signature: 'linux-fixture' });
   expect(beta.platforms['darwin-x86_64']).toEqual(manifest.platforms['darwin-x86_64']);
   expect(JSON.parse(readFileSync(join(root, tag, 'latest.json'), 'utf8'))).toEqual(beta);

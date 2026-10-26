@@ -11,7 +11,8 @@ application identity and existing data. The channel chooses the update manifest;
 it does not create a second installation or isolate daily application data.
 Returning to Stable waits for a newer stable version and never downgrades.
 
-See [Beta and stable update feeds](beta-updates.md) for publication and promotion.
+See [Beta and stable update feeds](beta-updates.md#installed-smoke-before-promotion)
+for the ship-to-beta, installed-smoke, then promote flow.
 The existing stable endpoint remains unchanged. Its `latest.json` and the rolling
 `beta.json` live beside each other. Normal `X.Y.Z` releases ship to beta first;
 stable advances only through the explicit promote command using the same signed

@@ -3217,6 +3217,34 @@
       ]
     },
     {
+      "path": "tests/installed-smoke-providers-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "network-listener",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/installed-smoke-real-path.test.ts",
+      "reasons": [
+        "apfs-tool",
+        "child-process",
+        "executable-fixture",
+        "native-build",
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/installed-smoke-window-route-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/intake-remote-idle.test.ts",
       "reasons": [
         "child-process",

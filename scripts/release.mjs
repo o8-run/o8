@@ -21,6 +21,8 @@
  *   npm run ship
  */
 
+import { createHash } from 'node:crypto';
+import { basename } from 'node:path';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
@@ -363,7 +365,13 @@ const { latestJson, uploadArgs } = buildReleaseManifest({
     ...(releaseChannel.compatibilityManifestName ? [join(BUNDLE, 'macos', releaseChannel.compatibilityManifestName)] : []),
     ...(releaseChannel.publishStableEffects ? [fixedJsonPath] : [])],
 });
-if (releaseChannel.channel === 'beta') latestJson.channel = 'beta';
+if (releaseChannel.channel === 'beta') {
+  latestJson.channel = 'beta';
+  latestJson.installers = uploadArgs.filter(path => /\.(dmg|AppImage)$/.test(path)).map(path => ({
+    url: path.endsWith('.AppImage') ? latestJson.platforms['linux-x86_64'].url : `${downloadBase}/${basename(path)}`,
+    sha256: createHash('sha256').update(readFileSync(path)).digest('hex'),
+  }));
+}
 writeFileSync(latestJsonPath, JSON.stringify(latestJson, null, 2));
 // The Linux completion command reads the candidate tag's compatibility manifest.
 // This alias is uploaded only to the candidate, never the rolling stable anchor.

@@ -50,7 +50,9 @@ before it signs it. The existing signing key and invocation stay unchanged.
    existing signer adds the signed Linux entry to the tag-local `latest.json`.
    Completion copies the full manifest to tag-local `beta.json` in every
    repository, then refreshes the rolling beta feed beside stable. Darwin
-   entries are preserved. No re-dispatch is needed for the signature copy.
+   entries are preserved. Completion also adds the exact AppImage hash to the
+   installer list, so promotion requires its own installed smoke receipt. No
+   re-dispatch is needed for the signature copy.
 4. Verify the completed beta candidate on every platform, run installed-build
    smoke acceptance, then use `npm run promote -- --version X.Y.Z`. Promotion
    copies every signed candidate platform unchanged and refuses a candidate

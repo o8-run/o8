@@ -35,6 +35,7 @@ mod voice_surfaces;
 mod voice_input;
 mod managed_voice_window;
 mod launch_updater;
+mod installed_smoke;
 mod update_ping;
 #[cfg(target_os = "macos")]
 mod live_dictation;
@@ -226,6 +227,9 @@ fn require_main_window(window: &tauri::Window) -> Result<(), String> {
 #[tauri::command]
 fn master_key_get(window: tauri::Window) -> Result<String, String> {
     require_main_window(&window)?;
+    if env_flag_enabled("O8_PRESHIP_GATE") {
+        return Err("preship-gate-keychain-disabled".to_string());
+    }
     keychain_find_password().ok_or_else(|| "keychain-miss".to_string())
 }
 
@@ -8108,6 +8112,9 @@ pub fn run() {
             }
             if payload.event() == tauri::webview::PageLoadEvent::Finished {
                 voice_input::navigation_finished();
+                if preship_gate {
+                    installed_smoke::observe_window(webview, &resolve_ws_token());
+                }
                 return;
             }
             if payload.event() != tauri::webview::PageLoadEvent::Started {

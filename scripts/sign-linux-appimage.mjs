@@ -20,7 +20,7 @@
  *   npm run ship:linux-sig -- --tag v0.1.724 --repo o8-run/o8 --repo hurttlocker/o8-releases
  */
 
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -30,6 +30,7 @@ import {
 } from './lib/linux-appimage-signature.mjs';
 
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { publishBetaFeed } from './lib/update-feeds.mjs';
 
 const LOG = '[sign-linux-appimage]';
@@ -83,6 +84,14 @@ async function main() {
     });
     // Complete beta publication after the existing signing operation.
     if (result.latest.channel === 'beta') {
+      const linux = result.latest.platforms['linux-x86_64'];
+      const installer = { url: linux.url, sha256: createHash('sha256')
+        .update(readFileSync(join(workDir, result.assetName))).digest('hex') };
+      result.latest.installers = [...(result.latest.installers ?? []).filter(entry => entry.url !== linux.url), installer];
+      writeFileSync(result.latestJsonPath, `${JSON.stringify(result.latest, null, 2)}\n`);
+      for (const repo of result.repos) {
+        execFileSync('gh', ['release', 'upload', options.tag, result.latestJsonPath, '--clobber', '--repo', repo], { stdio: 'inherit', timeout: 60_000 });
+      }
       const betaPath = join(workDir, 'beta.json');
       writeFileSync(betaPath, `${JSON.stringify(result.latest, null, 2)}\n`);
       for (const repo of result.repos) {

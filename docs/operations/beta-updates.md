@@ -62,3 +62,66 @@ The primary update service must select the matching manifest using
 without beta identity falls back to the beta mirror. Its deployment is maintained outside this repository; verify that
 service separately before enabling beta publication in production. The app's
 configured mirror fallback uses the same channel even if the primary is absent.
+
+## Installed smoke before promotion
+
+Run this flow only after the separate publication approval. These commands do
+not grant permission to publish or promote by themselves.
+
+1. Run the normal ship command to publish the candidate to beta.
+2. Finish Linux port publication and `ship:linux-sig` before downloading the
+   final tagged `beta.json`. Linux completion adds its exact AppImage hash to
+   `installers` while retaining the macOS installer identities. Download every
+   installer named there. A later Linux completion changes the manifest and
+   requires fresh smoke receipts for every installer before promotion.
+3. On each installer's supported platform, run:
+
+   ```sh
+   npm run smoke:installed -- --artifact <installer> --manifest <beta.json> --receipt <smoke.json>
+   ```
+
+   The command mounts a disk image read-only and copies its app to a temporary
+   location, or extracts an AppImage or package into a temporary location. It
+   launches that installed executable, checks the version and hydrated first
+   window through an isolated native acknowledgment (the optional control
+   plugin is not required), then runs both chat backends and a worker through the installed
+   server. Each reply must match a fresh sentinel and complete successfully.
+
+   Each chat uses its explicitly selected backend without fallback. The worker
+   uses an installed local runtime when either is available, otherwise the
+   primary fixture runtime. Installed CLIs are used when found on PATH;
+   an absent CLI gets an offline fixture that exercises the same app routing and
+   protocol parsers. Output and the receipt report `real` or `fixture` for each
+   provider. An installed but failing CLI fails the step. Fixture success is
+   protocol evidence, not live account or model acceptance.
+
+   The child receives a throwaway home, configuration, cache, data directory,
+   repository, ports and control socket. The app's isolated native-test mode
+   suppresses daily-instance integration and keychain access. No credentials or
+   profiles are copied from the operator. Real providers therefore need usable
+   environment-based authentication; missing authentication fails the step.
+   Provider output and credentials are omitted from the receipt and failure log.
+
+4. Inspect the passing receipt for every advertised installer, then run the
+   separately authorized promotion:
+
+   ```sh
+   npm run promote -- --version X.Y.Z --smoke-receipt <smoke.json>
+   ```
+
+   Repeat `--smoke-receipt` for multiple installers. Promote refuses before its
+   first stable write unless every installer has a passing receipt for the exact
+   version, installer hash and complete beta manifest. A changed artifact,
+   manifest, failed step or incomplete cleanup requires another smoke run.
+
+A failed smoke exits non-zero naming `artifact`, `unpack`, `first-window`,
+`codex-chat`, `claude-chat`, `worker-dispatch`, or `cleanup`. It never writes a
+passing receipt on failure. Cleanup terminates only the launched process group
+and checks the isolated listener before deleting temporary state. If cleanup
+cannot confirm shutdown, it retains that isolated state and fails. Preserve it
+for inspection; never use broad process killing or delete the daily profile.
+
+The command supports disk images on macOS and AppImage or `.deb` extraction on
+Linux. Unsupported package formats fail at `unpack`. Platform command fixtures
+and source-runtime tests do not establish acceptance of a real signed installer;
+retain that installer's actual passing receipt before production promotion.
