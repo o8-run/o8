@@ -1,0 +1,20 @@
+name: Current app launch runner
+
+on:
+  push:
+    branches: [perf/current-app-launch]
+    paths: ['.github/workflows/current-app-launch-probe.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check macOS launch measurement tools
+        run: |
+          test "$(uname -s)" = Darwin
+          sw_vers -productVersion
+          xcodebuild -version
