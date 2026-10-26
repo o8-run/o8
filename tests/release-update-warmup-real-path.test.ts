@@ -10,7 +10,7 @@ const runFile = promisify(execFile);
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 
-it('warms both configured update routes across a publish and persists previous-version receipts', async () => {
+it.each([0, 300_001])('warms configured update routes and measures the publication budget with prior lag=%s', async lag => {
   const root = mkdtempSync(join(tmpdir(), 'o8-update-publication-'));
   roots.push(root);
   const state = join(root, 'manifest.json');
@@ -36,14 +36,15 @@ it('warms both configured update routes across a publish and persists previous-v
   const receipt = join(root, 'publication.json');
   try {
     await runFile(process.execPath, [join(process.cwd(), 'scripts/warm-release-updates.mjs'),
-      '--version', '0.0.2', '--previous-version', '0.0.1', '--published-at', new Date().toISOString(),
+      '--version', '0.0.2', '--previous-version', '0.0.1', '--published-at', new Date(Date.now() - lag).toISOString(),
       '--receipt', receipt, '--retry-ms', '10', '--timeout-ms', '2000'], { cwd: root });
     const recorded = JSON.parse(readFileSync(receipt, 'utf8'));
     expect(recorded).toMatchObject({ schema: 'o8/update-publication-receipt/v1', version: '0.0.2',
-      previousVersion: '0.0.1', status: 'offered' });
+      previousVersion: '0.0.1', status: 'offered', withinPublishToOfferBudget: lag === 0, publishToOfferBudgetMs: 300_000 });
     expect(recorded.checks).toHaveLength(4);
     expect(recorded.checks.every((check: { version: string; status: number }) => check.version === '0.0.2' && check.status === 200)).toBe(true);
-    expect(recorded.publishToOfferMs).toBeLessThan(5 * 60_000);
+    if (lag === 0) expect(recorded.publishToOfferMs).toBeLessThan(5 * 60_000);
+    else expect(recorded.publishToOfferMs).toBeGreaterThanOrEqual(lag);
     expect(visits).toContain('/primary/darwin/aarch64/0.0.1');
     expect(visits).toContain('/primary/darwin/x86_64/0.0.1');
     expect(visits).toContain('/fallback/latest.json');
@@ -77,7 +78,7 @@ it('bounds stalled refreshes and records an unverified receipt instead of claimi
       '--version', '0.0.2', '--previous-version', '0.0.1', '--published-at', new Date().toISOString(),
       '--receipt', receipt, '--retry-ms', '10', '--timeout-ms', '200'], { cwd: root })).rejects.toMatchObject({ code: 1 });
     expect(performance.now() - started).toBeLessThan(2_000);
-    expect(JSON.parse(readFileSync(receipt, 'utf8'))).toMatchObject({ status: 'pending', publishToOfferMs: null,
+    expect(JSON.parse(readFileSync(receipt, 'utf8'))).toMatchObject({ status: 'pending', publishToOfferMs: null, withinPublishToOfferBudget: null,
       checks: expect.arrayContaining([expect.objectContaining({ version: null, errorCode: 'request_failed' })]) });
   } finally {
     server.closeAllConnections();

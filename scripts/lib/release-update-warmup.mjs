@@ -48,7 +48,8 @@ export async function warmUpdatePublication({ root, version, previousVersion, pu
   receiptPath ??= join(releaseBuildProfile(root, process.env, { release: true }).profile,
     'update-publication', `v${version}.json`);
   const receipt = { schema: 'o8/update-publication-receipt/v1', version, previousVersion, publishedAt,
-    startedAt: new Date().toISOString(), status: 'pending', attempts: 0, checks: [], publishToOfferMs: null };
+    startedAt: new Date().toISOString(), status: 'pending', attempts: 0, checks: [], publishToOfferMs: null,
+    publishToOfferBudgetMs: 300_000, withinPublishToOfferBudget: null };
   persist(receiptPath, receipt);
   const deadline = performance.now() + budget;
   do {
@@ -68,6 +69,7 @@ export async function warmUpdatePublication({ root, version, previousVersion, pu
     if (receipt.checks.every(check => check.status === 200 && check.version === version)) {
       receipt.status = 'offered';
       receipt.publishToOfferMs = Date.now() - publication;
+      receipt.withinPublishToOfferBudget = receipt.publishToOfferMs < receipt.publishToOfferBudgetMs;
     }
     persist(receiptPath, receipt);
     if (receipt.status === 'offered' || performance.now() >= deadline) return receipt;

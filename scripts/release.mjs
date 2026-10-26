@@ -519,7 +519,7 @@ try {
       previousVersion: releaseMetadataRange().split('..')[0].replace(/^v/, ''),
       publishedAt: resolvePublishedAt(pubDate) });
     const timing = receipt.publishToOfferMs === null ? 'unverified' : `${receipt.publishToOfferMs}ms`;
-    console.log(`[release] update publication ${receipt.status}; publish-to-offer ${timing}`);
+    console.log(`[release] update publication ${receipt.status}; publish-to-offer ${timing}; within-five-minutes=${receipt.withinPublishToOfferBudget ?? 'unverified'}`);
   } catch {
     console.warn('[release] update publication verification unavailable; no fresh-offer receipt was recorded.');
   }
