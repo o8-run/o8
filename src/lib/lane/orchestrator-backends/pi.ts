@@ -37,6 +37,7 @@ import type { createPiSdkSession, PiSdkSessionOptions } from '@/lib/pi/sdk/sessi
 import { newestPiSessionFile, prunePiSessionFiles } from '@/lib/pi/sdk/session-files';
 import { piOrchestratorStateDir } from '@/lib/pi/orchestrator/context';
 import { assertOrchestratorPermissionMode } from '@/lib/orchestrator/permission-mode';
+import { EffortPinRejectionError } from '@/lib/orchestrator/effort-pin';
 import type { OrchestratorBackend, OrchestratorSessionInfo, OrchestratorTurnOptions } from './types';
 
 /** Per-turn limits. A turn that dispatches and waits on a mission needs more than the prototype's defaults. */
@@ -361,6 +362,8 @@ export function createPiOrchestratorBackend(deps: PiOrchestratorDeps = {}): Orch
 
   const status = (name: string) => (active.has(name) ? 'busy' as const : 'ready' as const);
   const liveSteer: NonNullable<OrchestratorBackend['liveSteer']> = async (repoPath, message, options) => {
+    const effortError = unmappedEffortError(options.thinkingEffort);
+    if (effortError?.type === 'error') throw new EffortPinRejectionError('effort_unsupported_runtime', effortError.error);
     assertOrchestratorPermissionMode('pi', options.permissionMode, options.toolProfile);
     const route = await resolveLeadRoute(deps, options.model);
     const routeId = route.carrier === 'openrouter' ? route.choice : route.model.id;

@@ -4,6 +4,10 @@ import { join } from 'node:path';
 import { afterAll, afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { MANUAL_THINKING_EFFORTS } from '@/lib/orchestrator/thinking-effort';
 import type { OrchestratorEvent } from '@/lib/lane/orchestrator-stream-events';
+import type { OrchestratorBackend } from '@/lib/lane/orchestrator-backends/types';
+
+const queuedBackend = vi.hoisted(() => ({ current: null as OrchestratorBackend | null }));
+vi.mock('@/lib/lane/orchestrator-backends/registry', () => ({ getOrchestratorBackend: () => queuedBackend.current! }));
 
 const processStarts = vi.hoisted(() => [] as import('node:child_process').ChildProcess[]);
 vi.mock('node:child_process', async original => {
@@ -25,6 +29,7 @@ const { createO8Backend } = await import('@/lib/lane/orchestrator-backends/o8');
 const piBackends: ReturnType<typeof createPiOrchestratorBackend>[] = [];
 const requests: Record<string, unknown>[] = [];
 let sequence = 0;
+let inferenceHold: Promise<void> | undefined;
 writeFileSync(peer, `
 const fs=require('node:fs'),file=process.argv[2];
 const send=frame=>console.log(JSON.stringify(frame));
@@ -45,6 +50,7 @@ function calls() {
 }
 const relay: typeof fetch = async (_input, init) => {
   const body = JSON.parse(String(init?.body)); requests.push(body);
+  await inferenceHold;
   const chunk = (extra: unknown) => `data: ${JSON.stringify({ id: 'fixture', object: 'chat.completion.chunk', created: 1, model: body.model, ...extra as object })}\n\n`;
   return new Response(chunk({ choices: [{ index: 0, delta: { role: 'assistant', content: 'Fixture answer' }, finish_reason: null }] })
     + chunk({ choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } })
@@ -62,6 +68,7 @@ function pi() {
 }
 function textOnly() { return createO8Backend({ blocker: () => 'Fixture text-only mode' }); }
 beforeEach(() => {
+  inferenceHold = undefined;
   requests.length = 0; rmSync(capture, { force: true });
   vi.stubGlobal('fetch', vi.fn(async (_input, init) => {
     requests.push(JSON.parse(String(init?.body)));
@@ -108,6 +115,36 @@ it.each([undefined, 'adaptive'] as const)('keeps %s at the SDK default and captu
   expect(requests[0]).not.toHaveProperty('reasoning_effort'); expect(requests[0]).not.toHaveProperty('reasoning');
   expect(events).toContainEqual(expect.objectContaining({ type: 'turn_receipt', effort: 'adaptive', effortSource: 'runtime-default' }));
 });
+it.each(['pi', 'o8'] as const)('holds a queued high steer on an active %s lead before admission with a visible reason', async kind => {
+  const sdk = pi();
+  const backend = kind === 'pi' ? sdk : createO8Backend({ pi: sdk, blocker: () => null });
+  queuedBackend.current = backend;
+  const { writePersistedLlmChat, readPersistedLlmChat } = await import('@/lib/llm/chat-history-store');
+  const queue = await import('@/lib/orchestrator/composer-queue');
+  const { createComposerQueueHeartbeat } = await import('@/lib/ws-server/composer-queue-heartbeat');
+  const threadId = `thoughts-queued-effort-${kind}`;
+  writePersistedLlmChat(threadId, { repoPath: repo, messages: [] });
+  let release!: () => void;
+  inferenceHold = new Promise<void>(resolve => { release = resolve; });
+  const turn = backend.sendTurn(repo, 'Start at the runtime default', () => {}, { threadId });
+  try {
+    await vi.waitFor(() => expect(requests).toHaveLength(1), { timeout: 30_000 });
+    const id = `queued-high-${kind}`;
+    queue.enqueueComposerSend({ repoPath: repo, threadId, id, intent: 'steer-now', payload: {
+      text: 'Do this with high effort', wireMessage: 'Do this with high effort', images: [],
+      routing: { backend: kind, model: kind, effort: 'high', permissionMode: 'full', mode: 'single', pickedMode: 'solo', collide: false },
+    } });
+    createComposerQueueHeartbeat({ isBusy: () => true, readTranscript: async () => [],
+      registerAbort: () => () => {}, publish: () => {} })();
+    await vi.waitFor(() => expect(queue.readComposerSend(id)?.status).not.toBe('dispatching'), { timeout: 10_000 });
+    expect(queue.readComposerSend(id)).toMatchObject({ status: 'held', admittedAt: null,
+      reason: expect.stringMatching(/cannot apply.*independent thinking effort "high".*no verified mapping/i) });
+    expect(readPersistedLlmChat(threadId)?.history.messages).toEqual([]);
+    expect(requests).toHaveLength(1);
+  } finally {
+    inferenceHold = undefined; release(); await turn;
+  }
+}, 90_000);
 it('labels a managed text-only service tier separately from provider reasoning', async () => {
   const events: OrchestratorEvent[] = [];
   await textOnly().sendTurn(repo, 'Fixture task', event => events.push(event), { threadId: 'managed-default' });
