@@ -35,7 +35,7 @@ export const COMPOSER_PROBE_JS = `(() => {
   // The native value setter alone cannot change defaultValue. This requires a
   // controlled textarea commit, rather than an unhydrated HTML input.
   if (editor.value !== text || editor.defaultValue !== text || document.activeElement !== editor || !document.hasFocus()) {
-    return JSON.stringify({ state: 'awaiting-edit-commit', focused: document.hasFocus(), acknowledged: editor.defaultValue === text });
+    return JSON.stringify({ state: 'awaiting-edit-commit', focused: document.hasFocus(), acknowledged: editor.defaultValue === text, click: { x: Math.round(box.x + box.width / 2), y: Math.round(box.y + box.height / 2) } });
   }
   const navigation = performance.getEntriesByType('navigation')[0];
   return JSON.stringify({ state: 'ready', acknowledged: true, focused: document.hasFocus(),
@@ -126,7 +126,7 @@ export async function measureNativeMemory({ app, output, sourceSha, samples = 1 
       const seeded = materializeFixture(plan, { root: sampleRoot });
       const socketPath = path.join(sampleRoot, 'control.sock');
       const client = new WebviewSocketClient(socketPath);
-      let child, lastProbe, socketReadyMs, activated = false;
+      let child, lastProbe, socketReadyMs, activated = false, lastActivation = 0, nativeWindow;
       const nativeStages = [], seen = new Set();
       let logTail = '';
       const capture = chunk => {
@@ -153,12 +153,19 @@ export async function measureNativeMemory({ app, output, sourceSha, samples = 1 
               if (socketReadyMs === undefined) {
                 await client.connectOnly(); socketReadyMs = round(performance.now() - started);
               }
-              if (!activated) {
+              if (!activated || (lastProbe?.focused === false && performance.now() - lastActivation > 250)) {
                 await client.send('manage_window', { window_label: 'main', operation: 'focus' });
                 const activation = spawnSync(runner.executable, [String(child.pid), 'ai.o8.desktop.memorybench'],
                   { stdio: 'ignore', timeout: 3000 });
                 assert.equal(activation.status, 0, 'Foreground activation failed');
                 activated = true;
+                lastActivation = performance.now();
+                if (lastProbe?.click) {
+                  await client.send('mouse_movement', { windowLabel: 'main', ...lastProbe.click, click: true });
+                }
+                const info = await client.send('get_app_info', {});
+                const main = info.windows?.find(window => window.label === 'main');
+                nativeWindow = main && { visible: main.visible, focused: main.focused };
               }
               lastProbe = JSON.parse(await executeJs(client, COMPOSER_PROBE_JS));
               if (lastProbe.state === 'ready') {
@@ -192,6 +199,8 @@ export async function measureNativeMemory({ app, output, sourceSha, samples = 1 
         };
         await read('/api/mobile/history?sessionKey=llm-chat:thoughts-empty');
         await read('/api/mobile/sync', { history: { sessionKey: 'llm-chat:thoughts-empty', limit: 200 } });
+        const initialProject = (await read('/api/panel/projects')).activeProjectId;
+        assert(initialProject, 'The composer fixture must have an active project');
         const projectIds = [];
         for (let index = 0; index < 4; index++) {
           const name = `Memory project ${index}`;
@@ -203,16 +212,27 @@ export async function measureNativeMemory({ app, output, sourceSha, samples = 1 
           env, apiPort, wsPort, token, read, sessions: 24, workerSessions: 48, transcriptMiB: 4, projectIds });
         sampleReceipt.workload = { completedSessions: workload.completedSessions, completedWorkers: workload.completedWorkers,
           transcriptDigest: workload.transcriptDigest, payloadUtf8Bytes: workload.payloadUtf8Bytes };
+        await read('/api/panel/projects/active', { projectId: initialProject });
+        for (const deadline = performance.now() + 30_000; performance.now() < deadline;) {
+          lastProbe = JSON.parse(await executeJs(client, COMPOSER_PROBE_JS));
+          if (lastProbe.state === 'ready') break;
+          await client.send('manage_window', { window_label: 'main', operation: 'focus' });
+          if (lastProbe.click) await client.send('mouse_movement', { windowLabel: 'main', ...lastProbe.click, click: true });
+          await sleep(50);
+        }
+        assert.equal(lastProbe.state, 'ready', 'Restore the interactive composer before idle sampling');
+        await sleep(3000);
         sampleReceipt.rss.afterRun = wholeAppRss(child.pid);
         await sleep(600_000);
         sampleReceipt.rss.afterIdle = wholeAppRss(child.pid);
+        assert.equal(JSON.parse(await executeJs(client, COMPOSER_PROBE_JS)).state, 'ready', 'The composer must remain interactive while idle');
         sampleReceipt.workload.persistedOutputUnchanged = verifySessionWorkload(workload);
         sampleReceipt.workload.sandboxDenials = countSandboxDenials(workload.workers);
         assert.equal(sampleReceipt.workload.sandboxDenials, 1, 'Sandbox diagnostics must remain visible');
         assert(sampleReceipt.workload.persistedOutputUnchanged, 'Persisted fixture output changed');
       } catch (error) {
         receipt.failure = { sample, message: String(error.message).replaceAll(stageRoot, '<fixture>'),
-          lastProbe, nativeStages: [...nativeStages], exitCode: child?.exitCode, signal: child?.signalCode };
+          lastProbe, nativeWindow, nativeStages: [...nativeStages], exitCode: child?.exitCode, signal: child?.signalCode };
         throw error;
       } finally {
         try {
