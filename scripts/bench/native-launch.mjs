@@ -48,11 +48,20 @@ function wholeAppRss(rootPid) {
     ...webkitPids(processes)]);
   const rows = execFileSync('ps', ['-axo', 'pid=,rss='], { encoding: 'utf8' });
   let bytes = 0, count = 0;
+  const components = {};
   for (const row of rows.trim().split('\n')) {
     const match = row.trim().match(/^(\d+)\s+(\d+)$/);
-    if (match && owned.has(Number(match[1]))) { count++; bytes += Number(match[2]) * 1024; }
+    if (!match || !owned.has(Number(match[1]))) continue;
+    const pid = Number(match[1]), value = Number(match[2]) * 1024;
+    const command = processes.get(pid)?.command ?? '';
+    const component = pid === rootPid ? 'shell' : command.includes('/WebKit.framework/') ? 'webviewHelpers'
+      : command.includes('next-server') ? 'httpServer' : command.includes('ws-server') ? 'realtimeServer' : 'otherHelpers';
+    const group = components[component] ??= { bytes: 0, count: 0 };
+    group.bytes += value; group.count++;
+    count++; bytes += value;
   }
-  return { bytes, count, includes: 'native shell, server descendants and all webview helpers on the disposable runner' };
+  return { bytes, count, components,
+    includes: 'native shell, server descendants and all webview helpers on the disposable runner' };
 }
 
 function requireDisposableRunner(app) {
