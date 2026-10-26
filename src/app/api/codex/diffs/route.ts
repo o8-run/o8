@@ -1,4 +1,5 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { viewerJson } from '@/lib/viewers/response';
+import { NextRequest } from 'next/server';
 import { readdir, readFile, stat } from 'fs/promises';
 import path from 'path';
 import os from 'os';
@@ -114,7 +115,7 @@ export async function GET(req: NextRequest) {
     }
 
     if (allFiles.length === 0) {
-      return NextResponse.json({ diffs: [] });
+      return viewerJson({ diffs: [] });
     }
 
     // Sort by most recent, read top 5
@@ -162,11 +163,11 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    return NextResponse.json({ diffs: diffs.slice(-limit) }, {
+    return viewerJson({ diffs: diffs.slice(-limit) }, {
       headers: { 'Cache-Control': 'no-store, max-age=0' },
     });
   } catch (err) {
-    return NextResponse.json(
+    return viewerJson(
       { diffs: [], error: err instanceof Error ? err.message : 'unknown' },
       { status: 500 },
     );

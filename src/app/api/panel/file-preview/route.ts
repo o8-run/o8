@@ -1,3 +1,4 @@
+import { viewerBytes } from '@/lib/viewers/bytes';
 import { viewerJson } from '@/lib/viewers/response';
 export const dynamic = 'force-dynamic';
 
@@ -64,15 +65,7 @@ export async function GET(request: Request) {
       });
     }
 
-    // For raster images, return as base64 data URL
-    const base64 = buffer.toString('base64');
-    return viewerJson({
-      type: 'image',
-      dataUrl: `data:${mimeType};base64,${base64}`,
-      mimeType,
-      size: opened.stat.size,
-      path: filePath,
-    });
+    return viewerBytes(buffer, mimeType);
   } catch (error) {
     if (isWorkspaceFileError(error)) {
       return viewerJson({ error: error.message, code: error.code }, { status: error.status });

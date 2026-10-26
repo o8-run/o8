@@ -1,7 +1,8 @@
+import { viewerGitJson } from '@/lib/viewers/git-response';
 import { viewerJson } from '@/lib/viewers/response';
 export const dynamic = 'force-dynamic';
 
-import { getLocalCommitDetail, isValidCommitHash } from '@/lib/panel/git-commits';
+import { getLocalCommitDetail, isValidCommitHash, resolveWorkspaceRoot } from '@/lib/panel/git-commits';
 
 export async function GET(
   request: Request,
@@ -18,9 +19,9 @@ export async function GET(
   try {
     const commit = getLocalCommitDetail(hash, workspace);
 
-    return viewerJson({
+    return viewerGitJson({
       commit,
-    });
+    }, resolveWorkspaceRoot(workspace), { oldRef: `${hash}^`, newRef: hash });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error';
     return viewerJson({ error: message }, { status: 500 });

@@ -1,3 +1,5 @@
+import { viewerGitJson } from '@/lib/viewers/git-response';
+import { getDefaultLlmRepoRoot } from '@/lib/llm/repo-scope';
 import { viewerJson } from '@/lib/viewers/response';
 import { NextRequest } from 'next/server';
 import { getReviewFileDetail } from '@/lib/review/workspace';
@@ -14,8 +16,8 @@ export async function GET(request: NextRequest) {
 
   try {
     const file = await getReviewFileDetail(reviewPath);
-    return viewerJson(
-      { file },
+    return viewerGitJson(
+      { file }, getDefaultLlmRepoRoot(), {},
       {
         headers: {
           'Cache-Control': 'no-store, max-age=0',

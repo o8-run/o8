@@ -1,5 +1,5 @@
 export const knownViewerOperatorFixture = 'fixture-operator-' + 'x'.repeat(32);
-export const knownViewerDeviceFixture = 'fixture-device-' + 'y'.repeat(32);
+export const knownViewerDeviceFixture = 'd'.repeat(64);
 export const knownViewerEnvironmentFixture = 'fixture-environment-' + 'z'.repeat(24);
 
 /** Synthetic controls shared by route and matcher regressions. */

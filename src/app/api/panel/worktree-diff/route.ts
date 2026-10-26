@@ -1,3 +1,4 @@
+import { viewerGitJson } from '@/lib/viewers/git-response';
 import { viewerJson } from '@/lib/viewers/response';
 export const dynamic = 'force-dynamic';
 
@@ -60,7 +61,7 @@ export async function GET(request: Request) {
     }
     const truncated = Buffer.byteLength(diff, 'utf-8') > maxBytes;
     if (truncated) diff = diff.slice(0, maxBytes);
-    return viewerJson({ ok: true, branch, stat: stat.trim(), diff, truncated });
+    return viewerGitJson({ ok: true, branch, stat: stat.trim(), diff, truncated }, root);
   } catch (error) {
     return viewerJson({ ok: false, error: error instanceof Error ? error.message : 'git diff failed' });
   }

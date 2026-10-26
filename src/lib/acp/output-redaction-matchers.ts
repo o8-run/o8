@@ -8,7 +8,8 @@ export const SECRET_PATTERNS: ReadonlyArray<[RegExp, string]> = [
   [/(?<![A-Za-z0-9_-])([A-Za-z0-9_-]*(?:token|ticket|jwt|session|secret|passw(?:or)?d|authorization|cookie|api[_-]?key|credential)[A-Za-z0-9_-]*)(\\*["']?\s*[:=]\s*\\*["']?)([^"'\\\s&#,;{}()[\]]+)/gi, '$1$2[redacted]'],
 ];
 
-const KEY = '(?<![A-Za-z0-9_-])[A-Za-z0-9_-]*(?:token|ticket|jwt|session|secret|passw(?:or)?d|authorization|cookie|api[_-]?key|credential)[A-Za-z0-9_-]*';
+export const CREDENTIAL_KEY = '(?<![A-Za-z0-9_-])[A-Za-z0-9_-]*(?:token|ticket|jwt|session|secret|passw(?:or)?d|authorization|cookie|api[_-]?key|credential)[A-Za-z0-9_-]*';
+const KEY = CREDENTIAL_KEY;
 const VALUE = '(?:"(?:\\\\.|[^"\\\\])*(?:"|$)|\'(?:\\\\.|[^\'\\\\])*(?:\'|$)|`(?:\\\\.|[^`\\\\])*(?:`|$)|[^\\s;]+)';
 
 export const VIEWER_SECRET_PATTERNS: ReadonlyArray<[RegExp, string]> = [

@@ -1,3 +1,4 @@
+import { viewerGitJson } from '@/lib/viewers/git-response';
 import { viewerJson } from '@/lib/viewers/response';
 /**
  * GET /api/worktrees/diff?sessionKey=<sessionKey>
@@ -151,7 +152,7 @@ export async function GET(req: NextRequest) {
       truncated: body.truncated,
       ...(body.truncated ? { truncationReason: 'max_bytes' as const } : {}),
     };
-    return viewerJson(value, { headers: { 'Cache-Control': 'no-store, max-age=0' } });
+    return viewerGitJson(value, worktreePath, {}, { headers: { 'Cache-Control': 'no-store, max-age=0' } });
   } catch (error) {
     if (error instanceof WorktreeHeadChangedError) {
       return viewerJson({

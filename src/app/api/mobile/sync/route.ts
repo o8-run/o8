@@ -1,3 +1,5 @@
+import { viewerGitJson } from '@/lib/viewers/git-response';
+import { getDefaultLlmRepoRoot } from '@/lib/llm/repo-scope';
 import { viewerJson } from '@/lib/viewers/response';
 import { NextRequest } from 'next/server';
 import { performance } from 'node:perf_hooks';
@@ -337,7 +339,7 @@ export async function POST(request: NextRequest) {
     response.errors = errors;
   }
 
-  return viewerJson(response, {
+  return viewerGitJson(response, getDefaultLlmRepoRoot(), {}, {
     headers: {
       'Cache-Control': 'no-store, max-age=0',
       'Server-Timing': `total;dur=${Math.max(0, performance.now() - startedAt).toFixed(1)}`,

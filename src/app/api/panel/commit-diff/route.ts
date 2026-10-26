@@ -1,3 +1,4 @@
+import { viewerGitJson } from '@/lib/viewers/git-response';
 import { viewerJson } from '@/lib/viewers/response';
 export const dynamic = 'force-dynamic';
 
@@ -18,11 +19,11 @@ export async function GET(request: Request) {
 
   try {
     const files = getLocalCommitDiffFiles(sha, workspace);
-    return viewerJson({
+    return viewerGitJson({
       sha,
       workspace: resolveWorkspaceRoot(workspace),
       files,
-    });
+    }, resolveWorkspaceRoot(workspace), { oldRef: `${sha}^`, newRef: sha });
   } catch (error) {
     return viewerJson({
       sha,

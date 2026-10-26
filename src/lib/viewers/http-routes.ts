@@ -14,4 +14,15 @@ export const viewerHttpRoutes = [
   { path: '/api/mobile/review-file', load: () => import('@/app/api/mobile/review-file/route') },
   { path: '/api/review/diff', load: () => import('@/app/api/review/diff/route') },
   { path: '/api/panel/file-preview', load: () => import('@/app/api/panel/file-preview/route') },
-].map(entry => ({ ...entry, methods: ['GET'] }));
+  { path: '/api/panel/readme', load: () => import('@/app/api/panel/readme/route') },
+  { path: '/api/panel/file-asset', load: () => import('@/app/api/panel/file-asset/route') },
+  { path: '/api/panel/serve-image', load: () => import('@/app/api/panel/serve-image/route') },
+  { path: '/api/mobile/media', load: () => import('@/app/api/mobile/media/route') },
+  { path: '/api/panel/report-artifact', load: () => import('@/app/api/panel/report-artifact/route') },
+  { path: '/api/panel/threads/artifact', load: () => import('@/app/api/panel/threads/artifact/route') },
+  { path: '/api/v2/context/files', load: () => import('@/app/api/v2/context/files/route') },
+  { path: '/api/task-artifacts/[id]', load: () => import('@/app/api/task-artifacts/[id]/route') },
+  { path: '/api/codex/diffs', load: () => import('@/app/api/codex/diffs/route') },
+  { path: '/api/claude-code/diffs', load: () => import('@/app/api/claude-code/diffs/route') },
+  { path: '/api/repo-spec', load: () => import('@/app/api/repo-spec/route') },
+].map(entry => ({ ...entry, methods: entry.path === '/api/v2/context/files' ? ['GET', 'POST'] : ['GET'] }));

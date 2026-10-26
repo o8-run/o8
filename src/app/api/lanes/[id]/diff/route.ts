@@ -1,3 +1,4 @@
+import { viewerGitJson } from '@/lib/viewers/git-response';
 import { viewerJson } from '@/lib/viewers/response';
 import { type NextRequest } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
@@ -55,7 +56,7 @@ export async function GET(
       ? `${Buffer.from(review.full, 'utf8').subarray(0, maxBytes).toString('utf8')}\n\n…[diff truncated at ${maxBytes} bytes of ${sizeBytes} — raise maxBytes or read the file directly]`
       : review.full;
 
-    return viewerJson({
+    return viewerGitJson({
       ok: true,
       laneId: lane.id,
       packetId: lane.packetId ?? null,
@@ -75,7 +76,7 @@ export async function GET(
       sizeBytes,
       truncated,
       maxBytes,
-    }, { headers: { 'Cache-Control': 'no-store, max-age=0' } });
+    }, review.source.cwd, {}, { headers: { 'Cache-Control': 'no-store, max-age=0' } });
   } catch (error) {
     if (error instanceof LaneBranchUnresolvedError) {
       return viewerJson(branchUnresolvedPayload(error), { status: 409 });

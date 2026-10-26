@@ -28,7 +28,7 @@ beforeAll(async () => {
     if (url.hostname === '127.0.0.1') return originalFetch(input, init);
     const source = JSON.parse(readFileSync(join(root, 'source.json'), 'utf8'));
     if (url.pathname.endsWith('/files')) return Response.json([{ filename: 'control.txt', status: 'modified', additions: 1, deletions: 0, patch: source.patch }]);
-    if (/\/pulls\/\d+$/.test(url.pathname)) return Response.json({ number: 1, title: 'fixture', body: source.body, state: 'open', html_url: 'https://example.invalid/pull/1', created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z', head: { sha: '1'.repeat(40), ref: 'fixture' }, base: { sha: '0'.repeat(40), ref: 'main' } });
+    if (/\/pulls\/\d+$/.test(url.pathname)) return Response.json({ number: 1, title: 'fixture', body: source.body, state: 'open', html_url: 'https://example.invalid/pull/1', created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z', head: { sha: source.head ?? '1'.repeat(40), ref: 'fixture' }, base: { sha: '0'.repeat(40), ref: 'main' } });
     if (url.pathname.endsWith('/check-runs')) return Response.json({ check_runs: [] });
     return Response.json([]);
   });
@@ -63,4 +63,18 @@ describe('native remote viewer corpus from persisted provider state', () => {
     }
     expect(JSON.parse(readFileSync(join(root, 'source.json'), 'utf8')).patch).toBe(corpus);
   });
+  it.each(['+fixture-orphan-body\n', '@@ -4 +4 @\n+fixture-orphan-body\n'])('refuses an unverified patch even without a valid hunk heading', async patch => {
+    writeFileSync(join(root, 'source.json'), JSON.stringify({ body: 'public', patch, head: (patch.startsWith('@@') ? '3' : '2').repeat(40) }));
+    const url = new URL('/api/panel/prs/1?repo=example/widgets', origin);
+    const authorization = `Bearer ${knownViewerOperatorFixture}`;
+    const { GET } = await import('@/app/api/panel/prs/[number]/route');
+    const direct = await GET(new NextRequest(url, { headers: { authorization } }), { params: Promise.resolve({ number: '1' }) });
+    for (const response of [direct, await fetch(url, { headers: { authorization } })]) {
+      expect(response.status).toBe(200);
+      const body = await response.json();
+      expect(JSON.stringify(body).includes('fixture-orphan-body')).toBe(false);
+      expect(body.redaction.spans.length).toBeGreaterThan(0);
+    }
+  });
+
 });

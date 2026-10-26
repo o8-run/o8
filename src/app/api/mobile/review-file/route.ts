@@ -1,3 +1,5 @@
+import { viewerGitJson } from '@/lib/viewers/git-response';
+import { getDefaultLlmRepoRoot } from '@/lib/llm/repo-scope';
 import { viewerJson } from '@/lib/viewers/response';
 import { NextRequest } from 'next/server';
 import { getReviewFileDetail } from '@/lib/review/workspace';
@@ -33,8 +35,8 @@ export async function GET(request: NextRequest) {
   try {
     const cached = reviewFileCache.get(reviewPath);
     if (cached && Date.now() - cached.timestamp < REVIEW_FILE_CACHE_TTL) {
-      return viewerJson(
-        { file: cached.data },
+      return viewerGitJson(
+        { file: cached.data }, getDefaultLlmRepoRoot(), {},
         {
           headers: {
             'Cache-Control': 'private, max-age=10',
@@ -49,8 +51,8 @@ export async function GET(request: NextRequest) {
     // Only update cache if content actually changed
     reviewFileCache.set(reviewPath, { data: file, timestamp: Date.now(), hash });
 
-    return viewerJson(
-      { file },
+    return viewerGitJson(
+      { file }, getDefaultLlmRepoRoot(), {},
       {
         headers: {
           'Cache-Control': 'private, max-age=10',

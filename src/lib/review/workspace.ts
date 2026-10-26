@@ -453,9 +453,7 @@ async function loadFileCommitSummary(filePath: string): Promise<{ commitSummary?
 async function loadReviewFilePreview(file: ReviewChangedFile, originalPath?: string, currentPath?: string) {
   if (file.status === 'untracked' && currentPath) {
     const raw = await readFile(resolveRepoFile(currentPath), 'utf8').catch(() => '');
-    return trimPreview(raw)
-      ? trimPreview(raw)
-      : 'No readable file preview is available for this untracked path yet.';
+    return { text: trimPreview(raw) || 'No readable file preview is available for this untracked path yet.', kind: 'file' as const };
   }
 
   const diffTargets = [originalPath, currentPath].filter((value): value is string => Boolean(value));
@@ -464,18 +462,18 @@ async function loadReviewFilePreview(file: ReviewChangedFile, originalPath?: str
   );
 
   if (diffPreview) {
-    return diffPreview;
+    return { text: diffPreview, kind: 'diff' as const };
   }
 
   if (currentPath && file.status !== 'deleted') {
     const raw = await readFile(resolveRepoFile(currentPath), 'utf8').catch(() => '');
     const filePreview = trimPreview(raw);
     if (filePreview) {
-      return filePreview;
+      return { text: filePreview, kind: 'file' as const };
     }
   }
 
-  return 'No inline diff preview is available for this file yet.';
+  return { text: 'No inline diff preview is available for this file yet.', kind: 'file' as const };
 }
 
 async function loadPullRequestFileDetail(pullRequestNumber: number, reviewPath: string) {
@@ -510,6 +508,7 @@ async function loadPullRequestFileDetail(pullRequestNumber: number, reviewPath: 
     currentPath,
     note: buildReviewFileNote(file, originalPath, currentPath, 'pull_request'),
     preview,
+    previewKind: 'diff',
     ...commitInfo,
   } satisfies MobileReviewFileDetail;
 }
@@ -534,7 +533,8 @@ export async function getReviewFileDetail(reviewPath: string): Promise<MobileRev
       originalPath,
       currentPath,
       note: buildReviewFileNote(file, originalPath, currentPath),
-      preview,
+      preview: preview.text,
+      previewKind: preview.kind,
       ...commitInfo,
     };
   }

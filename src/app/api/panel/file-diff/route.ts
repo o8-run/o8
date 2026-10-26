@@ -1,3 +1,4 @@
+import { viewerGitJson } from '@/lib/viewers/git-response';
 import { viewerJson } from '@/lib/viewers/response';
 export const dynamic = 'force-dynamic';
 
@@ -70,10 +71,10 @@ export async function GET(request: Request) {
   const binary = isBinaryPatch(result.diff);
   const directory = isDirectoryPatch(result.diff);
   const truncated = result.diff.length > DIFF_LIMIT;
-  return viewerJson({
+  return viewerGitJson({
     path: filePath, isUntracked, hasDiff: Boolean(result.diff), ...metadata,
     diff: binary || directory ? '' : result.diff.slice(0, DIFF_LIMIT),
     diffStatus: result.tooLarge ? 'too_large' : directory ? 'directory' : binary ? 'binary' : truncated ? 'truncated' : result.diff ? 'ready' : 'empty',
     ...(binary ? { kind: 'binary' } : directory ? { kind: 'directory' } : {}),
-  });
+  }, root);
 }
