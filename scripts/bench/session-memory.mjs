@@ -137,7 +137,8 @@ export async function measureSessionMemory({ output, sessions = 12, transcriptMi
   const trees = {};
   const origin = `http://127.0.0.1:${apiPort}`;
   const read = async (route, body) => {
-    const response = await fetch(origin + route, { headers: { Authorization: `Bearer ${token}`,
+    // Large histories can outlast a pooled socket's idle timeout between steps.
+    const response = await fetch(origin + route, { headers: { Authorization: `Bearer ${token}`, Connection: 'close',
       ...(body ? { 'Content-Type': 'application/json' } : {}) },
       ...(body ? { method: 'POST', body: JSON.stringify(body) } : {}),
       signal: AbortSignal.timeout(60_000) });
@@ -199,6 +200,7 @@ export async function measureSessionMemory({ output, sessions = 12, transcriptMi
       assert(history.transcript.at(-1).text.startsWith('fixture-output-31:'), 'HTTP transcript payload missing');
       await openAndCloseSession(wsPort, token, `llm-chat:${id}`);
       completedSessions++;
+      if (completedSessions % 12 === 0) console.log(JSON.stringify({ phase: 'chats', completed: completedSessions }));
     }
     await sleep(settleMs);
     const after = {};
@@ -211,6 +213,7 @@ export async function measureSessionMemory({ output, sessions = 12, transcriptMi
       assert(history.transcript.some(entry => entry.text.startsWith('worker-output-31:')), 'HTTP worker payload missing');
       await openAndCloseSession(wsPort, token, sessionKey, true);
       completedWorkers++;
+      if (completedWorkers % 12 === 0) console.log(JSON.stringify({ phase: 'workers', completed: completedWorkers }));
     }
     await sleep(settleMs);
     natural.afterRun = processTree();
