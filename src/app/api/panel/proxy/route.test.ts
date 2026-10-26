@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
+import { runInNewContext } from 'node:vm';
 import * as parse5 from 'parse5';
 import { neutralizePreviewRefresh } from '@/lib/panel/neutralize-preview-refresh';
 
@@ -13,6 +14,7 @@ vi.mock('@/lib/panel/api-port', () => ({
 }));
 
 const { GET } = await import('./route');
+const { parse: freshParse } = await vi.importActual<typeof import('parse5')>('parse5');
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -30,6 +32,102 @@ function refreshCount(document: string): number {
   visit(parse5.parse(document));
   return count;
 }
+
+describe('preview bootstrap final document', () => {
+  const refresh = '<meta http-equiv=refresh content=0;url=/end>';
+  const pageScript = '<script>window.previewBootstrapFirst = window.fetch !== window.originalFetch;</script>';
+  const contexts = [
+    ['script string', `<script>window.marker = "<head>${refresh}";</script>`],
+    ['comment', `<!--<head>${refresh}-->`],
+    ['attribute value', '<div data-note="<head>"></div>'],
+    ['textarea', `<textarea><head>${refresh}</textarea>`],
+    ['title', `<title><head>${refresh}</title>`],
+  ];
+
+  async function rewrite(document: string) {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(document, {
+      headers: { 'content-type': 'text/html' },
+    })));
+    const response = await GET(new NextRequest(
+      `http://localhost:47100/api/panel/proxy?url=${encodeURIComponent('http://localhost:39001/')}`,
+    ));
+    expect(response.status).toBe(200);
+    return response.text();
+  }
+
+  function verifiedScripts(document: string) {
+    const scripts: string[] = [];
+    let refreshElements = 0;
+    const visit = (node: parse5.DefaultTreeAdapterTypes.Node) => {
+      if ('tagName' in node) {
+        if (node.tagName === 'meta' && node.attrs.some(attr =>
+          attr.name === 'http-equiv' && attr.value.trim().toLowerCase() === 'refresh')) refreshElements++;
+        if (node.tagName === 'script') {
+          scripts.push(node.childNodes.map(child => 'value' in child ? child.value : '').join(''));
+        }
+      }
+      if ('childNodes' in node) node.childNodes.forEach(visit);
+      if ('content' in node) visit(node.content);
+    };
+    // Bypass the mocked parser: verify exactly what a fresh consumer receives.
+    visit(freshParse(document));
+    expect(refreshElements).toBe(0);
+    const bootstraps = scripts.filter(script => script.includes('const nativeFetch = window.fetch.bind(window);'));
+    expect(bootstraps).toHaveLength(1);
+    expect(scripts[0]).toBe(bootstraps[0]);
+    return scripts;
+  }
+
+  it.each(contexts)('keeps head-like text in a %s inert without a real head', async (_name, content) => {
+    const document = await rewrite(`${content}${pageScript}`);
+    verifiedScripts(document);
+    expect(document).toContain(content);
+  });
+
+  it.each([
+    ['comment before the head', '<!--<head>--><html><head></head><body></body></html>'],
+    ['attribute before the head', '<html data-note="<head>"><head></head><body></body></html>'],
+    ['quoted delimiter in the head', '<html><head data-note=">"></head><body></body></html>'],
+  ])('uses the parsed head boundary with a %s', async (_name, content) => {
+    const document = await rewrite(content.replace('</head>', `${pageScript}</head>`));
+    verifiedScripts(document);
+    expect(document).toContain(content.slice(0, content.indexOf('</head>')));
+  });
+
+  it.each([
+    ['real head', `<html><head>${pageScript}</head><body></body></html>`],
+    ['implied head', pageScript],
+    ['empty document', ''],
+    ['leading doctype and comment', `<!doctype html><!--kept-->${pageScript}`],
+    ['implied head and trailing document comment', `${pageScript}</html><!--trailing-->`],
+    ['late ignored head', `<body><head>${pageScript}</head></body>`],
+    ...contexts.map(([name, content]) => [`real head with ${name}`, `<html><head>${content}${pageScript}</head></html>`]),
+  ])('runs the bootstrap first in a document with %s', async (_name, content) => {
+    const scripts = verifiedScripts(await rewrite(content));
+    const nativeFetch = () => Promise.resolve(new Response('fixture'));
+    const window = { fetch: nativeFetch, originalFetch: nativeFetch, previewBootstrapFirst: false };
+    class XMLHttpRequest { open() {} }
+    for (const script of scripts) runInNewContext(script, { window, XMLHttpRequest, Request, URL });
+    if (content.includes(pageScript)) expect(window.previewBootstrapFirst).toBe(true);
+    expect(scripts).toHaveLength(1 + (content.includes(pageScript) ? 1 : 0) + (content.includes('window.marker') ? 1 : 0));
+  });
+
+  it('leaves zero refresh elements and exactly one bootstrap for generated full rewrite outputs', async () => {
+    const joined = `<${refresh}meta http-equiv=refresh content=0;url=/joined>`;
+    const nested = `<${joined}meta http-equiv=refresh content=0;url=/nested>`;
+    for (const [, content] of contexts) {
+      for (const realHead of [false, true]) {
+        for (const metadata of [refresh, joined, nested, `<template>${joined}</template>`]) {
+          for (const leading of ['', '<!doctype html><!--<head>-->']) {
+            const body = `${content}${metadata}${pageScript}`;
+            const input = leading + (realHead ? `<html><head>${body}</head></html>` : body);
+            verifiedScripts(await rewrite(input));
+          }
+        }
+      }
+    }
+  });
+});
 
 describe('preview refresh neutralizer idempotence', () => {
   const refresh = '<meta http-equiv="refresh" content="0;url=/a">';

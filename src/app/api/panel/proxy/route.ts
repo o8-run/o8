@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { parse } from 'parse5';
 import { PREVIEW_PROXY_ROUTE } from '@/lib/panel/preview';
 import { isSensitivePreviewRequestHeader, parseLocalPreviewTarget, PREVIEW_DOCUMENT_CSP } from '@/lib/panel/preview-proxy-security';
 import { createPreviewResourceAccess, hasPreviewResourceAccess, PREVIEW_RESOURCE_KEY } from '@/lib/panel/preview-resource-access';
@@ -103,8 +104,6 @@ function rewriteHtml(html: string, currentUrl: URL, appOrigin: string, xhtml: bo
       return `${name}="${escapeAttribute(candidate ? appOrigin + buildProxyUrl(candidate, access) : value)}"`;
     },
   );
-  // Parse after compatibility rewriting so it cannot expose a new refresh tag.
-  const safeDocument = neutralizePreviewRefresh(rewritten, xhtml);
   const source = `(() => {
     const base = ${JSON.stringify(currentUrl.toString()).replaceAll('<', '\\u003c')};
     const origin = ${JSON.stringify(appOrigin)};
@@ -123,9 +122,20 @@ function rewriteHtml(html: string, currentUrl: URL, appOrigin: string, xhtml: bo
     XMLHttpRequest.prototype.open = function(method, url, ...rest) { return nativeOpen.call(this, method, resolve(url), ...rest); };
   })();`;
   const bootstrap = `<script>${xhtml ? `//<![CDATA[\n${source}\n//]]>` : source}</script>`;
-  return /<head\b[^>]*>/i.test(safeDocument)
-    ? safeDocument.replace(/<head\b[^>]*>/i, match => match + bootstrap)
-    : bootstrap + safeDocument;
+  // Only a parsed start tag is an insertion boundary. Head-like page text must
+  // stay inert, and an implied head needs the bootstrap before any page node.
+  const document = parse(rewritten, { sourceCodeLocationInfo: true });
+  const root = document.childNodes.find(node => 'tagName' in node && node.tagName === 'html');
+  const head = root && 'childNodes' in root
+    ? root.childNodes.find(node => 'tagName' in node && node.tagName === 'head')
+    : undefined;
+  const headLocation = head && 'tagName' in head ? head.sourceCodeLocation : undefined;
+  const offset = headLocation?.startTag?.endOffset
+    ?? document.childNodes[0]?.sourceCodeLocation?.startOffset
+    ?? 0;
+  // Insertion can change parsing too. Return only the final document verified
+  // by the neutralizer, with no subsequent markup edits.
+  return neutralizePreviewRefresh(rewritten.slice(0, offset) + bootstrap + rewritten.slice(offset), xhtml);
 }
 
 function buildUpstreamHeaders(req: NextRequest, targetUrl: URL): Headers {
