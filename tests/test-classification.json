@@ -5285,6 +5285,14 @@
       ]
     },
     {
+      "path": "tests/registered-build-cache-ownership-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/release-broadcast-real-path.test.ts",
       "reasons": [
         "child-process",

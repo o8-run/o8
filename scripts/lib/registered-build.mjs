@@ -1,3 +1,4 @@
+import { prepareRegisteredWebCache } from './release-web-cache-ownership.mjs';
 import { createRequire } from 'node:module';
 import { existsSync, lstatSync, readFileSync, renameSync, rmdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
@@ -5,15 +6,13 @@ import { resolveReleaseConfig } from './release-config.mjs';
 import { assertTauriExportInputsSafe } from './tauri-export-safety.mjs';
 
 /** Invoked only after generated-output exclusion and producer reservation. */
-export async function runRegisteredBuild(run, { restoredCache = false } = {}) {
+export async function runRegisteredBuild(run, { restoredCache = null } = {}) {
   const root = process.cwd();
   const require = createRequire(join(root, 'package.json'));
   const heapMiB = process.env.O8_BUILD_HEAP_MIB === undefined ? 24576 : Number(process.env.O8_BUILD_HEAP_MIB);
   if (!Number.isSafeInteger(heapMiB) || heapMiB < 1024 || heapMiB > 24576) {
     throw new Error('O8_BUILD_HEAP_MIB must be an integer from 1024 through 24576.');
   }
-  const bust = await run(process.execPath, ['scripts/bust-stale-patch-cache.mjs']);
-  if (bust !== 0) return bust;
   const env = { ...process.env };
   const releaseConfig = resolveReleaseConfig(root, env);
   if (!env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY && releaseConfig.clerkPublishableKey) {
@@ -28,11 +27,9 @@ export async function runRegisteredBuild(run, { restoredCache = false } = {}) {
     const distDir = relative(root, buildOutput).split('\\').join('/');
     if (distDir !== '.next/.o8-release-build') throw new Error('Build output reservation is invalid.');
     env.O8_RELEASE_NEXT_DIST_DIR = distDir;
-    const cache = join(root, '.next/cache');
-    if (existsSync(cache)) {
-      if (!restoredCache) throw new Error('Preserved unowned entries in .next/cache; no verified cache restoration owns them.');
-      renameSync(cache, join(buildOutput, 'cache'));
-    }
+    await prepareRegisteredWebCache(root, buildOutput, restoredCache);
+  } else if (lstatSync(join(root, '.next/cache'), { throwIfNoEntry: false })) {
+    throw new Error('Preserved unowned entries in .next/cache; cache invalidation requires a verified build reservation.');
   }
   if (!run.buildOutput) delete env.O8_RELEASE_NEXT_DIST_DIR;
   env.NODE_ENV = 'production';

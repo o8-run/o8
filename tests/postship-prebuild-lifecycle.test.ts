@@ -134,7 +134,7 @@ it.each([false, true, 'cache', 'rebuild', 'blocked-rebuild'] as const)('journals
       build: command(prebuild), notarize: command(['-e', 'process.exit(0)']),
       publish: command(['-e', 'process.exit(0)']), alwaysCleanup: [],
       successOnlyCleanup: cleanup ? [command([postshipScript])] : [] }));
-    const completed = spawnSync('npm', ['run', 'ship'], { cwd: repo, encoding: 'utf8', timeout: 180_000,
+    const completed = spawnSync(process.execPath, [path.join(source, 'scripts/release.mjs'), '--ship'], { cwd: repo, encoding: 'utf8', timeout: 180_000,
       env: { ...env, npm_config_cache: path.join(root, 'npm-cache'), npm_config_update_notifier: 'false', O8_RELEASE_TEST_MODE: '1', O8_RELEASE_TEST_PLAN: planPath } });
     writeFileSync(path.join(root, `ship-${++invocation}.json`), JSON.stringify({ status: completed.status,
       stdout: completed.stdout, stderr: completed.stderr }, null, 2));

@@ -1,4 +1,4 @@
 export function runRegisteredBuild(
   run: import('../../src/lib/workspace/generated-output-producer').GeneratedOutputSpawn,
-  options?: { restoredCache?: boolean },
+  options?: { restoredCache?: import('./release-web-cache-ownership.mjs').RestoredWebCacheOwnership | null },
 ): Promise<number>;
