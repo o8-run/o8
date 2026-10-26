@@ -71,7 +71,7 @@ it('walks every production surface registration and its HTTP routes', async () =
     .map(match => match[1]).filter(name => name !== 'fake');
   expect(Object.keys(nativeSurfaceRoutes).sort()).toEqual(registered.sort());
   for (const [name, routes] of Object.entries(nativeSurfaceRoutes)) {
-    if (!['grid', 'palette'].includes(name)) expect(routes.length, name).toBeGreaterThan(0);
+    if (!['grid', 'palette', 'shortcuts'].includes(name)) expect(routes.length, name).toBeGreaterThan(0);
     for (const route of routes) {
       const path = route.path.replace(/\[\w+\]/g, 'fixture');
       const handlers = await route.load() as Record<string, unknown>;

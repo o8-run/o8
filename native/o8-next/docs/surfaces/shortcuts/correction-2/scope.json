@@ -1,0 +1,15 @@
+{
+  "shellRegistrationLine": "1\t0\tnative/o8-next/src/shell.rs",
+  "unchangedSharedFiles": [
+    "native/o8-next/src/composer.rs",
+    "native/o8-next/src/terminal.rs",
+    "native/o8-next/src/surface_registry.rs",
+    "native/o8-next/src/client.rs",
+    "native/o8-next/src/main.rs",
+    "native/o8-next/src/shell_tests.rs",
+    "native/o8-next/src/shell_view.rs",
+    "native/o8-next/src/shell_state.rs",
+    "scripts/next/dev-server.ts"
+  ],
+  "outsideSurfaceFiles": []
+}

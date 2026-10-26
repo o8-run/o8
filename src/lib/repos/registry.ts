@@ -19,6 +19,7 @@ import type {
   ValidatedRepoCandidate,
 } from './types';
 import { isRepoWorkspaceIsolationPreference } from './types';
+import { readCurrentOrigin } from './remote';
 import { emitProductEvent } from '@/lib/analytics/server';
 import { withStoragePressurePolicyLock } from '@/lib/orchestrator/storage-pressure-policy-lock';
 import { getRepoDispatchAdmission } from '@/lib/lane/repo-preflight';
@@ -479,7 +480,27 @@ function fireSignatureRecompute(): void {
 
 export async function listRepos() {
   const store = await readStore();
-  return store.repos;
+  // Maintenance reads must remain bounded and read-only. Ordinary reads repair
+  // moved remotes using local git config, then merge only that field under the
+  // same mutation lock as add/update/remove so concurrent edits survive.
+  if (worktreeMetadataReadLimit() !== undefined) return store.repos;
+  const remotes = await Promise.all(store.repos.map(async repo => ({
+    id: repo.id, localPath: repo.localPath, previousRemote: repo.remoteUrl,
+    remote: repo.isGitRepo ? await readCurrentOrigin(repo.localPath) : undefined,
+  })));
+  if (!remotes.some(value => value.remote !== undefined && store.repos.find(repo => repo.id === value.id)?.remoteUrl !== value.remote)) return store.repos;
+  return withRegistryMutation(async () => {
+    const current = await readStoreFresh();
+    let changed = false;
+    const repos = current.repos.map(repo => {
+      const value = remotes.find(remote => remote.id === repo.id && remote.localPath === repo.localPath);
+      if (!value || value.remote === undefined || value.remote === repo.remoteUrl || value.previousRemote !== repo.remoteUrl) return repo;
+      changed = true;
+      return { ...repo, remoteUrl: value.remote };
+    });
+    if (changed) await writeStore({ version: 1, repos });
+    return repos;
+  });
 }
 
 /** Disk-fresh read for destructive policy decisions made under the registry mutation lock. */

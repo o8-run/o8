@@ -35,5 +35,11 @@ it('Workers uses the production state, lanes and live event routes behind operat
   const events = await fetch(origin + '/api/orchestrator/lane-events?since=0&timeoutMs=0', { headers });
   expect(events.status).toBe(200);
   expect((await events.json()).events.length).toBeGreaterThan(0);
+  const blocked = laneData.lanes.find((lane: { packetId: string }) => lane.packetId === 'worker-blocked');
+  const activity = await fetch(origin + `/api/lanes/${blocked.id}?events=500`, { headers });
+  expect(activity.status).toBe(200);
+  const activityData = await activity.json();
+  expect(activityData.events.filter((event: { payload: { message?: string } }) => event.payload.message).map((event: { payload: { message: string } }) => event.payload.message))
+    .toEqual(['Read the task', 'Inspect the working tree', 'Check ownership']);
   expect((await fetch(origin + '/api/lanes?active=true')).status).toBe(401);
-}, 30_000);
+}, 60_000);

@@ -34,7 +34,10 @@ impl Fixture {
         let root = fs::canonicalize(root).unwrap();
         let mut command = Process::new("node");
         if flags.contains(&"--issues-advancing-clock") {
-            command.args(["--import", "./scripts/next/surfaces/issues/advancing-clock.mjs"]);
+            command.args([
+                "--import",
+                "./scripts/next/surfaces/issues/advancing-clock.mjs",
+            ]);
         }
         command
             .current_dir(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.."))
@@ -159,18 +162,24 @@ fn scene(cx: &mut VisualTestContext) -> Value {
     })
 }
 fn wait(cx: &mut VisualTestContext, selector: &'static str) {
-    let deadline = Instant::now() + Duration::from_secs(10);
+    wait_with_bound(cx, selector, Duration::from_secs(35));
+}
+fn wait_with_bound(cx: &mut VisualTestContext, selector: &'static str, bound: Duration) {
+    let started = Instant::now();
     loop {
         draw(cx);
-        if scene(cx)["controls"]
-            .as_array()
-            .is_some_and(|items| items.iter().any(|i| i == selector))
+        let elapsed = started.elapsed();
+        if elapsed <= bound
+            && scene(cx)["controls"]
+                .as_array()
+                .is_some_and(|items| items.iter().any(|i| i == selector))
         {
             return;
         }
         assert!(
-            Instant::now() < deadline,
-            "real control did not reach CPU paint: {selector}"
+            elapsed < bound,
+            "real control did not reach CPU paint: {selector}; elapsed={elapsed:?}; bound={bound:?}; scene={}",
+            scene(cx)
         );
         std::thread::sleep(Duration::from_millis(10));
     }
@@ -199,11 +208,20 @@ fn open(fixture: &Fixture, cx: &mut TestAppContext) -> (Entity<Shell>, VisualTes
     });
     let shell = handle.root(cx).unwrap();
     let mut visual = VisualTestContext::from_window(handle.into(), cx);
-    for _ in 0..40 {
+    let connected_at = Instant::now();
+    let bound = Duration::from_secs(35);
+    loop {
         draw(&mut visual);
-        if shell.read_with(&visual, |s, _| s.connected) {
+        let elapsed = connected_at.elapsed();
+        if elapsed <= bound && shell.read_with(&visual, |s, _| s.connected) {
             break;
         }
+        assert!(
+            elapsed < bound,
+            "Issues bootstrap did not connect; elapsed={elapsed:?}; bound={bound:?}; notice={}",
+            shell.read_with(&visual, |s, _| s.notice.clone())
+        );
+        std::thread::sleep(Duration::from_millis(10));
     }
     visual.simulate_keystrokes("ctrl-k");
     visual.simulate_keystrokes("i s s u e s");
@@ -211,6 +229,37 @@ fn open(fixture: &Fixture, cx: &mut TestAppContext) -> (Entity<Shell>, VisualTes
     visual.simulate_keystrokes("enter");
     wait(&mut visual, "issue-ready");
     (shell, visual, start.elapsed().as_secs_f64() * 1000.)
+}
+
+#[gpui::test]
+fn issues_palette_waits_for_bootstrap_then_paint(cx: &mut TestAppContext) {
+    let fixture = Fixture::with_flags(false, &["--issues-delay-bootstrap"]);
+    let (shell, mut visual, _) = open(&fixture, cx);
+    assert!(shell.read_with(&visual, |s, _| s.connected));
+    wait(&mut visual, "issue-view-7");
+}
+
+#[gpui::test]
+fn issues_missing_paint_reports_elapsed_and_bound(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    let (_, mut visual, _) = open(&fixture, cx);
+    let failure = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        wait_with_bound(
+            &mut visual,
+            "issue-never-painted",
+            Duration::from_millis(50),
+        );
+    }))
+    .expect_err("a missing paint must fail within its bound");
+    let message = failure
+        .downcast_ref::<String>()
+        .map(String::as_str)
+        .or_else(|| failure.downcast_ref::<&str>().copied())
+        .unwrap_or("");
+    assert!(
+        message.contains("elapsed=") && message.contains("bound="),
+        "paint timeout must report its measured duration and bound: {message}"
+    );
 }
 
 #[gpui::test]

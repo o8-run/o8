@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 const state = vi.hoisted(() => ({ installationId: 84900 }));
 vi.mock('@/lib/github-broker/env', () => ({ getGitHubAppConfig: () => null }));
 vi.mock('@/lib/github-broker/managed', () => ({
-  readManagedGithubToken: () => ({ token: 'ci-list-fixture', installationId: state.installationId }),
+  readManagedGithubToken: () => ({ token: 'ci-list-fixture', installationId: state.installationId, accountLogin: 'example' }),
 }));
 vi.mock('@/lib/github-broker/repo', () => ({
   DEFAULT_GITHUB_REPO: 'example/default',

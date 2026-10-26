@@ -7,6 +7,7 @@ import { discardRippleDraft, rememberRippleResolution, requestRippleResolution }
 import { MobileMarkdown } from './mobile-markdown';
 import { getMessageTextContent, getMessageThinkingBlocks, getMessageToolCalls } from './mobile-assistant-chat-runtime';
 import { ttsEngine, type PlaybackState, type TTSEngineState } from '@/lib/tts/engine';
+import { edgeVoiceNotice, type EdgeVoiceError } from '@/lib/tts/edge-voice-error';
 import { playSendClick } from '@/lib/mobile/sounds';
 import { usePressToDictate } from '@/lib/mobile/use-press-to-dictate';
 import { MicWaveformIndicator } from '@/components/mobile/orchestrator/parts';
@@ -164,12 +165,15 @@ function TtsButton({
   palette: MobilePalette;
 }) {
   const [playback, setPlayback] = useState<PlaybackState>('idle');
+  const [voiceError, setVoiceError] = useState<EdgeVoiceError | null>(null);
+  const voiceNotice = edgeVoiceNotice(voiceError);
   const isPlaying = playback === 'loading' || playback === 'playing';
 
   useEffect(() => {
     return ttsEngine.subscribe((state: TTSEngineState) => {
       const active = state.activeMessageId === messageId;
       setPlayback(active ? state.state : 'idle');
+      setVoiceError(active ? state.voiceError : null);
     });
   }, [messageId]);
 
@@ -201,6 +205,7 @@ function TtsButton({
           }
         }}
         disabled={isPlaying}
+        title={voiceNotice ?? 'Play'}
         style={{
           ...glassPill,
           background: isPlaying ? palette.cardBackground : palette.panelElevated,
@@ -211,6 +216,7 @@ function TtsButton({
         <IconSpeaker fill={palette.iconFill} />
         {playback === 'loading' ? 'Loading...' : 'Play'}
       </button>
+      {voiceNotice ? <span role="status" style={{ fontSize: 11, fontWeight: 300, color: palette.subduedText }}>{voiceNotice}</span> : null}
       {isPlaying ? (
         <button
           type="button"

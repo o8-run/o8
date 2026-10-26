@@ -6,6 +6,7 @@ import { promisify } from 'node:util';
 import { ensureGitHubPullRequests, normalizeRepoSlug, resolveRepoSlug } from '@/lib/github-broker';
 import { fetchPullRequestListPage } from '@/lib/github-broker/pull-request-list';
 import type { PullRequestListState, PullRequestListSort } from '@/lib/github-broker/pull-request-list.types';
+import { GitHubOrgNotCoveredError } from '@/lib/github-broker/repo-access';
 
 const DEFAULT_REPO = process.env.CORTEX_IDE_REVIEW_REPO || '';
 const execFileAsync = promisify(execFile);
@@ -43,8 +44,9 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'Choose a valid pull request state and page.' }, { status: 400 });
     }
     try {
-      return NextResponse.json(await fetchPullRequestListPage(repo, state as PullRequestListState, page, request.signal, sort as PullRequestListSort));
-    } catch {
+      return NextResponse.json(await fetchPullRequestListPage(repo, state as PullRequestListState, page, request.signal, sort as PullRequestListSort, searchParams.get('fresh') === '1'));
+    } catch (error) {
+      if (error instanceof GitHubOrgNotCoveredError) return NextResponse.json({ code: error.code, error: error.message, prs: [], repo }, { status: 422 });
       return NextResponse.json({ error: 'Pull requests could not be loaded. Check your GitHub connection in Settings, then retry.' }, { status: 502 });
     }
   }
@@ -69,6 +71,7 @@ export async function GET(request: Request) {
     })),
     repo,
     error: result.error,
+    code: result.code,
     stale: result.stale,
     lastSuccessfulAt: result.lastSuccessfulAt,
     retryAt: result.retryAt,

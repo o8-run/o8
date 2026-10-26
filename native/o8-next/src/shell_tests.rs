@@ -72,7 +72,10 @@ fn glass_shell_probe(cx: &mut TestAppContext) {
             cx.notify();
         });
         draw(cx);
-        let workspace = cx.debug_bounds("workspace-1").unwrap();
+        let switcher = cx.debug_bounds("workspace-switcher").unwrap();
+        cx.simulate_click(switcher.center(), gpui::Modifiers::default());
+        draw(cx);
+        let workspace = cx.debug_bounds("command-1").unwrap();
         cx.simulate_click(workspace.center(), gpui::Modifiers::default());
         ready(&shell, cx);
         assert_eq!(

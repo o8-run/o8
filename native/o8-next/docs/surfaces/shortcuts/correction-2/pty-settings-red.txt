@@ -1,0 +1,15 @@
+running 1 test
+test shell::shortcuts::tests::review::correction_2::shortcuts_settings_chords_do_not_steal_pty_focus ...
+thread 'shell::shortcuts::tests::review::correction_2::shortcuts_settings_chords_do_not_steal_pty_focus' (288237) panicked at src/surfaces/shortcuts/correction_2_tests.rs:243:5:
+a focused PTY owns Settings chords too
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    shell::shortcuts::tests::review::correction_2::shortcuts_settings_chords_do_not_steal_pty_focus
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 99 filtered out; finished in 5.39s
+
+error: test failed, to rerun pass `--bin o8-next`

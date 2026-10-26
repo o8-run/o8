@@ -1,0 +1,6 @@
+running 3 tests
+test shell::workers::tests::workers_live_route_retains_cards_selection_and_filter_scroll ... ok
+test shell::workers::tests::workers_real_shell_filters_route_membership ... ok
+test shell::workers::card_tests::workers_card_activity_reads_real_events_and_keeps_position ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 166 filtered out; finished in 2.61s

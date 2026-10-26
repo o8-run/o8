@@ -28,7 +28,6 @@ import { registerCodexAppBridgeSteer } from '@/lib/codex/app-bridge-steer';
 import { noteCodexAppTurnLine } from '@/lib/codex/app-thread-sync';
 export { ensureCodexHome, mergeCodexMcpConfig, prepareCodexHome, stripPluginSections } from './codex-orchestrator-config';
 import { parseLocalModel } from '@/lib/codex/local-model';
-import { codexCliSupportsUltraEfforts } from '@/lib/codex/reasoning-effort';
 import { resolveCodexAppThreadsSync } from '@/lib/operator/defaults';
 import { MODEL_IDS } from '@/lib/models';
 import { CODEX_SOL_FALLBACK_MODEL, CODEX_SOL_UPDATE_NOTICE, isCodexSolUnsupported } from '@/lib/codex/model-compatibility';
@@ -330,7 +329,7 @@ async function sendToCodexOrchestratorAttempt(
   }
   if (settleBeforeSpawnIfAborted()) return;
   const isLocalModel = !!parseLocalModel(model);
-  let reasoningEffort = reasoningEffortFromThinkingEffort(options.thinkingEffort, model);
+  let reasoningEffort: Exclude<ThinkingEffort, 'adaptive'>;
 
   const { resolveCli, CliNotFoundError } = await import('@/lib/runtimes/shared/cli-resolver');
   if (settleBeforeSpawnIfAborted()) return;
@@ -342,13 +341,9 @@ async function sendToCodexOrchestratorAttempt(
       envOverride: 'O8_CODEX_BIN',
     });
     codexBin = resolved.path;
-    // The model-gated clamp (flagship models may use max/ultra) is not enough — the
-    // INSTALLED CLI must also understand the tier. An older codex refuses to
-    // load config mentioning `max` and exits 1 before the first token.
-    if ((reasoningEffort === 'max' || reasoningEffort === 'ultra') && !codexCliSupportsUltraEfforts(resolved.version)) {
-      console.warn(`[codex-orchestrator] installed codex ${resolved.version ?? '(unknown version)'} predates '${reasoningEffort}' — clamping to xhigh`);
-      reasoningEffort = 'xhigh';
-    }
+    reasoningEffort = reasoningEffortFromThinkingEffort(options.thinkingEffort, model, {
+      explicitModel: options.model, installedCliVersion: resolved.version ?? null,
+    });
   } catch (err) {
     if (settleBeforeSpawnIfAborted()) return;
     session.status = 'dead';

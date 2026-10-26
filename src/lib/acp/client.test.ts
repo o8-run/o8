@@ -259,3 +259,31 @@ describe('AcpClient', () => {
     await expect(client.initialize()).resolves.toMatchObject({ protocolVersion: 1 });
   });
 });
+
+it('streams progress immediately without saved secrets, before the peer can complete its prompt', async () => {
+  let received!: () => void;
+  const progress = new Promise<void>(resolve => { received = resolve; });
+  let finished = false;
+  const peer = String.raw`
+    const send = value => process.stdout.write(JSON.stringify(value) + '\n');
+    let pending;
+    require('node:readline').createInterface({input:process.stdin}).on('line', line => {
+      const r = JSON.parse(line);
+      if (r.method === 'session/prompt') {
+        pending = r.id;
+        return send({jsonrpc:'2.0',method:'session/update',params:{sessionId:'live',update:{sessionUpdate:'agent_message_chunk',content:{type:'text',text:'Working on it'}}}});
+      }
+      send({jsonrpc:'2.0',id:r.id,result:r.method==='initialize'?{protocolVersion:1}:r.method==='session/new'?{sessionId:'live'}:{}});
+      if (r.method === 'session/set_config_option') send({jsonrpc:'2.0',id:pending,result:{stopReason:'end_turn'}});
+    });
+    setTimeout(() => process.exit(0), 5000).unref();
+  `;
+  const client = new AcpClient({ runtimeId: 'acp', command: process.execPath, args: ['-e', peer],
+    onEvent: event => { if (event.type === 'text' && event.text === 'Working on it') received(); } });
+  children.push(client);
+  await client.initialize(); await client.newSession(process.cwd());
+  const prompt = client.prompt('live', 'Fixture progress.').then(() => { finished = true; });
+  await progress;
+  expect(finished).toBe(false);
+  await client.setModel('live', 'fixture'); await prompt;
+});

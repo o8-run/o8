@@ -1,0 +1,262 @@
+{
+  "schema": 1,
+  "sizes": [
+    [
+      1024,
+      720
+    ],
+    [
+      1440,
+      900
+    ]
+  ],
+  "elements": {
+    "sidebar": {
+      "web": "[data-o8-agent-panel]",
+      "native": null
+    },
+    "rail": {
+      "web": "[aria-label='Workspace navigation']",
+      "native": null
+    },
+    "top bar": {
+      "web": "[data-mcp-scope='navigation-window-controls']",
+      "native": null
+    },
+    "worker pane": {
+      "web": "[data-o8-workspace]",
+      "native": "pane-0"
+    },
+    "transcript": {
+      "web": "[data-worker-transcript]",
+      "native": null
+    },
+    "composer": {
+      "web": "textarea",
+      "native": "composer-input"
+    },
+    "palette": {
+      "web": "[aria-label='Command palette']",
+      "native": "command-palette"
+    },
+    "settings": {
+      "web": "[data-settings-shell]",
+      "native": "settings-page"
+    },
+    "files": {
+      "web": "[aria-label='Files']",
+      "native": null
+    },
+    "diff": {
+      "web": "[data-diff-viewer]",
+      "native": "diff-viewport"
+    },
+    "terminal": {
+      "web": ".xterm-screen",
+      "native": null
+    }
+  },
+  "surfaces": [
+    {
+      "id": "sidebar",
+      "flags": [
+        "--sidebar"
+      ],
+      "webRoute": "/dashboard",
+      "webClick": "[aria-label='Toggle sidebar']",
+      "nativeSelectors": [
+        "thread-search",
+        "thread-list"
+      ],
+      "remaining": "Sidebar row heights, typography and full-column bounds remain unmeasured"
+    },
+    {
+      "id": "session",
+      "tab": "Session",
+      "flags": [
+        "--composer",
+        "--transcript"
+      ],
+      "webRoute": "/dashboard",
+      "webEvent": "o8:open-pr-conversation",
+      "webDetail": {
+        "threadId": "thoughts-rich",
+        "title": "Rich transcript fixture"
+      },
+      "nativeSelectors": [
+        "composer-input"
+      ]
+    },
+    {
+      "id": "workers",
+      "tab": "Workers",
+      "flags": [
+        "--workers"
+      ],
+      "webRoute": "/dashboard",
+      "webEvent": "o8:open-inbox-tab",
+      "webClick": "[aria-label='Open right panel tab picker']",
+      "webText": "Threads",
+      "nativeSelectors": [
+        "workers-pane",
+        "workers-list"
+      ],
+      "remaining": "Current-UI thread grouping and native worker filters are not yet equivalent"
+    },
+    {
+      "id": "brain",
+      "tab": "Brain",
+      "flags": [
+        "--brain"
+      ],
+      "webRoute": "/dashboard",
+      "webClick": "[aria-label='Open right panel tab picker']",
+      "webText": "Side chat",
+      "nativeSelectors": [],
+      "webEvent": "o8:open-inbox-tab",
+      "remaining": "Equivalent conversation and source selection is unverified"
+    },
+    {
+      "id": "grid",
+      "tab": "Grid",
+      "flags": [],
+      "webRoute": "/dashboard",
+      "nativeSelectors": [
+        "pane-0"
+      ],
+      "remaining": "Matching current-UI pane-grid composition is not automated"
+    },
+    {
+      "id": "activity",
+      "tab": "Activity",
+      "flags": [
+        "--activity"
+      ],
+      "webRoute": "/dashboard",
+      "webClick": "[aria-label='Open right panel tab picker']",
+      "webText": "Activity",
+      "nativeSelectors": [
+        "activity-pane"
+      ],
+      "webEvent": "o8:open-inbox-tab"
+    },
+    {
+      "id": "pull_requests",
+      "tab": "PullRequests",
+      "flags": [
+        "--pull-requests"
+      ],
+      "webRoute": "/dashboard",
+      "webClick": "[aria-label='PRs']",
+      "nativeSelectors": []
+    },
+    {
+      "id": "inbox",
+      "tab": "Inbox",
+      "flags": [
+        "--inbox"
+      ],
+      "webRoute": "/dashboard",
+      "webEvent": "o8:open-inbox-tab",
+      "nativeSelectors": []
+    },
+    {
+      "id": "issues",
+      "tab": "Issues",
+      "flags": [
+        "--issues"
+      ],
+      "webRoute": "/dashboard",
+      "webClick": "[aria-label='Open a panel']",
+      "webText": "Issues",
+      "nativeSelectors": [],
+      "remaining": "Current-UI issue list opener is not mapped"
+    },
+    {
+      "id": "diff",
+      "flags": [
+        "--review"
+      ],
+      "nativeCommand": "Open diff for a packet",
+      "webRoute": "/dashboard",
+      "webEvent": "o8:focus-review",
+      "nativeSelectors": [
+        "target-picker",
+        "diff-viewport"
+      ],
+      "remaining": "Packet selection after the native target picker is not automated"
+    },
+    {
+      "id": "terminal",
+      "flags": [
+        "--terminal"
+      ],
+      "nativeCommand": "Open terminal",
+      "webRoute": "/dashboard",
+      "webClick": "[aria-label='Run terminal']",
+      "nativeSelectors": [
+        "target-picker"
+      ],
+      "remaining": "Fixture PTY attachment after the native target picker is not automated"
+    },
+    {
+      "id": "settings",
+      "flags": [
+        "--settings"
+      ],
+      "nativeKeys": "ctrl+comma",
+      "webRoute": "/dashboard",
+      "webKeys": "Control+,",
+      "nativeSelectors": [
+        "settings-page",
+        "settings-loaded"
+      ]
+    },
+    {
+      "id": "projects",
+      "flags": [
+        "--projects"
+      ],
+      "nativeCommand": "Open projects and repositories",
+      "webRoute": "/dashboard",
+      "webClick": "[aria-label='More navigation']",
+      "nativeSelectors": [
+        "shell-projects"
+      ],
+      "webText": "Projects"
+    },
+    {
+      "id": "customize",
+      "flags": [
+        "--customize"
+      ],
+      "nativeCommand": "Open Customize",
+      "webRoute": "/dashboard",
+      "webEvent": "o8:open-customize",
+      "nativeSelectors": [
+        "custom-search"
+      ]
+    },
+    {
+      "id": "setup",
+      "flags": [
+        "--onboarding"
+      ],
+      "nativeCommand": "Open setup",
+      "webRoute": "/dashboard",
+      "nativeSelectors": [
+        "setup-projects"
+      ]
+    },
+    {
+      "id": "palette",
+      "flags": [],
+      "nativeKeys": "ctrl+k",
+      "webRoute": "/dashboard",
+      "webKeys": "Control+k",
+      "nativeSelectors": [
+        "command-palette"
+      ]
+    }
+  ]
+}

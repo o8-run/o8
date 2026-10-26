@@ -16,7 +16,19 @@ export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server';
 import { spawn } from '@/lib/providers/child-process';
 import { synthesizeEdgeNeural } from '@/lib/tts/edge-neural';
-import { ensureEdgeTtsInstalled } from '@/lib/tts/ensure-edge-tts';
+import { ensureEdgeTtsInstalled, getEdgeTtsStatus } from '@/lib/tts/ensure-edge-tts';
+import type { EdgeVoiceError } from '@/lib/tts/edge-voice-error';
+
+// A rejected token scheme will not recover by retrying the same native client.
+const runtime = globalThis as typeof globalThis & { __o8EdgeTtsNativeDrift?: boolean };
+
+function isForbidden(error: unknown): boolean {
+  if (typeof error === 'object' && error !== null) {
+    const err = error as { status?: number; statusCode?: number; response?: { statusCode?: number } };
+    if (err.status === 403 || err.statusCode === 403 || err.response?.statusCode === 403) return true;
+  }
+  return /\b403\b/.test(String(error));
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -31,19 +43,33 @@ export async function POST(req: NextRequest) {
     // Limit text length to prevent abuse
     const trimmedText = text.slice(0, 10_000);
 
-    // Installation is demand-driven: a fresh boot never mutates Python. The
-    // native client serves this request while the optional fallback prepares
-    // in the background for future protocol-drift failures.
+    // Never wait for pip on the request path. Startup normally prepares this;
+    // this also covers servers that receive TTS before optional boot finishes.
     void ensureEdgeTtsInstalled();
 
-    // Native Node synthesis first — zero machine deps, works on a fresh
-    // laptop (report S9KT8H: the pip-only path silently failed there and the
-    // whole product spoke in the `say` Fred voice). The Python CLI stays as
-    // the fallback tier for protocol-drift insurance.
-    const mp3 = await synthesizeEdgeNeural(trimmedText, voice).catch(async (nativeError: unknown) => {
-      console.error('[TTS API] native edge-neural failed, trying python CLI:', nativeError);
-      return runEdgeTTS(trimmedText, voice);
-    });
+    let mp3: Buffer | undefined;
+    if (!runtime.__o8EdgeTtsNativeDrift) {
+      try {
+        mp3 = await synthesizeEdgeNeural(trimmedText, voice);
+      } catch (nativeError) {
+        if (isForbidden(nativeError)) {
+          runtime.__o8EdgeTtsNativeDrift = true;
+          void ensureEdgeTtsInstalled('forbidden');
+        }
+        console.warn('[TTS API] native voice failed; trying Python CLI:', nativeError);
+      }
+    }
+    if (!mp3) {
+      try {
+        mp3 = await runEdgeTTS(trimmedText, voice);
+      } catch (pythonError) {
+        if (isForbidden(pythonError)) void ensureEdgeTtsInstalled('forbidden');
+        const code: EdgeVoiceError = getEdgeTtsStatus() === 'update_required' || isForbidden(pythonError)
+          ? 'edge_voice_update_required' : 'edge_voice_unavailable';
+        console.warn('[TTS API]', code, pythonError);
+        return NextResponse.json({ error: 'Steffan voice unavailable', code }, { status: 503 });
+      }
+    }
 
     return new NextResponse(new Uint8Array(mp3), {
       status: 200,
@@ -65,7 +91,7 @@ export async function POST(req: NextRequest) {
 function runEdgeTTS(text: string, voice: string): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     // Use edge-tts CLI: writes to stdout with --write-media -
-    const proc = spawn('python3', [
+    const proc = spawn(process.env.O8_TTS_PYTHON || 'python3', [
       '-m', 'edge_tts',
       '--voice', voice,
       '--text', text,

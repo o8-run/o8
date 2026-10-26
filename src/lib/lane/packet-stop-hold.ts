@@ -14,6 +14,7 @@ import { missionLifecycleHoldIsActive } from '@/lib/orchestrator/mission-lifecyc
 import type { Lane } from './types';
 import type { OrchestratorMissionState, OrchestratorPacket } from '@/lib/orchestrator/types';
 import { hasCanonicalReleaseEvidence } from '@/lib/orchestrator/packet-release-truth';
+import { packetSpendCapBreach } from '@/lib/orchestrator/metered-spend';
 import { getSqlite } from '@/lib/db';
 import { findLaneByPacket } from './registry';
 
@@ -72,6 +73,30 @@ function readManagedRunPacket(packetId: string): OrchestratorPacket | null {
   const registryPacket = findMissionRegistryEntryByPacketId(normalizedPacketId, { includeArchived: true })
     ?.mission.packets.find((candidate) => candidate.id === normalizedPacketId) ?? null;
   return registryPacket;
+}
+
+function recoveryStopReason(packet: OrchestratorPacket): string | null {
+  if (packet.spendTelemetry?.capHit || (packet.spendCap && packet.spendTelemetry
+    && packetSpendCapBreach(packet.spendCap, packet.spendTelemetry))) return 'spend_cap_hit';
+  if (packet.operatorStopped) return 'operator_stopped';
+  if (packet.queueState === 'held') return 'packet_held';
+  return null;
+}
+
+/** Completion may advance normal statuses, but cannot clear a durable stop. */
+export function packetRecoveryStopReason(packetId: string): string | null {
+  const packet = readManagedRunPacket(packetId);
+  return (packet && recoveryStopReason(packet)) || packetSteerHoldReason(packetId);
+}
+
+/** Automatic work cannot clear a durable hold or grant a fresh spend allowance. */
+export function packetAutomaticRecoveryHoldReason(packetId: string): string | null {
+  const packet = readManagedRunPacket(packetId);
+  if (!packet) return 'packet_not_found';
+  const stopped = recoveryStopReason(packet);
+  if (stopped) return stopped;
+  const admission = managedRunAdmissionForPacket(packet);
+  return admission.allowed ? null : admission.reason;
 }
 
 /** A steer is not authority to undo an operator stop, archive, or proven release. */

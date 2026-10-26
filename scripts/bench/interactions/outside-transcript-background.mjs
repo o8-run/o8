@@ -2,7 +2,7 @@
 // Production transcript hook/renderers; four fixture sessions share live cache updates.
 import { build } from 'esbuild';
 import { execFileSync } from 'node:child_process';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { webkit } from 'playwright-core';
@@ -17,24 +17,45 @@ const presentationFile = workspace ? 'src/components/desktop/workspace-terminal/
 const entryAttribute = workspace ? 'data-o8-message-id' : 'data-outside-transcript-entry';
 const output = path.resolve(option('output', 'tests/bench/latest/outside-transcript-background.json'));
 const forceForeground = process.argv.includes('--force-foreground');
+const expectReuse = process.argv.includes('--expect-reuse');
+const forceRowInvalidation = process.argv.includes('--force-row-invalidation');
 const baselinePresentation = process.argv.includes('--baseline-presentation');
 const hiddenDocument = process.argv.includes('--hidden-document');
 if (!['chromium', 'webkit'].includes(engine)) throw new Error('Use --engine=chromium|webkit.');
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
+const historyCode = Array.from({ length: 4 }, (_, index) => `export function item${index}(value: number) {\n  return { id: value, enabled: value > ${index} };\n}`).join('\n');
 const baselineRef = baselinePresentation ? execFileSync('git', ['merge-base', 'HEAD', 'origin/main'], { cwd: root, encoding: 'utf8' }).trim() : null;
-const receipt = { engine, surface: workspace ? 'workspace' : 'outside', forceForeground, hiddenDocument, baselineRef, observations: [], errors: [], passed: false,
-  workload: { sessions: 4, entriesPerSession: 80, sourceCadenceMs: 50, samples: 3, sampleMs: 3000 },
-  limits: 'Production data hook, transcript renderers and shared store with fixture cache writes. Document visibility input is controlled; browser timer throttling and native minimization are not measured. Workspace fixture uses the production draft/scroll hooks; surrounding application chrome is omitted. Existing interaction browser ownership/statistics. Not full dashboard, native, provider or power-saving proof. WebKit TaskDuration unavailable.' };
+const receipt = { engine, surface: workspace ? 'workspace' : 'outside', forceForeground, expectReuse, forceRowInvalidation, hiddenDocument, baselineRef, observations: [], switches: [], errors: [], passed: false,
+  workload: { sessions: 4, entriesPerSession: 80, assistantHistoryCodeLines: 12, sourceCadenceMs: 50, samples: 3, sampleMs: 3000, switches: hiddenDocument ? 0 : 6 },
+  limits: 'Production data hook, transcript renderers and shared store with fixture cache writes. Switch time is an in-page click through two animation frames while all four caches stream; task windows exclude switches. Document visibility input is controlled; browser timer throttling and native minimization are not measured. Workspace fixture uses the production draft/scroll hooks; surrounding application chrome is omitted. Existing interaction browser ownership/statistics. Not full dashboard, native, provider or power-saving proof. WebKit TaskDuration unavailable.' };
 let browser; let measured;
 try {
   const built = await build({ absWorkingDir: root, bundle: true, write: false, minify: true, format: 'iife',
     platform: 'browser', alias: { '@': path.join(root, 'src') },
     define: { 'process.env.NODE_ENV': '"production"', 'process.env': '{}' },
-    plugins: baselinePresentation ? [{ name: 'original-presentation', setup(plugin) {
+    plugins: [...(baselinePresentation ? [{ name: 'original-presentation', setup(plugin) {
       plugin.onLoad({ filter: workspace ? /workspace-terminal\/useWorkspaceChatPane\.ts$/ : /transcripts\/useTranscript\.ts$/ }, () => ({ loader: 'ts',
         contents: execFileSync('git', ['show', `${baselineRef}:${presentationFile}`], { cwd: root, encoding: 'utf8' }),
       }));
-    } }] : [],
+    } }] : []), { name: 'history-render-observation', setup(plugin) {
+      plugin.onLoad({ filter: /LLMMarkdown\.tsx$/ }, async args => {
+        const source = await readFile(args.path, 'utf8');
+        const start = source.indexOf('export function renderLLMMarkdown(');
+        const marker = '}): React.ReactNode[] {';
+        const body = source.indexOf(marker, start);
+        if (start < 0 || body < 0) throw new Error('Missing production markdown observation seam');
+        const offset = body + marker.length;
+        return { loader: 'tsx', contents: source.slice(0, offset)
+          + "\nif (text.startsWith('**History ')) window.__historyRenders = (window.__historyRenders ?? 0) + 1;\n"
+          + source.slice(offset) };
+      });
+      if (forceRowInvalidation) plugin.onLoad({ filter: /OutsideConversationPane\.tsx$/ }, async args => {
+        const source = await readFile(args.path, 'utf8');
+        const marker = 'memo(function OutsideConversationEntry';
+        if (!source.includes(marker)) throw new Error('Missing production row memoization control seam');
+        return { loader: 'tsx', contents: source.replace(marker, '(function OutsideConversationEntry') };
+      });
+    } }],
     stdin: { resolveDir: root, loader: 'tsx', contents: `
       import React, { useEffect, useState } from 'react';
       import { createRoot } from 'react-dom/client';
@@ -60,7 +81,8 @@ try {
       const keys = Array.from({length: 4}, (_, s) => '${workspace ? 'muse-owned' : 'codex-discovered'}:fixture-' + s);
       const histories = keys.map((_, s) => Array.from({length: 80}, (_, i) => ({
         id: 's' + s + '-e' + i, role: i % 2 ? 'assistant' : 'user', timestamp: 1,
-        text: i === 79 ? 'Live 0' : '**History ' + i + '**\\n\\n' + 'Retain the original transcript position and selection. '.repeat(8),
+        text: i === 79 ? 'Live 0' : '**History ' + i + '**\\n\\n' + 'Retain the original transcript position and selection. '.repeat(8)
+          + (i % 2 ? ${JSON.stringify('\n\n```ts\n' + historyCode + '\n```')} : ''),
       })));
       keys.forEach((key, s) => transcriptStore.setSlice(key, { messages: histories[s], status: 'fresh', lastUpdated: 1 }));
       window.__transcriptStatuses = () => keys.map(key => transcriptStore.getSlice(key).status);
@@ -124,7 +146,7 @@ try {
       const epoch = window.__epoch = (window.__epoch ?? 0) + 1;
       window.__frames = []; let last = performance.now();
       const frame = now => { if (window.__epoch !== epoch) return; window.__frames.push(now - last); last = now; requestAnimationFrame(frame); };
-      requestAnimationFrame(frame); window.__batches = {};
+      requestAnimationFrame(frame); window.__batches = {}; window.__historyRenders = 0;
       window.__observer = new MutationObserver(mutations => {
         const changed = new Set();
         for (const mutation of mutations) {
@@ -140,14 +162,27 @@ try {
     const after = await taskTime();
     const observation = await page.evaluate(() => {
       window.__epoch++; window.__observer.disconnect();
-      return { batches: window.__batches, frames: window.__frames.length,
+      return { batches: window.__batches, frames: window.__frames.length, frameIntervals: window.__frames,
+        closedRowRenders: window.__historyRenders,
         framesOver34ms: window.__frames.filter(ms => ms > 34).length };
     });
     const hiddenBatches = [1, 2, 3].map(s => observation.batches['s' + s + '-e79'] ?? 0);
-    receipt.observations.push({ ...observation, hiddenBatches,
+    const { frameIntervals, ...counts } = observation;
+    receipt.observations.push({ ...counts, hiddenBatches,
+      frameP95Ms: percentile(frameIntervals, 0.95), maxFrameMs: Math.max(0, ...frameIntervals),
       visibleBatches: observation.batches['s0-e79'] ?? 0,
       taskMs: before === null ? null : (after - before) * 1000, elapsedMs: performance.now() - started,
       scrollPreserved: Math.abs(await scroller.evaluate(element => element.scrollTop) - scrollTop) <= 1 });
+  }
+  if (!hiddenDocument) for (const index of [1, 0, 2, 0, 3, 0]) {
+    receipt.switches.push(await page.evaluate(async index => {
+      window.__historyRenders = 0;
+      const started = performance.now();
+      [...document.querySelectorAll('nav button')].find(button => button.textContent === 'Session ' + index).click();
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      return { session: index, switchMs: performance.now() - started, closedRowRenders: window.__historyRenders,
+        shown: getComputedStyle(document.querySelector('[data-fixture-session="' + index + '"]')).display !== 'none' };
+    }, index));
   }
   await page.evaluate(() => window.__stop()); await page.waitForTimeout(300);
   if (hiddenDocument) {
@@ -168,8 +203,12 @@ try {
   receipt.transcriptHealthy = await page.evaluate(() => window.__transcriptStatuses().every(status => status === 'fresh'));
   if (option('screenshot', '')) await page.screenshot({ path: path.resolve(option('screenshot', '')) });
   receipt.medianTaskMs = percentile(receipt.observations.map(row => row.taskMs), 0.5);
+  receipt.medianFrameP95Ms = percentile(receipt.observations.map(row => row.frameP95Ms), 0.5);
+  receipt.medianSwitchMs = percentile(receipt.switches.map(row => row.switchMs), 0.5);
   receipt.passed = !receipt.errors.length && receipt.draftRetained && receipt.draftSelectionRetained && receipt.transcriptHealthy && receipt.catchUp && receipt.retained && receipt.scrollPreserved && receipt.selectionPreserved
     && (!hiddenDocument || receipt.documentWasHidden && receipt.windowCatchUp)
+    && receipt.switches.every(row => row.shown)
+    && (!expectReuse || receipt.observations.every(row => row.closedRowRenders === 0) && receipt.switches.every(row => row.closedRowRenders === 0))
     && receipt.observations.every(row => row.scrollPreserved && (hiddenDocument ? row.visibleBatches > 0 && row.visibleBatches <= 4 : row.visibleBatches >= 8) && row.hiddenBatches.every(count => count > 0 && count <= 4));
 } catch (error) { receipt.error = String(error); }
 finally {
