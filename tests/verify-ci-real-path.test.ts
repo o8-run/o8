@@ -30,16 +30,17 @@ if (barrier) {
   const unit = args.includes('test:unit') && args.includes('--shard=1/4');
   if (args.includes('lint') || unit) {
     fs.writeFileSync(path.join(barrier, unit ? 'unit' : 'lint'), 'started');
-    const deadline = Date.now() + 5000;
+    const deadline = Date.now() + 15000;
     while (!fs.existsSync(path.join(barrier, unit ? 'lint' : 'unit')) && Date.now() < deadline) wait();
     if (!fs.existsSync(path.join(barrier, unit ? 'lint' : 'unit'))) process.exit(9);
   }
-  const testCommand = args.includes('vitest') || args.includes('test:unit') || args.includes('test:integration') || args.includes('test:classification:check');
+  const testCommand = args.includes('vitest') || args.includes('typecheck') || args.includes('test:unit') || args.includes('test:integration') || args.includes('test:classification:check');
   if (testCommand) {
     const lock = path.join(barrier, 'test-process');
     try { fs.writeFileSync(lock, 'active', { flag: 'wx' }); } catch { process.exit(8); }
     process.on('exit', () => fs.unlinkSync(lock));
     wait();
+    if (args.includes('test:classification:check')) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2000);
   }
   if (args.includes('tests/release-channel-real-path.test.ts')) fs.writeFileSync(path.join(barrier, 'typecheck-complete'), 'done');
   if (args.includes('scripts/smoke-merge-requires-review.ts') && !fs.existsSync(path.join(barrier, 'typecheck-complete'))) process.exit(8);

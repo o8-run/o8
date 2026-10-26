@@ -38,7 +38,14 @@ function expand(value, shard) {
   requireCondition(!result.includes('${{'), 'unsupported hosted expression in a local command or environment');
   return result;
 }
-function runStep(step, job, shard) {
+function usesTestProcess(command, scripts, seen = new Set()) {
+  if (/\bvitest\b|npm run test:(?:unit|integration|classification:check)\b|scripts\/ci\/check-hermetic-shards\.mjs/.test(command)) return true;
+  return [...command.matchAll(/\bnpm run ([\w:-]+)/g)].some(([, name]) => {
+    if (seen.has(name) || typeof scripts[name] !== 'string') return false;
+    return usesTestProcess(scripts[name], scripts, new Set([...seen, name]));
+  });
+}
+function runStep(step, job, shard, scripts) {
   const env = Object.fromEntries(Object.entries({ ...job.env, ...step.env })
     .map(([key, value]) => [key, expand(value, shard)]));
   let command = expand(step.run, shard).trim();
@@ -55,7 +62,7 @@ function runStep(step, job, shard) {
     command = smoke[3];
     temporaryData = true;
   }
-  const testProcess = /\bvitest\b|npm run test:(?:unit|integration|classification:check)\b|scripts\/ci\/check-hermetic-shards\.mjs/.test(command);
+  const testProcess = usesTestProcess(command, scripts);
   return { command, env, timeoutMs, temporaryData, testProcess };
 }
 function selectedSteps(job, shard) {
@@ -74,6 +81,7 @@ function selectedSteps(job, shard) {
 }
 
 export function readVerificationPlan(root, workflowPath = path.join(root, '.github/workflows/ci.yml')) {
+  const scripts = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8')).scripts;
   const workflow = parse(readFileSync(workflowPath, 'utf8'));
   const jobs = workflow.jobs;
   requireCondition(jobs && typeof jobs === 'object', 'CI must define jobs');
@@ -115,18 +123,18 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
   const checks = [];
   const dependencies = job => [job.needs ?? []].flat().map(id => id === 'test-shards' ? 'test' : id);
   const appendJob = id => {
-    const steps = selectedSteps(jobs[id]).map(step => runStep(step, jobs[id]));
+    const steps = selectedSteps(jobs[id]).map(step => runStep(step, jobs[id], undefined, scripts));
     requireCondition(steps.length > 0, `${id} has no local checks`);
     checks.push({ id, after: dependencies(jobs[id]), name: jobs[id].name, steps });
   };
   appendJob('typecheck');
   appendJob('lint');
   checks.push({ id: 'classification', after: dependencies(shardJob), name: classification[0].name ?? 'Test Classification',
-    steps: classification.map(step => runStep(step, shardJob, 1)) });
+    steps: classification.map(step => runStep(step, shardJob, 1, scripts)) });
   const unitSteps = shards.flatMap(shard => selectedSteps(shardJob, shard)
     .filter(step => step.run !== classification[0].run)
     .map(step => {
-      const unit = runStep(step, shardJob, shard);
+      const unit = runStep(step, shardJob, shard, scripts);
       return { ...unit, env: { NODE_ENV: 'test', ...unit.env } };
     }));
   requireCondition(unitSteps.some(step => step.command.startsWith('npm run test:unit -- ')), 'CI must execute its hermetic unit entry point');
@@ -154,8 +162,8 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
     'integration step needs a verify:ci equivalent');
   }
   checks.push({ id: 'integration-changed', after: dependencies(integration), name: integration.name, steps: [
-    ...browserSteps.map(step => ({ ...runStep(step, integration), requiresFile: browserFile })),
-    { ...runStep({ ...integrationRun, run: 'npm run test:integration --' }, integration), selectedFiles: true },
+    ...browserSteps.map(step => ({ ...runStep(step, integration, undefined, scripts), requiresFile: browserFile })),
+    { ...runStep({ ...integrationRun, run: 'npm run test:integration --' }, integration, undefined, scripts), selectedFiles: true },
   ] });
   const audit = jobs.security.steps.find(step => step.uses?.startsWith(auditAction));
   requireCondition(audit, 'native dependency audit is missing');
@@ -163,7 +171,7 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
   requireCondition(ignores.every(value => /^RUSTSEC-\d{4}-\d{4}$/.test(value)), 'native audit ignore list is malformed');
   const auditFile = path.posix.join(audit.with?.['working-directory'] ?? '.', 'Cargo.lock');
   checks.push({ id: 'security', after: dependencies(jobs.security), name: jobs.security.name, steps: [
-    ...selectedSteps(jobs.security).map(step => runStep(step, jobs.security)),
+    ...selectedSteps(jobs.security).map(step => runStep(step, jobs.security, undefined, scripts)),
     { command: `cargo-audit audit --file ${quote(auditFile)}${ignores.map(value => ` --ignore ${quote(value)}`).join('')}`,
       env: {}, timeoutMs: jobs.security['timeout-minutes'] * 60_000 },
   ] });
