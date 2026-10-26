@@ -11,6 +11,7 @@ From the repository root, with the prerequisites in
 [the shared Linux setup](../../.github/actions/next-linux-setup/action.yml):
 
 ```sh
+node scripts/parity/next.mjs --check-surfaces
 cargo build --locked --manifest-path native/o8-next/Cargo.toml
 cargo test --locked --manifest-path native/o8-next/Cargo.toml --bin o8-next --no-run
 npx --no-install playwright-core install chromium
@@ -21,9 +22,11 @@ node scripts/parity/checklist.mjs work/next-parity/report.json
 
 Use `--browser /absolute/path` for an existing headless browser or `--only session`
 to inspect a single surface. An unknown `--only` exits 1 before starting a host.
-Capture and inventory commands name any registered surface missing from
-`scripts/parity/surfaces.json`; `--compare` can still process an existing report
-when the registration inventory has grown. Host startup and capture share the
+`--check-surfaces` names missing, stale or duplicate mappings in
+`scripts/parity/surfaces.json`. One dedicated CLI test owns this inventory check
+and runs in CI before capture. Listing, comparisons and selected-surface captures
+remain usable when the registration inventory grows; unrelated render tests do
+not repeat the global check. The GPUI probe measures its selected surface. Host startup and capture share the
 same cleanup, including when native test compilation fails.
 
 Set `VK_ICD_FILENAMES` to the installed software
@@ -55,6 +58,10 @@ The PR workflow uploads only images and bounded reports; raw child diagnostics
 stay in a local temporary directory printed by the runner. The
 [review regression receipts](../../native/o8-next/evidence/parity/review-1/verification.md)
 record injected render failures and a successful capture of all 28 cases.
+
+The [final main synchronization](../../native/o8-next/evidence/parity/final-main-sync/verification.md)
+adds Sidebar to the existing fixture matrix, now 16 surfaces. Its row, type and
+full-column parity remain unmeasured under #4642.
 
 ## Measurement limits and remaining acceptance
 
@@ -98,6 +105,17 @@ cover mapping drift, process cleanup and the expanded capture.
 <!-- parity-table:start -->
 | Surface | Element | Status | Owner | Measured gap (native − current UI, px) |
 | --- | --- | --- | --- | --- |
+| sidebar | sidebar | Partial | [#4642](https://github.com/o8-run/o8/issues/4642) | No capture recorded |
+| sidebar | rail | Missing | [#4642](https://github.com/o8-run/o8/issues/4642) | No capture recorded |
+| sidebar | top bar | Partial | [#4642](https://github.com/o8-run/o8/issues/4642) | No capture recorded |
+| sidebar | worker pane | Partial | [#4642](https://github.com/o8-run/o8/issues/4642) | No capture recorded |
+| sidebar | transcript | Partial | [#4642](https://github.com/o8-run/o8/issues/4642) | No capture recorded |
+| sidebar | composer | Partial | [#4642](https://github.com/o8-run/o8/issues/4642) | No capture recorded |
+| sidebar | palette | Partial | [#4642](https://github.com/o8-run/o8/issues/4642) | No capture recorded |
+| sidebar | settings | Partial | [#4642](https://github.com/o8-run/o8/issues/4642) | No capture recorded |
+| sidebar | files | Missing | [#4642](https://github.com/o8-run/o8/issues/4642) | No capture recorded |
+| sidebar | diff | Partial | [#4642](https://github.com/o8-run/o8/issues/4642) | No capture recorded |
+| sidebar | terminal | Partial | [#4642](https://github.com/o8-run/o8/issues/4642) | No capture recorded |
 | session | sidebar | Partial | [#4711](https://github.com/o8-run/o8/issues/4711) | 1024×720: unmeasured; 1440×900: unmeasured |
 | session | rail | Missing | [#4711](https://github.com/o8-run/o8/issues/4711) | 1024×720: unmeasured; 1440×900: unmeasured |
 | session | top bar | Partial | [#4711](https://github.com/o8-run/o8/issues/4711) | 1024×720: unmeasured; 1440×900: unmeasured |

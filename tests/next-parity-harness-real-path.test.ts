@@ -11,14 +11,22 @@ function run(...args: string[]) {
   return spawnSync(process.execPath, [entry, ...args], { encoding: 'utf8', timeout: 10_000 });
 }
 
-it('discovers every production registration and both viewport sizes through the harness CLI', () => {
+it('lists configured surfaces and both viewport sizes through the harness CLI', () => {
   const result = run('--list');
+  expect(result.status, result.stderr).toBe(0);
+  const manifest = JSON.parse(result.stdout);
+  expect(manifest.schema).toBe(1);
+  expect(manifest.surfaces.length).toBeGreaterThan(0);
+  expect(manifest.sizes).toEqual([[1024, 720], [1440, 900]]);
+});
+
+it('maps every registered shell surface and names inventory drift in this one guard', () => {
+  const result = run('--check-surfaces');
   expect(result.status, result.stderr).toBe(0);
   const manifest = JSON.parse(result.stdout);
   const shell = readFileSync('native/o8-next/src/shell.rs', 'utf8');
   const registered = [...shell.matchAll(/^        (\w+): .* = "surfaces\//gm)].map(match => match[1]);
   expect(manifest.surfaces.map((surface: { id: string }) => surface.id).sort()).toEqual(registered.sort());
-  expect(manifest.sizes).toEqual([[1024, 720], [1440, 900]]);
 });
 
 it('reports signed numeric gaps, preserves missing measurements and never gates on a visual difference', () => {

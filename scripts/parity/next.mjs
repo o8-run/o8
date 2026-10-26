@@ -24,14 +24,16 @@ async function main() {
     browser: process.env.O8_PARITY_BROWSER || '', only: '', nativeTest: '', webHost: resolve('scripts/parity/web-server.ts') };
   let comparison;
   let listing = false;
+  let checking = false;
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--list') listing = true;
+    else if (args[i] === '--check-surfaces') checking = true;
     else if (args[i] === '--compare' && args[i + 1]) comparison = args[++i];
     else if (Object.hasOwn(options, args[i].slice(2)) && args[i + 1]) options[args[i].slice(2)] = args[++i];
-    else throw new Error('Use --list | --compare FILE | [--output DIR --binary FILE --browser FILE --only SURFACE --nativeTest FILE --webHost FILE]');
+    else throw new Error('Use --check-surfaces | --list | --compare FILE | [--output DIR --binary FILE --browser FILE --only SURFACE --nativeTest FILE --webHost FILE]');
   }
   if (options.only && !manifest.surfaces.some(row => row.id === options.only)) throw new CaptureError(`Unknown surface: ${options.only}`);
-  if (listing || !comparison) validateManifest();
+  if (checking) { validateManifest(); console.log(JSON.stringify(manifest)); return; }
   if (listing) { console.log(JSON.stringify(manifest)); return; }
   options.output = resolve(options.output);
   options.binary = resolve(options.binary);

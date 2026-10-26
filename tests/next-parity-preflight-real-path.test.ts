@@ -35,18 +35,21 @@ function unmappedFixture() {
 it('names unmapped registered surfaces through the CLI instead of hiding inventory drift', () => {
   const fixture = unmappedFixture();
   try {
-    const result = run(fixture.entry, '--list');
+    const result = run(fixture.entry, '--check-surfaces');
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain('Unmapped registered surfaces: workers');
+    expect(result.stderr).toContain('Unmapped registered surfaces:');
+    expect(result.stderr).toMatch(/\bworkers\b/);
     expect(result.stderr).toContain('scripts/parity/surfaces.json');
   } finally { rmSync(fixture.root, { recursive: true, force: true }); }
 });
 
-it('compares an existing report even when a newer registration has no capture mapping', () => {
+it('lists mappings and compares reports even when a registration has no capture mapping', () => {
   const fixture = unmappedFixture();
   try {
     const input = join(fixture.root, 'captures.json');
     writeFileSync(input, '[]');
+    const listed = run(fixture.entry, '--list');
+    expect(listed.status, listed.stderr).toBe(0);
     const result = run(fixture.entry, '--compare', input, '--output', join(fixture.root, 'report'));
     expect(result.status, result.stderr).toBe(0);
     expect(JSON.parse(readFileSync(join(fixture.root, 'report/report.json'), 'utf8')).crashes).toBe(0);

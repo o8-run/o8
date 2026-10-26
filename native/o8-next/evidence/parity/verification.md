@@ -1,5 +1,8 @@
 # Parity capture verification
 
+The latest inventory isolation and Sidebar mapping are recorded in the
+[final main synchronization](final-main-sync/verification.md).
+
 The latest rebase, Workers mapping and process-cleanup correction are recorded in
 [review round 2](review-2/verification.md).
 

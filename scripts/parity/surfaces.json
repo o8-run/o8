@@ -58,6 +58,19 @@
   },
   "surfaces": [
     {
+      "id": "sidebar",
+      "flags": [
+        "--sidebar"
+      ],
+      "webRoute": "/dashboard",
+      "webClick": "[aria-label='Toggle sidebar']",
+      "nativeSelectors": [
+        "thread-search",
+        "thread-list"
+      ],
+      "remaining": "Sidebar row heights, typography and full-column bounds remain unmeasured"
+    },
+    {
       "id": "session",
       "tab": "Session",
       "flags": [
