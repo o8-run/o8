@@ -1,6 +1,5 @@
 import { decodedMcpText } from './decoded-mcp-text';
 import { workerParentEnvironment } from './worker-environment';
-import { deferredMcpArgumentsForCheck } from './deferred-mcp-arguments';
 import { createHash } from 'node:crypto';
 import { realpathSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -138,14 +137,11 @@ export function retainChildTransportCredentials(env: Record<string, string>, nam
   if (context) context.transport = Object.fromEntries(names.filter(name => env[name] !== undefined).map(name => [name, env[name]]));
 }
 
-/** Prepared argv cannot retain a provider value that the fresh environment denied. */
-export function assertChildArguments(args: readonly string[], input: Record<string, string | undefined> | undefined, fresh: NodeJS.ProcessEnv, allowDeferredMcp = false): void {
-  const allowed = new Set(Object.entries(fresh).filter(([name]) => providerCredentialName(name)).map(([, value]) => value).filter((value): value is string => Boolean(value)));
-  const denied = credentialMaterials(input ?? {}, allowed);
-  const prepared = (input ? contexts.get(input)?.deniedValues ?? [] : []).filter(value => value && !allowed.has(value));
-  const checked = allowDeferredMcp && input && contexts.get(input)?.runtimeId === 'codex'
-    ? deferredMcpArgumentsForCheck(input, args) : args;
-  if (checked.some(arg => prepared.some(value => arg.includes(value)) || matchesProviderCredential(decodedMcpText(arg), denied))) throw new Error('Prepared child arguments contain revoked or unauthorized provider credentials.');
+/** Provider values never belong in argv, including API-authorized credentials. */
+export function assertChildArguments(args: readonly string[], input: Record<string, string | undefined> | undefined, fresh: NodeJS.ProcessEnv, _allowDeferredMcp = false): void {
+  const denied = credentialMaterials(input ?? {});
+  const prepared = input ? contexts.get(input)?.deniedValues ?? [] : [];
+  if (args.some(arg => prepared.some(value => arg.includes(value)) || matchesProviderCredential(decodedMcpText(arg), denied))) throw new Error('Prepared child arguments contain revoked or unauthorized provider credentials.');
 }
 
 /** Trusted internal brokers reread encrypted policy; runtime children never inherit this key. */

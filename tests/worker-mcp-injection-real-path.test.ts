@@ -281,17 +281,14 @@ describe.sequential('worker MCP injection real path', () => {
     const config = JSON.parse(readFileSync(configPath, 'utf8')) as {
       mcpServers: Record<string, { command: string; args: string[]; env: Record<string, string> }>;
     };
-    expect(config.mcpServers['packet-observer']).toEqual({
+    const observer = config.mcpServers['packet-observer'];
+    expect(observer).toEqual({
       command: process.execPath,
-      args: ['fixture-server.mjs'],
-      env: {
-        PACKET_ID: firstPacket.id,
-        WORKTREE: firstLane.worktreePath,
-        BRANCH: firstPacket.branchTarget,
-        LANE_ID: firstLane.id,
-        UNKNOWN: '{{futureToken}}',
-      },
+      args: ['-e', expect.any(String), expect.stringMatching(/mcp-broker-[a-f0-9-]+\.json$/)],
+      env: {},
     });
+    expect(path.dirname(observer.args[2])).toBe(path.dirname(configPath));
+    expect(observer.args).not.toContain('fixture-server.mjs');
     expect(getLaneEvents(firstLane.id, 100)).toEqual(expect.arrayContaining([
       expect.objectContaining({
         verb: 'mcp_injected',

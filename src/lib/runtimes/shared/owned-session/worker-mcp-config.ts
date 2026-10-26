@@ -1,3 +1,5 @@
+import { redactMcpResponse } from '@/lib/providers/mcp-launch-policy';
+import { createWorkerMcpBroker } from '@/lib/mcp/launch-broker';
 import { readdir, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
@@ -16,6 +18,7 @@ import { fileURLToPath } from 'node:url';
 
 export interface PreparedOwnedWorkerMcpConfig {
   configPath?: string;
+  brokerReadPaths?: string[];
   sandboxReadPaths: string[];
   servers: ResolvedWorkerMcpServer[];
 }
@@ -27,7 +30,7 @@ function recordWorkerMcpEvent(
 ): void {
   if (!session.laneId) return;
   try {
-    recordLaneEvent(session.laneId, verb, 'system', payload);
+    recordLaneEvent(session.laneId, verb, 'system', redactMcpResponse(payload));
   } catch (error) {
     console.warn(`[owned-session] unable to record ${verb} for ${session.laneId}:`, error);
   }
@@ -86,9 +89,12 @@ export async function prepareOwnedWorkerMcpConfig({
   }
   if (resolution.servers.length === 0) return { sandboxReadPaths: [], servers: [] };
 
-  const injectableServers = resolution.servers;
+  const broker = createWorkerMcpBroker(resolution.servers.filter(server => server.id !== 'builtin:devices'), {
+    packetId: session.packetId, worktreePath: session.repoPath, branch: session.branch ?? '', laneId: session.laneId,
+  }, session.sessionDir, runId, sandboxEnabled);
+  const injectableServers = [...broker.servers, ...resolution.servers.filter(server => server.id === 'builtin:devices')];
   const commandReadPaths = sandboxEnabled
-    ? injectableServers.map((server) => path.dirname(server.command))
+    ? resolution.servers.map((server) => path.dirname(server.command))
     : [];
   if (adapter.workerMcpInjection === 'config-override') {
     recordWorkerMcpEvent(session, 'mcp_injected', {
@@ -96,7 +102,8 @@ export async function prepareOwnedWorkerMcpConfig({
       mode,
     });
     return {
-      sandboxReadPaths: commandReadPaths,
+      sandboxReadPaths: [...commandReadPaths, ...broker.readPaths],
+      brokerReadPaths: broker.readPaths,
       servers: injectableServers,
     };
   }
@@ -127,12 +134,14 @@ export async function prepareOwnedWorkerMcpConfig({
     });
     return {
       configPath,
+      brokerReadPaths: broker.readPaths,
       sandboxReadPaths: sandboxEnabled
-        ? [configPath, ...commandReadPaths]
+        ? [configPath, ...commandReadPaths, ...broker.readPaths]
         : [],
       servers: injectableServers,
     };
   } catch (error) {
+    broker.close();
     recordWorkerMcpEvent(session, 'mcp_injection_skipped', {
       servers: injectableServers.map((server) => server.name),
       reason: error instanceof Error ? error.message : String(error),

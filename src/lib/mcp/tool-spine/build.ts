@@ -218,7 +218,7 @@ export function buildToolRegistry(
         source: 'external',
         label: server.name,
         surfaces: ['claude-orchestrator', 'codex-orchestrator'],
-        config: externalServerToMcpConfig(server),
+        config: externalServerToMcpConfig(server, repoPath),
       });
     }
   } catch (error) {

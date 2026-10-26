@@ -20,7 +20,7 @@ import { join } from 'node:path';
 import { smokeDataDir } from './require-temp-data-dir';
 import { getMcpServersConfig } from '@/lib/lane/orchestrator-mcp-config';
 import { externalServerToMcpConfig, insertExternalMcpServer, listEnabledExternalMcpServers } from '@/lib/mcp/external-servers';
-import { buildToolRegistry } from '@/lib/mcp/tool-spine/build';
+import { buildToolRegistry, devMcpServerLaunch, resolveToolSpineApiBase, resolveToolSpineWsPort } from '@/lib/mcp/tool-spine/build';
 import { toClaudeServersMap, toClaudeJson } from '@/lib/mcp/tool-spine/emit-claude';
 import { toCodexToml } from '@/lib/mcp/tool-spine/emit-codex';
 import { toClaudeDesktopJson } from '@/lib/mcp/tool-spine/emit-claude-desktop';
@@ -31,29 +31,33 @@ function main(): void {
   // Pin the env-derived values so the golden is deterministic.
   writeFileSync(join(smokeDataDir, 'ws-token'), 'test-ws-token-fixed\n');
   writeFileSync(join(smokeDataDir, 'ws-port'), '3002\n');
+  process.env.O8_MCP_TOOL_LOADING = 'full';
 
   const repo = mkdtempSync(join(tmpdir(), 'tool-spine-repo-')); // non-git → slug ''
   const repoRoot = process.cwd();
-  const operatorPath = join(repoRoot, 'src/lib/mcp/operator-mcp-server.ts');
+  const operatorPath = join(repoRoot, 'src/lib/mcp/operator-mcp-proxy.ts');
   const cortexPath = join(repoRoot, 'src/lib/mcp/cortex-mcp-server.ts');
+  const apiBase = resolveToolSpineApiBase();
+  const ownedEnv = process.env.CORTEX_IDE_OWNED_CODEX_ROOT
+    ? { CORTEX_IDE_OWNED_CODEX_ROOT: process.env.CORTEX_IDE_OWNED_CODEX_ROOT } : {};
 
   // ── 1. Byte-for-byte parity: the shim reproduces the legacy output ──
   const expected = {
     operator: {
       type: 'stdio',
-      command: 'npx',
-      args: ['tsx', operatorPath],
-      env: { O8_API_BASE: 'http://127.0.0.1:3001' },
+      ...devMcpServerLaunch(operatorPath),
+      env: { O8_API_BASE: apiBase, O8_MCP_TOOL_LOADING: 'full', O8_DATA_DIR: smokeDataDir,
+        O8_VISUALIZATION_REPO_PATH: repo, ...ownedEnv },
     },
     cortex: {
       type: 'stdio',
-      command: 'npx',
-      args: ['tsx', cortexPath],
+      ...devMcpServerLaunch(cortexPath),
       env: {
-        CORTEX_API_BASE: 'http://127.0.0.1:3001',
+        CORTEX_API_BASE: apiBase,
+        O8_MCP_TOOL_LOADING: 'full', O8_DATA_DIR: smokeDataDir, ...ownedEnv,
         CORTEX_REPO_PATH: repo,
         CORTEX_REPO_SLUG: '',
-        WS_PORT: '3002',
+        WS_PORT: resolveToolSpineWsPort(),
         WS_TOKEN: 'test-ws-token-fixed',
       },
     },
@@ -78,7 +82,7 @@ function main(): void {
   assert.deepStrictEqual((desktop.mcpServers as Record<string, unknown>).filesystem, { command: 'fs' }, 'unknown server preserved');
   const o8Entry = (desktop.mcpServers as Record<string, unknown>).o8 as Record<string, unknown>;
   assert(o8Entry && !('type' in o8Entry), 'desktop o8 entry has no type field');
-  assert(o8Entry.command === 'npx', 'desktop o8 entry is the operator stdio config');
+  assert(o8Entry.command === expected.operator.command, 'desktop o8 entry is the operator stdio config');
 
   const openclaw = toOpenclawJson(registry);
   assert.deepStrictEqual(Object.keys(openclaw.servers), ['o8'], 'openclaw emits only o8');
@@ -86,7 +90,7 @@ function main(): void {
 
   const gemini = toGeminiSettings(registry);
   const gemO8 = (gemini.mcpServers as Record<string, unknown>).o8 as Record<string, unknown>;
-  assert(gemO8 && gemO8.command === 'npx' && !('type' in gemO8), 'gemini o8 entry is stdio with no type');
+  assert(gemO8 && gemO8.command === expected.operator.command && !('type' in gemO8), 'gemini o8 entry is stdio with no type');
 
   // ── 3. Externals-present parity (the path that drifts: ordering + passthrough) ──
   // Production always carries externals; this is the only case that exercises
@@ -107,12 +111,12 @@ function main(): void {
   for (const record of records) {
     assert.deepStrictEqual(
       withExternals[record.name],
-      externalServerToMcpConfig(record),
+      externalServerToMcpConfig(record, repo),
       `external "${record.name}" config passes through unchanged`,
     );
   }
-  // The stdio external keeps env; the http external folds oauth into a Bearer header.
-  assert.deepStrictEqual(withExternals['zeta-stdio'], { type: 'stdio', command: 'zeta', args: ['--x'], env: { K: 'v' } }, 'stdio external passthrough');
+  // Stdio uses a broker reference; HTTP folds oauth into a Bearer header.
+  assert.deepStrictEqual(withExternals['zeta-stdio'], externalServerToMcpConfig(records.find(record => record.name === 'zeta-stdio')!, repo), 'stdio external uses a stable broker reference');
   assert.deepStrictEqual(withExternals['alpha-http'], { type: 'http', url: 'https://a/mcp', headers: { Authorization: 'Bearer tok123' } }, 'http external passthrough');
   // operator/cortex builtins still trail the externals, unchanged.
   assert.deepStrictEqual(withExternals.operator, expected.operator, 'operator unchanged with externals present');

@@ -54,10 +54,10 @@ const RUNTIME_KEYS: Record<string, readonly string[]> = {
 };
 
 /** Operator extensions accept comma-separated, exact environment variable names. */
-export function workerParentEnvironment(source: Record<string, string | undefined>, runtimeId?: string): Record<string, string | undefined> {
+export function workerParentEnvironment(source: Record<string, string | undefined>, runtimeId?: string, allowExtensions = true): Record<string, string | undefined> {
   const npmNames = Object.keys(source).filter(name => NPM_CONFIG_KEYS.has(name.toLowerCase()));
-  const names = new Set(source.O8_WORKER_ENV_INHERIT === '1' ? Object.keys(source) : [...COMMON_KEYS, ...npmNames, ...(RUNTIME_KEYS[runtimeId ?? ''] ?? [])]);
-  for (const name of source.O8_WORKER_ENV_ALLOW?.split(',') ?? []) {
+  const names = new Set(allowExtensions && source.O8_WORKER_ENV_INHERIT === '1' ? Object.keys(source) : [...COMMON_KEYS, ...npmNames, ...(RUNTIME_KEYS[runtimeId ?? ''] ?? [])]);
+  for (const name of (allowExtensions ? source.O8_WORKER_ENV_ALLOW?.split(',') : []) ?? []) {
     const trimmed = name.trim();
     if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(trimmed)) names.add(trimmed);
   }

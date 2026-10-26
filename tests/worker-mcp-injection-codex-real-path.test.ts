@@ -274,18 +274,23 @@ describe.sequential('Codex worker MCP injection real path', () => {
     });
     expect(launchResult.ok, launchResult.note || 'launch refused').toBe(true);
     const launchArgs = spawnedArgs(launchCall);
-    const expectedOverrides = [
-      `mcp_servers.packet-observer.command=${JSON.stringify(process.execPath)}`,
-      'mcp_servers.packet-observer.args=["fixture-server.mjs"]',
-      `mcp_servers.packet-observer.env={"PACKET_ID"=${JSON.stringify(launchPacket.id)}, "WORKTREE"=${JSON.stringify(launchLane.worktreePath)}, "BRANCH"=${JSON.stringify(launchPacket.branchTarget)}, "LANE_ID"=${JSON.stringify(launchLane.id)}}`,
-    ];
-    expect(configOverrides(launchArgs).filter((value) => (
-      value.startsWith('mcp_servers.packet-observer.')
-    ))).toEqual(expectedOverrides);
+    function brokerReference(args: string[]): string {
+      const overrides = configOverrides(args).filter(value => value.startsWith('mcp_servers.packet-observer.'));
+      expect(overrides).toHaveLength(3);
+      expect(overrides).toContain(`mcp_servers.packet-observer.command=${JSON.stringify(process.execPath)}`);
+      expect(overrides).toContain('mcp_servers.packet-observer.env={}');
+      const prefix = 'mcp_servers.packet-observer.args=';
+      const proxy = JSON.parse(overrides.find(value => value.startsWith(prefix))!.slice(prefix.length)) as string[];
+      expect(proxy).toEqual(['-e', expect.any(String), expect.stringMatching(/mcp-broker-[a-f0-9-]+\.json$/)]);
+      expect(overrides.join('')).not.toContain('fixture-server.mjs');
+      return proxy[2];
+    }
+    const launchReference = brokerReference(launchArgs);
     expect(launchArgs).not.toContain('--mcp-config');
     const surfaceId = getLane(launchLane.id)?.sessionKey;
     expect(surfaceId).toMatch(/^codex-owned:/);
     const sessionDir = sessionDirForSurface(surfaceId!);
+    expect(path.dirname(launchReference)).toBe(sessionDir);
     expect(readdirSync(sessionDir).some((name) => /^o8-worker-mcp-.*\.json$/.test(name))).toBe(false);
     expect(getLaneEvents(launchLane.id, 100)).toEqual(expect.arrayContaining([
       expect.objectContaining({
@@ -306,9 +311,9 @@ describe.sequential('Codex worker MCP injection real path', () => {
     expect(resumeResult.ok).toBe(true);
     const resumeArgs = spawnedArgs(resumeCall);
     expect(resumeArgs).toEqual(expect.arrayContaining(['exec', 'resume', threadId]));
-    expect(configOverrides(resumeArgs).filter((value) => (
-      value.startsWith('mcp_servers.packet-observer.')
-    ))).toEqual(expectedOverrides);
+    const resumeReference = brokerReference(resumeArgs);
+    expect(path.dirname(resumeReference)).toBe(sessionDir);
+    expect(resumeReference).not.toBe(launchReference);
     expect(resumeArgs).not.toContain('--mcp-config');
     expect(getLaneEvents(launchLane.id, 100)).toEqual(expect.arrayContaining([
       expect.objectContaining({

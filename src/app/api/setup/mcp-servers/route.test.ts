@@ -47,12 +47,9 @@ describe.sequential('MCP server setup save path', () => {
       args: ['-y', 'fixture-package', '', ' value with edges '],
       env: { API_TOKEN: '  synthetic secret  ' },
     });
-    expect(externalServerToMcpConfig(stored!)).toEqual({
-      type: 'stdio',
-      command: 'npx',
-      args: ['-y', 'fixture-package', '', ' value with edges '],
-      env: { API_TOKEN: '  synthetic secret  ' },
-    });
+    const launch = externalServerToMcpConfig(stored!);
+    expect(launch).toMatchObject({ type: 'stdio', command: process.execPath, args: ['-e', expect.any(String), expect.any(String)] });
+    expect(JSON.stringify(launch).includes('  synthetic secret  ')).toBe(false);
     expect(spawnMock).not.toHaveBeenCalled();
 
     const listed = await GET();

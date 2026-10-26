@@ -27,17 +27,17 @@ export function assertMcpTransport(input: unknown): void {
 }
 
 /** Apply before truncation, including values that have no recognizable key prefix. */
-export function redactMcpOutput(text: string): string {
+export function redactMcpOutput(text: string, secrets: readonly string[] = providerCredentialMaterials().values): string {
   let result = text;
-  for (const secret of providerCredentialMaterials().values) result = result.split(secret).join('[redacted]');
+  for (const secret of secrets) result = result.split(secret).join('[redacted]');
   return result;
 }
 
 /** Scrub after parsing too: JSON escapes may hide a value on the wire. */
-export function redactMcpResponse<T>(value: T): T {
-  if (typeof value === 'string') return redactMcpOutput(value) as T;
-  if (Array.isArray(value)) return value.map(redactMcpResponse) as T;
+export function redactMcpResponse<T>(value: T, secrets: readonly string[] = providerCredentialMaterials().values): T {
+  if (typeof value === 'string') return redactMcpOutput(value, secrets) as T;
+  if (Array.isArray(value)) return value.map(item => redactMcpResponse(item, secrets)) as T;
   if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value)
-    .map(([key, item]) => [redactMcpOutput(key), redactMcpResponse(item)])) as T;
+    .map(([key, item]) => [redactMcpOutput(key, secrets), redactMcpResponse(item, secrets)])) as T;
   return value;
 }

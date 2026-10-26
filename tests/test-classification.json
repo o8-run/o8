@@ -3708,10 +3708,26 @@
       ]
     },
     {
+      "path": "tests/mcp-payer-deferred-config-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/mcp-payer-launch-real-path.test.ts",
       "reasons": [
         "network-listener",
         "real-path"
+      ]
+    },
+    {
+      "path": "tests/mcp-payer-owned-launch-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path",
+        "worktree-api"
       ]
     },
     {
@@ -4049,6 +4065,13 @@
       "reasons": [
         "child-process",
         "native-build"
+      ]
+    },
+    {
+      "path": "tests/native-worker-login-payer-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path"
       ]
     },
     {

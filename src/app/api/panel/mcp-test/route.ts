@@ -15,7 +15,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
-import { listExternalMcpServers, externalServerToMcpConfig } from '@/lib/mcp/external-servers';
+import { listExternalMcpServers } from '@/lib/mcp/external-servers';
 import { testMcpConnection, type McpTestInput } from '@/lib/mcp/test-connection';
 
 interface TestRequestBody {
@@ -41,7 +41,9 @@ function resolveInputByLookup(body: TestRequestBody): McpTestInput | { error: st
   if (!target) {
     return { error: 'Server not found' };
   }
-  const config = externalServerToMcpConfig(target);
+  const config = target.transport === 'http'
+    ? { type: 'http' as const, url: target.url || target.command, headers: target.oauthToken ? { Authorization: `Bearer ${target.oauthToken}` } : undefined }
+    : { type: 'stdio' as const, command: target.command, args: target.args, env: target.env ?? undefined };
   if (config.type === 'http') {
     return {
       transport: 'http',

@@ -1,3 +1,4 @@
+import { bindWorkerMcpBroker, closeWorkerMcpBroker, closePendingWorkerMcpBrokers } from '@/lib/mcp/launch-broker';
 import { createWorkerFailureHandler } from './worker-failure';
 import { assertRuntimeEffortPin } from '@/lib/orchestrator/effort-pin';
 import { assertOwnedActionFence, hasOwnedActionFence } from './action-fence';
@@ -229,6 +230,7 @@ export function createOwnedRunController({
     stderrPath: string,
     outcome: OwnedChildExitOutcome,
   ) {
+    closeWorkerMcpBroker(runId);
     revokeControlledGateway(surfaceId);
     const stderrTail = await readAbnormalStderrTail(stderrPath, outcome);
     const childExit = stderrTail ? { ...outcome, stderrTail } : outcome;
@@ -456,7 +458,7 @@ export function createOwnedRunController({
       withPacketLifecycleSpawnLock(session.packetId ?? session.workspaceBinding?.packetId ?? null, () => (
         spawnOwnedRunInner(session, prompt, mode)
       ))
-    ));
+    )).catch(error => { closePendingWorkerMcpBrokers(session.sessionDir); throw error; });
   }
 
   async function spawnOwnedRunInner(session: OwnedSessionRecord, prompt: string, mode: OwnedRunMode) {
@@ -525,6 +527,7 @@ export function createOwnedRunController({
     let spawnBinary = carrierLaunch.command;
     let spawnArgs = carrierLaunch.args;
     const sandboxEnvExtra: Record<string, string> = {};
+    let sandboxProfile: string | undefined;
     if (sandboxEnabled) {
       try {
         const controlledSandbox = controlledProviderSandbox(session, spawnBinary);
@@ -539,7 +542,7 @@ export function createOwnedRunController({
           extraReadPaths: executionCarrierSandboxReadPaths(workerMcp.sandboxReadPaths, carrierLaunch),
           readBackingProjectConfig: runtimeId === 'codex',
           readOwnerInstructions: !controlledSandbox,
-          finalAllowReadPaths: [...(controlledSandbox?.finalAllowReadPaths ?? []), ...(workerMcp.configPath ? [workerMcp.configPath] : [])],
+          finalAllowReadPaths: [...(controlledSandbox?.finalAllowReadPaths ?? []), ...(workerMcp.configPath ? [workerMcp.configPath] : []), ...(workerMcp.brokerReadPaths ?? [])],
           // Read-only: repo stays readable, kernel refuses every write. Deny
           // paths come from the SAME git probe prepareWorkerSandbox uses to
           // grant access, and it throws if that probe resolves nothing.
@@ -547,12 +550,14 @@ export function createOwnedRunController({
           finalAllowReadWritePaths: runtimeState.writablePaths,
           finalImmutableWritePaths: runtimeState.immutablePaths,
         });
+        sandboxProfile = prepared.profileText;
         spawnBinary = prepared.binary;
         spawnArgs = prepared.args;
         const { apiPort, wsPort } = resolvePortInfo();
         sandboxEnvExtra.O8_API_PORT = String(apiPort);
         sandboxEnvExtra.O8_WS_PORT = String(wsPort);
       } catch (error) {
+        closeWorkerMcpBroker(runId);
         const why = readOnlySandbox.enforced
           ? 'this is a read-only packet, which requires an OS-enforced sandbox'
           : 'worker sandbox is enabled (O8_WORKER_SANDBOX)';
@@ -600,18 +605,13 @@ export function createOwnedRunController({
     const spawnEnv = {
       ...adapterEnv,
       ...packetCargoEnvironment(session),
-      // Some coding CLIs trust the inherited PWD instead of asking the OS for
-      // the spawned process cwd. Keep both values aligned so a worker cannot
-      // silently operate in the o8 server's own checkout.
+      // Keep the inherited and actual working directory aligned.
       PWD: session.repoPath,
       PATH: executionCarrierSpawnPath(pathWithNodeRuntime(), carrierLaunch),
       NODE_ENV: 'development' as const,
       FORCE_COLOR: '0',
       NO_COLOR: '1',
-      // Workers must never pop an OS browser: dev servers (CRA, storybook)
-      // auto-open via BROWSER, and `o8 run` mirrors this env into its pane
-      // (report J4FHM2). 'none' is the CRA disable convention; tools that
-      // treat BROWSER as a launch binary fail to exec it, same net effect.
+      // Managed workers must not open a browser.
       BROWSER: 'none',
       O8_WORKER_TOKEN: workerToken,
       O8_OWNED_RUN_MARKER: runId,
@@ -663,6 +663,7 @@ export function createOwnedRunController({
         session.activeRun = preparedRun;
         prependOwnedRun(session, preparedRun);
         await io.saveSession(session);
+        bindWorkerMcpBroker(runId, { materializationIdentity, sandboxProfile });
 
         try {
           assertOwnedActionAdmission(session, runId);
@@ -781,6 +782,7 @@ export function createOwnedRunController({
         return run;
       });
     } catch (error) {
+      closeWorkerMcpBroker(runId);
       if (session.executionPolicy !== undefined) revokeReadOnlyWorkerToken(runId);
       throw error;
     }

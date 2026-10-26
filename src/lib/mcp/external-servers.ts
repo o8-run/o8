@@ -1,3 +1,5 @@
+import { externalMcpBrokerConfig } from './launch-broker';
+import { assertMcpTransport } from '@/lib/providers/mcp-launch-policy';
 import { randomUUID } from 'node:crypto';
 import { asc, eq } from 'drizzle-orm';
 import { externalMcpServers, getDb } from '@/lib/db';
@@ -297,10 +299,11 @@ export function removeExternalMcpServer(id: string): boolean {
   return (result.changes ?? 0) > 0;
 }
 
-export function externalServerToMcpConfig(server: ExternalMcpServerRecord): OrchestratorMcpServerConfig {
+export function externalServerToMcpConfig(server: ExternalMcpServerRecord, cwd = process.cwd()): OrchestratorMcpServerConfig {
   if (server.transport === 'http') {
     // Use explicit url field if set, fall back to command for backwards compat
     const url = server.url || server.command;
+    assertMcpTransport({ url, token: server.oauthToken });
     if (server.oauthToken) {
       return {
         type: 'http',
@@ -311,11 +314,5 @@ export function externalServerToMcpConfig(server: ExternalMcpServerRecord): Orch
     return { type: 'http', url };
   }
 
-  const env = server.env ?? undefined;
-  return {
-    type: 'stdio',
-    command: server.command,
-    args: server.args,
-    ...(env ? { env } : {}),
-  };
+  return externalMcpBrokerConfig(server, cwd);
 }

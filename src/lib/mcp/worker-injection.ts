@@ -1,3 +1,4 @@
+import { assertMcpTransport } from '@/lib/providers/mcp-launch-policy';
 import { access, constants as fsConstants, realpath } from 'node:fs/promises';
 import path from 'node:path';
 
@@ -60,7 +61,7 @@ function templateEnvValue(value: string, context: WorkerMcpInjectionContext): st
   });
 }
 
-function templateServer(
+export function templateWorkerMcpServer(
   server: ExternalMcpServerRecord,
   context: WorkerMcpInjectionContext,
 ): ResolvedWorkerMcpServer {
@@ -90,10 +91,12 @@ export async function resolveWorkerMcpInjection(
         && server.workerInjection
         && (server.teamId === null || server.teamId === context.teamId)
       ))
-      .map((server) => templateServer(server, context));
+      .map((server) => templateWorkerMcpServer(server, context));
     const validServers: ResolvedWorkerMcpServer[] = [];
     const skipped: WorkerMcpInjectionResolution['skipped'] = [];
     for (const server of configuredServers) {
+      try { assertMcpTransport([server.id, server.name, server.command]); }
+      catch { skipped.push({ server: '[redacted]', command: '[redacted]', reason: 'MCP server metadata contains a saved credential.' }); continue; }
       if (workerMcpServerNameIsValid(server.name)) {
         validServers.push(server);
       } else {

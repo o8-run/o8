@@ -3,6 +3,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { stripVTControlCharacters } from 'node:util';
+import { workerParentEnvironment } from '../src/lib/providers/worker-environment';
+import { providerSpawnEnvironment } from '../src/lib/providers/spawn-environment';
+import { withChildEnvironment } from '../src/lib/providers/child-process';
 
 import { resolveCli } from '../src/lib/runtimes/shared/cli-resolver';
 import { saveNativeWorkerToken } from '../src/lib/claude-code/worker-token';
@@ -17,23 +20,17 @@ async function main(): Promise<void> {
   const binary = await resolveCli({ runtimeId: 'claude-code', binaryName: 'claude', envOverride: 'O8_CLAUDE_CODE_BIN' });
   const { spawn } = createRequire(import.meta.url)('node-pty') as typeof import('node-pty');
   const configDir = await mkdtemp(path.join(os.tmpdir(), 'o8-worker-login-'));
-  const env = { ...process.env };
-  for (const key of Object.keys(env)) {
-    if (/^(ANTHROPIC_|CLAUDE_|O8_WORKER_)/.test(key)) delete env[key];
-  }
-  Object.assign(env, {
+  const env = providerSpawnEnvironment({
+    ...workerParentEnvironment(process.env, undefined, false),
     CLAUDE_CONFIG_DIR: configDir,
     CLAUDE_SECURESTORAGE_CONFIG_DIR: configDir,
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
     FORCE_COLOR: '0', NO_COLOR: '1',
-  });
-  delete env.BROWSER;
-  delete env.O8_MASTER_KEY;
-  delete env.O8_API_TOKEN;
-  delete env.O8_SPECTATOR_TOKEN;
+  }, { runtimeId: 'claude-code', inject: false });
   try {
     await new Promise<void>((resolve, reject) => {
-      const child = spawn(binary.path, ['setup-token'], { cwd: configDir, env, cols: 1000, rows: 40 });
+      const child = withChildEnvironment(env, [binary.path, 'setup-token'], fresh =>
+        spawn(binary.path, ['setup-token'], { cwd: configDir, env: fresh, cols: 1000, rows: 40 }), false, configDir);
       let raw = '';
       let browserReported = false;
       let saving: Promise<void> | undefined;
