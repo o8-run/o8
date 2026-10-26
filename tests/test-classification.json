@@ -4140,6 +4140,15 @@
       ]
     },
     {
+      "path": "tests/model-effort-evidence-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path",
+        "worktree-api"
+      ]
+    },
+    {
       "path": "tests/muse-host-real-path.test.ts",
       "reasons": [
         "child-process",

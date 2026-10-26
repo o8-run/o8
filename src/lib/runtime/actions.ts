@@ -1,3 +1,4 @@
+import { assertRuntimeEffortPin } from '@/lib/orchestrator/effort-pin';
 import { assertNotKnowledgeSource } from '@/lib/cortex/knowledge/sources';
 import { assertReviewerPrCheckout } from '@/lib/orchestrator/reviewer-pr-source';
 import { assertPreRunAdmission, retireCancelledPreRunWorktree } from '@/lib/lane/pre-run-cancellation';
@@ -98,14 +99,8 @@ export interface RuntimeLaunchRequest {
   /** Canonical repo root for project context when cwd/repoPath points at an isolated worktree. */
   projectRepoPath?: string;
   taskName?: string;
-  /**
-   * Pre-assigned lane branch the worktree must check out before the agent
-   * spawns. Without this, prepareLaunchWorktree falls back to the legacy
-   * `worktree/<agent>/<slug>` placeholder branch and the agent has to
-   * self-correct via `git checkout -b <lane.branch>`. Weaker models miss
-   * the prompt hint and silently commit on the wrong branch — the lane
-   * merge then sees an empty diff. Dispatch passes `lane.branch` here.
-   */
+  /** Pre-assigned lane branch to check out before spawning the worker.
+   * Dispatch supplies the branch so work and review use the same checkout. */
   branchName?: string;
   baseBranch?: string;
   isolate?: boolean;
@@ -199,6 +194,8 @@ async function launchRuntimeSurfaceInner(payload: RuntimeLaunchRequest): Promise
   if (!repoPath) {
     throw new Error('repoPath or cwd is required');
   }
+
+  if (runtimeId === 'muse') await assertRuntimeEffortPin(runtimeId, payload.model, payload.effort, { cwd: repoPath });
 
   const runtime = getRuntime(runtimeId);
   if (!runtime) {

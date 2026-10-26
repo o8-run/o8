@@ -447,7 +447,8 @@ export function createOwnedRunController({
   }
 
   async function spawnOwnedRunInner(session: OwnedSessionRecord, prompt: string, mode: OwnedRunMode) {
-    assertRuntimeEffortPin(runtimeId, session.model, session.effort);
+    await assertRuntimeEffortPin(runtimeId, session.model, session.effort, { cwd: session.repoPath,
+      runtimeConfig: { ...session.runtimeConfig, ...(session.identity ? { museConfigRoot: session.identity.configHomeRef } : {}) } });
     assertOwnedSingleAttemptSpawn(session, runtimeId, mode);
     await ensureDir(path.join(session.sessionDir, RUNS_DIR));
 
