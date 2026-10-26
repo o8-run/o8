@@ -1,12 +1,10 @@
 name: Current app launch measurements
 
 on:
-  push:
-    branches: [perf/current-app-launch]
   workflow_dispatch:
     inputs:
       main_artifact_run:
-        description: Optional run containing a previously built main app
+        description: Optional run containing a clean main app from the same base commit
         required: false
         default: ''
         type: string
@@ -28,7 +26,7 @@ jobs:
       NEXT_TELEMETRY_DISABLED: '1'
       O8_RELEASE_BUILD_CACHE: 'off'
       APPLE_SIGNING_IDENTITY: '-'
-      SAVED_MAIN_RUN_ID: ${{ github.event.inputs.main_artifact_run || (contains(github.event.head_commit.message, '[reuse-main]') && '40355401137') || '' }}
+      SAVED_MAIN_RUN_ID: ${{ github.event.inputs.main_artifact_run || '' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -96,7 +94,7 @@ jobs:
           retention-days: 1
       - name: Measure main three times before the fix
         continue-on-error: true
-        run: node harness/scripts/bench/native-launch.mjs --app=${{ env.SAVED_MAIN_RUN_ID != '' && 'main-artifact/o8.app' || 'main/src-tauri/target/release/bundle/macos/o8.app' }} --sha=${{ steps.base.outputs.sha }} --samples=${{ contains(github.event.head_commit.message, '[baseline-only]') && '1' || '3' }} --check-startup-loads --check --output="$RUNNER_TEMP/o8-launch-before"
+        run: node harness/scripts/bench/native-launch.mjs --app=${{ env.SAVED_MAIN_RUN_ID != '' && 'main-artifact/o8.app' || 'main/src-tauri/target/release/bundle/macos/o8.app' }} --sha=${{ steps.base.outputs.sha }} --samples=3 --check-startup-loads --check --output="$RUNNER_TEMP/o8-launch-before"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -105,7 +103,7 @@ jobs:
           retention-days: 1
       - name: Require real composer measurements
         env:
-          EXPECTED_SAMPLES: ${{ contains(github.event.head_commit.message, '[baseline-only]') && '1' || '3' }}
+          EXPECTED_SAMPLES: '3'
         run: |
           node - <<'JS'
           const fs = require('node:fs');
@@ -113,37 +111,8 @@ jobs:
           if (!report.teardownVerified || report.samples.length !== Number(process.env.EXPECTED_SAMPLES) || report.samples.some(sample => !sample.acknowledged)) process.exit(1);
           JS
 
-  candidate:
-    if: ${{ !contains(github.event.head_commit.message, '[baseline-only]') }}
-    needs: baseline
-    runs-on: ubuntu-latest
-    timeout-minutes: 55
-    outputs:
-      sha: ${{ steps.candidate.outputs.sha }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Wait for a measured-path fix on this branch
-        id: candidate
-        env:
-          GH_TOKEN: ${{ github.token }}
-          LAUNCH_BASE_SHA: ${{ needs.baseline.outputs.base }}
-        run: |
-          for launch_attempt in $(seq 1 180); do
-            launch_candidate_sha=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$GITHUB_REF_NAME" --jq .object.sha)
-            git fetch origin "$launch_candidate_sha"
-            if ! git diff --quiet "$LAUNCH_BASE_SHA" "$launch_candidate_sha" -- src src-tauri scripts ':(exclude)scripts/bench/**' ':(exclude)scripts/preship-webview-gate.mjs'; then
-              echo "sha=$launch_candidate_sha" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-            sleep 15
-          done
-          echo 'No measured-path candidate arrived within 45 minutes' >&2
-          exit 1
-
   compare:
-    needs: [baseline, candidate]
+    needs: baseline
     runs-on: macos-latest
     timeout-minutes: 120
     concurrency:
@@ -156,7 +125,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.candidate.outputs.sha }}
+          ref: ${{ github.sha }}
           path: head
       - uses: actions/setup-node@v4
         with:
@@ -195,7 +164,7 @@ jobs:
       - name: Measure main and head back to back on this runner
         run: |
           node head/scripts/bench/native-launch.mjs --app=main-artifact/o8.app --sha=${{ needs.baseline.outputs.base }} --samples=3 --output="$RUNNER_TEMP/o8-launch-paired-main"
-          node head/scripts/bench/native-launch.mjs --app=head/src-tauri/target/release/bundle/macos/o8.app --sha=${{ needs.candidate.outputs.sha }} --samples=3 --check-startup-loads --check --output="$RUNNER_TEMP/o8-launch-paired-head"
+          node head/scripts/bench/native-launch.mjs --app=head/src-tauri/target/release/bundle/macos/o8.app --sha=${{ github.sha }} --samples=3 --check-startup-loads --check --output="$RUNNER_TEMP/o8-launch-paired-head"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
