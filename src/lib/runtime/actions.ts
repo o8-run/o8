@@ -1,4 +1,4 @@
-import { assertRuntimeEffortPin } from '@/lib/orchestrator/effort-pin';
+import { assertLaunchEffortPin } from '@/lib/runtime/launch-effort';
 import { assertNotKnowledgeSource } from '@/lib/cortex/knowledge/sources';
 import { assertReviewerPrCheckout } from '@/lib/orchestrator/reviewer-pr-source';
 import { assertPreRunAdmission, retireCancelledPreRunWorktree } from '@/lib/lane/pre-run-cancellation';
@@ -195,7 +195,7 @@ async function launchRuntimeSurfaceInner(payload: RuntimeLaunchRequest): Promise
     throw new Error('repoPath or cwd is required');
   }
 
-  if (runtimeId === 'muse') await assertRuntimeEffortPin(runtimeId, payload.model, payload.effort, { cwd: repoPath });
+  await assertLaunchEffortPin(payload, repoPath);
 
   const runtime = getRuntime(runtimeId);
   if (!runtime) {

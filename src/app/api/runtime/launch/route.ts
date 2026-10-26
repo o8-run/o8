@@ -104,7 +104,7 @@ export async function POST(request: NextRequest) {
       runtime: runtimeName,
       model: launchRequest.model
         ?? (runtimeName === 'codex' ? resolveDefaultDispatchModelSync() || null : null),
-    }, { cwd: launchRequest.cwd ?? launchRequest.repoPath });
+    }, { cwd: launchRequest.cwd ?? launchRequest.repoPath, packetId: launchRequest.packetId });
     if (!effortPin.ok) {
       return NextResponse.json({ error: effortPin.message, code: effortPin.code }, { status: 400 });
     }

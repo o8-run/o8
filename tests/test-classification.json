@@ -7141,6 +7141,15 @@
       ]
     },
     {
+      "path": "tests/worker-effort-evidence-matrix-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path",
+        "worktree-api"
+      ]
+    },
+    {
       "path": "tests/worker-environment-dispatch-real-path.test.ts",
       "reasons": [
         "child-process",

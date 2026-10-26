@@ -14,6 +14,8 @@ export interface CodexSpeedCatalogue {
   /** Complete model/list effort choices; null means the capability was not reported. */
   reasoningEfforts?: Record<string, string[] | null>;
   configuredTier?: OrchestratorServiceTier;
+  /** model/list default, before config/read overrides; exec ignores user config. */
+  nativeDefaultModel?: string;
   defaultModel?: string;
 }
 let cache: { key: string; at: number; promise: Promise<CodexSpeedCatalogue> } | null = null;
@@ -64,6 +66,7 @@ export function readCodexSpeedCatalogue(binary: string, env: NodeJS.ProcessEnv, 
           if (reply.error || !Array.isArray(reply.result?.data)) { finish(new Error('Codex did not return a model catalogue.')); return; }
           const models = reply.result.data as Array<{ model?: unknown; serviceTiers?: unknown; additionalSpeedTiers?: unknown; supportedReasoningEfforts?: unknown; isDefault?: unknown }>;
           catalogue = {
+            nativeDefaultModel: models.find(model => model.isDefault === true && typeof model.model === 'string')?.model as string | undefined,
             defaultModel: models.find(model => model.isDefault === true && typeof model.model === 'string')?.model as string | undefined,
             models: Object.fromEntries(models.flatMap(model => typeof model.model === 'string' ? [[model.model, codexServiceTierOptions(model)]] : [])),
             reasoningEfforts: Object.fromEntries(models.flatMap(model => typeof model.model === 'string' ? [[model.model,
