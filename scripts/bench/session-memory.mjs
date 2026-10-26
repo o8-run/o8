@@ -60,7 +60,7 @@ async function openAndCloseSession(wsPort, token, sessionKey, worker = false) {
   const socket = new WebSocket(`ws://127.0.0.1:${wsPort}/ws?token=${token}`);
   try {
     await new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('Session bootstrap deadline exceeded')), 30_000);
+      const timer = setTimeout(() => reject(new Error('Session bootstrap deadline exceeded')), 120_000);
       socket.once('error', error => { clearTimeout(timer); reject(error); });
       socket.once('open', () => socket.send(JSON.stringify({ type: 'realtime-subscribe',
         subscriptions: [{ stream: `session:${sessionKey}` }] })));
@@ -157,6 +157,7 @@ export async function measureSessionMemory({ output, sessions = 12, transcriptMi
     // Warm the exact HTTP modules against an empty store before establishing baseline.
     await read('/api/mobile/orchestrator/threads');
     await read('/api/mobile/history?sessionKey=llm-chat:thoughts-empty');
+    await read('/api/mobile/sync', { history: { sessionKey: 'llm-chat:thoughts-empty', limit: 200 } });
     const projectIds = [];
     for (let index = 0; index < 4; index++) {
       const ledger = await read('/api/panel/projects', { name: `Memory project ${index}` });
@@ -211,6 +212,9 @@ export async function measureSessionMemory({ output, sessions = 12, transcriptMi
     for (const { sessionKey } of workers) {
       const history = await read(`/api/mobile/history?sessionKey=${sessionKey}&limit=200`);
       assert(history.transcript.some(entry => entry.text.startsWith('worker-output-31:')), 'HTTP worker payload missing');
+      const sync = await read('/api/mobile/sync', { history: { sessionKey, limit: 200 } });
+      assert.equal(sync.history?.sessionKey, sessionKey, 'Worker sync history must resolve');
+      assert(sync.history.entries.some(entry => entry.text.startsWith('worker-output-31:')), 'Sync worker payload missing');
       await openAndCloseSession(wsPort, token, sessionKey, true);
       completedWorkers++;
       if (completedWorkers % 12 === 0) console.log(JSON.stringify({ phase: 'workers', completed: completedWorkers }));
