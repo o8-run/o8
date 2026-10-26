@@ -18,6 +18,7 @@
  * restart, failure or idle close resumes the same conversation.
  */
 
+import { unmappedEffortError } from './unmapped-effort';
 import { join } from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { sessionNameForRepo } from '@/lib/lane/orchestrator-session-core';
@@ -301,7 +302,7 @@ export function createPiOrchestratorBackend(deps: PiOrchestratorDeps = {}): Orch
     turnReceipts = current.receipts;
     for (const key of Object.keys(current.attribution)) delete current.attribution[key as keyof PiUsageAttribution];
     Object.assign(current.attribution, piUsageAttribution(name, repoPath, options));
-    onEvent({ type: 'turn_receipt', leadModel: route.carrier === 'openrouter' ? route.choice : 'pi', effort: options.thinkingEffort ?? 'medium',
+    onEvent({ type: 'turn_receipt', leadModel: route.carrier === 'openrouter' ? route.choice : 'pi', effort: 'adaptive', effortSource: 'runtime-default',
       permissionMode: options.permissionMode ?? 'full' });
     const stop = () => { void current.session.abort(); };
     options.signal?.addEventListener('abort', stop, { once: true });
@@ -330,6 +331,11 @@ export function createPiOrchestratorBackend(deps: PiOrchestratorDeps = {}): Orch
 
   function sendTurn(repoPath: string, message: string, onEvent: (event: OrchestratorEvent) => void,
     options: OrchestratorTurnOptions = {}): Promise<void> {
+    const effortError = unmappedEffortError(options.thinkingEffort);
+    if (effortError) {
+      onEvent(effortError); onEvent({ type: 'done', sessionId: null, cost: null });
+      return Promise.resolve();
+    }
     try {
       assertOrchestratorPermissionMode('pi', options.permissionMode, options.toolProfile);
     } catch (error) {

@@ -344,6 +344,7 @@ export interface MobileTurnReceipt {
   permissionMode?: import('@/lib/orchestrator/permission-mode').OrchestratorPermissionMode;
   leadModel: string;
   effort: ThinkingEffort;
+  effortSource?: import('@/lib/orchestrator/thinking-effort').EffortReceiptSource;
   mode: 'solo' | 'multitask' | 'fast' | 'moa' | 'fusion';
   pickedMode?: 'solo' | 'multitask' | 'fast' | 'moa' | 'fusion';
   workers?: Array<{

@@ -3,7 +3,7 @@ import { planFromToolInput, type OrchestratorPlanStep } from './orchestrator-pla
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 
 export type OrchestratorEvent =
-  | { type: 'turn_receipt'; leadModel: string; effort: ThinkingEffort; permissionMode?: import('@/lib/orchestrator/permission-mode').OrchestratorPermissionMode }
+  | { type: 'turn_receipt'; leadModel: string; effort: ThinkingEffort; effortSource?: import('@/lib/orchestrator/thinking-effort').EffortReceiptSource; permissionMode?: import('@/lib/orchestrator/permission-mode').OrchestratorPermissionMode }
   | { type: 'text'; text: string }
   | { type: 'thinking'; text: string }
   | { type: 'tool_use'; id?: string | null; name: string; input: unknown }

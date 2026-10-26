@@ -90,7 +90,7 @@ describe('o8 backend event mapping', () => {
     await o8Backend.sendTurn('/repo', 'hi', onEvent, { threadId: 'thoughts-1' });
 
     expect(events).toEqual([
-      { type: 'turn_receipt', leadModel: 'o8-free', effort: 'low' },
+      { type: 'turn_receipt', leadModel: 'o8-free', effort: 'low', effortSource: 'service-tier' },
       NOTICE,
       { type: 'text', text: 'Hel' },
       { type: 'text', text: 'lo' },
@@ -124,7 +124,7 @@ describe('o8 backend event mapping', () => {
 
     await o8Backend.sendTurn('/repo', 'hi', onEvent, { threadId: 'thoughts-1' });
 
-    expect(events[0]).toEqual({ type: 'turn_receipt', leadModel: 'o8-free', effort: 'low' });
+    expect(events[0]).toEqual({ type: 'turn_receipt', leadModel: 'o8-free', effort: 'low', effortSource: 'service-tier' });
     expect(events[1]).toEqual(NOTICE);
     expect(events[2]).toEqual({ type: 'text', text: 'partial' });
     expect(events[3]).toEqual({ type: 'error', error: 'model exploded' });
@@ -140,7 +140,7 @@ describe('o8 backend event mapping', () => {
     await o8Backend.sendTurn('/repo', 'hi', onEvent, { threadId: 'thoughts-1', signal: controller.signal });
 
     expect(events).toEqual([
-      { type: 'turn_receipt', leadModel: 'o8-free', effort: 'low' },
+      { type: 'turn_receipt', leadModel: 'o8-free', effort: 'low', effortSource: 'service-tier' },
       NOTICE,
       { type: 'done', sessionId: expect.any(String), cost: 0 },
     ]);
@@ -205,7 +205,7 @@ describe('o8 backend runs the built-in Pi agent', () => {
   it('hands the turn, session lookups and options to Pi untouched, and never calls the proxy', async () => {
     const backend = createO8Backend({ pi: fakePi, blocker: () => null });
     const { onEvent } = collect();
-    const options = { threadId: 'thoughts-1', permissionMode: 'plan' as const, thinkingEffort: 'low' as const };
+    const options = { threadId: 'thoughts-1', permissionMode: 'plan' as const, thinkingEffort: 'adaptive' as const };
 
     await backend.sendTurn('/repo', 'list the repos', onEvent, options);
 
@@ -218,14 +218,14 @@ describe('o8 backend runs the built-in Pi agent', () => {
 
   it('puts the o8 model the turn was sent with on Pi\'s receipt, so the thread and its receipt agree', async () => {
     piSendTurn.mockImplementation(async (_repoPath, _message, onEvent) => {
-      onEvent({ type: 'turn_receipt', leadModel: 'pi', effort: 'low' });
+      onEvent({ type: 'turn_receipt', leadModel: 'pi', effort: 'adaptive', effortSource: 'runtime-default' });
       onEvent({ type: 'text', text: 'ok' });
     });
     const backend = createO8Backend({ pi: fakePi, blocker: () => null });
     for (const [model, leadModel] of [['o8-next', 'o8-next'], [undefined, 'o8-free'], ['claude-opus-5', 'o8-free'], ['gpt-6.1-sol', 'o8-free'], ['', 'o8-free']] as const) {
       const { events, onEvent } = collect();
-      await backend.sendTurn('/repo', 'hi', onEvent, { threadId: 'thoughts-1', thinkingEffort: 'low', model });
-      expect(events).toEqual([{ type: 'turn_receipt', leadModel, effort: 'low' }, { type: 'text', text: 'ok' }]);
+      await backend.sendTurn('/repo', 'hi', onEvent, { threadId: 'thoughts-1', model });
+      expect(events).toEqual([{ type: 'turn_receipt', leadModel, effort: 'adaptive', effortSource: 'runtime-default' }, { type: 'text', text: 'ok' }]);
     }
     piSendTurn.mockReset();
   });
@@ -265,18 +265,23 @@ describe('o8 text-only fallback where Pi cannot start', () => {
     (['free', 'pro', 'team', 'founder'] as const).flatMap((plan) => (
       [undefined, 'low', 'high'].map((thinkingEffort) => ({ plan, thinkingEffort }))
     )),
-  )('$plan plan, effort $thinkingEffort → requests and records Low (#3660)', async ({ plan, thinkingEffort }) => {
+  )('$plan plan, effort $thinkingEffort → labels a default service tier or refuses an independent pin', async ({ plan, thinkingEffort }) => {
     mockEntitlement.mockReturnValue({ plan });
     mockFetch.mockResolvedValue(sseResponse([contentFrame('ok'), 'data: [DONE]\n\n']));
     const { events, onEvent } = collect();
 
-    await o8Backend.sendTurn('/Users/me/proj', 'hi', onEvent, {
+    await o8Backend.sendTurn('/repo', 'hi', onEvent, {
       threadId: 'thoughts-1',
       ...(thinkingEffort ? { thinkingEffort: thinkingEffort as 'low' | 'high' } : {}),
     });
 
-    expect((bodyOf() as { thinkingEffort?: string }).thinkingEffort).toBe('low');
-    expect(events[0]).toMatchObject({ type: 'turn_receipt', effort: 'low' });
+    if (thinkingEffort) {
+      expect(mockFetch).not.toHaveBeenCalled();
+      expect(events[0]).toMatchObject({ type: 'error', code: 'effort_unsupported_runtime' });
+    } else {
+      expect((bodyOf() as { thinkingEffort?: string }).thinkingEffort).toBe('low');
+      expect(events[0]).toMatchObject({ type: 'turn_receipt', effort: 'low', effortSource: 'service-tier' });
+    }
   });
 
   it('ignores tool frames: the fallback renders text only', async () => {

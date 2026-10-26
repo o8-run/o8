@@ -122,8 +122,9 @@ function TurnReceiptLine({ receipt }: { receipt: MobileTurnReceipt }) {
     >
       <div>
         {formatModelLabel(receipt.leadModel)}
-        {/* The o8 lead has one setting, so its receipt names no effort (#3660). */}
-        {receipt.leadModel === 'o8-free' ? null : ` · ${THINKING_EFFORT_LABELS[receipt.effort].short}`} · {pickedMode
+        {receipt.effortSource === 'runtime-default' ? ' · runtime default'
+          : receipt.effortSource === 'service-tier' ? ` · ${THINKING_EFFORT_LABELS[receipt.effort].short} service tier`
+          : receipt.leadModel === 'o8-free' ? null : ` · ${THINKING_EFFORT_LABELS[receipt.effort].short}`} · {pickedMode
           ? `ran as ${mode}, picked ${pickedMode}`
           : mode}
         {receipt.permissionMode === 'outside-workspace' ? ' · Outside workspace' : null}

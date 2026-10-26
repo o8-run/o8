@@ -1,3 +1,4 @@
+import { unmappedEffortError } from './unmapped-effort';
 import { join } from 'node:path';
 import { credentialPolicyFingerprint } from '@/lib/providers/credential-policy';
 import { resolveLocalAcpLaunch, localAcpProcessLaunch, acpLaunchFingerprint } from '@/lib/acp/local-connection';
@@ -329,6 +330,8 @@ export function makeAcpBackend(config: AcpBackendConfig): OrchestratorBackend {
       return { sessionName: session.sessionName, status: session.status };
     },
     async sendTurn(repoPath, message, onEvent, options?: OrchestratorTurnOptions): Promise<void> {
+      const effortError = unmappedEffortError(options?.thinkingEffort);
+      if (effortError) { onEvent(effortError); return; }
       if (options?.signal?.aborted) { onEvent(mapStopReason('cancelled', null)); return; }
       if (id === 'opencode' || id === 'hermes' || (id === 'acp' && resolveLocalAcpLaunch()?.useOpenRouter)) {
         await resolveOpenRouterKey();
@@ -377,7 +380,8 @@ export function makeAcpBackend(config: AcpBackendConfig): OrchestratorBackend {
         countingOnEvent({
           type: 'turn_receipt',
           leadModel: session.appliedModel ?? defaultModelFor(id) ?? id,
-          effort: options?.thinkingEffort ?? 'adaptive',
+          effort: 'adaptive',
+          effortSource: 'runtime-default',
         });
         // session/prompt resolves only at end of turn, so the per-request RPC
         // default would bound the whole turn (#2472). The watchdog and abort

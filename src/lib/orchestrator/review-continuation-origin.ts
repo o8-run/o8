@@ -84,11 +84,11 @@ export function resolveChatTurnOrigin({ threadId, turnId, repoPath }: {
     || (latest.model && latest.model !== receipt.leadModel)
     || (latest.receipt && (latest.receipt.leadModel !== receipt.leadModel || latest.receipt.effort !== receipt.effort
       || latest.receipt.permissionMode !== receipt.permissionMode || latest.receipt.mode !== receipt.mode
-      || latest.receipt.pickedMode !== receipt.pickedMode))) {
+      || latest.receipt.pickedMode !== receipt.pickedMode || latest.receipt.effortSource !== receipt.effortSource))) {
     return { kind: 'refused', reason: 'Review chat routing choice changed.' };
   }
   return { kind: 'bound', origin: { threadId, turnId, backend: turn.backend, model: receipt.leadModel,
-    effort: receipt.effort,
+    effort: receipt.effortSource === 'service-tier' || receipt.effortSource === 'runtime-default' ? 'adaptive' : receipt.effort,
     ...(receipt.permissionMode ? { permissionMode: receipt.permissionMode } : {}),
     ...(receipt.pickedMode ? { pickedMode: receipt.pickedMode } : {}),
     ...(typeof history.projectId === 'string' ? { projectId: history.projectId } : {}),

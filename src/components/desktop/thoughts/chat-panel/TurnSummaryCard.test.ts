@@ -7,6 +7,20 @@ import { buildTurnSummaryStats, TurnSummaryCard } from './TurnSummaryCard';
 import { parseTerminalTurnReceipt } from '../use-orchestrator-stream/terminal-receipt';
 
 describe('TurnSummaryCard', () => {
+  it('keeps default and service-tier provenance through receipt parsing and transcript reload', () => {
+    for (const source of ['runtime-default', 'service-tier'] as const) {
+      const receipt = parseTerminalTurnReceipt({ leadModel: source === 'service-tier' ? 'o8-next' : 'pi',
+        effort: source === 'service-tier' ? 'low' : 'adaptive', effortSource: source, mode: 'solo' });
+      expect(receipt).toMatchObject({ effortSource: source });
+      const [persistedEntry] = deserializeStoredTranscript(serializeTranscriptForStorage([{
+        id: source, role: 'assistant', text: 'Complete.', receipt,
+      }]));
+      expect(persistedEntry.receipt).toMatchObject({ effortSource: source });
+      const html = renderToStaticMarkup(createElement(TurnSummaryCard, { persistedEntry }));
+      expect(html).toContain(source === 'service-tier' ? 'low service tier' : 'runtime default');
+      expect(html).not.toContain('medium');
+    }
+  });
   it('keeps the outside-workspace grant visible after receipt parsing and transcript reload', () => {
     const receipt = parseTerminalTurnReceipt({ leadModel: 'pi', effort: 'medium', mode: 'solo', permissionMode: 'outside-workspace' });
     expect(receipt?.permissionMode).toBe('outside-workspace');

@@ -23,7 +23,7 @@ export function resolveMobileTurnSelection(
   const leadModel = normalizeObservedOrchestratorTurnModel(backend, receipt?.leadModel)
     ?? normalizeObservedOrchestratorTurnModel(backend, previous.model);
   if (typeof leadModel === 'string') inherited.model = leadModel;
-  if (isManualThinkingEffort(receipt?.effort)) inherited.thinkingEffort = receipt.effort;
+  if ((!receipt?.effortSource || receipt.effortSource === 'transport') && isManualThinkingEffort(receipt?.effort)) inherited.thinkingEffort = receipt.effort;
   if (receipt?.permissionMode === 'plan' || receipt?.permissionMode === 'full') {
     inherited.permissionMode = receipt.permissionMode;
   }

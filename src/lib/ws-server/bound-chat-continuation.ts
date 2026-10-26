@@ -72,7 +72,7 @@ export async function runBoundChatContinuation(
     }), (event: OrchestratorEvent) => {
       switch (event.type) {
         case 'turn_receipt':
-          receipt = { ...receipt, leadModel: event.leadModel, effort: event.effort }; persist(null); break;
+          receipt = { ...receipt, leadModel: event.leadModel, effort: event.effort, effortSource: event.effortSource }; persist(null); break;
         case 'text':
           text += event.text; persist(null);
           hooks.publish(session.sessionName, 'output', { ...data, text: event.text, thinking: false }); break;
