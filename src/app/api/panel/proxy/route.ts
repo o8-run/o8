@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { PREVIEW_PROXY_ROUTE } from '@/lib/panel/preview';
 import { isSensitivePreviewRequestHeader, parseLocalPreviewTarget, PREVIEW_DOCUMENT_CSP } from '@/lib/panel/preview-proxy-security';
+import { createPreviewResourceAccess, hasPreviewResourceAccess, PREVIEW_RESOURCE_KEY } from '@/lib/panel/preview-resource-access';
+import { rewritePreviewModule } from '@/lib/panel/rewrite-preview-module';
 
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '0.0.0.0', '::1']);
 const HOP_BY_HOP_REQUEST_HEADERS = new Set([
@@ -51,8 +53,8 @@ function isSkippableReference(value: string): boolean {
   );
 }
 
-function buildProxyUrl(targetUrl: string): string {
-  return `${PREVIEW_PROXY_ROUTE}?url=${encodeURIComponent(targetUrl)}`;
+function buildProxyUrl(targetUrl: string, access?: string): string {
+  return `${PREVIEW_PROXY_ROUTE}?url=${encodeURIComponent(targetUrl)}${access ? `&${PREVIEW_RESOURCE_KEY}=${encodeURIComponent(access)}` : ''}`;
 }
 
 function resolveProxyCandidate(value: string, currentUrl: URL): string | null {
@@ -69,23 +71,58 @@ function resolveProxyCandidate(value: string, currentUrl: URL): string | null {
   }
 }
 
-function rewriteAssetReference(value: string, currentUrl: URL): string {
+function rewriteAssetReference(value: string, currentUrl: URL, access?: string): string {
   const candidate = resolveProxyCandidate(value, currentUrl);
-  return candidate ? buildProxyUrl(candidate) : value;
+  return candidate ? buildProxyUrl(candidate, access) : value;
 }
 
-function rewriteCssText(css: string, currentUrl: URL): string {
+function rewriteCssText(css: string, currentUrl: URL, access?: string): string {
   const rewrittenUrls = css.replace(/url\((['"]?)([^'")]+)\1\)/gi, (match, quote: string, rawValue: string) => {
-    const rewritten = rewriteAssetReference(rawValue.trim(), currentUrl);
+    const rewritten = rewriteAssetReference(rawValue.trim(), currentUrl, access);
     if (rewritten === rawValue.trim()) return match;
     return `url(${quote}${rewritten}${quote})`;
   });
 
   return rewrittenUrls.replace(/@import\s+(?!url\()(["'])([^"']+)\1/gi, (match, quote: string, rawValue: string) => {
-    const rewritten = rewriteAssetReference(rawValue.trim(), currentUrl);
+    const rewritten = rewriteAssetReference(rawValue.trim(), currentUrl, access);
     if (rewritten === rawValue.trim()) return match;
     return `@import ${quote}${rewritten}${quote}`;
   });
+}
+
+function rewriteHtml(html: string, currentUrl: URL, appOrigin: string, xhtml: boolean, access: string): string {
+  const escapeAttribute = (value: string) => value.replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll("'", '&#39;');
+  // Static resources stay cookieless through the same confined proxy. The
+  // response sandbox, rather than this compatibility script, enforces isolation.
+  const rewritten = html.replace(/<base\b[^>]*>/gi, '').replace(
+    /\b(src|href|action|poster)\s*=\s*("([^"]*)"|'([^']*)')/gi,
+    (_match, name: string, _quoted: string, double: string | undefined, single: string | undefined) => {
+      const value = double ?? single ?? '';
+      const candidate = resolveProxyCandidate(value.replaceAll('&amp;', '&'), currentUrl);
+      return `${name}="${escapeAttribute(candidate ? appOrigin + buildProxyUrl(candidate, access) : value)}"`;
+    },
+  );
+  const source = `(() => {
+    const base = ${JSON.stringify(currentUrl.toString()).replaceAll('<', '\\u003c')};
+    const origin = ${JSON.stringify(appOrigin)};
+    const proxy = ${JSON.stringify(PREVIEW_PROXY_ROUTE)};
+    const access = ${JSON.stringify(`&${PREVIEW_RESOURCE_KEY}=${encodeURIComponent(access)}`)};
+    function resolve(value) {
+      const url = new URL(String(value), base);
+      return url.origin === new URL(base).origin ? origin + proxy + '?url=' + encodeURIComponent(url.href) + access : url.href;
+    }
+    const nativeFetch = window.fetch.bind(window);
+    window.fetch = (input, init) => {
+      if (input instanceof Request) return nativeFetch(new Request(resolve(input.url), input), { ...init, credentials: 'omit' });
+      return nativeFetch(resolve(input), { ...init, credentials: 'omit' });
+    };
+    const nativeOpen = XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.open = function(method, url, ...rest) { return nativeOpen.call(this, method, resolve(url), ...rest); };
+  })();`;
+  const bootstrap = `<script>${xhtml ? `//<![CDATA[\n${source}\n//]]>` : source}</script>`;
+  return /<head\b[^>]*>/i.test(rewritten)
+    ? rewritten.replace(/<head\b[^>]*>/i, match => match + bootstrap)
+    : bootstrap + rewritten;
 }
 
 function buildUpstreamHeaders(req: NextRequest, targetUrl: URL): Headers {
@@ -127,6 +164,11 @@ async function proxyRequest(req: NextRequest): Promise<NextResponse> {
   }
 
   try {
+    const resourceRead = hasPreviewResourceAccess(req.nextUrl);
+    // Resource reads may reuse a grant, but cannot extend its lifetime.
+    const access = resourceRead
+      ? req.nextUrl.searchParams.get(PREVIEW_RESOURCE_KEY)!
+      : createPreviewResourceAccess(targetUrl);
     const body = BODYLESS_METHODS.has(req.method)
       ? undefined
       : await req.arrayBuffer();
@@ -142,6 +184,11 @@ async function proxyRequest(req: NextRequest): Promise<NextResponse> {
     FRAME_BUSTING_RESPONSE_HEADERS.forEach((key) => headers.delete(key));
     headers.set('content-security-policy', PREVIEW_DOCUMENT_CSP);
     headers.set('x-content-type-options', 'nosniff');
+    // Opaque sandbox documents need anonymous CORS for module and data loads.
+    headers.set('access-control-allow-origin', '*');
+    headers.delete('access-control-allow-credentials');
+    headers.set('cache-control', 'no-store');
+    headers.set('referrer-policy', 'no-referrer');
     headers.delete('set-cookie');
     headers.delete('clear-site-data');
     headers.delete('service-worker-allowed');
@@ -153,7 +200,10 @@ async function proxyRequest(req: NextRequest): Promise<NextResponse> {
       if (!destination) {
         return NextResponse.json({ error: 'redirect target is not permitted by the preview proxy policy' }, { status: 400 });
       }
-      headers.set('location', buildProxyUrl(destination.toString()));
+      if (resourceRead && destination.origin !== targetUrl.origin) {
+        return NextResponse.json({ error: 'preview resource redirect changes origin' }, { status: 400 });
+      }
+      headers.set('location', buildProxyUrl(destination.toString(), resourceRead ? req.nextUrl.searchParams.get(PREVIEW_RESOURCE_KEY)! : undefined));
     }
 
     if (req.method === 'HEAD' || (upstream.status >= 300 && upstream.status < 400)) {
@@ -163,15 +213,29 @@ async function proxyRequest(req: NextRequest): Promise<NextResponse> {
     const contentType = (headers.get('content-type') ?? '').toLowerCase();
 
     if (contentType.includes('text/html') || contentType.includes('application/xhtml+xml')) {
-      // Keep interactive documents at their source origin, including module and data requests.
-      return NextResponse.redirect(targetUrl, 302);
+      // Cookies are shared across ports. Never navigate the browser directly to
+      // the source: that would bypass request and response cookie stripping.
+      const html = rewriteHtml(await upstream.text(), targetUrl, req.nextUrl.origin, contentType.includes('application/xhtml+xml'), access);
+      headers.delete('content-length');
+      headers.delete('content-encoding');
+      return new NextResponse(html, { status: upstream.status, headers });
     }
 
     if (contentType.includes('text/css')) {
-      const css = rewriteCssText(await upstream.text(), targetUrl);
+      const css = rewriteCssText(await upstream.text(), targetUrl, access);
       headers.delete('content-length');
       headers.delete('content-encoding');
       return new NextResponse(css, { status: upstream.status, headers });
+    }
+
+    if (/(?:java|ecma)script/.test(contentType)) {
+      const source = await rewritePreviewModule(await upstream.text(), value => {
+        const candidate = resolveProxyCandidate(value, targetUrl);
+        return candidate ? req.nextUrl.origin + buildProxyUrl(candidate, access) : value;
+      });
+      headers.delete('content-length');
+      headers.delete('content-encoding');
+      return new NextResponse(source, { status: upstream.status, headers });
     }
 
     return new NextResponse(upstream.body, { status: upstream.status, headers });
