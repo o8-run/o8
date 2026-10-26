@@ -1,4 +1,5 @@
 import type { OperatorMcpRequest, OperatorMcpResponse } from './operator-mcp-host';
+import { browserWriteAllowed } from '../../../scripts/lib/http-request-boundary.cjs';
 
 export const STATELESS_MCP_VERSION = '2026-07-28';
 export const MCP_VERSIONS = [STATELESS_MCP_VERSION, '2024-11-05'];
@@ -71,22 +72,15 @@ export function modernMcpHeaders(message: unknown): Record<string, string> {
 }
 
 /** Validate mirrored routing fields before any handler or native-read side effect. */
-export function prepareMcpHttp(payload: unknown, headers: Headers): { modern: boolean; refusal: OperatorMcpResponse | null; status?: number } {
+export function prepareMcpHttp(payload: unknown, headers: Headers, protocol = 'http:'): { modern: boolean; refusal: OperatorMcpResponse | null; status?: number } {
   const version = headers.get('mcp-protocol-version');
   const messages = Array.isArray(payload) ? payload : [payload];
   const modern = (version !== null && version !== '2024-11-05') || messages.some(isModernMcpRequest)
     || (version === null && (headers.has('mcp-method') || headers.has('mcp-name')));
-  if (!modern) return { modern, refusal: null };
-  const origin = headers.get('origin');
-  if (origin) {
-    let allowed = false;
-    try {
-      const url = new URL(origin);
-      allowed = ['http:', 'https:', 'tauri:'].includes(url.protocol)
-        && ['localhost', '127.0.0.1', '[::1]', 'tauri.localhost'].includes(url.hostname);
-    } catch { /* Unparseable origins cannot reach a local tool. */ }
-    if (!allowed) return { modern, refusal: error(payload, -32600, 'Origin is not allowed'), status: 403 };
+  if (!browserWriteAllowed('POST', name => headers.get(name), protocol)) {
+    return { modern, refusal: error(payload, -32600, 'Origin is not allowed'), status: 403 };
   }
+  if (!modern) return { modern, refusal: null };
   if (Array.isArray(payload)) return { modern, refusal: error(null, -32600, 'Modern MCP requires one request per POST') };
   const malformed = modernMcpError(payload);
   // A mismatched or missing header is a routing error, independently of the
