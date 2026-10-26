@@ -1,15 +1,16 @@
-import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import { execFile, spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
+import { promisify } from 'node:util';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { bundleServers, SERVER_ENTRIES } from '../scripts/lib/server-bundles.mjs';
 import { stagePackagedNativeAddons } from './helpers/packaged-native-addons';
 
 const root = mkdtempSync(join(tmpdir(), 'o8-server-layout-'));
-const serverDir = join(root, 'server');
+const serverDir = join(root, 'Contents', 'Resources', 'server');
 const state = join(root, 'state');
 const children: ChildProcess[] = [];
 let api: Server;
@@ -29,15 +30,22 @@ function launch(label: string, extra: Record<string, string> = {}, args: string[
     cwd: root,
     env: { PATH: process.env.PATH, NODE_ENV: 'test', HOME: root, USERPROFILE: root,
       O8_DATA_DIR: state, CORTEX_IDE_DATA_DIR: state, CORTEX_IDE_DB_PATH: join(state, 'db.sqlite'),
+      O8_MASTER_KEY: Buffer.alloc(32, 1).toString('base64url'),
       CORTEX_IDE_REVIEW_REPO_ROOT: root, O8_API_PORT: String(apiPort),
       NEXT_ORIGIN: `http://127.0.0.1:${apiPort}`, O8_SILENT_EXIT_DETECTOR_ENABLED: '0', ...extra },
     stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
   });
   children.push(child);
   let output = '';
+  let stderr = '';
   child.stdout!.on('data', data => { output += String(data); });
-  child.stderr!.on('data', data => { output += String(data); });
-  return { child, output: () => output };
+  child.stderr!.on('data', data => { output += String(data); stderr += String(data); });
+  return { child, output: () => output, stderr: () => stderr };
+}
+function expectModulesLoaded(stderr: string) {
+  const failure = stderr.split(/\r?\n/).find(line => /^\s*\w*Error(?: \[[^\]]+\])?:/.test(line));
+  expect(failure).toBeUndefined();
+  expect(stderr).not.toContain('Could not locate the bindings file');
 }
 async function waitFor(check: () => boolean | Promise<boolean>) {
   const deadline = Date.now() + 15_000;
@@ -59,8 +67,8 @@ async function stop(child: ChildProcess) {
 beforeAll(async () => {
   mkdirSync(state);
   report = bundleServers({ root: process.cwd(), outDir: serverDir });
-  // Only native externals are installed. All JavaScript dependencies must come
-  // from the generated entries/chunks, with no checkout node_modules above them.
+  // The build stages the shared compiler runtime; add only host native addons.
+  // No checkout node_modules directory exists above this generated package.
   stagePackagedNativeAddons({ projectRoot: process.cwd(), serverRoot: serverDir });
   cpSync('src/lib/lane/orchestrator.md', join(serverDir, 'orchestrator.md'));
   api = createServer((request, response) => {
@@ -88,13 +96,69 @@ afterAll(async () => {
 });
 
 describe('shared server bundles in the packaged layout', () => {
+  it('excludes the unused Next server barrel and test fixtures from the shipped graph', () => {
+    const outputs = Object.values(report.metafile.outputs);
+    const shippedInputs = outputs.flatMap(output => Object.keys(output.inputs));
+    expect(shippedInputs).not.toContain('node_modules/next/server.js');
+    expect(shippedInputs).not.toContain('node_modules/next/dist/compiled/ua-parser-js/ua-parser.js');
+    expect(shippedInputs.filter(input => /(^|\/)(tests|fixtures)\/|\.test\.[cm]?[jt]sx?$/.test(input))).toEqual([]);
+  });
+
+  it('keeps native implementations outside the default server entry import closure', () => {
+    const outputs = report.metafile.outputs;
+    const pending = Object.keys(outputs).filter(file => file.endsWith('/ws-server-impl.mjs'));
+    expect(pending).toHaveLength(1);
+    const visited = new Set<string>();
+    while (pending.length) {
+      const file = pending.pop()!;
+      if (visited.has(file)) continue;
+      visited.add(file);
+      expect(Object.keys(outputs[file].inputs).filter(input => /^src\/app\/api\/|native-http-(?:handlers|routes)\.ts$/.test(input))).toEqual([]);
+      pending.push(...outputs[file].imports.filter(imported => !imported.external && imported.kind !== 'dynamic-import').map(imported => imported.path));
+    }
+  });
+
+  it('serves native surface handlers through packaged o8d with no Next listener', async () => {
+    const binary = resolve(process.env.O8D_TEST_BINARY ?? join('crates/o8d/target/debug', process.platform === 'win32' ? 'o8d.exe' : 'o8d'));
+    if (!process.env.O8D_TEST_BINARY) await promisify(execFile)('cargo', ['build', '--locked', '--manifest-path', 'crates/o8d/Cargo.toml', '--features', 'experimental-ws']);
+    const wsPort = await freePort();
+    const absentNextPort = await freePort();
+    const token = 'packaged-native-fixture-credential';
+    writeFileSync(join(state, 'ws-token'), token);
+    const started = performance.now();
+    const { child } = launch('ws-server', { O8_NEXT_O8D: '1', O8_WS_O8D: '1', O8D_BINARY: binary,
+      O8_WS_PORT: String(wsPort), NEXT_ORIGIN: `http://127.0.0.1:${absentNextPort}` });
+    const origin = `http://127.0.0.1:${wsPort}`;
+    try {
+      await waitFor(async () => {
+        try { return (await (await fetch(origin + '/health')).json()).delivery?.transport === 'o8d'; }
+        catch { return false; }
+      });
+      const paths = ['/api/panel/operator-defaults?include=native', '/api/panel/projects', '/api/panel/repos',
+        '/api/panel/approvals', '/api/prompt-library', '/api/customize/inventory'];
+      // Race the first lazy handler load with rejected requests. A concurrent
+      // import must neither skip the gate nor lose a response during startup.
+      await Promise.all(paths.flatMap(path => [true, false].map(async authorized => {
+        const response = await fetch(origin + path, { headers: { authorization: `Bearer ${authorized ? token : 'wrong-fixture-credential'}` } });
+        expect(response.status, path).toBe(authorized ? 200 : 401);
+        expect(response.headers.get('content-type')).toContain('application/json');
+        await response.arrayBuffer();
+      })));
+      expect(performance.now() - started).toBeLessThan(5_000);
+      const brain = await fetch(origin + '/api/cortex/ask', { method: 'POST',
+        headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: '{}' });
+      expect(brain.status).toBe(400);
+      expect(await brain.json()).toEqual({ ok: false, error: 'question is required' });
+    } finally { await stop(child); }
+  }, 180_000);
+
   it('keeps all launcher and implementation paths, sibling chunks, names, and no maps', () => {
     const files = readdirSync(serverDir);
     for (const label of Object.keys(SERVER_ENTRIES)) {
       expect(files).toContain(`${label}.mjs`);
       expect(files).toContain(`${label}-impl.mjs`);
       const launcher = readFileSync(join(serverDir, `${label}.mjs`), 'utf8');
-      if (!['operator-mcp-proxy', 'codex-app-bridge'].includes(label)) {
+      if (label !== 'operator-mcp-proxy') {
         expect(launcher.indexOf('prepareNativeAddons')).toBeLessThan(launcher.indexOf('await import'));
       } else expect(launcher).not.toContain('prepareNativeAddons');
     }
@@ -126,7 +190,7 @@ describe('shared server bundles in the packaged layout', () => {
     expect(JSON.parse(result.stdout)).toEqual({ ready: 1 });
   });
 
-  it.each(['operator-mcp-proxy', 'codex-app-bridge'])('keeps %s independent of native addons', label => {
+  it.each(['operator-mcp-proxy'])('keeps %s independent of native addons', label => {
     const outputs = report.metafile.outputs;
     const entry = Object.keys(outputs).find(file => file.endsWith(`/${label}-impl.mjs`))!;
     const visited = new Set<string>();
@@ -145,20 +209,20 @@ describe('shared server bundles in the packaged layout', () => {
 
   it.each(['operator-mcp-server-main', 'operator-mcp-server', 'cortex-mcp-server', 'operator-mcp-proxy'])(
     'boots %s and completes MCP initialization', async label => {
-      const { child, output } = launch(label);
+      const { child, output, stderr } = launch(label);
       child.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id: 73, method: 'initialize',
         params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'fixture', version: '1' } } }) + '\n');
       try {
         await waitFor(() => output().split('\n').some(line => {
           try { const message = JSON.parse(line); return message.id === 73 && Boolean(message.result?.serverInfo); } catch { return false; }
         }));
-      } finally { await stop(child); }
+      } finally { await stop(child); expectModulesLoaded(stderr()); }
     },
   );
 
   it('boots ws-server and answers health through its generated launcher', async () => {
     const wsPort = await freePort();
-    const { child } = launch('ws-server', { O8_WS_PORT: String(wsPort) });
+    const { child, stderr } = launch('ws-server', { O8_WS_PORT: String(wsPort) });
     try {
       await waitFor(async () => {
         try {
@@ -167,18 +231,30 @@ describe('shared server bundles in the packaged layout', () => {
           return response.ok && health.product === 'o8' && health.status === 'ok';
         } catch { return false; }
       });
-    } finally { await stop(child); }
+    } finally { await stop(child); expectModulesLoaded(stderr()); }
   });
 
   it('boots terminal-host over the packaged fork IPC channel', async () => {
-    const { child, output } = launch('terminal-host');
+    const { child, output, stderr } = launch('terminal-host');
     try {
       await waitFor(() => output().includes('[terminal-host] child started'));
       expect(output()).not.toContain('node-pty unavailable');
       const exited = once(child, 'exit');
       child.disconnect();
       expect((await exited)[0]).toBe(0);
-    } finally { await stop(child); }
+    } finally { await stop(child); expectModulesLoaded(stderr()); }
+  });
+
+  it('boots codex-app-bridge with a valid spec and reaches the exiting child', async () => {
+    const spec = join(root, 'bridge-valid-spec.json');
+    // Node accepts this extensionless script as its app-server argument.
+    writeFileSync(join(root, 'app-server'), 'process.exit(1);\n');
+    writeFileSync(spec, JSON.stringify({ codexBin: process.execPath, cwd: root }));
+    const { child, output, stderr } = launch('codex-app-bridge', {}, [spec]);
+    await once(child, 'close');
+    expectModulesLoaded(stderr());
+    expect(child.exitCode).toBe(1);
+    expect(output()).toContain('codex app-server exited (1)');
   });
 
   it('boots codex-app-bridge and reaches spec validation without a real account', async () => {

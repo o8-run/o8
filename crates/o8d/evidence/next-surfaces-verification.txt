@@ -1,0 +1,69 @@
+o8d registered surface verification
+Node 22.23.4; Rust 1.99.1; Linux fixtures
+
+Initial route regression
+ FAIL  tests/o8d-next-surfaces-real-path.test.ts > serves Settings through the production o8d bridge with Next stopped
+ FAIL  tests/o8d-next-surfaces-real-path.test.ts > serves Projects through the production o8d bridge with Next stopped
+ FAIL  tests/o8d-next-surfaces-real-path.test.ts > serves Issues through the production o8d bridge with Next stopped
+ FAIL  tests/o8d-next-surfaces-real-path.test.ts > serves Inbox through the production o8d bridge with Next stopped
+ FAIL  tests/o8d-next-surfaces-real-path.test.ts > serves Customize through the production o8d bridge with Next stopped
+AssertionError: expected 404 to be 200 // Object.is equality
+ FAIL  tests/o8d-next-surfaces-real-path.test.ts > serves Brain through the production o8d bridge with Next stopped
+AssertionError: expected 404 to be 400 // Object.is equality
+ FAIL  tests/o8d-next-surfaces-real-path.test.ts > reads saved fixture sessions with Next stopped
+AssertionError: expected 404 to be 200 // Object.is equality
+ Test Files  1 failed (1)
+      Tests  7 failed (7)
+   Duration  14.10s (transform 39ms, setup 42ms, import 27ms, tests 13.91s, environment 0ms)
+
+WS checkpoint regression
+ FAIL  tests/o8d-next-surfaces-real-path.test.ts > delivers a native session checkpoint after Next stops
+Error: cutover client timed out
+ Test Files  1 failed (1)
+      Tests  1 failed | 9 passed (10)
+   Duration  22.24s (transform 3.32s, setup 40ms, import 38ms, tests 22.03s, environment 0ms)
+
+Registry regression after main added surfaces
+ FAIL  tests/o8d-next-surfaces-real-path.test.ts > walks every production surface registration and its HTTP routes
+AssertionError: expected [ 'brain', 'customize', 'diff', …(7) ] to deeply equal [ 'activity', 'brain', …(10) ]
+ Test Files  1 failed (1)
+      Tests  1 failed | 14 skipped (15)
+   Duration  7.04s (transform 106ms, setup 58ms, import 66ms, tests 6.75s, environment 0ms)
+
+Relay authority regression
+ FAIL  tests/o8d-next-surfaces-real-path.test.ts > does not turn the Rust relay peer into unauthenticated loopback authority
+AssertionError: expected 200 to be 401 // Object.is equality
+ Test Files  1 failed (1)
+      Tests  1 failed | 15 skipped (16)
+   Duration  16.62s (transform 54ms, setup 43ms, import 58ms, tests 16.36s, environment 0ms)
+
+Focused final green
+ Test Files  5 passed (5)
+      Tests  58 passed | 1 skipped (59)
+   Duration  93.70s (transform 11.81s, setup 170ms, import 4.53s, tests 88.20s, environment 0ms)
+
+Packaged relative-binary regression
+ FAIL  tests/server-bundles-packaged-layout-real-path.test.ts > shared server bundles in the packaged layout > serves native surface handlers through packaged o8d with no Next listener
+Error: Packaged bundle did not answer its protocol
+ Test Files  1 failed (1)
+      Tests  1 failed | 11 skipped (12)
+   Duration  16.89s (transform 41ms, setup 36ms, import 36ms, tests 16.69s, environment 0ms)
+
+Packaged relative-binary green
+ Test Files  1 passed (1)
+      Tests  1 passed | 11 skipped (12)
+   Duration  12.32s (transform 51ms, setup 40ms, import 52ms, tests 12.12s, environment 0ms)
+
+Full final green
+ Test Files  1242 passed | 3 skipped (1245)
+      Tests  9057 passed | 5 skipped (9062)
+   Duration  176.21s (transform 12.85s, setup 19.92s, import 228.92s, tests 202.75s, environment 147.16s)
+
+Native persisted-history client / GPUI test context
+saved_history_surface_with_only_o8d ... ok
+1 passed; 0 failed; 132 filtered out
+
+Passed: npx tsc --noEmit with NODE_OPTIONS=--max-old-space-size=8192; typecheck:fast; ESLint on touched TypeScript; rule-check; test:classify; cargo test --all-features for o8d.
+
+Unchanged bundle-size gate remains red: 14,472,566 bytes; ceiling 14,077,919 bytes; excess 394,647 bytes.
+Production/native combined RSS and CPU, 500 MB target, macOS run, full-surface replay and complete latency inventory remain unverified.

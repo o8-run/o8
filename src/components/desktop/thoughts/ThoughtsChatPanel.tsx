@@ -63,7 +63,7 @@ import { ChatToastStack } from './chat-panel/ChatToastStack';
 import { VisualComposerArea } from '@/components/desktop/visual-instructions/VisualComposerArea';
 import { useOrchestratorModelState } from './composer-selector/useOrchestratorModelState';
 import { BackendSwitchChoice } from './chat-panel/BackendSwitchChoice';
-import { ComposerSendBufferStatus } from './chat-panel/ComposerSendBufferStatus';
+import { ComposerSendStatus } from './chat-panel/ComposerUploadStatus';
 import { useDefaultComposerSendBuffer } from './chat-panel/useDefaultComposerSendBuffer';
 import { useBufferedOrchestratorSend } from './chat-panel/useBufferedOrchestratorSend';
 import { shouldApplyAutoRestoreAfterFetch } from './chat-panel/autoRestoreGuard';
@@ -396,6 +396,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, ThoughtsCha
   const composerDropHostRef = useRef<HTMLDivElement>(null);
   const {
     attachedImages,
+    uploadError, uploading, failedUploads, retryFailedUploads, discardFailedUploads,
     addAttachedImage,
     attachedFiles,
     dragOver: attachmentDragOver,
@@ -1817,7 +1818,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, ThoughtsCha
     busy: displayWaiting,
     threadId,
     repoPath: resolvedRepoPath,
-    attachedImages,
+    attachedImages, uploadError, uploading,
     latestInputRef,
     inputRef,
     setInput,
@@ -2057,8 +2058,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, ThoughtsCha
         onSubmit={handleComposerSend}
         onStop={sendBuffer.stopOrUndo}
         onSteer={handleSteer} canSteerLive={durable.canSteer} queueSaving={queueSaving}
-        sendBufferStatus={<ComposerSendBufferStatus attachmentError={attachmentError} undoArmed={isOrchestratorMode && sendBuffer.undoArmed}
-          undoSequence={sendBuffer.undoSequence} queued={[]} onUndo={sendBuffer.stopOrUndo} onCancelQueued={sendBuffer.cancelQueued} />}
+        sendBufferStatus={<ComposerSendStatus attachmentError={attachmentError} sendBuffer={sendBuffer} active={isOrchestratorMode} uploads={{ uploading, failed: failedUploads.length > 0, retry: retryFailedUploads, discard: discardFailedUploads }} />}
         onSlashCommand={handleSlashCommand}
         modelLabel={isChatMode ? selectedChatModel.label : isSingleMode ? activeTargetLabel : isOrchestratorMode ? activeBackendLabel ?? formatComposerBackendLabel(orchestratorBackend, orchestratorModel) : activeTargetLabel}
         modelId={isOrchestratorMode ? orchestratorModel : undefined}

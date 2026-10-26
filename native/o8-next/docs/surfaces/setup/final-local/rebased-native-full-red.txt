@@ -1,0 +1,14 @@
+Baseline: 417586b6b00e55f4759fc95a68091ffad7596213
+
+thread 'diff_tests::diff_real_server_selection_modes_review_and_virtualized_paint' (389195171) panicked at src/diff_tests.rs:207:13:
+selected-file HTTP load must finish before paint timing ends
+thread 'pane_grid::tests::terminals::real_slot_terminals_route_keys_retain_hidden_attachments_and_restart' (389276927) panicked at src/pane_grid_tests.rs:58:14:
+fixture origin
+thread 'shell::activity::tests::activity_palette_reaches_native_pane' (389355812) panicked at src/surfaces/activity/tests.rs:27:5:
+assertion `left == right` failed
+  left: "Open pull requests"
+ right: "Open diff for a packet"
+thread 'terminal::tests::production_pty_to_gpui_terminal' (389897972) panicked at src/terminal_tests.rs:276:9:
+50 MB flood must finish; received 33528976 bytes
+
+test result: FAILED. 150 passed; 4 failed; 3 ignored; 0 measured; 0 filtered out; finished in 1525.33s

@@ -1,3 +1,7 @@
+import { reconcileKnowledgeSources } from '@/lib/cortex/knowledge/reconcile';
+import { parseKnowledgeSources, type KnowledgeSourceDefaults } from './knowledge-source-defaults';
+import { parseOperatorDefaultsToml } from '@/lib/settings/toml';
+import { validateKnowledgeSourceRoots } from '@/lib/cortex/knowledge/sources';
 import 'server-only';
 import { isSupportedModelId, MODEL_IDS, SUPPORTED_MODEL_IDS } from '@/lib/models';
 import { isThinkingEffort, type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
@@ -97,14 +101,16 @@ import { applySymonVoiceUpdate, resolveStoredSymonVoice, resolveSymonVoiceSettin
 import { applyJudgmentProviderUpdate, JUDGMENT_PROVIDER_FALLBACK, resolveJudgmentProviderSettings, resolveStoredJudgmentProvider, type JudgmentProviderDefault } from './judgment-default';
 import { applyJudgmentAllowanceUpdate, JUDGMENT_ALLOWANCE_FALLBACK, resolveJudgmentAllowanceSettings, resolveStoredJudgmentAllowance, type JudgmentAllowanceDefaults } from './judgment-allowance-default';
 import {
-  applyOperatorDefaultsTomlWithLock,
+  applyOperatorDefaultsTomlFile,
+  withOperatorDefaultsWriteLock,
   getOperatorDefaultsTomlState as readOperatorDefaultsTomlState,
   loadOperatorDefaultsFiles,
   loadOperatorDefaultsFilesSync,
   persistOperatorDefaults,
   readLegacyOperatorDefaults,
   readOperatorDefaultsTomlForUpdate,
-  withOperatorDefaultsUpdateRetry, withOperatorDefaultsWriteLock, SettingsTomlConflictError,
+  withOperatorDefaultsUpdateRetry,
+  SettingsTomlConflictError,
   type OperatorDefaultsTomlState,
 } from '@/lib/settings/operator-defaults-store';
 export { getOperatorDefaultsTomlPath } from '@/lib/settings/operator-defaults-store';
@@ -126,7 +132,7 @@ export type SettingSource = 'env' | 'file' | 'profile' | 'default';
 export type RequireApproval = 'high-risk' | 'surface' | 'always' | 'never';
 export function isRequireApproval(value: unknown): value is RequireApproval { return value === 'high-risk' || value === 'surface' || value === 'always' || value === 'never'; }
 
-export interface OperatorDefaults extends StorageReserveDefaults, WorkspaceParkingDefaults, ApfsDependencyImagesDefaults, MeteredPacketCapDefaults, UiLoopDefaults, BroadcastCommentaryDefaults, PresentationDefaults, ReviewContinuationDefault, CodexAppThreadsDefault, WorkspaceManifestPolicyDefault, SymonVoiceDefault, JudgmentProviderDefault, JudgmentAllowanceDefaults, BrainDefaults {
+export interface OperatorDefaults extends KnowledgeSourceDefaults, StorageReserveDefaults, WorkspaceParkingDefaults, ApfsDependencyImagesDefaults, MeteredPacketCapDefaults, UiLoopDefaults, BroadcastCommentaryDefaults, PresentationDefaults, ReviewContinuationDefault, CodexAppThreadsDefault, WorkspaceManifestPolicyDefault, SymonVoiceDefault, JudgmentProviderDefault, JudgmentAllowanceDefaults, BrainDefaults {
   subscriptionProfile: SubscriptionProfile;
   parallelCap: number;
   overlapGate: OverlapGateMode;
@@ -198,7 +204,7 @@ export interface OperatorDefaults extends StorageReserveDefaults, WorkspaceParki
    * fleet-canvas tabs (mirrors `experimentalChat`: tab data stays persisted
    * for when it flips back on).
    */
-  experimentalCanvas: boolean;
+  experimentalCanvas: boolean; experimentalNext: boolean;
   /** Native browser-view: render the embedded Browser pane in a host-owned child
    *  WebviewWindow (origin-sensitive auth apps render natively + stay
    *  agent-grabbable) instead of the iframe/proxy + engine-JPEG fallback.
@@ -279,7 +285,7 @@ export interface OperatorDefaults extends StorageReserveDefaults, WorkspaceParki
   updateAutoApply: UpdateAutoApply;
   /** Collide aggregator override. Auto follows the active composer backend. */
   collideAggregator: CollideAggregator;
-  /** Coarse product-usage telemetry. Explicit opt-in, persisted, and default off. */ productTelemetryEnabled: boolean;
+  /** Coarse usage analytics: null = never chosen (default on), true = on, false = off. */ productTelemetryEnabled: boolean | null;
   /** First-run telemetry prompt was answered with both independent choices. */ telemetryConsentAnswered: boolean;
   /** Crash-log upload opt-in; local capture continues while off. Env: `O8_TELEMETRY_OPT_IN`. */ telemetryOptIn: boolean;
   /** Crash-log endpoint, consulted only when telemetryOptIn is on. */ telemetryIngestUrl: string;
@@ -323,6 +329,7 @@ export interface OperatorDefaultsWithSources {
 
 // ── Hardcoded fallbacks (the "locked defaults") ──
 export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
+  knowledgeSources: [],
   subscriptionProfile: 'both',
   parallelCap: 5,
   overlapGate: 'strict',
@@ -357,7 +364,7 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   experimentalOpencode: false,
   experimentalGemini: false,
   experimentalChat: false,
-  experimentalCanvas: false,
+  experimentalCanvas: false, experimentalNext: false,
   nativeBrowserView: true,
   classAComposer: 'auto',
   // ON by default post-#1097; subscription pool, not Agent SDK pool.
@@ -382,7 +389,7 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   targetingAction: { runtime: 'codex', model: '', effort: 'high' },
   updateAutoApply: 'off',
   collideAggregator: 'auto',
-  productTelemetryEnabled: false,
+  productTelemetryEnabled: null,
   telemetryConsentAnswered: false,
   telemetryOptIn: false, // Local capture only, nothing uploaded.
   telemetryIngestUrl: '',
@@ -396,63 +403,10 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   worktreeMaxTotalGb: 20,
   ...STORAGE_RESERVE_FALLBACK, ...WORKSPACE_PARKING_FALLBACK, ...METERED_PACKET_CAP_FALLBACK, ...UI_LOOP_FALLBACK, ...SYMON_VOICE_FALLBACK, ...JUDGMENT_PROVIDER_FALLBACK, ...JUDGMENT_ALLOWANCE_FALLBACK,
 };
-interface StoredOperatorDefaults extends Partial<StorageReserveDefaults>, Partial<WorkspaceParkingDefaults>, Partial<ApfsDependencyImagesDefaults>, Partial<MeteredPacketCapDefaults>, Partial<UiLoopDefaults>, Partial<BroadcastCommentaryDefaults>, Partial<PresentationDefaults>, Partial<ReviewContinuationDefault>, Partial<CodexAppThreadsDefault>, Partial<WorkspaceManifestPolicyDefault>, Partial<SymonVoiceDefault>, Partial<JudgmentProviderDefault>, Partial<JudgmentAllowanceDefaults>, Partial<BrainDefaults> {
-  subscriptionProfile?: SubscriptionProfile;
-  parallelCap?: number;
-  overlapGate?: OverlapGateMode;
-  healBotEnabled?: boolean;
-  supervisorAutoEscalate?: boolean;
-  thinkingEffort?: ThinkingEffort;
-  promptCachingEnabled?: boolean;
-  autoTitleInferenceEnabled?: boolean;
-  mergeTestReplayEnabled?: boolean;
-  requireApproval?: RequireApproval;
-  orchestratorModel?: string;
-  opencodeOrchestratorModel?: string | null;
-  opencodeWorkerModel?: string | null;
-  threecodeWorkerModel?: string | null;
-  defaultDispatchRuntime?: OrchestratorRuntime;
-  workerExecutionCarrier?: ExecutionCarrierId | null;
+type StoredOperatorDefaults = Partial<OperatorDefaults> & {
   defaultDispatchRuntimeExplicit?: boolean;
-  workerStartMode?: WorkerStartMode;
-  workerRuntimes?: OrchestratorRuntime[];
-  codexWorkerEffort?: ThinkingEffort;
-  claudeWorkerEffort?: ThinkingEffort;
-  defaultDispatchModel?: string;
-  localInferenceBaseUrl?: string;
-  localEmbedModel?: string;
-  localChatModel?: string;
-  experimentalOpencode?: boolean;
-  experimentalGemini?: boolean;
-  experimentalChat?: boolean;
-  experimentalCanvas?: boolean;
-  nativeBrowserView?: boolean;
-  classAComposer?: ClassAComposer;
-  inAppOrchestratorEnabled?: boolean;
-  brainUseClaudeCli?: boolean;
-  workersUseBrain?: WorkersUseBrain;
-  crossHouseWorkerFallback?: boolean;
-  orchestratorBackend?: OrchestratorBackendSetting;
-  reviewerBackend?: ReviewerBackendSetting;
-  packetExplainerEnabled?: boolean;
-  quizGateEnabled?: boolean;
-  buyinDocEnabled?: boolean;
-  targetingTriage?: TargetingTier;
-  targetingAction?: TargetingTier;
-  updateAutoApply?: UpdateAutoApply;
   autoApplyUpdates?: 'off' | 'when-idle';
-  collideAggregator?: CollideAggregator;
-  productTelemetryEnabled?: boolean;
-  telemetryConsentAnswered?: boolean;
-  telemetryOptIn?: boolean;
-  telemetryIngestUrl?: string;
-  crashReportsEnabled?: boolean;
-  branchPrefix?: string;
-  commitAttributionEnabled?: boolean;
-  prLinkDestination?: PrLinkDestination;
-  worktreeMaxCount?: number;
-  worktreeMaxTotalGb?: number;
-}
+};
 
 type FileOperatorDefaults = Partial<OperatorDefaults> & {
   defaultDispatchRuntimeExplicit?: boolean;
@@ -461,7 +415,12 @@ type FileOperatorDefaults = Partial<OperatorDefaults> & {
 const parseStoredDefaults = (raw: string): StoredOperatorDefaults => parseStoredJson<StoredOperatorDefaults>(raw);
 
 function resolveFromFile(stored: StoredOperatorDefaults): FileOperatorDefaults {
-  const result: FileOperatorDefaults = {}; Object.assign(result, resolveStoredUiLoopDefaults(stored));
+  const result: FileOperatorDefaults = {};
+  if (stored.knowledgeSources !== undefined) {
+    try { result.knowledgeSources = parseKnowledgeSources(stored.knowledgeSources); }
+    catch { /* Ignore invalid legacy sources. */ }
+  }
+  Object.assign(result, resolveStoredUiLoopDefaults(stored));
   if (isSubscriptionProfile(stored.subscriptionProfile)) {
     result.subscriptionProfile = stored.subscriptionProfile;
   }
@@ -542,7 +501,7 @@ function resolveFromFile(stored: StoredOperatorDefaults): FileOperatorDefaults {
   }
   if (typeof stored.experimentalCanvas === 'boolean') {
     result.experimentalCanvas = stored.experimentalCanvas;
-  }
+  } if (typeof stored.experimentalNext === 'boolean') result.experimentalNext = stored.experimentalNext;
   if (typeof stored.nativeBrowserView === 'boolean') {
     result.nativeBrowserView = stored.nativeBrowserView;
   }
@@ -582,7 +541,7 @@ function resolveFromFile(stored: StoredOperatorDefaults): FileOperatorDefaults {
   if (isCollideAggregator(stored.collideAggregator)) {
     result.collideAggregator = stored.collideAggregator;
   }
-  if (typeof stored.productTelemetryEnabled === 'boolean') result.productTelemetryEnabled = stored.productTelemetryEnabled;
+  if (stored.productTelemetryEnabled === null || typeof stored.productTelemetryEnabled === 'boolean') result.productTelemetryEnabled = stored.productTelemetryEnabled;
   if (typeof stored.telemetryConsentAnswered === 'boolean') result.telemetryConsentAnswered = stored.telemetryConsentAnswered;
   if (typeof stored.telemetryOptIn === 'boolean') {
     result.telemetryOptIn = stored.telemetryOptIn;
@@ -685,6 +644,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
   const defaultDispatchRuntime = profileDefaults?.defaultDispatchRuntime ?? baseDefaultDispatchRuntime;
 
   const resolved: OperatorDefaults = {
+    knowledgeSources: fileValues.knowledgeSources ?? [],
     subscriptionProfile,
     parallelCap: envCap ?? fileValues.parallelCap ?? OPERATOR_DEFAULTS_FALLBACK.parallelCap,
     overlapGate: envGate ?? fileValues.overlapGate ?? OPERATOR_DEFAULTS_FALLBACK.overlapGate,
@@ -726,7 +686,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     experimentalOpencode: envOpencode ?? fileValues.experimentalOpencode ?? OPERATOR_DEFAULTS_FALLBACK.experimentalOpencode,
     experimentalGemini: envGemini ?? fileValues.experimentalGemini ?? OPERATOR_DEFAULTS_FALLBACK.experimentalGemini,
     experimentalChat: envChat ?? fileValues.experimentalChat ?? OPERATOR_DEFAULTS_FALLBACK.experimentalChat,
-    experimentalCanvas: envCanvas ?? fileValues.experimentalCanvas ?? OPERATOR_DEFAULTS_FALLBACK.experimentalCanvas,
+    experimentalCanvas: envCanvas ?? fileValues.experimentalCanvas ?? OPERATOR_DEFAULTS_FALLBACK.experimentalCanvas, experimentalNext: fileValues.experimentalNext ?? false,
     nativeBrowserView: envNative ?? fileValues.nativeBrowserView ?? OPERATOR_DEFAULTS_FALLBACK.nativeBrowserView,
     classAComposer: envComposer ?? fileValues.classAComposer ?? OPERATOR_DEFAULTS_FALLBACK.classAComposer,
     inAppOrchestratorEnabled,
@@ -764,6 +724,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
   };
 
   const sources: Record<keyof OperatorDefaults, SettingSource> = {
+    knowledgeSources: fileValues.knowledgeSources !== undefined ? 'file' : 'default',
     subscriptionProfile: envProfile !== null ? 'env' : fileValues.subscriptionProfile !== undefined ? 'file' : 'default',
     parallelCap: envCap !== null ? 'env' : fileValues.parallelCap !== undefined ? 'file' : 'default',
     overlapGate: envGate !== null ? 'env' : fileValues.overlapGate !== undefined ? 'file' : 'default',
@@ -803,7 +764,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     experimentalOpencode: envOpencode !== null ? 'env' : fileValues.experimentalOpencode !== undefined ? 'file' : 'default',
     experimentalGemini: envGemini !== null ? 'env' : fileValues.experimentalGemini !== undefined ? 'file' : 'default',
     experimentalChat: envChat !== null ? 'env' : fileValues.experimentalChat !== undefined ? 'file' : 'default',
-    experimentalCanvas: envCanvas !== null ? 'env' : fileValues.experimentalCanvas !== undefined ? 'file' : 'default',
+    experimentalCanvas: envCanvas !== null ? 'env' : fileValues.experimentalCanvas !== undefined ? 'file' : 'default', experimentalNext: fileValues.experimentalNext !== undefined ? 'file' : 'default',
     nativeBrowserView: envNative !== null ? 'env' : fileValues.nativeBrowserView !== undefined ? 'file' : 'default',
     classAComposer: envComposer !== null ? 'env' : fileValues.classAComposer !== undefined ? 'file' : 'default',
     inAppOrchestratorEnabled:
@@ -897,6 +858,7 @@ async function updateOperatorDefaultsOnce(update: Partial<OperatorDefaults>, exp
   if (update.supervisorAutoEscalate !== undefined) {
     stored.supervisorAutoEscalate = Boolean(update.supervisorAutoEscalate);
   }
+  if (update.knowledgeSources !== undefined) stored.knowledgeSources = validateKnowledgeSourceRoots(update.knowledgeSources);
   applyReviewContinuationUpdate(stored, update);
   applyCodexAppThreadsUpdate(stored, update);
   applyBroadcastCommentaryUpdate(stored, update);
@@ -996,7 +958,7 @@ async function updateOperatorDefaultsOnce(update: Partial<OperatorDefaults>, exp
   }
   if (update.experimentalCanvas !== undefined) {
     stored.experimentalCanvas = Boolean(update.experimentalCanvas);
-  }
+  } if (update.experimentalNext !== undefined) stored.experimentalNext = Boolean(update.experimentalNext);
   if (update.nativeBrowserView !== undefined) {
     stored.nativeBrowserView = Boolean(update.nativeBrowserView);
   }
@@ -1055,7 +1017,7 @@ async function updateOperatorDefaultsOnce(update: Partial<OperatorDefaults>, exp
     }
     stored.collideAggregator = update.collideAggregator;
   }
-  if (update.productTelemetryEnabled !== undefined) stored.productTelemetryEnabled = Boolean(update.productTelemetryEnabled);
+  if (update.productTelemetryEnabled !== undefined) stored.productTelemetryEnabled = update.productTelemetryEnabled;
   if (update.telemetryConsentAnswered !== undefined) stored.telemetryConsentAnswered = Boolean(update.telemetryConsentAnswered);
   if (update.telemetryOptIn !== undefined) {
     stored.telemetryOptIn = Boolean(update.telemetryOptIn);
@@ -1122,11 +1084,26 @@ async function updateOperatorDefaultsOnce(update: Partial<OperatorDefaults>, exp
 }
 
 export async function updateOperatorDefaults(update: Partial<OperatorDefaults>, expectedRevision?: string): Promise<OperatorDefaultsWithSources> {
-  return expectedRevision ? withOperatorDefaultsWriteLock(() => updateOperatorDefaultsOnce(update, expectedRevision)) : withOperatorDefaultsUpdateRetry(() => updateOperatorDefaultsOnce(update));
+  const apply = async () => {
+    const before = getOperatorDefaultsSync().values.knowledgeSources;
+    const result = await updateOperatorDefaultsOnce(update, expectedRevision);
+    await reconcileKnowledgeSources(before, result.values.knowledgeSources);
+    return result;
+  };
+  return expectedRevision ? withOperatorDefaultsWriteLock(apply) : withOperatorDefaultsUpdateRetry(apply);
 }
 
 export async function applyOperatorDefaultsToml(raw: string, expectedRevision: string): Promise<OperatorDefaultsWithSources> {
-  return applyOperatorDefaultsTomlWithLock(raw, expectedRevision, OPERATOR_DEFAULTS_FALLBACK, getOperatorDefaults);
+  return withOperatorDefaultsWriteLock(async () => {
+    const knowledge = parseOperatorDefaultsToml(raw).knowledgeSources;
+    if (knowledge !== undefined) validateKnowledgeSourceRoots(knowledge);
+    const before = getOperatorDefaultsSync().values.knowledgeSources;
+    return applyOperatorDefaultsTomlFile(raw, expectedRevision, OPERATOR_DEFAULTS_FALLBACK, async () => {
+      const result = await getOperatorDefaults();
+      await reconcileKnowledgeSources(before, result.values.knowledgeSources);
+      return result;
+    });
+  });
 }
 
 /**
@@ -1250,9 +1227,9 @@ export function resolveCollideAggregatorSync(): CollideAggregator {
   return getOperatorDefaultsSync().values.collideAggregator;
 }
 
-/** Whether coarse product telemetry is explicitly opted in (default off). */
+/** Effective usage preference. First-run disclosure is a separate egress gate. */
 export function resolveProductTelemetryEnabledSync(): boolean {
-  return getOperatorDefaultsSync().values.productTelemetryEnabled;
+  return getOperatorDefaultsSync().values.productTelemetryEnabled !== false;
 }
 
 /** Whether crash-telemetry upload is opted in (Rock 2, default off). */

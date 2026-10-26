@@ -3,6 +3,7 @@ export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server';
 import { execFileSync } from '@/lib/providers/child-process';
 import { isSafeGitRef } from '@/lib/git/refs';
+import { knowledgeSourceWriteRefusal } from '@/lib/cortex/knowledge/sources';
 
 export async function POST(req: NextRequest) {
   try {
@@ -22,6 +23,8 @@ export async function POST(req: NextRequest) {
     }
 
     const cwd = repoPath.replace(/^~/, process.env.HOME || require('os').homedir());
+    const sourceRefusal = knowledgeSourceWriteRefusal(repoPath, cwd);
+    if (sourceRefusal) return sourceRefusal;
 
     // Check for uncommitted changes
     let dirty = false;

@@ -53,6 +53,7 @@ import { basename, extname, isAbsolute, join, resolve } from 'node:path';
 import { execFile, execFileSync } from '@/lib/providers/child-process';
 import { createServer } from 'node:http';
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
+import { isTerminalChatConnectivityPrompt } from '@/lib/orchestrator/connectivity-check';
 import { homedir } from 'node:os';
 import { promisify } from 'node:util';
 import { getDataDir, migrateDataDirOnce } from '@/lib/data-dir-migration';
@@ -269,7 +270,7 @@ import { manualReviewRequested } from './lib/lane/review-mode';
 import { queueOrchestratorEscalation as queueSupervisorEscalationTurn } from './lib/orchestrator/supervisor-escalation';
 import { startWorktreeReaper, stopWorktreeReaper } from './lib/lane/worktree-reaper';
 import { startLaneZombieReaper, stopLaneZombieReaper } from './lib/lane/reaper';
-import { listDashTmuxSessionsWithAge, reapOrphanDashTmuxSessions } from './lib/ws-server/dash-terminal-gc';
+import { listDashTmuxSessionsWithAge, reapOrphanDashTmuxSessions, signalOwnedDashTmuxSession } from './lib/ws-server/dash-terminal-gc';
 import { resolveDeviceByToken, isDeviceActive, isTokenRevoked, type MobileDevice } from './lib/mobile/device-registry';
 import { startRelayConnectorIfEnabled, stopRelayConnector } from './lib/mobile/relay-connector';
 import {
@@ -5172,6 +5173,14 @@ async function handleOrchestratorSendMsgAdmitted(client: ClientState, msg: Recor
 
   const correlationId = resolveOrchestratorCommandCorrelationId(msg);
   const threadId = resolveMsgThreadId(msg);
+  if (isTerminalChatConnectivityPrompt(msg.displayMessage ?? message)
+    && (!Array.isArray(msg.attachments) || msg.attachments.length === 0)) {
+    send(client, { channel: 'orchestrator', event: 'error', data: {
+      repoPath, threadId, error: 'Use o8 chat --check to check connectivity without creating a conversation.',
+      ...orchestratorCommandAckCorrelation(correlationId),
+    } });
+    return;
+  }
   let attachments: ComposerImageAttachment[] | undefined;
   try {
     attachments = 'attachments' in msg ? validateComposerImageAttachments(msg.attachments) : undefined;
@@ -6225,10 +6234,9 @@ async function handleOrchestratorSendMsgOnce(
       }
       return;
     }
-    // Broadcast the error to EVERY subscriber on this thread, not just the
-    // origin client — a phone-started turn that throws must also release the
-    // desktop watching the same thread (it was latching forever). Fall back to
-    // the origin client only if the session name was never resolved.
+    // Accepted turns notify every subscriber. Before acceptance the origin
+    // may not yet subscribe to the selected backend, so admission failures
+    // must return directly to the client that still owns the draft.
     const errorMsg = {
       channel: 'orchestrator' as const,
       event: 'error' as const,
@@ -6243,7 +6251,7 @@ async function handleOrchestratorSendMsgOnce(
         ...orchestratorCommandAckCorrelation(correlationId),
       },
     };
-    if (sessionName) {
+    if (sessionName && commandAccepted) {
       broadcastToOrchestratorSession(sessionName, JSON.stringify(errorMsg));
     } else {
       send(client, errorMsg);
@@ -7585,13 +7593,12 @@ function handleAgentKill(_client: ClientState, msg: Record<string, unknown>) {
 }
 
 function terminateTerminalSession(sessionName: string, signal: string = 'SIGTERM') {
-  if (!sessionName) return;
+  if (!sessionName) return false;
 
-  console.log(`[ws-server] Kill request for ${sessionName} (signal: ${signal})`);
-
-  // 1. Try killing via PTY attachment (Codex / Claude Code terminals)
+  // Direct processes belong to this bridge. Only their literal in-memory
+  // identities qualify; selectors cannot acquire this local-process authority.
   const attachment = terminalAttachments.get(sessionName);
-  if (attachment) {
+  if (attachment?.snapshotSource === 'scrollback') {
     try {
       if (signal === 'SIGINT') {
         // Send Ctrl+C to the PTY (interrupt, not kill)
@@ -7609,34 +7616,13 @@ function terminateTerminalSession(sessionName: string, signal: string = 'SIGTERM
     return;
   }
 
-  // 2. Try killing tmux session directly (if PTY already detached but tmux lives)
-  try {
-    const tmuxBin = resolveTmuxBinary();
-    const tmuxArgs = isDashTerminalSession(sessionName) ? dashTmuxArgs() : [];
-    execFileSync(tmuxBin, [...tmuxArgs, 'has-session', '-t', sessionName], {
-      windowsHide: true,
-      timeout: 2000,
-      stdio: 'ignore',
-      env: sanitizePtyEnv() as NodeJS.ProcessEnv,
-    });
-    execFileSync(tmuxBin, [...tmuxArgs, 'kill-session', '-t', sessionName], {
-      windowsHide: true,
-      timeout: 3000,
-      stdio: 'ignore',
-      env: sanitizePtyEnv() as NodeJS.ProcessEnv,
-    });
-    console.log(`[ws-server] Killed tmux session: ${sessionName}`);
-    broadcastLifecycle(sessionName, 'killed');
-    return;
-  } catch { /* no tmux session */ }
-
-  // 3. No PTY or tmux session remains — broadcast the kill state so the UI can reconcile.
-  if (sessionName.startsWith('cortex-')) {
-    console.log(`[ws-server] No live PTY found for ${sessionName} — skipping stale kill broadcast`);
-    return;
-  }
-  console.log(`[ws-server] No PTY/tmux found for ${sessionName} — broadcasting killed state`);
-  broadcastLifecycle(sessionName, 'killed');
+  // Resolve every tmux selector before deciding ownership. Never dispatch a
+  // raw selector through the inherited TMUX socket or use it as a lifecycle ID.
+  const resolved = signalOwnedDashTmuxSession(sessionName, signal);
+  if (!resolved) return false;
+  if (signal === 'SIGINT') return;
+  try { terminalAttachments.get(resolved.sessionName)?.ptyProcess.kill(); } catch { /* transport already closed */ }
+  broadcastLifecycle(resolved.sessionName, 'killed');
 }
 
 /** Constant-time equality for the ws-token (avoids a timing side-channel). */
@@ -7673,6 +7659,7 @@ const httpServer = createServer(async (req, res) => {
     }
     return;
   }
+  if (process.env.O8_NEXT_O8D === '1' && await (await import('./lib/ws-server/native-http-routes')).handleNativeHttp(req, res)) return;
   // CORS headers — allow localhost, Tauri, and private/Tailscale IPs (mobile remote access)
   const { apiPort } = resolvePortInfo();
   const allowedOrigins = new Set([
@@ -8105,7 +8092,11 @@ const httpServer = createServer(async (req, res) => {
       }
 
       try {
-        terminateTerminalSession(sessionName, signal);
+        if (terminateTerminalSession(sessionName, signal) === false) {
+          res.writeHead(403, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'terminal_profile_mismatch' }));
+          return;
+        }
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: true }));
       } catch (error) {
@@ -9550,7 +9541,9 @@ async function bootstrapWsServer() {
     });
   }
 
-  await waitForNextReady();
+  // Native producers use this listener. Its stateful requests await this
+  // bootstrap, so probing them here waits on ourselves until the timeout.
+  if (process.env.O8_NEXT_O8D !== '1') await waitForNextReady();
   if (shuttingDown) return;
   await terminalHostReady;
   if (shuttingDown) return;

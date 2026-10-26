@@ -7,7 +7,6 @@ export const THREAD_GROUPS = [
   { id: 'blocked', label: 'Waiting on you' },
   { id: 'review', label: 'Ready for review' },
   { id: 'running', label: 'Working' },
-  { id: 'ready', label: 'Queued' },
   { id: 'done', label: 'Resolved' },
 ] as const;
 
@@ -27,7 +26,7 @@ export function resolveThreadProject(projects: ProjectRecord[], active: ProjectR
 export function scopeThreads(tasks: TaskPoolTask[], scope: ThreadScope): TaskPoolTask[] {
   const paths = new Set(scope.repoPaths.map(normalizedPath));
   return tasks.filter((task) => {
-    if (!threadProjectMatches(task.project, scope.projectId)) return false;
+    if (!threadProjectMatches(task.project, scope.projectId) && !(task.thread && !task.project && !['packet', 'lane', 'approval', 'inbox'].includes(task.thread.kind))) return false;
     return Boolean(task.repoPath && paths.has(normalizedPath(task.repoPath)));
   });
 }

@@ -345,7 +345,7 @@ export interface OwnedRuntimeAdapter {
 
   /**
    * Optional env-var augmentation for the spawned CLI child. Returned values
-   * are merged on top of the parent process env (overriding existing keys).
+   * are merged on top of the allowlisted worker env (overriding existing keys).
    * Used by adapters that need to translate one auth-var alias into another
    * (e.g. gemini CLI in stream-json mode reads GEMINI_API_KEY but the user
    * may only have GOOGLE_GENERATIVE_AI_API_KEY set in their shell). Called
@@ -491,7 +491,7 @@ export interface OwnedSessionStore {
   getReviewPacket(surfaceId: string): Promise<RuntimeReviewPacket>;
   getFleetAdditions(options?: { fresh?: boolean }): Promise<OwnedFleetAdditions>;
   sessionState(surfaceId: string): Promise<OwnedSessionState>;
-  archiveSession(surfaceId: string): Promise<OwnedArchiveResponse>;
+  archiveSession(surfaceId: string, workspace?: string): Promise<OwnedArchiveResponse>;
   setDetachedSession?(surfaceId: string, reason: string | null): Promise<{
     updated: boolean;
     previouslyDetached: boolean;

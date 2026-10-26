@@ -1,0 +1,4 @@
+Base: 506ea06a1; full hermetic gate; one worker, experimental filesystem module cache disabled for independent worktrees.
+ Test Files  1242 passed | 3 skipped (1245)
+      Tests  9056 passed | 5 skipped (9061)
+   Duration  2287.74s (transform 136.28s, setup 53.17s, import 715.24s, tests 647.62s, environment 559.88s)

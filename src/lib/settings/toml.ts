@@ -1,3 +1,4 @@
+import { parseKnowledgeSources } from '@/lib/operator/knowledge-source-defaults';
 import { randomUUID } from 'node:crypto';
 import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -253,6 +254,7 @@ function targetingTierField(section: string, key: string): TomlField<OperatorDef
  * test guards the same seam when this object is changed through untyped code.
  */
 export const OPERATOR_DEFAULTS_TOML_MAPPING = {
+  knowledgeSources: { path: ['brain', 'knowledge_sources'], parse: parseKnowledgeSources },
   subscriptionProfile: enumField('operator', 'subscription_profile', 'one of "both", "claude-only", or "codex-only"', isSubscriptionProfile),
   parallelCap: numberField('operator', 'parallel_cap', 'a positive safe integer', isParallelCap),
   meteredPacketCostCapUsd: numberField('operator', 'metered_packet_cost_cap_usd', 'a number greater than 0', (value) => value > 0),
@@ -311,6 +313,7 @@ export const OPERATOR_DEFAULTS_TOML_MAPPING = {
   experimentalGemini: booleanField('experimental', 'gemini_enabled'),
   experimentalChat: booleanField('experimental', 'chat_enabled'),
   experimentalCanvas: booleanField('experimental', 'canvas_enabled'),
+  experimentalNext: booleanField('experimental', 'next_enabled'),
   nativeBrowserView: booleanField('experimental', 'native_browser_view'),
   classAComposer: enumField('brain', 'class_a_composer', 'one of "auto", "haiku-cli", "sonnet-cli", or "fastest"', isClassAComposer),
   brainRoutingMode: enumField('brain', 'routing_mode', 'one of "auto" or "subscription"', isBrainRoutingMode),
@@ -335,7 +338,7 @@ export const OPERATOR_DEFAULTS_TOML_MAPPING = {
   targetingAction: targetingTierField('targeting', 'action'),
   updateAutoApply: enumField('operator', 'update_auto_apply', '"off" or "idle"', (value): value is OperatorDefaults['updateAutoApply'] => value === 'off' || value === 'idle'),
   collideAggregator: enumField('orchestrator', 'collide_aggregator', 'one of "auto", "claude", or "codex"', isCollideAggregator),
-  productTelemetryEnabled: booleanField('telemetry', 'product_enabled'),
+  productTelemetryEnabled: nullableField('telemetry', 'product_enabled', 'a boolean', (value): value is boolean => typeof value === 'boolean'),
   telemetryConsentAnswered: booleanField('telemetry', 'consent_answered'),
   telemetryOptIn: booleanField('telemetry', 'crash_log_opt_in'),
   telemetryIngestUrl: credentialSafeUrlField('telemetry', 'ingest_url'),

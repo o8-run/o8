@@ -15,6 +15,28 @@ use std::{
     time::Duration,
 };
 
+// The parent waits for the first server load in the open window. This channel
+// carries only fixed control signals, never diagnostics or credentials.
+fn report_startup(ready: bool) {
+    use std::{
+        io::Write,
+        sync::atomic::{AtomicBool, Ordering},
+    };
+    static REPORTED: AtomicBool = AtomicBool::new(false);
+    if std::env::var("O8_NEXT_PARENT_PIPE").as_deref() != Ok("1")
+        || REPORTED.swap(true, Ordering::SeqCst)
+    {
+        return;
+    }
+    let mut output = std::io::stdout().lock();
+    let signal: &[u8] = if ready {
+        b"o8-next-ready\n"
+    } else {
+        b"o8-next-startup-error\n"
+    };
+    let _ = output.write_all(signal).and_then(|_| output.flush());
+}
+
 pub const HELP: &str = "App shell: --app-shell --shell-state ABSOLUTE_FILE --server ORIGIN [--offscreen]. The o8 next launcher resolves existing local configuration.";
 #[path = "surface_registry.rs"]
 mod registry;
@@ -28,21 +50,28 @@ register_surfaces! {
         brain: Brain = "surfaces/brain.rs";
         grid: Grid = "surfaces/grid.rs";
         activity: Activity = "surfaces/activity.rs";
+        workers: Workers = "surfaces/workers.rs";
         pull_requests: PullRequests = "surfaces/pull_requests.rs";
         inbox: Inbox = "surfaces/inbox.rs";
         issues: Issues = "surfaces/issues.rs";
+        diff: Diff = "surfaces/diff.rs";
+        terminal: Terminal = "surfaces/terminal.rs";
         #[cfg(test)] fake: Fake = "surfaces/fake.rs";
     }
     commands {
+        shortcuts: ShortcutReference = "surfaces/shortcuts.rs";
+        sidebar: Sidebar = "surfaces/sidebar.rs";
         settings: Settings = "surfaces/settings.rs";
         projects: Projects = "surfaces/projects.rs";
-        diff: Diff = "surfaces/diff.rs";
-        terminal: Terminal = "surfaces/terminal.rs";
         customize: Customize = "surfaces/customize.rs";
+        setup: Setup = "surfaces/setup.rs";
+        palette: Palette = "surfaces/palette.rs";
     }
 }
 
 pub struct Shell {
+    system_glass: bool,
+    chrome: crate::render_region::Regions<Shell>,
     client: Client,
     file: PathBuf,
     state: State,
@@ -51,8 +80,11 @@ pub struct Shell {
     content: HashMap<String, Content>,
     focus: FocusHandle,
     palette: bool,
+    workspace_picker: bool,
+    shortcuts: bool,
     query: String,
     choice: usize,
+    palette_scroll: gpui::ScrollHandle,
     notice: String,
     loading: bool,
     connected: bool,
@@ -72,6 +104,8 @@ impl Shell {
         let focus = cx.focus_handle();
         focus.focus(window);
         let mut shell = Self {
+            system_glass: false,
+            chrome: crate::render_region::Regions::default(),
             client,
             file,
             state,
@@ -80,8 +114,11 @@ impl Shell {
             content: HashMap::new(),
             focus,
             palette: false,
+            workspace_picker: false,
+            shortcuts: false,
             query: String::new(),
             choice: 0,
+            palette_scroll: gpui::ScrollHandle::new(),
             notice: "Connecting to local o8 server…".into(),
             loading: false,
             connected: false,
@@ -110,6 +147,9 @@ impl Shell {
             });
             true
         });
+        for registration in registrations() {
+            (registration.initialize)(&mut shell, window, cx);
+        }
         shell.load(cx);
         shell
     }
@@ -119,6 +159,12 @@ impl Shell {
         }
     }
     fn load(&mut self, cx: &mut Context<Self>) {
+        if registry::extensions().any(|extension| extension.load(self, cx)) {
+            return;
+        }
+        if registrations().iter().any(|r| (r.load)(self, cx)) {
+            return;
+        }
         if self.loading {
             return;
         }
@@ -155,11 +201,13 @@ impl Shell {
                         } else if !this.state.selected.as_ref().is_some_and(|w| this.workspaces.contains(w)) {
                             this.state.selected = this.workspaces.first().cloned();
                         }
-                        this.notice = if this.workspaces.is_empty() { "Connected. No saved workspace sessions." } else { "Connected · Ctrl+K / Cmd+K: commands · Ctrl+Tab: next surface" }.into();
+                        this.notice.clear();
                         this.persist();
+                        report_startup(true);
                     }
                     Err(error) => {
                         this.connected = false;
+                        report_startup(false);
                         this.notice = format!("Local server unavailable: {error}. Start the local o8 server, then Retry.");
                     }
                 }
@@ -171,7 +219,10 @@ impl Shell {
     fn workspace_sessions(&self) -> Vec<Session> {
         self.sessions
             .iter()
-            .filter(|s| s.repo_path.as_ref() == self.state.selected.as_ref())
+            .filter(|s| {
+                Some(s.repo_path.as_deref().unwrap_or("Unassigned"))
+                    == self.state.selected.as_deref()
+            })
             .cloned()
             .collect()
     }
@@ -244,7 +295,9 @@ impl Shell {
         }
     }
     fn switch(&mut self, workspace: String, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.workspaces.contains(&workspace) {
+        if !registry::extensions().all(|extension| extension.allow_switch(self))
+            || !self.workspaces.contains(&workspace)
+        {
             return;
         }
         self.capture(window, cx);
@@ -267,7 +320,10 @@ impl Shell {
             (registration.capture)(self, window, cx);
         }
     }
-    fn commands(&self) -> Vec<Command> {
+    fn commands(&self) -> Vec<palette::Entry> {
+        palette::entries(self)
+    }
+    fn surface_commands(&self) -> Vec<Command> {
         let mut entries = registrations()
             .iter()
             .filter_map(|r| r.command)
@@ -293,16 +349,44 @@ impl Shell {
                 .iter()
                 .map(|s| Command::Session(s.id.clone())),
         );
+        commands.extend([Command::Refresh, Command::Shortcuts]);
         commands
             .into_iter()
             .filter(|c| {
-                c.label(&self.sessions)
-                    .to_lowercase()
-                    .contains(&self.query.to_lowercase())
+                registry::extensions().all(|extension| extension.allow_command(self, c))
+                    && c.label(&self.sessions)
+                        .to_lowercase()
+                        .contains(&self.query.to_lowercase())
             })
             .collect()
     }
     fn execute(&mut self, command: Command, window: &mut Window, cx: &mut Context<Self>) {
+        if !registry::extensions().all(|extension| extension.allow_command(self, &command)) {
+            return;
+        }
+        match command {
+            Command::Refresh => {
+                self.capture(window, cx);
+                if let Some(content) = self
+                    .active()
+                    .and_then(|tab| self.content.get(&self.key(&tab)))
+                {
+                    content.refresh(cx);
+                }
+                self.palette = false;
+                self.load(cx);
+                self.restore_focus(window, cx);
+                return;
+            }
+            Command::Shortcuts => {
+                self.palette = false;
+                self.shortcuts = true;
+                self.focus.focus(window);
+                cx.notify();
+                return;
+            }
+            _ => {}
+        }
         let registration = command.registration();
         if registration.overlay_command {
             (registration.open)(self, command, window, cx);
@@ -344,6 +428,18 @@ impl Shell {
         cx.notify();
     }
     fn key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        for extension in registry::extensions() {
+            match extension.key(self, event, window, cx) {
+                registry::KeyResult::Unhandled => {}
+                registry::KeyResult::Propagate => return,
+                registry::KeyResult::Handled => {
+                    self.revision += 1;
+                    cx.notify();
+                    cx.stop_propagation();
+                    return;
+                }
+            }
+        }
         let key = event.keystroke.key.as_str();
         let modifiers = event.keystroke.modifiers;
         if registrations()
@@ -355,8 +451,13 @@ impl Shell {
                 self.capture(window, cx);
             }
             self.palette = !self.palette;
+            self.workspace_picker = false;
+            self.shortcuts = false;
             self.query.clear();
             self.choice = 0;
+            self.restore_focus(window, cx);
+        } else if self.shortcuts && key == "escape" {
+            self.shortcuts = false;
             self.restore_focus(window, cx);
         } else if self.palette {
             match key {
@@ -370,7 +471,7 @@ impl Shell {
                 }
                 "enter" => {
                     if let Some(command) = self.commands().get(self.choice).cloned() {
-                        self.execute(command, window, cx);
+                        command.run(self, window, cx);
                     }
                 }
                 "backspace" => {
@@ -428,11 +529,21 @@ impl Shell {
         } else {
             return;
         }
+        if self.palette {
+            // The palette header is the first child of the scrolling container.
+            self.palette_scroll.scroll_to_item(self.choice + 1);
+        }
         self.revision += 1;
         cx.notify();
         cx.stop_propagation();
     }
     fn tick(&mut self, refresh: bool, window: &mut Window, cx: &mut Context<Self>) {
+        for extension in registry::extensions() {
+            extension.tick(self, refresh, window, cx);
+        }
+        for registration in registrations() {
+            (registration.tick)(self, window, cx);
+        }
         let before = serde_json::to_vec(&self.state).unwrap();
         self.capture(window, cx);
         if before != serde_json::to_vec(&self.state).unwrap() {
@@ -443,6 +554,8 @@ impl Shell {
         }
     }
 }
+#[path = "shell_material.rs"]
+mod material;
 #[path = "shell_view.rs"]
 mod view;
 pub use view::try_launch;

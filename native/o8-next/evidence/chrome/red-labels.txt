@@ -1,0 +1,15 @@
+running 1 test
+test ui::tests::session_chrome_uses_layout_instead_of_role_labels ... 
+thread 'ui::tests::session_chrome_uses_layout_instead_of_role_labels' (12607) panicked at src/surface_tests.rs:94:9:
+message identity must use layout, not a secondary label: ["Operator", "Inspect the files and run the checks."]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    ui::tests::session_chrome_uses_layout_instead_of_role_labels
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 134 filtered out; finished in 1.10s
+
+error: test failed, to rerun pass `--bin o8-next`

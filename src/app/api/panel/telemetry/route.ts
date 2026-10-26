@@ -5,7 +5,7 @@ import { emitProductEvent, isProductTelemetryEnabled } from '@/lib/analytics/ser
 
 export const dynamic = 'force-dynamic';
 
-/** Browser consent probe. Missing/corrupt state resolves false in defaults.ts. */
+/** Browser egress probe: persisted preference plus first-run disclosure gate. */
 export async function GET() {
   return NextResponse.json({ enabled: isProductTelemetryEnabled() });
 }

@@ -20,8 +20,8 @@ import { normalizePacketSpendCap } from '@/lib/orchestrator/metered-spend';
 import { assertSingleAttemptLaunch } from '@/lib/runtime/single-attempt-launch';
 import { EFFORT_CHOICE_LIST, resolveEffortPin } from '@/lib/orchestrator/effort-pin';
 import { isThinkingEffort } from '@/lib/orchestrator/thinking-effort';
-import { isOrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
 import { resolveDefaultDispatchModelSync } from '@/lib/operator/defaults';
+import { knowledgeSourceWriteRefusal } from '@/lib/cortex/knowledge/sources';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -74,6 +74,8 @@ export async function POST(request: NextRequest) {
   if (!payload || !clientMutationId) {
     return NextResponse.json({ error: 'clientMutationId is required for this launch route' }, { status: 400 });
   }
+  const sourceRefusal = knowledgeSourceWriteRefusal(payload.cwd, payload.repoPath, payload.projectRepoPath);
+  if (sourceRefusal) return sourceRefusal;
   if (payload.effort !== undefined && !isThinkingEffort(payload.effort)) {
     return NextResponse.json({
       error: `effort must be one of: ${EFFORT_CHOICE_LIST}.`, code: 'invalid_effort',
@@ -96,7 +98,7 @@ export async function POST(request: NextRequest) {
   const launchRequest = canonicalLaunchRequest(payload, runtimeName, clientMutationId);
   // A concrete pin must survive the adapter's mapping. Validate before the
   // receipt binding so a rejected selection can be corrected with the same ID.
-  if (isOrchestratorRuntime(runtimeName) && launchRequest.effort && launchRequest.effort !== 'adaptive') {
+  if (launchRequest.effort && launchRequest.effort !== 'adaptive') {
     const effortPin = resolveEffortPin({
       requestedEffort: launchRequest.effort,
       runtime: runtimeName,

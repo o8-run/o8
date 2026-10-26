@@ -21,6 +21,8 @@ vi.mock('@/lib/operator/brain-routing', () => ({
 }));
 vi.mock('@/lib/operator/role-routing-ledger', () => ({ recordRoleRoutingReceiptSafely: vi.fn() }));
 
+import { KnowledgeSourcesChangedError } from '@/lib/cortex/knowledge/answer-validity';
+import { composeClassA } from '@/lib/cortex/qa/compose-class-a';
 import { composeClassB } from '@/lib/cortex/qa/compose-class-b';
 import { callCodex } from '@/lib/cortex/qa/llm/codex-adapter';
 import { callOpenRouter } from '@/lib/cortex/qa/llm/openrouter-adapter';
@@ -109,4 +111,18 @@ describe('Class B Brain subscription routing', () => {
       text: 'Managed answer. [CITATION:directive-subscription-routing]',
     });
   });
+  it.each(['codex', 'sonnet', 'eval'])('never starts a fallback after knowledge revocation in the %s composer', async tier => {
+    const refusal = new KnowledgeSourcesChangedError();
+    vi.mocked(resolveBrainUseClaudeCliSync).mockReturnValue(tier !== 'codex');
+    const result = { tier: 'cli' as const, text: 'An answer. [D-subscription-routing]', tokens: tokens('An answer. [D-subscription-routing]') };
+    vi.mocked(callSonnet).mockResolvedValue(result);
+    vi.stubEnv('O8_EVAL_MODE', tier === 'eval' ? '1' : '0');
+    try {
+      await expect(composeClassB('How is this routed?', '/repo/o8', [row], () => { throw refusal; }, { terse: true })).rejects.toBe(refusal);
+      expect(composeClassA).not.toHaveBeenCalled();
+      expect(callCodex).toHaveBeenCalledTimes(tier === 'codex' ? 1 : 0);
+      expect(callSonnet).toHaveBeenCalledTimes(tier === 'codex' ? 0 : 1);
+    } finally { vi.unstubAllEnvs(); }
+  });
+
 });

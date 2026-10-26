@@ -1,0 +1,44 @@
+{
+  "base": "160576643e1138b4cb5a8519d9f6260f5991d4eb",
+  "native": {
+    "command": "cargo +1.97.1 test --locked --manifest-path native/o8-next/Cargo.toml -- --nocapture --test-threads=1",
+    "exitCode": 0,
+    "unit": "test result: ok. 126 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 1310.94s",
+    "cliPassed": 7,
+    "setupPassed": 22,
+    "modelMatrixPassed": 12
+  },
+  "mainCompilerProbe": {
+    "allOriginalSourceFilesIdentical": 90,
+    "registeredExitCode": 0,
+    "entryRemovedExitCode": 0
+  },
+  "typecheckFast": {
+    "heapMiB": 8192,
+    "exitCode": 0
+  },
+  "relatedTypeScript": {
+    "files": 7,
+    "tests": 57,
+    "exitCode": 0
+  },
+  "clippy": {
+    "allTargets": true,
+    "exitCode": 0,
+    "setupDiagnostics": []
+  },
+  "rustfmt": 0,
+  "eslint": 0,
+  "ruleCheck": {
+    "files": 14,
+    "violations": 0
+  },
+  "classification": {
+    "hermetic": 1238,
+    "resourceOwning": 909,
+    "datedFixtureTests": 78,
+    "exitCode": 0
+  },
+  "fullNpmSuiteRun": false,
+  "cargoTargetRemoved": true
+}

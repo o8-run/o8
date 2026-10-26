@@ -6,6 +6,7 @@ import { decryptValueSync } from '@/lib/db/master-key';
 import { providerCredentialMaterials } from './key-store';
 import { matchesProviderCredential } from './credential-materials';
 import { canonicalProfilePath, profileContains, selectedRuntimeProfiles } from './runtime-profile-paths';
+import type { ChildMetadataRedaction } from './spawn-environment';
 import { assertNoRecordedApiProfileChild } from './runtime-profile-processes';
 
 const warned = new Set<string>();
@@ -13,7 +14,8 @@ const issue = '#4340 (https://github.com/hurttlocker/o8/issues/4340)';
 function warn(file: string): void {
   if (warned.has(file)) return;
   warned.add(file);
-  console.warn(`[payer-policy] Legacy o8 runtime config left unchanged: ${JSON.stringify(file)}. See ${issue}.`);
+  // Profile paths can themselves be saved secrets, including on calls without a launch redactor.
+  console.warn(`[payer-policy] Legacy o8 runtime config left unchanged. See ${issue}.`);
 }
 
 function records(): string[] {
@@ -48,22 +50,23 @@ export function warnLegacyRuntimeConfigs(): void {
 }
 
 /** Read only authenticated o8 destinations; operator-owned files are not inspected. */
-export function assertRuntimeProfilesAvailable(profiles: readonly string[], checkApiSurvivors = true): void {
-  if (checkApiSurvivors) assertNoRecordedApiProfileChild(profiles);
+export function assertRuntimeProfilesAvailable(profiles: readonly string[], checkApiSurvivors = true, metadata?: ChildMetadataRedaction): void {
+  if (checkApiSurvivors) assertNoRecordedApiProfileChild(profiles, metadata);
   const materials = providerCredentialMaterials();
   for (const file of records()) {
     if (!profiles.some(profile => profileContains(profile, file)) || !existsSync(file)) continue;
+    const label = JSON.stringify(metadata ? metadata.redact(file) : file);
     let raw: string;
     try { raw = readFileSync(file, 'utf8'); }
-    catch { throw new Error(`Cannot inspect legacy o8 file ${JSON.stringify(file)}. Stop its runtime and check file access before retrying. See ${issue}.`); }
+    catch { throw new Error(`Cannot inspect legacy o8 file ${label}. Stop its runtime and check file access before retrying. See ${issue}.`); }
     if (!matchesProviderCredential(raw, materials)) continue;
     warn(file);
-    throw new Error(`Legacy o8 file ${JSON.stringify(file)} contains a saved provider credential. Stop the old runtime, then manually remove the saved provider credential from that file or move the file aside and configure subscription login before retrying. See ${issue}.`);
+    throw new Error(`Legacy o8 file ${label} contains a saved provider credential. Stop the old runtime, then manually remove the saved provider credential from that file or move the file aside and configure subscription login before retrying. See ${issue}.`);
   }
 }
 
-export function assertLegacyRuntimeConfigSelection(runtimeId: string | undefined, env: Record<string, string | undefined>, args: readonly string[], cwd?: string): string[] {
+export function assertLegacyRuntimeConfigSelection(runtimeId: string | undefined, env: Record<string, string | undefined>, args: readonly string[], cwd?: string, metadata?: ChildMetadataRedaction): string[] {
   const profiles = selectedRuntimeProfiles(runtimeId, env, args, cwd);
-  assertRuntimeProfilesAvailable(profiles, !runtimeId || ['acp', 'hermes', 'openclaw'].includes(runtimeId));
+  assertRuntimeProfilesAvailable(profiles, !runtimeId || ['acp', 'hermes', 'openclaw'].includes(runtimeId), metadata);
   return profiles;
 }

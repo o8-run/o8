@@ -23,7 +23,7 @@ import './neutralize-server-only';
 import { createInterface } from 'node:readline';
 import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
-import { execFileSync, execSync } from 'node:child_process';
+import { execFileSync, execSync } from '@/lib/providers/child-process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DEFAULT_API_PORT } from '@/lib/panel/api-port';

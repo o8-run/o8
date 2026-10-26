@@ -3,12 +3,19 @@ use crate::theme::current as theme;
 mod brain_dock;
 #[path = "composer_bench.rs"]
 mod composer_bench;
+#[path = "composer/regions.rs"]
+mod composer_regions;
 #[path = "conversation.rs"]
 mod conversation;
 #[path = "history.rs"]
 mod history;
+#[path = "session_sidebar.rs"]
+mod session_sidebar;
 #[path = "shell_session.rs"]
 mod shell_session;
+#[cfg(test)]
+#[path = "speed_receipt.rs"]
+mod speed_receipt;
 use crate::{
     client::{Client, Session},
     composer::{Composer, Submit},
@@ -35,8 +42,10 @@ use std::{
 
 pub(crate) struct Surface {
     client: Client,
+    embedded: bool,
     brains: HashMap<String, gpui::Entity<crate::brain::Brain>>,
     composer: gpui::Entity<Composer>,
+    regions: crate::render_region::Regions<Surface>,
     drafts: HashMap<String, gpui::Entity<Composer>>,
     pending: HashMap<String, Value>,
     linked_issues: HashMap<String, crate::issues::LinkedIssue>,
@@ -68,8 +77,10 @@ impl Surface {
         focus.focus(window);
         Self {
             client,
+            embedded: false,
             brains: HashMap::new(),
             composer: cx.new(Composer::new),
+            regions: crate::render_region::Regions::default(),
             drafts: HashMap::new(),
             pending: HashMap::new(),
             linked_issues: HashMap::new(),
@@ -244,7 +255,11 @@ impl Surface {
                     }
                 }
                 Incoming::Status(status) => {
-                    self.notice = status.trim_end_matches(" · read-only").into();
+                    self.notice = if status == "Live · read-only" {
+                        String::new()
+                    } else {
+                        status.trim_end_matches(" · read-only").into()
+                    };
                     cx.notify();
                 }
             }
@@ -335,11 +350,33 @@ impl Surface {
 }
 
 impl Render for Surface {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let rows = self.rows.clone();
-        let painted_rows = self.painted_rows.clone();
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let painted = self.painted.clone();
         let revision = self.key_revision;
+        let geometry = &crate::theme::GEOMETRY;
+        let typography = &crate::theme::TYPE;
+        let viewport = f32::from(window.viewport_size().width);
+        let sidebar_width = (viewport * 0.25).min(geometry.sidebar_width);
+        let right_width = (viewport * 0.30).min(geometry.right_width);
+        let empty = self.transcript.is_some() && self.rows.is_empty();
+        let header = self.regions.view(
+            "header",
+            composer_regions::header_style(),
+            Self::session_header,
+            cx,
+        );
+        let sidebar = self.regions.view(
+            "sidebar",
+            composer_regions::sidebar_style(px(sidebar_width)),
+            Self::session_sidebar_region,
+            cx,
+        );
+        let transcript = self.regions.view(
+            "transcript",
+            composer_regions::transcript_style(),
+            Self::session_transcript,
+            cx,
+        );
         div()
             .size_full()
             .flex()
@@ -347,8 +384,9 @@ impl Render for Surface {
             .bg(theme().background)
             .text_color(theme().text)
             .font_family(theme().font_ui)
-            .font_weight(gpui::FontWeight::LIGHT)
-            .text_size(px(13.))
+            .font_weight(typography.weight)
+            .text_size(px(typography.body))
+            .line_height(gpui::relative(typography.chrome_line))
             .track_focus(&self.focus)
             .capture_key_down(cx.listener(Self::brain_key))
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
@@ -421,138 +459,49 @@ impl Render for Surface {
                 }
                 cx.stop_propagation();
             }))
-            .child(
-                div()
-                    .h(px(40.))
-                    .px(px(16.))
-                    .flex()
-                    .items_center()
-                    .gap(px(16.))
-                    .child("o8 next")
-                    .child(self.brain_control(cx))
-                    .child(
-                        div()
-                            .id("refresh")
-                            .debug_selector(|| "session-refresh".into())
-                            .px(px(8.))
-                            .py(px(4.))
-                            .rounded(px(5.))
-                            .cursor_pointer()
-                            .bg(theme().surface_raised)
-                            .child("Refresh")
-                            .on_click(cx.listener(|this, _, _, cx| this.load_sessions(cx))),
-                    ),
-            )
+            .when(!self.embedded, |view| view.child(header))
             .child(
                 div()
                     .flex()
                     .flex_1()
                     .min_h_0()
+                    .p(px(geometry.inset))
+                    .gap(px(geometry.gap))
+                    .when(!self.embedded, |view| view.child(sidebar))
                     .child(
                         div()
-                            .id("sessions")
-                            .w(px(250.))
-                            .flex_shrink_0()
-                            .overflow_y_scroll()
-                            .px(px(8.))
-                            .children(
-                                sidebar::tree(&self.sessions, self.selected.as_deref())
-                                    .into_iter()
-                                    .map(|group| {
-                                        div()
-                                            .mt(px(16.))
-                                            .child(
-                                                div()
-                                                    .px(px(12.))
-                                                    .mb(px(6.))
-                                                    .text_size(px(10.))
-                                                    .text_color(theme().text_muted)
-                                                    .child(match group.kind {
-                                                        "working" => "Working",
-                                                        "review" => "Review",
-                                                        _ => "Recent",
-                                                    }),
-                                            )
-                                            .children(group.rows.into_iter().map(|session| {
-                                                let id = session.id.clone();
-                                                let selector = id.clone();
-                                                div()
-                                                    .id(gpui::ElementId::Name(id.clone().into()))
-                                                    .debug_selector(move || {
-                                                        format!("session-{selector}")
-                                                    })
-                                                    .px(px(12.))
-                                                    .py(px(5.))
-                                                    .rounded(px(8.))
-                                                    .cursor_pointer()
-                                                    .bg(if session.selected {
-                                                        theme().selection
-                                                    } else {
-                                                        theme().background
-                                                    })
-                                                    .child(
-                                                        div()
-                                                            .text_size(px(13.5))
-                                                            .child(session.title),
-                                                    )
-                                                    .child(
-                                                        div()
-                                                            .mt(px(4.))
-                                                            .text_size(px(9.5))
-                                                            .text_color(theme().text_muted)
-                                                            .child(format!(
-                                                                "{} · {}",
-                                                                self.sessions
-                                                                    .iter()
-                                                                    .find(|s| s.id == session.id)
-                                                                    .map(|s| s.runtime.as_str())
-                                                                    .unwrap_or(""),
-                                                                session.status
-                                                            )),
-                                                    )
-                                                    .on_click(cx.listener(
-                                                        move |this, _, window, cx| {
-                                                            this.select(id.clone(), cx);
-                                                            this.focus.focus(window);
-                                                        },
-                                                    ))
-                                            }))
-                                    }),
-                            ),
-                    )
-                    .child(
-                        div()
+                            .debug_selector(|| "conversation-column".into())
                             .flex()
                             .flex_col()
                             .flex_1()
                             .min_w_0()
+                            .when(empty, |view| {
+                                view.when(!self.notice.is_empty(), |view| {
+                                    view.child(
+                                        div()
+                                            .px(px(24.))
+                                            .py(px(8.))
+                                            .text_size(px(11.))
+                                            .text_color(theme().text_muted)
+                                            .child(self.notice.clone()),
+                                    )
+                                })
+                                .child(self.history_control(cx))
+                            })
+                            .when(!empty, |view| view.child(transcript))
                             .child(
                                 div()
-                                    .px(px(24.))
-                                    .py(px(8.))
-                                    .text_size(px(11.))
-                                    .text_color(theme().text_muted)
-                                    .child(self.notice.clone()),
-                            )
-                            .child(self.history_control(cx))
-                            .child(
-                                list(self.list.clone(), {
-                                    let list_state = self.list.clone();
-                                    move |index, _, _| {
-                                        RetainedRow {
-                                            state: rows[index].clone(),
-                                            index,
-                                            painted: painted_rows.clone(),
-                                        }
-                                        .interactive(&list_state)
-                                    }
-                                })
-                                .flex_1()
-                                .min_h_0(),
-                            )
-                            .child(self.brain_panel(cx))
-                            .child(self.composer_panel(cx)),
-                    ),
+                                    .debug_selector(|| "composer-space".into())
+                                    .flex()
+                                    .flex_col()
+                                    .when(empty, |view| view.flex_1().min_h_0().justify_center())
+                                    .when(!empty, |view| view.flex_shrink_0())
+                                    .px(px(geometry.content_inset))
+                                    .pb(px(if empty { 0. } else { geometry.gap * 2. }))
+                                    .child(self.composer_panel(window, cx)),
+                            ),
+                    )
+                    .child(self.brain_panel(px(right_width), cx)),
             )
             .child(
                 canvas(

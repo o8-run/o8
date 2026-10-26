@@ -1,10 +1,10 @@
 /** @vitest-environment jsdom */
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
-const fixture = vi.hoisted(() => ({ invoke: vi.fn(async () => {}), speak: vi.fn(), cancel: vi.fn(), pause: vi.fn() }));
+const fixture = vi.hoisted(() => ({ invoke: vi.fn(async () => {}), speak: vi.fn(), cancel: vi.fn(), pause: vi.fn(), events: new Map<string, (event: { payload: Record<string, unknown> }) => void>() }));
 vi.mock('@/lib/tauri/bridge', () => ({ isTauri: () => true }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: fixture.invoke }));
-vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(async () => () => {}) }));
+vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(async (name, handler) => { fixture.events.set(name, handler); return () => {}; }) }));
 let engine: typeof import('./engine')['ttsEngine'];
 class TestAudio {
   onplay: (() => void) | null = null;
@@ -18,7 +18,7 @@ class TestAudio {
   pause = fixture.pause;
 }
 beforeEach(async () => {
-  vi.resetModules(); vi.clearAllMocks();
+  vi.resetModules(); vi.clearAllMocks(); fixture.events.clear();
   vi.stubGlobal('fetch', vi.fn(async () => new Response('mp3', { status: 200 })));
   vi.stubGlobal('Audio', TestAudio);
   vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1)); vi.stubGlobal('cancelAnimationFrame', vi.fn());
@@ -42,12 +42,46 @@ it('falls back to system speech only when Edge fails and never invokes paid nati
   expect(fixture.speak).toHaveBeenCalledOnce(); expect(engine.state.usingFallback).toBe(true);
   expect(fixture.invoke).not.toHaveBeenCalled();
 });
+it.each(['edge_voice_update_required', 'edge_voice_unavailable'])('publishes %s before system speech and clears it on retry', async code => {
+  vi.mocked(fetch).mockResolvedValueOnce(Response.json({ code, error: 'Steffan unavailable' }, { status: 503 }));
+  const states: unknown[] = [];
+  const unsubscribe = engine.subscribe(state => states.push({ ...state }));
+  fixture.speak.mockImplementationOnce(() => {
+    expect(engine.state).toMatchObject({ voiceError: code, usingFallback: true });
+    expect(states).toContainEqual(expect.objectContaining({ voiceError: code, state: 'loading' }));
+  });
+  await engine.playNoKey('Confirmed reply', 'turn-voice:chat:turn');
+  expect(fixture.speak).toHaveBeenCalledOnce();
+  expect(engine.state).toMatchObject({ voiceError: code });
+  await engine.playNoKey('Retry', 'retry');
+  expect(engine.state).toMatchObject({ voiceError: null, usingFallback: false });
+  unsubscribe();
+});
 it('ignores late Edge rejection after the owned playback was stopped', async () => {
   let reject!: (error: Error) => void;
   vi.mocked(fetch).mockImplementation(() => new Promise((_resolve, fail) => { reject = fail; }));
   const playing = engine.playNoKey('Old reply', 'turn-voice:chat:turn');
   engine.stop(); reject(new Error('late failure')); await playing;
   expect(fixture.speak).not.toHaveBeenCalled(); expect(engine.state.activeMessageId).toBeNull();
+});
+it.each(['edge_voice_update_required', 'edge_voice_unavailable'])('reflects native say fallback with %s and clears it on retry', async voiceError => {
+  await engine.play('Reply', 'reply');
+  await vi.waitFor(() => expect(fixture.events.has('o8:tts-state')).toBe(true));
+  fixture.events.get('o8:tts-state')!({ payload: { state: 'playing', messageId: 'reply', usingFallback: true, voiceError } });
+  expect(engine.state).toMatchObject({ state: 'playing', activeMessageId: 'reply', usingFallback: true, voiceError });
+  expect(fixture.speak).not.toHaveBeenCalled();
+  await engine.play('Retry', 'retry');
+  expect(engine.state).toMatchObject({ usingFallback: false, voiceError: null });
+});
+it.each(['stop', 'native-replacement', 'web-replacement'])('ignores stale native say fallback after %s', async action => {
+  await engine.play('Old reply', 'old');
+  await vi.waitFor(() => expect(fixture.events.has('o8:tts-state')).toBe(true));
+  if (action === 'stop') engine.stop();
+  else if (action === 'native-replacement') await engine.play('New reply', 'new');
+  else await engine.playNoKey('Web reply', 'old');
+  const before = { ...engine.state };
+  fixture.events.get('o8:tts-state')!({ payload: { state: 'playing', messageId: 'old', usingFallback: true, voiceError: 'edge_voice_update_required' } });
+  expect(engine.state).toEqual(before);
 });
 it.each(['stop', 'new-turn'])('ignores a late native failure after %s took playback ownership', async action => {
   let reject!: (error: Error) => void;

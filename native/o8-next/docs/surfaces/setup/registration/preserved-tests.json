@@ -1,0 +1,13 @@
+{
+  "mainTestFunctions": 91,
+  "preservedSurfaceTestFunctions": [
+    "onboarding_project_tools_privacy_and_workspace",
+    "onboarding_opencode_keeps_selected_model_for_first_send",
+    "onboarding_folder_registration_error_and_cancel",
+    "onboarding_operator_auth_error_retry"
+  ],
+  "missingMainTestFunctions": [],
+  "newTestFunctions": [
+    "onboarding_registered_workspace_without_sessions_still_starts_setup"
+  ]
+}

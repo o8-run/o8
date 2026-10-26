@@ -1,0 +1,27 @@
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/desktop-account-identity.test.ts > desktop account identity > through the provider > shows and records the linked GitHub photo and email, not the sign-up snapshot
+AssertionError: expected [] to have a length of 1 but got +0
+
+- Expected
++ Received
+
+- 1
++ 0
+
+ ❯ tests/desktop-account-identity.test.ts:70:50
+     68|       const root = createRoot(document.createElement('div'));
+     69|       await act(async () => { root.render(createElement(O8AuthProvider…
+     70|       await vi.waitFor(() => expect(provisioned).toHaveLength(1));
+       |                                                  ^
+     71|       expect(state!.user).toMatchObject({ email: GITHUB_EMAIL, avatarU…
+     72|       expect(provisioned[0]).toMatchObject({ clerkUserId: 'user_identi…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 3 passed (4)
+   Start at  19:14:04
+   Duration  5.55s (transform 736ms, setup 286ms, import 411ms, tests 1.19s, environment 2.97s)

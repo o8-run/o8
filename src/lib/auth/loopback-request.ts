@@ -2,18 +2,19 @@
  * Loopback-request detection shared by the middleware gate and any server
  * component that must decide whether a request came from this machine.
  *
- * Two tiers of evidence:
+ * A loopback Host is required before either tier of peer evidence:
  *
  * 1. `x-o8-client-addr` — stamped by the bundled production server
  *    (out/server/server.js wrapper, see scripts/tauri-export.mjs) with the
  *    REAL TCP peer address on every request, overwriting any client-supplied
- *    value. When present it is authoritative: Host/Origin/sec-fetch-* are all
- *    client-controlled and spoofable by a direct LAN connection.
+ *    value. A local peer alone never authorizes a foreign Host.
  *
  * 2. Host-header heuristic — dev fallback only (`next dev` / dev-bridge run
  *    Next's stock server which doesn't stamp the header). A direct client can
  *    spoof Host, so this tier is best-effort.
  */
+
+import { isLoopbackHost } from '../../../scripts/lib/http-request-boundary.cjs';
 
 export const O8_CLIENT_ADDR_HEADER = 'x-o8-client-addr';
 
@@ -74,6 +75,7 @@ export function hostHeaderToHostname(host?: string | null): string | null {
  * components can share the logic.
  */
 export function headersIndicateLoopback(get: (name: string) => string | null): boolean {
+  if (!isLoopbackHost(get('host'))) return false;
   const clientAddr = get(O8_CLIENT_ADDR_HEADER);
   if (clientAddr) return isLoopbackAddress(clientAddr);
   return isLoopbackHostname(hostHeaderToHostname(get('host')));

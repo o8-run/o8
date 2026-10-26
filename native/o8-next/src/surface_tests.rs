@@ -18,6 +18,9 @@ fn fixture() -> (Server, Client) {
     fixture_mode(false)
 }
 fn fixture_mode(worker: bool) -> (Server, Client) {
+    fixture_options(worker, false)
+}
+fn fixture_options(worker: bool, empty: bool) -> (Server, Client) {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let mut command = Command::new("node");
     command.current_dir(root).args([
@@ -30,6 +33,9 @@ fn fixture_mode(worker: bool) -> (Server, Client) {
     ]);
     if worker {
         command.arg("--worker");
+    }
+    if empty {
+        command.arg("--composer-empty");
     }
     let mut child = command
         .env("O8_NEXT_API_TOKEN", "fixture-operator-bearer")
@@ -72,6 +78,186 @@ fn fixture_mode(worker: bool) -> (Server, Client) {
 
 #[path = "worker_tests.rs"]
 mod worker_tests;
+
+#[gpui::test]
+fn session_chrome_uses_layout_instead_of_role_labels(cx: &mut TestAppContext) {
+    let (_server, client) = fixture();
+    let saved = client.clone();
+    let (surface, cx) = cx.add_window_view(|window, cx| Surface::new(client, window, cx));
+    surface.update(cx, |s, cx| {
+        s.sessions = saved.sessions().unwrap();
+        s.select("thoughts-tools".into(), cx);
+    });
+    cx.run_until_parked();
+    cx.update(|window, cx| {
+        window.refresh();
+        window.draw(cx).clear();
+        window.refresh();
+        window.draw(cx).clear();
+    });
+    surface.read_with(cx, |s, _| {
+        let (_, lines) = s.rows[0].borrow().rendered();
+        assert!(
+            !lines
+                .iter()
+                .any(|line| ["Operator", "Agent", "Work details"].contains(&line.as_str())),
+            "message identity must use layout, not a secondary label: {lines:?}"
+        );
+    });
+}
+
+#[gpui::test]
+fn correction_empty_conversation_has_no_tagline(cx: &mut TestAppContext) {
+    let (_server, client) = fixture_options(false, true);
+    let saved = client.clone();
+    let (surface, cx) = cx.add_window_view(|window, cx| Surface::new(client, window, cx));
+    surface.update(cx, |s, cx| {
+        s.sessions = saved.sessions().unwrap();
+        s.select("thoughts-composer-first".into(), cx);
+    });
+    cx.run_until_parked();
+    for (width, height) in [(900., 700.), (1680., 1050.)] {
+        cx.simulate_resize(size(px(width), px(height)));
+        cx.update(|window, cx| {
+            window.refresh();
+            window.draw(cx).clear();
+        });
+        assert!(surface.read_with(cx, |s, _| s.transcript.is_some() && s.rows.is_empty()));
+        assert!(cx.debug_bounds("composer-card").is_some());
+        assert!(
+            cx.debug_bounds("session-empty").is_none(),
+            "empty conversations must not render a build tagline at {width}x{height}"
+        );
+    }
+}
+
+#[gpui::test]
+fn correction_composer_has_no_shortcut_or_mode_helper(cx: &mut TestAppContext) {
+    let (_server, client) = fixture_options(false, true);
+    let saved = client.clone();
+    let (surface, cx) = cx.add_window_view(|window, cx| Surface::new(client, window, cx));
+    surface.update(cx, |s, cx| {
+        s.sessions = saved.sessions().unwrap();
+        s.select("thoughts-composer-first".into(), cx);
+    });
+    cx.run_until_parked();
+    cx.update(|window, cx| {
+        window.refresh();
+        window.draw(cx).clear();
+    });
+    assert!(
+        cx.debug_bounds("composer-shortcuts").is_none(),
+        "composer must not render a permanent shortcut hint"
+    );
+    for helper in ["Queued for after this turn", "Steers the running turn"] {
+        assert!(
+            cx.debug_bounds(helper).is_none(),
+            "composer must use action labels instead of mode helper text: {helper}"
+        );
+    }
+    assert!(
+        cx.debug_bounds("send-mode-steer").is_some()
+            || cx.debug_bounds("send-mode-queue").is_some(),
+        "mode selection remains available without helper text"
+    );
+}
+
+#[gpui::test]
+fn placement_empty_state_composer_and_right_panel(cx: &mut TestAppContext) {
+    let (_server, client) = fixture_options(false, true);
+    let saved = client.clone();
+    let (surface, cx) = cx.add_window_view(|window, cx| Surface::new(client, window, cx));
+    surface.update(cx, |s, cx| {
+        s.sessions = saved.sessions().unwrap();
+        s.select("thoughts-composer-first".into(), cx);
+    });
+    cx.run_until_parked();
+    let mut layouts = vec![];
+    for (width, height) in [(900., 700.), (1680., 1050.)] {
+        cx.simulate_resize(size(px(width), px(height)));
+        cx.update(|window, cx| {
+            window.refresh();
+            window.draw(cx).clear();
+            window.refresh();
+            window.draw(cx).clear();
+        });
+        let column = cx.debug_bounds("conversation-column").unwrap();
+        let card = cx.debug_bounds("composer-card").expect("composer card");
+        let sidebar = cx.debug_bounds("session-sidebar").expect("left sidebar");
+        let space = cx.debug_bounds("composer-space").unwrap();
+        assert!((space.center().y - card.center().y).abs() < px(1.));
+        assert!((column.center().x - card.center().x).abs() < px(1.));
+        assert!(card.left() > sidebar.right());
+        assert!(card.size.width <= px(720.));
+        assert!(card.right() <= px(width));
+        cx.simulate_keystrokes("ctrl-e");
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            window.refresh();
+            window.draw(cx).clear();
+            window.refresh();
+            window.draw(cx).clear();
+        });
+        let right = cx
+            .debug_bounds("right-panel-slot")
+            .expect("existing Brain uses the right slot");
+        let card = cx.debug_bounds("composer-card").unwrap();
+        assert!(right.left() >= card.right());
+        let send = cx.debug_bounds("send").unwrap();
+        assert!(
+            send.right() <= card.right(),
+            "composer controls must fit beside the right panel"
+        );
+        assert!(right.right() <= px(width));
+        assert!(right.size.height > card.size.height);
+        layouts.push(json!({"viewport":[width,height], "composer":[f32::from(card.origin.x),f32::from(card.origin.y),f32::from(card.size.width),f32::from(card.size.height)],"rightPanel":[f32::from(right.origin.x),f32::from(right.origin.y),f32::from(right.size.width),f32::from(right.size.height)]}));
+        cx.simulate_keystrokes("escape");
+    }
+    if let Ok(file) = std::env::var("O8_NEXT_PLACEMENT_EVIDENCE") {
+        std::fs::write(file, serde_json::to_vec_pretty(&json!({"endpoint":"headless production GPUI layout; no raster or compositor capture","layouts":layouts})).unwrap()).unwrap();
+    }
+}
+
+#[gpui::test]
+fn placement_empty_send_racing_selection_retains_the_destination(cx: &mut TestAppContext) {
+    let (_server, client) = fixture_options(false, true);
+    let saved = client.clone();
+    let (surface, cx) = cx.add_window_view(|window, cx| Surface::new(client, window, cx));
+    surface.update(cx, |s, cx| {
+        s.sessions = saved.sessions().unwrap();
+        s.select("thoughts-composer-first".into(), cx);
+    });
+    cx.run_until_parked();
+    surface.update(cx, |s, cx| {
+        s.composer
+            .update(cx, |input, cx| input.set_text("First prompt", cx));
+        s.send(None, cx);
+        s.select("thoughts-composer-second".into(), cx);
+    });
+    cx.run_until_parked();
+    cx.update(|window, cx| {
+        window.refresh();
+        window.draw(cx).clear();
+    });
+    surface.read_with(cx, |s, cx| {
+        assert_eq!(s.selected.as_deref(), Some("thoughts-composer-second"));
+        assert!(s.rows.is_empty());
+        assert!(s.composer.read(cx).text.is_empty());
+    });
+    let first = saved
+        .sessions()
+        .unwrap()
+        .into_iter()
+        .find(|s| s.id == "thoughts-composer-first")
+        .unwrap();
+    assert!(
+        saved.queue(&first).unwrap()["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["payload"]["text"] == "First prompt")
+    );
+}
 
 #[gpui::test]
 fn fixture_send_selected_queue_promote_and_echo(cx: &mut TestAppContext) {

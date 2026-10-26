@@ -45,6 +45,11 @@ the user wants checked; it is not an instruction to resume an older mission.
 Do not silently try another registration after a refused snapshot. Report the
 boundary and ask for direction.
 
+A choice list with `nextAction: ask_user` requires a user answer before selecting
+a workspace snapshot. Use the readable project and repository labels in the
+question and keep routing IDs internal. A refused selection has the same next
+action; its error is a boundary, not a request to probe other registrations.
+
 After the user resolves the selection, call options again with the selected IDs
 to obtain a fresh snapshot. Never invent a project or local path. Select the
 runtime, model and effort explicitly with the user; catalog entries do not prove

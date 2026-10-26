@@ -1,3 +1,4 @@
+import { assertNotKnowledgeSource } from '@/lib/cortex/knowledge/sources';
 import { assertReviewerPrCheckout } from '@/lib/orchestrator/reviewer-pr-source';
 import { assertPreRunAdmission, retireCancelledPreRunWorktree } from '@/lib/lane/pre-run-cancellation';
 import { AutomaticRecoveryRefusedError, withAutomaticRecoveryRequest, withOwnedAutomaticRecovery } from '@/lib/runtimes/shared/owned-session/automatic-recovery';
@@ -89,7 +90,7 @@ export interface RuntimeLaunchRequest {
   claudeCodeModel?: string;
   claudeCodeCarrier?: ClaudeCodeModelSource;
   executionCarrier?: ExecutionCarrierId;
-  /** Requested reasoning effort — passed to the runtime's launch; per-runtime no-op. */
+  /** Requested reasoning effort; concrete pins must pass runtime admission unchanged. */
   effort?: ThinkingEffort;
   clientMutationId?: string;
   cwd?: string;
@@ -166,6 +167,7 @@ function auditRuntimeSteer(payload: RuntimeActionRequest, sessionKey: string): v
 }
 
 export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promise<RuntimeLaunchResult> {
+  assertNotKnowledgeSource(payload.repoPath); assertNotKnowledgeSource(payload.cwd);
   if (payload.automaticRecoverySurfaceId || payload.automaticRecoveryRunId) {
     if (!payload.automaticRecoverySurfaceId?.startsWith(`${payload.runtime}-owned:`) || !payload.automaticRecoveryRunId) {
       throw new Error('Automatic retry requires the original owned runtime and generation.');
@@ -545,10 +547,14 @@ async function performRuntimeActionInner(payload: RuntimeActionRequest): Promise
     return actionUnavailable(payload, '', '', 'surfaceId is required');
   }
 
-  if (payload.action === 'stop' || payload.action === 'interrupt') holdPendingOwnedCorrections(surfaceId);
+  if (payload.action === 'stop' || payload.action === 'interrupt') {
+    holdPendingOwnedCorrections(surfaceId);
+    // Stop the exact owned run before discovery can reconnect a cancelled launch.
+    const ownedResult = await performOwnedActionWithoutInventory(payload, surfaceId);
+    if (ownedResult) return ownedResult;
+  }
 
-  // Try cached snapshot first to avoid expensive full re-discovery on every action.
-  // Only fall back to a fresh fetch if the agent isn't in cache (e.g. just spawned).
+  // Refresh inventory only if the surface is absent from its cached snapshot.
   const cached = await getRuntimeInventorySnapshot();
   let agent = findRuntimeAgent(cached, surfaceId);
   if (!agent) {
@@ -558,7 +564,6 @@ async function performRuntimeActionInner(payload: RuntimeActionRequest): Promise
   if (!agent) {
     const ownedResult = await performOwnedActionWithoutInventory(payload, surfaceId);
     if (ownedResult) return ownedResult;
-    // Fix #3: return structured error instead of throwing across the API boundary
     return actionUnavailable(payload, surfaceId, '', 'Runtime surface not found.');
   }
 
@@ -736,8 +741,6 @@ async function performRuntimeActionInner(payload: RuntimeActionRequest): Promise
       }
 
       if (payload.action === 'stop' || payload.action === 'interrupt') {
-        const ownedResult = await performOwnedActionWithoutInventory(payload, runtimeSurface.id);
-        if (ownedResult) return ownedResult;
         if (runtimeSurface.ownership === 'owned') {
           const result = await escalateInterruptOwnedSurface(runtimeSurface.id);
           if (!result) {

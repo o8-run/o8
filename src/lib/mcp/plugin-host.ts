@@ -157,8 +157,13 @@ export async function callPluginTool(principal: PluginPrincipal, payload: unknow
     status = error instanceof TaskDraftError ? error.status : 503;
     const validation = draftTool && error instanceof TaskDraftError && error.status === 400
       ? taskDraftValidationMessage(error.code) : undefined;
+    const selectionRefused = tool === 'o8_task_options' && error instanceof TaskDraftError
+      && (error.status === 400 || error.status === 409);
     result = { ok: false, code: error instanceof TaskDraftError ? error.code : 'task_unavailable',
-      message: validation ?? (draftTool ? 'The task draft is held or unavailable. This preparation request did not start or retry a worker. Retry only with the same arguments and key.'
+      ...(selectionRefused ? { nextAction: 'ask_user', selectionRequired: true } : {}),
+      message: selectionRefused
+        ? 'The selected workspace was refused. Report the error and ask the user for direction. Do not try another registration without explicit user direction. No snapshot or task was prepared.'
+        : validation ?? (draftTool ? 'The task draft is held or unavailable. This preparation request did not start or retry a worker. Retry only with the same arguments and key.'
         : controlTool ? 'Inspect the existing task attempt in o8 before continuing. A launch retry only inspects that attempt; it cannot create a replacement worker.'
           : 'Inspect the task in o8. Retry a follow-up only with the same arguments and key.') };
   }

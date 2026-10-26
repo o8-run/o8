@@ -33,7 +33,8 @@ it('checks live inventory through batch-mode SSH and keeps host-key errors visib
   const bin = join(dir, 'bin');
   mkdirSync(bin);
   const argsFile = join(dir, 'ssh-args');
-  writeFileSync(join(bin, 'ssh'), `#!/bin/sh\nprintf '%s\\n' "$@" > '${argsFile}'\nif [ "$O8_TEST_SSH_FAIL" = 1 ]; then echo 'Host key verification failed.' >&2; exit 255; fi\nprintf '%s\\n' '{"schema":"o8/cli/terminal.list/v1","sessions":[{"id":"dash-1","cols":80,"rows":24}]}'\n`, { mode: 0o755 });
+  const failureFile = join(dir, 'ssh-fail');
+  writeFileSync(join(bin, 'ssh'), `#!/bin/sh\nprintf '%s\\n' "$@" > '${argsFile}'\nif [ -f '${failureFile}' ]; then echo 'Host key verification failed.' >&2; exit 255; fi\nprintf '%s\\n' '{"schema":"o8/cli/terminal.list/v1","sessions":[{"id":"dash-1","cols":80,"rows":24}]}'\n`, { mode: 0o755 });
   vi.stubEnv('PATH', `${bin}${delimiter}${process.env.PATH ?? ''}`);
   expect(await listRemoteTerminalSessions(machine)).toEqual([{ id: 'dash-1', cols: 80, rows: 24 }]);
   const args = readFileSync(argsFile, 'utf8');
@@ -41,7 +42,8 @@ it('checks live inventory through batch-mode SSH and keeps host-key errors visib
   expect(args).toContain('StrictHostKeyChecking=yes');
   expect(args).toContain('fixture@localhost');
   expect(args).toContain("'o8' 'terminal' 'list'");
-  vi.stubEnv('O8_TEST_SSH_FAIL', '1');
+  // The process boundary intentionally rejects arbitrary ambient fixture flags.
+  writeFileSync(failureFile, 'fail');
   await expect(listRemoteTerminalSessions(machine)).rejects.toMatchObject({ code: 'machine_unreachable', message: 'Host key verification failed.' });
 });
 

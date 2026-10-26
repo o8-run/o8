@@ -11,6 +11,7 @@ function state(playbackState: TTSEngineState['state']): TTSEngineState {
     playbackRate: 1,
     activeMessageId: playbackState === 'idle' ? null : 'reply-1',
     usingFallback: false,
+    voiceError: null,
     activeChunk: null,
   };
 }

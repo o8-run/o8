@@ -1,0 +1,13 @@
+{
+  "endpoint": "headless production GPUI shell; no raster or compositor capture",
+  "requested": "glass",
+  "nativeMaterialInstalled": false,
+  "opaqueFallback": true,
+  "surfaceAlpha": 0.0,
+  "raisedAlpha": 0.05000000074505806,
+  "restoredSize": [
+    900,
+    700
+  ],
+  "paletteFocusAndCloseRace": true
+}

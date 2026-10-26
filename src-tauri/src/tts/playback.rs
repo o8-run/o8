@@ -179,10 +179,7 @@ pub fn play_thread(text: String, config: TtsConfig) {
 /// finishes naturally. Stop, supersession, synthesis failure, or fallback
 /// interruption resolve `false`, allowing callers to keep a protected action
 /// behind the audible review instead of racing the confirmation card.
-pub fn play_thread_with_completion(
-    text: String,
-    config: TtsConfig,
-) -> oneshot::Receiver<bool> {
+pub fn play_thread_with_completion(text: String, config: TtsConfig) -> oneshot::Receiver<bool> {
     let (sender, receiver) = oneshot::channel();
     play_thread_inner(text, config, None, Some(sender));
     receiver
@@ -338,6 +335,8 @@ fn play_thread_inner(
                 completion.completed = run_say_fallback(
                     &text,
                     speed,
+                    message_id.as_deref(),
+                    None,
                     &is_active,
                     &is_pending,
                     &sink_slot,
@@ -349,6 +348,7 @@ fn play_thread_inner(
         };
 
         let mut tts_failed_before_audio = false;
+        let mut fallback_error = None;
         let mut playback_completed = false;
 
         rt.block_on(async {
@@ -507,6 +507,7 @@ fn play_thread_inner(
                                 "[tts] chunk {i}: {err} before any audio — falling back to say"
                             );
                             tts_failed_before_audio = true;
+                            fallback_error = Some(err);
                             break;
                         }
                     }
@@ -514,16 +515,10 @@ fn play_thread_inner(
             }
 
             if any_chunk_played {
-                let drained = wait_for_sink_to_drain(
-                    &sink_slot,
-                    &is_active,
-                    &generation,
-                    my_gen,
-                )
-                .await;
-                playback_completed = drained
-                    && !stopped_mid_read
-                    && generation.load(Ordering::SeqCst) == my_gen;
+                let drained =
+                    wait_for_sink_to_drain(&sink_slot, &is_active, &generation, my_gen).await;
+                playback_completed =
+                    drained && !stopped_mid_read && generation.load(Ordering::SeqCst) == my_gen;
                 if stopped_mid_read {
                     log::warn!("[tts] stopped before completion to keep voice consistent");
                 } else {
@@ -539,6 +534,8 @@ fn play_thread_inner(
             playback_completed = run_say_fallback(
                 &text,
                 speed,
+                message_id.as_deref(),
+                fallback_error.as_deref(),
                 &is_active,
                 &is_pending,
                 &sink_slot,
@@ -568,6 +565,8 @@ fn play_thread_inner(
 fn run_say_fallback(
     text: &str,
     speed: f32,
+    message_id: Option<&str>,
+    error: Option<&str>,
     is_active: &Arc<AtomicBool>,
     is_pending: &Arc<AtomicBool>,
     sink_slot: &Arc<Mutex<Option<rodio::Sink>>>,
@@ -585,6 +584,10 @@ fn run_say_fallback(
         }
         is_active.store(true, Ordering::SeqCst);
         is_pending.store(false, Ordering::SeqCst);
+        // Publish before say starts, while this generation still owns playback.
+        emit_tts_state_payload(super::edge_voice_error::say_fallback_state(
+            message_id, error,
+        ));
     }
     log::warn!("[tts] no audio played; falling back to macOS say");
     let completed = super::native_say::speak_with_say_cancellable(text, speed, &|| {
@@ -651,9 +654,12 @@ async fn wait_for_sink_to_drain(
 /// Emit `o8:tts-state` so the dock / Ask panel can render a play/stop control.
 /// Direct `emit_to(DOCK_LABEL)` (the reliable path) + broadcast to `main`.
 fn emit_tts_state(state: &str) {
+    emit_tts_state_payload(serde_json::json!({ "state": state }));
+}
+
+fn emit_tts_state_payload(payload: serde_json::Value) {
     use tauri::Emitter;
     if let Some(app) = super::app_handle() {
-        let payload = serde_json::json!({ "state": state });
         let _ = app.emit_to(
             crate::dock_window::DOCK_LABEL,
             "o8:tts-state",

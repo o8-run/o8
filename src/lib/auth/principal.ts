@@ -1,4 +1,5 @@
 import { isReadOnlyWorkerBearer, resolveReadOnlyWorkerToken } from './read-only-worker-token';
+import { isBrainReadWorkerBearer, resolveBrainReadWorkerToken } from './brain-read-worker-token';
 import { isLegacyLocalWorkerToken, isPacketWorkerToken } from './worker-token';
 import { resolvePacketWorkerToken } from './packet-worker-token';
 import { createHash, timingSafeEqual } from 'node:crypto';
@@ -16,6 +17,8 @@ export type RequestPrincipalContext =
   | {
       role: 'worker';
       readOnly?: true;
+      brainRepoPath?: string;
+      brainProjectId?: string | null;
       packetId: string | null;
       tokenId: string | null;
       leaseProcessMarker: string | null;
@@ -69,6 +72,12 @@ export function resolveRequestPrincipal(req: Request): RequestPrincipal {
 export function resolveRequestPrincipalContext(req: Request): RequestPrincipalContext {
   const auth = req.headers.get('authorization');
   const bearer = auth?.startsWith('Bearer ') ? auth.slice(7).trim() : '';
+  if (isBrainReadWorkerBearer(bearer)) {
+    const grant = resolveBrainReadWorkerToken(bearer);
+    return grant ? { role: 'worker', readOnly: true, brainRepoPath: grant.repoPath, brainProjectId: grant.projectId,
+      packetId: null, tokenId: null, leaseProcessMarker: null, leaseProcessPid: null, leaseProcessGroupId: null }
+      : { role: 'anonymous' };
+  }
   if (isReadOnlyWorkerBearer(bearer)) {
     const identity = resolveReadOnlyWorkerToken(bearer);
     return identity ? { role: 'worker', readOnly: true, packetId: null, tokenId: identity.tokenId,

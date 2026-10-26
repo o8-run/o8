@@ -1,0 +1,15 @@
+running 1 test
+test shell::setup::tests::onboarding_registered_workspace_without_sessions_still_starts_setup ...
+thread 'shell::setup::tests::onboarding_registered_workspace_without_sessions_still_starts_setup' (195660) panicked at src/surfaces/setup/tests.rs:23:5:
+registered paths without saved conversations must still enter first-run setup
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    shell::setup::tests::onboarding_registered_workspace_without_sessions_still_starts_setup
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 86 filtered out; finished in 2.54s
+
+error: test failed, to rerun pass `--bin o8-next`

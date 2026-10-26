@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process';
+import { workerParentEnvironment } from '../providers/worker-environment';
 
 import { buildNode22ReexecPlan, NODE22_REEXEC_GUARD } from './operator-node22-locator';
 import {
@@ -59,7 +60,18 @@ function reexecOnNode22IfNeeded(): void {
 
   const result = spawnSync(plan.nodePath, plan.argv, {
     windowsHide: true,
-    env: { ...process.env, [NODE22_REEXEC_GUARD]: '1', [NODE22_CHECKED]: '1' },
+    env: {
+      ...workerParentEnvironment(process.env),
+      NODE_ENV: process.env.NODE_ENV ?? 'production',
+      // Explicit local transport/bootstrap inputs survive the interpreter hop;
+      // unrelated parent exports and the provider-store master key do not.
+      ...Object.fromEntries([
+        'O8_API_BASE', 'O8_API_TOKEN', 'O8_WS_TOKEN', 'O8_WORKER_TOKEN',
+        'O8_MCP_TRANSPORT', 'O8_MCP_PORT', 'O8_MCP_NO_ORPHAN_KILL', 'O8_MCP_WORKER_ONLY', 'O8_MCP_TOOL_LOADING',
+        'O8_BUNDLED_MCP_PATH', 'O8_BUNDLED_MCP_DIR', 'O8_NODE_BIN', LAUNCH_AGENT_STARTED_AT_ENV,
+      ].flatMap(name => process.env[name] === undefined ? [] : [[name, process.env[name]]])),
+      [NODE22_REEXEC_GUARD]: '1', [NODE22_CHECKED]: '1',
+    },
     stdio: 'inherit',
   });
 

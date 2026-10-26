@@ -1,4 +1,7 @@
+import { resolveRequestPrincipalContext } from '@/lib/auth/principal';
+import { parseKnowledgeSources } from '@/lib/operator/knowledge-source-defaults';
 import { NextResponse } from 'next/server';
+import { changeNextWindowPreference, nextWindowError } from '@/lib/next/app-window';
 
 import {
   CODEX_MODEL_IDS,
@@ -43,7 +46,7 @@ import {
 } from '@/lib/operator/routing-compatibility';
 import { isThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import { withStoragePressurePolicyLock } from '@/lib/orchestrator/storage-pressure-policy-lock';
-import { SettingsTomlConflictError } from '@/lib/settings/operator-defaults-store';
+import { operatorDefaultsUpdateFailure } from '@/lib/settings/operator-defaults-error';
 import { mergeNativeSettingsToml, readNativeSettings, updateNativeSettings } from '@/lib/settings/native-settings';
 import { validateCredentialSafeUrl } from '@/lib/settings/credential-safe-url';
 import { resolveApfsDependencyImagesOverride } from '@/lib/workspace/dependency-image-policy';
@@ -102,6 +105,7 @@ function operatorDefaultsValuesPayload(
 ) {
   return {
     ...data,
+    nextWindowError: nextWindowError(),
     judgmentPath: resolveJudgmentPath(data.values.judgmentProvider),
     effectiveOverride: effectiveOverride(),
     settingsToml,
@@ -446,7 +450,7 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
     update.localChatModel = body.localChatModel.trim();
   }
 
-  for (const field of ['experimentalOpencode', 'experimentalGemini', 'experimentalChat', 'experimentalCanvas', 'nativeBrowserView'] as const) {
+  for (const field of ['experimentalOpencode', 'experimentalGemini', 'experimentalChat', 'experimentalCanvas', 'experimentalNext', 'nativeBrowserView'] as const) {
     const value = body[field];
     if (value === undefined) continue;
     if (typeof value !== 'boolean') throw new Error(`${field} must be boolean.`);
@@ -467,6 +471,7 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
     }
     update.inAppOrchestratorEnabled = body.inAppOrchestratorEnabled;
   }
+  if (body.knowledgeSources !== undefined) update.knowledgeSources = parseKnowledgeSources(body.knowledgeSources);
   if (body.brainUseClaudeCli !== undefined) {
     if (typeof body.brainUseClaudeCli !== 'boolean') {
       throw new Error('brainUseClaudeCli must be boolean.');
@@ -587,8 +592,8 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
   }
 
   if (body.productTelemetryEnabled !== undefined) {
-    if (typeof body.productTelemetryEnabled !== 'boolean') {
-      throw new Error('productTelemetryEnabled must be boolean.');
+    if (body.productTelemetryEnabled !== null && typeof body.productTelemetryEnabled !== 'boolean') {
+      throw new Error('productTelemetryEnabled must be boolean or null.');
     }
     update.productTelemetryEnabled = body.productTelemetryEnabled;
   }
@@ -599,7 +604,7 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
     }
     if (
       body.telemetryConsentAnswered
-      && (typeof body.productTelemetryEnabled !== 'boolean' || typeof body.crashReportsEnabled !== 'boolean')
+      && ((body.productTelemetryEnabled !== null && typeof body.productTelemetryEnabled !== 'boolean') || typeof body.crashReportsEnabled !== 'boolean')
     ) {
       throw new Error('Answering telemetry consent requires both productTelemetryEnabled and crashReportsEnabled.');
     }
@@ -740,6 +745,8 @@ export async function POST(request: Request) {
     if (!isRecord(body)) {
       return response({ error: 'Invalid request body.' }, 400);
     }
+    const sourceUpdate = body.knowledgeSources ?? (typeof body.settingsToml === 'string' ? parseOperatorDefaultsToml(body.settingsToml).knowledgeSources : undefined);
+    if ((sourceUpdate !== undefined || (body.settingsToml !== undefined && (await getOperatorDefaults()).values.knowledgeSources.length > 0)) && resolveRequestPrincipalContext(request).role !== 'operator') return response({ error: 'Knowledge sources require an operator credential.' }, 403);
     if (body.settingsToml !== undefined) {
       if (typeof body.settingsToml !== 'string') {
         return response({ error: 'settingsToml must be a string.' }, 400);
@@ -754,8 +761,8 @@ export async function POST(request: Request) {
         await assertThreecodeWorkerModelAvailable(tomlModel);
       }
       const [updated, cliAuth] = await Promise.all([
-        withStoragePressurePolicyLock(() => (
-          applyOperatorDefaultsToml(body.settingsToml as string, body.settingsTomlRevision as string)
+        changeNextWindowPreference(parseOperatorDefaultsToml(body.settingsToml as string).experimentalNext ?? false, () => (
+          withStoragePressurePolicyLock(() => applyOperatorDefaultsToml(body.settingsToml as string, body.settingsTomlRevision as string))
         )),
         getRuntimeAuthSnapshot(),
       ]);
@@ -777,7 +784,7 @@ export async function POST(request: Request) {
     }
     if (update.threecodeWorkerModel) await assertThreecodeWorkerModelAvailable(update.threecodeWorkerModel);
     const [updated, cliAuth] = await Promise.all([
-      withStoragePressurePolicyLock(() => native ? updateNativeSettings(update, body.settingsTomlRevision) : updateOperatorDefaults(update)),
+      changeNextWindowPreference(update.experimentalNext, () => withStoragePressurePolicyLock(() => native ? updateNativeSettings(update, body.settingsTomlRevision) : updateOperatorDefaults(update))),
       getRuntimeAuthSnapshot(),
     ]);
     const [settingsToml, dispatchableRuntimes] = await Promise.all([
@@ -786,8 +793,8 @@ export async function POST(request: Request) {
     ]);
     return response(native ? { ok: true } : operatorDefaultsPayload(updated, settingsToml, cliAuth, dispatchableRuntimes));
   } catch (error) {
-    const message = native ? (error instanceof SettingsTomlConflictError ? 'Settings changed. Reload before saving.' : 'Settings update refused. Check the declared settings and try again.') : error instanceof Error ? error.message : 'Failed to update operator defaults.';
-    console.error('[panel-operator-defaults] Failed to update operator defaults:', message);
-    return response({ error: message }, error instanceof SettingsTomlConflictError ? 409 : 400);
+    const failure = operatorDefaultsUpdateFailure(error, native);
+    console.error('[panel-operator-defaults] Failed to update operator defaults:', failure.body.error);
+    return response(failure.body, failure.status);
   }
 }

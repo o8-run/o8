@@ -48,10 +48,11 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
     const spawnHandlers = useMemo<WorkspaceSpawnHandlers>(() => ({
       spawnSingleRuntimeTab: controller.spawnSingleRuntimeTab,
       spawnChatTab: controller.spawnChatTab,
+      spawnChatGPTPlanTab: controller.handleNewChatGPTPlanTab,
       spawnOrchestratorTab: controller.spawnOrchestratorTab,
       spawnFleetCanvasTab: controller.spawnFleetCanvasTab,
       updateTabMode: controller.handleUpdateTabMode,
-    }), [controller.handleUpdateTabMode, controller.spawnChatTab, controller.spawnFleetCanvasTab, controller.spawnOrchestratorTab, controller.spawnSingleRuntimeTab]);
+    }), [controller.handleNewChatGPTPlanTab, controller.handleUpdateTabMode, controller.spawnChatTab, controller.spawnFleetCanvasTab, controller.spawnOrchestratorTab, controller.spawnSingleRuntimeTab]);
     const activeTab = terminalMode.terminalTab ?? controller.activeTab;
     // workspaceConversationHeaderLabel only knows chat-shaped tabs
     // (orchestrator / llm-chat / single-runtime chat). For terminals

@@ -4,9 +4,21 @@ use std::time::{Duration, Instant};
 const MAX_TURNS: usize = 10;
 const TURN_TIMEOUT_SECS: u64 = 2;
 const FIRST_TURN_MODEL_UNAVAILABLE_PREFIX: &str = "claude first turn model unavailable: ";
+const MODEL_UNAVAILABLE_ERROR_PREFIX: &str = "claude model unavailable: ";
 const PREMATURE_DONE_NUDGE: &str = "fixture nudge";
-fn is_model_unavailable_error(_: &str) -> bool {
-    false
+#[path = "../../../src-tauri/src/agent/claude/session.rs"]
+mod session;
+pub(crate) use session::ClaudeSession;
+use session::is_model_unavailable_error;
+#[path = "../../../src-tauri/src/agent/claude/phone_text.rs"]
+mod phone_text;
+pub(crate) use phone_text::run_phone_text_loop_with_binary;
+
+fn ensure_empty_mcp_config() -> Result<String, String> {
+    let root = std::env::var("O8_DATA_DIR").map_err(|_| "Fixture data directory is required.")?;
+    let path = std::path::Path::new(&root).join("empty-mcp.json");
+    std::fs::write(&path, "{\"mcpServers\":{}}" ).map_err(|error| error.to_string())?;
+    Ok(path.to_string_lossy().into_owned())
 }
 fn looks_like_action_request(_: &str) -> bool {
     false
@@ -49,6 +61,11 @@ pub(crate) trait TextPlannerSession: Send + 'static {
         None
     }
     fn send_planner_turn(&mut self, prompt: &str, image: Option<&str>) -> Result<String, String>;
+}
+impl TextPlannerSession for ClaudeSession {
+    fn send_planner_turn(&mut self, prompt: &str, image: Option<&str>) -> Result<String, String> {
+        self.send_turn(prompt, image)
+    }
 }
 pub fn path_with_node_runtime() -> String {
     std::env::var("PATH").unwrap_or_default()

@@ -1,0 +1,21 @@
+{
+  "exitCode": 0,
+  "surfaceDiagnostics": [],
+  "sharedWarningsOutsideChangedHunks": [
+    {
+      "file": "src/composer.rs",
+      "line": 479,
+      "message": "this `if` statement can be collapsed"
+    },
+    {
+      "file": "src/composer.rs",
+      "line": 515,
+      "message": "this `if` statement can be collapsed"
+    },
+    {
+      "file": "src/terminal.rs",
+      "line": 163,
+      "message": "this `if` statement can be collapsed"
+    }
+  ]
+}

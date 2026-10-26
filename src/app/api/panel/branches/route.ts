@@ -5,6 +5,7 @@ import { isSafeGitRef } from '@/lib/git/refs';
 import { getBranchSnapshot, getCachedBranchSnapshot, refreshBranchSnapshot } from '@/lib/panel/branch-snapshot';
 import { findLaneByRepoAndBranch } from '@/lib/lane/registry';
 import { markLaneWorktreeOrphaned } from '@/lib/lane/orphaned-lane';
+import { knowledgeSourceWriteRefusal } from '@/lib/cortex/knowledge/sources';
 
 export const dynamic = 'force-dynamic';
 
@@ -266,6 +267,8 @@ export async function DELETE(req: NextRequest) {
   try {
     const body = await req.json() as { path: string; branch: string; force?: boolean; deleteRemote?: boolean };
     const { path: repoPath, branch, force, deleteRemote } = body;
+    const sourceRefusal = knowledgeSourceWriteRefusal(repoPath);
+    if (sourceRefusal) return sourceRefusal;
 
     if (!repoPath || !branch) {
       return NextResponse.json({ error: 'path and branch required' }, { status: 400 });
@@ -295,6 +298,8 @@ export async function DELETE(req: NextRequest) {
           if (!(await allowWorktreeRemoval(currentPath, { logPrefix: 'branch-cleanup' }))) {
             return NextResponse.json({ error: `Worktree ${currentPath} still has a live process or could not be inspected; branch removal refused.` }, { status: 409 });
           }
+          const worktreeRefusal = knowledgeSourceWriteRefusal(repoPath, currentPath);
+          if (worktreeRefusal) return worktreeRefusal;
           git(repoPath, ['worktree', 'remove', currentPath, ...(force ? ['--force'] : [])], 10000);
           worktreeRemoved = true;
           // #2144 — this gesture knows nothing about lanes, so a lane that is
@@ -347,6 +352,8 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json() as { path: string; branch: string; baseBranch?: string; worktree?: boolean };
     const { path: repoPath, branch, baseBranch, worktree } = body;
+    const sourceRefusal = knowledgeSourceWriteRefusal(repoPath);
+    if (sourceRefusal) return sourceRefusal;
 
     if (!repoPath || !branch) {
       return NextResponse.json({ error: 'path and branch required' }, { status: 400 });
@@ -368,6 +375,8 @@ export async function POST(req: NextRequest) {
     if (worktree) {
       // Create worktree with new branch
       const worktreePath = `${repoPath}/../.worktrees/${branch.replace(/\//g, '-')}`;
+      const worktreeRefusal = knowledgeSourceWriteRefusal(worktreePath);
+      if (worktreeRefusal) return worktreeRefusal;
       git(repoPath, ['worktree', 'add', worktreePath, '-b', branch, base], 10000);
       return NextResponse.json({
         created: branch,

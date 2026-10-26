@@ -1,0 +1,19 @@
+    Checking o8-next v0.0.0 (/workspace/work/o8-glass-review1/native/o8-next)
+error[E0277]: the trait bound `PlatformInput: From<gpui::MouseDownEvent>` is not satisfied
+  --> test-support/window_occlusion.rs:90:14
+   |
+90 |             .into(),
+   |              ^^^^ the trait `From<gpui::MouseDownEvent>` is not implemented for `PlatformInput`
+   |
+   = note: required for `gpui::MouseDownEvent` to implement `Into<PlatformInput>`
+
+error[E0277]: the trait bound `PlatformInput: From<gpui::MouseUpEvent>` is not satisfied
+   --> test-support/window_occlusion.rs:100:14
+    |
+100 |             .into(),
+    |              ^^^^ the trait `From<gpui::MouseUpEvent>` is not implemented for `PlatformInput`
+    |
+    = note: required for `gpui::MouseUpEvent` to implement `Into<PlatformInput>`
+
+For more information about this error, try `rustc --explain E0277`.
+error: could not compile `o8-next` (example "window-occlusion") due to 2 previous errors

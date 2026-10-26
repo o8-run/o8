@@ -1,0 +1,13 @@
+running 9 tests
+test shell::setup::tests::correction_2::onboarding_fresh_opencode_uses_its_own_default ... ok
+test shell::setup::tests::correction_2::onboarding_missing_model_refuses_conversation_creation ... ok
+test shell::setup::tests::correction_2::onboarding_opencode_default_is_independent_of_codex_workers ... ok
+test shell::setup::tests::correction_2::onboarding_registry_hooks_are_optional_for_other_surfaces ... ok
+test shell::setup::tests::onboarding_folder_registration_error_and_cancel ... ok
+test shell::setup::tests::onboarding_opencode_keeps_selected_model_for_first_send ... ok
+test shell::setup::tests::onboarding_operator_auth_error_retry ... ok
+test shell::setup::tests::onboarding_project_tools_privacy_and_workspace ... O8_NEXT_ONBOARDING_EVIDENCE {"endpoint":"headless GPUI CPU scene; no GPU/compositor","openToFirstFrameMs":67.48596599999999,"interactionToFrameMs":41.814123}
+ok
+test shell::setup::tests::onboarding_registered_workspace_without_sessions_still_starts_setup ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 90 filtered out; finished in 28.30s

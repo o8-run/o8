@@ -1,0 +1,10 @@
+Superseded initial capture attempts, before adopting the main Linux verifier's xrefresh expose step:
+Before and after; all four captures per stage:
+900 x 700: 243 bytes, one solid black color
+1680 x 1050: 381 bytes, one solid black color
+AssertionError: native screenshots must contain rendered content; black captures are not evidence
+CPU receipts are process-only measurements; rendered performance is unverified.
+
+The final capture protocol presents an expose event on each owned display.
+Final PNGs contain readable GPUI text (660 baseline / 680 corrected colors);
+all before/after intervals exceed 60 seconds. See idle-before/after.json.

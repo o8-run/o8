@@ -2144,8 +2144,6 @@ dependencies = [
 [[package]]
 name = "gpui"
 version = "0.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "979b45cfa6ec723b6f42330915a1b3769b930d02b2d505f9697f8ca602bee707"
 dependencies = [
  "anyhow",
  "as-raw-xcb-connection",
@@ -3532,7 +3530,10 @@ dependencies = [
  "alacritty_terminal",
  "async-channel 2.5.0",
  "base64",
+ "cocoa 0.26.0",
  "gpui",
+ "objc",
+ "raw-window-handle",
  "regex",
  "serde",
  "serde_json",

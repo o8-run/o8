@@ -1,0 +1,7 @@
+running 3 tests
+test theme_tests::chrome_metrics_follow_the_locked_desktop_sources ... ok
+test theme_tests::every_theme_token_resolves_for_both_appearances_and_matches_desktop_css ... ok
+test theme_tests::native_styles_use_theme_tokens ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 134 filtered out; finished in 0.55s
+

@@ -1,5 +1,93 @@
 # Experimental saved HTTP reads
 
+## Native shell transport with Next stopped
+
+Shell work for #4547: `O8_NEXT_O8D=1 O8_WS_O8D=1` on the existing WS entry
+point exposes the registered native surfaces through o8d's authenticated
+TypeScript backhaul. Build o8d with `experimental-ws` and select it with
+`O8D_BINARY` as described in [README.md](README.md). Point the native client's
+explicit `--server` at the resolved WS origin, with `O8_NEXT_API_TOKEN` for that
+profile. Stop Next after the WS listener is ready. Native startup, saved reads,
+surface writes and the WS checkpoint producers use that listener. The native
+CLI's default API-origin selection is unchanged.
+WS producer requests select this listener only when their path and method are
+registered. Unregistered conflict reads, Symon turns and other methods retain
+the existing Next origin when Next is available.
+
+This mode reuses production route handlers and `panelGateMiddleware`; it does
+not reimplement their stores, account checks, profile filtering or response
+shapes. The HTTP relay's original peer is unverified, so local-only producer
+reads also require a bearer; public peer/address headers cannot grant local
+authority. After the middleware gate admits a lane-diff GET, an authoritative
+packet-worker token lookup restores that handler's local-worker admission;
+the handler then rechecks the bearer against the requested packet. Unknown,
+revoked and foreign-packet workers remain refused. Dynamic route parameters
+are decoded per request; queries, account headers, HTTP status,
+cooldowns and response headers reach the original handlers. Brain SSE is passed
+incrementally with backpressure, and a disconnected consumer cancels its reader.
+That cancellation does not claim to stop inference inside the existing handler.
+Uploads are bounded at 16 MiB; the native client's existing 16 MiB read ceiling
+and each handler's validation remain in effect.
+
+The flag is off by default. The existing WS listener, default API origin and
+standalone saved-read mode below retain their behavior. Rust's existing
+TypeScript fallback also exposes the same registered routes during a bridge
+restart. This requires the WS TypeScript process; it does not claim a Rust-only
+application backend.
+
+The transport inventory is maintained in
+[native-http-registry.ts](../../src/lib/ws-server/native-http-registry.ts) and its
+[named handlers](../../src/lib/ws-server/native-http-handlers.ts). Request and
+response contracts are the existing handlers linked there. The
+[HTTP adapter](../../src/lib/ws-server/native-http-routes.ts) and WS producer
+fetcher select routes from that same registry:
+
+| Surface | Requests | Request / response contract |
+| --- | --- | --- |
+| Session / Grid | GET threads, state, inventory, history, chat-history, composer-queue, ws-info; POST/PATCH/DELETE composer-queue | Existing session/transcript/queue projections below; queue writes keep their original routing, receipts and target isolation. |
+| Settings | GET/POST operator-defaults; GET/POST/PATCH/DELETE keys | Native defaults projection and provider-key metadata; account headers and handler validation retained. |
+| Setup | GET/POST setup config; GET/POST chat-history; existing defaults and repository requests | Existing first-run configuration, selected coding tools and saved conversation creation. |
+| Projects | GET projects and panel projects; POST projects, repos and active project; PATCH/DELETE project and member routes | Project/repository ledgers; IDs, canonical workspace paths and original mutation bodies. |
+| Issues | GET repos, issues and issue number; POST create and enhance | Repository selection, issue pages/details, creation/enhancement request and response. |
+| Inbox | GET supervisor-inbox and approvals; POST approvals | Existing inbox projection and approval ID/action decision. |
+| Brain | POST cortex/ask | Question/conversation/workspace body; original SSE event stream or validation refusal. |
+| Customize | GET inventory, directives, MCP servers and prompt library; GET/POST/PATCH/DELETE prompt entries | Existing inventories and saved-prompt revision checks; no new configuration writes. |
+| Diff | GET review-state, lane diff and worktree diff; POST review | Existing packet/workspace query and decision receipt. |
+| Activity | GET commits, CI/list/detail, PR details, issues and state; PATCH state; POST stop-mission | Existing activity projections and mission mutation receipts. |
+| Pull Requests | GET PR list/detail, GitHub status and merge-preview; POST PR detail | Existing pagination, review/merge gates and action receipts. |
+| Terminal | GET mobile/terminal-sessions; existing WebSocket transport | Existing terminal picker inventory and live PTY transport. |
+| Palette | Local commands and workspace navigation | Reuses the selected surface's transport. |
+
+`tests/o8d-next-surfaces-real-path.test.ts` walks `register_surfaces!`, requires
+a transport entry for every surface, checks production handler methods and
+literal native endpoints, and exercises every registered method's auth through
+the public o8d socket with the fixture Next listener closed. It also checks
+saved history, native session checkpoints, canonical paths, stream disconnects,
+concurrent prompt revisions, upload bounds and flag-off behavior.
+`tests/server-bundles-packaged-layout-real-path.test.ts` runs the generated
+WS entry with the packaged platform-specific addon layout and no Next listener.
+The [review round 1 receipt](evidence/next-surfaces-review-round-1.txt) records
+the origin-selection and packet-worker regressions, their fixes, and the
+first-run Setup registrations required after rebasing on current main.
+The [review round 2 receipt](evidence/next-surfaces-review-round-2.txt) records
+the bundle trim, the minimal total-ceiling increase for required handler
+dependencies, lazy implementation boundaries and the Terminal/Palette
+registrations added on main. Standalone exports use the original framework
+request/response classes without its unused rendering and user-agent barrel.
+
+The [fixture measurement receipt](evidence/next-surfaces-metrics.json) records
+252.29 MiB / 1.50% CPU with Next stopped and 969.18 MiB / 1.50% with a warmed
+development Next server running. These are backend process-tree sums after
+20 seconds of settling, measured over 10 seconds, with one core equal to 100%.
+Per-route latency uses 10 warmups and 100 alternating samples per server.
+The native binary builds, but cannot open a GPUI window in this executor without
+DISPLAY or Wayland. The receipt excludes that exited process. Production/native
+combined memory and CPU, macOS evidence, the 500 MB target and full-surface
+request replay remain unverified; fixture/backend figures do not meet those
+acceptance items.
+
+## Standalone persisted-read mode
+
 This is a partial slice of [#4547](https://github.com/o8-run/o8/issues/4547).
 It does **not** replace the Next server for the current native startup path.
 Runtime discovery, mission reconciliation and live streams still need their

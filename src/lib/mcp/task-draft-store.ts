@@ -8,6 +8,8 @@ import type { TaskDraftWorkspace } from './task-draft-workspace';
 
 export interface TaskDraftSnapshot extends TaskDraftAccount, TaskDraftWorkspace {
   snapshotId: string; machineId: string; clientId: string; expiresAt: number;
+  /** Missing only on legacy snapshots and immutable historical draft receipts. */
+  catalogRevision?: string;
 }
 export interface TaskDraftRecord {
   version: 1;
@@ -73,6 +75,25 @@ export function readTaskDraftSnapshot(id: string): TaskDraftSnapshot {
   if (!/^[a-f0-9-]{36}$/.test(id)) throw new TaskDraftError('snapshot_unavailable', 409);
   try { return JSON.parse(readFileSync(join(directory('snapshots'), `${id}.json`), 'utf8')) as TaskDraftSnapshot; }
   catch { throw new TaskDraftError('snapshot_unavailable', 409); }
+}
+
+/** Discovery may retire snapshots, never held tasks or another app's state. */
+export function invalidateTaskDraftSnapshots(account: TaskDraftAccount,
+  app: { clientId: string; machineId: string }, catalogRevision: string): number {
+  const dir = directory('snapshots');
+  let invalidated = 0;
+  for (const file of readdirSync(dir).filter((name) => /^[a-f0-9-]{36}\.json$/.test(name))) {
+    let snapshot: TaskDraftSnapshot;
+    try { snapshot = readTaskDraftSnapshot(file.slice(0, -5)); }
+    catch { continue; }
+    if (!snapshot || snapshot.accountId !== account.accountId || snapshot.clientId !== app.clientId
+      || snapshot.machineId !== app.machineId) continue;
+    if (snapshot.catalogRevision === catalogRevision && snapshot.epoch === account.epoch) continue;
+    rmSync(join(dir, file), { force: true });
+    invalidated++;
+  }
+  if (invalidated) syncTaskDirectories(dir);
+  return invalidated;
 }
 export function readTaskDraft(key: string): TaskDraftRecord | null {
   const file = join(directory('intents'), `${key}.json`);

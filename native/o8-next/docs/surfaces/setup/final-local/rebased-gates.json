@@ -1,0 +1,61 @@
+{
+  "base": "417586b6b00e55f4759fc95a68091ffad7596213",
+  "nativeFull": {
+    "command": "cargo +1.97.1 test --locked --manifest-path native/o8-next/Cargo.toml -- --nocapture --test-threads=2",
+    "exitCode": 101,
+    "passed": 150,
+    "failed": 4,
+    "ignored": 3,
+    "setupPassed": 22,
+    "modelMatrixPassed": 12,
+    "integratedPullRequestsPassed": 28
+  },
+  "isolatedUnchangedRetries": {
+    "diff": 0,
+    "paneGrid": 0,
+    "terminal": 0
+  },
+  "remainingMainFailure": {
+    "test": "shell::activity::tests::activity_palette_reaches_native_pane",
+    "path": "native/o8-next/src/surfaces/activity/tests.rs:27",
+    "expected": "Open diff for a packet",
+    "actual": "Open pull requests"
+  },
+  "cli": {
+    "passed": 7,
+    "exitCode": 0
+  },
+  "mainCompilerProbe": {
+    "identicalMainSourceFiles": 100,
+    "registeredExitCode": 0,
+    "entryRemovedExitCode": 0
+  },
+  "typecheckFast": {
+    "heapMiB": 8192,
+    "exitCode": 0
+  },
+  "relatedTypeScript": {
+    "files": 7,
+    "tests": 57,
+    "exitCode": 0
+  },
+  "clippy": {
+    "allTargets": true,
+    "exitCode": 0,
+    "setupDiagnostics": []
+  },
+  "rustfmt": 0,
+  "eslint": 0,
+  "ruleCheck": {
+    "files": 3,
+    "violations": 0
+  },
+  "classification": {
+    "hermetic": 1238,
+    "resourceOwning": 910,
+    "datedFixtureTests": 78,
+    "exitCode": 0
+  },
+  "fullNpmSuiteRun": false,
+  "cargoTargetRemoved": true
+}

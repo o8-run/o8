@@ -37,7 +37,7 @@ The active orchestrator and the dispatched worker runtime are separate choices. 
 
 ## Safety and recovery
 
-API access is default-deny, workers cannot silently bypass review, and merge authority depends on the caller’s principal. Persistent state lets o8 recover lanes and transcripts after process restarts, while explicit stop, retry, and rerun actions keep failures visible instead of guessing that work completed.
+Workers use a documented [environment allowlist](./worker-environment.md). API access is default-deny, workers cannot silently bypass review, and merge authority depends on the caller’s principal. Persistent state lets o8 recover lanes and transcripts after process restarts, while explicit stop, retry, and rerun actions keep failures visible instead of guessing that work completed.
 
 For the day-to-day operating loop, continue with the [orchestration playbook](orchestration-playbook.md).
 

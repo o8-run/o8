@@ -1,0 +1,11 @@
+{
+  "endpoint": "headless GPUI CPU scene; no GPU/compositor",
+  "openToFirstFrameMs": 108.02223699999999,
+  "interactionToFrameMs": 55.546456,
+  "platform": "linux",
+  "build": "debug",
+  "samples": 1,
+  "base": "eba4cf5041c8b9de23b86415464ee903e6f10065",
+  "shellAndInboxTestsPassed": 11,
+  "shellAndInboxTestsFailed": 0
+}

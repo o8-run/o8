@@ -1,0 +1,27 @@
+running 21 tests
+test shell::projects::tests::projects_auth_refusal_and_retry ... ok
+test shell::projects::tests::projects_first_run_crud_membership_and_focus ... O8_NEXT_PROJECTS_EVIDENCE {"endpoint":"first completed GPUI TestAppContext CPU scene paint; debug build; test text system; no GPU/compositor","openToFirstFrameMs":23.787336,"workspaceOpenToFrameMs":42.925602,"registeredReposAfterRemove":0}
+ok
+test shell::projects::tests::projects_lost_registration_response_preserves_membership_role ... ok
+test shell::projects::tests::projects_palette_loading_and_cancel ... ok
+test shell::projects::tests::projects_preserve_session_focus_and_allow_inbox_navigation ... ok
+test shell::projects::tests::projects_reconnect_and_runtime_removal_refusal ... ok
+test shell::projects::tests::projects_switch_active_without_saved_sessions ... O8_NEXT_PROJECTS_SWITCH_EVIDENCE {"endpoint":"first completed GPUI TestAppContext CPU scene paint; debug build; test text system; no GPU/compositor","interactionToFrameMs":[103.790177,51.476831000000004,132.41598,52.856951,142.18634899999998,135.330108,167.452516,176.85516900000002,293.125726,150.14846400000002,72.620593,73.371823,29.712823999999998,39.642313,31.804916000000002,30.957709,33.771322,37.158337,34.964782,30.978801]}
+ok
+test shell::projects::tests::review::review_p1_deletes_existing_duplicate_by_stable_id ... ok
+test shell::projects::tests::review::review_p1_rejects_duplicate_rename_before_deleting_alpha ... ok
+test shell::projects::tests::review::review_p2_project_open_resolves_repointed_repository ... ok
+test shell::projects::tests::review::review_p2_repository_open_resolves_repointed_repository ... ok
+test shell::projects::tests::review::round2_legacy_desktop_rename_before_native_read_keeps_one_pair ... ok
+test shell::projects::tests::review::round2_legacy_open_resolves_id_pair ... ok
+test shell::projects::tests::review::round2_legacy_rename_updates_both_stable_ids ... ok
+test shell::projects::tests::review::round2_legacy_switch_resolves_id_pair ... ok
+test shell::projects::tests::review::round2_project_delete_refuses_unconfirmed_runtime ... ok
+test shell::setup::tests::onboarding_folder_registration_error_and_cancel ... ok
+test shell::setup::tests::onboarding_opencode_keeps_selected_model_for_first_send ... ok
+test shell::setup::tests::onboarding_operator_auth_error_retry ... ok
+test shell::setup::tests::onboarding_project_tools_privacy_and_workspace ... O8_NEXT_ONBOARDING_EVIDENCE {"endpoint":"headless GPUI CPU scene; no GPU/compositor","openToFirstFrameMs":86.836066,"interactionToFrameMs":34.089929999999995}
+ok
+test shell::setup::tests::onboarding_registered_workspace_without_sessions_still_starts_setup ... ok
+
+test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 66 filtered out; finished in 90.10s

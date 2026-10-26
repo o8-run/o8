@@ -1,5 +1,7 @@
 import type { RuntimeConnectionEvidence } from '@/lib/runtimes/shared/connection-evidence';
 import { MODEL_IDS } from '@/lib/models';
+import { resolveBackendTurnModel } from '@/lib/orchestrator/turn-model-selection';
+import { isOpenRouterPiModelChoice, OPENROUTER_PI_MODEL_PREFIX } from '@/lib/pi/sdk/openrouter-model-choice';
 import type { OrchestratorBackendSetting } from '@/lib/operator/backend-setting';
 import { getRuntimeCapability, type OrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
 import { builtInAgentFromInventory } from './built-in-agent';
@@ -58,7 +60,7 @@ export function runtimeForLead(backend: OrchestratorBackendSetting | null, inven
   const builtIn = builtInAgentFromInventory(inventory);
   if (builtIn?.builtIn?.backend === backend) return builtIn.id;
   if (backend === 'claude' || backend === 'fable') return 'claude-code';
-  if (backend === 'codex' || backend === 'opencode' || backend === 'muse') return backend;
+  if (backend === 'codex' || backend === 'opencode' || backend === 'muse' || backend === 'pi') return backend;
   return null;
 }
 
@@ -66,6 +68,7 @@ export function leadModelPreset(backend: OrchestratorBackendSetting | null): str
   if (backend === 'codex') return MODEL_IDS.codexDefault;
   if (backend === 'claude') return MODEL_IDS.orchestratorDefault;
   if (backend === 'fable') return MODEL_IDS.fableDefault;
+  if (backend === 'o8') return resolveBackendTurnModel('o8', undefined) ?? '';
   return '';
 }
 
@@ -118,10 +121,19 @@ export function recommendRuntimeSetup({ inventory, activity, values = {}, source
   }
   // orchestratorModel belongs to the Claude backend. Codex starts with its
   // own model default; Fable owns a separate fixed model configuration.
+  const pi = inventory.find((item) => item.id === 'pi')?.piSetup;
+  const piModel = pi?.model?.trim() || '';
   const leadModel = backend === 'claude'
     ? explicit('orchestratorModel') && values.orchestratorModel?.startsWith('claude-')
       ? values.orchestratorModel : localLeadModels.claude ?? leadModelPreset(backend)
-    : backend === 'opencode' ? values.opencodeOrchestratorModel ?? '' : leadModelPreset(backend);
+    : backend === 'opencode'
+      ? values.opencodeOrchestratorModel?.trim() || opencodeModel || MODEL_IDS.opencodeDefault
+      : backend === 'codex'
+        ? localLeadModels.codex?.trim() || leadModelPreset(backend)
+      : backend === 'pi'
+        ? piModel && pi?.provider === 'openrouter' && !isOpenRouterPiModelChoice(piModel)
+          ? `${OPENROUTER_PI_MODEL_PREFIX}${piModel}` : piModel
+      : leadModelPreset(backend);
   return {
     backend, leadModel, workerRuntimes,
     opencodeModel: values.opencodeWorkerModel ?? opencodeModel,

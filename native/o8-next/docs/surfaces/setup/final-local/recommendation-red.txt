@@ -1,0 +1,57 @@
+ FAIL  src/lib/setup/runtime-recommendation.test.ts > detected runtime recommendation > resolves its own lead model or asks: 'codex' saved=true
+AssertionError: expected 'gpt-6-astra' to be 'gpt-6.1-sol' // Object.is equality
+
+Expected: "gpt-6.1-sol"
+Received: "gpt-6-astra"
+
+ ❯ src/lib/setup/runtime-recommendation.test.ts:36:29
+     34|       localLeadModels: saved ? { codex: MODEL_IDS.codexCliDefault } : …
+     35|     });
+     36|     expect(setup.leadModel).toBe(expected);
+       |                             ^
+     37|   });
+     38|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  src/lib/setup/runtime-recommendation.test.ts > detected runtime recommendation > resolves its own lead model or asks: 'pi' saved=true
+AssertionError: expected '' to be 'fixture/pi-saved-model' // Object.is equality
+
+- Expected
++ Received
+
+- fixture/pi-saved-model
+
+ ❯ src/lib/setup/runtime-recommendation.test.ts:36:29
+     34|       localLeadModels: saved ? { codex: MODEL_IDS.codexCliDefault } : …
+     35|     });
+     36|     expect(setup.leadModel).toBe(expected);
+       |                             ^
+     37|   });
+     38|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  src/lib/setup/runtime-recommendation.test.ts > detected runtime recommendation > resolves its own lead model or asks: 'o8' saved=false
+ FAIL  src/lib/setup/runtime-recommendation.test.ts > detected runtime recommendation > resolves its own lead model or asks: 'o8' saved=true
+AssertionError: expected '' to be 'o8-free' // Object.is equality
+
+- Expected
++ Received
+
+- o8-free
+
+ ❯ src/lib/setup/runtime-recommendation.test.ts:36:29
+     34|       localLeadModels: saved ? { codex: MODEL_IDS.codexCliDefault } : …
+     35|     });
+     36|     expect(setup.leadModel).toBe(expected);
+       |                             ^
+     37|   });
+     38|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  4 failed | 17 passed (21)
+   Duration  2.62s (transform 277ms, setup 213ms, import 241ms, tests 187ms, environment 0ms)

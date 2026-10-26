@@ -2,7 +2,7 @@
 import { generateKeyPairSync } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { once } from 'node:events';
-import { symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -12,16 +12,21 @@ export async function issueFixture(dataDir: string, root: string, repoPath: stri
   const slugs = ['fixture/alpha', 'fixture/beta', 'fixture/missing'];
   const setup = { envMode: 'skip', envFiles: [], installCommand: null, installOnCreateWorkspace: false,
     buildCommand: null, runBuildOnCreateWorkspace: false, devCommand: null, defaultPort: null };
+  // Equal recency keeps the seeded alphabetical order across clock ticks.
+  const addedAt = new Date().toISOString();
   const repos = slugs.map((slug, index) => ({ id: `issues-${index}`, name: slug.split('/')[1],
     localPath: index === 0 ? repoPath : join(root, index === 1 ? 'second-repo' : 'missing-repo'),
     remoteUrl: `https://github.com/${slug}.git`, defaultBranch: 'main', isGitRepo: true,
-    addedAt: new Date().toISOString(), lastOpenedAt: null, setup }));
+    addedAt, lastOpenedAt: null, setup }));
   if (process.argv.includes('--issues-symlink')) {
     const alias = join(root, 'issue-repo-alias');
     symlinkSync(repoPath, alias, 'dir');
     repos[0].localPath = alias;
   }
   execFileSync('git', ['-C', repoPath, 'remote', 'add', 'origin', repos[0].remoteUrl]);
+  if (existsSync(join(repos[1].localPath, '.git'))) {
+    execFileSync('git', ['-C', repos[1].localPath, 'remote', 'add', 'origin', repos[1].remoteUrl]);
+  }
   writeFileSync(join(dataDir, 'repos.json'), JSON.stringify({ version: 1, repos }));
   let mode = '';
   process.stdin.setEncoding('utf8');
@@ -48,7 +53,7 @@ export async function issueFixture(dataDir: string, root: string, repoPath: stri
     writeActiveIdentity(`fixture-issue-owner-${account}`);
     bumpSignInEpoch();
     writeManagedGithubState({ installed: true, ownerClerkUserId: `fixture-issue-owner-${account}`,
-      token: `fixture-managed-${account}`, installationId: 101, expiresAt: '2099-01-01T00:00:00Z' });
+      token: `fixture-managed-${account}`, installationId: 101, accountLogin: 'fixture', expiresAt: '2099-01-01T00:00:00Z' });
   };
   let switchOnReserve = false;
   const postsSeen: Array<{ title: string; account: string }> = [];
@@ -74,7 +79,7 @@ export async function issueFixture(dataDir: string, root: string, repoPath: stri
     }
     const mint = url.pathname.match(/^\/app\/installations\/(\d+)\/access_tokens$/);
     if (mint) { send(201, { token: `fixture-installation-${mint[1]}`, expires_at: '2099-01-01T00:00:00Z' }); return; }
-    const target = url.pathname.match(/^\/repos\/([^/]+\/[^/]+)\/(issues|labels)(?:\/(\d+))?$/);
+    const target = url.pathname.match(/^\/repos\/([^/]+\/[^/]+)\/(issues|labels)(?:\/(\d+))?(\/comments)?$/);
     if (!target || !records.has(target[1])) { send(404, { message: 'Outside fixture installation' }); return; }
     const [, slug, resource, number] = target;
     const account = managedMode ? req.headers.authorization === 'Bearer fixture-managed-a' ? 'a'
@@ -83,6 +88,7 @@ export async function issueFixture(dataDir: string, root: string, repoPath: stri
       : req.headers.authorization !== `Bearer fixture-installation-${101 + slugs.indexOf(slug)}`) {
       send(403, { message: 'Wrong installation credential' }); return;
     }
+    if (target[4]) { send(200, []); return; }
     if ((mode === 'detail-error' && number) || (mode === 'mutation-error' && req.method === 'POST')) {
       send(mode === 'mutation-error' ? 422 : 503, { message: 'Fixture request refused' }); return;
     }

@@ -1,0 +1,26 @@
+running 11 tests
+test shell::palette::target::tests::target_choices_compare_canonical_workspace_paths ... ok
+test shell::palette::target::tests::target_click_keeps_identity_when_inventory_reorders ... ok
+test shell::palette::target::tests::target_load_finishing_after_workspace_switch_keeps_composer_focus ... ok
+test shell::palette::target::tests::target_reopen_cancels_pending_restore ... ok
+test shell::palette::tests::palette_and_keyboard_workspace_frame_measurements ... O8_NEXT_PALETTE_EVIDENCE {"endpoint":"GPUI TestAppContext CPU scene; debug build; test text; no GPU/compositor","platform":"linux","paletteOpenToFrameMs":[13.658363,12.999933,13.087453,13.149265999999999,13.733113,13.360339,13.248983,12.985812,13.117436999999999,13.0991,13.45517,13.365236000000001,13.680294,13.146372,13.0855,13.035504999999999,13.506426,13.592003,13.249334,13.207662000000001,12.995787,12.97089,13.223415000000001,13.291988,13.217155,13.200991,13.373229,13.002877,13.198188,13.154653],"keyboardWorkspaceSwitchMs":[60.333901000000004,11.181208999999999,7.6665470000000004,11.333446,8.254329,11.722845000000001,7.930598000000001,11.215190999999999,8.468918,11.974058,8.041894000000001,10.978969,7.721537,10.915443999999999,7.809548,11.146207,7.744911999999999,13.719132,8.446074,10.563612]}
+ok
+test shell::palette::tests::palette_keyboard_opens_all_surfaces_and_switches_workspaces ... ok
+test shell::palette::tests::palette_keyboard_workspace_command_is_filtered_and_cancel_keeps_focus ... ok
+test shell::palette::tests::round1_focused_pty_receives_ctrl_k ... ok
+test shell::palette::tests::round1_focused_text_field_keeps_ctrl_and_cmd_k ... ok
+test shell::palette::tests::round1_palette_owns_workspace_commands_and_renderer ...
+thread 'shell::palette::tests::round1_palette_owns_workspace_commands_and_renderer' (159840) panicked at src/surfaces/palette_tests.rs:325:5:
+workspace commands belong to their registered module
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+test shell::palette::tests::round1_reading_surface_can_open_palette_with_ctrl_k ... ok
+
+failures:
+
+failures:
+    shell::palette::tests::round1_palette_owns_workspace_commands_and_renderer
+
+test result: FAILED. 10 passed; 1 failed; 0 ignored; 0 measured; 171 filtered out; finished in 21.11s
+
+error: test failed, to rerun pass `--bin o8-next`

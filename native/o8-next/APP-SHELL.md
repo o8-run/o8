@@ -1,7 +1,18 @@
 # App shell (#4548)
 
-The separate shell is opt-in and reuses the session/composer and workspace grid
-already on main. Build the crate and CLI as described in [the README](README.md#build-and-use), then launch:
+The installed macOS app carries the native shell as a Tauri sidecar. In Settings,
+open the Experimental group and enable **o8 next**. The switch is off by default;
+enabling opens the native window, disabling closes it, and restart restores the
+saved choice. With it off, the existing startup, defaults and data directory stay
+unchanged. The server supplies its own loopback origin and operator bearer only
+in the child environment at spawn. A stdin lifeline closes the native window if
+the server exits or is killed. No bearer enters arguments, saved state or logs.
+The switch is saved only after the open native window acknowledges its first
+server load. A startup error, early exit or fifteen-second readiness timeout
+leaves the switch off and shows one short failure message in Settings.
+
+The separate CLI remains available for explicit fixtures and development. Build
+the crate and CLI as described in [the README](README.md#build-and-use), then launch:
 
 ```sh
 node cli/dist/o8.mjs next --enable-next --binary "$PWD/native/o8-next/target/release/o8-next" --app-shell
@@ -14,6 +25,15 @@ proxies. A worker launch keeps worker authority even if a native operator
 credential was inherited. An explicit different origin never receives the local
 configuration's disk credential. The normal explicit fixture modes remain available.
 
+The shell defaults to All Glass on macOS and plain dark elsewhere.
+`O8_NEXT_APPEARANCE=glass` or `O8_NEXT_APPEARANCE=plain` selects the appearance
+at process startup. On macOS, All Glass installs one window-owned
+NSVisualEffectView with FullScreenUI, BehindWindow blending and Active state.
+Its size follows the GPUI content view. The desktop's three-stop veil and panel
+alpha tokens come from the shared native theme. In-flow surfaces pass through
+to that material. Non-macOS and offscreen windows keep an opaque dark root;
+they do not emulate system blur. Hidden tests never request a native handle.
+
 The shell lists workspaces with saved sessions. Ctrl+K or Cmd+K opens searchable
 commands; arrows and Enter choose, Escape cancels. Open session, Open grid and
 New message use the existing views; New message focuses the selected session's
@@ -23,6 +43,23 @@ Ctrl+Tab cycles surfaces and Ctrl+W closes a surface. Grid shortcuts,
 including Ctrl+Alt+W to close one pane, reach the grid. Drafts remain in memory
 while switching workspaces and sessions. An unavailable local server has a clear
 error and Retry control.
+
+Workspaces use one searchable switcher, including with 15 or more saved
+workspaces. Brain, Refresh and Keyboard shortcuts are palette commands. The shortcut
+reference closes with Escape; key hints are absent from permanent chrome.
+Session tabs use their conversation titles. The embedded session shares the
+shell header. The composer action says Send next or Steer now; its adjacent
+disclosure switches the mode, as does Ctrl+Shift+Enter.
+
+Existing session surfaces use the shared typography and geometry in
+`src/theme.rs`: compact sidebar rows, top tab pills, and a composer card up to
+720 px wide. An empty saved conversation centres that card in the available
+column without a tagline or permanent composer hints. The existing per-session Brain dock occupies the right panel slot, with
+its draft and focus retained while resizing and switching sessions. Compact
+windows reduce the sidebar and right-slot widths without cropping the composer.
+The sidebar renderer lives in `src/session_sidebar.rs` to keep the session module
+within the repository file limit. Native tracking and raster/compositor
+comparison remain unverified; the pinned GPUI API exposes no letter spacing.
 
 Settings opens from the shell's Settings button, the Open settings command, or
 Ctrl+, / Cmd+,. This partial port edits shared server defaults, provider keys and
@@ -75,4 +112,20 @@ Terminal and packet diff surfaces are not on this branch's main baseline. Their
 palette commands report that the surface is unavailable; they do not create
 placeholder tabs or claim an attach. Their integration remains open. See
 [app shell evidence](evidence/shell/verification.md) for measurements and exact
-remaining acceptance. The shipped entry point remains Tauri; the separate client requires explicit opt-in.
+remaining acceptance. The shipped entry point remains Tauri; the native window requires explicit opt-in.
+
+The prebuild stages arm64, x86_64 and universal release binaries under
+`src-tauri/helpers/`; Tauri's existing `externalBin` signing and notarization
+cover the bundled sidecar. The release native-bundle gate verifies its presence,
+architectures, nested signature, hardened runtime, matching signing team and the
+outer app seal. It can also be run directly after signing:
+
+```sh
+node scripts/next/verify-app-bundle.mjs PATH_TO_APP
+```
+
+Linux fixture tests use fake executables and signing tools. They do not establish
+macOS signing/notarization or the compressed installer size; those receipts come
+from the next macOS release. At the reported roughly 18 MB per release slice,
+the estimated uncompressed payload increase is roughly 18 MB per CPU installer
+or 36 MB in a universal app, before compression and signing metadata.

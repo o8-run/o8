@@ -20,6 +20,7 @@ import { join } from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { hasEncryptedKeyValues } from '@/lib/providers/env-format';
 import { execKeychainCommand } from '@/lib/providers/child-process';
+import Database from 'better-sqlite3';
 
 // ── Constants ──
 
@@ -32,6 +33,17 @@ const KEYCHAIN_ACCOUNT = 'default';
 
 function dataDir(): string {
   return getDataDir();
+}
+
+/** Every store sharing this key must prevent first-run creation after key loss. */
+function hasEncryptedStoredCredentials(): boolean {
+  const providerPath = join(dataDir(), '.env.local');
+  if (existsSync(providerPath) && hasEncryptedKeyValues(readFileSync(providerPath, 'utf8'))) return true;
+  const acpPath = join(dataDir(), 'acp-environment.sqlite');
+  if (!existsSync(acpPath)) return false;
+  const db = new Database(acpPath, { readonly: true, fileMustExist: true });
+  try { return Boolean(db.prepare('SELECT 1 FROM credentials LIMIT 1').get()); }
+  finally { db.close(); }
 }
 
 /**
@@ -49,7 +61,7 @@ function readOrCreateKeyFile(create: boolean): string {
     return existing;
   }
   if (!create) throw new Error('Master key unavailable');
-  if (existsSync(join(dataDir(), '.env.local')) && hasEncryptedKeyValues(readFileSync(join(dataDir(), '.env.local'), 'utf8'))) {
+  if (hasEncryptedStoredCredentials()) {
     throw new Error('Encrypted credentials exist without an accessible master key');
   }
   const key = generateKey();
@@ -136,9 +148,9 @@ export class MasterKeyUnavailableError extends Error {
 }
 
 /** Re-read the backing source without rotating an established process identity. */
-export function assertMasterKeyAvailableForMutation(): string {
+export function assertMasterKeyAvailableForMutation(options: { createIfMissing?: boolean } = {}): string {
   try {
-    const current = resolveBackingKey(_cachedKey === null);
+    const current = resolveBackingKey(_cachedKey === null && options.createIfMissing !== false);
     if (_cachedKey && !decodeBase64Url(current).equals(decodeBase64Url(_cachedKey))) throw new Error('Master key changed');
     _cachedKey = current;
     return current;
@@ -176,7 +188,7 @@ function resolveBackingKey(create: boolean): string {
     if (!keychainKey) {
       // Genuinely absent (first run) — generate and persist.
       if (existsSync(join(dataDir(), 'master-key'))) return readOrCreateKeyFile(create);
-      if (existsSync(join(dataDir(), '.env.local')) && hasEncryptedKeyValues(readFileSync(join(dataDir(), '.env.local'), 'utf8'))) throw new Error('Encrypted credentials exist without a master key');
+      if (hasEncryptedStoredCredentials()) throw new Error('Encrypted credentials exist without a master key');
       if (!create) throw new Error('Master key unavailable');
       const newKey = generateKey();
       if (writeKeychainKey(newKey)) {

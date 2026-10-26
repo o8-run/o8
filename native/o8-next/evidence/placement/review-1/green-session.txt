@@ -1,0 +1,13 @@
+running 8 tests
+test ui::tests::brain_dock_tests::brain_dock_returns_focus_and_keeps_each_session_draft ... ok
+test ui::tests::correction_composer_has_no_shortcut_or_mode_helper ... ok
+test ui::tests::correction_empty_conversation_has_no_tagline ... ok
+test ui::tests::fixture_send_selected_queue_promote_and_echo ... O8_NEXT_COMPOSER_EVIDENCE {"endpoint":"GPUI TestAppContext CPU scene paint; no GPU submission or presentation","keyToFrameMs":[6.35097,6.339233,6.162321,6.187576999999999,6.151303,6.2016789999999995,6.200897,6.1946889999999994,6.176471,6.1273480000000005,6.174137,6.12197,6.137543,6.140607999999999,6.130110999999999,6.117793,6.130471999999999,6.11507,6.190783,6.161177],"sendToFirstEchoMs":33.816486,"queueBefore":0,"queueAfter":1,"transcriptBefore":1,"transcriptAfter":2}
+ok
+test ui::tests::placement_empty_send_racing_selection_retains_the_destination ... ok
+test ui::tests::placement_empty_state_composer_and_right_panel ... ok
+test ui::tests::session_chrome_uses_layout_instead_of_role_labels ... ok
+test ui::tests::worker_tests::worker_send_steer_queue_promote_remove_and_streaming_latency ... O8_NEXT_WORKER_EVIDENCE {"endpoint":"Linux GPUI TestAppContext CPU scene paint; no GPU presentation; no-op text system","release":false,"keyToFrameWhileStreamingMs":[3.7003909999999998,4.691668000000001,6.933416,4.027094999999999,3.765067,3.7540400000000003,4.250118,4.114625,3.9148789999999996,3.9846430000000006,4.188975999999999,4.0816669999999995,4.532047,4.319711000000001,4.60201,4.430886,5.237334,4.286711,4.817191,5.36872,5.059691,4.925111,5.419235,4.975796,5.237685,6.313434,5.278396,4.758493,4.76343,5.167141],"sendToFirstWorkerTranscriptPaintMs":10967.334831,"workerTextBytesBefore":40,"workerTextBytesAfter":2372}
+ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 174 filtered out; finished in 65.50s

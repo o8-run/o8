@@ -312,20 +312,22 @@ describe('composer fresh operator defaults at the send seam', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(950); });
   });
 
-  it('keeps a new chat on its selected repository through the first send and history reload', async () => {
+  it.each([true, false])('keeps a chat on its selected repository through first send and reload (saved=%s)', async (alreadySaved) => {
     const oldRepo = '/repo/old-thread-home';
     const newRepo = '/repo/new-turn-home';
-    const tabId = `thoughts-existing-target-${Date.now()}`;
-    const saved = await POST_CHAT(new NextRequest('http://127.0.0.1/api/v2/chat-history', {
-      method: 'POST',
-      body: JSON.stringify({
-        tabId,
-        repoPath: oldRepo,
-        repoName: 'old-thread-home',
-        messages: [],
-      }),
-    }));
-    expect(saved.ok).toBe(true);
+    const tabId = `thoughts-target-${alreadySaved}-${Date.now()}`;
+    if (alreadySaved) {
+      const saved = await POST_CHAT(new NextRequest('http://127.0.0.1/api/v2/chat-history', {
+        method: 'POST',
+        body: JSON.stringify({
+          tabId,
+          repoPath: oldRepo,
+          repoName: 'old-thread-home',
+          messages: [],
+        }),
+      }));
+      expect(saved.ok).toBe(true);
+    }
     useRealHistoryRoute = true;
     let releasePatch: () => void = () => {};
     historyPatchGate = new Promise<void>((resolve) => { releasePatch = resolve; });

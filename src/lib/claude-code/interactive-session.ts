@@ -1,4 +1,5 @@
 import { withProviderStoreLock } from '@/lib/providers/store-lock';
+import { assertNotKnowledgeSource } from '@/lib/cortex/knowledge/sources';
 import { childEnvironment } from '@/lib/providers/spawn-environment';
 import { credentialPolicyFingerprint } from '@/lib/providers/credential-policy';
 import { providerSpawnEnvironment } from '@/lib/providers/spawn-environment';
@@ -427,7 +428,9 @@ export function ensureSession(
   permissionMode?: ClaudeCodePermissionMode,
   resumeSessionId?: string | null,
 ): ClaudeCodeInteractiveSession {
+  assertNotKnowledgeSource(cwd);
   const normalizedCwd = normalizeCwd(cwd);
+  assertNotKnowledgeSource(normalizedCwd);
   const normalizedModel = normalizeModel(model);
   const normalizedPermissionMode = normalizePermissionMode(permissionMode);
   const existing = sessions.get(tabId);
@@ -470,6 +473,7 @@ export async function sendMessage(
   options: SendClaudeCodeInteractiveMessageOptions = {},
 ): Promise<void> {
   const internal = session as InternalClaudeCodeInteractiveSession;
+  assertNotKnowledgeSource(internal.cwd);
   if (internal.credentialPolicy !== credentialPolicyFingerprint('claude-code')) {
     killClaudeCodeInteractiveSession(internal.tabId);
     throw new Error('Credentials or billing changed. Retry the launch.');

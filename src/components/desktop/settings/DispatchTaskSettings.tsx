@@ -143,6 +143,13 @@ export function DispatchTaskSettings({ values, sources, busyField, updateField, 
         >
 
 
+          <SettingsRow
+            label="o8 next"
+            checked={values.experimentalNext ?? false}
+            disabled={busyField === 'experimentalNext'}
+            onToggle={(next) => { updateField('experimentalNext', next); }}
+            divider
+          />
           {/* Casual-chat tab toggle intentionally NOT surfaced for the beta
               (operator, 2026-07-06) — the flag still exists (experimentalChat /
               env) but the orchestrator is the only conversational surface. */}

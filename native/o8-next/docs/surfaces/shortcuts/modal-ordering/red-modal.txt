@@ -1,0 +1,15 @@
+running 1 test
+test shell::shortcuts::tests::modal::shortcuts_modal_surfaces_keep_all_tab_chords_off_underlying_tabs has been running for over 60 seconds
+
+thread 'shell::shortcuts::tests::modal::shortcuts_modal_surfaces_keep_all_tab_chords_off_underlying_tabs' panicked at src/surfaces/shortcuts/modal_tests.rs:95:5:
+modal tab shortcut ordering: ["settings: ctrl-w", "settings: cmd-w", "settings: cmd-alt-left", "settings: cmd-alt-right", "settings: ctrl-tab", "settings: ctrl-shift-tab", "settings: cmd-2", "settings: ctrl-2", "projects: ctrl-w", "projects: cmd-w", "projects: cmd-alt-left", "projects: cmd-alt-right", "projects: ctrl-tab", "projects: ctrl-shift-tab", "projects: cmd-2", "projects: ctrl-2", "setup: ctrl-w", "setup: cmd-w", "setup: cmd-alt-left", "setup: cmd-alt-right", "setup: ctrl-tab", "setup: ctrl-shift-tab", "setup: cmd-2", "setup: ctrl-2", "palette: ctrl-w", "palette: cmd-w", "palette: cmd-alt-left", "palette: cmd-alt-right", "palette: cmd-2", "palette: ctrl-2"]
+test shell::shortcuts::tests::modal::shortcuts_modal_surfaces_keep_all_tab_chords_off_underlying_tabs ... FAILED
+
+failures:
+
+failures:
+    shell::shortcuts::tests::modal::shortcuts_modal_surfaces_keep_all_tab_chords_off_underlying_tabs
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 178 filtered out; finished in 152.88s
+
+error: test failed, to rerun pass `--bin o8-next`

@@ -28,6 +28,9 @@ export function ThreadActions({ task, busy, onSelectSession, onAction }: {
   const [mode, setMode] = useState<'report' | 'block' | null>(null);
   const [message, setMessage] = useState('');
   const session = taskSessionKey(task);
+  if (task.thread && !['packet', 'lane'].includes(task.thread.kind)) return <section aria-label="Thread actions" style={{ marginBottom: 16 }}>
+    {task.thread.sessionKey && onSelectSession ? <ThreadActionButton label="Open session" disabled={busy} onClick={() => onSelectSession(task.thread!.sessionKey!)} /> : null}
+  </section>;
   const queued = task.group === 'ready' || task.group === 'blocked';
   const done = task.group === 'done';
   return <section aria-label="Thread actions" style={{ marginBottom: 16 }}>

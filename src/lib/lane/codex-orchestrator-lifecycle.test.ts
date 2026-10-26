@@ -3,6 +3,7 @@ import { mutateProviderKey } from '@/lib/providers/key-store';
 import { saveRuntimeBillingMode } from '@/lib/providers/runtime-billing';
 import { listOrchestratorTurnsForThread } from './orchestrator-crash-survival';
 import { EventEmitter } from 'node:events';
+import { Writable } from 'node:stream';
 import type { ChildProcess } from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -56,8 +57,18 @@ import {
 } from './codex-orchestrator-session';
 import { writeOrchestratorBackendSessionId } from '@/lib/mobile/orchestrator-thread-history';
 import type { OrchestratorEvent } from './orchestrator-stream-events';
+import { writePersistedLlmChat } from '@/lib/llm/chat-history-store';
+
+function persistRecoveryHistory(threadId: string, current: string) {
+  writePersistedLlmChat(threadId, { repoPath: process.cwd(), messages: [
+    { id: 'earlier-user', role: 'user', content: 'Retain the earlier requirement.', timestamp: 1 },
+    { id: 'earlier-assistant', role: 'assistant', content: 'Requirement retained.', timestamp: 2 },
+    { id: 'current-user', role: 'user', content: current, timestamp: 3 },
+  ] });
+}
 
 class FakeCodexProc extends EventEmitter {
+  stdin = new Writable({ write(_chunk, _encoding, callback) { callback(); } });
   stdout = new EventEmitter();
   stderr = new EventEmitter();
   pid = process.pid;
@@ -83,6 +94,22 @@ async function waitForSpawn(): Promise<void> {
 }
 
 describe('Codex orchestrator process lifecycle', () => {
+  it.each(['Error', 'TypeError', 'SyntaxError', 'RangeError', 'ReferenceError', 'AggregateError', 'Error [ERR_MODULE_NOT_FOUND]'])('surfaces the first %s line after a packaged bridge code frame', async (name) => {
+    const session = ensureCodexOrchestratorSession(process.cwd(), `bridge-error-${name}-${Date.now()}`);
+    const proc = useFakeProc();
+    const events: OrchestratorEvent[] = [];
+    const turn = sendToCodexOrchestrator(session, 'startup failure', event => events.push(event));
+    await waitForSpawn();
+    const error = `${name}: Could not locate the bindings file. Tried:`;
+    proc.stderr.emit('data', Buffer.from('file:///bundle/Contents/Resources/server/codex-app-bridge-impl.mjs:2\n'
+      + 'const bundledSource = 1;'.repeat(100) + '\n  ^\n\n' + error + '\nError: secondary failure\n    at main (bridge.mjs:2:1)\n'));
+    proc.exitCode = 1;
+    proc.emit('close', 1);
+    await turn;
+    expect(events).toContainEqual({ type: 'error', error });
+    expect(events.at(-1)?.type).toBe('done');
+  });
+
   it.each([false, true])('passes an explicit tier to the actual CLI launch (resume=%s)', async (resume) => {
     const session = ensureCodexOrchestratorSession(process.cwd(), `speed-${resume}-${Date.now()}`);
     if (resume) session.threadId = 'saved-speed-thread';
@@ -126,6 +153,7 @@ describe('Codex orchestrator process lifecycle', () => {
       guardPath: '/tmp/o8-single-bin/codex',
       launchBinaryPath: '/tmp/o8-single-bin/.codex-main',
       supervisorPath: '/tmp/o8-single-bin/.single-supervisor.mjs',
+      diagnostics: [],
       cleanup: vi.fn(),
     }));
   });
@@ -253,6 +281,34 @@ describe('Codex orchestrator process lifecycle', () => {
     expect(prepared.cleanup).toHaveBeenCalledOnce();
   });
 
+  it('shows each unavailable Solo host diagnostic before launching a usable turn', async () => {
+    const diagnostics = [
+      'Solo tool host unavailable: /fixture/legacy/codex-code-mode-host (missing). Workspace tools using this host may fail.',
+      'Solo tool host unavailable: /fixture/current/codex-code-mode-host (dangling symlink). Workspace tools using this host may fail.',
+    ];
+    const prepare = prepareSingleMock.getMockImplementation()!;
+    prepareSingleMock.mockImplementation(async input => ({ ...await prepare(input), diagnostics }));
+    const session = ensureCodexOrchestratorSession(process.cwd(), `solo-host-diagnostics-${Date.now()}`);
+    const proc = useFakeProc();
+    const events: OrchestratorEvent[] = [];
+    spawnMock.mockImplementationOnce(() => {
+      for (const text of diagnostics) expect(events).toContainEqual({ type: 'thinking', text: `${text}\n` });
+      return proc;
+    });
+    const turn = sendToCodexOrchestrator(session, 'work alone', event => events.push(event), {
+      orchestrationMode: 'single',
+    });
+    try {
+      await waitForSpawn();
+      for (const text of diagnostics) expect(events).toContainEqual({ type: 'thinking', text: `${text}\n` });
+      expect(events.some(event => event.type === 'error')).toBe(false);
+    } finally {
+      proc.exitCode = 0;
+      proc.emit('close', 0);
+      await turn;
+    }
+  });
+
   it('passes composer images to a Codex Solo turn as image files', async () => {
     const session = ensureCodexOrchestratorSession(process.cwd(), `thoughts-single-image-${Date.now()}`);
     const proc = useFakeProc();
@@ -301,6 +357,7 @@ describe('Codex orchestrator process lifecycle', () => {
 
   it('retries a missing persisted Codex rollout once as a fresh thread', async () => {
     const historyThreadId = `thoughts-stale-resume-${Date.now()}`;
+    persistRecoveryHistory(historyThreadId, 'recover me');
     writeOrchestratorBackendSessionId(historyThreadId, 'codex', 'stale-codex-thread');
     const session = ensureCodexOrchestratorSession(process.cwd(), historyThreadId);
     const staleProc = new FakeCodexProc();
@@ -310,7 +367,7 @@ describe('Codex orchestrator process lifecycle', () => {
       .mockReturnValueOnce(freshProc as unknown as ChildProcess);
     const events: OrchestratorEvent[] = [];
 
-    const turn = sendToCodexOrchestrator(session, 'recover me', (event) => events.push(event));
+    const turn = sendToCodexOrchestrator(session, 'recover me', (event) => events.push(event), { rawMessage: 'recover me' });
     await vi.waitFor(() => expect(spawnMock).toHaveBeenCalledTimes(1));
     expect(spawnMock.mock.calls[0][1]).toEqual(expect.arrayContaining([
       'exec', 'resume', 'stale-codex-thread', '--json',
@@ -324,9 +381,9 @@ describe('Codex orchestrator process lifecycle', () => {
     await vi.waitFor(() => expect(spawnMock).toHaveBeenCalledTimes(2));
     expect(spawnMock.mock.calls[1][1]).toEqual(expect.arrayContaining(['exec', '--json']));
     expect(spawnMock.mock.calls[1][1]).not.toContain('resume');
-    expect(backendSessions.has(`${historyThreadId}:codex`)).toBe(false);
+    expect(backendSessions.get(`${historyThreadId}:codex`)).toBe('stale-codex-thread');
 
-    freshProc.stdout.emit('data', Buffer.from('{"type":"thread.started","thread_id":"fresh-codex-thread"}\n'));
+    freshProc.stdout.emit('data', Buffer.from('{"type":"thread.started","thread_id":"fresh-codex-thread"}\n{"type":"turn.started"}\n'));
     freshProc.exitCode = 0;
     freshProc.emit('close', 0);
     await turn;
@@ -339,6 +396,7 @@ describe('Codex orchestrator process lifecycle', () => {
 
   it('retries a no-rollout resume response after long startup warnings as a fresh thread', async () => {
     const historyThreadId = `thoughts-no-rollout-resume-${Date.now()}`;
+    persistRecoveryHistory(historyThreadId, 'recover the production error');
     writeOrchestratorBackendSessionId(historyThreadId, 'codex', '019ffcb1-3d86-7ba3-af64-0ca2a66660e9');
     const session = ensureCodexOrchestratorSession(process.cwd(), historyThreadId);
     const staleProc = new FakeCodexProc();
@@ -348,7 +406,7 @@ describe('Codex orchestrator process lifecycle', () => {
       .mockReturnValueOnce(freshProc as unknown as ChildProcess);
     const events: OrchestratorEvent[] = [];
 
-    const turn = sendToCodexOrchestrator(session, 'recover the production error', (event) => events.push(event));
+    const turn = sendToCodexOrchestrator(session, 'recover the production error', (event) => events.push(event), { rawMessage: 'recover the production error' });
     await vi.waitFor(() => expect(spawnMock).toHaveBeenCalledTimes(1));
     staleProc.stderr.emit('data', Buffer.from(
       'WARN catalog request timed out\n'.repeat(30)
@@ -359,7 +417,7 @@ describe('Codex orchestrator process lifecycle', () => {
 
     await vi.waitFor(() => expect(spawnMock).toHaveBeenCalledTimes(2));
     expect(spawnMock.mock.calls[1][1]).not.toContain('resume');
-    freshProc.stdout.emit('data', Buffer.from('{"type":"thread.started","thread_id":"replacement-thread"}\n'));
+    freshProc.stdout.emit('data', Buffer.from('{"type":"thread.started","thread_id":"replacement-thread"}\n{"type":"turn.started"}\n'));
     freshProc.exitCode = 0;
     freshProc.emit('close', 0);
     await turn;

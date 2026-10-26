@@ -1,0 +1,15 @@
+running 1 test
+test shell::shortcuts::tests::review::correction_2::shortcuts_text_fields_pass_palette_chords ...
+thread 'shell::shortcuts::tests::review::correction_2::shortcuts_text_fields_pass_palette_chords' (310539) panicked at src/surfaces/shortcuts/correction_2_tests.rs:122:9:
+text fields pass palette, Settings and legacy tab-cycle chords: ctrl-tab
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    shell::shortcuts::tests::review::correction_2::shortcuts_text_fields_pass_palette_chords
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 99 filtered out; finished in 7.95s
+
+error: test failed, to rerun pass `--bin o8-next`

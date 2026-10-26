@@ -1,0 +1,13 @@
+Full npm test, run once before the final rebase onto current main:
+Test Files  3 failed | 1227 passed | 3 skipped (1233)
+Tests       5 failed | 8850 passed | 5 skipped (8860)
+Duration    1239.38s
+
+Three route-mock failures were fixed by preserving the default lister call shape.
+The artifact provenance failure was caused by untracked task-local toolchains
+exceeding the test's git-output buffer. A local git exclude resolved it; release
+files were not changed. All four now pass in the final focused JavaScript run.
+
+The remaining account-provider fixture failure reproduces on unchanged main
+31ccf0315ade988fae2b9af06fc7bd4847365ce1: expected one mock provisioning receipt,
+observed zero; three other tests pass. Tracked at #4633. No account code changed.

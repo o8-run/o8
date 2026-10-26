@@ -1,0 +1,4 @@
+ ✓ |hermetic-unit| src/components/desktop/CustomizePage.test.ts (11 tests) 1464ms
+ Test Files  1 passed (1)
+      Tests  11 passed (11)
+   Duration  2.60s (transform 182ms, setup 28ms, import 457ms, tests 1.46s, environment 486ms)

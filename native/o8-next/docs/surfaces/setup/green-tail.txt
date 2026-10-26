@@ -1,0 +1,8 @@
+test shell::tests::onboarding_folder_registration_error_and_cancel ... ok
+test shell::tests::onboarding_operator_auth_error_retry ... ok
+test shell::tests::onboarding_project_tools_privacy_and_workspace ... O8_NEXT_ONBOARDING_EVIDENCE {"endpoint":"headless GPUI CPU scene; no GPU/compositor","openToFirstFrameMs":94.80959999999999,"interactionToFrameMs":51.80859}
+ok
+test shell::tests::shell_palette_switch_restart_and_server_down ... O8_NEXT_SHELL_EVIDENCE {"endpoint":"GPUI TestAppContext CPU scene paint; test text system; no GPU/compositor","platform":"linux","launchToInteractiveMs":383.254055,"paletteOpenToFrameMs":[28.851721,29.275305000000003,28.156965,26.974729,29.072686,28.425315,29.201171000000002,28.764199,28.274626,27.708695,28.934452,27.547873,28.081404,27.533092,28.134811,26.585755,27.602716,28.288327,28.048398,27.210963],"workspaceSwitchMs":[40.696115,27.65369,24.693858,24.710172999999998,25.279488999999998,29.052815,23.862064,25.069437999999998,16.356738999999997,24.018283],"idleMemoryMiB":33.03515625,"workspaces":2,"restoredSurfaces":3}
+ok
+test shell::tests::shell_retains_sidebar_selection_and_view_identity ... ok
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 31 filtered out; finished in 18.49s

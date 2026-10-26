@@ -1,0 +1,51 @@
+name: o8 next Linux shell
+
+on:
+  pull_request:
+    branches: [main]
+    paths: ['native/o8-next/**', 'scripts/next/**', '.github/actions/next-linux-setup/**', '.github/workflows/next-linux.yml']
+  push:
+    branches: [main]
+    paths: ['native/o8-next/**', 'scripts/next/**', '.github/actions/next-linux-setup/**', '.github/workflows/next-linux.yml']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: next-linux-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  shell:
+    name: Linux x64 release, first frame and idle RSS
+    runs-on: ubuntu-24.04
+    timeout-minutes: 9
+    env:
+      CARGO_TERM_COLOR: never
+      LIBGL_ALWAYS_SOFTWARE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/next-linux-setup
+      - name: Build native release
+        run: cargo build --release --locked --manifest-path native/o8-next/Cargo.toml
+      - name: Warm-up and three fresh fixture hosts, native frames and budgets
+        run: |
+          export VK_ICD_FILENAMES="$(find /usr/share/vulkan/icd.d -name 'lvp_icd*.json' -print -quit)"
+          test -n "$VK_ICD_FILENAMES"
+          xvfb-run -a -s '-screen 0 1440x1024x24 -nolisten tcp -noreset -br' node scripts/next/linux-headless.mjs --output work/next-linux
+      # Compile all test-only code, then run every native CLI integration suite.
+      # The full GPUI fixture/throughput suite has recorded runs over 25 minutes;
+      # it is excluded from this nine-minute launch gate. Test after measurement
+      # so test-support features cannot replace the release binary being measured.
+      - name: Compile all native tests
+        run: cargo test --release --locked --manifest-path native/o8-next/Cargo.toml --no-run
+      - name: Run native CLI assertions
+        run: cargo test --release --locked --manifest-path native/o8-next/Cargo.toml --test shell_cli --test pane_grid_cli --test terminal_cli --test diff_cli
+      - name: Save fixture screenshots and measurements
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: o8-next-linux-x64
+          path: work/next-linux/
+          if-no-files-found: error
+          retention-days: 7
