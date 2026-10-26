@@ -1,0 +1,21 @@
+running 3 tests
+test shell::shortcuts::tests::review::correction_2::shortcuts_control_k_reaches_the_focused_grid_pty ...
+thread 'shell::shortcuts::tests::review::correction_2::shortcuts_control_k_reaches_the_focused_grid_pty' (285314) panicked at src/surfaces/shortcuts/correction_2_tests.rs:206:5:
+Cmd+K must not steal focused PTY input
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+test shell::shortcuts::tests::review::correction_2::shortcuts_every_binding_respects_the_focused_secret_field ...
+thread 'shell::shortcuts::tests::review::correction_2::shortcuts_every_binding_respects_the_focused_secret_field' (285390) panicked at src/surfaces/shortcuts/correction_2_tests.rs:107:5:
+focused Settings key field lost key ownership: ["?", "shift-/", "cmd-/", "ctrl-/", "cmd-w", "ctrl-w", "cmd-alt-left", "cmd-alt-right", "ctrl-tab", "cmd-1", "cmd-2", "cmd-3", "cmd-4", "cmd-5", "cmd-6", "cmd-7", "cmd-8", "cmd-9", "ctrl-1", "ctrl-2", "ctrl-3", "ctrl-4", "ctrl-5", "ctrl-6", "ctrl-7", "ctrl-8", "ctrl-9"]
+FAILED
+test shell::shortcuts::tests::review::correction_2::shortcuts_text_fields_pass_palette_chords ... ok
+
+failures:
+
+failures:
+    shell::shortcuts::tests::review::correction_2::shortcuts_control_k_reaches_the_focused_grid_pty
+    shell::shortcuts::tests::review::correction_2::shortcuts_every_binding_respects_the_focused_secret_field
+
+test result: FAILED. 1 passed; 2 failed; 0 ignored; 0 measured; 95 filtered out; finished in 31.51s
+
+error: test failed, to rerun pass `--bin o8-next`

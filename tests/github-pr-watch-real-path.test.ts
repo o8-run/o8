@@ -5,7 +5,7 @@ import { githubInstallationFetch } from '@/lib/github-broker/auth';
 
 const state = vi.hoisted(() => ({ installation: 8100, token: 'fixture-token', head: 'a'.repeat(40), comments: [] as Array<{ id: number; body: string; user: { login: string }; created_at: string }> }));
 vi.mock('@/lib/github-broker/env', () => ({ getGitHubAppConfig: () => null }));
-vi.mock('@/lib/github-broker/managed', () => ({ readManagedGithubToken: () => ({ installationId: state.installation, token: state.token }) }));
+vi.mock('@/lib/github-broker/managed', () => ({ readManagedGithubToken: () => ({ installationId: state.installation, token: state.token, accountLogin: 'example' }) }));
 vi.mock('@/lib/repos/registry', () => ({ listRepos: async () => [{ remoteUrl: 'https://github.com/example/watch', localPath: '/fixture/github-watch' }] }));
 vi.mock('@/lib/repos/readiness', () => ({ getCachedRepoReadiness: () => null }));
 const request = vi.fn();

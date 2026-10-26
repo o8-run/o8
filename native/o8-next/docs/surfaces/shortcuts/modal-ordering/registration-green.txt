@@ -1,0 +1,1 @@
+Surface files and one inventory line compile; shared registry and editors match the base.

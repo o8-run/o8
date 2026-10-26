@@ -72,6 +72,17 @@ impl Surface {
         surface.select(id, cx);
         surface
     }
+    pub(crate) fn shell_select(
+        &mut self,
+        sessions: Vec<Session>,
+        id: String,
+        cx: &mut Context<Self>,
+    ) {
+        self.sessions = sessions;
+        if self.selected.as_ref() != Some(&id) {
+            self.select(id, cx);
+        }
+    }
     pub(crate) fn shell_tick(&mut self, refresh: bool, cx: &mut Context<Self>) {
         self.poll_stream(cx);
         if refresh {
@@ -124,6 +135,10 @@ impl Surface {
             self.selected.clone(),
             self.composer.read(cx).focus.is_focused(window),
         )
+    }
+    #[cfg(test)]
+    pub(crate) fn shell_selected(&self) -> String {
+        self.selected.clone().unwrap()
     }
     #[cfg(test)]
     pub(crate) fn shell_ready(&self) -> bool {

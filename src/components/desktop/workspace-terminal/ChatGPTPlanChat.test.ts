@@ -4,9 +4,11 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ChatGPTPlanChat } from './ChatGPTPlanChat';
 import { WorkspaceTerminalPanels } from './WorkspaceTerminalPanels';
+import { WorkspaceLaunchPicker } from './WorkspaceLaunchPicker';
 import { WorkspaceAddTabButton } from '../shell/WorkspaceAddTabButton';
 import { buildNewChatGPTPlanTab, buildPersistedState } from './terminal-tab-handlers';
 import { useTextChatTabs } from './use-text-chat-tabs';
+import { computeRestoredTabs } from './terminal-restore';
 import { registerPlanAccountToken } from '@/lib/chatgpt-plan/client';
 import type { TerminalTab } from './types';
 import { OPEN_SETTINGS_TAB_EVENT } from '@/lib/desktop/events';
@@ -22,7 +24,8 @@ vi.mock('@lisse/react', () => ({ SmoothCorners: ({ children, style }: HTMLAttrib
 vi.mock('@/lib/pretext', async importOriginal => ({ ...await importOriginal<typeof import('@/lib/pretext')>(), usePretextHeight: () => 24 }));
 
 let planAccount: string;
-const status = () => ({ connected: true, planEnabled: true, activeId: planAccount, selection: { accountId: planAccount, generation: 1, desktopEpoch: 'fixture-epoch' }, welcomed: true, accounts: [], models: [{ id: 'fixture-model', label: 'Fixture model' }, { id: 'fixture-model-two', label: 'Second model' }], usageUrl: '' });
+let firstModelAvailable: boolean;
+const status = () => ({ connected: true, planEnabled: true, activeId: planAccount, selection: { accountId: planAccount, generation: 1, desktopEpoch: 'fixture-epoch' }, welcomed: true, accounts: [], models: [...(firstModelAvailable ? [{ id: 'fixture-model', label: 'Fixture model' }] : []), { id: 'fixture-model-two', label: 'Second model' }], usageUrl: '' });
 let root: Root; let container: HTMLDivElement; let releaseToken: () => void;
 let connected: boolean; let requestBodies: Array<Record<string, unknown>>; let requestHeaders: Headers[];
 let stream: ReadableStreamDefaultController<Uint8Array> | null;
@@ -32,7 +35,7 @@ const event = (text: string) => new TextEncoder().encode(`data: ${text}\n\n`);
 
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-  fixture.owner = 'fixture-owner-a'; fixture.signedIn = true; connected = true; planAccount = 'fixture-plan-account'; requestBodies = []; requestHeaders = []; stream = null; deferStream = false; replyText = 'O8_PLAN_OK_40';
+  fixture.owner = 'fixture-owner-a'; fixture.signedIn = true; connected = true; firstModelAvailable = true; planAccount = 'fixture-plan-account'; requestBodies = []; requestHeaders = []; stream = null; deferStream = false; replyText = 'O8_PLAN_OK_40';
   releaseToken = registerPlanAccountToken(async () => `fixture-session-${fixture.owner}`);
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
@@ -58,7 +61,7 @@ async function send() {
   await act(async () => new Promise(resolve => setTimeout(resolve, 60)));
 }
 
-async function openFromWorkspace() {
+async function openFromWorkspace(useTabPicker = false) {
   let spawned: CustomEvent | null = null;
   const persist = vi.fn();
   function Harness() {
@@ -72,11 +75,11 @@ async function openFromWorkspace() {
       return () => window.removeEventListener('o8:request-spawn-tab', listener);
     }, [handleNewChatGPTPlanTab]);
     const noop = vi.fn();
-    return createElement(Fragment, null, createElement(WorkspaceAddTabButton, { workspaceId: 'fixture-workspace' }), createElement(WorkspaceTerminalPanels, { workspaceId: 'fixture-workspace', visibleTabs: tabs, restoreSettled: true, effectiveActiveTabId: activeId, termWsConnected: false, panelRefs: { current: new Map() }, onCloseTab: noop, onRunInTerminal: noop, onOpenWorkspaceCommitTab: noop, onUpdateLlmSummary: noop, onUpdateLinkedIssue: noop, onUpdateChatMessages: noop, onUpdateChatSessionKey: noop, onUpdateChatModel: noop, onConsumeChatDraftInjection: noop, onSaveCheckpoint: noop, onRestoreLatestCheckpoint: noop, projectContextRailVisible: false, sendTerminalAttach: noop, sendTerminalInput: noop, sendTerminalResize: noop, sendTerminalVisibility: noop, sendTerminalDetach: noop }));
+    return createElement(Fragment, null, useTabPicker ? createElement(WorkspaceLaunchPicker, { onNewTab: noop, onNewLLMChatTab: noop, onNewChatGPTPlanTab: handleNewChatGPTPlanTab }) : createElement(WorkspaceAddTabButton, { workspaceId: 'fixture-workspace' }), createElement(WorkspaceTerminalPanels, { workspaceId: 'fixture-workspace', visibleTabs: tabs, restoreSettled: true, effectiveActiveTabId: activeId, termWsConnected: false, panelRefs: { current: new Map() }, onCloseTab: noop, onRunInTerminal: noop, onOpenWorkspaceCommitTab: noop, onUpdateLlmSummary: noop, onUpdateLinkedIssue: noop, onUpdateChatMessages: noop, onUpdateChatSessionKey: noop, onUpdateChatModel: noop, onConsumeChatDraftInjection: noop, onSaveCheckpoint: noop, onRestoreLatestCheckpoint: noop, projectContextRailVisible: false, sendTerminalAttach: noop, sendTerminalInput: noop, sendTerminalResize: noop, sendTerminalVisibility: noop, sendTerminalDetach: noop }));
   }
   await act(async () => root.render(createElement(Harness)));
   await act(async () => container.querySelector('button')!.click());
-  const launch = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === 'ChatGPT plan chat');
+  const launch = Array.from(document.querySelectorAll('button')).find((button) => button.textContent?.startsWith('ChatGPT plan chat'));
   expect(launch).toBeDefined();
   await act(async () => launch!.click());
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
@@ -262,4 +265,55 @@ it('closes the composer model portal when its resident pane becomes inactive', a
   await act(async () => root.render(createElement(ChatGPTPlanChat, { tabId: 'fixture-plan-tab', active: false })));
   expect(document.querySelector('[aria-label="ChatGPT models"]')).toBeNull();
   expect(requestBodies).toHaveLength(0);
+});
+
+
+it('opens from the workspace tab picker, persists through the state route, and sends after restore', async () => {
+  const persist = await openFromWorkspace(true);
+  expect(persist).toHaveBeenCalledWith(expect.objectContaining({ tabs: [expect.objectContaining({ kind: 'chatgpt-plan' })] }));
+  const { POST, GET } = await import('@/app/api/panel/terminal-state/route');
+  const url = 'http://localhost/api/panel/terminal-state?scope=fixture-plan-launch';
+  expect((await POST(new Request(url, { method: 'POST', body: JSON.stringify(persist.mock.calls[0][0]) }))).status).toBe(200);
+  const response = await GET(new Request(url));
+  expect(response.status).toBe(200);
+  const restored = await computeRestoredTabs(await response.json(), { preferredRepo: null, defaultTab: 'terminal', createDefaultChatTab: () => { throw new Error('Restore the saved plan pane'); } });
+  expect(restored?.tabs[0]).toMatchObject({ kind: 'chatgpt-plan', tmuxSession: null });
+  expect(restored?.sessionsToAttach).toEqual([]);
+  await act(async () => root.render(createElement(ChatGPTPlanChat, { tabId: restored!.activeTabId })));
+  await send();
+  expect(requestBodies).toHaveLength(1);
+  expect(requestBodies[0]).toMatchObject({ provider: 'chatgpt', planTextOnly: true, disableTools: true });
+  expect(container.querySelector('[role="log"]')?.textContent).toContain('O8_PLAN_OK_40');
+});
+
+it('keeps the draft and selected model when model discovery removes that model before send', async () => {
+  await openFromWorkspace();
+  firstModelAvailable = false;
+  await send();
+  expect(requestBodies).toHaveLength(0);
+  expect(container.querySelector('textarea')?.value).toBe('Add 17 and 23');
+  expect(container.textContent).toContain('no longer available');
+  expect(container.querySelector<HTMLButtonElement>('[aria-label="ChatGPT plan model"]')?.value).toBe('fixture-model');
+  await send();
+  expect(requestBodies).toHaveLength(0);
+});
+
+it('keeps a newer draft while the original send is rechecking its plan model', async () => {
+  const originalFetch = globalThis.fetch;
+  let statusReads = 0; let release = () => {};
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input) === '/api/panel/models/chatgpt' && init?.method !== 'POST' && ++statusReads === 2) await gate;
+    return originalFetch(input, init);
+  });
+  await mount(); await send();
+  const input = container.querySelector('textarea')!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, 'A newer draft');
+    input.dispatchEvent(new Event('input', { bubbles: true })); release();
+  });
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 60)); });
+  expect(requestBodies).toHaveLength(1);
+  expect(requestBodies[0]).toMatchObject({ messages: [{ role: 'user', content: 'Add 17 and 23' }] });
+  expect(input.value).toBe('A newer draft');
 });

@@ -38,7 +38,13 @@ pub async fn synthesize(text: &str) -> Result<Vec<u8>, String> {
         .await
         .map_err(|e| format!("edge-local request: {e}"))?;
     if !resp.status().is_success() {
-        return Err(format!("edge-local status {}", resp.status()));
+        let status = resp.status();
+        let body = resp.json::<serde_json::Value>().await.ok();
+        let code = body.as_ref().and_then(|body| body.get("code")?.as_str());
+        return Err(super::edge_voice_error::response_error(
+            status.as_str(),
+            code,
+        ));
     }
     let bytes = resp
         .bytes()

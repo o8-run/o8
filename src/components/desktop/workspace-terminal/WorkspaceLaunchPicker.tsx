@@ -16,6 +16,7 @@ interface WorkspaceLaunchPickerProps {
   scopedRepo?: RegisteredRepo | null;
   onNewTab: (agentId: string, repo?: RegisteredRepo) => void;
   onNewLLMChatTab: (repo?: RegisteredRepo) => void;
+  onNewChatGPTPlanTab?: () => void;
 }
 
 const subscribePlatform = () => () => undefined;
@@ -29,6 +30,7 @@ function WorkspaceLaunchPickerBase({
   scopedRepo,
   onNewTab,
   onNewLLMChatTab,
+  onNewChatGPTPlanTab,
 }: WorkspaceLaunchPickerProps) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const magnitudeSupported = useSyncExternalStore(subscribePlatform, browserSupportsMagnitude, () => false);
@@ -143,6 +145,17 @@ function WorkspaceLaunchPickerBase({
             <div>
               <div style={{ fontWeight: 500 }}>Orchestrator</div>
               <div style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>Fleet by default · switch mode in-tab</div>
+            </div>
+          </button>
+
+          <div style={dividerStyle} />
+          <button type="button" onClick={() => { (onNewChatGPTPlanTab ?? spawnHandlers?.spawnChatGPTPlanTab)?.(); setPickerOpen(false); }}
+            disabled={!onNewChatGPTPlanTab && !spawnHandlers?.spawnChatGPTPlanTab}
+            style={menuButtonStyle} onMouseEnter={highlightOn} onMouseLeave={resetOn}>
+            <span style={iconSlotStyle}><MessageSquare size={14} style={{ color: THEME_ACCENT }} /></span>
+            <div>
+              <div style={{ fontWeight: 300 }}>ChatGPT plan chat</div>
+              <div style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>Text with your connected plan</div>
             </div>
           </button>
 

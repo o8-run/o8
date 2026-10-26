@@ -1,11 +1,12 @@
 'use client';
 
-import { useEffect } from 'react';
+import { memo, useEffect } from 'react';
 import { getRuntimeCapability, type OrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
 import { bootstrapTranscripts } from '@/lib/transcripts/bootstrap';
 import { useTranscript } from '@/lib/transcripts/useTranscript';
 import { renderLLMMarkdown } from '@/components/desktop/LLMMarkdown';
 import { sanitizeTranscriptText } from '@/components/desktop/transcript-sanitize';
+import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import type { TerminalTab } from './types';
 
 /** A source transcript has no writable chat lifecycle, injection or runtime controls. */
@@ -42,20 +43,24 @@ export function OutsideConversationPane({ sessionKey, runtime, tab, active }: {
         </div>
       ) : null}
       <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingTop: 12, paddingRight: 16, paddingBottom: 12, paddingLeft: 16 }}>
-        {slice.messages.map(({ id, role, text, ...details }) => (
-          <article key={id} data-outside-transcript-entry={id} style={{ marginBottom: 16, overflowWrap: 'anywhere' }}>
-            <div style={{ fontSize: 11, color: 'var(--t-text-secondary)' }}>{role}</div>
-            {/* Specialized receipt renderers can supply their own mutation actions.
-                Source content uses only markdown without action callbacks. */}
-            {renderLLMMarkdown(sanitizeTranscriptText(text), { compact: true })}
-            {Object.keys(details).length > 0 ? <details>
-              <summary style={{ cursor: 'pointer', color: 'var(--t-text-secondary)', fontSize: 11 }}>Source details</summary>
-              <pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', fontSize: 11 }}>{JSON.stringify(details, null, 2)}</pre>
-            </details> : null}
-          </article>
-        ))}
+        {slice.messages.map(entry => <OutsideConversationEntry key={entry.id} entry={entry} />)}
         {slice.messages.length === 0 ? <div role="status">{slice.status === 'loading' || slice.status === 'idle' ? 'Loading transcript…' : 'No readable transcript is available yet.'}</div> : null}
       </div>
     </section>
   );
 }
+
+const OutsideConversationEntry = memo(function OutsideConversationEntry({ entry }: { entry: MobileTranscriptEntry }) {
+  const { id, role, text, ...details } = entry;
+  return (
+    <article data-outside-transcript-entry={id} style={{ marginBottom: 16, overflowWrap: 'anywhere' }}>
+      <div style={{ fontSize: 11, color: 'var(--t-text-secondary)' }}>{role}</div>
+      {/* Source markdown has no mutation callbacks. */}
+      {renderLLMMarkdown(sanitizeTranscriptText(text), { compact: true })}
+      {Object.keys(details).length > 0 ? <details>
+        <summary style={{ cursor: 'pointer', color: 'var(--t-text-secondary)', fontSize: 11 }}>Source details</summary>
+        <pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', fontSize: 11 }}>{JSON.stringify(details, null, 2)}</pre>
+      </details> : null}
+    </article>
+  );
+});

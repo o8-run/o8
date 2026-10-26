@@ -6225,10 +6225,9 @@ async function handleOrchestratorSendMsgOnce(
       }
       return;
     }
-    // Broadcast the error to EVERY subscriber on this thread, not just the
-    // origin client — a phone-started turn that throws must also release the
-    // desktop watching the same thread (it was latching forever). Fall back to
-    // the origin client only if the session name was never resolved.
+    // Accepted turns notify every subscriber. Before acceptance the origin
+    // may not yet subscribe to the selected backend, so admission failures
+    // must return directly to the client that still owns the draft.
     const errorMsg = {
       channel: 'orchestrator' as const,
       event: 'error' as const,
@@ -6243,7 +6242,7 @@ async function handleOrchestratorSendMsgOnce(
         ...orchestratorCommandAckCorrelation(correlationId),
       },
     };
-    if (sessionName) {
+    if (sessionName && commandAccepted) {
       broadcastToOrchestratorSession(sessionName, JSON.stringify(errorMsg));
     } else {
       send(client, errorMsg);
@@ -9533,7 +9532,9 @@ async function bootstrapWsServer() {
     });
   }
 
-  await waitForNextReady();
+  // Native producers use this listener. Its stateful requests await this
+  // bootstrap, so probing them here waits on ourselves until the timeout.
+  if (process.env.O8_NEXT_O8D !== '1') await waitForNextReady();
   if (shuttingDown) return;
   await terminalHostReady;
   if (shuttingDown) return;

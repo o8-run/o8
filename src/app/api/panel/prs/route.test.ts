@@ -36,7 +36,7 @@ describe('workspace pull request list entry point', () => {
     fetchPullRequestListPage.mockResolvedValue(page);
     const response = await GET(new Request(`http://localhost/api/panel/prs?view=list&state=open&page=2&sort=oldest&repoPath=${encodeURIComponent(repoPath)}`));
     expect(await response.json()).toEqual(page);
-    expect(fetchPullRequestListPage).toHaveBeenCalledWith('example/workspace', 'open', 2, expect.any(AbortSignal), 'oldest');
+    expect(fetchPullRequestListPage).toHaveBeenCalledWith('example/workspace', 'open', 2, expect.any(AbortSignal), 'oldest', false);
     expect(ensureGitHubPullRequests).not.toHaveBeenCalled();
   });
 

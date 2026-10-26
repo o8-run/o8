@@ -470,7 +470,9 @@ impl Render for Surface {
                     .min_h_0()
                     .p(px(geometry.inset))
                     .gap(px(geometry.gap))
-                    .child(self.session_sidebar(px(sidebar_width), cx))
+                    .when(!self.embedded, |view| {
+                        view.child(self.session_sidebar(px(sidebar_width), cx))
+                    })
                     .child(
                         div()
                             .debug_selector(|| "conversation-column".into())

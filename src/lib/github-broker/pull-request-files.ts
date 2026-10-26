@@ -1,6 +1,7 @@
 import 'server-only';
 import { githubInstallationFetch } from './auth';
 import type { GitHubReadPriority } from './request-budget';
+import { GitHubReadScopeChangedError } from './read-scope';
 
 export interface PullRequestFile {
   filename: string; previous_filename?: string; additions?: number; deletions?: number; status?: string; patch?: string;
@@ -13,8 +14,8 @@ export function readPullRequestFiles(repo: string, number: number, installationI
   const existing = key ? entries.get(key) : undefined;
   if (existing && Date.now() - existing.at < 60_000) return existing.promise;
   const promise = githubInstallationFetch(repo, `/repos/${repo}/pulls/${number}/files?per_page=100`, { signal: AbortSignal.timeout(18_000) }, { priority })
-    .then(async ({ response, scope, installation }) => {
-      if ((authorizedScope && scope !== authorizedScope) || (installationId && installation?.id !== installationId)) { void response.body?.cancel().catch(() => {}); throw new Error('GitHub authorization changed while reading pull request files. Retry.'); }
+    .then(async ({ response, scope, installation, anonymous }) => {
+      if ((authorizedScope && scope !== authorizedScope) || (installationId && installation?.id !== installationId)) { void response.body?.cancel().catch(() => {}); throw new GitHubReadScopeChangedError('GitHub authorization changed while reading pull request files. Retry.', anonymous); }
       if (!response.ok) throw new Error(`Pull request changes could not be read (${response.status}). Retry.`);
       return response.json() as Promise<PullRequestFile[]>;
     });

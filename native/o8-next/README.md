@@ -1,5 +1,7 @@
 # o8 next: live sessions, composer and opt-in terminal
 
+[Parity harness and measured checklist](../../docs/internals/o8-next-parity.md): paired native/current-UI captures, layout gaps and remaining acceptance.
+
 [Current UI parity and Linux CI budgets](PARITY.md): surface states, remaining gaps and the headless release workload.
 
 [Per-surface port documentation](docs/surfaces/): registration contracts and rebase steps. Add each port's documentation there.
