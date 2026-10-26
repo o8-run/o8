@@ -57,6 +57,8 @@ jobs:
           path: tsconfig.tsbuildinfo
           key: ${{ runner.os }}-node22-typecheck-v1-${{ hashFiles('package-lock.json', 'tsconfig.json') }}-${{ github.sha }}
           restore-keys: ${{ runner.os }}-node22-typecheck-v1-${{ hashFiles('package-lock.json', 'tsconfig.json') }}-
+      - name: Verify local check coverage
+        run: node scripts/ci/check-verify-ci.mjs
       - run: npm run protocol:check
       - name: Measure fast typecheck with its own heap budget
         run: /usr/bin/time -f 'typecheck:fast wall=%e s peak_rss=%M KiB' npm run typecheck:fast
@@ -161,7 +163,8 @@ jobs:
       # broke every PR + main). One npm version everywhere.
       - run: npm install -g "$(node -p 'require("./package.json").packageManager')"
       - run: npm ci --prefer-offline
-      - if: matrix.shard == 1
+      - name: Test Classification
+        if: matrix.shard == 1
         run: npm run test:classification:check
       - if: matrix.shard == 1
         run: node scripts/ci/check-hermetic-shards.mjs
@@ -324,9 +327,8 @@ jobs:
             scripts/ci/weekly-integration-issue.sh open "No scheduled run since $since passed all six weekly shards. The Sunday cron was dropped, failed, or timed out."
           fi
 
-  # Launch posture: surface high-severity dependency findings without making
-  # the first OSS PRs unmergeable. Remove continue-on-error once the remaining
-  # semver-major advisories have been adjudicated.
+  # Credential-free audit failures block here and in verify:ci so both
+  # entry points report the same result.
   security:
     name: Security Audit
     if: github.event.schedule != '41 13 * * 1'
@@ -353,7 +355,6 @@ jobs:
       - run: npm install -g "$(node -p 'require("./package.json").packageManager')"
       - name: Audit root dependencies
         run: npm audit --audit-level=high
-        continue-on-error: true
       - name: Audit Rust dependencies
         uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2.0.0
         with:

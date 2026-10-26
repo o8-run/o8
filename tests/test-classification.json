@@ -6685,6 +6685,15 @@
       ]
     },
     {
+      "path": "tests/verify-ci-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "native-build",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/visual-inspection-real-path.test.ts",
       "reasons": [
         "real-path"
