@@ -1467,6 +1467,7 @@
     {
       "path": "tests/acp-launch-environment-real-path.test.ts",
       "reasons": [
+        "child-process",
         "real-path"
       ]
     },

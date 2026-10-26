@@ -21,12 +21,20 @@ vi.mock('@/lib/data-dir-migration', () => ({ getDataDir: () => fixture.dir }));
 vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: vi.fn(async () => {}) }));
 vi.mock('@/lib/runtimes/shared/auth-detect', () => ({ invalidateRuntimeAuthCache: vi.fn() }));
 vi.mock('@/lib/mcp/tool-spine/build', () => ({ buildToolRegistry: () => { throw new Error('No fixture tools'); } }));
-vi.mock('@/lib/providers/child-process', async original => ({ ...await original<typeof import('@/lib/providers/child-process')>(),
-  execKeychainCommand: () => { throw Object.assign(new Error('Fixture Keychain entry absent'), { status: 44 }); },
-}));
+// Keep application process wrappers real across the cache-cold module reset.
+vi.mock('node:child_process', async original => {
+  const childProcess = await original<typeof import('node:child_process')>();
+  return { ...childProcess, execFileSync: (file: string, ...args: unknown[]) => {
+    if (file === '/usr/bin/security') throw Object.assign(new Error('Fixture Keychain entry absent'), { status: 44 });
+    return Reflect.apply(childProcess.execFileSync, childProcess, [file, ...args]);
+  } };
+});
 fixture.dir = mkdtempSync(join(tmpdir(), 'o8-acp-environment-'));
 vi.stubEnv('O8_MASTER_KEY', Buffer.alloc(32, 7).toString('base64url'));
 vi.stubEnv('O8_ACP_COMMAND', '');
+vi.stubEnv('O8_WORKER_ENV_INHERIT', '');
+vi.stubEnv('O8_WORKER_ENV_ALLOW', '');
+// ACP_REGION is outside the ambient allowlist; only saved connection overrides may supply it.
 vi.stubEnv('ACP_REGION', 'ambient');
 vi.stubEnv('OPENROUTER_API_KEY', '');
 const { GET, POST } = await import('@/app/api/runtime/acp-connection/route');
@@ -115,11 +123,11 @@ it('saves masked connection secrets and refreshes only new selected ACP processe
   expect(await turn('resident')).toEqual({ region: 'first', token: tokenDigest('synthetic-connection-secret') });
   expect(await turn('new')).toEqual({ region: 'second', token: tokenDigest('synthetic-connection-secret') });
   const other = makeAcpBackend({ id: 'opencode', label: 'Other fixture', resolveLaunch: () => connection });
-  expect(await turn('other', other)).toEqual({ region: 'ambient', token: null });
+  expect(await turn('other', other)).toStrictEqual({ token: null });
   expect((await save([], initial)).status).toBe(409);
   expect((await save([])).status).toBe(200);
   expect((await inventory()).variables).toEqual([]);
-  expect(await turn('removed')).toEqual({ region: 'ambient', token: null });
+  expect(await turn('removed')).toStrictEqual({ token: null });
 });
 
 it('binds edits to the current connection and preserves secrets on unavailable encryption', async () => {
@@ -128,11 +136,11 @@ it('binds edits to the current connection and preserves secrets on unavailable e
   vi.stubEnv('O8_MASTER_KEY', 'invalid');
   expect((await save([{ name: 'ACP_TOKEN', secret: true, value: 'synthetic-replacement' }])).status).toBe(400);
   vi.stubEnv('O8_MASTER_KEY', Buffer.alloc(32, 7).toString('base64url'));
-  expect(await turn('after-failed-save')).toEqual({ region: 'ambient', token: tokenDigest('synthetic-retained-secret') });
+  expect(await turn('after-failed-save')).toStrictEqual({ token: tokenDigest('synthetic-retained-secret') });
   expect((await POST(request({ connection: { ...connection, args: [peer, 'another-connection'] } }))).status).toBe(200);
   expect((await save([], binding)).status).toBe(409);
   expect((await inventory()).variables).toEqual([]);
-  expect(await turn('different-connection')).toEqual({ region: 'ambient', token: null });
+  expect(await turn('different-connection')).toStrictEqual({ token: null });
   const savedBinding = await inventory();
   vi.stubEnv('O8_ACP_COMMAND', process.execPath);
   expect((await save([], savedBinding)).status).toBe(409);
