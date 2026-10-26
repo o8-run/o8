@@ -3,7 +3,10 @@
 Tracked by #4511. Base: `d73cca9a2d6ed88f4c6804f642265ce75833c57a`.
 The baseline executable was built from this base. Every distinct command entry
 in its root help was invoked with --help; these calls require no live server.
-The table below records the returned exit code and explicit call guidance.
+The table below records the returned exit code and the presence of literal
+Required:, Defaults:, and Example: sections. Inline usage and hints can provide
+some of this information without these labels. The ten repaired commands also
+received a semantic review against their parsers; remaining commands need that review.
 
 ## Findings and changes
 
@@ -45,7 +48,7 @@ Live native actions and destructive commands were not exercised.
 
 ## Baseline command inventory
 
-| Command help | Exit | Required arguments named | Defaults named | Typical example |
+| Command help | Exit | Required: section | Defaults: section | Example: section |
 | --- | --- | --- | --- | --- |
 | `o8 chat --help` | 0 | missing | missing | missing |
 | `o8 version --help` | 0 | missing | missing | missing |
