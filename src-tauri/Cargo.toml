@@ -221,6 +221,13 @@ tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 # which this dependency does not enable.
 [target.'cfg(target_os = "linux")'.dependencies]
 o8-linux-voice = { path = "../crates/o8-linux-voice" }
+# ── Linux Secret Service (item 13 of the Linux gap list) ──
+# Voice-provider keys use the freedesktop Secret Service (GNOME Keyring,
+# KWallet's Secret Service bridge, KeePassXC) when one is running, and keep the
+# 0600 `dictation.json` fallback otherwise. `sync-secret-service` rides the
+# `dbus`/`libdbus-sys` crates that are already in the Linux lock graph;
+# `crypto-rust` encrypts the D-Bus session without pulling in OpenSSL.
+keyring = { version = "3.6", features = ["sync-secret-service", "crypto-rust"] }
 
 # ── System-wide Symon fold: paste + global Fn hotkey (macOS only) ──
 # Versions pinned to aqua/Symon's exact stack so the lifted `paste.rs` +
