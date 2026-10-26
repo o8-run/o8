@@ -9,7 +9,12 @@ import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 import { pathWithNodeRuntime } from '@/lib/util/node-on-path';
 import { codexServiceTierOptions, isOrchestratorServiceTier, type OrchestratorServiceTier, type ServiceTierOption } from '@/lib/orchestrator/service-tier';
 
-export interface CodexSpeedCatalogue { models: Record<string, ServiceTierOption[]>; configuredTier?: OrchestratorServiceTier }
+export interface CodexSpeedCatalogue {
+  models: Record<string, ServiceTierOption[]>;
+  /** Complete model/list effort choices; null means the capability was not reported. */
+  reasoningEfforts?: Record<string, string[] | null>;
+  configuredTier?: OrchestratorServiceTier;
+}
 let cache: { key: string; at: number; promise: Promise<CodexSpeedCatalogue> } | null = null;
 
 /** Read-only model/list and config/read; never creates a thread or a provider turn. */
@@ -56,7 +61,15 @@ export function readCodexSpeedCatalogue(binary: string, env: NodeJS.ProcessEnv, 
           send(2, 'model/list', { includeHidden: false }); send(3, 'config/read', { includeLayers: false });
         } else if (reply.id === 2) {
           if (reply.error || !Array.isArray(reply.result?.data)) { finish(new Error('Codex did not return a model catalogue.')); return; }
-          catalogue = { models: Object.fromEntries(reply.result.data.flatMap((model: { model?: unknown; serviceTiers?: unknown; additionalSpeedTiers?: unknown }) => typeof model.model === 'string' ? [[model.model, codexServiceTierOptions(model)]] : [])) };
+          const models = reply.result.data as Array<{ model?: unknown; serviceTiers?: unknown; additionalSpeedTiers?: unknown; supportedReasoningEfforts?: unknown }>;
+          catalogue = {
+            models: Object.fromEntries(models.flatMap(model => typeof model.model === 'string' ? [[model.model, codexServiceTierOptions(model)]] : [])),
+            reasoningEfforts: Object.fromEntries(models.flatMap(model => typeof model.model === 'string' ? [[model.model,
+              Array.isArray(model.supportedReasoningEfforts)
+                ? model.supportedReasoningEfforts.flatMap(option => option && typeof option.reasoningEffort === 'string' ? [option.reasoningEffort] : [])
+                : null,
+            ]] : [])),
+          };
         } else if (reply.id === 3) {
           configDone = true;
           const tier = reply.result?.config?.service_tier;
