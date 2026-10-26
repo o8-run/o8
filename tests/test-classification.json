@@ -6555,6 +6555,13 @@
       ]
     },
     {
+      "path": "tests/terminal-split-resize-real-path.test.ts",
+      "reasons": [
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/terminal-state-worktree-restore-real-path.test.ts",
       "reasons": [
         "child-process",
