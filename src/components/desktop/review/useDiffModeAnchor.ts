@@ -3,16 +3,61 @@ import type { DiffMode } from './panel/types';
 
 type Anchor = { path: string; line: string | null; offset: number };
 
+function anchorLine(row: HTMLElement, key: string): HTMLElement | undefined {
+  const lines = [...row.querySelectorAll<HTMLElement>('[data-review-line]')];
+  const exact = lines.find(node => node.getAttribute('data-review-line') === key);
+  if (exact) return exact;
+  const source = /^([LR]):(\d+)$/.exec(key);
+  if (!source) return undefined;
+  let nearest: HTMLElement | undefined;
+  let distance = Infinity;
+  for (const line of lines) {
+    const candidate = /^([LR]):(\d+)$/.exec(line.getAttribute('data-review-line') ?? '');
+    if (!candidate || candidate[1] !== source[1]) continue;
+    const delta = Math.abs(Number(candidate[2]) - Number(source[2]));
+    if (delta < distance) { nearest = line; distance = delta; }
+  }
+  return nearest;
+}
+
 /** Preserve a source line across renderer replacement and wrapped-line reflow. */
 export function useDiffModeAnchor(mode: DiffMode, rows: RefObject<Map<string, HTMLDivElement>>) {
   const pending = useRef<Anchor | null>(null);
+  const retained = useRef<Anchor | null>(null);
+  const reading = useRef<{ scroll: HTMLElement; top: number; width: number; height: number } | null>(null);
   const cancel = useRef<(() => void) | null>(null);
+  const reader = useRef<{ scroll: HTMLElement; dispose: () => void } | null>(null);
+  useLayoutEffect(() => () => { reader.current?.dispose(); }, []);
   const capture = () => {
     cancel.current?.();
     pending.current = null;
+    const original = retained.current;
+    retained.current = null;
     // File rows are siblings inside the changed-file scroller.
     const scroll = rows.current.values().next().value?.parentElement;
     if (!scroll) return;
+    if (reader.current?.scroll !== scroll) {
+      reader.current?.dispose();
+      const interrupt = () => {
+        retained.current = null;
+        reading.current = null;
+        cancel.current?.();
+      };
+      const events = ['wheel', 'touchstart', 'pointerdown', 'keydown'];
+      for (const event of events) scroll.addEventListener(event, interrupt, { passive: true });
+      reader.current = { scroll, dispose: () => {
+        for (const event of events) scroll.removeEventListener(event, interrupt);
+      } };
+    }
+    const position = reading.current;
+    if (original && rows.current.has(original.path) && position?.scroll === scroll
+      && (Math.abs(scroll.scrollTop - position.top) < 1
+        || scroll.clientWidth !== position.width || scroll.clientHeight !== position.height)) {
+      pending.current = original;
+      retained.current = original;
+      return;
+    }
+    reading.current = { scroll, top: scroll.scrollTop, width: scroll.clientWidth, height: scroll.clientHeight };
     const viewport = scroll.getBoundingClientRect();
     const ordered = [...rows.current].map(([path, row]) => ({ path, row, box: row.getBoundingClientRect() }))
       .sort((a, b) => a.box.top - b.box.top);
@@ -25,6 +70,7 @@ export function useDiffModeAnchor(mode: DiffMode, rows: RefObject<Map<string, HT
         }) : undefined;
       pending.current = { path, line: line?.getAttribute('data-review-line') ?? null,
         offset: (line ?? row).getBoundingClientRect().top - viewport.top };
+      retained.current = pending.current;
       break;
     }
   };
@@ -40,9 +86,9 @@ export function useDiffModeAnchor(mode: DiffMode, rows: RefObject<Map<string, HT
       if (!active) return;
       const row = rows.current.get(anchor.path);
       if (!row) return;
-      const line = anchor.line === null ? null : [...row.querySelectorAll<HTMLElement>('[data-review-line]')]
-        .find(node => node.getAttribute('data-review-line') === anchor.line);
+      const line = anchor.line === null ? null : anchorLine(row, anchor.line);
       scroll.scrollTop += (line ?? row).getBoundingClientRect().top - scroll.getBoundingClientRect().top - anchor.offset;
+      reading.current = { scroll, top: scroll.scrollTop, width: scroll.clientWidth, height: scroll.clientHeight };
     };
     restore();
     // Observe row sizes while font metrics and wrapping settle, then relinquish control.
@@ -54,11 +100,9 @@ export function useDiffModeAnchor(mode: DiffMode, rows: RefObject<Map<string, HT
       observer?.disconnect();
       cancelAnimationFrame(frame);
       clearTimeout(timeout);
-      for (const event of ['wheel', 'touchstart', 'pointerdown', 'keydown']) scroll.removeEventListener(event, stop);
       if (cancel.current === stop) cancel.current = null;
     };
     const timeout = setTimeout(stop, 500);
-    for (const event of ['wheel', 'touchstart', 'pointerdown', 'keydown']) scroll.addEventListener(event, stop, { passive: true });
     cancel.current = stop;
     return stop;
   }, [mode, rows]);

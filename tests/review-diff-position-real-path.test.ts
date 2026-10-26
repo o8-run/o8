@@ -11,16 +11,17 @@ import { ReviewPanel } from '@/components/desktop/review/ReviewPanel';
 const files = Array.from({ length: 18 }, (_, index) => ({
   path: 'file-' + index + '.txt', status: 'modified', additions: 44, deletions: 40,
 }));
-const patch = path => [0, 1, 2, 3].map(hunk => {
+const patch = (path, hideWhitespace) => [0, 1, 2, 3].map(hunk => {
   const start = 1 + hunk * 30;
-  return '@@ -' + start + ',11 +' + start + ',12 @@\\n anchor-' + path + '-' + hunk + '\\n'
+  const additions = hideWhitespace && path === 'file-12.txt' && hunk === 2 ? 8 : 11;
+  return '@@ -' + start + ',11 +' + start + ',' + (additions + 1) + ' @@\\n anchor-' + path + '-' + hunk + '\\n'
     + Array.from({ length: 10 }, (_, line) => '-old-' + path + '-' + hunk + '-' + line + ' ' + 'old text '.repeat(28)).join('\\n') + '\\n'
-    + Array.from({ length: 11 }, (_, line) => '+new-' + path + '-' + hunk + '-' + line + ' ' + 'new text '.repeat(28)).join('\\n');
+    + Array.from({ length: additions }, (_, line) => '+new-' + path + '-' + hunk + '-' + line + ' ' + 'new text '.repeat(28)).join('\\n');
 }).join('\\n');
 window.fetch = async input => String(input).includes('/api/review/workspace?')
   ? Response.json({ changedFiles: files, branch: 'main' })
   : String(input).includes('/api/panel/file-diff?')
-    ? Response.json({ diff: patch(new URL(String(input), 'http://fixture.invalid').searchParams.get('path')) })
+    ? Response.json({ diff: patch(new URL(String(input), 'http://fixture.invalid').searchParams.get('path'), String(input).includes('ignoreWhitespace=1')) })
     : Response.json({ ok: false, artifacts: [], filePaths: [] });
 createRoot(document.getElementById('root')).render(createElement(ReviewPanel, { repoPath: '/fixture/repo' }));
 `;
@@ -82,5 +83,122 @@ it.each([{ label: 'normal', width: 440, height: 600 }, { label: 'maximized', wid
       expect((await fileRow().textContent())?.replace(/\s/g, '')).toContain('new-file-12.txt-2-10');
     }
     expect(await fileRow().textContent()).toBe(contents);
+  } finally { await page.close(); }
+}, 60_000);
+
+it.each([{ label: 'normal', width: 440, height: 600 }, { label: 'maximized', width: 1280, height: 850 }]
+  .flatMap(panel => ['R:70', 'L:70'].map(anchor => ({ ...panel, anchor }))))
+('keeps the original $anchor side and line through repeated round trips in $label Review', async ({ label, width, height, anchor }) => {
+  page = await browser.newPage({ viewport: { width, height } });
+  try {
+    await page.setContent('<html><body style="margin:0"><div id="root" style="width:100vw;height:100vh"></div></body></html>');
+    await page.addScriptTag({ content: bundle });
+    await page.locator('button[title="file-12.txt"][aria-expanded]').waitFor();
+    await page.locator('button[title="View options"]').click();
+    await page.getByRole('menuitem', { name: 'Expand all' }).click();
+    const inspected = () => fileRow().locator(`[data-review-line="${anchor}"]`);
+    await inspected().waitFor();
+    await inspected().evaluate(node => {
+      let scroll = node.parentElement;
+      while (scroll && getComputedStyle(scroll).overflowY !== 'auto') scroll = scroll.parentElement;
+      if (!scroll) throw new Error('Review scroller missing');
+      scroll.scrollTop += node.getBoundingClientRect().top - scroll.getBoundingClientRect().top + 3;
+    });
+    await settle();
+    const before = await inspected().boundingBox();
+    if (!before) throw new Error('Inspected addition missing');
+    for (let round = 0; round < 3; round += 1) {
+      for (const mode of ['split', 'unified']) {
+        await page.locator(`button[title="Switch to ${mode} diff"]`).click();
+        await settle();
+        if (round === 0 && mode === 'split') await page.waitForTimeout(550);
+        const after = await inspected().boundingBox();
+        console.info('review-round-trip', JSON.stringify({ panel: label, round, mode, anchor, before: before.y, after: after?.y }));
+        expect(after?.y).toBeGreaterThanOrEqual(before.y - 2);
+        expect(after?.y).toBeLessThanOrEqual(before.y + 2);
+      }
+    }
+    await page.waitForTimeout(550);
+    const next = () => fileRow().locator(`[data-review-line="${anchor[0]}:95"]`);
+    await next().evaluate(node => {
+      let scroll = node.parentElement;
+      while (scroll && getComputedStyle(scroll).overflowY !== 'auto') scroll = scroll.parentElement;
+      if (!scroll) throw new Error('Review scroller missing');
+      scroll.scrollTop += node.getBoundingClientRect().top - scroll.getBoundingClientRect().top + 3;
+    });
+    await settle();
+    const moved = await next().boundingBox();
+    if (!moved) throw new Error('New reading position missing');
+    for (const mode of ['split', 'unified']) {
+      await page.locator(`button[title="Switch to ${mode} diff"]`).click();
+      await settle();
+      const after = await next().boundingBox();
+      expect(after?.y).toBeGreaterThanOrEqual(moved.y - 2);
+      expect(after?.y).toBeLessThanOrEqual(moved.y + 2);
+    }
+    await page.waitForTimeout(550);
+    await page.setViewportSize({ width: width + 24, height });
+    await inspected().evaluate(node => {
+      let scroll = node.parentElement;
+      while (scroll && getComputedStyle(scroll).overflowY !== 'auto') scroll = scroll.parentElement;
+      if (!scroll) throw new Error('Review scroller missing');
+      scroll.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -100 }));
+      scroll.scrollTop += node.getBoundingClientRect().top - scroll.getBoundingClientRect().top + 3;
+    });
+    await settle();
+    const wheeled = await inspected().boundingBox();
+    if (!wheeled) throw new Error('Wheel reading position missing');
+    for (const mode of ['split', 'unified']) {
+      await page.locator(`button[title="Switch to ${mode} diff"]`).click();
+      await settle();
+      const after = await inspected().boundingBox();
+      expect(after?.y).toBeGreaterThanOrEqual(wheeled.y - 2);
+      expect(after?.y).toBeLessThanOrEqual(wheeled.y + 2);
+    }
+  } finally { await page.close(); }
+}, 60_000);
+
+it('uses the nearest line on the original side only while the exact addition is absent', async () => {
+  page = await browser.newPage({ viewport: { width: 440, height: 600 } });
+  try {
+    await page.setContent('<html><body style="margin:0"><div id="root" style="width:100vw;height:100vh"></div></body></html>');
+    await page.addScriptTag({ content: bundle });
+    await page.locator('button[title="file-12.txt"][aria-expanded]').waitFor();
+    await page.locator('button[title="View options"]').click();
+    await page.getByRole('menuitem', { name: 'Expand all' }).click();
+    const line = (key: string) => fileRow().locator(`[data-review-line="${key}"]`);
+    await line('R:70').waitFor();
+    await line('R:70').evaluate(node => {
+      let scroll = node.parentElement;
+      while (scroll && getComputedStyle(scroll).overflowY !== 'auto') scroll = scroll.parentElement;
+      if (!scroll) throw new Error('Review scroller missing');
+      scroll.scrollTop += node.getBoundingClientRect().top - scroll.getBoundingClientRect().top + 3;
+    });
+    await settle();
+    const before = await line('R:70').boundingBox();
+    if (!before) throw new Error('Inspected addition missing');
+    await page.locator('button[title="Switch to split diff"]').click();
+    await settle();
+    await page.locator('button[title="View options"]').click();
+    await page.getByRole('menuitem', { name: 'Hide whitespace' }).click();
+    await line('R:69').waitFor();
+    await settle();
+    expect(await line('R:70').count()).toBe(0);
+    expect(await line('L:70').count()).toBe(1);
+    for (const mode of ['unified', 'split']) {
+      await page.locator(`button[title="Switch to ${mode} diff"]`).click();
+      await settle();
+      const fallback = await line('R:69').boundingBox();
+      expect(fallback?.y).toBeGreaterThanOrEqual(before.y - 2);
+      expect(fallback?.y).toBeLessThanOrEqual(before.y + 2);
+    }
+    await page.locator('button[title="View options"]').click();
+    await page.getByRole('menuitem', { name: 'Hide whitespace' }).click();
+    await line('R:70').waitFor();
+    await page.locator('button[title="Switch to unified diff"]').click();
+    await settle();
+    const exact = await line('R:70').boundingBox();
+    expect(exact?.y).toBeGreaterThanOrEqual(before.y - 2);
+    expect(exact?.y).toBeLessThanOrEqual(before.y + 2);
   } finally { await page.close(); }
 }, 60_000);
