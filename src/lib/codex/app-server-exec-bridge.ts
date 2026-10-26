@@ -224,7 +224,9 @@ async function main(): Promise<void> {
   process.on('SIGINT', stop);
 
   const run = async () => {
-    await call('initialize', { clientInfo: { name: 'o8', title: 'o8', version: '1' } });
+    await call('initialize', { clientInfo: { name: 'o8', title: 'o8', version: '1' },
+      ...(spec.turnDeveloperInstructions !== undefined ? { capabilities: { experimentalApi: true } } : {}),
+    });
     send({ method: 'initialized' });
     const threadParams: Json = {
       cwd: spec.cwd,
@@ -256,6 +258,16 @@ async function main(): Promise<void> {
       threadId,
       input,
       effort: spec.effort,
+      // Resume-time thread instructions do not reach the next model request.
+      // Collaboration settings carry untruncated developer context per turn,
+      // including after compaction, while history retains only spec.message.
+      ...(spec.turnDeveloperInstructions !== undefined ? {
+        collaborationMode: {
+          mode: asObject(started.collaborationMode)?.mode === 'plan' ? 'plan' : 'default',
+          settings: { model: spec.model, reasoning_effort: spec.effort,
+            developer_instructions: spec.turnDeveloperInstructions },
+        },
+      } : {}),
       ...(spec.serviceTier ? { serviceTier: spec.serviceTier } : {}),
     });
     turnId = text(asObject(turn.turn)?.id) || null;

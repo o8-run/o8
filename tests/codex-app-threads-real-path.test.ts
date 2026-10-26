@@ -11,6 +11,7 @@ import { withOrchestratorTurnReceiptContext } from '@/lib/orchestrator/turn-rece
 import { applyOrchestrationMode } from '@/lib/lane/orchestrator-backends/orchestration-mode';
 import { withOperatingAgreement } from '@/lib/operator/operating-agreement';
 import { writePersistedLlmChat } from '@/lib/llm/chat-history-store';
+import { probeAppBridgeWire } from './fixtures/app-bridge-wire-probe';
 
 // #3573. Only the Codex executable and unrelated prewarm/readiness calls are
 // stubbed. The setting store, session, bridge process, spec file and argv are real.
@@ -80,7 +81,8 @@ process.stdin.on('data', (chunk) => {
         send({ id: message.id, error: { code: -32600, message: 'no rollout found for thread id ' + message.params.threadId } });
       } else {
         thread = message.params.threadId;
-        send({ id: message.id, result: { thread: { id: thread, source: 'vscode' } } });
+        send({ id: message.id, result: { thread: { id: thread, source: 'vscode' },
+          collaborationMode: { mode: existsSync(join(process.cwd(), 'native-plan')) ? 'plan' : 'default' } } });
       }
     }
     if (message.method === 'turn/start') {
@@ -137,6 +139,31 @@ afterAll(() => {
 });
 
 describe.skipIf(process.platform === 'win32')('Codex orchestrator chats in the Codex app (#3573)', () => {
+  it.skipIf(!process.env.O8_CODEX_WIRE_TEST_BIN)('delivers complete current-turn context through the real CLI across cold resume and compaction (#3629)', async () => {
+    const result = await probeAppBridgeWire(process.env.O8_CODEX_WIRE_TEST_BIN!, root);
+    const control = JSON.stringify((result.captured.find(entry => entry.phase === 'control-resumed')!.body.input as Array<{ role: string }>)
+      .filter(item => item.role === 'developer'));
+    expect(control).toContain('RECEIPT_control-first');
+    expect(control).not.toContain('RECEIPT_control-resumed');
+    for (const [phase, context] of Object.entries(result.contexts)) {
+      const requests = result.captured.filter(entry => entry.phase === phase);
+      expect(requests.length).toBeGreaterThan(0);
+      const last = requests.at(-1)!.body;
+      const input = last.input as Array<{ role: string; content: unknown }>;
+      const developer = JSON.stringify(input.filter(item => item.role === 'developer'));
+      for (const marker of [`OWNER_${phase}`, `PROJECT_${phase}`, `MIDDLE_${phase}`, `MODE_${phase}`, `RECEIPT_${phase}`]) {
+        expect.soft(developer).toContain(marker);
+      }
+      expect.soft(developer).toContain(context.replaceAll('\n', '\\n'));
+    }
+    const history = result.history.thread as { turns: Array<{ items: Array<{ type: string; content?: unknown }> }> };
+    const items = history.turns.flatMap(turn => turn.items);
+    expect(items.filter(item => item.type === 'userMessage').map(item => item.content))
+      .toEqual(Object.values(result.messages).map(text => [{ type: 'text', text, text_elements: [] }]));
+    expect(items.filter(item => item.type === 'contextCompaction').length).toBeGreaterThanOrEqual(2);
+    expect(result.captured.filter(entry => entry.phase === 'midturn').length).toBeGreaterThanOrEqual(3);
+  }, 120_000);
+
   it('keeps the private codex exec path while the setting is off', async () => {
     const cwd = repo('setting-off');
     const start = calls().length;
@@ -194,7 +221,7 @@ describe.skipIf(process.platform === 'win32')('Codex orchestrator chats in the C
     expect(state!.threadId).toBe(getCodexOrchestratorSession(cwd, 'thoughts-codex-app-recorded')!.threadId);
   }, 60_000);
 
-  it.each(['fleet', 'fusion'] as const)('keeps only operator text visible with every wrapper in developer instructions (%s, #3629)', async (orchestrationMode) => {
+  it.each(['fleet', 'fusion'] as const)('keeps operator text visible and refreshes every wrapper through turn instructions (%s, #3629)', async (orchestrationMode) => {
     await updateOperatorDefaults({ codexAppThreads: true });
     const cwd = repo(`raw-operator-${orchestrationMode}`);
     const agreementPath = join(getDataDir(), 'OPERATING_AGREEMENT.md');
@@ -228,8 +255,12 @@ describe.skipIf(process.platform === 'win32')('Codex orchestrator chats in the C
         const made = since(start);
         const thread = made.find((call) => call.method === (index === 0 ? 'thread/start' : 'thread/resume'))!;
         const turnStart = made.find((call) => call.method === 'turn/start')!;
+        expect(made.find(call => call.method === 'initialize')!.params!.capabilities).toEqual({ experimentalApi: true });
         expect.soft(turnStart.params!.input).toEqual([{ type: 'text', text: operatorMessage, text_elements: [] }]);
-        expect.soft(thread.params!.developerInstructions).toBe(expectedPrompt);
+        expect.soft(thread.params!.developerInstructions).toBeUndefined();
+        expect.soft(turnStart.params!.collaborationMode).toMatchObject({
+          mode: 'default', settings: { developer_instructions: expectedPrompt },
+        });
       }
     } finally {
       rmSync(agreementPath, { force: true });
@@ -246,6 +277,19 @@ describe.skipIf(process.platform === 'win32')('Codex orchestrator chats in the C
       .toEqual([{ type: 'text', text: continuation, text_elements: [] }]);
     expect(made.find((call) => call.method === 'thread/start')!.params!.developerInstructions)
       .toBe(buildCodexOrchestratorPrompt(cwd, '').split('\n\n## USER MESSAGE\n\n')[0]);
+  }, 60_000);
+
+  it('preserves a resumed native plan mode while refreshing turn context (#3629)', async () => {
+    await updateOperatorDefaults({ codexAppThreads: true });
+    const cwd = repo('resume-native-plan');
+    await turn(cwd, 'First', { rawMessage: 'First' });
+    writeFileSync(join(cwd, 'native-plan'), 'plan');
+    const start = calls().length;
+    await turn(cwd, 'Plan this change', { rawMessage: 'Plan this change', permissionMode: 'plan' });
+    const made = since(start);
+    expect(made.find(call => call.method === 'thread/resume')!.params!.sandbox).toBe('read-only');
+    expect(made.find(call => call.method === 'turn/start')!.params!.collaborationMode)
+      .toMatchObject({ mode: 'plan', settings: { developer_instructions: expect.stringContaining('Plan this change') } });
   }, 60_000);
 
   it('starts a fresh Codex app thread when the saved one is gone', async () => {
@@ -265,9 +309,10 @@ describe.skipIf(process.platform === 'win32')('Codex orchestrator chats in the C
     expect(methods.indexOf('thread/start')).toBeGreaterThan(methods.indexOf('thread/resume'));
     expect(events.filter((event) => event.type === 'error')).toEqual([]);
     expect(events).toContainEqual({ type: 'text', text: 'Answer from the Codex app thread' });
-    const recovered = since(start).find(call => call.method === 'thread/start')!;
-    expect(recovered.params!.developerInstructions).toContain('widget-731');
-    expect(recovered.params!.developerInstructions).toContain('copper');
+    const recovered = since(start).find(call => call.method === 'turn/start')!;
+    const settings = (recovered.params!.collaborationMode as { settings: { developer_instructions: string } } | undefined)?.settings;
+    expect(settings?.developer_instructions).toContain('widget-731');
+    expect(settings?.developer_instructions).toContain('copper');
     expect(since(start).find(call => call.method === 'turn/start')!.params!.input)
       .toEqual([{ type: 'text', text: 'Second', text_elements: [] }]);
   }, 60_000);

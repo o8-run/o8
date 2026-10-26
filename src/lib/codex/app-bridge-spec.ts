@@ -13,8 +13,10 @@ export interface CodexAppBridgeSpec {
   cwd: string;
   /** Resume this Codex thread; null starts a new one. */
   threadId: string | null;
-  /** o8's orchestrator prompt. Sent as developer instructions, not as user text. */
+  /** Thread-level instructions for continuations without raw operator text. */
   developerInstructions: string | null;
+  /** Complete current-turn prompt; refreshed through turn/start, including on resume. */
+  turnDeveloperInstructions?: string;
   message: string;
   imagePaths: string[];
   model: string;
@@ -28,11 +30,13 @@ export interface CodexAppBridgeSpec {
 /** Marker between o8's prompt and the user's message in buildCodexOrchestratorPrompt. */
 export const CODEX_USER_MESSAGE_MARKER = '\n\n## USER MESSAGE\n\n';
 
-/** Keep the complete wrapped turn in developer context when the operator's text is available. */
-export function splitCodexOrchestratorPrompt(prompt: string, rawMessage?: string): { instructions: string | null; message: string } {
+/** Keep the complete wrapped turn in per-turn context when the operator's text is available. */
+export function splitCodexOrchestratorPrompt(prompt: string, rawMessage?: string): {
+  instructions: string | null; message: string; turnInstructions?: string;
+} {
   // Preserve every instruction and its order, including context after the marker.
   // Do not parse the operator's words: they can contain o8's headings verbatim.
-  if (rawMessage !== undefined) return { instructions: prompt, message: rawMessage };
+  if (rawMessage !== undefined) return { instructions: null, message: rawMessage, turnInstructions: prompt };
   // Automated continuations have no raw operator text; retain their existing split.
   // The first marker: o8's prompt comes first, and the user's text may contain anything.
   const at = prompt.indexOf(CODEX_USER_MESSAGE_MARKER);
