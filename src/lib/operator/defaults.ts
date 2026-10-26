@@ -204,7 +204,7 @@ export interface OperatorDefaults extends KnowledgeSourceDefaults, StorageReserv
    * fleet-canvas tabs (mirrors `experimentalChat`: tab data stays persisted
    * for when it flips back on).
    */
-  experimentalCanvas: boolean;
+  experimentalCanvas: boolean; experimentalNext: boolean;
   /** Native browser-view: render the embedded Browser pane in a host-owned child
    *  WebviewWindow (origin-sensitive auth apps render natively + stay
    *  agent-grabbable) instead of the iframe/proxy + engine-JPEG fallback.
@@ -364,7 +364,7 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   experimentalOpencode: false,
   experimentalGemini: false,
   experimentalChat: false,
-  experimentalCanvas: false,
+  experimentalCanvas: false, experimentalNext: false,
   nativeBrowserView: true,
   classAComposer: 'auto',
   // ON by default post-#1097; subscription pool, not Agent SDK pool.
@@ -501,7 +501,7 @@ function resolveFromFile(stored: StoredOperatorDefaults): FileOperatorDefaults {
   }
   if (typeof stored.experimentalCanvas === 'boolean') {
     result.experimentalCanvas = stored.experimentalCanvas;
-  }
+  } if (typeof stored.experimentalNext === 'boolean') result.experimentalNext = stored.experimentalNext;
   if (typeof stored.nativeBrowserView === 'boolean') {
     result.nativeBrowserView = stored.nativeBrowserView;
   }
@@ -686,7 +686,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     experimentalOpencode: envOpencode ?? fileValues.experimentalOpencode ?? OPERATOR_DEFAULTS_FALLBACK.experimentalOpencode,
     experimentalGemini: envGemini ?? fileValues.experimentalGemini ?? OPERATOR_DEFAULTS_FALLBACK.experimentalGemini,
     experimentalChat: envChat ?? fileValues.experimentalChat ?? OPERATOR_DEFAULTS_FALLBACK.experimentalChat,
-    experimentalCanvas: envCanvas ?? fileValues.experimentalCanvas ?? OPERATOR_DEFAULTS_FALLBACK.experimentalCanvas,
+    experimentalCanvas: envCanvas ?? fileValues.experimentalCanvas ?? OPERATOR_DEFAULTS_FALLBACK.experimentalCanvas, experimentalNext: fileValues.experimentalNext ?? false,
     nativeBrowserView: envNative ?? fileValues.nativeBrowserView ?? OPERATOR_DEFAULTS_FALLBACK.nativeBrowserView,
     classAComposer: envComposer ?? fileValues.classAComposer ?? OPERATOR_DEFAULTS_FALLBACK.classAComposer,
     inAppOrchestratorEnabled,
@@ -764,7 +764,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     experimentalOpencode: envOpencode !== null ? 'env' : fileValues.experimentalOpencode !== undefined ? 'file' : 'default',
     experimentalGemini: envGemini !== null ? 'env' : fileValues.experimentalGemini !== undefined ? 'file' : 'default',
     experimentalChat: envChat !== null ? 'env' : fileValues.experimentalChat !== undefined ? 'file' : 'default',
-    experimentalCanvas: envCanvas !== null ? 'env' : fileValues.experimentalCanvas !== undefined ? 'file' : 'default',
+    experimentalCanvas: envCanvas !== null ? 'env' : fileValues.experimentalCanvas !== undefined ? 'file' : 'default', experimentalNext: fileValues.experimentalNext !== undefined ? 'file' : 'default',
     nativeBrowserView: envNative !== null ? 'env' : fileValues.nativeBrowserView !== undefined ? 'file' : 'default',
     classAComposer: envComposer !== null ? 'env' : fileValues.classAComposer !== undefined ? 'file' : 'default',
     inAppOrchestratorEnabled:
@@ -958,7 +958,7 @@ async function updateOperatorDefaultsOnce(update: Partial<OperatorDefaults>, exp
   }
   if (update.experimentalCanvas !== undefined) {
     stored.experimentalCanvas = Boolean(update.experimentalCanvas);
-  }
+  } if (update.experimentalNext !== undefined) stored.experimentalNext = Boolean(update.experimentalNext);
   if (update.nativeBrowserView !== undefined) {
     stored.nativeBrowserView = Boolean(update.nativeBrowserView);
   }

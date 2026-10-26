@@ -4370,6 +4370,15 @@
       ]
     },
     {
+      "path": "tests/o8-next-app-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/o8-next-bundle-real-path.test.ts",
       "reasons": [
         "child-process",
