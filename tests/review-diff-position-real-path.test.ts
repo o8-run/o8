@@ -29,6 +29,18 @@ let browser: Browser;
 let bundle: string;
 let page: Page;
 const settle = () => page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+const settleLayout = () => page.evaluate(() => new Promise<void>(resolve => {
+  let frame = 0;
+  const observer = new ResizeObserver(() => {
+    cancelAnimationFrame(frame);
+    frame = requestAnimationFrame(() => { observer.disconnect(); resolve(); });
+  });
+  // DOM patch markers can appear before layout and the panel's resize restore.
+  // Observe every expanded row because earlier files also move the target line.
+  for (const button of document.querySelectorAll('button[title^="file-"][aria-expanded="true"]')) {
+    if (button.parentElement) observer.observe(button.parentElement);
+  }
+}));
 const fileRow = () => page.locator('button[title="file-12.txt"][aria-expanded]').locator('..');
 const waitForPatches = (exactAddition = true) => page.waitForFunction(exact => {
   const headers = [...document.querySelectorAll('button[title^="file-"][aria-expanded="true"]')];
@@ -223,28 +235,28 @@ it('uses the nearest line on the original side only while the exact addition is 
     await page.getByRole('menuitem', { name: 'Expand all' }).click();
     const line = (key: string) => fileRow().locator(`[data-review-line="${key}"]`);
     await waitForPatches();
-    await settle();
+    await settleLayout();
     await line('R:70').evaluate(node => {
       let scroll = node.parentElement;
       while (scroll && getComputedStyle(scroll).overflowY !== 'auto') scroll = scroll.parentElement;
       if (!scroll) throw new Error('Review scroller missing');
       scroll.scrollTop += node.getBoundingClientRect().top - scroll.getBoundingClientRect().top + 3;
     });
-    await settle();
+    await settleLayout();
     const before = await line('R:70').boundingBox();
     if (!before) throw new Error('Inspected addition missing');
     await page.locator('button[title="Switch to split diff"]').click();
-    await settle();
+    await settleLayout();
     await page.locator('button[title="View options"]').click();
     await page.getByRole('menuitem', { name: 'Hide whitespace' }).click();
     // All reloaded rows contribute to the selected line's layout, including earlier files.
     await waitForPatches(false);
-    await settle();
+    await settleLayout();
     expect(await line('R:70').count()).toBe(0);
     expect(await line('L:70').count()).toBe(1);
     for (const mode of ['unified', 'split']) {
       await page.locator(`button[title="Switch to ${mode} diff"]`).click();
-      await settle();
+      await settleLayout();
       const fallback = await line('R:69').boundingBox();
       expect(fallback?.y).toBeGreaterThanOrEqual(before.y - 2);
       expect(fallback?.y).toBeLessThanOrEqual(before.y + 2);
@@ -252,9 +264,9 @@ it('uses the nearest line on the original side only while the exact addition is 
     await page.locator('button[title="View options"]').click();
     await page.getByRole('menuitem', { name: 'Hide whitespace' }).click();
     await waitForPatches();
-    await settle();
+    await settleLayout();
     await page.locator('button[title="Switch to unified diff"]').click();
-    await settle();
+    await settleLayout();
     const exact = await line('R:70').boundingBox();
     expect(exact?.y).toBeGreaterThanOrEqual(before.y - 2);
     expect(exact?.y).toBeLessThanOrEqual(before.y + 2);
