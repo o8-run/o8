@@ -556,7 +556,8 @@ export function createOwnedRunController({
           // grant access, and it throws if that probe resolves nothing.
           enforceReadOnly: readOnlySandbox.enforced,
           finalAllowReadWritePaths: runtimeState.writablePaths,
-          finalImmutableWritePaths: runtimeState.immutablePaths,
+          finalImmutableWritePaths: [...(runtimeState.immutablePaths ?? []), ...(preparedLaunch.workerO8?.immutablePaths ?? [])],
+          finalImmutableAncestorPaths: preparedLaunch.workerO8?.immutableAncestorPaths,
         });
         spawnBinary = prepared.binary;
         spawnArgs = prepared.args;
@@ -666,6 +667,7 @@ export function createOwnedRunController({
           // Credential-bearing launches require policy validation at OS spawn.
           if (!hasOwnedActionFence() && !useSupervisor && !hasProviderCredentials && !workerMcp.configPath && workerMcp.servers.length === 0 && process.platform !== 'win32' && session.executionPolicy === undefined && !carrierLaunch.carried && !crashSurvivableWorkersEnabled()) {
             try {
+              preparedLaunch.workerO8?.assertCurrent();
               const result = await spawnBridgeTerminalSession({
                 sessionName: bridgeSessionName,
                 shellCommand: shellCmd,
@@ -698,6 +700,7 @@ export function createOwnedRunController({
                 binary: spawnBinary, args: spawnArgs, env: spawnEnv,
                 stdinFd, stdoutFd, stderrFd, mcpConfigPath: workerMcp.configPath, mcpServers: workerMcp.servers,
                 materializationIdentity,
+                assertWorkerO8Current: preparedLaunch.workerO8?.assertCurrent,
               };
               if (useSupervisor) {
                 supervised = await spawnCredentialCheckedSupervised({ ...launchInput, stdoutPath, stderrPath, stdinPath });
@@ -776,6 +779,11 @@ export function createOwnedRunController({
       });
     } catch (error) {
       if (session.executionPolicy !== undefined) revokeReadOnlyWorkerToken(runId);
+      if (error instanceof WorkerO8CliUnavailableError) {
+        const held = await stageOwnedLaunchFailure({ session, runId, mode, prompt, stdoutPath, stderrPath, message: error.message });
+        await io.saveSession(session);
+        return held;
+      }
       throw error;
     }
   }

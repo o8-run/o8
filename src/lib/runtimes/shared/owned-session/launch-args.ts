@@ -1,5 +1,5 @@
 import { prepareOwnedWorkerMcpConfig, type PreparedOwnedWorkerMcpConfig } from './worker-mcp-config';
-import { prepareWorkerO8Cli } from './worker-o8-cli';
+import { prepareWorkerO8Cli, type PreparedWorkerO8Cli } from './worker-o8-cli';
 import type {
   OwnedRunMode,
   OwnedRuntimeAdapter,
@@ -12,6 +12,7 @@ export interface PreparedOwnedLaunchArgs {
   workerMcp: PreparedOwnedWorkerMcpConfig;
   workerO8BinDir?: string;
   workerO8ReadPaths: string[];
+  workerO8?: PreparedWorkerO8Cli;
 }
 
 export async function prepareOwnedLaunchArgs({
@@ -63,6 +64,7 @@ export async function prepareOwnedLaunchArgs({
       workerMcp,
       workerO8BinDir: workerO8?.binDir,
       workerO8ReadPaths: workerO8?.readPaths ?? [],
+      workerO8: workerO8 ?? undefined,
     };
   }
 
@@ -92,5 +94,6 @@ export async function prepareOwnedLaunchArgs({
     workerMcp,
     workerO8BinDir: workerO8?.binDir,
     workerO8ReadPaths: workerO8?.readPaths ?? [],
+    workerO8: workerO8 ?? undefined,
   };
 }

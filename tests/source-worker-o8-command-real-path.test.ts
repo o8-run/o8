@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, renameSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -8,25 +8,28 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import type { OwnedSessionRecord } from '@/lib/runtimes/shared/owned-session/types';
 
-const sandbox = vi.hoisted(() => ({ reads: [] as string[] }));
+const sandbox = vi.hoisted(() => ({ reads: [] as string[], immutable: [] as string[], ancestors: [] as string[], beforeDispatch: undefined as (() => void) | undefined }));
 vi.mock('@/lib/runtimes/shared/owned-session/sandbox', async original => ({
   ...await original<typeof import('@/lib/runtimes/shared/owned-session/sandbox')>(),
-  prepareWorkerSandbox: async (input: { binary: string; args: string[]; finalAllowReadPaths?: string[] }) => {
+  prepareWorkerSandbox: async (input: { binary: string; args: string[]; finalAllowReadPaths?: string[]; finalImmutableWritePaths?: string[]; finalImmutableAncestorPaths?: string[] }) => {
     sandbox.reads = input.finalAllowReadPaths ?? [];
+    sandbox.immutable = input.finalImmutableWritePaths ?? [];
+    sandbox.ancestors = input.finalImmutableAncestorPaths ?? [];
     return { binary: input.binary, args: input.args };
   },
 }));
 
 // Provider readiness is offline; launch, ownership, routes, CLI, and git are real.
 vi.mock('@/lib/runtimes/shared/dispatch-readiness', () => ({
-  ensureDispatchBackendReady: vi.fn(async () => ({ ready: true })),
+  ensureDispatchBackendReady: vi.fn(async () => { sandbox.beforeDispatch?.(); return { ready: true }; }),
 }));
 vi.mock('@clerk/nextjs/server', () => ({ clerkMiddleware: (handler: unknown) => handler }));
 
 const root = realpathSync(mkdtempSync(join(tmpdir(), 'o8-worker-cli-')));
-const repo = join(root, 'repo');
-const data = root;
-const owned = join(root, 'owned');
+const data = join(root, 'data');
+const repo = join(data, 'repo');
+const writableTmp = join(root, 'worker-tmp');
+const owned = join(writableTmp, 'owned');
 const runtime = join(root, 'worker.mjs');
 const receipt = join(root, 'receipt.json');
 let http: Server;
@@ -39,7 +42,8 @@ const originalPath = process.env.PATH;
 const git = (...args: string[]) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' }).trim();
 
 beforeAll(async () => {
-  mkdirSync(repo);
+  mkdirSync(data); mkdirSync(repo); mkdirSync(writableTmp);
+  vi.stubEnv('TMPDIR', writableTmp);
   vi.stubEnv('CORTEX_IDE_DATA_DIR', data); vi.stubEnv('O8_DATA_DIR', data);
   vi.stubEnv('CORTEX_IDE_OWNED_CODEX_ROOT', owned);
   vi.stubEnv('CODEX_HOME', join(root, 'runtime-home'));
@@ -143,11 +147,10 @@ describe.skipIf(process.platform === 'win32')('source worker o8 command at the r
       packetId, laneId, model: 'gpt-5.6-sol', effort: 'high' });
     expect(launched.ok).toBe(true);
     await finished(launched.surfaceId);
-    const run = session(launched.surfaceId).recentRuns[0];
-    sourceBundle = join(dirname(run.stdoutPath), `${run.id}-o8`, 'o8.mjs');
+    const result = JSON.parse(readFileSync(receipt, 'utf8'));
+    sourceBundle = join(result.path.split(':')[0], 'o8.mjs');
     const verification = JSON.parse(readFileSync(join(dirname(sourceBundle), 'verification.json'), 'utf8'));
     expect(verification).toMatchObject({ source: 'source', verified: true });
-    const result = JSON.parse(readFileSync(receipt, 'utf8'));
     expect(result.error).toBeUndefined();
     expect(result.cwd).toBe(worktree);
     expect(result.info.schema).toBe('o8/cli/packet.info/v1');
@@ -185,13 +188,76 @@ describe.skipIf(process.platform === 'win32')('source worker o8 command at the r
       const { launchOwnedCodexSession } = await import('@/lib/codex/owned');
       const launched = await launchOwnedCodexSession({ cwd: worktree, prompt: 'Use o8 packet commands.', packetId, laneId, model: 'gpt-5.6-sol', effort: 'high' });
       expect(launched.ok).toBe(true); await finished(launched.surfaceId);
-      const run = session(launched.surfaceId).recentRuns[0];
-      const binDir = join(dirname(run.stdoutPath), `${run.id}-o8`);
+      const binDir = JSON.parse(readFileSync(receipt, 'utf8')).path.split(':')[0];
       expect(sandbox.reads).toEqual(expect.arrayContaining([join(binDir, 'o8'), join(binDir, 'o8.mjs')]));
+      expect(sandbox.immutable).toContain(join(data, 'worker-cli'));
+      expect(sandbox.ancestors).toEqual(expect.arrayContaining([data, root, dirname(root), '/']));
       expect(sandbox.reads).not.toContain(root);
       expect(sandbox.reads).not.toContain(session(launched.surfaceId).sessionDir);
       expect(JSON.parse(readFileSync(receipt, 'utf8')).commit.committed).toBe(true);
     } finally { vi.stubEnv('O8_WORKER_SANDBOX', 'off'); }
+  }, 60000);
+
+  it.each(['rewrite', 'symlink', 'entry rewrite', 'ancestor symlink', 'receipt rewrite'] as const)('holds a post-verification %s of the CLI before worker launch', async mutation => {
+    rmSync(receipt, { force: true });
+    vi.stubEnv('O8_WORKER_SANDBOX', '1');
+    let changedBundle = '';
+    let restore = () => {};
+    sandbox.beforeDispatch = () => {
+      changedBundle = sandbox.reads.find(file => file.endsWith('/o8.mjs'))!;
+      expect(changedBundle).toBeTruthy();
+      if (mutation.endsWith('rewrite')) {
+        const target = mutation === 'entry rewrite' ? join(dirname(changedBundle), 'o8')
+          : mutation === 'receipt rewrite' ? join(dirname(changedBundle), 'verification.json') : changedBundle;
+        const original = readFileSync(target);
+        restore = () => writeFileSync(target, original);
+        writeFileSync(target, '\n/* changed after verification */\n', { flag: 'a' });
+      }
+      else if (mutation === 'ancestor symlink') {
+        const replacement = join(writableTmp, 'replacement-directory');
+        renameSync(dirname(changedBundle), replacement); symlinkSync(replacement, dirname(changedBundle), 'dir');
+        restore = () => { rmSync(dirname(changedBundle)); renameSync(replacement, dirname(changedBundle)); };
+      } else {
+        const replacement = join(writableTmp, 'replacement.mjs');
+        cpSync(changedBundle, replacement);
+        rmSync(changedBundle); symlinkSync(replacement, changedBundle);
+        restore = () => { rmSync(changedBundle); cpSync(replacement, changedBundle); };
+      }
+    };
+    try {
+      const { launchOwnedCodexSession } = await import('@/lib/codex/owned');
+      const launched = await launchOwnedCodexSession({ cwd: worktree, prompt: 'Use o8 packet info.', packetId, laneId, model: 'gpt-5.6-sol', effort: 'high' });
+      if (launched.ok) await finished(launched.surfaceId);
+      expect(launched.ok).toBe(false);
+      expect(launched.note).toContain('o8_cli_unavailable');
+      const persisted = session(launched.surfaceId);
+      expect(persisted.recentRuns[0]).toMatchObject({ outcome: 'failed', pid: 0 });
+      expect(persisted.recentRuns.filter(run => run.id === persisted.recentRuns[0].id)).toHaveLength(1);
+      expect(readdirSync(root)).not.toContain('receipt.json');
+      expect(changedBundle.startsWith(data + '/')).toBe(true);
+      expect(changedBundle.startsWith(writableTmp + '/')).toBe(false);
+      expect(sandbox.immutable).toContain(join(data, 'worker-cli'));
+    } finally { sandbox.beforeDispatch = undefined; restore(); vi.stubEnv('O8_WORKER_SANDBOX', 'off'); }
+  }, 60000);
+
+  it('holds a symlink in the protected CLI storage path before preparing an entry', async () => {
+    rmSync(receipt, { force: true });
+    const cliRoot = join(data, 'worker-cli');
+    const saved = join(data, 'worker-cli-saved');
+    if (readdirSync(data).includes('worker-cli')) renameSync(cliRoot, saved);
+    const redirected = join(writableTmp, 'redirected'); mkdirSync(redirected);
+    symlinkSync(redirected, cliRoot, 'dir');
+    try {
+      const { launchOwnedCodexSession } = await import('@/lib/codex/owned');
+      const launched = await launchOwnedCodexSession({ cwd: worktree, prompt: 'Use o8 packet info.', packetId, laneId, model: 'gpt-5.6-sol', effort: 'high' });
+      if (launched.ok) await finished(launched.surfaceId);
+      expect(launched.ok).toBe(false);
+      expect(launched.note).toContain('o8_cli_unavailable');
+      expect(readdirSync(redirected)).toEqual([]);
+      expect(readdirSync(root)).not.toContain('receipt.json');
+    } finally {
+      rmSync(cliRoot); if (readdirSync(data).includes('worker-cli-saved')) renameSync(saved, cliRoot);
+    }
   }, 60000);
 
   it('launches with the current packaged CLI through the same worker boundary', async () => {

@@ -26,6 +26,7 @@ type LaunchInput = {
   stdinFd?: number; stdoutFd: number; stderrFd: number; mcpConfigPath?: string;
   mcpServers?: readonly { name: string; env?: Record<string, string> | null }[];
   materializationIdentity: Parameters<typeof guardedWorkspaceInvocation>[2];
+  assertWorkerO8Current?: () => void;
 };
 
 function withCheckedLaunch<T>(input: LaunchInput, create: (launch: { command: string; args: string[] }, env: ReturnType<typeof ownedSpawnEnvironment>) => T): T {
@@ -42,6 +43,7 @@ function withCheckedLaunch<T>(input: LaunchInput, create: (launch: { command: st
       ? bindDeferredCodexMcpLaunch(env, input.args, input.mcpServers ?? [], build) : build(input.args);
     assertControlledLaunchGrantCurrent(input.session);
     assertOwnedActionAdmission(input.session, input.runId);
+    input.assertWorkerO8Current?.();
     return create(launch, env);
   });
 }

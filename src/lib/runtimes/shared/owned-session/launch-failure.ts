@@ -16,6 +16,8 @@ export async function stageOwnedLaunchFailure(input: {
   session.reviewDisposition = 'watching';
   session.reviewDispositionUpdatedAt = finishedAt;
   session.activeRun = undefined;
-  prependOwnedRun(session, run);
+  if (session.recentRuns.some(candidate => candidate.id === runId)) {
+    session.recentRuns = session.recentRuns.map(candidate => candidate.id === runId ? run : candidate);
+  } else prependOwnedRun(session, run);
   return run;
 }

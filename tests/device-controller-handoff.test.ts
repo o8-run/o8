@@ -275,16 +275,20 @@ describe.sequential('Devices controller handoff through panel routes and MCP too
     const session = { surfaceId: 'claude-code-owned:fixture-device', packetId: 'fixture-device-packet', sessionDir,
       cwd: root, repoPath: root, branch: 'fixture', title: 'Fixture worker', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
       threadId: 'fixture-parent-conversation', initialPrompt: 'Fixture', latestPrompt: 'Fixture', latestSummary: '', recentRuns: [] };
-    const launch = await prepareOwnedLaunchArgs({ adapter: claudeCodeOwnedAdapter, session,
-      runId: 'fixture-device-config', prompt: 'Fixture', mode: 'launch', sandboxEnabled: false, humanLabel: 'Fixture worker' });
-    const server = launch.workerMcp.servers.find(entry => entry.name === 'o8-devices');
-    expect(server?.env).toMatchObject({ O8_DEVICE_WORKER_ONLY: '1', O8_DEVICE_CONVERSATION_ID: 'fixture-parent-conversation' });
-    const saved = JSON.parse(readFileSync(launch.workerMcp.configPath!, 'utf8'));
-    expect(saved.mcpServers['o8-devices'].env).not.toHaveProperty('WS_TOKEN');
-    const { codexOwnedAdapter } = await import('@/lib/codex/owned');
-    const codex = await prepareOwnedLaunchArgs({ adapter: codexOwnedAdapter, session,
-      runId: 'fixture-device-codex', prompt: 'Fixture', mode: 'launch', sandboxEnabled: false, humanLabel: 'Fixture worker' });
-    expect(codex.args).toContain('mcp_servers.o8-devices.env_vars=["O8_WORKER_TOKEN"]');
+    // CLI execution requires the canonical protected storage path.
+    process.env.O8_DATA_DIR = physicalData; process.env.CORTEX_IDE_DATA_DIR = physicalData;
+    try {
+      const launch = await prepareOwnedLaunchArgs({ adapter: claudeCodeOwnedAdapter, session,
+        runId: 'fixture-device-config', prompt: 'Fixture', mode: 'launch', sandboxEnabled: false, humanLabel: 'Fixture worker' });
+      const server = launch.workerMcp.servers.find(entry => entry.name === 'o8-devices');
+      expect(server?.env).toMatchObject({ O8_DEVICE_WORKER_ONLY: '1', O8_DEVICE_CONVERSATION_ID: 'fixture-parent-conversation' });
+      const saved = JSON.parse(readFileSync(launch.workerMcp.configPath!, 'utf8'));
+      expect(saved.mcpServers['o8-devices'].env).not.toHaveProperty('WS_TOKEN');
+      const { codexOwnedAdapter } = await import('@/lib/codex/owned');
+      const codex = await prepareOwnedLaunchArgs({ adapter: codexOwnedAdapter, session,
+        runId: 'fixture-device-codex', prompt: 'Fixture', mode: 'launch', sandboxEnabled: false, humanLabel: 'Fixture worker' });
+      expect(codex.args).toContain('mcp_servers.o8-devices.env_vars=["O8_WORKER_TOKEN"]');
+    } finally { process.env.O8_DATA_DIR = data; process.env.CORTEX_IDE_DATA_DIR = data; }
   });
 
   it('recovers an abandoned operation after its recorded helper exits without reassigning live control', async () => {
