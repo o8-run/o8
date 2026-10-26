@@ -1,8 +1,6 @@
 name: Current app idle memory measurements
 
 on:
-  push:
-    branches: [fix/4581-idle-memory-budget]
   workflow_dispatch:
 
 permissions:
