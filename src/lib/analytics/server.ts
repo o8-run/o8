@@ -17,9 +17,9 @@ import { isProductTelemetryAllowed } from './policy';
  */
 export function isProductTelemetryEnabled(): boolean {
   const { productTelemetryEnabled, telemetryConsentAnswered } = getOperatorDefaultsSync().values;
-  // Existing explicit opt-ins keep working. Default-on waits for the privacy
-  // screen to finish, so one-click off is persisted before the first event.
-  if (productTelemetryEnabled !== true && !telemetryConsentAnswered) return false;
+  // An on preference is staged until the privacy screen is saved. Toggling
+  // off and back on must never bypass disclosure, including after a restart.
+  if (!telemetryConsentAnswered) return false;
   return isProductTelemetryAllowed({
     productTelemetryEnabled: productTelemetryEnabled !== false,
     localOnlyMode: false,

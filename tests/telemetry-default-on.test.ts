@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { execFileSync } from 'node:child_process';
 import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { act, createElement } from 'react';
@@ -65,6 +66,25 @@ async function render(settings = false) {
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
     expect(settings ? usageSwitch() : document.querySelector('[role="dialog"]')).toBeTruthy();
   });
+}
+
+function coldEgressCapture() {
+  writeFileSync(join(dataDir, 'entitlement.json'), JSON.stringify({ licenseKey: 'fixture-license' }));
+  const output = execFileSync(process.execPath, [
+    '--import=./scripts/register-server-only-stub.mjs', '--import=tsx', '--input-type=module', '--eval',
+    [
+      'const payloads = [];',
+      'globalThis.fetch = async (_url, init) => { payloads.push(JSON.parse(init.body)); return Response.json({ ok: true }); };',
+      "const imported = await import('./src/lib/analytics/server.ts');",
+      'const telemetry = imported.default ?? imported;',
+      'const enabled = telemetry.isProductTelemetryEnabled();',
+      "const emitted = await telemetry.emitProductEvent('app.opened');",
+      'process.stdout.write(JSON.stringify({ enabled, emitted, payloads }));',
+    ].join(' '),
+  ], { cwd: process.cwd(), encoding: 'utf8', timeout: 10_000,
+    env: { PATH: process.env.PATH, NODE_ENV: 'test', O8_DATA_DIR: dataDir, CORTEX_IDE_DATA_DIR: dataDir },
+  });
+  return JSON.parse(output);
 }
 
 beforeEach(() => {
@@ -169,6 +189,43 @@ describe('default-on usage analytics through persisted routes and first-run UI',
     window.dispatchEvent(new Event(PRODUCT_TELEMETRY_READY_EVENT));
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
     expect(egress).toHaveBeenCalledTimes(1);
+  });
+
+  it('stages off-then-on until the unanswered privacy screen is saved, including a reopened startup hook', async () => {
+    await render();
+    await click('Turn off');
+    await click('Turn on');
+    expect(getOperatorDefaultsSync().values).toMatchObject({
+      productTelemetryEnabled: true, telemetryConsentAnswered: false, crashReportsEnabled: false,
+    });
+    await act(async () => root?.unmount());
+    root = undefined;
+    document.body.innerHTML = '';
+    invalidateOperatorDefaultsSnapshot();
+    egress.mockClear();
+    await render();
+    expect(egress.mock.calls.length).toBe(0);
+    expect(await (await getTelemetry()).json()).toEqual({ enabled: false });
+    expect(await emitProductEvent('app.opened')).toBe(false);
+    expect(egress.mock.calls.length).toBe(0);
+    await click('Keep crash reports off');
+    await click('Save privacy choices');
+    await vi.waitFor(() => expect(egress.mock.calls.length).toBe(1));
+    expect(JSON.parse(String(egress.mock.calls[0]?.[1]?.body))).toEqual({ event: 'app.opened' });
+    expect(getOperatorDefaultsSync().values).toMatchObject({
+      productTelemetryEnabled: true, telemetryConsentAnswered: true, crashReportsEnabled: false,
+    });
+  });
+
+  it('keeps off-then-on staged across a cold process until the privacy screen is saved', async () => {
+    await render();
+    await click('Turn off');
+    await click('Turn on');
+    expect(coldEgressCapture()).toEqual({ enabled: false, emitted: false, payloads: [] });
+    await click('Keep crash reports off');
+    await click('Save privacy choices');
+    expect(coldEgressCapture()).toEqual({ enabled: true, emitted: true, payloads: [{ event: 'app.opened' }] });
+    expect(getOperatorDefaultsSync().values.crashReportsEnabled).toBe(false);
   });
 
   it('keeps a requested opt-out when its successful disk write loses the response', async () => {

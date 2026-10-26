@@ -4,10 +4,11 @@
 
 Usage analytics help us count installs that use o8 and the features they reach.
 They are optional and on by default when you have not made an earlier choice.
-Before default-on sharing begins, the first-run privacy screen shows every event
+Before usage sharing begins, the first-run privacy screen shows every event
 and field and a visible Turn off button. Sharing waits until you finish that
-screen. An earlier explicit opt-out stays off after updates. An earlier explicit
-opt-in keeps working.
+screen, including when usage is turned off and on again. An earlier explicit
+opt-out stays off after updates. An on choice stays saved, and sharing begins
+after this screen is completed.
 
 The complete usage event list is:
 
@@ -56,10 +57,10 @@ button. Completing the screen writes `productTelemetryEnabled`, the separate
 analytics at its default records `null`, not an explicit opt-in. Crash reports
 still require a separate choice.
 
-Default-on emits nothing until that screen is completed. The startup event
+Usage analytics emit nothing until that screen is completed. The startup event
 `app.opened` is then sent once for the dashboard opening if analytics remain
-on. An existing explicit opt-in keeps working. Browser and server events both
-re-check persisted state before egress; Settings → General → Privacy turns
+on. An explicit on choice cannot skip an unanswered privacy screen. Browser
+and server events both re-check persisted state before egress; Settings → General → Privacy turns
 sharing off immediately. Missing or malformed state cannot bypass the first-run
 gate. Crash-report consent and the always-on desktop update ping are unchanged.
 

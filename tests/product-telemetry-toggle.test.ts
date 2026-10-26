@@ -147,7 +147,9 @@ describe.sequential('product telemetry persisted consent — real routes', () =>
     expect(await offResponse.json()).toEqual({ ok: true, emitted: false });
     expect(fetchMock).not.toHaveBeenCalled();
 
-    await operatorDefaultsRoute!.POST(defaultsRequest({ productTelemetryEnabled: true }));
+    await operatorDefaultsRoute!.POST(defaultsRequest({
+      productTelemetryEnabled: true, crashReportsEnabled: false, telemetryConsentAnswered: true,
+    }));
     const onResponse = await telemetryRoute.POST(telemetryRequest({
       event: 'repo.added',
       props: {
