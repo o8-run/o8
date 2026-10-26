@@ -367,7 +367,7 @@ it.each([...['workspace', 'generated-output'].flatMap(kind =>
     const claim = getSqlite().prepare('SELECT claim_path FROM workspace_exact_claims WHERE source_path = ?')
       .get(done.path) as { claim_path: string };
     expect(result.outcomes[0]).toMatchObject({ reason: expect.stringMatching(/writable shadows.*unsupported/),
-      retainedPaths: [claim.claim_path, done.path] });
+      retainedPaths: [claim.claim_path] });
     expect(readFileSync(path.join(claim.claim_path, 'README.md'), 'utf8')).toBe('preserved source\n');
     expect(existsSync(done.path)).toBe(false);
   } else if (held) {

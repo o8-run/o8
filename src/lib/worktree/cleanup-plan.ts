@@ -236,13 +236,14 @@ async function executeEntry(plan: WorkspaceCleanupPlan, entry: CleanupPlanEntry,
       const unsupportedImage = retained && await readCleanupMetadata(plan.repositoryPath).then(
         metadata => metadata[entry.worktreeId]?.dependencyMaterialization?.mode === 'image', () => false,
       );
-      if (unsupportedImage) outcome.reason = 'Reviewed retirement of dependency-image writable shadows is unsupported; retain both exact namespaces.';
-      if (retained && (unsupportedImage || retained.authority?.reviewedCleanupRestore || await Promise.all(
-        [retained.claimPath, retained.sourcePath].map(candidate => lstat(candidate).then(() => true, error => {
-          if (error.code === 'ENOENT') return false; throw error;
+      if (unsupportedImage) outcome.reason = 'Reviewed retirement of dependency-image writable shadows is unsupported; retain the exact journal and remaining namespace.';
+      const retainedPaths = retained ? (await Promise.all(
+        [retained.claimPath, retained.sourcePath].map(candidate => lstat(candidate).then(() => candidate, error => {
+          if (error.code === 'ENOENT') return null; throw error;
         })),
-      ).then(namespaces => namespaces.every(Boolean)))) {
-        outcome.state = 'held'; outcome.retainedPaths = [retained.claimPath, retained.sourcePath];
+      )).filter((candidate): candidate is string => candidate !== null) : [];
+      if (retained && (unsupportedImage || retained.authority?.reviewedCleanupRestore || retainedPaths.length === 2)) {
+        outcome.state = 'held'; outcome.retainedPaths = retainedPaths;
       }
     }
     if (outcome.state !== 'started') outcome.finishedAt = Date.now();
