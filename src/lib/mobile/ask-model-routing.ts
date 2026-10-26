@@ -116,24 +116,20 @@ export function normalizeMobileAskModelId(value: unknown): MobileAskModelId {
     : 'auto';
 }
 
-/** Unknown and omitted values retain the historical xhigh Ask behavior. */
-export function normalizeMobileAskEffort(value: unknown): MobileAskEffort {
-  return typeof value === 'string' && MOBILE_ASK_EFFORT_SET.has(value)
-    ? value as MobileAskEffort
-    : 'xhigh';
+export function isMobileAskEffort(value: unknown): value is MobileAskEffort {
+  return typeof value === 'string' && MOBILE_ASK_EFFORT_SET.has(value);
 }
 
-/**
- * Opus 5 currently stalls at low through the Claude Code REPL. Clamp only that
- * live-hit combination; every other allow-listed model keeps the validated
- * effort unchanged.
- */
-export function resolveMobileAskEffort(
-  model: MobileAskModelId,
-  value: unknown,
-): MobileAskEffort {
-  const effort = normalizeMobileAskEffort(value);
-  return model === 'claude-opus' && effort === 'low' ? 'medium' : effort;
+/** Restore saved choices only; stale values retain the historical xhigh default. */
+export function normalizeMobileAskEffort(value: unknown): MobileAskEffort {
+  return isMobileAskEffort(value) ? value : 'xhigh';
+}
+
+/** A concrete request is a pin. Only omission selects the default policy. */
+export function resolveMobileAskEffort(value: unknown): MobileAskEffort {
+  if (value === undefined) return 'xhigh';
+  if (!isMobileAskEffort(value)) throw new RangeError(`effort must be one of: ${MOBILE_ASK_EFFORTS.join(', ')}.`);
+  return value;
 }
 
 export function buildMobileAskModelCatalog(readiness: MobileAskReadiness): {
@@ -173,7 +169,7 @@ export function resolveMobileAskRoute(
   requestedEffort?: unknown,
 ): MobileAskRoute {
   const requestedModel = normalizeMobileAskModelId(requestedValue);
-  const effort = resolveMobileAskEffort(requestedModel, requestedEffort);
+  const effort = resolveMobileAskEffort(requestedEffort);
 
   if (requestedModel === 'managed-free') {
     return { kind: 'managed', requestedModel, fallback: false };

@@ -1,9 +1,10 @@
 import type { Socket } from 'node:net';
+import { WebviewBridgeError } from '@/lib/mcp/o8-webview-error';
 
 /** A mutation may have executed before transport loss. Never automatically replay it. */
-export class WebviewMutationUncertainError extends Error {
+export class WebviewMutationUncertainError extends WebviewBridgeError {
   constructor() {
-    super('Webview connection dropped during a mutation; not retried automatically because the action may have already executed. Inspect the app before issuing another action.');
+    super('webview_outcome_unknown');
     this.name = 'WebviewMutationUncertainError';
   }
 }
@@ -27,6 +28,7 @@ export function getErrorCode(error: unknown): string | undefined {
 }
 
 export function isMutationAckTimeout(error: unknown): boolean {
+  if (error instanceof WebviewBridgeError && error.code === 'webview_bridge_unresponsive') return true;
   const message = error instanceof Error ? error.message : String(error);
   return /(?:timeout waiting for .* response|request timed out|timed out after)/i.test(message);
 }

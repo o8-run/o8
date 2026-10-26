@@ -226,7 +226,7 @@ o8 team status "<one-line status>"
 o8 team tell @<handle> "<message>"
 o8 team inbox [--all]
 o8 team lease list
-o8 team lease acquire <name> [--note "..."] [--ttl <minutes>]
+o8 team lease acquire <name> [--note "..."]
 o8 team lease release <name>
 
 o8 lane touches --path <file>          # other lanes touching the same file (or --packet <id>)
@@ -266,9 +266,38 @@ o8 spec suggest  [--repo <path>] --kind add|del|sub --anchor "<text>" [--text "<
 
 Claude sessions receive addressed messages through their live user-turn path. Codex receives one coalesced inbox wake, then reads every pending peer message from the durable inbox without replaying acknowledged rows. Other runtimes must run `o8 msg inbox` at turn start; o8 remembers the acknowledged position when the caller uses its session identity. If a page reports `hasMore: true`, read again until it is false. Every message remains in the durable inbox when native delivery is unavailable.
 
-Output is JSON by default (pass `--human` for pretty ANSI). Errors use stable schemas and exit codes: 1 invalid arguments, 2 connection refused, 3 unauthorized, 4 not found, and 5 conflict. The CLI resolves the active port and bearer token from dispatch env, `~/.o8`, or the legacy fallback; do not replace it with handwritten HTTP calls.
+Output is JSON by default (pass `--human` for pretty ANSI). Errors use stable schemas and exit codes: 1 invalid arguments, 2 connection refused, 3 unauthorized, 4 not found, 5 conflict, and 6 server timeout with an uncertain outcome. The CLI resolves the active port and bearer token from dispatch env, the selected `O8_DATA_DIR` profile, `~/.o8`, or the legacy fallback. Read status before retrying an uncertain mutation.
 
 If a command exits 127 (`command not found`), launch o8.app once and run `o8 doctor --repair` after the binary is reachable. If the local control plane is unavailable, continue only with work that does not depend on packet mutation, and report the missing verification boundary.
+
+## Operator call recipes
+
+Use `o8 <group> <command> --help` for command-specific required arguments,
+defaults, allowed values, and an example. Group help lists related commands.
+These recipes use explicit identifiers so worktree inference cannot select a different task.
+
+| Task | Typical call | Default or prerequisite |
+| --- | --- | --- |
+| Prepare work | `o8 mission create --title "Inspect behavior" --repo /path/to/repo` | Preparation only; `--dispatch` starts work. |
+| Dispatch prepared work | `o8 mission dispatch --mission mission-audit --wait` | `--wait` waits for launch; `--watch` waits for attention. |
+| Read status | `o8 mission status --mission mission-audit` | Add `--cost` for recorded runtime cost. |
+| Preview a merge | `o8 packet merge-preview --packet pkt-audit` | Read-only; inspect blockers before approval. |
+| Steer work | `o8 packet steer --packet pkt-audit --message "Also check empty input"` | Requires an existing session. |
+| Record approval | `o8 packet review --packet pkt-audit --approve --expected-sha <full-sha> --coverage R1=src/example.ts` | Records approval and attempts a merge; use only when authorized. |
+| Acquire a resource | `o8 lease acquire audit --ttl 2m` | Default TTL 2h; add `--wait` to queue. |
+| Inspect a resource | `o8 lease status audit` | Reads the exact shared resource name. |
+| Queue a task | `o8 task create --title "Inspect behavior" --repo /path/to/repo --project project-audit` | Uses the active project when `--project` is omitted; no worker launch. |
+| Block a task | `o8 task block pkt-audit --reason "Waiting for dependency" --code dependency_blocked` | The reason is required; code is optional. |
+
+Bare --ttl values are milliseconds; prefer explicit suffixes such as `2m` or `2h`.
+The allowed lease duration is 1s through 24h. `o8 lease` uses the running server's
+resource store. o8 team lease uses a separate checkout-local store and does not accept `--ttl`.
+Release a server lease with `o8 lease release audit` from the same agent process.
+
+Errors are structured JSON with a message and, when available, a corrective hint.
+For argument errors, change the named argument and consult the command's help.
+Exit 6 means a server timeout with an uncertain outcome: read status before retrying
+a mutation. Preserve the same idempotency key when retrying a supported operation.
 
 ## Running things the operator can see (`o8 run`)
 
