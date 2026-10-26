@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { WebviewSocketClient, executeJs } from '../preship-webview-gate.mjs';
 import { cleanupGate } from '../lib/preship-gate-cleanup.mjs';
 import { prepareNativeRunner } from './native-runner-preconditions.mjs';
@@ -129,6 +129,7 @@ export async function measureNativeMemory({ app, output, sourceSha, samples = 1 
   let preserveFixture = false, runner;
   const receipt = { schema: 'o8/native-idle-memory/v1', platform: process.platform, arch: process.arch,
     osVersion: execFileSync('sw_vers', ['-productVersion'], { encoding: 'utf8' }).trim(), sourceSha, artifactDigest,
+    benchmarkSha: execFileSync('git', ['-C', fileURLToPath(new URL('../..', import.meta.url)), 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
     method: 'normal release app; private profile; chat/worker history and project workload; no forced collection',
     pollMs: 10, inspectorEnabled: true, heapSnapshotsAfterRss: true, limitBytes: 500_000_000, sessions: 24, workerSessions: 48, transcriptMiB: 4, idleMs: 600_000, samples: [] };
   try {
