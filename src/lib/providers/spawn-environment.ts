@@ -7,6 +7,7 @@ import { getDataDir } from '@/lib/data-dir-migration';
 import { credentialPolicyFingerprint } from './credential-policy';
 import { PROVIDER_ENV_KEYS, PROVIDER_KEY_ALIASES, providerCredentialMaterials, resolveProviderKey, type ProviderCredentialMaterials } from './key-store';
 import { matchesProviderCredential } from './credential-materials';
+import { matchesEncodedProviderCredential } from './encoded-credential-materials';
 import { runtimeBillingMode } from './runtime-billing';
 import { ensureLaunchPolicy } from './launch-policy';
 import { ORCHESTRATOR_RUNTIMES } from '@/lib/orchestrator/runtime-capabilities';
@@ -52,7 +53,7 @@ function resolvedEnvironment(input: Record<string, string | undefined>, inject: 
   const credentials = new Set([...canonical, ...aliases]);
   const materials = credentialMaterials(input);
   const env = Object.fromEntries(Object.entries(input).filter((entry): entry is [string, string] => entry[1] !== undefined && !credentials.has(entry[0]) && entry[0] !== 'O8_MASTER_KEY'
-    && !matchesProviderCredential(entry[1], materials)));
+    && !matchesEncodedProviderCredential(entry[0], materials) && !matchesEncodedProviderCredential(entry[1], materials)));
   if (options.clearInherited) for (const name of credentials) env[name] = '';
   if (inject) {
     for (const name of canonical) {
@@ -70,11 +71,6 @@ function resolvedEnvironment(input: Record<string, string | undefined>, inject: 
       const value = provider ? resolveProviderKey(provider, { ...input, [provider]: input[provider] || input[alias] }) : null;
       if (value) env[alias] = value;
     }
-  }
-  if (inject) {
-    const allowed = new Set([...credentials].map(name => env[name]).filter(Boolean));
-    const denied = credentialMaterials(input, allowed);
-    for (const [name, value] of Object.entries(input)) if (value && !credentials.has(name) && name !== 'O8_MASTER_KEY' && !matchesProviderCredential(value, denied)) env[name] = value;
   }
   const mode = input.NODE_ENV;
   const result = { ...env, NODE_ENV: mode === 'development' || mode === 'test' ? mode : 'production' } as Record<string, string> & Pick<NodeJS.ProcessEnv, 'NODE_ENV'>;
@@ -124,10 +120,15 @@ export function refreshChildEnvironment(env?: Record<string, string | undefined>
   const context = childEnvironmentContext(env);
   const result = childEnvironment({ ...context, env, inherit: env === undefined });
   const authorized = new Set(Object.entries(result).filter(([name]) => providerCredentialName(name)).map(([, value]) => value).filter((value): value is string => typeof value === 'string'));
+  const materials = credentialMaterials({});
   const denied = credentialMaterials({}, authorized);
-  for (const [name, value] of Object.entries(context?.transport ?? {})) if (!matchesProviderCredential(value, denied)) result[name] = value;
+  for (const [name, value] of Object.entries(context?.transport ?? {})) {
+    // Only declared provider transport slots can retain an API-authorized value.
+    if (!matchesEncodedProviderCredential(name, materials)
+      && !matchesEncodedProviderCredential(value, providerCredentialName(name) ? denied : materials)) result[name] = value;
+  }
   if (context?.brokerKey) { result.O8_MASTER_KEY = context.brokerKey; contexts.get(result)!.brokerKey = context.brokerKey; }
-  for (const [name, value] of Object.entries(env ?? {})) if (value === '') result[name] = '';
+  for (const [name, value] of Object.entries(env ?? {})) if (value === '' && !matchesEncodedProviderCredential(name, materials)) result[name] = '';
   return result;
 }
 

@@ -119,7 +119,8 @@ class LaunchBroker {
       assertMcpTransport([server.command, server.args]);
       const env = mcpLaunchEnvironment(server.command, server.env ?? {});
       const secrets = [...new Set([...providerCredentialMaterials().values,
-        ...Object.entries(env).filter(([key]) => /API_KEY|AUTH_TOKEN/.test(key)).map(([, value]) => value).filter(Boolean)])];
+        ...Object.entries(env).filter(([key]) => /API_KEY|AUTH_TOKEN/.test(key)).map(([, value]) => value)
+          .filter((value): value is string => typeof value === 'string' && value.length > 0)])];
       let launch = cliInvocation(server.command, server.args);
       if (this.scope.sandboxRequired) {
         if (!this.policy.sandboxProfile) throw new Error();

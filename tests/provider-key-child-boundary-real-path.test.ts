@@ -99,6 +99,52 @@ it.each(['subscription', 'remove'])('strips embedded provider copies from auxili
   });
   expect(JSON.parse(result)).toEqual([null, null]);
 });
+it.each(['subscription', 'api'] as const)('keeps nested encoded credentials out of auxiliary fields in %s billing', mode => {
+  saveRuntimeBillingMode('gemini', mode);
+  const hidden = JSON.stringify({ outer: JSON.stringify({ auth: Buffer.from('fixture-boundary-key').toString('base64url') }) });
+  const benign = JSON.stringify({ auth: Buffer.from('fixture-service').toString('base64'), region: 'fixture-region', endpoint: 'https://example.invalid/mcp' });
+  const result = cp.execFileSync(process.execPath, ['-e', 'process.stdout.write(JSON.stringify({key:!!process.env.OPENAI_API_KEY,hidden:!!process.env.SERVICE_AUTH_CONFIG,benign:process.env.UNRELATED_SERVICE_CONFIG}))'], {
+    encoding: 'utf8', env: childEnvironment({ runtimeId: 'gemini', env: { SERVICE_AUTH_CONFIG: hidden, UNRELATED_SERVICE_CONFIG: benign } }),
+  });
+  expect(JSON.parse(result)).toEqual({ key: mode === 'api', hidden: false, benign });
+});
+it('inspects ordered query values independently of query names before child launch', () => {
+  const value = 'fixture-boundary-key';
+  const hidden = 'https://example.invalid/?first=' + encodeURIComponent(value.slice(0, 11)) + '&second=' + encodeURIComponent(value.slice(11));
+  const result = cp.execFileSync(process.execPath, ['-e', 'process.stdout.write(String(!!process.env.SERVICE_AUTH_CONFIG))'], {
+    encoding: 'utf8', env: { NODE_ENV: 'test', SERVICE_AUTH_CONFIG: hidden },
+  });
+  expect(result).toBe('false');
+});
+it.each(['depth', 'bytes', 'nodes'])('drops an opaque field exceeding the %s inspection budget before actual launch', limit => {
+  let value = 'fixture-service';
+  if (limit === 'depth') {
+    let nested: unknown = value;
+    for (let i = 0; i < 24; i++) nested = { nested };
+    value = JSON.stringify(nested);
+  }
+  else if (limit === 'bytes') value = 'x'.repeat(256 * 1024 + 1);
+  else value = JSON.stringify(Array.from({ length: 1025 }, (_, index) => String(index)));
+  const result = cp.execFileSync(process.execPath, ['-e', 'process.stdout.write(JSON.stringify({opaque:!!process.env.SERVICE_AUTH_CONFIG,service:process.env.SERVICE_AUTH}))'], {
+    encoding: 'utf8', env: childEnvironment({ runtimeId: 'gemini', env: { SERVICE_AUTH_CONFIG: value, SERVICE_AUTH: 'fixture-service' } }),
+  });
+  expect(JSON.parse(result)).toEqual({ opaque: false, service: 'fixture-service' });
+});
+it('rechecks encoded subscription transport values at the actual child boundary', async () => {
+  const { retainChildTransportCredentials } = await import('@/lib/providers/spawn-environment');
+  const env = childEnvironment({ runtimeId: 'gemini' });
+  env.ANTHROPIC_AUTH_TOKEN = Buffer.from('fixture-boundary-key').toString('base64');
+  retainChildTransportCredentials(env, ['ANTHROPIC_AUTH_TOKEN']);
+  const result = cp.execFileSync(process.execPath, ['-e', 'process.stdout.write(String(!!process.env.ANTHROPIC_AUTH_TOKEN))'], { encoding: 'utf8', env });
+  expect(result).toBe('false');
+});
+it('does not restore an encoded credential name with an empty value at raw spawn', () => {
+  const name = Buffer.from('fixture-boundary-key').toString('base64url');
+  const result = cp.execFileSync(process.execPath, ['-e', 'process.stdout.write(String(Object.keys(process.env).some(name=>name!=="NODE_ENV")))'], {
+    encoding: 'utf8', env: { NODE_ENV: 'test', [name]: '' },
+  });
+  expect(result).toBe('false');
+});
 
 it('preserves policy and options with an explicitly omitted child argument array', async () => {
   saveRuntimeBillingMode('gemini', 'api');
