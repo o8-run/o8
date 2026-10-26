@@ -44,7 +44,7 @@ import { assertOwnedSessionProcessIdentity, captureOwnedRunIdentity } from './pr
 import { emitRuntimeFallbackNotification } from './run-notifications';
 import { observeChildExit, readAbnormalStderrTail } from './exit-outcome';
 import { prepareOwnedLaunchArgs } from './launch-args';
-import { detectSandboxDenial, sandboxDenialOperatorMessage } from './sandbox-denial';
+import { detectSandboxDenial, detectRunSandboxDenial, sandboxDenialOperatorMessage } from './sandbox-denial';
 import {
   RUNS_DIR,
   compactText,
@@ -115,7 +115,7 @@ export function createOwnedRunController({
   invalidateFleetCache: () => void;
 }): OwnedRunController {
   const capacityRecovery = createCapacityRecovery({ adapter, io, spawnOwnedRun });
-  const readRunArtifacts = createRunArtifactReader(adapter);
+  const readRunArtifacts = createRunArtifactReader(adapter, detectRunSandboxDenial);
   const handleWorkerFailure = createWorkerFailureHandler({ adapter, io, readRunArtifacts, park: capacityRecovery.park });
   const recoverModelCompatibility = createModelCompatibilityRecovery({ adapter, io, withSurfaceLock, readRunArtifacts, spawnOwnedRun });
   const scheduleFailureRetry = createFailureRetry({ adapter, io, withSurfaceLock, readRunArtifacts, spawnOwnedRun,
@@ -323,7 +323,9 @@ export function createOwnedRunController({
       }
 
       if (run.sandboxed && !run.sandboxDenial) {
-        const denial = sandboxDenial;
+        const denial = sandboxDenial === undefined
+          ? (await readRunArtifacts(run, false, false, true)).sandboxDenial
+          : sandboxDenial;
         if (denial) {
           run.sandboxDenial = denial;
           session.latestSummary = sandboxDenialOperatorMessage(runtimeId, denial);

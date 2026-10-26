@@ -6,7 +6,8 @@ interface RunArtifacts {
   stdoutRaw: string | null;
   stderrRaw: string | null;
   parsed: ParsedRunLog;
-  sandboxDenial: SandboxDenial | null;
+  /** Undefined until reconciliation requests a scan; null means no denial. */
+  sandboxDenial?: SandboxDenial | null;
 }
 
 /** Serialized logs detach previews from large source strings and bound all retained bytes. */
