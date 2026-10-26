@@ -59,7 +59,8 @@ export function execFileSync(command,args=[],options={}){
  if(command==='tar')return real.execFileSync(command,args,options);
  if(args.includes('--sign')||command==='cargo'||(command==='xcrun'&&!args.includes('validate')))throw Error('Tests cannot sign or notarize');
  fs.appendFileSync(${JSON.stringify(log)},JSON.stringify({command,args})+'\\n');
- if(command.endsWith('hdiutil')&&args[0]==='attach')fs.cpSync(${JSON.stringify(join(mac, 'o8.app'))},p.join(args[args.indexOf('-mountpoint')+1],'o8.app'),{recursive:true});
+ // Match a mounted image's archived permissions, including directory modes.
+ if(command.endsWith('hdiutil')&&args[0]==='attach')real.execFileSync('cp',['-pR',${JSON.stringify(join(mac, 'o8.app'))},p.join(args[args.indexOf('-mountpoint')+1],'o8.app')]);
  if(command.endsWith('plutil')){if(args[0]==='-convert')return JSON.stringify({'system-entities':[{'dev-entry':'/dev/disk99'}]});return '0.1.900\\n';}
  if(command==='gh'&&args[1]==='download'&&args[2]==='beta'){fs.writeFileSync(p.join(args[args.indexOf('--dir')+1],'beta.json'),JSON.stringify({channel:'beta',version:process.env.O8_BOUND_MIRROR_FEED_VERSION}));return '';}
  if(command==='gh'&&args[0]==='api')return JSON.stringify({tag_name:'v0.1.800',draft:false,prerelease:false,published_at:'2026-09-01T00:00:00Z'});

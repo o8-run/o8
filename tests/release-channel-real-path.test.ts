@@ -1,6 +1,5 @@
 import {
   copyFileSync,
-  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -60,12 +59,14 @@ function fixture(version = '0.1.741-preview.1', variant = 'universal') {
   }));
   const dmgApp = join(root, 'dmg-fixture', 'o8.app');
   mkdirSync(join(dmgApp, '..'), { recursive: true });
-  cpSync(join(bundle, 'macos', 'o8.app'), dmgApp, { recursive: true, preserveTimestamps: true });
+  // Preserve archived directory modes as well as bytes in the simulated DMG.
+  const copied = spawnSync('cp', ['-pR', join(bundle, 'macos', 'o8.app'), dmgApp]);
+  if (copied.status !== 0) throw new Error(`DMG fixture copy failed: ${copied.stderr}`);
   const log = join(root, 'effects.jsonl');
   const prelude = `import { appendFileSync } from 'node:fs';
 const record = (name, args = []) => appendFileSync(process.env.O8_CHANNEL_TEST_LOG, JSON.stringify({name, args}) + '\\n');`;
   const childProcess = `${prelude}
-import { cpSync, readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 const realChildProcess = process.getBuiltinModule('node:child_process');
 export function execFileSync(command, args = [], options = {}) {
@@ -83,7 +84,7 @@ export function execFileSync(command, args = [], options = {}) {
       const mountpoint = args[args.indexOf('-mountpoint') + 1];
       const cpuApps = JSON.parse(process.env.O8_CHANNEL_TEST_CPU_DMG_APPS || '{}');
       const source = cpuApps[basename(args.at(-1))] || process.env.O8_CHANNEL_TEST_DMG_APP;
-      cpSync(source, join(mountpoint, 'o8.app'), { recursive: true, preserveTimestamps: true });
+      realChildProcess.execFileSync('cp', ['-pR', source, join(mountpoint, 'o8.app')]);
       return '<plist><dict><key>system-entities</key><array><dict><key>dev-entry</key><string>/dev/disk99</string></dict></array></dict></plist>';
     }
     return '';

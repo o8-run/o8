@@ -19,7 +19,13 @@ fn command(
             cmd: cmd.into(),
             callback: tauri::ipc::CallbackFn(0),
             error: tauri::ipc::CallbackFn(1),
-            url: "tauri://localhost".parse().unwrap(),
+            url: if cfg!(target_os = "windows") {
+                "http://tauri.localhost"
+            } else {
+                "tauri://localhost"
+            }
+            .parse()
+            .unwrap(),
             body: tauri::ipc::InvokeBody::Json(body),
             headers: Default::default(),
             invoke_key: INVOKE_KEY.into(),
@@ -37,9 +43,10 @@ fn stable_refuses_beta_identity_on_primary_and_fallback() {
         &fallback.url,
         &dir.path().join("settings.json"),
     );
+    let error = command(&app, "check_app_update", serde_json::json!({})).unwrap_err();
     assert!(
-        command(&app, "check_app_update", serde_json::json!({})).is_err(),
-        "Stable must refuse a higher beta manifest"
+        error.as_str().unwrap().contains("channel identity"),
+        "Stable must refuse a higher beta manifest at the channel guard: {error}"
     );
 }
 #[test]
