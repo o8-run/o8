@@ -1,3 +1,4 @@
+import { viewerBytes } from '@/lib/viewers/bytes';
 export const dynamic = 'force-dynamic';
 
 import { NextRequest } from 'next/server';
@@ -64,42 +65,7 @@ export async function GET(request: NextRequest) {
     if (opened.stat.size > MAX_PREVIEW_BYTES) {
       return new Response('File too large for preview', { status: 413 });
     }
-    const size = Number(opened.stat.size);
-    const range = request.headers.get('range');
-    let start = 0; let end = size - 1;
-    if (range) {
-      const match = range.match(/^bytes=(\d*)-(\d*)$/);
-      if (!match || !match[1] && !match[2] || size === 0) return new Response('Invalid byte range', { status: 416, headers: { 'Content-Range': `bytes */${size}` } });
-      start = match[1] ? Number(match[1]) : Math.max(0, size - Number(match[2]));
-      end = match[1] && match[2] ? Math.min(Number(match[2]), size - 1) : size - 1;
-      if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || start > end || start >= size || !match[1] && Number(match[2]) === 0) return new Response('Invalid byte range', { status: 416, headers: { 'Content-Range': `bytes */${size}` } });
-    }
-    let buffer = range ? Buffer.alloc(end - start + 1) : await opened.handle.readFile();
-    if (range) {
-      let offset = 0;
-      while (offset < buffer.length) {
-        const { bytesRead } = await opened.handle.read(buffer, offset, buffer.length - offset, start + offset);
-        if (!bytesRead) break;
-        offset += bytesRead;
-      }
-      if (!offset) return new Response('File changed during preview', { status: 409 });
-      buffer = buffer.subarray(0, offset);
-      end = start + offset - 1;
-    }
-    const filename = path.split('/').pop()?.replace(/"/g, '') || 'asset';
-    const headers: Record<string, string> = {
-      'Cache-Control': 'private, max-age=60',
-      'Content-Disposition': `inline; filename="${filename}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
-      'Content-Length': String(buffer.byteLength),
-      'Content-Type': mimeType,
-      'X-Content-Type-Options': 'nosniff',
-      'Accept-Ranges': 'bytes',
-      ...(range ? { 'Content-Range': `bytes ${start}-${end}/${size}` } : {}),
-    };
-    if (mimeType === 'image/svg+xml') {
-      headers['Content-Security-Policy'] = "sandbox; default-src 'none'; style-src 'unsafe-inline'";
-    }
-    return new Response(new Uint8Array(buffer), { status: range ? 206 : 200, headers });
+    return viewerBytes(await opened.handle.readFile(), mimeType);
   } catch {
     return new Response('File not found or path refused', { status: 404 });
   } finally {

@@ -3,14 +3,14 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createServer, type Server } from 'node:http';
 import { exportJWK, generateKeyPair, SignJWT } from 'jose';
-import { MacPlanStore } from '@/lib/chatgpt-plan/credential-store';
+import { OsPlanStore } from '@/lib/chatgpt-plan/credential-store';
 import { ChatGPTPlanService } from '@/lib/chatgpt-plan/service';
 import { emptyPlanRecord, PLAN_SCOPES, type PlanRecord, type PlanStore } from '@/lib/chatgpt-plan/types';
 
 /** Synthetic credentials only. This is not an alternate production store. */
 export class FixturePlanStore implements PlanStore {
-  private readonly locks: MacPlanStore;
-  constructor(private readonly directory: string) { this.locks = new MacPlanStore(directory); }
+  private readonly locks: OsPlanStore;
+  constructor(private readonly directory: string) { this.locks = new OsPlanStore(directory); }
   hostId() { return this.locks.hostId(); }
   locked<T>(owner: string, action: () => Promise<T>) { return this.locks.locked(owner, action); }
   private path(owner: string) { return join(this.directory, `${createHash('sha256').update(owner).digest('hex')}.fixture.json`); }

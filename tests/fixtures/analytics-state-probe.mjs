@@ -65,6 +65,16 @@ function snapshot() {
   ])) : null;
 }
 
+const notify = (type) => new Promise((resolve, reject) => {
+  process.send({ type }, (error) => error ? reject(error) : resolve());
+});
+const admitted = new Promise((resolve) => process.once('message', (message) => {
+  if (message?.type !== 'run') throw new Error('Fixture readiness acknowledgement is missing.');
+  resolve();
+}));
+await notify('ready');
+await admitted;
+
 const results = [];
 if (process.argv[2] === 'off') {
   const cases = [
@@ -89,6 +99,7 @@ if (process.argv[2] === 'off') {
     const restore = forbidStateAccess(accesses);
     egress = 0;
     let status = 200;
+    await notify('case_started');
     try {
       if (item.entry === 'launch') status = await launch();
       else {
@@ -97,6 +108,7 @@ if (process.argv[2] === 'off') {
       }
     } finally { restore(); }
     results.push({ ...item, status, accesses, egress, unchanged: snapshot() === before });
+    await notify('case_completed');
   }
 } else if (process.argv[2] === 'markers') {
   let markerScans = 0;
@@ -117,12 +129,14 @@ if (process.argv[2] === 'off') {
       else fs.writeFileSync(marker, JSON.stringify({ pid: process.ppid, enabled: !enabled }));
       egress = 0;
       markerScans = 0;
+      await notify('case_started');
       const status = await launch();
       results.push({ enabled, kind, status, markerScans, egress,
         regularUpdated: enabled && kind === 'regular' ? JSON.parse(fs.readFileSync(marker, 'utf8')).enabled : null });
+      await notify('case_completed');
     }
   }
 } else throw new Error('Unknown fixture mode.');
 
-console.log(`ANALYTICS_STATE_PROBE:${JSON.stringify(results)}`);
+await new Promise(resolve => process.stdout.write(`ANALYTICS_STATE_PROBE:${JSON.stringify(results)}\n`, resolve));
 process.exit(0);

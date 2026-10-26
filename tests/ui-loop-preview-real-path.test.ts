@@ -14,8 +14,8 @@ vi.mock('@/lib/runtime/actions', async (importOriginal) => ({
   performRuntimeAction: h.perform,
 }));
 
-const dataDir = realpathSync(mkdtempSync(join(os.homedir(), '.tmp-o8-ui-loop-preview-data-')));
-const repoPath = realpathSync(mkdtempSync(join(os.homedir(), '.tmp-o8-ui-loop-preview-repo-')));
+const dataDir = realpathSync(mkdtempSync(join(os.tmpdir(), 'o8-ui-loop-preview-data-')));
+const repoPath = realpathSync(mkdtempSync(join(os.tmpdir(), 'o8-ui-loop-preview-repo-')));
 process.env.O8_DATA_DIR = dataDir;
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
 
@@ -208,7 +208,7 @@ describe('UI-loop preview real path', () => {
     expect(browserProbeResults).toEqual([]);
   });
 
-  it('persists resolvable BEFORE and AFTER screenshot references on the proof event', async () => {
+  it('persists private BEFORE and AFTER screenshot references while refusing opaque reads', async () => {
     const packet = packetFixture('packet-proof');
     persistPacket(packet);
     const lane = createTestLane(packet.id);
@@ -239,9 +239,9 @@ describe('UI-loop preview real path', () => {
       const response = await serveImage(new Request(
         `http://localhost/api/panel/serve-image?path=${encodeURIComponent(reference.path)}`,
       ));
-      expect(response.status).toBe(200);
-      expect(response.headers.get('content-type')).toMatch(/^image\//);
-      expect((await response.arrayBuffer()).byteLength).toBeGreaterThan(0);
+      expect(response.status).toBe(415);
+      expect(await response.json()).toMatchObject({ code: 'binary_preview_refused', redaction: { version: 1 } });
+      expect(statSync(reference.path).size).toBeGreaterThan(0);
     }
     expect(proof!.payload).toMatchObject({
       proofId: expect.stringMatching(new RegExp(`^${lane.id}:\\d+$`)),
