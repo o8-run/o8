@@ -246,15 +246,33 @@ fn shortcuts_focused_text_field_keeps_help_and_close_keys(cx: &mut TestAppContex
     cx.simulate_keystrokes("cmd-shift-p");
     cx.simulate_keystrokes("b r a i n enter");
     ready(&shell, cx);
+    let before = shell.read_with(cx, |s, _| s.active());
+    let brain = shell.read_with(cx, |s, cx| {
+        match s.content.get(&s.key(&s.active().unwrap())) {
+            Some(Content::Session(session)) => session.read(cx).shell_brain_view().unwrap(),
+            _ => panic!("Brain opens in the active session's dock"),
+        }
+    });
+    let brain_focus = brain.read_with(cx, |b, cx| b.composer.read(cx).focus.clone());
+    assert!(cx.update(|window, _| brain_focus.is_focused(window)));
     cx.simulate_keystrokes("?");
     shortcuts_draw(cx);
     assert!(
         shell.read_with(cx, |s, _| s.surfaces.shortcuts.view.is_none()),
         "a focused text field owns typing"
     );
-    cx.simulate_keystrokes("cmd-w");
-    shortcuts_draw(cx);
-    assert_eq!(shell.read_with(cx, |s, _| s.active()), Some(Tab::Brain));
+    assert_eq!(
+        brain.read_with(cx, |b, cx| b.composer.read(cx).text.clone()),
+        "?"
+    );
+    let focus = cx.update(|window, cx| window.focused(cx));
+    for binding in ["cmd-w", "ctrl-w"] {
+        cx.simulate_keystrokes(binding);
+        shortcuts_draw(cx);
+        assert_eq!(shell.read_with(cx, |s, _| s.active()), before);
+        assert_eq!(cx.update(|window, cx| window.focused(cx)), focus);
+        assert!(cx.update(|window, _| brain_focus.is_focused(window)));
+    }
 }
 #[gpui::test]
 fn shortcuts_control_alt_arrows_belong_to_grid_panes(cx: &mut TestAppContext) {
