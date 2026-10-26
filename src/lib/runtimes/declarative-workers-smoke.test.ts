@@ -95,6 +95,9 @@ for (const runtimeId of declarativeRuntimeIds) {
 }
 setManagedEnv('O8_OWNED_FIXTURE_CLI_ROOT', path.join(tempRoot, 'sessions', 'fixture-cli'));
 setManagedEnv('O8_FIXTURE_CLI_BIN', fixtureBinary);
+setManagedEnv('O8_WORKER_ENV_ALLOW', [
+  'O8_SMOKE_RUNTIME', 'O8_SMOKE_PARSER_PROFILE', 'O8_SMOKE_NO_RESULT', 'O8_SMOKE_HANG',
+].join(','));
 setManagedEnv('O8_SMOKE_RUNTIME', '');
 setManagedEnv('O8_SMOKE_PARSER_PROFILE', '');
 

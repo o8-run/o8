@@ -1,0 +1,74 @@
+name: o8 next surface boundary
+
+on:
+  pull_request_target:
+    branches: [main]
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+    paths:
+      - 'native/o8-next/**'
+      - 'scripts/next/**'
+      - '.github/workflows/next-surface-boundary.yml'
+  # Bootstrap this first introduction only. Once main contains this workflow,
+  # pull_request_target owns the policy and PR-owned workflow edits cannot stop it.
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+    paths:
+      - 'native/o8-next/**'
+      - 'scripts/next/**'
+      - '.github/workflows/next-surface-boundary.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: next-surface-boundary-${{ github.event.pull_request.number }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+jobs:
+  boundary:
+    name: ${{ github.event_name == 'pull_request_target' && 'o8 next surface boundary' || 'o8 next surface boundary (bootstrap)' }}
+    if: github.event_name == 'pull_request_target' || github.event.pull_request.base.sha == '417586b6b00e55f4759fc95a68091ffad7596213'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      BASE_REF: origin/main
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      HEAD_REF: ${{ github.event.pull_request.head.sha }}
+      CHECKER_PATH: scripts/next/check-surface-boundary.mjs
+      POLICY_PATH: ${{ github.workspace }}/.git/next-surface-checker.mjs
+      POLICY_BOOTSTRAP_REF: c50d2933f71caa5d9c0b338b2e2310df730c2531
+      CARGO_HOME: ${{ github.workspace }}/.next-surface-cargo
+      CARGO_TARGET_DIR: ${{ github.workspace }}/.next-surface-target
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      CARGO_INCREMENTAL: '0'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Load trusted policy and PR objects without checking out PR code
+        run: |
+          git cat-file -e "$HEAD_REF^{commit}" || git fetch --no-tags origin "$HEAD_REF"
+          if git cat-file -e "$BASE_SHA:$CHECKER_PATH"; then
+            git show "$BASE_SHA:$CHECKER_PATH" > "$POLICY_PATH"
+          else
+            git show "$POLICY_BOOTSTRAP_REF:$CHECKER_PATH" > "$POLICY_PATH"
+          fi
+      # Refuse shared hunks before installing Rust or compiling native code.
+      - name: Check shared files and select isolated build
+        id: select
+        run: node "$POLICY_PATH" --base "$BASE_REF" --head "$HEAD_REF" --select-only
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        if: steps.select.outputs.run == 'true'
+        with:
+          toolchain: stable
+      # A target event must never save caches containing PR-owned source output
+      # into main's cache namespace. Avoid that overhead as well as cache writes.
+      - name: Check surface patch on main and report wall time
+        if: steps.select.outputs.run == 'true'
+        run: node "$POLICY_PATH" --base "$BASE_REF" --head "$HEAD_REF"

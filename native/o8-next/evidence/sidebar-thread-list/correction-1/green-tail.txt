@@ -1,0 +1,4 @@
+running 1 test
+test shell::tests::sidebar_tests::sidebar_message_between_pages_keeps_every_thread ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 38 filtered out; finished in 4.91s

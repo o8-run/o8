@@ -1,0 +1,50 @@
+{
+  "platform": "Linux",
+  "build": "debug",
+  "endpoint": "headless GPUI CPU scene",
+  "runs": [
+    {
+      "run": 1,
+      "paletteOpenToFrameMs": {
+        "p50": 18.143304,
+        "p95": 19.76288
+      },
+      "keyboardWorkspaceSwitchMs": {
+        "p50": 15.061292,
+        "p95": 20.916917
+      }
+    },
+    {
+      "run": 2,
+      "paletteOpenToFrameMs": {
+        "p50": 19.170748,
+        "p95": 21.278765
+      },
+      "keyboardWorkspaceSwitchMs": {
+        "p50": 14.437736,
+        "p95": 21.479121
+      }
+    },
+    {
+      "run": 3,
+      "paletteOpenToFrameMs": {
+        "p50": 18.334785,
+        "p95": 21.088958
+      },
+      "keyboardWorkspaceSwitchMs": {
+        "p50": 14.840430999999999,
+        "p95": 35.618393999999995
+      }
+    }
+  ],
+  "median": {
+    "paletteOpenToFrameMs": {
+      "p50": 18.334785,
+      "p95": 21.088958
+    },
+    "keyboardWorkspaceSwitchMs": {
+      "p50": 14.840430999999999,
+      "p95": 21.479121
+    }
+  }
+}

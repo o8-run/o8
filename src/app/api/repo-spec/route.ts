@@ -1,6 +1,8 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { existsSync, readFileSync, writeFileSync, mkdirSync, statSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { existsSync, readFileSync, statSync } from 'node:fs';
+import { join, dirname, basename } from 'node:path';
+import { knowledgeSourceWriteRefusal } from '@/lib/cortex/knowledge/sources';
+import { isWorkspaceFileError, writeWorkspaceFile } from '@/lib/fs/workspace-file';
 import {
   extractRoughdraftReviewIndex,
   validateRoughdraftMarkdown,
@@ -87,6 +89,8 @@ export async function PUT(request: NextRequest) {
   if (!specPath) {
     return NextResponse.json({ ok: false, error: 'repoPath invalid' }, { status: 400 });
   }
+  const sourceRefusal = knowledgeSourceWriteRefusal(repoPath, specPath);
+  if (sourceRefusal) return sourceRefusal;
   const body = await request.json().catch(() => null) as {
     content?: unknown;
     expectedHash?: unknown;
@@ -112,8 +116,10 @@ export async function PUT(request: NextRequest) {
       }, { status: 409 });
     }
   }
-  mkdirSync(dirname(specPath), { recursive: true });
-  writeFileSync(specPath, cleanup.content, 'utf-8');
+  try { await writeWorkspaceFile(dirname(specPath), basename(specPath), cleanup.content); }
+  catch (error) {
+    return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : 'Spec could not be written.' }, { status: isWorkspaceFileError(error) ? error.status : 500 });
+  }
   return NextResponse.json({
     ok: true,
     path: specPath,
@@ -136,6 +142,8 @@ export async function POST(request: NextRequest) {
   if (!specPath) {
     return NextResponse.json({ ok: false, error: 'repoPath invalid' }, { status: 400 });
   }
+  const sourceRefusal = knowledgeSourceWriteRefusal(repoPath, specPath);
+  if (sourceRefusal) return sourceRefusal;
   const action = request.nextUrl.searchParams.get('action');
   const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
   const suppliedContent = typeof body?.content === 'string' ? body.content : null;
@@ -164,7 +172,7 @@ export async function POST(request: NextRequest) {
       if (Buffer.byteLength(updated, 'utf-8') > MAX_BYTES) {
         return NextResponse.json({ ok: false, error: `content exceeds ${MAX_BYTES} bytes` }, { status: 400 });
       }
-      writeFileSync(specPath, updated, 'utf-8');
+      await writeWorkspaceFile(dirname(specPath), basename(specPath), updated);
       const newId = extractRoughdraftReviewIndex(updated).items.find((i) => !beforeIds.has(i.id))?.id ?? null;
       return NextResponse.json({ ok: true, id: newId, path: specPath, content: updated });
     }
@@ -185,7 +193,7 @@ export async function POST(request: NextRequest) {
       if (Buffer.byteLength(updated, 'utf-8') > MAX_BYTES) {
         return NextResponse.json({ ok: false, error: `content exceeds ${MAX_BYTES} bytes` }, { status: 400 });
       }
-      writeFileSync(specPath, updated, 'utf-8');
+      await writeWorkspaceFile(dirname(specPath), basename(specPath), updated);
       const newId = extractRoughdraftReviewIndex(updated).items.find((i) => !beforeIds.has(i.id))?.id ?? null;
       return NextResponse.json({ ok: true, id: newId, path: specPath, content: updated });
     }
@@ -211,7 +219,7 @@ export async function POST(request: NextRequest) {
       if (Buffer.byteLength(updated, 'utf-8') > MAX_BYTES) {
         return NextResponse.json({ ok: false, error: `content exceeds ${MAX_BYTES} bytes` }, { status: 400 });
       }
-      writeFileSync(specPath, updated, 'utf-8');
+      await writeWorkspaceFile(dirname(specPath), basename(specPath), updated);
       const newId = extractRoughdraftReviewIndex(updated).items.find((i) => !beforeIds.has(i.id))?.id ?? null;
       return NextResponse.json({ ok: true, id: newId, path: specPath, content: updated });
     }
@@ -226,7 +234,7 @@ export async function POST(request: NextRequest) {
         targetId,
         ...(summary !== undefined ? { summary } : {}),
       });
-      writeFileSync(specPath, updated, 'utf-8');
+      await writeWorkspaceFile(dirname(specPath), basename(specPath), updated);
       return NextResponse.json({ ok: true, path: specPath, content: updated });
     }
 
@@ -241,7 +249,7 @@ export async function POST(request: NextRequest) {
       if (Buffer.byteLength(updated, 'utf-8') > MAX_BYTES) {
         return NextResponse.json({ ok: false, error: `content exceeds ${MAX_BYTES} bytes` }, { status: 400 });
       }
-      writeFileSync(specPath, updated, 'utf-8');
+      await writeWorkspaceFile(dirname(specPath), basename(specPath), updated);
       return NextResponse.json({ ok: true, ...result, path: specPath, content: updated });
     }
 
@@ -254,7 +262,7 @@ export async function POST(request: NextRequest) {
         targetId,
         accept: body?.accept !== false,
       });
-      writeFileSync(specPath, updated, 'utf-8');
+      await writeWorkspaceFile(dirname(specPath), basename(specPath), updated);
       return NextResponse.json({ ok: true, path: specPath, content: updated });
     }
 
@@ -276,13 +284,14 @@ export async function POST(request: NextRequest) {
         if (Buffer.byteLength(updated, 'utf-8') > MAX_BYTES) {
           return NextResponse.json({ ok: false, error: `content exceeds ${MAX_BYTES} bytes` }, { status: 400 });
         }
-        writeFileSync(specPath, updated, 'utf-8');
+        await writeWorkspaceFile(dirname(specPath), basename(specPath), updated);
       }
       return NextResponse.json({ ok: true, ...result, path: specPath });
     }
 
     return NextResponse.json({ ok: false, error: `unknown action: ${action ?? '(none)'}` }, { status: 400 });
   } catch (err) {
+    if (isWorkspaceFileError(err)) return NextResponse.json({ ok: false, error: err.message, code: err.code }, { status: err.status });
     // Parser-domain failure (target not found, raw close delimiter, missing
     // metadata): the request was well-formed but can't be applied. 422 so the
     // CLI surfaces the detail message; MCP reads the body regardless of status.

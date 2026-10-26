@@ -138,9 +138,38 @@ describe('workflow policy — every workflow is classified from the filesystem',
     }
   });
 
-  it('keeps pull_request_target workflows metadata-only', () => {
+  it('keeps pull_request_target metadata-only except the base-owned native boundary', () => {
     const violations = workflowFiles.flatMap((file) => {
       if (!triggerNames(file.workflow).has('pull_request_target')) return [];
+      if (file.name === 'next-surface-boundary.yml') {
+        // This lane is base-owned precisely so a PR cannot replace its rules.
+        // It never checks out a PR, receives write authority, or saves PR caches.
+        expect(file.workflow.permissions).toEqual({ contents: 'read' });
+        const triggers = file.workflow.on as Record<string, { paths: string[] }>;
+        for (const event of ['pull_request', 'pull_request_target']) {
+          expect(triggers[event].paths).toEqual(['native/o8-next/**', 'scripts/next/**', '.github/workflows/next-surface-boundary.yml']);
+        }
+        expect(jobsIn(file).map(([name]) => name)).toEqual(['boundary']);
+        const job = jobsIn(file)[0][1];
+        expect(job.permissions).toBeUndefined();
+        expect(job.environment).toBeUndefined();
+        expect(stringsIn(job.env).some(value => value.includes('secrets.'))).toBe(false);
+        const env = job.env as RecordValue;
+        expect(env.BASE_SHA).toBe('${{ github.event.pull_request.base.sha }}');
+        expect(env.POLICY_BOOTSTRAP_REF).toMatch(/^[a-f0-9]{40}$/);
+        expect(job.if).toBe("github.event_name == 'pull_request_target' || github.event.pull_request.base.sha == '417586b6b00e55f4759fc95a68091ffad7596213'");
+        const steps = job.steps as RecordValue[];
+        const checkouts = steps.filter(step => String(step.uses).startsWith('actions/checkout@'));
+        expect(checkouts).toHaveLength(1);
+        expect(checkouts[0].with).toEqual({ ref: '${{ github.event.pull_request.base.sha }}', 'fetch-depth': 0, 'persist-credentials': false });
+        expect(steps.some(step => String(step.uses).startsWith('actions/cache@'))).toBe(false);
+        const runs = steps.filter(step => typeof step.run === 'string').map(step => String(step.run));
+        expect(runs).toHaveLength(3);
+        expect(runs[0]).toContain('git show "$BASE_SHA:$CHECKER_PATH" > "$POLICY_PATH"');
+        expect(runs[0]).toContain('git show "$POLICY_BOOTSTRAP_REF:$CHECKER_PATH" > "$POLICY_PATH"');
+        for (const run of runs.slice(1)) expect(run).toMatch(/^node "\$POLICY_PATH" --base "\$BASE_REF" --head "\$HEAD_REF"/);
+        return [];
+      }
       const checkoutViolations = usesReferences(file)
         .filter(({ uses }) => /^actions\/checkout(?:@|\/|$)/i.test(uses))
         .map(({ location, uses }) => `${location}: ${uses}`);
@@ -185,10 +214,18 @@ describe('workflow policy — every workflow is classified from the filesystem',
     for (const file of workflowFiles) {
       const triggers = triggerNames(file.workflow);
       const manualOnly = triggers.size === 1 && triggers.has('workflow_dispatch');
-      // #4444 adds one weekly native resource suite, never a per-PR macOS lane.
+      // The native resource suite also covers changes to its preservation
+      // fixture or workflow; unrelated pull requests never request this runner.
       const weeklyResources = file.name === 'macos-resource-tests.yml';
       if (weeklyResources) {
-        expect([...triggers].sort()).toEqual(['schedule', 'workflow_dispatch']);
+        expect([...triggers].sort()).toEqual(['pull_request', 'schedule', 'workflow_dispatch']);
+        expect((file.workflow.on as RecordValue).pull_request).toEqual({
+          branches: ['main'],
+          paths: [
+            'tests/workspace-preservation-cli-real-path.test.ts',
+            '.github/workflows/macos-resource-tests.yml',
+          ],
+        });
         expect((file.workflow.on as RecordValue).schedule).toEqual([{ cron: '37 6 * * 2' }]);
         expect(jobsIn(file)).toHaveLength(1);
         const job = jobsIn(file)[0][1];
@@ -241,6 +278,17 @@ describe('workflow policy — every workflow is classified from the filesystem',
       .filter((file) => !isRecord(file.workflow.permissions))
       .map((file) => file.name);
     expect(violations, 'top-level permissions make the default token scope explicit and least-privilege').toEqual([]);
+  });
+
+  it('keeps runner and step contexts out of job-level environments', () => {
+    // GitHub rejects the whole workflow before creating any jobs when job.env
+    // uses a context that is available only after the job has started.
+    const violations = workflowFiles.flatMap(file => jobsIn(file).flatMap(([name, job]) =>
+      stringsIn(job.env)
+        .filter(value => /\$\{\{[^}]*\b(?:runner|steps|job|env)\s*(?:\.|\[)/.test(value))
+        .map(value => `${file.name}: jobs.${name}.env: ${value}`),
+    ));
+    expect(violations, 'job.env accepts github, inputs, matrix, needs, secrets, strategy and vars contexts').toEqual([]);
   });
 });
 

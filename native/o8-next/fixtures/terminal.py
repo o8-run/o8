@@ -29,7 +29,9 @@ while True:
     while b"\r" in pending or b"\n" in pending:
         end = min(i for i, value in enumerate(pending) if value in (10, 13))
         command, pending = pending[:end].decode(errors="replace"), pending[end + 1:]
-        if command == "size":
+        if command == "\x0b":
+            emit("CTRL-K\r\n")
+        elif command == "size":
             rows, cols, _, _ = struct.unpack("HHHH", fcntl.ioctl(0, termios.TIOCGWINSZ, b"\0" * 8))
             emit(f"SIZE {cols} {rows}\r\n")
         elif command == "alt":
@@ -50,6 +52,13 @@ while True:
                 emit(block)
                 if command == "flood":
                     time.sleep(max(0, started + (i + 1) * 0.004 - time.monotonic()))
-            emit("FLOOD-DONE\r\n")
+            tail_gate = os.environ.get("O8_NEXT_TERMINAL_FLOOD_TAIL_GATE")
+            if tail_gate:
+                emit("FLOOD-DONE")
+                while not os.path.exists(tail_gate):
+                    time.sleep(0.01)
+                emit("\r\n")
+            else:
+                emit("FLOOD-DONE\r\n")
         else:
             emit("\x1b[31mKEY\x1b[0m 界 e\u0301\r\n")

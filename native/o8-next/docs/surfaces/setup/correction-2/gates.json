@@ -1,0 +1,15 @@
+{
+  "base": "3b99b20d6c5c095cb88efbf941c45bb1e1758bd8",
+  "typecheckFast": "passed, 8192MiB",
+  "npxTscNoEmit": "passed, NODE_OPTIONS=--max-old-space-size=8192",
+  "eslint": "0 errors; 6 Rust files ignored by ESLint, checked with Clippy",
+  "ruleCheck": "2 files, zero violations vs origin/main",
+  "testClassify": "passed, including dated-fixture isolation audit; manifest unchanged",
+  "clippy": "exit 0, no touched-file diagnostics",
+  "focusedNative": "9 passed",
+  "focusedTypeScript": "7 files, 43 tests passed",
+  "fullNative": "95 passed, 1 unchanged worker transcript timeout, 3 ignored",
+  "workerRetry": "1 passed",
+  "cli": "7 passed",
+  "fullNpm": "1242 files / 9061 tests passed, 3 skipped files / 5 skipped tests"
+}

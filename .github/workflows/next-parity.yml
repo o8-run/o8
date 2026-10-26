@@ -1,0 +1,57 @@
+name: o8 next parity
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'native/o8-next/**'
+      - 'scripts/next/**'
+      - 'scripts/parity/**'
+      - 'tests/next-parity-harness-real-path.test.ts'
+      - 'tests/next-parity-render-failure-real-path.test.ts'
+      - 'tests/next-parity-preflight-real-path.test.ts'
+      - 'tests/next-parity-route-ownership-real-path.test.ts'
+      - 'tests/fixtures/next-parity-route-ownership.mjs'
+      - '.github/actions/next-linux-setup/**'
+      - '.github/workflows/next-parity.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: next-parity-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  parity:
+    name: Paired native and current UI captures
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      CARGO_TERM_COLOR: never
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      CARGO_PROFILE_TEST_DEBUG: '0'
+      CARGO_INCREMENTAL: '0'
+      LIBGL_ALWAYS_SOFTWARE: '1'
+      NODE_OPTIONS: --max-old-space-size=8192
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/next-linux-setup
+        with:
+          browser: 'true'
+      - name: Check inventory and reject capture failures through the CLI
+        run: npx vitest run tests/next-parity-harness-real-path.test.ts tests/next-parity-preflight-real-path.test.ts tests/next-parity-render-failure-real-path.test.ts tests/next-parity-route-ownership-real-path.test.ts
+      - name: Build native renderer and test context
+        run: |
+          cargo build --locked --manifest-path native/o8-next/Cargo.toml
+          cargo test --locked --manifest-path native/o8-next/Cargo.toml --bin o8-next --no-run
+      - name: Capture every registered surface at both sizes
+        run: |
+          export VK_ICD_FILENAMES="$(find /usr/share/vulkan/icd.d -name 'lvp_icd*.json' -print -quit)"
+          test -n "$VK_ICD_FILENAMES"
+          xvfb-run -a -s '-screen 0 1600x1200x24 -nolisten tcp -noreset -br' node scripts/parity/next.mjs --output work/next-parity
+      - name: Save pairs and numeric report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: o8-next-parity
+          path: work/next-parity/
+          if-no-files-found: error
+          retention-days: 7

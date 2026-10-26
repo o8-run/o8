@@ -1,94 +1,115 @@
-# EXTERNAL_AGENTS.md — driving o8 from the outside
+# Driving o8 from an external agent
 
-How any external agent (Claude Opus/Sonnet via MCP, or anything that can run a CLI) controls o8 proficiently with zero UI touches. The o8 desktop app must be running (it hosts the API the tools call).
+Use the running API or CLI to prepare work, dispatch workers, inspect evidence,
+and record governed decisions. The app or a development server must be reachable.
+Discover the current connection and tool definitions before making an action call.
 
-## Setup (one time)
+## Connect and discover
 
-1. Launch o8.app once — it writes the discovery files:
-   - `~/.o8/api-port` — the local API port (fallback: 3001)
-   - `~/.o8/ws-token` — Bearer token (only required for non-loopback callers; localhost requests skip auth)
-2. **MCP**: spawn the operator server from the repo root — `.mcp.json` already does this for Claude Code sessions opened here:
-   ```json
-   { "mcpServers": { "o8": { "command": "npx", "args": ["tsx", "src/lib/mcp/operator-mcp-server.ts"] } } }
-   ```
-   Env overrides honored: `O8_API_PORT`, `O8_API_TOKEN`.
-3. **CLI**: `o8` is symlinked to `/usr/local/bin/o8` after first app launch. `o8 doctor` verifies port/token resolution. JSON output by default; `--human` for ANSI.
+- Run `o8 doctor` to inspect CLI connection readiness. `O8_API_PORT` and
+  `O8_API_TOKEN` select a particular server. `O8_DATA_DIR` selects its data profile.
+  Keep test and development profiles separate from the installed app's profile.
+- Loopback API calls require a bearer token. Localhost is not an authentication
+  bypass. Keep bearer values out of prompts, transcripts, and repository files.
+- Use the client configuration produced by `o8 mcp install --print` or Settings.
+  The usual stdio bridge forwards to the running HTTP host. The standalone server
+  supports headless use; it does not start the application backend.
+- List the live tools with `POST /api/mcp` and the JSON-RPC request below. Names,
+  required fields, enum values, and defaults come from this response.
 
-## The dispatch loop (the core recipe)
-
-```
-o8_operator_defaults({})                          # read current brains/gates
-o8_operator_defaults({orchestratorModel: "...",   # optionally pick the brain for this work
-                      thinkingEffort: "high"})    # (GLOBAL + persistent — restore after!)
-create_mission({issues: [495] | issues_inline: [{title, body}], repoPath, runtime})
-get_mission_status() / mission_tail({packetId})   # watch
-o8_packet_diff({packetId})                        # read the actual code (byte-bounded)
-o8_merge_preview({packetId})                      # dry-run the governance gates
-submit_review({packetId, approved, findings})     # ALWAYS record this first (audit trail);
-approve_and_merge({packetId})                     # then ship. In that order.
+```json
+{"jsonrpc":"2.0","id":1,"method":"tools/list"}
 ```
 
-Small Codex tasks typically complete in 2–5 minutes — `wait_for_mission_ready` with the default 10-min timeout is usually one call.
+A tool call uses `method:"tools/call"` and
+`params:{name:"exact_discovered_name",arguments:{...}}`. Send an object for
+arguments, including `{}` when no fields are required. CLI command help is
+`o8 <group> <command> --help`; group help lists related commands.
 
-If a gate blocks: `o8_merge_preview` names the check; `o8_packet_diff` shows the offending lines; `rerun_with_feedback` or `submit_review({approved:false, findings})` sends it back with instructions. Never bypass a gate.
+## Prepare, then dispatch
 
-## Packet states & failure triage
+MCP `create_mission` dispatches by default. Pass `dispatch:false` to stage work.
+CLI `o8 mission create` stages work by default; `--dispatch` starts it.
+Select a runtime from live discovery and availability instead of guessing an id.
 
-- **Terminal-good:** `awaiting_review` (your cue to diff + gate-check) · `released` (merged).
-- **Terminal-bad:** `failed` · `archived` — but `archived` after a worker failure is often **recoverable**: if the transcript shows an external cause (quota, auth), `rerun_with_feedback` can revive the packet on a fresh lane.
-- **Stuck — needs YOUR intervention; more waiting will not help:** `blocked` / `awaiting_input`, and last-events like `silent_exit_no_work` or `agent_failed`. `wait_for_mission_ready` does **not** treat these as terminal — inspect `get_mission_status` on every wake; a timeout does NOT mean still-running.
-- **First move on any failure or empty diff: read `o8_packet_transcript`.** The worker's real error (quota exhaustion, auth, build break) lives in the transcript, not in the status label.
-- **Recovery selection:** warm parked session → `steer_packet` · dead/no-work session → `rerun_with_feedback` (fresh worker, same packet) · start truly clean → `reset_packet` then `dispatch_mission`. One rework round, then stop and report to the operator.
-- **Worker quota exhaustion** (e.g. Codex usage limits) presents as `silent_exit_no_work` or `agent_failed` — the diff may be empty OR partially complete (work committed before the wall). **Always confirm in the transcript**; don't infer from the diff alone. Then wait for the reset or switch runtime — do not redispatch into the same wall.
-- **After any merge, verify with git** (`git -C <repo> log --oneline -1` via the operator or `o8 packet info`): a `merged:true` / `alreadyReleased` response is bookkeeping, not proof a commit landed (see o8-run/o8 lane-drift issue).
-
-## Tool inventory (by job)
-
-- **Configure**: `o8_operator_defaults` (read/set orchestratorModel, thinkingEffort, overlapGate, parallelCap, defaultDispatchRuntime, healBot, supervisor, promptCaching — global, persistent)
-- **Dispatch**: `create_mission` (creates + dispatches by default), `dispatch_mission` (rare — post-reset), `reset_packet`, `retry_packet`, `rerun_with_feedback`
-- **Watch**: `o8_status`, `get_mission_status` (`includeCost: true` for spend), `mission_tail` (cursor long-poll), `o8_lane_events`, `o8_packet_transcript`, `wait_for_mission_ready`
-- **Review/ship**: `o8_packet_diff`, `o8_merge_preview`, `submit_review`, `o8_review_state`, `approve_and_merge` (idempotencyKey supported), `o8_approve` / `o8_reject` (chat-level)
-- **Steer**: `o8_send` (new task or nudge a session), `steer_packet`
-- **Task pool**: `o8_task_list/create/brief/claim/dispatch/block/report/archive/prune`
-- **Repo/project**: `o8_register_repo`, `o8_init_repo`, `o8_create_project`, `o8_scaffold`, `get_packet_scope`, `o8_user_context`
-- **Brain**: `cortex_ask` (query project memory/directives), `cortex_propose_observation` (proposal queue — not a direct write)
-- **Spec (o8.md)**: `o8_spec_read/review_index/pending_feedback/validate/comment/reply/resolve/suggest`
-- **UI automation (last resort)**: `o8_view_*` (screenshot, snapshot, click, type, read, eval, navigate, scroll, press_key, wait_for, console_errors, active_route) — prefer the API tools above; the webview is for verification and the rare UI-only surface.
-
-## Model & cost control
-
-- **Orchestrator brain**: `o8_operator_defaults({orchestratorModel})`. Default is Opus-class; drop to `claude-sonnet-4-6` for routine sweeps. `thinkingEffort`: `adaptive | low | medium | high | max | xhigh`.
-- **Worker runtime**: per-mission via `create_mission({runtime: "codex" | "gemini"})`; the global default via `o8_operator_defaults({defaultDispatchRuntime})`. The Codex worker model itself is configured in `~/.codex/config.toml` (not exposed here).
-- **Defaults are global and persist.** If you change them for one mission, read-before-write and restore afterward.
-- Cost visibility: `get_mission_status({includeCost: true})`.
-
-## Governance posture (read before you automate)
-
-- `overlapGate`: `strict` blocks parallel packets touching the same files; `advisory` warns. Tune per sprint via `o8_operator_defaults`, restore after.
-- Merge gates are the product. An external agent's job is to **satisfy** them — read the diff, fix the violation, re-run — never to route around them. The four: **security-patterns** (regex scan for dangerous calls/secrets), **diff-budget** (size limit on the change), **untracked-imports** (no imports of files outside the packet's scope), **self-review-integrity** (the worker's self-review must match the actual diff).
-- **PR-only dogfood mode:** a repo may be configured so merge-to-main is blocked — `approve_and_merge` returns an honest `merged:false` naming PR-only mode, with gates listed as passing. That IS the governed success state for an agent: stop there and report; a human opens/merges the PR. Do not hand-merge with git and do not treat it as a failure.
-- `cortex_propose_observation` is a proposal queue by design; directives are operator-approved.
-
-## CLI quick reference
-
+```text
+create_mission({repoPath:"/path/to/repo", issues: ["495"], dispatch:false, holdMerges:true})
+create_mission({repoPath:"/path/to/repo", issues_inline:[{title:"Check empty input", body:"Inspect behavior and report evidence"}], dispatch:false, holdMerges:true})
+dispatch_mission({missionId:"mission-id-returned-by-create"})
+get_mission_status({missionId:"mission-id-returned-by-create"})
 ```
-o8 status · o8 doctor · o8 run [--detach] <cmd>
-o8 task {list,create,brief,claim,dispatch,block,report,archive,prune}
-o8 packet {info,scope,diff,commit,heartbeat,review,report,capture,mirror-proof,log,runtime-drift}
-o8 spec {read,index,pending,validate,comment,reply,resolve,suggest}
-o8 cortex observe · o8 lane touches
+
+Use string issue references or inline objects with a non-empty title. Keep the
+returned mission and packet identifiers; do not infer identifiers from titles.
+Do not dispatch again after a timeout until status establishes what happened.
+For supported mutations, keep the same idempotency key after an uncertain response.
+
+## Inspect, steer, and review
+
+```text
+get_packet_scope({packetId:"packet-id-from-status"})
+o8_packet_diff({packetId:"packet-id-from-status"})
+o8_merge_preview({packetId:"packet-id-from-status"})
+steer_packet({packetId:"packet-id-from-status", message:"Also check empty input"})
+submit_review({packetId:"packet-id-from-status", approved:false, findings:[{file:"src/example.ts", severity:"bug", description:"Empty input is not handled", status: "deferred"}]})
 ```
-Exit codes: 0 ok · 1 invalid args · 2 connection refused · 3 unauthorized · 4 not found · 5 conflict.
 
-## Gotchas
+Each finding needs file, severity, description, and status. Canonical severity
+values are `bug`, `rule_violation`, and `note`; status values are `fixed`,
+`accepted`, and `deferred`. Put explanatory text in description or fixSuggestion.
+An empty findings array is valid when the review has no findings.
 
-- The app must be running; `connection refused` (CLI exit 2) means launch o8.app.
-- Long-poll calls (`wait_for_mission_ready`, `mission_tail`) can transiently report "API unreachable" while the app is fine — re-probe with `get_mission_status` and resume. Only a hard `connection refused` means the app is down.
-- `o8_packet_diff` is byte-bounded (64KB default, 512KB cap via `maxBytes`) — check `truncated` before judging a large diff.
-- `create_mission` dispatches immediately by default — pass `dispatch: false` to stage.
-- Claude runs as the orchestrator only; packet workers are Codex/Gemini.
-- Loopback callers need no token; anything non-local needs `Authorization: Bearer $(cat ~/.o8/ws-token)`.
+An approved review can unlock automatic merge. Set `holdMerges:true` when merges
+must wait for the operator. Run `approve_and_merge` or `o8 packet review --approve`
+only when the current task authorizes approval and merge. A merge preview is
+read-only and never supplies that authorization by itself.
 
-## Acceptance bar
+Use packet transcripts and terminal reasons to diagnose a failed launch. A warm
+existing session can be steered; a missing session needs a recovery decision.
+`wait_for_mission_ready` wakes for attention or state changes as well as timeouts;
+inspect its returned status and wakeReason before deciding to wait again.
+Never reset a worktree merely to repair an argument error.
 
-A fresh external agent reading only this file should be able to: register a repo → set its preferred brain/effort → create + dispatch a mission → watch it → read the diff → fix a gate violation via feedback → merge — without touching the UI.
+## Ten operator recipes
+
+| Task | Typical CLI call |
+| --- | --- |
+| Prepare work | `o8 mission create --title "Inspect behavior" --repo /path/to/repo` |
+| Dispatch prepared work | `o8 mission dispatch --mission mission-audit --wait` |
+| Read mission state | `o8 mission status --mission mission-audit` |
+| Preview merge gates | `o8 packet merge-preview --packet pkt-audit` |
+| Steer an existing session | `o8 packet steer --packet pkt-audit --message "Also check empty input"` |
+| Record approval and attempt merge, when authorized | `o8 packet review --packet pkt-audit --approve --expected-sha <full-sha> --coverage R1=src/example.ts` |
+| Acquire a server resource | `o8 lease acquire audit --ttl 2m` |
+| Inspect that resource | `o8 lease status audit` |
+| Queue a project task | `o8 task create --title "Inspect behavior" --repo /path/to/repo --project project-audit` |
+| Block a task | `o8 task block pkt-audit --reason "Waiting for dependency" --code dependency_blocked` |
+
+For server leases, bare TTL values are milliseconds; suffixes are `ms`, `s`, `m`,
+and `h`. Default TTL is 2h, allowed duration is 1s through 24h, and `--wait` queues
+in FIFO order. Release with `o8 lease release audit` from the same agent process.
+`o8 team lease` is a separate checkout-local coordination store.
+
+## Repository notes and errors
+
+```text
+o8 spec read --repo /path/to/repo
+o8 spec index --repo /path/to/repo
+o8 spec pending --repo /path/to/repo
+o8 spec check --repo /path/to/repo
+```
+
+Agents annotate the operator's o8.md through comment, reply, resolve, and suggest.
+Use the returned review item ids for subsequent actions and preserve operator prose.
+
+CLI output is JSON by default; `--human` selects formatted output. Exit codes are
+0 success, 1 invalid arguments, 2 unreachable API, 3 unauthorized, 4 not found,
+5 conflict, and 6 server timeout with an uncertain outcome. Follow the error's
+message and corrective hint. For exit 6, inspect status before repeating a mutation.
+For an unauthorized call, check the configured server/profile and token source.
+For an unavailable tool, repeat discovery and use an exact exposed name.
+
+Operator defaults persist globally within their profile. Read before changing
+them, and restore the original values after a temporary change.
+See the [agent reference](../../AGENT_REFERENCE.md#operator-call-recipes) for
+additional command families and [agent setup](../operations/agent-setup.md) for connection setup.

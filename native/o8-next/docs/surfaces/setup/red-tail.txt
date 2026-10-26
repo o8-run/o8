@@ -1,0 +1,25 @@
+running 3 tests
+test shell::tests::onboarding_folder_registration_error_and_cancel ...
+thread 'shell::tests::onboarding_folder_registration_error_and_cancel' (11795) panicked at src/shell_tests.rs:65:62:
+missing control: setup-folder
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+test shell::tests::onboarding_operator_auth_error_retry ...
+thread 'shell::tests::onboarding_operator_auth_error_retry' (11844) panicked at src/shell_tests.rs:65:62:
+missing control: setup-open
+FAILED
+test shell::tests::onboarding_project_tools_privacy_and_workspace ...
+thread 'shell::tests::onboarding_project_tools_privacy_and_workspace' (11867) panicked at src/shell_tests.rs:80:5:
+first run must paint project setup
+FAILED
+
+failures:
+
+failures:
+    shell::tests::onboarding_folder_registration_error_and_cancel
+    shell::tests::onboarding_operator_auth_error_retry
+    shell::tests::onboarding_project_tools_privacy_and_workspace
+
+test result: FAILED. 0 passed; 3 failed; 0 ignored; 0 measured; 33 filtered out; finished in 6.77s
+
+error: test failed, to rerun pass `--bin o8-next`

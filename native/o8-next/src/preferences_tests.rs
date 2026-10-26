@@ -28,7 +28,7 @@ fn launch_preferences_match_palette_sidebar_and_window_before_input(cx: &mut Tes
         crate::theme::Theme::for_appearance(crate::theme::Appearance::Light).background
     );
     assert_eq!(
-        cx.debug_bounds("session-sidebar").unwrap().size.width,
+        cx.debug_bounds("shell-sidebar").unwrap().size.width,
         px(384.)
     );
     shell.update_in(cx, |s, window, cx| {
@@ -71,14 +71,12 @@ fn launch_preferences_apply_glass_and_collapsed_sidebar_without_stealing_input(
         crate::theme::current().shell_background.a,
         if cfg!(target_os = "macos") { 0. } else { 1. }
     );
-    assert_eq!(
-        cx.debug_bounds("session-sidebar").unwrap().size.width,
-        px(0.)
-    );
+    assert_eq!(cx.debug_bounds("shell-sidebar").unwrap().size.width, px(0.));
     shell.update_in(cx, |s, window, cx| {
         let id = s.workspace_sessions()[0].id.clone();
         s.execute(Command::Message(id), window, cx);
     });
+    cx.simulate_keystrokes("f8");
     cx.simulate_input("glass draft");
     draw(cx);
     shell.read_with(cx, |s, cx| {
@@ -117,7 +115,7 @@ fn launch_preferences_reject_invalid_snapshot_and_retain_saved_bounds(cx: &mut T
     assert_eq!(size.width, px(1000.));
     assert_eq!(size.height, px(720.));
     assert_eq!(
-        visual.debug_bounds("session-sidebar").unwrap().size.width,
-        px(250.)
+        visual.debug_bounds("shell-sidebar").unwrap().size.width,
+        px(280.)
     );
 }

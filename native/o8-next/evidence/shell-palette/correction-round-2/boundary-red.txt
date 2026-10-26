@@ -1,0 +1,9 @@
+native/o8-next/fixtures/terminal.py: 4 changed lines (+3/-1); only one added registration line is allowed; use label shell-work for shared work
+native/o8-next/src/pane_grid.rs: 3 changed lines (+3/-0); only one added registration line is allowed; use label shell-work for shared work
+native/o8-next/src/projects_tests.rs: 4 changed lines (+2/-2); only one added registration line is allowed; use label shell-work for shared work
+native/o8-next/src/shell.rs: 37 changed lines (+31/-6); only one added registration line is allowed; use label shell-work for shared work
+native/o8-next/src/shell_session.rs: 4 changed lines (+4/-0); only one added registration line is allowed; use label shell-work for shared work
+native/o8-next/src/shell_tests.rs: 16 changed lines (+9/-7); only one added registration line is allowed; use label shell-work for shared work
+native/o8-next/src/shell_view.rs: 56 changed lines (+34/-22); only one added registration line is allowed; use label shell-work for shared work
+native/o8-next/src/surface_registry.rs: 58 changed lines (+58/-0); only one added registration line is allowed; use label shell-work for shared work
+o8 next surface boundary wall=0.019 s

@@ -1,0 +1,41 @@
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/next-speed-receipt-real-path.test.ts > uses canonical paths and restores composer focus after switches while writing both measurements
+AssertionError: expected undefined to deeply equal [ 1200, 816 ]
+
+- Expected:
+[
+  1200,
+  816,
+]
+
++ Received:
+undefined
+
+ ❯ tests/next-speed-receipt-real-path.test.ts:57:38
+     55|   expect(receipt.fixture.digest).toMatch(/^[a-f0-9]{64}$/);
+     56|   for (const target of ['current', 'next']) {
+     57|     expect(receipt[target].viewport).toEqual([1200, 816]);
+       |                                      ^
+     58|     expect(receipt[target].scaleFactor).toBe(1);
+     59|     expect(receipt[target].conditions.process).toBe('fresh-owned-proce…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  tests/next-speed-receipt-real-path.test.ts > rejects viewport native evidence without replacing an earlier receipt
+ FAIL  tests/next-speed-receipt-real-path.test.ts > rejects cold-session native evidence without replacing an earlier receipt
+ FAIL  tests/next-speed-receipt-real-path.test.ts > rejects missing-conditions native evidence without replacing an earlier receipt
+AssertionError: expected +0 not to be +0 // Object.is equality
+ ❯ tests/next-speed-receipt-real-path.test.ts:76:29
+     74|   writeFileSync(output, '{"retained":true}\n');
+     75|   const result = run(probe(mode), output);
+     76|   expect(result.status).not.toBe(0);
+       |                             ^
+     77|   expect(readFileSync(output, 'utf8')).toBe('{"retained":true}\n');
+     78| }, 90_000);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  4 failed | 3 passed (7)

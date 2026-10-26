@@ -10,7 +10,18 @@ pub(super) const REGISTRATION: Registration = Registration {
             crate::brain::Brain::new(client, workspace, None, window, cx)
         })))
     },
-    ..Registration::new("Brain", "Open Brain", |_, _, _, _| {
+    ..Registration::new("Brain", "Open Brain", |shell, _, window, cx| {
+        if let Some(Content::Session(session)) = shell
+            .active()
+            .and_then(|tab| shell.content.get(&shell.key(&tab)))
+        {
+            let session = session.clone();
+            shell.palette = false;
+            session.update(cx, |session, cx| session.shell_open_brain(window, cx));
+            shell.revision += 1;
+            cx.notify();
+            return None;
+        }
         Some((Tab::Brain, false))
     })
 };

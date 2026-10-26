@@ -1,17 +1,30 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { assertPreRunAdmission } from '@/lib/lane/pre-run-cancellation';
+import { assertPreRunAdmission, withoutPreRunAdmission } from '@/lib/lane/pre-run-cancellation';
 import { advanceCorrectionStop } from '@/lib/db/worker-correction-fences';
 import { getSqlite } from '@/lib/db';
 import type { OwnedSessionRecord } from './types';
 
 interface Admission { correctionId: string; surfaceId: string; runId: string; allowInterrupted: boolean; check: () => void }
-const admission = new AsyncLocalStorage<Admission>();
+const admission = new AsyncLocalStorage<Admission & { active: boolean }>();
 type ActionGuard = (session: OwnedSessionRecord | null, preparedRunId?: string) => void;
 const actionGuard = new AsyncLocalStorage<ActionGuard>();
 
 /** Keep a queued operator intent fenced through asynchronous spawn preparation. */
 export function withOwnedActionGuard<T>(check: ActionGuard, action: () => Promise<T>): Promise<T> {
-  return actionGuard.run(check, action);
+  const parent = actionGuard.getStore();
+  let active = true;
+  return actionGuard.run((session, preparedRunId) => {
+    parent?.(session, preparedRunId);
+    if (!active) return;
+    check(session, preparedRunId);
+  }, async () => {
+    try { return await action(); } finally { active = false; }
+  });
+}
+
+/** Gateway requests and exact-surface cleanup are independent of launch admission. */
+export function withoutOwnedStartAdmission<T>(operation: () => Promise<T>): Promise<T> {
+  return withoutPreRunAdmission(() => admission.exit(() => actionGuard.exit(operation)));
 }
 
 /** Assert only the surrounding action guard, including before lane attachment. */
@@ -22,14 +35,26 @@ export function assertOwnedActionGuard(): void {
 
 /** An explicit correction may continue only the exact run the operator selected. */
 export function withOwnedActionAdmission<T>(input: Admission, action: () => Promise<T>): Promise<T> {
-  return admission.run(input, action);
+  const current = { ...input, active: true };
+  return admission.run(current, async () => {
+    try { return await action(); } finally { current.active = false; }
+  });
 }
 
 export function assertOwnedActionAdmission(session: OwnedSessionRecord | null, preparedRunId?: string): void {
   assertPreRunAdmission();
   actionGuard.getStore()?.(session, preparedRunId);
+  assertCorrectionAdmission(session, preparedRunId);
+}
+
+/** Stop cannot be vetoed by start admission. Keep a correction's exact-run checks. */
+export function assertOwnedStopAdmission(session: OwnedSessionRecord | null): void {
+  assertCorrectionAdmission(session);
+}
+
+function assertCorrectionAdmission(session: OwnedSessionRecord | null, preparedRunId?: string): void {
   const expected = admission.getStore();
-  if (!expected) return;
+  if (!expected?.active) return;
   expected.check();
   const run = session?.activeRun ?? session?.recentRuns[0];
   if (!session || session.surfaceId !== expected.surfaceId || session.detachedAt || session.orphanedAt
@@ -46,6 +71,6 @@ export function holdPendingOwnedCorrections(surfaceId: string): void {
     getSqlite().prepare(`UPDATE worker_correction_deliveries SET status = 'held',
     note = 'Worker stopped. Inspect it before resuming.', updated_at = ?
     WHERE surface_id = ? AND status IN ('pending','sending') AND correction_id != ?`)
-    .run(Date.now(), surfaceId, admission.getStore()?.correctionId ?? '');
+    .run(Date.now(), surfaceId, admission.getStore()?.active ? admission.getStore()!.correctionId : '');
   })();
 }

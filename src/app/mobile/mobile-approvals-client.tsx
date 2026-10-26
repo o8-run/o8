@@ -92,8 +92,8 @@ function getWsBridgeUrl(token: string) {
   // [mobile-lan] Connect to the ws-server port on the same host as the page.
   // We used to attempt the same-port `/ws` rewrite for LAN/Tailscale hosts,
   // but Next.js's standalone server does NOT proxy WebSocket upgrades through
-  // rewrites. ws-server already binds 0.0.0.0:<wsPort>, so direct host:wsPort
-  // works on LAN; the token query param is verified before upgrade completes.
+  // rewrites. With O8_LAN_ACCESS=1 ws-server binds 0.0.0.0:<wsPort>, so direct
+  // host:wsPort works on LAN; the token query param is verified before upgrade completes.
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   return `${protocol}//${window.location.hostname}:${getBrowserWsPort()}/ws?token=${encodeURIComponent(token)}`;
 }

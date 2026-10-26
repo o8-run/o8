@@ -1,0 +1,15 @@
+running 1 test
+test shell::tests::onboarding_project_tools_privacy_and_workspace ...
+thread 'shell::tests::onboarding_project_tools_privacy_and_workspace' (45296) panicked at src/shell_tests.rs:182:5:
+the opened workspace must persist a send through the production queue
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    shell::tests::onboarding_project_tools_privacy_and_workspace
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 41 filtered out; finished in 7.14s
+
+error: test failed, to rerun pass `--bin o8-next`

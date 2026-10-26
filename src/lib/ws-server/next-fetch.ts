@@ -9,7 +9,7 @@
  * uses and cached on first call (getOrCreateWsToken does a file read each time).
  */
 
-import { getApiBase } from '@/lib/panel/api-port';
+import { getApiBase, getWsBase } from '@/lib/panel/api-port';
 import type {
   RuntimeActionRequest,
   RuntimeActionResult,
@@ -17,6 +17,7 @@ import type {
   RuntimeLaunchResult,
 } from '@/lib/runtime/actions';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
+import { matchNativeHttpRoute } from './native-http-registry';
 
 /** Default per-request timeout (ms). Also used by the entry's fetchSync probe. */
 export const FETCH_TIMEOUT_MS = 8_000;
@@ -38,13 +39,14 @@ function wsToken(): string {
   return (cachedWsToken ??= getOrCreateWsToken());
 }
 
-function getNextOrigin(): string {
+function getNextOrigin(pathname: string, method: string): string {
+  if (process.env.O8_NEXT_O8D === '1' && matchNativeHttpRoute(pathname, method)) return getWsBase().replace(/^ws:/, 'http:');
   return process.env.NEXT_ORIGIN ?? getApiBase();
 }
 
-export function buildNextUrl(pathname: string, searchParams?: URLSearchParams): string {
+export function buildNextUrl(pathname: string, searchParams?: URLSearchParams, method = 'GET'): string {
   const query = searchParams && searchParams.size > 0 ? `?${searchParams.toString()}` : '';
-  return `${getNextOrigin()}${pathname}${query}`;
+  return `${getNextOrigin(pathname, method)}${pathname}${query}`;
 }
 
 function getNextFetchErrorCode(error: Error): string | null {
@@ -102,7 +104,7 @@ export async function fetchNextJson<T>(
     headers['Content-Type'] = 'application/json';
   }
 
-  const response = await fetchWithRetry(buildNextUrl(pathname, options.searchParams), {
+  const response = await fetchWithRetry(buildNextUrl(pathname, options.searchParams, options.method), {
     method: options.method ?? 'GET',
     headers,
     body: options.body === undefined ? undefined : JSON.stringify(options.body),

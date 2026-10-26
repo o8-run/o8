@@ -1,0 +1,20 @@
+note: to see what the problems were, use the option `--future-incompat-report`, or run `cargo report future-incompatibilities --id 1`
+     Running unittests src/main.rs (work/native-target/debug/deps/o8_next-f96529fb57d58ecd)
+
+running 1 test
+test shell::tests::correction_palette_brain_resumes_the_session_draft ...
+thread 'shell::tests::correction_palette_brain_resumes_the_session_draft' (90637) panicked at src/shell_tests.rs:151:9:
+assertion `left == right` failed: New message must still focus the main composer beside an open Brain
+  left: String("")
+ right: "Main draft"
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    shell::tests::correction_palette_brain_resumes_the_session_draft
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 140 filtered out; finished in 1.58s
+
+error: test failed, to rerun pass `--bin o8-next`

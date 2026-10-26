@@ -3,6 +3,7 @@ import 'server-only';
 import { githubInstallationFetch } from './auth';
 import { getGitHubAppConfig } from './env';
 import type { GitHubReadPriority } from './request-budget';
+import { GitHubReadScopeChangedError } from './read-scope';
 
 interface Check {
   name: string;
@@ -38,8 +39,8 @@ export function readPullRequestChecks(repo: string, head: string, installationId
   const pending = githubInstallationFetch(repo, `/repos/${repo}/commits/${head}/check-runs?per_page=100`, {
     signal: AbortSignal.timeout(18_000),
     headers: entry.etag ? { 'If-None-Match': entry.etag } : undefined,
-  }, { priority }).then(async ({ response, installation, scope }) => {
-    if (authorizedScope && scope !== authorizedScope) { void response.body?.cancel().catch(() => {}); throw new Error('GitHub authorization changed while reading pull request checks. Retry.'); }
+  }, { priority }).then(async ({ response, installation, scope, anonymous }) => {
+    if (authorizedScope && scope !== authorizedScope) { void response.body?.cancel().catch(() => {}); throw new GitHubReadScopeChangedError('GitHub authorization changed while reading pull request checks. Retry.', anonymous); }
     if (installationId && installation?.id !== installationId) {
       void response.body?.cancel().catch(() => {});
       throw new Error('GitHub installation changed while reading pull request checks. Retry.');

@@ -27,6 +27,7 @@ import {
 } from './store';
 import { githubInstallationFetch as installationFetch } from './auth';
 import { hasGitHubBrokerAccess } from './auth';
+import { canReadGitHubSnapshot, githubOrgAccessCode, PUBLIC_GITHUB_REFRESH_MS, usesAnonymousGitHubReads } from './repo-access';
 import {
   isGitHubBotLogin,
   isGitHubInsiderAssociation,
@@ -41,7 +42,8 @@ import { resolveVerifiedClosedOutsideHumanWaitingThread } from '@/lib/supervisor
 
 const GITHUB_SNAPSHOT_TTL_MS = 120_000; // 2 min — balance freshness with rate limit budget
 const syncPriority = new AsyncLocalStorage<GitHubReadPriority>();
-const githubInstallationFetch: typeof installationFetch = (repo, endpoint, init) => installationFetch(repo, endpoint, init, { priority: syncPriority.getStore() ?? 'background' });
+const githubInstallationFetch: typeof installationFetch = (repo, endpoint, init) => installationFetch(repo, endpoint,
+  syncPriority.getStore() === 'interactive' ? { ...init, cache: 'reload' } : init, { priority: syncPriority.getStore() ?? 'background' });
 
 const MAX_PULL_REQUEST_PAGES = 5;
 const MAX_ISSUE_PAGES = 5; // 5 pages * 100 = 500 issues max
@@ -67,9 +69,10 @@ function recentlyClosedPath(
   return `/repos/${repoFullName}/pulls?state=closed&per_page=100&sort=updated&direction=desc&page=${page}`;
 }
 
-function isFresh(lastSuccessfulAt?: string | null) {
+function isFresh(lastSuccessfulAt?: string | null, repoFullName?: string) {
   if (!lastSuccessfulAt) return false;
-  return (Date.now() - new Date(lastSuccessfulAt).getTime()) < GITHUB_SNAPSHOT_TTL_MS;
+  if (repoFullName && !canReadGitHubSnapshot(repoFullName)) return false;
+  return (Date.now() - new Date(lastSuccessfulAt).getTime()) < (repoFullName && usesAnonymousGitHubReads(repoFullName) ? PUBLIC_GITHUB_REFRESH_MS : GITHUB_SNAPSHOT_TTL_MS);
 }
 
 function buildGitHubError(response: Response, bodyText: string) {
@@ -441,7 +444,7 @@ async function syncIssues(repoFullName: string) {
     headers: useEtag ? { 'If-None-Match': etag } : undefined,
   });
 
-  upsertGitHubInstallation({
+  if (installation.id) upsertGitHubInstallation({
     installationId: installation.id,
     accountLogin: installation.account?.login ?? repoFullName.split('/')[0],
     accountType: installation.account?.type ?? null,
@@ -517,7 +520,7 @@ async function syncPullRequests(repoFullName: string) {
     headers: useEtag ? { 'If-None-Match': etag } : undefined,
   });
 
-  upsertGitHubInstallation({
+  if (installation.id) upsertGitHubInstallation({
     installationId: installation.id,
     accountLogin: installation.account?.login ?? repoFullName.split('/')[0],
     accountType: installation.account?.type ?? null,
@@ -621,7 +624,7 @@ async function syncPullRequests(repoFullName: string) {
 async function syncPullRequest(repoFullName: string, prNumber: number) {
   const { response, installation } = await githubInstallationFetch(repoFullName, `/repos/${repoFullName}/pulls/${prNumber}`);
 
-  upsertGitHubInstallation({
+  if (installation.id) upsertGitHubInstallation({
     installationId: installation.id,
     accountLogin: installation.account?.login ?? repoFullName.split('/')[0],
     accountType: installation.account?.type ?? null,
@@ -648,7 +651,7 @@ async function syncPullRequestByHead(repoFullName: string, headRefName: string) 
     `/repos/${repoFullName}/pulls?state=all&head=${head}&per_page=1&sort=updated&direction=desc`,
   );
 
-  upsertGitHubInstallation({
+  if (installation.id) upsertGitHubInstallation({
     installationId: installation.id,
     accountLogin: installation.account?.login ?? owner,
     accountType: installation.account?.type ?? null,
@@ -671,7 +674,7 @@ async function syncPullRequestByHead(repoFullName: string, headRefName: string) 
 }
 
 export async function ensureGitHubIssues(repoFullName: string, options?: { fresh?: boolean }) {
-  const current = listGitHubIssues(repoFullName);
+  const current = canReadGitHubSnapshot(repoFullName) ? listGitHubIssues(repoFullName) : [];
   const syncState = readGitHubSyncState(repoFullName, 'issues');
 
   if (!hasGitHubBrokerAccess()) {
@@ -682,8 +685,8 @@ export async function ensureGitHubIssues(repoFullName: string, options?: { fresh
     };
   }
 
-  if (!options?.fresh && isFresh(syncState?.lastSuccessfulAt)) {
-    return { issues: current, error: syncState?.lastError ?? null, stale: Boolean(syncState?.lastError), lastSuccessfulAt: syncState?.lastSuccessfulAt ?? null };
+  if (!options?.fresh && isFresh(syncState?.lastSuccessfulAt, repoFullName)) {
+    return { issues: current, code: githubOrgAccessCode(syncState?.lastError), error: syncState?.lastError ?? null, stale: Boolean(syncState?.lastError), lastSuccessfulAt: syncState?.lastSuccessfulAt ?? null };
   }
 
   let retryAt: number | null = null;
@@ -694,17 +697,18 @@ export async function ensureGitHubIssues(repoFullName: string, options?: { fresh
     markGitHubSyncError(repoFullName, 'issues', error instanceof Error ? error.message : 'Unable to sync GitHub issues');
   }
 
-  const refreshed = listGitHubIssues(repoFullName);
+  const refreshed = canReadGitHubSnapshot(repoFullName) ? listGitHubIssues(repoFullName) : [];
   const nextState = readGitHubSyncState(repoFullName, 'issues');
   return {
     issues: refreshed,
     error: nextState?.lastError ?? null,
-    stale: Boolean(nextState?.lastError) || !isFresh(nextState?.lastSuccessfulAt), lastSuccessfulAt: nextState?.lastSuccessfulAt ?? null, retryAt,
+    code: githubOrgAccessCode(nextState?.lastError),
+    stale: Boolean(nextState?.lastError) || !isFresh(nextState?.lastSuccessfulAt, repoFullName), lastSuccessfulAt: nextState?.lastSuccessfulAt ?? null, retryAt,
   };
 }
 
 export async function ensureGitHubPullRequests(repoFullName: string, options?: { fresh?: boolean }) {
-  const current = listGitHubPullRequests(repoFullName);
+  const current = canReadGitHubSnapshot(repoFullName) ? listGitHubPullRequests(repoFullName) : [];
   const syncState = readGitHubSyncState(repoFullName, 'pull_requests');
 
   if (!hasGitHubBrokerAccess()) {
@@ -715,8 +719,8 @@ export async function ensureGitHubPullRequests(repoFullName: string, options?: {
     };
   }
 
-  if (!options?.fresh && isFresh(syncState?.lastSuccessfulAt)) {
-    return { prs: current, error: syncState?.lastError ?? null, stale: Boolean(syncState?.lastError), lastSuccessfulAt: syncState?.lastSuccessfulAt ?? null };
+  if (!options?.fresh && isFresh(syncState?.lastSuccessfulAt, repoFullName)) {
+    return { prs: current, code: githubOrgAccessCode(syncState?.lastError), error: syncState?.lastError ?? null, stale: Boolean(syncState?.lastError), lastSuccessfulAt: syncState?.lastSuccessfulAt ?? null };
   }
 
   let retryAt: number | null = null;
@@ -727,17 +731,18 @@ export async function ensureGitHubPullRequests(repoFullName: string, options?: {
     markGitHubSyncError(repoFullName, 'pull_requests', error instanceof Error ? error.message : 'Unable to sync GitHub pull requests');
   }
 
-  const refreshed = listGitHubPullRequests(repoFullName);
+  const refreshed = canReadGitHubSnapshot(repoFullName) ? listGitHubPullRequests(repoFullName) : [];
   const nextState = readGitHubSyncState(repoFullName, 'pull_requests');
   return {
     prs: refreshed,
     error: nextState?.lastError ?? null,
-    stale: Boolean(nextState?.lastError) || !isFresh(nextState?.lastSuccessfulAt), lastSuccessfulAt: nextState?.lastSuccessfulAt ?? null, retryAt,
+    code: githubOrgAccessCode(nextState?.lastError),
+    stale: Boolean(nextState?.lastError) || !isFresh(nextState?.lastSuccessfulAt, repoFullName), lastSuccessfulAt: nextState?.lastSuccessfulAt ?? null, retryAt,
   };
 }
 
 export async function ensureGitHubPullRequest(repoFullName: string, prNumber: number) {
-  const current = getGitHubPullRequestByNumber(repoFullName, prNumber);
+  const current = canReadGitHubSnapshot(repoFullName) ? getGitHubPullRequestByNumber(repoFullName, prNumber) : null;
 
   if (!hasGitHubBrokerAccess()) {
     return {
@@ -759,7 +764,7 @@ export async function ensureGitHubPullRequest(repoFullName: string, prNumber: nu
 }
 
 export async function ensureGitHubPullRequestByHead(repoFullName: string, headRefName: string) {
-  const current = getGitHubPullRequestByHead(repoFullName, headRefName);
+  const current = canReadGitHubSnapshot(repoFullName) ? getGitHubPullRequestByHead(repoFullName, headRefName) : null;
 
   if (!hasGitHubBrokerAccess()) {
     return {

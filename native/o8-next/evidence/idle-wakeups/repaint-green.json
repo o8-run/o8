@@ -1,0 +1,198 @@
+{
+  "testSupport": false,
+  "showInitially": false,
+  "alphaWhenOrdered": 0,
+  "focus": false,
+  "passed": true,
+  "stages": [
+    {
+      "stage": "initial",
+      "expected": 1,
+      "painted": 1,
+      "presents": 1,
+      "passed": true
+    },
+    {
+      "stage": "hidden-data",
+      "expected": 2,
+      "painted": 2,
+      "dataSubmitted": true,
+      "paintMs": 2.042784,
+      "resizeEventToFrameMs": null,
+      "firstTransitionFrameMs": 2.079311,
+      "nativeTransitionMs": 0.030321,
+      "presents": 1,
+      "frameBudgetMs": 16.666666666666668,
+      "idleFrameChecks": 0,
+      "passed": true,
+      "details": null
+    },
+    {
+      "stage": "input",
+      "expected": 3,
+      "painted": 3,
+      "dataSubmitted": true,
+      "paintMs": 1.860909,
+      "resizeEventToFrameMs": null,
+      "firstTransitionFrameMs": 1.88206,
+      "nativeTransitionMs": 0.01935,
+      "presents": 1,
+      "frameBudgetMs": 16.666666666666668,
+      "idleFrameChecks": 0,
+      "passed": true,
+      "details": null
+    },
+    {
+      "stage": "resize",
+      "expected": 4,
+      "painted": 4,
+      "dataSubmitted": true,
+      "paintMs": 4.772853,
+      "resizeEventToFrameMs": 9.240326,
+      "firstTransitionFrameMs": 19.427242,
+      "nativeTransitionMs": 14.648525000000001,
+      "presents": 2,
+      "frameBudgetMs": 16.666666666666668,
+      "idleFrameChecks": 0,
+      "passed": true,
+      "details": {
+        "method": "resize",
+        "alpha": 0,
+        "activated": false
+      }
+    },
+    {
+      "stage": "occluded",
+      "expected": 5,
+      "painted": 5,
+      "dataSubmitted": true,
+      "paintMs": 1.38266,
+      "resizeEventToFrameMs": null,
+      "firstTransitionFrameMs": 8.110037,
+      "nativeTransitionMs": 6.72179,
+      "presents": 1,
+      "frameBudgetMs": 16.666666666666668,
+      "idleFrameChecks": 0,
+      "passed": true,
+      "details": {
+        "method": "occluded",
+        "alpha": 0,
+        "activated": false
+      }
+    },
+    {
+      "stage": "hide",
+      "expected": 6,
+      "painted": 6,
+      "dataSubmitted": true,
+      "paintMs": 1.199586,
+      "resizeEventToFrameMs": null,
+      "firstTransitionFrameMs": 9.001040999999999,
+      "nativeTransitionMs": 7.7958050000000005,
+      "presents": 1,
+      "frameBudgetMs": 16.666666666666668,
+      "idleFrameChecks": 0,
+      "passed": true,
+      "details": {
+        "method": "hide",
+        "alpha": 0,
+        "activated": false
+      }
+    },
+    {
+      "stage": "unhide",
+      "expected": 7,
+      "painted": 7,
+      "dataSubmitted": true,
+      "paintMs": 1.192947,
+      "resizeEventToFrameMs": null,
+      "firstTransitionFrameMs": 2.46482,
+      "nativeTransitionMs": 1.267642,
+      "presents": 1,
+      "frameBudgetMs": 16.666666666666668,
+      "idleFrameChecks": 0,
+      "passed": true,
+      "details": {
+        "method": "unhide",
+        "alpha": 0,
+        "activated": false
+      }
+    },
+    {
+      "stage": "display",
+      "expected": 8,
+      "painted": 8,
+      "dataSubmitted": true,
+      "paintMs": 7.616561,
+      "resizeEventToFrameMs": 24.207065,
+      "firstTransitionFrameMs": 33.154869,
+      "nativeTransitionMs": 25.535042,
+      "presents": 2,
+      "frameBudgetMs": 13.88888888888889,
+      "idleFrameChecks": 0,
+      "passed": true,
+      "details": {
+        "displays": 2,
+        "method": "native transparent move"
+      }
+    },
+    {
+      "stage": "minimize-notification",
+      "expected": 9,
+      "painted": 9,
+      "dataSubmitted": true,
+      "paintMs": 1.247136,
+      "resizeEventToFrameMs": null,
+      "firstTransitionFrameMs": 1.3616,
+      "nativeTransitionMs": 0.111835,
+      "presents": 1,
+      "frameBudgetMs": 13.88888888888889,
+      "idleFrameChecks": 0,
+      "passed": true,
+      "details": {
+        "method": "minimize-notification",
+        "alpha": 0,
+        "activated": false
+      }
+    },
+    {
+      "stage": "restore-notification",
+      "expected": 10,
+      "painted": 10,
+      "dataSubmitted": true,
+      "paintMs": 1.1538220000000001,
+      "resizeEventToFrameMs": null,
+      "firstTransitionFrameMs": 1.243138,
+      "nativeTransitionMs": 0.087136,
+      "presents": 1,
+      "frameBudgetMs": 13.88888888888889,
+      "idleFrameChecks": 0,
+      "passed": true,
+      "details": {
+        "method": "restore-notification",
+        "alpha": 0,
+        "activated": false
+      }
+    },
+    {
+      "stage": "next-frame",
+      "expected": 11,
+      "painted": 11,
+      "dataSubmitted": true,
+      "paintMs": 1.137013,
+      "resizeEventToFrameMs": null,
+      "firstTransitionFrameMs": 1.166056,
+      "nativeTransitionMs": 0.027093,
+      "presents": 1,
+      "frameBudgetMs": 13.88888888888889,
+      "idleFrameChecks": 0,
+      "passed": true,
+      "details": null
+    },
+    {
+      "stage": "close-with-queued-frame",
+      "remainingWindows": 1,
+      "passed": true
+    }
+  ]
+}

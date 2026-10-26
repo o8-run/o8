@@ -1,0 +1,17 @@
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/next-speed-receipt-real-path.test.ts > rejects scale-factor native evidence without replacing an earlier receipt
+AssertionError: expected +0 not to be +0 // Object.is equality
+ ❯ tests/next-speed-receipt-real-path.test.ts:77:29
+     75|   writeFileSync(output, '{"retained":true}\n');
+     76|   const result = run(probe(mode), output);
+     77|   expect(result.status).not.toBe(0);
+       |                             ^
+     78|   expect(readFileSync(output, 'utf8')).toBe('{"retained":true}\n');
+     79| }, 90_000);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 7 skipped (8)

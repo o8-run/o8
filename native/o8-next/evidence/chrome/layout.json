@@ -1,0 +1,31 @@
+{
+  "endpoint": "headless GPUI layout; no raster or compositor capture",
+  "workspaces": 15,
+  "permanentWorkspaceControls": 1,
+  "layouts": [
+    {
+      "viewport": [
+        900.0,
+        700.0
+      ],
+      "switcher": [
+        218.0,
+        8.0,
+        106.0,
+        33.0
+      ]
+    },
+    {
+      "viewport": [
+        1680.0,
+        1050.0
+      ],
+      "switcher": [
+        218.0,
+        8.0,
+        106.0,
+        33.0
+      ]
+    }
+  ]
+}

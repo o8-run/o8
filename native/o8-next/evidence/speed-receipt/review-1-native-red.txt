@@ -1,0 +1,6 @@
+[next-speed] native failure: thread 'ui::speed_receipt::paired_speed_receipt' (116543) panicked at src/speed_receipt.rs:60:5:
+assertion `left == right` failed: paired workloads must match viewport and warmup
+  left: Object {"viewport": Array [Number(1920.0), Number(1080.0)], "prewarmedSessionIds": Array [String("thoughts-composer-second")]}
+ right: Object {"viewport": Array [Number(1200.0), Number(816.0)], "prewarmedSessionIds": Array [String("thoughts-composer-first"), String("thoughts-composer-second")]}
+[next-speed] Native benchmark failed or timed out
+[next-speed] failure kind: Error Native benchmark failed or timed out

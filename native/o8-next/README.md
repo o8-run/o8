@@ -1,10 +1,14 @@
 # o8 next: live sessions, composer and opt-in terminal
 
+[Parity harness and measured checklist](../../docs/internals/o8-next-parity.md): paired native/current-UI captures, layout gaps and remaining acceptance.
+
+[Current UI parity and Linux CI budgets](PARITY.md): surface states, remaining gaps and the headless release workload.
+
 [Per-surface port documentation](docs/surfaces/): registration contracts and rebase steps. Add each port's documentation there.
 
 [Brain conversation and memory retrieval](BRAIN.md): reading, search, sources and a native composer.
 
-[Opt-in app shell](APP-SHELL.md): local connection, workspace switching and persisted session/grid surfaces. The explicit fixture modes below remain available.
+[Opt-in app shell](APP-SHELL.md): available in the installed macOS app under Settings > Experimental > o8 next, off by default. Local connection, workspace switching and persisted session/grid surfaces. The explicit fixture modes below remain available.
 
 Opt-in Rust GPUI surface for #4405, stacked on the static history slice in #4410.
 Lists saved orchestrator sessions beside runtime workers, bootstraps the selected
@@ -39,9 +43,9 @@ Pass `--terminal SESSION_ID` to open a native terminal pane for an existing
 terminal session. This requires the normal `--enable-next`, explicit `--server`
 and `O8_NEXT_API_TOKEN`. The CLI launcher forwards the option. It uses the same
 published GPUI crate as the other native surfaces and `alacritty_terminal =
-0.26.0` (Apache-2.0), with no GPL application crates. The shipped Tauri app is
-unchanged. See [terminal protocol](TERMINAL-PROTOCOL.md) for attach, input, resize,
-replay and reconnection details.
+0.26.0` (Apache-2.0), with no GPL application crates. The shipped entry point
+remains Tauri; the native window is opt-in. See [terminal protocol](TERMINAL-PROTOCOL.md)
+for attach, input, resize, replay and reconnection details.
 
 The pane paints ANSI/indexed/truecolor cells, combining/wide characters and
 cursor shapes, preserves alternate screen state, and retains 10,000 lines.
@@ -82,7 +86,8 @@ for the three release receipts, license graphs and remaining latency limits.
 
 ## Build and use
 
-macOS is the verified target for this slice. From the repository root, with the
+Linux release shell rendering is checked in [headless CI](PARITY.md#linux-ci-measurements).
+macOS remains the interactive verification target. From the repository root, with the
 normal JavaScript dependencies installed:
 
 ```sh
@@ -103,8 +108,8 @@ node cli/dist/o8.mjs next --enable-next --binary "$PWD/native/o8-next/target/rel
 
 The normal window is created without activation. Automated verification always
 adds `--offscreen`, which uses `Application::headless()` and a hidden window.
-Do not run visible checks at an occupied desk. The shipped Tauri binary, its
-startup/defaults, and its data directory are not part of this feature.
+Do not run visible checks at an occupied desk. With the Experimental switch off,
+Tauri startup/defaults and its data directory are unchanged. The standalone fixture launcher does not change that preference.
 
 The launcher requires both the opt-in flag and an explicit absolute executable
 path. The native client requires an explicit numeric loopback HTTP origin with a

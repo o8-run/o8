@@ -72,3 +72,53 @@ on main; it does not enable unlanded Activity, pull-request, file, commit, diff,
 Customize, shortcuts, first-run or stack-review ports. Those ports follow the same
 module contract when they rebase. Sidebar selection remains in the session view,
 with its shell regression owned by the session test module.
+
+## CI boundary
+
+The `o8 next surface boundary` PR check runs for changes under `native/o8-next/`,
+`scripts/next/`, or its workflow. Every scoped file is shared by default. Surface
+modules under `src/surfaces/` and `scripts/next/surfaces/` own their implementation,
+request adapters, fixtures and other helpers. An explicit allowlist also admits
+the existing pull-request desktop probe and gates fixture, and documentation/data
+under `docs/` and `evidence/`. Build scripts remain shared even inside a surface.
+The policy lives in `scripts/next/check-surface-boundary.mjs`; new core files,
+transport, macros, manifests and vendor changes require shell-work authority.
+
+The only shared exception is one added entry inside `shell.rs`'s registration
+macro. Counts are additions plus deletions: replacing a line counts as two, and
+renaming or deleting a shared file is checked too. Each refusal reports the path
+and changed-line count on one line. Intentional shell work must carry the exact
+`shell-work` PR label; that label exempts the boundary and isolated build. Adding
+or removing the label reruns the check. Ordinary CI still applies.
+
+For surface work, the check creates a disposable worktree at current main, applies
+only the PR's Rust surface files and discovered fixture entries, inserts its one
+registration without removing entries landed since the PR branched, and runs
+`cargo check --all-targets --locked --manifest-path native/o8-next/Cargo.toml`.
+It excludes shared edits, manifests, build scripts and vendor changes. Keep any
+support the port needs inside its own included modules. Both native tests and
+production code must compile. The check cleans up on success or failure and
+reports wall time in the CI log and job summary. CI disables debug information
+and incremental output for this compile-only lane and does not save PR caches.
+
+The workflow and checker themselves also require the `shell-work` label. A
+base-owned `pull_request_target` workflow checks out only the base SHA, loads its
+checker, and reads the PR through Git objects. It has only `contents: read`, saves
+no credentials, and never checks out a PR's checker or workflow. This is the
+bounded exception to the repository's metadata-only target-event policy.
+
+Until the first version lands on main, a bootstrap PR event is restricted to the
+recorded pre-introduction base SHA and loads an immutable checker commit. Once
+the base contains the policy, only the base-owned event runs; a PR cannot change
+or disable the workflow used to judge it. The bootstrap uses a distinct check
+name and concurrency group so its skipped run cannot cancel the trusted check.
+
+Run the same entry point locally after fetching main:
+
+```sh
+node scripts/next/check-surface-boundary.mjs --base origin/main --head HEAD
+npx vitest run tests/next-surface-boundary-real-path.test.ts
+```
+
+For a local shell-work check, supply `--event FILE` with the GitHub PR event
+containing its labels. CI reads the event from `GITHUB_EVENT_PATH`.

@@ -23,6 +23,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { remoteRepositoryIdentity } from './remote-identity';
+import { assertNotKnowledgeSource, normalizeKnowledgeWritePath } from '@/lib/cortex/knowledge/sources';
 
 const execFileAsync = promisify(execFile);
 
@@ -61,7 +62,7 @@ async function pathExists(target: string) {
 }
 
 export function getDefaultCloneRoot() {
-  return path.join(os.homedir(), 'Developer');
+  return normalizeKnowledgeWritePath(path.join(os.homedir(), 'Developer'));
 }
 
 /**
@@ -79,6 +80,7 @@ export async function cloneRepoToDefaultLocation(cloneUrl: string, explicitName?
   const name = deriveRepoName(url, explicitName);
   const root = getDefaultCloneRoot();
   const dest = path.join(root, name);
+  assertNotKnowledgeSource(dest);
 
   if (await pathExists(dest)) {
     // Reuse only the requested repository. Different owners can use the same
@@ -92,9 +94,11 @@ export async function cloneRepoToDefaultLocation(cloneUrl: string, explicitName?
     throw new RepoCloneError(`Destination already exists and is not a git repository: ${dest}`, 409);
   }
 
+  assertNotKnowledgeSource(dest);
   await mkdir(root, { recursive: true });
 
   const execOpts = { windowsHide: true, timeout: CLONE_TIMEOUT_MS, env: childEnvironment({ env: { GH_NO_UPDATE_NOTIFIER: '1', GIT_TERMINAL_PROMPT: '0' } }) };
+  assertNotKnowledgeSource(dest);
 
   if (isGitHubUrl(url)) {
     try {
@@ -110,8 +114,11 @@ export async function cloneRepoToDefaultLocation(cloneUrl: string, explicitName?
     }
   }
 
+  assertNotKnowledgeSource(dest);
   try {
-    await execFileAsync('git', ['clone', '--', url, dest], execOpts);
+    // Local clones must own their metadata inodes so subsequent guarded writes
+    // do not inherit shared object files from the source repository.
+    await execFileAsync('git', ['clone', '--no-hardlinks', '--', url, dest], execOpts);
   } catch (error) {
     const stderr = String((error as { stderr?: unknown }).stderr ?? '').trim();
     throw new RepoCloneError(`Clone failed: ${stderr.split('\n').pop() || 'git clone error'}`, 502);

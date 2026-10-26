@@ -21,7 +21,7 @@ async function settle(milliseconds = 80) {
 }
 
 describe('first-run preview route surface', () => {
-  it.each(['unanswered', 'one-choice'] as const)('keeps %s incomplete without saving', async (state) => {
+  it.each(['unanswered', 'one-choice'] as const)('keeps %s unsaved', async (state) => {
     const request = vi.fn(createConsentPreviewRequest(state));
     const container = document.createElement('div');
     document.body.appendChild(container);
@@ -31,8 +31,8 @@ describe('first-run preview route surface', () => {
     await act(async () => root.render(createElement(ConsentScenario, { state, request })));
     expect(container.querySelectorAll('[aria-pressed="true"]')).toHaveLength(state === 'one-choice' ? 1 : 0);
     const save = Array.from(container.querySelectorAll('button'))
-      .find((button) => button.textContent === 'Save both choices');
-    expect(save?.disabled).toBe(true);
+      .find((button) => button.textContent === 'Save privacy choices');
+    expect(save?.disabled).toBe(state === 'unanswered');
     expect(request.mock.calls.filter(([init]) => init?.method === 'POST')).toHaveLength(0);
   });
 
@@ -54,7 +54,7 @@ describe('first-run preview route surface', () => {
     expect(writes()).toHaveLength(1);
     expect(JSON.parse(String(writes()[0][0]?.body))).toEqual({
       crashReportsEnabled: true,
-      productTelemetryEnabled: false,
+      productTelemetryEnabled: null,
       telemetryConsentAnswered: true,
     });
     await act(async () => vi.advanceTimersByTime(100));

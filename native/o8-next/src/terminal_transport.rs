@@ -46,13 +46,21 @@ impl Drop for Link {
         self.cancel.store(true, Ordering::Relaxed);
     }
 }
-fn emit(sender: &SyncSender<Event>, cancel: &AtomicBool, mut event: Event) -> bool {
+fn emit(
+    sender: &SyncSender<Event>,
+    cancel: &AtomicBool,
+    client: &Client,
+    mut event: Event,
+) -> bool {
     loop {
         if cancel.load(Ordering::Relaxed) {
             return false;
         }
         match sender.try_send(event) {
-            Ok(()) => return true,
+            Ok(()) => {
+                client.wake();
+                return true;
+            }
             Err(TrySendError::Disconnected(_)) => return false,
             Err(TrySendError::Full(value)) => {
                 event = value;
@@ -74,7 +82,7 @@ pub fn connect(client: Client, session: String, initial: Size, grid: Arc<Mutex<G
             available.store(false, Ordering::Release);
             // Never deliver queued keystrokes into a replacement connection.
             while commands.try_recv().is_ok() {}
-            if !emit(&sender, &stopped, Event::Reconnecting) {
+            if !emit(&sender, &stopped, &client, Event::Reconnecting) {
                 break;
             }
             let mut run = || -> Result<(), ()> {
@@ -168,19 +176,20 @@ pub fn connect(client: Client, session: String, initial: Size, grid: Arc<Mutex<G
                                 // Notifications coalesce; the bounded grid is the
                                 // source of truth, never a backlog of output strings.
                                 let _ = sender.try_send(Event::Changed);
+                                client.wake();
                                 if resync {
                                     waiting = false;
                                     backoff = 100;
                                     available.store(true, Ordering::Release);
-                                    if !emit(&sender, &stopped, Event::Ready) {
+                                    if !emit(&sender, &stopped, &client, Event::Ready) {
                                         return Ok(());
                                     }
                                 }
                             } else if frame["event"] == "error" {
-                                emit(&sender, &stopped, Event::Failed);
+                                emit(&sender, &stopped, &client, Event::Failed);
                                 return Ok(());
                             } else if frame["event"] == "exited" {
-                                emit(&sender, &stopped, Event::Exited);
+                                emit(&sender, &stopped, &client, Event::Exited);
                                 return Ok(());
                             }
                         }

@@ -1,0 +1,16 @@
+{
+  "sharedSourcesMatchMain": {
+    "composer.rs": true,
+    "terminal.rs": true,
+    "surface_registry.rs": true,
+    "shell_view.rs": true,
+    "shell_state.rs": true,
+    "client.rs": true,
+    "main.rs": true
+  },
+  "shellDelta": "+1/-0 registration line",
+  "existingPullRequestTestUnchangedFromReviewedHead": true,
+  "previousShortcutTests": 11,
+  "currentShortcutTests": 13,
+  "missingPreviousTests": []
+}

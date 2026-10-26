@@ -1,6 +1,9 @@
 import { runPrStack } from './commands/pr-stack.js';
+import { runBrainSources } from './commands/brain-sources.js';
+import { runThreads } from './commands/threads.js';
 import { runNext } from './commands/next.js';
 import { runSetup } from './commands/setup.js';
+import { commandUsage } from './command-help.js';
 /**
  * o8 CLI — agent-first wrapper over the local HTTP API.
  *
@@ -281,6 +284,7 @@ commands:
   broadcast say|automation-say|focus|post|token   speak on demand or from an automation, set focus, post narration, or manage spectator bearers
   msg send|inbox       send a bounded agent message (--reply-to ID, --close) or read this session's inbox
   presence list|join   list live sessions or register an explicit external name
+  brain sources        manage read-only markdown knowledge folders
   cortex observe       propose a worker observation for the orchestrator
   lane touches         active lanes touching a path or packet diff
   artifact create      attach an interactive task artifact to this packet or a thread (--title --html <file> --actions <file.json>)
@@ -312,6 +316,8 @@ commands:
   project remove-repo <project> <repo>  detach it while preserving registration and disk
   project delete <target>               remove a project and exclusive repo registrations; disk is preserved
   pr-stack --repo owner/repo --number N  read native PR layers, revisions and provenance
+  threads list         project work grouped by waiting/review/working/resolved (--repo path, --state, --offset, --limit)
+  threads show <id>    exact recorded thread evidence (--repo path)
   problem list         recurring problems detected across independent work (--all includes suppressed)
   problem show <id>    full evidence, remedy, and closure state for one problem dossier
   plugin list          list reviewed executable actions [--plugin ID]
@@ -341,7 +347,7 @@ ${OPERATOR_PACKET_COMMAND_LINES}
   task create          add a project-backed task to the ready pool
   task brief <id>      project-backed task brief for a packet or lane
   task claim <id>      bind/reserve a task to a lane
-  task dispatch <id>   launch the claimed task through Codex-only routing
+  task dispatch <id>   launch the claimed task through the selected runtime
   task block <id>      mark a task blocked with --reason
   task report <id>     append a structured task progress event
   task archive <id>    prune/archive stale task-pool rows
@@ -358,7 +364,8 @@ env:
   O8_API_PORT          override port (set by dispatch for worker agents)
   O8_API_TOKEN         override bearer token (set by dispatch)
   O8_SPECTATOR_TOKEN   scoped spectator bearer preferred by o8 truth
-  CORTEX_IDE_DATA_DIR  override data dir (default ~/.o8, legacy ~/.cortex-ide)
+  O8_DATA_DIR          select a data profile (default ~/.o8)
+  CORTEX_IDE_DATA_DIR  legacy data-profile alias
 
 exit codes:
   0 ok   1 invalid args   2 connection refused
@@ -392,12 +399,12 @@ async function dispatch(args: ParsedArgs): Promise<number> {
   // untrusted trees.
   if (process.platform === 'win32') process.env.NoDefaultCurrentDirectoryInExePath = '1';
   const [primary, secondary] = args.command;
-  if (args.version && !primary) return runVersion(args.mode);
+  if (args.version && !primary) return runVersion(args.mode, args.rest.includes('--offline'));
   // `run` owns all flag parsing for its wrapped command (extractRunCommand reads
   // raw argv), so a `--help`/`-h` meant for the wrapped tool must NOT trigger o8's
   // global help here — otherwise `o8 run node --help` prints o8 USAGE + exit 0.
   if (args.help && primary !== 'run') {
-    process.stdout.write((primary && groupUsage(primary)) || USAGE);
+    process.stdout.write((primary && commandUsage(primary, secondary)) || (primary && groupUsage(primary)) || USAGE);
     return 0;
   }
   if (!primary) {
@@ -412,7 +419,7 @@ async function dispatch(args: ParsedArgs): Promise<number> {
       if (args.jsonExplicit) throw new CliError('invalid_args', 'o8 chat is interactive. Use o8 lead or o8 history for JSON.', EXIT.INVALID_ARGS);
       return runChat(process.argv.slice(2).filter((arg) => !['--human', '--verbose', '-v'].includes(arg)).slice(1));
     case 'version':
-      return runVersion(args.mode);
+      return runVersion(args.mode, args.rest.includes('--offline'));
     case 'doctor':
       return runDoctor(args.mode, args.rest);
     case 'status':
@@ -475,6 +482,9 @@ async function dispatch(args: ParsedArgs): Promise<number> {
       return runMsg(args.mode, secondary, args.rest);
     case 'presence':
       return runPresence(args.mode, secondary, args.rest);
+    case 'brain':
+      if (secondary === 'sources') return runBrainSources(args.mode, args.rest);
+      throw unknownSubcommandError('brain', secondary);
     case 'cortex': {
       if (secondary === 'observe') return runCortexObserve(args.mode, args.rest);
       throw unknownSubcommandError('cortex', secondary);
@@ -503,6 +513,8 @@ async function dispatch(args: ParsedArgs): Promise<number> {
       return runProject(args.mode, secondary, args.rest);
     case 'pr-stack':
       return runPrStack(args.mode, singleLevelArgs(secondary, args.rest, args.secondaryBeforeRest));
+    case 'threads':
+      return runThreads(args.mode, secondary, args.rest);
     case 'problem':
       return runProblem(args.mode, secondary, args.rest);
     case 'plugin':

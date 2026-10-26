@@ -1,8 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useLayoutEffect, useRef, type DragEvent, type RefObject } from 'react';
+import { useCallback, useEffect, type DragEvent, type RefObject } from 'react';
+import { useComposerUploads } from './useComposerUploads';
 import { useComposerDraftValue } from './composer-draft-store';
-import { useFileDrop, MAX_COMPOSER_IMAGES, type FileUploadHandler } from '@/lib/hooks/use-file-drop';
+import { useFileDrop, MAX_COMPOSER_IMAGES } from '@/lib/hooks/use-file-drop';
 
 export interface ThoughtsAttachedImage {
   name: string;
@@ -36,19 +37,9 @@ export function useThoughtsComposerAttachments(options?: UseThoughtsComposerAtta
     dragHandlers,
   } = useFileDrop({ enablePaste: false, hostRef: options?.hostRef });
 
-  const draftKey = options?.draftKey;
-  const owner = useRef<{ key: typeof draftKey; controller: AbortController } | null>(null);
-  useLayoutEffect(() => {
-    const controller = new AbortController();
-    owner.current = { key: draftKey, controller };
-    return () => controller.abort();
-  }, [draftKey]);
-  const processOwnedFiles = useCallback<FileUploadHandler>((files, upload) => {
-    const signal = owner.current?.controller.signal;
-    return processFiles(files, { ...upload,
-      isCurrent: () => signal?.aborted === false && (!upload?.isCurrent || upload.isCurrent()),
-    });
-  }, [processFiles]);
+  const uploads = useComposerUploads(processFiles, options?.draftKey, MAX_COMPOSER_IMAGES - attachedImages.length - pendingFiles.filter(file => file.mimeType.startsWith('image/')).length);
+  const processOwnedFiles = uploads.processFiles;
+  const clearUploads = uploads.clearUploads;
   const onDrop = useCallback((event: DragEvent) => {
     dragHandlers.onDragLeave(event);
     if (event.dataTransfer.files.length) void processOwnedFiles(event.dataTransfer.files);
@@ -120,16 +111,19 @@ export function useThoughtsComposerAttachments(options?: UseThoughtsComposerAtta
   }, [setAttachedFiles]);
 
   const clearAttachments = useCallback(() => {
+    clearUploads();
     setAttachedImages([]);
     setAttachedFiles([]);
     clearPendingFiles();
-  }, [clearPendingFiles, setAttachedFiles, setAttachedImages]);
+  }, [clearPendingFiles, setAttachedFiles, setAttachedImages, clearUploads]);
 
   const consumeAttachedImages = useCallback((images: ThoughtsAttachedImage[]) => {
     setAttachedImages(current => current.filter(image => !images.includes(image)));
   }, [setAttachedImages]);
 
   return {
+    ...uploads,
+    uploading: uploads.uploading || pendingFiles.length > 0,
     attachedImages,
     attachedFiles,
     retentionWarning: warning,

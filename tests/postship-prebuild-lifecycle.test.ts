@@ -36,7 +36,8 @@ it('journals postship disposal and reuses the verified artifact across later pre
   for (const name of ['preship-cleanup.mjs', 'bust-stale-patch-cache.mjs']) {
     writeFileSync(path.join(scripts, name), readFileSync(path.join(source, 'scripts', name)));
   }
-  for (const name of ['build-speech-local.mjs', 'build-pi-write.mjs']) {
+  mkdirSync(path.join(scripts, 'next'), { recursive: true });
+  for (const name of ['build-speech-local.mjs', 'build-pi-write.mjs', 'next/build-sidecar.mjs']) {
     writeFileSync(path.join(scripts, name), 'process.exit(0);');
   }
   writeFileSync(path.join(scripts, 'tauri-export.mjs'), `

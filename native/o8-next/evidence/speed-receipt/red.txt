@@ -1,0 +1,79 @@
+ FAIL  tests/next-speed-receipt-real-path.test.ts > writes both production-component measurements and one matching fixture identity through the script entry
+AssertionError: node:internal/modules/cjs/loader:1386
+  throw err;
+  ^
+
+Error: Cannot find module '/workspace/o8/scripts/next/speed-receipt.mjs'
+    at Function._resolveFilename (node:internal/modules/cjs/loader:1383:15)
+    at defaultResolveImpl (node:internal/modules/cjs/loader:1025:19)
+    at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1030:22)
+    at Function._load (node:internal/modules/cjs/loader:1192:37)
+    at TracingChannel.traceSync (node:diagnostics_channel:328:14)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:237:24)
+    at Function.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:171:5)
+    at node:internal/main/run_main_module:36:49 {
+  code: 'MODULE_NOT_FOUND',
+  requireStack: []
+}
+
+Node.js v22.22.0
+: expected 1 to be +0 // Object.is equality
+
+- Expected
++ Received
+
+- 0
++ 1
+
+ ❯ tests/next-speed-receipt-real-path.test.ts:43:40
+     41|   const output = join(root, 'paired.json');
+     42|   const result = run(probe(), output);
+     43|   expect(result.status, result.stderr).toBe(0);
+       |                                        ^
+     44|   const receipt = JSON.parse(readFileSync(output, 'utf8'));
+     45|   expect(receipt.schema).toBe('o8/next-speed/v1');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  tests/next-speed-receipt-real-path.test.ts > accepts canonical executable and output parents and refuses unknown flags before launch
+AssertionError: expected 'node:internal/modules/cjs/loader:1386…' to contain 'Use --binary'
+
+- Expected
++ Received
+
+- Use --binary
++ node:internal/modules/cjs/loader:1386
++   throw err;
++   ^
++
++ Error: Cannot find module '/workspace/o8/scripts/next/speed-receipt.mjs'
++     at Function._resolveFilename (node:internal/modules/cjs/loader:1383:15)
++     at defaultResolveImpl (node:internal/modules/cjs/loader:1025:19)
++     at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1030:22)
++     at Function._load (node:internal/modules/cjs/loader:1192:37)
++     at TracingChannel.traceSync (node:diagnostics_channel:328:14)
++     at wrapModuleLoad (node:internal/modules/cjs/loader:237:24)
++     at Function.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:171:5)
++     at node:internal/main/run_main_module:36:49 {
++   code: 'MODULE_NOT_FOUND',
++   requireStack: []
++ }
++
++ Node.js v22.22.0
++
+
+ ❯ tests/next-speed-receipt-real-path.test.ts:69:25
+     67|   const result = spawnSync(process.execPath, [entry, '--unknown'], { e…
+     68|   expect(result.status).not.toBe(0);
+     69|   expect(result.stderr).toContain('Use --binary');
+       |                         ^
+     70|   expect(() => execFileSync(process.execPath, [entry, '--binary', join…
+     71| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 2 passed (4)
+   Start at  13:01:41
+   Duration  271ms (transform 34ms, setup 39ms, import 11ms, tests 89ms, environment 0ms)

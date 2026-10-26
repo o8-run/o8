@@ -232,3 +232,14 @@ it('keeps the Claude model setting when saving an Astra and Terra setup', async 
   expect(resolveOrchestratorBackendId()).toBe('codex');
   expect(resolveReviewerBackendId()).toBe('codex');
 });
+
+it.each([
+  { runtime: 'codex' as const, model: MODEL_IDS.codexCliDefault },
+  { runtime: 'pi' as const, model: 'openrouter/fixture/api-saved-model' },
+])('saves $runtime setup with its detected model without changing another runtime model default', async ({ runtime, model }) => {
+  const before = await (await route.GET(new Request('http://127.0.0.1/api/panel/operator-defaults'))).json();
+  await persistOnboardingRuntimeSelection({ orchestratorRuntime: runtime, workerRuntimes: ['codex'], leadModel: model }, routeFetch);
+  const persisted = await (await route.GET(new Request('http://127.0.0.1/api/panel/operator-defaults'))).json();
+  expect(persisted.values.orchestratorBackend).toBe(runtime);
+  expect(persisted.values.orchestratorModel).toBe(before.values.orchestratorModel);
+});

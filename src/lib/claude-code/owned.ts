@@ -72,7 +72,7 @@ export const claudeCodeOwnedAdapter: OwnedRuntimeAdapter = {
     if (providerFromConfig(session.runtimeConfig)) {
       const connection = await prepareControlledGateway(session, key!);
       return { ...buildClaudeCodeWorkerSpawnEnv('openrouter', session.model, connection.token, connection.baseUrl),
-        CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: '0', CLAUDE_CONFIG_DIR: isolatedConfigDir,
+        CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: '1', CLAUDE_CONFIG_DIR: isolatedConfigDir,
         CLAUDE_CODE_TMPDIR: isolatedScratchDir, TMPDIR: isolatedScratchDir, ...credentialEnv,
         ANTHROPIC_BASE_URL: connection.baseUrl, ANTHROPIC_API_KEY: connection.token, ANTHROPIC_AUTH_TOKEN: '',
         CLAUDE_CODE_OAUTH_TOKEN: '' };

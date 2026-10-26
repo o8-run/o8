@@ -1,0 +1,12 @@
+Baseline: 417586b6b00e55f4759fc95a68091ffad7596213
+Only setup.rs, setup/** and its one shell inventory entry were overlaid.
+All 100 original main native source files match after removing that entry.
+Setup files match the final tested source.
+
+Registered: cargo check --locked --offline --all-targets
+Finished `dev` profile [unoptimized + debuginfo] target(s) in 4m 42s
+exit: 0
+
+Entry removed: cargo check --locked --offline --all-targets
+Finished `dev` profile [unoptimized + debuginfo] target(s) in 11.90s
+exit: 0

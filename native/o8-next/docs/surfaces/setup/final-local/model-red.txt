@@ -1,0 +1,52 @@
+running 12 tests
+test shell::setup::tests::final_round::onboarding_matrix_api_key_with_saved ...
+thread 'shell::setup::tests::final_round::onboarding_matrix_api_key_with_saved' (387054819) panicked at src/surfaces/setup/final_tests.rs:45:5:
+pi, saved=true: Continue must open a conversation with a resolved model
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+test shell::setup::tests::final_round::onboarding_matrix_api_key_without_saved ...
+thread 'shell::setup::tests::final_round::onboarding_matrix_api_key_without_saved' (387061864) panicked at src/surfaces/setup/final_tests.rs:39:9:
+pi without a default must ask for its model before conversation creation
+FAILED
+test shell::setup::tests::final_round::onboarding_matrix_claude_with_saved ... MODEL_MATRIX backend=claude saved=true: conversation and first queue retain the resolved model
+ok
+test shell::setup::tests::final_round::onboarding_matrix_claude_without_saved ... MODEL_MATRIX backend=claude saved=false: conversation and first queue retain the resolved model
+ok
+test shell::setup::tests::final_round::onboarding_matrix_codex_with_saved ... MODEL_MATRIX backend=codex saved=true: conversation and first queue retain the resolved model
+ok
+test shell::setup::tests::final_round::onboarding_matrix_codex_without_saved ... MODEL_MATRIX backend=codex saved=false: conversation and first queue retain the resolved model
+ok
+test shell::setup::tests::final_round::onboarding_matrix_managed_o8_with_saved ...
+thread 'shell::setup::tests::final_round::onboarding_matrix_managed_o8_with_saved' (387093969) panicked at src/surfaces/setup/final_tests.rs:45:5:
+o8, saved=true: Continue must open a conversation with a resolved model
+FAILED
+test shell::setup::tests::final_round::onboarding_matrix_managed_o8_without_saved ...
+thread 'shell::setup::tests::final_round::onboarding_matrix_managed_o8_without_saved' (387098916) panicked at src/surfaces/setup/final_tests.rs:45:5:
+o8, saved=false: Continue must open a conversation with a resolved model
+FAILED
+test shell::setup::tests::final_round::onboarding_matrix_opencode_with_saved ... MODEL_MATRIX backend=opencode saved=true: conversation and first queue retain the resolved model
+ok
+test shell::setup::tests::final_round::onboarding_matrix_opencode_without_saved ... MODEL_MATRIX backend=opencode saved=false: conversation and first queue retain the resolved model
+ok
+test shell::setup::tests::final_round::onboarding_matrix_pi_with_saved ...
+thread 'shell::setup::tests::final_round::onboarding_matrix_pi_with_saved' (387112967) panicked at src/surfaces/setup/final_tests.rs:45:5:
+pi, saved=true: Continue must open a conversation with a resolved model
+FAILED
+test shell::setup::tests::final_round::onboarding_matrix_pi_without_saved ...
+thread 'shell::setup::tests::final_round::onboarding_matrix_pi_without_saved' (387116838) panicked at src/surfaces/setup/final_tests.rs:39:9:
+pi without a default must ask for its model before conversation creation
+FAILED
+
+failures:
+
+failures:
+    shell::setup::tests::final_round::onboarding_matrix_api_key_with_saved
+    shell::setup::tests::final_round::onboarding_matrix_api_key_without_saved
+    shell::setup::tests::final_round::onboarding_matrix_managed_o8_with_saved
+    shell::setup::tests::final_round::onboarding_matrix_managed_o8_without_saved
+    shell::setup::tests::final_round::onboarding_matrix_pi_with_saved
+    shell::setup::tests::final_round::onboarding_matrix_pi_without_saved
+
+test result: FAILED. 6 passed; 6 failed; 0 ignored; 0 measured; 116 filtered out; finished in 111.75s
+
+error: test failed, to rerun pass `--bin o8-next`

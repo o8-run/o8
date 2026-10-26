@@ -1,6 +1,15 @@
 //! Narrow embedding API. The shell uses the production Surface and composer.
 use super::*;
 impl Surface {
+    #[cfg(test)]
+    pub(crate) fn shell_loaded_probe(&mut self, load_older: bool, cx: &mut Context<Self>) -> Value {
+        if load_older {
+            self.load_older(cx);
+        }
+        let editor = self.composer.read(cx);
+        json!({"rows":self.rows.len(), "text":editor.text, "revision":editor.revision,
+            "painted":editor.painted, "regions":self.regions.renders(cx)})
+    }
     pub(crate) fn shell_linked_issue(&self) -> Option<crate::issues::LinkedIssue> {
         self.selected
             .as_ref()
@@ -9,7 +18,8 @@ impl Surface {
     }
     #[cfg(test)]
     pub(crate) fn shell_issue_state(&self, cx: &App) -> Value {
-        json!({"notice":self.notice,"ready":self.queue_ready,"canSteer":self.queue["canSteer"],"saving":self.saving,"draft":self.composer.read(cx).text,"selected":self.selected})
+        let brain = self.selected.as_ref().and_then(|id| self.brains.get(id));
+        json!({"notice":self.notice,"ready":self.queue_ready,"canSteer":self.queue["canSteer"],"saving":self.saving,"draft":self.composer.read(cx).text,"selected":self.selected,"brainDraft":brain.map(|brain| brain.read(cx).composer.read(cx).text.clone())})
     }
     pub(crate) fn shell_link_issue(
         &mut self,
@@ -66,14 +76,45 @@ impl Surface {
         cx: &mut Context<Self>,
     ) -> Self {
         let mut surface = Self::new(client, window, cx);
+        surface.embedded = true;
         surface.sessions = sessions;
         surface.select(id, cx);
         surface
+    }
+    pub(crate) fn shell_select(
+        &mut self,
+        sessions: Vec<Session>,
+        id: String,
+        cx: &mut Context<Self>,
+    ) {
+        self.sessions = sessions;
+        if self.selected.as_ref() != Some(&id) {
+            self.select(id, cx);
+        }
     }
     pub(crate) fn shell_tick(&mut self, refresh: bool, cx: &mut Context<Self>) {
         self.poll_stream(cx);
         if refresh {
             self.reconcile(cx);
+        }
+    }
+    pub(crate) fn shell_refresh(&mut self, cx: &mut Context<Self>) {
+        self.load_sessions(cx);
+    }
+    #[cfg(test)]
+    pub(crate) fn shell_brain_view(&self) -> Option<gpui::Entity<crate::brain::Brain>> {
+        self.selected
+            .as_ref()
+            .and_then(|id| self.brains.get(id))
+            .cloned()
+    }
+    pub(crate) fn shell_open_brain(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(brain) = self.selected.as_ref().and_then(|id| self.brains.get(id))
+            && brain.read(cx).expanded
+        {
+            brain.read(cx).focus(window, cx);
+        } else {
+            self.toggle_brain(window, cx);
         }
     }
     pub(crate) fn shell_open(&mut self, id: String, cx: &mut Context<Self>) {
@@ -84,15 +125,29 @@ impl Surface {
     pub(crate) fn shell_focus(&self, composer: bool, window: &mut Window, cx: &App) {
         if composer {
             self.composer.read(cx).focus.focus(window);
-        } else {
-            self.focus.focus(window);
+            return;
         }
+        if let Some(brain) = self.selected.as_ref().and_then(|id| self.brains.get(id))
+            && brain.read(cx).expanded
+        {
+            brain.read(cx).focus(window, cx);
+            return;
+        }
+        self.focus.focus(window);
+    }
+    /// Reading focus is distinct from any nested editor or terminal control.
+    pub(crate) fn shell_reading_focused(&self, window: &Window) -> bool {
+        self.focus.is_focused(window)
     }
     pub(crate) fn shell_selection(&self, window: &Window, cx: &App) -> (Option<String>, bool) {
         (
             self.selected.clone(),
             self.composer.read(cx).focus.is_focused(window),
         )
+    }
+    #[cfg(test)]
+    pub(crate) fn shell_selected(&self) -> String {
+        self.selected.clone().unwrap()
     }
     #[cfg(test)]
     pub(crate) fn shell_ready(&self) -> bool {

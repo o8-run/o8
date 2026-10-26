@@ -1,6 +1,6 @@
 import { savedImageReadScript, type SavedImageTarget } from '@/lib/mcp/o8-saved-image-read';
 import { validateImageAttachment, validateComposerInspection, imageRequestId, type ImageAttachmentRequest } from '@/lib/composer/image-attachment';
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { createConnection, type Socket } from 'node:net';
 
 import { sendScreenshotWithFallback } from '@/lib/mcp/o8-screenshot-fallback';
@@ -12,11 +12,11 @@ import {
 // Retry-safety is classified once, next to the command's documentation, in the
 // socket command catalog. See o8-webview-commands.ts for the full surface.
 import { RECONNECT_RETRY_SAFE_COMMANDS } from '@/lib/mcp/o8-webview-commands';
+import { nativeWebviewError, WebviewBridgeError } from '@/lib/mcp/o8-webview-error';
 
 const DEFAULT_WINDOW_LABEL = 'main';
 const REQUEST_TIMEOUT_MS = 30_000;
 
-const UNAVAILABLE_MESSAGE = 'o8 webview tools unavailable — launch o8 with --features dev-mcp-plugin or use the signed build';
 import {
   coercePageMap, detectImageMimeType, extractCoordinates, extractDataUrlPayload,
   formatSnapshotTree, getImageDimensions, normalizeTextResult, unwrapCommandData,
@@ -551,6 +551,7 @@ export class O8WebviewClient {
 
   private async sendCommandOnce(command: string, payload: Record<string, unknown>): Promise<unknown> {
     await this.ensureConnected();
+    this.authToken = this.resolveAuthToken();
 
     if (!this.socket) {
       throw new Error('Socket client not initialized');
@@ -562,7 +563,7 @@ export class O8WebviewClient {
       const requestId = `${Date.now()}${Math.random().toString(36).slice(2)}`;
       const timeout = setTimeout(() => {
         this.pending.delete(requestId);
-        reject(new Error('Request timed out after 30 seconds'));
+        reject(new WebviewBridgeError('webview_bridge_unresponsive'));
       }, REQUEST_TIMEOUT_MS);
 
       this.pending.set(requestId, {
@@ -598,6 +599,7 @@ export class O8WebviewClient {
 
   private async queueCommand(command: string, payload: Record<string, unknown>): Promise<void> {
     await this.ensureConnected();
+    this.authToken = this.resolveAuthToken();
     if (!this.socket) {
       throw new Error('Socket client not initialized');
     }
@@ -617,6 +619,11 @@ export class O8WebviewClient {
       return await operation();
     } catch (error) {
       const code = getErrorCode(error);
+      // Native JS failures share the auth error's string-only envelope. Never
+      // treat its text as proof that an arbitrary eval did not execute.
+      if (retrySafe && error instanceof WebviewBridgeError && code === 'webview_auth_rejected') {
+        return operation();
+      }
       if (code !== 'EPIPE' && code !== 'ECONNRESET') {
         throw error;
       }
@@ -754,37 +761,28 @@ export class O8WebviewClient {
     }
   }
 
-  private resolveAuthToken(): string | undefined {
-    const envToken = process.env.TAURI_MCP_AUTH_TOKEN;
-    if (envToken) {
-      return envToken;
-    }
-
+  private resolveAuthToken(): string {
     try {
-      if (!existsSync(this.tokenPath)) {
-        return undefined;
-      }
-
       const token = readFileSync(this.tokenPath, 'utf-8').trim();
-      return token || undefined;
-    } catch {
-      return undefined;
+      if (token) return token;
+    } catch (error) {
+      if (['EACCES', 'EPERM'].includes(getErrorCode(error) ?? '')) throw new WebviewBridgeError('webview_permission_denied');
     }
+    const envToken = process.env.TAURI_MCP_AUTH_TOKEN?.trim();
+    if (envToken) return envToken;
+    throw new WebviewBridgeError('webview_auth_missing');
   }
 
   private normalizeConnectionError(error: Error): Error {
     const code = getErrorCode(error);
     if (code === 'ECONNREFUSED' || code === 'ENOENT') {
-      return createCodedError(UNAVAILABLE_MESSAGE, code);
+      return new WebviewBridgeError('webview_bridge_missing');
     }
-
+    if (code === 'EACCES' || code === 'EPERM') return new WebviewBridgeError('webview_permission_denied');
     return createCodedError(error.message, code);
   }
 
   private normalizeResponseError(error: unknown): Error {
-    const message = typeof error === 'string' && error.trim()
-      ? error
-      : 'o8 webview command failed without an error message';
-    return new Error(message);
+    return nativeWebviewError(error);
   }
 }

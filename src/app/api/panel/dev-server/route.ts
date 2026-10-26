@@ -4,6 +4,7 @@ export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server';
 import { spawn, type ChildProcess } from '@/lib/providers/child-process';
 import { resolveRequestPrincipal } from '@/lib/auth/principal';
+import { knowledgeSourceWriteRefusal } from '@/lib/cortex/knowledge/sources';
 
 // ── Active dev server processes ──
 const activeServers = new Map<string, {
@@ -67,6 +68,8 @@ export async function POST(req: NextRequest) {
 
     // Resolve path
     const cwd = repoPath.replace(/^~/, process.env.HOME || require('os').homedir());
+    const sourceRefusal = knowledgeSourceWriteRefusal(repoPath, cwd);
+    if (sourceRefusal) return sourceRefusal;
 
     // Spawn the dev server
     const child = spawn('sh', ['-c', command], {

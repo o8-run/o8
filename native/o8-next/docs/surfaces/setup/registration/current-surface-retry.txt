@@ -1,0 +1,24 @@
+running 5 tests
+test shell::setup::tests::onboarding_folder_registration_error_and_cancel ... ok
+test shell::setup::tests::onboarding_opencode_keeps_selected_model_for_first_send ... ok
+test shell::setup::tests::onboarding_operator_auth_error_retry ... ok
+test shell::setup::tests::onboarding_project_tools_privacy_and_workspace ... O8_NEXT_ONBOARDING_EVIDENCE {"endpoint":"headless GPUI CPU scene; no GPU/compositor","openToFirstFrameMs":140.957383,"interactionToFrameMs":42.880356}
+ok
+test ui::tests::worker_tests::worker_send_steer_queue_promote_remove_and_streaming_latency ...
+thread 'ui::tests::worker_tests::worker_send_steer_queue_promote_remove_and_streaming_latency' (187377) panicked at src/worker_tests.rs:167:5:
+assertion failed: surface.read_with(cx,
+    |s, _|
+        s.queue["items"].as_array().unwrap().iter().any(|item|
+                item["payload"]["text"] == "Removed instruction" &&
+                    item["status"] == "queued"))
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    ui::tests::worker_tests::worker_send_steer_queue_promote_remove_and_streaming_latency
+
+test result: FAILED. 4 passed; 1 failed; 0 ignored; 0 measured; 81 filtered out; finished in 87.38s
+
+error: test failed, to rerun pass `--bin o8-next`

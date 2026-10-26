@@ -1,3 +1,4 @@
+import { assertNotKnowledgeSource } from '@/lib/cortex/knowledge/sources';
 /**
  * WorktreeManager — Orchestration Layer for Git Worktree Isolation
  *
@@ -332,6 +333,8 @@ export class WorktreeManager {
    *   at deploy time keep working until they drain.
    */
   async create(opts: CreateWorktreeOptions): Promise<WorktreeInfo> {
+    assertNotKnowledgeSource(this.repoRoot);
+    assertNotKnowledgeSource(this.worktreeBase);
     if (opts.warmBaseCommit) {
       await assertWarmFilesystemBudget(this.repoRoot);
       assertWarmPacketSlot(this.repoRoot, opts.warmReservationToken, deriveWorktreeId(opts));

@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "launchToFirstFrameMs": 1849,
+  "idleRssMiB": 150,
+  "baseline": [
+    {
+      "launchToFirstFrameMs": 1448.87,
+      "idleRssMiB": 119.09
+    },
+    {
+      "launchToFirstFrameMs": 1478.76,
+      "idleRssMiB": 119.23
+    },
+    {
+      "launchToFirstFrameMs": 1392.28,
+      "idleRssMiB": 118.19
+    }
+  ]
+}

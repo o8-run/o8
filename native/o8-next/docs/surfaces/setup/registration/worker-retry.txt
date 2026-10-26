@@ -1,0 +1,5 @@
+running 1 test
+test ui::tests::worker_tests::worker_send_steer_queue_promote_remove_and_streaming_latency ... O8_NEXT_WORKER_EVIDENCE {"endpoint":"Linux GPUI TestAppContext CPU scene paint; no GPU presentation; no-op text system","release":false,"keyToFrameWhileStreamingMs":[5.826936,5.811905,6.065354999999999,5.906924,6.307091,6.205361000000001,7.927587999999999,6.190379,6.099398,6.135116,7.649669,6.302027,6.316009,7.344239,6.476387,7.702956,6.63598,7.276964,7.18244,7.48373,6.924546,7.445304,7.55457,7.043,7.440356,7.476373,7.118659999999999,7.403156999999999,7.344522,7.251483],"sendToFirstWorkerTranscriptPaintMs":11201.170648,"workerTextBytesBefore":24,"workerTextBytesAfter":2336}
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 85 filtered out; finished in 61.69s

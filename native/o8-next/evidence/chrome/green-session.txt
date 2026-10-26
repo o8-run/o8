@@ -1,0 +1,10 @@
+running 4 tests
+test ui::tests::brain_dock_tests::brain_dock_returns_focus_and_keeps_each_session_draft ... ok
+test ui::tests::fixture_send_selected_queue_promote_and_echo ... O8_NEXT_COMPOSER_EVIDENCE {"endpoint":"GPUI TestAppContext CPU scene paint; no GPU submission or presentation","keyToFrameMs":[6.782202,7.262256,7.20456,8.135083,7.698174000000001,7.817182000000001,7.00284,9.572474,20.008293,10.384579,9.188438999999999,7.74314,7.095257,7.438949,13.161335999999999,7.2808329999999994,8.454768,10.332721,7.926093000000001,8.929063],"sendToFirstEchoMs":58.275175999999995,"queueBefore":0,"queueAfter":1,"transcriptBefore":1,"transcriptAfter":2}
+ok
+test ui::tests::session_chrome_uses_layout_instead_of_role_labels ... ok
+test ui::tests::worker_tests::worker_send_steer_queue_promote_remove_and_streaming_latency ... O8_NEXT_WORKER_EVIDENCE {"endpoint":"Linux GPUI TestAppContext CPU scene paint; no GPU presentation; no-op text system","release":false,"keyToFrameWhileStreamingMs":[3.30959,4.464136,3.358253,3.594163,5.019792000000001,5.347840000000001,3.602255,9.132164999999999,4.315535,3.466994,3.59182,5.708896,3.836493,4.802905,4.039444,4.001628999999999,3.716504,6.029323,8.453427,6.7328589999999995,4.2707,7.038634,4.2111,5.077798,4.383046,9.201148,6.445091,4.694249,5.486146,10.187152999999999],"sendToFirstWorkerTranscriptPaintMs":10976.417122,"workerTextBytesBefore":32,"workerTextBytesAfter":2332}
+ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 133 filtered out; finished in 63.14s
+

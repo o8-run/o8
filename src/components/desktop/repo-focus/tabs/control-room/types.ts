@@ -41,6 +41,7 @@ export interface TaskPoolProjectSummary {
 }
 
 export interface TaskPoolTask {
+  thread?: import('@/lib/threads/types').ThreadEvidence;
   id: string;
   packetId: string | null;
   laneId: string | null;

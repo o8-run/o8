@@ -1,6 +1,7 @@
 import 'server-only';
 
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { spawn, type ChildProcessWithoutNullStreams } from '@/lib/providers/child-process';
+import { childEnvironment } from '@/lib/providers/spawn-environment';
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 import {
   listEnabledExternalMcpServers,
@@ -128,7 +129,7 @@ class StdioSession implements McpSession {
     this.child = spawn(launch.command, launch.args, {
       windowsHide: true,
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, ...(server.env ?? {}) },
+      env: childEnvironment({ env: server.env ?? {}, inject: false }),
     });
     this.child.stdout.on('data', (chunk: Buffer) => this.onStdout(chunk));
     this.child.stderr.on('data', () => {

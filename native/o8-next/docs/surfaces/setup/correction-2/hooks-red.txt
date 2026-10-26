@@ -1,0 +1,14 @@
+error[E0599]: no method named `is_none` found for fn pointer `for<'a, 'b, 'c> fn(&'a mut shell::Shell, &'b mut gpui::Context<'c, shell::Shell>)` in the current scope
+  --> src/surfaces/setup/correction_2_tests.rs:96:39
+   |
+96 |     assert!(fake::REGISTRATION.loaded.is_none());
+   |                                       ^^^^^^^ method not found in `for<'a, 'b, 'c> fn(&'a mut shell::Shell, &'b mut gpui::Context<'c, shell::Shell>)`
+
+error[E0599]: no method named `is_none` found for fn pointer `for<'a, 'b, 'c> fn(&'a mut shell::Shell, &'b mut gpui::Context<'c, shell::Shell>) -> bool` in the current scope
+  --> src/surfaces/setup/correction_2_tests.rs:97:43
+   |
+97 |     assert!(fake::REGISTRATION.allow_open.is_none());
+   |                                           ^^^^^^^ method not found in `for<'a, 'b, 'c> fn(&'a mut shell::Shell, &'b mut gpui::Context<'c, shell::Shell>) -> bool`
+
+For more information about this error, try `rustc --explain E0599`.
+error: could not compile `o8-next` (bin "o8-next" test) due to 2 previous errors

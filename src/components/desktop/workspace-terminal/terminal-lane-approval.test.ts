@@ -97,3 +97,67 @@ it('releases old busy state after hiding and returning while a decision is pendi
   await act(async () => finish!(Response.json({ ok: false, error: 'changed' }, { status: 409 })));
   expect(button('Resume lane').disabled).toBe(false);
 });
+
+it('keeps a decision for a contradictory runtime raw without changing terminal input', async () => {
+  root = undefined;
+  vi.stubGlobal('fetch', vi.fn(async () => Response.json({ terminalAdapter: { ...adapter, runtime: 'claude-code' } })));
+  await render();
+  const raw = container.querySelector('textarea')!;
+  raw.value = 'unsent shell input';
+  expect(container.textContent).not.toContain(adapter.summary);
+  expect(container.querySelector('textarea')).toBe(raw);
+  expect(raw.value).toBe('unsent shell input');
+});
+
+it('invalidates a settled decision when only the displayed runtime changes', async () => {
+  root = undefined;
+  let finish: ((response: Response) => void) | undefined;
+  const fetcher = vi.fn().mockResolvedValueOnce(Response.json({ terminalAdapter: adapter }))
+    .mockImplementation(() => new Promise<Response>(resolve => { finish = resolve; }));
+  vi.stubGlobal('fetch', fetcher);
+  await render();
+  button('Resume lane');
+  const raw = container.querySelector('textarea')!;
+  raw.value = 'unsent shell input';
+  const changed = props();
+  changed.statusEvidence = { ...changed.statusEvidence!, runtime: 'claude-code' };
+  await render(changed);
+  expect(container.textContent).not.toContain(adapter.summary);
+  expect(fetcher).toHaveBeenCalledTimes(2);
+  await act(async () => finish!(Response.json({ terminalAdapter: adapter })));
+  expect(container.textContent).not.toContain(adapter.summary);
+  expect(container.querySelector('textarea')).toBe(raw);
+  expect(raw.value).toBe('unsent shell input');
+});
+
+it('abandons a pending decision read when only the displayed runtime changes', async () => {
+  root = undefined;
+  const reads: Array<{ signal: AbortSignal; finish: (response: Response) => void }> = [];
+  vi.stubGlobal('fetch', vi.fn((_input: unknown, init: RequestInit) => new Promise<Response>(finish => {
+    reads.push({ signal: init.signal as AbortSignal, finish });
+  })));
+  await render();
+  const changed = props();
+  changed.statusEvidence = { ...changed.statusEvidence!, runtime: 'claude-code' };
+  await render(changed);
+  await act(async () => reads[0].finish(Response.json({ terminalAdapter: adapter })));
+  expect(container.textContent).not.toContain(adapter.summary);
+  expect(reads[0].signal.aborted).toBe(true);
+  expect(reads).toHaveLength(2);
+  expect(container.querySelector('textarea')!.value).toBe('unchanged PTY bytes');
+});
+
+it.each(['codex', 'claude-code'] as const)('retains matching %s controls after a fresh read', async runtime => {
+  root = undefined;
+  const matching = { ...adapter, runtime, sessionKey: `${runtime}-owned:one` };
+  const fetcher = vi.fn(async (_input: unknown, init?: RequestInit) => init?.method === 'POST'
+    ? Response.json({ ok: true }) : Response.json({ terminalAdapter: matching }));
+  vi.stubGlobal('fetch', fetcher);
+  const p = props();
+  p.statusEvidence = { ...p.statusEvidence!, runtime, sessionId: matching.sessionKey };
+  await render(p);
+  await act(async () => button('Reject decision').click());
+  const post = fetcher.mock.calls.find(call => call[1]?.method === 'POST')!;
+  expect(JSON.parse(String(post[1]?.body))).toMatchObject({ action: 'reject', terminalAdapter: matching });
+  expect(container.querySelector('textarea')!.value).toBe('unchanged PTY bytes');
+});

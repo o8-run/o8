@@ -1,6 +1,6 @@
 import { correctionStopVersion } from '@/lib/db/worker-correction-fences';
 import { getLane } from '@/lib/lane/registry';
-import { packetSteerHoldReason } from '@/lib/lane/packet-stop-hold';
+import { packetAutomaticRecoveryHoldReason } from '@/lib/lane/packet-stop-hold';
 import type { Lane } from '@/lib/lane/types';
 
 /** Capture operator intent before asynchronous handoff evidence collection. */
@@ -15,7 +15,7 @@ export function workerFallbackGuard(lane: Lane, surfaceId: string, owned: boolea
       || current.worktreePath !== lane.worktreePath || current.repoPath !== lane.repoPath
       || current.packetId !== lane.packetId || current.branch !== lane.branch
       || correctionStopVersion(`worker:${surfaceId}`) !== stopVersion
-      || (lane.packetId && packetSteerHoldReason(lane.packetId))) {
+      || (lane.packetId && packetAutomaticRecoveryHoldReason(lane.packetId))) {
       throw new Error('Worker handoff cancelled because the source worker or lane changed.');
     }
   };

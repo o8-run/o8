@@ -1,0 +1,21 @@
+{
+  "endpoint": "headless GPUI CPU scene; no GPU/compositor",
+  "openToFirstFrameMs": 94.80959999999999,
+  "interactionToFrameMs": 51.80859,
+  "build": "debug",
+  "platform": "linux",
+  "before": {
+    "setupSurface": false,
+    "newRegressionTestsPassed": 0,
+    "newRegressionTestsFailed": 3,
+    "openToFirstFrameMs": null,
+    "interactionToFrameMs": null
+  },
+  "after": {
+    "newRegressionTestsPassed": 3,
+    "newRegressionTestsFailed": 0,
+    "shellTestsPassed": 5
+  },
+  "samples": 1,
+  "beforeTimingReason": "No setup surface on the base commit."
+}

@@ -1,4 +1,5 @@
 import os from 'os';
+import { knowledgeSourceWriteRefusal, normalizeKnowledgeWritePath } from '@/lib/cortex/knowledge/sources';
 import { ensureSession, sendMessage } from '@/lib/claude-code/interactive-session';
 import type { ClaudeCodePermissionMode } from '@/lib/claude-code/interactive-session';
 
@@ -42,8 +43,12 @@ export async function handleClaudeCodeSend(req: Request) {
     return jsonError('A stable tabId or sessionId is required', 400);
   }
 
-  const expandedCwd = cwd?.replace(/^~/, os.homedir());
+  const sourceRefusal = knowledgeSourceWriteRefusal(cwd);
+  if (sourceRefusal) return sourceRefusal;
+  const expandedCwd = cwd ? normalizeKnowledgeWritePath(cwd.replace(/^~(?=\/|$)/, os.homedir())) : undefined;
   const workingDir = expandedCwd || process.cwd();
+  const resolvedRefusal = knowledgeSourceWriteRefusal(workingDir);
+  if (resolvedRefusal) return resolvedRefusal;
   const permissionMode: ClaudeCodePermissionMode = bypassPermissions
     ? 'bypassPermissions'
     : planMode

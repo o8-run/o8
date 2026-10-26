@@ -1,0 +1,12 @@
+7 | pub enum Appearance {
+  |          ---------- variant in this enum
+8 |     Dark,
+9 |     Light,
+  |     ^^^^^
+  |
+  = note: `Appearance` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: `o8-next` (bin "o8-next") generated 2 warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.56s
+warning: the following packages contain code that will be rejected by a future version of Rust: proc-macro-error2 v2.0.1
+note: to see what the problems were, use the option `--future-incompat-report`, or run `cargo report future-incompatibilities --id 1`
