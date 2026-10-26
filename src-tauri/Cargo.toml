@@ -81,7 +81,7 @@ tauri-plugin-global-shortcut = "2"
 # for async reqwest synth before handing MP3 bytes to !Send rodio. Zero binary
 # cost; features unify with Tauri's. `sync` adds the oneshot channel + Semaphore
 # the Symon voice-agent loop uses for the confirm gate.
-tokio = { version = "1", features = ["rt", "net", "time", "sync"] }
+tokio = { version = "1.54.1", features = ["rt", "net", "time", "sync"] }
 # Optional: see [features].dev-mcp-plugin above. Vendored in-repo so fresh
 # clones resolve without any sibling checkout (#1673 — cargo reads optional
 # path deps' manifests even when the feature is off).

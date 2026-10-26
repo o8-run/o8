@@ -55,9 +55,9 @@ function fixture() {
     mkdirSync(dirname(join(server, file)), { recursive: true });
     writeFileSync(join(server, file), `runtime:${file}`);
   }
-  for (const name of ['o8', 'speech_recognizer', 'speech-local', 'o8-pi-write']) {
+  for (const name of ['o8', 'speech_recognizer', 'speech-local', 'o8-pi-write', 'o8-next']) {
     mkdirSync(join(app, 'Contents/MacOS'), { recursive: true });
-    writeFileSync(join(app, 'Contents/MacOS', name), universalMachO());
+    writeFileSync(join(app, 'Contents/MacOS', name), universalMachO(), { mode: 0o755 });
   }
   writeFileSync(join(root, 'package.json'), JSON.stringify({ version: '0.1.742' }));
   return { root, app, server };
@@ -204,7 +204,8 @@ describe('packaging preflight through real filesystem and script entry points', 
       mkdirSync(join(root, 'out'));
       writeFileSync(join(root, 'out/keep'), 'previous staging');
       for (const script of ['tauri-export.mjs', 'native-bundle.mjs', 'tauri-hook-resources.mjs', 'run-lib.mjs',
-        'lib/release-config.mjs', 'lib/tauri-export-safety.mjs', 'lib/packaged-build-inputs.mjs']) {
+        'lib/release-config.mjs', 'lib/tauri-export-safety.mjs', 'lib/packaged-build-inputs.mjs',
+        'next/verify-app-bundle.mjs', 'next/build-identity.mjs', 'lib/macos-release-artifacts.mjs']) {
         const destination = join(root, 'scripts', script);
         mkdirSync(dirname(destination), { recursive: true });
         cpSync(join(sourceRoot, 'scripts', script), destination);
@@ -213,6 +214,7 @@ describe('packaging preflight through real filesystem and script entry points', 
         cwd: root, encoding: 'utf8', timeout: 10_000, env: { NODE_ENV: 'test', PATH: process.env.PATH, HOME: root },
       });
       expect(result.status, result.stderr).toBe(1);
+      expect(result.stderr).not.toContain('ERR_MODULE_NOT_FOUND');
       expect(result.stderr).toContain('standalone build contains checkout metadata');
       expect(readFileSync(join(root, 'out/keep'), 'utf8')).toBe('previous staging');
       expect(readFileSync(join(standalone, file), 'utf8')).toBe('synthetic metadata');
@@ -341,7 +343,8 @@ export function spawnSync(command, args) {
     mkdirSync(dirname(sentinel), { recursive: true });
     writeFileSync(sentinel, 'previous-output');
     for (const file of ['tauri-export.mjs', 'native-bundle.mjs', 'tauri-hook-resources.mjs',
-      'run-lib.mjs', 'lib/release-config.mjs', 'lib/tauri-export-safety.mjs', 'lib/packaged-build-inputs.mjs']) {
+      'run-lib.mjs', 'lib/release-config.mjs', 'lib/tauri-export-safety.mjs', 'lib/packaged-build-inputs.mjs',
+      'next/verify-app-bundle.mjs', 'next/build-identity.mjs', 'lib/macos-release-artifacts.mjs']) {
       const destination = join(f.root, 'scripts', file);
       mkdirSync(dirname(destination), { recursive: true });
       cpSync(join(sourceRoot, 'scripts', file), destination);
@@ -391,9 +394,10 @@ export function spawnSync(command, args) {
     expect(existsSync(archive)).toBe(true);
   });
 
-  it.each(['bundle', 'archive', 'cache', 'dev', 'trace', 'trace-build', 'safe'] as const)(
+  it.each(['bundle', 'archive', 'cache', 'dev', 'trace', 'trace-build', 'safe', 'missing-sidecar'] as const)(
     'guards the actual signing entry point for %s input before platform operations', (scenario) => {
       const f = fixture();
+      if (scenario === 'missing-sidecar') rmSync(join(f.app, 'Contents/MacOS/o8-next'));
       const buildOnly = scenario === 'cache' || scenario === 'dev' || scenario === 'trace' || scenario === 'trace-build';
       if (buildOnly) putCache(f.server, scenario);
       const log = join(f.root, 'calls.jsonl');
@@ -429,6 +433,9 @@ export function execFileSync(command, args) {
       if (scenario === 'safe') {
         expect(result.stderr).toContain('PLATFORM_BOUNDARY_REACHED');
         expect(calls.at(-1)?.command).toBe('codesign');
+      } else if (scenario === 'missing-sidecar') {
+        expect(result.stderr).toContain('Contents/MacOS/o8-next is missing from the macOS app bundle');
+        expect(calls.every(call => call.command === 'cat')).toBe(true);
       } else {
         expect(result.stderr).toContain(buildOnly ? `contains .next/${scenario}`
           : scenario === 'bundle' ? 'appBundleBytes' : 'updaterArchiveBytes');
@@ -504,7 +511,7 @@ export async function load(url, context, nextLoad) {
     if (existingParent) expect(readFileSync(sentinel, 'utf8')).toBe('unrelated-output');
     const calls = readFileSync(log, 'utf8').trim().split('\n').map(line => JSON.parse(line) as { command: string; args: string[] });
     const image = calls.findIndex(call => call.command === 'hdiutil');
-    expect(calls[image].args).toEqual(['create', '-volname', 'o8 0.1.742', '-srcfolder', join(bundle, 'dmg-staging'), '-ov', '-format', 'UDZO', dmg]);
+    expect(calls[image].args).toEqual(['create', '-volname', 'o8 0.1.742', '-srcfolder', join(bundle, 'dmg-staging'), '-ov', '-format', 'ULMO', dmg]);
     expect(calls[image - 2].command).toBe('cargo');
     expect(calls[image - 1]).toEqual({ command: '/usr/bin/ditto', args: [f.app, join(bundle, 'dmg-staging', 'o8.app')] });
     expect(calls.slice(image + 1).map(call => [call.command, ...call.args.slice(0, 2)])).toEqual([

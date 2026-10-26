@@ -291,6 +291,27 @@ describe('launch provisioning through mission HTTP entry points', () => {
     }
   });
 
+  it('retains the provisioning cause for callers after the recent event window advances', async () => {
+    boundary.invalidateLane = true;
+    const packet = persistMission('provisioning-durable-cause');
+    const launches = boundary.launch.mock.calls.length;
+    await dispatch(packet);
+    const lane = registry.findLatestLaneByPacket(packet.id)!;
+    // Late progress receipts must not hide the durable failure from a queued snapshot.
+    for (let index = 0; index < 101; index += 1) {
+      registry.appendEvent(lane.id, 'update', 'system', { progressReceipt: index });
+    }
+    persistMission(packet.id);
+    for (const polled of [await status(packet), ...await callerStatuses(packet)]) {
+      expect.soft(polled.status).toBe('failed');
+      expect.soft(polled.blockedReason).toContain('exact unbound pre-launch lane');
+    }
+    expect(lane.status).toBe('failed');
+    expect(existsSync(boundary.preparedPaths.at(-1)!)).toBe(false);
+    expect(getSqlite().prepare('SELECT state FROM storage_admission_reservations WHERE owner_id = ?').pluck().get(packet.id)).toBe('released');
+    expect(boundary.launch).toHaveBeenCalledTimes(launches);
+  }, 120_000);
+
   it.each(['applied', 'failed', 'skipped', 'watchdog', 'human', 'spoofed'] as const)(
     'preserves launch authority with a manifest outcome: %s', async (outcome) => {
       const { updateOperatorDefaults } = await import('@/lib/operator/defaults');
