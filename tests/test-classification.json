@@ -5543,8 +5543,11 @@
     {
       "path": "tests/release-preflight.test.ts",
       "reasons": [
+        "child-process",
         "git-cli",
-        "native-build"
+        "native-build",
+        "process-signal",
+        "terminal-tool"
       ]
     },
     {

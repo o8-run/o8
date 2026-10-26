@@ -116,7 +116,9 @@ function assertNoCompetingBuilds(run, root, env) {
   if (receipt.status !== 0) {
     throw new Error(`could not inspect competing release processes: ${receipt.stderr.trim() || `exit ${receipt.status}`}`);
   }
-  const buildPattern = /(?:next[^ ]* build|cargo(?: +tauri)? +build|cargo-tauri.*build|scripts\/release\.mjs +--ship)/;
+  // The shared cwd-aware guard owns output producers. Keep the independent
+  // native-build and ship collision checks from overriding its warnings.
+  const buildPattern = /(?:cargo(?: +tauri)? +build|cargo-tauri.*build|scripts\/release\.mjs +--ship)/;
   const competing = receipt.stdout
     .split('\n')
     .map((line) => line.trim())
