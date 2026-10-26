@@ -1,0 +1,16 @@
+native
+test shell::tests::sidebar_tests::sidebar_message_between_pages_keeps_every_thread ... ok
+test shell::tests::sidebar_tests::sidebar_repeated_full_page_retains_available_threads ... ok
+test result: ok. 36 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 193.86s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+focused-js
+ Test Files  7 passed (7)
+      Tests  38 passed (38)
+
+npm-test
+ Test Files  1230 passed | 3 skipped (1233)
+      Tests  8855 passed | 5 skipped (8860)

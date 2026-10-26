@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { mkdirSync, readFileSync, readdirSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterAll, beforeAll, expect, it } from 'vitest';
@@ -28,6 +28,8 @@ it.each([
   ['Terminal', 'GET', '/api/mobile/terminal-sessions', 200],
   ['Workers list', 'GET', '/api/lanes?active=true', 200],
   ['Workers events', 'GET', '/api/orchestrator/lane-events?since=0&timeoutMs=0', 200],
+  ['Sidebar list', 'GET', '/api/v2/chat-history/list?include=orchestrator', 200],
+  ['Sidebar archive validation', 'POST', '/api/runtime/archive', 400],
 ])('serves %s through the production o8d bridge with Next stopped', async (_surface, method, path, status) => {
   const response = await fetch(origin + path, { method, headers: { authorization: `Bearer ${server.token}`, 'content-type': 'application/json' },
     ...(method === 'POST' ? { body: '{}' } : {}) });
@@ -60,6 +62,9 @@ it('persists Setup conversation creation through its existing handler with Next 
   const history = await saved.json();
   expect(history).toMatchObject({ backend: 'pi', model: 'pi', messages: [] });
   expect(realpathSync(history.repoPath)).toBe(realpathSync(server.directory));
+  const removed = await fetch(`${origin}/api/v2/chat-history?tabId=thoughts-native-setup`, { method: 'DELETE', headers });
+  expect(removed.status).toBe(200);
+  expect(existsSync(join(server.directory, 'chat-history', 'thoughts-native-setup.json'))).toBe(false);
 });
 
 it('walks every production surface registration and its HTTP routes', async () => {

@@ -37,6 +37,7 @@ register_surfaces! {
         #[cfg(test)] fake: Fake = "surfaces/fake.rs";
     }
     commands {
+        sidebar: Sidebar = "surfaces/sidebar.rs";
         settings: Settings = "surfaces/settings.rs";
         projects: Projects = "surfaces/projects.rs";
         customize: Customize = "surfaces/customize.rs";
@@ -121,6 +122,9 @@ impl Shell {
             });
             true
         });
+        for registration in registrations() {
+            (registration.initialize)(&mut shell, window, cx);
+        }
         shell.load(cx);
         shell
     }
@@ -131,6 +135,9 @@ impl Shell {
     }
     fn load(&mut self, cx: &mut Context<Self>) {
         if registry::extensions().any(|extension| extension.load(self, cx)) {
+            return;
+        }
+        if registrations().iter().any(|r| (r.load)(self, cx)) {
             return;
         }
         if self.loading {
@@ -185,7 +192,10 @@ impl Shell {
     fn workspace_sessions(&self) -> Vec<Session> {
         self.sessions
             .iter()
-            .filter(|s| s.repo_path.as_ref() == self.state.selected.as_ref())
+            .filter(|s| {
+                Some(s.repo_path.as_deref().unwrap_or("Unassigned"))
+                    == self.state.selected.as_deref()
+            })
             .cloned()
             .collect()
     }
@@ -500,6 +510,9 @@ impl Shell {
     fn tick(&mut self, refresh: bool, window: &mut Window, cx: &mut Context<Self>) {
         for extension in registry::extensions() {
             extension.tick(self, refresh, window, cx);
+        }
+        for registration in registrations() {
+            (registration.tick)(self, window, cx);
         }
         let before = serde_json::to_vec(&self.state).unwrap();
         self.capture(window, cx);
