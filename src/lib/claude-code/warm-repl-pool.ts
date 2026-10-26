@@ -76,6 +76,7 @@ interface WarmProc {
   spawnedAt: number;
   reapTimer: ReturnType<typeof setTimeout> | null;
   flushParser: () => ClaudeCodeStreamJsonParserEvent[];
+  stderr: string;
 }
 
 const idlePools = new Map<string, WarmProc[]>();
@@ -120,6 +121,7 @@ function spawnWarmProc(binary: string, model: string, effort?: string): WarmProc
     spawnedAt: Date.now(),
     reapTimer: null,
     flushParser: () => parser.flush(),
+    stderr: '',
   };
 
   child.stdout.on('data', (chunk: Buffer) => {
@@ -128,9 +130,8 @@ function spawnWarmProc(binary: string, model: string, effort?: string): WarmProc
       else proc.buffered.push(evt);
     }
   });
-  // Drain stderr so the pipe never backpressures; content only matters on
-  // failure, and failures surface as exit-before-result.
-  child.stderr.on('data', () => {});
+  // Keep a bounded diagnostic for workers that reject arguments before a result.
+  child.stderr.on('data', (chunk: Buffer) => { proc.stderr = (proc.stderr + chunk.toString('utf8')).slice(-4_096); });
   child.on('error', () => { markDead(proc); });
   child.on('close', (code, signal) => {
     markDead(proc);
@@ -324,7 +325,7 @@ function runTurn(
         deltaText += evt.text;
         onDelta?.(evt.text);
       } else if (evt.type === 'done') {
-        finish(evt.isError ? new Error('Worker returned a failed result.') : null, evt.text || deltaText);
+        finish(evt.isError ? new Error(evt.text.trim() || proc.stderr.trim() || 'Worker returned a failed result.') : null, evt.text || deltaText);
       }
     };
 
@@ -338,11 +339,11 @@ function runTurn(
       for (const evt of proc.flushParser()) handleEvent(evt);
       if (settled) return;
       const suffix = signal ? `signal ${signal}` : `code ${code ?? 'unknown'}`;
-      finish(new Error(`[qa][warm-repl] exited before result (${suffix})`));
+      finish(new Error(proc.stderr.trim() || `[qa][warm-repl] exited before result (${suffix})`));
     };
 
     if (proc.dead || proc.child.exitCode !== null) {
-      finish(new Error('[qa][warm-repl] proc died before the turn started'));
+      finish(new Error(proc.stderr.trim() || '[qa][warm-repl] proc died before the turn started'));
       return;
     }
 

@@ -4025,6 +4025,13 @@
       ]
     },
     {
+      "path": "tests/mobile-ask-effort-real-path.test.ts",
+      "reasons": [
+        "executable-fixture",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/mobile-chat-send-effort-real-path.test.ts",
       "reasons": [
         "real-path"
@@ -5222,6 +5229,22 @@
         "process-signal",
         "real-path",
         "terminal-tool"
+      ]
+    },
+    {
+      "path": "tests/preview-next-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/preview-origin-real-path.test.ts",
+      "reasons": [
+        "network-listener",
+        "real-path"
       ]
     },
     {

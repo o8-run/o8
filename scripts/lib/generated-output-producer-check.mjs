@@ -1,37 +1,43 @@
 /** Read-only producer observation shared by ship preflight and prebuild. */
 import { execFileSync } from 'node:child_process';
-import { lstatSync, readlinkSync, realpathSync } from 'node:fs';
+import { lstatSync, readlinkSync, realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
 
-function inside(directory, workspace) {
-  const relative = path.relative(workspace, directory);
-  return relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`)
-    && !path.isAbsolute(relative));
-}
-
-// Resolve existing ancestors too: a missing path through an alias into the
-// release workspace must never become permission to ignore its producer.
-function resolveMissingDirectory(directory) {
-  const missing = [];
-  let parent = directory;
+// Path spelling is not directory identity on case-insensitive volumes or mount
+// aliases. Follow links and compare every ancestor with the workspace inode.
+function inside(directory, workspaceIdentity, { allowMissing = false } = {}) {
+  let current = directory;
+  const root = path.parse(directory).root;
+  while (current.length > root.length && current.endsWith(path.sep)) current = current.slice(0, -1);
   for (;;) {
-    try { return path.join(realpathSync(parent), ...missing); }
+    let identity;
+    try {
+      identity = statSync(current, { bigint: true });
+      if (!identity.isDirectory()) throw new Error('producer working-directory ancestor is not a directory');
+    }
     catch (error) {
-      if (error.code !== 'ENOENT' || path.dirname(parent) === parent) throw error;
+      if (!allowMissing || error.code !== 'ENOENT' || path.dirname(current) === current) throw error;
       // A dangling link can point into the release workspace. Its unresolved
       // target is unknown; never reconstruct it as an ordinary missing name.
       try {
-        if (lstatSync(parent).isSymbolicLink()) throw new Error('unresolved producer working-directory alias');
+        if (lstatSync(current).isSymbolicLink()) throw new Error('unresolved producer working-directory alias');
       } catch (statError) {
         if (statError.code !== 'ENOENT') throw statError;
       }
-      missing.unshift(path.basename(parent));
-      parent = path.dirname(parent);
     }
+    if (identity && identity.dev === workspaceIdentity.dev && identity.ino === workspaceIdentity.ino) return true;
+    // A known symlink can target a workspace descendant. Visit that target's
+    // ancestors too; case and mount aliases still use their directory identity.
+    const resolved = identity ? realpathSync(current) : current;
+    const parent = path.dirname(resolved);
+    if (parent === resolved) return false;
+    current = parent;
   }
 }
 
 export function assertNoProducer(workspace, { run = execFileSync } = {}) {
+  const workspaceIdentity = statSync(workspace, { bigint: true });
+  if (!workspaceIdentity.isDirectory()) throw new Error('release workspace is not a directory');
   const snapshot = (command, args, maxBuffer = 4 * 1024 ** 2) => run(command, args,
     { encoding: 'utf8', timeout: 5_000, maxBuffer });
   // Select the executable position or process title, never prompt text. This
@@ -71,16 +77,19 @@ export function assertNoProducer(workspace, { run = execFileSync } = {}) {
       try { if (!snapshot('ps', ['-p', String(pid), '-o', 'pid=']).trim()) continue; }
       catch (probeError) { if (probeError.status === 1 && !probeError.stdout?.trim()) continue; }
       if (error.code === 'ENOENT' && directory && path.isAbsolute(directory)) {
-        let missing;
-        try { missing = resolveMissingDirectory(directory); } catch { /* fail closed */ }
-        if (missing && !inside(missing, workspace)) {
+        let contained;
+        try { contained = inside(directory, workspaceIdentity, { allowMissing: true }); } catch { /* fail closed */ }
+        if (contained === false) {
           console.warn(`[producer-check] warning: working directory no longer exists outside release workspace; ${diagnostic()}`);
           continue;
         }
       }
       throw new Error(`possible live producer has an unknown working directory; ${diagnostic()}`);
     }
-    if (inside(cwd, workspace)) {
+    let contained;
+    try { contained = inside(cwd, workspaceIdentity); }
+    catch { throw new Error(`possible live producer has an unknown working directory; ${diagnostic()}`); }
+    if (contained) {
       throw new Error(`workspace has a live generated-output producer; ${diagnostic()}`);
     }
   }

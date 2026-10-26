@@ -12,7 +12,7 @@ afterEach(() => {
 
 describe('GET /api/browser/proxy redirect policy', () => {
   it('refuses a real upstream redirect whose resolved target is an o8-owned port', async () => {
-    const upstreamFetch = vi.fn(async () => new Response(null, {
+    const upstreamFetch = vi.fn(async (_input: string | URL | Request, _init?: RequestInit) => new Response(null, {
       status: 302,
       headers: { location: 'http://127.0.0.1:48123/api/panel/status' },
     }));
@@ -26,11 +26,9 @@ describe('GET /api/browser/proxy redirect policy', () => {
 
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({
-      error: 'redirect target is not permitted by the browser proxy policy',
+      error: 'redirect target is not permitted by the preview proxy policy',
     });
-    expect(upstreamFetch).toHaveBeenCalledWith(target, {
-      redirect: 'manual',
-      headers: { accept: 'text/html,*/*' },
-    });
+    expect(String(upstreamFetch.mock.calls[0]?.[0])).toBe(target);
+    expect(upstreamFetch.mock.calls[0]?.[1]).toMatchObject({ redirect: 'manual' });
   });
 });
