@@ -8,6 +8,31 @@ const EVENTS = new Set([
 ]);
 const DAY_MS = 24 * 60 * 60 * 1000;
 const invalidExport = () => new MetricsError('Invalid metrics export; expected versioned anonymous events.');
+const integer = '(?:0|[1-9]\\d*)';
+const prerelease = `(?:${integer}|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)`;
+const VERSION = new RegExp(`^${integer}\\.${integer}\\.${integer}(?:-${prerelease}(?:\\.${prerelease})*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$`);
+const DATE = /^\d{4}-\d{2}-\d{2}$/;
+const COUNT = /^(?:0|[1-9]\d*)$/;
+const RATE = /^(?:—|(?:100\.0|(?:[0-9]|[1-9][0-9])\.\d)% \((?:0|[1-9]\d*)\/(?:[1-9]\d*)\))$/;
+// Full-match comparison also rejects a trailing newline, which `$` alone permits.
+const matches = (value, pattern) => typeof value === 'string' && pattern.exec(value)?.[0] === value;
+function printedField(value, pattern) {
+  const text = String(value);
+  if (!matches(text, pattern)) throw invalidExport();
+  return text;
+}
+const credentials = [...new Set([process.env.O8_METRICS_READ_TOKEN, process.env.O8_METRICS_READ_TOKEN?.trim()])]
+  .filter((value) => value).sort((left, right) => right.length - left.length);
+function writeLine(line, error = false) {
+  // Apply to every write, including fixed help/error text and valid field values.
+  for (const credential of credentials) line = line.split(credential).join('[REDACTED]');
+  // A short credential may occur in the label or form across replacement edges.
+  // Residual removal strictly shortens the line and cannot reinsert a secret.
+  while (credentials.some((credential) => line.includes(credential))) {
+    for (const credential of credentials) line = line.split(credential).join('');
+  }
+  (error ? process.stderr : process.stdout).write(`${line}\n`);
+}
 
 function options(args) {
   const result = {};
@@ -23,7 +48,7 @@ function options(args) {
   }
   result.date ??= new Date(Date.now() - DAY_MS).toISOString().slice(0, 10);
   const start = Date.parse(`${result.date}T00:00:00.000Z`);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(result.date) || !Number.isFinite(start)
+  if (!matches(result.date, DATE) || !Number.isFinite(start)
     || new Date(start).toISOString().slice(0, 10) !== result.date) {
     throw new MetricsError('Report date must be a valid UTC date in YYYY-MM-DD form.');
   }
@@ -48,7 +73,7 @@ function normalizeExport(data, end) {
     const time = timestamp(event?.timestamp);
     if (!opaqueId(event?.id) || !opaqueId(event?.installId) || time === null
       || typeof event.appVersion !== 'string' || event.appVersion.length > 80
-      || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(event.appVersion)
+      || !matches(event.appVersion, VERSION)
       || !EVENTS.has(event.event) || (event.event === 'session.ended' && typeof event.props?.clean !== 'boolean')) {
       throw invalidExport();
     }
@@ -84,7 +109,12 @@ async function readExport(config) {
       method: 'GET', headers: { Accept: 'application/json', Authorization: `Bearer ${credential}` },
       redirect: 'error', signal: AbortSignal.timeout(15_000),
     });
-    if (!response.ok) throw new MetricsError(`Metrics read failed (HTTP ${response.status}).`);
+    if (!response.ok) {
+      if (!Number.isInteger(response.status) || !matches(String(response.status), /^[1-5]\d{2}$/)) {
+        throw new MetricsError('Metrics read failed.');
+      }
+      throw new MetricsError(`Metrics read failed (HTTP ${printedField(response.status, /^[1-5]\d{2}$/)}).`);
+    }
     try { return await response.json(); } catch { throw new MetricsError('Metrics read failed: invalid JSON export.'); }
   } catch (error) {
     // Never echo an upstream body, URL, exception, headers, or credentials.
@@ -120,24 +150,26 @@ function aggregate(events, config) {
 async function main() {
   const config = options(process.argv.slice(2));
   if (config.help) {
-    console.log('Usage: npm run metrics:daily -- [--date YYYY-MM-DD] [--fixture FILE]\nDefaults to the previous complete UTC day. Live reads require O8_METRICS_READ_URL and O8_METRICS_READ_TOKEN in the environment.');
+    writeLine('Usage: npm run metrics:daily -- [--date YYYY-MM-DD] [--fixture FILE]\nDefaults to the previous complete UTC day. Live reads require O8_METRICS_READ_URL and O8_METRICS_READ_TOKEN in the environment.');
     return;
   }
   const events = normalizeExport(await readExport(config), config.end);
   const versions = aggregate(events, config);
-  console.log(`Usage metrics for ${config.date} (UTC)`);
-  if (config.fixture) console.log('Fixture data; these are not production numbers.');
-  console.log('| App version | New installs | Daily active installs | First worker launched | First merge | Clean-session rate |');
-  console.log('| --- | ---: | ---: | ---: | ---: | ---: |');
+  writeLine(`Usage metrics for ${printedField(config.date, DATE)} (UTC)`);
+  if (config.fixture) writeLine('Fixture data; these are not production numbers.');
+  writeLine('| App version | New installs | Daily active installs | First worker launched | First merge | Clean-session rate |');
+  writeLine('| --- | ---: | ---: | ---: | ---: | ---: |');
   for (const version of [...versions.keys()].sort((left, right) => left.localeCompare(right, 'en', { numeric: true }))) {
     const row = versions.get(version);
     const rate = row.ended ? `${(100 * row.clean / row.ended).toFixed(1)}% (${row.clean}/${row.ended})` : '—';
-    console.log(`| ${version} | ${row.installs.size} | ${row.active.size} | ${row.workers.size} | ${row.merges.size} | ${rate} |`);
+    const fields = [printedField(version, VERSION), ...[row.installs.size, row.active.size, row.workers.size, row.merges.size]
+      .map((value) => printedField(value, COUNT)), printedField(rate, RATE)];
+    writeLine(`| ${fields.join(' | ')} |`);
   }
-  if (!versions.size) console.log('No observed usage for this date.');
+  if (!versions.size) writeLine('No observed usage for this date.');
 }
 
 main().catch((error) => {
-  console.error(error instanceof MetricsError ? error.message : 'Daily metrics failed.');
+  writeLine(error instanceof MetricsError ? error.message : 'Daily metrics failed.', true);
   process.exitCode = 1;
 });

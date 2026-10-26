@@ -24,7 +24,7 @@ writeFileSync(transport, `
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
 function run(args: string[], extra: Partial<NodeJS.ProcessEnv> = {}) {
-  const child = spawnSync('npm', ['run', 'metrics:daily', '--', ...args], {
+  const child = spawnSync('npm', ['--silent', 'run', 'metrics:daily', '--', ...args], {
     cwd: process.cwd(), encoding: 'utf8', timeout: 20_000,
     env: { PATH: process.env.PATH, NODE_ENV: 'test', npm_config_cache: join(root, 'cache'),
       npm_config_update_notifier: 'false', ...extra },
@@ -45,6 +45,51 @@ const liveEnv = () => ({
 });
 
 describe('daily metrics through the npm command', () => {
+  it('redacts the read bearer embedded in a successful export version', () => {
+    const environment = liveEnv();
+    const data = JSON.parse(readFileSync(fixture, 'utf8'));
+    const changed = exportWith({ events: data.events.map((event: Record<string, unknown>) => ({
+      ...event, appVersion: `1.0.0-${environment.O8_METRICS_READ_TOKEN}`,
+    })) });
+    const result = run(['--date', '2026-10-24'], { ...environment, O8_METRICS_TEST_FIXTURE: changed });
+    expect(result.status).toBe(0);
+    // Boolean assertions never include a bearer or captured output in a red tail.
+    expect(result.output.includes(environment.O8_METRICS_READ_TOKEN)).toBe(false);
+    expect(result.output).toContain('| 1.0.0-[REDACTED] |');
+  });
+
+  it('never reintroduces a credential through the redaction label', () => {
+    const credential = 'REDACTED';
+    const data = JSON.parse(readFileSync(fixture, 'utf8'));
+    const changed = exportWith({ events: data.events.map((event: Record<string, unknown>) => ({
+      ...event, appVersion: `1.0.0-${credential}`,
+    })) });
+    const result = run(['--date', '2026-10-24'], { ...liveEnv(), O8_METRICS_READ_TOKEN: credential, O8_METRICS_TEST_FIXTURE: changed });
+    expect(result.status).toBe(0);
+    expect(result.output.includes(credential)).toBe(false);
+  });
+
+  it.each([
+    { credential: '2026-10-24', args: ['--date', '2026-10-24'], failure: undefined },
+    { credential: '1', args: ['--date', '2026-10-24'], failure: undefined },
+    { credential: 'O8_METRICS_READ_TOKEN', args: ['--help'], failure: undefined },
+    { credential: 'Metrics read failed', args: ['--date', '2026-10-24'], failure: 'throw' },
+  ])('redacts credential collisions from all command output ($credential)', ({ credential, args, failure }) => {
+    const result = run(args, { ...liveEnv(), O8_METRICS_READ_TOKEN: credential, O8_METRICS_TEST_FAILURE: failure });
+    expect(result.output.includes(credential)).toBe(false);
+    expect(result.output).toContain('[REDACTED]');
+    expect(result.status).toBe(failure ? 1 : 0);
+  });
+
+  it.each(['01.0.0', '1.0.0-01', '1.0.0-..', '1.0.0+.', '1.0.0\n'])('rejects malformed printed versions (%j)', (appVersion) => {
+    const data = JSON.parse(readFileSync(fixture, 'utf8'));
+    const changed = exportWith({ events: data.events.map((event: Record<string, unknown>) => ({ ...event, appVersion })) });
+    const result = run(['--date', '2026-10-24'], { ...liveEnv(), O8_METRICS_TEST_FIXTURE: changed });
+    expect(result.status).toBe(1);
+    expect(result.output).toContain('Invalid metrics export');
+    expect(result.output).not.toContain('| App version |');
+  });
+
   it('aggregates complete history by UTC date and app version without identities or network reads', () => {
     const result = run(['--fixture', fixture, '--date', '2026-10-24'], {
       ...liveEnv(), O8_METRICS_TEST_FAILURE: 'throw',

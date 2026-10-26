@@ -30,6 +30,10 @@ Both values are read from the environment only. The command never prints them,
 reads credential files, or includes upstream response bodies in errors. The
 export URL must use HTTPS and contain no embedded credentials, query, or
 fragment. Redirects are rejected and requests have a 15-second timeout.
+Every script-written line, including successful rows, help and errors, redacts
+the read bearer and its trimmed form. Dates, versions, counts, rates and HTTP
+statuses must match strict field patterns before they can be printed. A bearer
+hidden in an otherwise valid version suffix is redacted as well.
 
 The current sending code includes only the sanitized event and its properties.
 The export service must supply the existing anonymous install ID, app version,
@@ -109,8 +113,10 @@ with milliseconds. Each event has this shape:
 ```
 
 `id` and `installId` are opaque strings containing letters, digits, underscores,
-or hyphens, up to 128 characters. `appVersion` is a version string with optional
-prerelease/build suffixes. Event names come from the nine-event usage allowlist;
+or hyphens, up to 128 characters. `appVersion` is a semantic version of at most
+80 characters with optional prerelease/build suffixes. Numeric core and
+prerelease identifiers cannot have leading zeroes; dot-separated identifiers
+cannot be empty. Event names come from the nine-event usage allowlist;
 `session.ended` requires a boolean `clean`. Other event properties are not used
 by the report. Unknown events, missing metadata, incomplete coverage, and
 malformed outcomes fail with a concise error instead of a misleading table.
