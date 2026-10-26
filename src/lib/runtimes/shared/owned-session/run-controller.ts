@@ -3,6 +3,7 @@ import { assertRuntimeEffortPin } from '@/lib/orchestrator/effort-pin';
 import { assertOwnedActionFence, hasOwnedActionFence } from './action-fence';
 import { createCapacityRecovery } from './capacity-wait';
 import { packetCargoEnvironment } from '@/lib/worktree/cargo-target-cache';
+import { createRunArtifactReader } from './run-artifact-reader';
 import { controlledProviderSandbox } from './controlled-provider-sandbox';
 import { providerCredentialName } from '@/lib/providers/spawn-environment';
 import { credentialPolicyFingerprint } from '@/lib/providers/credential-policy';
@@ -19,7 +20,7 @@ import { createFailureRetry } from './failure-retry';
 import { assertOwnedSingleAttemptSpawn, assertDurableOwnedSpawn } from './execution-policy';
 import type { ChildProcess } from 'node:child_process';
 import { closeSync, constants, fstatSync, openSync } from 'node:fs';
-import { readFile, stat, writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { getOrCreateLocalWorkerToken } from '@/lib/auth/worker-token';
@@ -69,14 +70,13 @@ import { preparedRuntimeStateSandboxPolicy } from './runtime-state-sandbox';
 import type { OwnedSessionIo } from './session-io';
 import type {
   OwnedChildExitOutcome,
-  ParsedRunLog,
   OwnedRunMode,
   OwnedRunRecord,
   OwnedRuntimeAdapter,
   OwnedSessionRecord,
 } from './types';
 export interface OwnedRunController {
-  readRunArtifacts(run: OwnedRunRecord): Promise<{
+  readRunArtifacts(run: OwnedRunRecord, includeStdout?: boolean): Promise<{
     stdoutRaw: string;
     stderrRaw: string;
     parsed: ReturnType<OwnedRuntimeAdapter['parseRunLog']>;
@@ -115,16 +115,8 @@ export function createOwnedRunController({
   invalidateFleetCache: () => void;
 }): OwnedRunController {
   const capacityRecovery = createCapacityRecovery({ adapter, io, spawnOwnedRun });
+  const readRunArtifacts = createRunArtifactReader(adapter);
   const handleWorkerFailure = createWorkerFailureHandler({ adapter, io, readRunArtifacts, park: capacityRecovery.park });
-  const runArtifactCache = new Map<string, {
-    key: string;
-    /** null = raw exceeded RAW_RETENTION_MAX_BYTES; re-read from disk on hit. */
-    stdoutRaw: string | null;
-    stderrRaw: string | null;
-    parsed: ParsedRunLog;
-  }>();
-  const RUN_ARTIFACT_CACHE_MAX = 48;
-  const RAW_RETENTION_MAX_BYTES = 2 * 1024 * 1024;
   const recoverModelCompatibility = createModelCompatibilityRecovery({ adapter, io, withSurfaceLock, readRunArtifacts, spawnOwnedRun });
   const scheduleFailureRetry = createFailureRetry({ adapter, io, withSurfaceLock, readRunArtifacts, spawnOwnedRun,
     notify: (session, from, to, reason) => emitRuntimeFallbackNotification(runtimeId, session, from, to, reason), invalidateFleetCache, retryDelayMs });
@@ -148,63 +140,6 @@ export function createOwnedRunController({
 
   function quoteShellArg(value: string): string {
     return `'${value.replace(/'/g, "'\\''")}'`;
-  }
-
-  async function statKey(filePath: string): Promise<string> {
-    try {
-      const info = await stat(filePath);
-      return `${info.size}:${info.mtimeMs}`;
-    } catch {
-      return 'absent';
-    }
-  }
-
-  async function readRunArtifacts(run: OwnedRunRecord) {
-    const [stdoutKey, stderrKey] = await Promise.all([
-      statKey(run.stdoutPath),
-      statKey(run.stderrPath),
-    ]);
-    const key = JSON.stringify([
-      stdoutKey, stderrKey, run.outcome, run.finishedAt, run.interruptRequestedAt, run.childExit,
-    ]);
-    const cached = runArtifactCache.get(run.id);
-    if (cached?.key === key) {
-      runArtifactCache.delete(run.id);
-      runArtifactCache.set(run.id, cached);
-      if (cached.stdoutRaw !== null && cached.stderrRaw !== null) {
-        return { stdoutRaw: cached.stdoutRaw, stderrRaw: cached.stderrRaw, parsed: cached.parsed };
-      }
-      const [rereadStdout, rereadStderr] = await Promise.all([
-        cached.stdoutRaw ?? (stdoutKey === 'absent' ? '' : readFile(run.stdoutPath, 'utf8').catch(() => '')),
-        cached.stderrRaw ?? (stderrKey === 'absent' ? '' : readFile(run.stderrPath, 'utf8').catch(() => '')),
-      ]);
-      return { stdoutRaw: rereadStdout, stderrRaw: rereadStderr, parsed: cached.parsed };
-    }
-
-    const [stdoutRaw, stderrRaw] = await Promise.all([
-      stdoutKey === 'absent' ? '' : readFile(run.stdoutPath, 'utf8').catch(() => ''),
-      stderrKey === 'absent' ? '' : readFile(run.stderrPath, 'utf8').catch(() => ''),
-    ]);
-
-    const withinRawCap = stdoutRaw.length + stderrRaw.length <= RAW_RETENTION_MAX_BYTES;
-    const entry = {
-      key,
-      stdoutRaw: withinRawCap ? stdoutRaw : null,
-      stderrRaw: withinRawCap ? stderrRaw : null,
-      parsed: adapter.parseRunLog(
-        stdoutRaw,
-        run,
-        stdoutKey === 'absent' ? undefined
-          : new Date(Number(stdoutKey.slice(stdoutKey.indexOf(':') + 1))).toISOString(),
-      ),
-    };
-    runArtifactCache.set(run.id, entry);
-    while (runArtifactCache.size > RUN_ARTIFACT_CACHE_MAX) {
-      const oldest = runArtifactCache.keys().next().value;
-      if (oldest === undefined) break;
-      runArtifactCache.delete(oldest);
-    }
-    return { stdoutRaw, stderrRaw, parsed: entry.parsed };
   }
 
   async function readOwnedRunStdout(run: OwnedRunRecord): Promise<string> {
@@ -367,7 +302,7 @@ export function createOwnedRunController({
       // A prepared journal is deliberately preserved until the binding path,
       // under the same surface lock as spawn, reconciles its durable marker.
       if (run.spawnState === 'prepared') continue;
-      const { stdoutRaw, stderrRaw, parsed } = await readRunArtifacts(run);
+      const { stdoutRaw, stderrRaw, parsed } = await readRunArtifacts(run, Boolean(run.sandboxed && !run.sandboxDenial));
 
       if (!session.threadId && parsed.threadId) {
         session.threadId = parsed.threadId;
