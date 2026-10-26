@@ -1,0 +1,4 @@
+[integration-gate] 1/2 FAIL tests/next-surface-registration-real-path.test.ts · 1/1 passed · 13.4s · integration fixture process tree could not be confirmed stopped
+[integration-gate] 2/2 FAIL tests/o8-next-shell-real-path.test.ts · 6/6 passed · 15.3s · integration fixture process tree could not be confirmed stopped
+[integration-gate] summary: 2/2 files, 7/7 tests passed, 2 failed files, 28.7s · ran 2 · green 0 · baseline red 0 · new red 2
+[integration-gate] first cause: tests/next-surface-registration-real-path.test.ts

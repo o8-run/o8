@@ -1,0 +1,16 @@
+Focused regressions through native input, launched fixture routes, and persisted state:
+test shell::issues::tests::issues_missing_paint_reports_elapsed_and_bound ... 
+paint timeout must report its measured duration and bound: real control did not reach CPU paint: issue-never-painted
+FAILED
+test shell::issues::tests::issues_palette_waits_for_bootstrap_then_paint ... ok
+test terminal::tests::production_pty_flood_waits_for_delayed_tail ... 
+assertion `left == right` failed: complete flood tail must be received and painted; elapsed=10.271764ms
+  left: 50000010
+ right: 50000012
+FAILED
+test result: FAILED. 1 passed; 2 failed; 0 ignored; 0 measured; 225 filtered out; finished in 33.26s
+
+Sibling refresh control before its palette update:
+round1_symlink_worker_survives_real_refresh_and_send
+called `Option::unwrap()` on a `None` value
+test result: FAILED. 17 passed; 1 failed

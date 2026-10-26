@@ -1,5 +1,5 @@
 import { parseLocalModel } from '@/lib/codex/local-model';
-import { resolveCodexReasoningEffort } from '@/lib/codex/reasoning-effort';
+import { EffortPinRejectionError, resolveEffortPin } from '@/lib/orchestrator/effort-pin';
 import { resolveDefaultDispatchModelSync } from '@/lib/operator/defaults';
 import { MODEL_IDS } from '@/lib/models';
 import { BRAIN_PROMPT_SECTION } from '@/lib/orchestrator/brain-access';
@@ -26,15 +26,16 @@ export function sandboxFlagsForMode(mode: CodexOrchestratorPermissionMode): stri
   return ['--dangerously-bypass-approvals-and-sandbox'];
 }
 
+/** Omitted and adaptive lead choices use xhigh; explicit pins never normalize. */
 export function reasoningEffortFromThinkingEffort(
   effort: ThinkingEffort | undefined,
   model?: string,
+  compatibility: { installedCliVersion?: string | null; explicitModel?: string } = {},
 ): Exclude<ThinkingEffort, 'adaptive'> {
-  if (!effort || effort === 'adaptive') return 'xhigh';
-  // Codex effort tiers: low, medium, high, xhigh, max, ultra. The `max`/`ultra`
-  // tiers are honored only on flagship models; every other model clamps to
-  // xhigh. See resolveCodexReasoningEffort.
-  return resolveCodexReasoningEffort(effort, model) as Exclude<ThinkingEffort, 'adaptive'>;
+  const pin = resolveEffortPin({ runtime: 'codex', model: model ?? null,
+    requestedEffort: effort, ...compatibility });
+  if (!pin.ok) throw new EffortPinRejectionError(pin.code, pin.message);
+  return (pin.selectedEffort as Exclude<ThinkingEffort, 'adaptive'> | null) ?? 'xhigh';
 }
 
 /**

@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { parseReleaseNotes } from '../scripts/lib/public-release.mjs';
 import {
   acquireReleaseLock,
+  commandReceipt,
   performShipPreflight,
   runQuickBenchmarkPreflight,
 } from '../scripts/lib/ship-preflight.mjs';
@@ -287,9 +288,16 @@ describe('ship preflight', () => {
     };
 
     expect(() => performShipPreflight({ root, version: '0.1.999', env, run })).toThrow(remedy);
-    expect(calls).toContain(`${process.execPath} scripts/classify-tests.mjs --check`);
+    expect(calls).toContain(`${process.execPath} scripts/classify-tests.mjs --check-manifest`);
     // No real build ran — the stub above never spawns node/npm/cargo for a build.
     expect(calls.some((call) => call.includes('build'))).toBe(false);
+  });
+
+  it('reports a check that runs past its limit as a timeout, not a missing command', () => {
+    const receipt = commandReceipt(process.execPath, ['-e', 'setTimeout(() => {}, 10_000)'], { timeoutMs: 300 });
+
+    expect(receipt.status).toBe(127);
+    expect(receipt.stderr).toBe('timed out after 300 ms');
   });
 
   it('passes the ship preflight when the test classification manifest is current', () => {
@@ -319,7 +327,7 @@ describe('ship preflight', () => {
     const receipt = performShipPreflight({ root, version: '0.1.999', env, run });
 
     expect(receipt.head).toBe(head);
-    expect(calls).toContain(`${process.execPath} scripts/classify-tests.mjs --check`);
+    expect(calls).toContain(`${process.execPath} scripts/classify-tests.mjs --check-manifest`);
   });
 
   it('keeps an intentionally disabled intake independent from ship readiness', () => {

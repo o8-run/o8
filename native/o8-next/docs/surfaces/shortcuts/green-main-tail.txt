@@ -1,0 +1,14 @@
+test shell::inbox_tests::inbox_cards_counts_statuses_and_approval_match_desktop_routes ... Inbox parity counts before=[1, 2, 5, 4, 3] after=[1, 2, 2, 4, 3]; native approved=1 rejected=1; desktop approved=1; durable decision/audit match
+ok
+test shell::inbox_tests::inbox_empty_and_server_error_never_claim_a_false_clean_state ... ok
+test shell::inbox_tests::inbox_keyboard_buttons_activate_enter_space_and_skip_disabled ... ok
+test shell::inbox_tests::inbox_opens_related_session_and_pull_request_and_restores ... Inbox palette to loaded CPU scene: 78.37 ms; compact=900x700 wide=1680x1050; restored Inbox surfaces=1
+ok
+test shell::inbox_tests::inbox_plan_session_header_preserves_desktop_authority_and_continuation ... ok
+test shell::tests::inbox_is_reachable_from_the_real_shell_palette ... ok
+test shell::tests::shell_palette_switch_restart_and_server_down ... O8_NEXT_SHELL_EVIDENCE {"endpoint":"GPUI TestAppContext CPU scene paint; test text system; no GPU/compositor","platform":"linux","launchToInteractiveMs":361.272376,"paletteOpenToFrameMs":[29.251875000000002,30.621596,30.647353,31.115746,28.375402,29.321558,32.227123000000006,33.733622,30.999336,29.892429,25.572183,18.112886000000003,29.42105,30.746878,29.679765,27.81035,30.224436,32.146124,28.409593,31.725603999999997],"workspaceSwitchMs":[38.218423,32.866031,19.655463,24.77635,17.079549,19.914965,16.172485,26.893686,19.21692,28.610425],"idleMemoryMiB":35.09765625,"workspaces":2,"restoredSurfaces":3}
+ok
+test shell::tests::shell_retains_sidebar_selection_and_view_identity ... ok
+test shell::tests::shortcuts_overlay_bindings_dismissal_and_typing ... O8_NEXT_SHORTCUTS_EVIDENCE {"endpoint":"headless GPUI CPU scene; no GPU/compositor","openToFirstFrameMs":23.184842,"interactionToFrameMs":14.963846}
+ok
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 31 filtered out; finished in 81.02s

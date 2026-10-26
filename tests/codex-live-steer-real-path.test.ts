@@ -19,7 +19,7 @@ vi.mock('@/lib/cortex/qa/llm/sonnet-adapter', () => ({ prewarmSonnetCli: async (
 vi.mock('@/lib/runtimes/shared/dispatch-readiness', () => ({ ensureDispatchBackendReady: async () => ({ ready: true }) }));
 vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: vi.fn(async () => {}) }));
 // Solo's platform sandbox has its own tests. Keep its exec process real here.
-vi.mock('@/lib/lane/single-orchestrator-policy', () => ({ prepareSingleOrchestratorLaunch: async (input: Record<string, unknown>) => ({ ...input, cleanup: () => {} }) }));
+vi.mock('@/lib/lane/single-orchestrator-policy', () => ({ prepareSingleOrchestratorLaunch: async (input: Record<string, unknown>) => ({ ...input, diagnostics: [], cleanup: () => {} }) }));
 vi.mock('@/components/desktop/thoughts/InputButtons', () => ({ InputButtons: () => null }));
 vi.mock('@/components/desktop/thoughts/chat-panel/SlashCommandPicker', () => ({ SlashCommandPicker: () => null }));
 vi.mock('@/components/desktop/thoughts/chat-panel/ComposerStatusBar', () => ({ ComposerStatusBar: () => null }));
@@ -29,13 +29,12 @@ const home = join(root, 'home');
 mkdirSync(join(home, '.codex'), { recursive: true });
 vi.stubEnv('O8_STEER_TEST_HOME', home);
 vi.stubEnv('O8_CODEX_BIN', join(root, 'codex'));
-vi.stubEnv('O8_STEER_TEST_LOG', join(root, 'calls.jsonl'));
 vi.stubEnv('O8_CRASH_SURVIVABLE_ORCHESTRATOR', '0');
 writeFileSync(join(root, 'codex'), `#!/usr/bin/env node
 import { appendFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 if (process.argv.includes('--version')) { console.log('codex-cli 0.163.0'); process.exit(0); }
-const record = entry => appendFileSync(process.env.O8_STEER_TEST_LOG, JSON.stringify({ cwd: process.cwd(), ...entry }) + '\\n');
+const record = entry => appendFileSync(${JSON.stringify(join(root, 'calls.jsonl'))}, JSON.stringify({ cwd: process.cwd(), ...entry }) + '\\n');
 const send = message => console.log(JSON.stringify(message));
 if (process.argv[2] !== 'app-server') {
   record({ method: 'exec' });

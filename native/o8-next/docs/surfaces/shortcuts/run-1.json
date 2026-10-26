@@ -1,0 +1,22 @@
+{
+  "endpoint": "headless GPUI CPU scene; no GPU/compositor",
+  "openToFirstFrameMs": 34.445051,
+  "interactionToFrameMs": 22.862414,
+  "platform": "linux",
+  "build": "debug",
+  "samples": 1,
+  "before": {
+    "surface": false,
+    "regressionsPassed": 0,
+    "regressionsFailed": 1,
+    "openToFirstFrameMs": null,
+    "interactionToFrameMs": null
+  },
+  "after": {
+    "regressionsPassed": 1,
+    "regressionsFailed": 0,
+    "shellTestsPassed": 3,
+    "desktopBindingRows": 6
+  },
+  "beforeTimingReason": "No native shortcuts overlay on the base commit."
+}

@@ -1,0 +1,83 @@
+{
+  "schema": 1,
+  "platform": "Linux Cloud, private X11 and software Vulkan",
+  "reviewedRef": "2fe766898749020298481e6d5f7f720c7fa67acb",
+  "mainRef": "fbe95283d61468118b450b75e167b6b76f10fee3",
+  "measurements": {
+    "before": {
+      "schema": 1,
+      "cold": {
+        "launchToFirstFrameMs": 948.75,
+        "idleRssMiB": 141.43
+      },
+      "runs": [
+        {
+          "launchToFirstFrameMs": 984.23,
+          "idleRssMiB": 125.04
+        },
+        {
+          "launchToFirstFrameMs": 985.09,
+          "idleRssMiB": 124.67
+        },
+        {
+          "launchToFirstFrameMs": 918.41,
+          "idleRssMiB": 124.77
+        }
+      ]
+    },
+    "main": {
+      "schema": 1,
+      "cold": {
+        "launchToFirstFrameMs": 915.62,
+        "idleRssMiB": 120.73
+      },
+      "runs": [
+        {
+          "launchToFirstFrameMs": 919.45,
+          "idleRssMiB": 101.11
+        },
+        {
+          "launchToFirstFrameMs": 897.78,
+          "idleRssMiB": 100.87
+        },
+        {
+          "launchToFirstFrameMs": 895.67,
+          "idleRssMiB": 100.16
+        }
+      ]
+    },
+    "after": {
+      "schema": 1,
+      "cold": {
+        "launchToFirstFrameMs": 905.34,
+        "idleRssMiB": 121.16
+      },
+      "runs": [
+        {
+          "launchToFirstFrameMs": 912.19,
+          "idleRssMiB": 101.49
+        },
+        {
+          "launchToFirstFrameMs": 901.44,
+          "idleRssMiB": 100.93
+        },
+        {
+          "launchToFirstFrameMs": 932.79,
+          "idleRssMiB": 101.9
+        }
+      ]
+    }
+  },
+  "releaseSessionCpuScene": {
+    "messages": 200,
+    "inputs": 100,
+    "before": {
+      "p50Ms": 0.068862,
+      "p95Ms": 0.092968
+    },
+    "after": {
+      "p50Ms": 0.071026,
+      "p95Ms": 0.088031
+    }
+  }
+}

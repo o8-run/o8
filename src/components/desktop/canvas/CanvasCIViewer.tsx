@@ -7,6 +7,7 @@ import { formatAge } from '@/components/desktop/canvas-utils';
 import { relativeAge } from '@/lib/util/relative-age';
 import { useCanvasCIRuns } from './useCanvasCIRuns';
 import { useCanvasCIDetail } from './useCanvasCIDetail';
+import { GitHubOrgNotCoveredError } from '@/lib/github/org-access';
 
 function ciColor(conclusion: string, status: string): string {
   if (status === 'in_progress' || status === 'queued') return '#f59e0b';
@@ -28,7 +29,7 @@ function ciIcon(conclusion: string, status: string): string {
 function CIViewerBase({ repo, initialRunId }: { repo?: string; initialRunId?: number }) {
   const runQuery = useCanvasCIRuns(repo);
   const { repoScope } = runQuery;
-  const runs = runQuery.data?.runs ?? [];
+  const runs = runQuery.error instanceof GitHubOrgNotCoveredError ? [] : runQuery.data?.runs ?? [];
   const selectionScope = JSON.stringify([repoScope, initialRunId ?? null]);
   const [selection, setSelection] = useState<{ scope: string; id: number | null }>(() => ({ scope: selectionScope, id: initialRunId ?? null }));
   const requestedRun = selection.scope === selectionScope ? selection.id : initialRunId ?? null;
@@ -40,7 +41,7 @@ function CIViewerBase({ repo, initialRunId }: { repo?: string; initialRunId?: nu
 
   const listError = runQuery.isError ? (
     <div role="status" style={{ paddingTop: 10, paddingRight: 14, paddingBottom: 10, paddingLeft: 14, fontSize: 12, color: 'var(--t-text-muted)' }}>
-      {runQuery.data
+      {runQuery.error instanceof GitHubOrgNotCoveredError ? `${runQuery.error.message}. ` : runQuery.data
         ? `Showing last successful CI runs · ${relativeAge(runQuery.dataUpdatedAt)}. Refresh failed. `
         : 'Unable to load CI runs. '}
       <button type="button" onClick={() => { void runQuery.refetch(); }} style={{ color: 'var(--t-text)', background: 'var(--t-panel)', border: '1px solid var(--t-divider)', borderRadius: 6, cursor: 'pointer' }}>

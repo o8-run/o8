@@ -1,0 +1,33 @@
+ FAIL  tests/next-parity-preflight-real-path.test.ts > rejects an unknown --only before starting hosts and leaves no capture processes
+AssertionError: Parity harness failed; inspect the local capture logs.
+: expected { exit: null, cliAlive: true, …(2) } to deeply equal { exit: 1, cliAlive: false, …(2) }
+
+- Expected
++ Received
+
+  {
+-   "cliAlive": false,
+-   "exit": 1,
+-   "hostAlive": false,
+-   "hostStarted": false,
++   "cliAlive": true,
++   "exit": null,
++   "hostAlive": true,
++   "hostStarted": true,
+  }
+
+ ❯ tests/next-parity-preflight-real-path.test.ts:80:8
+     78|     const hostPid = existsSync(pidFile) ? Number(readFileSync(pidFile,…
+     79|     expect({ exit: exited?.code ?? null, cliAlive: alive(child.pid), h…
+     80|       .toEqual({ exit: 1, cliAlive: false, hostStarted: false, hostAli…
+       |        ^
+     81|     expect(stderr).toContain('Unknown surface: not-a-surface');
+     82|   } finally {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 3 skipped (4)
+   Start at  23:25:32
+   Duration  5.27s (transform 34ms, setup 46ms, import 12ms, tests 5.03s, environment 0ms)

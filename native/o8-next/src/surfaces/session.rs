@@ -4,6 +4,9 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::ui::Surface;
+#[cfg(test)]
+#[path = "../composer/loaded_shell_tests.rs"]
+mod loaded_shell_tests;
 pub(super) type Runtime = ();
 #[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct Slice {
@@ -179,7 +182,16 @@ impl Client {
             .and_then(|r| r["permissionMode"].as_str())
             .filter(|p| *p != "outside-workspace")
             .unwrap_or("full");
+        let defaults: Value = self
+            .get("/api/panel/operator-defaults", &[("include", "values")])
+            .unwrap_or(Value::Null);
         let mut routing = json!({"backend":backend,"model":model,"effort":"medium","permissionMode":permission,"mode":"single","pickedMode":"solo","collide":false});
+        if let Some(effort) = receipt
+            .and_then(|r| r["effort"].as_str())
+            .or(defaults["values"]["thinkingEffort"].as_str())
+        {
+            routing["effort"] = json!(effort);
+        }
         if let Some(project) = record["projectId"].as_str() {
             routing["projectId"] = json!(project);
         }

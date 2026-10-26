@@ -94,10 +94,16 @@ API field does not establish parity with every control on its desktop tab.
 ## Linux CI measurements
 
 [The scoped CI job](../../.github/workflows/next-linux.yml) builds release on Linux
-x64 with Node 22 and stable Rust. It runs the existing fixture host three times
-under a private 1440 by 1024 Xvfb display with software Vulkan. It never uses the
+x64 with Node 22 and stable Rust. It runs one informational cold launch followed
+by three timed launches with fresh fixture hosts under a private 1440 by 1024
+Xvfb display with software Vulkan. It never uses the
 GPUI test platform (`--offscreen`). Screenshots and numeric receipts are uploaded
 as `o8-next-linux-x64`, including screenshots available after a failure.
+
+The cold receipt is informational only. The median of the three timed first-frame
+measurements must meet the launch budget; each timed idle RSS must meet the RSS
+budget. Renderer caches are shared across the four launches and removed afterward.
+Both checked-in budgets stay unchanged.
 
 Launch to first frame is wall time from spawning the release binary to observing
 more than 32 colors in a full-display PNG. Capture and polling overhead are
