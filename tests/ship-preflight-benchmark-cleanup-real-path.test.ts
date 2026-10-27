@@ -16,7 +16,8 @@ const roots: string[] = [];
 function alive(pid: number) {
   try {
     process.kill(pid, 0);
-    return true;
+    const state = spawnSync('ps', ['-o', 'stat=', '-p', String(pid)], { encoding: 'utf8' }).stdout.trim();
+    return Boolean(state) && !state.startsWith('Z');
   } catch {
     return false;
   }
@@ -142,7 +143,7 @@ describe('ship preflight quick benchmark cleanup', () => {
     writeFileSync(join(root, '.next', 'BUILD_ID'), 'prior-build');
 
     expect(() => runQuickBenchmarkPreflight({ root, timeoutMs: 3000 }))
-      .toThrow(/\.next.*already exists/);
+      .toThrow(/\.next.*already exists.*node scripts\/postship-cleanup\.mjs/);
 
     expect(existsSync(join(root, 'grandchild.pid'))).toBe(false);
     expect(existsSync(join(root, '.next', 'dev', 'lock'))).toBe(false);

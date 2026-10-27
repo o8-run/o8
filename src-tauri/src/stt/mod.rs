@@ -32,6 +32,55 @@ use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc;
 
+/// Linux runs `o8-speech-recognizer` (crates/o8-linux-voice, whisper.cpp),
+/// which speaks the Swift helper's protocol. Lookup order: the
+/// `O8_SPEECH_RECOGNIZER` override, beside the app binary (with or without the
+/// Tauri target-triple suffix), `$PATH`, then the crate's own release build for
+/// dev checkouts. The last candidate is returned even when missing so the
+/// "helper not found" error names a concrete path.
+#[cfg(any(target_os = "linux", test))]
+fn linux_helper_path(
+    override_path: Option<PathBuf>,
+    exe: Option<&std::path::Path>,
+    search_path: Option<&std::ffi::OsStr>,
+    manifest_dir: &std::path::Path,
+) -> PathBuf {
+    const NAME: &str = "o8-speech-recognizer";
+    if let Some(path) = override_path.filter(|p| !p.as_os_str().is_empty()) {
+        return path;
+    }
+    if let Some(dir) = exe.and_then(|exe| exe.parent()) {
+        let arch = if cfg!(target_arch = "aarch64") {
+            "aarch64"
+        } else {
+            "x86_64"
+        };
+        for candidate in [
+            dir.join(format!("{NAME}-{arch}-unknown-linux-gnu")),
+            dir.join(NAME),
+        ] {
+            if candidate.is_file() {
+                return candidate;
+            }
+        }
+    }
+    if let Some(search_path) = search_path {
+        if let Some(found) = std::env::split_paths(search_path)
+            .map(|dir| dir.join(NAME))
+            .find(|candidate| candidate.is_file())
+        {
+            return found;
+        }
+    }
+    manifest_dir
+        .join("..")
+        .join("crates")
+        .join("o8-linux-voice")
+        .join("target")
+        .join("release")
+        .join(NAME)
+}
+
 fn process_command_runs_helper(command: &str, helper: &std::path::Path) -> bool {
     let helper = helper.to_string_lossy();
     !helper.is_empty() && command.contains(helper.as_ref())
@@ -330,6 +379,18 @@ impl LiveRecognizer {
     ///
     /// During development, it lives at `src-tauri/helpers/speech_recognizer`.
     /// In a release bundle, it's next to the app binary.
+    #[cfg(target_os = "linux")]
+    pub fn helper_path() -> PathBuf {
+        linux_helper_path(
+            std::env::var_os("O8_SPEECH_RECOGNIZER").map(PathBuf::from),
+            std::env::current_exe().ok().as_deref(),
+            std::env::var_os("PATH").as_deref(),
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")),
+        )
+    }
+
+    /// Resolve the path to the compiled `speech_recognizer` helper binary.
+    #[cfg(not(target_os = "linux"))]
     pub fn helper_path() -> PathBuf {
         // 1. Check next to our own binary (Tauri externalBin bundles here)
         if let Ok(exe) = std::env::current_exe() {
@@ -569,6 +630,10 @@ impl LiveRecognizer {
     /// one-helper-per-machine invariant before the new child is spawned.
     /// Best-effort: a failure here must never block the spawn.
     fn kill_stale_helpers(helper: &std::path::Path) {
+        #[cfg(not(target_os = "linux"))]
+        const STALE_HELPER_PATTERN: &str = r"[/]speech_recognizer(-[a-z0-9_-]+)?( |$)";
+        #[cfg(target_os = "linux")]
+        const STALE_HELPER_PATTERN: &str = r"[/]o8-speech-recognizer(-[a-z0-9_-]+)?( |$)";
         #[cfg(unix)]
         {
             // -f with an end-anchored regex, NOT -x with the bare name: the
@@ -577,7 +642,7 @@ impl LiveRecognizer {
             // anchor also covers the dev build's target-triple-suffixed helper
             // while excluding unrelated argv mentions of the word.
             let Ok(out) = Command::new("pgrep")
-                .args(["-f", r"[/]speech_recognizer(-[a-z0-9_-]+)?( |$)"])
+                .args(["-f", STALE_HELPER_PATTERN])
                 .output()
             else {
                 return;
@@ -748,6 +813,7 @@ impl LiveRecognizer {
         rc == 0 && val == 1
     }
 
+    #[cfg(target_os = "macos")]
     fn spawn_disclaimed(
         helper: &std::path::Path,
         audio_fifo: Option<&std::path::Path>,
@@ -1101,6 +1167,44 @@ mod lifecycle_tests {
             installed,
         ));
     }
+
+    #[test]
+    fn linux_helper_lookup_prefers_override_then_bundle_then_path() {
+        use super::linux_helper_path;
+        let root = std::env::temp_dir().join(format!("o8-helper-lookup-{}", std::process::id()));
+        let app_dir = root.join("app");
+        let bin_dir = root.join("bin");
+        std::fs::create_dir_all(&app_dir).unwrap();
+        std::fs::create_dir_all(&bin_dir).unwrap();
+        let exe = app_dir.join("o8");
+        let manifest = root.join("src-tauri");
+        let dev = manifest.join("../crates/o8-linux-voice/target/release/o8-speech-recognizer");
+
+        // Nothing installed: the dev build path, so the error names it.
+        assert_eq!(linux_helper_path(None, Some(&exe), None, &manifest), dev);
+
+        let on_path = bin_dir.join("o8-speech-recognizer");
+        std::fs::write(&on_path, b"").unwrap();
+        let search = std::env::join_paths([&bin_dir]).unwrap();
+        assert_eq!(
+            linux_helper_path(None, Some(&exe), Some(&search), &manifest),
+            on_path
+        );
+
+        let bundled = app_dir.join("o8-speech-recognizer");
+        std::fs::write(&bundled, b"").unwrap();
+        assert_eq!(
+            linux_helper_path(None, Some(&exe), Some(&search), &manifest),
+            bundled
+        );
+
+        let custom = root.join("custom-helper");
+        assert_eq!(
+            linux_helper_path(Some(custom.clone()), Some(&exe), Some(&search), &manifest),
+            custom
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }
 
 impl Drop for LiveRecognizer {
@@ -1150,5 +1254,96 @@ impl Drop for LiveRecognizer {
                 }
             }
         }
+    }
+}
+
+/// Live end-to-end check of the Linux wiring: `LiveRecognizer` spawns the real
+/// `o8-speech-recognizer`, which captures from a PipeWire / PulseAudio source
+/// while a clip plays into it. Ignored by default; needs a sound server and:
+///   O8_SPEECH_RECOGNIZER  helper built with `--features whisper`
+///   O8_WHISPER_MODEL      ggml model path (e.g. ggml-tiny.en.bin)
+///   O8_STT_E2E_CLIP       WAV to play;  O8_STT_E2E_SINK  sink feeding the mic
+///   O8_STT_E2E_SOURCE     (optional) source to select via `input_device:`
+///   O8_STT_E2E_EXPECT     (optional) word the final transcript must contain
+#[cfg(all(test, target_os = "linux"))]
+mod linux_live_tests {
+    use super::{LiveRecognizer, TranscriptEvent};
+    use std::time::{Duration, Instant};
+
+    fn next(rx: &std::sync::mpsc::Receiver<TranscriptEvent>, deadline: Instant) -> TranscriptEvent {
+        let left = deadline.saturating_duration_since(Instant::now());
+        rx.recv_timeout(left).expect("helper event before deadline")
+    }
+
+    #[test]
+    #[ignore = "needs a sound server, a virtual mic and a whisper model"]
+    fn live_recognizer_transcribes_the_virtual_mic() {
+        let clip = std::env::var("O8_STT_E2E_CLIP").expect("O8_STT_E2E_CLIP");
+        let sink = std::env::var("O8_STT_E2E_SINK").expect("O8_STT_E2E_SINK");
+        let mut recognizer = LiveRecognizer::new();
+        let rx = recognizer
+            .spawn_daemon()
+            .expect("spawn o8-speech-recognizer");
+        let deadline = Instant::now() + Duration::from_secs(60);
+        while !matches!(next(&rx, deadline), TranscriptEvent::Ready) {}
+        if let Ok(source) = std::env::var("O8_STT_E2E_SOURCE") {
+            recognizer.set_input_device(Some(&source)).unwrap();
+        }
+        recognizer.set_locale("en-US").unwrap();
+
+        recognizer.start(42, None).unwrap();
+        loop {
+            match next(&rx, deadline) {
+                TranscriptEvent::Status { text, .. } if text == "listening" => break,
+                TranscriptEvent::Error { text, .. } => panic!("helper error: {text}"),
+                _ => {}
+            }
+        }
+        let played = std::process::Command::new("paplay")
+            .arg(format!("--device={sink}"))
+            .arg(&clip)
+            .status()
+            .expect("run paplay");
+        assert!(played.success(), "paplay failed");
+        std::thread::sleep(Duration::from_millis(300));
+        recognizer.stop(42);
+
+        let (mut partials, mut levels) = (0, 0);
+        let (mut final_text, mut audio_file) = (None, None);
+        loop {
+            match next(&rx, deadline) {
+                TranscriptEvent::Partial { session_id: 42, .. } => partials += 1,
+                TranscriptEvent::Level { session_id: 42, .. } => levels += 1,
+                TranscriptEvent::Final {
+                    session_id: 42,
+                    text,
+                } => final_text = Some(text),
+                TranscriptEvent::AudioFile {
+                    session_id: 42,
+                    path,
+                } => audio_file = Some(path),
+                TranscriptEvent::Complete { session_id: 42 } => break,
+                TranscriptEvent::Error { text, .. } => panic!("helper error: {text}"),
+                _ => {}
+            }
+        }
+        let final_text = final_text.expect("final transcript");
+        eprintln!("final transcript: {final_text:?} (partials={partials}, levels={levels})");
+        assert!(levels > 0, "no level events: the mic delivered no audio");
+        let audio_file = audio_file.expect("audio_file event");
+        let wav = std::fs::read(&audio_file).expect("read session WAV");
+        let stats = crate::stt::gate::analyze_wav(&wav).expect("parse session WAV");
+        assert!(
+            !crate::stt::gate::is_silence(&stats),
+            "session WAV is silent"
+        );
+        let _ = std::fs::remove_file(&audio_file);
+        if let Ok(expect) = std::env::var("O8_STT_E2E_EXPECT") {
+            assert!(
+                final_text.to_lowercase().contains(&expect.to_lowercase()),
+                "{final_text:?} lacks {expect:?}"
+            );
+        }
+        recognizer.shutdown();
     }
 }

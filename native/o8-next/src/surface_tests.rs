@@ -55,7 +55,7 @@ fn fixture_options(worker: bool, empty: bool) -> (Server, Client) {
     let anonymous = Client::authenticated(&origin, None).unwrap();
     assert_eq!(
         anonymous.sessions().unwrap_err(),
-        "Server returned HTTP 401"
+        "/api/mobile/orchestrator/threads: Server returned HTTP 401"
     );
     let client = Client::authenticated(&origin, Some("fixture-operator-bearer".into())).unwrap();
     let sessions = client.sessions().unwrap();
