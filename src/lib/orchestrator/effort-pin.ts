@@ -235,7 +235,8 @@ export async function resolveRuntimeEffortPin(input: ResolveEffortPinInput, cont
     const configHome = context.configHome ?? identity?.configHomeRef;
     const discoveryConfig = configHome ? { ...config, museConfigRoot: museRoot(configHome, true) } : config;
     const catalog = await probeMuseModels(context.cwd ?? process.cwd(), true, discoveryConfig);
-    return resolveEffortPin({ ...input, modelEfforts: catalog.models.find(row => row.id === input.model)?.efforts });
+    const model = input.model?.trim() || catalog.models.find(row => row.isDefault)?.id || null;
+    return resolveEffortPin({ ...input, model, modelEfforts: catalog.models.find(row => row.id === model)?.efforts });
   } catch {
     return { ok: false, code: 'effort_unsupported_model', message: 'Cannot verify this model effort with the selected account. Refresh the model catalog or omit effort; no worker was started.' };
   }

@@ -232,6 +232,72 @@ it('rechecks current model evidence before an automatic retry against persisted 
   } finally { error.mockRestore(); }
 });
 
+it('admits an omitted worker model using the discovered native default effort', async () => {
+  const store = createOwnedSessionStore(museOwnedAdapter); stores.push(store);
+  const start = calls().length;
+  const launched = await store.launch({ cwd: repo, effort: 'low', prompt: 'fixture native default' });
+  expect(launched.ok, launched.note).toBe(true);
+  await vi.waitFor(async () => expect((await store.getRuntimeTail(launched.surfaceId)).surface.lifecycle?.lastOutcome).toBe('finished'), { timeout: 10_000 });
+  const launchedCalls = calls().slice(start);
+  expect(launchedCalls.some(call => call.method === 'model/list')).toBe(true);
+  const args = launchedCalls.find(call => call.method === 'exec').args;
+  expect(args).toEqual(expect.arrayContaining(['--reasoning-effort', 'low']));
+  expect(args).not.toContain('--model');
+});
+it('admits an omitted lead model using the discovered native default effort', async () => {
+  const backend = createMuseBackend({ stateRoot: () => join(root, 'native-default-lead') }); backends.push(backend);
+  const start = calls().length, events: Array<{ type: string }> = [];
+  await backend.sendTurn(repo, 'fixture native default', event => events.push(event), { thinkingEffort: 'low' });
+  const launchedCalls = calls().slice(start);
+  expect(events.filter(event => event.type === 'error')).toEqual([]);
+  expect(launchedCalls.find(call => call.method === 'session/start')?.params.modelId).toBeUndefined();
+  expect(launchedCalls.find(call => call.method === 'turn/start')?.params).toMatchObject({ reasoningEffort: 'low' });
+});
+it.each(['worker', 'lead'] as const)('refuses an omitted %s model when only a non-default model supports the effort', async operation => {
+  const catalog = rows(['ultra']);
+  catalog.models[1].variants = ['low'];
+  writeFileSync(join(account, 'models.json'), JSON.stringify(catalog));
+  const start = calls().length;
+  if (operation === 'worker') {
+    const store = createOwnedSessionStore(museOwnedAdapter); stores.push(store);
+    await expect(store.launch({ cwd: repo, effort: 'low', prompt: 'fixture' }))
+      .rejects.toMatchObject({ name: 'EffortPinRejectionError', code: 'effort_unsupported_model' });
+  } else {
+    const backend = createMuseBackend({ stateRoot: () => join(root, 'unsupported-native-default-lead') }); backends.push(backend);
+    const events: Array<{ type: string; error?: string }> = [];
+    await backend.sendTurn(repo, 'fixture', event => events.push(event), { thinkingEffort: 'low' });
+    expect(events.at(-1)).toMatchObject({ type: 'error', error: expect.stringContaining('low') });
+  }
+  expect(calls().slice(start).filter(call => ['exec', 'session/start', 'turn/start'].includes(call.method))).toEqual([]);
+});
+
+it('admits task dispatch using its pinned account after the selected account changes', async () => {
+  const identities = await import('@/lib/runtime/identity-catalog');
+  const { createTask, dispatchTask } = await import('@/lib/tasks/actions');
+  const pinned = await identities.registerRuntimeIdentity({ runtime: 'muse', label: 'Task fixture A', configHomeRef: account });
+  writeFileSync(join(account, 'models.json'), JSON.stringify(rows(['low'])));
+  await identities.selectRuntimeIdentity('muse', pinned.id);
+  const created = await createTask({ title: 'Pinned account task', repoPath: repo,
+    requestedRuntime: 'muse', model: 'muse-fixture', requestedEffort: 'low' });
+  expect(created.packetId).toBeTruthy();
+  const { createLane } = await import('@/lib/lane/registry');
+  createLane({ repoPath: repo, branch: created.task!.branch!, runtime: 'muse', packetId: created.packetId! });
+  await identities.getOrPinPacketRuntimeIdentity({ runtime: 'muse', packetId: created.packetId!, fallback: pinned });
+  const other = join(root, 'selected-task'); mkdirSync(other);
+  writeFileSync(join(other, 'models.json'), JSON.stringify(rows(['ultra'])));
+  const selected = await identities.registerRuntimeIdentity({ runtime: 'muse', label: 'Task fixture B', configHomeRef: other });
+  await identities.selectRuntimeIdentity('muse', selected.id);
+  effects.lane.mockResolvedValueOnce({ ok: true, note: 'Captured task launch' } as never);
+  const start = calls().length;
+  const dispatched = await dispatchTask(created.taskId, { repoPath: repo });
+  expect(dispatched.ok, dispatched.note).toBe(true);
+  expect(effects.lane).toHaveBeenCalledWith(expect.objectContaining({ model: 'muse-fixture', effort: 'low' }));
+  expect(calls().slice(start).filter(call => call.method === 'model/list').map(call => call.config)).toEqual([account]);
+  const { readOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
+  expect(readOrchestratorControlPlaneState().packets.find(packet => packet.id === created.packetId)?.workerRouting)
+    .toMatchObject({ selectedRuntime: 'muse', selectedEffort: 'low' });
+});
+
 it.each(['dispatch', 'launch'] as const)('admits a packet pinned to account A after selecting account B at %s', async operation => {
   const identities = await import('@/lib/runtime/identity-catalog');
   const packetId = crypto.randomUUID();

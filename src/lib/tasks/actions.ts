@@ -137,7 +137,7 @@ export function readTaskEffortSelection(body: Record<string, unknown>): Thinking
   return selection.requestedEffort;
 }
 
-async function resolveTaskWorkerRouting(input: NonNullable<Parameters<typeof resolveWorkerRouting>[0]>, cwd: string | null): Promise<WorkerRouting> {
+async function resolveTaskWorkerRouting(input: NonNullable<Parameters<typeof resolveWorkerRouting>[0]>, cwd: string | null, packetId?: string): Promise<WorkerRouting> {
   const routing = resolveWorkerRouting(input);
   const pin = await resolveRuntimeEffortPin({
     requestedEffort: input.requestedEffort,
@@ -145,7 +145,7 @@ async function resolveTaskWorkerRouting(input: NonNullable<Parameters<typeof res
     model: routing.selectedModel ?? getRuntimeCapability(routing.selectedRuntime).defaultModel ?? null,
     explicitModel: typeof input.requestedModel === 'string' ? input.requestedModel : null,
     modelDisposition: routing.modelDisposition,
-  }, { cwd: cwd ?? undefined });
+  }, { cwd: cwd ?? undefined, packetId });
   if (!pin.ok) throw new TaskMutationError(400, pin.message);
   return routing;
 }
@@ -500,7 +500,7 @@ export async function dispatchTask(taskId: string, input: TaskDispatchInput = {}
     requestedModel: input.model ?? task.workerRouting?.requestedModel ?? undefined,
     requestedEffort: input.requestedEffort ?? task.workerRouting?.requestedEffort ?? undefined,
     source: 'task-dispatch',
-  }, task.repoPath);
+  }, task.repoPath, task.packetId ?? undefined);
   try {
     if (workerRouting.selectedRuntime === 'cloud') {
       const error = remoteWorkerPreflightError(input.model ?? task.workerRouting?.requestedModel);

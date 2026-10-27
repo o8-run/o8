@@ -47,6 +47,7 @@ export function createMuseBackend(deps: {
   async function admitEffort(host: MuseHost, model: string | null, effort: OrchestratorTurnOptions['thinkingEffort']) {
     if (!effort || effort === 'adaptive') return;
     const models = decodeMuseModels(await boundedMuseRequest(host.connection.request('model/list', {}), host));
+    model = model?.trim() || models.find(row => row.isDefault)?.id || null;
     const pin = resolveEffortPin({ runtime: 'muse', model, requestedEffort: effort,
       modelEfforts: models.find(row => row.id === model)?.efforts });
     if (!pin.ok) throw new EffortPinRejectionError(pin.code, pin.message);
