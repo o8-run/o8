@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { NextRequest } from 'next/server';
 import { afterAll, beforeEach, expect, it, vi } from 'vitest';
 import { getDataDir } from '@/lib/data-dir-migration';
 import type { OrchestratorEvent } from '@/lib/lane/orchestrator-stream-events';
@@ -43,6 +44,8 @@ const { codexOwnedAdapter, launchOwnedCodexSession } = await import('@/lib/codex
 const { createOwnedSessionStore } = await import('@/lib/runtimes/shared/owned-session');
 const { registerRuntimeIdentity, selectRuntimeIdentity } = await import('@/lib/runtime/identity-catalog');
 const { updateOperatorDefaults } = await import('@/lib/operator/defaults');
+const { POST } = await import('@/app/api/runtime/launch/route');
+const { closeDb } = await import('@/lib/db');
 function cache(config: string, model: string, efforts: string[]) {
   mkdirSync(config, { recursive: true });
   writeFileSync(join(config, 'models_cache.json'), JSON.stringify({ models: [{
@@ -75,7 +78,47 @@ beforeEach(async () => {
   cache(configHome, 'gpt-6.1-sol', ['none', 'minimal']);
   await updateOperatorDefaults({ codexAppThreads: false });
 });
-afterAll(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); rmSync(root, { recursive: true, force: true }); });
+afterAll(() => { closeDb(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); rmSync(root, { recursive: true, force: true }); });
+
+it.each(['none', 'minimal'] as const)('launch POST uses selected worker discovery for %s before binding a receipt', async effort => {
+  const identityHome = join(root, `route-identity-${effort}`);
+  cache(identityHome, 'gpt-6.1-sol', [effort]);
+  cache(configHome, 'gpt-6.1-sol', ['low']);
+  const identity = await registerRuntimeIdentity({ runtime: 'codex', label: 'Fixture', configHomeRef: identityHome });
+  await selectRuntimeIdentity('codex', identity.id);
+  const cwd = repo(`route-identity-${effort}-repo`);
+  const before = records();
+  const body = { runtime: 'codex', model: 'gpt-6.1-sol', effort, prompt: 'fixture', cwd,
+    clientMutationId: `route-identity-${effort}`, skipSetup: true, isolate: false };
+  const invoke = () => POST(new NextRequest('http://localhost/api/runtime/launch', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+  }));
+  const response = await invoke();
+  expect(response.status).toBe(200);
+  const launched = await response.json();
+  expect(launched.ok).toBe(true);
+  await finished(launched.surfaceId);
+  expect(saved(launched.surfaceId)).toMatchObject({ effort, identity: { id: identity.id, configHomeRef: identityHome } });
+  expect(calls(cwd)).toMatchObject([{ configHome: identityHome, args: expect.arrayContaining([`model_reasoning_effort=${effort}`]) }]);
+  closeDb();
+  expect((await invoke()).headers.get('x-o8-idempotency-replayed')).toBe('1');
+  expect(calls(cwd)).toHaveLength(1);
+
+  body.clientMutationId += '-correction';
+  cache(identityHome, 'gpt-6.1-sol', ['low']);
+  cache(configHome, 'gpt-6.1-sol', [effort]);
+  const refused = await invoke();
+  expect(refused.status).toBe(400);
+  expect(await refused.json()).toMatchObject({ code: 'effort_unsupported_model' });
+  expect(calls(cwd)).toHaveLength(1);
+  expect(records()).toHaveLength(before.length + 1);
+  cache(identityHome, 'gpt-6.1-sol', [effort]);
+  closeDb();
+  const corrected = await invoke();
+  expect(corrected.status).toBe(200);
+  await finished((await corrected.json()).surfaceId);
+  expect(calls(cwd)).toHaveLength(2);
+});
 
 it.each(['gpt-6.1-sol', 'gpt-5.6-sol'].flatMap(model =>
   (['none', 'minimal'] as const).map(effort => ({ model, effort })),
