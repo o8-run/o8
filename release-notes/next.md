@@ -1,16 +1,1 @@
-- Chats that run through the packaged CLI bridge work again in the installed app. In 0.1.808 every such turn failed before the CLI started.
-- Repositories in a GitHub organization load even when your GitHub sign-in covers only your personal account. Public organization repos are read without your token.
-- The Steffan voice keeps working after its speech service changed its token scheme. If playback falls back to system speech, o8 says so instead of switching voices silently.
-- Workers no longer inherit every variable from the shell that launched o8. Their environment is built from an allowlist, so unrelated exported secrets stay out of agent processes.
-- Automatic recovery never resumes a packet stopped at its spend cap or on hold, and Stop always wins, even while a worker is still launching.
-- Brain reads from native worker turns work again, and each worker sees only its own project's knowledge.
-- Navigation fits laptop-sized windows, without scrollbar gutters.
-- Experimental o8 next, the native client, adds a thread sidebar, worker list, Activity with CI details, pull requests, projects, setup, Customize and a command palette, and runs without the Next server.
-- Workers on a controlled provider validate their model against the models that provider actually serves, instead of failing before they start.
-- Saving a provider key during an outage or quota refusal tells you the key could not be verified, instead of reporting success.
-- Markdown knowledge folders feed the Brain read-only and can't become writable workspaces.
-- Terminal cleanup from the dashboard only touches sessions in its own data profile.
-- Project Threads show past missions, approvals and the evidence behind each decision.
-- Ripple checks what a marked instruction means before sending it, and asks when it's ambiguous.
-- Simulator input has one controller at a time, with an explicit handoff between conversations and workers.
-- Workspace manifests start their services in a terminal o8 owns and tear them down when the work ends.
+- Usage analytics count the first successful worker launch, first completed merge, and clean or unclean backend session endings. The existing opt-out and first-run gate apply to every event; no content or new identity fields are sent.

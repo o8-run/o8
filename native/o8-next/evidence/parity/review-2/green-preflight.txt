@@ -1,0 +1,14 @@
+ ✓ tests/next-parity-harness-real-path.test.ts > discovers every production registration and both viewport sizes through the harness CLI 54ms
+ ✓ tests/next-parity-harness-real-path.test.ts > reports signed numeric gaps, preserves missing measurements and never gates on a visual difference 96ms
+ ✓ tests/next-parity-harness-real-path.test.ts > recomputes all 52 recorded numeric gaps without changing the accepted measurements 92ms
+ ✓ tests/next-parity-harness-real-path.test.ts > serves the same persisted history and selected desktop tab through production fixture routes 2244ms
+ ✓ tests/next-parity-preflight-real-path.test.ts > maps Workers through the real CLI with the existing route fixture and native selectors 34ms
+ ✓ tests/next-parity-preflight-real-path.test.ts > names unmapped registered surfaces through the CLI instead of hiding inventory drift 38ms
+ ✓ tests/next-parity-preflight-real-path.test.ts > compares an existing report even when a newer registration has no capture mapping 42ms
+ ✓ tests/next-parity-preflight-real-path.test.ts > rejects an unknown --only before starting hosts and leaves no capture processes 47ms
+ ✓ tests/next-parity-preflight-real-path.test.ts > stops a started web host when native test compilation fails 634ms
+
+ Test Files  2 passed (2)
+      Tests  9 passed (9)
+   Start at  23:37:09
+   Duration  3.81s (transform 87ms, setup 106ms, import 26ms, tests 3.30s, environment 0ms)

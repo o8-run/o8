@@ -130,7 +130,7 @@ export function OperatorDefaultsTab({ onNavigateTab }: { onNavigateTab?: (tab: S
       if (loadSequenceRef.current !== sequence) return;
       const next = payload as OperatorDefaultsResponse;
       setData(next);
-      setNotice(next.settingsToml?.error ?? null);
+      setNotice(next.nextWindowError ?? next.settingsToml?.error ?? null);
     } catch (error) {
       if (loadSequenceRef.current !== sequence) return;
       setNotice(error instanceof Error ? error.message : 'Failed to load operator defaults.');

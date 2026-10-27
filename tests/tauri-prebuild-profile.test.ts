@@ -104,10 +104,12 @@ it.each(['ordinary', 'linked'] as const)('retains %s prebuild creation authority
     scripts: { build: `${JSON.stringify(process.execPath)} ${JSON.stringify(path.join(source, 'scripts/build.mjs'))}` } }));
   // Real callers, guard, recipe, manifest, cache and native producer; only expensive
   // compiler/export/smoke payloads are stand-ins. No containing manager is seeded.
-  for (const name of ['preship-cleanup.mjs', 'bust-stale-patch-cache.mjs']) {
+  mkdirSync(path.join(scripts, 'lib'));
+  for (const name of ['preship-cleanup.mjs', 'lib/generated-output-producer-check.mjs', 'bust-stale-patch-cache.mjs']) {
     writeFileSync(path.join(scripts, name), readFileSync(path.join(source, 'scripts', name)));
   }
-  for (const name of ['build-speech-local.mjs', 'build-pi-write.mjs']) {
+  mkdirSync(path.join(scripts, 'next'), { recursive: true });
+  for (const name of ['build-speech-local.mjs', 'build-pi-write.mjs', 'next/build-sidecar.mjs']) {
     writeFileSync(path.join(scripts, name), 'process.exit(0);');
   }
   writeFileSync(path.join(scripts, 'tauri-export.mjs'), `
@@ -133,9 +135,10 @@ it.each(['ordinary', 'linked'] as const)('retains %s prebuild creation authority
   symlinkSync(path.dirname(require.resolve('better-sqlite3/package.json')), path.join(repo, 'node_modules/better-sqlite3'), 'dir');
   writeFileSync(path.join(next, 'next'), `
     const fs = require('node:fs');
-    fs.mkdirSync('.next/cache', { recursive: true });
-    fs.writeFileSync('.next/cache/proof.bin', 'fixture cache');
-    fs.writeFileSync('.next/BUILD_ID', 'native fixture');
+    const output = process.env.O8_RELEASE_NEXT_DIST_DIR || '.next';
+    fs.mkdirSync(output + '/cache', { recursive: true });
+    fs.writeFileSync(output + '/cache/proof.bin', 'fixture cache');
+    fs.writeFileSync(output + '/BUILD_ID', 'native fixture');
     fs.appendFileSync('.fixture/compiler-calls', 'build\\n');
   `);
   for (const args of [['init', '--initial-branch=main'], ['add', '.'],

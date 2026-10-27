@@ -1,0 +1,13 @@
+thread 'shell::workers::card_tests::workers_card_activity_reads_real_events_and_keeps_position' (59482) panicked at src/surfaces/workers/card_tests.rs:13:5:
+assertion failed: visual.debug_bounds("worker-status-worker-blocked").is_some()
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test shell::workers::card_tests::workers_card_activity_reads_real_events_and_keeps_position ... FAILED
+
+failures:
+
+failures:
+    shell::workers::card_tests::workers_card_activity_reads_real_events_and_keeps_position
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 168 filtered out; finished in 1.96s
+
+error: test failed, to rerun pass `--bin o8-next`

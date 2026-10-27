@@ -1,3 +1,4 @@
+import { startProductSession, endProductSession } from '@/lib/analytics/session';
 import { mutationToLaneLifecyclePayload } from '@/lib/realtime/lane-lifecycle';
 import { assertOrchestratorPermissionMode, resolveOrchestratorPermissionMode } from '@/lib/orchestrator/permission-mode';
 import { managedCommandLaunch } from './lib/terminal/managed-command-launch';
@@ -53,6 +54,7 @@ import { basename, extname, isAbsolute, join, resolve } from 'node:path';
 import { execFile, execFileSync } from '@/lib/providers/child-process';
 import { createServer } from 'node:http';
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
+import { isTerminalChatConnectivityPrompt } from '@/lib/orchestrator/connectivity-check';
 import { homedir } from 'node:os';
 import { promisify } from 'node:util';
 import { getDataDir, migrateDataDirOnce } from '@/lib/data-dir-migration';
@@ -75,6 +77,7 @@ import { expireStaleApprovals } from '@/lib/approvals/store';
 import { getDb } from '@/lib/db';
 import { resolvePortInfo } from '@/lib/panel/api-port';
 import { getInstanceIdentity } from '@/lib/panel/instance-identity';
+import { resolveListenHost } from '@/lib/panel/listen-host';
 import { HEADLESS_LAUNCH_DEADLINE_MS } from '@/lib/orchestrator/headless-tick-deadline';
 import {
   startAgentSession,
@@ -5172,6 +5175,14 @@ async function handleOrchestratorSendMsgAdmitted(client: ClientState, msg: Recor
 
   const correlationId = resolveOrchestratorCommandCorrelationId(msg);
   const threadId = resolveMsgThreadId(msg);
+  if (isTerminalChatConnectivityPrompt(msg.displayMessage ?? message)
+    && (!Array.isArray(msg.attachments) || msg.attachments.length === 0)) {
+    send(client, { channel: 'orchestrator', event: 'error', data: {
+      repoPath, threadId, error: 'Use o8 chat --check to check connectivity without creating a conversation.',
+      ...orchestratorCommandAckCorrelation(correlationId),
+    } });
+    return;
+  }
   let attachments: ComposerImageAttachment[] | undefined;
   try {
     attachments = 'attachments' in msg ? validateComposerImageAttachments(msg.attachments) : undefined;
@@ -6225,10 +6236,9 @@ async function handleOrchestratorSendMsgOnce(
       }
       return;
     }
-    // Broadcast the error to EVERY subscriber on this thread, not just the
-    // origin client — a phone-started turn that throws must also release the
-    // desktop watching the same thread (it was latching forever). Fall back to
-    // the origin client only if the session name was never resolved.
+    // Accepted turns notify every subscriber. Before acceptance the origin
+    // may not yet subscribe to the selected backend, so admission failures
+    // must return directly to the client that still owns the draft.
     const errorMsg = {
       channel: 'orchestrator' as const,
       event: 'error' as const,
@@ -6243,7 +6253,7 @@ async function handleOrchestratorSendMsgOnce(
         ...orchestratorCommandAckCorrelation(correlationId),
       },
     };
-    if (sessionName) {
+    if (sessionName && commandAccepted) {
       broadcastToOrchestratorSession(sessionName, JSON.stringify(errorMsg));
     } else {
       send(client, errorMsg);
@@ -8793,7 +8803,9 @@ const httpServer = createServer(async (req, res) => {
   res.end();
 });
 
-const o8dBridge = process.env.O8_WS_O8D === '1' ? new O8dBridge(httpServer, WS_PORT, REALTIME_EPOCH) : null;
+// Loopback by default; O8_LAN_ACCESS=1 opts in to 0.0.0.0 for phone access.
+const WS_LISTEN_HOST = resolveListenHost();
+const o8dBridge = process.env.O8_WS_O8D === '1' ? new O8dBridge(httpServer, WS_PORT, REALTIME_EPOCH, WS_LISTEN_HOST) : null;
 
 const WS_TOKEN = getOrCreateWsToken();
 console.log(`[ws-auth] WS token loaded (source: ${process.env.WS_TOKEN ? 'env' : WS_TOKEN_PATH})`);
@@ -9496,7 +9508,7 @@ async function recoverFromPortInUse(): Promise<void> {
     }
     setTimeout(() => {
       if (shuttingDown) return;
-      httpServer.listen(WS_PORT, '0.0.0.0');
+      httpServer.listen(WS_PORT, WS_LISTEN_HOST);
     }, 500);
   } catch (error) {
     console.error(
@@ -9526,14 +9538,16 @@ async function bootstrapWsServer() {
   } else {
     await new Promise<void>((done) => {
       httpServer.once('listening', () => {
-        console.log(`[ws-server] o8 WebSocket server listening on ws://0.0.0.0:${WS_PORT}/ws`);
+        console.log(`[ws-server] o8 WebSocket server listening on ws://${WS_LISTEN_HOST}:${WS_PORT}/ws`);
         done();
       });
-      httpServer.listen(WS_PORT, '0.0.0.0');
+      httpServer.listen(WS_PORT, WS_LISTEN_HOST);
     });
   }
 
-  await waitForNextReady();
+  // Native producers use this listener. Its stateful requests await this
+  // bootstrap, so probing them here waits on ourselves until the timeout.
+  if (process.env.O8_NEXT_O8D !== '1') await waitForNextReady();
   if (shuttingDown) return;
   await terminalHostReady;
   if (shuttingDown) return;
@@ -9984,7 +9998,9 @@ async function bootstrapWsServer() {
 }
 
 let shuttingDown = false;
-const wsStartupReady = bootstrapWsServer().catch(() => {
+const wsStartupReady = bootstrapWsServer().then(() => {
+  if (!shuttingDown) void startProductSession();
+}).catch(() => {
   console.error('[ws-server] Startup initialization failed.');
   shutdown('startup-failed', 1);
 });
@@ -10050,16 +10066,20 @@ async function shutdown(signal: string, exitCode = 0) {
     exitCode = 1;
   }
 
+  // Force exit after 3s if something hangs
+  const forceShutdownTimer = setTimeout(() => {
+    exitCode ||= 1;
+    void endProductSession(false).finally(() => process.exit(exitCode || 1));
+  }, 3000).unref();
+
   // Close HTTP + WS server, then exit
   wss.close(() => {
     httpServer.close(() => {
+      clearTimeout(forceShutdownTimer);
       console.log('[ws-server] Clean shutdown complete');
-      process.exit(exitCode);
+      void endProductSession(exitCode === 0).finally(() => process.exit(exitCode));
     });
   });
-
-  // Force exit after 3s if something hangs
-  setTimeout(() => process.exit(exitCode), 3000).unref();
 }
 
 process.on('SIGTERM', () => shutdown('SIGTERM'));

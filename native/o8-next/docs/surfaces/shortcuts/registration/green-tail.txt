@@ -1,0 +1,8 @@
+running 4 tests
+test shell::shortcuts::tests::review::shortcuts_control_alt_arrows_belong_to_grid_panes ... ok
+test shell::shortcuts::tests::review::shortcuts_focused_grid_terminal_keeps_question_and_close_keys ... ok
+test shell::shortcuts::tests::review::shortcuts_focused_text_field_keeps_help_and_close_keys ... ok
+test shell::shortcuts::tests::shortcuts_overlay_bindings_dismissal_and_typing ... O8_NEXT_SHORTCUTS_EVIDENCE {"endpoint":"headless GPUI CPU scene; no GPU/compositor","openToFirstFrameMs":15.732920000000002,"interactionToFrameMs":23.641239000000002}
+ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 82 filtered out; finished in 18.47s

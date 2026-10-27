@@ -1,0 +1,143 @@
+Local integration entry point:
+[integration-gate] 1/1 PASS tests/next-parity-route-ownership-real-path.test.ts · 5/5 passed · 10.0s
+[integration-gate] summary: 1/1 files, 5/5 tests passed, 0 failed files, 10.0s · ran 1 · green 1 · baseline red 0 · new red 0
+
+Harness:
+ Test Files  4 passed (4)
+      Tests  27 passed (27)
+
+Startup receipt with keyboard events suppressed:
+{
+  "requests": [
+    {
+      "method": "POST",
+      "path": "/api/panel/terminal-state",
+      "attempts": 1,
+      "fulfilled": 1,
+      "continued": 0,
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/panel/operator-defaults",
+      "attempts": 1,
+      "fulfilled": 1,
+      "continued": 0,
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/panel/operator-defaults",
+      "attempts": 1,
+      "fulfilled": 1,
+      "continued": 0,
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/panel/provider/launch",
+      "attempts": 1,
+      "fulfilled": 1,
+      "continued": 0,
+      "status": 405
+    }
+  ],
+  "upstream": [
+    {
+      "method": "POST",
+      "path": "/api/panel/terminal-state",
+      "authorized": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/panel/operator-defaults",
+      "authorized": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/panel/operator-defaults",
+      "authorized": true
+    }
+  ],
+  "overlap": 4,
+  "forwarded": 3,
+  "blockedForwarded": 0,
+  "errors": [],
+  "stages": [
+    {
+      "name": "server listening",
+      "ms": 29
+    },
+    {
+      "name": "browser launched",
+      "ms": 931
+    },
+    {
+      "name": "context created",
+      "ms": 987
+    },
+    {
+      "name": "overlapping routes registered",
+      "ms": 1003
+    },
+    {
+      "name": "repos served",
+      "ms": 1071
+    },
+    {
+      "name": "page created",
+      "ms": 1605
+    },
+    {
+      "name": "document served",
+      "ms": 1679
+    },
+    {
+      "name": "request intercepted",
+      "ms": 1797
+    },
+    {
+      "name": "document loaded",
+      "ms": 1814
+    },
+    {
+      "name": "request intercepted",
+      "ms": 1816
+    },
+    {
+      "name": "request intercepted",
+      "ms": 1825
+    },
+    {
+      "name": "request intercepted",
+      "ms": 1829
+    },
+    {
+      "name": "hydration wait started",
+      "ms": 1929
+    },
+    {
+      "name": "hydration wait finished",
+      "ms": 2102
+    }
+  ]
+}
+
+Fixture deadline: unchanged at 20,000 ms.
+
+Completion checks:
+ Test Files  1251 passed | 3 skipped (1254)
+      Tests  9165 passed | 5 skipped (9170)
+22 workflow regressions passed.
+7 native CLI assertions passed.
+cargo clippy --all-targets --locked: exit 0 (existing warnings).
+NODE_OPTIONS=--max-old-space-size=8192 npx tsc --noEmit: exit 0.
+npm run typecheck:fast: exit 0.
+npm run test:classify: exit 0.
+Touched-file ESLint and rule-check: exit 0.
+Surface inventory: 17 mappings.
+Trusted surface boundary selection: exit 0; no surface code changed.
+GPUI parity tests: 2 passed; 0 failed.
+
+Residual broader native run: failures in unchanged Issues and pull-request fixtures.
+Preceding hosted parity job 121382853286: Settings completed both sizes; native Issues failed both sizes.

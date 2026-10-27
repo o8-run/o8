@@ -12,7 +12,7 @@ export async function prepare({ dataDir, repo }: SurfaceContext): Promise<Surfac
   for (const key of ['GITHUB_APP_ID', 'GITHUB_APP_PRIVATE_KEY', 'GITHUB_APP_PRIVATE_KEY_PATH']) delete process.env[key];
   writeFileSync(join(dataDir, 'active-identity'), 'fixture-pr-owner');
   writeFileSync(join(dataDir, 'github-app-managed.json'), JSON.stringify({ installed: true, token: 'fixture-github-token',
-    installationId: 1, ownerClerkUserId: 'fixture-pr-owner', expiresAt: new Date(Date.now() + 3600_000).toISOString() }));
+    installationId: 1, accountLogin: 'example', ownerClerkUserId: 'fixture-pr-owner', expiresAt: new Date(Date.now() + 3600_000).toISOString() }));
   const originalFetch = globalThis.fetch;
   const comments: Array<Record<string, unknown>> = [];
   const reviews: Array<Record<string, unknown>> = [];

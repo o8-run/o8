@@ -1,0 +1,30 @@
+Checks after rebasing onto origin/main at 737c988ff. All commands exited 0.
+
+gpui:
+test shell::fake::parity_tests::parity_capture_real_shell ... ok
+test shell::fake::parity_tests::parity_native_error_receipt_follows_real_surface_error ... ok
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 225 filtered out; finished in 10.83s
+
+native-cli:
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+clippy:
+    Finished `dev` profile [unoptimized] target(s) in 10.69s
+
+retained:
+ Test Files  2 passed (2)
+      Tests  27 passed (27)
+
+npm-test:
+ Test Files  1251 passed | 3 skipped (1254)
+      Tests  9157 passed | 5 skipped (9162)
+
+classify:
+[test-classification] 1247 hermetic, 933 resource-owning
+
+NODE_OPTIONS=--max-old-space-size=8192 npx tsc --noEmit: exit 0
+npm run typecheck:fast: exit 0
+Touched TypeScript ESLint and Rust formatting: exit 0

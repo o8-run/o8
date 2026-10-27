@@ -21,6 +21,7 @@ export interface OrchestratorSendHandle {
   threadId: string;
   backend: OrchestratorBackendId | null;
   transcriptBeforeSend: MobileTranscriptEntry[];
+  admission?: Promise<import('./image-send-admission').ImageSendAdmission>;
 }
 
 export interface OrchestratorSendOptions {

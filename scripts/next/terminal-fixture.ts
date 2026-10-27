@@ -39,9 +39,12 @@ export async function startTerminalFixture(dataDir: string, repo: string, apiPor
     const sessionName = sessionNames[0];
     const script = resolve('native/o8-next/fixtures/terminal.py').replaceAll("'", "'\\''");
     for (const sessionName of sessionNames) {
+      const env = Object.fromEntries([
+        'O8_NEXT_TERMINAL_START_GATE', 'O8_NEXT_TERMINAL_FLOOD_TAIL_GATE',
+      ].flatMap(name => process.env[name] ? [[name, process.env[name]]] : []));
       const response = await fetch(`http://127.0.0.1:${port}/terminal-spawn`, {
         method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionName, shellCommand: `python3 '${script}'`, cwd: repo, cols: 80, rows: 24 }),
+        body: JSON.stringify({ sessionName, shellCommand: `python3 '${script}'`, cwd: repo, cols: 80, rows: 24, env }),
       });
       if (!response.ok) throw new Error(`Fixture PTY spawn failed (${response.status})`);
     }

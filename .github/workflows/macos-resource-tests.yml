@@ -1,6 +1,11 @@
 name: macOS Resource Tests
 
 on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'tests/workspace-preservation-cli-real-path.test.ts'
+      - '.github/workflows/macos-resource-tests.yml'
   schedule:
     - cron: '37 6 * * 2'
   workflow_dispatch:
@@ -33,4 +38,5 @@ jobs:
           src/lib/workspace/worktree-exact.test.ts
           src/lib/workspace/exact-directory-purge.test.ts
           tests/workspace-git-bundle-real-path.test.ts
+          tests/workspace-preservation-cli-real-path.test.ts
           tests/generated-output-postship-large-real-path.test.ts

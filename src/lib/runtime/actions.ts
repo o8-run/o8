@@ -90,7 +90,7 @@ export interface RuntimeLaunchRequest {
   claudeCodeModel?: string;
   claudeCodeCarrier?: ClaudeCodeModelSource;
   executionCarrier?: ExecutionCarrierId;
-  /** Requested reasoning effort — passed to the runtime's launch; per-runtime no-op. */
+  /** Requested reasoning effort; concrete pins must pass runtime admission unchanged. */
   effort?: ThinkingEffort;
   clientMutationId?: string;
   cwd?: string;

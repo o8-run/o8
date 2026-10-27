@@ -89,6 +89,12 @@ let acpRealtimeSeq = 0;
  */
 const sessionConfigCache = new Map<OrchestratorBackendId, AcpConfigOption[]>();
 
+function cacheSessionConfig(id: OrchestratorBackendId, session: AcpSession): void {
+  sessionConfigCache.set(id, session.configOptions.map(option => ({
+    ...session.client.redactOutput(option), id: option.id, type: option.type, category: option.category,
+  })));
+}
+
 /**
  * The operator's pinned default model for a backend, or null when unpinned.
  * Only opencode has a setting today; other ACP agents run on their own default.
@@ -143,6 +149,7 @@ function o8McpServersForAcp(repoPath: string, threadId: string | null): AcpMcpSe
 }
 
 function publishAcpLifecycle(backendId: string, session: AcpSession, event: OrchestratorEvent): void {
+  event = session.client.redactEvent(event);
   const base = { backendId, threadKey: session.key };
   const realtime = event.type === 'text'
     ? { event: 'output' as const, action: 'orchestrator-output', status: 'completed' as const, note: `${backendId} assistant output (${event.text.length} chars)`, data: { ...base, text: event.text, thinking: false } }
@@ -173,6 +180,7 @@ function publishAcpLifecycle(backendId: string, session: AcpSession, event: Orch
 }
 
 export interface AcpLaunch {
+  localEnvironment?: import('@/lib/acp/connection-environment').AcpEnvironmentBinding;
   command: string;
   args: string[];
   env?: Record<string, string>;
@@ -215,6 +223,7 @@ export function makeAcpBackend(config: AcpBackendConfig): OrchestratorBackend {
         args: launch.args,
         cwd: repoPath,
         env: launch.env,
+        localEnvironment: launch.localEnvironment,
         runtimeId: id,
         omitEnv: launch.omitEnv,
         onEvent: (event, sourceSessionId) => { if (sourceSessionId === session.sessionId && session.status === 'busy') session.onEvent?.(event); },
@@ -229,8 +238,12 @@ export function makeAcpBackend(config: AcpBackendConfig): OrchestratorBackend {
     const key = sessionKey(id, repoPath, threadId);
     const existing = sessions.get(key);
     if (existing && existing.status !== 'dead' && existing.client.alive) {
+      if (existing.status === 'busy') return existing;
+      // Established processes retain their original environment even while a
+      // different saved connection or its credential store is unavailable.
+      if (existing.credentialFingerprint === credentialPolicyFingerprint(id) && existing.sessionId) return existing;
       const launch = config.resolveLaunch(repoPath);
-      if (existing.status === 'busy' || (existing.credentialFingerprint === credentialPolicyFingerprint(id) && (existing.sessionId || (launch && existing.launchFingerprint === acpLaunchFingerprint(launch))))) return existing;
+      if (existing.credentialFingerprint === credentialPolicyFingerprint(id) && launch && existing.launchFingerprint === acpLaunchFingerprint(launch)) return existing;
       existing.client.kill();
     }
     if (existing) sessions.delete(key);
@@ -248,7 +261,7 @@ export function makeAcpBackend(config: AcpBackendConfig): OrchestratorBackend {
     session.initialModel = modelConfigOption(session.configOptions)?.currentValue ?? null;
     session.appliedModel = session.initialModel;
     if (session.configOptions.length) {
-      sessionConfigCache.set(id, session.configOptions);
+      cacheSessionConfig(id, session);
     }
     return session.sessionId;
   }
@@ -280,7 +293,7 @@ export function makeAcpBackend(config: AcpBackendConfig): OrchestratorBackend {
       if (!(error instanceof AcpRequestError)) {
         session.modelUnconfirmed = true;
         session.configOptions = session.configOptions.map(option => option.id === 'model' || option.category === 'model' ? { ...option, currentValue: undefined } : option);
-        sessionConfigCache.set(id, session.configOptions);
+        cacheSessionConfig(id, session);
         throw new AcpModelSelectionError(`${label} could not confirm that model switch. Select a model or its default before sending. This conversation was preserved.`);
       }
       if (restoringDefault) throw resetError();
@@ -301,7 +314,7 @@ export function makeAcpBackend(config: AcpBackendConfig): OrchestratorBackend {
     }
     session.appliedModel = requested;
     session.configOptions = session.configOptions.map(option => option.id === 'model' || option.category === 'model' ? { ...option, currentValue: requested } : option);
-    sessionConfigCache.set(id, session.configOptions);
+    cacheSessionConfig(id, session);
   }
 
   return {
@@ -342,7 +355,7 @@ export function makeAcpBackend(config: AcpBackendConfig): OrchestratorBackend {
         if (event.type === 'text' || event.type === 'thinking' || event.type === 'tool_use') produced += 1;
         if (event.type === 'tool_use' || event.type === 'tool_result') awaitingFinalReply = true;
         else if (event.type === 'text' && event.text.trim()) awaitingFinalReply = false;
-        onEvent(event);
+        onEvent(session.client.redactEvent(event));
       };
       session.onEvent = countingOnEvent;
 
@@ -358,9 +371,9 @@ export function makeAcpBackend(config: AcpBackendConfig): OrchestratorBackend {
 
       try {
         const sessionId = await ensureHandshake(session);
-        if (options?.signal?.aborted) { onEvent(mapStopReason('cancelled', sessionId)); return; }
+        if (options?.signal?.aborted) { onEvent(session.client.redactEvent(mapStopReason('cancelled', sessionId))); return; }
         await applyModel(session, sessionId, options?.model, countingOnEvent);
-        if (options?.signal?.aborted) { onEvent(mapStopReason('cancelled', sessionId)); return; }
+        if (options?.signal?.aborted) { onEvent(session.client.redactEvent(mapStopReason('cancelled', sessionId))); return; }
         countingOnEvent({
           type: 'turn_receipt',
           leadModel: session.appliedModel ?? defaultModelFor(id) ?? id,
@@ -388,11 +401,11 @@ export function makeAcpBackend(config: AcpBackendConfig): OrchestratorBackend {
           } satisfies OrchestratorEvent)
           : mapStopReason(stopReason, sessionId);
         if (doneOrError.type === 'done') session.completedTurns += 1;
-        onEvent(doneOrError);
+        onEvent(session.client.redactEvent(doneOrError));
         publishAcpLifecycle(id, session, doneOrError);
       } catch (err) {
         const errorEvent: OrchestratorEvent = { type: 'error', error: err instanceof Error ? err.message : String(err) };
-        onEvent(errorEvent);
+        onEvent(session.client.redactEvent(errorEvent));
         publishAcpLifecycle(id, session, errorEvent);
         if (!(err instanceof AcpDefaultModelResetError) && !(err instanceof AcpModelSelectionError)) {
           session.status = 'dead';

@@ -21,6 +21,9 @@ it('builds and rebuilds retained real standalone output from pre-build reservati
   writeFileSync(path.join(repo, 'scripts/bust-stale-patch-cache.mjs'), 'process.exit(0);');
   writeFileSync(path.join(repo, 'app/layout.js'), 'export default function Layout({children}) { return <html><body>{children}</body></html>; }');
   writeFileSync(path.join(repo, 'app/page.js'), 'export default function Page() { return <main>Release fixture</main>; }');
+  mkdirSync(path.join(repo, 'src/lib/panel'), { recursive: true });
+  writeFileSync(path.join(repo, 'src/lib/panel/preview-document-policy.ts'),
+    readFileSync(path.join(source, 'src/lib/panel/preview-document-policy.ts')));
   writeFileSync(path.join(repo, 'next.config.ts'), readFileSync(path.join(source, 'next.config.ts'), 'utf8')
     .replace('experimental: {', 'experimental: { cpus: 1,'));
   symlinkSync(path.join(source, 'node_modules'), path.join(repo, 'node_modules'), 'dir');

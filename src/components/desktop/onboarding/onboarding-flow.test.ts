@@ -107,12 +107,12 @@ it('opens the chosen project after explicit privacy choices, without a tour or t
   const request = vi.fn(createOnboardingPreviewRequest());
   const { complete } = await render(request);
   await click('Open Sample project');
-  expect(button('Save both choices').disabled).toBe(true);
+  expect(button('Save privacy choices').disabled).toBe(true);
   expect(complete).not.toHaveBeenCalled();
   await click('Keep crash reports off');
-  expect(button('Save both choices').disabled).toBe(true);
-  await click('Keep product usage off');
-  await click('Save both choices');
+  expect(button('Save privacy choices').disabled).toBe(false);
+  await click('Turn off');
+  await click('Save privacy choices');
   expect(complete).toHaveBeenCalledWith({ project: PREVIEW_PROJECT, text: '' });
   expect(localStorage.getItem(PROGRESS_KEY)).toBeNull();
   const writes = request.mock.calls.filter(([, init]) => init?.method === 'POST');
@@ -125,7 +125,7 @@ it('saves a ready projectless recommendation before privacy and completes after 
 
   await click('Start without a project');
   expect(complete).not.toHaveBeenCalled();
-  expect(button('Save both choices')).toBeDefined();
+  expect(button('Save privacy choices')).toBeDefined();
 
   const routingWritesBeforePrivacy = request.mock.calls.filter(([, init]) => {
     if (init?.method !== 'POST') return false;
@@ -139,8 +139,8 @@ it('saves a ready projectless recommendation before privacy and completes after 
   });
 
   await click('Keep crash reports off');
-  await click('Keep product usage off');
-  await click('Save both choices');
+  await click('Turn off');
+  await click('Save privacy choices');
 
   expect(complete).toHaveBeenCalledWith(undefined);
   expect(request.mock.calls.filter(([, init]) => {
@@ -169,13 +169,14 @@ it('allows projectless exploration without a ready tool', async () => {
   const { complete } = await render(request);
 
   await click('Start without a project');
-  expect(button('Save both choices')).toBeDefined();
+  expect(button('Save privacy choices')).toBeDefined();
   await click('Keep crash reports off');
-  await click('Keep product usage off');
-  await click('Save both choices');
+  await click('Turn off');
+  await click('Save privacy choices');
 
   expect(complete).toHaveBeenCalledWith(undefined);
   expect(request.mock.calls.filter(([, init]) => init?.method === 'POST').map(([, init]) => JSON.parse(String(init?.body)))).toEqual([
+    { productTelemetryEnabled: false },
     { crashReportsEnabled: false, productTelemetryEnabled: false, telemetryConsentAnswered: true },
   ]);
 });
@@ -199,7 +200,7 @@ it('does not continue projectless setup when saving the recommendation fails', a
 
   fail = false;
   await click('Start without a project');
-  expect(button('Save both choices')).toBeDefined();
+  expect(button('Save privacy choices')).toBeDefined();
   expect(complete).not.toHaveBeenCalled();
 });
 
@@ -209,8 +210,7 @@ it('resumes privacy with the selected project and retries a failed workspace han
   const request = vi.fn(createOnboardingPreviewRequest());
   await render(request, complete);
   await click('Keep crash reports off');
-  await click('Share product usage');
-  await click('Save both choices');
+  await click('Save privacy choices');
   expect(document.body.textContent).toContain('Could not open the workspace');
   expect(document.body.textContent).toContain('Privacy choices saved');
   expect(document.body.textContent).toContain('Setting up Sample project');
@@ -324,7 +324,7 @@ it('lets folder selection cancel, then registers and opens the chosen project', 
   await click('Open a folder');
   const registration = request.mock.calls.find(([url, init]) => String(url) === '/api/panel/repos' && init?.method === 'POST');
   expect(JSON.parse(String(registration?.[1]?.body))).toEqual({ action: 'add', localPath: PREVIEW_PROJECT.localPath });
-  expect(button('Save both choices').disabled).toBe(true);
+  expect(button('Save privacy choices').disabled).toBe(true);
   expect(complete).not.toHaveBeenCalled();
 });
 
@@ -356,7 +356,7 @@ it('accepts an agent-selected folder without a picker, hands privacy to the user
   expect(fixture.state.status).toBe('needs_privacy');
   expect(picker).not.toHaveBeenCalled();
   expect(complete).not.toHaveBeenCalled();
-  await click('Keep crash reports off'); await click('Keep product usage off'); await click('Save both choices');
+  await click('Keep crash reports off'); await click('Turn off'); await click('Save privacy choices');
   expect(complete).toHaveBeenCalledWith({ project: PREVIEW_PROJECT, text: '' });
   expect(fixture.state.status).toBe('opened');
 });
@@ -380,14 +380,14 @@ it('recovers a persisted handoff after remount and clears a cancelled agent rece
   expect(fixture.state.status).toBe('needs_privacy');
   act(() => root.unmount());
   const { complete } = await render(fixture.request);
-  await click('Keep crash reports off'); await click('Keep product usage off'); await click('Save both choices');
+  await click('Keep crash reports off'); await click('Turn off'); await click('Save privacy choices');
   expect(fixture.state.status).toBe('opened');
   expect(complete).toHaveBeenCalledOnce();
   act(() => root.unmount());
   fixture.state.status = 'cancelled';
   localStorage.setItem(PROGRESS_KEY, JSON.stringify({ ...emptyProgress('privacy'), project: PREVIEW_PROJECT }));
   const next = await render(fixture.request);
-  await click('Save both choices');
+  await click('Save privacy choices');
   expect(next.complete).toHaveBeenCalledOnce();
   expect(fixture.state.status).toBe('cancelled');
   expect(document.body.textContent).not.toContain('could not be confirmed');
