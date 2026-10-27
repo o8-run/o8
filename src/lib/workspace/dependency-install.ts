@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { execDependencyInstallProcess } from './dependency-install-process';
+import { dependencyInstallProcessesStopped, execDependencyInstallProcess } from './dependency-install-process';
 import { timedDependencyInstall } from './dependency-install-timing';
 import { execFile } from '@/lib/providers/child-process';
 import { lstat, readFile, readdir, realpath, stat } from 'node:fs/promises';
@@ -743,9 +743,11 @@ export async function runDependencyInstall(
     const invocation = nativeInvocation(
       workspacePath, recipe, authority, runtime, execution.executable,
     );
-    executionStarted = true;
-    await timedDependencyInstall((signal) => options.run
-      ? options.run({ ...invocation, signal }) : defaultRun({ ...invocation, signal }, options.materializationIdentity));
+    await timedDependencyInstall((signal) => {
+      executionStarted = true;
+      return options.run ? options.run({ ...invocation, signal })
+        : defaultRun({ ...invocation, signal }, options.materializationIdentity);
+    });
     executionFinished = true;
     await ensurePinnedWorkspaceDirectory(workspacePath, materializationIdentity, 'node_modules');
     await auditPrivateDependencyView(workspacePath);
@@ -756,11 +758,15 @@ export async function runDependencyInstall(
       completedAt: (options.now ?? (() => new Date()))().toISOString(),
     };
     return receipt;
+  } catch (error) {
+    // Failed installs also release their lease once native teardown has settled.
+    executionFinished ||= dependencyInstallProcessesStopped(error);
+    throw error;
   } finally {
     try {
       if (runtime) await retireInstallRuntime(runtime, options.afterRuntimeTreeCapture);
     } finally {
-      // A failed/aborted runner may leave installer children alive. Keep its cache reservation.
+      // An unconfirmed teardown or an unresolved custom runner still protects live writers.
       if (!executionStarted || executionFinished) {
         const retention = await authority.release();
         if (receipt) receipt.cacheRetention = retention;

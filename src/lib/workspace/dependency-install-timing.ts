@@ -31,27 +31,43 @@ export async function timedDependencyInstall<T>(operation: (signal?: AbortSignal
   emit('dependency_install', 'started', 0, { deadlineMs: DEPENDENCY_INSTALL_DEADLINE_MS });
   const controller = new AbortController();
   let timer: ReturnType<typeof setInterval> | undefined;
+  let cleanupTimer: ReturnType<typeof setTimeout> | undefined;
+  let pending: Promise<T> | undefined;
   try {
     const expired = new Promise<never>((_, reject) => {
       timer = setInterval(() => {
         if (performance.now() - started < DEPENDENCY_INSTALL_DEADLINE_MS) return;
         context.expired = true;
         const error = new DependencyInstallTimeoutError();
-        const lane = getLane(launch.laneId!);
-        if (lane?.status === 'launching' && lane.packetId === launch.packetId) updateLane(lane.id, {
-          status: 'failed', outcomeNote: error.message, lastEventLabel: error.code,
-        }, 'system', { stage: 'dependency_install', reason: 'deadline_exceeded' });
         controller.abort(error);
         reject(error);
       }, 25);
     });
-    const result = await Promise.race([operation(controller.signal), expired]);
+    pending = operation(controller.signal);
+    const result = await Promise.race([pending, expired]);
     emit('dependency_install', 'completed', performance.now() - started);
     return result;
   } catch (error) {
+    let failure = error;
+    if (context.expired) {
+      clearInterval(timer);
+      // Abort requests teardown. Wait for its receipt before returning a failure
+      // to the installer, which owns the cache lease and private runtime.
+      await Promise.race([
+        pending?.catch(reason => { failure = reason; }),
+        new Promise<void>(resolve => { cleanupTimer = setTimeout(() => {
+          failure = new Error('Dependency install exceeded its deadline and cleanup could not be confirmed; its cache reservation remains protected.');
+          resolve();
+        }, 11_000); }),
+      ]);
+      const lane = getLane(launch.laneId!);
+      if (lane?.status === 'launching' && lane.packetId === launch.packetId) updateLane(lane.id, {
+        status: 'failed', outcomeNote: (failure as Error).message, lastEventLabel: 'dependency_install_timeout',
+      }, 'system', { stage: 'dependency_install', reason: 'deadline_exceeded' });
+    }
     emit('dependency_install', 'failed', performance.now() - started, {
       reason: context.expired ? 'deadline_exceeded' : 'operation_failed', deadlineMs: DEPENDENCY_INSTALL_DEADLINE_MS,
     });
-    throw error;
-  } finally { clearInterval(timer); }
+    throw failure;
+  } finally { clearInterval(timer); clearTimeout(cleanupTimer); }
 }

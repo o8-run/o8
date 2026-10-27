@@ -2753,6 +2753,7 @@
         "child-process",
         "executable-fixture",
         "git-cli",
+        "process-signal",
         "real-path"
       ]
     },
