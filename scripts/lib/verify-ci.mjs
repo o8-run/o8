@@ -233,13 +233,14 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
       run: 'node scripts/ci/linux-package-prerequisites.mjs key --group="$O8_PACKAGE_GROUP"' },
     { uses: `actions/cache/restore@${cachePin}`, id: 'archives', with: {
       path: archivePaths, key: '${{ steps.identity.outputs.key }}',
+      'restore-keys': '${{ steps.identity.outputs.key }}-',
     } },
     { id: 'install', shell: 'bash', env: { O8_PACKAGE_GROUP: '${{ inputs.group }}',
       O8_PACKAGE_CACHE: '${{ steps.identity.outputs.path }}' },
     run: 'node scripts/ci/linux-package-prerequisites.mjs install --group="$O8_PACKAGE_GROUP" --cache="$O8_PACKAGE_CACHE"' },
     { uses: `actions/cache/save@${cachePin}`,
-      if: "github.ref == 'refs/heads/main' && steps.archives.outputs.cache-hit != 'true' && steps.install.outputs.source == 'download'",
-      with: { path: archivePaths, key: '${{ steps.identity.outputs.key }}' } },
+      if: "github.ref == 'refs/heads/main' && steps.install.outputs.source == 'download'",
+      with: { path: archivePaths, key: '${{ steps.identity.outputs.key }}-${{ steps.install.outputs.revision }}' } },
   ];
   requireCondition(packageSetup.runs?.using === 'composite'
     && isDeepStrictEqual(packageSetup.runs.steps, expectedPackages)

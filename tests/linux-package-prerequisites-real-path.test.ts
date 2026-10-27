@@ -1,5 +1,6 @@
+import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, expect, it } from 'vitest';
@@ -23,21 +24,42 @@ function fixture() {
   const calls = path.join(root, 'calls.jsonl');
   const cache = path.join(root, 'cache');
   const output = path.join(root, 'output');
-  const reset = () => { writeFileSync(state, '{"installed":false}'); writeFileSync(calls, ''); };
+  const system = path.join(root, 'system-archives');
+  const trusted = 'signed repository package bytes';
+  const trustedHash = createHash('sha256').update(trusted).digest('hex');
+  const reset = () => { writeFileSync(state, '{"installed":false}'); writeFileSync(calls, ''); rmSync(system, { recursive: true, force: true }); mkdirSync(system); };
   reset();
+  const preload = path.join(root, 'filesystem.mjs');
+  writeFileSync(preload, `import fs from 'node:fs'; import { syncBuiltinESMExports } from 'node:module';
+    const translate = value => typeof value === 'string' && value.startsWith('/var/cache/apt/archives')
+      ? process.env.APT_FIXTURE_ARCHIVES + value.slice('/var/cache/apt/archives'.length) : value;
+    for (const name of ['readFileSync','readdirSync','lstatSync','copyFileSync']) {
+      const original = fs[name]; fs[name] = (...args) => original(...args.map((value, index) => index < (name === 'copyFileSync' ? 2 : 1) ? translate(value) : value));
+    } syncBuiltinESMExports();`);
   const scripts = {
     sudo: `const r = require('node:child_process').spawnSync(process.argv[2], process.argv.slice(3), { stdio: 'inherit', env: process.env }); process.exit(r.status ?? 1);`,
     'dpkg-query': `const state = JSON.parse(require('node:fs').readFileSync(process.env.APT_FIXTURE_STATE)); if (state.installed) console.log('install ok installed'); else process.exit(1);`,
+    'dpkg-deb': `process.stdout.write('fixture\\t1\\tall');`,
+    'apt-cache': `console.log('Package: fixture\\nVersion: 1\\nArchitecture: all\\nFilename: pool/main/f/fixture/fixture_1_all.deb\\nSHA256: ${trustedHash}\\n');`,
+    install: `const fs=require('node:fs'), path=require('node:path'), args=process.argv.slice(2);
+      const input=args.at(-2), destination=args.at(-1);
+      if (!destination.startsWith('/var/cache/apt/archives/')) process.exit(36);
+      fs.copyFileSync(input,path.join(process.env.APT_FIXTURE_ARCHIVES,path.basename(destination)));`,
+    rm: `const fs=require('node:fs'),path=require('node:path'); for (const value of process.argv.slice(2).filter(value=>value.startsWith('/var/cache/apt/archives/'))) fs.rmSync(path.join(process.env.APT_FIXTURE_ARCHIVES,path.basename(value)),{force:true});`,
     'apt-get': `const fs = require('node:fs'); const path = require('node:path'); const args = process.argv.slice(2);
       fs.appendFileSync(process.env.APT_FIXTURE_CALLS, JSON.stringify(args) + '\\n');
-      const online = args.includes('update') || args.includes('--download-only');
-      if (online && process.env.APT_FIXTURE_OFFLINE === 'true') process.exit(23);
+      if (args.includes('update')) process.exit(0);
+      const local = args.find(arg => arg.endsWith('.deb'));
+      const directory = args.find(arg => arg.startsWith('Dir::Cache::archives='))?.split('=').slice(1).join('=') ?? process.env.APT_FIXTURE_ARCHIVES;
+      const archive=path.join(directory,'fixture_1_all.deb');
       if (args.includes('--download-only')) {
-        const destination = args.find(arg => arg.startsWith('Dir::Cache::archives=')).split('=').slice(1).join('=');
-        fs.mkdirSync(destination, { recursive: true }); fs.writeFileSync(path.join(destination, 'fixture_1_all.deb'), 'verified fixture archive');
+        if (!fs.existsSync(archive)) {
+          if (process.env.APT_FIXTURE_PACKAGE_NETWORK === 'false') process.exit(23);
+          fs.mkdirSync(directory,{recursive:true});fs.writeFileSync(archive,${JSON.stringify(trusted)});
+        }
       } else if (args.includes('install')) {
-        if (!args.includes('--no-download') || !args.some(arg => arg.endsWith('.deb'))) process.exit(35);
-        fs.writeFileSync(process.env.APT_FIXTURE_STATE, '{"installed":true}');
+        const bytes=fs.readFileSync(local ?? archive,'utf8');
+        fs.writeFileSync(process.env.APT_FIXTURE_STATE,JSON.stringify({installed:true,bytes}));
       }`,
   };
   for (const [name, body] of Object.entries(scripts)) {
@@ -45,52 +67,58 @@ function fixture() {
     writeFileSync(file, `#!${process.execPath}\n${body}\n`);
     chmodSync(file, 0o700);
   }
-  const run = (mode = 'install', extra: Partial<NodeJS.ProcessEnv> = {}) => {
+  const run = (mode = 'install', extra: Partial<NodeJS.ProcessEnv> = {}, group = 'rust') => {
     writeFileSync(output, '');
-    const result = spawnSync(process.execPath, [path.join(root, 'linux-package-prerequisites.mjs'), mode,
-      '--group=rust', `--cache=${cache}`], { cwd: root, encoding: 'utf8', timeout: 15_000,
+    const result = spawnSync(process.execPath, ['--import', preload, path.join(root, 'linux-package-prerequisites.mjs'), mode,
+      `--group=${group}`, `--cache=${cache}`], { cwd: root, encoding: 'utf8', timeout: 15_000,
       env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, ImageOS: 'fixture-linux', ImageVersion: '2026.10.1',
-        APT_FIXTURE_STATE: state, APT_FIXTURE_CALLS: calls, GITHUB_OUTPUT: output, ...extra } });
+        APT_FIXTURE_STATE: state, APT_FIXTURE_CALLS: calls, APT_FIXTURE_ARCHIVES: system, GITHUB_OUTPUT: output, ...extra } });
     return { ...result, metadata: readFileSync(output, 'utf8'), calls: readFileSync(calls, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line) as string[]) };
   };
-  return { root, state, cache, calls, reset, run };
+  return { root, state, cache, calls, reset, run, trusted, trustedHash, system };
 }
 
-linuxIt('downloads a complete miss and installs a fresh image from cached archives without network', () => {
-  const f = fixture();
-  const miss = f.run();
-  expect(miss.status, miss.stderr + miss.stdout).toBe(0);
+linuxIt('refreshes the signed index on a miss and a hit while reusing authenticated package payloads', () => {
+  const f = fixture(); const miss=f.run();
+  expect(miss.status,miss.stderr+miss.stdout).toBe(0);
   expect(miss.metadata).toContain('source=download');
-  expect(miss.calls.some(args => args.includes('update'))).toBe(true);
-  expect(miss.calls.some(args => args.includes('--download-only'))).toBe(true);
-  f.reset();
-  const hit = f.run('install', { APT_FIXTURE_OFFLINE: 'true' });
-  expect(hit.status, hit.stderr + hit.stdout).toBe(0);
+  f.reset(); const hit=f.run('install',{APT_FIXTURE_PACKAGE_NETWORK:'false'});
+  expect(hit.status,hit.stderr+hit.stdout).toBe(0);
   expect(hit.metadata).toContain('source=cache');
-  expect(hit.calls).toHaveLength(1);
-  expect(hit.calls[0]).toEqual(expect.arrayContaining(['install', '--no-download']));
-  expect(hit.calls[0]).toContain(`Dir::Cache::archives=${f.cache}`);
-  expect(hit.calls[0].some(arg => arg.endsWith('.deb'))).toBe(true);
+  expect(hit.calls[0]).toContain('update');
+  const installs=hit.calls.filter(args=>args.includes('install'));
+  expect(installs.length).toBeGreaterThan(0);
+  expect(installs.every(args=>!args.includes('--no-download') && !args.some(value=>value.endsWith('.deb') || value.startsWith('Dir::Etc::') || value.startsWith('Dir::State::')))).toBe(true);
+  expect(JSON.parse(readFileSync(f.state,'utf8')).bytes).toBe(f.trusted);
 });
 
-linuxIt('skips every network and install command when the image already has the requested packages', () => {
-  const f = fixture();
-  writeFileSync(f.state, '{"installed":true}');
-  const result = f.run('install', { APT_FIXTURE_OFFLINE: 'true' });
-  expect(result.status, result.stderr + result.stdout).toBe(0);
-  expect(result.calls).toEqual([]);
-  expect(result.metadata).toContain('source=installed');
+linuxIt('refreshes APT authentication even when the requested packages are already installed', () => {
+  const f=fixture();writeFileSync(f.state,'{"installed":true}');
+  const result=f.run();expect(result.status,result.stderr+result.stdout).toBe(0);
+  expect(result.calls[0]).toContain('update');
+  expect(result.calls.some(args=>args.includes('install'))).toBe(true);
 });
 
-linuxIt('rejects a corrupted archive and refreshes the cache through the ordinary miss path', () => {
-  const f = fixture();
-  expect(f.run().status).toBe(0);
-  writeFileSync(path.join(f.cache, 'fixture_1_all.deb'), 'corrupted archive');
-  f.reset();
-  const result = f.run();
-  expect(result.status, result.stderr + result.stdout).toBe(0);
+linuxIt.each(['rust','resources'])('rejects a tampered archive and matching manifest hash for %s', group => {
+  const f=fixture(); const key=f.run('key',{},group).stdout.trim(); mkdirSync(f.cache);
+  const tampered=f.trusted.slice(0,-1)+'!';
+  writeFileSync(path.join(f.cache,'fixture_1_all.deb'),tampered);
+  writeFileSync(path.join(f.cache,'manifest.json'),JSON.stringify({key,archives:[{file:'fixture_1_all.deb',sha256:createHash('sha256').update(tampered).digest('hex')}]}));
+  const result=f.run('install',{},group);
+  expect(result.status,result.stderr+result.stdout).toBe(0);
+  expect(JSON.parse(readFileSync(f.state,'utf8')).bytes).toBe(f.trusted);
+  expect(result.stdout).toContain('signed index');
   expect(result.metadata).toContain('source=download');
-  expect(result.calls.some(args => args.includes('--download-only'))).toBe(true);
+});
+
+linuxIt('unlinks a tampered system-cache symlink without following or modifying its target', () => {
+  const f=fixture(); const target=path.join(f.root,'tampered.deb');
+  const tampered=f.trusted.slice(0,-1)+'!'; writeFileSync(target,tampered);
+  symlinkSync(target,path.join(f.system,'fixture_1_all.deb'));
+  const result=f.run();
+  expect(result.status,result.stderr+result.stdout).toBe(0);
+  expect(JSON.parse(readFileSync(f.state,'utf8')).bytes).toBe(f.trusted);
+  expect(readFileSync(target,'utf8')).toBe(tampered);
 });
 
 linuxIt('keys package caches on package definitions, installer version and the runner image', () => {
@@ -117,7 +145,8 @@ it('pins archive cache actions and saves only the reviewed main-branch cache', (
   expect(restore.uses).toMatch(/@[0-9a-f]{40}$/);
   expect(save.uses).toMatch(/@[0-9a-f]{40}$/);
   expect(save.if).toContain("github.ref == 'refs/heads/main'");
-  expect(save.with.key).toBe(restore.with.key);
+  expect(restore.with['restore-keys']).toBe('${{ steps.identity.outputs.key }}-');
+  expect(save.with.key).toBe('${{ steps.identity.outputs.key }}-${{ steps.install.outputs.revision }}');
   const archivePaths = '${{ steps.identity.outputs.path }}/*.deb\n${{ steps.identity.outputs.path }}/manifest.json\n';
   expect(restore.with.path).toBe(archivePaths);
   expect(save.with.path).toBe(archivePaths);
