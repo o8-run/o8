@@ -17,7 +17,8 @@ impl Render for ThreadList {
         div()
             .id("thread-sidebar")
             .group("thread-sidebar")
-            .w(px(280.))
+            .w_full()
+            .min_w_0()
             .h_full()
             .flex_shrink_0()
             .min_h_0()
@@ -206,6 +207,7 @@ impl Render for ThreadList {
             .child(
                 div()
                     .flex()
+                    .flex_wrap()
                     .gap(px(12.))
                     .px(px(12.))
                     .py(px(6.))
@@ -219,6 +221,8 @@ impl Render for ThreadList {
                             div()
                                 .id("thread-rename")
                                 .debug_selector(|| "thread-rename".into())
+                                .min_w_0()
+                                .max_w_full()
                                 .cursor_pointer()
                                 .child("Rename (F2)")
                                 .on_click(
@@ -232,6 +236,8 @@ impl Render for ThreadList {
                         div()
                             .id("thread-archive")
                             .debug_selector(|| "thread-archive".into())
+                            .min_w_0()
+                            .max_w_full()
                             .cursor_pointer()
                             .child("Archive / Restore (Delete)")
                             .on_click(cx.listener(|this, _, _, cx| this.archive(cx))),

@@ -76,7 +76,7 @@ pub fn configure(palette: &str, glass: bool, all_glass: bool, width: f32, visibl
         light: palette == "light" && !(glass && all_glass),
         glass,
         all_glass: glass && all_glass,
-        width,
+        width: width.clamp(160., 500.),
         visible,
     }));
 }

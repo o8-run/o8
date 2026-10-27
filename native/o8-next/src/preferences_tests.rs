@@ -119,3 +119,178 @@ fn launch_preferences_reject_invalid_snapshot_and_retain_saved_bounds(cx: &mut T
         px(280.)
     );
 }
+
+fn sidebar_controls_fit(cx: &mut TestAppContext, width: f32) {
+    let f = Fixture::start_mode(true, "--shell --composer --sidebar");
+    let created = f
+        .client
+        .project_request(
+            "POST",
+            "/api/projects",
+            &json!({"name":"Sidebar layout fixture", "slug":"sidebar-layout-fixture"}),
+        )
+        .unwrap();
+    let project = created["project"]["id"].as_str().unwrap();
+    for path in &f.folders {
+        let repo = f
+            .client
+            .project_request(
+                "POST",
+                "/api/panel/repos",
+                &json!({"action":"add", "localPath":path}),
+            )
+            .unwrap();
+        f.client
+            .project_request(
+                "POST",
+                &format!("/api/projects/{project}/repos"),
+                &json!({"repoId":repo["repo"]["id"]}),
+            )
+            .unwrap();
+    }
+    f.client
+        .project_request(
+            "POST",
+            "/api/panel/projects/active",
+            &json!({"projectId":project}),
+        )
+        .unwrap();
+    for (size, palette) in [([900., 700.], "light"), ([1680., 1050.], "dark")] {
+        let prefs = Preferences::parse(
+            &json!({"version":1,"palette":palette,"glass":false,
+            "allGlass":false,"sidebarWidth":width,"sidebarVisible":true,"windowSize":size})
+            .to_string(),
+        )
+        .unwrap();
+        let handle = cx.update(|cx| {
+            view::open_window_with_preferences(
+                f.client.clone(),
+                f.root.join(format!("width-{width}-{palette}.json")),
+                State::default(),
+                true,
+                Some(prefs),
+                cx,
+            )
+        });
+        let shell = handle.root(cx).unwrap();
+        let mut visual = VisualTestContext::from_window(handle.into(), cx);
+        let started = Instant::now();
+        loop {
+            visual.run_until_parked();
+            shell.update_in(&mut visual, |s, window, cx| s.tick(false, window, cx));
+            draw(&mut visual);
+            if shell.read_with(&visual, |s, cx| {
+                s.connected
+                    && s.surfaces
+                        .sidebar
+                        .view
+                        .as_ref()
+                        .unwrap()
+                        .read(cx)
+                        .diagnostic()["project"]
+                        == project
+            }) {
+                break;
+            }
+            assert!(
+                started.elapsed() < std::time::Duration::from_secs(10),
+                "sidebar project must load"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        // Select a saved conversation through the native row so both footer
+        // controls are present, even when the initial choice is a worker.
+        let (sidebar, index) = shell.read_with(&visual, |s, cx| {
+            let sidebar = s.surfaces.sidebar.view.as_ref().unwrap().clone();
+            let index = sidebar
+                .read(cx)
+                .rows
+                .iter()
+                .position(|row| row.id.as_ref().is_some_and(|id| !id.contains(':')))
+                .expect("saved fixture conversation");
+            (sidebar, index)
+        });
+        sidebar.update(&mut visual, |s, cx| {
+            s.scroll.scroll_to_item(index, gpui::ScrollStrategy::Top);
+            cx.notify();
+        });
+        draw(&mut visual);
+        let row = visual
+            .debug_bounds(Box::leak(format!("thread-row-{index}").into_boxed_str()))
+            .unwrap();
+        visual.simulate_click(row.center(), gpui::Modifiers::default());
+        visual.run_until_parked();
+        draw(&mut visual);
+        let rail = visual.debug_bounds("shell-sidebar").unwrap();
+        assert_eq!(rail.size.width, px(width));
+        let search = visual.debug_bounds("thread-search").unwrap();
+        assert_eq!(search.left(), rail.left());
+        assert_eq!(
+            search.right(),
+            rail.right(),
+            "sidebar content must fill the preferred width"
+        );
+        assert!(
+            visual.debug_bounds("sidebar-repo-0").is_some(),
+            "registered repository chip"
+        );
+        for selector in [
+            "sidebar-project-header",
+            "sidebar-project-switcher",
+            "sidebar-project-add",
+            "sidebar-project-chevron",
+            "thread-search",
+            "thread-list",
+            "thread-rename",
+            "thread-archive",
+            "sidebar-repo-0",
+            "sidebar-repo-1",
+            "sidebar-repo-2",
+            "sidebar-repo-overflow",
+        ] {
+            if let Some(control) = visual.debug_bounds(selector) {
+                assert!(
+                    control.left() >= rail.left()
+                        && control.right() <= rail.right()
+                        && control.top() >= rail.top()
+                        && control.bottom() <= rail.bottom()
+                        && control.size.width > px(0.)
+                        && control.size.height > px(0.),
+                    "{selector} must fit width {width}: {control:?} inside {rail:?}"
+                );
+            } else {
+                assert!(
+                    selector.starts_with("sidebar-repo-"),
+                    "missing control: {selector}"
+                );
+            }
+        }
+        let add = visual.debug_bounds("sidebar-project-add").unwrap();
+        assert_eq!(rail.right() - add.right(), px(5.));
+        visual.update(|window, _| window.remove_window());
+    }
+}
+
+#[gpui::test]
+fn launch_preferences_sidebar_minimum_width_fits_controls(cx: &mut TestAppContext) {
+    sidebar_controls_fit(cx, 160.);
+}
+
+#[gpui::test]
+fn launch_preferences_sidebar_maximum_width_fits_controls(cx: &mut TestAppContext) {
+    sidebar_controls_fit(cx, 500.);
+}
+
+#[gpui::test]
+fn launch_preferences_sidebar_intermediate_width_fills_column(cx: &mut TestAppContext) {
+    sidebar_controls_fit(cx, 384.);
+}
+
+#[test]
+fn launch_preferences_sidebar_width_is_clamped_at_the_layout_boundary() {
+    for (requested, expected) in [(159., 160.), (160., 160.), (500., 500.), (501., 500.)] {
+        crate::theme::configure("dark", false, false, requested, true);
+        assert_eq!(crate::theme::sidebar_width(280.), expected);
+    }
+    crate::theme::reset_preferences();
+}
