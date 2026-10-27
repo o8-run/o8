@@ -22,6 +22,7 @@ struct Service {
     base: String,
     stop: Arc<AtomicBool>,
     artifact_pause: Arc<Mutex<Option<Box<dyn FnOnce() + Send>>>>,
+    requests: mpsc::Receiver<String>,
 }
 impl Drop for Service {
     fn drop(&mut self) {
@@ -37,6 +38,7 @@ fn service() -> Service {
     let done = stop.clone();
     let pause: Arc<Mutex<Option<Box<dyn FnOnce() + Send>>>> = Arc::new(Mutex::new(None));
     let paused = pause.clone();
+    let (sent, requests) = mpsc::channel();
     std::thread::spawn(move || {
         while !done.load(Ordering::SeqCst) {
             let Ok((mut socket, _)) = listener.accept() else {
@@ -75,6 +77,7 @@ fn service() -> Service {
                 .split_whitespace()
                 .nth(1)
                 .unwrap();
+            let _ = sent.send(path.to_owned());
             let reply = if path == "/artifact" {
                 base64::engine::general_purpose::STANDARD
                     .decode(include_str!("../../artifacts/valid.artifact.b64").trim())
@@ -110,6 +113,7 @@ fn service() -> Service {
         base,
         stop,
         artifact_pause: pause,
+        requests,
     }
 }
 fn fixture(
@@ -131,6 +135,7 @@ fn fixture(
             update_ping::read_update_check_ticket,
             update_ping::check_app_update,
             update_ping::read_update_channel,
+            update_ping::read_update_channel_status,
             update_ping::set_update_channel,
             update_ping::download_app_update,
             update_ping::install_app_update
@@ -253,7 +258,9 @@ fn update_ping_channel_change_cancels_pending_install_after_epoch_guard() {
         let result = pending.join().unwrap();
         results.push((
             automatic,
-            saved == Ok(serde_json::json!("stable")),
+            saved
+                .as_ref()
+                .is_ok_and(|value| value["channel"] == "stable" && value["outcome"] == "applied"),
             result
                 .as_ref()
                 .err()
@@ -310,7 +317,7 @@ fn update_ping_channel_change_invalidates_in_flight_download() {
 }
 
 #[test]
-fn update_ping_install_start_serializes_channel_changes_without_blocking_callbacks() {
+fn update_ping_channel_saved_during_install_is_held_and_applied_after_finish() {
     for automatic in [false, true] {
         let service = service();
         let directory = tempfile::tempdir().unwrap();
@@ -323,8 +330,15 @@ fn update_ping_install_start_serializes_channel_changes_without_blocking_callbac
             let before = update_ping::read_update_check_ticket(handle.clone()).unwrap();
             let result = update_ping::set_update_channel(handle.clone(), "stable".into());
             let after = update_ping::read_update_check_ticket(handle.clone()).unwrap();
-            *observed.lock().unwrap() =
-                Some((result.is_err(), before.generation == after.generation));
+            let receipt = result
+                .ok()
+                .map(|value| serde_json::to_value(value).unwrap());
+            *observed.lock().unwrap() = Some((
+                receipt.as_ref().is_some_and(|value| {
+                    value["channel"] == "stable" && value["outcome"] == "after-install"
+                }),
+                before.generation == after.generation,
+            ));
             inside();
             Ok(())
         }));
@@ -355,16 +369,22 @@ fn update_ping_install_start_serializes_channel_changes_without_blocking_callbac
         let channel = update_ping::read_update_channel(app.handle().clone());
         resume.send(()).unwrap();
         assert!(pending.join().unwrap().is_ok());
-        assert_eq!(*callback_results.lock().unwrap(),Some((true,true)),"same-thread setter must refuse without changing epoch; clock callbacks must not deadlock");
-        assert!(changed.is_err());
+        assert_eq!(*callback_results.lock().unwrap(),Some((true,true)),"same-thread save must durably hold Stable without changing the active install epoch or deadlocking");
+        let receipt = changed.expect("an in-progress install must hold the save, never reject it");
+        assert_eq!(receipt["channel"], "stable");
+        assert_eq!(receipt["outcome"], "after-install");
         assert_eq!(channel, "beta");
         assert_eq!(app.state::<Hooks>().calls.load(Ordering::SeqCst), 1);
-        command(
-            &view,
-            "set_update_channel",
-            serde_json::json!({"channel":"stable"}),
-        )
-        .unwrap();
+        assert_eq!(
+            update_ping::read_update_channel(app.handle().clone()),
+            "stable",
+            "the held save must apply as soon as either installer returns"
+        );
+        let saved: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(directory.path().join("settings.json")).unwrap())
+                .unwrap();
+        assert_eq!(saved["channel"], "stable");
+        assert!(saved.get("pendingChannel").is_none());
     }
 }
 
@@ -399,5 +419,253 @@ fn update_ping_installer_refusal_does_not_poison_channel_gate() {
             serde_json::json!({"channel":"stable"}),
         )
         .unwrap();
+    }
+}
+
+#[test]
+fn update_ping_latest_held_choice_applies_after_installer_error_or_refusal() {
+    for automatic in [false, true] {
+        for refuses in [false, true] {
+            let service = service();
+            let directory = tempfile::tempdir().unwrap();
+            let (app, view) = fixture(&service, directory.path());
+            let handle = app.handle().clone();
+            *app.state::<Hooks>().installer.lock().unwrap() = Some(Box::new(move || {
+                for channel in ["stable", "beta", "stable"] {
+                    let saved =
+                        update_ping::set_update_channel(handle.clone(), channel.into()).unwrap();
+                    assert_eq!(saved.outcome, "after-install");
+                }
+                if refuses {
+                    std::panic::panic_any(update_ping::RestartRefused("fixture refusal".into()));
+                }
+                Err(tauri_plugin_updater::Error::Io(std::io::Error::other(
+                    "fixture installer error",
+                )))
+            }));
+            if automatic {
+                let native = effects(&app, &service);
+                let update = tauri::async_runtime::block_on(update_ping::check(app.handle()))
+                    .unwrap()
+                    .unwrap();
+                let result = tauri::async_runtime::block_on(
+                    native.install_candidate(update, "held-choice-error"),
+                );
+                assert!(result.is_err() || result == Ok(false));
+            } else {
+                let rid = downloaded(&view);
+                assert!(
+                    command(&view, "install_app_update", serde_json::json!({"rid":rid})).is_err()
+                );
+            }
+            let status =
+                command(&view, "read_update_channel_status", serde_json::json!({})).unwrap();
+            assert_eq!(status["channel"], "stable");
+            assert_eq!(status["outcome"], "applied");
+            assert_eq!(
+                update_ping::read_update_channel(app.handle().clone()),
+                "stable"
+            );
+        }
+    }
+}
+
+#[test]
+fn update_ping_held_choice_survives_installer_process_exit_and_interrupted_drain() {
+    const CHILD: &str = "O8_FIXTURE_EXIT_WITH_HELD_CHANNEL";
+    if let Some(directory) = std::env::var_os(CHILD) {
+        let service = service();
+        let (app, view) = fixture(&service, std::path::Path::new(&directory));
+        let handle = app.handle().clone();
+        let settings = std::path::Path::new(&directory).join("settings.json");
+        *app.state::<Hooks>().installer.lock().unwrap() = Some(Box::new(move || {
+            let saved = update_ping::set_update_channel(handle, "stable".into()).unwrap();
+            assert_eq!(saved.outcome, "after-install");
+            if std::env::var_os("O8_FIXTURE_EXIT_AT_CHANNEL_DRAIN").is_some() {
+                crate::channel_save_edge::fail(
+                    &settings,
+                    Box::new(|temporary| {
+                        std::fs::write(temporary, b"{\"channel\":").unwrap();
+                        std::process::exit(0);
+                    }),
+                );
+                Ok(())
+            } else {
+                // Model the installer exiting before its synchronous call returns.
+                std::process::exit(0);
+            }
+        }));
+        let rid = downloaded(&view);
+        command(&view, "install_app_update", serde_json::json!({"rid":rid})).unwrap();
+        panic!("fixture installer must exit the child");
+    }
+    for interrupted_drain in [false, true] {
+        let directory = tempfile::tempdir().unwrap();
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap());
+        child
+        .args([
+            "--exact",
+            "tests::update_ping_install_race_tests::update_ping_held_choice_survives_installer_process_exit_and_interrupted_drain",
+            "--nocapture",
+        ])
+        .env(CHILD, directory.path());
+        if interrupted_drain {
+            child.env("O8_FIXTURE_EXIT_AT_CHANNEL_DRAIN", "1");
+        }
+        let result = child.output().unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        let path = directory.path().join("settings.json");
+        let saved: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(saved["channel"], "beta");
+        assert_eq!(saved["pendingChannel"], "stable");
+        let service = service();
+        let endpoint = format!("{}/latest.json", service.base);
+        let recovered = super::build_app(&endpoint, &endpoint, "0.3.0");
+        let view = WebviewWindowBuilder::new(&recovered, "main", Default::default())
+            .build()
+            .unwrap();
+        if interrupted_drain {
+            crate::channel_save_edge::fail_commits(&path, 3);
+            assert!(update_ping::initialize_at(recovered.handle(), &path).is_err());
+            assert!(command(&view, "check_app_update", serde_json::json!({})).is_err());
+            assert!(
+                service.requests.try_recv().is_err(),
+                "startup drain failure must block Beta transport even without Settings"
+            );
+            command(&view, "check_app_update", serde_json::json!({})).unwrap();
+        } else {
+            update_ping::initialize_at(recovered.handle(), &path).unwrap();
+        }
+        assert_eq!(
+            update_ping::read_update_channel(recovered.handle().clone()),
+            "stable"
+        );
+        let status = update_ping::read_update_channel_status(recovered.handle().clone()).unwrap();
+        assert_eq!(status.outcome, "applied");
+        let saved: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        assert!(saved.get("pendingChannel").is_none());
+    }
+}
+
+#[test]
+fn update_ping_channel_drain_failure_keeps_install_success_and_blocks_old_channel() {
+    for automatic in [false, true] {
+        let service = service();
+        let directory = tempfile::tempdir().unwrap();
+        let (app, view) = fixture(&service, directory.path());
+        let spare = downloaded(&view);
+        let handle = app.handle().clone();
+        let path = directory.path().join("settings.json");
+        let target = path.clone();
+        *app.state::<Hooks>().installer.lock().unwrap() = Some(Box::new(move || {
+            update_ping::set_update_channel(handle, "stable".into()).unwrap();
+            crate::channel_save_edge::fail_commits(&target, 1);
+            Ok(())
+        }));
+        if automatic {
+            let native = effects(&app, &service);
+            let update = tauri::async_runtime::block_on(update_ping::check(app.handle()))
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                tauri::async_runtime::block_on(
+                    native.install_candidate(update, "held-channel-save-fault")
+                ),
+                Ok(true)
+            );
+        } else {
+            let rid = downloaded(&view);
+            command(&view, "install_app_update", serde_json::json!({"rid":rid})).unwrap();
+        }
+        let saved: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(
+            saved["pendingChannel"], "stable",
+            "partial staging must not truncate the acknowledged pending choice"
+        );
+        while service.requests.try_recv().is_ok() {}
+        crate::channel_save_edge::fail_commits(&path, 2);
+        assert!(command(&view, "check_app_update", serde_json::json!({})).is_err());
+        assert!(
+            service.requests.try_recv().is_err(),
+            "do not check Beta while Stable remains unapplied"
+        );
+        crate::channel_save_edge::fail_commits(&path, 1);
+        assert!(command(
+            &view,
+            "install_app_update",
+            serde_json::json!({"rid":spare})
+        )
+        .is_err());
+        assert_eq!(app.state::<Hooks>().calls.load(Ordering::SeqCst), 1);
+        command(&view, "check_app_update", serde_json::json!({})).unwrap();
+        assert_eq!(
+            update_ping::read_update_channel(app.handle().clone()),
+            "stable"
+        );
+    }
+}
+
+#[test]
+fn update_ping_final_install_gate_rechecks_a_previous_installs_failed_channel_drain() {
+    for automatic in [false, true] {
+        let service = service();
+        let directory = tempfile::tempdir().unwrap();
+        let (app, view) = fixture(&service, directory.path());
+        let spare = downloaded(&view);
+        let handle = app.handle().clone();
+        let settings = directory.path().join("settings.json");
+        let (inside, entered, resume) = pause();
+        *app.state::<Hooks>().installer.lock().unwrap() = Some(Box::new(move || {
+            update_ping::set_update_channel(handle, "stable".into()).unwrap();
+            crate::channel_save_edge::fail_commits(&settings, 1);
+            inside();
+            Ok(())
+        }));
+        let first = if automatic {
+            let native = effects(&app, &service);
+            let update = tauri::async_runtime::block_on(update_ping::check(app.handle()))
+                .unwrap()
+                .unwrap();
+            std::thread::spawn(move || {
+                tauri::async_runtime::block_on(native.install_candidate(update, "final-gate-first"))
+                    .map(|_| ())
+            })
+        } else {
+            let rid = downloaded(&view);
+            let view = view.clone();
+            std::thread::spawn(move || {
+                command(&view, "install_app_update", serde_json::json!({"rid":rid}))
+                    .map(|_| ())
+                    .map_err(|error| error.to_string())
+            })
+        };
+        entered.recv_timeout(Duration::from_secs(5)).unwrap();
+        let (before_gate, second_entered, second_resume) = pause();
+        *app.state::<Hooks>().gate.lock().unwrap() = Some(before_gate);
+        let other = view.clone();
+        let second = std::thread::spawn(move || {
+            command(
+                &other,
+                "install_app_update",
+                serde_json::json!({"rid":spare}),
+            )
+        });
+        second_entered.recv_timeout(Duration::from_secs(5)).unwrap();
+        resume.send(()).unwrap();
+        assert!(first.join().unwrap().is_ok());
+        second_resume.send(()).unwrap();
+        assert!(second.join().unwrap().is_err());
+        assert_eq!(app.state::<Hooks>().calls.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            update_ping::read_update_channel(app.handle().clone()),
+            "stable"
+        );
     }
 }

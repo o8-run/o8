@@ -73,5 +73,18 @@ rules. Promotion remains outside this recovery path (#4857).
 A channel change also invalidates downloads and pending installs from the old
 enrollment. The native install handoff rechecks that generation while holding
 the same gate used to save channel preferences. Once an installer has started,
-a channel save reports that it must be retried after installation finishes;
-it does not claim to have changed enrollment during replacement.
+a channel save persists the requested choice separately and reports that it will
+take effect when installation finishes. The installer keeps its original channel
+through its callbacks; immediately after it returns, the last saved choice becomes
+active and invalidates old candidates. Installer failure or refusal also releases
+that held choice. If the installer exits the process first, startup applies the
+saved choice before checking for updates. Settings shows the held choice while it
+waits, then confirms that it is active. A preferences save error is reported as a
+save error, independently of update-check failures.
+Enrollment transitions write and sync a private staging file before replacing the
+settings file atomically. An interrupted drain leaves the acknowledged held
+choice intact. This private file is not registered for generic store-plugin exit
+rewrites. A storage failure after installation does not turn a successful
+binary replacement into an installation failure. Settings reports that applying
+the saved choice will retry; new checks and installs retry that transition and
+refuse transport or installation while it remains unresolved.

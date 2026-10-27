@@ -6874,6 +6874,12 @@
       ]
     },
     {
+      "path": "tests/update-channel-settings-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/update-check-state-real-path.test.ts",
       "reasons": [
         "child-process",

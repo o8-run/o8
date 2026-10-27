@@ -14,6 +14,15 @@ pub(crate) struct Hooks {
     pub before: Mutex<Option<Before>>,
     pub installer: Mutex<Option<Installer>>,
     pub calls: AtomicUsize,
+    pub gate: Mutex<Option<Before>>,
+}
+pub(crate) fn before_gate<R: Runtime>(app: &AppHandle<R>) {
+    if let Some(hooks) = app.try_state::<Hooks>() {
+        let gate = hooks.gate.lock().unwrap().take();
+        if let Some(gate) = gate {
+            gate();
+        }
+    }
 }
 pub(crate) fn before_install<R: Runtime>(app: &AppHandle<R>) {
     if let Some(hooks) = app.try_state::<Hooks>() {

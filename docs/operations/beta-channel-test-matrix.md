@@ -117,8 +117,58 @@ test result: ok. 13 passed; 0 failed; 24 filtered out
 Channel saves and synchronous installation now share a gate. A successful save
 invalidates older candidates before installation and before an automatic journal
 marker is created. If installation has already claimed the gate, a channel save
-returns a retry error without changing persisted enrollment or its generation.
+returned a retry error without changing persisted enrollment or its generation
+at the round-1 head. The round-2 receipt below supersedes that behavior.
 The clock mutex is separate so installer callbacks can read it. Expected restart
 refusals are caught before releasing the gate, allowing subsequent channel saves.
+
+## Channel saves during installation: round 2
+
+Baseline `08a66c9f5` was tested before production edits. The real native IPC and
+automatic installer fixture failed
+`update_ping_channel_saved_during_install_is_held_and_applied_after_finish`:
+
+```text
+same-thread save must durably hold Stable without changing the active install epoch or deadlocking
+left: Some((false, true))
+right: Some((true, true))
+test result: FAILED. 0 passed; 1 failed; 36 filtered out
+```
+
+`tests/update-channel-settings-real-path.test.ts` mounted the real Settings row
+and used its real enrollment client. Its three cases failed: the held-save
+message, the rejected-save message, and reopening a durable held preference.
+
+```text
+Expected: "The update channel could not be saved. Try again."
+Received: "The update check could not finish. Retry from Updates."
+Test Files 1 failed (1)
+Tests 3 failed (3)
+```
+
+The installer gate now holds a persisted `pendingChannel` instead of rejecting
+the save. The last held choice applies after either installer returns, including
+failure or refusal. Startup recovers it when an installer exits before returning.
+The generation stays fixed through platform callbacks, then advances as the
+choice becomes active. Preference revisions prevent older polling responses from
+replacing newer Settings state. Settings distinguishes a saved held choice, an
+active channel, and a save failure; a background check cannot turn a successful
+save into a save error.
+The settings file transition is atomic. Native faults cover a partial staging
+write followed by process exit, startup drain failure before any transport, and
+a post-install drain failure that must retain the install's successful result.
+Unresolved held enrollment blocks new checks and installs until it can commit.
+The private settings file bypasses generic store registration, whose exit writer
+would otherwise truncate it despite disabled autosave.
+
+Final green tails:
+
+```text
+cargo test update_ping: 19 passed; 0 failed; 24 filtered out
+Full native fixture: 43 passed; 0 failed
+Settings DOM cases: 6 passed
+Focused updater JS: 9 files passed; 40 tests passed
+Full npm test: 1268 files passed, 3 skipped; 9582 tests passed, 5 skipped
+```
 The fixture's source-copy instrumentation and stub scope are documented in
 [the native fixture](../../tests/fixtures/update-ping-native/README.md).

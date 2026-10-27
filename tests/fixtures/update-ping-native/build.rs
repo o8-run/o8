@@ -26,10 +26,15 @@ fn main() {
         "update_install_journal.rs",
         "update_task.rs",
         "update_ping.rs",
+        "update_channel_persistence.rs",
     ] {
         let path = source.join(name);
         println!("cargo:rerun-if-changed={}", path.display());
         let mut code = fs::read_to_string(path).unwrap();
+        if name == "update_channel_persistence.rs" {
+            replace_once(&mut code, "    std::fs::rename(&temporary, path)",
+                "    crate::channel_save_edge::before_commit(path, &temporary)?;\n    std::fs::rename(&temporary, path)");
+        }
         if name == "update_schedule.rs" {
             replace_once(
                 &mut code,
@@ -44,6 +49,8 @@ fn main() {
             );
         }
         if name == "update_ping.rs" {
+            replace_once(&mut code, "    let installation = clock\n        .installation",
+                "    crate::install_race_edge::before_gate(app);\n    let installation = clock\n        .installation");
             replace_once(&mut code, "    let _installing = downloaded", "    crate::install_race_edge::before_install(webview.app_handle());\n    let _installing = downloaded");
             replace_once(&mut code, "downloaded.checked.update.install(&downloaded.bytes)",
                 "crate::install_race_edge::install(webview.app_handle(), &downloaded.checked.update, &downloaded.bytes)");

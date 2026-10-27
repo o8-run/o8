@@ -15,9 +15,9 @@ The fixture covers unreachable services, HTTP errors, redirects, malformed manif
 This crate compiles the production updater, launch, scheduler, journal and task
 modules with a mock native runtime. It never launches the installed app.
 
-`build.rs` copies those source modules into its generated output. It adds two
-checked, exact-match fixture edges: a pause in each existing pre-install gap,
-and a wrapper around each platform installer call. Source drift fails fixture
+`build.rs` copies those source modules into its generated output. It adds
+checked, exact-match fixture edges: pauses around installer admission, a wrapper
+around each platform installer call, and preferences commit faults. Source drift fails fixture
 compilation. Other code, including channel persistence, native commands, signed
 download verification, admission and journal behavior, runs unchanged.
 
@@ -32,3 +32,10 @@ epoch checks, saves Stable, then resumes. It requires zero installer calls and
 no automatic-install marker. Companion tests cover an in-flight download,
 installation winning the race, reentrant channel saves, clock callbacks, and
 recovery after an expected installer refusal.
+
+`update_ping_channel_saved_during_install_is_held_and_applied_after_finish`
+covers same-thread and concurrent saves during both installers. Held enrollment
+is durable, the last choice wins, and installer errors or refusal still release
+the choice. Child-process fixtures exit before return or during a partial staged
+preferences write. Per-path commit faults verify that a successful binary install
+stays successful and unresolved enrollment blocks new checks and installs.

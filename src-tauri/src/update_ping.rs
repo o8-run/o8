@@ -6,19 +6,20 @@ use std::sync::{
 };
 use std::{path::Path, time::Duration};
 use tauri::{AppHandle, Manager, Runtime, Webview};
-use tauri_plugin_store::StoreExt;
 use tauri_plugin_updater::{Update, UpdaterExt};
 use uuid::Uuid;
 
 const SERVICE_TIMEOUT: Duration = Duration::from_secs(2);
 const FALLBACK_TIMEOUT: Duration = Duration::from_secs(15);
+#[path = "update_channel_persistence.rs"]
+mod channel_persistence;
 
 struct UpdateIdentity(String);
 
 struct UpdateSettingsPath(std::path::PathBuf);
 struct UpdateCheckClock {
     state: Mutex<UpdateCheckClockState>,
-    // Saving enrollment and starting an installer are one serialized handoff.
+    // Active enrollment and starting an installer are one serialized handoff.
     // Separate from state: the updater's exit hook reads the epoch itself.
     installation: Mutex<()>,
 }
@@ -26,6 +27,15 @@ struct UpdateCheckClockState {
     session: String,
     sequence: u64,
     generation: u64,
+    enrollment_revision: u64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateChannelStatus {
+    pub channel: String,
+    pub outcome: String,
+    pub revision: u64,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -44,6 +54,7 @@ fn clock<R: Runtime>(app: &AppHandle<R>) -> tauri::State<'_, UpdateCheckClock> {
                 session: Uuid::new_v4().to_string(),
                 sequence: 0,
                 generation: 0,
+                enrollment_revision: 0,
             }),
             installation: Mutex::new(()),
         });
@@ -62,6 +73,7 @@ pub(crate) fn ensure_epoch<R: Runtime>(app: &AppHandle<R>, expected: u64) -> Res
 
 #[tauri::command]
 pub fn begin_update_check<R: Runtime>(app: AppHandle<R>) -> UpdateCheckTicket {
+    let _ = apply_pending_when_idle(&app);
     let clock = clock(&app);
     let mut state = clock.state.lock().unwrap();
     state.sequence += 1;
@@ -130,7 +142,7 @@ pub(crate) fn is_current_report<R: Runtime>(
 }
 pub fn get_update_channel<R: Runtime>(app: AppHandle<R>) -> String {
     if let Some(path) = app.try_state::<UpdateSettingsPath>() {
-        if let Ok(store) = app.store_builder(&path.0).disable_auto_save().build() {
+        if let Ok(store) = channel_persistence::load(&path.0) {
             if let Some(value) = store
                 .get("channel")
                 .and_then(|v| v.as_str().map(str::to_owned))
@@ -162,36 +174,107 @@ pub fn read_update_channel<R: Runtime>(app: AppHandle<R>) -> String {
 pub fn set_update_channel<R: Runtime>(
     app: AppHandle<R>,
     channel: String,
-) -> Result<String, String> {
+) -> Result<UpdateChannelStatus, String> {
     if channel != "stable" && channel != "beta" {
         return Err("Unknown update channel.".into());
     }
     let clock = clock(&app);
-    let _installation = clock.installation.try_lock().map_err(|_| {
-        "Update installation has started; retry changing channels after it finishes."
-    })?;
     let mut state = clock.state.lock().unwrap();
-    let path = app.state::<UpdateSettingsPath>();
-    let store = app
-        .store_builder(&path.0)
-        .disable_auto_save()
-        .build()
-        .map_err(|e| e.to_string())?;
-    let previous = store.get("channel");
-    store.set("channel", serde_json::json!(channel));
-    if let Err(error) = store.save() {
-        match previous {
-            Some(value) => {
-                store.set("channel", value);
-            }
-            None => {
-                store.delete("channel");
-            }
-        }
-        return Err(error.to_string());
+    // Nonblocking under state: installer callbacks may save on this thread.
+    // The finishing installer releases its gate under the same state lock.
+    let installation = clock.installation.try_lock();
+    let deferred = installation.is_err();
+    save_channel(&app, &channel, deferred)?;
+    state.enrollment_revision += 1;
+    if !deferred {
+        state.generation += 1;
     }
-    state.generation += 1;
-    Ok(channel)
+    Ok(UpdateChannelStatus {
+        channel,
+        outcome: if deferred { "after-install" } else { "applied" }.into(),
+        revision: state.enrollment_revision,
+    })
+}
+
+fn pending_channel<R: Runtime>(app: &AppHandle<R>) -> Result<Option<String>, String> {
+    let Some(path) = app.try_state::<UpdateSettingsPath>() else {
+        return Ok(None);
+    };
+    let store = channel_persistence::load(&path.0)?;
+    Ok(store.get("pendingChannel").and_then(|value| {
+        value
+            .as_str()
+            .filter(|channel| *channel == "stable" || *channel == "beta")
+            .map(str::to_owned)
+    }))
+}
+
+fn save_channel<R: Runtime>(
+    app: &AppHandle<R>,
+    channel: &str,
+    deferred: bool,
+) -> Result<(), String> {
+    let path = app
+        .try_state::<UpdateSettingsPath>()
+        .ok_or("Update preferences are unavailable.")?;
+    let mut store = channel_persistence::load(&path.0)?;
+    if deferred {
+        store.insert("pendingChannel".into(), serde_json::json!(channel));
+    } else {
+        store.insert("channel".into(), serde_json::json!(channel));
+        store.remove("pendingChannel");
+    }
+    channel_persistence::save(&path.0, store)
+}
+
+fn apply_pending_when_idle<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
+    let clock = clock(app);
+    let Ok(installation) = clock.installation.try_lock() else {
+        return Ok(());
+    };
+    let mut state = clock.state.lock().unwrap();
+    let result = apply_pending_channel(app, &mut state);
+    drop(installation);
+    result
+}
+
+fn apply_pending_channel<R: Runtime>(
+    app: &AppHandle<R>,
+    state: &mut UpdateCheckClockState,
+) -> Result<(), String> {
+    if let Some(channel) = pending_channel(app)? {
+        save_channel(app, &channel, false)?;
+        state.generation += 1;
+        state.enrollment_revision += 1;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn read_update_channel_status<R: Runtime>(
+    app: AppHandle<R>,
+) -> Result<UpdateChannelStatus, String> {
+    let clock = clock(&app);
+    let mut state = clock.state.lock().unwrap();
+    // Retry a durable pending save if the installer returned during a temporary
+    // store failure. Never claim an installation finished merely from a timer.
+    let installation = clock.installation.try_lock();
+    let waiting_for_save = installation.is_ok() && apply_pending_channel(&app, &mut state).is_err();
+    let pending = pending_channel(&app)?;
+    Ok(UpdateChannelStatus {
+        channel: pending
+            .clone()
+            .unwrap_or_else(|| get_update_channel(app.clone())),
+        outcome: if waiting_for_save {
+            "waiting-for-save"
+        } else if pending.is_some() {
+            "after-install"
+        } else {
+            "applied"
+        }
+        .into(),
+        revision: state.enrollment_revision,
+    })
 }
 
 pub(crate) fn ensure_update_channel<R: Runtime>(
@@ -211,19 +294,34 @@ pub(crate) fn update_generation<R: Runtime>(app: &AppHandle<R>, update: &Update)
 }
 
 /// No await and no clock guard may span the installer. The installation guard
-/// excludes a successful channel save until this synchronous effect has finished.
+/// holds saved enrollment choices until this synchronous effect has finished.
 pub(crate) fn install_in_channel<R: Runtime, T>(
     app: &AppHandle<R>,
     generation: u64,
     operation: impl FnOnce() -> Result<T, String>,
 ) -> Result<T, String> {
     let clock = clock(app);
-    let _installation = clock
+    let installation = clock
         .installation
         .try_lock()
         .map_err(|_| "Update installation is already in progress.")?;
+    // An earlier install may have left a durable held choice after a failed
+    // drain. Resolve it under this final gate before validating the candidate.
+    {
+        let mut state = clock.state.lock().unwrap();
+        apply_pending_channel(app, &mut state)?;
+    }
     ensure_epoch(app, generation)?;
-    operation()
+    let result = operation();
+    let mut state = clock.state.lock().unwrap();
+    if let Err(error) = apply_pending_channel(app, &mut state) {
+        log::warn!("Update installation finished; saved channel is waiting for preferences storage: {error}");
+    }
+    // A save waiting for state must observe the gate as free, rather than queue
+    // itself after the final drain. The active installer epoch stays unchanged
+    // through all plugin callbacks, including its Windows exit hook.
+    drop(installation);
+    result
 }
 
 pub(crate) struct RestartRefused(pub String);
@@ -236,11 +334,7 @@ pub fn initialize<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
 pub fn initialize_at<R: Runtime>(app: &AppHandle<R>, path: &Path) -> Result<(), String> {
     app.manage(UpdateSettingsPath(path.to_path_buf()));
     let _ = clock(app);
-    let store = app
-        .store_builder(path)
-        .disable_auto_save()
-        .build()
-        .map_err(|e| e.to_string())?;
+    let mut store = channel_persistence::load(path)?;
     let id = match store.get("installId") {
         Some(value) => {
             let id = value.as_str().ok_or("invalid update install identifier")?;
@@ -252,12 +346,16 @@ pub fn initialize_at<R: Runtime>(app: &AppHandle<R>, path: &Path) -> Result<(), 
         }
         None => {
             let id = Uuid::new_v4().to_string();
-            store.set("installId", serde_json::json!(id));
-            store.save().map_err(|e| e.to_string())?;
+            store.insert("installId".into(), serde_json::json!(id));
+            channel_persistence::save(path, store)?;
             id
         }
     };
     app.manage(UpdateIdentity(id));
+    // An installer may exit the process before returning (or it may crash).
+    // The durable held choice must be applied before any launch update check.
+    let clock = clock(app);
+    apply_pending_channel(app, &mut clock.state.lock().unwrap())?;
     Ok(())
 }
 
@@ -327,6 +425,9 @@ async fn check_with<R: Runtime>(
     force: Arc<AtomicBool>,
     ticket: &UpdateCheckTicket,
 ) -> Result<Option<Update>, String> {
+    // A previously acknowledged choice must be honored (or block transport)
+    // even if its startup drain could not commit and Settings is not open.
+    apply_pending_when_idle(app)?;
     ensure_current_check(app, ticket)?;
     let result = match ticket.channel.as_str() {
         "beta" => check_beta(app, force).await,

@@ -8176,6 +8176,7 @@ pub fn run() {
             update_ping::read_update_check_ticket,
             update_ping::check_app_update,
             update_ping::read_update_channel,
+            update_ping::read_update_channel_status,
             update_ping::set_update_channel,
             update_ping::download_app_update,
             update_ping::discard_app_update_download,

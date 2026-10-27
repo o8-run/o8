@@ -49,6 +49,54 @@ fn stable_refuses_beta_identity_on_primary_and_fallback() {
         "Stable must refuse a higher beta manifest at the channel guard: {error}"
     );
 }
+
+#[test]
+fn update_ping_unidentified_app_keeps_fallback_without_settings_initialization() {
+    let primary = server("ok");
+    let fallback = server("ok");
+    let app = build_app(&primary.url, &fallback.url, "0.1.0");
+    let ticket = crate::update_ping::begin_update_check(app.handle().clone());
+    let result = command(
+        &app,
+        "check_app_update",
+        serde_json::json!({"ticket":ticket}),
+    )
+    .unwrap();
+    assert_eq!(result["version"], "0.2.0");
+    assert!(primary.requests.try_recv().is_err());
+    assert!(fallback.requests.try_recv().is_ok());
+    assert!(command(
+        &app,
+        "set_update_channel",
+        serde_json::json!({"channel":"beta"})
+    )
+    .is_err());
+}
+
+#[test]
+fn update_ping_enrollment_is_not_registered_for_plugin_exit_rewrites() {
+    use tauri_plugin_store::StoreExt;
+    let primary = server("ok");
+    let fallback = server("ok");
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("settings.json");
+    let app = app(&primary.url, &fallback.url, &path);
+    command(
+        &app,
+        "set_update_channel",
+        serde_json::json!({"channel":"beta"}),
+    )
+    .unwrap();
+    command(&app, "read_update_channel_status", serde_json::json!({})).unwrap();
+    assert_eq!(
+        command(&app, "read_update_channel", serde_json::json!({})).unwrap(),
+        "beta"
+    );
+    assert!(
+        app.get_store(&path).is_none(),
+        "enrollment must not be rewritten by the generic store plugin on exit"
+    );
+}
 #[test]
 fn enrollment_persists_and_returning_to_stable_never_downgrades() {
     let primary = server("ok");
@@ -64,7 +112,7 @@ fn enrollment_persists_and_returning_to_stable_never_downgrades() {
                 "set_update_channel",
                 serde_json::json!({"channel":"beta"})
             )
-            .unwrap(),
+            .unwrap()["channel"],
             "beta"
         );
     }
@@ -80,7 +128,7 @@ fn enrollment_persists_and_returning_to_stable_never_downgrades() {
             "set_update_channel",
             serde_json::json!({"channel":"stable"})
         )
-        .unwrap(),
+        .unwrap()["channel"],
         "stable"
     );
     assert!(command(&app, "check_app_update", serde_json::json!({}))

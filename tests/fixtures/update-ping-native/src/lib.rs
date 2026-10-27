@@ -1,5 +1,6 @@
 // Compile the production command without starting the desktop app or sidecars.
 include!(concat!(env!("OUT_DIR"), "/native_modules.rs"));
+mod channel_save_edge;
 mod install_race_edge;
 #[path = "../../../../src-tauri/src/restart_job_drain.rs"]
 mod restart_job_drain;
@@ -11,13 +12,13 @@ fn resolve_ws_token() -> String {
 #[cfg(test)]
 mod tests {
     mod auto_apply_failure_tests;
-    mod update_ping_install_race_tests;
-    #[path = "channel_boundary_tests.rs"]
-    mod update_ping_channel_boundary_tests;
     mod download_timeout_tests;
     mod install_journal_tests;
     mod production_install_tests;
     mod scheduler_tests;
+    #[path = "channel_boundary_tests.rs"]
+    mod update_ping_channel_boundary_tests;
+    mod update_ping_install_race_tests;
     mod windows_install_tests;
     use super::update_ping;
     use std::{
@@ -202,6 +203,7 @@ mod tests {
                 update_ping::read_update_check_ticket,
                 update_ping::check_app_update,
                 update_ping::read_update_channel,
+                update_ping::read_update_channel_status,
                 update_ping::set_update_channel,
                 update_ping::download_app_update,
                 update_ping::install_app_update,
