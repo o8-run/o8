@@ -7,6 +7,42 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { collectLaunchStageProfile } from './launch-stage-summary.mjs';
+import { checkLaunchStageReceipt } from './check-launch-stage-receipt.mjs';
+
+test('rejects a connected startup request while its real response is still pending', { timeout: 30000 }, async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'o8-launch-pending-'));
+  const observer = fileURLToPath(new URL('./launch-stage-preload.cjs', import.meta.url));
+  fs.writeFileSync(path.join(root, 'server.js'), `
+    require('node:http').createServer(() => console.log('pending'))
+      .listen(0, '127.0.0.1', function () { console.log(JSON.stringify({ port: this.address().port })); });`);
+  const started = Date.now();
+  const child = spawn(process.execPath, ['--require', observer, path.join(root, 'server.js')], {
+    env: { PATH: process.env.PATH, HOME: process.env.HOME, O8_DATA_DIR: root },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  const abort = new AbortController();
+  try {
+    const [chunk] = await once(child.stdout, 'data');
+    const { port } = JSON.parse(String(chunk));
+    const received = once(child.stdout, 'data');
+    const pending = fetch(`http://127.0.0.1:${port}/api/automations/connected`, { signal: abort.signal }).catch(() => {});
+    await received;
+    const serverProfile = await collectLaunchStageProfile(root, started, { roles: ['http'] });
+    assert.equal(serverProfile[0].requests[0].complete, false);
+    const result = { samples: [{ interactiveComposerMs: Date.now() - started, serverProfile }] };
+    assert.throws(() => checkLaunchStageReceipt(result, { 'check-connected-startup': true }), /Connected automation requests/);
+    abort.abort();
+    await pending;
+  } finally {
+    abort.abort();
+    const exited = once(child, 'exit');
+    child.kill('SIGTERM');
+    const force = setTimeout(() => child.kill('SIGKILL'), 3000);
+    if (child.exitCode === null && child.signalCode === null) await exited;
+    clearTimeout(force);
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test('waits for a busy real server to flush listener, request, module and child snapshots', { timeout: 30000 }, async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'o8-launch-stage-test-'));

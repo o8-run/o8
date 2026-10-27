@@ -48,7 +48,7 @@ try {
   const receipt = await measureNativeLaunch({ app: String(args.app), output: String(args.output),
     sourceSha: String(args.sha), samples: Number(args.samples ?? 3) });
   assert(receipt.teardownVerified, 'The measurement must verify teardown');
-  assert(receipt.samples.every(row => row.optionalStartupRequests === 0), 'Apply the startup prefetch patch to both measured copies');
+  checkLaunchStageReceipt(receipt, { 'check-connected-startup': true });
   assert(receipt.samples.every(row => row.serverProfile.some(server => server.role === 'http' && server.listeners.length && server.requests.some(request => request.route === '/dashboard'))), 'Capture the real HTTP listener and dashboard request');
   const identities = new Map();
   if (args.stats) {
