@@ -8,7 +8,6 @@ import { parse, stringify } from 'yaml';
 const repo = process.cwd();
 const root = mkdtempSync(path.join(tmpdir(), 'o8-verify-ci-'));
 const workflowPath = path.join(repo, '.github/workflows/ci.yml');
-const runner = path.join(repo, 'scripts/verify-ci.mjs');
 const guard = path.join(repo, 'scripts/ci/check-verify-ci.mjs');
 const manifest = JSON.parse(readFileSync(path.join(repo, 'package.json'), 'utf8'));
 const bin = path.join(root, 'bin');
@@ -27,12 +26,15 @@ const barrier = process.env.VERIFY_FIXTURE_BARRIER;
 if (barrier) {
   const path = require('node:path');
   const wait = () => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
-  const unit = args.includes('test:unit') && args.includes('--shard=1/4');
-  if (args.includes('lint') || unit) {
-    fs.writeFileSync(path.join(barrier, unit ? 'unit' : 'lint'), 'started');
+  // Classification is independent of Lint. Shard 1 also awaits discovery, so
+  // requiring it to start within this barrier falsely fails slow discovery.
+  const classification = args.includes('test:classification:check');
+  if (args.includes('lint') || classification) {
+    fs.writeFileSync(path.join(barrier, classification ? 'classification' : 'lint'), 'started');
+    const peer = path.join(barrier, classification ? 'lint' : 'classification');
     const deadline = Date.now() + 15000;
-    while (!fs.existsSync(path.join(barrier, unit ? 'lint' : 'unit')) && Date.now() < deadline) wait();
-    if (!fs.existsSync(path.join(barrier, unit ? 'lint' : 'unit'))) process.exit(9);
+    while (!fs.existsSync(peer) && Date.now() < deadline) wait();
+    if (!fs.existsSync(peer)) process.exit(9);
   }
   const testCommand = args.includes('vitest') || args.includes('typecheck') || args.includes('test:unit') || args.includes('test:integration') || args.includes('test:classification:check');
   if (testCommand) {
@@ -60,16 +62,7 @@ process.exit(process.env.VERIFY_FIXTURE_FAIL && (args.includes(process.env.VERIF
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
 function execute(fail = '', parallel = false) {
-  const receipt = path.join(root, `receipt-${(fail || 'pass').replace(/[^a-zA-Z0-9-]/g, '_')}.jsonl`);
-  writeFileSync(receipt, '');
-  const result = spawnSync(process.execPath, [runner], {
-    cwd: repo, encoding: 'utf8', timeout: 60_000, maxBuffer: 4 * 1024 * 1024,
-    env: { ...process.env, PATH: bin + path.delimiter + process.env.PATH, CI: '', NODE_ENV: 'development',
-      VERIFY_FIXTURE_RECEIPT: receipt, VERIFY_FIXTURE_FAIL: fail,
-      VERIFY_FIXTURE_BARRIER: parallel ? mkdtempSync(path.join(root, 'parallel-')) : '' },
-  });
-  const calls = readFileSync(receipt, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
-  return { ...result, calls };
+  return executeFixture('tests/fixture.test.ts', false, { fail, parallel });
 }
 
 function coverage(workflow: object) {
@@ -77,7 +70,8 @@ function coverage(workflow: object) {
   writeFileSync(fixture, stringify(workflow));
   return spawnSync(process.execPath, [guard, '--workflow', fixture], { cwd: repo, encoding: 'utf8' });
 }
-function executeFixture(selectedFile: string, nestedDependency = false) {
+function executeFixture(selectedFile: string, nestedDependency = false,
+  { fail = '', parallel = false, discoveryMs = 0 } = {}) {
   const directory = mkdtempSync(path.join(root, 'verifier-fixture-'));
   const files = ['scripts/verify-ci.mjs', 'scripts/lib/verify-ci.mjs', 'scripts/ci/check-verify-ci.mjs',
     'scripts/ci/resource-owning-changed.mjs', 'scripts/ci/review-dependency-changes.mjs', '.github/workflows/ci.yml'];
@@ -86,9 +80,15 @@ function executeFixture(selectedFile: string, nestedDependency = false) {
     copyFileSync(path.join(repo, file), path.join(directory, file));
   }
   symlinkSync(path.join(repo, 'node_modules'), path.join(directory, 'node_modules'), 'junction');
-  for (const file of ['scripts/ci/check-hermetic-shards.mjs', 'scripts/check-server-bundle-size.mjs']) {
-    writeFileSync(path.join(directory, file), 'process.exit(0);\n');
-  }
+  // The verifier's scheduler is under test. Keep unrelated bundle building and
+  // Vitest discovery bounded, while retaining the real plan, selector and audit.
+  writeFileSync(path.join(directory, 'scripts/check-server-bundle-size.mjs'), 'process.exit(0);\n');
+  writeFileSync(path.join(directory, 'scripts/ci/check-hermetic-shards.mjs'), `
+    import { appendFileSync } from 'node:fs';
+    const started = Date.now();
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ${discoveryMs});
+    appendFileSync(process.env.VERIFY_FIXTURE_RECEIPT, JSON.stringify({ tool: 'discovery', args: [], elapsedMs: Date.now() - started }) + '\\n');
+  `);
   mkdirSync(path.join(directory, 'tests'));
   const browserFile = selectedFile;
   writeFileSync(path.join(directory, browserFile), 'base\n');
@@ -118,7 +118,9 @@ function executeFixture(selectedFile: string, nestedDependency = false) {
   writeFileSync(receipt, '');
   const result = spawnSync(process.execPath, [path.join(directory, 'scripts/verify-ci.mjs')], {
     cwd: directory, encoding: 'utf8', timeout: 60_000,
-    env: { ...process.env, PATH: bin + path.delimiter + process.env.PATH, VERIFY_FIXTURE_RECEIPT: receipt, VERIFY_FIXTURE_FAIL: '' },
+    env: { ...process.env, PATH: bin + path.delimiter + process.env.PATH, CI: '', NODE_ENV: 'development',
+      VERIFY_FIXTURE_RECEIPT: receipt, VERIFY_FIXTURE_FAIL: fail,
+      VERIFY_FIXTURE_BARRIER: parallel ? mkdtempSync(path.join(root, 'parallel-')) : '' },
   });
   const calls = readFileSync(receipt, 'utf8').trim().split('\n').map(line => JSON.parse(line));
   return { ...result, calls };
@@ -167,6 +169,25 @@ describe('local CI verification through its command entry point', () => {
     expect(result.stdout).toContain('PASS Lint');
     expect(result.stdout).toContain('PASS Hermetic Unit Tests');
     expect(result.stdout).toContain('PASS Governance Smoke');
+  }, 60_000);
+
+  it.each([0, 16_000])('keeps every check passing after successful %i ms hermetic discovery', discoveryMs => {
+    const result = executeFixture('tests/fixture.test.ts', false, { parallel: true, discoveryMs });
+    expect(result.error).toBeUndefined();
+    expect(result.status, result.stderr + result.stdout).toBe(0);
+    for (const name of ['Type Check', 'Lint', 'Test Classification', 'Hermetic Unit Tests',
+      'Server Bundle Size', 'Integration Tests (changed files)', 'Security Audit', 'Governance Smoke']) {
+      expect(result.stdout).toContain(`PASS ${name}`);
+    }
+    expect(result.stdout).not.toContain('[verify:ci] FAIL');
+    expect(result.stderr).not.toContain('exceeded its CI timeout');
+    const discovery = result.calls.findIndex(call => call.tool === 'discovery');
+    expect(discovery).toBeGreaterThanOrEqual(0);
+    expect(result.calls[discovery].elapsedMs).toBeGreaterThanOrEqual(discoveryMs);
+    const shards = result.calls.filter(call => call.args.includes('test:unit'));
+    expect(shards.map(call => call.args.at(-1))).toEqual(['--shard=1/4', '--shard=2/4', '--shard=3/4', '--shard=4/4']);
+    expect(result.calls.findIndex(call => call.args.includes('test:unit'))).toBeGreaterThan(discovery);
+    expect(result.calls.find(call => call.args.includes('test:integration'))?.args).toContain('tests/fixture.test.ts');
   }, 60_000);
 
   it('rejects a newly added CI check before running verification work', () => {
