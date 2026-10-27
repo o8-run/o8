@@ -5,6 +5,7 @@ import { closeSync, existsSync, mkdtempSync, openSync, readFileSync, rmSync, wri
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { getDataDir } from '@/lib/data-dir-migration';
+import { createRunArtifactReader } from '@/lib/runtimes/shared/owned-session/run-artifacts';
 import { workerOwnedStdinInvocation } from '@/lib/runtimes/shared/owned-session/staged-stdin';
 import type { OwnedSessionRecord } from '@/lib/runtimes/shared/owned-session/types';
 
@@ -20,6 +21,17 @@ async function waitFor(check: () => boolean, label: string) {
     await new Promise(resolve => setTimeout(resolve, 20));
   }
   throw new Error(`${label}: ${output.slice(-3000)}`);
+}
+async function waitForJson<T>(path: string, label: string): Promise<T> {
+  let parsed: T;
+  await waitFor(() => {
+    try { parsed = JSON.parse(readFileSync(path, 'utf8')) as T; return true; }
+    catch (error) {
+      if (error instanceof SyntaxError || (error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+      throw error;
+    }
+  }, label);
+  return parsed!;
 }
 async function stopParent(signal: NodeJS.Signals) {
   if (!parent || parent.exitCode !== null || parent.signalCode !== null) return;
@@ -71,20 +83,21 @@ describe.skipIf(process.platform === 'win32')('worker-owned stdin across server 
     await waitFor(() => existsSync(file('mid-write')), 'provider paused while input is buffered');
     const staged = readFileSync(run.stdinPath!);
     expect(Number(readFileSync(file('mid-write'), 'utf8'))).toBeLessThan(staged.length);
-    const provider = JSON.parse(readFileSync(file('provider.json'), 'utf8'));
+    const provider = await waitForJson<{ pid: number; stdinIsFile: boolean }>(file('provider.json'), 'provider ready');
     expect(provider.stdinIsFile).toBe(false);
     expect(Number(execFileSync('ps', ['-o', 'pgid=', '-p', String(provider.pid)], { encoding: 'utf8' }).trim())).toBe(run.pid);
     if (phase === 'after-write') {
       writeFileSync(file('continue'), 'read');
-      await waitFor(() => existsSync(file('received.json')), 'provider received EOF');
+      await waitForJson(file('received.json'), 'provider received EOF');
     }
     await stopParent(signal);
     expect(() => process.kill(run!.pid, 0)).not.toThrow();
     const tick = Number(readFileSync(file('heartbeat'), 'utf8'));
     writeFileSync(file('continue'), 'read');
-    await waitFor(() => existsSync(file('received.json')) && Number(readFileSync(file('heartbeat'), 'utf8')) > tick,
+    const received = await waitForJson(file('received.json'), 'provider completed receipt');
+    await waitFor(() => Number(readFileSync(file('heartbeat'), 'utf8')) > tick,
       'provider keeps running without the server');
-    expect(JSON.parse(readFileSync(file('received.json'), 'utf8'))).toEqual({
+    expect(received).toEqual({
       bytes: staged.length, sha256: createHash('sha256').update(staged).digest('hex'),
     });
     writeFileSync(file('exit'), 'finish');
@@ -92,6 +105,40 @@ describe.skipIf(process.platform === 'win32')('worker-owned stdin across server 
     await startParent();
     expect((await request('inspect', session.surfaceId)).recentRuns[0].outcome).toBe('finished');
   }, 40_000);
+
+  it('publishes only complete delivery JSON during a 500 ms receipt write', async () => {
+    setup();
+    const stdinPath = file('input');
+    const deliveryPath = `${stdinPath}.delivery.jsonl`;
+    writeFileSync(stdinPath, 'complete input');
+    const stdin = openSync(stdinPath, 'r');
+    const stdoutPath = file('stdout');
+    const stderrPath = file('stderr');
+    const stdout = openSync(stdoutPath, 'w');
+    const stderr = openSync(stderrPath, 'w');
+    const invocation = workerOwnedStdinInvocation({ command: process.execPath,
+      args: ['-e', 'process.stdin.resume(); process.stdin.on("end", () => console.log("complete")); setInterval(() => {}, 1000);'] }, 14, deliveryPath);
+    const child = spawn(invocation.command, ['--require=./tests/fixtures/owned-stdin-receipt-pause.cjs', ...invocation.args], {
+      detached: true, stdio: [stdin, stdout, stderr],
+      env: { NODE_ENV: 'test', PATH: process.env.PATH, O8_STDIN_FIXTURE_ROOT: root },
+    });
+    closeSync(stdin); closeSync(stdout); closeSync(stderr);
+    run = { id: 'receipt-write', mode: 'launch', prompt: '', startedAt: new Date().toISOString(),
+      pid: child.pid!, stdinPath, stdoutPath, stderrPath, outcome: 'running' };
+    await waitFor(() => existsSync(file('delivery-write-started')), 'relay paused during receipt write');
+    const publishedDuringWrite = existsSync(deliveryPath) ? readFileSync(deliveryPath, 'utf8') : undefined;
+    const reader = createRunArtifactReader({
+      runtimeId: 'test-stdin', surfaceIdPrefix: 'test-stdin-owned:',
+      rootEnvVar: 'O8_STDIN_SESSION_ROOT', rootDefault: root, binaryName: 'node', binaryEnvOverride: 'O8_STDIN_NODE',
+      humanLabel: 'Stdin fixture', squadShortName: 'Stdin', launchArgs: () => [], resumeArgs: () => null,
+      parseRunLog: () => ({ entries: [], outcome: 'running', completedTurn: false }),
+    });
+    expect((await reader(run)).parsed.providerFailure).toBeUndefined();
+    expect(publishedDuringWrite).toBeUndefined();
+    writeFileSync(file('delivery-write-release'), 'continue');
+    expect(await waitForJson(deliveryPath, 'relay published receipt')).toEqual({ stagedBytes: 14, deliveredBytes: 14 });
+    expect((await reader(run)).parsed.providerFailure).toBeUndefined();
+  });
 
   it('persists rejected input as failure even when the provider reports success', async () => {
     setup();
@@ -140,13 +187,11 @@ describe.skipIf(process.platform === 'win32')('worker-owned stdin across server 
     const stagedPath = file('input');
     writeFileSync(stagedPath, 'partial');
     const stdin = openSync(stagedPath, 'r');
-    const delivery = openSync(`${stagedPath}.delivery.jsonl`, 'wx', 0o600);
     const invocation = workerOwnedStdinInvocation({ command: process.execPath,
-      args: ['-e', 'require("node:fs").writeFileSync(process.argv[1], "started")', file('started')] }, 1000);
-    const child = spawn(invocation.command, invocation.args, { stdio: [stdin, 'ignore', 'pipe', delivery],
+      args: ['-e', 'require("node:fs").writeFileSync(process.argv[1], "started")', file('started')] }, 1000, `${stagedPath}.delivery.jsonl`);
+    const child = spawn(invocation.command, invocation.args, { stdio: [stdin, 'ignore', 'pipe'],
       env: { NODE_ENV: 'test', PATH: process.env.PATH } });
     closeSync(stdin);
-    closeSync(delivery);
     let stderr = '';
     child.stderr!.on('data', chunk => { stderr += String(chunk); });
     const [code] = await once(child, 'close');

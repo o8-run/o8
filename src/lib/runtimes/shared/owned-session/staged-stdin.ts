@@ -6,13 +6,22 @@ const STAGED_STDIN_RELAY = EMBEDDED_CHILD_POLICY_SCRIPT + String.raw`
 const fs = require('node:fs');
 const { spawn } = require('node:child_process');
 const expectedBytes = Number(process.argv[1]);
+const deliveryPath = process.argv[2];
 const payload = fs.readFileSync(0);
 fs.closeSync(0);
 let deliveredBytes = 0;
 let failed = false;
 function recordDelivery(error) {
-  fs.writeSync(3, JSON.stringify({ stagedBytes: expectedBytes, deliveredBytes, error }) + '\n');
-  fs.fsyncSync(3);
+  // Readers see either no receipt or a complete, flushed record.
+  const temporaryPath = deliveryPath + '.' + process.pid + '.tmp';
+  const fd = fs.openSync(temporaryPath, 'wx', 0o600);
+  try {
+    try {
+      fs.writeFileSync(fd, JSON.stringify({ stagedBytes: expectedBytes, deliveredBytes, error }) + '\n');
+      fs.fsyncSync(fd);
+    } finally { fs.closeSync(fd); }
+    fs.renameSync(temporaryPath, deliveryPath);
+  } finally { fs.rmSync(temporaryPath, { force: true }); }
 }
 function inputFailure(error) {
   if (failed) return;
@@ -25,7 +34,7 @@ if (payload.length !== expectedBytes) {
   inputFailure('staged input was truncated before delivery');
   process.exit(74);
 }
-const child = withO8ChildPolicy(env => spawn(process.argv[2], process.argv.slice(3), {
+const child = withO8ChildPolicy(env => spawn(process.argv[3], process.argv.slice(4), {
   env, windowsHide: true, stdio: ['pipe', 1, 2],
 }), { preserveStamp: true });
 let delivered = false;
@@ -56,8 +65,8 @@ child.on('close', (code, signal) => {
 });
 `;
 
-export function workerOwnedStdinInvocation(launch: { command: string; args: string[] }, bytes: number) {
-  return { command: process.execPath, args: ['-e', STAGED_STDIN_RELAY, String(bytes), launch.command, ...launch.args] };
+export function workerOwnedStdinInvocation(launch: { command: string; args: string[] }, bytes: number, deliveryPath: string) {
+  return { command: process.execPath, args: ['-e', STAGED_STDIN_RELAY, String(bytes), deliveryPath, launch.command, ...launch.args] };
 }
 
 export const stagedStdinDeliveryPath = (stdinPath: string) => `${stdinPath}.delivery.jsonl`;

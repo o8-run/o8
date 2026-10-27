@@ -24,8 +24,13 @@ process.stdin.on('data', chunk => {
 });
 process.stdin.on('end', () => {
   const input = Buffer.concat(chunks);
-  fs.writeFileSync(file('received.json'), JSON.stringify({ bytes, sha256: crypto.createHash('sha256').update(input).digest('hex') }));
-  console.log('complete');
+  // Keep heartbeats running while the receipt is open but incomplete.
+  const receipt = fs.openSync(file('received.json'), 'w', 0o600);
+  setTimeout(() => {
+    fs.writeFileSync(receipt, JSON.stringify({ bytes, sha256: crypto.createHash('sha256').update(input).digest('hex') }));
+    fs.closeSync(receipt);
+    console.log('complete');
+  }, 500);
 });
 let ticks = 0;
 const timer = setInterval(() => {

@@ -1,5 +1,5 @@
 import type { ChildProcess } from 'node:child_process';
-import { closeSync, fstatSync, openSync } from 'node:fs';
+import { fstatSync } from 'node:fs';
 import { spawnWithWorkAdmission as spawn } from '@/lib/app-update/work-launch-admission';
 import { bindDeferredCodexMcpLaunch } from '@/lib/providers/deferred-mcp-arguments';
 import { withProviderStoreLock } from '@/lib/providers/store-lock';
@@ -61,18 +61,12 @@ function withCheckedLaunch<T>(input: LaunchInput, create: (launch: { command: st
 export function spawnCredentialCheckedChild(input: LaunchInput): ChildProcess {
   return withCheckedLaunch(input, (launch, env) => {
     const invocation = input.stdinFd === undefined ? launch
-      : workerOwnedStdinInvocation(launch, input.stdinBytes ?? fstatSync(input.stdinFd).size);
-    const deliveryFd = input.stdinFd === undefined ? undefined
-      : openSync(stagedStdinDeliveryPath(input.stdinPath!), 'wx', 0o600);
-    try {
-      return spawn(invocation.command, invocation.args, {
-        windowsHide: true, cwd: input.session.repoPath, detached: true,
-        stdio: [input.stdinFd ?? 'ignore', input.stdoutFd, input.stderrFd, deliveryFd ?? 'ignore'],
-        env,
-      });
-    } finally {
-      if (deliveryFd !== undefined) closeSync(deliveryFd);
-    }
+      : workerOwnedStdinInvocation(launch, input.stdinBytes ?? fstatSync(input.stdinFd).size, stagedStdinDeliveryPath(input.stdinPath!));
+    return spawn(invocation.command, invocation.args, {
+      windowsHide: true, cwd: input.session.repoPath, detached: true,
+      stdio: [input.stdinFd ?? 'ignore', input.stdoutFd, input.stderrFd],
+      env,
+    });
   });
 }
 
