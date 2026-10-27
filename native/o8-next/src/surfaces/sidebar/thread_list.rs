@@ -241,7 +241,10 @@ impl ThreadList {
             let result = task.await;
             let _ = this.update(cx, |this, cx| {
                 this.loading = false;
-                if generation != this.generation {
+                // Stream updates fence stale catalog snapshots, not transport
+                // failures. Suppressing an error leaves the shell waiting for
+                // recovery while the next full request deadline runs again.
+                if result.is_ok() && generation != this.generation {
                     this.dirty = Some(Instant::now());
                     return;
                 }

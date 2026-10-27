@@ -240,7 +240,17 @@ fn round1_reconnect_keeps_composer_focus_draft_and_queue(cx: &mut TestAppContext
             .unwrap()
             .success()
     );
-    shell.update_in(cx, |s, _, cx| s.load(cx));
+    shell.update_in(cx, |s, _, cx| {
+        s.load(cx);
+        // A queued catalog update can arrive while this request is in flight.
+        // Its generation fence must not hide the eventual connection failure.
+        s.surfaces
+            .sidebar
+            .view
+            .as_ref()
+            .unwrap()
+            .update(cx, |sidebar, _| sidebar.catalog_changed());
+    });
     settled(&shell, cx);
     assert!(!shell.read_with(cx, |s, _| s.connected));
     drop(resume);

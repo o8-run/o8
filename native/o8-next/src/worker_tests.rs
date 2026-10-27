@@ -66,6 +66,7 @@ fn worker_text(surface: &Surface) -> String {
 }
 
 #[gpui::test]
+#[ignore = "flaky in required CI, about half of runs since 2026-10-27: #4929"]
 fn worker_send_steer_queue_promote_remove_and_streaming_latency(cx: &mut TestAppContext) {
     let (mut server, client) = fixture_mode(true);
     let saved = client.clone();
