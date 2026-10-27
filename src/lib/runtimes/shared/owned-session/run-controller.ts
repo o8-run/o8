@@ -20,7 +20,7 @@ import { createFailureRetry } from './failure-retry';
 import { assertOwnedSingleAttemptSpawn, assertDurableOwnedSpawn } from './execution-policy';
 import type { ChildProcess } from 'node:child_process';
 import { closeSync, constants, fstatSync, openSync } from 'node:fs';
-import { readFile, stat, writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { getOrCreateLocalWorkerToken } from '@/lib/auth/worker-token';
@@ -42,7 +42,8 @@ import { pathWithNodeRuntime } from '@/lib/util/node-on-path';
 import { crashSurvivableWorkersEnabled } from './crash-survival';
 import { assertOwnedSessionProcessIdentity, captureOwnedRunIdentity } from './process-identity';
 import { emitRuntimeFallbackNotification, notifySupervisorOfCleanExit } from './run-notifications';
-import { observeChildExit, readAbnormalStderrTail } from './exit-outcome';
+import { observeChildExit, readAbnormalStderrTail, silentCleanExitMessage } from './exit-outcome';
+import { createRunArtifactReader } from './run-artifacts';
 import { prepareOwnedLaunchArgs } from './launch-args';
 import { WorkerO8CliUnavailableError } from './worker-o8-cli';
 import { stageOwnedLaunchFailure } from './launch-failure';
@@ -72,7 +73,6 @@ import { preparedRuntimeStateSandboxPolicy } from './runtime-state-sandbox';
 import type { OwnedSessionIo } from './session-io';
 import type {
   OwnedChildExitOutcome,
-  ParsedRunLog,
   OwnedRunMode,
   OwnedRunRecord,
   OwnedRuntimeAdapter,
@@ -117,17 +117,9 @@ export function createOwnedRunController({
   workspaceSpawnGuard: OwnedWorkspaceSpawnGuard;
   invalidateFleetCache: () => void;
 }): OwnedRunController {
+  const readRunArtifacts = createRunArtifactReader(adapter);
   const capacityRecovery = createCapacityRecovery({ adapter, io, spawnOwnedRun });
   const handleWorkerFailure = createWorkerFailureHandler({ adapter, io, readRunArtifacts, park: capacityRecovery.park });
-  const runArtifactCache = new Map<string, {
-    key: string;
-    /** null = raw exceeded RAW_RETENTION_MAX_BYTES; re-read from disk on hit. */
-    stdoutRaw: string | null;
-    stderrRaw: string | null;
-    parsed: ParsedRunLog;
-  }>();
-  const RUN_ARTIFACT_CACHE_MAX = 48;
-  const RAW_RETENTION_MAX_BYTES = 2 * 1024 * 1024;
   const recoverModelCompatibility = createModelCompatibilityRecovery({ adapter, io, withSurfaceLock, readRunArtifacts, spawnOwnedRun });
   const scheduleFailureRetry = createFailureRetry({ adapter, io, withSurfaceLock, readRunArtifacts, spawnOwnedRun,
     notify: (session, from, to, reason) => emitRuntimeFallbackNotification(runtimeId, session, from, to, reason), invalidateFleetCache, retryDelayMs });
@@ -151,63 +143,6 @@ export function createOwnedRunController({
 
   function quoteShellArg(value: string): string {
     return `'${value.replace(/'/g, "'\\''")}'`;
-  }
-
-  async function statKey(filePath: string): Promise<string> {
-    try {
-      const info = await stat(filePath);
-      return `${info.size}:${info.mtimeMs}`;
-    } catch {
-      return 'absent';
-    }
-  }
-
-  async function readRunArtifacts(run: OwnedRunRecord) {
-    const [stdoutKey, stderrKey] = await Promise.all([
-      statKey(run.stdoutPath),
-      statKey(run.stderrPath),
-    ]);
-    const key = JSON.stringify([
-      stdoutKey, stderrKey, run.outcome, run.finishedAt, run.interruptRequestedAt, run.childExit,
-    ]);
-    const cached = runArtifactCache.get(run.id);
-    if (cached?.key === key) {
-      runArtifactCache.delete(run.id);
-      runArtifactCache.set(run.id, cached);
-      if (cached.stdoutRaw !== null && cached.stderrRaw !== null) {
-        return { stdoutRaw: cached.stdoutRaw, stderrRaw: cached.stderrRaw, parsed: cached.parsed };
-      }
-      const [rereadStdout, rereadStderr] = await Promise.all([
-        cached.stdoutRaw ?? (stdoutKey === 'absent' ? '' : readFile(run.stdoutPath, 'utf8').catch(() => '')),
-        cached.stderrRaw ?? (stderrKey === 'absent' ? '' : readFile(run.stderrPath, 'utf8').catch(() => '')),
-      ]);
-      return { stdoutRaw: rereadStdout, stderrRaw: rereadStderr, parsed: cached.parsed };
-    }
-
-    const [stdoutRaw, stderrRaw] = await Promise.all([
-      stdoutKey === 'absent' ? '' : readFile(run.stdoutPath, 'utf8').catch(() => ''),
-      stderrKey === 'absent' ? '' : readFile(run.stderrPath, 'utf8').catch(() => ''),
-    ]);
-
-    const withinRawCap = stdoutRaw.length + stderrRaw.length <= RAW_RETENTION_MAX_BYTES;
-    const entry = {
-      key,
-      stdoutRaw: withinRawCap ? stdoutRaw : null,
-      stderrRaw: withinRawCap ? stderrRaw : null,
-      parsed: adapter.parseRunLog(
-        stdoutRaw,
-        run,
-        stdoutKey === 'absent' ? undefined
-          : new Date(Number(stdoutKey.slice(stdoutKey.indexOf(':') + 1))).toISOString(),
-      ),
-    };
-    runArtifactCache.set(run.id, entry);
-    while (runArtifactCache.size > RUN_ARTIFACT_CACHE_MAX) {
-      const oldest = runArtifactCache.keys().next().value;
-      if (oldest === undefined) break;
-      runArtifactCache.delete(oldest);
-    }
-    return { stdoutRaw, stderrRaw, parsed: entry.parsed };
   }
 
   async function readOwnedRunStdout(run: OwnedRunRecord): Promise<string> {
@@ -247,6 +182,22 @@ export function createOwnedRunController({
       laneId = current.laneId;
       const currentRun = current.recentRuns.find((run) => run.id === runId);
       artifacts = currentRun ? await readRunArtifacts({ ...currentRun, childExit }).catch(() => null) : null;
+      if (current.recentRuns[0]?.id === runId && artifacts?.parsed.providerFailure?.subtype === 'stdin_delivery_failed' && artifacts.parsed.providerFailure.message) {
+        current.latestSummary = artifacts.parsed.providerFailure.message;
+      }
+      // A worker that exits 0 without writing a byte did no work (for example
+      // a CLI that ignored its input). Surface that instead of a silent success
+      // unless the runtime's own parser recognized a completed turn.
+      const silentCleanExit = Boolean(artifacts) && childExit.classification === 'clean-exit'
+        && !artifacts!.parsed.completedTurn
+        && !currentRun?.interruptRequestedAt && currentRun?.outcome !== 'interrupted'
+        && !artifacts!.stdoutRaw.trim() && !artifacts!.stderrRaw.trim();
+      if (silentCleanExit) {
+        const message = silentCleanExitMessage(humanLabel);
+        artifacts = { ...artifacts!, parsed: { ...artifacts!.parsed, outcome: 'failed', completedTurn: false,
+          providerFailure: { subtype: 'empty_output', message } } };
+        current.latestSummary = message;
+      }
       let dirty = false;
       const finishedAt = nowIso();
       const applyExit = (run: OwnedRunRecord): OwnedRunRecord => {
@@ -390,6 +341,10 @@ export function createOwnedRunController({
       }
 
       const nextOutcome = deriveRunOutcome(run, parsed, stderrRaw, stderrNoise);
+      if (session.recentRuns[0]?.id === run.id && parsed.providerFailure?.subtype === 'stdin_delivery_failed' && parsed.providerFailure.message && session.latestSummary !== parsed.providerFailure.message) {
+        session.latestSummary = parsed.providerFailure.message;
+        dirty = true;
+      }
       if (run.outcome !== nextOutcome) {
         run.outcome = nextOutcome;
         dirty = true;
@@ -634,7 +589,7 @@ export function createOwnedRunController({
           pid: 0,
           ...(useSupervisor ? { supervisor: { id: runId, owner: session.surfaceId, epoch: '', cursor: 0 } } : {}),
           processIdentityRequired: crashSurvivableWorkersEnabled() && Boolean(session.packetId) && process.platform !== 'win32',
-          commandIdentity: executionCarrierCommandIdentity(carrierLaunch, spawnBinary),
+          commandIdentity: process.platform === 'win32' && stdinPayload && !useSupervisor ? process.execPath : executionCarrierCommandIdentity(carrierLaunch, spawnBinary),
           processMarker: runId,
           spawnState: 'prepared',
           stdoutPath,
@@ -690,7 +645,7 @@ export function createOwnedRunController({
               const launchInput = {
                 session, runtimeId, policy: credentialPolicy, runId,
                 binary: spawnBinary, args: spawnArgs, env: spawnEnv,
-                stdinFd, stdoutFd, stderrFd, mcpConfigPath: workerMcp.configPath, mcpServers: workerMcp.servers,
+                stdinFd, stdinPath, stdinBytes: stdinPayload ? Buffer.byteLength(stdinPayload) : undefined, stdoutFd, stderrFd, mcpConfigPath: workerMcp.configPath, mcpServers: workerMcp.servers,
                 materializationIdentity,
                 assertWorkerO8Current: preparedLaunch.workerO8?.assertCurrent,
                 onSubmit: () => { spawnSubmitted = true; },

@@ -3,11 +3,12 @@
 import { appendFileSync, fstatSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { once } from 'node:events';
+import { fileURLToPath } from 'node:url';
 
 if (process.argv.includes('--version') || process.argv.includes('--help')) {
   console.log('claude-fixture 1.0.0');
 } else {
-  const root = process.env.O8_RESTART_FIXTURE_ROOT;
+  const root = fileURLToPath(new URL('.', import.meta.url));
   const inputWait = setInterval(() => {}, 1000);
   const releaseInput = once(process, 'SIGUSR1');
   appendFileSync(join(root, 'launches.jsonl'), `${JSON.stringify({ pid: process.pid, stdinIsFile: fstatSync(0).isFile() })}\n`);
