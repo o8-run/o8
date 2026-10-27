@@ -3,12 +3,12 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 export async function installSidebarRuntime(dataDir: string, repo: string) {
-  await (await import('./pane-fixture')).installPaneRuntime(dataDir, repo);
+  await (await import('./pane-fixture')).installPaneRuntime(dataDir, repo, false, 'pi-builtin');
   const { getRuntime } = await import('../../src/lib/runtimes');
-  const runtime = getRuntime('pi')!;
+  const runtime = getRuntime('pi-builtin')!;
   const discover = runtime.discoverSessions.bind(runtime);
   Object.defineProperty(runtime, 'discoverSessions', { value: async () =>
-    existsSync(join(dataDir, 'owned-pi', 'grid-runtime', 'session.json')) ? discover() : [], configurable: true });
+    existsSync(join(dataDir, 'owned-pi-builtin', 'grid-runtime', 'session.json')) ? discover() : [], configurable: true });
 }
 
 export function seedSidebar(dataDir: string, root: string) {

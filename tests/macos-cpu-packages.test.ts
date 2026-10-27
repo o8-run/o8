@@ -13,7 +13,7 @@ import {
 import { verifyMacCpuDerivation } from '../scripts/lib/macos-cpu-packages.mjs';
 
 const roots: string[] = [];
-const binaries = ['o8', 'speech_recognizer', 'speech-local', 'o8-pi-write'];
+const binaries = ['o8', 'speech_recognizer', 'speech-local', 'o8-pi-write', 'o8-next'];
 const script = join(process.cwd(), 'scripts/macos-cpu-packages.mjs');
 
 afterEach(() => {

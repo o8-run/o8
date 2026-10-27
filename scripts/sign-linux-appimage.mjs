@@ -12,26 +12,29 @@
  *      the expected `o8_<version>_linux_amd64_preview.AppImage`
  *   2. Download that asset
  *   3. Sign it with the same key + invocation the macOS updater artifact uses
- *   4. Upload `<asset>.sig` next to it, and a regenerated `latest.json` that
- *      gains exactly one `linux-x86_64` entry (darwin entries untouched)
+ *   4. Verify the signature and inspect the embedded build channel without
+ *      executing the AppImage, then add only `linux-x86_64` to that channel's
+ *      matching manifest on each repository
  *
  * Usage:
  *   npm run ship:linux-sig -- --tag v0.1.724
  *   npm run ship:linux-sig -- --tag v0.1.724 --repo o8-run/o8 --repo hurttlocker/o8-releases
  */
 
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   DEFAULT_REPOS,
   createLinuxSignatureDeps,
   signLinuxAppImage,
+  versionFromTag,
+  withLinuxPlatform,
 } from './lib/linux-appimage-signature.mjs';
-
-import { execFileSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
-import { publishBetaFeed } from './lib/update-feeds.mjs';
+import { readLinuxBuildChannel } from './lib/linux-build-channel.mjs';
+import { acquirePublicationLock, BETA_FEED_TAG } from './lib/release-publication.mjs';
 
 const LOG = '[sign-linux-appimage]';
 
@@ -55,12 +58,99 @@ function usage() {
     'Usage: npm run ship:linux-sig -- --tag <vX.Y.Z> [--repo <owner/name> ...]',
     '',
     'Signs the tag\'s published Linux AppImage with the operator updater key and',
-    'republishes the signature plus a latest.json carrying the linux-x86_64 entry.',
+    'republishes the signature plus the signed build channel\'s updater manifest.',
     '',
     `Default repositories: ${DEFAULT_REPOS.join(', ')}`,
     '',
     'Requires the updater signing key on this machine. Never runs on CI.',
   ].join('\n'));
+}
+
+function channelSignatureDeps(root, options, workDir) {
+  const original = createLinuxSignatureDeps();
+  const version = versionFromTag(options.tag);
+  const manifests = new Map();
+  let identity;
+  let signature;
+  let installerSha256;
+  const completeManifest = (current) => {
+    const latest = withLinuxPlatform({ latest: current, version, signature });
+    if (identity.channel === 'beta') {
+      const url = latest.platforms['linux-x86_64'].url;
+      latest.installers = [...(current.installers ?? []).filter(entry => entry.url !== url), { url, sha256: installerSha256 }];
+    }
+    return latest;
+  };
+  const manifestName = () => ({ stable: 'latest.json', beta: 'beta.json', preview: 'preview.json' })[identity.channel];
+  const requireManifest = (latest) => {
+    if (latest?.version !== version || latest.channel !== identity.channel) {
+      throw new Error(`Published manifest channel/version does not match signed Linux build identity (${identity.channel} ${version})`);
+    }
+    return latest;
+  };
+  const downloadManifest = (repo, tag, label) => {
+    const destDir = join(workDir, label);
+    mkdirSync(destDir, { recursive: true });
+    const name = manifestName();
+    execFileSync('gh', ['release', 'download', tag, '--repo', repo, '--pattern', name, '--dir', destDir, '--clobber'], { stdio: ['ignore', 'pipe', 'pipe'] });
+    return JSON.parse(readFileSync(join(destDir, name), 'utf8'));
+  };
+  const writeManifest = (repo, latest, label) => {
+    const directory = join(workDir, label, repo.replaceAll('/', '-'));
+    mkdirSync(directory, { recursive: true });
+    const path = join(directory, manifestName());
+    writeFileSync(path, `${JSON.stringify(latest, null, 2)}\n`);
+    return path;
+  };
+  return {
+    deps: {
+      ...original,
+      signAppImage: async (args) => {
+        const sigPath = await original.signAppImage(args);
+        identity = readLinuxBuildChannel(root, args.filePath, sigPath, version);
+        signature = readFileSync(sigPath, 'utf8').trim();
+        installerSha256 = createHash('sha256').update(readFileSync(args.filePath)).digest('hex');
+        return sigPath;
+      },
+      fetchLatestJson: ({ repo, tag }) => {
+        // Preflight every destination before any manifest upload. The shared
+        // publication lock keeps local publishers from changing these feeds.
+        for (const [index, target] of options.repos.entries()) {
+          const current = requireManifest(downloadManifest(target, tag, `current-${index}`));
+          // Validate the Darwin URL before the first repository is mutated.
+          withLinuxPlatform({ latest: current, version, signature });
+          manifests.set(target, current);
+        }
+        return manifests.get(repo);
+      },
+      writeLatestJson: ({ latest }) => { writeManifest(options.repos[0], latest, 'generated'); },
+      uploadAssets: ({ repo, tag, files }) => {
+        const current = requireManifest(manifests.get(repo));
+        const latest = completeManifest(current);
+        const path = writeManifest(repo, latest, 'tag-completion');
+        original.uploadAssets({ repo, tag, files: [files[0], path] });
+      },
+    },
+    manifestName,
+    completeRollingBeta: () => {
+      if (identity.channel !== 'beta') return;
+      for (const [index, repo] of options.repos.entries()) {
+        const release = original.fetchRelease({ repo, tag: BETA_FEED_TAG });
+        if (!release || release.isDraft) throw new Error(`Beta feed anchor ${BETA_FEED_TAG} must be provisioned and published by an operator in ${repo}`);
+        const current = downloadManifest(repo, BETA_FEED_TAG, `rolling-${index}`);
+        if (current.channel !== 'beta') throw new Error(`Beta feed anchor in ${repo} has an invalid channel identity`);
+        // Completing an older or newer tag cannot advance or roll back the
+        // independently provisioned rolling feed.
+        if (current.version !== version) {
+          console.log(`${LOG} leaving ${repo} beta anchor at ${current.version}`);
+          continue;
+        }
+        const latest = completeManifest(current);
+        const path = writeManifest(repo, latest, 'rolling-completion');
+        original.uploadAssets({ repo, tag: BETA_FEED_TAG, files: [path] });
+      }
+    },
+  };
 }
 
 async function main() {
@@ -73,36 +163,24 @@ async function main() {
   // The key is an operator secret; a CI runner must never reach the signer.
   if (process.env.CI) throw new Error('refusing to run on CI — the updater signing key stays on the ship machine');
 
-  const workDir = mkdtempSync(join(tmpdir(), 'o8-linux-appimage-sig-'));
+  const lock = acquirePublicationLock();
+  let workDir;
   try {
+    workDir = mkdtempSync(join(tmpdir(), 'o8-linux-appimage-sig-'));
+    const channel = channelSignatureDeps(process.cwd(), options, workDir);
     const result = await signLinuxAppImage({
       tag: options.tag,
       repos: options.repos,
       workDir,
-      deps: createLinuxSignatureDeps(),
-      log: (message) => console.log(`${LOG} ${message}`),
+      deps: channel.deps,
+      log: (message) => console.log(`${LOG} ${message.includes('latest.json') ? message.replaceAll('latest.json', channel.manifestName()) : message}`),
     });
-    // Complete beta publication after the existing signing operation.
-    if (result.latest.channel === 'beta') {
-      const linux = result.latest.platforms['linux-x86_64'];
-      const installer = { url: linux.url, sha256: createHash('sha256')
-        .update(readFileSync(join(workDir, result.assetName))).digest('hex') };
-      result.latest.installers = [...(result.latest.installers ?? []).filter(entry => entry.url !== linux.url), installer];
-      writeFileSync(result.latestJsonPath, `${JSON.stringify(result.latest, null, 2)}\n`);
-      for (const repo of result.repos) {
-        execFileSync('gh', ['release', 'upload', options.tag, result.latestJsonPath, '--clobber', '--repo', repo], { stdio: 'inherit', timeout: 60_000 });
-      }
-      const betaPath = join(workDir, 'beta.json');
-      writeFileSync(betaPath, `${JSON.stringify(result.latest, null, 2)}\n`);
-      for (const repo of result.repos) {
-        execFileSync('gh', ['release', 'upload', options.tag, betaPath, '--clobber', '--repo', repo], { stdio: 'inherit', timeout: 60_000 });
-      }
-      publishBetaFeed(betaPath, result.repos);
-    }
-    console.log(`${LOG} published ${result.assetName}.sig and latest.json for ${options.tag}`);
+    channel.completeRollingBeta();
+    console.log(`${LOG} published ${result.assetName}.sig and ${channel.manifestName()} for ${options.tag}`);
     console.log(`${LOG} linux-x86_64 url: ${result.latest.platforms['linux-x86_64'].url}`);
   } finally {
-    rmSync(workDir, { recursive: true, force: true });
+    try { if (workDir) rmSync(workDir, { recursive: true, force: true }); }
+    finally { lock.release(); }
   }
 }
 

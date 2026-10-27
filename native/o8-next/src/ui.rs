@@ -3,9 +3,8 @@ use crate::theme::current as theme;
 mod brain_dock;
 #[path = "composer_bench.rs"]
 mod composer_bench;
-#[cfg(test)]
-#[path = "speed_receipt.rs"]
-mod speed_receipt;
+#[path = "composer/regions.rs"]
+mod composer_regions;
 #[path = "conversation.rs"]
 mod conversation;
 #[path = "history.rs"]
@@ -14,6 +13,9 @@ mod history;
 mod session_sidebar;
 #[path = "shell_session.rs"]
 mod shell_session;
+#[cfg(test)]
+#[path = "speed_receipt.rs"]
+mod speed_receipt;
 use crate::{
     client::{Client, Session},
     composer::{Composer, Submit},
@@ -43,6 +45,7 @@ pub(crate) struct Surface {
     embedded: bool,
     brains: HashMap<String, gpui::Entity<crate::brain::Brain>>,
     composer: gpui::Entity<Composer>,
+    regions: crate::render_region::Regions<Surface>,
     drafts: HashMap<String, gpui::Entity<Composer>>,
     pending: HashMap<String, Value>,
     linked_issues: HashMap<String, crate::issues::LinkedIssue>,
@@ -77,6 +80,7 @@ impl Surface {
             embedded: false,
             brains: HashMap::new(),
             composer: cx.new(Composer::new),
+            regions: crate::render_region::Regions::default(),
             drafts: HashMap::new(),
             pending: HashMap::new(),
             linked_issues: HashMap::new(),
@@ -347,8 +351,6 @@ impl Surface {
 
 impl Render for Surface {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let rows = self.rows.clone();
-        let painted_rows = self.painted_rows.clone();
         let painted = self.painted.clone();
         let revision = self.key_revision;
         let geometry = &crate::theme::GEOMETRY;
@@ -357,6 +359,24 @@ impl Render for Surface {
         let sidebar_width = (viewport * 0.25).min(geometry.sidebar_width);
         let right_width = (viewport * 0.30).min(geometry.right_width);
         let empty = self.transcript.is_some() && self.rows.is_empty();
+        let header = self.regions.view(
+            "header",
+            composer_regions::header_style(),
+            Self::session_header,
+            cx,
+        );
+        let sidebar = self.regions.view(
+            "sidebar",
+            composer_regions::sidebar_style(px(sidebar_width)),
+            Self::session_sidebar_region,
+            cx,
+        );
+        let transcript = self.regions.view(
+            "transcript",
+            composer_regions::transcript_style(),
+            Self::session_transcript,
+            cx,
+        );
         div()
             .size_full()
             .flex()
@@ -439,30 +459,7 @@ impl Render for Surface {
                 }
                 cx.stop_propagation();
             }))
-            .when(!self.embedded, |view| {
-                view.child(
-                    div()
-                        .h(px(geometry.header))
-                        .px(px(16.))
-                        .flex()
-                        .items_center()
-                        .gap(px(16.))
-                        .child("o8 next")
-                        .child(self.brain_control(cx))
-                        .child(
-                            div()
-                                .id("refresh")
-                                .debug_selector(|| "session-refresh".into())
-                                .px(px(8.))
-                                .py(px(4.))
-                                .rounded(px(5.))
-                                .cursor_pointer()
-                                .bg(theme().surface_raised)
-                                .child("Refresh")
-                                .on_click(cx.listener(|this, _, _, cx| this.load_sessions(cx))),
-                        ),
-                )
-            })
+            .when(!self.embedded, |view| view.child(header))
             .child(
                 div()
                     .flex()
@@ -470,9 +467,7 @@ impl Render for Surface {
                     .min_h_0()
                     .p(px(geometry.inset))
                     .gap(px(geometry.gap))
-                    .when(!self.embedded, |view| {
-                        view.child(self.session_sidebar(px(sidebar_width), cx))
-                    })
+                    .when(!self.embedded, |view| view.child(sidebar))
                     .child(
                         div()
                             .debug_selector(|| "conversation-column".into())
@@ -480,34 +475,20 @@ impl Render for Surface {
                             .flex_col()
                             .flex_1()
                             .min_w_0()
-                            .when(!self.notice.is_empty(), |view| {
-                                view.child(
-                                    div()
-                                        .px(px(24.))
-                                        .py(px(8.))
-                                        .text_size(px(11.))
-                                        .text_color(theme().text_muted)
-                                        .child(self.notice.clone()),
-                                )
+                            .when(empty, |view| {
+                                view.when(!self.notice.is_empty(), |view| {
+                                    view.child(
+                                        div()
+                                            .px(px(24.))
+                                            .py(px(8.))
+                                            .text_size(px(11.))
+                                            .text_color(theme().text_muted)
+                                            .child(self.notice.clone()),
+                                    )
+                                })
+                                .child(self.history_control(cx))
                             })
-                            .child(self.history_control(cx))
-                            .when(!empty, |view| {
-                                view.child(
-                                    list(self.list.clone(), {
-                                        let list_state = self.list.clone();
-                                        move |index, _, _| {
-                                            RetainedRow {
-                                                state: rows[index].clone(),
-                                                index,
-                                                painted: painted_rows.clone(),
-                                            }
-                                            .interactive(&list_state)
-                                        }
-                                    })
-                                    .flex_1()
-                                    .min_h_0(),
-                                )
-                            })
+                            .when(!empty, |view| view.child(transcript))
                             .child(
                                 div()
                                     .debug_selector(|| "composer-space".into())
@@ -517,7 +498,7 @@ impl Render for Surface {
                                     .when(!empty, |view| view.flex_shrink_0())
                                     .px(px(geometry.content_inset))
                                     .pb(px(if empty { 0. } else { geometry.gap * 2. }))
-                                    .child(self.composer_panel(cx)),
+                                    .child(self.composer_panel(window, cx)),
                             ),
                     )
                     .child(self.brain_panel(px(right_width), cx)),

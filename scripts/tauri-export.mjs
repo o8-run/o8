@@ -8,6 +8,7 @@ import { cpSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, rea
 import { execFileSync as runFileSync } from 'child_process';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { writeBuildChannel } from './lib/build-channel.mjs';
 import { prepareNativeBundle } from './native-bundle.mjs';
 import { exportTauriSafetyHookResources } from './tauri-hook-resources.mjs';
 import { resolveReleaseConfig } from './lib/release-config.mjs';
@@ -437,10 +438,35 @@ if (process.platform === 'darwin') {
 
 const http = require('node:http');
 const https = require('node:https');
+const { isAllowedLocalHost, requestTargetAllowed, browserWriteAllowed } = require('./http-request-boundary.cjs');
 
 function stampClientAddr(server) {
-  server.prependListener('request', (req) => {
+  // Ensure upgrade requests reach the boundary even without an app listener.
+  const upgradeSentinel = () => {};
+  server.on('upgrade', upgradeSentinel);
+  const emit = server.emit;
+  server.emit = function (event, ...args) {
+    if (event !== 'request' && event !== 'upgrade') return emit.call(this, event, ...args);
+    const [req, target] = args;
+    const hasUpgradeHandler = event === 'upgrade' && this.rawListeners('upgrade').some(listener => listener !== upgradeSentinel);
+    const refuse = (status) => {
+      const text = status === 421 ? 'Misdirected Request' : 'Origin is not allowed';
+      if (event === 'upgrade') target.end('HTTP/1.1 ' + status + ' ' + text + '\\r\\nConnection: close\\r\\nContent-Length: 0\\r\\n\\r\\n');
+      else { target.writeHead(status, { 'Connection': 'close', 'Content-Type': 'text/plain' }); target.end(text); }
+      return true;
+    };
     try {
+      // PORT identifies Next's app listener, not auxiliary servers such as the
+      // authenticated browser egress proxy, whose Host names the destination.
+      // Keep the boundary enabled if the app port cannot be identified.
+      const appPort = Number(process.env.PORT);
+      if (!Number.isInteger(appPort) || appPort < 1 || appPort > 65535
+        || req.socket?.localPort === appPort) {
+        if (!isAllowedLocalHost(req.headers.host, req.socket.localPort)
+          || !requestTargetAllowed(req.url, req.socket.localPort)) return refuse(421);
+        const get = (name) => typeof req.headers[name] === 'string' ? req.headers[name] : null;
+        if (!browserWriteAllowed(req.method, get, req.socket?.encrypted ? 'https:' : 'http:')) return refuse(403);
+      }
       const peer = req.socket?.remoteAddress || '';
       const loopbackPeer = peer === '::1' || peer === '127.0.0.1' || peer.startsWith('127.') || peer.startsWith('::ffff:127.');
       const requestedRelaySurface = req.headers['x-o8-relay-surface'];
@@ -459,8 +485,10 @@ function stampClientAddr(server) {
       } else {
         req.headers['x-o8-client-addr'] = peer;
       }
-    } catch { /* never block a request over a stamp failure */ }
-  });
+    } catch { return refuse(421); }
+    if (event === 'upgrade' && !hasUpgradeHandler) { target.destroy(); return true; }
+    return emit.call(this, event, ...args);
+  };
   return server;
 }
 
@@ -477,6 +505,7 @@ process.env.O8_PACKAGED_APP = '1';
 require('./server-impl.js');
 `);
 console.log('📦 Wrote server.js wrapper (socket-addr stamping) + server-impl.js');
+cpSync(join(root, 'scripts', 'lib', 'http-request-boundary.cjs'), join(server, 'http-request-boundary.cjs'));
 cpSync(nativeAddonRuntimePath, join(server, 'native-addon-runtime.cjs'));
 console.log('📦 Copied native addon runtime selector');
 
@@ -733,3 +762,6 @@ try { size = execSync(`du -sh "${server}" 2>/dev/null`).toString().trim().split(
 console.log('\\n✅ Export complete');
 console.log(`   frontend/ → loader HTML`);
 console.log(`   server/ → ${size}`);
+
+// Written before packaging: the app seal and updater signature cover this manifest.
+writeBuildChannel(root, server, loaderAppVersion);

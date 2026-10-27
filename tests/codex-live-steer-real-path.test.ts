@@ -19,7 +19,7 @@ vi.mock('@/lib/cortex/qa/llm/sonnet-adapter', () => ({ prewarmSonnetCli: async (
 vi.mock('@/lib/runtimes/shared/dispatch-readiness', () => ({ ensureDispatchBackendReady: async () => ({ ready: true }) }));
 vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: vi.fn(async () => {}) }));
 // Solo's platform sandbox has its own tests. Keep its exec process real here.
-vi.mock('@/lib/lane/single-orchestrator-policy', () => ({ prepareSingleOrchestratorLaunch: async (input: Record<string, unknown>) => ({ ...input, cleanup: () => {} }) }));
+vi.mock('@/lib/lane/single-orchestrator-policy', () => ({ prepareSingleOrchestratorLaunch: async (input: Record<string, unknown>) => ({ ...input, diagnostics: [], cleanup: () => {} }) }));
 vi.mock('@/components/desktop/thoughts/InputButtons', () => ({ InputButtons: () => null }));
 vi.mock('@/components/desktop/thoughts/chat-panel/SlashCommandPicker', () => ({ SlashCommandPicker: () => null }));
 vi.mock('@/components/desktop/thoughts/chat-panel/ComposerStatusBar', () => ({ ComposerStatusBar: () => null }));
@@ -29,13 +29,12 @@ const home = join(root, 'home');
 mkdirSync(join(home, '.codex'), { recursive: true });
 vi.stubEnv('O8_STEER_TEST_HOME', home);
 vi.stubEnv('O8_CODEX_BIN', join(root, 'codex'));
-vi.stubEnv('O8_STEER_TEST_LOG', join(root, 'calls.jsonl'));
 vi.stubEnv('O8_CRASH_SURVIVABLE_ORCHESTRATOR', '0');
 writeFileSync(join(root, 'codex'), `#!/usr/bin/env node
 import { appendFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 if (process.argv.includes('--version')) { console.log('codex-cli 0.163.0'); process.exit(0); }
-const record = entry => appendFileSync(process.env.O8_STEER_TEST_LOG, JSON.stringify({ cwd: process.cwd(), ...entry }) + '\\n');
+const record = entry => appendFileSync(${JSON.stringify(join(root, 'calls.jsonl'))}, JSON.stringify({ cwd: process.cwd(), ...entry }) + '\\n');
 const send = message => console.log(JSON.stringify(message));
 if (process.argv[2] !== 'app-server') {
   record({ method: 'exec' });
@@ -116,7 +115,7 @@ async function running(outcome = 'accepted', options: { bridge?: boolean; model?
   // Wait for the parent to consume the bridge's turn.started acknowledgement.
   await new Promise(resolve => setTimeout(resolve, 100));
   const payload: ComposerQueuePayload = { text: 'Use the smaller change', wireMessage: 'Use the smaller change', images: [],
-    routing: { backend: 'codex', model: options.model ?? 'gpt-5.5', effort: 'low', permissionMode: 'full', mode: 'fleet', pickedMode: 'multitask', collide: false } };
+    routing: { backend: 'codex', model: options.model ?? 'gpt-5.5', effort: 'adaptive', permissionMode: 'full', mode: 'fleet', pickedMode: 'multitask', collide: false } };
   const request = (method: string, body?: unknown) => new NextRequest('http://localhost/api/orchestrator/composer-queue', {
     method, headers: { host: 'localhost', 'Content-Type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}),
   });
@@ -133,6 +132,60 @@ async function running(outcome = 'accepted', options: { bridge?: boolean; model?
 afterAll(() => { closeDb(); vi.unstubAllEnvs(); rmSync(root, { recursive: true, force: true }); });
 
 describe.skipIf(process.platform === 'win32')('Codex native live steer through the composer and bridge', () => {
+  it.each(['high', 'ultra'] as const)('refuses a queued %s pin before native input with a visible reason', async effort => {
+    const fixture = await running();
+    const id = `effort-local-${sequence}`;
+    const payload = { ...fixture.payload, routing: { ...fixture.payload.routing, effort } };
+    const heartbeat = createComposerQueueHeartbeat({ isBusy: () => true, readTranscript: async () => [], publish: () => {}, registerAbort: () => () => {} });
+    try {
+      expect((await POST(fixture.request('POST', { ...fixture.target, id, intent: 'steer-now', payload }))).status).toBe(200);
+      heartbeat();
+      await vi.waitFor(() => expect(queue.readComposerSend(id)?.status).toMatch(/^(held|applied)$/));
+      const item = queue.readComposerSend(id)!;
+      expect(item.status).toBe('held');
+      expect(item.admittedAt).toBeNull();
+      expect(item.reason).toMatch(new RegExp(`cannot.*effort.*${effort}`, 'i'));
+      expect(fixture.steers()).toEqual([]);
+      const { ComposerDeliveryTag } = await import('@/components/desktop/thoughts/chat-panel/ComposerQueuedMessages');
+      const html = renderToStaticMarkup(createElement(ComposerDeliveryTag, { item,
+        queue: { items: [item], canSteer: true, onSteer: () => {}, onCancel: () => {} } }));
+      expect(html.replace(/<[^>]*>/g, '')).toContain(renderToStaticMarkup(item.reason!));
+      closeDb(); ensureV71ComposerQueueSchema(getSqlite());
+      expect(queue.readComposerSend(id)).toMatchObject({ status: 'held', reason: item.reason });
+    } finally { await fixture.close(); }
+  }, 60_000);
+
+  it.each(['high', 'ultra'] as const)('retains the %s refusal across the server-process relay and chat', async effort => {
+    const fixture = await running();
+    const id = `effort-remote-${sequence}`;
+    const payload = { ...fixture.payload, routing: { ...fixture.payload.routing, effort } };
+    try {
+      expect((await POST(fixture.request('POST', { ...fixture.target, id, intent: 'steer-now', payload }))).status).toBe(200);
+      const script = join(root, `effort-remote-${sequence}.mts`);
+      writeFileSync(script, `
+        import queue from ${JSON.stringify(join(process.cwd(), 'src/lib/orchestrator/composer-queue.ts'))};
+        import heartbeat from ${JSON.stringify(join(process.cwd(), 'src/lib/ws-server/composer-queue-heartbeat.ts'))};
+        const tick = heartbeat.createComposerQueueHeartbeat({ isBusy: () => true, readTranscript: async () => [], publish: () => {}, registerAbort: () => () => {} });
+        tick();
+        const deadline = Date.now() + 15000;
+        while (queue.readComposerSend(${JSON.stringify(id)})?.status === 'dispatching' && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 10));
+        console.log('ITEM ' + JSON.stringify(queue.readComposerSend(${JSON.stringify(id)})));
+      `);
+      const result = await promisify(execFile)(process.execPath, ['--import', 'tsx', '--import', join(process.cwd(), 'scripts/register-server-only-stub.mjs'), script],
+        { cwd: process.cwd(), env: { ...process.env, CODEX_HOME: join(home, '.codex') }, timeout: 30_000 });
+      const item = JSON.parse(result.stdout.split('\n').find(line => line.startsWith('ITEM '))!.slice(5));
+      expect(item.status).toBe('held');
+      expect(item.admittedAt).toBeNull();
+      expect(item.reason).toMatch(new RegExp(`cannot.*effort.*${effort}`, 'i'));
+      expect(item.reason).not.toContain('unconfirmed');
+      expect(fixture.steers()).toEqual([]);
+      const { ComposerDeliveryTag } = await import('@/components/desktop/thoughts/chat-panel/ComposerQueuedMessages');
+      const html = renderToStaticMarkup(createElement(ComposerDeliveryTag, { item,
+        queue: { items: [item], canSteer: true, onSteer: () => {}, onCancel: () => {} } }));
+      expect(html.replace(/<[^>]*>/g, '')).toContain(renderToStaticMarkup(item.reason));
+    } finally { await fixture.close(); }
+  }, 60_000);
+
   it.each(['accepted', 'refused', 'mismatched', 'unconfirmed', 'wrong-ack', 'disconnected', 'silent', 'crash-survival'])('records native admission and persists %s without replay', async outcome => {
     const accepted = outcome === 'accepted' || outcome === 'crash-survival';
     const fixture = await running(accepted ? 'accepted' : outcome, { crashSurvival: outcome === 'crash-survival' });

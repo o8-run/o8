@@ -3,7 +3,7 @@ import 'server-only';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
 import { createRemoteJWKSet, jwtVerify, type JWTPayload } from 'jose';
-import { MacPlanStore } from './credential-store';
+import { OsPlanStore } from './credential-store';
 import { readDesktopAccountEpoch } from '@/lib/auth/desktop-plan-binding';
 import { ChatGPTPlanError, PLAN_SCOPE, PLAN_SCOPES, PLAN_USAGE_URL, type PlanModel, type PlanRecord, type PlanRegistration, type PlanSelection, type PlanStatus, type PlanStore, type PlanTokens } from './types';
 
@@ -316,4 +316,4 @@ export class ChatGPTPlanService {
 }
 
 let service: ChatGPTPlanService | null = null;
-export function getChatGPTPlanService(): ChatGPTPlanService { return service ??= new ChatGPTPlanService(new MacPlanStore()); }
+export function getChatGPTPlanService(): ChatGPTPlanService { return service ??= new ChatGPTPlanService(new OsPlanStore()); }

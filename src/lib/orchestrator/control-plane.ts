@@ -6,6 +6,7 @@ import { currentLaneMergePolicy } from '@/lib/lane/dogfood-guard';
 import { getLaneEvents, listLanes } from '@/lib/lane/registry';
 import { CODEX_AUTH_RECOVERY_LANE_LABEL, findCurrentAuthExit } from '@/lib/lane/current-auth-exit';
 import { recoveryInfoFromLaneEvents } from '@/lib/lane/recovery-info';
+import { readLaneTerminalReason } from '@/lib/lane/terminal-reason';
 import type { Lane, LaneEvent } from '@/lib/lane/types';
 import type { DomainLaneSummary } from '@/lib/orchestrator/domain-lane-summary';
 import { normalizeOrchestratorMissionStateForPersistence } from '@/lib/orchestrator/persisted-mission';
@@ -365,8 +366,9 @@ export function buildDomainLaneSummaries(packetIds?: ReadonlySet<string>): Domai
         && contextEvent.payload.runtimeOutcome === 'failed'
         ? (contextEvent.payload.authRecoveryRequired === true ? CODEX_AUTH_RECOVERY_MESSAGE
           : codexAuthRecoveryMessage(typeof contextEvent.payload.stderr === 'string' ? contextEvent.payload.stderr : ''))
-        : provisionFailure && lane.lastEventLabel === 'packet_worktree_provision_failed'
-          ? String(provisionFailure.payload.note ?? provisionFailure.payload.cause ?? 'Worktree provisioning failed')
+        : lane.lastEventLabel === 'packet_worktree_provision_failed'
+          ? String(provisionFailure?.payload.note ?? provisionFailure?.payload.cause
+            ?? readLaneTerminalReason(lane)?.cause ?? 'Worktree provisioning failed')
           : null;
       return {
         laneId: lane.id,

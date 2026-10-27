@@ -32,6 +32,7 @@ import {
 } from '@/lib/app-update/install-target';
 
 import { subscribeRecordedUpdate } from '@/lib/app-update/recorded-update-client';
+import { acceptNativeUpdateCheck, acceptUpdateCheck, readNativeUpdateCheck } from '@/lib/app-update/check-order';
 
 /** Tells the server about an install attempt, so a remote apply can read its outcome (#3588). */
 async function reportInstall(install: { outcome: 'started' | 'installed' | 'failed' | 'cancelled'; version: string | null; error?: string }) {
@@ -51,6 +52,7 @@ const APPLY_MUTATIONS_KEY = 'o8:update-card:apply-mutations';
 const UPDATE_AVAILABLE_EVENT = 'o8://update-available';
 const UPDATE_CLEAR_EVENT = 'o8://update-clear';
 const BUNDLE_SIGNATURE_INVALID_EVENT = 'o8://bundle-signature-invalid';
+const PACKAGE_MANAGER_NOTE = 'o8 was installed from a .deb or .rpm. Update it with your package manager (apt or dnf), or get the new package from the release page.';
 let updateInstallInFlight = false;
 
 interface InstallRequest {
@@ -118,8 +120,10 @@ function AppUpdateCard({ quiet }: { quiet: boolean }) {
   const interruptWorkRef = useRef(false);
 
   useEffect(() => {
+    const action = resolveUpdateAction(installInfo, update?.version ?? null);
     publishAppUpdateView({ version: update?.version ?? null, currentVersion: update?.currentVersion ?? null, outcome: checkReport.outcome, installing,
-      message: blockedNote, error: installError || checkReport.error, downloadOnly: resolveUpdateAction(installInfo, update?.version ?? null).kind === 'download',
+      message: blockedNote, error: installError || checkReport.error, downloadOnly: action.kind === 'download',
+      packageManager: action.kind === 'download' && action.packageManager === true,
       progress, blockers });
   }, [update, checkReport, installing, blockedNote, installError, installInfo, progress, blockers]);
   useEffect(() => { void refreshCliUpdateView(); }, []);
@@ -137,8 +141,8 @@ function AppUpdateCard({ quiet }: { quiet: boolean }) {
   }, [installInfo]);
 
   // What the running install is capable of. Only the server can read
-  // process.platform + APPIMAGE; a deb/rpm Linux install can never
-  // restart-to-install, so the card offers the release download instead.
+  // process.platform, APPIMAGE and package ownership; a deb/rpm Linux install can never
+  // restart-to-install, so the card points at the release page instead.
   useEffect(() => {
     fetch('/api/panel/app/install-info', { cache: 'no-store' })
       .then(async (response) => {
@@ -162,6 +166,7 @@ function AppUpdateCard({ quiet }: { quiet: boolean }) {
   // check is the operator asking to see it.
   useEffect(() => {
     const onFound = (event: Event) => {
+      if (!acceptUpdateCheck((event as CustomEvent<unknown>).detail)) return;
       const next = normalizeUpdateInfo((event as CustomEvent<unknown>).detail);
       if (!next) return;
       try {
@@ -188,9 +193,12 @@ function AppUpdateCard({ quiet }: { quiet: boolean }) {
 
   const checkForUpdate = useCallback(async () => {
     if (!canUseTauriEvents()) return { version: null, error: 'o8 update checking is available in the desktop app.' };
+    const context = await readNativeUpdateCheck().catch(() => undefined);
+    if (context === undefined) return { version: null, error: 'The update check could not start. Try again.' };
     try {
       const { requestFreshAppUpdateCheck } = await import('@/lib/app-update/recorded-update-client');
-      const { info: result } = await requestFreshAppUpdateCheck();
+      const { info: result, check: report } = await requestFreshAppUpdateCheck();
+      if (!await acceptNativeUpdateCheck(report)) return { version: null, error: 'The update check was replaced by a newer check. Check again.' };
       if (result) {
         setUpdate({
           version: result.version,
@@ -198,14 +206,22 @@ function AppUpdateCard({ quiet }: { quiet: boolean }) {
           notes: result.notes ?? undefined,
           date: result.date ?? undefined,
         });
-        setCheckReport(updateCheckReport('available'));
+        setCheckReport(report);
         return { version: result.version };
       } else {
         setUpdate(null);
-        setCheckReport(updateCheckReport('current'));
+        setCheckReport(report);
         return { version: null };
       }
     } catch (error) {
+      // A transport failure has no result ticket. It can affect the view only
+      // while the native context captured before the request is still current.
+      const current = await readNativeUpdateCheck().catch(() => undefined);
+      if (current === undefined) return { version: null, error: 'The latest update check could not be verified. Try again.' };
+      const unchanged = context === null ? current === null
+        : current !== null && (['checkSequence', 'checkSession', 'channel', 'generation'] as const)
+          .every(key => context[key] === current[key]);
+      if (!unchanged || !acceptUpdateCheck(current)) return { version: null, error: 'The update check was replaced by a newer check. Check again.' };
       setCheckReport(updateCheckReport('failed', error));
       return { version: null, error: error instanceof Error ? error.message : 'o8 update check failed.' };
     }
@@ -231,7 +247,8 @@ function AppUpdateCard({ quiet }: { quiet: boolean }) {
     let integrityUnlisten: Promise<() => void> | null = null;
     void import('@tauri-apps/api/event').then(({ listen }) => {
       if (cancelled) return;
-      availableUnlisten = listen<UpdateInfo>(UPDATE_AVAILABLE_EVENT, (event) => {
+      availableUnlisten = listen<UpdateInfo>(UPDATE_AVAILABLE_EVENT, async (event) => {
+        if (!await acceptNativeUpdateCheck(event.payload) || cancelled) return;
         const next = normalizeUpdateInfo(event.payload);
         if (next) {
           const payload = event.payload as unknown as Record<string, unknown>;
@@ -243,7 +260,8 @@ function AppUpdateCard({ quiet }: { quiet: boolean }) {
           ));
         }
       });
-      clearUnlisten = listen<unknown>(UPDATE_CLEAR_EVENT, (event) => {
+      clearUnlisten = listen<unknown>(UPDATE_CLEAR_EVENT, async (event) => {
+        if (!await acceptNativeUpdateCheck(event.payload) || cancelled) return;
         const nextReport = normalizeUpdateCheckReport(event.payload) ?? updateCheckReport('current');
         setCheckReport(nextReport);
         if (nextReport.outcome === 'current') {
@@ -267,6 +285,7 @@ function AppUpdateCard({ quiet }: { quiet: boolean }) {
 
   useEffect(() => {
     return subscribeRecordedUpdate((info, report, activity) => {
+      if (!acceptUpdateCheck(report)) return;
       setUpdate(info); setCheckReport(report);
       if (!activity) return;
       setInstalling(activity.phase === 'installing' || activity.phase === 'restarting');
@@ -362,7 +381,7 @@ function AppUpdateCard({ quiet }: { quiet: boolean }) {
     if (action.kind === 'download' && !request.userInitiated) {
       // Background applies (idle auto-apply, remote apply mutation) never open
       // a browser on the operator's behalf.
-      setBlockedNote('This install updates by download. o8 cannot replace a deb or rpm install in place.');
+      setBlockedNote(action.packageManager ? 'Package-managed update available.' : 'This install updates by download. o8 cannot replace it in place.');
       return;
     }
     updateInstallInFlight = true;
@@ -500,10 +519,12 @@ function AppUpdateCard({ quiet }: { quiet: boolean }) {
   if (!update) return null;
   if (dismissed && dismissed === update.version) return null;
 
-  // A deb/rpm Linux install cannot replace itself, so the same slot carries a
-  // download link to the release asset instead of restart-to-install.
+  // A deb/rpm Linux install cannot replace itself, so the same slot links to
+  // the release page and the note says to update with the package manager.
   const action = resolveUpdateAction(installInfo, update.version);
-  const actionLabel = action.kind === 'download' ? 'Download' : blockers?.live.length ? updateRestartLabel(blockers) : 'Restart';
+  const packageManaged = action.kind === 'download' && action.packageManager === true;
+  const actionLabel = packageManaged ? 'Release page' : action.kind === 'download' ? 'Download' : blockers?.live.length ? updateRestartLabel(blockers) : 'Restart';
+  const note = blockedNote ?? (packageManaged && expanded ? PACKAGE_MANAGER_NOTE : null);
 
   const cardStyle: CSSProperties = {
     flexShrink: 0,
@@ -635,7 +656,9 @@ function AppUpdateCard({ quiet }: { quiet: boolean }) {
             void handleInstall({ userInitiated: true, requireIdle: true, interrupt: Boolean(blockers?.live.length) });
           }}
           disabled={installing}
-          aria-label={action.kind === 'download'
+          aria-label={packageManaged
+            ? `Open the o8 v${update.version} release page`
+            : action.kind === 'download'
             ? `Download o8 v${update.version}`
             : `Restart to install o8 v${update.version}`}
           style={restartStyle}
@@ -655,7 +678,7 @@ function AppUpdateCard({ quiet }: { quiet: boolean }) {
         </button>
       </div>
 
-      {blockedNote ? (
+      {note ? (
         <div
           role="note"
           style={{
@@ -669,7 +692,7 @@ function AppUpdateCard({ quiet }: { quiet: boolean }) {
             wordBreak: 'break-word',
           }}
         >
-          {blockedNote}
+          {note}
         </div>
       ) : null}
 

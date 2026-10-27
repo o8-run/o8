@@ -106,6 +106,7 @@ export const deepSeekHarnessRuntime: AgentRuntime = {
     const result = await launchOwnedDeepSeekHarnessSession({
       cwd: opts.cwd,
       prompt: opts.prompt,
+      promptMemoryRevision: opts.promptMemoryRevision,
       clientMutationId: opts.clientMutationId,
       model: opts.model,
       laneId: opts.laneId,

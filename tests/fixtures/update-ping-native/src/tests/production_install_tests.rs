@@ -78,7 +78,7 @@ fn service(valid: bool, pulled: bool, admission: bool) -> Service {
                 .to_string();
             observed.lock().unwrap().push(path.clone());
             let reply = if path == "/manifest" || path.ends_with("/latest.json") {
-                serde_json::json!({"version":"0.2.0", "url": format!("{origin}/artifact"), "signature":
+                serde_json::json!({"channel":"stable", "version":"0.2.0", "url": format!("{origin}/artifact"), "signature":
                     if valid { include_str!("../../artifacts/valid.signature.b64").trim() }
                     else { include_str!("../../artifacts/invalid.signature.b64").trim() }}).to_string().into_bytes()
             } else if path == "/artifact" {

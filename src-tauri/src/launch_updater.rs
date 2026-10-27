@@ -21,22 +21,24 @@ static RUNNING_BUNDLE_INTEGRITY: OnceLock<BundleIntegrityStatus> = OnceLock::new
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct LaunchUpdatePayload {
-    channel: String,
     version: String,
     current_version: String,
     notes: Option<String>,
     date: Option<String>,
     release_url: Option<String>,
     checked_at: String,
+    #[serde(flatten)]
+    ticket: crate::update_ping::UpdateCheckTicket,
 }
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct LaunchUpdateCheckPayload {
-    channel: String,
     outcome: &'static str,
     checked_at: String,
     error: Option<String>,
+    #[serde(flatten)]
+    ticket: crate::update_ping::UpdateCheckTicket,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -213,45 +215,61 @@ pub fn start_launch_update_check<R: Runtime>(app: AppHandle<R>) {
 }
 
 pub(super) async fn run_check<R: Runtime>(app: &AppHandle<R>) -> serde_json::Value {
-    match crate::update_ping::check(app).await {
+    let started_at = checked_at();
+    let ticket = crate::update_ping::begin_update_check(app.clone());
+    let result = crate::update_ping::check_for_ticket(app, &ticket).await;
+    crate::update_ping::with_current_check(app, &ticket, || match result {
         Ok(Some(update)) => {
             let payload = LaunchUpdatePayload {
-                channel: crate::update_ping::get_update_channel(app.clone()),
                 version: update.version.clone(),
                 current_version: update.current_version.clone(),
                 notes: update.body.clone(),
                 date: update.date.map(|date| date.to_string()),
                 release_url: release_url_from_raw_json(&update.raw_json),
-                checked_at: checked_at(),
+                checked_at: started_at,
+                ticket: ticket.clone(),
             };
             let report = serde_json::json!({ "updatePending": true, "version": payload.version,
-                    "channel": payload.channel, "checkOutcome": "available", "checkedAt": payload.checked_at, "info": payload });
+                    "checkOutcome": "available", "checkedAt": payload.checked_at, "info": payload,
+                    "checkSequence": ticket.check_sequence, "checkSession": ticket.check_session,
+                    "channel": ticket.channel, "generation": ticket.generation });
             if let Err(err) = app.emit(UPDATE_AVAILABLE_EVENT, payload) {
                 log::warn!("[launch-updater] emit update-available failed: {}", err);
             }
             report
         }
-        Ok(None) => emit_clear(app, "current", None),
+        Ok(None) => emit_clear(app, "current", None, started_at, ticket.clone()),
         Err(err) => {
             log::warn!("[launch-updater] check failed: {}", err);
-            emit_clear(app, "failed", Some(bounded_check_error(err)))
+            emit_clear(
+                app,
+                "failed",
+                Some(bounded_check_error(err)),
+                started_at,
+                ticket.clone(),
+            )
         }
-    }
+    })
+    .unwrap_or(serde_json::Value::Null)
 }
 
 fn emit_clear<R: Runtime>(
     app: &AppHandle<R>,
     outcome: &'static str,
     error: Option<String>,
+    started_at: String,
+    ticket: crate::update_ping::UpdateCheckTicket,
 ) -> serde_json::Value {
     let payload = LaunchUpdateCheckPayload {
-        channel: crate::update_ping::get_update_channel(app.clone()),
         outcome,
-        checked_at: checked_at(),
+        checked_at: started_at,
         error,
+        ticket: ticket.clone(),
     };
-    let report = serde_json::json!({ "updatePending": false, "channel": payload.channel, "checkOutcome": outcome,
-        "checkedAt": payload.checked_at, "checkError": payload.error });
+    let report = serde_json::json!({ "updatePending": false, "checkOutcome": outcome,
+        "checkedAt": payload.checked_at, "checkError": payload.error,
+        "checkSequence": ticket.check_sequence, "checkSession": ticket.check_session,
+        "channel": ticket.channel, "generation": ticket.generation });
     if let Err(err) = app.emit(UPDATE_CLEAR_EVENT, payload) {
         log::warn!("[launch-updater] emit update-clear failed: {}", err);
     }

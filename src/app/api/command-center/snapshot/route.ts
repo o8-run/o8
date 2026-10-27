@@ -1,4 +1,5 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { viewerJson } from '@/lib/viewers/response';
+import { NextRequest } from 'next/server';
 import { getCommandCenterSnapshotWithOptions } from '@/lib/command-center/snapshot';
 import { performance } from 'node:perf_hooks';
 
@@ -10,14 +11,14 @@ export async function GET(req: NextRequest) {
     const startedAt = performance.now();
     const fresh = req.nextUrl.searchParams.get('fresh') === '1';
     const snapshot = await getCommandCenterSnapshotWithOptions({ fresh });
-    return NextResponse.json(snapshot, {
+    return viewerJson(snapshot, {
       headers: {
         'Cache-Control': 'no-store, max-age=0',
         'Server-Timing': `total;dur=${Math.max(0, performance.now() - startedAt).toFixed(1)}`,
       },
     });
   } catch (error) {
-    return NextResponse.json(
+    return viewerJson(
       {
         error: error instanceof Error ? error.message : 'Unable to load command center snapshot',
       },

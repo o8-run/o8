@@ -1,3 +1,5 @@
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -214,7 +216,44 @@ describe('ship preflight', () => {
     second.release();
   });
 
-  it('refuses a real competing build without counting the current release parent', () => {
+  it('completes preflight after warning about a build in a deleted external worktree', async () => {
+    const { root, head, env } = fixture();
+    const removed = mkdtempSync(join(tmpdir(), 'o8-removed-review-worktree-'));
+    roots.push(removed);
+    const child = spawn(process.execPath, ['-e', 'process.send("ready"); setInterval(() => {}, 1000);'],
+      { cwd: removed, stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
+    try {
+      await once(child, 'message');
+      rmSync(removed, { recursive: true });
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const run = (command: string, args: string[]) => {
+        if (command === 'ps') return { status: 0, stderr: '', stdout: args[0] === '-p'
+          ? `${child.pid}\n`
+          : args[1] === 'pid=,command=' ? `${child.pid} next build\n`
+            : `${child.pid} ${process.pid} next build\n` };
+        if (command === 'lsof') return { status: 0, stderr: '', stdout: `p${child.pid}\nfcwd\nn${removed}\n` };
+        return passingRun(head)(command, args);
+      };
+
+      const receipt = performShipPreflight({ root, version: '0.1.999', env, run });
+
+      expect(receipt.tag).toBe('v0.1.999');
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining(`pid=${child.pid}`));
+      const reported = process.platform === 'linux' ? `${removed} (deleted)` : removed;
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining(`cwd=${JSON.stringify(reported)}`));
+      expect(child.exitCode).toBeNull();
+      expect(child.signalCode).toBeNull();
+    } finally {
+      if (child.exitCode === null && child.signalCode === null) {
+        const closed = once(child, 'close');
+        child.kill('SIGTERM');
+        await closed;
+      }
+    }
+  });
+
+  it.each(['cargo tauri build', 'node scripts/release.mjs --ship'])
+  ('refuses a competing %s without counting the current release parent', competingCommand => {
     const { root, head, env } = fixture();
     const run = (command: string, args: string[]) => {
       if (command === 'git' && args[0] === 'rev-parse') return { status: 0, stdout: head, stderr: '' };
@@ -232,7 +271,7 @@ describe('ship preflight', () => {
       if (command === 'ps') {
         return {
           status: 0,
-          stdout: `${process.ppid} 1 node scripts/release.mjs --ship\n99999 1 cargo tauri build\n`,
+          stdout: `${process.ppid} 1 node scripts/release.mjs --ship\n99999 1 ${competingCommand}\n`,
           stderr: '',
         };
       }

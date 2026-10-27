@@ -2,6 +2,7 @@ import { recoverStoppedNativeTask } from '@/lib/app-update/native-task';
 import { NextResponse } from 'next/server';
 import { getRequestedCheckTime } from '@/lib/app-update/fresh-check';
 import { controlAutoApply } from '@/lib/app-update/auto-apply';
+import { updateCheckTicket } from '@/lib/app-update/check-order';
 
 import {
   getAppUpdateState,
@@ -61,9 +62,6 @@ export async function POST(request: Request) {
   if (typeof body.checkOutcome !== 'string' || !CHECK_OUTCOMES.has(body.checkOutcome as AppUpdateCheckOutcome)) {
     return invalidState('invalid_check_outcome', 'checkOutcome must be never, available, current, or failed.');
   }
-  if (body.channel !== undefined && body.channel !== 'stable' && body.channel !== 'beta' && body.channel !== 'preview') {
-    return invalidState('invalid_update_channel', 'channel must be stable or beta.');
-  }
   const checkOutcome = body.checkOutcome as AppUpdateCheckOutcome;
   if (checkOutcome === 'available' && !body.updatePending) {
     return invalidState('invalid_update_state', 'available requires updatePending to be true.');
@@ -76,11 +74,16 @@ export async function POST(request: Request) {
     return invalidState('invalid_checked_at', 'checkedAt must be an ISO timestamp after a check runs.');
   }
 
+  const ticket = updateCheckTicket(body);
+  if (['checkSession', 'checkSequence', 'channel', 'generation'].some(key => key in body) && !ticket) {
+    return invalidState('invalid_check_ticket', 'An ordered check requires its native session, sequence, channel, and generation.');
+  }
+
   const state = setAppUpdateState({
+    ...(ticket ?? {}),
     updatePending: body.updatePending,
     version: typeof body.version === 'string' && body.version.trim() ? body.version.trim() : null,
     checkOutcome,
-    channel: body.channel,
     checkedAt: typeof body.checkedAt === 'string' ? body.checkedAt : null,
     info: isRecord(body.info) ? body.info : null,
     checkError: typeof body.checkError === 'string' ? body.checkError : null,

@@ -5,8 +5,10 @@
  *   1. O8_MASTER_KEY env var — CI / headless override, always wins.
  *   2. macOS Keychain via `security` CLI — creates a fresh 256-bit key on
  *      first call; subsequent calls retrieve the same key. Only on darwin.
- *   3. Persisted random key file — reproducible across restarts, used only when
- *      Keychain is unavailable (e.g. `npm run dev` on non-macOS or in CI).
+ *   3. Linux Secret Service via `secret-tool` (GNOME Keyring, KWallet, KeePassXC)
+ *      for new installs, when one is running. An existing key file keeps winning.
+ *   4. Persisted random key file — reproducible across restarts, used when no
+ *      OS secret store is available (headless Linux, CI, other platforms).
  *
  * The Tauri commands `master_key_get` / `master_key_ensure` (src-tauri/src/lib.rs)
  * use the same native master-key resolver. Provider inventory never exposes secrets.
@@ -20,6 +22,8 @@ import { join } from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { hasEncryptedKeyValues } from '@/lib/providers/env-format';
 import { execKeychainCommand } from '@/lib/providers/child-process';
+import { lookupSecretSync, storeSecretSync } from '@/lib/providers/secret-service';
+import Database from 'better-sqlite3';
 
 // ── Constants ──
 
@@ -32,6 +36,17 @@ const KEYCHAIN_ACCOUNT = 'default';
 
 function dataDir(): string {
   return getDataDir();
+}
+
+/** Every store sharing this key must prevent first-run creation after key loss. */
+function hasEncryptedStoredCredentials(): boolean {
+  const providerPath = join(dataDir(), '.env.local');
+  if (existsSync(providerPath) && hasEncryptedKeyValues(readFileSync(providerPath, 'utf8'))) return true;
+  const acpPath = join(dataDir(), 'acp-environment.sqlite');
+  if (!existsSync(acpPath)) return false;
+  const db = new Database(acpPath, { readonly: true, fileMustExist: true });
+  try { return Boolean(db.prepare('SELECT 1 FROM credentials LIMIT 1').get()); }
+  finally { db.close(); }
 }
 
 /**
@@ -49,7 +64,7 @@ function readOrCreateKeyFile(create: boolean): string {
     return existing;
   }
   if (!create) throw new Error('Master key unavailable');
-  if (existsSync(join(dataDir(), '.env.local')) && hasEncryptedKeyValues(readFileSync(join(dataDir(), '.env.local'), 'utf8'))) {
+  if (hasEncryptedStoredCredentials()) {
     throw new Error('Encrypted credentials exist without an accessible master key');
   }
   const key = generateKey();
@@ -120,7 +135,8 @@ function generateKey(): string {
  * Resolution order:
  *   1. O8_MASTER_KEY env var  (CI / headless override, always wins).
  *   2. macOS Keychain via `security` CLI (creates entry on first call).
- *   3. Persisted random key file (reproducible across restarts, no Keychain needed).
+ *   3. Linux Secret Service via `secret-tool` (new installs, when running).
+ *   4. Persisted random key file (reproducible across restarts, no OS store needed).
  *
  * Reads may use the in-process cache; mutations always revalidate its source.
  */
@@ -136,9 +152,9 @@ export class MasterKeyUnavailableError extends Error {
 }
 
 /** Re-read the backing source without rotating an established process identity. */
-export function assertMasterKeyAvailableForMutation(): string {
+export function assertMasterKeyAvailableForMutation(options: { createIfMissing?: boolean } = {}): string {
   try {
-    const current = resolveBackingKey(_cachedKey === null);
+    const current = resolveBackingKey(_cachedKey === null && options.createIfMissing !== false);
     if (_cachedKey && !decodeBase64Url(current).equals(decodeBase64Url(_cachedKey))) throw new Error('Master key changed');
     _cachedKey = current;
     return current;
@@ -176,7 +192,7 @@ function resolveBackingKey(create: boolean): string {
     if (!keychainKey) {
       // Genuinely absent (first run) — generate and persist.
       if (existsSync(join(dataDir(), 'master-key'))) return readOrCreateKeyFile(create);
-      if (existsSync(join(dataDir(), '.env.local')) && hasEncryptedKeyValues(readFileSync(join(dataDir(), '.env.local'), 'utf8'))) throw new Error('Encrypted credentials exist without a master key');
+      if (hasEncryptedStoredCredentials()) throw new Error('Encrypted credentials exist without a master key');
       if (!create) throw new Error('Master key unavailable');
       const newKey = generateKey();
       if (writeKeychainKey(newKey)) {
@@ -195,9 +211,61 @@ function resolveBackingKey(create: boolean): string {
     }
   }
 
-  // 3. Persisted random key file (0600) — non-macOS, or if the Keychain is
-  //    unavailable. NEVER a hardcoded constant (§MED-1).
+  // 3. Linux Secret Service, when one is running.
+  if (process.platform === 'linux') {
+    const secretServiceKey = resolveSecretServiceKey(create);
+    if (secretServiceKey) return secretServiceKey;
+  }
+
+  // 4. Persisted random key file (0600) — no OS secret store, or a key file
+  //    that predates one. NEVER a hardcoded constant (§MED-1).
   return readOrCreateKeyFile(create);
+}
+
+const SECRET_SERVICE_ATTRIBUTES = { service: KEYCHAIN_SERVICE, account: KEYCHAIN_ACCOUNT } as const;
+/** Non-secret marker: the key lives in the Secret Service, so never mint a file key. */
+const SECRET_SERVICE_MARKER = 'master-key.secret-service';
+let _loggedFileFallback = false;
+
+/**
+ * Linux Secret Service resolution. Returns null when the 0600 key file should
+ * be used instead: a key file already exists (it stays authoritative and is
+ * never moved), or no Secret Service is running and none was used before.
+ * Throws rather than rotate when a key that lives in the service can't be read.
+ */
+function resolveSecretServiceKey(create: boolean): string | null {
+  if (existsSync(join(dataDir(), 'master-key'))) return null;
+  const marker = join(dataDir(), SECRET_SERVICE_MARKER);
+  const read = lookupSecretSync(SECRET_SERVICE_ATTRIBUTES);
+  if (read.status === 'found') {
+    const key = read.value.trim();
+    if (Buffer.from(key, 'base64url').length !== 32) throw new Error('Invalid existing master key');
+    return key;
+  }
+  if (read.status === 'unavailable' && !existsSync(marker)) {
+    if (!_loggedFileFallback) {
+      _loggedFileFallback = true;
+      console.warn(`[master-key] Secret Service unavailable (${read.detail}); using the 0600 key file at ${join(dataDir(), 'master-key')}`);
+    }
+    return null;
+  }
+  if (read.status !== 'absent' || existsSync(marker)) {
+    // Locked collection, dismissed prompt, or a key this install stored in the
+    // service and can't reach now. Minting a replacement would orphan every blob.
+    const why = read.status === 'absent' ? 'the stored key is missing' : read.detail;
+    console.error(`[master-key] Secret Service read FAILED (not "absent"): ${why}`);
+    throw new Error(`Secret Service read failed — refusing to rotate or downgrade the master key. Unlock the keyring and retry. (${why})`);
+  }
+  if (hasEncryptedStoredCredentials()) throw new Error('Encrypted credentials exist without a master key');
+  if (!create) throw new Error('Master key unavailable');
+  const key = generateKey();
+  const stored = storeSecretSync('o8 master key', SECRET_SERVICE_ATTRIBUTES, key);
+  if (stored.status === 'unavailable') return null;
+  if (stored.status === 'error') throw new Error(`Secret Service write failed; existing state preserved (${stored.detail})`);
+  mkdirSync(dataDir(), { recursive: true, mode: 0o700 });
+  writeFileSync(marker, 'The o8 master key is stored in the Secret Service (service ai.o8.master-key).\n', { mode: 0o600 });
+  console.log('[master-key] Generated and stored new key in the Secret Service');
+  return key;
 }
 
 /**

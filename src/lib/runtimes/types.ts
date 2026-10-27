@@ -272,6 +272,8 @@ export interface RuntimeSessionTransformProviderResult {
  * Options for launching a new session.
  */
 export interface LaunchOptions {
+  /** Recall epoch bound before assembling this launch prompt. */
+  promptMemoryRevision?: string;
   cwd: string;
   controlledTask?: import('@/lib/mcp/task-execution-store').ControlledTaskBinding;
   executionPolicy?: 'single-attempt';

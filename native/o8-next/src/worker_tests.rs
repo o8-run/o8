@@ -74,12 +74,10 @@ fn worker_send_steer_queue_promote_remove_and_streaming_latency(cx: &mut TestApp
         s.sessions = saved.sessions().unwrap();
         s.select("thoughts-composer-first".into(), cx);
     });
-    cx.run_until_parked();
-    draw(cx);
-    assert!(surface.read_with(cx, |s, _| s.queue_ready));
+    wait(&surface, cx, "initial queue receipt", |s| s.queue_ready);
     assert!(
-        cx.debug_bounds("Steer now").is_some(),
-        "render the default mode in words"
+        cx.debug_bounds("send-mode-steer").is_some(),
+        "render the default Steer chip"
     );
     surface.update_in(cx, |s, window, cx| s.composer.read(cx).focus.focus(window));
     // GPUI installs the native input handler during paint after focus changes.
@@ -141,11 +139,16 @@ fn worker_send_steer_queue_promote_remove_and_streaming_latency(cx: &mut TestApp
     );
     cx.simulate_keystrokes("ctrl-shift-enter");
     draw(cx);
-    assert!(cx.debug_bounds("Send next").is_some());
+    assert!(cx.debug_bounds("send-mode-queue").is_some());
     cx.simulate_input("Promoted instruction");
     cx.simulate_keystrokes("enter");
-    cx.run_until_parked();
-    draw(cx);
+    wait(&surface, cx, "queued promote receipt", |s| {
+        s.queue["items"].as_array().is_some_and(|items| {
+            items.iter().any(|item| {
+                item["payload"]["text"] == "Promoted instruction" && item["status"] == "queued"
+            })
+        })
+    });
     let promote = cx
         .debug_bounds("steer-now")
         .expect("queued steer now action");
@@ -162,16 +165,13 @@ fn worker_send_steer_queue_promote_remove_and_streaming_latency(cx: &mut TestApp
     cx.simulate_input("Removed instruction");
     draw(cx);
     cx.simulate_keystrokes("enter");
-    cx.run_until_parked();
-    draw(cx);
-    assert!(
-        surface.read_with(cx, |s, _| s.queue["items"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|item| item["payload"]["text"] == "Removed instruction"
-                && item["status"] == "queued"))
-    );
+    wait(&surface, cx, "queued remove receipt", |s| {
+        s.queue["items"].as_array().is_some_and(|items| {
+            items.iter().any(|item| {
+                item["payload"]["text"] == "Removed instruction" && item["status"] == "queued"
+            })
+        })
+    });
     cx.simulate_input("Draft kept");
     assert_eq!(
         surface.read_with(cx, |s, cx| s.composer.read(cx).text.clone()),
@@ -180,17 +180,13 @@ fn worker_send_steer_queue_promote_remove_and_streaming_latency(cx: &mut TestApp
     draw(cx);
     let remove = cx.debug_bounds("remove-queued").unwrap();
     cx.simulate_click(remove.center(), gpui::Modifiers::default());
-    cx.run_until_parked();
-    draw(cx);
-    assert!(
-        surface.read_with(cx, |s, _| s.queue["items"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .all(|item| item["payload"]["text"] != "Removed instruction")),
-        "{}",
-        surface.read_with(cx, |s, _| s.notice.clone())
-    );
+    wait(&surface, cx, "removed queue receipt", |s| {
+        s.queue["items"].as_array().is_some_and(|items| {
+            items
+                .iter()
+                .all(|item| item["payload"]["text"] != "Removed instruction")
+        })
+    });
     assert_eq!(
         surface.read_with(cx, |s, cx| s.composer.read(cx).text.clone()),
         "Draft kept"

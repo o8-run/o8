@@ -40,25 +40,26 @@ before it signs it. The existing signing key and invocation stay unchanged.
 
 ## Order of operations for a full Linux updater publish
 
-1. Ship the macOS candidate to beta. Its tag contains `beta.json` and an
-   identical tag-local `latest.json` compatibility alias for Linux completion.
-   The rolling stable manifest stays on the existing stable feed anchor.
-2. Dispatch `Port Build` for that candidate tag with `publish_target: linux`
-   or `both`, then copy the AppImage to the mirror with `publish_to_mirror`.
-   Both repositories must hold the same candidate's AppImage before signing.
-3. Run `npm run ship:linux-sig -- --tag vX.Y.Z` on the release host. The
-   existing signer adds the signed Linux entry to the tag-local `latest.json`.
-   Completion copies the full manifest to tag-local `beta.json` in every
-   repository, then refreshes the rolling beta feed beside stable. Darwin
-   entries are preserved. Completion also adds the exact AppImage hash to the
-   installer list, so promotion requires its own installed smoke receipt. No
-   re-dispatch is needed for the signature copy.
-4. Verify the completed beta candidate on every platform, run installed-build
-   smoke acceptance, then use `npm run promote -- --version X.Y.Z`. Promotion
-   copies every signed candidate platform unchanged and refuses a candidate
-   missing any platform already served by stable. Never promote the macOS-only
-   intermediate manifest when stable also serves Linux.
-5. Serialize promotions with the common release-host lock. An overlapping
-   command fails and may be retried after the owner exits. A candidate older
-   than stable is refused, including after a concurrent newer promotion.
-   See [beta and stable feeds](beta-updates.md) for lock recovery and retries.
+1. Ship the macOS candidate to beta using the existing approved controls. Its
+   tag contains `beta.json`; the independent `beta` anchor carries the rolling
+   beta feed. Stable's existing `latest.json` anchor is unchanged.
+2. Dispatch the port build for that candidate and copy its AppImage to the
+   mirror. Both repositories must hold the same candidate before completion.
+   The AppImage must contain the matching signed build channel identity.
+3. Run `npm run ship:linux-sig -- --tag vX.Y.Z` on the release host. It verifies
+   the signature and embedded identity, adds the Linux platform and exact
+   installer hash to each candidate `beta.json`, and preserves all other
+   entries. The rolling beta anchor is completed only at that exact version;
+   an old completion cannot move it backwards. No `latest.json` alias is used.
+4. Download the final manifest and every installer it advertises. Run
+   `npm run smoke:installed -- --artifact <installer> --manifest <beta.json> --receipt <smoke.json>`
+   on each supported platform. Later manifest changes invalidate all receipts.
+5. Inspect every passing receipt before separately authorized promotion:
+   `npm run promote -- --version X.Y.Z --smoke-receipt <smoke.json>`.
+   Repeat the receipt option for all installers. Promotion preserves every
+   signed platform, refuses any gap relative to stable and sets stable feed
+   identity without rebuilding the artifacts.
+6. All feed writers share `O8_RELEASE_FEED_LOCK` on the same release host.
+   An overlapping operation fails; retry after its owner exits. Promotion
+   rechecks stable immediately before each write and refuses backwards moves.
+   See [beta and stable feeds](beta-updates.md) for recovery and receipt details.

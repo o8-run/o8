@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -18,11 +18,17 @@ it('completes the beta Linux manifest through ship:linux-sig without changing ro
   }], platforms: {
     'darwin-x86_64': { url: `https://github.com/o8-run/o8/releases/download/${tag}/o8.app.tar.gz`, signature: 'darwin-fixture' },
   } };
-  for (const release of [tag, 'v0.1.800']) mkdirSync(join(root, release));
-  for (const name of ['beta.json', 'latest.json']) writeFileSync(join(root, tag, name), JSON.stringify(manifest));
+  for (const release of [tag, 'beta', 'v0.1.800']) mkdirSync(join(root, release));
+  writeFileSync(join(root, tag, 'beta.json'), JSON.stringify(manifest));
   const stable = JSON.stringify({ version: '0.1.800', platforms: {} });
   writeFileSync(join(root, 'v0.1.800/latest.json'), stable);
-  writeFileSync(join(root, tag, asset), 'fixture artifact bytes');
+  writeFileSync(join(root, 'beta/beta.json'), JSON.stringify(manifest));
+  const source = join(process.cwd(), 'tests/fixtures/linux-build-channel');
+  copyFileSync(join(source, 'beta.AppImage'), join(root, tag, asset));
+  mkdirSync(join(root, 'src-tauri'));
+  writeFileSync(join(root, 'src-tauri/tauri.conf.json'), JSON.stringify({ plugins: { updater: {
+    pubkey: readFileSync(join(source, 'public-key.txt'), 'utf8'),
+  } } }));
   const gh = join(root, 'bin/gh');
   writeFileSync(gh, `#!${process.execPath}
 const fs=require('node:fs'),path=require('node:path'),a=process.argv.slice(2),root=process.env.O8_LINUX_FIXTURE;
@@ -33,22 +39,26 @@ if(a[1]==='upload')for(const file of a.slice(3)){if(file.startsWith('--'))break;
 `);
   const cargo = join(root, 'bin/cargo');
   writeFileSync(cargo, `#!${process.execPath}
-const fs=require('node:fs');fs.writeFileSync(process.argv.at(-1)+'.sig','linux-fixture');
+const fs=require('node:fs');fs.copyFileSync(process.env.O8_LINUX_SIGNATURE,process.argv.at(-1)+'.sig');
 `);
-  for (const executable of [gh, cargo]) chmodSync(executable, 0o700);
+  const unsquashfs = join(root, 'bin/unsquashfs');
+  writeFileSync(unsquashfs, `#!${process.execPath}
+const fs=require('node:fs');process.stdout.write(fs.readFileSync(process.argv[5]).subarray(352));
+`);
+  for (const executable of [gh, cargo, unsquashfs]) chmodSync(executable, 0o700);
   const result = spawnSync(process.execPath, [join(process.cwd(), 'scripts/sign-linux-appimage.mjs'), '--tag', tag, '--repo', 'o8-run/o8'], {
-    encoding: 'utf8', timeout: 15_000,
-    env: { ...process.env, CI: '', TAURI_SIGNING_PRIVATE_KEY: 'fixture', PATH: `${join(root, 'bin')}:${process.env.PATH}`, O8_LINUX_FIXTURE: root },
+    cwd: root, encoding: 'utf8', timeout: 15_000,
+    env: { ...process.env, CI: '', TAURI_SIGNING_PRIVATE_KEY: 'fixture', PATH: `${join(root, 'bin')}:${process.env.PATH}`, O8_LINUX_FIXTURE: root, O8_LINUX_SIGNATURE: join(source, 'beta.AppImage.sig'), O8_RELEASE_FEED_LOCK: join(root, 'publication.lock') },
   });
   expect(result.status, result.stderr).toBe(0);
   const beta = JSON.parse(readFileSync(join(root, tag, 'beta.json'), 'utf8'));
   expect(beta.installers).toEqual([...manifest.installers, {
     url: beta.platforms['linux-x86_64'].url,
-    sha256: createHash('sha256').update('fixture artifact bytes').digest('hex'),
+    sha256: createHash('sha256').update(readFileSync(join(root, tag, asset))).digest('hex'),
   }]);
-  expect(beta.platforms['linux-x86_64']).toMatchObject({ signature: 'linux-fixture' });
+  expect(beta.platforms['linux-x86_64']).toMatchObject({ signature: readFileSync(join(source, 'beta.AppImage.sig'), 'utf8').trim() });
   expect(beta.platforms['darwin-x86_64']).toEqual(manifest.platforms['darwin-x86_64']);
-  expect(JSON.parse(readFileSync(join(root, tag, 'latest.json'), 'utf8'))).toEqual(beta);
-  expect(JSON.parse(readFileSync(join(root, 'v0.1.800/beta.json'), 'utf8'))).toEqual(beta);
+  expect(existsSync(join(root, tag, 'latest.json'))).toBe(false);
+  expect(JSON.parse(readFileSync(join(root, 'beta/beta.json'), 'utf8'))).toEqual(beta);
   expect(readFileSync(join(root, 'v0.1.800/latest.json'), 'utf8')).toBe(stable);
 });

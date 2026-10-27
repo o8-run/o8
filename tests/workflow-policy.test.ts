@@ -214,10 +214,18 @@ describe('workflow policy — every workflow is classified from the filesystem',
     for (const file of workflowFiles) {
       const triggers = triggerNames(file.workflow);
       const manualOnly = triggers.size === 1 && triggers.has('workflow_dispatch');
-      // #4444 adds one weekly native resource suite, never a per-PR macOS lane.
+      // The native resource suite also covers changes to its preservation
+      // fixture or workflow; unrelated pull requests never request this runner.
       const weeklyResources = file.name === 'macos-resource-tests.yml';
       if (weeklyResources) {
-        expect([...triggers].sort()).toEqual(['schedule', 'workflow_dispatch']);
+        expect([...triggers].sort()).toEqual(['pull_request', 'schedule', 'workflow_dispatch']);
+        expect((file.workflow.on as RecordValue).pull_request).toEqual({
+          branches: ['main'],
+          paths: [
+            'tests/workspace-preservation-cli-real-path.test.ts',
+            '.github/workflows/macos-resource-tests.yml',
+          ],
+        });
         expect((file.workflow.on as RecordValue).schedule).toEqual([{ cron: '37 6 * * 2' }]);
         expect(jobsIn(file)).toHaveLength(1);
         const job = jobsIn(file)[0][1];
@@ -242,8 +250,16 @@ describe('workflow policy — every workflow is classified from the filesystem',
         expect(job.strategy).toBeUndefined();
         expect(job.steps).toHaveLength(2);
       }
+      const localVerification = file.name === 'verify-ci-macos.yml';
+      if (localVerification) {
+        expect([...triggers]).toEqual(['workflow_dispatch']);
+        expect(jobsIn(file)).toHaveLength(1);
+        const job = jobsIn(file)[0][1];
+        expect(job['timeout-minutes']).toBe(60);
+        expect(job.strategy).toEqual({ 'fail-fast': false, matrix: { scenario: ['clean', 'integration', 'dependency', 'bundle'] } });
+      }
       for (const [jobName, job] of jobsIn(file)) {
-        if (usesMacOsRunner(job) && !manualOnly && !weeklyResources && !minimumOsDmg) {
+        if (usesMacOsRunner(job) && !manualOnly && !weeklyResources && !minimumOsDmg && !localVerification) {
           violations.push(`${file.name}: jobs.${jobName}`);
         }
       }

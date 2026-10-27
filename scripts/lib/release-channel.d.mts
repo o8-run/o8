@@ -1,9 +1,8 @@
 export interface ReleaseChannel {
-  channel: 'beta' | 'preview';
+  channel: 'stable' | 'preview';
   preview: boolean;
   tag: string;
-  manifestName: 'beta.json' | 'preview.json';
-  compatibilityManifestName: 'latest.json' | null;
+  manifestName: 'latest.json' | 'preview.json';
   githubFlags: string[];
   publishStableEffects: boolean;
 }

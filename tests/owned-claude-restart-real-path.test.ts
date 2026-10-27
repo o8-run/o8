@@ -19,6 +19,7 @@ let output = '';
 let surfaceId = '';
 let laneId = '';
 let pid = 0;
+let providerPid = 0;
 let start = '';
 let launchBody: Record<string, unknown>;
 const startTime = (workerPid: number) => execFileSync('ps', ['-o', 'lstart=', '-p', String(workerPid)], { encoding: 'utf8' }).trim();
@@ -64,7 +65,7 @@ const state = () => api<{ alive?: boolean; lane: { sessionKey: string; status: s
 const transcript = (cursor?: string) => api<{ transcript: Array<{ id: string; text: string }> }>(`/api/runtime/transcript?sessionKey=${encodeURIComponent(surfaceId)}&limit=1000${cursor ? `&sinceId=${encodeURIComponent(cursor)}` : ''}`);
 
 beforeAll(async () => {
-  helper = buildPiWriteHelper();
+  helper = process.env.O8_PI_WRITE_BIN || buildPiWriteHelper();
   mkdirSync(repo); mkdirSync(join(root, 'operator-fixture'));
   writeFileSync(join(root, 'ws-token'), 'offline-claude-restart-token', { mode: 0o600 });
   const git = (...args: string[]) => execFileSync('git', args, { cwd: repo, stdio: 'pipe' });
@@ -81,18 +82,19 @@ beforeAll(async () => {
   const result = await api<{ ok: boolean; surfaceId: string }>('/api/runtime/launch', launchBody);
   expect(result, output).toMatchObject({ ok: true }); surfaceId = result.surfaceId;
   await waitFor(() => existsSync(join(root, 'launches.jsonl')), 'worker ready');
+  providerPid = JSON.parse(readFileSync(join(root, 'launches.jsonl'), 'utf8').trim()).pid;
   pid = session().activeRun!.pid; start = startTime(pid);
 }, 180_000);
 
 afterAll(async () => {
   await stopServer('SIGKILL');
-  if (pid) { try { if (startTime(pid) === start) process.kill(pid, 'SIGKILL'); } catch { /* Already exited. */ } }
+  if (pid) { try { if (startTime(pid) === start) process.kill(-pid, 'SIGKILL'); } catch { /* Already exited. */ } }
   rmSync(root, { recursive: true, force: true });
 });
 
 describe.skipIf(process.platform === 'win32')('Claude packet restart through the real launch route', () => {
-  it('hands the worker a durable regular stdin file before any provider input is read', () => {
-    expect(JSON.parse(readFileSync(join(root, 'launches.jsonl'), 'utf8').trim())).toMatchObject({ pid, stdinIsFile: true });
+  it('hands the provider a worker-owned pipe before any input is read', () => {
+    expect(JSON.parse(readFileSync(join(root, 'launches.jsonl'), 'utf8').trim())).toMatchObject({ pid: providerPid, stdinIsFile: false });
   });
 
   it('survives TERM and KILL with the same identity, provider session, lane, offline transcript and launch receipt', async () => {
@@ -101,9 +103,9 @@ describe.skipIf(process.platform === 'win32')('Claude packet restart through the
     for (const [index, signal] of (['SIGTERM', 'SIGKILL'] as const).entries()) {
       const cursor = (await transcript()).transcript.at(-1)?.id;
       await stopServer(signal);
-      if (index === 0) process.kill(pid, 'SIGUSR1');
+      if (index === 0) process.kill(providerPid, 'SIGUSR1');
       await waitFor(() => existsSync(join(root, 'heartbeat')), 'worker reads input after server death');
-      rmSync(join(root, 'offline-written'), { force: true }); process.kill(pid, 'SIGUSR2');
+      rmSync(join(root, 'offline-written'), { force: true }); process.kill(providerPid, 'SIGUSR2');
       await waitFor(() => existsSync(join(root, 'offline-written')), 'output without server');
       expect(startTime(pid)).toBe(start);
       expect(JSON.parse(readFileSync(join(root, 'input.json'), 'utf8')).message.content).toContain('Keep the packet alive');

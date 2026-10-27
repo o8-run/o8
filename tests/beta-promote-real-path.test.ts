@@ -51,15 +51,15 @@ if (a[1] === 'upload') {
 function run(f: ReturnType<typeof fixture>, version = '0.1.900', extra: string[] = []) {
   return spawnSync(process.execPath, [script, '--version', version, '--repo', 'o8-run/o8', ...(extra.includes('--no-receipt') ? [] : ['--smoke-receipt', f.receipt]), ...extra.filter(arg => arg !== '--no-receipt')], {
     cwd: f.root, encoding: 'utf8', timeout: 10_000,
-    env: { ...process.env, PATH: `${join(f.root, 'bin')}:${process.env.PATH}`, O8_PROMOTE_FIXTURE: f.root, O8_PROMOTE_LOCK_PATH: join(f.root, 'promote.lock') },
+    env: { ...process.env, PATH: `${join(f.root, 'bin')}:${process.env.PATH}`, O8_PROMOTE_FIXTURE: f.root, O8_RELEASE_FEED_LOCK: join(f.root, 'promote.lock') },
   });
 }
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
-it('promotes exactly the beta manifest without a build or artifact upload', () => {
+it('promotes the smoke-verified beta artifacts with explicit stable identity without a build or artifact upload', () => {
   const f = fixture();
   const result = run(f);
   expect(result.status, result.stderr).toBe(0);
-  expect(JSON.parse(readFileSync(join(f.root, 'promoted.json'), 'utf8'))).toEqual(f.manifest);
+  expect(JSON.parse(readFileSync(join(f.root, 'promoted.json'), 'utf8'))).toEqual({ ...f.manifest, channel: 'stable' });
   const calls: string[][] = readFileSync(join(f.root, 'calls.jsonl'), 'utf8').trim().split('\n').map(line => JSON.parse(line));
   expect(calls.filter(a => a[1] === 'upload')).toHaveLength(1);
   expect(calls.find(a => a[1] === 'upload')).toContain('v0.1.800');
@@ -140,7 +140,7 @@ it('serializes overlapping commands and refuses a later downgrade', async () => 
     version: newer.version, manifestSha256: manifestSha256(newer) }));
   const child = spawn(process.execPath, [script, '--version', '0.1.900', '--repo', 'o8-run/o8', '--smoke-receipt', f.receipt], {
     cwd: f.root, stdio: 'pipe', env: { ...process.env, PATH: `${join(f.root, 'bin')}:${process.env.PATH}`,
-      O8_PROMOTE_FIXTURE: f.root, O8_PROMOTE_LOCK_PATH: join(f.root, 'promote.lock'), O8_PROMOTE_PAUSE: '1' },
+      O8_PROMOTE_FIXTURE: f.root, O8_RELEASE_FEED_LOCK: join(f.root, 'promote.lock'), O8_PROMOTE_PAUSE: '1' },
   });
   let errors = '';
   child.stderr.on('data', chunk => { errors += chunk; });
@@ -161,3 +161,19 @@ it('serializes overlapping commands and refuses a later downgrade', async () => 
     await completed;
   }
 }, 20_000);
+
+it('uses the same publication lock as beta and Linux writers before reading manifests', () => {
+  const f = fixture();
+  writeFileSync(join(f.root, 'promote.lock'), 'another publisher owns this lock');
+  const result = run(f);
+  expect(result.status).toBe(1);
+  expect(existsSync(join(f.root, 'calls.jsonl'))).toBe(false);
+  expect(existsSync(join(f.root, 'promoted.json'))).toBe(false);
+  expect(readFileSync(join(f.root, 'promote.lock'), 'utf8')).toBe('another publisher owns this lock');
+});
+it('repeats promotion with stable identity and unchanged artifact bytes', () => {
+  const f = fixture();
+  expect(run(f).status).toBe(0);
+  expect(run(f).status).toBe(0);
+  expect(JSON.parse(readFileSync(join(f.root, 'latest.json'), 'utf8'))).toEqual({ ...f.manifest, channel: 'stable' });
+});

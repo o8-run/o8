@@ -10,10 +10,13 @@ import {
 } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 import { collectReleaseBuildCacheIdentity } from './release-build-cache.mjs';
+import { compilerEnvironment } from './release-native-inputs.mjs';
 
 export const RELEASE_ARTIFACT_MANIFEST = 'out/.o8-release-artifact-manifest.json';
 
 const RECIPE_FILES = [
+  'release-build.json',
+  'scripts/lib/build-channel.mjs',
   'package-lock.json',
   'src-tauri/Cargo.lock',
   'src-tauri/tauri.conf.json',
@@ -21,6 +24,9 @@ const RECIPE_FILES = [
   'scripts/build.mjs',
   'scripts/build-speech-local.mjs',
   'scripts/build-pi-write.mjs',
+  'scripts/next/build-sidecar.mjs',
+  'scripts/next/build-identity.mjs',
+  'native/o8-next/Cargo.lock',
   'src-tauri/sidecars/pi-write/Cargo.lock',
   'scripts/tauri-export.mjs',
   'scripts/tauri-prebuild.mjs',
@@ -46,6 +52,9 @@ const SPEECH_ARTIFACTS = [
   'src-tauri/helpers/speech-local-universal-apple-darwin',
   'src-tauri/helpers/speech-local-x86_64-apple-darwin',
 ];
+
+const NEXT_ARTIFACTS = ['', '-aarch64-apple-darwin', '-x86_64-apple-darwin', '-universal-apple-darwin', '-build.json']
+  .map(suffix => `src-tauri/helpers/o8-next${suffix}`);
 
 const PI_WRITE_ARTIFACTS = [
   'src-tauri/helpers/o8-pi-write',
@@ -82,7 +91,7 @@ function commandVersion(root, command, args) {
 function outputRoots(root) {
   return [
     { absolute: join(root, 'out'), relative: 'out' },
-    ...[...SPEECH_ARTIFACTS, ...PI_WRITE_ARTIFACTS].map((path) => ({ absolute: join(root, path), relative: path })),
+    ...[...SPEECH_ARTIFACTS, ...PI_WRITE_ARTIFACTS, ...NEXT_ARTIFACTS].map((path) => ({ absolute: join(root, path), relative: path })),
   ];
 }
 
@@ -149,6 +158,14 @@ export function collectReleaseArtifactRecipe(root, version, options = {}) {
   const webBuildCompatibilitySha256 = collectReleaseBuildCacheIdentity(root, 'web', {
     env: options.env ?? process.env,
   }).compatibilitySha256;
+  // Whole-artifact reuse also skips native sidecar compilation. Use the native
+  // compiler registry (including external Cargo config), without persisting its
+  // values or depending on generated frontend files that prebuild recreates.
+  const env = options.env ?? process.env;
+  const nativeCompilerInputsSha256 = createHash('sha256').update(stableJson({
+    environment: compilerEnvironment(root, 'native', env),
+    sidecarTarget: env.O8_TAURI_BUILD_TARGET || env.TAURI_ENV_TARGET_TRIPLE || '',
+  })).digest('hex');
   const recipe = {
     schema: 'o8/release-artifact-recipe/v1',
     head,
@@ -170,6 +187,7 @@ export function collectReleaseArtifactRecipe(root, version, options = {}) {
     },
     inputs,
     webBuildCompatibilitySha256,
+    nativeCompilerInputsSha256,
   };
   return {
     ...recipe,

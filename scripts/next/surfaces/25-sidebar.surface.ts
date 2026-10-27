@@ -4,14 +4,18 @@ import type { SurfaceContext, SurfaceRoutes } from '../surface-routes';
 
 export async function prepare({ dataDir }: SurfaceContext): Promise<SurfaceRoutes> {
   process.env.O8_OWNED_PI_ROOT = join(dataDir, 'owned-pi');
+  process.env.O8_OWNED_PI_BUILTIN_ROOT = join(dataDir, 'owned-pi-builtin');
   return {};
 }
 export default async function register({ dataDir, root, seeds, fixtureToken, transcriptFixtures }: SurfaceContext): Promise<SurfaceRoutes> {
   const enabled = process.argv.includes('--sidebar');
+  const auditKeyboard = process.argv.includes('--sidebar-keyboard-audit');
+  const archives: Array<{ method: string; path: string; tabId?: string }> = [];
   const { GET: historyList } = await import('../../../src/app/api/v2/chat-history/list/route');
   if (!enabled) return { routes: { 'GET /api/v2/chat-history/list': historyList } };
   const fixture = await import('../sidebar-fixture');
   seeds.push(...fixture.seedSidebar(dataDir, root));
+  if (process.argv.includes('--sidebar-markers')) await (await import('./sidebar-markers')).seedSidebarMarkers(join(root, 'sidebar-alpha'));
   await fixture.installSidebarRuntime(dataDir, join(root, 'sidebar-alpha'));
   const { GET: sessions } = await import('../../../src/app/api/mobile/orchestrator/threads/route');
   const { GET: history } = await import('../../../src/app/api/mobile/history/route');
@@ -26,15 +30,20 @@ export default async function register({ dataDir, root, seeds, fixtureToken, tra
       'GET /api/v2/chat-history': context, 'PATCH /api/v2/chat-history': patchHistory,
       'POST /api/v2/chat-history': saveHistory, 'GET /api/v2/chat-history/list': historyList,
       'GET /api/runtime/archive': runtimeArchive.GET, 'POST /api/runtime/archive': runtimeArchive.POST,
+      ...(auditKeyboard ? { 'GET /api/sidebar-fixture/archives': async () => Response.json({ archives }) } : {}),
     },
-    admit: ({ route, url, body }) => {
+    admit: ({ route, url, body, method }) => {
+      if (auditKeyboard && body && (route === runtimeArchive.POST
+        || route === patchHistory && Object.hasOwn(JSON.parse(body), 'archivedAt'))) {
+        archives.push({ method, path: url.pathname, tabId: JSON.parse(body).tabId });
+      }
       if (route === history && !seeds.some(seed => `llm-chat:${seed.id}` === url.searchParams.get('sessionKey'))
         && !(transcriptFixtures && url.searchParams.get('sessionKey') === 'opencode-owned:next-worker')
-        && url.searchParams.get('sessionKey') !== 'pi-owned:grid-runtime') return 404;
+        && url.searchParams.get('sessionKey') !== 'pi-builtin-owned:grid-runtime') return 404;
       if (route === context && !seeds.some(seed => seed.id === url.searchParams.get('tabId'))) return 404;
       if (!body) return 200;
       const target = JSON.parse(body);
-      return (route === runtimeArchive.POST ? target.sessionKey === 'pi-owned:grid-runtime'
+      return (route === runtimeArchive.POST ? target.sessionKey === 'pi-builtin-owned:grid-runtime'
         : (route === patchHistory || route === saveHistory) && seeds.some(seed => seed.id === target.tabId)) ? 200 : 400;
     },
     run: async (route, request) => {

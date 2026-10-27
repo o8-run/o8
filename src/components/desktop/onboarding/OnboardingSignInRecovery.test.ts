@@ -86,7 +86,7 @@ it('preserves the command and project through clipboard and scan failures, and e
   await click('Back to tools');
   expect(document.activeElement).toBe(button('Back to agent choices'));
   await click('Continue to Sample project');
-  expect(button('Save both choices')).toBeDefined();
+  expect(button('Save privacy choices')).toBeDefined();
   expect(JSON.parse(localStorage.getItem('settings')!)).toMatchObject({ orchestratorBackend: 'codex', workerRuntimes: ['codex'] });
 });
 
@@ -96,7 +96,7 @@ it('keeps the pending workspace after a failed handoff so retry opens the same p
   await render(state.request, complete);
   await click('Open Sample project'); state.signIn();
   await click('Refresh tools'); await click('Continue to Sample project');
-  await click('Keep crash reports off'); await click('Keep product usage off'); await click('Save both choices');
+  await click('Keep crash reports off'); await click('Turn off'); await click('Save privacy choices');
   expect(complete).toHaveBeenCalledExactlyOnceWith({ project: PREVIEW_PROJECT, text: '' });
   expect(localStorage.getItem(PROGRESS_KEY)).not.toBeNull();
   await click('Continue');
@@ -112,8 +112,8 @@ it('resumes the selected project after restarting during tool recovery', async (
   act(() => root.unmount());
   state.signIn(); await render(state.request, complete);
   await click('Continue to Sample project');
-  expect(button('Save both choices')).toBeDefined();
-  await click('Keep crash reports off'); await click('Keep product usage off'); await click('Save both choices');
+  expect(button('Save privacy choices')).toBeDefined();
+  await click('Keep crash reports off'); await click('Turn off'); await click('Save privacy choices');
   expect(complete).toHaveBeenCalledExactlyOnceWith({ project: PREVIEW_PROJECT, text: '' });
   expect(localStorage.getItem(PROGRESS_KEY)).toBeNull();
 });

@@ -3,10 +3,10 @@ name: o8 next Linux shell
 on:
   pull_request:
     branches: [main]
-    paths: ['native/o8-next/**', 'scripts/next/**', '.github/actions/next-linux-setup/**', '.github/workflows/next-linux.yml']
+    paths: ['native/o8-next/**', 'scripts/next/**', '.github/actions/next-linux-setup/**', '.github/workflows/next-linux.yml', 'package.json', 'package-lock.json']
   push:
     branches: [main]
-    paths: ['native/o8-next/**', 'scripts/next/**', '.github/actions/next-linux-setup/**', '.github/workflows/next-linux.yml']
+    paths: ['native/o8-next/**', 'scripts/next/**', '.github/actions/next-linux-setup/**', '.github/workflows/next-linux.yml', 'package.json', 'package-lock.json']
 
 permissions:
   contents: read
@@ -19,7 +19,7 @@ jobs:
   shell:
     name: Linux x64 release, first frame and idle RSS
     runs-on: ubuntu-24.04
-    timeout-minutes: 9
+    timeout-minutes: 20
     env:
       CARGO_TERM_COLOR: never
       LIBGL_ALWAYS_SOFTWARE: '1'
@@ -35,7 +35,8 @@ jobs:
           xvfb-run -a -s '-screen 0 1440x1024x24 -nolisten tcp -noreset -br' node scripts/next/linux-headless.mjs --output work/next-linux
       # Compile all test-only code, then run every native CLI integration suite.
       # The full GPUI fixture/throughput suite has recorded runs over 25 minutes;
-      # it is excluded from this nine-minute launch gate. Test after measurement
+      # it is excluded from this launch gate. A cold release and test build can
+      # exceed nine minutes. Test after measurement
       # so test-support features cannot replace the release binary being measured.
       - name: Compile all native tests
         run: cargo test --release --locked --manifest-path native/o8-next/Cargo.toml --no-run

@@ -36,10 +36,10 @@ export async function fetchOperatorDefaults(
     invalidateOperatorDefaultsSnapshot();
     return fetch(OPERATOR_DEFAULTS_URL, init).then(syncTauriStore);
   }
+  if (options.fresh) invalidateOperatorDefaultsSnapshot();
   if (options.includeRuntime === false) {
     return fetchOperatorDefaultsValues().then(syncTauriStore);
   }
-  if (options.fresh) invalidateOperatorDefaultsSnapshot();
   if (snapshot && snapshot.expiresAt > Date.now()) return snapshot.response.clone();
   if (!inFlight) {
     const requestVersion = version;

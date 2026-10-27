@@ -1,3 +1,4 @@
+import { assertWorkerMemoryCurrent } from '@/lib/dispatch/worker-memory-context';
 import { childEnvironment } from '@/lib/providers/spawn-environment';
 import { providerSpawnEnvironment } from '@/lib/providers/spawn-environment';
 import type { ChildProcess } from 'node:child_process';
@@ -53,6 +54,7 @@ interface PiRunRecord {
 }
 
 interface PiSessionRecord {
+  promptMemoryRevision?: string;
   surfaceId: string;
   launchMutationId?: string;
   laneId?: string;
@@ -300,6 +302,7 @@ function send(client: PiRpcClient, command: Record<string, unknown>) {
 
 async function spawnRpcProcess(session: PiSessionRecord, run: PiRunRecord, initialCommand: 'prompt' | 'follow_up') {
   const binary = await resolvePiBinary();
+  assertWorkerMemoryCurrent(session);
   const args = ['--mode', 'rpc', '--name', session.title];
   if (session.model) args.push('--model', session.model);
   if (session.piSessionFile && run.mode === 'resume') args.push('--session', session.piSessionFile);
@@ -315,6 +318,9 @@ async function spawnRpcProcess(session: PiSessionRecord, run: PiRunRecord, initi
   const client: PiRpcClient = {
     child,
     send(command) {
+      if (['prompt', 'follow_up', 'steer'].includes(String(command.type))) {
+        try { assertWorkerMemoryCurrent(session); } catch (error) { child.kill(); throw error; }
+      }
       if (!child.stdin || child.killed) return false;
       child.stdin.write(`${JSON.stringify(command)}\n`);
       return true;
@@ -394,6 +400,7 @@ async function spawnRpcProcess(session: PiSessionRecord, run: PiRunRecord, initi
 }
 
 async function startRun(session: PiSessionRecord, prompt: string, mode: PiRunMode, command: 'prompt' | 'follow_up' = 'prompt') {
+  assertWorkerMemoryCurrent(session);
   await mkdir(path.join(session.sessionDir, RUNS_DIR), { recursive: true });
   const runId = `${Date.now()}-${randomUUID().slice(0, 8)}`;
   const run: PiRunRecord = {
@@ -489,6 +496,7 @@ async function tailForSession(session: PiSessionRecord) {
 export async function launchOwnedPiSession(request: {
   cwd: string;
   prompt: string;
+  promptMemoryRevision?: string;
   clientMutationId?: string;
   model?: string;
   laneId?: string;
@@ -526,6 +534,7 @@ export async function launchOwnedPiSession(request: {
     createdAt: nowIso(),
     updatedAt: nowIso(),
     latestPrompt: prompt,
+    promptMemoryRevision: request.promptMemoryRevision,
     latestSummary: compactText(prompt, 140),
     model: request.model?.trim() || undefined,
     agentDir: piUserAgentDir(),
@@ -546,6 +555,7 @@ export async function launchOwnedPiSession(request: {
 export async function steerOwnedPiSession(surfaceId: string, message: string) {
   const session = await findSession(surfaceId);
   if (!session) throw new Error('Owned Pi session was not found.');
+  assertWorkerMemoryCurrent(session);
   const trimmed = message.trim();
   if (!trimmed) return { ok: false, note: 'message is required' };
   const client = activeClients.get(surfaceId);

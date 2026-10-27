@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 import { execFileSync } from 'node:child_process';
-import { closeSync, mkdtempSync, openSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DEFAULT_REPOS } from './lib/linux-appimage-signature.mjs';
 import { requireSmokeReceipts } from './lib/smoke-receipt.mjs';
-import { compareReleaseVersions, feedAnchor } from './lib/update-feeds.mjs';
+import { acquirePublicationLock, compareVersions } from './lib/release-publication.mjs';
 
 function options(args) {
   let version;
@@ -19,8 +19,16 @@ function options(args) {
     else if (args[i - 1] === '--repo' && /^[\w.-]+\/[\w.-]+$/.test(value)) repos.push(value);
     else throw new Error('Unknown promote option.');
   }
-  compareReleaseVersions(version, version);
+  compareVersions(version, version);
   return { version, receipts, repos: repos.length ? [...new Set(repos)] : DEFAULT_REPOS };
+}
+
+function feedAnchor(repo) {
+  const tag = execFileSync('gh', ['release', 'view', '--repo', repo, '--json', 'tagName', '--jq', '.tagName'], {
+    encoding: 'utf8', timeout: 30_000, stdio: ['ignore', 'pipe', 'pipe'],
+  }).trim();
+  if (!/^v\d+\.\d+\.\d+$/.test(tag)) throw new Error('The stable feed anchor is unavailable.');
+  return tag;
 }
 
 function download(repo, tag, name, dir) {
@@ -46,7 +54,7 @@ function validateCandidate(candidate, version) {
 }
 
 function validateStable(candidate, stable) {
-  if (compareReleaseVersions(candidate.version, stable.version) < 0) throw new Error('Promotion cannot downgrade stable.');
+  if (compareVersions(candidate.version, stable.version) < 0) throw new Error('Promotion cannot downgrade stable.');
   if (stable.version === candidate.version && JSON.stringify(stable) !== JSON.stringify(candidate)) throw new Error('Stable version already has different artifacts.');
   for (const platform of Object.keys(stable.platforms ?? {})) {
     if (!Object.hasOwn(candidate.platforms, platform)) throw new Error('The beta candidate is missing a stable platform.');
@@ -57,11 +65,9 @@ async function main() {
   const { version, repos, receipts } = options(process.argv.slice(2));
   // One lock across all versions and destinations, held through the last write.
   // Fail closed on existing locks; never remove another command's live lock.
-  const lock = process.env.O8_PROMOTE_LOCK_PATH || join(tmpdir(), 'o8-promote.lock');
-  const owner = openSync(lock, 'wx', 0o600);
+  const lock = acquirePublicationLock();
   let dir;
   try {
-    writeFileSync(owner, JSON.stringify({ pid: process.pid }));
     dir = mkdtempSync(join(tmpdir(), 'o8-promote-'));
     let candidate;
     const targets = [];
@@ -73,23 +79,23 @@ async function main() {
       candidate = beta;
       const tag = feedAnchor(repo);
       const stable = download(repo, tag, 'latest.json', dir);
-      validateStable(beta, stable);
+      validateStable({ ...beta, channel: 'stable' }, stable);
       targets.push({ repo, tag });
     }
     requireSmokeReceipts(candidate, receipts);
+    const promoted = { ...candidate, channel: 'stable' };
     const manifest = join(dir, 'latest.json');
-    writeFileSync(manifest, `${JSON.stringify(candidate, null, 2)}\n`);
+    writeFileSync(manifest, `${JSON.stringify(promoted, null, 2)}\n`);
     for (const { repo, tag } of targets) {
       // Re-read inside the lock immediately before each stable write.
-      validateStable(candidate, download(repo, tag, 'latest.json', dir));
-      writeFileSync(manifest, `${JSON.stringify(candidate, null, 2)}\n`);
+      validateStable(promoted, download(repo, tag, 'latest.json', dir));
+      writeFileSync(manifest, `${JSON.stringify(promoted, null, 2)}\n`);
       execFileSync('gh', ['release', 'upload', tag, manifest, '--clobber', '--repo', repo], { stdio: 'inherit', timeout: 60_000 });
     }
     console.log(`[promote] Stable now serves ${version} using the beta artifacts.`);
   } finally {
     if (dir) rmSync(dir, { recursive: true, force: true });
-    closeSync(owner);
-    unlinkSync(lock);
+    lock.release();
   }
 }
 
