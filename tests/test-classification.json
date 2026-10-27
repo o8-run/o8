@@ -2737,6 +2737,16 @@
       ]
     },
     {
+      "path": "tests/dependency-review-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "native-build",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/dependency-seed-lease-namespace-backcompat.test.ts",
       "reasons": [
         "apfs-tool"
@@ -6961,6 +6971,16 @@
       "reasons": [
         "child-process",
         "git-cli"
+      ]
+    },
+    {
+      "path": "tests/verify-ci-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "native-build",
+        "real-path"
       ]
     },
     {

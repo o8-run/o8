@@ -30,6 +30,7 @@
     "typecheck:fast": "node scripts/typecheck-fast.mjs --noEmit",
     "typecheck:parity": "node scripts/typecheck-parity.mjs",
     "typecheck": "npm run verify:routes && node scripts/typecheck.mjs",
+    "verify:ci": "node scripts/verify-ci.mjs",
     "verify:routes": "vitest run tests/route-coverage.test.ts -t \"route module shape\"",
     "rule-check": "tsx scripts/rule-check.ts",
     "eval:qa": "tsx src/lib/cortex/qa/eval/runner.ts",
