@@ -1,7 +1,7 @@
 import { execFileSync, spawn } from 'node:child_process';
-import { chmodSync, constants, copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, constants, copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, watch, writeFileSync } from 'node:fs';
 import { delimiter, dirname, join } from 'node:path';
-import { afterAll, beforeAll, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { OrchestratorMissionState, OrchestratorPacket } from '@/lib/orchestrator/types';
 import { buildPiWriteHelper } from './helpers/pi-write-helper';
 
@@ -26,12 +26,10 @@ vi.mock('@/lib/worktree/storage-telemetry', async (original) => ({
 }));
 
 const root = mkdtempSync(join(process.env.CORTEX_IDE_DATA_DIR!, 'launch-stages-'));
-const binary = join(root, 'worker');
-const capture = join(root, 'spawned');
 const npmCli = process.env.O8_MEASURE_NPM_CLI ?? process.env.npm_execpath!;
 const changes = {
   CORTEX_IDE_DATA_DIR: root, O8_DATA_DIR: root,
-  O8_WORKTREE_ROOT: join(root, 'worktrees'), O8_OWNED_QODER_ROOT: join(root, 'owned'), O8_QODER_BIN: binary,
+  O8_WORKTREE_ROOT: join(root, 'worktrees'), O8_OWNED_QODER_ROOT: join(root, 'owned'), O8_QODER_BIN: join(root, 'worker'),
   O8_SKIP_PRELAUNCH_TYPECHECK: '1', O8_APFS_DEPENDENCY_IMAGES: '0', O8_CRASH_SURVIVABLE_WORKERS: '0', O8_PACKAGED_APP: '',
   PATH: `${join(root, 'bin')}${delimiter}${process.env.PATH}`,
 };
@@ -39,11 +37,22 @@ const previous = new Map(Object.keys(changes).map((name) => [name, process.env[n
 Object.assign(process.env, changes);
 const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, stdio: 'pipe', encoding: 'utf8' }).trim();
 async function until(predicate: () => boolean) {
-  const end = Date.now() + 10_000;
   while (!predicate()) {
-    if (Date.now() >= end) throw new Error('Fixture did not reach the launch stage.');
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
+}
+
+function installSignal(files: string[]) {
+  const written = () => files.every(file => existsSync(file));
+  let close = () => {};
+  const ready = new Promise<void>((resolve, reject) => {
+    const observer = watch(root, () => { if (written()) { observer.close(); resolve(); } });
+    close = () => observer.close();
+    observer.once('error', reject);
+    // The child can write between subscribing and the first notification.
+    if (written()) { observer.close(); resolve(); }
+  });
+  return { ready, written, close };
 }
 
 beforeAll(async () => {
@@ -65,17 +74,10 @@ beforeAll(async () => {
     process.exit(result.status ?? 1);
   `);
   chmodSync(join(root, 'bin/npm'), 0o755);
-  writeFileSync(binary, `#!/usr/bin/env node
-    if (process.argv.includes('--version')) { console.log('worker 1.0.0'); process.exit(0); }
-    require('node:fs').appendFileSync(${JSON.stringify(capture)}, 'spawned\\n');
-    console.log('fixture complete');
-    setTimeout(() => process.exit(0), 100);
-  `);
-  chmodSync(binary, 0o755);
   vi.stubGlobal('fetch', async () => Response.json({ ok: true }));
   const { updateOperatorDefaults } = await import('@/lib/operator/defaults');
   await updateOperatorDefaults({ productTelemetryEnabled: false, storageReserveRatio: 0.0001, storageReserveFloorGb: 0.001 });
-});
+}, 0);
 afterAll(async () => {
   const { closeDb } = await import('@/lib/db');
   closeDb();
@@ -93,6 +95,16 @@ async function fixture(stalled: boolean | 'failed', id = stalled ? 'stalled-inst
   const release = join(root, `${id}-release`);
   const cache = join(root, `${id}-cache`);
   const escaped = join(root, `${id}-detached`);
+  const binary = join(root, `${id}-worker`);
+  const capture = join(root, `${id}-spawned`);
+  writeFileSync(binary, `#!/usr/bin/env node
+    if (process.argv.includes('--version')) { console.log('worker 1.0.0'); process.exit(0); }
+    require('node:fs').appendFileSync(${JSON.stringify(capture)}, 'spawned\\n');
+    console.log('fixture complete');
+    setTimeout(() => process.exit(0), 100);
+  `);
+  chmodSync(binary, 0o755);
+  process.env.O8_QODER_BIN = binary;
   if (source) {
     execFileSync('git', ['clone', '--local', '--no-hardlinks', '--single-branch', '-q', source, repo], { stdio: 'pipe' });
     git(repo, 'checkout', '-B', 'main');
@@ -128,16 +140,21 @@ async function fixture(stalled: boolean | 'failed', id = stalled ? 'stalled-inst
       scripts: { lint: 'launch-check', postinstall: 'node install.cjs' }, devDependencies: { 'launch-tool': 'file:tool' } }));
     const leaf = `const fs = require('node:fs');
       process.on('SIGTERM', () => {});
-      fs.writeFileSync(${JSON.stringify(escaped)}, String(process.pid));
+      fs.writeFileSync(${JSON.stringify(escaped + '.tmp')}, String(process.pid));
+      fs.renameSync(${JSON.stringify(escaped + '.tmp')}, ${JSON.stringify(escaped)});
       setInterval(() => {}, 1000);`;
     const launcher = `const cp = require('node:child_process');
       const child = cp.spawn(process.execPath, ['-e', ${JSON.stringify(leaf)}], { detached: true, stdio: 'ignore' });
       child.unref();`;
     writeFileSync(join(repo, 'install.cjs'), `const fs = require('node:fs');
       fs.writeFileSync(${JSON.stringify(cache)}, process.env.npm_config_cache);
+      const enter = () => {
+        fs.writeFileSync(${JSON.stringify(entered + '.tmp')}, String(process.pid));
+        fs.renameSync(${JSON.stringify(entered + '.tmp')}, ${JSON.stringify(entered)});
+      };
       ${detached ? `const child = require('node:child_process').spawn(process.execPath, ['-e', ${JSON.stringify(launcher)}], { stdio: 'ignore' });
-        child.once('exit', () => fs.writeFileSync(${JSON.stringify(entered)}, String(process.pid)));`
-      : `fs.writeFileSync(${JSON.stringify(entered)}, String(process.pid));`}
+        child.once('exit', enter);`
+      : 'enter();'}
       const done = () => { fs.writeFileSync(${JSON.stringify(completed)}, 'complete'); process.exit(0); };
       ${stalled === true ? `setInterval(() => { if (fs.existsSync(${JSON.stringify(release)})) done(); }, 10);` : stalled === 'failed' ? 'process.exit(1);' : 'done();'}
     `);
@@ -157,7 +174,45 @@ async function fixture(stalled: boolean | 'failed', id = stalled ? 'stalled-inst
   const state = { missionId: id, repoPath: repo, packets: [packet], updatedAt: new Date().toISOString() } as OrchestratorMissionState;
   const control = await import('@/lib/orchestrator/control-plane');
   control.writeOrchestratorControlPlaneState(state);
-  return { id, state, entered, completed, release, cache, escaped };
+  return { id, state, entered, completed, release, cache, escaped, capture };
+}
+
+type Fixture = Awaited<ReturnType<typeof fixture>>;
+type Dispatch = ReturnType<typeof import('@/lib/orchestrator/scheduling').runDispatchTick>;
+
+function installCase(
+  title: string,
+  setup: { id: string; stalled: boolean | 'failed'; detached?: boolean; shiftPreparation?: boolean },
+  assertions: (data: Fixture, pending: Dispatch) => Promise<void>,
+) {
+  describe.skipIf(Boolean(process.env.O8_MEASURE_CLEAN_DISPATCH) || (setup.detached && process.platform === 'win32'))(setup.id, () => {
+    let data: Fixture | undefined;
+    let pending: Dispatch | undefined;
+    beforeAll(async () => {
+      data = await fixture(setup.stalled, setup.id, undefined, setup.detached);
+      const { runDispatchTick } = await import('@/lib/orchestrator/scheduling');
+      preflight.shift = Boolean(setup.shiftPreparation);
+      const signal = installSignal(setup.detached ? [data.entered, data.escaped] : [data.entered]);
+      pending = runDispatchTick(data.state, { launchBudget: { maxLaunches: 1 } });
+      try {
+        await Promise.race([signal.ready, pending.then(() => {
+          if (!signal.written()) throw new Error('Dispatch settled before postinstall signalled install entry.');
+        })]);
+      } finally { signal.close(); }
+    }, 0); // Fixture startup follows the child's signal; assertions retain their 30 s limit.
+    afterAll(async () => {
+      preflight.clock?.mockRestore();
+      preflight.shift = false;
+      if (!data) return;
+      writeFileSync(data.release, 'release');
+      await pending?.catch(() => undefined);
+      if (existsSync(data.escaped)) {
+        const pid = Number(readFileSync(data.escaped, 'utf8'));
+        if (alive(pid)) process.kill(pid, 'SIGKILL');
+      }
+    }, 0);
+    it(title, async () => assertions(data!, pending!));
+  });
 }
 
 function alive(pid: number) {
@@ -167,18 +222,15 @@ function alive(pid: number) {
   }
 }
 
-it.runIf(process.platform !== 'win32' && !process.env.O8_MEASURE_CLEAN_DISPATCH)(
-  'stops an owned detached orphan before returning the install deadline failure', async () => {
-    const data = await fixture(true, 'detached-install', undefined, true);
-    const { runDispatchTick } = await import('@/lib/orchestrator/scheduling');
+installCase(
+  'stops an owned detached orphan before returning the install deadline failure',
+  { id: 'detached-install', stalled: true, detached: true }, async (data, pending) => {
     const lanes = await import('@/lib/lane/registry');
-    const pending = runDispatchTick(data.state, { launchBudget: { maxLaunches: 1 } });
     const unrelated = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000);'], { stdio: 'ignore', env: { NODE_ENV: 'test' } });
     const unrelatedClosed = new Promise<void>(resolve => unrelated.once('close', () => resolve()));
     let clock: ReturnType<typeof vi.spyOn> | undefined;
     let pid = 0;
     try {
-      await until(() => existsSync(data.entered) && existsSync(data.escaped));
       pid = Number(readFileSync(data.escaped, 'utf8'));
       expect(alive(pid)).toBe(true);
       expect(Number(execFileSync('ps', ['-p', String(pid), '-o', 'pgid='], { encoding: 'utf8' }).trim())).toBe(pid);
@@ -200,13 +252,10 @@ it.runIf(process.platform !== 'win32' && !process.env.O8_MEASURE_CLEAN_DISPATCH)
   },
 );
 
-it.skipIf(Boolean(process.env.O8_MEASURE_CLEAN_DISPATCH))('releases the cache lease after a stalled postinstall reaches its deadline', async () => {
-  const data = await fixture(true, 'lease-timeout');
-  const { runDispatchTick } = await import('@/lib/orchestrator/scheduling');
-  const pending = runDispatchTick(data.state, { launchBudget: { maxLaunches: 1 } });
+installCase('releases the cache lease after a stalled postinstall reaches its deadline',
+  { id: 'lease-timeout', stalled: true }, async (data, pending) => {
   let clock: ReturnType<typeof vi.spyOn> | undefined;
   try {
-    await until(() => existsSync(data.entered));
     const cacheRoot = dirname(readFileSync(data.cache, 'utf8'));
     const leases = () => readdirSync(cacheRoot).filter(name => name.startsWith('.o8-active-'));
     expect(leases()).toHaveLength(1);
@@ -221,25 +270,21 @@ it.skipIf(Boolean(process.env.O8_MEASURE_CLEAN_DISPATCH))('releases the cache le
   }
 });
 
-it.skipIf(Boolean(process.env.O8_MEASURE_CLEAN_DISPATCH))('releases the cache lease when postinstall exits with a failure', async () => {
-  const data = await fixture('failed', 'failed-install');
-  const { runDispatchTick } = await import('@/lib/orchestrator/scheduling');
+installCase('releases the cache lease when postinstall exits with a failure',
+  { id: 'failed-install', stalled: 'failed' }, async (data, pending) => {
   const lanes = await import('@/lib/lane/registry');
-  await runDispatchTick(data.state, { launchBudget: { maxLaunches: 1 } });
+  await pending;
   expect(lanes.findLatestLaneByPacket(data.id)?.status).toBe('failed');
   const cacheRoot = dirname(readFileSync(data.cache, 'utf8'));
   expect(readdirSync(cacheRoot).filter(name => name.startsWith('.o8-active-'))).toEqual([]);
   expect(existsSync(join(cacheRoot, '.o8-cache.json'))).toBe(true);
 });
 
-it.skipIf(Boolean(process.env.O8_MEASURE_CLEAN_DISPATCH))('fails a dispatched lane at the package-manager invocation deadline and retires its lifecycle child', async () => {
-  const data = await fixture(true);
-  const { runDispatchTick } = await import('@/lib/orchestrator/scheduling');
+installCase('fails a dispatched lane at the package-manager invocation deadline and retires its lifecycle child',
+  { id: 'stalled-install', stalled: true }, async (data, pending) => {
   const lanes = await import('@/lib/lane/registry');
-  const pending = runDispatchTick(data.state, { launchBudget: { maxLaunches: 1 } });
   let clock: ReturnType<typeof vi.spyOn> | undefined;
   try {
-    await until(() => existsSync(data.entered));
     clock = vi.spyOn(performance, 'now').mockReturnValue(performance.now() + 300_001);
     const result = await pending;
     const lane = lanes.findLatestLaneByPacket(data.id)!;
@@ -261,16 +306,15 @@ it.skipIf(Boolean(process.env.O8_MEASURE_CLEAN_DISPATCH))('fails a dispatched la
   }
   await new Promise(resolve => setTimeout(resolve, 50));
   expect(existsSync(data.completed)).toBe(false);
-  expect(existsSync(capture)).toBe(false);
+  expect(existsSync(data.capture)).toBe(false);
 });
 
-it.skipIf(Boolean(process.env.O8_MEASURE_CLEAN_DISPATCH))('starts the install deadline after preparation and records their durations separately', async () => {
-  const data = await fixture(false);
-  const { runDispatchTick } = await import('@/lib/orchestrator/scheduling');
+installCase('starts the install deadline after preparation and records their durations separately',
+  { id: 'prepared-install', stalled: false, shiftPreparation: true }, async (data, pending) => {
   const lanes = await import('@/lib/lane/registry');
   preflight.shift = true;
   try {
-    await runDispatchTick(data.state, { launchBudget: { maxLaunches: 1 } });
+    await pending;
     const lane = lanes.findLatestLaneByPacket(data.id)!;
     expect(lane.status).toBe('running');
     const events = lanes.getLaneEvents(lane.id, 200).filter(event => event.verb === 'worktree_preparation_timing');
