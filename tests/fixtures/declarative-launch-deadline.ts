@@ -13,6 +13,7 @@ export function declarativeLaunchDeadlineTest(fixture: {
     const id = 'pkt-started-journal-stall';
     const ioModule = await import('@/lib/runtimes/shared/owned-session/session-io');
     const original = ioModule.createOwnedSessionIo;
+    let reachedJournal = false;
     let entered!: () => void;
     const held = new Promise<void>(resolve => { entered = resolve; });
     let release!: () => void;
@@ -23,7 +24,7 @@ export function declarativeLaunchDeadlineTest(fixture: {
       const io = original(options);
       return { ...io, saveSession: async session => {
         if (session.packetId === id && session.activeRun?.spawnState === 'started') {
-          entered(); await gate;
+          reachedJournal = true; entered(); await gate;
           try { await io.saveSession(session); } finally { saved(); }
         } else await io.saveSession(session);
       } };
@@ -39,7 +40,7 @@ export function declarativeLaunchDeadlineTest(fixture: {
     let clock: ReturnType<typeof vi.spyOn> | undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
-      await held;
+      await Promise.race([held, pending.then(() => { throw new Error('Launch returned before the started journal checkpoint.'); })]);
       clock = vi.spyOn(performance, 'now').mockReturnValue(performance.now() + 31_000);
       const result = await Promise.race([pending, new Promise<never>((_, reject) => {
         timer = setTimeout(() => reject(new Error('Started journal ignored its launch deadline.')), 1_000);
@@ -54,7 +55,7 @@ export function declarativeLaunchDeadlineTest(fixture: {
       ]));
       await vi.waitFor(() => expect(lines()).toBe(before + 1));
     } finally {
-      clearTimeout(timer); release(); await pending; await settled;
+      clearTimeout(timer); release(); await pending; if (reachedJournal) await settled;
       await new Promise(resolve => setTimeout(resolve, 100));
       clock?.mockRestore(); spy.mockRestore();
     }
