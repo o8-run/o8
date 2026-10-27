@@ -1,5 +1,31 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
+
+function needsBrowser(path, source) {
+  if (/^(?:\uFEFF)?\/\/ @o8-test-browser(?:\r?\n|$)/.test(source)) return true;
+  if (!source.includes('chromium') || !source.includes('playwright')) return false;
+  // Classification runs after npm ci. Keep this dependency lazy because the
+  // early CI selector also imports the metadata helpers before npm ci.
+  const ts = require('typescript');
+  const file = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, false);
+  return file.statements.some(statement => {
+    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)
+      || !['playwright', 'playwright-core'].includes(statement.moduleSpecifier.text)) return false;
+    const clause = statement.importClause;
+    if (!clause || clause.isTypeOnly) return false;
+    const bindings = clause.namedBindings;
+    return !!clause.name || !!bindings && (ts.isNamespaceImport(bindings)
+      || bindings.elements.some(element => !element.isTypeOnly && (element.propertyName ?? element.name).text === 'chromium'));
+  });
+}
+
+export function selectedTestsRequireBrowser(files, classification) {
+  const selected = new Set(files);
+  return (classification.resourceOwning ?? []).some(entry => selected.has(entry.path) && entry.browser === true);
+}
 
 // Match Vitest's production include contract exactly. Fixture files with other
 // extensions are helpers, not independently scheduled tests.
@@ -54,6 +80,7 @@ export function classifyTestSource(path, source) {
   for (const [reason, pattern] of SOURCE_RULES) {
     if (pattern.test(source)) reasons.push(reason);
   }
+  if (needsBrowser(path, source)) reasons.push('browser');
   return [...new Set(reasons)].sort();
 }
 
@@ -66,7 +93,7 @@ export function buildTestClassificationReport(root) {
   files.sort();
   const resourceOwning = files.flatMap((path) => {
     const reasons = classifyTestSource(path, readFileSync(join(root, path), 'utf8'));
-    return reasons.length > 0 ? [{ path, reasons }] : [];
+    return reasons.length > 0 ? [{ path, reasons, ...(reasons.includes('browser') ? { browser: true } : {}) }] : [];
   });
   return {
     hermeticFiles: files.filter(path => !resourceOwning.some(entry => entry.path === path)),

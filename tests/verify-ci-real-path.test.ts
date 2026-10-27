@@ -88,12 +88,12 @@ function coverage(workflow: object) {
 }
 function executeFixture(selectedFile: string, nestedDependency = false,
   { fail = '', parallel = false, discoveryMs = 0, nativeChange = '', nativeState = 'untracked', setupChange = '',
-    nativeDeadlineMinutes = 0, nativeDelayMs = 0 } = {}) {
+    nativeDeadlineMinutes = 0, nativeDelayMs = 0, browser = false } = {}) {
   const directory = mkdtempSync(path.join(root, 'verifier-fixture-'));
   const files = ['scripts/verify-ci.mjs', 'scripts/lib/verify-ci.mjs', 'scripts/ci/check-verify-ci.mjs',
     'scripts/ci/resource-owning-changed.mjs', 'scripts/ci/review-dependency-changes.mjs', 'scripts/ci/native-changes.mjs',
     '.github/workflows/ci.yml', '.github/actions/next-linux-setup/action.yml', 'scripts/ci/native-test-shard.mjs',
-    'scripts/ci/native-test-inputs.mjs', 'scripts/ci/install-native-linux-deps.sh'];
+    'scripts/ci/native-test-inputs.mjs', 'scripts/ci/install-native-linux-deps.sh', 'scripts/lib/test-classification.mjs'];
   for (const file of files) {
     mkdirSync(path.dirname(path.join(directory, file)), { recursive: true });
     copyFileSync(path.join(repo, file), path.join(directory, file));
@@ -124,7 +124,7 @@ function executeFixture(selectedFile: string, nestedDependency = false,
   mkdirSync(path.join(directory, 'tests'));
   const browserFile = selectedFile;
   writeFileSync(path.join(directory, browserFile), 'base\n');
-  writeFileSync(path.join(directory, 'tests/test-classification.json'), JSON.stringify({ resourceOwning: [{ path: browserFile }] }));
+  writeFileSync(path.join(directory, 'tests/test-classification.json'), JSON.stringify({ resourceOwning: [{ path: browserFile, ...(browser ? { browser: true } : {}) }] }));
   writeFileSync(path.join(directory, 'package.json'), JSON.stringify(manifest));
   mkdirSync(path.join(directory, 'native/o8-next/src'), { recursive: true });
   writeFileSync(path.join(directory, 'native/o8-next/src/input_fixture.rs'),
@@ -427,33 +427,54 @@ describe('local CI verification through its command entry point', () => {
     expect(result.stderr).toContain('required-fixture');
   });
 
-  it('covers the conditional browser prerequisite added to the changed integration lane', () => {
+  it('covers the browser prerequisite selected by classification metadata', () => {
     const workflow = parse(readFileSync(workflowPath, 'utf8'));
     workflow.jobs['integration-changed'].steps = workflow.jobs['integration-changed'].steps
       .filter((step: { name?: string }) => step.name !== 'Install touched browser-test prerequisites');
     workflow.jobs['integration-changed'].steps.splice(-1, 0, {
       name: 'Install touched browser-test prerequisites',
-      if: "contains(steps.select.outputs.files, 'tests/next-parity-route-ownership-real-path.test.ts') || contains(steps.select.outputs.files, 'tests/review-diff-position-real-path.test.ts') || contains(steps.select.outputs.files, 'tests/sidebar-window-layout-real-path.test.ts') || contains(steps.select.outputs.files, 'tests/compaction-progress-inference-real-path.test.ts')",
+      if: "steps.select.outputs.browser == 'true'",
       run: 'npx --no-install playwright-core install --with-deps chromium',
     });
     const result = coverage(workflow);
     expect(result.status, result.stderr).toBe(0);
   });
 
-  it.each(['tests/next-parity-route-ownership-real-path.test.ts',
-    'tests/review-diff-position-real-path.test.ts',
-    'tests/sidebar-window-layout-real-path.test.ts',
-    'tests/compaction-progress-inference-real-path.test.ts',
-    'tests/next-parity-route-ownership-real-path.test.ts-extra.test.ts',
-    'tests/NEXT-PARITY-ROUTE-OWNERSHIP-REAL-PATH.test.ts'])('runs the CI conditional prerequisite for %s through the verifier entry point', selectedFile => {
-    const result = executeFixture(selectedFile);
+  it.each(['missing', 'duplicate', 'filename condition'])('rejects a %s browser prerequisite contract', change => {
+    const workflow = parse(readFileSync(workflowPath, 'utf8'));
+    const steps = workflow.jobs['integration-changed'].steps;
+    const browser = steps.find((step: { name?: string }) => step.name === 'Install touched browser-test prerequisites');
+    if (change === 'missing') steps.splice(steps.indexOf(browser), 1);
+    if (change === 'duplicate') steps.push({ ...browser });
+    if (change === 'filename condition') browser.if = "contains(steps.select.outputs.files, 'tests/example.test.ts')";
+    const result = coverage(workflow);
+    expect(result.status, result.stderr).toBe(1);
+    expect(result.stderr).toContain('browser prerequisite');
+  });
+
+  it.each([
+    { selectedFile: 'tests/new-layout.test.ts', browser: true },
+    { selectedFile: 'tests/renamed-layout.test.ts', browser: true },
+    { selectedFile: 'tests/next-parity-route-ownership-real-path.test.ts', browser: false },
+    { selectedFile: 'tests/next-parity-route-ownership-real-path.test.ts-extra.test.ts', browser: false },
+    { selectedFile: 'tests/NEXT-PARITY-ROUTE-OWNERSHIP-REAL-PATH.test.ts', browser: false },
+  ])('uses declared browser=$browser for $selectedFile through the verifier entry point', ({ selectedFile, browser }) => {
+    const result = executeFixture(selectedFile, false, { browser });
     expect(result.status, result.stderr + result.stdout).toBe(0);
     const calls = result.calls;
     const prerequisite = calls.findIndex(call => call.args.includes('playwright-core'));
     const integration = calls.findIndex(call => call.args.includes('test:integration'));
-    expect(prerequisite).toBeGreaterThanOrEqual(0);
-    expect(calls[prerequisite].args).toEqual(['--no-install', 'playwright-core', 'install', '--with-deps', 'chromium']);
-    expect(integration).toBeGreaterThan(prerequisite);
+    if (browser) {
+      expect(prerequisite).toBeGreaterThanOrEqual(0);
+      expect(calls[prerequisite].args).toEqual(['--no-install', 'playwright-core', 'install', '--with-deps', 'chromium']);
+      expect(integration).toBeGreaterThan(prerequisite);
+    } else expect(prerequisite).toBe(-1);
+  }, 60_000);
+
+  it('fails local verification when the declared browser prerequisite fails', () => {
+    const result = executeFixture('tests/new-layout.test.ts', false, { browser: true, fail: 'playwright-core' });
+    expect(result.status, result.stderr + result.stdout).toBe(1);
+    expect(result.stdout).toContain('FAIL Integration Tests (changed files)');
   }, 60_000);
 
 

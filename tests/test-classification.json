@@ -1592,8 +1592,10 @@
     {
       "path": "tests/agent-tile-header-layout-real-path.test.ts",
       "reasons": [
+        "browser",
         "real-path"
-      ]
+      ],
+      "browser": true
     },
     {
       "path": "tests/agents-presence-foreign-write-real-path.test.ts",
@@ -1742,15 +1744,19 @@
     {
       "path": "tests/automations-loading-layout-real-path.test.ts",
       "reasons": [
+        "browser",
         "network-listener",
         "real-path"
-      ]
+      ],
+      "browser": true
     },
     {
       "path": "tests/bench-design-gesture-real-path.test.ts",
       "reasons": [
+        "browser",
         "real-path"
-      ]
+      ],
+      "browser": true
     },
     {
       "path": "tests/bench-interactions.test.ts",
@@ -1773,8 +1779,10 @@
     {
       "path": "tests/bench-startup-readiness-real-path.test.ts",
       "reasons": [
+        "browser",
         "real-path"
-      ]
+      ],
+      "browser": true
     },
     {
       "path": "tests/bench-tmux-scope-real-path.test.ts",
@@ -1920,6 +1928,14 @@
       ]
     },
     {
+      "path": "tests/browser-prerequisites-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/build-heap.test.ts",
       "reasons": [
         "child-process"
@@ -1934,8 +1950,10 @@
     {
       "path": "tests/canvas-custom-background-real-path.test.ts",
       "reasons": [
+        "browser",
         "real-path"
-      ]
+      ],
+      "browser": true
     },
     {
       "path": "tests/catch-up-ranking-real-path.test.ts",
@@ -2408,14 +2426,18 @@
     {
       "path": "tests/compact-chat-overlay-real-path.test.ts",
       "reasons": [
+        "browser",
         "real-path"
-      ]
+      ],
+      "browser": true
     },
     {
       "path": "tests/compaction-progress-inference-real-path.test.ts",
       "reasons": [
+        "browser",
         "real-path"
-      ]
+      ],
+      "browser": true
     },
     {
       "path": "tests/compaction-scorer-real-path.test.ts",
@@ -2448,8 +2470,10 @@
     {
       "path": "tests/composer-chip-layout-real-path.test.ts",
       "reasons": [
+        "browser",
         "real-path"
-      ]
+      ],
+      "browser": true
     },
     {
       "path": "tests/composer-image-operator-real-path.test.ts",
@@ -4331,8 +4355,10 @@
     {
       "path": "tests/navigation-density-real-path.test.ts",
       "reasons": [
+        "browser",
         "real-path"
-      ]
+      ],
+      "browser": true
     },
     {
       "path": "tests/next-brain-real-path.test.ts",
@@ -4443,26 +4469,32 @@
     {
       "path": "tests/next-parity-render-failure-real-path.test.ts",
       "reasons": [
+        "browser",
         "child-process",
         "executable-fixture",
         "network-listener",
         "real-path"
-      ]
+      ],
+      "browser": true
     },
     {
       "path": "tests/next-parity-route-ownership-real-path.test.ts",
       "reasons": [
+        "browser",
         "child-process",
         "real-path"
-      ]
+      ],
+      "browser": true
     },
     {
       "path": "tests/next-playwright-runtime-real-path.test.ts",
       "reasons": [
+        "browser",
         "child-process",
         "git-cli",
         "real-path"
-      ]
+      ],
+      "browser": true
     },
     {
       "path": "tests/next-pull-requests-real-path.test.ts",
@@ -4497,10 +4529,12 @@
     {
       "path": "tests/next-speed-receipt-real-path.test.ts",
       "reasons": [
+        "browser",
         "child-process",
         "executable-fixture",
         "real-path"
-      ]
+      ],
+      "browser": true
     },
     {
       "path": "tests/next-startup-route-loading-real-path.test.ts",
@@ -4911,9 +4945,11 @@
     {
       "path": "tests/outside-transcript-background-real-path.test.ts",
       "reasons": [
+        "browser",
         "child-process",
         "real-path"
-      ]
+      ],
+      "browser": true
     },
     {
       "path": "tests/outsider-waiting-inbox-real-path.test.ts",
@@ -5437,18 +5473,22 @@
     {
       "path": "tests/preview-next-real-path.test.ts",
       "reasons": [
+        "browser",
         "child-process",
         "network-listener",
         "process-signal",
         "real-path"
-      ]
+      ],
+      "browser": true
     },
     {
       "path": "tests/preview-origin-real-path.test.ts",
       "reasons": [
+        "browser",
         "network-listener",
         "real-path"
-      ]
+      ],
+      "browser": true
     },
     {
       "path": "tests/principal-authz.test.ts",
@@ -6104,8 +6144,10 @@
     {
       "path": "tests/review-diff-position-real-path.test.ts",
       "reasons": [
+        "browser",
         "real-path"
-      ]
+      ],
+      "browser": true
     },
     {
       "path": "tests/review-file-previews.test.ts",
@@ -6446,14 +6488,18 @@
     {
       "path": "tests/sidebar-review-layout-real-path.test.ts",
       "reasons": [
+        "browser",
         "real-path"
-      ]
+      ],
+      "browser": true
     },
     {
       "path": "tests/sidebar-window-layout-real-path.test.ts",
       "reasons": [
+        "browser",
         "real-path"
-      ]
+      ],
+      "browser": true
     },
     {
       "path": "tests/sign-and-notarize.test.ts",
@@ -6775,8 +6821,10 @@
     {
       "path": "tests/telemetry-consent-contrast-real-path.test.ts",
       "reasons": [
+        "browser",
         "real-path"
-      ]
+      ],
+      "browser": true
     },
     {
       "path": "tests/telemetry-default-on.test.ts",
@@ -6838,9 +6886,11 @@
     {
       "path": "tests/terminal-split-resize-real-path.test.ts",
       "reasons": [
+        "browser",
         "network-listener",
         "real-path"
-      ]
+      ],
+      "browser": true
     },
     {
       "path": "tests/terminal-state-worktree-restore-real-path.test.ts",
@@ -6929,9 +6979,11 @@
     {
       "path": "tests/transcript-tab-reuse-real-path.test.ts",
       "reasons": [
+        "browser",
         "child-process",
         "real-path"
-      ]
+      ],
+      "browser": true
     },
     {
       "path": "tests/transcript-visualizations-real-path.test.ts",
@@ -7186,9 +7238,11 @@
     {
       "path": "tests/visualization-browser-real-path.test.ts",
       "reasons": [
+        "browser",
         "network-listener",
         "real-path"
-      ]
+      ],
+      "browser": true
     },
     {
       "path": "tests/visualization-mcp-real-path.test.ts",
@@ -7269,8 +7323,10 @@
     {
       "path": "tests/worker-drop-scroll-real-path.test.ts",
       "reasons": [
+        "browser",
         "real-path"
-      ]
+      ],
+      "browser": true
     },
     {
       "path": "tests/worker-environment-dispatch-real-path.test.ts",
@@ -7356,21 +7412,27 @@
     {
       "path": "tests/worker-outcome-pane-real-path.test.ts",
       "reasons": [
+        "browser",
         "network-listener",
         "real-path"
-      ]
+      ],
+      "browser": true
     },
     {
       "path": "tests/worker-pane-drafts-real-path.test.ts",
       "reasons": [
+        "browser",
         "real-path"
-      ]
+      ],
+      "browser": true
     },
     {
       "path": "tests/worker-pane-scroll-real-path.test.ts",
       "reasons": [
+        "browser",
         "real-path"
-      ]
+      ],
+      "browser": true
     },
     {
       "path": "tests/worker-start-mode-real-path.test.ts",

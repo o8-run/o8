@@ -33,8 +33,10 @@ Governance Smoke, and Security Audit. Fetch `origin/main` before running. Change
 integration files use CI's merge-base selector, including staged, unstaged and untracked
 classified tests locally, and the same integration configuration and baseline as CI.
 Install `ripgrep` and the system secure-shell tools for resource-owning tests.
-When the routing ownership test is selected, the command also runs CI's conditional
-browser installation before the integration command.
+Browser tests declare Chromium through their runtime import, or a first-line
+`// @o8-test-browser` marker for an indirect launcher. Classification generates
+`browser: true`; CI and local verification select the prerequisite from that same
+metadata. Adding a browser test does not require editing the workflow or verifier.
 It sets `CI=true`, uses the CI test configuration and environment, gives type checking
 an 8192 MiB heap, and runs the smoke in a fresh temporary data directory with its CI
 timeout. Each check prints PASS or FAIL under its CI name; any failed command makes

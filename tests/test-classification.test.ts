@@ -18,6 +18,34 @@ function runClassification(root: string, mode: '--check' | '--check-manifest' | 
 }
 
 describe('test factory classification', () => {
+  it('derives browser metadata from real Chromium imports or a test-local declaration', () => {
+    const root = mkdtempSync(join(tmpdir(), 'o8-browser-classification-'));
+    mkdirSync(join(root, 'tests'));
+    const sources = {
+      'browser.test.ts': "import { chromium as browser } from 'playwright-core';\n",
+      'indirect.test.ts': '// @o8-test-browser\nexpect(true).toBe(true);\n',
+      'mixed-default.test.ts': "import playwright, { type Browser } from 'playwright-core'; playwright.chromium.launch();\n",
+      'types.test.ts': "import type { Browser } from 'playwright-core';\n",
+      'text.test.ts': 'const source = "import { chromium } from \'playwright-core\';";\n',
+    };
+    for (const [name, source] of Object.entries(sources)) writeFileSync(join(root, 'tests', name), source);
+    try {
+      const result = runClassification(root, '--write');
+      expect(result.status, result.stderr).toBe(0);
+      const manifest = JSON.parse(readFileSync(join(root, 'tests/test-classification.json'), 'utf8'));
+      expect(manifest.resourceOwning).toEqual([
+        { path: 'tests/browser.test.ts', reasons: ['browser'], browser: true },
+        { path: 'tests/indirect.test.ts', reasons: ['browser'], browser: true },
+        { path: 'tests/mixed-default.test.ts', reasons: ['browser'], browser: true },
+      ]);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it.each(['tests/next-speed-receipt-real-path.test.ts', 'tests/transcript-tab-reuse-real-path.test.ts',
+    'tests/outside-transcript-background-real-path.test.ts'])('records the existing indirect Chromium requirement in %s', file => {
+    expect(classifyTestSource(file, readFileSync(new URL(`../${file}`, import.meta.url), 'utf8'))).toContain('browser');
+  });
+
   it('routes real Git, process, APFS, and listener ownership to integration', () => {
     expect(classifyTestSource('tests/lane-real-path.test.ts', 'describe("plain", () => {})'))
       .toContain('real-path');
