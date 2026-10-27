@@ -51,6 +51,7 @@ const APPLY_MUTATIONS_KEY = 'o8:update-card:apply-mutations';
 const UPDATE_AVAILABLE_EVENT = 'o8://update-available';
 const UPDATE_CLEAR_EVENT = 'o8://update-clear';
 const BUNDLE_SIGNATURE_INVALID_EVENT = 'o8://bundle-signature-invalid';
+const PACKAGE_MANAGER_NOTE = 'o8 was installed from a .deb or .rpm. Update it with your package manager (apt or dnf), or get the new package from the release page.';
 let updateInstallInFlight = false;
 
 interface InstallRequest {
@@ -118,8 +119,10 @@ function AppUpdateCard({ quiet }: { quiet: boolean }) {
   const interruptWorkRef = useRef(false);
 
   useEffect(() => {
+    const action = resolveUpdateAction(installInfo, update?.version ?? null);
     publishAppUpdateView({ version: update?.version ?? null, currentVersion: update?.currentVersion ?? null, outcome: checkReport.outcome, installing,
-      message: blockedNote, error: installError || checkReport.error, downloadOnly: resolveUpdateAction(installInfo, update?.version ?? null).kind === 'download',
+      message: blockedNote, error: installError || checkReport.error, downloadOnly: action.kind === 'download',
+      packageManager: action.kind === 'download' && action.packageManager === true,
       progress, blockers });
   }, [update, checkReport, installing, blockedNote, installError, installInfo, progress, blockers]);
 
@@ -136,8 +139,8 @@ function AppUpdateCard({ quiet }: { quiet: boolean }) {
   }, [installInfo]);
 
   // What the running install is capable of. Only the server can read
-  // process.platform + APPIMAGE; a deb/rpm Linux install can never
-  // restart-to-install, so the card offers the release download instead.
+  // process.platform, APPIMAGE and package ownership; a deb/rpm Linux install can never
+  // restart-to-install, so the card points at the release page instead.
   useEffect(() => {
     fetch('/api/panel/app/install-info', { cache: 'no-store' })
       .then(async (response) => {
@@ -361,7 +364,7 @@ function AppUpdateCard({ quiet }: { quiet: boolean }) {
     if (action.kind === 'download' && !request.userInitiated) {
       // Background applies (idle auto-apply, remote apply mutation) never open
       // a browser on the operator's behalf.
-      setBlockedNote('This install updates by download. o8 cannot replace a deb or rpm install in place.');
+      setBlockedNote(action.packageManager ? 'Package-managed update available.' : 'This install updates by download. o8 cannot replace it in place.');
       return;
     }
     updateInstallInFlight = true;
@@ -499,10 +502,12 @@ function AppUpdateCard({ quiet }: { quiet: boolean }) {
   if (!update) return null;
   if (dismissed && dismissed === update.version) return null;
 
-  // A deb/rpm Linux install cannot replace itself, so the same slot carries a
-  // download link to the release asset instead of restart-to-install.
+  // A deb/rpm Linux install cannot replace itself, so the same slot links to
+  // the release page and the note says to update with the package manager.
   const action = resolveUpdateAction(installInfo, update.version);
-  const actionLabel = action.kind === 'download' ? 'Download' : blockers?.live.length ? updateRestartLabel(blockers) : 'Restart';
+  const packageManaged = action.kind === 'download' && action.packageManager === true;
+  const actionLabel = packageManaged ? 'Release page' : action.kind === 'download' ? 'Download' : blockers?.live.length ? updateRestartLabel(blockers) : 'Restart';
+  const note = blockedNote ?? (packageManaged && expanded ? PACKAGE_MANAGER_NOTE : null);
 
   const cardStyle: CSSProperties = {
     flexShrink: 0,
@@ -634,7 +639,9 @@ function AppUpdateCard({ quiet }: { quiet: boolean }) {
             void handleInstall({ userInitiated: true, requireIdle: true, interrupt: Boolean(blockers?.live.length) });
           }}
           disabled={installing}
-          aria-label={action.kind === 'download'
+          aria-label={packageManaged
+            ? `Open the o8 v${update.version} release page`
+            : action.kind === 'download'
             ? `Download o8 v${update.version}`
             : `Restart to install o8 v${update.version}`}
           style={restartStyle}
@@ -654,7 +661,7 @@ function AppUpdateCard({ quiet }: { quiet: boolean }) {
         </button>
       </div>
 
-      {blockedNote ? (
+      {note ? (
         <div
           role="note"
           style={{
@@ -668,7 +675,7 @@ function AppUpdateCard({ quiet }: { quiet: boolean }) {
             wordBreak: 'break-word',
           }}
         >
-          {blockedNote}
+          {note}
         </div>
       ) : null}
 

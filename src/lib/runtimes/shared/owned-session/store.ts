@@ -1,3 +1,5 @@
+import { RuntimeLaunchTimeoutError, runtimeLaunchStep } from '@/lib/runtime/launch-deadline';
+import { retireUnstartedSession } from './retire-unstarted';
 import { providerFromConfig } from './controlled-provider';
 import { assertOwnedActionFence } from './action-fence';
 import { assertRuntimeEffortPin } from '@/lib/orchestrator/effort-pin';
@@ -162,17 +164,17 @@ export function createOwnedSessionStore(
       throw new Error('prompt is required');
     }
 
-    const repoPath = await validateWorkspace(request.cwd);
-    const repo = await resolveRepoContext(repoPath);
+    const repoPath = await runtimeLaunchStep(request, 'workspace_validation', () => validateWorkspace(request.cwd));
+    const repo = await runtimeLaunchStep(request, 'repository_context', () => resolveRepoContext(repoPath));
     const id = `${sessionIdPrefix}${Date.now()}-${randomUUID().slice(0, 8)}`;
     try {
-      return await withSurfaceLock(`${surfacePrefix}${id}`, () => withOwnedArtifactAdmission(root, () => (
+      return await runtimeLaunchStep(request, 'session_admission', () => withSurfaceLock(`${surfacePrefix}${id}`, () => withOwnedArtifactAdmission(root, () => (
         launchAdmitted(request, repoPath, repo, id, executionPolicy, prompt)
       ), (attempt, cause) => {
         if (request.laneId) recordLaneEvent(request.laneId, 'artifact_admission_retry', 'system', {
           packetId: request.packetId, runtime: runtimeId, attempt, cause,
         });
-      }));
+      })));
     } catch (error) {
       if (error instanceof OwnedArtifactAdmissionError) return {
         ok: false, runtime: runtimeId, surfaceId: `${surfacePrefix}${id}`, note: error.message, sideEffect: error.sideEffect,
@@ -186,37 +188,40 @@ export function createOwnedSessionStore(
     id: string, executionPolicy: ReturnType<typeof createOwnedExecutionPolicy>, prompt: string,
   ): Promise<OwnedLaunchResponse> {
     const sessionDir = path.join(root, id);
-    let selectedIdentity: Awaited<ReturnType<typeof getSelectedRuntimeIdentity>> = null;
-    if (adapter.isolatedConfigHomeEnv && adapter.defaultConfigHome && request.packetId) {
-      const defaultConfigHome = adapter.defaultConfigHome();
-      let latestPacketSession: OwnedSessionRecord | null = null;
-      for (const sessionDir of await io.listSessionDirs()) {
-        try {
-          const candidate = await io.loadSession(sessionDir);
-          if (candidate.packetId === request.packetId
-            && candidate.identity
-            && (!latestPacketSession || candidate.updatedAt > latestPacketSession.updatedAt)) {
-            latestPacketSession = candidate;
+    const selectedIdentity = await runtimeLaunchStep(request, 'identity_selection', async () => {
+      let selectedIdentity: Awaited<ReturnType<typeof getSelectedRuntimeIdentity>> = null;
+      if (adapter.isolatedConfigHomeEnv && adapter.defaultConfigHome && request.packetId) {
+        const defaultConfigHome = adapter.defaultConfigHome();
+        let latestPacketSession: OwnedSessionRecord | null = null;
+        for (const sessionDir of await io.listSessionDirs()) {
+          try {
+            const candidate = await io.loadSession(sessionDir);
+            if (candidate.packetId === request.packetId
+              && candidate.identity
+              && (!latestPacketSession || candidate.updatedAt > latestPacketSession.updatedAt)) {
+              latestPacketSession = candidate;
+            }
+          } catch {
+            // One corrupt legacy session must not block a new, otherwise valid launch.
           }
-        } catch {
-          // One corrupt legacy session must not block a new, otherwise valid launch.
         }
+        const existingPacketIdentity = latestPacketSession?.identity;
+        selectedIdentity = await getOrPinPacketRuntimeIdentity({
+          runtime: runtimeId,
+          packetId: request.packetId,
+          preferred: existingPacketIdentity,
+          fallback: {
+            id: `${runtimeId}-local-default`,
+            label: 'Current local sign-in',
+            configHomeRef: defaultConfigHome,
+          },
+        });
+      } else if (adapter.isolatedConfigHomeEnv && !providerFromConfig(request.runtimeConfig)) {
+        selectedIdentity = await getSelectedRuntimeIdentity(runtimeId);
       }
-      const existingPacketIdentity = latestPacketSession?.identity;
-      selectedIdentity = await getOrPinPacketRuntimeIdentity({
-        runtime: runtimeId,
-        packetId: request.packetId,
-        preferred: existingPacketIdentity,
-        fallback: {
-          id: `${runtimeId}-local-default`,
-          label: 'Current local sign-in',
-          configHomeRef: defaultConfigHome,
-        },
-      });
-    } else if (adapter.isolatedConfigHomeEnv && !providerFromConfig(request.runtimeConfig)) {
-      selectedIdentity = await getSelectedRuntimeIdentity(runtimeId);
-    }
 
+      return selectedIdentity;
+    });
     const createdAt = nowIso();
     const session = {
       surfaceId: `${surfacePrefix}${id}`,
@@ -265,11 +270,14 @@ export function createOwnedSessionStore(
 
     let run;
     try {
-      await bindControlledTaskSession(request, runtimeId, session.surfaceId);
-      await ensureDir(sessionDir);
-      await io.saveSession(session);
-      run = await runController.spawnOwnedRun(session, prompt, 'launch');
+      await runtimeLaunchStep(request, 'task_binding', () => bindControlledTaskSession(request, runtimeId, session.surfaceId));
+      await runtimeLaunchStep(request, 'session_directory', () => ensureDir(sessionDir));
+      await runtimeLaunchStep(request, 'session_persistence', () => io.saveSession(session));
+      run = await runtimeLaunchStep(request, 'workspace_spawn_admission', () => runController.spawnOwnedRun(session, prompt, 'launch'));
     } catch (error) {
+      if (error instanceof RuntimeLaunchTimeoutError && !error.effectStarted) {
+        await retireUnstartedSession(runtimeId, root, sessionDir, session, io, true);
+      }
       if (error instanceof OwnedWorkspaceUnavailableError || error instanceof OwnedArtifactAdmissionError || error instanceof OwnedProcessIdentityError) {
         return {
           ok: false, runtime: runtimeId, surfaceId: session.surfaceId,

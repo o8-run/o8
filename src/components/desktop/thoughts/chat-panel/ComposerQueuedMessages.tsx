@@ -30,7 +30,7 @@ export function ComposerDeliveryTag({ item, queue }: { item: QueuedComposerSendR
     : item.status === 'dispatching' ? 'Sending…' : `Queued${item.reason?.startsWith('Steer declined') ? ' · Steer declined' : ''}`;
   const textAction = { border: 0, padding: 0, background: 'transparent', color: 'var(--t-text-muted)', font: 'inherit', cursor: 'pointer' } as const;
   return <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 10, color: 'var(--t-text-muted)', fontSize: 11, fontWeight: 300 }}>
-    <span role="status" title={item.reason ?? undefined}>{label}</span>
+    <span role="status" title={item.reason ?? undefined}>{label}{item.status === 'held' && item.reason ? `: ${item.reason}` : ''}</span>
     {(queue.steerableIds ? queue.steerableIds.has(item.id) : queue.canSteer) && item.status === 'queued' && item.intent === 'send-next' && !item.payload.afterTaskId ? <button type="button" disabled={promoting} onClick={() => queue.onSteer(item.id)} style={{ ...textAction, cursor: promoting ? 'default' : 'pointer' }}>{promoting ? 'Steering…' : 'Steer now'}</button> : null}
     {!applied ? <button type="button" title="Cancel queued message" aria-label={`Remove queued message: ${item.payload.text}`} disabled={!cancellable}
       onClick={() => queue.onCancel(item.sequence)} style={{ ...textAction, cursor: cancellable ? 'pointer' : 'default', opacity: cancellable ? 1 : 0.45 }}>{removing ? 'Removing…' : 'Remove'}</button> : null}
