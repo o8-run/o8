@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 /** All application child processes cross this environment and artifact boundary. */
 import * as processApi from 'node:child_process';
 import { promisify } from 'node:util';
@@ -15,6 +16,12 @@ export function execKeychainCommand(operation: 'find-generic-password' | 'add-ge
   return processApi.execFileSync('/usr/bin/security', [operation, ...args], {
     env: { NODE_ENV: 'production' }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
   });
+}
+
+const creationGuard = new AsyncLocalStorage<() => void>();
+export function withChildCreationGuard<T>(check: () => void, operation: () => T): T {
+  const parent = creationGuard.getStore();
+  return creationGuard.run(() => { parent?.(); check(); }, operation);
 }
 
 export interface SecretToolResult { code: number | null; stdout: string; stderr: string; missing?: boolean }
@@ -91,6 +98,7 @@ export function withChildEnvironment<T>(input: Record<string, string | undefined
     assertChildArguments(args, input, env, allowDeferredMcp);
     const profiles = context?.runtimeId || context?.runtimeLaunch ? assertLegacyRuntimeConfigSelection(context.runtimeId, env, args, cwd, context.metadataRedaction) : [];
     stampChildPolicy(env);
+    creationGuard.getStore()?.();
     const result = create(env);
     recordRuntimeProfileChild(result, context?.runtimeId, profiles, env, context?.metadataRedaction);
     return result;

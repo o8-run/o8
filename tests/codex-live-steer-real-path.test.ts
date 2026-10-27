@@ -115,7 +115,7 @@ async function running(outcome = 'accepted', options: { bridge?: boolean; model?
   // Wait for the parent to consume the bridge's turn.started acknowledgement.
   await new Promise(resolve => setTimeout(resolve, 100));
   const payload: ComposerQueuePayload = { text: 'Use the smaller change', wireMessage: 'Use the smaller change', images: [],
-    routing: { backend: 'codex', model: options.model ?? 'gpt-5.5', effort: 'low', permissionMode: 'full', mode: 'fleet', pickedMode: 'multitask', collide: false } };
+    routing: { backend: 'codex', model: options.model ?? 'gpt-5.5', effort: 'adaptive', permissionMode: 'full', mode: 'fleet', pickedMode: 'multitask', collide: false } };
   const request = (method: string, body?: unknown) => new NextRequest('http://localhost/api/orchestrator/composer-queue', {
     method, headers: { host: 'localhost', 'Content-Type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}),
   });
@@ -132,6 +132,60 @@ async function running(outcome = 'accepted', options: { bridge?: boolean; model?
 afterAll(() => { closeDb(); vi.unstubAllEnvs(); rmSync(root, { recursive: true, force: true }); });
 
 describe.skipIf(process.platform === 'win32')('Codex native live steer through the composer and bridge', () => {
+  it.each(['high', 'ultra'] as const)('refuses a queued %s pin before native input with a visible reason', async effort => {
+    const fixture = await running();
+    const id = `effort-local-${sequence}`;
+    const payload = { ...fixture.payload, routing: { ...fixture.payload.routing, effort } };
+    const heartbeat = createComposerQueueHeartbeat({ isBusy: () => true, readTranscript: async () => [], publish: () => {}, registerAbort: () => () => {} });
+    try {
+      expect((await POST(fixture.request('POST', { ...fixture.target, id, intent: 'steer-now', payload }))).status).toBe(200);
+      heartbeat();
+      await vi.waitFor(() => expect(queue.readComposerSend(id)?.status).toMatch(/^(held|applied)$/));
+      const item = queue.readComposerSend(id)!;
+      expect(item.status).toBe('held');
+      expect(item.admittedAt).toBeNull();
+      expect(item.reason).toMatch(new RegExp(`cannot.*effort.*${effort}`, 'i'));
+      expect(fixture.steers()).toEqual([]);
+      const { ComposerDeliveryTag } = await import('@/components/desktop/thoughts/chat-panel/ComposerQueuedMessages');
+      const html = renderToStaticMarkup(createElement(ComposerDeliveryTag, { item,
+        queue: { items: [item], canSteer: true, onSteer: () => {}, onCancel: () => {} } }));
+      expect(html.replace(/<[^>]*>/g, '')).toContain(renderToStaticMarkup(item.reason!));
+      closeDb(); ensureV71ComposerQueueSchema(getSqlite());
+      expect(queue.readComposerSend(id)).toMatchObject({ status: 'held', reason: item.reason });
+    } finally { await fixture.close(); }
+  }, 60_000);
+
+  it.each(['high', 'ultra'] as const)('retains the %s refusal across the server-process relay and chat', async effort => {
+    const fixture = await running();
+    const id = `effort-remote-${sequence}`;
+    const payload = { ...fixture.payload, routing: { ...fixture.payload.routing, effort } };
+    try {
+      expect((await POST(fixture.request('POST', { ...fixture.target, id, intent: 'steer-now', payload }))).status).toBe(200);
+      const script = join(root, `effort-remote-${sequence}.mts`);
+      writeFileSync(script, `
+        import queue from ${JSON.stringify(join(process.cwd(), 'src/lib/orchestrator/composer-queue.ts'))};
+        import heartbeat from ${JSON.stringify(join(process.cwd(), 'src/lib/ws-server/composer-queue-heartbeat.ts'))};
+        const tick = heartbeat.createComposerQueueHeartbeat({ isBusy: () => true, readTranscript: async () => [], publish: () => {}, registerAbort: () => () => {} });
+        tick();
+        const deadline = Date.now() + 15000;
+        while (queue.readComposerSend(${JSON.stringify(id)})?.status === 'dispatching' && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 10));
+        console.log('ITEM ' + JSON.stringify(queue.readComposerSend(${JSON.stringify(id)})));
+      `);
+      const result = await promisify(execFile)(process.execPath, ['--import', 'tsx', '--import', join(process.cwd(), 'scripts/register-server-only-stub.mjs'), script],
+        { cwd: process.cwd(), env: { ...process.env, CODEX_HOME: join(home, '.codex') }, timeout: 30_000 });
+      const item = JSON.parse(result.stdout.split('\n').find(line => line.startsWith('ITEM '))!.slice(5));
+      expect(item.status).toBe('held');
+      expect(item.admittedAt).toBeNull();
+      expect(item.reason).toMatch(new RegExp(`cannot.*effort.*${effort}`, 'i'));
+      expect(item.reason).not.toContain('unconfirmed');
+      expect(fixture.steers()).toEqual([]);
+      const { ComposerDeliveryTag } = await import('@/components/desktop/thoughts/chat-panel/ComposerQueuedMessages');
+      const html = renderToStaticMarkup(createElement(ComposerDeliveryTag, { item,
+        queue: { items: [item], canSteer: true, onSteer: () => {}, onCancel: () => {} } }));
+      expect(html.replace(/<[^>]*>/g, '')).toContain(renderToStaticMarkup(item.reason));
+    } finally { await fixture.close(); }
+  }, 60_000);
+
   it.each(['accepted', 'refused', 'mismatched', 'unconfirmed', 'wrong-ack', 'disconnected', 'silent', 'crash-survival'])('records native admission and persists %s without replay', async outcome => {
     const accepted = outcome === 'accepted' || outcome === 'crash-survival';
     const fixture = await running(accepted ? 'accepted' : outcome, { crashSurvival: outcome === 'crash-survival' });

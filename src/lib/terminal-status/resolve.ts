@@ -135,14 +135,14 @@ function runtimeLifecycleState(
   lifecycle: NonNullable<TerminalRuntimeSessionEvidence['lifecycle']>,
   fallback: TerminalStatusState,
 ): TerminalStatusState {
-  if (lifecycle.availability === 'running' || lifecycle.availability === 'awaiting-thread') {
+  if (lifecycle.availability === 'running') {
     return 'working';
   }
   switch (lifecycle.lastOutcome) {
     case 'failed': return 'failed';
     case 'finished': return 'complete';
     case 'interrupted': return 'blocked';
-    default: return fallback;
+    default: return lifecycle.availability === 'awaiting-thread' ? 'blocked' : fallback;
   }
 }
 

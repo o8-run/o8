@@ -27,6 +27,7 @@ const defaultRunner: PickerRunner = async (command, args, timeoutMs) => {
       ...workerParentEnvironment(process.env),
       NODE_ENV: process.env.NODE_ENV, // Already inherited; required by Next's ProcessEnv type.
       DISPLAY: process.env.DISPLAY,
+      XAUTHORITY: process.env.XAUTHORITY,
       WAYLAND_DISPLAY: process.env.WAYLAND_DISPLAY,
       XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR,
       DBUS_SESSION_BUS_ADDRESS: process.env.DBUS_SESSION_BUS_ADDRESS,
@@ -60,12 +61,14 @@ function isCancellation(error: unknown): boolean {
   if (failure?.code !== 1) return false;
   const stderr = Buffer.isBuffer(failure.stderr) ? failure.stderr.toString('utf8')
     : typeof failure.stderr === 'string' ? failure.stderr : '';
-  // GTK prints some nonfatal rendering/accessibility hints on working dialogs.
+  // GTK prints nonfatal rendering/accessibility/session-bus hints on working dialogs.
   // Other diagnostics distinguish startup failure from a plain cancellation.
   const informational = [
     /Gtk-Message:.*GtkDialog mapped without a transient parent\. This is discouraged\.\s*$/,
     /^libEGL warning: (?:DRI3 error: Could not get DRI3 device|Ensure your X server supports DRI3 to get accelerated rendering)\s*$/,
     /Gtk-WARNING.*Unable to acquire the address of the accessibility bus:.*ServiceUnknown:.*org\.a11y\.Bus/,
+    /Gtk-WARNING.*Unable to acquire session bus:/,
+    /dconf-WARNING.*failed to commit changes to dconf:/,
   ];
   return stderr.split('\n').every(line => !line.trim() || informational.some(pattern => pattern.test(line)));
 }

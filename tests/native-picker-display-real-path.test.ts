@@ -7,7 +7,7 @@ import { execFile } from '@/lib/providers/child-process';
 import { pickNativePath } from '@/lib/desktop/native-picker';
 
 const run = promisify(execFile);
-const displayNames = ['DISPLAY', 'WAYLAND_DISPLAY', 'XDG_RUNTIME_DIR', 'DBUS_SESSION_BUS_ADDRESS'];
+const displayNames = ['DISPLAY', 'XAUTHORITY', 'WAYLAND_DISPLAY', 'XDG_RUNTIME_DIR', 'DBUS_SESSION_BUS_ADDRESS'];
 let root: string;
 let bin: string;
 let capture: string;
@@ -19,6 +19,7 @@ beforeEach(() => {
   capture = join(root, 'picker.json'); baseline = join(root, 'baseline.json');
   vi.stubEnv('PATH', bin + delimiter + process.env.PATH);
   vi.stubEnv('DISPLAY', ':8877');
+  vi.stubEnv('XAUTHORITY', join(root, 'non-default.Xauthority'));
   vi.stubEnv('WAYLAND_DISPLAY', 'wayland-o8-fixture');
   vi.stubEnv('XDG_RUNTIME_DIR', join(root, 'runtime'));
   vi.stubEnv('DBUS_SESSION_BUS_ADDRESS', `unix:path=${join(root, 'bus')}`);
@@ -40,9 +41,10 @@ process.stdout.write('/tmp/selected\\n');` : ''}
 `, { mode: 0o755 });
 }
 
-it.skipIf(process.platform !== 'linux')('passes only the picker display additions through the real process wrapper', async () => {
+it.skipIf(process.platform !== 'linux').each(['zenity', 'kdialog'])('passes only the picker display additions to %s through the real process wrapper', async command => {
   const control = join(bin, 'control.cjs'); program(control, baseline, false);
-  program(join(bin, 'zenity'), capture, true);
+  if (command === 'kdialog') writeFileSync(join(bin, 'zenity'), '#!/bin/sh\nexit 127\n', { mode: 0o755 });
+  program(join(bin, command), capture, true);
   await run(process.execPath, [control]);
   const expectedBase = JSON.parse(readFileSync(baseline, 'utf8')) as { names: string[] };
   await expect(pickNativePath('folder', 'Pick')).resolves.toEqual({ path: '/tmp/selected' });

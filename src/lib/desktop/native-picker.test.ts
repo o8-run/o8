@@ -106,3 +106,27 @@ it('keeps cancellation after nonfatal EGL and accessibility diagnostics', async 
   await expect(pickNativePath('folder', 'Pick', { platform: 'linux', run })).resolves.toEqual({ path: null });
   expect(run).toHaveBeenCalledOnce();
 });
+
+const sessionBusWarnings = [
+  '(zenity:12): Gtk-WARNING **: 12:00:00: Unable to acquire session bus: Failed to execute child process “dbus-launch” (No such file or directory)',
+  '(zenity:12): dconf-WARNING **: 12:00:00: failed to commit changes to dconf: Failed to execute child process “dbus-launch” (No such file or directory)',
+].join('\n');
+
+it.each(['folder', 'file'] as const)('cancels %s once despite session-bus and dconf warnings', async kind => {
+  for (const stderr of [sessionBusWarnings, Buffer.from(sessionBusWarnings)]) {
+    const run = vi.fn<PickerRunner>(async () => { throw Object.assign(failure(1), { stderr }); });
+    await expect(pickNativePath(kind, 'Pick', { platform: 'linux', run })).resolves.toEqual({ path: null });
+    expect(run).toHaveBeenCalledOnce();
+  }
+});
+
+it('still falls back when session-bus warnings accompany a GTK startup failure', async () => {
+  const run = vi.fn<PickerRunner>(async command => {
+    if (command === 'zenity') throw Object.assign(failure(1), {
+      stderr: sessionBusWarnings + '\n(zenity:12): Gtk-WARNING **: cannot open display: :77\n',
+    });
+    return '/tmp/selected\n';
+  });
+  await expect(pickNativePath('folder', 'Pick', { platform: 'linux', run })).resolves.toEqual({ path: '/tmp/selected' });
+  expect(run.mock.calls.map(([command]) => command)).toEqual(['zenity', 'kdialog']);
+});

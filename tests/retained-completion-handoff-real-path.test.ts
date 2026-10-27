@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawn } from 'node:child_process';
+import { checkForgetDependentDispatch } from './fixtures/forget-dependent-dispatch';
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { createRequire } from 'node:module';
 import { basename, dirname, join } from 'node:path';
@@ -15,6 +16,25 @@ import type { CompletionHandoffRecord } from '@/lib/workspace/completion-handoff
 
 // Stub provider/notification side effects, not completion, ownership, Git,
 // context capture, retention, terminal cleanup or private persistence.
+vi.mock('@/lib/runtimes/shared/auth-detect', async original => ({
+  ...await original<typeof import('@/lib/runtimes/shared/auth-detect')>(),
+  assertRuntimeDispatchable: vi.fn(async () => {}),
+}));
+vi.mock('@/lib/worktree/storage-telemetry', async original => ({
+  ...await original<typeof import('@/lib/worktree/storage-telemetry')>(),
+  measureHostVolume: async () => ({ accountingStatus: 'observed', probePath: '/', availableBytes: 90_000_000_000,
+    freeBytes: 90_000_000_000, totalBytes: 100_000_000_000, error: null }),
+}));
+const providerStarts = vi.hoisted(() => vi.fn(async (input: import('@/lib/runtimes/types').LaunchOptions) => ({
+  ok: true, sessionKey: `fixture:${input.packetId}`, note: 'Provider seam; no inference.',
+})));
+vi.mock('@/lib/runtimes', async original => {
+  const actual = await original<typeof import('@/lib/runtimes')>();
+  return { ...actual, getRuntime: (id: import('@/lib/runtimes/types').RuntimeId) => {
+    const runtime = actual.getRuntime(id);
+    return runtime ? { ...runtime, launch: providerStarts } : undefined;
+  } };
+});
 const publicationRace = vi.hoisted(() => ({ before: null as null | ((request: { operation?: string; identity?: { canonicalPath: string } }) => void) }));
 vi.mock('node:child_process', async (original) => {
   const actual = await original<typeof import('node:child_process')>();
@@ -30,17 +50,18 @@ vi.mock('@/lib/runtime/pty-bridge', async (original) => ({
 }));
 vi.mock('@/lib/runtimes/shared/dispatch-readiness', () => ({ ensureDispatchBackendReady: vi.fn(async () => {}) }));
 vi.mock('@/lib/runtime/inventory', () => ({ getRuntimeInventorySnapshot: async () => ({ agents: [] }) }));
-vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: vi.fn(async () => {}) }));
+vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: vi.fn(async () => {}), publishCortexChange: vi.fn(async () => {}) }));
 vi.mock('@/lib/command-center/snapshot', () => ({ invalidateCommandCenterSnapshotCaches: vi.fn() }));
 vi.mock('@/lib/mobile/inbox', () => ({ invalidateInboxCache: vi.fn() }));
 vi.mock('@/lib/orchestrator/cost-persistence', () => ({ persistRuntimeSessionCost: vi.fn(async () => {}) }));
 vi.mock('@/lib/orchestrator/capacity-snapshots', () => ({ capturePacketCapacitySnapshot: vi.fn(async () => {}) }));
 vi.mock('@/lib/lane/report-claim-check', () => ({ startReportClaimCheck: vi.fn() }));
 
-const root = mkdtempSync(join(tmpdir(), 'o8-retained-completion-handoff-'));
+const restartRoot = process.env.O8_FORGET_DISPATCH_RESTART_ROOT;
+const root = restartRoot ?? realpathSync(mkdtempSync(join(tmpdir(), 'o8-retained-completion-handoff-')));
 const dataDir = join(root, 'data');
 const sessionsRoot = join(root, 'sessions');
-mkdirSync(dataDir, { mode: 0o700 });
+mkdirSync(dataDir, { mode: 0o700, recursive: true });
 process.env.O8_DATA_DIR = dataDir;
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
 process.env.O8_WORKTREE_ROOT = join(dataDir, 'worktrees');
@@ -66,6 +87,8 @@ const { readCompletionHandoff } = await import('@/lib/workspace/completion-hando
 // transcript-only provider fixture. The production liveness probe stays real.
 const { registerRuntime } = await import('@/lib/runtimes');
 const { resetOwnedSessionIndex } = await import('@/lib/runtimes/shared/owned-session-index');
+// A cold route import is setup; the restarted dispatch keeps its normal turn deadline.
+if (restartRoot) await import('@/app/api/orchestrator/dispatch/route');
 
 function git(cwd: string, ...args: string[]): string {
   return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 10_000 }).trim();
@@ -106,11 +129,11 @@ afterEach((context) => { publicationRace.before = null; if (context.task.result?
 afterAll(() => {
   closeDb();
   // Keep a failed fixture available for the lead's private red receipt.
-  if (passed && !failed) rmSync(root, { recursive: true, force: true });
+  if (!restartRoot && passed && !failed) rmSync(root, { recursive: true, force: true });
 });
 
 let fixtureIndex = 0;
-async function fixture(retained = true) {
+async function fixture(retained = true, transcriptOffsetMs = 0) {
   const repoPath = join(dataDir, 'repo-' + ++fixtureIndex);
   mkdirSync(repoPath);
   git(repoPath, 'init', '-q', '-b', 'main');
@@ -143,13 +166,21 @@ async function fixture(retained = true) {
   const completedAt = new Date().toISOString();
   const summary = 'Inspected tracked.txt without changing source.';
   const remainingWork = 'Lead acceptance of the read-only finding remains.';
+  const processMarker = 'run-retained-completion-1';
+  const exited = spawn(process.execPath, ['-e', ''], {
+    cwd: workspacePath, detached: true, stdio: 'ignore', timeout: 10_000,
+    env: { ...process.env, O8_OWNED_RUN_MARKER: processMarker },
+  });
+  await new Promise<void>((resolve, reject) => exited.once('error', reject).once('exit', code => code === 0 ? resolve() : reject(new Error(`Fixture process exit ${code}`))));
+  const pid = exited.pid ?? 0;
+  expect(pid).toBeGreaterThan(0);
   const session: OwnedSessionRecord = {
     surfaceId: sessionKey, packetId, laneId: lane.id, sessionDir, cwd: workspacePath, repoPath: workspacePath,
     branch, head, title: summary, createdAt: completedAt, updatedAt: completedAt,
     latestPrompt: 'Inspect tracked.txt read-only.', latestSummary: summary,
     threadId: '12345678-1234-1234-1234-123456789abc',
     recentRuns: [{ id: 'run-retained-completion-1', mode: 'launch', prompt: 'Inspect tracked.txt read-only.',
-      startedAt: completedAt, finishedAt: completedAt, pid: 0, outcome: 'finished',
+      startedAt: completedAt, finishedAt: completedAt, pid, processGroupId: pid, processMarker, outcome: 'finished',
       stdoutPath: join(sessionDir, 'stdout.jsonl'), stderrPath: join(sessionDir, 'stderr.log'),
       childExit: { code: 0, signal: null, classification: 'clean-exit' } }],
     runIdentityLedger: { version: 1, totalRuns: 1, complete: true },
@@ -170,7 +201,7 @@ async function fixture(retained = true) {
     capabilities: { discover: false, readTranscript: true, launch: false, resume: false,
       interrupt: false, reviewDiffs: false, costTelemetry: false, streaming: false },
     discoverSessions: async () => [],
-    readTranscript: async () => [{ id: 'completion-1', role: 'assistant', text: transcriptText, timestamp: new Date(completedAt) }],
+    readTranscript: async () => [{ id: 'completion-1', role: 'assistant', text: transcriptText, timestamp: new Date(Date.parse(completedAt) + transcriptOffsetMs) }],
     getChangedFiles: async () => [],
     launch: async () => ({ ok: false, note: 'Transcript-only fixture' }),
     resume: async () => ({ ok: false, note: 'Transcript-only fixture' }),
@@ -182,7 +213,7 @@ async function fixture(retained = true) {
   const packet: OrchestratorPacket = {
     id: packetId, referenceLabel: '#3260', title: summary, summary, runtime: 'codex',
     workspaceTargetPath: repo.localPath, branchTarget: branch, dependencyLabels: [], dependencyPacketIds: [],
-    queueState: 'held', releaseState: 'pending', status: 'running', blockedReason: null, review: null,
+    queueState: 'queued', releaseState: 'pending', status: 'running', blockedReason: null, review: null,
     attemptCount: 0, storageAdmissionEpoch: 1,
     launchContext: { source: 'cli', presentation: 'tab', repoContext: 'registered', workMode: 'read-only' },
     lane: { tileId: lane.id, tabId: lane.id, laneId: lane.id, repoPath: repo.localPath,
@@ -201,6 +232,11 @@ async function fixture(retained = true) {
 }
 
 describe('retained worker completion through the production supervisor callback', () => {
+  it('excludes forgotten completion memory from dependent dispatch after a process restart', async () => {
+    await checkForgetDependentDispatch({ root, dataDir, restartRoot, fixture, starts: () => providerStarts.mock.calls.map(call => call[0]) });
+    passed = true;
+  }, 180_000);
+
   it('persists a compact private handoff while the active hold retains the completed source', async () => {
     const { packet: { id: packetId }, lane, sessionDir, sessionKey, workspacePath, identity, head, tree, hold, remainingWork, exitEvent, dependencies } = await fixture();
 
@@ -282,11 +318,20 @@ describe('retained worker completion through the production supervisor callback'
     passed = true;
   });
 
-  // Retirement, two separately bounded cold reads and Git recovery share this
-  // outer budget. Keep each operation's deadline and recovery assertions intact.
+  // Measured locally: completion 12.0s, maintenance through 43.2s, and two cold
+  // reads plus Git recovery through 58.0s. The old 60s aggregate deadline timed
+  // out under contention. Keep each operation's deadline and recovery assertions.
   it('keeps unheld completion on the established automatic retirement and private Git banking path', async () => {
+    const started = performance.now();
+    const phase = (name: string) => console.log(`[retirement-timing] ${name} elapsedMs=${Math.round(performance.now() - started)}`);
     const f = await fixture(false);
+    phase('fixture');
     expect(await handleAgentCompletion(f.sessionKey, 'completed', f.dependencies)).toMatchObject({ detail: expect.stringContaining('completed its read-only inspection') });
+    phase('completion');
+    const { runWorktreeMaintenanceTick } = await import('@/lib/lane/worktree-reaper');
+    // Join the bounded retirement job; its real preservation work can outlast a polling deadline.
+    await runWorktreeMaintenanceTick();
+    phase('maintenance');
     await vi.waitFor(() => expect(getWorkspaceSnapshot(f.repo.id, f.packet.id)?.state).toBe('retired'), { timeout: 15_000, interval: 50 });
     expect(existsSync(f.workspacePath)).toBe(false);
     const handoff = readCompletionHandoff(f.repo.id, f.packet.id);
@@ -295,12 +340,14 @@ describe('retained worker completion through the production supervisor callback'
     const preservationId = terminal?.receipt?.preservationId;
     expect(preservationId).toMatch(/^[a-f0-9]{64}$/);
     const preservation = await readWorkspacePreservation(String(preservationId));
+    phase('preservation-read');
     expect(preservation.payload.gitBundle).toMatchObject({ headCommit: f.head, treeSha: f.tree });
     expect(preservation.payload.handoff.revision).toBe(f.head);
     expect(getWorkspaceRetentionHold(f.workspacePath, f.identity)).toBeNull();
     const historical = JSON.stringify(handoff);
     closeDb();
     const current = coldCompletionContext(f.packet.id);
+    phase('cold-recovery-read');
     expect(current.recovery).toMatchObject({ source: 'verified-preservation', preservationId,
       bundleSha256: preservation.payload.gitBundle!.sha256 });
     expect(current.recovery!.instructions).toContain('live-source instructions are historical');
@@ -310,16 +357,18 @@ describe('retained worker completion through the production supervisor callback'
     execFileSync('sh', ['-c', commands.replaceAll('<empty-successor-path>', destination)], { timeout: 10_000, stdio: 'pipe' });
     expect(git(destination, 'rev-parse', 'HEAD')).toBe(f.head);
     expect(git(destination, 'rev-parse', 'HEAD^{tree}')).toBe(f.tree);
+    phase('git-recovery');
     const bundle = join(getDataDir(), 'workspace-preservation', 'git-bundles', preservation.payload.gitBundle!.sha256 + '.bundle');
     renameSync(bundle, bundle + '.unavailable');
     try {
       const missing = coldCompletionContext(f.packet.id);
+      phase('cold-unavailable-read');
       expect(missing.recovery).toMatchObject({ source: 'unavailable' });
       expect(missing.recovery!.instructions).toContain('instructions are historical');
       expect(missing.recovery!.instructions).not.toMatch(/git (clone|init|fetch)/);
     } finally { renameSync(bundle + '.unavailable', bundle); }
     expect(JSON.stringify(readCompletionHandoff(f.repo.id, f.packet.id))).toBe(historical);
-  }, 60_000);
+  }, 120_000);
 
   it('does not republish an older run when a newer turn completes during transcript capture', async () => {
     const f = await fixture();
@@ -684,46 +733,44 @@ describe('retained worker completion through the production supervisor callback'
     }
   });
 
-  it('publishes held dirty-salvage review and already-merged completion at their accepted silent-exit transitions', async () => {
+  it.each(['salvage', 'already-merged'] as const)('publishes held %s completion at its accepted silent-exit transition', async (route) => {
     const { runSilentExitTriageForLane } = await import('@/lib/supervisor/silent-exit-detector');
     const verification = await import('@/lib/supervisor/completion-verification');
-    for (const route of ['salvage', 'already-merged'] as const) {
-      const f = await fixture();
-      const mission = readOrchestratorControlPlaneState();
-      mission.packets[0].launchContext!.workMode = 'edit';
-      writeOrchestratorControlPlaneState(mission);
-      writeFileSync(join(f.workspacePath, 'tracked.txt'), 'Silent-exit committed source.\n');
-      if (route === 'already-merged') {
-        git(f.workspacePath, 'commit', '-qam', 'completed work already on remote main');
-        const remote = join(root, 'remote-' + fixtureIndex);
-        git(root, 'clone', '--bare', '-q', f.workspacePath, remote);
-        git(remote, 'update-ref', 'refs/heads/main', 'HEAD');
-        git(f.workspacePath, 'remote', 'add', 'origin', remote);
-      }
-      // Provider output/liveness and all triage/salvage/merge decisions remain real;
-      // only the heavy repository verification command is replaced here.
-      const verify = vi.spyOn(verification, 'runCompletionVerification').mockResolvedValue({ ok: true, kind: 'typecheck', output: '' });
-      try { expect(await runSilentExitTriageForLane(f.lane.id)).toBe(true); } finally { verify.mockRestore(); }
-      const record = readCompletionHandoff(f.repo.id, f.packet.id)!;
-      expect(record).toMatchObject({ acceptedState: route === 'salvage' ? 'reviewing' : 'completed',
-        sessionKey: f.sessionKey, owner: { runId: f.session.recentRuns[0].id },
-        handoff: { revision: git(f.workspacePath, 'rev-parse', 'HEAD'), treeSha: git(f.workspacePath, 'rev-parse', 'HEAD^{tree}') } });
-      if (route === 'already-merged') expect(record.handoff.outcome).toBe('already_merged');
-      expect(getLane(f.lane.id)?.status).toBe(route === 'salvage' ? 'reviewing' : 'completed');
-      if (route === 'already-merged') {
-        expect(getLaneEvents(f.lane.id, 100)).toEqual(expect.arrayContaining([
-          expect.objectContaining({ verb: 'silent_exit_already_merged', payload: expect.objectContaining({ headSha: record.handoff.revision }) }),
-        ]));
-      }
-      const saved = privateHandoffs(getDataDir(), f.packet.id)[0].path;
-      const bytes = readFileSync(saved), modified = lstatSync(saved).mtimeMs;
-      await capturePacketCompletionContext(f.packet.id, f.sessionKey);
-      expect(readFileSync(saved)).toEqual(bytes);
-      expect(lstatSync(saved).mtimeMs).toBe(modified);
-      expect(getWorkspaceRetentionHold(f.workspacePath, f.identity)).toEqual(f.hold);
-      expect(existsSync(f.workspacePath)).toBe(true);
-      expect(git(f.workspacePath, 'status', '--porcelain')).toBe('');
+    const f = await fixture();
+    const mission = readOrchestratorControlPlaneState();
+    mission.packets[0].launchContext!.workMode = 'edit';
+    writeOrchestratorControlPlaneState(mission);
+    writeFileSync(join(f.workspacePath, 'tracked.txt'), 'Silent-exit committed source.\n');
+    if (route === 'already-merged') {
+      git(f.workspacePath, 'commit', '-qam', 'completed work already on remote main');
+      const remote = join(root, 'remote-' + fixtureIndex);
+      git(root, 'clone', '--bare', '-q', f.workspacePath, remote);
+      git(remote, 'update-ref', 'refs/heads/main', 'HEAD');
+      git(f.workspacePath, 'remote', 'add', 'origin', remote);
     }
+    // Provider output/liveness and all triage/salvage/merge decisions remain real;
+    // only the heavy repository verification command is replaced here.
+    const verify = vi.spyOn(verification, 'runCompletionVerification').mockResolvedValue({ ok: true, kind: 'typecheck', output: '' });
+    try { expect(await runSilentExitTriageForLane(f.lane.id)).toBe(true); } finally { verify.mockRestore(); }
+    const record = readCompletionHandoff(f.repo.id, f.packet.id)!;
+    expect(record).toMatchObject({ acceptedState: route === 'salvage' ? 'reviewing' : 'completed',
+      sessionKey: f.sessionKey, owner: { runId: f.session.recentRuns[0].id },
+      handoff: { revision: git(f.workspacePath, 'rev-parse', 'HEAD'), treeSha: git(f.workspacePath, 'rev-parse', 'HEAD^{tree}') } });
+    if (route === 'already-merged') expect(record.handoff.outcome).toBe('already_merged');
+    expect(getLane(f.lane.id)?.status).toBe(route === 'salvage' ? 'reviewing' : 'completed');
+    if (route === 'already-merged') {
+      expect(getLaneEvents(f.lane.id, 100)).toEqual(expect.arrayContaining([
+        expect.objectContaining({ verb: 'silent_exit_already_merged', payload: expect.objectContaining({ headSha: record.handoff.revision }) }),
+      ]));
+    }
+    const saved = privateHandoffs(getDataDir(), f.packet.id)[0].path;
+    const bytes = readFileSync(saved), modified = lstatSync(saved).mtimeMs;
+    await capturePacketCompletionContext(f.packet.id, f.sessionKey);
+    expect(readFileSync(saved)).toEqual(bytes);
+    expect(lstatSync(saved).mtimeMs).toBe(modified);
+    expect(getWorkspaceRetentionHold(f.workspacePath, f.identity)).toEqual(f.hold);
+    expect(existsSync(f.workspacePath)).toBe(true);
+    expect(git(f.workspacePath, 'status', '--porcelain')).toBe('');
   });
 
   it('refuses a newer owner generation during actual silent-exit capture before acceptance', async () => {
