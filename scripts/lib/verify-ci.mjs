@@ -150,8 +150,9 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
   }), 'integration comparison refs need a verify:ci equivalent');
   const integrationRun = integration.steps.find(step => step.run === 'npm run test:integration -- ${{ steps.select.outputs.files }}');
   requireCondition(integrationRun?.if === "steps.select.outputs.count != '0'", 'integration command changed');
-  const browserFile = 'tests/next-parity-route-ownership-real-path.test.ts';
-  const browserSteps = integration.steps.filter(step => step.if === `contains(steps.select.outputs.files, '${browserFile}')`
+  const browserFiles = ['tests/next-parity-route-ownership-real-path.test.ts', 'tests/review-diff-position-real-path.test.ts'];
+  const browserCondition = browserFiles.map(file => `contains(steps.select.outputs.files, '${file}')`).join(' || ');
+  const browserSteps = integration.steps.filter(step => step.if === browserCondition
     && step.run === 'npx --no-install playwright-core install --with-deps chromium');
   requireCondition(browserSteps.length <= 1, 'duplicate integration browser prerequisites');
   const prerequisites = 'sudo apt-get update\nsudo apt-get install -y ripgrep openssh-server\nrg --version';
@@ -162,7 +163,7 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
     'integration step needs a verify:ci equivalent');
   }
   checks.push({ id: 'integration-changed', after: dependencies(integration), name: integration.name, steps: [
-    ...browserSteps.map(step => ({ ...runStep(step, integration, undefined, scripts), requiresFile: browserFile })),
+    ...browserSteps.map(step => ({ ...runStep(step, integration, undefined, scripts), requiresFiles: browserFiles })),
     { ...runStep({ ...integrationRun, run: 'npm run test:integration --' }, integration, undefined, scripts), selectedFiles: true },
   ] });
   const audit = jobs.security.steps.find(step => step.uses?.startsWith(auditAction));

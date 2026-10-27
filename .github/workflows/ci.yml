@@ -232,8 +232,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ripgrep openssh-server
           rg --version
-      - name: Install parity routing test browser
-        if: contains(steps.select.outputs.files, 'tests/next-parity-route-ownership-real-path.test.ts')
+      - name: Install touched browser-test prerequisites
+        if: contains(steps.select.outputs.files, 'tests/next-parity-route-ownership-real-path.test.ts') || contains(steps.select.outputs.files, 'tests/review-diff-position-real-path.test.ts')
         run: npx --no-install playwright-core install --with-deps chromium
       - if: steps.select.outputs.count != '0'
         run: npm run test:integration -- ${{ steps.select.outputs.files }}

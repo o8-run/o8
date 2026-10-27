@@ -5965,6 +5965,12 @@
       ]
     },
     {
+      "path": "tests/review-diff-position-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/review-file-previews.test.ts",
       "reasons": [
         "child-process",
