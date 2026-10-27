@@ -13,15 +13,15 @@ export function appendUserHistoryMessage(input: {
 }): ChatHistoryMessage[] {
   const next = [...input.messages];
   const last = next[next.length - 1];
-  const duplicate = last?.role === 'user' && (
-    (Boolean(input.messageId) && last.id === input.messageId)
-    || (!input.media?.length && last.content === input.content)
-  );
-  if (duplicate && input.media?.length && input.messageId && last.id === input.messageId) {
-    next[next.length - 1] = { ...last, media: input.media };
+  const duplicateIndex = input.messageId
+    ? next.findIndex(message => message.role === 'user' && message.id === input.messageId)
+    : last?.role === 'user' && !input.media?.length && last.content === input.content ? next.length - 1 : -1;
+  const duplicate = duplicateIndex >= 0;
+  if (duplicate && input.media?.length && input.messageId) {
+    next[duplicateIndex] = { ...next[duplicateIndex], media: input.media };
   }
   if (input.handoff && !next.some((message) => message.id === input.handoff?.handoffId)) {
-    next.splice(duplicate ? next.length - 1 : next.length, 0, createHandoffHistoryMarker(input.handoff, input.timestamp));
+    next.splice(duplicate ? duplicateIndex : next.length, 0, createHandoffHistoryMarker(input.handoff, input.timestamp));
   }
   if (!duplicate) {
     next.push({

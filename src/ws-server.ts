@@ -5777,6 +5777,8 @@ async function handleOrchestratorSendMsgOnce(
               permissionMode,
               leadModel: event.leadModel,
               effort: event.effort,
+              effortSource: event.effortSource,
+              serviceTier: event.serviceTier,
               mode,
               ...(pickedMode ? { pickedMode } : {}),
             };
