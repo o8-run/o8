@@ -5,7 +5,7 @@ import { Suspense, useState, useCallback, useEffect, useRef, useMemo } from 'rea
 import type { WorkspaceHeaderTab } from '@/components/desktop/shell/workspace-header-strip-types';
 import { usePaletteFileSelection } from './hooks/usePaletteFileSelection';
 import { isTauri, canUseTauriEvents, browserViewHide } from '@/lib/tauri/bridge';
-import { isNonMacShell } from '@/lib/desktop/host-platform';
+import { isNonMacShell, shellLacksGlass } from '@/lib/desktop/host-platform';
 import { subscribeTauriEvent } from '@/lib/tauri/events';
 import { useAppOpenedTelemetry } from '@/lib/analytics/startup';
 import { AnimatePresence, motion } from 'framer-motion';
@@ -4278,7 +4278,7 @@ function DashboardInner() {
       height: 'calc(100vh / var(--ui-zoom, 1))',
       display: 'flex',
       flexDirection: 'column',
-      background: inTauri && !isNonMacShell() && paletteId === 'dark' ? DARK_FRAME_GLASS_TINT : effectiveGlassSurface ? 'var(--t-bg-gradient)' : 'var(--t-shell-frame-bg, var(--t-bg-gradient))',
+      background: inTauri && !shellLacksGlass() && paletteId === 'dark' ? DARK_FRAME_GLASS_TINT : effectiveGlassSurface ? 'var(--t-bg-gradient)' : 'var(--t-shell-frame-bg, var(--t-bg-gradient))',
       ...(!compactShell ? {
         ['--o8-shell-header-height' as string]: `${SHELL_HEADER_HEIGHT}px`,
         ['--o8-shell-edge-inset' as string]: `${SHELL_EDGE_INSET}px`,
@@ -4964,7 +4964,7 @@ function DashboardInner() {
       <AlertToast alerts={activeAlerts} compact={compactShell} onAction={handleAlertAction} />
 
       {showCompactNavigationRail ? <CompactNavigationRail
-        glassSurface={chromeMounted && (isGlassSurface || (workspaceGlass && inTauri && !isNonMacShell()))}
+        glassSurface={chromeMounted && (isGlassSurface || (workspaceGlass && inTauri && !shellLacksGlass()))}
         workspacePage={isWorkspaceUtilityKind(focusedWorkspaceTab?.canvasKind) ? focusedWorkspaceTab.canvasKind : undefined}
         activeDestination={activeNavSection}
         onHome={leaveNavTakeover}

@@ -5,7 +5,8 @@ import { closeSync, existsSync, mkdtempSync, openSync, readFileSync, rmSync, wri
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { getDataDir } from '@/lib/data-dir-migration';
-import { createRunArtifactReader } from '@/lib/runtimes/shared/owned-session/run-artifacts';
+import { createRunArtifactReader } from '@/lib/runtimes/shared/owned-session/run-artifact-reader';
+import { detectRunSandboxDenial } from '@/lib/runtimes/shared/owned-session/sandbox-denial';
 import { workerOwnedStdinInvocation } from '@/lib/runtimes/shared/owned-session/staged-stdin';
 import type { OwnedSessionRecord } from '@/lib/runtimes/shared/owned-session/types';
 
@@ -128,11 +129,9 @@ describe.skipIf(process.platform === 'win32')('worker-owned stdin across server 
     await waitFor(() => existsSync(file('delivery-write-started')), 'relay paused during receipt write');
     const publishedDuringWrite = existsSync(deliveryPath) ? readFileSync(deliveryPath, 'utf8') : undefined;
     const reader = createRunArtifactReader({
-      runtimeId: 'test-stdin', surfaceIdPrefix: 'test-stdin-owned:',
-      rootEnvVar: 'O8_STDIN_SESSION_ROOT', rootDefault: root, binaryName: 'node', binaryEnvOverride: 'O8_STDIN_NODE',
-      humanLabel: 'Stdin fixture', squadShortName: 'Stdin', launchArgs: () => [], resumeArgs: () => null,
+      runtimeId: 'test-stdin',
       parseRunLog: () => ({ entries: [], outcome: 'running', completedTurn: false }),
-    });
+    }, detectRunSandboxDenial);
     expect((await reader(run)).parsed.providerFailure).toBeUndefined();
     expect(publishedDuringWrite).toBeUndefined();
     writeFileSync(file('delivery-write-release'), 'continue');
