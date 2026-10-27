@@ -54,7 +54,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        platform: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.publish_target == 'linux' && '["ubuntu-latest"]' || github.event_name == 'workflow_dispatch' && inputs.publish_target == 'windows' && '["windows-latest"]' || '["windows-latest","ubuntu-latest"]') }}
+        platform: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.publish_target == 'linux' && '["ubuntu-22.04"]' || github.event_name == 'workflow_dispatch' && inputs.publish_target == 'windows' && '["windows-latest"]' || '["windows-latest","ubuntu-22.04"]') }}
+    # Linux builds on ubuntu-22.04, not ubuntu-latest: glibc is never bundled
+    # (not even in the AppImage), so the runner's glibc is the oldest one the
+    # package can start on. 24.04 runners produced a shell that needs
+    # GLIBC_2.39, locking out Ubuntu 22.04, Debian 12, Mint 21 and Pop!_OS
+    # 22.04. The glibc gate after the build keeps the floor at 2.35.
     runs-on: ${{ matrix.platform }}
     timeout-minutes: 75
     steps:
@@ -202,6 +207,23 @@ jobs:
             exit 1
           fi
           echo "AppImage embedded signature is present"
+      - name: Verify Linux glibc baseline
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mapfile -d '' packages < <(
+            find src-tauri/target/release/bundle -type f \( -name '*.deb' -o -name '*.AppImage' \) -print0
+          )
+          if [[ ${#packages[@]} -eq 0 ]]; then
+            echo "no Linux deb or AppImage to check" >&2
+            exit 1
+          fi
+          for package in "${packages[@]}"; do
+            if [[ "$package" == *.AppImage ]]; then chmod +x "$package"; fi
+          done
+          node scripts/ci/check-linux-glibc.mjs --max 2.35 "${packages[@]}"
       - name: Verify Windows Authenticode signatures
         if: runner.os == 'Windows' && inputs.release_tag != '' && inputs.sign_windows
         shell: pwsh
