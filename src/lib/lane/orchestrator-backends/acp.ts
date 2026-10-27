@@ -1,3 +1,4 @@
+import { unmappedEffortError } from './unmapped-effort';
 import { join } from 'node:path';
 import { credentialPolicyFingerprint } from '@/lib/providers/credential-policy';
 import { resolveLocalAcpLaunch, localAcpProcessLaunch, acpLaunchFingerprint } from '@/lib/acp/local-connection';
@@ -79,6 +80,7 @@ interface AcpSession {
 }
 
 const sessions = new Map<string, AcpSession>();
+const reserved = new Set<string>();
 let acpRealtimeSeq = 0;
 
 /**
@@ -230,6 +232,7 @@ export function makeAcpBackend(config: AcpBackendConfig): OrchestratorBackend {
         requestTimeoutMs: config.requestTimeoutMs,
       }),
     };
+    reserved.delete(key);
     sessions.set(key, session);
     return session;
   }
@@ -322,13 +325,21 @@ export function makeAcpBackend(config: AcpBackendConfig): OrchestratorBackend {
     label,
     peekSession(repoPath, _agent, threadId): OrchestratorSessionInfo | null {
       const session = sessions.get(sessionKey(id, repoPath, threadId));
-      return session && session.client.alive ? { sessionName: session.sessionName, status: session.status } : null;
+      return session && session.client.alive ? { sessionName: session.sessionName, status: session.status }
+        : reserved.has(sessionKey(id, repoPath, threadId)) ? { sessionName: sessionKey(id, repoPath, threadId), status: 'ready' } : null;
     },
     ensureSession(repoPath, _agent, threadId): OrchestratorSessionInfo {
-      const session = ensureSync(repoPath, threadId);
-      return { sessionName: session.sessionName, status: session.status };
+      const key = sessionKey(id, repoPath, threadId);
+      const session = sessions.get(key);
+      if (session?.client.alive && session.status !== 'dead') return { sessionName: key, status: session.status };
+      // Reserving a conversation must not start a process before turn options
+      // have passed admission. sendTurn performs the actual launch.
+      reserved.add(key);
+      return { sessionName: key, status: 'ready' };
     },
     async sendTurn(repoPath, message, onEvent, options?: OrchestratorTurnOptions): Promise<void> {
+      const effortError = unmappedEffortError(options?.thinkingEffort);
+      if (effortError) { onEvent(effortError); return; }
       if (options?.signal?.aborted) { onEvent(mapStopReason('cancelled', null)); return; }
       if (id === 'opencode' || id === 'hermes' || (id === 'acp' && resolveLocalAcpLaunch()?.useOpenRouter)) {
         await resolveOpenRouterKey();
@@ -377,7 +388,8 @@ export function makeAcpBackend(config: AcpBackendConfig): OrchestratorBackend {
         countingOnEvent({
           type: 'turn_receipt',
           leadModel: session.appliedModel ?? defaultModelFor(id) ?? id,
-          effort: options?.thinkingEffort ?? 'adaptive',
+          effort: 'adaptive',
+          effortSource: 'runtime-default',
         });
         // session/prompt resolves only at end of turn, so the per-request RPC
         // default would bound the whole turn (#2472). The watchdog and abort

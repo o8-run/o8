@@ -66,7 +66,7 @@ describe('install-info route decides the update action (seam A)', () => {
     else process.env.APPIMAGE = realAppImage;
   });
 
-  it('offers a download on a Linux install with no AppImage path (deb/rpm)', async () => {
+  it('keeps a Linux tarball on the direct download path', async () => {
     stubInstall('linux', 'x64', null);
     await expect(actionForRunningInstall('0.1.726')).resolves.toEqual({
       kind: 'download',
