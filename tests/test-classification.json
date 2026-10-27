@@ -3441,6 +3441,14 @@
       ]
     },
     {
+      "path": "tests/judgment-surface-merge-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/knowledge-source-direct-writers-real-path.test.ts",
       "reasons": [
         "child-process",
