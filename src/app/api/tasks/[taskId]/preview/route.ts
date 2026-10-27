@@ -13,7 +13,7 @@ export const dynamic = 'force-dynamic';
 const headers = { 'Cache-Control': 'no-store' };
 
 function coordinatorOrigin(request: NextRequest): string | null {
-  // The packaged Next server binds to 0.0.0.0, so nextUrl is not the client's
+  // The packaged Next server may bind 0.0.0.0 (O8_LAN_ACCESS), so nextUrl is not the client's
   // origin. Socket-peer truth must still win over a spoofed loopback Host.
   if (!isTrustedPanelRequest(request)) return null;
   const host = request.headers.get('host');

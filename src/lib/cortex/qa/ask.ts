@@ -19,6 +19,7 @@ import { assertKnowledgeAnswerCurrent } from '@/lib/cortex/knowledge/answer-vali
  */
 
 import 'server-only';
+import { requestProjectScopeKey } from '@/lib/repos/request-project-scope';
 import { readMemoryRevision } from '@/lib/cortex/memory-revision';
 
 import { createHash } from 'node:crypto';
@@ -76,7 +77,7 @@ interface CacheEntry {
 const answerCache = new Map<string, CacheEntry>();
 
 function scopeKey(repoPath: string | undefined, projectId: string | undefined, terse = false): string {
-  return `${readMemoryRevision()}\x00${brainRouteCacheKeySync()}\x00${repoPath ?? ''}\x00${projectId ?? ''}${terse ? '\x00terse' : ''}`;
+  return `${readMemoryRevision()}\x00${brainRouteCacheKeySync()}\x00${repoPath ?? ''}\x00${projectId ?? ''}${terse ? '\x00terse' : ''}\x00${requestProjectScopeKey()}`;
 }
 
 /**
@@ -94,6 +95,8 @@ export { findSemanticMatch } from '@/lib/cortex/qa/semantic-cache';
  */
 async function getSemanticCached(question: string, scope: string): Promise<CacheEntry | null> {
   if (currentComposerBrainRoute()?.runtime) return null;
+  const memoryRevision = readMemoryRevision();
+  if (!scope.startsWith(`${memoryRevision}\x00`)) return null;
   const now = Date.now();
   const candidates: Array<{ key: string; vector: number[] }> = [];
   for (const [key, entry] of answerCache) {
@@ -104,7 +107,7 @@ async function getSemanticCached(question: string, scope: string): Promise<Cache
   if (candidates.length === 0) return null;
 
   const vector = await embedQuestion(normalizeQuestionForCache(question));
-  if (!vector) return null;
+  if (!vector || memoryRevision !== readMemoryRevision()) return null;
 
   const match = findSemanticMatch(vector, candidates);
   if (!match) return null;
@@ -152,7 +155,7 @@ function cacheKey(
   terse = false,
 ): string {
   return createHash('sha256')
-    .update(`${readMemoryRevision()}\x00${brainRouteCacheKeySync()}\x00${normalizeQuestionForCache(question)}\x00${repoPath ?? ''}\x00${projectId ?? ''}${terse ? '\x00terse' : ''}`)
+    .update(`${readMemoryRevision()}\x00${brainRouteCacheKeySync()}\x00${normalizeQuestionForCache(question)}\x00${repoPath ?? ''}\x00${projectId ?? ''}${terse ? '\x00terse' : ''}\x00${requestProjectScopeKey()}`)
     .digest('hex');
 }
 

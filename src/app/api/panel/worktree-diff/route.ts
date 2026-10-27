@@ -1,6 +1,7 @@
+import { viewerGitJson } from '@/lib/viewers/git-response';
+import { viewerJson } from '@/lib/viewers/response';
 export const dynamic = 'force-dynamic';
 
-import { NextResponse } from 'next/server';
 import { execFileSync } from '@/lib/providers/child-process';
 import os from 'os';
 
@@ -14,7 +15,7 @@ export async function GET(request: Request) {
   const workspaceParam = searchParams.get('workspace') ?? searchParams.get('repoPath');
   const maxBytes = Math.min(512 * 1024, Math.max(16 * 1024, Number(searchParams.get('maxBytes')) || 131_072));
   if (!workspaceParam) {
-    return NextResponse.json({ ok: false, error: 'workspace param required' }, { status: 400 });
+    return viewerJson({ ok: false, error: 'workspace param required' }, { status: 400 });
   }
   const root = workspaceParam.startsWith('~') ? workspaceParam.replace('~', os.homedir()) : workspaceParam;
   try {
@@ -60,8 +61,8 @@ export async function GET(request: Request) {
     }
     const truncated = Buffer.byteLength(diff, 'utf-8') > maxBytes;
     if (truncated) diff = diff.slice(0, maxBytes);
-    return NextResponse.json({ ok: true, branch, stat: stat.trim(), diff, truncated });
+    return viewerGitJson({ ok: true, branch, stat: stat.trim(), diff, truncated }, root);
   } catch (error) {
-    return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : 'git diff failed' });
+    return viewerJson({ ok: false, error: error instanceof Error ? error.message : 'git diff failed' });
   }
 }

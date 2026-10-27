@@ -57,4 +57,4 @@ async function main() {
   Object.assign(getOrchestratorBackend('pi'), withOrchestrationMode(fixture));
   await import('../../src/ws-server');
 }
-void main().catch(() => { console.error('[o8-next-worker] Fixture runtime failed'); process.exitCode = 1; });
+void main().catch(error => { console.error('[o8-next-worker] Fixture runtime failed', error); process.exitCode = 1; });

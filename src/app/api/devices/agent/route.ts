@@ -26,7 +26,7 @@ export async function POST(request: Request): Promise<Response> {
   } catch {
     return Response.json({ error: { code: 'device_action_invalid', message: 'Choose a supported device tool action.' } }, { status: 400, headers });
   }
-  const protocol = prepareMcpHttp(payload, request.headers);
+  const protocol = prepareMcpHttp(payload, request.headers, new URL(request.url).protocol);
   if (protocol.refusal) return Response.json(protocol.refusal, { status: protocol.status ?? 400, headers });
   if (!['initialize', 'tools/list', 'tools/call', 'server/discover'].includes(payload.method)) {
     return Response.json({ jsonrpc: '2.0', id: payload.id ?? null, error: { code: -32601, message: 'Device tool method unavailable' } }, { status: 400, headers });

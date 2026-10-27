@@ -19,7 +19,7 @@ sha2 = { version = "0.10", optional = true }
 chrono = { version = "0.4", default-features = false, features = ["clock"], optional = true }
 unicode-normalization = { version = "0.1", optional = true }
 serde_json = "1"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "net", "io-std", "io-util", "signal", "time", "process", "fs"] }
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "sync", "net", "io-std", "io-util", "signal", "time", "process", "fs"] }
 libc = { version = "0.2", optional = true }
 base64 = { version = "0.22", optional = true }
 tokio-tungstenite = { version = "0.29", optional = true }

@@ -12,6 +12,12 @@ use std::{
 #[cfg(test)]
 thread_local! {
     pub(crate) static IDENTITY_UNAVAILABLE: std::cell::Cell<bool> = std::cell::Cell::new(false);
+    pub(crate) static IDENTITY_PROBE: std::cell::Cell<Option<fn(u32) -> Option<Value>>> = std::cell::Cell::new(None);
+}
+
+#[cfg(all(test, windows))]
+thread_local! {
+    static CIM_TEST_BUDGET: std::cell::Cell<Option<Duration>> = std::cell::Cell::new(None);
 }
 
 const UNBOUND_MS: f64 = 30_000.0;
@@ -57,6 +63,8 @@ fn command(program: &str, args: &[&str]) -> Result<String, String> {
     // Cold Windows PowerShell/CIM startup may exceed two seconds. Keep a bound
     // but do not mistake the query's startup deadline for an absent process.
     let budget = Duration::from_secs(if cfg!(windows) { 10 } else { 2 });
+    #[cfg(all(test, windows))]
+    let budget = CIM_TEST_BUDGET.with(|test_budget| test_budget.get().unwrap_or(budget));
     let deadline = Instant::now() + budget;
     loop {
         if let Some(status) = child.try_wait().map_err(|error| error.to_string())? {
@@ -91,6 +99,10 @@ pub fn identity(pid: u32) -> Option<Value> {
     #[cfg(test)]
     if IDENTITY_UNAVAILABLE.with(|unavailable| unavailable.get()) {
         return None;
+    }
+    #[cfg(test)]
+    if let Some(probe) = IDENTITY_PROBE.with(|probe| probe.get()) {
+        return probe(pid);
     }
     #[cfg(windows)]
     if pid == std::process::id() {
@@ -257,8 +269,15 @@ pub fn expire_observation(path: &Path) {
 #[cfg(windows)]
 #[test]
 fn windows_cim_probe_reports_live_owner_and_elapsed_time() {
-    let started = Instant::now();
+    // A fresh runner can start with a cold WMI service. Only this test gets a
+    // longer deadline, including the identity() call below; production keeps 10 s.
+    CIM_TEST_BUDGET.with(|budget| budget.set(Some(Duration::from_secs(60))));
     let script = windows_script(std::process::id());
+    let _ = command(
+        "powershell.exe",
+        &["-NoProfile", "-NonInteractive", "-Command", &script],
+    );
+    let started = Instant::now();
     let result = command(
         "powershell.exe",
         &["-NoProfile", "-NonInteractive", "-Command", &script],

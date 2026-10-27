@@ -42,6 +42,8 @@ beforeEach(() => {
   }
 
   vi.doMock('@/lib/panel/status-boot', () => ({ startStatusBootHooks: vi.fn() }));
+  // Voice preparation is tested with an injected runner; diagnostics stay hermetic.
+  vi.doMock('@/lib/tts/ensure-edge-tts', () => ({ ensureEdgeTtsInstalled: vi.fn(async () => {}) }));
   vi.doMock('@/lib/lane/registry', () => ({ getLane: vi.fn() }));
   vi.doMock('@/lib/lane/auto-review', () => ({ triggerAutoReview: vi.fn() }));
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {

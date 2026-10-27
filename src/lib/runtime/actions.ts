@@ -1,3 +1,6 @@
+import type { RuntimeLaunchRequest } from './launch-request';
+export type { RuntimeLaunchRequest } from './launch-request';
+import { runtimeLaunchStep, withRuntimeLaunchDeadline } from './launch-deadline';
 import { assertNotKnowledgeSource } from '@/lib/cortex/knowledge/sources';
 import { assertReviewerPrCheckout } from '@/lib/orchestrator/reviewer-pr-source';
 import { assertPreRunAdmission, retireCancelledPreRunWorktree } from '@/lib/lane/pre-run-cancellation';
@@ -5,11 +8,7 @@ import { AutomaticRecoveryRefusedError, withAutomaticRecoveryRequest, withOwnedA
 import type { AgentSummary } from '@/lib/fleet/types';
 import { recordLaneEvent } from '@/lib/lane/events';
 import { listLanes, updateLane } from '@/lib/lane/registry';
-import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
-import type { ClaudeCodeModelSource } from '@/lib/claude-code/worker-profile-types';
-import type { OrchestratorRuntime, WorkerWorkMode } from '@/lib/orchestrator/types';
-import type { PacketSpendCap } from '@/lib/orchestrator/metered-spend';
-import type { ExecutionCarrierId } from '@/lib/runtimes/shared/execution-carrier';
+import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
 import {
   listDeclarativeRuntimes,
 } from '@/lib/orchestrator/runtime-capabilities';
@@ -39,9 +38,9 @@ import { confirmDiscoveredInterrupt } from '@/lib/runtime/confirmed-interrupt';
 import { settleRuntimeLaunchGovernance } from '@/lib/runtime/launch-governance';
 import { holdPendingOwnedCorrections } from '@/lib/runtimes/shared/owned-session/action-admission';
 import { assertSingleAttemptLaunch } from '@/lib/runtime/single-attempt-launch';
-
+import { resolveCodexLaunchIdentity } from '@/lib/codex/launch-context';
+import type { RuntimeLaunchIdentity } from '@/lib/runtime/identity-catalog';
 export type RuntimeActionKind = 'steer' | 'stop' | 'send_input' | 'interrupt' | 'watch' | 'resolve' | 'launch';
-
 export interface RuntimeActionRequest {
   /** Restricts automated steering to this uninterrupted owned run. */
   automaticRecoveryRunId?: string;
@@ -76,59 +75,6 @@ export interface RuntimeActionResult {
   aborted?: boolean;
   /** An idempotent duplicate found the original mutation still executing. */
   inProgress?: boolean;
-}
-
-export interface RuntimeLaunchRequest {
-  controlledTask?: import('@/lib/mcp/task-execution-store').ControlledTaskBinding;
-  executionPolicy?: 'single-attempt';
-  controlledProvider?: import('@/lib/runtimes/shared/owned-session/controlled-provider').ControlledOpenRouterPolicy;
-  automaticRecoverySurfaceId?: string;
-  automaticRecoveryRunId?: string;
-  runtime: RuntimeId;
-  prompt: string;
-  model?: string;
-  claudeCodeModel?: string;
-  claudeCodeCarrier?: ClaudeCodeModelSource;
-  executionCarrier?: ExecutionCarrierId;
-  /** Requested reasoning effort — passed to the runtime's launch; per-runtime no-op. */
-  effort?: ThinkingEffort;
-  clientMutationId?: string;
-  cwd?: string;
-  repoPath?: string;
-  /** Canonical repo root for project context when cwd/repoPath points at an isolated worktree. */
-  projectRepoPath?: string;
-  taskName?: string;
-  /**
-   * Pre-assigned lane branch the worktree must check out before the agent
-   * spawns. Without this, prepareLaunchWorktree falls back to the legacy
-   * `worktree/<agent>/<slug>` placeholder branch and the agent has to
-   * self-correct via `git checkout -b <lane.branch>`. Weaker models miss
-   * the prompt hint and silently commit on the wrong branch — the lane
-   * merge then sees an empty diff. Dispatch passes `lane.branch` here.
-   */
-  branchName?: string;
-  baseBranch?: string;
-  isolate?: boolean;
-  isolation?: 'main' | 'branch';
-  skipSetup?: boolean;
-  // When set, the caller already owns a lane for this launch (eg. packet
-  // dispatch going through the lane command bus). launchRuntimeSurface will
-  // skip its implicit lane creation and leave binding to the caller.
-  existingLaneId?: string;
-  // When the launch is bound to a packet, include its id so supervisor inbox
-  // items surfaced during pre-launch (eg. rebase conflicts) can deep-link
-  // back to the packet card. Leave undefined for scratch runs that aren't
-  // tied to a packet. Also drives the worktree directory naming (one slot
-  // per packet, instead of a shared taskName-derived slot).
-  packetId?: string;
-  spendCap?: PacketSpendCap;
-  /**
-   * Optional caller hint. The durable packet launch context wins when it is
-   * stricter, so a caller can never widen a read-only packet by omitting it.
-   */
-  workMode?: WorkerWorkMode;
-  /** Scheduler-owned storage reservation reused by the managed-worktree boundary. */
-  storageAdmissionReservationId?: string;
 }
 
 export { resolveLaunchWorkMode, type LaunchWorkModeResolution } from './launch-work-mode';
@@ -166,7 +112,7 @@ function auditRuntimeSteer(payload: RuntimeActionRequest, sessionKey: string): v
   }
 }
 
-export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promise<RuntimeLaunchResult> {
+export async function launchRuntimeSurface(payload: RuntimeLaunchRequest, codexIdentity?: RuntimeLaunchIdentity): Promise<RuntimeLaunchResult> {
   assertNotKnowledgeSource(payload.repoPath); assertNotKnowledgeSource(payload.cwd);
   if (payload.automaticRecoverySurfaceId || payload.automaticRecoveryRunId) {
     if (!payload.automaticRecoverySurfaceId?.startsWith(`${payload.runtime}-owned:`) || !payload.automaticRecoveryRunId) {
@@ -174,7 +120,7 @@ export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promi
     }
     try {
       return await withOwnedAutomaticRecovery(payload.automaticRecoverySurfaceId, payload.automaticRecoveryRunId,
-        () => launchRuntimeSurfaceInner(payload));
+        () => launchRuntimeSurfaceInner(payload, codexIdentity));
     } catch (error) {
       if (!(error instanceof AutomaticRecoveryRefusedError)) throw error;
       return { ok: false, runtime: payload.runtime, surfaceId: '', note: error.message,
@@ -182,10 +128,9 @@ export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promi
         worktree: null, laneId: payload.existingLaneId ?? null };
     }
   }
-  return launchRuntimeSurfaceInner(payload);
+  return launchRuntimeSurfaceInner(payload, codexIdentity);
 }
-
-async function launchRuntimeSurfaceInner(payload: RuntimeLaunchRequest): Promise<RuntimeLaunchResult> {
+async function launchRuntimeSurfaceInner(payload: RuntimeLaunchRequest, codexIdentity?: RuntimeLaunchIdentity): Promise<RuntimeLaunchResult> {
   const runtimeId = payload.runtime;
   const prompt = payload.prompt?.trim();
   const repoPath = payload.repoPath?.trim() || payload.cwd?.trim();
@@ -227,7 +172,8 @@ async function launchRuntimeSurfaceInner(payload: RuntimeLaunchRequest): Promise
     };
   }
 
-  assertSingleAttemptLaunch(payload, workModeResolution.workMode);
+  const launchIdentity = runtimeId === 'codex' ? codexIdentity ?? resolveCodexLaunchIdentity(payload.packetId) : undefined;
+  assertSingleAttemptLaunch(payload, workModeResolution.workMode, launchIdentity?.configHomeRef);
   if (payload.controlledTask && (payload.executionPolicy !== 'single-attempt' || payload.isolate !== false
     || payload.skipSetup !== true || payload.automaticRecoverySurfaceId || payload.automaticRecoveryRunId)) {
     throw new Error('Controlled task launch requires its pre-admitted isolated workspace and no recovery.');
@@ -424,42 +370,46 @@ async function launchRuntimeSurfaceInner(payload: RuntimeLaunchRequest): Promise
       throw packetWorktreeProvisionError(payload, runtimeId, repoPath, note, note);
     }
   }
-  await assertReviewerPrCheckout(payload.packetId, cwd);
-  assertPreRunAdmission();
-  const result = await runtime.launch({
-    cwd,
-    sourceRepoPath: repoPath,
-    branchName: payload.branchName,
-    baseBranch: payload.baseBranch,
-    prompt: launchPrompt,
-    taskName: payload.taskName,
-    clientMutationId: payload.clientMutationId,
-    model: payload.model,
-    claudeCodeModel: payload.claudeCodeModel,
-    claudeCodeCarrier: payload.claudeCodeCarrier,
-    executionCarrier: payload.executionCarrier,
-    effort: payload.effort,
-    worktreeFlag: launchWorktree?.claudeWorktreeFlag,
-    worktreePath: launchWorktree?.worktree?.path,
-    laneId: payload.existingLaneId ?? undefined,
-    packetId: payload.packetId,
-    spendCap: payload.spendCap,
-    workMode: workModeResolution.workMode,
-    executionPolicy: payload.executionPolicy,
-    controlledTask: payload.controlledTask,
-    controlledProvider: payload.controlledProvider,
-  });
+  return withRuntimeLaunchDeadline({ runtime: runtimeId, laneId: payload.existingLaneId ?? undefined, packetId: payload.packetId }, async () => {
+    await runtimeLaunchStep({ laneId: payload.existingLaneId ?? undefined, packetId: payload.packetId }, 'reviewer_checkout', () => assertReviewerPrCheckout(payload.packetId, cwd));
+    assertPreRunAdmission();
+    const result = await runtime.launch({
+      runtimeIdentity: launchIdentity,
+      cwd,
+      sourceRepoPath: repoPath,
+      branchName: payload.branchName,
+      baseBranch: payload.baseBranch,
+      prompt: launchPrompt,
+      promptMemoryRevision: payload.promptMemoryRevision,
+      taskName: payload.taskName,
+      clientMutationId: payload.clientMutationId,
+      model: payload.model,
+      claudeCodeModel: payload.claudeCodeModel,
+      claudeCodeCarrier: payload.claudeCodeCarrier,
+      executionCarrier: payload.executionCarrier,
+      effort: payload.effort,
+      worktreeFlag: launchWorktree?.claudeWorktreeFlag,
+      worktreePath: launchWorktree?.worktree?.path,
+      laneId: payload.existingLaneId ?? undefined,
+      packetId: payload.packetId,
+      spendCap: payload.spendCap,
+      workMode: workModeResolution.workMode,
+      executionPolicy: payload.executionPolicy,
+      controlledTask: payload.controlledTask,
+      controlledProvider: payload.controlledProvider,
+    });
 
-  return settleRuntimeLaunchGovernance({
-    payload,
-    runtime,
-    runtimeId,
-    prompt,
-    result,
-    launchWorktree,
-    projectId: projectContext?.id ?? null,
-    cwd,
-    repoPath,
+    return runtimeLaunchStep({ laneId: payload.existingLaneId ?? undefined, packetId: payload.packetId }, 'launch_governance', () => settleRuntimeLaunchGovernance({
+      payload,
+      runtime,
+      runtimeId,
+      prompt,
+      result,
+      launchWorktree,
+      projectId: projectContext?.id ?? null,
+      cwd,
+      repoPath,
+    }));
   });
 }
 
@@ -547,10 +497,14 @@ async function performRuntimeActionInner(payload: RuntimeActionRequest): Promise
     return actionUnavailable(payload, '', '', 'surfaceId is required');
   }
 
-  if (payload.action === 'stop' || payload.action === 'interrupt') holdPendingOwnedCorrections(surfaceId);
+  if (payload.action === 'stop' || payload.action === 'interrupt') {
+    holdPendingOwnedCorrections(surfaceId);
+    // Stop the exact owned run before discovery can reconnect a cancelled launch.
+    const ownedResult = await performOwnedActionWithoutInventory(payload, surfaceId);
+    if (ownedResult) return ownedResult;
+  }
 
-  // Try cached snapshot first to avoid expensive full re-discovery on every action.
-  // Only fall back to a fresh fetch if the agent isn't in cache (e.g. just spawned).
+  // Refresh inventory only if the surface is absent from its cached snapshot.
   const cached = await getRuntimeInventorySnapshot();
   let agent = findRuntimeAgent(cached, surfaceId);
   if (!agent) {
@@ -560,7 +514,6 @@ async function performRuntimeActionInner(payload: RuntimeActionRequest): Promise
   if (!agent) {
     const ownedResult = await performOwnedActionWithoutInventory(payload, surfaceId);
     if (ownedResult) return ownedResult;
-    // Fix #3: return structured error instead of throwing across the API boundary
     return actionUnavailable(payload, surfaceId, '', 'Runtime surface not found.');
   }
 
@@ -738,8 +691,6 @@ async function performRuntimeActionInner(payload: RuntimeActionRequest): Promise
       }
 
       if (payload.action === 'stop' || payload.action === 'interrupt') {
-        const ownedResult = await performOwnedActionWithoutInventory(payload, runtimeSurface.id);
-        if (ownedResult) return ownedResult;
         if (runtimeSurface.ownership === 'owned') {
           const result = await escalateInterruptOwnedSurface(runtimeSurface.id);
           if (!result) {

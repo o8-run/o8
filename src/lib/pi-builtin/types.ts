@@ -20,6 +20,7 @@ export interface PiWorkerRunRecord {
 }
 
 export interface PiWorkerSessionRecord {
+  promptMemoryRevision?: string;
   surfaceId: string;
   launchMutationId?: string;
   laneId?: string;

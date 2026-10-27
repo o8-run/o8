@@ -2,6 +2,10 @@
 use super::*;
 struct Probe;
 register_shell_feature!(Probe);
+#[derive(Default)]
+struct ChromeState {
+    changed: bool,
+}
 fn active(s: &Shell) -> bool {
     s.file.ends_with("feature-registry.json")
 }
@@ -18,12 +22,31 @@ static COMMAND: PaletteCommand = PaletteCommand {
 impl ShellFeature for Probe {
     fn slots(&self) -> &'static [RenderSlot] {
         &[RenderSlot {
+            group: RenderGroup::Chrome,
             order: 450,
             render: |s, _, _, _| {
+                let changed = s.features.get::<ChromeState>().changed;
                 active(s).then(|| {
                     div()
                         .debug_selector(|| "feature-probe".into())
-                        .size(px(1.))
+                        .child(
+                            div()
+                                .debug_selector(move || {
+                                    if changed {
+                                        "feature-slot-updated"
+                                    } else {
+                                        "feature-slot-initial"
+                                    }
+                                    .into()
+                                })
+                                .w(px(100.))
+                                .h(px(24.))
+                                .child(if changed {
+                                    "Updated slot"
+                                } else {
+                                    "Initial slot"
+                                }),
+                        )
                         .into_any_element()
                 })
             },
@@ -33,6 +56,10 @@ impl ShellFeature for Probe {
         &[KeyContext {
             order: -10,
             dispatch: |s, event, _, _| {
+                if active(s) && event.keystroke.modifiers.alt && event.keystroke.key == "c" {
+                    s.features.get::<ChromeState>().changed = true;
+                    return KeyResult::Handled;
+                }
                 if active(s) && event.keystroke.modifiers.alt && event.keystroke.key == "u" {
                     s.notice = "feature key".into();
                     KeyResult::Handled

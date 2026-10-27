@@ -166,7 +166,15 @@ fn settings_fixture_all_default_controls_persist_and_refresh(cx: &mut TestAppCon
         "healBotEnabled",
     ] {
         search(cx, field);
-        let previous = values(&fixture)[field].as_bool().expect(field);
+        let value = values(&fixture)[field].clone();
+        let previous = value.as_bool().unwrap_or_else(|| {
+            assert_eq!(
+                field, "productTelemetryEnabled",
+                "only usage consent is nullable"
+            );
+            assert!(value.is_null(), "unanswered usage consent must be null");
+            false
+        });
         let start = Instant::now();
         click(cx, &format!("setting-{field}"));
         frame(&shell, cx);

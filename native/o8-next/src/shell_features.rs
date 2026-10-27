@@ -13,7 +13,13 @@ pub(super) struct TickHook {
     pub order: i32,
     pub run: fn(&mut Shell, bool, &mut Window, &mut Context<Shell>),
 }
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum RenderGroup {
+    Chrome,
+    Content,
+}
 pub(super) struct RenderSlot {
+    pub group: RenderGroup,
     pub order: i32,
     pub render: fn(&mut Shell, &Frame, &mut Window, &mut Context<Shell>) -> Option<AnyElement>,
 }
@@ -118,7 +124,7 @@ pub(super) fn tick(s: &mut Shell, refresh: bool, w: &mut Window, cx: &mut Contex
         (hook.run)(s, refresh, w, cx);
     }
 }
-pub(super) fn render(
+pub(super) fn render_chrome(
     s: &mut Shell,
     frame: &Frame,
     w: &mut Window,
@@ -126,7 +132,26 @@ pub(super) fn render(
 ) -> Vec<AnyElement> {
     SLOTS
         .iter()
+        .filter(|slot| slot.group == RenderGroup::Chrome)
         .filter_map(|slot| (slot.render)(s, frame, w, cx))
+        .collect()
+}
+// Place the retained chrome group once, at its first slot. Content slots keep
+// their order around it, including the material veil and first-paint receipt.
+pub(super) fn render_content(
+    s: &mut Shell,
+    frame: &Frame,
+    chrome: AnyElement,
+    w: &mut Window,
+    cx: &mut Context<Shell>,
+) -> Vec<AnyElement> {
+    let mut chrome = Some(chrome);
+    SLOTS
+        .iter()
+        .filter_map(|slot| match slot.group {
+            RenderGroup::Chrome => chrome.take(),
+            RenderGroup::Content => (slot.render)(s, frame, w, cx),
+        })
         .collect()
 }
 pub(super) fn key(

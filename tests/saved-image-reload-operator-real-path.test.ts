@@ -1,5 +1,5 @@
 /** @vitest-environment jsdom */
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type Socket } from 'node:net';
 import { basename, join, win32 } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -72,7 +72,7 @@ async function mount() {
   } as Parameters<typeof ChatMessageList>[0])));
   await vi.waitFor(async () => {
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
-    expect(doc.querySelector('[data-o8-message-id="fixture-message"] img')).not.toBeNull();
+    expect(doc.querySelector('[data-o8-message-id="fixture-message"] [data-o8-image-source-state="error"]')).not.toBeNull();
   }, { timeout: 2000, interval: 20 });
 }
 const server = createServer(socket => {
@@ -127,12 +127,6 @@ afterAll(async () => {
   await new Promise<void>(resolve => server.close(() => resolve()));
   closeDb(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); rmSync(directory, { recursive: true, force: true });
 });
-function decoded() {
-  const img = frame.contentDocument!.querySelector('[data-o8-message-id="fixture-message"] img')!;
-  Object.defineProperties(img, { complete: { configurable: true, value: true }, naturalWidth: { configurable: true, value: 1 }, naturalHeight: { configurable: true, value: 1 }, currentSrc: { configurable: true, value: img.getAttribute('src') } });
-  const event = frame.contentDocument!.createEvent('Event'); event.initEvent('load', false, false);
-  act(() => img.dispatchEvent(event));
-}
 describe('registered saved image/reload HTTP -> authenticated socket -> persisted React renderer', () => {
   it('discovers both bounded controls and denies anonymous/worker credentials before socket access', async () => {
     const list = await rpc('tools/list');
@@ -141,21 +135,20 @@ describe('registered saved image/reload HTTP -> authenticated socket -> persiste
     for (const bearer of ['', worker, 'invalid-token']) for (const name of ['o8_view_saved_image', 'o8_view_hard_reload']) expect(await rpc(name, args, bearer)).toHaveProperty('denied');
     expect(requests).toBe(before);
   });
-  it('observes actual decode properties, then a new document and persisted image after fixed reload', async () => {
-    expect(await rpc('o8_view_saved_image', args)).toMatchObject({ status: 'pending', decoded: false, natural_width: 0 });
-    const undecoded = frame.contentDocument!.querySelector('[data-o8-message-id="fixture-message"] img')!;
-    Object.defineProperty(undecoded, 'complete', { configurable: true, value: true });
-    expect(await rpc('o8_view_saved_image', args)).toMatchObject({ status: 'error', code: 'image_decode_failed', decoded: false });
-    decoded();
+  it('reports opaque-media refusal before and after reload while preserving the saved upload', async () => {
+    const response = await mediaGet(new NextRequest(`http://localhost/api/mobile/media?path=${encodeURIComponent(media.path)}`));
+    expect(response.status).toBe(415);
+    expect(await response.json()).toMatchObject({ code: 'binary_preview_refused', redaction: { version: 1 } });
     const before = await rpc('o8_view_saved_image', args);
-    expect(before).toMatchObject({ status: 'ready', decoded: true, complete: true, natural_width: 1, natural_height: 1, image_id: imageId, url_kind: 'blob' });
+    expect(before).toMatchObject({ status: 'error', code: 'image_decode_failed', decoded: false, natural_width: 0 });
     const receipt = await rpc('o8_view_hard_reload', { operation: 'reload', document_id: before.document_id });
     expect(receipt).toMatchObject({ status: 'pending', action_dispatched: true, document_id: before.document_id });
     const observation = await rpc('o8_view_hard_reload', { operation: 'observe', document_id: before.document_id });
     expect(observation).toMatchObject({ status: 'ready', document_changed: true });
     expect(observation.document_id).not.toBe(before.document_id);
     expect(readPersistedLlmChat(args.thread_id)?.history.messages[0].media).toEqual([media]);
-    decoded(); expect(await rpc('o8_view_saved_image', args)).toMatchObject({ decoded: true, image_id: imageId, thread_id: args.thread_id });
+    expect(readFileSync(media.path).toString('base64')).toBe(image);
+    expect(await rpc('o8_view_saved_image', args)).toMatchObject({ status: 'error', code: 'image_decode_failed', decoded: false, image_id: imageId, thread_id: args.thread_id });
     expect(focused).toBe(0); expect(sent).toBe(0);
   });
   it('refuses bad schema, wrong chat/message/image, inactive and ambiguous targets, foreign/direct URLs and non-images', async () => {
@@ -179,8 +172,8 @@ describe('registered saved image/reload HTTP -> authenticated socket -> persiste
     const duplicateImage = mediaTarget.cloneNode(true); mediaTarget.parentElement!.append(duplicateImage); expect(await rpc('o8_view_saved_image', args)).toMatchObject({ code: 'ambiguous_image' }); duplicateImage.parentNode!.removeChild(duplicateImage);
     const path = mediaTarget.getAttribute('data-o8-media-path')!;
     mediaTarget.setAttribute('data-o8-media-path', 'https://example.test/' + imageId); expect(await rpc('o8_view_saved_image', args)).toMatchObject({ code: 'foreign_image' }); mediaTarget.setAttribute('data-o8-media-path', path);
-    const img = mediaTarget.querySelector('img')!; img.setAttribute('src', 'https://example.test/image.png'); expect(await rpc('o8_view_saved_image', args)).toMatchObject({ code: 'foreign_image' }); img.setAttribute('src', 'blob:http://localhost/fixture-image');
-    img.remove(); mediaTarget.append(frame.contentDocument!.createElement('span')); expect(await rpc('o8_view_saved_image', args)).toMatchObject({ status: 'pending', decoded: false });
+    const img = frame.contentDocument!.createElement('img'); mediaTarget.append(img); img.setAttribute('src', 'https://example.test/image.png'); expect(await rpc('o8_view_saved_image', args)).toMatchObject({ code: 'foreign_image' }); img.setAttribute('src', 'blob:http://localhost/fixture-image');
+    img.remove(); mediaTarget.setAttribute('data-o8-image-source-state', 'loading'); expect(await rpc('o8_view_saved_image', args)).toMatchObject({ status: 'pending', decoded: false });
     mediaTarget.setAttribute('data-o8-image-source-state', 'error'); expect(await rpc('o8_view_saved_image', args)).toMatchObject({ status: 'error', code: 'image_decode_failed' });
     expect(await rpc('o8_view_hard_reload', { operation: 'reload', document_id: crypto.randomUUID() })).toMatchObject({ code: 'stale_document', action_dispatched: false });
     expect(reloads).toBe(before);
@@ -224,10 +217,9 @@ describe('registered saved image/reload HTTP -> authenticated socket -> persiste
         if (url.searchParams.get('path') === windowsPath) url.searchParams.set('path', media.path);
         return mediaGet(new NextRequest(url));
       });
-      act(() => root.unmount()); frame.remove(); await mount(); decoded();
+      act(() => root.unmount()); frame.remove(); await mount();
       const result = await rpc('o8_view_saved_image', args);
-      expect(result.code).toBeUndefined();
-      expect(result).toMatchObject({ status: 'ready', decoded: true, image_id: imageId, natural_width: 1 });
+      expect(result).toMatchObject({ status: 'error', code: 'image_decode_failed', decoded: false, image_id: imageId, natural_width: 0 });
       const target = frame.contentDocument!.querySelector('[data-o8-message-id="fixture-message"] [data-o8-saved-image]')!;
       expect(target.getAttribute('data-o8-media-path')).toBe(windowsPath);
       for (const foreign of [win32.join('D:\\foreign', 'orchestrator-images', imageId), windowsPath.replace('C:', 'c:'), `${windowsRoot}/orchestrator-images/${imageId}`, `https://example.test/orchestrator-images/${imageId}`]) {
@@ -235,7 +227,7 @@ describe('registered saved image/reload HTTP -> authenticated socket -> persiste
         expect(await rpc('o8_view_saved_image', args)).toMatchObject({ code: 'foreign_image' });
       }
       target.setAttribute('data-o8-media-path', windowsPath);
-      const img = target.querySelector('img')!; img.setAttribute('src', 'https://example.test/image.png');
+      const img = frame.contentDocument!.createElement('img'); target.append(img); img.setAttribute('src', 'https://example.test/image.png');
       expect(await rpc('o8_view_saved_image', args)).toMatchObject({ code: 'foreign_image' });
       expect(await rpc('o8_view_saved_image', { ...args, message_id: 'fixture-foreign' })).toMatchObject({ code: 'foreign_image' });
       for (const bearer of ['', worker]) expect(await rpc('o8_view_saved_image', args, bearer)).toHaveProperty('denied');

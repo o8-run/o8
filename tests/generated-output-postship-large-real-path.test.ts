@@ -50,20 +50,24 @@ it('disposes thousands of registered output files through the postship runner an
   const cold = (phase: string, script: string) => run(phase, ['--import', path.join(source, 'scripts/register-server-only-stub.mjs'),
     '--import', require.resolve('tsx'), '--input-type=module', '-e', script]);
   const producer = `
-    const fs = require('node:fs'); const path = require('node:path');
+    const fs = require('node:fs'); const path = require('node:path'); const output = process.argv[1];
     for (let group = 0; group < 192; group++) {
-      const directory = path.join('.next/standalone/node_modules/next/dist/compiled/server/app', 'route-' + group);
+      const directory = path.join(output, 'standalone/node_modules/next/dist/compiled/server/app', 'route-' + group);
       fs.mkdirSync(directory, { recursive: true });
       for (let file = 0; file < 64; file++) fs.writeFileSync(path.join(directory, file + '.js'), Buffer.alloc(4096, 42));
     }
     // Logical build size also covers large caches without allocating gigabytes in the fixture.
-    const fd = fs.openSync('.next/cache.pack', 'wx'); fs.ftruncateSync(fd, 6 * 1024 ** 3); fs.closeSync(fd);
+    const fd = fs.openSync(path.join(output, 'cache.pack'), 'wx'); fs.ftruncateSync(fd, 6 * 1024 ** 3); fs.closeSync(fd);
     fs.mkdirSync('out'); fs.writeFileSync('out/server.js', 'preserved fixture artifact');
   `;
   const prebuild = `
     const ns = await import(${url('src/lib/workspace/generated-output-producer.ts')});
     const code = await (ns.default ?? ns).runGeneratedOutputPrebuild({ workspacePath: process.cwd(), preflight() {},
-      operation: context => context.runBuild(run => run(process.execPath, ['-e', ${JSON.stringify(producer)}])) });
+      operation: context => context.runBuild(async run => {
+        const code = await run(process.execPath, ['-e', ${JSON.stringify(producer)}, run.buildOutput.directory]);
+        if (code === 0) await run.buildOutput.complete();
+        return code;
+      }) });
     if (code !== 0) throw new Error('Fixture producer failed');
   `;
   await cold('producer', prebuild + `

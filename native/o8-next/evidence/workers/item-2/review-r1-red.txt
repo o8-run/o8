@@ -1,0 +1,30 @@
+running 4 tests
+
+thread 'shell::workers::card_tests::workers_escape_returns_focus_to_list' (116944) panicked at src/surfaces/workers/card_tests.rs:100:5:
+Escape must return focus from Activity to the list
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test shell::workers::card_tests::workers_escape_returns_focus_to_list ... FAILED
+test shell::workers::card_tests::workers_card_activity_reads_real_events_and_keeps_position ... ok
+
+thread 'shell::workers::card_tests::workers_enter_keeps_arrow_navigation_inside_card' (116943) panicked at src/surfaces/workers/card_tests.rs:90:5:
+assertion `left == right` failed: Down must leave the expanded card and select its next peer
+  left: Some("worker-running")
+ right: Some("worker-running-next")
+test shell::workers::card_tests::workers_enter_keeps_arrow_navigation_inside_card ... FAILED
+
+thread 'shell::workers::card_tests::workers_latest_progress_survives_more_than_500_events_and_refresh' (116945) panicked at src/surfaces/workers/card_tests.rs:112:5:
+assertion `left == right` failed: the newest persisted progress must be reachable beyond the first page
+  left: Some("Progress 500")
+ right: Some("Progress 515")
+test shell::workers::card_tests::workers_latest_progress_survives_more_than_500_events_and_refresh ... FAILED
+
+failures:
+
+failures:
+    shell::workers::card_tests::workers_enter_keeps_arrow_navigation_inside_card
+    shell::workers::card_tests::workers_escape_returns_focus_to_list
+    shell::workers::card_tests::workers_latest_progress_survives_more_than_500_events_and_refresh
+
+test result: FAILED. 1 passed; 3 failed; 0 ignored; 0 measured; 168 filtered out; finished in 4.72s
+
+error: test failed, to rerun pass `--bin o8-next`

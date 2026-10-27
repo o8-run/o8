@@ -1,5 +1,7 @@
 'use client';
 
+import { useImageSendAdmissions } from './use-orchestrator-stream/image-send-admission';
+import { useOrchestratorThreadBinding } from './use-orchestrator-stream/thread-binding';
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { stopRunningTools } from '@/components/desktop/transcript/activity';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
@@ -108,12 +110,7 @@ export function useOrchestratorStream(
   const projectIdRef = useRef<string | null>(options?.projectId ?? null);
   projectIdRef.current = options?.projectId ?? null;
   const threadId = options?.threadId ?? null;
-  const threadIdRef = useRef<string | null>(threadId);
-  // Only mirror the parent-supplied threadId when it is set. If the hook has
-  // already minted an id inside send() (because the parent's state hadn't
-  // landed yet), don't wipe it on the next render — the parent's eventual
-  // setThreadId call will replace it with the same value via onThreadIdMint.
-  if (threadId) threadIdRef.current = threadId;
+  const { threadIdRef, allowUnboundRecoveryRef } = useOrchestratorThreadBinding(threadId, options?.allowUnboundRecovery);
   const onThreadIdMintRef = useRef(options?.onThreadIdMint);
   onThreadIdMintRef.current = options?.onThreadIdMint;
   const onSettledAssistantMissingRef = useRef(options?.onSettledAssistantMissing);
@@ -151,6 +148,7 @@ export function useOrchestratorStream(
     data?: Record<string, unknown>;
     observedAt: number;
   }) => void>(() => {});
+  const imageAdmissions = useImageSendAdmissions(pendingActivityHandlerRef);
 
   // Server turn truth on subscribe snapshots is the primary reconciliation
   // seam. These elapsed/event refs remain only as a compatibility fallback
@@ -245,7 +243,7 @@ export function useOrchestratorStream(
       telemetryTotalRef,
       isCurrent: () => mountedRef.current && repoPathRef.current === activeRepoPath && threadIdRef.current === compactThreadId,
     });
-  }, [syncMessages, updateRunningTotal]);
+  }, [syncMessages, threadIdRef, updateRunningTotal]);
 
   const estimateNextTurnTokens = useCallback((message: string) => (
     runningTotalRef.current
@@ -313,7 +311,7 @@ export function useOrchestratorStream(
     }
     clearQueuedOrchestratorSessionPrelude(repoPathRef.current, threadIdRef.current);
     emitTokenUsage({ repoPath: repoPathRef.current, tokenCount: 0, runningTotal: 0 });
-  }, [connected, resetFirstTurnPlanCapture, syncMessages, turnOptionResolution, updateRunningTotal]);
+  }, [connected, resetFirstTurnPlanCapture, syncMessages, threadIdRef, turnOptionResolution, updateRunningTotal]);
 
   const archiveMissionThread = useCallback(async (detail: OrchestratorMissionCompletedDetail) => {
     const activeRepoPath = repoPathRef.current;
@@ -418,13 +416,7 @@ export function useOrchestratorStream(
     appendSnapshotTurnFailure(turn.id, setMessages, messagesRef);
   }, [healStaleBusyState]);
 
-  const settlePendingSend = useCallback((event: {
-    event: string;
-    data?: Record<string, unknown>;
-    observedAt: number;
-  }) => {
-    pendingActivityHandlerRef.current(event);
-  }, []);
+  const settlePendingSend = imageAdmissions.observe;
 
   const commitCurrentAssistant = useCallback(() => {
     const current = currentAssistantRef.current;
@@ -542,6 +534,7 @@ export function useOrchestratorStream(
       eventCountRef,
       snapshotSeenRef,
       threadIdRef,
+      allowUnboundRecoveryRef,
       finalizeFirstTurnPlanCapture,
       firstTurnPlanChunksRef,
       firstTurnPlanStartedRef,
@@ -591,7 +584,7 @@ export function useOrchestratorStream(
     ws.onerror = () => {
       // onclose will fire after this
     };
-  }, [finalizeFirstTurnPlanCapture, flushCurrentAssistant, scheduleFlushCurrentAssistant, healStaleBusyState, reconcileSnapshotTerminalTurn, settlePendingSend]);
+  }, [allowUnboundRecoveryRef, finalizeFirstTurnPlanCapture, flushCurrentAssistant, scheduleFlushCurrentAssistant, healStaleBusyState, reconcileSnapshotTerminalTurn, settlePendingSend, threadIdRef]);
 
   const setPendingStatusReady = useCallback(() => {
     const nextStatus = wsRef.current?.readyState === WebSocket.OPEN || connected ? 'ready' : 'connecting';
@@ -768,7 +761,7 @@ export function useOrchestratorStream(
       resumePrelude: primed.resumePrelude,
       tokensAfter: primed.nextTotal,
     };
-  }, [primeCompactedSession, requestCompaction]);
+  }, [primeCompactedSession, requestCompaction, threadIdRef]);
 
   // #624 — User clicked the stop pill. Fire-and-forget the interrupt message
   // to ws-server and optimistically flip status back to ready/connecting so
@@ -799,7 +792,7 @@ export function useOrchestratorStream(
       activeTurnRef.current = null;
       currentAssistantRef.current = null;
     }
-  }, [connected, syncMessages, turnOptionResolution]);
+  }, [connected, syncMessages, threadIdRef, turnOptionResolution]);
   const send = useCallback((message: string, options?: OrchestratorSendOptions) => {
     if (!canReadSessionContext(repoPathRef.current, threadIdRef.current, setMessages, messagesRef)) return null;
     suppressTurnEventsRef.current = false;
@@ -821,12 +814,13 @@ export function useOrchestratorStream(
       threadId: threadIdRef.current,
       backend: options?.backend ?? null,
       transcriptBeforeSend,
+      ...(options?.attachments?.length ? { admission: imageAdmissions.register(clientMessageId) } : {}),
     };
     lastSendAtRef.current = sentAtMs;
     lastEventAtRef.current = sentAtMs;
     setPendingStatusBusy();
 
-    void trackComposerSubmission(sendHandle.userMessageId, (receipt) => setVoiceTerminals(previous => ({ ...previous, [receipt.userMessageId]: receipt })), async (markDispatch) => {
+    void trackComposerSubmission(sendHandle.userMessageId, imageAdmissions.onFailure(clientMessageId, (receipt) => setVoiceTerminals(previous => ({ ...previous, [receipt.userMessageId]: receipt }))), async (markDispatch) => {
       const turnOptions = await turnOptionResolution.resolve(clientMessageId, options);
       if (turnOptions === null || repoPathRef.current !== repoPathAtSend || threadIdRef.current !== sendHandle.threadId) {
         activeTurnBackendRef.current = null;
@@ -986,9 +980,10 @@ export function useOrchestratorStream(
       setPendingStatusBusy();
     });
     return sendHandle;
-  }, [connect, connected, durablePendingSend, estimateNextTurnTokens, primeCompactedSession, requestCompaction, setPendingStatusBusy, turnOptionResolution, updateRunningTotal]);
+  }, [connect, connected, durablePendingSend, imageAdmissions, estimateNextTurnTokens, primeCompactedSession, requestCompaction, setPendingStatusBusy, threadIdRef, turnOptionResolution, updateRunningTotal]);
 
   const undoSend = useCallback((handle: OrchestratorSendHandle) => {
+    imageAdmissions.settle(handle.clientMessageId, { status: 'cancelled' });
     turnOptionResolution.abort(handle.clientMessageId);
     const activeRepoPath = repoPathRef.current;
     durablePendingSend.cancelPending(handle.clientMessageId);
@@ -1018,7 +1013,7 @@ export function useOrchestratorStream(
       getWebSocket: () => wsRef.current,
       connect: () => { console.warn('[orchestrator-stream] WS not open, reconnecting to undo send...'); connect(); },
     });
-  }, [connect, connected, durablePendingSend, resetFirstTurnPlanCapture, syncMessages, turnOptionResolution]);
+  }, [connect, connected, durablePendingSend, imageAdmissions, resetFirstTurnPlanCapture, syncMessages, turnOptionResolution]);
 
   return {
     voiceTerminals,

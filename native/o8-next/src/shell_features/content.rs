@@ -3,7 +3,11 @@ struct ContentSlot;
 register_shell_feature!(ContentSlot);
 impl ShellFeature for ContentSlot {
     fn slots(&self) -> &'static [RenderSlot] {
-        &[RenderSlot { order: 600, render }]
+        &[RenderSlot {
+            group: RenderGroup::Content,
+            order: 600,
+            render,
+        }]
     }
 }
 fn render(

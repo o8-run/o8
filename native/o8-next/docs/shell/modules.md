@@ -22,6 +22,19 @@ once. Key dispatch stops on `Handled` or `Propagate`, preserving focused control
 key ownership. Slots return optional elements and retain the existing root's
 spacing, type, colors, glass and child order.
 
+Every render slot names its `RenderGroup`: `Chrome` or `Content`. Header, status,
+shortcuts, palette and tab slots compose inside `Shell::render_chrome`, behind
+the existing measured `shell-chrome` region. The root places that retained group
+once at the first chrome slot; content slots keep their order around it. The
+material veil precedes chrome and the first-paint receipt follows content, both
+outside the cache. The content slot retains the surface decorator fold.
+
+Module state changes notify the shell through the existing key, tick or observer
+hooks. The region's owner subscription then invalidates both its scene and
+measured height. Composer input that only notifies the editor reuses the chrome
+scene. A real-input regression changes a registered slot's local state and
+checks its updated scene and chrome render count without forcing a refresh.
+
 ```rust
 use super::*;
 struct Example;
@@ -41,8 +54,9 @@ Store a module's window-local entities and subscriptions in
 Observer installers run once when the real shell window is created. They can
 retain GPUI preference subscriptions in that state, without adding a field to
 `Shell` or changing an app entry point. This split introduces no preference
-fetcher or additional server route. The starting main branch has no
-`app_parent.rs`; `main.rs` continues launching the same shell.
+fetcher or additional server route. The existing app parent still receives
+readiness only from the window's first paint; the Experimental launch gate is
+unchanged.
 
 Existing surface modules retain the same `register_surfaces!` inventory and one
 registration line per surface. Their extension hooks are adapted through the

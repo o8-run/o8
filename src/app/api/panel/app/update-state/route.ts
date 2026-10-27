@@ -2,6 +2,7 @@ import { recoverStoppedNativeTask } from '@/lib/app-update/native-task';
 import { NextResponse } from 'next/server';
 import { getRequestedCheckTime } from '@/lib/app-update/fresh-check';
 import { controlAutoApply } from '@/lib/app-update/auto-apply';
+import { updateCheckTicket } from '@/lib/app-update/check-order';
 
 import {
   getAppUpdateState,
@@ -73,7 +74,13 @@ export async function POST(request: Request) {
     return invalidState('invalid_checked_at', 'checkedAt must be an ISO timestamp after a check runs.');
   }
 
+  const ticket = updateCheckTicket(body);
+  if (['checkSession', 'checkSequence', 'channel', 'generation'].some(key => key in body) && !ticket) {
+    return invalidState('invalid_check_ticket', 'An ordered check requires its native session, sequence, channel, and generation.');
+  }
+
   const state = setAppUpdateState({
+    ...(ticket ?? {}),
     updatePending: body.updatePending,
     version: typeof body.version === 'string' && body.version.trim() ? body.version.trim() : null,
     checkOutcome,

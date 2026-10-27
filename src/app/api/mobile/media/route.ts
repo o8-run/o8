@@ -1,5 +1,6 @@
+import { viewerBytes } from '@/lib/viewers/bytes';
 import { readFile, realpath, stat } from 'node:fs/promises';
-import { basename, extname, join } from 'node:path';
+import { extname, join } from 'node:path';
 import { NextRequest } from 'next/server';
 import { getDataDir } from '@/lib/data-dir-migration';
 
@@ -55,7 +56,6 @@ async function resolveAllowedMediaPath(rawPath: string) {
 
 export async function GET(request: NextRequest) {
   const rawPath = request.nextUrl.searchParams.get('path')?.trim();
-  const download = request.nextUrl.searchParams.get('download') === '1';
 
   if (!rawPath) {
     return new Response('path is required', { status: 400 });
@@ -69,17 +69,7 @@ export async function GET(request: NextRequest) {
     }
 
     const buffer = await readFile(filePath);
-    const filename = basename(filePath).replace(/"/g, '');
-    const disposition = download ? 'attachment' : 'inline';
-
-    return new Response(new Uint8Array(buffer), {
-      headers: {
-        'Content-Type': contentTypeForExtension(filePath),
-        'Content-Length': String(buffer.byteLength),
-        'Content-Disposition': `${disposition}; filename="${filename}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
-        'Cache-Control': 'private, max-age=86400, immutable',
-      },
-    });
+    return viewerBytes(buffer, contentTypeForExtension(filePath));
   } catch {
     return new Response('Not found', { status: 404 });
   }

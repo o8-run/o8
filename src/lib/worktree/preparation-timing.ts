@@ -1,4 +1,5 @@
 import type { CreateWorktreeOptions } from './types';
+import { withDependencyPreparationTiming } from '@/lib/workspace/dependency-install-timing';
 
 /** Monotonic stage timings on the same lane that records session_launched. */
 export async function timeWorktreePreparation<T>(
@@ -9,7 +10,8 @@ export async function timeWorktreePreparation<T>(
   const started = performance.now();
   let completed = false;
   try {
-    const result = await operation();
+    const result = await (stage === 'dependency_materialization'
+      ? withDependencyPreparationTiming(launch, operation) : operation());
     completed = true;
     return result;
   } finally {

@@ -1,6 +1,7 @@
 import { pullRequestListQuery, issueListQuery, validGithubListRow, type ListQueryOptions } from './queries';
 import type { QueryClient } from '@tanstack/react-query';
 import { assertGithubRead, assertGithubScope } from './refresh-policy';
+import { assertGitHubOrgCoverage } from '@/lib/github/org-access';
 
 export type ActivityListKind = 'issues' | 'prs' | 'ci' | 'commits';
 /** Compact activity, badges and cards observe the same repository entries. */
@@ -15,6 +16,8 @@ export function activityListQuery(repo: string, kind: ActivityListKind, options?
     queryFn: async ({ signal, client }: { signal?: AbortSignal; client?: QueryClient }): Promise<Record<string, unknown>> => {
       assertGithubScope(client, repo, options?.manual);
       const response = await fetch(`/api/panel/${kind}${repo.trim() ? `?repo=${encodeURIComponent(repo.trim())}` : ''}${options?.manual ? `${repo.trim() ? '&' : '?'}fresh=1` : ''}`, { signal, ...(options?.headers ? { headers: options.headers } : {}) });
+      const payload = response.status === 422 ? await response.clone().json().catch(() => null) : null;
+      assertGitHubOrgCoverage(payload);
       assertGithubRead(response, client, repo);
       const data = await response.json();
       if (!data || data.error || !Array.isArray(data[field]) || !data[field].every(validGithubListRow)) throw new Error('GitHub activity could not be read.');

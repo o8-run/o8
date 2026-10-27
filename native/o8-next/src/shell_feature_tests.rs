@@ -3,6 +3,37 @@ use super::test_support::*;
 use super::*;
 
 #[gpui::test]
+fn registered_chrome_slot_state_change_repaints_cached_scene(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    let (shell, mut visual) = open(
+        fixture.client.clone(),
+        fixture.root.join("feature-registry.json"),
+        State::default(),
+        cx,
+    );
+    ready(&shell, &mut visual);
+    let renders = |visual: &VisualTestContext| {
+        shell.read_with(visual, |s, cx| {
+            s.chrome
+                .renders(cx)
+                .into_iter()
+                .find_map(|(id, count)| (id == "shell-chrome").then_some(count))
+                .unwrap_or(0)
+        })
+    };
+    assert!(visual.debug_bounds("feature-slot-initial").is_some());
+    let before = renders(&visual);
+    visual.simulate_keystrokes("alt-c");
+    visual.update(|window, cx| window.draw(cx).clear());
+    assert!(visual.debug_bounds("feature-slot-updated").is_some());
+    let after = renders(&visual);
+    assert!(
+        after > before,
+        "changing a registered chrome slot must repaint the cached chrome scene: {before} -> {after}"
+    );
+}
+
+#[gpui::test]
 fn registered_shell_feature_reaches_render_keys_commands_tick_and_observer(
     cx: &mut TestAppContext,
 ) {

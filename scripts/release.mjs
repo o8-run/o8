@@ -30,7 +30,9 @@ import { contributorCreditLine, creditsForSubjects, ghCreditLookups } from './li
 import { publishFixed } from './publish-fixed.mjs';
 import { syncReports } from './sync-reports.mjs';
 import { verifyNativeBundle } from './native-bundle.mjs';
+import { verifyNextAppSidecar } from './next/verify-app-bundle.mjs';
 import { runShipWorkflow } from './lib/ship-broadcast.mjs';
+import { warmUpdatePublication } from './lib/release-update-warmup.mjs';
 import { buildReleaseManifest } from './lib/release-manifest.mjs';
 import {
   resolveMacosReleaseArtifacts,
@@ -42,6 +44,9 @@ import {
 import { assertCpuPreparationCurrent, macosCpuPackageArchitectures } from './lib/macos-cpu-packages.mjs';
 import { verifyUpdaterSignature } from './lib/updater-signature.mjs';
 import { buildLatestShip, scrubPublicText } from './lib/public-release.mjs';
+import { acquirePublicationLock } from './lib/release-publication.mjs';
+import { assertLinuxArtifactChannels } from './lib/linux-build-channel.mjs';
+import { artifactChannel } from './lib/build-channel.mjs';
 import { resolveReleaseChannel } from './lib/release-channel.mjs';
 import { formatReleaseSummary, prepareReleaseSummary } from './lib/release-summary.mjs';
 
@@ -114,7 +119,9 @@ const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 const version = pkg.version;
 let releaseChannel;
 try {
-  releaseChannel = resolveReleaseChannel(version);
+  const expected = version.includes('-preview.') ? 'preview' : 'stable';
+  releaseChannel = resolveReleaseChannel(version, { O8_RELEASE_CHANNEL: expected, O8_RELEASE_CLOBBER: process.env.O8_RELEASE_CLOBBER });
+  if (!process.argv.includes('--dry-run') && process.argv[2] !== '--ship') artifactChannel(root, version, expected);
 } catch (error) {
   console.error(`[release] ${error.message}`);
   process.exit(1);
@@ -228,6 +235,7 @@ for (const path of [DMG, APP_TAR, APP_SIG]) {
 let darwinIdentity;
 try {
   darwinIdentity = verifyUniversalMacUpdaterArchive(artifacts.app, APP_TAR);
+  verifyNextAppSidecar(artifacts.app);
   console.log('[release] universal macOS updater archive gate passed', JSON.stringify(darwinIdentity));
 } catch (error) {
   console.error(`[release] FATAL: ${error.message}`);
@@ -304,6 +312,7 @@ if (cpuArchitectures.length) {
       assertCpuPreparationCurrent(root, version, architecture);
       const identity = verifyMacCpuUpdaterArchive(cpu.app, cpu.updaterArchive, architecture);
       const signatureIdentity = verifyUpdaterSignature(root, cpu.updaterArchive, cpu.updaterSignature);
+      artifactChannel(root, version, releaseChannel.channel, cpu);
       if (signatureIdentity.artifactSha256 !== identity.updaterArchiveSha256) {
         throw new Error(`${architecture} updater signature identity mismatch`);
       }
@@ -346,6 +355,7 @@ const latestNotes = gateReleaseNote ? `o8 ${tag} — ${gateReleaseNote}` : `o8 $
 // the upload list. CPU delivery requires both independently verified packages.
 const latestJsonPath = join(BUNDLE, 'macos', releaseChannel.manifestName);
 const fixedJsonPath = join(BUNDLE, 'macos', 'fixed.json');
+acquirePublicationLock();
 const { latestJson, uploadArgs } = buildReleaseManifest({
   // Linux preview artifacts are produced separately under the non-targeted
   // Cargo bundle directory. Keep discovering them there while macOS uses the
@@ -360,6 +370,8 @@ const { latestJson, uploadArgs } = buildReleaseManifest({
   baseUploadAssets: [DMG, APP_TAR, APP_SIG],
   trailingUploadAssets: [latestJsonPath, ...(releaseChannel.publishStableEffects ? [fixedJsonPath] : [])],
 });
+assertLinuxArtifactChannels(root, version, releaseChannel.channel, uploadArgs);
+latestJson.channel = releaseChannel.channel;
 writeFileSync(latestJsonPath, JSON.stringify(latestJson, null, 2));
 console.log(`[release] wrote ${latestJsonPath}`);
 
@@ -512,6 +524,15 @@ try {
   if (releaseChannel.preview) {
     console.log('[release] Preview published for explicit tag downloads; the stable updater and announcements are unchanged.');
     process.exit(0);
+  }
+  try {
+    const receipt = await warmUpdatePublication({ root, version,
+      previousVersion: releaseMetadataRange().split('..')[0].replace(/^v/, ''),
+      publishedAt: resolvePublishedAt(pubDate) });
+    const timing = receipt.publishToOfferMs === null ? 'unverified' : `${receipt.publishToOfferMs}ms`;
+    console.log(`[release] update publication ${receipt.status}; publish-to-offer ${timing}; within-five-minutes=${receipt.withinPublishToOfferBudget ?? 'unverified'}`);
+  } catch {
+    console.warn('[release] update publication verification unavailable; no fresh-offer receipt was recorded.');
   }
   // Publish the page feeds from one local mirror checkout and one mirror commit.
   // This runs only after the updater assets are available on the public mirror.

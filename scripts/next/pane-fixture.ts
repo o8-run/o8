@@ -5,14 +5,14 @@ import type { Server } from 'node:http';
 import { WebSocketServer } from 'ws';
 import type { RuntimeSession } from '../../src/lib/runtimes/types';
 
-export async function installPaneRuntime(dataDir: string, repo: string, terminals = false) {
+export async function installPaneRuntime(dataDir: string, repo: string, terminals = false, runtimeId = 'pi') {
   // Replace discovery only, retaining production inventory projection and the
   // owned runtime's actual persisted transcript reader. No provider is started.
   const { getAllRuntimes, getRuntime } = await import('../../src/lib/runtimes');
   for (const runtime of getAllRuntimes()) {
     Object.defineProperty(runtime, 'discoverSessions', { value: async () => [], configurable: true });
   }
-  const sessionDir = join(dataDir, 'owned-pi', 'grid-runtime');
+  const sessionDir = join(dataDir, `owned-${runtimeId}`, 'grid-runtime');
   const runsDir = join(sessionDir, 'runs');
   mkdirSync(runsDir, { recursive: true });
   const stdoutPath = join(runsDir, 'run.stdout.jsonl');
@@ -21,14 +21,14 @@ export async function installPaneRuntime(dataDir: string, repo: string, terminal
   writeFileSync(stdoutPath, JSON.stringify({ type: 'message_update',
     assistantMessageEvent: { type: 'text_delta', delta: 'Persisted grid runtime answer' } }) + '\n' + JSON.stringify({ type: 'agent_end' }) + '\n');
   writeFileSync(stderrPath, '');
-  writeFileSync(join(sessionDir, 'session.json'), JSON.stringify({ surfaceId: 'pi-owned:grid-runtime',
+  writeFileSync(join(sessionDir, 'session.json'), JSON.stringify({ surfaceId: `${runtimeId}-owned:grid-runtime`,
     sessionDir, cwd: repo, repoPath: repo, title: 'Grid runtime worker', createdAt: timestamp, updatedAt: timestamp,
     latestPrompt: 'Grid runtime prompt', latestSummary: 'done', recentRuns: [{ id: 'run-grid-runtime', mode: 'launch',
       prompt: 'Grid runtime prompt', startedAt: timestamp, finishedAt: timestamp, stdoutPath, stderrPath, outcome: 'finished' }] }));
-  const worker = { sessionKey: 'pi-owned:grid-runtime', runtimeId: 'pi', displayName: 'Grid runtime worker',
+  const worker = { sessionKey: `${runtimeId}-owned:grid-runtime`, runtimeId, displayName: 'Grid runtime worker',
     cwd: repo, status: 'running', ownership: 'owned', lastActivityAt: new Date(),
     sessionCapabilities: { canSendInput: false, canInterrupt: false, canReviewDiffs: false } } satisfies RuntimeSession;
-  const pi = getRuntime('pi');
+  const pi = getRuntime(runtimeId);
   if (!pi) throw new Error('Fixture runtime is not registered');
   Object.defineProperty(pi, 'discoverSessions', { value: async () => terminals ? Array.from({ length: 6 }, (_, index) => {
     const key = `grid-terminal-${index}`;

@@ -1,0 +1,43 @@
+running 8 tests
+test composer::native_tests::native_copy_cut_paste_megabyte_and_empty_copy ...
+thread 'composer::native_tests::native_copy_cut_paste_megabyte_and_empty_copy' (11396) panicked at src/composer/native_tests.rs:95:5:
+assertion `left == right` failed
+  left: ""
+ right: "keep clipboard"
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+test composer::native_tests::native_focus_change_ends_mouse_drag ... ok
+test composer::native_tests::native_ime_utf16_replacement_is_one_undo_and_never_submits ... ok
+test composer::native_tests::native_key_to_cpu_paint_measurement ... COMPOSER_CPU_PAINT platform=linux samples=100 p50_ms=0.537339 p95_ms=0.641293
+ok
+test composer::native_tests::native_mouse_drag_double_word_triple_line_and_keyboard_selection ...
+thread 'composer::native_tests::native_mouse_drag_double_word_triple_line_and_keyboard_selection' (11400) panicked at src/composer/native_tests.rs:64:5:
+assertion `left == right` failed
+  left: 7..7
+ right: 6..10
+FAILED
+test composer::native_tests::native_rtl_mixed_text_selection_clipboard_and_utf16_hit_testing ... ok
+test composer::native_tests::native_undo_redo_restores_reversed_selection ...
+thread 'composer::native_tests::native_undo_redo_restores_reversed_selection' (11402) panicked at src/composer/native_tests.rs:80:5:
+assertion `left == right` failed
+  left: 15..15
+ right: 5..8
+FAILED
+test composer::native_tests::native_word_and_line_moves_select_and_delete ...
+thread 'composer::native_tests::native_word_and_line_moves_select_and_delete' (11403) panicked at src/composer/native_tests.rs:32:5:
+assertion `left == right` failed
+  left: 21..21
+ right: 18..18
+FAILED
+
+failures:
+
+failures:
+    composer::native_tests::native_copy_cut_paste_megabyte_and_empty_copy
+    composer::native_tests::native_mouse_drag_double_word_triple_line_and_keyboard_selection
+    composer::native_tests::native_undo_redo_restores_reversed_selection
+    composer::native_tests::native_word_and_line_moves_select_and_delete
+
+test result: FAILED. 4 passed; 4 failed; 0 ignored; 0 measured; 133 filtered out; finished in 0.09s
+
+error: test failed, to rerun pass `--bin o8-next`

@@ -91,6 +91,10 @@ it('preserves the exact composer and queued context when storage access rejects,
     attachments: [{ name: image.name, dataUri: image.dataUri }],
   });
   expect(String(sends()[0].message)).toContain('Retain the existing project constraints.');
+  expect(host.querySelector('textarea')!.value).toBe('Inspect this picture');
+  await act(async () => transport.socket?.onmessage?.({ data: JSON.stringify({
+    channel: 'orchestrator', event: 'send-ack', data: { threadId, state: 'accepted', clientMessageId: sends()[0].clientMessageId },
+  }) } as MessageEvent));
   expect(host.querySelector('textarea')!.value).toBe('');
   expect(host.querySelector('[data-image-count]')!.getAttribute('data-image-count')).toBe('0');
 });

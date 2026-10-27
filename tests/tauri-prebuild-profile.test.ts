@@ -1,4 +1,4 @@
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn, spawnSync, type SpawnSyncReturns } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { once } from 'node:events';
 import { createRequire } from 'node:module';
@@ -11,6 +11,48 @@ import { createRetainedGeneratedOutputFixture } from './generated-output-fixture
 
 const source = process.cwd();
 const require = createRequire(import.meta.url);
+
+type PrebuildResult = SpawnSyncReturns<string> & { elapsedMs?: number; timeoutMs?: number; label?: string };
+
+function expectSuccessfulPrebuild(result: PrebuildResult): void {
+  const error = result.error as NodeJS.ErrnoException | undefined;
+  const diagnostic = [
+    `prebuild stderr:\n${result.stderr || '<empty>'}`,
+    ...(result.timeoutMs === undefined ? [] : [
+      `prebuild ${result.label ?? 'command'}: elapsed=${result.elapsedMs}ms; limit=${result.timeoutMs}ms`,
+    ]),
+    `prebuild exit=${result.status}; signal=${result.signal ?? 'none'}; spawn error=${error?.code ?? 'none'}`,
+    error?.message ?? '',
+    `prebuild stdout:\n${result.stdout || '<empty>'}`,
+  ].join('\n');
+  expect(result.error, diagnostic).toBeUndefined();
+  expect(result.signal, diagnostic).toBeNull();
+  expect(result.status, diagnostic).toBe(0);
+}
+
+it.each([0, 1])('reports child stderr and timeouts from failed prebuild commands (termination exit: %s)', exit => {
+  const refusal = 'Generated-output producer refused: fixture refusal';
+  const refused = spawnSync(process.execPath, ['-e',
+    `console.log('[db] Connected to fixture database'); console.error(${JSON.stringify(refusal)}); process.exitCode = 1;`],
+  { encoding: 'utf8', timeout: 5_000 });
+  expect(() => expectSuccessfulPrebuild(refused)).toThrow(refusal);
+
+  const waiting = 'fixture prebuild stderr: waiting for its final phase';
+  const started = Date.now();
+  const timedOut = Object.assign(spawnSync(process.execPath, ['-e',
+    `console.error(${JSON.stringify(waiting)}); console.log('[db] Connected to fixture database'); process.on('SIGTERM', () => process.exit(${exit})); setInterval(() => {}, 1000);`],
+  { encoding: 'utf8', timeout: 1000 }), { elapsedMs: Date.now() - started, timeoutMs: 1000 });
+  expect((timedOut.error as NodeJS.ErrnoException)?.code).toBe('ETIMEDOUT');
+  expect(() => expectSuccessfulPrebuild(timedOut)).toThrow('ETIMEDOUT');
+  expect(() => expectSuccessfulPrebuild(timedOut)).toThrow('limit=1000ms');
+  expect(() => expectSuccessfulPrebuild(timedOut)).toThrow(waiting);
+  try { expectSuccessfulPrebuild(timedOut); }
+  catch (error) {
+    const message = String(error);
+    expect(message.indexOf(waiting)).toBeLessThan(message.indexOf('prebuild stdout:'));
+    expect(message).toMatch(/elapsed=\d+ms/);
+  }
+});
 
 it('loads both preloads through the real launcher from a path containing spaces and a URL fragment', async () => {
   const root = await createRetainedGeneratedOutputFixture('o8-preload-url-');
@@ -99,15 +141,32 @@ it.each(['ordinary', 'linked'] as const)('retains %s prebuild creation authority
   mkdirSync(scripts, { recursive: true });
   mkdirSync(home);
   mkdirSync(path.join(repo, '.fixture'));
+  // Compilation is synthetic, so its version inputs must be synthetic too.
+  // Cold host compiler/SDK probes can time out or change the artifact recipe.
+  const toolchains = path.join(root, 'toolchain-bin');
+  mkdirSync(toolchains);
+  for (const [name, argument] of [['cargo', '--version'], ['rustc', '--version'],
+    ['swift', '--version'], ['xcrun', '--show-sdk-version']]) {
+    writeFileSync(path.join(toolchains, name), `#!/bin/sh
+if [ "$#" -eq 1 ] && [ "$1" = '${argument}' ]; then
+  printf '%s\\n' 'fixture ${name} 1'
+else
+  printf '%s\\n' 'unexpected fixture compiler invocation' >&2
+  exit 97
+fi
+`, { mode: 0o700 });
+  }
   writeFileSync(path.join(repo, '.gitignore'), '.next\nout\nnode_modules\n.fixture\n.o8-generated-output-store\n');
   writeFileSync(path.join(repo, 'package.json'), JSON.stringify({ name: 'prebuild-fixture', version: '0.0.0',
     scripts: { build: `${JSON.stringify(process.execPath)} ${JSON.stringify(path.join(source, 'scripts/build.mjs'))}` } }));
   // Real callers, guard, recipe, manifest, cache and native producer; only expensive
   // compiler/export/smoke payloads are stand-ins. No containing manager is seeded.
-  for (const name of ['preship-cleanup.mjs', 'bust-stale-patch-cache.mjs']) {
+  mkdirSync(path.join(scripts, 'lib'));
+  for (const name of ['preship-cleanup.mjs', 'lib/generated-output-producer-check.mjs', 'bust-stale-patch-cache.mjs']) {
     writeFileSync(path.join(scripts, name), readFileSync(path.join(source, 'scripts', name)));
   }
-  for (const name of ['build-speech-local.mjs', 'build-pi-write.mjs']) {
+  mkdirSync(path.join(scripts, 'next'), { recursive: true });
+  for (const name of ['build-speech-local.mjs', 'build-pi-write.mjs', 'next/build-sidecar.mjs']) {
     writeFileSync(path.join(scripts, name), 'process.exit(0);');
   }
   writeFileSync(path.join(scripts, 'tauri-export.mjs'), `
@@ -133,9 +192,10 @@ it.each(['ordinary', 'linked'] as const)('retains %s prebuild creation authority
   symlinkSync(path.dirname(require.resolve('better-sqlite3/package.json')), path.join(repo, 'node_modules/better-sqlite3'), 'dir');
   writeFileSync(path.join(next, 'next'), `
     const fs = require('node:fs');
-    fs.mkdirSync('.next/cache', { recursive: true });
-    fs.writeFileSync('.next/cache/proof.bin', 'fixture cache');
-    fs.writeFileSync('.next/BUILD_ID', 'native fixture');
+    const output = process.env.O8_RELEASE_NEXT_DIST_DIR || '.next';
+    fs.mkdirSync(output + '/cache', { recursive: true });
+    fs.writeFileSync(output + '/cache/proof.bin', 'fixture cache');
+    fs.writeFileSync(output + '/BUILD_ID', 'native fixture');
     fs.appendFileSync('.fixture/compiler-calls', 'build\\n');
   `);
   for (const args of [['init', '--initial-branch=main'], ['add', '.'],
@@ -154,18 +214,24 @@ it.each(['ordinary', 'linked'] as const)('retains %s prebuild creation authority
   }
   const env = { ...process.env, HOME: home, O8_RELEASE_BUILD_CACHE_DIR: path.join(root, 'cache'),
     O8_RELEASE_BUILD_CACHE_MAX_BYTES: '10485760', O8_RELEASE_LOCK_PATH: path.join(root, 'release.lock'),
-    O8_RELEASE_BROADCAST_CLI: 'true', TSX_TSCONFIG_PATH: path.join(source, 'tsconfig.json') };
+    O8_RELEASE_BROADCAST_CLI: 'true', TSX_TSCONFIG_PATH: path.join(source, 'tsconfig.json'),
+    PATH: `${toolchains}${path.delimiter}${process.env.PATH ?? ''}` };
   for (const key of ['O8_DATA_DIR', 'CORTEX_IDE_DATA_DIR', 'CORTEX_IDE_DB_PATH', 'O8_OPERATOR_DATA_DIR',
     'O8_RELEASE_BUILD_DATA_DIR', 'O8_RELEASE_CACHE_RUN_ID', 'O8_RELEASE_CACHE_PREBUILD_MARKER']) {
     delete (env as NodeJS.ProcessEnv)[key];
   }
   let invocation = 0;
-  function run(args: string[], extra: Partial<NodeJS.ProcessEnv> = {}) {
+  function run(args: string[], extra: Partial<NodeJS.ProcessEnv> = {},
+    { timeoutMs = 60_000, label = 'lifecycle command' } = {}) {
+    const started = Date.now();
     const result = spawnSync(process.execPath, args, { cwd: repo, env: { ...env, ...extra },
-      encoding: 'utf8', timeout: 60_000, maxBuffer: 2 * 1024 ** 2 });
-    writeFileSync(path.join(root, `command-${++invocation}.json`), JSON.stringify({ args,
-      pid: result.pid, exit: result.status, signal: result.signal, stdout: result.stdout, stderr: result.stderr }, null, 2));
-    return result;
+      encoding: 'utf8', timeout: timeoutMs, maxBuffer: 2 * 1024 ** 2 });
+    const elapsedMs = Date.now() - started;
+    writeFileSync(path.join(root, `command-${++invocation}.json`), JSON.stringify({ args, kind, label,
+      pid: result.pid, exit: result.status, signal: result.signal, elapsedMs, timeoutMs,
+      error: result.error ? { code: (result.error as NodeJS.ErrnoException).code, message: result.error.message } : null,
+      stdout: result.stdout, stderr: result.stderr }, null, 2));
+    return Object.assign(result, { elapsedMs, timeoutMs, label });
   }
   const prebuild = [process.env.O8_PREBUILD_TEST_SCRIPT || path.join(source, 'scripts/tauri-prebuild.mjs')];
   if (kind === 'linked') {
@@ -187,8 +253,11 @@ it.each(['ordinary', 'linked'] as const)('retains %s prebuild creation authority
     expect(readFileSync(path.join(repo, '.next/dev/lock'), 'utf8')).toBe('retained unknown producer evidence');
     renameSync(path.join(repo, '.next'), path.join(repo, '.fixture/retained-legacy-next'));
   }
-  const first = run(prebuild);
-  expect(first.status, first.stderr + first.stdout).toBe(0);
+  // A reviewed macOS combined run exhausted 60s on this first call; the native
+  // fixture file has measured 130s overall. Allow 180s for the cold lifecycle
+  // admission/build, within the 420s case bound. Later calls keep their 60s limit.
+  const first = run(prebuild, {}, { timeoutMs: 180_000, label: `${kind} first prebuild` });
+  expectSuccessfulPrebuild(first);
   const profile = JSON.parse(readFileSync(path.join(repo, '.fixture/profile.json'), 'utf8')).modern as string;
   expect(existsSync(profile), 'lifecycle profile must survive the first caller').toBe(true);
   const databasePath = path.join(profile, 'cortex-ide.db');
@@ -237,7 +306,7 @@ it.each(['ordinary', 'linked'] as const)('retains %s prebuild creation authority
   const outputIdentity = lstatSync(path.join(repo, '.next'));
   const profileCount = readdirSync(path.dirname(profile)).length;
   const second = run(prebuild);
-  expect(second.status, second.stderr + second.stdout).toBe(0);
+  expectSuccessfulPrebuild(second);
   expect(second.stdout).toContain('reused verified artifact');
   expect(resource()).toEqual(original); // Reuse must not invent a successful child or replace its receipt.
   const noop = { command: process.execPath, args: ['-e', 'process.exit(0)'] };

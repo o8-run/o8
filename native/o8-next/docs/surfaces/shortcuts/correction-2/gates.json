@@ -1,0 +1,16 @@
+{
+  "base": "3b99b20d6c5c095cb88efbf941c45bb1e1758bd8",
+  "typecheckFast": "passed,8GB",
+  "npxTscNoEmit": "passed,NODE_OPTIONS=--max-old-space-size=8192",
+  "eslint": "0errors;7Rust files ignored by config and checked with Clippy",
+  "ruleCheck": "passed, no touched TypeScript files",
+  "testClassify": "passed, including dated-fixture audit; manifest unchanged",
+  "cargoClippyAllTargets": "exit0, no touched-file diagnostics",
+  "surfaceTests": "10passed, all5 original names kept",
+  "focusedWithMainRegressions": "12passed",
+  "nativeFinal": "97unit+7CLI=104passed,3existingignoredmeasurements",
+  "nativeInitial": "95passed2failed3ignored; narrow CtrlTab guard fixed main restart; unchanged Diffpaint passed retry and final full run",
+  "fullNpm": "1242files9057tests passed,3skippedfiles5skippedtests",
+  "typescriptEntryTests": "2files7tests passed",
+  "registrationBoundary": "main archive+surface files+oneinventoryline compile;sharedsourcebyteidentical"
+}

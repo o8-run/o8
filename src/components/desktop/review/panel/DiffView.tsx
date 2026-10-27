@@ -174,7 +174,7 @@ function UnifiedDiff({
               </button>
               <span style={NUM_CELL}>{line.oldNumber ?? ''}</span>
               <span style={NUM_CELL}>{line.newNumber ?? ''}</span>
-              <span style={{ flex: 1, minWidth: 0, whiteSpace: wrap ? 'pre-wrap' : 'pre', overflowWrap: wrap ? 'anywhere' : 'normal' }}>
+              <span data-review-line={[line.oldNumber != null ? `L:${line.oldNumber}` : '', line.newNumber != null ? `R:${line.newNumber}` : ''].filter(Boolean).join(' ') || undefined} style={{ flex: 1, minWidth: 0, whiteSpace: wrap ? 'pre-wrap' : 'pre', overflowWrap: wrap ? 'anywhere' : 'normal' }}>
                 {segments ? <WordDiffText line={line} segments={segments} /> : (line.text || ' ')}
               </span>
             </div>
@@ -233,9 +233,9 @@ function SideDiff({ lines, wrap, segMap }: { lines: DiffLine[]; wrap: boolean; s
           return (
             <div key={index} style={{ display: 'grid', gridTemplateColumns: '30px minmax(0, 1fr) 30px minmax(0, 1fr)' }}>
               <span style={{ ...NUM_CELL, width: 'auto', paddingRight: 6 }}>{row.left?.oldNumber ?? ''}</span>
-              <span style={{ ...textCell, background: row.left ? leftTone.background : 'transparent', color: row.left ? leftTone.color : 'var(--t-text-faint)' }}>{leftSegs && row.left ? <WordDiffText line={row.left} segments={leftSegs} /> : (row.left?.text || ' ')}</span>
+              <span data-review-line={row.left?.oldNumber != null ? `L:${row.left.oldNumber}` : undefined} style={{ ...textCell, background: row.left ? leftTone.background : 'transparent', color: row.left ? leftTone.color : 'var(--t-text-faint)' }}>{leftSegs && row.left ? <WordDiffText line={row.left} segments={leftSegs} /> : (row.left?.text || ' ')}</span>
               <span style={{ ...NUM_CELL, width: 'auto', paddingRight: 6 }}>{row.right?.newNumber ?? ''}</span>
-              <span style={{ ...textCell, background: row.right ? rightTone.background : 'transparent', color: row.right ? rightTone.color : 'var(--t-text-faint)' }}>{rightSegs && row.right ? <WordDiffText line={row.right} segments={rightSegs} /> : (row.right?.text || ' ')}</span>
+              <span data-review-line={row.right?.newNumber != null ? `R:${row.right.newNumber}` : undefined} style={{ ...textCell, background: row.right ? rightTone.background : 'transparent', color: row.right ? rightTone.color : 'var(--t-text-faint)' }}>{rightSegs && row.right ? <WordDiffText line={row.right} segments={rightSegs} /> : (row.right?.text || ' ')}</span>
             </div>
           );
         })}

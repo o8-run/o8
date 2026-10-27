@@ -3,7 +3,11 @@ struct Tabs;
 register_shell_feature!(Tabs);
 impl ShellFeature for Tabs {
     fn slots(&self) -> &'static [RenderSlot] {
-        &[RenderSlot { order: 500, render }]
+        &[RenderSlot {
+            group: RenderGroup::Chrome,
+            order: 500,
+            render,
+        }]
     }
 }
 fn render(s: &mut Shell, _: &Frame, _: &mut Window, cx: &mut Context<Shell>) -> Option<AnyElement> {

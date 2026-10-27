@@ -3,7 +3,11 @@ struct Header;
 register_shell_feature!(Header);
 impl ShellFeature for Header {
     fn slots(&self) -> &'static [RenderSlot] {
-        &[RenderSlot { order: 100, render }]
+        &[RenderSlot {
+            group: RenderGroup::Chrome,
+            order: 100,
+            render,
+        }]
     }
 }
 fn render(
@@ -93,6 +97,7 @@ fn render(
                 view.child(
                     div()
                         .id("shell-retry")
+                        .debug_selector(|| "shell-retry".into())
                         .cursor_pointer()
                         .p(px(6.))
                         .child("Retry")

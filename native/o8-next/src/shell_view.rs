@@ -1,4 +1,6 @@
 use super::*;
+#[path = "shell_geometry.rs"]
+mod geometry;
 use crate::theme::current as theme;
 impl Render for Shell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -11,7 +13,17 @@ impl Render for Shell {
         if !registrations().iter().any(|r| (r.block_ensure)(self)) {
             self.ensure(window, cx);
         }
-        let slots = features::render(self, &frame, window, cx);
+        let mut style = gpui::StyleRefinement::default();
+        style.size.width = Some(gpui::relative(1.).into());
+        style.flex_shrink = Some(0.);
+        let chrome = self.chrome.measured_view(
+            "shell-chrome",
+            style,
+            Self::render_chrome,
+            window.viewport_size().width,
+            cx,
+        );
+        let slots = features::render_content(self, &frame, chrome.into_any_element(), window, cx);
         div()
             .size_full()
             .flex()
@@ -29,6 +41,20 @@ impl Render for Shell {
             .track_focus(&self.focus)
             .capture_key_down(cx.listener(Self::key_down))
             .children(slots)
+    }
+}
+
+impl Shell {
+    fn render_chrome(&mut self, window: &mut Window, cx: &mut Context<Self>) -> gpui::AnyElement {
+        let frame = registry::extensions()
+            .find_map(|extension| extension.frame(self))
+            .unwrap_or_default();
+        div()
+            .w_full()
+            .flex()
+            .flex_col()
+            .children(features::render_chrome(self, &frame, window, cx))
+            .into_any_element()
     }
 }
 
@@ -129,20 +155,30 @@ pub(super) fn start_pump(
 pub(super) fn open_window(
     client: Client,
     file: PathBuf,
-    state: State,
+    mut state: State,
     offscreen: bool,
     cx: &mut App,
 ) -> gpui::WindowHandle<Shell> {
     let [x, y, w, h] = state.bounds;
+    let bounds = geometry::visible(
+        Bounds::new(point(px(x), px(y)), size(px(w), px(h))),
+        &cx.displays()
+            .iter()
+            .map(|display| display.bounds())
+            .collect::<Vec<_>>(),
+    );
+    state.bounds = [
+        bounds.origin.x.into(),
+        bounds.origin.y.into(),
+        bounds.size.width.into(),
+        bounds.size.height.into(),
+    ];
     cx.open_window(
         WindowOptions {
             window_background: material::background(offscreen),
             focus: false,
             show: !offscreen,
-            window_bounds: Some(WindowBounds::Windowed(Bounds::new(
-                point(px(x), px(y)),
-                size(px(w), px(h)),
-            ))),
+            window_bounds: Some(WindowBounds::Windowed(bounds)),
             window_min_size: Some(size(px(600.), px(400.))),
             titlebar: Some(gpui::TitlebarOptions {
                 title: Some("o8 next".into()),
@@ -151,8 +187,9 @@ pub(super) fn open_window(
             ..Default::default()
         },
         |window, cx| {
+            let system_glass = material::apply(window, offscreen);
+            geometry::restore_size(window, bounds.size);
             cx.new(|cx| {
-                let system_glass = material::apply(window, offscreen);
                 let mut shell = Shell::new(client, file, state, window, cx);
                 shell.system_glass = system_glass;
                 shell

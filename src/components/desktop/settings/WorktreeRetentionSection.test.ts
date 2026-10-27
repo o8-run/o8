@@ -122,6 +122,45 @@ describe('WorktreeRetentionSection storage accounting', () => {
     vi.unstubAllGlobals();
   });
 
+  it('opens a repository-scoped cleanup review and requires an explicit selection and confirmation', async () => {
+    const plan = { id: 'cleanup-fixture', repositoryPath: '/fixture/repo', fingerprint: 'reviewed-fingerprint',
+      status: 'preview', selection: null, outcomes: [], observedFreeSpace: [{ observedAt: 1, availableBytes: 1024 }], entries: [
+        { id: 'workspace:done', worktreeId: 'done', kind: 'workspace', eligible: true, workspacePath: '/fixture/repo/done',
+          dependencies: [], estimate: { logicalBytes: null }, recovery: { ref: 'refs/heads/kept' } },
+        { id: 'workspace:active', worktreeId: 'active', kind: 'workspace', eligible: false, reason: 'Not terminal',
+          dependencies: [], estimate: { logicalBytes: null }, recovery: {} },
+      ] };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).includes('/panel/repos')) return Response.json({ repos: [{ id: 'repo', name: 'Fixture', localPath: '/fixture/repo' }] });
+      if (String(input).includes('/workspace/maintenance')) {
+        const body = init?.body ? JSON.parse(String(init.body)) : {};
+        return Response.json({ ok: true, result: { plan: body.action === 'execute' ? { ...plan, status: 'settled',
+          selection: ['workspace:done'], outcomes: [{ entryId: 'workspace:done', state: 'removed', recovery: { ref: 'refs/heads/kept' } }] } : plan } });
+      }
+      return Response.json(observedUsage);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await act(async () => { root.render(createElement(WorktreeRetentionSection)); await settle(); });
+    const button = (label: string) => [...container.querySelectorAll('button')].find(node => node.textContent?.trim() === label)!;
+    expect(button('Review cleanup')).toBeDefined();
+    await act(async () => { button('Review cleanup').click(); await settle(); });
+    const select = container.querySelector<HTMLSelectElement>('select[aria-label="Cleanup repository"]')!;
+    await act(async () => { select.value = '/fixture/repo'; select.dispatchEvent(new Event('change', { bubbles: true })); await settle(); });
+    await act(async () => { button('Preview cleanup').click(); await settle(); });
+    expect(button('Clean selected')?.disabled).toBe(true);
+    const checkboxes = [...container.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')];
+    expect(checkboxes.find(node => node.disabled)).toBeDefined();
+    await act(async () => { checkboxes.find(node => !node.disabled)!.click(); await settle(); button('Clean selected').click(); await settle(); });
+    expect(fetchMock.mock.calls.filter(([, init]) => String(init?.body).includes('execute'))).toHaveLength(0);
+    await act(async () => { button('Confirm cleanup').click(); await settle(); });
+    expect(fetchMock.mock.calls.find(([, init]) => String(init?.body).includes('execute'))?.[1]?.body).toBe(JSON.stringify({
+      action: 'execute', planId: 'cleanup-fixture', fingerprint: 'reviewed-fingerprint', selection: ['workspace:done'],
+    }));
+    expect(container.textContent).toContain('removed');
+    expect(container.textContent).toContain('refs/heads/kept');
+    expect(container.textContent).toContain('Before cleanup: 1024 bytes available');
+  });
+
   it('shows fleet reserve, pressure projection, and observational category accounting', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => Response.json(observedUsage)));
 

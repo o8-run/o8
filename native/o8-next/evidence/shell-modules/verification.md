@@ -1,5 +1,10 @@
 # Shell module verification
 
+See [cached chrome integration](chrome-groups.md) for the current main/head
+comparison, render groups and slot-state invalidation regression.
+
+## Earlier verification
+
 The primary regression was written before the registries. It opened the real
 GPUI shell against the existing authenticated production-route fixture and failed
 at the absent feature render slot. The unchanged test now passes rendering, key

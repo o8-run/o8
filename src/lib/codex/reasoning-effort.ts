@@ -36,6 +36,8 @@ export function codexSupportsReasoningEffort(
   effort: ManualThinkingEffort,
 ): boolean {
   if (model?.trim().toLowerCase() === 'gpt-4o' || parseLocalModel(model)) return false;
+  // These tiers need installed discovery evidence at admission, not a name rule.
+  if (effort === 'none' || effort === 'minimal') return false;
   if (model?.trim().toLowerCase() === 'gpt-6.1-sol') {
     return SOL_EFFORTS.includes(effort as typeof SOL_EFFORTS[number]);
   }
@@ -66,6 +68,9 @@ export function resolveCodexReasoningEffort(
   effort: Exclude<ThinkingEffort, 'adaptive'>,
   model?: string | null,
 ): string {
+  // Admission verifies these against model discovery before either seat launches.
+  // Preserve the wire value instead of upgrading a disabled/minimal request to low.
+  if (effort === 'none' || effort === 'minimal') return effort;
   if (model?.trim().toLowerCase() === 'gpt-6.1-sol' && !codexSupportsReasoningEffort(model, effort)) return 'low';
   return codexSupportsReasoningEffort(model, effort) ? effort : 'xhigh';
 }

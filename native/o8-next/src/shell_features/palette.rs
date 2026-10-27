@@ -3,7 +3,11 @@ struct Palette;
 register_shell_feature!(Palette);
 impl ShellFeature for Palette {
     fn slots(&self) -> &'static [RenderSlot] {
-        &[RenderSlot { order: 400, render }]
+        &[RenderSlot {
+            group: RenderGroup::Chrome,
+            order: 400,
+            render,
+        }]
     }
 }
 fn render(s: &mut Shell, _: &Frame, _: &mut Window, cx: &mut Context<Shell>) -> Option<AnyElement> {
@@ -35,9 +39,11 @@ fn render(s: &mut Shell, _: &Frame, _: &mut Window, cx: &mut Context<Shell>) -> 
                         theme().surface_raised
                     })
                     .child(command.label(&s.sessions))
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.execute(command.clone(), window, cx)
-                    }))
+                    .on_click(
+                        cx.listener(move |this, _, window, cx| {
+                            command.clone().run(this, window, cx)
+                        }),
+                    )
             })))
         .into_any_element(),
     )

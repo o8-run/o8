@@ -396,8 +396,20 @@ fn placement_shell_tabs_use_compact_rows(cx: &mut TestAppContext) {
         .debug_bounds("surface-tab-0")
         .expect("top tab geometry");
     assert_eq!(tab.size.height, px(26.));
+    let index = shell.read_with(&visual, |s, cx| {
+        s.surfaces
+            .sidebar
+            .view
+            .as_ref()
+            .unwrap()
+            .read(cx)
+            .rows
+            .iter()
+            .position(|row| row.id.as_deref() == Some("thoughts-composer-first"))
+            .unwrap()
+    });
     let row = visual
-        .debug_bounds("session-thoughts-composer-first")
+        .debug_bounds(Box::leak(format!("thread-row-{index}").into_boxed_str()))
         .unwrap();
     assert_eq!(row.size.height, px(28.));
 }

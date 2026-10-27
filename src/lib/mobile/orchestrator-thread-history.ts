@@ -9,6 +9,7 @@ import { ensureOrchestratorHistoryDir as ensureHistoryDir, ORCHESTRATOR_HISTORY_
 import { resolveOrchestratorThreadProjectId } from './orchestrator-thread-project';
 import { buildProjectBoundThreadRecord, type BindOrchestratorThreadProjectInput } from './orchestrator-thread-project-binding';
 import { nextOrchestratorThreadId } from './orchestrator-thread-id';
+import { isSavedConnectivityCheck } from '@/lib/orchestrator/connectivity-check';
 import { repairComposerPreambleHistory, repairFlippedTranscriptHistory } from './orchestrator-thread-history-repair';
 import { consumePendingTurnWorkers, mergeMobileTurnReceipts } from './turn-receipt';
 import { threadSummaryCache } from './orchestrator-thread-summary-cache';
@@ -403,6 +404,7 @@ export function appendMobileOrchestratorUserMessage(input: {
   agent?: string | null;
   timestampMs?: number;
   handoff?: MobileTranscriptEntry['handoff'];
+  steerAnchor?: MobileTranscriptEntry['steerAnchor'];
 }): MobileOrchestratorThread | null {
   const tabId = input.tabId;
   if (!tabId?.startsWith('thoughts-')) return null;
@@ -433,7 +435,7 @@ export function appendMobileOrchestratorUserMessage(input: {
   const nextMessages = appendUserHistoryMessage({
     messages: Array.isArray(existing.messages) ? existing.messages : [],
     content, messageId: input.messageId, media: input.media,
-    handoff: input.handoff, timestamp,
+    handoff: input.handoff, steerAnchor: input.steerAnchor, timestamp,
   });
   writeHistoryRecord(tabId, {
     ...existing,
@@ -732,6 +734,7 @@ export function listMobileOrchestratorRevealRequests(since: string | null): Orch
       const filePath = join(ORCHESTRATOR_HISTORY_DIR, file);
       const stat = statSync(filePath);
       const record = JSON.parse(readFileSync(filePath, 'utf-8')) as OrchestratorHistoryRecord;
+      if (isSavedConnectivityCheck(record)) continue;
       const requestedAt = typeof record.mobileRevealRequestedAt === 'string' ? record.mobileRevealRequestedAt : null;
       if (!requestedAt) continue;
       const requestedMs = Date.parse(requestedAt);

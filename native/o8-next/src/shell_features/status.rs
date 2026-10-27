@@ -5,6 +5,7 @@ impl ShellFeature for Status {
     fn slots(&self) -> &'static [RenderSlot] {
         &[
             RenderSlot {
+                group: RenderGroup::Chrome,
                 order: 200,
                 render: |s, frame, _, _| {
                     frame.status.then(|| {
@@ -17,6 +18,7 @@ impl ShellFeature for Status {
                 },
             },
             RenderSlot {
+                group: RenderGroup::Chrome,
                 order: 300,
                 render: |s, _, _, _| {
                     s.shortcuts.then(|| {

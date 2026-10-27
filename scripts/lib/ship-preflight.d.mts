@@ -53,6 +53,13 @@ export interface QuickBenchmarkPreflightReceipt {
   cleanup?: QuickBenchmarkCleanup & { recoveredPrevious?: QuickBenchmarkCleanup[] };
 }
 
+export function commandReceipt(command: string, args: string[], options?: {
+  cwd?: string;
+  env?: NodeJS.ProcessEnv;
+  timeoutMs?: number;
+  maxBuffer?: number;
+  detached?: boolean;
+}): ShipCommandReceipt;
 export function acquireReleaseLock(options?: { lockPath?: string }): {
   path: string;
   release(): void;

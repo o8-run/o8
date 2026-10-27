@@ -19,7 +19,73 @@ import { GET } from './route';
 
 afterEach(() => {
   resolver.mockReset(); invalidate.mockReset();
+  vi.useRealTimers();
   vi.unstubAllGlobals();
+});
+
+it('flushes discovery headers and found rows before a slower version probe completes', async () => {
+  let release!: (value: unknown) => void;
+  const slow = new Promise(resolve => { release = resolve; });
+  resolver.mockImplementation(async ({ runtimeId }: { runtimeId: string }) => {
+    if (runtimeId === 'grok') return slow;
+    if (runtimeId === 'codex') return { path: '/selected/codex', version: '1.0.0', source: 'env' };
+    throw new Error('not installed');
+  });
+  vi.stubGlobal('fetch', vi.fn(async () => Response.json({ version: '1.0.1' })));
+  const pending = GET(new Request('http://localhost/api/setup/cli-updates', { headers: { Accept: 'text/event-stream' } }));
+  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const response = await Promise.race([pending, new Promise<null>(resolve => { timer = setTimeout(() => resolve(null), 100); })]);
+    clearTimeout(timer);
+    expect(response, 'discovery withheld headers until every probe finished').not.toBeNull();
+    expect(response!.headers.get('content-type')).toContain('text/event-stream');
+    reader = response!.body!.getReader();
+    const decoder = new TextDecoder(); let text = '';
+    const early = (async () => {
+      while (!text.includes('"runtimeId":"codex"')) {
+        const chunk = await reader!.read();
+        if (chunk.done) break;
+        text += decoder.decode(chunk.value);
+      }
+    })();
+    await Promise.race([early, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('A found tool was withheld')), 3000); })]);
+    clearTimeout(timer);
+    expect(text).toContain('event: progress');
+    expect(text).toContain('"runtimeId":"codex"');
+    expect(text).not.toContain('event: result');
+    release({ path: '/selected/grok', version: '1.0.0', source: 'env' });
+    for (;;) { const chunk = await reader.read(); if (chunk.done) break; text += decoder.decode(chunk.value); }
+    expect(text).toContain('event: result');
+    expect(text).toContain('"runtimeId":"grok"');
+  } finally {
+    clearTimeout(timer); release({ path: '/selected/grok', version: '1.0.0', source: 'env' });
+    await reader?.cancel().catch(() => {}); reader?.releaseLock(); await pending;
+  }
+});
+
+it('releases the discovery heartbeat when the requesting view disconnects', async () => {
+  vi.useFakeTimers();
+  let release!: () => void;
+  const waiting = new Promise((_, reject) => { release = () => reject(new Error('not installed')); });
+  resolver.mockImplementation(() => waiting);
+  const abort = new AbortController();
+  const before = vi.getTimerCount();
+  const response = await GET(new Request('http://localhost/api/setup/cli-updates', {
+    headers: { Accept: 'text/event-stream' }, signal: abort.signal,
+  }));
+  const reader = response.body!.getReader();
+  try {
+    await reader.read();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(resolver).toHaveBeenCalled();
+    abort.abort();
+    expect((await reader.read()).done).toBe(true);
+    expect(vi.getTimerCount()).toBe(before);
+  } finally {
+    release(); await vi.advanceTimersByTimeAsync(0);
+    await reader.cancel().catch(() => {}); reader.releaseLock();
+  }
 });
 
 describe('GET /api/setup/cli-updates', () => {

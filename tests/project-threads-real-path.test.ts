@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync, symlinkSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, symlinkSync } from 'node:fs';
 import { execFileSync, execFile } from 'node:child_process';
 import { createServer } from 'node:http';
 import { promisify } from 'node:util';
@@ -280,7 +280,7 @@ it('scopes orphan approvals and incidents by project identity when repositories 
     expect.soft(cli.stdout).toContain(own.marker); expect.soft(cli.stdout).not.toContain(foreign.marker);
   }
 }, 60_000);
-it('serves each recorded evidence kind through its emitted URL and redacts report bodies', async () => {
+it('inspects text evidence and refuses opaque or structurally masked evidence at emitted URLs', async () => {
   const { recordArtifact } = await import('@/lib/artifacts/store');
   mkdirSync(join(root, 'artifacts'), { recursive: true });
   const kinds = [
@@ -301,10 +301,14 @@ it('serves each recorded evidence kind through its emitted URL and redacts repor
     const modulePath = url.pathname === '/api/panel/serve-image' ? '@/app/api/panel/serve-image/route' : '@/app/api/panel/threads/artifact/route';
     const serving = await import(modulePath);
     const response = await serving.GET(new NextRequest(url, { headers: { authorization: `Bearer ${token}` } }));
-    expect.soft(response.status, artifact.kind).toBe(200);
     const item = expected.get(artifact.id)!;
-    if (item.kind === 'report' || item.kind === 'receipt') expectPrivateTextHidden(await response.text());
-    else expect.soft(Buffer.from(await response.arrayBuffer())).toEqual(item.bytes);
+    expect.soft(response.status, artifact.kind).toBe(item.kind === 'receipt' ? 200 : 415);
+    if (item.kind === 'receipt') {
+      const text = await response.text();
+      expect(text).not.toContain(displaySecret); expect(text).not.toContain(displayHome); expect(text).toContain('[redacted]');
+    }
+    else expect(await response.json()).toMatchObject({ code: item.kind === 'report' ? 'marked_preview_required' : 'binary_preview_refused', redaction: { version: 1 } });
+    expect(readFileSync(join(root, `artifacts/served-${item.kind}.${item.ext}`))).toEqual(item.bytes);
   }
 });
 
@@ -322,7 +326,10 @@ it('redacts interactive evidence at its emitted read URL without modifying the s
   const modulePath = url.pathname.startsWith('/api/task-artifacts/') ? '@/app/api/task-artifacts/[id]/route' : '@/app/api/panel/threads/artifact/route';
   const reader = await import(modulePath);
   const response = await reader.GET(new NextRequest(url, { headers: { authorization: `Bearer ${token}` } }), { params: Promise.resolve({ id }) });
-  expect(response.status).toBe(200); expectPrivateTextHidden(await response.text());
+  expect(response.status).toBe(200);
+  const body = await response.text();
+  expect(body).not.toContain(displaySecret); expect(body).not.toContain(displayHome);
+  expect(body).toContain('[redacted]');
   expect(getTaskArtifactById(id)?.html).toBe(html);
 });
 

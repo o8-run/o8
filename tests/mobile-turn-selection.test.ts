@@ -21,10 +21,20 @@ beforeEach(() => {
 });
 
 describe('mobile thread selection', () => {
-  it('continues the actual model, Solo, effort and Plan without rewriting input or identity', () => {
-    expect(resolve()).toEqual({ ...original, model: 'selected-model', thinkingEffort: 'high',
+  it('continues the actual model, Solo and Plan without inventing an independent effort', () => {
+    expect(resolve()).toEqual({ ...original, model: 'selected-model',
       orchestrationMode: 'single', pickedMode: 'solo', permissionMode: 'plan' });
     expect(history.messages).toHaveLength(2);
+  });
+
+  it('keeps an observed legacy effort for a lead with a matching transport', () => {
+    history.messages[0].backend = 'codex';
+    expect(resolve(original, '/repo', 'thoughts-one', 'codex')).toMatchObject({ thinkingEffort: 'high' });
+  });
+
+  it.each(['acp', 'hermes', 'opencode', 'pi', 'o8'])('does not inherit an unmapped legacy effort for %s', backend => {
+    history.messages[0].backend = backend as typeof history.messages[0]['backend'];
+    expect(resolve(original, '/repo', 'thoughts-one', backend)).not.toHaveProperty('thinkingEffort');
   });
 
   it('preserves explicit choices, including selecting the agent default', () => {

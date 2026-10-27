@@ -23,7 +23,7 @@ async function freePort(): Promise<number> {
 
 /** Same real WS process / fixture Next HTTP boundary as the negotiation integration test. */
 export async function startParityReference(options: {
-  logLimit?: number; o8d?: boolean; binary?: string; stallFixture?: boolean; nativeHttp?: boolean;
+  logLimit?: number; o8d?: boolean; binary?: string; stallFixture?: boolean; nativeHttp?: boolean; entry?: string;
 } = {}) {
   const directory = realpathSync(mkdtempSync(join(tmpdir(), 'o8-ws-parity-')));
   const token = 'ws-parity-fixture-credential';
@@ -71,8 +71,8 @@ export async function startParityReference(options: {
   const child = execFile(process.execPath, [
     ...(options.stallFixture ? ['--import=./tests/fixtures/ws-stall-preload.mjs'] : []),
     ...(options.nativeHttp ? ['--require=./scripts/next/brain-runtime.cjs'] : []),
-    '--import=./scripts/register-server-only-stub.mjs',
-    '--import=tsx', 'src/ws-server.ts'], {
+    ...(options.entry ? [options.entry] : ['--import=./scripts/register-server-only-stub.mjs',
+      '--import=tsx', 'src/ws-server.ts'])], {
     cwd: process.cwd(), env: { ...process.env, NODE_ENV: 'test',
       HOME: directory, USERPROFILE: directory,
       O8_DATA_DIR: undefined, CORTEX_IDE_DATA_DIR: directory,

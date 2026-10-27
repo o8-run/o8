@@ -24,7 +24,7 @@ register_shell_feature!(Sidebar);
 fn active(s: &Shell) -> bool { s.file.ends_with("order-experiment.json") }
 impl ShellFeature for Sidebar {
     fn slots(&self) -> &'static [RenderSlot] {
-        &[RenderSlot { order: 450, render: |s, _, _, _| active(s).then(|| div().debug_selector(|| "order-sidebar".into()).size(px(1.)).into_any_element()) }]
+        &[RenderSlot { group: RenderGroup::Chrome, order: 450, render: |s, _, _, _| active(s).then(|| div().debug_selector(|| "order-sidebar".into()).size(px(1.)).into_any_element()) }]
     }
     fn ticks(&self) -> &'static [TickHook] {
         &[TickHook { order: 300, run: |s, _, _, _| if active(s) { s.notice = "order tick".into(); } }]
@@ -59,7 +59,7 @@ struct Preferences;
 impl gpui::Global for Preferences {}
 impl ShellFeature for Mirror {
     fn slots(&self) -> &'static [RenderSlot] {
-        &[RenderSlot { order: 460, render: |s, _, _, _| s.file.ends_with("order-experiment.json").then(|| div().debug_selector(|| "order-preferences".into()).size(px(1.)).into_any_element()) }]
+        &[RenderSlot { group: RenderGroup::Chrome, order: 460, render: |s, _, _, _| s.file.ends_with("order-experiment.json").then(|| div().debug_selector(|| "order-preferences".into()).size(px(1.)).into_any_element()) }]
     }
     fn keys(&self) -> &'static [KeyContext] {
         &[KeyContext { order: -10, dispatch: |s, event, _, _| {

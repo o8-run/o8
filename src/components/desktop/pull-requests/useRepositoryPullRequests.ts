@@ -5,6 +5,7 @@ import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import type { PullRequestListPage, PullRequestListSort, PullRequestListState } from '@/lib/github-broker/pull-request-list.types';
 import { pullRequestListQuery } from '@/lib/github-client';
 import { ipcFetch } from '@/lib/tauri/ipc-fetch';
+import { assertGitHubOrgCoverage, GitHubOrgNotCoveredError } from '@/lib/github/org-access';
 
 function pageQuery(repoPath: string, state: PullRequestListState, sort: PullRequestListSort, fresh = false) {
   return {
@@ -16,6 +17,7 @@ function pageQuery(repoPath: string, state: PullRequestListState, sort: PullRequ
       const params = new URLSearchParams({ repoPath, view: 'list', state, sort, page: String(pageParam) });
       if (fresh) params.set('fresh', '1');
       const response = await ipcFetch(`/api/panel/prs?${params}`, { signal });
+      if (response.status === 422) assertGitHubOrgCoverage(await response.clone().json().catch(() => null));
       assertGithubRead(response);
       const result = await response.json() as PullRequestListPage;
       if (!response.ok || result.error || !Array.isArray(result.prs)) {
@@ -39,7 +41,7 @@ export function useRepositoryPullRequests(repoPath: string | null, state: PullRe
     subscribed: Boolean(active && repoPath),
   });
   const data = useMemo(() => {
-    if (!query.data) return null;
+    if (!query.data || query.error instanceof GitHubOrgNotCoveredError) return null;
     const pages = query.data.pages;
     const seen = new Set<number>();
     const prs = pages.flatMap(page => page.prs).filter(pr => {
@@ -47,7 +49,7 @@ export function useRepositoryPullRequests(repoPath: string | null, state: PullRe
       seen.add(pr.number); return true;
     });
     return { ...pages[pages.length - 1], prs, statsUnavailable: pages.some(page => page.statsUnavailable) };
-  }, [query.data]);
+  }, [query.data, query.error]);
 
   const refresh = useCallback(async () => {
     if (!repoPath || !active) return;

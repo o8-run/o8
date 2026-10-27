@@ -1,3 +1,4 @@
+import { EffortPinRejectionError, resolveEffortPin } from '@/lib/orchestrator/effort-pin';
 import { ensureMcpConfig } from './claude-orchestrator-mcp-config';
 import { orchestratorProcessPolicyCurrent, withOrchestratorPromptPolicy, sessions, getWarmState, clearIdleTimer, killOrchestratorProc, reapIdleForCapacity, settleOrchestratorTurn, handleClaudeJsonLine, spawnOrchestratorProc } from './orchestrator-resident-process';
 export { getWarmState, attachOrchestratorProcHandlers } from './orchestrator-resident-process';
@@ -21,7 +22,7 @@ import {
   createToolCallTracker,
   type OrchestratorEvent,
 } from '@/lib/lane/orchestrator-stream-events';
-import { claudeEffortFlagValue, type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
+import { type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import { getRuntime, type RuntimeSession } from '@/lib/runtimes';
 import { buildToolRegistry } from '@/lib/mcp/tool-spine/build';
 import { toClaudeJson } from '@/lib/mcp/tool-spine/emit-claude';
@@ -522,7 +523,6 @@ export async function sendToOrchestrator(
   options: SendToOrchestratorOptions = {},
 ): Promise<void> {
   const permissionMode: OrchestratorPermissionMode = options.permissionMode ?? 'full';
-  const thinkingEffort = claudeEffortFlagValue(options.thinkingEffort ?? 'adaptive') as ThinkingEffort;
   const requestedModel = resolveClaudeOrchestratorModel(options.model);
   const toolProfile: ToolProfile = options.toolProfile ?? 'full';
   const w = getWarmState(session.sessionName);
@@ -573,6 +573,10 @@ export async function sendToOrchestrator(
     throw failure;
   }
   const model = carrier.model;
+  const effortPin = resolveEffortPin({ runtime: 'claude-code', model,
+    explicitModel: options.model, requestedEffort: options.thinkingEffort });
+  if (!effortPin.ok) throw new EffortPinRejectionError(effortPin.code, effortPin.message);
+  const thinkingEffort = effortPin.selectedEffort ?? 'adaptive';
   if (options.serviceTier && options.serviceTier !== 'default' && (options.serviceTier !== 'fast' || carrier.source !== 'native' || !claudeModelSupportsFast(model) || process.env.CLAUDE_CODE_DISABLE_FAST_MODE === '1')) {
     throw new Error('Fast mode is not available for this Claude model and provider. Choose Standard.');
   }
@@ -613,7 +617,8 @@ export async function sendToOrchestrator(
   const systemPrompt = buildOrchestratorSystemPrompt(session.repoPath, { backend: 'claude', toolProfile });
   const promptFingerprint = orchestratorPromptFingerprint(systemPrompt);
 
-  onEvent({ type: 'turn_receipt', leadModel: model, effort: thinkingEffort });
+  onEvent({ type: 'turn_receipt', leadModel: model, effort: thinkingEffort,
+    ...(effortPin.selectedEffort === null ? { effortSource: 'runtime-default' as const } : {}) });
   if (session.proc && !orchestratorProcessPolicyCurrent(session.proc)) killOrchestratorProc(session, w, true);
   // Spawn a fresh proc when there's no warm one (first turn / after recycle).
   if (!session.proc) {

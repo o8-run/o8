@@ -44,7 +44,7 @@ fn dispatch(
             "down" => s.choice = (s.choice + 1).min(s.commands().len().saturating_sub(1)),
             "enter" => {
                 if let Some(command) = s.commands().get(s.choice).cloned() {
-                    s.execute(command, window, cx);
+                    command.run(s, window, cx);
                 }
             }
             "backspace" => {

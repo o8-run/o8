@@ -79,9 +79,9 @@ function getWsUrl(): string {
   // through `next.config.ts:rewrites()` — only HTTP. The upgrade returns 404
   // and the client retries forever.
   //
-  // ws-server already binds 0.0.0.0:<wsPort> (see src/ws-server.ts and the
-  // Tauri sidecar in src-tauri/src/lib.rs), so the LAN IP from the phone's
-  // perspective is reachable on the ws port directly. The token query param
+  // With O8_LAN_ACCESS=1 the ws-server binds 0.0.0.0:<wsPort> (see
+  // src/lib/panel/listen-host.ts; default is 127.0.0.1), so the LAN IP from
+  // the phone's perspective is reachable on the ws port directly. The token query param
   // is verified by ws-server's verifyClient before the upgrade completes.
   const wsProto = protocol === 'https:' ? 'wss' : 'ws';
   return `${wsProto}://${hostname}:${getBrowserWsPort()}/ws?token=${encodeURIComponent(token)}`;

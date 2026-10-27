@@ -15,6 +15,25 @@ use std::{
     time::Duration,
 };
 
+// The parent waits only for the first paint of the open window. This channel
+// carries only fixed control signals, never diagnostics or credentials.
+fn report_startup() {
+    use std::{
+        io::Write,
+        sync::atomic::{AtomicBool, Ordering},
+    };
+    static REPORTED: AtomicBool = AtomicBool::new(false);
+    if std::env::var("O8_NEXT_PARENT_PIPE").as_deref() != Ok("1")
+        || REPORTED.swap(true, Ordering::SeqCst)
+    {
+        return;
+    }
+    let mut output = std::io::stdout().lock();
+    let _ = output
+        .write_all(b"o8-next-ready\n")
+        .and_then(|_| output.flush());
+}
+
 pub const HELP: &str = "App shell: --app-shell --shell-state ABSOLUTE_FILE --server ORIGIN [--offscreen]. The o8 next launcher resolves existing local configuration.";
 #[path = "surface_registry.rs"]
 mod registry;
@@ -37,6 +56,7 @@ register_surfaces! {
         #[cfg(test)] fake: Fake = "surfaces/fake.rs";
     }
     commands {
+        shortcuts: ShortcutReference = "surfaces/shortcuts.rs";
         sidebar: Sidebar = "surfaces/sidebar.rs";
         settings: Settings = "surfaces/settings.rs";
         projects: Projects = "surfaces/projects.rs";
@@ -52,6 +72,7 @@ mod features;
 pub struct Shell {
     features: features::State,
     system_glass: bool,
+    chrome: crate::render_region::Regions<Shell>,
     client: Client,
     file: PathBuf,
     state: State,
@@ -86,6 +107,7 @@ impl Shell {
         let mut shell = Self {
             features: features::State::default(),
             system_glass: false,
+            chrome: crate::render_region::Regions::default(),
             client,
             file,
             state,
@@ -276,7 +298,10 @@ impl Shell {
             (registration.capture)(self, window, cx);
         }
     }
-    fn commands(&self) -> Vec<Command> {
+    fn commands(&self) -> Vec<palette::Entry> {
+        palette::entries(self)
+    }
+    fn surface_commands(&self) -> Vec<Command> {
         features::commands(self)
             .into_iter()
             .filter(|command| {
@@ -353,6 +378,10 @@ mod view;
 pub use view::try_launch;
 
 #[cfg(test)]
+#[path = "shell_window_tests.rs"]
+mod window_tests;
+
+#[cfg(test)]
 #[path = "shell_tests.rs"]
 mod tests;
 
@@ -363,3 +392,7 @@ mod test_support;
 #[cfg(test)]
 #[path = "shell_feature_tests.rs"]
 mod feature_tests;
+
+#[cfg(test)]
+#[path = "startup_tests.rs"]
+mod startup_tests;

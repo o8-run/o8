@@ -44,3 +44,7 @@ impl ShellView for View {
 #[cfg(test)]
 #[path = "workers/tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "workers/card_tests.rs"]
+mod card_tests;
