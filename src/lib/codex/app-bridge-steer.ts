@@ -3,6 +3,7 @@ import type { CodexOrchestratorSession } from '@/lib/lane/codex-orchestrator-ses
 import type { OrchestratorBackend, OrchestratorTurnOptions } from '@/lib/lane/orchestrator-backends/types';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
 import { createCodexSteerRelay } from './app-bridge-steer-relay';
+import { assertCodexLiveSteerEffort } from './app-bridge-steer-effort';
 
 type LiveSteer = NonNullable<OrchestratorBackend['liveSteer']>;
 type Route = Pick<OrchestratorTurnOptions, 'model' | 'permissionMode' | 'toolProfile' | 'orchestrationMode'>;
@@ -54,6 +55,7 @@ export function registerCodexAppBridgeSteer(session: CodexOrchestratorSession, p
     if (!running() || options.attachments?.length || options.threadId !== session.historyThreadId || options.model !== route.model
       || (options.orchestrationMode ?? 'fleet') !== (route.orchestrationMode ?? 'fleet')
       || (options.permissionMode ?? 'full') !== route.permissionMode || (options.toolProfile ?? 'full') !== route.toolProfile) return { accepted: false };
+    assertCodexLiveSteerEffort(options.thinkingEffort);
     const id = options.clientUserMessageId;
     if (!id || attempted.has(id)) throw new Error('Codex steer requires a unique queued message identity.');
     // No asynchronous preparation after this cancellation/permission fence.

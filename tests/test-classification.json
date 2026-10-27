@@ -2391,6 +2391,14 @@
       ]
     },
     {
+      "path": "tests/collide-effort-admission-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/committed-storage-reconciliation-real-path.test.ts",
       "reasons": [
         "real-path"
