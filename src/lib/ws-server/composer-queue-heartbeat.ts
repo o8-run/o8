@@ -1,4 +1,5 @@
 import { readPersistedLlmChat } from '@/lib/llm/chat-history-store';
+import { EffortPinRejectionError } from '@/lib/orchestrator/effort-pin';
 import { backendSwitchRequiresExplicitHandoff } from '@/lib/orchestrator/backend-switch-carry';
 import { assertComposerSendClaim, admitComposerSend, claimNextComposerSend, listComposerQueueTargets,
   listQueuedComposerSends, recoverComposerSends, settleComposerSend, validateComposerQueueTarget } from '@/lib/orchestrator/composer-queue';
@@ -57,6 +58,7 @@ export async function runQueuedComposerSteer(item: QueuedComposerSendRecord): Pr
   const backend = getOrchestratorBackend(originFor(item).backend, targetFor(item));
   if (!backend.liveSteer) { deferComposerSteer(item.id, 'Steer declined; queued for the next turn.'); return; }
   const result = await backend.liveSteer(item.repoPath, item.payload.wireMessage, {
+    thinkingEffort: item.payload.routing.effort,
     ...item.payload.routing, threadId: item.threadId, clientUserMessageId: item.id, attachments: item.payload.images, orchestrationMode: item.payload.routing.mode,
     beforeAdmit: () => { checkComposerQueueBinding(item); if (!admitComposerSend(item.id)) throw new Error('Message admission was cancelled.'); },
   });
@@ -111,7 +113,8 @@ export function createComposerQueueHeartbeat(input: SharedWorkerHeartbeatHooks):
         if (claimed) {
           steering.add(key); publishComposerQueueChange(target.threadId);
           void runQueuedComposerSteer(claimed).catch(error => {
-            settleComposerSend(claimed.id, { status: 'held', reason: `Steer unconfirmed; queued for inspection. ${error instanceof Error ? error.message : ''}` });
+            settleComposerSend(claimed.id, { status: 'held', reason: error instanceof EffortPinRejectionError
+              ? error.message : `Steer unconfirmed; queued for inspection. ${error instanceof Error ? error.message : ''}` });
           }).finally(() => { steering.delete(key); publishComposerQueueChange(target.threadId); });
         }
         continue;

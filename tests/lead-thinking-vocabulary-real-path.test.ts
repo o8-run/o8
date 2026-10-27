@@ -93,9 +93,11 @@ it.each([undefined, 'adaptive', 'low', 'medium', 'high', 'xhigh', 'max'] as cons
   expect(events.filter(event => event.type === 'error')).toEqual([]);
   const args = turns().at(-1)!;
   const index = args.indexOf('--thinking');
-  expect(index >= 0).toBe(effort !== undefined);
-  if (effort) expect(args[index + 1]).toBe(effort);
-  expect(events).toContainEqual({ type: 'turn_receipt', leadModel: 'fixture/model', effort: effort ?? 'adaptive' });
+  const concrete = effort !== undefined && effort !== 'adaptive';
+  expect(index >= 0).toBe(concrete);
+  if (concrete) expect(args[index + 1]).toBe(effort);
+  expect(events).toContainEqual({ type: 'turn_receipt', leadModel: 'fixture/model', effort: effort ?? 'adaptive',
+    ...(!concrete ? { effortSource: 'runtime-default' } : {}) });
 });
 it('preserves ultra only when the selected executable advertises it', async () => {
   setContract({ text: currentHelp });
@@ -104,6 +106,16 @@ it('preserves ultra only when the selected executable advertises it', async () =
   const args = turns().at(-1)!;
   expect(args[args.indexOf('--thinking') + 1]).toBe('ultra');
   expect(events).toContainEqual({ type: 'turn_receipt', leadModel: 'fixture/model', effort: 'ultra' });
+});
+
+it.each([undefined, 'adaptive'] as const)('leaves %s at the installed default without a thinking argument or help probe', async effort => {
+  setContract({ fail: true });
+  const events = await turn(effort);
+  expect(events.filter(event => event.type === 'error')).toEqual([]);
+  expect(turns()).toHaveLength(1);
+  expect(turns()[0]).not.toContain('--thinking');
+  expect(helpCalls()).toBe(0);
+  expect(events).toContainEqual(expect.objectContaining({ type: 'turn_receipt', effort: 'adaptive', effortSource: 'runtime-default' }));
 });
 
 it('shares one help read across 14 unchanged launches', async () => {
