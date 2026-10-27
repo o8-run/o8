@@ -30,7 +30,7 @@ export function sandboxFlagsForMode(mode: CodexOrchestratorPermissionMode): stri
 export function reasoningEffortFromThinkingEffort(
   effort: ThinkingEffort | undefined,
   model?: string,
-  compatibility: { installedCliVersion?: string | null; explicitModel?: string } = {},
+  compatibility: { installedCliVersion?: string | null; explicitModel?: string; codexHome?: string } = {},
 ): Exclude<ThinkingEffort, 'adaptive'> | undefined {
   const pin = resolveEffortPin({ runtime: 'codex', model: model ?? null,
     requestedEffort: effort, ...compatibility });

@@ -120,13 +120,15 @@ export interface ResolveEffortPinInput {
   modelDisposition?: WorkerModelDisposition;
   /** Present when the launch boundary has resolved the installed executable. */
   installedCliVersion?: string | null;
+  /** Discovery home for the account that will actually launch. */
+  codexHome?: string;
 }
 
 /** Read the selected account's model evidence without starting a provider turn. */
-function codexAdvertisedEfforts(model: string | null): string[] | null {
+function codexAdvertisedEfforts(model: string | null, codexHome?: string): string[] | null {
   if (!model) return null;
   try {
-    const cache = JSON.parse(readFileSync(join(process.env.CODEX_HOME || join(homedir(), '.codex'), 'models_cache.json'), 'utf8'));
+    const cache = JSON.parse(readFileSync(join(codexHome ?? (process.env.CODEX_HOME?.trim() || join(homedir(), '.codex')), 'models_cache.json'), 'utf8'));
     if (!Array.isArray(cache?.models)) return null;
     const entry = cache.models.find((candidate: { slug?: unknown } | null) => candidate?.slug === model);
     if (!Array.isArray(entry?.supported_reasoning_levels)) return null;
@@ -188,9 +190,9 @@ export function resolveEffortPin(input: ResolveEffortPinInput): ResolveEffortPin
     };
   }
   const discoveryOnly = raw === 'none' || raw === 'minimal';
-  if (input.runtime === 'codex' || input.runtime === 'cloud') {
-    const advertised = codexAdvertisedEfforts(actualModel);
-    if ((advertised !== null && !advertised.includes(raw)) || (discoveryOnly && advertised === null)) {
+  if (discoveryOnly && (input.runtime === 'codex' || input.runtime === 'cloud')) {
+    const advertised = codexAdvertisedEfforts(actualModel, input.codexHome);
+    if (!advertised?.includes(raw)) {
       return { ok: false, code: 'effort_unsupported_model', message: advertised === null
         ? `Cannot honor effort "${raw}" for Codex model "${actualModel ?? 'runtime default'}": no usable model discovery evidence advertises this effort. Refresh the Codex model catalogue or omit effort.`
         : `Codex model "${actualModel}" does not advertise the requested effort "${raw}". Advertised efforts: ${advertised.join(', ') || 'no tiers'}. Choose an advertised effort or omit effort.` };
@@ -216,7 +218,7 @@ export function resolveEffortPin(input: ResolveEffortPinInput): ResolveEffortPin
 }
 
 /** Shared last admission boundary for owned launch, cold resume and automatic retries. */
-export function assertRuntimeEffortPin(runtime: string, model: string | null | undefined, effort: unknown): void {
-  const pin = resolveEffortPin({ runtime, model: model ?? null, requestedEffort: effort });
+export function assertRuntimeEffortPin(runtime: string, model: string | null | undefined, effort: unknown, codexHome?: string): void {
+  const pin = resolveEffortPin({ runtime, model: model ?? null, requestedEffort: effort, codexHome });
   if (!pin.ok) throw new EffortPinRejectionError(pin.code, pin.message);
 }

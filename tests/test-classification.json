@@ -2308,6 +2308,15 @@
       ]
     },
     {
+      "path": "tests/codex-effort-discovery-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/codex-home-executable-real-path.test.ts",
       "reasons": [
         "child-process",

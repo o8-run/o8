@@ -54,6 +54,7 @@ const codex = await import('@/lib/lane/codex-orchestrator-session');
 const claude = await import('@/lib/lane/orchestrator-session');
 const { invalidateCliCache } = await import('@/lib/runtimes/shared/cli-resolver');
 const { updateOperatorDefaults } = await import('@/lib/operator/defaults');
+const { validateLeadRouting } = await import('@/lib/orchestrator/lead-contract');
 beforeEach(async () => {
   rmSync(record, { force: true }); rmSync(join(home, '.codex', 'models_cache.json'), { force: true }); writeFileSync(version, 'codex-cli 0.161.0');
   invalidateCliCache('codex'); invalidateCliCache('claude-code');
@@ -156,4 +157,42 @@ it.each(['gpt-4o', 'ollama:fixture'])('refuses concrete effort on a model withou
   const events = await send('codex', model, 'high');
   expect(existsSync(record)).toBe(false);
   expect(events).toContainEqual(expect.objectContaining({ type: 'error', error: expect.stringContaining('high') }));
+});
+
+
+it.each(['none', 'minimal'] as const)('refuses unmapped %s on a resident lead before provider work', async effort => {
+  const events = await send('claude', 'claude-opus-4-8', effort);
+  expect(existsSync(record)).toBe(false);
+  expect(events.some(event => event.type === 'turn_receipt')).toBe(false);
+  expect(events).toContainEqual(expect.objectContaining({ type: 'error', error: expect.stringContaining(effort) }));
+});
+
+it.each(['none', 'minimal'].flatMap(effort => [false, true].flatMap(app =>
+  [false, true].map(advertised => ({ effort: effort as ThinkingEffort, app, advertised })),
+)))('uses only the lead account cache for $effort (app=$app, advertised=$advertised)', async ({ effort, app, advertised }) => {
+  const unrelatedHome = join(root, 'unrelated');
+  mkdirSync(unrelatedHome, { recursive: true });
+  const cache = (efforts: string[]) => JSON.stringify({ models: [{
+    slug: 'gpt-6.1-sol', supported_reasoning_levels: efforts.map(effort => ({ effort })),
+  }] });
+  writeFileSync(join(home, '.codex', 'models_cache.json'), cache(advertised ? [effort] : ['low']));
+  writeFileSync(join(unrelatedHome, 'models_cache.json'), cache(advertised ? ['low'] : [effort]));
+  vi.stubEnv('CODEX_HOME', unrelatedHome);
+  try {
+    await updateOperatorDefaults({ codexAppThreads: app });
+    const routing = () => validateLeadRouting({ backend: 'codex', model: 'gpt-6.1-sol', effort });
+    if (advertised) expect(routing().effort).toBe(effort);
+    else expect(routing).toThrow(/does not advertise.*effort/i);
+    const events = await send('codex', 'gpt-6.1-sol', effort);
+    if (advertised) {
+      const request = JSON.parse(readFileSync(record, 'utf8'));
+      if (app) expect(request.effort).toBe(effort);
+      else expect(request.args).toContain(`model_reasoning_effort=${effort}`);
+      expect(events).toContainEqual({ type: 'turn_receipt', leadModel: 'gpt-6.1-sol', effort });
+    } else {
+      expect(existsSync(record)).toBe(false);
+      expect(events.some(event => event.type === 'turn_receipt')).toBe(false);
+      expect(events).toContainEqual(expect.objectContaining({ type: 'error', error: expect.stringMatching(/does not advertise.*effort/i) }));
+    }
+  } finally { vi.stubEnv('CODEX_HOME', join(home, '.codex')); }
 });

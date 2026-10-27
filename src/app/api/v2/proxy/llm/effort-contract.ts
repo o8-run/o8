@@ -23,7 +23,8 @@ export function nativeApiEffortError(provider: string, model: string, raw: unkno
   if (provider === 'operator') return raw === 'low' || raw === 'high' ? null : 'effort_unsupported_model';
   if (provider === 'openai' && OPENAI_REASONING_MODELS.has(family)
     && ['low', 'medium', 'high'].includes(raw)) return null;
-  if (provider === 'anthropic' && ANTHROPIC_BUDGET_MODELS.has(family) && raw !== 'ultra') return null;
+  if (provider === 'anthropic' && ANTHROPIC_BUDGET_MODELS.has(family)
+    && ['low', 'medium', 'high', 'max', 'xhigh'].includes(raw)) return null;
   return 'effort_unsupported_model';
 }
 
