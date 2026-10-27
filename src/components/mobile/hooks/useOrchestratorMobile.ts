@@ -24,13 +24,16 @@
  * delta starts a new entry.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { deserializeStoredTranscript, serializeTranscriptForStorage, type StoredTranscriptMessage } from '@/lib/transcripts/history-serde';
+import { placeSteerTranscriptEntries } from '@/lib/transcripts/steer-anchor';
 import { getBrowserWsPort } from '@/lib/panel/ws-port-client';
 import { getMobileWsToken } from '@/lib/mobile/ws-token-client';
 import { skipDuplicateBySeq } from '@/lib/orchestrator/replay-cursor';
 import type {
   MobileOrchestratorThread,
   MobileOrchestratorTranscriptEntry,
+  MobileTranscriptEntry,
 } from '@/lib/mobile/types';
 import {
   enqueuePending,
@@ -85,12 +88,6 @@ const PING_INTERVAL = 20_000;
 const STREAM_FLUSH_MS = 60;
 const PERSIST_DEBOUNCE_MS = 800;
 
-interface ChatHistoryMessage {
-  id?: string;
-  role?: string;
-  content?: string;
-}
-
 function getWsUrl(): string {
   if (typeof window === 'undefined') return '';
   const { hostname, protocol } = window.location;
@@ -115,13 +112,13 @@ function toolPreviewFromOutput(value: unknown): string | undefined {
   return firstLine.length > 80 ? `${firstLine.slice(0, 80)}…` : firstLine;
 }
 
-function historyToTranscript(messages: ChatHistoryMessage[]): MobileOrchestratorTranscriptEntry[] {
+function historyToTranscript(messages: StoredTranscriptMessage[]) {
   const entries: MobileOrchestratorTranscriptEntry[] = [];
+  const canonical: StoredTranscriptMessage[] = [];
   let counter = 0;
   for (const message of messages) {
-    if (typeof message.content !== 'string') continue;
-    const text = message.content.trim();
-    if (!text) continue;
+    const text = message.text ?? message.content;
+    if (typeof text !== 'string' || !text.trim()) continue;
     const role: MobileOrchestratorTranscriptEntry['role'] =
       message.role === 'user' ? 'user'
         : message.role === 'assistant' ? 'assistant'
@@ -131,14 +128,16 @@ function historyToTranscript(messages: ChatHistoryMessage[]): MobileOrchestrator
       ? message.id
       : `history-${counter}`;
     counter += 1;
+    const timestamp = message.timestamp ?? Date.now() - (messages.length - counter);
+    canonical.push({ ...message, id: entryId, role, timestamp });
     entries.push({
       id: entryId,
       role,
       text,
-      timestamp: Date.now() - (messages.length - counter),
+      timestamp,
     });
   }
-  return entries;
+  return { entries, sources: new Map(deserializeStoredTranscript(canonical, { dropInvalid: true }).map(entry => [entry.id, entry])) };
 }
 
 export function useOrchestratorMobile({
@@ -147,6 +146,7 @@ export function useOrchestratorMobile({
   const [connectionState, setConnectionState] = useState<MobileOrchestratorConnectionState>('disconnected');
   const [turnStatus, setTurnStatus] = useState<MobileOrchestratorTurnStatus>('idle');
   const [transcript, setTranscript] = useState<MobileOrchestratorTranscriptEntry[]>([]);
+  const [historySources, setHistorySources] = useState<ReadonlyMap<string, MobileTranscriptEntry>>(new Map());
   const [transcriptLoading, setTranscriptLoading] = useState(false);
   const [errorNote, setErrorNote] = useState<string | null>(null);
 
@@ -198,17 +198,18 @@ export function useOrchestratorMobile({
     }
     persistTimerRef.current = setTimeout(() => {
       persistTimerRef.current = null;
-      const messages = entries
+      const messages = serializeTranscriptForStorage(entries
         // Skip queued entries — they live in the pending-queue localStorage
         // until reconnect commits them; persisting both would duplicate the
         // bubble on reload (once from chat-history, once from queue).
         .filter((entry) => (entry.role === 'user' || entry.role === 'assistant') && !entry.queued)
         .map((entry) => ({
+          ...historySources.get(entry.id),
           id: entry.id,
           role: entry.role,
-          content: entry.text,
+          text: entry.text,
           timestamp: entry.timestamp ?? Date.now(),
-        }));
+        })));
       if (messages.length === 0) return;
       const firstUserText = entries.find((entry) => entry.role === 'user')?.text ?? '';
       const fallbackTitle = firstUserText
@@ -231,7 +232,7 @@ export function useOrchestratorMobile({
         }),
       }).catch((error) => console.log('[mobile-orchestrator] persist failed', error));
     }, PERSIST_DEBOUNCE_MS);
-  }, []);
+  }, [historySources]);
 
   const flushStreamingBuffer = useCallback(() => {
     const buffer = streamingBufferRef.current;
@@ -275,7 +276,7 @@ export function useOrchestratorMobile({
   const activeThreadId = activeThread?.id ?? null;
   useEffect(() => {
     if (!activeThreadId) {
-
+      setHistorySources(new Map());
       setTranscript([]);
       setTranscriptLoading(false);
 
@@ -290,13 +291,16 @@ export function useOrchestratorMobile({
     fetch(`/api/v2/chat-history?tabId=${encodeURIComponent(activeThreadId)}`, { cache: 'no-store' })
       .then(async (response) => {
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const data = await response.json() as { messages?: ChatHistoryMessage[] };
+        const data = await response.json() as { messages?: StoredTranscriptMessage[] };
         if (cancelled) return;
-        setTranscript(historyToTranscript(data.messages ?? []));
+        const { entries, sources } = historyToTranscript(data.messages ?? []);
+        setHistorySources(sources);
+        setTranscript(entries);
       })
       .catch((error) => {
         console.log('[mobile-orchestrator] history load failed', error);
         if (!cancelled) {
+          setHistorySources(new Map());
           setTranscript([]);
           setErrorNote('Unable to load thread history.');
         }
@@ -764,10 +768,18 @@ export function useOrchestratorMobile({
     streamingBufferRef.current = null;
   }, []);
 
+  // Split only the returned view. Persistence above retains each aggregate and
+  // its original metadata, using the same placement as the desktop renderer.
+  const presentedTranscript = useMemo(() => {
+    const originals = new Map(transcript.map(entry => [entry.id, entry]));
+    return placeSteerTranscriptEntries(transcript.map(entry => ({ ...historySources.get(entry.id),
+      id: entry.id, role: entry.role, text: entry.text, timestamp: entry.timestamp })))
+      .map(entry => ({ ...originals.get(entry.id), id: entry.id, role: entry.role, text: entry.text, timestamp: entry.timestamp ?? 0 }));
+  }, [transcript, historySources]);
   return {
     connectionState,
     turnStatus,
-    transcript,
+    transcript: presentedTranscript,
     transcriptLoading,
     errorNote,
     sendMessage,

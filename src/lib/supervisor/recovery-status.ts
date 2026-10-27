@@ -1,5 +1,5 @@
 import type { AgentStatusEntry, WatchedAgent } from './agent-supervisor-types';
-export { readOwnedRecoveryState } from '@/lib/runtimes/shared/owned-session/automatic-recovery';
+export { readOwnedRecoveryState, readOwnedCompletionState } from '@/lib/runtimes/shared/owned-session/automatic-recovery';
 
 export function resolveStatus(
   agent: AgentStatusEntry | undefined,

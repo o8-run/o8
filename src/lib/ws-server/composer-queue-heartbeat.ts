@@ -1,3 +1,4 @@
+import { readSteerTranscriptAnchor } from './steer-transcript-anchor';
 import { readPersistedLlmChat } from '@/lib/llm/chat-history-store';
 import { backendSwitchRequiresExplicitHandoff } from '@/lib/orchestrator/backend-switch-carry';
 import { assertComposerSendClaim, admitComposerSend, claimNextComposerSend, listComposerQueueTargets,
@@ -57,14 +58,18 @@ export async function runQueuedComposerSteer(item: QueuedComposerSendRecord): Pr
   if (item.payload.afterTaskId) { deferComposerSteer(item.id, 'Queued for the original task to finish.'); return; }
   const backend = getOrchestratorBackend(originFor(item).backend, targetFor(item));
   if (!backend.liveSteer) { deferComposerSteer(item.id, 'Steer declined; queued for the next turn.'); return; }
+  let steerAnchor: import('@/lib/transcripts/steer-anchor').SteerTranscriptAnchor | undefined;
+  let admittedAt: number | undefined;
   const result = await backend.liveSteer(item.repoPath, item.payload.wireMessage, {
     ...item.payload.routing, threadId: item.threadId, clientUserMessageId: item.id, attachments: item.payload.images, orchestrationMode: item.payload.routing.mode,
     thinkingEffort: item.payload.routing.effort,
-    beforeAdmit: () => { checkComposerQueueBinding(item); if (!admitComposerSend(item.id)) throw new Error('Message admission was cancelled.'); },
+    beforeAdmit: () => { checkComposerQueueBinding(item); if (!admitComposerSend(item.id)) throw new Error('Message admission was cancelled.');
+      steerAnchor = readSteerTranscriptAnchor(item.repoPath, item.threadId); admittedAt = Date.now(); },
   });
   if (result.accepted !== true) { deferComposerSteer(item.id, 'Steer declined; queued for the next turn.'); return; }
-  appendMobileOrchestratorUserMessage({ tabId: item.threadId, repoPath: item.repoPath, message: item.payload.text,
-    messageId: `composer-steer-${item.id}`, backend: item.payload.routing.backend, timestampMs: item.createdAt });
+  // A relay owner may already have saved its exact boundary before replying.
+  if (!readPersistedLlmChat(item.threadId)?.history.messages.some(message => message.id === `composer-steer-${item.id}`)) appendMobileOrchestratorUserMessage({ tabId: item.threadId, repoPath: item.repoPath, message: item.payload.text,
+    messageId: `composer-steer-${item.id}`, backend: item.payload.routing.backend, timestampMs: admittedAt ?? item.createdAt, steerAnchor });
   settleComposerSend(item.id, { status: 'applied' });
 }
 

@@ -1,6 +1,7 @@
 import 'server-only';
 
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 
@@ -19,6 +20,8 @@ export interface RuntimeIdentityRecord {
   createdAt: string;
   updatedAt: string;
 }
+
+export type RuntimeLaunchIdentity = Pick<RuntimeIdentityRecord, 'id' | 'label' | 'configHomeRef'>;
 
 interface RuntimeIdentityCatalog {
   schema: typeof IDENTITY_CATALOG_SCHEMA;
@@ -171,6 +174,26 @@ export async function getSelectedRuntimeIdentity(runtime: string): Promise<Runti
   return catalog.identities.find((entry) => entry.id === selectedId && entry.runtime === runtime) ?? null;
 }
 
+/** Synchronous admission boundaries use the same persisted, validated selection. */
+export function getSelectedRuntimeIdentitySync(runtime: string): RuntimeIdentityRecord | null {
+  return getRuntimeLaunchIdentitySync(runtime);
+}
+
+/** Catalog fallback after explicit and saved-session identities are resolved. */
+export function getRuntimeLaunchIdentitySync(runtime: string, packetId?: string): RuntimeIdentityRecord | null {
+  let catalog: RuntimeIdentityCatalog;
+  try {
+    catalog = normalizeCatalog(JSON.parse(readFileSync(catalogPath(), 'utf8')) as unknown);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw new Error('identity_catalog_unavailable');
+  }
+  const pinned = packetId ? catalog.packetBindings[`${runtime}\0${packetId}`] : undefined;
+  if (pinned) return pinned;
+  const selectedId = catalog.selectedByRuntime[runtime];
+  return catalog.identities.find(entry => entry.id === selectedId && entry.runtime === runtime) ?? null;
+}
+
 export async function reconcileRuntimeIdentityMutation(input:
   | { action: 'register'; runtime: string; label: string; configHomeRef: string }
   | { action: 'select'; runtime: string; identityId: string }
@@ -217,7 +240,10 @@ export async function getOrPinPacketRuntimeIdentity(input: {
     const catalog = await readCatalog();
     const bindingKey = `${input.runtime}\0${input.packetId}`;
     const existing = catalog.packetBindings[bindingKey];
-    if (existing) return existing;
+    // A server-resolved or saved-session identity is authoritative for this
+    // launch. Persist it so a stale catalog binding cannot change the child.
+    if (existing && (!input.preferred || (existing.id === input.preferred.id
+      && existing.configHomeRef === input.preferred.configHomeRef))) return existing;
     const selectedId = catalog.selectedByRuntime[input.runtime];
     const selected = catalog.identities.find(
       (identity) => identity.id === selectedId && identity.runtime === input.runtime,

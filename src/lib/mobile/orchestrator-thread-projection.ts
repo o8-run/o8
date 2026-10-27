@@ -16,6 +16,8 @@ import { resolveRepoGithubIdentity } from '@/lib/repos/github-identity';
 const DEFAULT_MODEL = 'claude-code';
 
 export type ChatHistoryMessage = {
+  steerAnchor?: import('@/lib/transcripts/steer-anchor').SteerTranscriptAnchor;
+
   id?: string;
   role?: string;
   content?: string;

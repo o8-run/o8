@@ -184,17 +184,17 @@ export function RailUpdateControl({ buttonStyle }: { buttonStyle: CSSProperties 
           </button> : null}
           <span style={{ fontSize: 10.5, lineHeight: 1.5, color: 'var(--t-text-muted)' }}>Updates o8 only. Other tools stay under Tools.</span>
         </div> : null}
-        {/* Tools precedes notes so checking and the first results are visible on open. */}
-        <section style={{ borderTop: '1px solid var(--t-divider-subtle)', paddingTop: 10 }}>
+        {/* Reserve discovery space even while collapsed so visible notes never move. */}
+        <section style={{ borderTop: '1px solid var(--t-divider-subtle)', paddingTop: 10, height: 280, display: 'flex', flexDirection: 'column' }}>
           <button type="button" aria-label="Tools updates" aria-expanded={toolsExpanded} aria-controls={`${id}-tools`}
             onClick={() => { setToolsExpanded(value => !value); if (!toolsExpanded) {
               if (!hub.checkedAt) setCurrentExpanded(true);
               if (!hub.checking) void refreshCliUpdateView(true);
             } }}
-            style={{ ...button, width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingLeft: 0, paddingRight: 0, background: 'transparent' }}>
+            style={{ ...button, flexShrink: 0, width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingLeft: 0, paddingRight: 0, background: 'transparent' }}>
             <span>Tools{visibleTools.some(tool => tool.status === 'update-available') ? ' · updates available' : ''}</span><ChevronDown size={13} style={{ transform: toolsExpanded ? 'rotate(180deg)' : undefined }} />
           </button>
-          {toolsExpanded ? <div id={`${id}-tools`} style={{ display: 'grid', gap: 12, paddingTop: 8 }}>
+          {toolsExpanded ? <div id={`${id}-tools`} style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'grid', alignContent: 'start', gap: 12, paddingTop: 8 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><span style={{ flex: 1, fontSize: 10.5, lineHeight: 1.5, color: 'var(--t-text-muted)' }}>Update each tool explicitly. Running sessions stay protected.</span>
               <button type="button" aria-label={hub.cliError ? 'Retry tool discovery' : 'Check tool versions'} disabled={hub.checking || pending} onClick={() => { void refreshCliUpdateView(true); }} style={{ ...button, paddingLeft: 6, paddingRight: 6 }}>{hub.cliError ? 'Retry' : <RefreshCw size={12} />}</button></div>
             <div style={{ minHeight: 15, fontSize: 11, fontWeight: 300, lineHeight: 1.35, color: 'var(--t-text-muted)' }}>

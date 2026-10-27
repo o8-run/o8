@@ -131,6 +131,19 @@ describe('mobile orchestrator durable send delivery', () => {
     document.body.replaceChildren();
   });
 
+  it('retains legacy history rows without message ids when using the shared transcript adapter', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ messages: [
+      { role: 'user', content: 'Legacy prompt' }, { role: 'assistant', content: 'Legacy reply' },
+    ] })));
+    const values: HookValue[] = [];
+    const mounted = mountHook(value => { values.push(value); });
+    try {
+      await flushConnection();
+      expect(values.at(-1)!.transcript.map(entry => entry.text)).toEqual(['Legacy prompt', 'Legacy reply']);
+      expect(values.at(-1)!.transcript.map(entry => entry.id)).toEqual(['history-0', 'history-1']);
+    } finally { act(() => { mounted.root.unmount(); mounted.host.remove(); }); }
+  });
+
   it('replays an unacked send after remount and removes it only after send-ack', async () => {
     let current: HookValue | null = null;
     const firstMount = mountHook((value) => { current = value; });

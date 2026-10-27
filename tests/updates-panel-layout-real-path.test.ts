@@ -65,7 +65,7 @@ describe.skipIf(!executablePath)('Updates panel discovery layout in a real brows
   for (const theme of ['light', 'dark'] as const) {
     for (const [width, height] of [[900, 700], [1440, 900], [1680, 1050]]) {
       for (const fullNotes of [false, true]) {
-        it(`keeps the Tools header fixed with ${fullNotes ? 'full' : 'short'} notes at ${width}x${height} in ${theme}`, async () => {
+        it(`keeps visible content fixed with ${fullNotes ? 'full' : 'short'} notes at ${width}x${height} in ${theme}`, async () => {
           await page.setViewportSize({ width, height });
           await page.setContent(`<style>${fs.readFileSync('src/app/globals.css', 'utf8')}</style><main></main>`);
           await page.evaluate(({ tokens, fullNotes }) => {
@@ -79,11 +79,14 @@ describe.skipIf(!executablePath)('Updates panel discovery layout in a real brows
           const panel = page.getByRole('dialog', { name: 'Updates and release notes' });
           await panel.getByText('Latest published changes', { exact: true }).waitFor();
           const tools = page.getByRole('button', { name: 'Tools updates', exact: true });
+          const notes = panel.locator('section').nth(1);
           const before = await tools.boundingBox();
+          const notesBefore = await notes.boundingBox();
           await tools.click();
           const progress = page.getByRole('progressbar', { name: 'Tool discovery' });
           await progress.waitFor();
           const checking = await tools.boundingBox();
+          const notesChecking = await notes.boundingBox();
           const progressVisible = await progress.evaluate(node => {
             const box = node.getBoundingClientRect();
             const panel = node.closest('[role="dialog"]')!.getBoundingClientRect();
@@ -100,22 +103,42 @@ describe.skipIf(!executablePath)('Updates panel discovery layout in a real brows
           await publish(3, true);
           await panel.locator('[data-cli-update-row]').nth(2).waitFor();
           const partial = await tools.boundingBox();
+          const notesPartial = await notes.boundingBox();
+          const firstRow = panel.locator('[data-cli-update-row]').first();
+          const firstPartial = await firstRow.boundingBox();
           await publish(10, false);
           await panel.locator('[data-cli-update-row]').nth(9).waitFor();
           const loaded = await tools.boundingBox();
+          const notesLoaded = await notes.boundingBox();
+          const firstLoaded = await firstRow.boundingBox();
           const firstRowsVisible = await panel.locator('[data-cli-update-row]').evaluateAll(rows => rows.slice(0, 2).every(node => {
             const box = node.getBoundingClientRect();
             const panel = node.closest('[role="dialog"]')!.getBoundingClientRect();
-            return box.top >= panel.top && box.bottom <= panel.bottom;
+            const tools = node.closest('section')!.getBoundingClientRect();
+            return box.top >= panel.top && box.bottom <= Math.min(panel.bottom, tools.bottom);
           }));
           console.info('[updates-panel-layout]', JSON.stringify({ theme, width, height, fullNotes,
             y: [before?.y, checking?.y, partial?.y, loaded?.y], progressVisible, firstRowsVisible }));
+          expect(notesLoaded?.y, 'notes move when discovery rows arrive').toBe(notesChecking?.y);
+          expect(notesChecking?.y, 'notes move when Tools opens').toBe(notesBefore?.y);
+          expect(notesPartial?.y, 'notes move when partial rows arrive').toBe(notesBefore?.y);
+          expect(notesLoaded?.y, 'notes move when discovery completes').toBe(notesBefore?.y);
+          expect(firstLoaded?.y, 'first row moves as more rows arrive').toBe(firstPartial?.y);
           expect(loaded?.y, 'Tools header moves when discovery rows arrive').toBe(checking?.y);
           expect(checking).toEqual(before);
           expect(partial).toEqual(before);
           expect(loaded).toEqual(before);
           expect(progressVisible, 'checking must be visible without scrolling').toBe(true);
           expect(firstRowsVisible, 'first rows must be visible without scrolling').toBe(true);
+          await tools.click();
+          expect((await notes.boundingBox())?.y, 'notes move when Tools closes').toBe(notesBefore?.y);
+          await tools.click();
+          await progress.waitFor();
+          expect((await notes.boundingBox())?.y, 'notes move on recheck').toBe(notesBefore?.y);
+          expect((await firstRow.boundingBox())?.y, 'first row moves on recheck').toBe(firstLoaded?.y);
+          await publish(10, false);
+          await progress.waitFor({ state: 'detached' });
+          expect((await notes.boundingBox())?.y, 'notes move after recheck').toBe(notesBefore?.y);
           // The last result and release history must remain reachable by keyboard.
           await panel.locator('[data-cli-update-row]').last().getByRole('button').focus();
           await page.getByRole('button', { name: 'View release on GitHub' }).focus();

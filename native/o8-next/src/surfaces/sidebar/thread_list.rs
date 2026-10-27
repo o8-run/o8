@@ -228,7 +228,12 @@ impl ThreadList {
         let client = self.client.clone();
         let task = cx.background_executor().spawn(async move {
             let (sessions, branches) = client.sidebar_sessions_with_branches()?;
-            let header = project_header::HeaderSnapshot::load(&client).ok();
+            let header = match project_header::HeaderSnapshot::load(&client) {
+                Ok(header) => Some(header),
+                // Older session-only hosts do not provide project routes.
+                Err(error) if error.ends_with("Server returned HTTP 404") => None,
+                Err(error) => return Err(error),
+            };
             let ledger = header.as_ref().map(|header| header.ledger.clone());
             Ok::<_, String>((sessions, ledger, header, branches))
         });

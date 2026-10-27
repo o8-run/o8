@@ -129,7 +129,9 @@ export function deferComposerSteer(id: string, reason: string): void {
 export function listComposerTranscriptSends(target: ComposerQueueTarget): QueuedComposerSendRecord[] {
   const applied = getSqlite().prepare("SELECT * FROM composer_send_queue WHERE repo_path = ? AND thread_id = ? AND intent = 'steer-now' AND status = 'applied' ORDER BY sequence DESC LIMIT 40")
     .all(composerQueueRepoKey(target.repoPath), target.threadId) as Row[];
-  return [...applied.map(view), ...listQueuedComposerSends(target)].sort((a, b) => a.sequence - b.sequence);
+  const messages = readPersistedLlmChat(target.threadId)?.history.messages ?? [];
+  return [...applied.map(view), ...listQueuedComposerSends(target)].sort((a, b) => a.sequence - b.sequence)
+    .map(item => ({ ...item, steerAnchor: messages.find(message => message.id === `composer-steer-${item.id}`)?.steerAnchor }));
 }
 /** Recheck after every asynchronous preparation step, immediately before provider admission. */
 export function assertComposerSendClaim(id: string): void {
