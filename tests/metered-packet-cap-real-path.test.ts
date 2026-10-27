@@ -1,5 +1,5 @@
 import { execFile, execFileSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
@@ -8,6 +8,7 @@ import { promisify } from 'node:util';
 
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import { retainTestRunAfterTimeout } from './test-fixture-lifecycle';
+import { holdArchiveContention } from './fixtures/artifact-archive-contention';
 
 // Unrelated capacity discovery must not launch a real provider CLI.
 vi.mock('@/lib/codex/live-capacity', () => ({ readLiveCodexRuntimeCapacity: vi.fn(async () => ({ runtime: 'codex', identityId: null, status: 'unavailable',
@@ -40,7 +41,7 @@ vi.mock('@/lib/worktree/storage-telemetry', async (importOriginal) => ({
   })),
 }));
 
-const root = mkdtempSync(path.join(os.tmpdir(), 'o8-metered-cap-'));
+const root = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'o8-metered-cap-')));
 const dataDir = path.join(root, 'data');
 const repoPath = path.join(dataDir, 'repo');
 const ownedRoot = path.join(dataDir, 'owned');
@@ -536,6 +537,8 @@ describe('metered packet cap real path', () => {
   }, 60_000);
 
   it('holds a metered cap stop through supervisor recovery and SQLite reopen without another request', async () => {
+    const contention = process.env.O8_TEST_CAP_ARCHIVE_CONTENTION;
+    expect([undefined, 'runtime', 'cli']).toContain(contention);
     await writeClaudeCodeWorkerProfile({ source: 'openrouter', model: 'metered/test', codexModel: null });
     await addRepo(repoPath);
     const beforeSiblingRequests = upstreamCalls;
@@ -611,8 +614,11 @@ describe('metered packet cap real path', () => {
     supervisor.startSupervisorLoop(callbacks);
     supervisor.stopSupervisorLoop();
     supervisor.registerWatchedAgent(surfaceId!, repoPath, 'metered fixture', 'synthetic recovery');
+    const releaseAdmission = contention === 'runtime' || contention === 'cli'
+      ? await holdArchiveContention(ownedRoot, contention, surfaceId!) : null;
     releaseResponse();
     responseGate = null;
+    await releaseAdmission?.();
     const event = await waitForEvent(lane.id, 'spend_cap_hit');
     expect(event.payload).toMatchObject({ costUsd: 0.09, costSource: 'gateway', costCapUsd: 0.05 });
     const { readOwnedRecoveryState } = await import('@/lib/runtimes/shared/owned-session/automatic-recovery');

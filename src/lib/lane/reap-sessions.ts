@@ -1,6 +1,19 @@
 import type { Lane, LaneEventVerb } from '@/lib/lane/types';
 import type { RuntimeId } from '@/lib/runtimes/types';
 import { recordLaneEvent } from '@/lib/lane/events';
+import { OwnedArtifactAdmissionError } from '@/lib/runtimes/shared/owned-session/artifact-admission';
+
+async function retryArchiveContention<T>(archive: () => Promise<T>): Promise<T> {
+  for (let attempt = 0; ; attempt += 1) {
+    try { return await archive(); }
+    catch (error) {
+      if (!(error instanceof OwnedArtifactAdmissionError) || !error.retryable || attempt >= 3) throw error;
+      // Re-enter the runtime archive API so every retry refreshes its session
+      // and process-clearance checks. Other refusals remain final.
+      await new Promise(resolve => setTimeout(resolve, 100 * (attempt + 1)));
+    }
+  }
+}
 
 // #1471 S1 — `kill_escalated` is a new lane-event verb owned by the
 // state-machine-truth builder's union. Until it lands in `LaneEventVerb`, cast
@@ -270,35 +283,36 @@ export async function archiveLaneSessions(lanes: Lane[]): Promise<LaneSessionArc
         laneId: target.laneId,
         packetId: lanes.find((lane) => lane.id === target.laneId)?.packetId ?? null,
       });
-      let result: { archived?: boolean } | null = null;
-      const registeredLifecycle = getOwnedSessionLifecycle(target.sessionKey);
-      if (registeredLifecycle) {
-        result = await registeredLifecycle.archiveSession(target.sessionKey);
-      } else if (target.sessionKey.startsWith('codex-owned:')) {
-        const { archiveOwnedCodexSession } = await import('@/lib/codex/owned');
-        result = await archiveOwnedCodexSession(target.sessionKey);
-      } else if (target.sessionKey.startsWith('claude-code-owned:')) {
-        const { archiveOwnedClaudeCodeSession } = await import('@/lib/claude-code/owned');
-        result = await archiveOwnedClaudeCodeSession(target.sessionKey);
-      } else if (target.sessionKey.startsWith('gemini-owned:')) {
-        const { archiveOwnedGeminiSession } = await import('@/lib/gemini/owned');
-        result = await archiveOwnedGeminiSession(target.sessionKey);
-      } else if (target.sessionKey.startsWith('opencode-owned:')) {
-        const { archiveOwnedOpencodeSession } = await import('@/lib/opencode/owned');
-        result = await archiveOwnedOpencodeSession(target.sessionKey);
-      } else if (target.sessionKey.startsWith('cursor-owned:')) {
-        const { archiveOwnedCursorSession } = await import('@/lib/cursor/owned');
-        result = await archiveOwnedCursorSession(target.sessionKey);
-      } else if (target.sessionKey.startsWith('grok-owned:')) {
-        const { archiveOwnedGrokSession } = await import('@/lib/grok/owned');
-        result = await archiveOwnedGrokSession(target.sessionKey);
-      } else if (target.sessionKey.startsWith('prime-agent-owned:')) {
-        const { archiveOwnedPrimeAgentSession } = await import('@/lib/prime-agent/owned');
-        result = await archiveOwnedPrimeAgentSession(target.sessionKey);
-      } else if (target.sessionKey.startsWith('pi-owned:')) {
-        const { archiveOwnedPiSession } = await import('@/lib/pi/owned');
-        result = await archiveOwnedPiSession(target.sessionKey);
-      }
+      const result = await retryArchiveContention(async () => {
+        const registeredLifecycle = getOwnedSessionLifecycle(target.sessionKey);
+        if (registeredLifecycle) return registeredLifecycle.archiveSession(target.sessionKey);
+        if (target.sessionKey.startsWith('codex-owned:')) {
+          const { archiveOwnedCodexSession } = await import('@/lib/codex/owned');
+          return archiveOwnedCodexSession(target.sessionKey);
+        } else if (target.sessionKey.startsWith('claude-code-owned:')) {
+          const { archiveOwnedClaudeCodeSession } = await import('@/lib/claude-code/owned');
+          return archiveOwnedClaudeCodeSession(target.sessionKey);
+        } else if (target.sessionKey.startsWith('gemini-owned:')) {
+          const { archiveOwnedGeminiSession } = await import('@/lib/gemini/owned');
+          return archiveOwnedGeminiSession(target.sessionKey);
+        } else if (target.sessionKey.startsWith('opencode-owned:')) {
+          const { archiveOwnedOpencodeSession } = await import('@/lib/opencode/owned');
+          return archiveOwnedOpencodeSession(target.sessionKey);
+        } else if (target.sessionKey.startsWith('cursor-owned:')) {
+          const { archiveOwnedCursorSession } = await import('@/lib/cursor/owned');
+          return archiveOwnedCursorSession(target.sessionKey);
+        } else if (target.sessionKey.startsWith('grok-owned:')) {
+          const { archiveOwnedGrokSession } = await import('@/lib/grok/owned');
+          return archiveOwnedGrokSession(target.sessionKey);
+        } else if (target.sessionKey.startsWith('prime-agent-owned:')) {
+          const { archiveOwnedPrimeAgentSession } = await import('@/lib/prime-agent/owned');
+          return archiveOwnedPrimeAgentSession(target.sessionKey);
+        } else if (target.sessionKey.startsWith('pi-owned:')) {
+          const { archiveOwnedPiSession } = await import('@/lib/pi/owned');
+          return archiveOwnedPiSession(target.sessionKey);
+        }
+        return null;
+      });
       const archived = result?.archived === true;
       const note = archived
         ? 'Owned session directory archived.'

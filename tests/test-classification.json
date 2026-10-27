@@ -1673,6 +1673,13 @@
       ]
     },
     {
+      "path": "tests/artifact-archive-retry-safety-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/artifact-channel-publication-real-path.test.ts",
       "reasons": [
         "apfs-tool",
@@ -4096,6 +4103,13 @@
       "reasons": [
         "real-path",
         "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/metered-cap-archive-contention-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path"
       ]
     },
     {
