@@ -191,8 +191,8 @@ it.each([false, true])('completes the real onboarding UI and setup hook (Open fo
   }
   await click(openFolder ? 'Open a folder' : 'Start without a project');
   await click('Keep crash reports off');
-  await click('Keep product usage off');
-  await click('Save both choices');
+  await click('Turn off');
+  await click('Save privacy choices');
   await act(async () => {
     for (let attempt = 0; attempt < 100; attempt++) {
       if (JSON.parse(readFileSync(setupPath, 'utf8')).setupComplete) return;

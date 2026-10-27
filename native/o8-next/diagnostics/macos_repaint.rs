@@ -29,7 +29,11 @@ mod check {
         _bounds_subscription: gpui::Subscription,
     }
     impl Probe {
-        fn new(painted: Rc<Cell<(u64, Instant)>>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        fn new(
+            painted: Rc<Cell<(u64, Instant)>>,
+            window: &mut Window,
+            cx: &mut Context<Self>,
+        ) -> Self {
             let focus = cx.focus_handle();
             focus.focus(window);
             let bounds = cx.observe_window_bounds(window, |this, window, _| {
@@ -37,7 +41,13 @@ mod check {
                     this.resize_event = Some((window.frame_present_count(), Instant::now()));
                 }
             });
-            Self { value: 1, painted, focus, resize_event: None, _bounds_subscription: bounds }
+            Self {
+                value: 1,
+                painted,
+                focus,
+                resize_event: None,
+                _bounds_subscription: bounds,
+            }
         }
     }
     impl Render for Probe {
@@ -133,8 +143,7 @@ mod check {
                     }
                     let _: () =
                         msg_send![window, windowDidChangeScreen: std::ptr::null_mut::<Object>()];
-                    let _: () =
-                        msg_send![window, windowDidChangeOcclusionState: std::ptr::null_mut::<Object>()];
+                    let _: () = msg_send![window, windowDidChangeOcclusionState: std::ptr::null_mut::<Object>()];
                     return json!({"displays":count,"method":"screen-change and occlusion notifications"});
                 }
                 "minimize-notification" | "restore-notification" => {}

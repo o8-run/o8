@@ -15,25 +15,32 @@ fn sidebar_2000_thread_first_paint_and_scroll_measurement(cx: &mut TestAppContex
             cx,
         );
         let cx = &mut visual;
-        for _ in 0..30 {
+        loop {
             cx.run_until_parked();
-            cx.update(|window, cx| {
-                window.refresh();
-                window.draw(cx).clear();
+            // open() bypasses launch()'s timer. Drain the real surface tick and
+            // both layout/paint turns while asynchronous HTTP settles.
+            shell.update_in(cx, |s, window, cx| s.tick(false, window, cx));
+            draw(cx);
+            let (connected, threads, painted, diagnostic) = shell.read_with(cx, |s, cx| {
+                let list = s.surfaces.sidebar.view.as_ref().unwrap().read(cx);
+                (
+                    s.connected,
+                    list.sessions
+                        .iter()
+                        .filter(|s| s.id.starts_with("thoughts-sidebar-"))
+                        .count(),
+                    list.painted.get(),
+                    list.diagnostic(),
+                )
             });
-            if shell.read_with(cx, |s, cx| {
-                s.surfaces
-                    .sidebar
-                    .view
-                    .as_ref()
-                    .unwrap()
-                    .read(cx)
-                    .painted
-                    .get()
-                    != usize::MAX
-            }) {
+            if connected && threads == 2000 && painted != usize::MAX {
                 break;
             }
+            assert!(
+                start.elapsed() < std::time::Duration::from_secs(20),
+                "HTTP bootstrap must reach 2,000 records and a painted thread within 20s: sample={sample} connected={connected} threads={threads} painted={painted} sidebar={diagnostic}"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(5));
         }
         first_paint.push(start.elapsed().as_secs_f64() * 1000.);
         shell.read_with(cx, |s, cx| {
@@ -52,6 +59,9 @@ fn sidebar_2000_thread_first_paint_and_scroll_measurement(cx: &mut TestAppContex
                 "sidebar row reached CPU scene paint"
             );
         });
+        // Reveal the full inventory through keyboard input before the 2,000-row scroll workload.
+        cx.simulate_keystrokes("f8 end home");
+        draw(cx);
         let bounds = cx.debug_bounds("thread-list").unwrap();
         let initial_painted = shell.read_with(cx, |s, cx| {
             s.surfaces

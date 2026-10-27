@@ -28,6 +28,7 @@ impl Render for ThreadList {
             .font_weight(gpui::FontWeight::LIGHT)
             .track_focus(&self.focus)
             .capture_key_down(cx.listener(Self::key))
+            .child(self.project_header(window, cx))
             .child(
                 div()
                     .id("thread-search")
@@ -36,9 +37,9 @@ impl Render for ThreadList {
                     .p(px(12.))
                     .text_size(px(11.))
                     .child(if self.rename.is_some() {
-                        "Rename thread · Enter saves · Escape cancels"
+                        "Rename thread"
                     } else {
-                        "Search threads · Ctrl+F · F8 to navigate"
+                        "Search"
                     })
                     .on_click(cx.listener(|this, _, window, cx| this.search(window, cx))),
             )
@@ -91,6 +92,8 @@ impl Render for ThreadList {
                                     .id(gpui::ElementId::Name(identity.into()))
                                     .debug_selector(move || format!("thread-row-{i}"))
                                     .h(px(28.))
+                                    .flex()
+                                    .items_center()
                                     .px(px(12.))
                                     .rounded(px(8.))
                                     .overflow_hidden()
@@ -105,6 +108,7 @@ impl Render for ThreadList {
                                     .child(
                                         div()
                                             .flex()
+                                            .w_full()
                                             .items_center()
                                             .justify_between()
                                             .gap(px(6.))
@@ -113,7 +117,8 @@ impl Render for ThreadList {
                                                     .flex_1()
                                                     .overflow_hidden()
                                                     .whitespace_nowrap()
-                                                    .text_size(px(if thread { 13.5 } else { 10. }))
+                                                    .text_ellipsis()
+                                                    .text_size(px(if thread { 13.5 } else { 12. }))
                                                     .text_color(if thread {
                                                         theme().text
                                                     } else {
@@ -124,49 +129,50 @@ impl Render for ThreadList {
                                             .when(thread, |view| {
                                                 view.child(
                                                     div()
+                                                        .max_w(px(65.))
+                                                        .min_w_0()
+                                                        .text_ellipsis()
+                                                        .font_weight(gpui::FontWeight(260.))
+                                                        .text_size(px(11.5))
+                                                        .text_color(theme().text_faint)
+                                                        .child(label(&row.workspace)),
+                                                )
+                                                .child(
+                                                    div()
+                                                        .flex_shrink_0()
+                                                        .flex()
+                                                        .items_center()
+                                                        .gap(px(6.))
+                                                        .font_weight(gpui::FontWeight(260.))
                                                         .text_size(px(9.5))
-                                                        .text_color(
-                                                            if matches!(
-                                                                row.status.as_str(),
-                                                                "failed"
-                                                                    | "error"
-                                                                    | "blocked"
-                                                                    | "recovering"
-                                                                    | "rejected"
-                                                            ) {
-                                                                theme().danger
-                                                            } else if row.running {
-                                                                theme().success
-                                                            } else if row.unread
-                                                                || matches!(
-                                                                    row.status.as_str(),
-                                                                    "approval"
-                                                                        | "awaiting_review"
-                                                                        | "review"
-                                                                        | "reviewing"
-                                                                        | "awaiting_human"
-                                                                        | "awaiting_input"
-                                                                        | "waiting"
-                                                                )
-                                                            {
-                                                                theme().warning
-                                                            } else {
-                                                                theme().text_muted
-                                                            },
-                                                        )
-                                                        .child(format!(
-                                                            "{}{}{}",
-                                                            if row.running { "● " } else { "" },
-                                                            if row.unread {
-                                                                "Unread · "
-                                                            } else {
-                                                                ""
-                                                            },
-                                                            row.status
-                                                        )),
+                                                        .text_color(theme().text_faint)
+                                                        .child(row.age.clone())
+                                                        .when(row.branch, |v| v.child("⑂"))
+                                                        .when(row.attention || row.running, |v| {
+                                                            v.child(
+                                                                div()
+                                                                    .size(px(6.))
+                                                                    .rounded_full()
+                                                                    .bg(if row.attention {
+                                                                        theme().warning
+                                                                    } else {
+                                                                        theme().success
+                                                                    }),
+                                                            )
+                                                        }),
                                                 )
                                             }),
                                     )
+                                    .when(row.kind == "more", |view| {
+                                        let group = row.status.clone();
+                                        view.cursor_pointer().on_click(cx.listener(
+                                            move |this, _, _, cx| {
+                                                this.expanded.insert(group.clone());
+                                                this.rebuild();
+                                                cx.notify();
+                                            },
+                                        ))
+                                    })
                                     .when(thread, |view| {
                                         view.on_click(cx.listener(move |this, _, window, cx| {
                                             let id = row.id.clone().unwrap();
@@ -190,8 +196,15 @@ impl Render for ThreadList {
                                         }))
                                     })
                                     .child(
-                                        canvas(|_, _, _| (), move |_, _, _, _| painted.set(i))
-                                            .size(px(1.)),
+                                        canvas(
+                                            |_, _, _| (),
+                                            move |_, _, _, _| {
+                                                if thread {
+                                                    painted.set(i);
+                                                }
+                                            },
+                                        )
+                                        .size(px(1.)),
                                     )
                             })
                             .collect()

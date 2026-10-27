@@ -1,6 +1,7 @@
+import { viewerJson } from '@/lib/viewers/response';
 export const dynamic = 'force-dynamic';
 
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { performance } from 'node:perf_hooks';
 import { fetchGitHubCommits, resolveRepoSlug, DEFAULT_GITHUB_REPO } from '@/lib/github-broker';
 import { getCached, setCached } from '@/lib/github/cache';
@@ -20,7 +21,7 @@ export async function GET(req: NextRequest) {
     const limit = parseLimit(req.nextUrl.searchParams.get('limit'), 20, 50);
     try {
       const commits = await getRecentWorkspaceCommits(workspace, limit);
-      return NextResponse.json({
+      return viewerJson({
         commits,
         workspaceState: 'ready',
         workspace: resolveWorkspaceRoot(workspace),
@@ -33,7 +34,7 @@ export async function GET(req: NextRequest) {
         REVIEW_PATH_MISSING: 'This folder is no longer available. Choose an existing folder.',
         REVIEW_PATH_UNAVAILABLE: 'This folder cannot be read. Check its permissions or choose another folder.',
       };
-      return NextResponse.json({
+      return viewerJson({
         commits: [],
         workspace: resolveWorkspaceRoot(workspace),
         workspaceState: states[code] ?? 'git_error',
@@ -47,20 +48,20 @@ export async function GET(req: NextRequest) {
   const limit = parseLimit(req.nextUrl.searchParams.get('limit'), 15, 30);
 
   if (!repo) {
-    return NextResponse.json({ commits: [], repo: '', error: 'Invalid repo format' }, { status: 400, headers: { 'Server-Timing': `total;dur=${Math.max(0, performance.now() - startedAt).toFixed(1)}` } });
+    return viewerJson({ commits: [], repo: '', error: 'Invalid repo format' }, { status: 400, headers: { 'Server-Timing': `total;dur=${Math.max(0, performance.now() - startedAt).toFixed(1)}` } });
   }
 
   const cacheKey = `commits:${repo}:${limit}`;
   const cached = req.nextUrl.searchParams.get('fresh') === '1' ? null : getCached<unknown[]>(cacheKey, 120_000);
   if (cached) {
-    return NextResponse.json({ commits: cached, repo }, { headers: { 'Server-Timing': `total;dur=${Math.max(0, performance.now() - startedAt).toFixed(1)}` } });
+    return viewerJson({ commits: cached, repo }, { headers: { 'Server-Timing': `total;dur=${Math.max(0, performance.now() - startedAt).toFixed(1)}` } });
   }
 
   try {
     const commits = await fetchGitHubCommits(repo, limit);
     setCached(cacheKey, commits);
-    return NextResponse.json({ commits, repo }, { headers: { 'Server-Timing': `total;dur=${Math.max(0, performance.now() - startedAt).toFixed(1)}` } });
+    return viewerJson({ commits, repo }, { headers: { 'Server-Timing': `total;dur=${Math.max(0, performance.now() - startedAt).toFixed(1)}` } });
   } catch (error) {
-    return NextResponse.json({ commits: [], repo, error: error instanceof Error ? error.message : 'Failed to fetch commits' }, { headers: { 'Server-Timing': `total;dur=${Math.max(0, performance.now() - startedAt).toFixed(1)}` } });
+    return viewerJson({ commits: [], repo, error: error instanceof Error ? error.message : 'Failed to fetch commits' }, { headers: { 'Server-Timing': `total;dur=${Math.max(0, performance.now() - startedAt).toFixed(1)}` } });
   }
 }

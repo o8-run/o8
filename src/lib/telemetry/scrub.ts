@@ -1,3 +1,5 @@
+import { SECRET_PATTERNS, VIEWER_SECRET_PATTERNS } from '@/lib/acp/output-redaction-matchers';
+
 /**
  * Sentry payload scrubbing — the single, tested transform every JS Sentry layer
  * runs in `beforeSend` (@sentry/node in the Next server + ws-server, and
@@ -48,14 +50,6 @@ export function stripQueryStrings(input: string): string {
  * encoded parameters and dots cannot slip past. The native console-error hook
  * in src-tauri/src/webview_latch.rs mirrors these rules; keep them identical.
  */
-const SECRET_PATTERNS: ReadonlyArray<[RegExp, string]> = [
-  [/eyJ[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}/g, '[redacted]'],
-  [/\b(Bearer|Basic)\s+[^\s"'\\,;]+/gi, '$1 [redacted]'],
-  [/\bo8d_[A-Za-z0-9_-]+/g, 'o8d_[redacted]'],
-  [/\b(sk|rk)_(live|test)_[A-Za-z0-9]+/g, '$1_$2_[redacted]'],
-  [/([?&#;]code=)[^&#\s"'\\]+/gi, '$1[redacted]'],
-  [/([A-Za-z0-9_-]*(?:token|ticket|jwt|session|secret|passw(?:or)?d|authorization|cookie|api[_-]?key|credential)[A-Za-z0-9_-]*)(\\*["']?\s*[:=]\s*\\*["']?)([^"'\\\s&#,;{}()[\]]+)/gi, '$1$2[redacted]'],
-];
 
 function percentDecode(input: string): string {
   return input.replace(/%([0-9A-Fa-f]{2})/g, (_, hex: string) => String.fromCharCode(parseInt(hex, 16)));
@@ -67,7 +61,7 @@ export function redactSecrets(input: string): string {
   try {
     let text = input;
     for (let pass = 0; pass < 3 && /%[0-9A-Fa-f]{2}/.test(text); pass++) text = percentDecode(text);
-    for (const [pattern, replacement] of SECRET_PATTERNS) text = text.replace(pattern, replacement);
+    for (const [pattern, replacement] of [...VIEWER_SECRET_PATTERNS, ...SECRET_PATTERNS]) text = text.replace(pattern, replacement);
     return text;
   } catch {
     return '[redacted]';

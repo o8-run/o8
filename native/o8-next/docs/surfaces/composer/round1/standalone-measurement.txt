@@ -1,0 +1,1 @@
+test composer::native_tests::native_key_to_cpu_paint_measurement ... COMPOSER_CPU_PAINT platform=linux samples=100 p50_ms=0.543076 p95_ms=0.639310
