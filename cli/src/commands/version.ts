@@ -25,7 +25,12 @@ interface PanelStatus {
   runtime?: string;
 }
 
-export async function runVersion(mode: OutputMode): Promise<number> {
+export async function runVersion(mode: OutputMode, offline = false): Promise<number> {
+  if (offline) {
+    if (mode.human) printHumanKv([['cli', CLI_VERSION]]);
+    else printJson({ schema: 'o8/cli/version/v1', cliVersion: CLI_VERSION });
+    return 0;
+  }
   const cfg = resolveConfig();
   let serverVersion: string | null = null;
   let nodeVersion: string | undefined;

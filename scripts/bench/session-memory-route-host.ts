@@ -4,14 +4,20 @@ import { NextRequest } from 'next/server';
 import { GET as threads } from '../../src/app/api/mobile/orchestrator/threads/route';
 import { GET as history } from '../../src/app/api/mobile/history/route';
 import { POST as sync } from '../../src/app/api/mobile/sync/route';
+import { GET as projects, POST as createProject } from '../../src/app/api/panel/projects/route';
+import { POST as switchProject } from '../../src/app/api/panel/projects/active/route';
 
 const routes = new Map<string, (request: NextRequest) => Promise<Response>>([
   ['/api/mobile/orchestrator/threads', threads],
   ['/api/mobile/history', history],
+  ['/api/panel/projects', projects],
 ]);
 const server = createServer(async (request, response) => {
   const url = new URL(request.url ?? '/', `http://${request.headers.host}`);
-  const handler = request.method === 'POST' && url.pathname === '/api/mobile/sync' ? sync : routes.get(url.pathname);
+  const posts = new Map([
+    ['/api/mobile/sync', sync], ['/api/panel/projects', createProject], ['/api/panel/projects/active', switchProject],
+  ]);
+  const handler = request.method === 'POST' ? posts.get(url.pathname) : routes.get(url.pathname);
   if (!handler) {
     response.writeHead(200, { 'Content-Type': 'application/json' }).end('{}');
     return;

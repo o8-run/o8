@@ -366,7 +366,7 @@ async function sendToCodexOrchestratorAttempt(
   }
   if (settleBeforeSpawnIfAborted()) return;
   const isLocalModel = !!parseLocalModel(model);
-  let reasoningEffort: Exclude<ThinkingEffort, 'adaptive'>;
+  let reasoningEffort: Exclude<ThinkingEffort, 'adaptive'> | undefined;
 
   const { resolveCli, CliNotFoundError } = await import('@/lib/runtimes/shared/cli-resolver');
   if (settleBeforeSpawnIfAborted()) return;
@@ -403,7 +403,8 @@ async function sendToCodexOrchestratorAttempt(
     return;
   }
 
-  onEvent({ type: 'turn_receipt', leadModel: model, effort: reasoningEffort });
+  onEvent({ type: 'turn_receipt', leadModel: model, effort: reasoningEffort ?? 'adaptive',
+    ...(reasoningEffort === undefined ? { effortSource: 'runtime-default' } : {}) });
 
   const serviceTier = serviceTierForTurn(options.serviceTier, 'codex', resolveOrchestratorModelSync(options.model), 'codex', model);
   if (serviceTier && serviceTier !== 'default') {
@@ -475,6 +476,7 @@ async function sendToCodexOrchestratorAttempt(
         cwd: session.repoPath,
         threadId: session.threadId,
         developerInstructions: prompt.instructions,
+        turnDeveloperInstructions: prompt.turnInstructions,
         message: prompt.message,
         imagePaths,
         model,
@@ -503,6 +505,7 @@ async function sendToCodexOrchestratorAttempt(
       spawnArgs = prepared.args;
       spawnEnv = prepared.env;
       cleanupSingleLaunch = prepared.cleanup;
+      for (const diagnostic of prepared.diagnostics) onEvent({ type: 'thinking', text: `${diagnostic}\n` });
     } catch (err) {
       session.status = 'dead';
       onEvent({ type: 'error', error: `Single mode unavailable: ${err instanceof Error ? err.message : String(err)}` });

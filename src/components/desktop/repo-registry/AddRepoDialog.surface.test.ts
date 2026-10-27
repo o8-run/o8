@@ -18,7 +18,7 @@ function Harness() {
     createElement('h1', null, 'Workspace heading behind the dialog'),
     createElement('button', { onClick: () => setOpen(true) }, 'Open repository dialog'),
     createElement(AddRepoDialog, {
-      open, projects: [], activeProjectId: null,
+      open, projects: [], activeProjectId: null, initialMode: 'scratch',
       onClose: () => { onClose(); setOpen(false); },
     }),
   );
@@ -27,7 +27,7 @@ function Harness() {
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   vi.stubGlobal('fetch', fetchMock);
-  fetchMock.mockReset().mockRejectedValue(new Error('Unexpected request'));
+  fetchMock.mockReset().mockImplementation(async () => Response.json({ repos: [] }));
   onClose.mockClear();
   localStorage.clear();
   host = document.createElement('div');
@@ -113,9 +113,9 @@ it.each(appearances)('uses the protected overlay surface in %s/%s (All Glass: %s
   // Keep the scroll boundary; compact-width layout needs a native render.
   expect(modal.style.maxHeight).toBe('calc(100vh - 28px)');
   expect((modal.children[1] as HTMLElement).style.overflowY).toBe('auto');
-  expect(button('Add').disabled).toBe(true);
+  expect(button('Open').disabled).toBe(true);
   expect(input().style.color).toBe('var(--t-text)');
-  expect(fetchMock).not.toHaveBeenCalled();
+  expect(fetchMock.mock.calls.filter(([, init]) => init?.method)).toHaveLength(0);
 });
 
 it.each(['Cancel', 'Close', 'Escape', 'backdrop'])('clears the form on %s and reopens without leaking a dismissal listener', async (dismissal) => {
@@ -123,7 +123,7 @@ it.each(['Cancel', 'Close', 'Escape', 'backdrop'])('clears the form on %s and re
   await typePath('/example/repository');
   input().focus();
   expect(document.activeElement).toBe(input());
-  expect(button('Scan').disabled).toBe(false);
+  expect(button('Open').disabled).toBe(false);
   await act(async () => input().click());
   expect(onClose).not.toHaveBeenCalled();
   await act(async () => {
@@ -137,38 +137,28 @@ it.each(['Cancel', 'Close', 'Escape', 'backdrop'])('clears the form on %s and re
   expect(onClose).toHaveBeenCalledOnce();
   await act(async () => button('Open repository dialog').click());
   expect(input().value).toBe('');
-  expect(button('Add').disabled).toBe(true);
+  expect(button('Open').disabled).toBe(true);
   expect(panel().style.background).toBe('var(--t-popover-surface)');
-  expect(fetchMock).not.toHaveBeenCalled();
+  expect(fetchMock.mock.calls.filter(([, init]) => init?.method)).toHaveLength(0);
 });
 
-it('keeps the shared surface through validation, error recovery, and the busy add state', async () => {
-  let finishValidation!: (response: Response) => void;
-  fetchMock.mockImplementationOnce(() => new Promise((resolve) => { finishValidation = resolve; }));
+it('keeps the shared surface through error recovery and the busy open state', async () => {
   await render();
   await typePath('/example/repository');
-  await act(async () => button('Scan').click());
-  expect(button('Scan').disabled).toBe(true);
-  expect(button('Browse').disabled).toBe(true);
-  expect(button('Add').disabled).toBe(true);
-  expect(panel().style.background).toBe('var(--t-popover-surface)');
-  await act(async () => finishValidation(Response.json({ error: 'Folder is unavailable' }, { status: 400 })));
-  expect(panel().textContent).toContain('Folder is unavailable');
-  expect(button('Add').disabled).toBe(true);
-  await typePath('/example/another-repository');
-  expect(panel().textContent).not.toContain('Folder is unavailable');
-  expect(button('Add').disabled).toBe(false);
-
   let finishAdd!: (response: Response) => void;
-  fetchMock.mockImplementationOnce(() => new Promise((resolve) => { finishAdd = resolve; }));
-  await act(async () => button('Add').click());
-  expect(button('Adding…').disabled).toBe(true);
+  fetchMock.mockImplementationOnce(() => new Promise(resolve => { finishAdd = resolve; }));
+  await act(async () => button('Open').click());
+  expect(button('Opening…').disabled).toBe(true);
+  expect(button('Choose folder').disabled).toBe(true);
   expect(button('Cancel').disabled).toBe(true);
   expect(input().disabled).toBe(true);
   expect(panel().style.background).toBe('var(--t-popover-surface)');
-  await act(async () => finishAdd(Response.json({ error: 'Folder is unavailable' }, { status: 400 })));
+  await act(async () => finishAdd(Response.json({ error: 'Folder is unavailable. Choose another folder.' }, { status: 400 })));
+  expect(panel().textContent).toContain('Choose another folder.');
   expect(button('Cancel').disabled).toBe(false);
   expect(input().disabled).toBe(false);
-  expect(fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body)).action)).toEqual(['validate', 'validate']);
+  await typePath('/example/another-repository');
+  expect(panel().textContent).not.toContain('Folder is unavailable');
+  expect(button('Open').disabled).toBe(false);
   expect(onClose).not.toHaveBeenCalled();
 });

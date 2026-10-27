@@ -10,6 +10,7 @@ import { getOperatorDefaultsSync } from '@/lib/operator/defaults';
 
 import { sanitizeProductEvent, type ProductEventName, type ProductEventProps } from './events';
 import { isProductTelemetryAllowed } from './policy';
+import { noteProductSessionConsent } from './state';
 
 /**
  * #1451 local-only integration seam. That setting does not exist yet, so the
@@ -32,6 +33,7 @@ export async function emitProductEvent(
 ): Promise<boolean> {
   try {
     if (!isProductTelemetryEnabled()) return false;
+    noteProductSessionConsent(true);
 
     const payload = sanitizeProductEvent(event, props);
     if (!payload) return false;

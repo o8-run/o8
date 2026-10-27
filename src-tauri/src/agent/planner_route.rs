@@ -87,8 +87,8 @@ pub(crate) enum PlannerTransport {
 /// How the seat's reasoning effort reaches the CLI.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PlannerEffort {
-    /// `--effort <tier>`, and only on the builder rung — the worker rung runs
-    /// at the CLI default so the model-keyed warm pool stays coherent.
+    /// Model-tier defaults pass `--effort` on the builder rung. Bound requests
+    /// pass their validated effort on every catalog model in a dedicated session.
     ClaudeBuilderFlag,
     /// `-c model_reasoning_effort=<tier>` on every spawn.
     CodexReasoningEffort,
@@ -285,12 +285,9 @@ pub(crate) struct PlannerSelection {
     /// Resolved model id, or `None` when the adapter defers to the model the
     /// operator configured for it.
     pub model: Option<String>,
-    /// The reasoning tier this seat actually runs at. On the Codex path it is
-    /// passed straight through as `model_reasoning_effort`. On the Claude path
-    /// the CLI only receives an `--effort` flag for the builder tier, so a
-    /// worker-tier seat reports `medium` — the CLI default it runs at — rather
-    /// than a flag value nothing passes. An adapter that takes its reasoning
-    /// from the operator's own config reports `default`.
+    /// The reasoning tier this seat runs at. Bound requests pass this value
+    /// unchanged; unbound selections use their model-tier defaults. An adapter
+    /// whose reasoning comes from its runtime config reports `default`.
     pub effort: &'static str,
 }
 
@@ -658,15 +655,10 @@ where
     PlannerRouting::Selected(PlannerSelection {
         provider: adapter,
         binary,
-        // A pinned Claude seat still only gets `--effort` on the builder tier,
-        // so report the tier the spawn actually uses rather than the requested
-        // value. The Codex path applies the request verbatim, and an adapter
-        // that takes its reasoning from the operator's config reports that.
+        // Bound requests carry a concrete pin, separate from the unbound
+        // model-tier defaults. The session factory must pass it unchanged.
         effort: match adapter.effort {
-            PlannerEffort::ClaudeBuilderFlag => {
-                model.as_deref().map_or("medium", claude_planner_effort)
-            }
-            PlannerEffort::CodexReasoningEffort => static_effort(effort),
+            PlannerEffort::ClaudeBuilderFlag | PlannerEffort::CodexReasoningEffort => static_effort(effort),
             PlannerEffort::RuntimeConfigured => RUNTIME_CONFIGURED_EFFORT,
         },
         model,

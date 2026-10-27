@@ -295,7 +295,7 @@ export class AcpClient {
   redactEvent(event: OrchestratorEvent): OrchestratorEvent {
     const safe = { ...this.redactOutput(event), type: event.type } as OrchestratorEvent;
     if (safe.type === 'turn_receipt' && event.type === 'turn_receipt') {
-      safe.effort = event.effort; safe.permissionMode = event.permissionMode;
+      safe.effort = event.effort; safe.effortSource = event.effortSource; safe.serviceTier = event.serviceTier; safe.permissionMode = event.permissionMode;
     }
     if (safe.type === 'done' && event.type === 'done') safe.terminalOutcome = event.terminalOutcome;
     if (safe.type === 'handoff' && event.type === 'handoff') safe.carries = event.carries;

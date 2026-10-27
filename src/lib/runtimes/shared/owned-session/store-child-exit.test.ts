@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { truncateSync } from 'node:fs';
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -7,7 +8,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { DispatchBackendWaitResult } from '@/lib/runtimes/shared/dispatch-readiness';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
-import type { OwnedRuntimeAdapter, OwnedSessionRecord, ParsedRunLog } from './types';
+import type { OwnedRuntimeAdapter, OwnedSessionRecord, OwnedSessionStore, ParsedRunLog } from './types';
+import { getDataDir } from '@/lib/data-dir-migration';
 
 const ensureDispatchBackendReadyMock = vi.hoisted(() => vi.fn());
 const fetchRuntimeLaunchMock = vi.hoisted(() => vi.fn());
@@ -41,7 +43,7 @@ describe('createOwnedSessionStore child exit recording', () => {
   let priorCodexRoot: string | undefined;
 
   beforeEach(async () => {
-    tempRoot = await mkdtemp(path.join(process.cwd(), '.tmp-owned-child-exit-'));
+    tempRoot = await mkdtemp(path.join(getDataDir(), '.tmp-owned-child-exit-'));
     repoPath = path.join(tempRoot, 'repo');
     execFileSync('git', ['init', '-q', '-b', 'main', repoPath]);
     priorRoot = process.env.O8_TEST_CHILD_EXIT_ROOT;
@@ -77,7 +79,7 @@ describe('createOwnedSessionStore child exit recording', () => {
     const store = createOwnedSessionStore(testAdapter('exit-1'));
 
     const launched = await store.launch({ cwd: repoPath, prompt: 'exit 1' });
-    const session = await waitForRecordedExit(launched.surfaceId);
+    const session = await waitForRecordedExit(store, launched.surfaceId);
     const run = session.recentRuns[0];
 
     expect(run.childExit).toMatchObject({
@@ -138,7 +140,7 @@ describe('createOwnedSessionStore child exit recording', () => {
         workspaceTargetPath: repoPath, branchTarget: 'agent/auth-failure',
       } satisfies OrchestratorPacket],
     });
-    await waitForRecordedExit(launched.surfaceId);
+    await waitForRecordedExit(store, launched.surfaceId);
     const supervisor = await import('@/lib/supervisor/agent-supervisor');
     const updates = vi.fn();
     const relaunch = vi.fn(relaunchSupervisedAgent);
@@ -204,7 +206,7 @@ describe('createOwnedSessionStore child exit recording', () => {
     const store = createOwnedSessionStore(testAdapter('sigkill'));
 
     const launched = await store.launch({ cwd: repoPath, prompt: 'sigkill' });
-    const session = await waitForRecordedExit(launched.surfaceId);
+    const session = await waitForRecordedExit(store, launched.surfaceId);
     const run = session.recentRuns[0];
 
     expect(run.childExit).toMatchObject({
@@ -233,7 +235,7 @@ describe('createOwnedSessionStore child exit recording', () => {
       prompt: 'provider exits zero with an error result',
       laneId: lane.id,
     });
-    const session = await waitForRecordedExit(launched.surfaceId);
+    const session = await waitForRecordedExit(store, launched.surfaceId);
     const event = await waitForLaneEvent(lane.id, 'runtime_process_exit', getLaneEvents);
 
     expect(session.recentRuns[0]).toMatchObject({
@@ -246,6 +248,69 @@ describe('createOwnedSessionStore child exit recording', () => {
       runtimeOutcome: 'failed',
       completedTurn: false,
       providerFailure: { subtype: 'success', message: 'Not logged in' },
+    });
+  }, 20_000);
+
+  it('delivers staged stdin through a pipe, not a regular file, on the detached path', async () => {
+    // Claude Code stream-json exits 0 with no output when fd 0 is a regular
+    // file; this child mimics that so a regression fails loudly here.
+    const { createOwnedSessionStore } = await import('./store');
+    const store = createOwnedSessionStore(testAdapter('stdin-echo'));
+
+    const launched = await store.launch({ cwd: repoPath, prompt: 'pipe me' });
+    const session = await waitForRecordedExit(store, launched.surfaceId);
+    const run = session.recentRuns[0];
+
+    expect(run.detachMode).toBe('detached');
+    expect(run.stdinPath).toBeTruthy();
+    const stdout = await readFile(run.stdoutPath, 'utf8');
+    expect(stdout).toContain('stdin-kind:pipe');
+    expect(stdout).toContain('"content":"pipe me"');
+    expect(run).toMatchObject({ outcome: 'finished', childExit: { code: 0, classification: 'clean-exit' } });
+  }, 20_000);
+
+  it('records truncated staged input as failure before the provider can read a partial prompt', async () => {
+    const [{ createOwnedSessionStore }, credentials] = await Promise.all([import('./store'), import('./credential-spawn')]);
+    const spawn = credentials.spawnCredentialCheckedChild;
+    const intercepted = vi.spyOn(credentials, 'spawnCredentialCheckedChild').mockImplementationOnce(input => {
+      truncateSync(path.join(input.session.sessionDir, 'runs', `${input.runId}.jsonl.stdin`), 10);
+      return spawn(input);
+    });
+    const store = createOwnedSessionStore(testAdapter('stdin-echo'));
+    try {
+      const launched = await store.launch({ cwd: repoPath, prompt: 'must never become a partial prompt' });
+      const session = await waitForRecordedExit(store, launched.surfaceId);
+      const run = session.recentRuns[0];
+      expect(run).toMatchObject({ outcome: 'failed', childExit: { code: 74, classification: 'nonzero-exit' } });
+      expect(await readFile(run.stderrPath, 'utf8')).toContain('staged input was truncated');
+      expect(await readFile(run.stdoutPath, 'utf8')).toBe('');
+      expect((await store.getReviewPacket(launched.surfaceId)).lastRun?.outcome).toBe('failed');
+      const persisted = JSON.parse(await readFile(path.join(session.sessionDir, 'session.json'), 'utf8')) as OwnedSessionRecord;
+      expect(persisted.recentRuns[0].outcome).toBe('failed');
+    } finally { intercepted.mockRestore(); }
+  }, 20_000);
+
+  it('surfaces a clean exit with no output as a failure instead of a silent success', async () => {
+    const [{ createLane, getLaneEvents }, { createOwnedSessionStore }] = await Promise.all([
+      import('@/lib/lane/registry'),
+      import('./store'),
+    ]);
+    const lane = createLane({ repoPath, branch: 'main', runtime: 'claude-code', label: 'silent clean exit' });
+    const store = createOwnedSessionStore(testAdapter('silent-exit'));
+
+    const launched = await store.launch({ cwd: repoPath, prompt: 'do nothing', laneId: lane.id });
+    const session = await waitForRecordedExit(store, launched.surfaceId);
+    const event = await waitForLaneEvent(lane.id, 'runtime_process_exit', getLaneEvents);
+
+    expect(session.recentRuns[0]).toMatchObject({
+      outcome: 'failed',
+      childExit: { code: 0, classification: 'clean-exit' },
+    });
+    expect(session.latestSummary).toContain('exited without producing any output');
+    expect(event.payload).toMatchObject({
+      exitCode: 0,
+      runtimeOutcome: 'failed',
+      providerFailure: { subtype: 'empty_output' },
     });
   }, 20_000);
 
@@ -315,9 +380,9 @@ describe('createOwnedSessionStore child exit recording', () => {
       }
     } finally {
       await writeFile(releasePath, 'exit without further output');
-      await waitForRecordedExit(launched.surfaceId);
+      await waitForRecordedExit(store, launched.surfaceId);
     }
-    const session = await waitForRecordedExit(launched.surfaceId);
+    const session = await waitForRecordedExit(store, launched.surfaceId);
     const event = await waitForLaneEvent(lane.id, 'runtime_process_exit', getLaneEvents);
     expect(session.recentRuns[0]).toMatchObject({ outcome: 'failed', childExit: { code: 0 } });
     expect(event.payload).toMatchObject({
@@ -391,7 +456,7 @@ describe('createOwnedSessionStore child exit recording', () => {
       packetId,
     });
     expect(launched.ok, launched.note).toBe(true);
-    const session = await waitForRecordedExit(launched.surfaceId);
+    const session = await waitForRecordedExit(store, launched.surfaceId);
     expect(session.recentRuns[0]).toMatchObject({
       outcome: 'failed', sandboxed: true, childExit: { code: 1, classification: 'nonzero-exit' },
     });
@@ -509,10 +574,12 @@ describe('createOwnedSessionStore child exit recording', () => {
   });
 });
 
-function testAdapter(kind: 'exit-1' | 'sigkill' | 'sandbox-denial' | 'provider-error' | 'auth-failure'): OwnedRuntimeAdapter {
+type ChildKind = 'exit-1' | 'sigkill' | 'provider-error' | 'auth-failure' | 'stdin-echo' | 'silent-exit';
+
+function testAdapter(kind: ChildKind | 'sandbox-denial'): OwnedRuntimeAdapter {
   return {
     runtimeId: `test-child-${kind}`,
-    surfaceIdPrefix: `test-child-${kind}:`,
+    surfaceIdPrefix: kind === 'stdin-echo' ? `test-child-${kind}-owned:` : `test-child-${kind}:`,
     rootEnvVar: 'O8_TEST_CHILD_EXIT_ROOT',
     rootDefault: path.join(os.tmpdir(), 'o8-test-child-exit'),
     binaryName: 'node',
@@ -522,6 +589,7 @@ function testAdapter(kind: 'exit-1' | 'sigkill' | 'sandbox-denial' | 'provider-e
     launchArgs: () => kind === 'sandbox-denial'
       ? [process.env.O8_TEST_SANDBOX_DENIED_PATH ?? '/missing-denial-path']
       : ['-e', childScript(kind)],
+    ...(kind === 'stdin-echo' ? { launchStdin: ({ prompt }: { prompt: string }) => `${JSON.stringify({ type: 'user', message: { role: 'user', content: prompt } })}\n` } : {}),
     resumeArgs: () => kind === 'sandbox-denial'
       ? [process.env.O8_TEST_SANDBOX_DENIED_PATH ?? '/missing-denial-path']
       : ['-e', childScript(kind)],
@@ -536,7 +604,16 @@ function testAdapter(kind: 'exit-1' | 'sigkill' | 'sandbox-denial' | 'provider-e
   };
 }
 
-function childScript(kind: 'exit-1' | 'sigkill' | 'provider-error' | 'auth-failure') {
+function childScript(kind: ChildKind) {
+  if (kind === 'stdin-echo') {
+    // Like Claude Code stream-json: silently ignore a regular-file stdin.
+    return `const fs = require('node:fs');
+if (fs.fstatSync(0).isFile()) process.exit(0);
+let input = '';
+process.stdin.on('data', (chunk) => { input += chunk; });
+process.stdin.on('end', () => { process.stdout.write('stdin-kind:pipe ' + input); process.exit(0); });`;
+  }
+  if (kind === 'silent-exit') return 'process.exit(0);';
   const stderrLine = 'rmcp session-delete 404 from fake child\\n';
   if (kind === 'exit-1') {
     return `process.stderr.write(${JSON.stringify(stderrLine)}); process.exit(1);`;
@@ -566,7 +643,10 @@ async function waitForLaneEvent(
   throw new Error(`timed out waiting for ${verb} lane event on ${laneId}`);
 }
 
-async function waitForRecordedExit(surfaceId: string): Promise<OwnedSessionRecord> {
+async function waitForRecordedExit(
+  store: Pick<OwnedSessionStore, 'getWorkspaceBinding'>,
+  surfaceId: string,
+): Promise<OwnedSessionRecord> {
   const root = process.env.O8_TEST_CHILD_EXIT_ROOT;
   if (!root) throw new Error('missing O8_TEST_CHILD_EXIT_ROOT');
 
@@ -576,7 +656,14 @@ async function waitForRecordedExit(surfaceId: string): Promise<OwnedSessionRecor
     const raw = sessionPath ? await readFile(sessionPath, 'utf8').catch(() => '') : '';
     if (raw) {
       const parsed = JSON.parse(raw) as OwnedSessionRecord;
-      if (parsed.recentRuns[0]?.childExit) return parsed;
+      if (parsed.recentRuns[0]?.childExit) {
+        // childExit is saved from the child's close event, after its streams
+        // close. Exit cleanup still holds the surface lock and can recreate
+        // .sessions-artifact-store, so drain that lock before fixture removal.
+        if (!store.getWorkspaceBinding) throw new Error('missing owned-session surface lock barrier');
+        await store.getWorkspaceBinding(surfaceId);
+        return parsed;
+      }
     }
     await new Promise((resolve) => setTimeout(resolve, 10));
   }

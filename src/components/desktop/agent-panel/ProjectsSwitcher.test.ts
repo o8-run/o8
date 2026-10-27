@@ -53,6 +53,24 @@ function resize(width: number, nameWidth = 68) {
   act(() => [...observers].forEach(callback => callback([], {} as ResizeObserver)));
 }
 describe('adaptive project repository navigation', () => {
+  it('accepts a folder dropped on the Add entry without opening a source menu', () => {
+    const onAddRepo = vi.fn();
+    act(() => root.render(createElement(ProjectsSwitcher, { ...props, onAddRepo })));
+    const drop = new Event('drop', { bubbles: true, cancelable: true });
+    Object.defineProperty(drop, 'dataTransfer', { value: { files: [], getData: (type: string) => type === 'text/uri-list' ? 'file:///projects/example' : '' } });
+    act(() => host.querySelector('[aria-label="Add repository"]')!.dispatchEvent(drop));
+    expect(onAddRepo).toHaveBeenCalledExactlyOnceWith('/projects/example');
+  });
+
+  it('accepts a Git URL pasted on the Add entry', () => {
+    const onAddRepo = vi.fn();
+    act(() => root.render(createElement(ProjectsSwitcher, { ...props, onAddRepo })));
+    const paste = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(paste, 'clipboardData', { value: { getData: () => 'https://example.org/team/project.git' } });
+    act(() => host.querySelector('[aria-label="Add repository"]')!.dispatchEvent(paste));
+    expect(onAddRepo).toHaveBeenCalledExactlyOnceWith('https://example.org/team/project.git');
+  });
+
   it('keeps a pending project switch dismissed when the sidebar reopens', async () => {
     let finish!: (result: boolean) => void;
     const onProjectSelect = vi.fn(() => new Promise<boolean>(resolve => { finish = resolve; }));
@@ -78,8 +96,8 @@ describe('adaptive project repository navigation', () => {
   });
 
   it.each([
-    ['projects', false], ['add', false], ['overflow', false],
-    ['projects', true], ['add', true], ['overflow', true],
+    ['projects', false], ['overflow', false],
+    ['projects', true], ['overflow', true],
   ] as const)('dismisses %s when the retained sidebar closes (overlay=%s)', (menu, overlay) => {
     const renderColumn = (visible: boolean) => act(() => root.render(createElement('div', null,
       createElement('button', { 'aria-label': 'Toggle sidebar', onClick: () => renderColumn(!visible) }, 'Chats'),
@@ -90,8 +108,7 @@ describe('adaptive project repository navigation', () => {
     resize(260);
     const scroll = host.querySelector<HTMLElement>('[data-chat-scroll]')!;
     scroll.scrollTop = 173;
-    const trigger = host.querySelector<HTMLButtonElement>(menu === 'projects' ? '[aria-label="Switch project"]'
-      : menu === 'add' ? '[aria-label="Add repository"]' : '[aria-label="3 more repositories"]')!;
+    const trigger = host.querySelector<HTMLButtonElement>(menu === 'projects' ? '[aria-label="Switch project"]' : '[aria-label="3 more repositories"]')!;
     act(() => trigger.click());
     expect(trigger.getAttribute('aria-expanded')).toBe('true');
     expect(document.querySelector('[data-composer-overlay]')).not.toBeNull();
@@ -128,8 +145,6 @@ describe('adaptive project repository navigation', () => {
     act(() => find('New project').click());
     expect(document.querySelector('[role="dialog"]')?.textContent).toBe('Project form');
     act(() => find('Add repository').click());
-    const local = [...document.querySelectorAll('button')].find(button => button.textContent?.startsWith('Local folder'))!;
-    act(() => local.click());
     expect(onAddRepo).toHaveBeenCalledOnce();
     expect(onProjectSelect).not.toHaveBeenCalled();
   });

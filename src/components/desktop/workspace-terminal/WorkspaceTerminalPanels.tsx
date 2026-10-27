@@ -12,7 +12,7 @@ import { repoSlugFromRemote, shortenPath } from '@/components/desktop/workspace-
 import { XtermPanel, type XtermPanelHandle } from '@/components/desktop/workspace-terminal/XtermPanel';
 import { useTheme } from '@/lib/theme/context';
 import { isWebMachineBrowserSurface } from '@/lib/connect/web-machine-surface';
-import { isNonMacShell } from '@/lib/desktop/host-platform';
+import { shellLacksGlass } from '@/lib/desktop/host-platform';
 import { WorkspaceBootLoaderClaim } from '@/components/desktop/workspace-terminal/workspace-boot-loader-claim';
 import { WorkspaceBootLoader } from '@/components/desktop/workspace-terminal/WorkspaceBootLoader';
 import { updateResidentTabIds } from '@/components/desktop/workspace-terminal/resident-tabs';
@@ -586,7 +586,7 @@ export const TerminalResidentPanel = memo(function TerminalResidentPanel({
 }) {
   const { workspaceGlass } = useTheme();
   const connectionEpoch = useWsConnectionEpoch();
-  const transparentTerminal = workspaceGlass && !isWebMachineBrowserSurface() && !isNonMacShell();
+  const transparentTerminal = workspaceGlass && !isWebMachineBrowserSurface() && !shellLacksGlass();
   useEffect(() => {
     if (window.__o8TerminalBenchEnabled !== true) return;
     console.warn('[workspace-terminal:bench]', JSON.stringify({

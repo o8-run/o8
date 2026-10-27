@@ -15,6 +15,8 @@ import {
   readExactManagedFinalization,
 } from './exact-managed-finalization-state';
 import { renameExactChildDirectory } from './exact-parent-operation';
+import { reviewedCleanupAuthority, verifyReviewedCleanup, restoreReviewedCleanup, hasReviewedCleanupNamespace, ReviewedCleanupChanged,
+  type ReviewedCleanupAuthority } from './reviewed-cleanup-authority';
 import { assertWorkspaceRetentionReleased } from './retention-holds';
 import { admitRetirementAuthority, requiresPausedOrphanVerification, verifyRetirementAuthority, withRetirementAuthorityLock, type ManagedRetirementReason } from './retirement-authority';
 import {
@@ -34,6 +36,8 @@ export interface ExactManagedDirectoryRetirementInput {
   parentIdentity?: WorktreeMaterializationIdentity;
   retirementReason?: ManagedRetirementReason;
   beforeRetirementRename?: () => Promise<void>;
+  beforeSourceRemoval?: () => Promise<void>;
+  reviewedCleanup?: ReviewedCleanupAuthority;
   afterRetirementRename?: () => Promise<void>;
   beforeRetirementPurge?: (candidatePath: string) => Promise<void>;
 }
@@ -126,6 +130,9 @@ async function prepareRetirement(
   );
   if (existing) {
     verifyClaimInput(existing, input, parentIdentity);
+    if (input.reviewedCleanup && JSON.stringify(existing.authority?.reviewedCleanup) !== JSON.stringify(input.reviewedCleanup)) {
+      throw new Error('Exact retirement belongs to a different reviewed selection.');
+    }
     return existing;
   }
   if (!(await directoryIdentity(directoryPath))) return null;
@@ -137,6 +144,9 @@ async function prepareRetirement(
     const manifest = await captureExactDirectoryManifest(directoryPath, input.identity);
     if (manifest.entries.length !== 1) throw new Error('Unowned nonempty workspace contents must be retained.');
   }
+  // Recovery capture must not publish replay authority for an unreviewed source.
+  // Existing/moved claims returned above keep their original exact replay path.
+  await input.beforeSourceRemoval?.();
   const operationId = randomUUID();
   const claimPath = path.join(parentIdentity.canonicalPath, `.o8-retired-managed-${operationId}`);
   const contentDigest = createHash('sha256').update(JSON.stringify({
@@ -155,7 +165,8 @@ async function prepareRetirement(
     parentIdentity,
     sourceIdentity: input.identity,
     contentDigest,
-    authority: { sourceCanonicalPath: input.identity.canonicalPath, ...authority },
+    authority: { sourceCanonicalPath: input.identity.canonicalPath, ...authority,
+      ...(input.reviewedCleanup ? { reviewedCleanup: input.reviewedCleanup } : {}) },
   });
 }
 
@@ -164,10 +175,32 @@ async function finishClaim(
   beforeRetirementRename?: () => Promise<void>,
   afterRetirementRename?: () => Promise<void>,
   beforeRetirementPurge?: (candidatePath: string) => Promise<void>,
+  beforeSourceRemoval?: () => Promise<void>,
 ): Promise<void> {
-  return withRetirementAuthorityLock(initial.authority, () => finishClaimUnlocked(
-    initial, beforeRetirementRename, afterRetirementRename, beforeRetirementPurge,
-  ));
+  return withRetirementAuthorityLock(initial.authority, async () => {
+    try {
+      if (initial.authority?.reviewedCleanupRestore) {
+        await restoreReviewedCleanup(initial);
+        throw new ReviewedCleanupChanged();
+      }
+      await finishClaimUnlocked(initial, beforeRetirementRename, afterRetirementRename, beforeRetirementPurge, beforeSourceRemoval);
+    } catch (error) {
+      const current = readExactWorkspaceClaim(initial.kind, initial.repositoryPath, initial.worktreeId);
+      if (current?.operationId === initial.operationId && reviewedCleanupAuthority(current)
+        && await hasReviewedCleanupNamespace(current)) {
+        let mismatch = error instanceof ReviewedCleanupChanged;
+        if (!mismatch) {
+          const candidate = await directoryIdentity(current.claimPath) ? current.claimPath : current.sourcePath;
+          try { await verifyReviewedCleanup(current, candidate); } catch { mismatch = true; }
+        }
+        if (mismatch) {
+          await restoreReviewedCleanup(current);
+          throw new ReviewedCleanupChanged();
+        }
+      }
+      throw error;
+    }
+  });
 }
 
 async function verifyFinalRemovalAuthority(claim: ExactWorkspaceClaimRecord): Promise<void> {
@@ -195,6 +228,7 @@ async function finishClaimUnlocked(
   beforeRetirementRename?: () => Promise<void>,
   afterRetirementRename?: () => Promise<void>,
   beforeRetirementPurge?: (candidatePath: string) => Promise<void>,
+  beforeSourceRemoval?: () => Promise<void>,
 ): Promise<void> {
   let claim = initial;
   await assertWorktreeMaterializationIdentity(
@@ -214,12 +248,15 @@ async function finishClaimUnlocked(
 
   if (claim.state === 'prepared') {
     if (original) {
+      await verifyReviewedCleanup(claim, claim.sourcePath);
       await beforeRetirementRename?.();
+      await beforeSourceRemoval?.();
       refreshCloseProcessObservation();
       await verifyRetirementAuthority({
         authority: claim.authority, sourcePath: claim.sourcePath, candidatePath: claim.sourcePath,
         identity: expected, verifyContents: true,
       });
+      await beforeSourceRemoval?.();
       await renameExactChildDirectory(
         path.dirname(claim.sourcePath), claim.parentIdentity,
         claim.sourcePath, claim.claimPath, expected,
@@ -228,6 +265,7 @@ async function finishClaimUnlocked(
     } else if (!retired) {
       throw new Error('Exact managed retirement lost both prepared namespaces.');
     }
+    await verifyReviewedCleanup(claim, claim.claimPath);
     claim = transitionExactWorkspaceClaim({
       kind: 'managed-retirement',
       repositoryPath: claim.repositoryPath,
@@ -239,6 +277,7 @@ async function finishClaimUnlocked(
     });
   }
   if (claim.state === 'claimed') {
+    await verifyReviewedCleanup(claim, claim.claimPath);
     if (!claim.claimIdentity || !sameIdentity(claim.claimIdentity, expected)) {
       throw new Error('Exact managed retirement claim identity is missing or changed.');
     }
@@ -248,6 +287,7 @@ async function finishClaimUnlocked(
     });
     await beforeRetirementPurge?.(claim.claimPath);
     const manifest = await captureExactDirectoryManifest(claim.claimPath, expected);
+    await verifyReviewedCleanup(claim, claim.claimPath);
     // A warm claim may only purge its original sealed inventory. Recheck after
     // capture so this manifest cannot bless an intervening edit as disposable.
     if (claim.authority?.warmSeal) await verifyRetirementAuthority({
@@ -285,15 +325,17 @@ async function finishClaimUnlocked(
       identity: expected, verifyContents: false,
     });
     await beforeRetirementPurge?.(claim.claimPath);
+    await verifyReviewedCleanup(claim, claim.claimPath);
     const manifest = claim.authority?.purgeManifest as ExactDirectoryManifest | undefined;
     if (!manifest?.fingerprint || !Array.isArray(manifest.entries) || manifest.entries.length === 0) {
       throw new Error('Exact retirement has no durable pre-purge descendant manifest.');
     }
     await purgeExactDirectory(claim.claimPath, expected, undefined,
-      !pausedOrphanVerification ? undefined : async (candidatePath, capturedPurge) => {
+      !pausedOrphanVerification && !reviewedCleanupAuthority(claim) ? undefined : async (candidatePath, capturedPurge) => {
+        await verifyReviewedCleanup(claim, candidatePath);
         // Nonempty orphan verification includes source and ignored artifacts,
         // even in replay mode. Empty finalization needs no readable Git tree.
-        await verifyRetirementAuthority({
+        if (pausedOrphanVerification) await verifyRetirementAuthority({
           authority: claim.authority, sourcePath: claim.sourcePath, candidatePath,
           identity: expected, verifyContents: false, capturedPurge,
         });
@@ -338,7 +380,7 @@ async function retireExactManagedDirectoryNative(
 ): Promise<void> {
   const claim = await prepareRetirement(input);
   if (!claim) return;
-  await finishClaim(claim, input.beforeRetirementRename, input.afterRetirementRename, input.beforeRetirementPurge);
+  await finishClaim(claim, input.beforeRetirementRename, input.afterRetirementRename, input.beforeRetirementPurge, input.beforeSourceRemoval);
 }
 
 /** Remove durable authority only after the caller has removed managed metadata. */
