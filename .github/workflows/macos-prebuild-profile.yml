@@ -40,11 +40,11 @@ jobs:
         run: env -u CI npx vitest run tests/tauri-prebuild-profile.test.ts -t 'retains linked' --reporter=verbose
       - name: Run both lifetime fixtures in the CI environment
         run: npx vitest run tests/tauri-prebuild-profile.test.ts -t 'retains (ordinary|linked)' --reporter=verbose
-      - name: Report failed fixture command receipts
+      - name: Report fixture command receipts
         if: always()
         run: |
           node --input-type=module <<'NODE'
-          import { readdirSync, readFileSync, realpathSync } from 'node:fs';
+          import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
           import { tmpdir } from 'node:os';
           import path from 'node:path';
           const parent = realpathSync(tmpdir());
@@ -54,11 +54,15 @@ jobs:
               const root = path.join(runRoot, fixture);
               for (const name of readdirSync(root).filter(name => /^command-\d+\.json$/.test(name))) {
                 const receipt = JSON.parse(readFileSync(path.join(root, name), 'utf8'));
-                if (receipt.exit === 0) continue;
+                if (receipt.exit === 0 && Number(name.match(/\d+/)[0]) > 6) continue;
                 console.log(JSON.stringify({ command: name, exit: receipt.exit, signal: receipt.signal,
+                  elapsedMs: receipt.elapsedMs, error: receipt.error,
                   stdout: receipt.stdout?.slice(-24000), stderr: receipt.stderr?.slice(-24000) }, null, 2)
                   .replaceAll(root, '<fixture>').replaceAll(process.cwd(), '<checkout>'));
               }
+              const probes = path.join(root, 'repo/.fixture/version-probes.jsonl');
+              if (existsSync(probes)) console.log(readFileSync(probes, 'utf8')
+                .replaceAll(root, '<fixture>').replaceAll(process.cwd(), '<checkout>'));
             }
           }
           NODE

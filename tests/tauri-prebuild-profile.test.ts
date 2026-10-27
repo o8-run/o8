@@ -1,4 +1,4 @@
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn, spawnSync, type SpawnSyncReturns } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { once } from 'node:events';
 import { createRequire } from 'node:module';
@@ -11,6 +11,33 @@ import { createRetainedGeneratedOutputFixture } from './generated-output-fixture
 
 const source = process.cwd();
 const require = createRequire(import.meta.url);
+
+function expectSuccessfulPrebuild(result: SpawnSyncReturns<string>): void {
+  const error = result.error as NodeJS.ErrnoException | undefined;
+  const diagnostic = [
+    `prebuild stderr:\n${result.stderr || '<empty>'}`,
+    `prebuild exit=${result.status}; signal=${result.signal ?? 'none'}; spawn error=${error?.code ?? 'none'}`,
+    error?.message ?? '',
+    `prebuild stdout:\n${result.stdout || '<empty>'}`,
+  ].join('\n');
+  expect(result.error, diagnostic).toBeUndefined();
+  expect(result.signal, diagnostic).toBeNull();
+  expect(result.status, diagnostic).toBe(0);
+}
+
+it.each([0, 1])('reports child stderr and timeouts from failed prebuild commands (termination exit: %s)', exit => {
+  const refusal = 'Generated-output producer refused: fixture refusal';
+  const refused = spawnSync(process.execPath, ['-e',
+    `console.log('[db] Connected to fixture database'); console.error(${JSON.stringify(refusal)}); process.exitCode = 1;`],
+  { encoding: 'utf8', timeout: 5_000 });
+  expect(() => expectSuccessfulPrebuild(refused)).toThrow(refusal);
+
+  const timedOut = spawnSync(process.execPath, ['-e',
+    `console.log('[db] Connected to fixture database'); process.on('SIGTERM', () => process.exit(${exit})); setInterval(() => {}, 1000);`],
+  { encoding: 'utf8', timeout: 200 });
+  expect((timedOut.error as NodeJS.ErrnoException)?.code).toBe('ETIMEDOUT');
+  expect(() => expectSuccessfulPrebuild(timedOut)).toThrow('ETIMEDOUT');
+});
 
 it('loads both preloads through the real launcher from a path containing spaces and a URL fragment', async () => {
   const root = await createRetainedGeneratedOutputFixture('o8-preload-url-');
@@ -99,6 +126,25 @@ it.each(['ordinary', 'linked'] as const)('retains %s prebuild creation authority
   mkdirSync(scripts, { recursive: true });
   mkdirSync(home);
   mkdirSync(path.join(repo, '.fixture'));
+  const versionProbe = path.join(repo, '.fixture/version-probe.cjs');
+  writeFileSync(versionProbe, `
+    const cp = require('node:child_process'); const fs = require('node:fs');
+    const original = cp.execFileSync;
+    cp.execFileSync = (command, args, options) => {
+      const observe = args?.[0] === '--version' || args?.[0] === '--show-sdk-version'
+        || command === 'git' && args?.[0] === 'status';
+      if (!observe) return original(command, args, options);
+      const started = Date.now();
+      const record = { command: require('node:path').basename(command), args };
+      try {
+        const value = original(command, args, options);
+        record.stdout = String(value).trim().slice(0, 1000); return value;
+      } catch (error) { record.status = error.status; record.code = error.code; throw error; }
+      finally { record.elapsedMs = Date.now() - started;
+        fs.appendFileSync(${JSON.stringify(path.join(repo, '.fixture/version-probes.jsonl'))}, JSON.stringify(record) + '\\n'); }
+    };
+    require('node:module').syncBuiltinESMExports();
+  `);
   writeFileSync(path.join(repo, '.gitignore'), '.next\nout\nnode_modules\n.fixture\n.o8-generated-output-store\n');
   writeFileSync(path.join(repo, 'package.json'), JSON.stringify({ name: 'prebuild-fixture', version: '0.0.0',
     scripts: { build: `${JSON.stringify(process.execPath)} ${JSON.stringify(path.join(source, 'scripts/build.mjs'))}` } }));
@@ -153,20 +199,25 @@ it.each(['ordinary', 'linked'] as const)('retains %s prebuild creation authority
     expect(linked.status, linked.stderr).toBe(0);
     renameSync(path.join(primary, 'node_modules'), path.join(repo, 'node_modules'));
     mkdirSync(path.join(repo, '.fixture'));
+    writeFileSync(versionProbe, readFileSync(path.join(primary, '.fixture/version-probe.cjs')));
   }
   const env = { ...process.env, HOME: home, O8_RELEASE_BUILD_CACHE_DIR: path.join(root, 'cache'),
     O8_RELEASE_BUILD_CACHE_MAX_BYTES: '10485760', O8_RELEASE_LOCK_PATH: path.join(root, 'release.lock'),
-    O8_RELEASE_BROADCAST_CLI: 'true', TSX_TSCONFIG_PATH: path.join(source, 'tsconfig.json') };
+    O8_RELEASE_BROADCAST_CLI: 'true', TSX_TSCONFIG_PATH: path.join(source, 'tsconfig.json'),
+    NODE_OPTIONS: `${process.env.NODE_OPTIONS || ''} --require=${JSON.stringify(versionProbe)}`.trim() };
   for (const key of ['O8_DATA_DIR', 'CORTEX_IDE_DATA_DIR', 'CORTEX_IDE_DB_PATH', 'O8_OPERATOR_DATA_DIR',
     'O8_RELEASE_BUILD_DATA_DIR', 'O8_RELEASE_CACHE_RUN_ID', 'O8_RELEASE_CACHE_PREBUILD_MARKER']) {
     delete (env as NodeJS.ProcessEnv)[key];
   }
   let invocation = 0;
   function run(args: string[], extra: Partial<NodeJS.ProcessEnv> = {}) {
+    const started = Date.now();
     const result = spawnSync(process.execPath, args, { cwd: repo, env: { ...env, ...extra },
       encoding: 'utf8', timeout: 60_000, maxBuffer: 2 * 1024 ** 2 });
     writeFileSync(path.join(root, `command-${++invocation}.json`), JSON.stringify({ args,
-      pid: result.pid, exit: result.status, signal: result.signal, stdout: result.stdout, stderr: result.stderr }, null, 2));
+      pid: result.pid, exit: result.status, signal: result.signal, elapsedMs: Date.now() - started,
+      error: result.error ? { code: (result.error as NodeJS.ErrnoException).code, message: result.error.message } : null,
+      stdout: result.stdout, stderr: result.stderr }, null, 2));
     return result;
   }
   const prebuild = [process.env.O8_PREBUILD_TEST_SCRIPT || path.join(source, 'scripts/tauri-prebuild.mjs')];
@@ -190,7 +241,7 @@ it.each(['ordinary', 'linked'] as const)('retains %s prebuild creation authority
     renameSync(path.join(repo, '.next'), path.join(repo, '.fixture/retained-legacy-next'));
   }
   const first = run(prebuild);
-  expect(first.status, first.stderr + first.stdout).toBe(0);
+  expectSuccessfulPrebuild(first);
   const profile = JSON.parse(readFileSync(path.join(repo, '.fixture/profile.json'), 'utf8')).modern as string;
   expect(existsSync(profile), 'lifecycle profile must survive the first caller').toBe(true);
   const databasePath = path.join(profile, 'cortex-ide.db');
@@ -239,7 +290,7 @@ it.each(['ordinary', 'linked'] as const)('retains %s prebuild creation authority
   const outputIdentity = lstatSync(path.join(repo, '.next'));
   const profileCount = readdirSync(path.dirname(profile)).length;
   const second = run(prebuild);
-  expect(second.status, second.stderr + second.stdout).toBe(0);
+  expectSuccessfulPrebuild(second);
   expect(second.stdout).toContain('reused verified artifact');
   expect(resource()).toEqual(original); // Reuse must not invent a successful child or replace its receipt.
   const noop = { command: process.execPath, args: ['-e', 'process.exit(0)'] };

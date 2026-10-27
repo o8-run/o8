@@ -6580,6 +6580,7 @@
       "reasons": [
         "child-process",
         "git-cli",
+        "process-signal",
         "worktree-api"
       ]
     },
