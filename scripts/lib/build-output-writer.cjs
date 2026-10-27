@@ -406,9 +406,15 @@ function connect(config, initialRoot) {
     const parent = entries.get(path.dirname(name));
     putReceipt({ relative: name, ...createEntry(absolute(name), parent, { kind: 'directory', mode: opts.mode }) });
   }
-  function remove(file, options = {}, directoryOnly = false) {
+  function remove(file, options = {}, directoryOnly = false, unlinkOnly = false) {
     const name = relative(file);
-    if (name === null) return directoryOnly ? raw.rmdirSync(file, options) : raw.rmSync(file, options);
+    // Outside the reservation, unlink must stay unlink: Node 22's JS rmSync
+    // removes files through the (installed) fs.unlinkSync, so routing that
+    // back to raw.rmSync recursed until the stack overflowed.
+    if (name === null) {
+      if (directoryOnly) return raw.rmdirSync(file, options);
+      return unlinkOnly ? raw.unlinkSync(file) : raw.rmSync(file, options);
+    }
     if (name === '.') refuse('removal of the compiler reservation');
     parents(name);
     const stat = raw.lstatSync(file, { throwIfNoEntry: false });
@@ -474,7 +480,7 @@ function connect(config, initialRoot) {
     fchmodSync: (descriptor, ...args) => mutateFd(descriptor, () => raw.fchmodSync(descriptor, ...args)),
     futimesSync: (descriptor, ...args) => mutateFd(descriptor, () => raw.futimesSync(descriptor, ...args)),
     closeSync: descriptor => { handles.delete(descriptor); return raw.closeSync(descriptor); },
-    unlinkSync: file => remove(file), rmSync: (file, options) => remove(file, options),
+    unlinkSync: file => remove(file, {}, false, true), rmSync: (file, options) => remove(file, options),
     rmdirSync: (file, options) => remove(file, options, true),
   };
   for (const method of ['chmod', 'utimes']) api[method + 'Sync'] = (file, ...args) => {
