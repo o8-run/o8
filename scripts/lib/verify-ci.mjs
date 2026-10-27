@@ -106,7 +106,7 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
     requireCondition(job.defaults?.run === undefined, `${id} run defaults need a verify:ci equivalent`);
     job.env = { ...workflow.env, ...job.env };
     requireCondition(typeof job.name === 'string', `${id} needs a CI check name`);
-    requireCondition(!job.strategy || id === 'test-shards', `${id} has an unsupported matrix`);
+    requireCondition(!job.strategy || ['test-shards', 'o8-next-tests'].includes(id), `${id} has an unsupported matrix`);
     for (const step of job.steps ?? []) {
       if (!step.uses) continue;
       const supported = setupActions.some(prefix => step.uses.startsWith(prefix))
@@ -129,7 +129,8 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
     }), 'hermetic aggregate steps changed; update verify:ci coverage');
   const native = jobs['o8-next-tests'];
   requireCondition(native.name === 'o8 next Native Tests (Linux)' && native['runs-on'] === 'ubuntu-24.04'
-    && native.if === testCondition && !native.strategy && !native.defaults && !native.needs
+    && native.if === testCondition && !native.defaults && !native.needs
+    && isDeepStrictEqual(native.strategy, { 'fail-fast': false, matrix: { shard: [1, 2, 3, 4] } })
     && !native['continue-on-error'] && native.steps.every(step => !step['continue-on-error']),
   'native test runner or condition needs a verify:ci equivalent');
   const nativeCondition = "steps.native.outputs.changed == 'true'";
@@ -148,7 +149,7 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
     }),
   'native selection or setup needs a verify:ci equivalent');
   const build = 'cargo build --locked --manifest-path crates/o8d/Cargo.toml --features experimental-http --bin o8d';
-  const test = "unset DISPLAY WAYLAND_DISPLAY\nTIMEFORMAT='o8 next native tests wall=%3R s'\ntime cargo test --locked --manifest-path native/o8-next/Cargo.toml -- --test-threads=4";
+  const test = "unset DISPLAY WAYLAND_DISPLAY\nTIMEFORMAT='o8 next native tests wall=%3R s'\ntime node scripts/ci/native-test-shard.mjs --cargo";
   requireCondition(nativeRunSteps[1].run === build && nativeRunSteps[2].run.trim() === test
     && nativeRunSteps.slice(1).every(step => step.if === nativeCondition
       && !step.shell && !step['working-directory'] && !step['continue-on-error'] && !step.env),
@@ -158,6 +159,7 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
     CARGO_TARGET_DIR: '${{ github.workspace }}/native/o8-next/target',
     CARGO_PROFILE_DEV_DEBUG: '0', CARGO_INCREMENTAL: '0',
     O8D_HTTP_TEST_BINARY: '${{ github.workspace }}/native/o8-next/target/debug/o8d',
+    O8_NATIVE_TEST_SHARD: '${{ matrix.shard }}/4',
   };
   requireCondition(JSON.stringify(native.env) === JSON.stringify(nativeEnv), 'native environment needs a verify:ci equivalent');
   const setup = parse(readFileSync(path.join(root, '.github/actions/next-linux-setup/action.yml'), 'utf8'));
@@ -194,10 +196,12 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
   appendJob('lint');
   if (nativeLocal) checks.push({ id: 'o8-next-tests', after: [], name: native.name, nativeInputs: true,
     timeoutMs: native['timeout-minutes'] * 60_000,
-    steps: nativeRunSteps.slice(1).map(step => runStep({ ...step, run: step.run, env: {} }, {
+    // Build the shared daemon once, then run every CI shard serially against
+    // the same target cache. The shared deadline remains at least as strict.
+    steps: [nativeRunSteps[1], ...[1, 2, 3, 4].map(() => nativeRunSteps[2])].map((step, index) => runStep({ ...step, env: {} }, {
       ...native, env: Object.fromEntries(Object.entries(nativeEnv).map(([key, value]) =>
         [key, value.replaceAll('${{ github.workspace }}', root)])),
-    }, undefined, scripts)),
+    }, index || 1, scripts)),
   });
   checks.push({ id: 'classification', after: dependencies(shardJob), name: classification[0].name ?? 'Test Classification',
     steps: classification.map(step => runStep(step, shardJob, 1, scripts)) });

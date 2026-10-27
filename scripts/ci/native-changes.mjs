@@ -46,7 +46,7 @@ function isNative(changedPaths) {
       /^(\.cargo\/|rust-toolchain(?:\.toml)?$|Cargo\.(?:toml|lock)$)/.test(file)
       || /^(native\/o8-next|scripts\/next|crates\/o8d|\.github\/actions\/next-linux-setup)\//.test(file)
       || ['package.json', 'package-lock.json', '.github/workflows/ci.yml',
-        '.github/workflows/next-linux.yml', 'scripts/ci/native-changes.mjs',
+        '.github/workflows/next-linux.yml', 'scripts/ci/native-changes.mjs', 'scripts/ci/native-test-shard.mjs',
         'scripts/register-server-only-stub.mjs'].includes(file));
   }
   return paths.some((file) =>

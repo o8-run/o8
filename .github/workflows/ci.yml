@@ -529,12 +529,17 @@ jobs:
     if: github.event.schedule != '41 13 * * 1'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     env:
       CARGO_HOME: ${{ github.workspace }}/.o8-next-cargo
       CARGO_TARGET_DIR: ${{ github.workspace }}/native/o8-next/target
       CARGO_PROFILE_DEV_DEBUG: '0'
       CARGO_INCREMENTAL: '0'
       O8D_HTTP_TEST_BINARY: ${{ github.workspace }}/native/o8-next/target/debug/o8d
+      O8_NATIVE_TEST_SHARD: ${{ matrix.shard }}/4
     steps:
       - uses: actions/checkout@v4
         with:
@@ -555,7 +560,7 @@ jobs:
         run: |
           unset DISPLAY WAYLAND_DISPLAY
           TIMEFORMAT='o8 next native tests wall=%3R s'
-          time cargo test --locked --manifest-path native/o8-next/Cargo.toml -- --test-threads=4
+          time node scripts/ci/native-test-shard.mjs --cargo
 
   roadmap-check:
     name: Roadmap Drift Check

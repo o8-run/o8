@@ -23,6 +23,7 @@ fs.appendFileSync(process.env.VERIFY_FIXTURE_RECEIPT, JSON.stringify({
   nodeOptions: process.env.NODE_OPTIONS, dataDir: process.env.CORTEX_IDE_DATA_DIR,
   cargoHome: process.env.CARGO_HOME, targetDir: process.env.CARGO_TARGET_DIR,
   daemon: process.env.O8D_HTTP_TEST_BINARY, display: process.env.DISPLAY, wayland: process.env.WAYLAND_DISPLAY,
+  nativeShard: process.env.O8_NATIVE_TEST_SHARD,
 }) + '\\n');
 const barrier = process.env.VERIFY_FIXTURE_BARRIER;
 if (barrier) {
@@ -39,7 +40,7 @@ if (barrier) {
     if (!fs.existsSync(peer)) process.exit(9);
   }
   if (args.includes('test:unit')) fs.writeFileSync(path.join(barrier, 'unit-started'), 'started');
-  if ('${name}' === 'cargo' && args[0] === 'test') {
+  if ('${name}' === 'cargo' && args.includes('test')) {
     const deadline = Date.now() + 15000;
     while (!fs.existsSync(path.join(barrier, 'unit-started')) && Date.now() < deadline) wait();
     if (!fs.existsSync(path.join(barrier, 'unit-started'))) process.exit(9);
@@ -83,7 +84,7 @@ function executeFixture(selectedFile: string, nestedDependency = false,
   const directory = mkdtempSync(path.join(root, 'verifier-fixture-'));
   const files = ['scripts/verify-ci.mjs', 'scripts/lib/verify-ci.mjs', 'scripts/ci/check-verify-ci.mjs',
     'scripts/ci/resource-owning-changed.mjs', 'scripts/ci/review-dependency-changes.mjs', 'scripts/ci/native-changes.mjs',
-    '.github/workflows/ci.yml', '.github/actions/next-linux-setup/action.yml'];
+    '.github/workflows/ci.yml', '.github/actions/next-linux-setup/action.yml', 'scripts/ci/native-test-shard.mjs'];
   for (const file of files) {
     mkdirSync(path.dirname(path.join(directory, file)), { recursive: true });
     copyFileSync(path.join(repo, file), path.join(directory, file));
@@ -154,7 +155,7 @@ function executeFixture(selectedFile: string, nestedDependency = false,
       VERIFY_FIXTURE_BARRIER: parallel ? mkdtempSync(path.join(root, 'parallel-')) : '' },
   });
   const calls = readFileSync(receipt, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
-  return { ...result, calls };
+  return { ...result, calls, directory };
 }
 
 describe('local CI verification through its command entry point', () => {
@@ -229,8 +230,10 @@ describe('local CI verification through its command entry point', () => {
       const calls = result.calls.filter(call => call.tool === 'cargo');
       expect(calls.map(call => call.args)).toEqual([
         ['build', '--locked', '--manifest-path', 'crates/o8d/Cargo.toml', '--features', 'experimental-http', '--bin', 'o8d'],
-        ['test', '--locked', '--manifest-path', 'native/o8-next/Cargo.toml', '--', '--test-threads=4'],
+        ...[1, 2, 3, 4].map(() => ['--config', `target.x86_64-unknown-linux-gnu.runner=${JSON.stringify([process.execPath, path.join(result.directory, 'scripts/ci/native-test-shard.mjs')])}`,
+          'test', '--locked', '--manifest-path', 'native/o8-next/Cargo.toml', '--', '--test-threads=4']),
       ]);
+      expect(calls.slice(1).map(call => call.nativeShard)).toEqual(['1/4', '2/4', '3/4', '4/4']);
       for (const call of calls) {
         expect(call.ci).toBe('true');
         expect(call.targetDir).toMatch(/native\/o8-next\/target$/);
@@ -245,7 +248,7 @@ describe('local CI verification through its command entry point', () => {
   it.each(['committed', 'staged', 'unstaged', 'untracked'])('selects a %s native change against origin/main', nativeState => {
     const result = executeFixture('tests/fixture.test.ts', false, { nativeChange: 'native/o8-next/src/main.rs', nativeState });
     expect(result.status, result.stderr + result.stdout).toBe(0);
-    expect(result.calls.filter(call => call.tool === 'cargo')).toHaveLength(2);
+    expect(result.calls.filter(call => call.tool === 'cargo')).toHaveLength(5);
   }, 60_000);
 
   it('runs native and hermetic work concurrently while retaining the required aggregate', () => {
@@ -283,20 +286,22 @@ describe('local CI verification through its command entry point', () => {
 
   it.each(['command', 'action', 'condition', 'native tolerance', 'native step tolerance',
     'aggregate tolerance', 'aggregate step tolerance', 'aggregate condition', 'checkout ref',
-    'shard tolerance', 'shard step tolerance'])('rejects uncovered native execution changes: %s', change => {
+    'shard tolerance', 'shard step tolerance', 'missing native shard', 'native fail fast'])('rejects uncovered native execution changes: %s', change => {
     const workflow = parse(readFileSync(workflowPath, 'utf8'));
     const job = workflow.jobs['o8-next-tests'];
     if (change === 'command') job.steps.push({ run: 'cargo test --required-fixture' });
     if (change === 'action') job.steps.push({ uses: './.github/actions/required-fixture' });
     if (change === 'checkout ref') job.steps[0].with.ref = 'main';
+    if (change === 'missing native shard') job.strategy.matrix.shard.pop();
+    if (change === 'native fail fast') job.strategy['fail-fast'] = true;
     if (change === 'shard tolerance') workflow.jobs['test-shards']['continue-on-error'] = true;
     if (change === 'shard step tolerance') workflow.jobs['test-shards'].steps.find((step: { run?: string }) => step.run?.startsWith('npm run test:unit'))['continue-on-error'] = true;
     if (change === 'native tolerance') job['continue-on-error'] = true;
-    if (change === 'native step tolerance') job.steps.find((step: { run?: string }) => step.run?.includes('cargo test'))['continue-on-error'] = true;
+    if (change === 'native step tolerance') job.steps.find((step: { run?: string }) => step.run?.includes('native-test-shard.mjs'))['continue-on-error'] = true;
     if (change === 'aggregate tolerance') workflow.jobs.test['continue-on-error'] = true;
     if (change === 'aggregate step tolerance') workflow.jobs.test.steps[0]['continue-on-error'] = true;
     if (change === 'aggregate condition') workflow.jobs.test.if = 'false';
-    if (change === 'condition') job.steps.find((step: { run?: string }) => step.run?.includes('cargo test')).if = 'false';
+    if (change === 'condition') job.steps.find((step: { run?: string }) => step.run?.includes('native-test-shard.mjs')).if = 'false';
     const result = coverage(workflow);
     expect(result.status, result.stdout).toBe(1);
     expect(result.stderr).toContain('verify:ci');

@@ -221,7 +221,7 @@ describe('native next CI through persisted fixtures', () => {
   it.each(['native/o8-next/src/main.rs', 'native/o8-next/README.md',
     'native/o8-next/fixtures/state.json', 'scripts/next/dev-server.ts',
     'crates/o8d/src/main.rs', 'package-lock.json', '.cargo/config.toml', 'rust-toolchain.toml', '.github/workflows/ci.yml',
-    'scripts/ci/native-changes.mjs'])('selects native tests for %s', file => {
+    'scripts/ci/native-changes.mjs', 'scripts/ci/native-test-shard.mjs'])('selects native tests for %s', file => {
     const before = git('rev-parse', 'HEAD');
     const after = commit(file);
     expect(selectNext('push', { before, after })).toBe('changed=true');
@@ -254,11 +254,12 @@ describe('native next CI through persisted fixtures', () => {
     expect(job, 'native tests must have an automatic CI job').toBeDefined();
     expect(job['runs-on']).toBe('ubuntu-24.04');
     expect(job['timeout-minutes']).toBe(20);
+    expect(job.strategy).toEqual({ 'fail-fast': false, matrix: { shard: [1, 2, 3, 4] } });
     expect(job.if).toBe(workflow.jobs['test-shards'].if);
-    const step = job.steps.find((entry: { run?: string }) => entry.run?.includes('cargo test'));
+    const step = job.steps.find((entry: { run?: string }) => entry.run?.includes('native-test-shard.mjs'));
     expect(step.if).toBe("steps.native.outputs.changed == 'true'");
     expect(step['continue-on-error']).toBeUndefined();
-    expect(step.run).toContain('--locked --manifest-path native/o8-next/Cargo.toml');
+    expect(step.run).toContain('node scripts/ci/native-test-shard.mjs --cargo');
     const directory = probeRoot;
     const crate = path.join(directory, 'native/o8-next');
     mkdirSync(path.join(crate, 'src'), { recursive: true });
@@ -273,10 +274,12 @@ fn persisted_state() {
     assert_eq!(state, "ready");
 }
 `);
-    const run = () => spawnSync('bash', ['-e', '-o', 'pipefail', '-c', step.run], {
+    const runner = path.join(repo, 'scripts/ci/native-test-shard.mjs').replaceAll("'", "'\"'\"'");
+    const command = step.run.replace('scripts/ci/native-test-shard.mjs', `'${runner}'`);
+    const run = () => spawnSync('bash', ['-e', '-o', 'pipefail', '-c', command], {
       cwd: directory, encoding: 'utf8', timeout: 30_000,
       env: { ...process.env, CARGO_NET_OFFLINE: 'true', CARGO_TARGET_DIR: path.join(directory, 'target'),
-        DISPLAY: 'fixture-display', WAYLAND_DISPLAY: 'fixture-display' },
+        DISPLAY: 'fixture-display', WAYLAND_DISPLAY: 'fixture-display', O8_NATIVE_TEST_SHARD: '1/1' },
     });
     writeFileSync(path.join(crate, 'state'), 'blocked');
     const red = run();
