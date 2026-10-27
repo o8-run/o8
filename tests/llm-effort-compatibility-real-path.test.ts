@@ -56,6 +56,7 @@ describe('native LLM API effort compatibility through POST and captured payloads
     ['openai', 'gpt-4o', 'high'], ['openai', 'o3', 'ultra'],
     ['google', 'gemini-2.5-flash', 'high'], ['anthropic', 'claude-haiku-4-5', 'max'],
     ['anthropic', 'claude-sonnet-4-5', 'ultra'],
+    ['anthropic', 'claude-sonnet-4-5', 'none'], ['anthropic', 'claude-sonnet-4-5', 'minimal'],
     ['openai', 'o3-20250416', 'high'], ['openai', 'o3-preview', 'high'],
     ['openai', 'o3-2025-04-16-preview', 'high'], ['openai', 'o3-mini-other-2025-01-31', 'high'],
     ['anthropic', 'claude-sonnet-4-5-2025-09-29', 'high'], ['anthropic', 'claude-sonnet-4-5-20250929-extra', 'high'],
