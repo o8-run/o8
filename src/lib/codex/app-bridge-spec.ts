@@ -20,7 +20,7 @@ export interface CodexAppBridgeSpec {
   message: string;
   imagePaths: string[];
   model: string;
-  effort: string;
+  effort?: string;
   serviceTier: string | null;
   sandbox: 'read-only' | 'danger-full-access';
   /** Per-thread config overrides, such as o8's MCP servers. */

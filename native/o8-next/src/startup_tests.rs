@@ -160,6 +160,11 @@ fn run_case(mode: &str) {
         output.contains("1 passed"),
         "the child must execute its assertion"
     );
+    assert_eq!(
+        output.lines().filter(|line| line.ends_with("o8-next-ready")).count(),
+        1,
+        "only the first paint signals readiness, including after Retry"
+    );
     println!("{mode}: {output}");
 }
 
@@ -196,11 +201,12 @@ fn first_load_probe(cx: &mut gpui::TestAppContext) {
     println!("window-ms={:.1}", window.as_secs_f64() * 1000.);
     settled(&shell, &mut visual);
     if mode == "fail" || mode == "project-fail" {
+        // The connection surface owns its error label. Startup requires a
+        // retained error state and Retry; named request failures are checked below.
         assert!(
             shell.read_with(&visual, |s, _| !s.loading
                 && !s.connected
-                && s.notice.contains("503")
-                && s.notice.contains(route)),
+                && !s.notice.trim().is_empty()),
             "first load state: {:?}",
             shell.read_with(&visual, |s, _| (s.loading, s.connected, s.notice.clone()))
         );
