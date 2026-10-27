@@ -6,6 +6,8 @@ use std::{
     net::SocketAddr,
     sync::{Arc, RwLock},
 };
+#[cfg(test)]
+pub(crate) use transport::LOAD_REQUEST_TIMEOUT;
 pub(crate) use transport::same_workspace;
 pub use transport::{QueueError, Session};
 use url::Url;

@@ -1,4 +1,6 @@
-import { NextResponse, type NextRequest } from 'next/server';
+import { isMaskedViewerReplay } from '@/lib/viewers/copy-safety';
+import { viewerJson } from '@/lib/viewers/response';
+import { type NextRequest } from 'next/server';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join, dirname, basename } from 'node:path';
 import { knowledgeSourceWriteRefusal } from '@/lib/cortex/knowledge/sources';
@@ -61,7 +63,7 @@ export async function GET(request: NextRequest) {
   const repoPath = request.nextUrl.searchParams.get('repoPath') ?? '';
   const specPath = resolveSpecPath(repoPath);
   if (!specPath) {
-    return NextResponse.json({ ok: false, error: 'repoPath invalid' }, { status: 400 });
+    return viewerJson({ ok: false, error: 'repoPath invalid' }, { status: 400 });
   }
   const exists = existsSync(specPath);
   const content = exists ? readFileSync(specPath, 'utf-8') : DEFAULT_TEMPLATE;
@@ -69,12 +71,12 @@ export async function GET(request: NextRequest) {
   // Review-aware views (RFM parser). `view` absent = raw content (back-compat).
   const view = request.nextUrl.searchParams.get('view');
   if (view === 'index') {
-    return NextResponse.json({ ok: true, index: extractRoughdraftReviewIndex(content), exists, path: specPath });
+    return viewerJson({ ok: true, index: extractRoughdraftReviewIndex(content), exists, path: specPath });
   }
   if (view === 'validate') {
-    return NextResponse.json({ ok: true, validation: validateRoughdraftMarkdown(content), exists, path: specPath });
+    return viewerJson({ ok: true, validation: validateRoughdraftMarkdown(content), exists, path: specPath });
   }
-  return NextResponse.json({
+  return viewerJson({
     ok: true,
     content,
     contentHash: await contentHash(content),
@@ -87,7 +89,7 @@ export async function PUT(request: NextRequest) {
   const repoPath = request.nextUrl.searchParams.get('repoPath') ?? '';
   const specPath = resolveSpecPath(repoPath);
   if (!specPath) {
-    return NextResponse.json({ ok: false, error: 'repoPath invalid' }, { status: 400 });
+    return viewerJson({ ok: false, error: 'repoPath invalid' }, { status: 400 });
   }
   const sourceRefusal = knowledgeSourceWriteRefusal(repoPath, specPath);
   if (sourceRefusal) return sourceRefusal;
@@ -98,18 +100,19 @@ export async function PUT(request: NextRequest) {
   } | null;
   const content = typeof body?.content === 'string' ? body.content : null;
   if (content === null) {
-    return NextResponse.json({ ok: false, error: 'content must be a string' }, { status: 400 });
+    return viewerJson({ ok: false, error: 'content must be a string' }, { status: 400 });
   }
+  if (isMaskedViewerReplay(existsSync(specPath) ? readFileSync(specPath, 'utf8') : '', content)) return viewerJson({ error: 'Masked viewer content is read-only', code: 'redacted_content_read_only' }, { status: 409 });
   const cleanup = cleanupOrphanedRoughdraftAnnotations(content);
   if (Buffer.byteLength(cleanup.content, 'utf-8') > MAX_BYTES) {
-    return NextResponse.json({ ok: false, error: `content exceeds ${MAX_BYTES} bytes` }, { status: 400 });
+    return viewerJson({ ok: false, error: `content exceeds ${MAX_BYTES} bytes` }, { status: 400 });
   }
   const expectedHash = typeof body?.expectedHash === 'string' ? body.expectedHash : undefined;
   if (expectedHash !== undefined && body?.force !== true) {
     const currentContent = existsSync(specPath) ? readFileSync(specPath, 'utf-8') : null;
     const currentHash = currentContent === null ? null : await contentHash(currentContent);
     if (currentHash !== expectedHash) {
-      return NextResponse.json({
+      return viewerJson({
         error: 'changed-on-disk',
         contentHash: currentHash,
         content: currentContent,
@@ -118,9 +121,9 @@ export async function PUT(request: NextRequest) {
   }
   try { await writeWorkspaceFile(dirname(specPath), basename(specPath), cleanup.content); }
   catch (error) {
-    return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : 'Spec could not be written.' }, { status: isWorkspaceFileError(error) ? error.status : 500 });
+    return viewerJson({ ok: false, error: error instanceof Error ? error.message : 'Spec could not be written.' }, { status: isWorkspaceFileError(error) ? error.status : 500 });
   }
-  return NextResponse.json({
+  return viewerJson({
     ok: true,
     path: specPath,
     bytes: Buffer.byteLength(cleanup.content, 'utf-8'),
@@ -140,7 +143,7 @@ export async function POST(request: NextRequest) {
   const repoPath = request.nextUrl.searchParams.get('repoPath') ?? '';
   const specPath = resolveSpecPath(repoPath);
   if (!specPath) {
-    return NextResponse.json({ ok: false, error: 'repoPath invalid' }, { status: 400 });
+    return viewerJson({ ok: false, error: 'repoPath invalid' }, { status: 400 });
   }
   const sourceRefusal = knowledgeSourceWriteRefusal(repoPath, specPath);
   if (sourceRefusal) return sourceRefusal;
@@ -148,11 +151,12 @@ export async function POST(request: NextRequest) {
   const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
   const suppliedContent = typeof body?.content === 'string' ? body.content : null;
   if (suppliedContent !== null && Buffer.byteLength(suppliedContent, 'utf-8') > MAX_BYTES) {
-    return NextResponse.json({ ok: false, error: `content exceeds ${MAX_BYTES} bytes` }, { status: 400 });
+    return viewerJson({ ok: false, error: `content exceeds ${MAX_BYTES} bytes` }, { status: 400 });
   }
   // The editor supplies its current buffer so a note action can't race the
   // autosave debounce and overwrite fresh operator prose. MCP callers omit it
   // and continue operating against the persisted file exactly as before.
+  if (suppliedContent !== null && isMaskedViewerReplay(existsSync(specPath) ? readFileSync(specPath, 'utf8') : '', suppliedContent)) return viewerJson({ error: 'Masked viewer content is read-only', code: 'redacted_content_read_only' }, { status: 409 });
   const current = suppliedContent ?? (existsSync(specPath) ? readFileSync(specPath, 'utf-8') : DEFAULT_TEMPLATE);
 
   try {
@@ -160,7 +164,7 @@ export async function POST(request: NextRequest) {
       const parentId = typeof body?.parentId === 'string' ? body.parentId : null;
       const message = typeof body?.message === 'string' ? body.message : null;
       if (!parentId || !message) {
-        return NextResponse.json({ ok: false, error: 'parentId and message are required' }, { status: 400 });
+        return viewerJson({ ok: false, error: 'parentId and message are required' }, { status: 400 });
       }
       const author = typeof body?.author === 'string' ? body.author : undefined;
       const beforeIds = new Set(extractRoughdraftReviewIndex(current).items.map((i) => i.id));
@@ -170,17 +174,17 @@ export async function POST(request: NextRequest) {
         ...(author !== undefined ? { author } : {}),
       });
       if (Buffer.byteLength(updated, 'utf-8') > MAX_BYTES) {
-        return NextResponse.json({ ok: false, error: `content exceeds ${MAX_BYTES} bytes` }, { status: 400 });
+        return viewerJson({ ok: false, error: `content exceeds ${MAX_BYTES} bytes` }, { status: 400 });
       }
       await writeWorkspaceFile(dirname(specPath), basename(specPath), updated);
       const newId = extractRoughdraftReviewIndex(updated).items.find((i) => !beforeIds.has(i.id))?.id ?? null;
-      return NextResponse.json({ ok: true, id: newId, path: specPath, content: updated });
+      return viewerJson({ ok: true, id: newId, path: specPath, content: updated });
     }
 
     if (action === 'comment') {
       const body_ = typeof body?.body === 'string' ? body.body : null;
       if (!body_) {
-        return NextResponse.json({ ok: false, error: 'body is required' }, { status: 400 });
+        return viewerJson({ ok: false, error: 'body is required' }, { status: 400 });
       }
       const anchor = typeof body?.anchor === 'string' ? body.anchor : undefined;
       const author = typeof body?.author === 'string' ? body.author : undefined;
@@ -191,17 +195,17 @@ export async function POST(request: NextRequest) {
         ...(author !== undefined ? { author } : {}),
       });
       if (Buffer.byteLength(updated, 'utf-8') > MAX_BYTES) {
-        return NextResponse.json({ ok: false, error: `content exceeds ${MAX_BYTES} bytes` }, { status: 400 });
+        return viewerJson({ ok: false, error: `content exceeds ${MAX_BYTES} bytes` }, { status: 400 });
       }
       await writeWorkspaceFile(dirname(specPath), basename(specPath), updated);
       const newId = extractRoughdraftReviewIndex(updated).items.find((i) => !beforeIds.has(i.id))?.id ?? null;
-      return NextResponse.json({ ok: true, id: newId, path: specPath, content: updated });
+      return viewerJson({ ok: true, id: newId, path: specPath, content: updated });
     }
 
     if (action === 'suggest') {
       const rawKind = body?.kind;
       if (rawKind !== 'add' && rawKind !== 'del' && rawKind !== 'sub') {
-        return NextResponse.json({ ok: false, error: 'kind must be add, del, or sub' }, { status: 400 });
+        return viewerJson({ ok: false, error: 'kind must be add, del, or sub' }, { status: 400 });
       }
       const kind: SuggestionKind = rawKind;
       const anchor = typeof body?.anchor === 'string' ? body.anchor : undefined;
@@ -217,17 +221,17 @@ export async function POST(request: NextRequest) {
         ...(author !== undefined ? { author } : {}),
       });
       if (Buffer.byteLength(updated, 'utf-8') > MAX_BYTES) {
-        return NextResponse.json({ ok: false, error: `content exceeds ${MAX_BYTES} bytes` }, { status: 400 });
+        return viewerJson({ ok: false, error: `content exceeds ${MAX_BYTES} bytes` }, { status: 400 });
       }
       await writeWorkspaceFile(dirname(specPath), basename(specPath), updated);
       const newId = extractRoughdraftReviewIndex(updated).items.find((i) => !beforeIds.has(i.id))?.id ?? null;
-      return NextResponse.json({ ok: true, id: newId, path: specPath, content: updated });
+      return viewerJson({ ok: true, id: newId, path: specPath, content: updated });
     }
 
     if (action === 'resolve') {
       const targetId = typeof body?.targetId === 'string' ? body.targetId : null;
       if (!targetId) {
-        return NextResponse.json({ ok: false, error: 'targetId is required' }, { status: 400 });
+        return viewerJson({ ok: false, error: 'targetId is required' }, { status: 400 });
       }
       const summary = typeof body?.summary === 'string' ? body.summary : undefined;
       const updated = markRoughdraftResolved(current, {
@@ -235,35 +239,35 @@ export async function POST(request: NextRequest) {
         ...(summary !== undefined ? { summary } : {}),
       });
       await writeWorkspaceFile(dirname(specPath), basename(specPath), updated);
-      return NextResponse.json({ ok: true, path: specPath, content: updated });
+      return viewerJson({ ok: true, path: specPath, content: updated });
     }
 
     if (action === 'scoped-reply') {
       const parentId = typeof body?.parentId === 'string' ? body.parentId : null;
       const message = typeof body?.message === 'string' ? body.message : null;
       if (!parentId || !message) {
-        return NextResponse.json({ ok: false, error: 'parentId and message are required' }, { status: 400 });
+        return viewerJson({ ok: false, error: 'parentId and message are required' }, { status: 400 });
       }
       const { runSingleNoteReply } = await import('@/lib/o8md/spec-review');
       const { updated, result } = await runSingleNoteReply(current, parentId, message);
       if (Buffer.byteLength(updated, 'utf-8') > MAX_BYTES) {
-        return NextResponse.json({ ok: false, error: `content exceeds ${MAX_BYTES} bytes` }, { status: 400 });
+        return viewerJson({ ok: false, error: `content exceeds ${MAX_BYTES} bytes` }, { status: 400 });
       }
       await writeWorkspaceFile(dirname(specPath), basename(specPath), updated);
-      return NextResponse.json({ ok: true, ...result, path: specPath, content: updated });
+      return viewerJson({ ok: true, ...result, path: specPath, content: updated });
     }
 
     if (action === 'apply-suggestion') {
       const targetId = typeof body?.targetId === 'string' ? body.targetId : null;
       if (!targetId) {
-        return NextResponse.json({ ok: false, error: 'targetId is required' }, { status: 400 });
+        return viewerJson({ ok: false, error: 'targetId is required' }, { status: 400 });
       }
       const updated = applySuggestion(current, {
         targetId,
         accept: body?.accept !== false,
       });
       await writeWorkspaceFile(dirname(specPath), basename(specPath), updated);
-      return NextResponse.json({ ok: true, path: specPath, content: updated });
+      return viewerJson({ ok: true, path: specPath, content: updated });
     }
 
     if (action === 'prewarm-review') {
@@ -271,7 +275,7 @@ export async function POST(request: NextRequest) {
       // spawn. Fire-and-forget + idempotent (pool keeps ≤1 idle proc per key).
       const { prewarmReview } = await import('@/lib/o8md/spec-review');
       prewarmReview();
-      return NextResponse.json({ ok: true });
+      return viewerJson({ ok: true });
     }
 
     if (action === 'review') {
@@ -282,20 +286,20 @@ export async function POST(request: NextRequest) {
       const { updated, result } = await runSpecReview(repoPath, current);
       if (updated !== current) {
         if (Buffer.byteLength(updated, 'utf-8') > MAX_BYTES) {
-          return NextResponse.json({ ok: false, error: `content exceeds ${MAX_BYTES} bytes` }, { status: 400 });
+          return viewerJson({ ok: false, error: `content exceeds ${MAX_BYTES} bytes` }, { status: 400 });
         }
         await writeWorkspaceFile(dirname(specPath), basename(specPath), updated);
       }
-      return NextResponse.json({ ok: true, ...result, path: specPath });
+      return viewerJson({ ok: true, ...result, path: specPath });
     }
 
-    return NextResponse.json({ ok: false, error: `unknown action: ${action ?? '(none)'}` }, { status: 400 });
+    return viewerJson({ ok: false, error: `unknown action: ${action ?? '(none)'}` }, { status: 400 });
   } catch (err) {
-    if (isWorkspaceFileError(err)) return NextResponse.json({ ok: false, error: err.message, code: err.code }, { status: err.status });
+    if (isWorkspaceFileError(err)) return viewerJson({ ok: false, error: err.message, code: err.code }, { status: err.status });
     // Parser-domain failure (target not found, raw close delimiter, missing
     // metadata): the request was well-formed but can't be applied. 422 so the
     // CLI surfaces the detail message; MCP reads the body regardless of status.
-    return NextResponse.json(
+    return viewerJson(
       { ok: false, error: err instanceof Error ? err.message : 'review mutation failed' },
       { status: 422 },
     );

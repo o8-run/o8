@@ -182,6 +182,7 @@ export const sessionOutcomes = sqliteTable('session_outcomes', {
   packetId: text('packet_id'),
   outcome: text('outcome', { enum: ['succeeded', 'failed', 'partial', 'interrupted', 'adopted_elsewhere', 'superseded', 'spec_changed', 'wontfix'] }).notNull(),
   summary: text('summary').notNull(),
+  memoryFingerprint: text('memory_fingerprint'),
   planText: text('plan_text'),
   attempts: integer('attempts').notNull().default(1),
   retryHistoryJson: text('retry_history_json').notNull().default('[]'),

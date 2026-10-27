@@ -3682,7 +3682,7 @@ dependencies = [
 
 [[package]]
 name = "o8"
-version = "0.1.810"
+version = "0.1.811"
 dependencies = [
  "base64 0.22.1",
  "block2",
@@ -3707,6 +3707,7 @@ dependencies = [
  "rusqlite",
  "screencapturekit",
  "security-framework",
+ "semver",
  "sentry",
  "sentry-rust-minidump",
  "serde",

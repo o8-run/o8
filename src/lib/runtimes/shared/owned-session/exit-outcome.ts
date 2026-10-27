@@ -1,9 +1,23 @@
 import type { ChildProcess } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 
-import type { OwnedChildExitOutcome } from './types';
+import type { OwnedChildExitOutcome, ParsedRunLog } from './types';
 
 const DEFAULT_STDERR_TAIL_BYTES = 500;
+
+/** Durable input failures override even a provider's successful partial result. */
+export function withStagedStdinOutcome(parsed: ParsedRunLog, deliveryRaw: string): ParsedRunLog {
+  if (!deliveryRaw.trim()) return parsed;
+  let message: string | undefined;
+  try {
+    const delivery = JSON.parse(deliveryRaw.trim().split('\n').at(-1)!);
+    if (delivery.error || delivery.deliveredBytes !== delivery.stagedBytes) {
+      message = `stdin delivery failed: ${delivery.error || 'incomplete input'} (${delivery.deliveredBytes}/${delivery.stagedBytes} bytes delivered)`;
+    }
+  } catch { message = 'stdin delivery failed: unreadable delivery record'; }
+  return message ? { ...parsed, outcome: 'failed', completedTurn: false,
+    providerFailure: { subtype: 'stdin_delivery_failed', message } } : parsed;
+}
 
 export function classifyChildExit(
   code: number | null,
@@ -23,6 +37,11 @@ export function childExitOutcome(
     signal,
     classification: classifyChildExit(code, signal),
   };
+}
+
+/** Operator-facing text for a worker that exited 0 without any output. */
+export function silentCleanExitMessage(humanLabel: string): string {
+  return `${humanLabel} exited without producing any output, so no work was done. Retry the worker; if it keeps happening, check that its CLI is installed and signed in.`;
 }
 
 export async function readAbnormalStderrTail(

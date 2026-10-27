@@ -1,8 +1,9 @@
+import { viewerJson } from '@/lib/viewers/response';
 export const dynamic = 'force-dynamic';
 
 import { NextRequest } from 'next/server';
 import { resolveRequestPrincipalContext } from '@/lib/auth/principal';
-import { operatorError, operatorSuccess } from '@/app/api/orchestrator/_utils';
+import { operatorError } from '@/app/api/orchestrator/_utils';
 import { getTaskArtifactView } from '@/lib/task-artifacts/service';
 import { TASK_ARTIFACT_ID_PATTERN } from '@/lib/task-artifacts/types';
 
@@ -23,5 +24,5 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   if (ctx.role === 'worker' && (!ctx.packetId || view.artifact.target.packetId !== ctx.packetId)) {
     return operatorError('forbidden', 'A worker may read only artifacts attached to its own packet.', 403);
   }
-  return operatorSuccess(view);
+  return viewerJson({ ok: true, result: view });
 }

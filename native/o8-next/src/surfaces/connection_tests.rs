@@ -3,7 +3,8 @@ use crate::shell::test_support::*;
 // Drive main's retained sidebar lifecycle too: a streamed update can fence an
 // in-flight HTTP load, which is retried by the normal shell tick.
 fn settled(shell: &Entity<Shell>, cx: &mut VisualTestContext) {
-    let started = Instant::now();
+    // Allow the production GET budget, then time for the shell to apply its result.
+    let deadline = Instant::now() + crate::client::LOAD_REQUEST_TIMEOUT + Duration::from_secs(5);
     loop {
         shell.update_in(cx, |s, window, cx| s.tick(false, window, cx));
         cx.run_until_parked();
@@ -11,10 +12,7 @@ fn settled(shell: &Entity<Shell>, cx: &mut VisualTestContext) {
         if !shell.read_with(cx, |s, _| s.loading) {
             return;
         }
-        assert!(
-            started.elapsed() < Duration::from_secs(30),
-            "connection load must settle"
-        );
+        assert!(Instant::now() < deadline, "connection load must settle");
         std::thread::sleep(Duration::from_millis(10));
     }
 }

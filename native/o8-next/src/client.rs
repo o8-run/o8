@@ -4,6 +4,17 @@ use std::net::{IpAddr, SocketAddr};
 use std::{io::Read, time::Duration};
 use url::{Host, Url};
 
+// Cold route compilation can outlast window creation. Bound the entire GET,
+// including its response body, without extending mutation request deadlines.
+pub(crate) const LOAD_REQUEST_TIMEOUT: Duration = Duration::from_secs(45);
+
+fn timed_out(error: &(dyn std::error::Error + 'static)) -> bool {
+    error
+        .downcast_ref::<std::io::Error>()
+        .is_some_and(|error| error.kind() == std::io::ErrorKind::TimedOut)
+        || error.source().is_some_and(timed_out)
+}
+
 pub(crate) fn same_workspace(a: &str, b: &str) -> bool {
     a == b
         || matches!((std::fs::canonicalize(a), std::fs::canonicalize(b)), (Ok(a), Ok(b)) if a == b)
@@ -117,12 +128,16 @@ impl Client {
     ) -> Result<T, String> {
         let mut url = self.url(path).map_err(|_| "Invalid route")?;
         url.query_pairs_mut().extend_pairs(query.iter().copied());
-        let request = self.request("GET", &url);
-        let response = request.call().map_err(|e| match e {
-            ureq::Error::Status(code, _) => format!("Server returned HTTP {code}"),
-            _ => "Could not reach the selected server".into(),
+        let request = self.request("GET", &url).timeout(LOAD_REQUEST_TIMEOUT);
+        let response = request.call().map_err(|error| {
+            let message = match &error {
+                ureq::Error::Status(code, _) => format!("Server returned HTTP {code}"),
+                _ if timed_out(&error) => "Request timed out".into(),
+                _ => "Could not reach the selected server".into(),
+            };
+            format!("{}: {message}", url.path())
         })?;
-        Self::read(response)
+        Self::read(response).map_err(|error| format!("{}: {error}", url.path()))
     }
     pub(crate) fn read<T: DeserializeOwned>(response: ureq::Response) -> Result<T, String> {
         let mut bytes = Vec::new();
@@ -130,7 +145,13 @@ impl Client {
             .into_reader()
             .take(16 * 1024 * 1024 + 1)
             .read_to_end(&mut bytes)
-            .map_err(|_| "Could not read history")?;
+            .map_err(|error| {
+                if timed_out(&error) {
+                    "Request timed out"
+                } else {
+                    "Could not read history"
+                }
+            })?;
         if bytes.len() > 16 * 1024 * 1024 {
             return Err("History response exceeds 16 MiB".into());
         }

@@ -5,6 +5,9 @@ import path from 'node:path';
 
 import { getDataDir } from '@/lib/data-dir-migration';
 import { getSqlite } from '@/lib/db';
+import { reviewedCleanupAuthority, verifyReviewedCleanup, restoreReviewedCleanup, hasReviewedCleanupNamespace, ReviewedCleanupChanged,
+  type ReviewedCleanupAuthority } from './reviewed-cleanup-authority';
+import { refreshCloseProcessObservation } from '@/lib/runtime/close-process-observation';
 import { captureWorktreeMaterializationIdentity, assertWorktreeMaterializationIdentity,
   type WorktreeMaterializationIdentity } from '@/lib/worktree/materialization-identity';
 import { probeMetadataLockProcessIdentity } from '@/lib/worktree/metadata-lock-process-identity';
@@ -26,6 +29,8 @@ import { generatedOutputOwner, generatedOutputRevision, readGeneratedOutputResou
 type Owner = NonNullable<GeneratedOutputResource['owner']>;
 
 export interface GeneratedOutputRetirementHooks {
+  reviewedCleanup?: ReviewedCleanupAuthority;
+  beforeSourceRemoval?: () => Promise<void>;
   afterRename?: () => Promise<void>;
   beforePurge?: () => Promise<void>;
   afterFinalAdmission?: () => Promise<void>;
@@ -201,104 +206,139 @@ export async function retireGeneratedOutput(resourceId: string,
   outsideWorkspace(resource.workspace);
   return withGeneratedOutputExclusion(resource.workspace, resource.owner, async () => {
     let claim = readExactWorkspaceClaim('generated-output-retirement', resource.owner!.repositoryPath, resourceId);
-    if (resource.state === 'retired' && !claim) return resource;
-    const sourcePath = path.join(resource.workspace.canonicalPath, '.next');
-    if (!claim) {
-      await verifyAuthority(resource, sourcePath);
-      const operationId = randomUUID();
-      claim = prepareExactWorkspaceClaim({ kind: 'generated-output-retirement', repositoryPath: resource.owner!.repositoryPath,
-        worktreeId: resourceId, operationId, expectedPath: sourcePath, sourcePath,
-        claimPath: path.join(resource.workspace.canonicalPath, `.o8-retired-generated-${operationId}`),
-        parentIdentity: resource.workspace, sourceIdentity: resource.output, contentDigest: resource.bank!.digest,
-        authority: { resourceId, bankDigest: resource.bank!.digest, resourceVersion: resource.version } });
+    if (claim && hooks.reviewedCleanup && JSON.stringify(claim.authority?.reviewedCleanup) !== JSON.stringify(hooks.reviewedCleanup)) {
+      throw new Error('Generated-output retirement belongs to a different reviewed selection.');
     }
-    if (claim.kind !== 'generated-output-retirement' || claim.repositoryPath !== resource.owner!.repositoryPath
-      || claim.worktreeId !== resourceId || claim.authority?.resourceId !== resourceId
-      || claim.authority.bankDigest !== resource.bank?.digest || claim.authority.resourceVersion !== resource.version
-      || claim.contentDigest !== resource.bank?.digest
-      || claim.expectedPath !== sourcePath || claim.sourcePath !== sourcePath
-      || claim.claimPath !== path.join(resource.workspace.canonicalPath, `.o8-retired-generated-${claim.operationId}`)
-      || claim.parentIdentity.canonicalPath !== resource.workspace.canonicalPath
-      || claim.parentIdentity.device !== resource.workspace.device || claim.parentIdentity.inode !== resource.workspace.inode
-      || claim.sourceIdentity?.device !== resource.output!.device || claim.sourceIdentity.inode !== resource.output!.inode) {
-      throw new Error('Generated-output claim authority changed.');
-    }
-    const original = await identityAt(sourcePath);
-    const moved = await identityAt(claim.claimPath);
-    const same = (value: { device: number; inode: number } | null) => !value
-      || (value.device === resource.output!.device && value.inode === resource.output!.inode);
-    if ((original && moved) || !same(original) || !same(moved)) throw new Error('Generated-output source or claim was replaced.');
-    if (claim.state === 'prepared') {
-      if (!original && !moved) throw new Error('Generated-output prepared namespaces are missing.');
-      if (original) {
-        await verifyAuthority(resource, sourcePath, claim);
-        await renameExactChildDirectory(resource.workspace.canonicalPath, resource.workspace,
-          sourcePath, claim.claimPath, resource.output!);
-        await hooks.afterRename?.();
+    try {
+      if (claim?.authority?.reviewedCleanupRestore) {
+        await restoreReviewedCleanup(claim);
+        throw new ReviewedCleanupChanged();
       }
-      claim = transitionExactWorkspaceClaim({ kind: claim.kind, repositoryPath: claim.repositoryPath,
-        worktreeId: resourceId, operationId: claim.operationId, expectedState: 'prepared', toState: 'claimed',
-        claimIdentity: resource.output! });
-    }
-    if (claim.state === 'claimed') {
-      await verifyAuthority(resource, claim.claimPath, claim);
-      const manifest = await captureExactDirectoryManifest(claim.claimPath, resource.output!);
-      const releaseIntents = resource.bank!.entries.filter(entry => entry.kind === 'file')
-        .map(entry => ({ relative: entry.relative, device: entry.device, inode: entry.inode,
-          originalBytes: entry.bytes, originalSha256: entry.sha256, releaseBytes: 0 }));
-      claim = transitionExactWorkspaceClaim({ kind: claim.kind, repositoryPath: claim.repositoryPath,
-        worktreeId: resourceId, operationId: claim.operationId, expectedState: 'claimed', toState: 'purging',
-        authority: { ...claim.authority, purgeManifest: manifest, releaseIntents } });
-    }
-    if (claim.state !== 'purging') throw new Error('Generated-output retirement journal is invalid.');
-    const remaining = await identityAt(claim.claimPath);
-    if (await identityAt(sourcePath)) throw new Error('Generated-output source returned during purge.');
-    if (remaining) {
-      await hooks.beforePurge?.();
-      await verifyAuthority(resource, claim.claimPath, claim);
-      const manifest = claim.authority?.purgeManifest as ExactDirectoryManifest | undefined;
-      if (!manifest?.entries.length) throw new Error('Generated-output purge has no durable manifest.');
-      await purgeExactDirectory(claim.claimPath, resource.output!, undefined,
-        async (candidatePath, captured) => {
-          if (!captured) throw new Error('Generated-output purge requires a captured process witness.');
-          await verifyAuthority(resource, candidatePath, claim!, captured);
-        }, async candidatePath => {
-          assertExactManagedFinalizationClaim(claim!);
-          await verifyAuthority(resource, candidatePath, claim!);
-          if (await identityAt(sourcePath) || (await readdir(candidatePath)).length !== 0) {
-            throw new Error('Generated-output finalization has no exact empty, source-absent namespace.');
-          }
-          admitExactManagedFinalization(claim!);
-          await hooks.afterFinalAdmission?.();
-        }, manifest.fingerprint, manifest.entries);
-      await hooks.afterFinalRemoval?.();
+      if (resource.state === 'retired' && !claim) return resource;
+      const sourcePath = path.join(resource.workspace.canonicalPath, '.next');
+      if (!claim) {
+        await verifyAuthority(resource, sourcePath);
+        await hooks.beforeSourceRemoval?.();
+        const operationId = randomUUID();
+        claim = prepareExactWorkspaceClaim({ kind: 'generated-output-retirement', repositoryPath: resource.owner!.repositoryPath,
+          worktreeId: resourceId, operationId, expectedPath: sourcePath, sourcePath,
+          claimPath: path.join(resource.workspace.canonicalPath, `.o8-retired-generated-${operationId}`),
+          parentIdentity: resource.workspace, sourceIdentity: resource.output, contentDigest: resource.bank!.digest,
+          authority: { resourceId, bankDigest: resource.bank!.digest, resourceVersion: resource.version,
+            ...(hooks.reviewedCleanup ? { reviewedCleanup: hooks.reviewedCleanup } : {}) } });
+      }
+      if (claim.kind !== 'generated-output-retirement' || claim.repositoryPath !== resource.owner!.repositoryPath
+        || claim.worktreeId !== resourceId || claim.authority?.resourceId !== resourceId
+        || claim.authority.bankDigest !== resource.bank?.digest || claim.authority.resourceVersion !== resource.version
+        || claim.contentDigest !== resource.bank?.digest
+        || claim.expectedPath !== sourcePath || claim.sourcePath !== sourcePath
+        || claim.claimPath !== path.join(resource.workspace.canonicalPath, `.o8-retired-generated-${claim.operationId}`)
+        || claim.parentIdentity.canonicalPath !== resource.workspace.canonicalPath
+        || claim.parentIdentity.device !== resource.workspace.device || claim.parentIdentity.inode !== resource.workspace.inode
+        || claim.sourceIdentity?.device !== resource.output!.device || claim.sourceIdentity.inode !== resource.output!.inode) {
+        throw new Error('Generated-output claim authority changed.');
+      }
+      const original = await identityAt(sourcePath);
+      const moved = await identityAt(claim.claimPath);
+      const same = (value: { device: number; inode: number } | null) => !value
+        || (value.device === resource.output!.device && value.inode === resource.output!.inode);
+      if ((original && moved) || !same(original) || !same(moved)) throw new Error('Generated-output source or claim was replaced.');
+      if (claim.state === 'prepared') {
+        if (!original && !moved) throw new Error('Generated-output prepared namespaces are missing.');
+        if (original) {
+          await verifyReviewedCleanup(claim, sourcePath);
+          await hooks.beforeSourceRemoval?.();
+          await verifyAuthority(resource, sourcePath, claim);
+          await hooks.beforeSourceRemoval?.();
+          await renameExactChildDirectory(resource.workspace.canonicalPath, resource.workspace,
+            sourcePath, claim.claimPath, resource.output!);
+          await hooks.afterRename?.();
+        }
+        await verifyReviewedCleanup(claim, claim.claimPath);
+        claim = transitionExactWorkspaceClaim({ kind: claim.kind, repositoryPath: claim.repositoryPath,
+          worktreeId: resourceId, operationId: claim.operationId, expectedState: 'prepared', toState: 'claimed',
+          claimIdentity: resource.output! });
+      }
+      if (claim.state === 'claimed') {
+        await verifyReviewedCleanup(claim, claim.claimPath);
+        await verifyAuthority(resource, claim.claimPath, claim);
+        const manifest = await captureExactDirectoryManifest(claim.claimPath, resource.output!);
+        await verifyReviewedCleanup(claim, claim.claimPath);
+        const releaseIntents = resource.bank!.entries.filter(entry => entry.kind === 'file')
+          .map(entry => ({ relative: entry.relative, device: entry.device, inode: entry.inode,
+            originalBytes: entry.bytes, originalSha256: entry.sha256, releaseBytes: 0 }));
+        claim = transitionExactWorkspaceClaim({ kind: claim.kind, repositoryPath: claim.repositoryPath,
+          worktreeId: resourceId, operationId: claim.operationId, expectedState: 'claimed', toState: 'purging',
+          authority: { ...claim.authority, purgeManifest: manifest, releaseIntents } });
+      }
+      if (claim.state !== 'purging') throw new Error('Generated-output retirement journal is invalid.');
+      const remaining = await identityAt(claim.claimPath);
+      if (await identityAt(sourcePath)) throw new Error('Generated-output source returned during purge.');
+      if (remaining) {
+        await hooks.beforePurge?.();
+        await verifyReviewedCleanup(claim, claim.claimPath);
+        await verifyAuthority(resource, claim.claimPath, claim);
+        const manifest = claim.authority?.purgeManifest as ExactDirectoryManifest | undefined;
+        if (!manifest?.entries.length) throw new Error('Generated-output purge has no durable manifest.');
+        await purgeExactDirectory(claim.claimPath, resource.output!, undefined,
+          async (candidatePath, captured) => {
+            if (!captured) throw new Error('Generated-output purge requires a captured process witness.');
+            await verifyReviewedCleanup(claim!, candidatePath);
+            // The paused native helper did not exist in the earlier owner observation.
+            refreshCloseProcessObservation();
+            await verifyAuthority(resource, candidatePath, claim!, captured);
+          }, async candidatePath => {
+            assertExactManagedFinalizationClaim(claim!);
+            await verifyAuthority(resource, candidatePath, claim!);
+            if (await identityAt(sourcePath) || (await readdir(candidatePath)).length !== 0) {
+              throw new Error('Generated-output finalization has no exact empty, source-absent namespace.');
+            }
+            admitExactManagedFinalization(claim!);
+            await hooks.afterFinalAdmission?.();
+          }, manifest.fingerprint, manifest.entries);
+        await hooks.afterFinalRemoval?.();
+        await verifyAuthority(resource, null, claim);
+        if (await identityAt(sourcePath) || await identityAt(claim.claimPath)) {
+          throw new Error('Generated-output finalization namespaces returned.');
+        }
+        completeExactManagedFinalization(claim, 'removed');
+      } else {
+        const finalization = readExactManagedFinalization(claim);
+        if (!finalization) throw new Error('Missing generated-output claim has no durable final-empty admission.');
+        await verifyAuthority(resource, null, claim);
+        if (await identityAt(sourcePath) || await identityAt(claim.claimPath)) {
+          throw new Error('Generated-output finalization namespace returned during replay.');
+        }
+        if (finalization.state === 'admitted') completeExactManagedFinalization(claim, 'absent-after-admission');
+      }
       await verifyAuthority(resource, null, claim);
-      if (await identityAt(sourcePath) || await identityAt(claim.claimPath)) {
-        throw new Error('Generated-output finalization namespaces returned.');
+      if (await identityAt(sourcePath) || await identityAt(claim.claimPath)
+        || readExactManagedFinalization(claim)?.state !== 'complete') {
+        throw new Error('Generated-output completion lacks retained finalization truth.');
       }
-      completeExactManagedFinalization(claim, 'removed');
-    } else {
-      const finalization = readExactManagedFinalization(claim);
-      if (!finalization) throw new Error('Missing generated-output claim has no durable final-empty admission.');
-      await verifyAuthority(resource, null, claim);
-      if (await identityAt(sourcePath) || await identityAt(claim.claimPath)) {
-        throw new Error('Generated-output finalization namespace returned during replay.');
+      return getSqlite().transaction(() => {
+        assertExactManagedFinalizationClaim(claim!);
+        retentionReleased(resource);
+        const retired = saveGeneratedOutputResource(resource, { state: 'retired', retirement: {
+          operationId: claim!.operationId, retiredAt: Date.now(), expandedBytes: resource.bank!.expandedBytes,
+          bankDigest: resource.bank!.digest, verifiedRecoveryOperationId: resource.recovery!.operationId, claim: claim! } });
+        removeExactWorkspaceClaim(claim!.kind, claim!.repositoryPath, resourceId, claim!.operationId);
+        return retired;
+      }).immediate();
+    } catch (error) {
+      const current = readExactWorkspaceClaim('generated-output-retirement', resource.owner!.repositoryPath, resourceId);
+      if (current && reviewedCleanupAuthority(current) && await hasReviewedCleanupNamespace(current)) {
+        let mismatch = error instanceof ReviewedCleanupChanged;
+        if (!mismatch) {
+          const candidate = await identityAt(current.claimPath) ? current.claimPath : current.sourcePath;
+          try { await verifyReviewedCleanup(current, candidate); } catch { mismatch = true; }
+        }
+        if (mismatch) {
+          await restoreReviewedCleanup(current);
+          throw new ReviewedCleanupChanged();
+        }
       }
-      if (finalization.state === 'admitted') completeExactManagedFinalization(claim, 'absent-after-admission');
+      throw error;
     }
-    await verifyAuthority(resource, null, claim);
-    if (await identityAt(sourcePath) || await identityAt(claim.claimPath)
-      || readExactManagedFinalization(claim)?.state !== 'complete') {
-      throw new Error('Generated-output completion lacks retained finalization truth.');
-    }
-    return getSqlite().transaction(() => {
-      assertExactManagedFinalizationClaim(claim!);
-      retentionReleased(resource);
-      const retired = saveGeneratedOutputResource(resource, { state: 'retired', retirement: {
-        operationId: claim!.operationId, retiredAt: Date.now(), expandedBytes: resource.bank!.expandedBytes,
-        bankDigest: resource.bank!.digest, verifiedRecoveryOperationId: resource.recovery!.operationId, claim: claim! } });
-      removeExactWorkspaceClaim(claim!.kind, claim!.repositoryPath, resourceId, claim!.operationId);
-      return retired;
-    }).immediate();
   });
 }

@@ -1,6 +1,6 @@
 [package]
 name = "o8"
-version = "0.1.810"
+version = "0.1.811"
 description = "o8 — governance layer for autonomous engineering teams"
 authors = ["hurttlocker"]
 license = "MIT"
@@ -49,6 +49,7 @@ default = []
 dev-mcp-plugin = ["dep:tauri-plugin-mcp"]
 
 [dependencies]
+semver = "1"
 o8-restart-safety = { path = "../crates/o8-restart-safety" }
 serde_json = "1.0"
 uuid = { version = "1", features = ["v4"] }

@@ -88,6 +88,7 @@ impl<R: Runtime> NativeEffects<R> {
         attempt_id: &str,
     ) -> Result<bool, String> {
         let version = &update.version;
+        let generation = crate::update_ping::update_generation(&self.app, &update);
         let directory = self
             .data_directory()?
             .ok_or("Native update storage is unavailable")?;
@@ -114,7 +115,9 @@ impl<R: Runtime> NativeEffects<R> {
                 }
             }
         }
+        crate::update_ping::ensure_update_channel(&self.app, &update)?;
         let bytes = download(&update, |_, _| {}, || {}).await?;
+        crate::update_ping::ensure_epoch(&self.app, generation)?;
         let admission = control(
             &self.client,
             &format!("{}/api/panel/app/update-state", self.base),
@@ -125,17 +128,20 @@ impl<R: Runtime> NativeEffects<R> {
         if admission["allowed"].as_bool() != Some(true) {
             return Ok(false);
         }
-        let installed = journal.install_if_admitted(
-            version,
-            || match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                update.install(bytes)
-            })) {
-                Ok(result) => result.map(|_| true).map_err(|error| error.to_string()),
-                Err(error) if error.is::<crate::update_ping::RestartRefused>() => Ok(false),
-                Err(_) => Err("Native installer stopped unexpectedly.".into()),
-            },
-            || Ok(()),
-        )?;
+        crate::update_ping::ensure_update_channel(&self.app, &update)?;
+        let installed = crate::update_ping::install_in_channel(&self.app, generation, || {
+            journal.install_if_admitted(
+                version,
+                || match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    update.install(bytes)
+                })) {
+                    Ok(result) => result.map(|_| true).map_err(|error| error.to_string()),
+                    Err(error) if error.is::<crate::update_ping::RestartRefused>() => Ok(false),
+                    Err(_) => Err("Native installer stopped unexpectedly.".into()),
+                },
+                || Ok(()),
+            )
+        })?;
         // Windows success exits inside the plugin. Any returned error stays here,
         // and its durable marker prevents an unchanged launch from retrying it.
         Ok(installed)

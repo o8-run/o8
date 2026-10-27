@@ -13,12 +13,14 @@ export interface CodexAppBridgeSpec {
   cwd: string;
   /** Resume this Codex thread; null starts a new one. */
   threadId: string | null;
-  /** o8's orchestrator prompt. Sent as developer instructions, not as user text. */
+  /** Stable orchestrator instructions; continuations retain their legacy split. */
   developerInstructions: string | null;
+  /** Wrapped current turn, separate from the reusable orchestrator instructions. */
+  turnDeveloperInstructions?: string;
   message: string;
   imagePaths: string[];
   model: string;
-  effort: string;
+  effort?: string;
   serviceTier: string | null;
   sandbox: 'read-only' | 'danger-full-access';
   /** Per-thread config overrides, such as o8's MCP servers. */
@@ -28,11 +30,17 @@ export interface CodexAppBridgeSpec {
 /** Marker between o8's prompt and the user's message in buildCodexOrchestratorPrompt. */
 export const CODEX_USER_MESSAGE_MARKER = '\n\n## USER MESSAGE\n\n';
 
-/** Keep the complete wrapped turn in developer context when the operator's text is available. */
-export function splitCodexOrchestratorPrompt(prompt: string, rawMessage?: string): { instructions: string | null; message: string } {
+/** Keep the complete wrapped turn in per-turn context when the operator's text is available. */
+export function splitCodexOrchestratorPrompt(prompt: string, rawMessage?: string): {
+  instructions: string | null; message: string; turnInstructions?: string;
+} {
   // Preserve every instruction and its order, including context after the marker.
   // Do not parse the operator's words: they can contain o8's headings verbatim.
-  if (rawMessage !== undefined) return { instructions: prompt, message: rawMessage };
+  if (rawMessage !== undefined) {
+    const at = prompt.indexOf(CODEX_USER_MESSAGE_MARKER);
+    return { instructions: at < 0 ? null : prompt.slice(0, at), message: rawMessage,
+      turnInstructions: at < 0 ? prompt : prompt.slice(at + CODEX_USER_MESSAGE_MARKER.length) };
+  }
   // Automated continuations have no raw operator text; retain their existing split.
   // The first marker: o8's prompt comes first, and the user's text may contain anything.
   const at = prompt.indexOf(CODEX_USER_MESSAGE_MARKER);

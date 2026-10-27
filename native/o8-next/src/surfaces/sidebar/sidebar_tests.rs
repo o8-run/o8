@@ -261,25 +261,39 @@ fn active_id(shell: &Entity<Shell>, cx: &mut VisualTestContext) -> String {
     })
 }
 fn assert_oracle(shell: &Entity<Shell>, cx: &VisualTestContext, expected: Value) {
-    let actual = shell.read_with(cx, |s, cx| {
-        serde_json::to_value(&*s.surfaces.sidebar.view.as_ref().unwrap().read(cx).rows).unwrap()
+    let sessions = shell.read_with(cx, |s, cx| {
+        s.surfaces
+            .sidebar
+            .view
+            .as_ref()
+            .unwrap()
+            .read(cx)
+            .sessions
+            .clone()
     });
-    for (i, (actual, expected)) in actual
+    let expected: Vec<_> = expected
         .as_array()
         .unwrap()
         .iter()
-        .zip(expected.as_array().unwrap())
-        .enumerate()
-    {
+        .filter(|r| r["kind"] == "thread")
+        .collect();
+    assert_eq!(
+        sessions.len(),
+        expected.len(),
+        "retain every desktop route record, including disclosed groups"
+    );
+    for row in expected {
+        let session = sessions
+            .iter()
+            .find(|s| row["id"] == s.id)
+            .expect("desktop record must remain available");
+        assert_eq!(row["title"], session.title);
+        assert_eq!(row["status"], session.status);
         assert_eq!(
-            actual, expected,
-            "desktop row {i}: record, workspace, section, order and state"
+            row["workspace"],
+            session.repo_path.as_deref().unwrap_or("Unassigned")
         );
     }
-    assert_eq!(
-        actual.as_array().unwrap().len(),
-        expected.as_array().unwrap().len()
-    );
 }
 
 #[gpui::test]
@@ -445,20 +459,20 @@ fn sidebar_group_order_search_keyboard_rename_archive_and_live_events(cx: &mut T
             .read(cx)
             .rows
             .iter()
-            .position(|r| r.id.as_deref() == Some("pi-owned:grid-runtime"))
+            .position(|r| r.id.as_deref() == Some("pi-builtin-owned:grid-runtime"))
             .unwrap()
     });
     assert_eq!(row, 2);
     click(cx, "thread-row-2");
     ready(&shell, cx);
-    assert_eq!(active_id(&shell, cx), "pi-owned:grid-runtime");
+    assert_eq!(active_id(&shell, cx), "pi-builtin-owned:grid-runtime");
     cx.simulate_keystrokes("f8");
     draw(cx);
     cx.simulate_keystrokes("escape");
     draw(cx);
     cx.simulate_keystrokes("home down enter");
     ready(&shell, cx);
-    assert_ne!(active_id(&shell, cx), "pi-owned:grid-runtime");
+    assert_ne!(active_id(&shell, cx), "pi-builtin-owned:grid-runtime");
 }
 
 #[gpui::test]
@@ -559,6 +573,10 @@ fn sidebar_worker_archive_real_path(cx: &mut TestAppContext) {
     settle(&shell, cx);
     click(cx, "thread-row-2");
     ready(&shell, cx);
+    // Opening the worker focuses its content. Focus the sidebar through its
+    // real shortcut before clicking the footer control hidden outside it.
+    cx.simulate_keystrokes("f8");
+    settle(&shell, cx);
     click(cx, "thread-archive");
     wait_for(&shell, cx, |s, cx| {
         !s.surfaces
@@ -569,17 +587,17 @@ fn sidebar_worker_archive_real_path(cx: &mut TestAppContext) {
             .read(cx)
             .sessions
             .iter()
-            .any(|s| s.id == "pi-owned:grid-runtime")
+            .any(|s| s.id == "pi-builtin-owned:grid-runtime")
     });
     let state: Value = fixture
         .client
         .get(
             "/api/runtime/archive",
-            &[("sessionKeys", "pi-owned:grid-runtime")],
+            &[("sessionKeys", "pi-builtin-owned:grid-runtime")],
         )
         .unwrap();
     assert_eq!(
-        state["states"]["pi-owned:grid-runtime"], "archived",
+        state["states"]["pi-builtin-owned:grid-runtime"], "archived",
         "native worker archive must persist in the desktop runtime store"
     );
 }
@@ -699,3 +717,6 @@ mod project_keyboard_tests;
 
 #[path = "project_round2_tests.rs"]
 mod project_round2_tests;
+
+#[path = "recents_tests.rs"]
+mod recents_tests;

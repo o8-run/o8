@@ -22,7 +22,7 @@ export const DEFAULT_COLLIDE_CONFIG: MoaConfig = {
     { backend: 'claude', model: MODEL_IDS.orchestratorDefault, thinkingEffort: 'max' },
     { backend: 'codex', model: MODEL_IDS.codexDefault, thinkingEffort: 'xhigh' },
   ],
-  aggregator: { backend: 'claude', model: MODEL_IDS.orchestratorDefault, thinkingEffort: 'max' },
+  aggregator: { backend: 'claude', model: MODEL_IDS.orchestratorDefault },
 };
 
 const VALID_BACKENDS: OrchestratorBackendId[] = ['claude', 'codex'];
@@ -78,15 +78,18 @@ function aggregatorFor(
     ? collideBackendFamily(activeBackend)
     : defaultSetting;
   const fallback = DEFAULT_COLLIDE_CONFIG.proposers.find((p) => p.backend === backend) ?? { backend };
+  // A proposer has its own reasoning pin. Choosing the same model to aggregate
+  // does not make that private pin an explicit choice for the visible turn.
+  const selection: MoaParticipant = { backend, model: fallback.model };
   // Q ruling 2026-07-11: Collide's aggregator is the model the operator actually
   // picked in the composer — not the house default. When the chosen model
   // belongs to the aggregator's family, run it as the aggregator (Fable, Terra,
   // Sol, Opus, Sonnet all reach the decider chair). Cross-family picks keep the
   // family default so we never hand codex a claude id (or vice-versa).
   if (baseModel && modelFamily(baseModel) === backend) {
-    return { ...fallback, backend, model: baseModel };
+    return { ...selection, model: baseModel };
   }
-  return fallback;
+  return selection;
 }
 
 /**

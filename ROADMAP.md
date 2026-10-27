@@ -17,16 +17,13 @@ Taste is a gate on every row here, not a pillar of its own. A change that reads 
 ## Current focus
 
 The [focus plan through October 27](./docs/operations/focus-through-2026-10-27.md) is the execution order for this month: installed first-run acceptance, trustworthy funnel measurement, paid-tier behavior, and Symon reliability. It includes two bounded contributor queues and weekly checkpoints. The pillar tables below retain longer-term work; an open arc is not automatically permission to start it this month.
+<!-- TODO: Maintainer to review the priorities and contributor queues tied to the October 27 focus plan when it ends. -->
 
 ## Now
 
-First-run acceptance is the immediate engineering priority. Published stable is 0.1.805. A fresh stall-free first-run repeat and physical Apple Silicon execution remain unverified. A candidate run is not a public download-to-merge benchmark. Preserve the Solo tools, sent-image, and comparison stop/requeue checks. [#2211](https://github.com/o8-run/o8/issues/2211)
+First-run acceptance is the immediate engineering priority. Published stable is [0.1.811](https://github.com/hurttlocker/o8-releases/releases/tag/v0.1.811), released October 26. A fresh stall-free first-run repeat and physical Apple Silicon execution remain unverified. A candidate run is not a public download-to-merge benchmark. Preserve the Solo tools, sent-image, and comparison stop/requeue checks. [#2211](https://github.com/o8-run/o8/issues/2211)
 
-Shared screen layout rules, explicit agent readiness, independent project discovery, optional voice and iPhone setup, and sensory feedback are implemented in [#3345](https://github.com/o8-run/o8/pull/3345). Full-window setup follows native glass while preserving opaque browser and solid surfaces. Built-in agent runtime roles are registered; installed-app acceptance remains open in [#3246](https://github.com/o8-run/o8/issues/3246). These are source and development checks; installed first-run acceptance remains open.
-
-Direct tool sign-in recovery, explicit workspace continuation, restart intent, and focus and sound follow-through are implemented in [#3374](https://github.com/o8-run/o8/pull/3374). A ready discovery result enables continuation; opening a sign-in surface never starts authentication automatically. Source completion does not establish installed acceptance or a release; voice and mobile acceptance remain with their existing work.
-
-Default-on usage analytics, with a first-run disclosure, preserved opt-outs and a matching privacy page, merged in [#3046](https://github.com/o8-run/o8/pull/3046) and ships with the next release. Update-service delivery in the installed updater and trustworthy active-install counts remain unverified.
+Default-on usage analytics, with a first-run disclosure, preserved opt-outs and matching privacy documentation, is published in 0.1.811 via [#3046](https://github.com/o8-run/o8/pull/3046). Update-service delivery in the installed updater and trustworthy active-install counts remain unverified. Later activation and reporting work is listed below as source work awaiting the next release and installed acceptance.
 
 After first-run acceptance, verify paid-tier behavior through the installed app, then complete the existing Symon reliability review. Its scope includes sessions, models, tool results, interruptions, reconnect and approvals. Current Symon follow-ups retain their own prerequisite and acceptance evidence. [#2534](https://github.com/o8-run/o8/issues/2534)
 
@@ -37,6 +34,34 @@ Broad remote-project expansion is outside this month's default queue. Existing s
 Shared-checkout teams shipped in 0.1.771 with four-worker native evidence. Ten-worker, collision and isolated-mode acceptance remain open. Linux and Windows product validation stay parked; running existing tests on Linux does not change that status. [#2772](https://github.com/o8-run/o8/issues/2772), [#1672](https://github.com/o8-run/o8/issues/1672), [#2204](https://github.com/o8-run/o8/issues/2204)
 
 ## Source work awaiting installed acceptance
+
+Published stable is [0.1.811](https://github.com/hurttlocker/o8-releases/releases/tag/v0.1.811). The October 26 and 27 merges below are beyond its source tag and await the next release. Merged source does not establish installed acceptance; earlier published work retains its recorded acceptance gaps.
+
+Activation analytics count the first observed successful worker launch, first completed merge and clean or unclean backend session endings in [#4810](https://github.com/o8-run/o8/pull/4810). The daily report in [#4812](https://github.com/o8-run/o8/pull/4812) groups observed installs, activation and session outcomes by version. Fixture verification does not supply production counts; the hosted read-only export remains a separate prerequisite. Installed measurement remains unverified.
+
+Lead effort choices are checked against the installed CLI's advertised vocabulary in [#4865](https://github.com/o8-run/o8/pull/4865). Unmapped concrete pins are refused in [#4858](https://github.com/o8-run/o8/pull/4858); omitted or adaptive choices retain runtime defaults, and unsupported live steers are refused before delivery in [#4901](https://github.com/o8-run/o8/pull/4901). Phone Ask preserves explicit effort through native launch in [#4850](https://github.com/o8-run/o8/pull/4850), while automatic continuations drop inherited pins on leads without a matching transport in [#4914](https://github.com/o8-run/o8/pull/4914). Installed acceptance remains separate.
+
+Runtime launch records its preparation stages and bounds post-worktree observation to 30 seconds in [#4755](https://github.com/o8-run/o8/pull/4755). A timeout names the active step without claiming that a process is absent; unstarted sessions retire only after complete run-history and process-clearance checks. Detached workers receive staged input through a pipe, and an unrecognized empty exit is recorded as failure in [#4854](https://github.com/o8-run/o8/pull/4854). Installed launch and recovery acceptance remain open.
+
+Finished worker panes collapse to outcome cards with review links and transcript expansion in [#4848](https://github.com/o8-run/o8/pull/4848). The project Add entry opens a folder directly and also accepts URL paste or folder drop in [#4845](https://github.com/o8-run/o8/pull/4845). Rail-created chat panes retain independent conversations in [#4805](https://github.com/o8-run/o8/pull/4805). Source and controlled UI evidence do not establish installed acceptance.
+
+Sidebar layout follows applied UI zoom in [#4893](https://github.com/o8-run/o8/pull/4893), and Review retains source anchors through reflow in [#4873](https://github.com/o8-run/o8/pull/4873). Optional surface preloads stay off composer startup in [#4874](https://github.com/o8-run/o8/pull/4874); returning to an unchanged session reuses transcript, visualization and composer work in [#4897](https://github.com/o8-run/o8/pull/4897). Installed responsiveness and the original window comparison remain separate acceptance work.
+
+Completed worker log retention has byte and expiry bounds in [#4851](https://github.com/o8-run/o8/pull/4851). Controlled native measurements do not establish installed acceptance, and the whole-app 500 MB idle-memory target remains unmet.
+
+The native sidebar groups Recents by age and preserves keyboard focus through live reordering in [#4737](https://github.com/o8-run/o8/pull/4737). Native shell startup recovers unreadable state in memory and restores window bounds onto an active display in [#4704](https://github.com/o8-run/o8/pull/4704). Installed acceptance of the experimental shell remains separate.
+
+MCP tool schemas publish required fields, supported values and corrective input errors in [#4832](https://github.com/o8-run/o8/pull/4832). Deterministic contract checks do not establish the unmeasured model-backed operator trial or installed acceptance.
+
+Explicitly forgotten project memory stays excluded from later capture, recall and dispatch in [#4888](https://github.com/o8-run/o8/pull/4888). Source verification does not establish installed acceptance.
+
+Linux package installation recommends Node 22 while retaining the runtime preflight in [#4822](https://github.com/o8-run/o8/pull/4822). Packaged desktop entries pass deep-link URLs in [#4826](https://github.com/o8-run/o8/pull/4826), and package-managed installs use their package manager's update path in [#4825](https://github.com/o8-run/o8/pull/4825). Native browser commands and receiver settings are limited to supported hosts in [#4819](https://github.com/o8-run/o8/pull/4819) and [#4827](https://github.com/o8-run/o8/pull/4827); Linux glass is opt-in in [#4816](https://github.com/o8-run/o8/pull/4816). These merges do not establish Linux install-to-merge acceptance or restart maintainer VM validation.
+
+Verification support: the local CI command derives its checks from the workflow in [#4815](https://github.com/o8-run/o8/pull/4815), and child-exit fixtures stay inside the isolated test data directory in [#4867](https://github.com/o8-run/o8/pull/4867). Release preflight reports competing producer identity in [#4866](https://github.com/o8-run/o8/pull/4866). These changes do not establish a new release or installed acceptance.
+
+Shared screen layout rules, explicit agent readiness, independent project discovery, optional voice and iPhone setup, and sensory feedback are implemented in [#3345](https://github.com/o8-run/o8/pull/3345) and included in 0.1.811. Full-window setup follows native glass while preserving opaque browser and solid surfaces. Built-in agent runtime roles are registered; installed-app acceptance remains open in [#3246](https://github.com/o8-run/o8/issues/3246). Publication does not establish installed first-run acceptance.
+
+Direct tool sign-in recovery, explicit workspace continuation, restart intent, and focus and sound follow-through are implemented in [#3374](https://github.com/o8-run/o8/pull/3374) and included in 0.1.811. A ready discovery result enables continuation; opening a sign-in surface never starts authentication automatically. Installed acceptance remains open; voice and mobile acceptance remain with their existing work.
 
 Explicit adopted-elsewhere Close recovers an original archived clean-exit owner only when manager identity, packet and lane bindings, complete run evidence and native process quiescence agree. The archived worker stays closed; branch preservation, operator-stop state and the existing retirement checks remain in force. Source handler proof is separate from installed acceptance and release. [#4065](https://github.com/o8-run/o8/issues/4065)
 
@@ -318,3 +343,9 @@ Activity refresh [#3460](https://github.com/o8-run/o8/issues/3460) excludes tran
 
 <!-- issue3131-activity-reliability -->
 Activity folder-state follow-up (#3131): selected local folders retain their scope, local Git failures stay visible beside remote history, and Retry rechecks the same folder. Review/Workspace existing remedies are preserved. Source verification and native acceptance remain separate; no release is included.
+
+Artifact-bound beta enrollment [#4798](https://github.com/o8-run/o8/issues/4798)
+is under review. Publication and updater entry-point regressions cover signed
+channel identity, stable isolation, ordered results and returning to Stable
+without downgrade. Promotion remains separate in #4857; installed-build smoke
+acceptance remains draft #4813. No release or installed acceptance is claimed.

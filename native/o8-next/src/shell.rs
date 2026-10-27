@@ -15,9 +15,9 @@ use std::{
     time::Duration,
 };
 
-// The parent waits for the first server load in the open window. This channel
+// The parent waits only for the first paint of the open window. This channel
 // carries only fixed control signals, never diagnostics or credentials.
-fn report_startup(ready: bool) {
+fn report_startup() {
     use std::{
         io::Write,
         sync::atomic::{AtomicBool, Ordering},
@@ -29,12 +29,9 @@ fn report_startup(ready: bool) {
         return;
     }
     let mut output = std::io::stdout().lock();
-    let signal: &[u8] = if ready {
-        b"o8-next-ready\n"
-    } else {
-        b"o8-next-startup-error\n"
-    };
-    let _ = output.write_all(signal).and_then(|_| output.flush());
+    let _ = output
+        .write_all(b"o8-next-ready\n")
+        .and_then(|_| output.flush());
 }
 
 pub const HELP: &str = "App shell: --app-shell --shell-state ABSOLUTE_FILE --server ORIGIN [--offscreen]. The o8 next launcher resolves existing local configuration.";
@@ -204,11 +201,9 @@ impl Shell {
                         }
                         this.notice.clear();
                         this.persist();
-                        report_startup(true);
                     }
                     Err(error) => {
                         this.connected = false;
-                        report_startup(false);
                         this.notice = format!("Local server unavailable: {error}. Start the local o8 server, then Retry.");
                     }
                 }
@@ -562,9 +557,17 @@ mod view;
 pub use view::try_launch;
 
 #[cfg(test)]
+#[path = "shell_window_tests.rs"]
+mod window_tests;
+
+#[cfg(test)]
 #[path = "shell_tests.rs"]
 mod tests;
 
 #[cfg(test)]
 #[path = "shell_test_support.rs"]
 mod test_support;
+
+#[cfg(test)]
+#[path = "startup_tests.rs"]
+mod startup_tests;

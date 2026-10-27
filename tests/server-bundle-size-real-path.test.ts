@@ -101,7 +101,7 @@ describe('server size check CLI', () => {
       cookie: 'two', setCookie: 'three', continuation: '1', redirect: 307 });
   });
 
-  it('shares the lazy compiler runtime through a packaged CLI against saved source', () => {
+  it.each(['native', 'darwin'])('shares the lazy compiler runtime through a packaged CLI against saved source on %s', platform => {
     const { root } = fixture();
     symlinkSync(join(process.cwd(), 'node_modules'), join(root, 'node_modules'), 'junction');
     const saved = join(root, 'saved.ts');
@@ -124,7 +124,10 @@ describe('server size check CLI', () => {
     const outDir = join(root, 'built');
     const report = bundleServers({ root, outDir });
     rmSync(join(root, 'node_modules'), { recursive: true, force: true });
-    const executed = spawnSync(process.execPath, [join(outDir, 'ws-server.mjs'), saved], {
+    writeFileSync(join(outDir, 'native-addon-runtime.cjs'), 'exports.prepareNativeAddons = () => {};');
+    const preload = join(root, 'platform.cjs');
+    writeFileSync(preload, "Object.defineProperty(process, 'platform', { value: 'darwin' });");
+    const executed = spawnSync(process.execPath, [...(platform === 'darwin' ? ['--require', preload] : []), join(outDir, 'ws-server.mjs'), saved], {
       encoding: 'utf8', timeout: 10_000,
     });
     expect(executed.status, executed.stderr).toBe(0);

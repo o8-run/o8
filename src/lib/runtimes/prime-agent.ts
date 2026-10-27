@@ -99,6 +99,7 @@ export const primeAgentRuntime: AgentRuntime = {
     const result = await launchOwnedPrimeAgentSession({
       cwd: opts.cwd,
       prompt: opts.prompt,
+      promptMemoryRevision: opts.promptMemoryRevision,
       clientMutationId: opts.clientMutationId,
       laneId: opts.laneId,
       packetId: opts.packetId,

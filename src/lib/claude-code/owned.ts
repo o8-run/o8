@@ -169,6 +169,8 @@ export async function getOwnedClaudeCodeTelemetrySources(surfaceId: string) {
 }
 
 export async function launchOwnedClaudeCodeSession(request: {
+  /** Recall epoch bound before assembling this launch prompt. */
+  promptMemoryRevision?: string;
   cwd: string;
   controlledTask?: import('@/lib/mcp/task-execution-store').ControlledTaskBinding;
   executionPolicy?: 'single-attempt';

@@ -38,3 +38,30 @@ it('bounds text on short screens and remeasures a hidden composer when shown', a
   await act(async () => root.render(createElement(Harness, { value: 'Restored draft' })));
   expect(Number.parseFloat(host.querySelector('textarea')!.style.height)).toBeCloseTo(112);
 });
+it('reuses unchanged composer geometry when a retained session returns', async () => {
+  measuredHeight = 140;
+  await act(async () => root.render(createElement(Harness, { value: 'Retained draft' })));
+  const input = host.querySelector('textarea')!;
+  const geometry = vi.mocked(HTMLTextAreaElement.prototype.getBoundingClientRect);
+  geometry.mockClear();
+  await act(async () => root.render(createElement(Harness, { value: 'Retained draft', active: false })));
+  await act(async () => root.render(createElement(Harness, { value: 'Retained draft' })));
+  expect(input.style.height).toBe('140px');
+  expect(geometry).not.toHaveBeenCalled();
+  width = 280; measuredHeight = 180;
+  await act(async () => resize());
+  expect(input.style.height).toBe('180px');
+});
+
+it('remeasures a changed hidden draft and falls back when resize observation is unavailable', async () => {
+  await act(async () => root.render(createElement(Harness, { value: '' })));
+  await act(async () => root.render(createElement(Harness, { value: 'Changed while hidden', active: false })));
+  measuredHeight = 170;
+  await act(async () => root.render(createElement(Harness, { value: 'Changed while hidden' })));
+  expect(host.querySelector('textarea')!.style.height).toBe('170px');
+  await act(async () => root.render(createElement(Harness, { value: 'Changed while hidden', active: false })));
+  vi.stubGlobal('ResizeObserver', undefined);
+  measuredHeight = 190;
+  await act(async () => root.render(createElement(Harness, { value: 'Changed while hidden' })));
+  expect(host.querySelector('textarea')!.style.height).toBe('190px');
+});

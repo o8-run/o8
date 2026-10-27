@@ -21,6 +21,7 @@ import {
   SETTINGS_CONTENT_MAX_WIDTH,
   type SettingsTab,
 } from './shared';
+import { UpdateChannelSection } from './UpdateChannelSection';
 import { SettingsGroup, SettingsRow } from './grouped';
 import { fetchOperatorDefaults } from './operator-defaults-client';
 import {
@@ -288,6 +289,8 @@ export function GeneralTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTa
         </section>
       ) : null}
 
+      {tauri ? <UpdateChannelSection /> : null}
+
       <section style={{ marginTop: 28 }}>
         <SettingsGroup
           header="Conversations"
@@ -344,7 +347,7 @@ export function GeneralTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTa
           <SettingsRow
             icon={<ShieldIcon />}
             label="Share usage data"
-            subtitle="Share six basic feature-use events. No code, prompts, file paths, repo names, or file contents. Changes take effect immediately."
+            subtitle="Share nine basic feature-use events. No code, prompts, file paths, repo names, or file contents. Changes take effect immediately."
             checked={shareUsage}
             disabled={!values || busyField === 'productTelemetryEnabled'}
             onToggle={(next) => { void updateField('productTelemetryEnabled', next); }}

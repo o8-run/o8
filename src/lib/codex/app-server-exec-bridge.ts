@@ -13,6 +13,7 @@ import { childEnvironment } from '@/lib/providers/spawn-environment';
 import { spawn } from '@/lib/providers/child-process';
 import { readFileSync, rmSync } from 'node:fs';
 import type { CodexAppBridgeSpec } from './app-bridge-spec';
+import { appBridgeContext, retainedAppBridgeContextHashes } from './app-bridge-context';
 
 type Json = Record<string, unknown>;
 class RpcRefusal extends Error {}
@@ -224,7 +225,12 @@ async function main(): Promise<void> {
   process.on('SIGINT', stop);
 
   const run = async () => {
-    await call('initialize', { clientInfo: { name: 'o8', title: 'o8', version: '1' } });
+    const contexts = spec.turnDeveloperInstructions === undefined ? [] : [
+      appBridgeContext(spec.developerInstructions ?? '', 'base'), appBridgeContext(spec.turnDeveloperInstructions, 'turn'),
+    ];
+    await call('initialize', { clientInfo: { name: 'o8', title: 'o8', version: '1' },
+      ...(spec.turnDeveloperInstructions !== undefined ? { capabilities: { experimentalApi: true } } : {}),
+    });
     send({ method: 'initialized' });
     const threadParams: Json = {
       cwd: spec.cwd,
@@ -232,7 +238,8 @@ async function main(): Promise<void> {
       sandbox: spec.sandbox,
       approvalPolicy: 'never',
       config: spec.config,
-      ...(spec.developerInstructions ? { developerInstructions: spec.developerInstructions } : {}),
+      ...(contexts.length ? { developerInstructions: contexts.map(context => context.text).join('\n\n') }
+        : spec.developerInstructions ? { developerInstructions: spec.developerInstructions } : {}),
     };
     let started: Json;
     if (spec.threadId) {
@@ -248,6 +255,16 @@ async function main(): Promise<void> {
     if (!threadId) throw new Error('codex app-server did not return a thread id');
     out({ type: 'thread.started', thread_id: threadId });
     if (stopping) return finish(130);
+    // Thread instructions survive compaction, but resume does not replace the
+    // retained developer history. Inject changed context once before this turn.
+    // Catalog mode presets can override collaboration instructions entirely.
+    if (contexts.length && spec.threadId) {
+      const retained = await retainedAppBridgeContextHashes(asObject(started.thread)?.path);
+      const changed = contexts.filter(context => retained[context.part] !== context.hash);
+      if (changed.length) await call('thread/inject_items', { threadId, items: changed.map(context => ({
+        type: 'message', role: 'developer', content: [{ type: 'input_text', text: context.text }],
+      })) });
+    }
     const input: Json[] = [
       { type: 'text', text: spec.message, text_elements: [] },
       ...spec.imagePaths.map((path) => ({ type: 'localImage', path })),
