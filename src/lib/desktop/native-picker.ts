@@ -58,9 +58,12 @@ export async function pickNativePath(
   if (platform === 'darwin') {
     try {
       return { path: cleanPath(await run('osascript', ['-e', macScript(kind, prompt)], timeoutMs), kind) };
-    } catch {
-      // Cancelled (osascript exits non-zero) or dialog unavailable.
-      return { path: null };
+    } catch (error) {
+      // The file picker keeps its existing cancel/error contract. Folder
+      // failures must reach the direct-open form's inline recovery from #4845.
+      const reason = error instanceof Error ? `${error.message} ${'stderr' in error ? error.stderr : ''}` : '';
+      if (kind === 'file' || /\(-128\)|user cancel(?:ed|led)/i.test(reason)) return { path: null };
+      return { path: null, unavailable: true };
     }
   }
 

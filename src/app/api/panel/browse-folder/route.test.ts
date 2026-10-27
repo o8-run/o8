@@ -31,6 +31,21 @@ describe('POST /api/panel/browse-folder on Linux', () => {
   it('tells the caller to ask for a typed path when no picker is installed', async () => {
     fixture.execFile.mockRejectedValue(Object.assign(new Error('spawn zenity ENOENT'), { code: 'ENOENT' }));
     const { POST } = await import('./route');
-    await expect((await POST()).json()).resolves.toEqual({ path: null, unavailable: true });
+    const response = await POST();
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual(expect.objectContaining({ path: null, unavailable: true, error: expect.stringContaining('Paste') }));
   });
+});
+
+it('keeps macOS cancellation distinct from an unavailable folder picker', async () => {
+  setPlatform('darwin');
+  fixture.execFile.mockRejectedValueOnce(Object.assign(new Error('cancelled'), { stderr: 'User canceled. (-128)' }));
+  const { POST } = await import('./route');
+  const cancelled = await POST();
+  expect(cancelled.status).toBe(200);
+  expect(await cancelled.json()).toEqual({ path: null });
+  fixture.execFile.mockRejectedValueOnce(new Error('command unavailable'));
+  const unavailable = await POST();
+  expect(unavailable.status).toBe(503);
+  expect((await unavailable.json()).error).toContain('Paste');
 });

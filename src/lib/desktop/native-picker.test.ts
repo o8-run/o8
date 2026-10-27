@@ -47,4 +47,19 @@ describe('pickNativePath', () => {
     await expect(pickNativePath('file', 'Open', { platform: 'win32', run })).resolves.toEqual({ path: null, unavailable: true });
     expect(run).not.toHaveBeenCalled();
   });
+
+  it('keeps the macOS file picker command and cancel/error contract', async () => {
+    const run = vi.fn<PickerRunner>(async () => '/Users/q/notes.md\n');
+    const options = { platform: 'darwin' as const, run };
+    await expect(pickNativePath('file', 'Open a file on the canvas', options)).resolves.toEqual({ path: '/Users/q/notes.md' });
+    expect(run).toHaveBeenCalledWith('osascript', ['-e', [
+      'tell application "System Events" to activate',
+      'POSIX path of (choose file with prompt "Open a file on the canvas" with invisibles)',
+    ].join('\n')], 120_000);
+    run.mockRejectedValueOnce(Object.assign(new Error('cancelled'), { stderr: 'User canceled. (-128)' }));
+    await expect(pickNativePath('file', 'Open a file on the canvas', options)).resolves.toEqual({ path: null });
+    run.mockRejectedValueOnce(new Error('command unavailable'));
+    await expect(pickNativePath('file', 'Open a file on the canvas', options)).resolves.toEqual({ path: null });
+  });
+
 });

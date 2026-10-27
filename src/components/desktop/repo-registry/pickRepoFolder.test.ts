@@ -35,3 +35,15 @@ describe('pickRepoFolder server fallback', () => {
     expect(fixture.requestPrompt).toHaveBeenCalledWith(expect.objectContaining({ title: 'Pick', message: 'Type a path' }));
   });
 });
+
+it('keeps direct-open manual entry instead of a second prompt when the host has no picker', async () => {
+  serverPicker({ path: null, unavailable: true });
+  await expect(pickRepoFolder('Pick', 'Type a path', false)).rejects.toThrow();
+  expect(fixture.requestPrompt).not.toHaveBeenCalled();
+});
+
+it('reports server picker failures to the direct-open form', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => Response.json({ error: 'Unavailable' }, { status: 503 })));
+  await expect(pickRepoFolder('Pick', 'Type a path', false)).rejects.toThrow();
+  expect(fixture.requestPrompt).not.toHaveBeenCalled();
+});

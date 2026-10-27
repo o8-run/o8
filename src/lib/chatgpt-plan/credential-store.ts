@@ -1,6 +1,7 @@
 import 'server-only';
 
 import { spawn } from '@/lib/providers/child-process';
+import { clearSecret, lookupSecret, storeSecret } from '@/lib/providers/secret-service';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -15,9 +16,6 @@ const keyFor = (hostId: string, owner: string) => createHash('sha256')
 // Credential-bearing writes use bounded interactive commands over stdin.
 // Reads/deletes pass only opaque entry names in argv. Never capture diagnostics.
 function security(args: string[], input?: string): Promise<{ code: number; output: string }> {
-  if (process.platform !== 'darwin') {
-    throw new ChatGPTPlanError('secure_store_unavailable', 'ChatGPT plan sign-in currently requires the macOS secure store.', 503);
-  }
   return new Promise((resolve, reject) => {
     const child = spawn('/usr/bin/security', args, { stdio: ['pipe', 'pipe', 'ignore'] });
     let output = '';
@@ -31,21 +29,59 @@ function security(args: string[], input?: string): Promise<{ code: number; outpu
 
 interface Manifest { version: string; count: number; digest: string }
 
-async function readEntry(account: string): Promise<string | null> {
-  const result = await security(['find-generic-password', '-a', account, '-s', SERVICE, '-w']);
-  if (result.code === 44) return null;
-  if (result.code !== 0) throw new ChatGPTPlanError('secure_store_unavailable', 'Unlock the OS secure store and try again.', 503);
-  return result.output.trim();
+/** One OS secret store: macOS Keychain or the Linux Secret Service. */
+export interface PlanEntryStore {
+  read(account: string): Promise<string | null>;
+  /** Raw write; callers verify through `read`. */
+  store(account: string, value: string): Promise<boolean>;
+  remove(account: string): Promise<void>;
 }
 
-async function writeEntry(account: string, value: string): Promise<void> {
-  const hex = Buffer.from(value, 'utf8').toString('hex');
-  const command = `add-generic-password -U -a ${account} -s ${SERVICE} -X ${hex}`;
-  // security's interactive parser truncates large commands. Each protected
-  // chunk is small; a protected manifest is published only after verification.
-  if (command.length > 1_900) throw new ChatGPTPlanError('secure_store_write_failed', 'The secure-store command exceeded its limit.', 503);
-  const result = await security(['-i'], `${command}\n`);
-  if (result.code !== 0 || await readEntry(account) !== value) throw new ChatGPTPlanError('secure_store_write_failed', 'ChatGPT credentials could not be saved securely.', 503);
+const keychainEntries: PlanEntryStore = {
+  async read(account) {
+    const result = await security(['find-generic-password', '-a', account, '-s', SERVICE, '-w']);
+    if (result.code === 44) return null;
+    if (result.code !== 0) throw new ChatGPTPlanError('secure_store_unavailable', 'Unlock the OS secure store and try again.', 503);
+    return result.output.trim();
+  },
+  async store(account, value) {
+    const hex = Buffer.from(value, 'utf8').toString('hex');
+    const command = `add-generic-password -U -a ${account} -s ${SERVICE} -X ${hex}`;
+    // security's interactive parser truncates large commands. Each protected
+    // chunk is small; a protected manifest is published only after verification.
+    if (command.length > 1_900) throw new ChatGPTPlanError('secure_store_write_failed', 'The secure-store command exceeded its limit.', 503);
+    return (await security(['-i'], `${command}\n`)).code === 0;
+  },
+  async remove(account) {
+    await security(['delete-generic-password', '-a', account, '-s', SERVICE]).catch(() => {});
+  },
+};
+
+const LINUX_UNAVAILABLE = 'ChatGPT plan sign-in on Linux needs a running Secret Service, such as GNOME Keyring or KWallet.';
+
+/** Linux: freedesktop Secret Service through libsecret's secret-tool. */
+export const secretServiceEntries: PlanEntryStore = {
+  async read(account) {
+    const result = await lookupSecret({ service: SERVICE, account });
+    if (result.status === 'absent') return null;
+    if (result.status === 'found') return result.value.trim();
+    throw new ChatGPTPlanError('secure_store_unavailable', result.status === 'unavailable' ? LINUX_UNAVAILABLE : 'Unlock the OS secure store and try again.', 503);
+  },
+  async store(account, value) {
+    const result = await storeSecret(`o8 ChatGPT plan ${account.slice(0, 12)}`, { service: SERVICE, account }, value);
+    if (result.status === 'unavailable') throw new ChatGPTPlanError('secure_store_unavailable', LINUX_UNAVAILABLE, 503);
+    return result.status === 'ok';
+  },
+  async remove(account) {
+    await clearSecret({ service: SERVICE, account });
+  },
+};
+
+/** The OS secret store for this platform. There is no file fallback. */
+export function platformEntries(platform: NodeJS.Platform = process.platform): PlanEntryStore {
+  if (platform === 'darwin') return keychainEntries;
+  if (platform === 'linux') return secretServiceEntries;
+  throw new ChatGPTPlanError('secure_store_unavailable', 'ChatGPT plan sign-in needs the macOS Keychain or a Linux Secret Service.', 503);
 }
 
 function manifest(value: string): Manifest {
@@ -55,8 +91,21 @@ function manifest(value: string): Manifest {
 }
 
 /** There is deliberately no environment-key, encrypted-file, or plaintext fallback. */
-export class MacPlanStore implements PlanStore {
-  constructor(private readonly directory = join(getDataDir(), 'chatgpt-plan')) {}
+export class OsPlanStore implements PlanStore {
+  constructor(
+    private readonly directory = join(getDataDir(), 'chatgpt-plan'),
+    private readonly entries?: PlanEntryStore,
+  ) {}
+
+  private get store(): PlanEntryStore { return this.entries ?? platformEntries(); }
+
+  private async readEntry(account: string): Promise<string | null> { return this.store.read(account); }
+
+  private async writeEntry(account: string, value: string): Promise<void> {
+    if (!await this.store.store(account, value) || await this.store.read(account) !== value) {
+      throw new ChatGPTPlanError('secure_store_write_failed', 'ChatGPT credentials could not be saved securely.', 503);
+    }
+  }
 
   async hostId(): Promise<string> {
     await mkdir(this.directory, { recursive: true, mode: 0o700 });
@@ -69,7 +118,7 @@ export class MacPlanStore implements PlanStore {
   }
 
   async locked<T>(owner: string, action: () => Promise<T>): Promise<T> {
-    // Keychain is OS-user global. Copies retaining the same host ID must also
+    // The OS secret store is user global. Copies retaining the same host ID must also
     // share the same rotation lock, regardless of their profile directory.
     const locks = join(getDataDir({}), 'chatgpt-plan-locks');
     await mkdir(locks, { recursive: true, mode: 0o700 });
@@ -91,13 +140,13 @@ export class MacPlanStore implements PlanStore {
 
   async read(owner: string): Promise<PlanRecord> {
     const account = keyFor(await this.hostId(), owner);
-    const index = await readEntry(account);
+    const index = await this.readEntry(account);
     if (index === null) return emptyPlanRecord(owner);
     try {
       const selected = manifest(index);
       const chunks: Buffer[] = [];
       for (let part = 0; part < selected.count; part += 1) {
-        const value = await readEntry(`${account}-${selected.version}-${part}`);
+        const value = await this.readEntry(`${account}-${selected.version}-${part}`);
         if (value === null || !/^[A-Za-z0-9+/]*={0,2}$/.test(value)) throw new Error();
         chunks.push(Buffer.from(value, 'base64'));
       }
@@ -115,7 +164,7 @@ export class MacPlanStore implements PlanStore {
   async write(owner: string, record: PlanRecord): Promise<void> {
     if (record.owner !== owner) throw new ChatGPTPlanError('account_mismatch', 'The connection belongs to another o8 account.', 403);
     const account = keyFor(await this.hostId(), owner);
-    const previous = await readEntry(account);
+    const previous = await this.readEntry(account);
     const bytes = Buffer.from(JSON.stringify(record), 'utf8');
     const count = Math.ceil(bytes.length / 512);
     if (count > 1_024) throw new ChatGPTPlanError('secure_store_full', 'The ChatGPT connection record is too large.', 503);
@@ -125,19 +174,19 @@ export class MacPlanStore implements PlanStore {
     try {
       for (let part = 0; part < count; part += 1) {
         const key = `${account}-${version}-${part}`;
-        await writeEntry(key, bytes.subarray(part * 512, (part + 1) * 512).toString('base64'));
+        await this.writeEntry(key, bytes.subarray(part * 512, (part + 1) * 512).toString('base64'));
         written.push(key);
       }
       publicationAttempted = true;
-      await writeEntry(account, JSON.stringify({ version, count, digest: createHash('sha256').update(bytes).digest('hex') } satisfies Manifest));
+      await this.writeEntry(account, JSON.stringify({ version, count, digest: createHash('sha256').update(bytes).digest('hex') } satisfies Manifest));
       if (previous) {
         const old = manifest(previous);
-        for (let part = 0; part < old.count; part += 1) await security(['delete-generic-password', '-a', `${account}-${old.version}-${part}`, '-s', SERVICE]).catch(() => {});
+        for (let part = 0; part < old.count; part += 1) await this.store.remove(`${account}-${old.version}-${part}`).catch(() => {});
       }
     } finally {
       // An interrupted index write may have committed. Keep encrypted chunks
       // on that uncertain path so an index can never point to deleted data.
-      if (!publicationAttempted) for (const key of written) await security(['delete-generic-password', '-a', key, '-s', SERVICE]).catch(() => {});
+      if (!publicationAttempted) for (const key of written) await this.store.remove(key).catch(() => {});
     }
   }
 }

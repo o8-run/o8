@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { PRODUCT_EVENT_DISCLOSURES, sanitizeProductEvent } from './events';
 
 describe('product telemetry payload allowlist', () => {
-  it('discloses all six wire events exactly once', () => {
+  it('discloses all nine wire events exactly once', () => {
     expect(PRODUCT_EVENT_DISCLOSURES).toEqual([
       { event: 'app.opened', fields: 'no properties' },
       { event: 'brain.asked', fields: 'no properties' },
@@ -11,6 +11,9 @@ describe('product telemetry payload allowlist', () => {
       { event: 'dispatch.started', fields: 'runtime — known worker-runtime enum' },
       { event: 'merge.approved', fields: 'runtime — known worker-runtime enum; pushed — boolean' },
       { event: 'repo.added', fields: 'hasRemote — boolean; isGitRepo — boolean' },
+      { event: 'worker.first_launched', fields: 'no properties' },
+      { event: 'merge.first_completed', fields: 'no properties' },
+      { event: 'session.ended', fields: 'clean — boolean' },
     ]);
   });
 

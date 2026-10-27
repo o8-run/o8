@@ -1,0 +1,146 @@
+Report PQCHBW verification tails
+
+Behavior tests were written and run before the corresponding changes.
+
+Initial add-flow red
+ FAIL  src/components/desktop/repo-registry/fast-add-repo.test.ts > preserves the input and gives a recovery action after an add error
+AssertionError: the given combination of arguments (undefined and string) is invalid for this assertion. You can use an array, a map, an object, a set, a string, or a weakset instead of a string
+ ❯ src/components/desktop/repo-registry/fast-add-repo.test.ts:81:65
+     79|   await type(repo.localPath);
+     80|   await enter();
+     81|   expect(document.querySelector('[role="alert"]')?.textContent).toCont…
+       |                                                                 ^
+     82|   expect(document.querySelector<HTMLInputElement>('#add-repo-path')?.v…
+     83|   expect(onClose).not.toHaveBeenCalled();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/4]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  4 failed (4)
+   Start at  13:43:43
+   Duration  1.93s (transform 513ms, setup 63ms, import 726ms, tests 145ms, environment 768ms)
+
+
+Invalid-folder route red
+     72|     expect(response.status).toBe(400);
+       |                             ^
+     73|     expect((await response.json()).error).toContain(expected);
+     74|   }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 2 skipped (3)
+   Start at  13:44:55
+   Duration  5.47s (transform 3.88s, setup 40ms, import 5.24s, tests 30ms, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.9.0 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice
+
+Picker failure red
++ 200
+
+ ❯ src/app/api/panel/browse-folder/route.test.ts:14:30
+     12|   vi.mocked(execSync).mockImplementationOnce(() => { throw new Error('…
+     13|   const unavailable = await POST();
+     14|   expect(unavailable.status).toBe(503);
+       |                              ^
+     15|   expect((await unavailable.json()).error).toContain('Paste');
+     16| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed (1)
+   Start at  14:00:39
+   Duration  332ms (transform 48ms, setup 52ms, import 56ms, tests 19ms, environment 0ms)
+
+
+Direct entry drop red
+Number of calls: 0
+
+ ❯ src/components/desktop/agent-panel/ProjectsSwitcher.test.ts:62:23
+     60|     Object.defineProperty(drop, 'dataTransfer', { value: { files: [], …
+     61|     act(() => host.querySelector('[aria-label="Add repository"]')!.dis…
+     62|     expect(onAddRepo).toHaveBeenCalledExactlyOnceWith('/projects/examp…
+       |                       ^
+     63|   });
+     64|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 8 skipped (9)
+   Start at  14:13:36
+   Duration  1.67s (transform 391ms, setup 141ms, import 405ms, tests 136ms, environment 661ms)
+
+
+Direct entry paste red
+Number of calls: 0
+
+ ❯ src/components/desktop/agent-panel/ProjectsSwitcher.test.ts:71:23
+     69|     Object.defineProperty(paste, 'clipboardData', { value: { getData: …
+     70|     act(() => host.querySelector('[aria-label="Add repository"]')!.dis…
+     71|     expect(onAddRepo).toHaveBeenCalledExactlyOnceWith('https://example…
+       |                       ^
+     72|   });
+     73|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 9 skipped (10)
+   Start at  14:14:43
+   Duration  1.06s (transform 167ms, setup 51ms, import 232ms, tests 98ms, environment 510ms)
+
+
+Workspace handoff focus red
++ </button>
+
+ ❯ src/components/desktop/repo-registry/add-repo-flow.test.ts:271:36
+    269|     expect((focused.mock.calls[0][0] as CustomEvent).detail).toEqual({…
+    270|     expect(document.querySelector('#add-repo-path')).toBeNull();
+    271|     expect(document.activeElement).toBe(composer);
+       |                                    ^
+    272|   } finally { window.removeEventListener(FOCUS_REPO_WORKSPACE_TAB_EVEN…
+    273| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 12 skipped (13)
+   Start at  14:19:59
+   Duration  4.48s (transform 2.00s, setup 133ms, import 2.91s, tests 318ms, environment 822ms)
+
+
+Touched routes, components and workspace tests green
+ Test Files  11 passed (11)
+      Tests  61 passed (61)
+   Duration  74.07s (transform 16.26s, setup 523ms, import 25.70s, tests 39.58s, environment 5.52s)
+
+Handoff focus regression green
+ Test Files  3 passed (3)
+      Tests  25 passed (25)
+   Duration  9.09s (transform 1.67s, setup 148ms, import 3.08s, tests 3.05s, environment 2.19s)
+
+Full npm test green
+ Test Files  1259 passed | 3 skipped (1262)
+      Tests  9468 passed | 5 skipped (9473)
+   Duration  289.71s (transform 16.15s, setup 29.88s, import 359.04s, tests 330.92s, environment 268.01s)
+
+Other checks
+npm run typecheck: passed (routes, app and CLI)
+npm run typecheck:fast: passed
+Touched-file lint: passed
+Rule check against origin/main: 12 source files, zero violations
+
+Optional classification check reports existing dated-fixture validation errors in unrelated tests; its manifest was not rewritten.
