@@ -329,6 +329,24 @@ describe('local CI verification through its command entry point', () => {
     }
   }, 40_000);
 
+  it.each(['native/o8-next/target', '.o8-next-cargo'])('excludes generated %s files from the real lint command', generated => {
+    const directory = path.join(repo, generated);
+    mkdirSync(directory, { recursive: true });
+    const scratch = mkdtempSync(path.join(directory, 'verify-ci-lint-'));
+    const file = path.join(scratch, 'generated.ts');
+    writeFileSync(file, 'const = ;\n');
+    try {
+      const result = spawnSync(process.execPath, ['node_modules/eslint/bin/eslint.js', file], {
+        cwd: repo, encoding: 'utf8', timeout: 30_000,
+      });
+      expect(result.error).toBeUndefined();
+      expect(result.status, result.stderr + result.stdout).toBe(0);
+      expect(result.stdout).toContain('ignored');
+    } finally {
+      rmSync(scratch, { recursive: true, force: true });
+    }
+  }, 40_000);
+
   it('rejects a newly added CI check before running verification work', () => {
     const workflow = parse(readFileSync(workflowPath, 'utf8'));
     workflow.jobs['required-fixture'] = { name: 'Required Fixture', 'runs-on': 'ubuntu-latest', steps: [{ run: 'npm run fixture' }] };

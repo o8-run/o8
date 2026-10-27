@@ -46,7 +46,8 @@ Dependency changes use the same credential-free lockfile audit in CI and locally
 added package versions fail at low severity, while unchanged baseline findings remain
 the responsibility of the full audits. Nested package and native lockfiles are included.
 The o8 next Native Tests (Linux) check also runs on Linux x64, using CI's locked
-Cargo build for the HTTP fixture daemon and its headless full-suite command. Install
+Cargo build for the HTTP fixture daemon and its headless full-suite command. Native
+build/cache outputs are excluded from lint and type checking; source fixtures remain checked. Install
 the system prerequisites listed in `.github/actions/next-linux-setup/action.yml` and
 the stable Rust toolchain. Its selector compares against `origin/main` and includes
 committed, staged, unstaged and untracked native inputs. A TS-only change prints SKIP
