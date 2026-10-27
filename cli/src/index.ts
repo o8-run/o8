@@ -1,6 +1,7 @@
 import { runPrStack } from './commands/pr-stack.js';
 import { runBrainSources } from './commands/brain-sources.js';
 import { runThreads } from './commands/threads.js';
+import { runWorkspaceCleanup } from './commands/workspace-cleanup.js';
 import { runNext } from './commands/next.js';
 import { runSetup } from './commands/setup.js';
 import { commandUsage } from './command-help.js';
@@ -318,6 +319,8 @@ commands:
   pr-stack --repo owner/repo --number N  read native PR layers, revisions and provenance
   threads list         project work grouped by waiting/review/working/resolved (--repo path, --state, --offset, --limit)
   threads show <id>    exact recorded thread evidence (--repo path)
+  workspace-cleanup preview --repo <path>  review completed owned work and retained recovery
+  workspace-cleanup execute --plan <id> --approve <fingerprint> --entry <id>  execute that exact selection; status --plan <id> reads its receipt
   problem list         recurring problems detected across independent work (--all includes suppressed)
   problem show <id>    full evidence, remedy, and closure state for one problem dossier
   plugin list          list reviewed executable actions [--plugin ID]
@@ -399,7 +402,7 @@ async function dispatch(args: ParsedArgs): Promise<number> {
   // untrusted trees.
   if (process.platform === 'win32') process.env.NoDefaultCurrentDirectoryInExePath = '1';
   const [primary, secondary] = args.command;
-  if (args.version && !primary) return runVersion(args.mode);
+  if (args.version && !primary) return runVersion(args.mode, args.rest.includes('--offline'));
   // `run` owns all flag parsing for its wrapped command (extractRunCommand reads
   // raw argv), so a `--help`/`-h` meant for the wrapped tool must NOT trigger o8's
   // global help here — otherwise `o8 run node --help` prints o8 USAGE + exit 0.
@@ -419,7 +422,7 @@ async function dispatch(args: ParsedArgs): Promise<number> {
       if (args.jsonExplicit) throw new CliError('invalid_args', 'o8 chat is interactive. Use o8 lead or o8 history for JSON.', EXIT.INVALID_ARGS);
       return runChat(process.argv.slice(2).filter((arg) => !['--human', '--verbose', '-v'].includes(arg)).slice(1));
     case 'version':
-      return runVersion(args.mode);
+      return runVersion(args.mode, args.rest.includes('--offline'));
     case 'doctor':
       return runDoctor(args.mode, args.rest);
     case 'status':
@@ -515,6 +518,8 @@ async function dispatch(args: ParsedArgs): Promise<number> {
       return runPrStack(args.mode, singleLevelArgs(secondary, args.rest, args.secondaryBeforeRest));
     case 'threads':
       return runThreads(args.mode, secondary, args.rest);
+    case 'workspace-cleanup':
+      return runWorkspaceCleanup(args.mode, secondary, args.rest);
     case 'problem':
       return runProblem(args.mode, secondary, args.rest);
     case 'plugin':

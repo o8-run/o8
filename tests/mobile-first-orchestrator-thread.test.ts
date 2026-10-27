@@ -212,9 +212,9 @@ describe('mobile first orchestrator conversation', () => {
     const mediaResponse = await mediaRoute.GET(new NextRequest(
       `http://localhost/api/mobile/media?path=${encodeURIComponent(media.path)}`,
     ));
-    expect(mediaResponse.status).toBe(200);
-    expect(mediaResponse.headers.get('content-type')).toBe('image/png');
-    expect(Buffer.from(await mediaResponse.arrayBuffer()).toString()).toBe('image-fixture');
+    expect(mediaResponse.status).toBe(415);
+    expect(await mediaResponse.json()).toMatchObject({ code: 'binary_preview_refused', redaction: { version: 1 } });
+    expect(readFileSync(media.path).toString()).toBe('image-fixture');
 
     const response = await historyRoute.POST(new NextRequest('http://localhost/api/v2/chat-history', {
       method: 'POST',

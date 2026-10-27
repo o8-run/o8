@@ -7,6 +7,7 @@ import { resolveDeviceByToken } from '@/lib/mobile/device-registry';
 import {
   normalizeMobileAskModelId,
   resolveMobileAskRoute,
+  type MobileAskEffort,
 } from '@/lib/mobile/ask-model-routing';
 import { readSymonAgentContext, resolveSymonAgentScope } from '@/lib/mobile/symon-agent-context';
 import {
@@ -36,9 +37,9 @@ function requestBearer(request: NextRequest): string {
   return auth?.startsWith('Bearer ') ? auth.slice(7).trim() : '';
 }
 
-async function resolveRequestedPlanner(value: unknown): Promise<SymonTextPlannerSelection | null> {
+async function resolveRequestedPlanner(value: unknown, effort?: MobileAskEffort): Promise<SymonTextPlannerSelection | null> {
   const requestedModel = normalizeMobileAskModelId(value);
-  if (requestedModel === 'auto' || requestedModel === 'managed-free') return null;
+  if ((requestedModel === 'auto' && effort === undefined) || requestedModel === 'managed-free') return null;
   try {
     // The Tauri planner launches the native CLI. Stored gateway readiness belongs to
     // packet workers and must not make this native-only surface selectable.
@@ -52,7 +53,7 @@ async function resolveRequestedPlanner(value: unknown): Promise<SymonTextPlanner
       claude: claude.installed && claude.ready,
       codex: codex.installed && codex.ready,
     };
-    const route = resolveMobileAskRoute(requestedModel, readiness);
+    const route = resolveMobileAskRoute(requestedModel, readiness, effort);
     if (route.kind === 'managed') throw new Error('The selected native planner is unavailable.');
     return {
       engine: route.kind,
@@ -87,6 +88,12 @@ export async function POST(request: NextRequest) {
   }
 
   const context = await readSymonAgentContext(request);
+  if (context.invalidBody) {
+    return NextResponse.json({ ok: false, error: 'invalid_body', detail: 'Invalid Ask request body.' }, { status: 400 });
+  }
+  if (context.invalidEffort) {
+    return NextResponse.json({ ok: false, error: 'invalid_effort', detail: 'Invalid explicit Ask effort.' }, { status: 400 });
+  }
   const scope = await resolveSymonAgentScope(context);
   if (!scope) {
     return NextResponse.json(
@@ -106,13 +113,16 @@ export async function POST(request: NextRequest) {
   // reachable. An explicit native model pin is never replaced by it.
   const brainMode = readSymonTextBrainMode();
   const managedRequested = normalizeMobileAskModelId(context.model) === 'managed-free';
+  if (context.effort !== undefined && (brainMode === 'pi' || managedRequested)) {
+    return NextResponse.json({ ok: false, error: 'effort_unsupported', detail: 'This planner cannot honor an explicit effort pin.' }, { status: 400 });
+  }
   let info: SymonTextPlannerInfo;
   if (brainMode === 'pi' || managedRequested) {
     info = PI_BRAIN_INFO;
   } else {
     let requestedPlanner: SymonTextPlannerSelection | null;
     try {
-      requestedPlanner = await resolveRequestedPlanner(context.model);
+      requestedPlanner = await resolveRequestedPlanner(context.model, context.effort);
     } catch (error) {
       return NextResponse.json(
         { ok: false, error: 'desktop_unavailable', detail: error instanceof Error ? error.message : 'Desktop bridge unavailable.' },
@@ -144,6 +154,9 @@ export async function POST(request: NextRequest) {
   if (!info.engine || !info.model || !info.effort) {
     return NextResponse.json({ ok: false, error: 'no_cli', detail: 'No supported Symon planner is available.' }, { status: 501 });
   }
+  if (context.effort !== undefined && info.effort !== context.effort) {
+    return NextResponse.json({ ok: false, error: 'effort_mismatch', detail: 'The planner did not honor the explicit effort pin.' }, { status: 409 });
+  }
   const allowedTools = Array.from(new Set((info.tools ?? []).flatMap((tool) => {
     const name = tool.name;
     return typeof name === 'string' && /^[A-Za-z0-9_:-]{1,96}$/.test(name) ? [name] : [];
@@ -156,7 +169,7 @@ export async function POST(request: NextRequest) {
       engine: info.engine,
       model: info.model,
       effort: info.effort,
-      allowDefaultFallback: info.allowDefaultFallback === true,
+      allowDefaultFallback: context.effort === undefined && info.allowDefaultFallback === true,
       workspaceMode: scope.workspaceMode,
       repoId: scope.repoId,
       repoPath: scope.repoPath,

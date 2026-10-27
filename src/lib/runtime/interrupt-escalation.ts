@@ -297,6 +297,11 @@ async function defaultIsAlive(
   return { alive: false, confirmedDead: true };
 }
 
+/** Keep a known group delivery even when descendant verification later fails. */
+class InterruptDeliveryError extends Error {
+  constructor(message: string, readonly sent: boolean) { super(message); }
+}
+
 async function defaultKill(
   target: InterruptEscalationTarget,
   signal: InterruptEscalationSignal,
@@ -391,12 +396,12 @@ async function defaultKill(
     const groupContext = groupSignalError
       ? ` Process group ${tree.processGroupId} also failed: ${groupSignalError}.`
       : '';
-    throw new Error(
-      `Could not signal process-tree pids ${pidList(unaddressed).join(', ')} with ${signal}.${groupContext}`,
+    throw new InterruptDeliveryError(
+      `Could not signal process-tree pids ${pidList(unaddressed).join(', ')} with ${signal}.${groupContext}`, groupSignaled,
     );
   }
   if (snapshotError) {
-    throw new Error(`Could not snapshot the complete process tree before ${signal}: ${snapshotError}`);
+    throw new InterruptDeliveryError(`Could not snapshot the complete process tree before ${signal}: ${snapshotError}`, groupSignaled);
   }
   if (!groupSignaled && !tree.rootObserved && !tree.groupObserved) {
     throw new Error(
@@ -467,6 +472,7 @@ export async function escalateInterrupt(
       await runtimeDeps.kill(target, step.signal);
       sent = true;
     } catch (err) {
+      sent = err instanceof InterruptDeliveryError && err.sent;
       error = err instanceof Error ? err.message : String(err);
     }
     await runtimeDeps.sleep(step.waitMs);

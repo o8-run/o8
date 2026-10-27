@@ -1,5 +1,6 @@
 import { McpInputError } from '@/lib/mcp/api-error';
 import { randomBytes, randomUUID } from 'node:crypto';
+import { DEFAULT_RESOURCE_LEASE_TTL_MS } from '@/lib/leases/resource-lease-types';
 
 import {
   apiFetch,
@@ -17,21 +18,21 @@ const claimTokens = new Map<string, string>();
 export const LEASE_TOOLS: McpTool[] = [
   {
     name: 'o8_lease_acquire',
-    description: 'Acquire one named resource lease. With wait:true, remain queued in durable FIFO order until ownership is granted or this MCP process exits.',
+    description: 'Acquire one named resource lease. Required: resource. ttlMs is milliseconds, default 7200000 (2 hours); wait defaults to false. With wait:true, remain queued in durable FIFO order until ownership is granted or this MCP process exits. Release from the same MCP process. Example: o8_lease_acquire({resource: "audit", ttlMs: 60000, wait: false}).',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        resource: { type: 'string', minLength: 1, maxLength: 2048 },
-        ttlMs: { type: 'integer', minimum: 1000, maximum: 86400000 },
-        wait: { type: 'boolean' },
+        resource: { type: 'string', minLength: 1, maxLength: 2048, description: 'Exact resource name; reuse it with o8_lease_status and o8_lease_release.' },
+        ttlMs: { type: 'integer', minimum: 1000, maximum: 86400000, default: DEFAULT_RESOURCE_LEASE_TTL_MS, description: 'Lease duration in milliseconds, from 1000 through 86400000. Default 7200000 (2 hours).' },
+        wait: { type: 'boolean', default: false, description: 'true queues until acquired; false returns immediately if held. Default false.' },
       },
       required: ['resource'],
     },
   },
   {
     name: 'o8_lease_release',
-    description: 'Release a named resource only when this exact MCP process is its current holder.',
+    description: 'Release a named resource only when this exact MCP process is its current holder. Required: resource, using the exact name passed to o8_lease_acquire. Example: o8_lease_release({resource: "audit"}).',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
@@ -41,7 +42,7 @@ export const LEASE_TOOLS: McpTool[] = [
   },
   {
     name: 'o8_lease_status',
-    description: 'Read the current holder, overdue state, fail-closed blocker, and FIFO waiters for one named resource.',
+    description: 'Read the current holder, overdue state, fail-closed blocker, and FIFO waiters for one named resource. Required: resource. Example: o8_lease_status({resource: "audit"}).',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
@@ -51,7 +52,7 @@ export const LEASE_TOOLS: McpTool[] = [
   },
   {
     name: 'o8_lease_list',
-    description: 'List every active named resource holder and waiter queue.',
+    description: 'List every active named resource holder and waiter queue. No required fields. Example: o8_lease_list({}).',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
@@ -84,6 +85,10 @@ function sleep(): Promise<void> {
 
 export async function handleLeaseAcquire(args: Record<string, unknown>): Promise<McpToolResult> {
   const resource = requiredString(args, 'resource');
+  if (args.wait !== undefined && typeof args.wait !== 'boolean') {
+    throw new McpInputError('wait must be a boolean. Set wait:true to queue, or wait:false to return immediately.');
+  }
+  const ttlMs = optionalTtl(args);
   const wait = args.wait === true;
   const leaseOwner = owner();
   const waiterId = `waiter:mcp:${process.pid}:${randomUUID()}`;
@@ -99,7 +104,7 @@ export async function handleLeaseAcquire(args: Record<string, unknown>): Promise
           owner: leaseOwner,
           claimToken,
           waiterPid: wait ? process.pid : undefined,
-          ttlMs: optionalTtl(args),
+          ttlMs,
           wait,
           waiterId,
         }),

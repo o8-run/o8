@@ -1,3 +1,4 @@
+import { cleanupWorkerO8Cli } from './worker-o8-cli-cleanup';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { withOwnedArtifactRootLock } from './artifact-admission';
@@ -202,6 +203,7 @@ async function archiveOwnedSessionDirLocked(
 
   await assertOwnedSessionTree(root, session.sessionDir);
   await assertOwnedSessionPath(root, archiveRoot, { missing: true, kind: 'directory' });
+  await cleanupWorkerO8Cli(root, session);
   await mkdir(archiveRoot, { recursive: true });
   if (await assertOwnedSessionPath(root, archivePath, { missing: true, kind: 'directory' })) refuseOwnedSessionPath('archive session destination became occupied');
   await assertOwnedSessionPath(root, session.sessionDir, { kind: 'directory', identity: source });

@@ -24,6 +24,7 @@ export interface AppUpdateView {
   message: string | null;
   error: string | null;
   downloadOnly: boolean;
+  packageManager?: boolean;
   progress?: UpdateProgress | null;
   /** Set when the update is installed and its restart is waiting. */
   blockers?: AppUpdateBlockers | null;

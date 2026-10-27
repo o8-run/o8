@@ -9,11 +9,11 @@ import { chainOnKey } from '@/lib/util/keyed-promise-chain';
 
 const root = mkdtempSync(join(tmpdir(), 'o8-absent-stop-'));
 process.env.CORTEX_IDE_OWNED_CLAUDE_CODE_ROOT = join(root, 'sessions');
-const { escalateInterruptOwnedSurface } = await import('@/lib/runtime/interrupt-escalation');
+const { escalateInterruptOwnedSurface, escalateInterrupt } = await import('@/lib/runtime/interrupt-escalation');
 await import('@/lib/runtimes');
 const { probeOwnedProcessIdentity } = await import('@/lib/runtimes/shared/owned-session/process-identity');
 const { createOwnedSessionIo } = await import('@/lib/runtimes/shared/owned-session/session-io');
-const { registerOwnedStopHandler } = await import('@/lib/runtimes/shared/owned-session/stop-outcome');
+const { registerOwnedStopHandler, withOwnedStopOutcome } = await import('@/lib/runtimes/shared/owned-session/stop-outcome');
 const io = createOwnedSessionIo({ root: join(root, 'sessions'), surfacePrefix: 'claude-code-owned:', invalidateFleetCache: () => {} });
 const chains = new Map<string, Promise<unknown>>();
 let beforeLock: (() => void) | undefined;
@@ -39,6 +39,51 @@ afterEach(async () => {
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
 describe.runIf(process.platform !== 'win32')('Stop before the owned exit journal settles', () => {
+  it('persists a delivered group Stop when an escaped child is still awaiting provider cleanup', async () => {
+    const marker = randomUUID();
+    const script = `
+      const { spawn } = require('node:child_process');
+      const worker = spawn(process.execPath, ['-e', "process.send('ready'); setInterval(() => {}, 1000)"],
+        { detached: true, stdio: ['ignore', 'ignore', 'ignore', 'ipc'], env: process.env });
+      worker.once('message', () => process.send(worker.pid));
+      process.on('SIGINT', () => {});
+      process.on('message', () => {
+        worker.once('exit', () => process.exit(0));
+        worker.kill('SIGTERM');
+      });
+    `;
+    const child = spawn(process.execPath, ['-e', script], { detached: true,
+      stdio: ['ignore', 'ignore', 'ignore', 'ipc'], env: { NODE_ENV: 'test', O8_OWNED_RUN_MARKER: marker } });
+    children.push(child);
+    const [workerPid] = await once(child, 'message');
+    const proof = await probeOwnedProcessIdentity(child.pid!);
+    expect(proof.state).toBe('live');
+    if (proof.state !== 'live') throw new Error('Fixture identity unavailable.');
+    descendants.push({ pid: Number(workerPid), identity: await probeOwnedProcessIdentity(Number(workerPid)) });
+    const sessionDir = join(root, 'sessions', marker);
+    mkdirSync(sessionDir, { recursive: true });
+    const run = { id: marker, pid: child.pid!, processGroupId: child.pid!, processMarker: marker,
+      processIdentity: proof.identity, processIdentitySource: proof.source, processIdentityRequired: true,
+      outcome: 'running', startedAt: new Date().toISOString(),
+      stdoutPath: join(sessionDir, 'out'), stderrPath: join(sessionDir, 'err') };
+    const surfaceId = `claude-code-owned:${marker}`;
+    const file = join(sessionDir, 'session.json');
+    writeFileSync(file, JSON.stringify({ surfaceId, sessionDir, repoPath: root, cwd: root,
+      activeRun: run, recentRuns: [run] }));
+    const result = await withOwnedStopOutcome(surfaceId, run, () => escalateInterrupt(run, {
+      // Release provider cleanup only after the actual group signal and the
+      // escaped-child refusal. No cold-start or scheduling deadline is assumed.
+      sleep: async () => {
+        const exited = once(child, 'exit');
+        child.send('finish stopping');
+        await exited;
+      },
+    }));
+    expect(result).toMatchObject({ confirmedDead: true, steps: [{ signal: 'SIGINT', sent: true, confirmedDead: true }] });
+    expect(JSON.parse(readFileSync(file, 'utf8')).recentRuns[0])
+      .toMatchObject({ outcome: 'interrupted', interruptRequestedAt: expect.any(String) });
+  }, 20_000);
+
   it.each(['clear', 'settled', 'successor', 'group', 'escaped', 'unknown', 'mismatch', 'missing-marker', 'missing-group'] as const)(
     'rechecks %s process evidence without signaling or rewriting the saved run', async (kind) => {
       const marker = randomUUID();

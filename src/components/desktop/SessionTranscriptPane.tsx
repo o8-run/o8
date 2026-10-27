@@ -22,6 +22,7 @@ interface SessionTranscriptPaneProps {
   focused?: boolean;
   onFocus?: (sessionKey: string) => void;
   onClose?: (sessionKey: string) => void;
+  onCollapsedChange?: (collapsed: boolean) => void;
 }
 
 export function SessionTranscriptPane({
@@ -29,6 +30,7 @@ export function SessionTranscriptPane({
   focused = false,
   onFocus,
   onClose,
+  onCollapsedChange,
 }: SessionTranscriptPaneProps) {
   const data = useOrchestratorData();
   const agent = useMemo(
@@ -86,6 +88,7 @@ export function SessionTranscriptPane({
       packet={packet}
       focused={focused}
       onClose={handleClose}
+      onCollapsedChange={onCollapsedChange}
       onFocus={handleFocus}
       onOpenReview={packet?.lane?.laneId && data?.onOpenO8Panel ? handleOpenReview : undefined}
     />

@@ -1,6 +1,6 @@
+import { viewerJson } from '@/lib/viewers/response';
 export const dynamic = 'force-dynamic';
 
-import { NextResponse } from 'next/server';
 import { execFileSync } from '@/lib/providers/child-process';
 import { isSafeGitRef } from '@/lib/git/refs';
 
@@ -20,11 +20,11 @@ export async function GET(request: Request) {
 
   try {
     if (branch && !isSafeGitRef(branch)) {
-      return NextResponse.json({ error: 'Invalid branch name', commits: [], currentBranch: 'main', branches: [] });
+      return viewerJson({ error: 'Invalid branch name', commits: [], currentBranch: 'main', branches: [] });
     }
     const logArgs = [
       'log',
-      '--format={"hash":"%H","shortHash":"%h","author":"%an","authorEmail":"%ae","date":"%aI","subject":"%s","refs":"%D"}',
+      '--format=%H%x00%h%x00%an%x00%ae%x00%aI%x00%s%x00%D',
       '-n',
       String(limit),
     ];
@@ -33,7 +33,9 @@ export async function GET(request: Request) {
 
     const commits = logOutput.trim().split('\n').filter(Boolean).map(line => {
       try {
-        const parsed = JSON.parse(line);
+        // Delimit fields outside JSON so quoted subjects remain visible and inspected.
+        const [hash, shortHash, author, authorEmail, date, subject, rawRefs] = line.split('\0');
+        const parsed = { hash, shortHash, author, authorEmail, date, subject, refs: rawRefs };
         // Parse refs into structured data
         const refs: { type: string; name: string }[] = [];
         if (parsed.refs) {
@@ -73,9 +75,9 @@ export async function GET(request: Request) {
       }).trim().split('\n').map((b) => b.trim()).filter(Boolean).slice(0, 20);
     } catch { /* silent */ }
 
-    return NextResponse.json({ commits, currentBranch, branches });
+    return viewerJson({ commits, currentBranch, branches });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error';
-    return NextResponse.json({ error: message, commits: [], currentBranch: 'main', branches: [] });
+    return viewerJson({ error: message, commits: [], currentBranch: 'main', branches: [] });
   }
 }
