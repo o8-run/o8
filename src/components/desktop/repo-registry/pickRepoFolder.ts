@@ -11,8 +11,8 @@ export async function pickRepoFolder(title: string, promptMessage: string, promp
   } catch {
     try {
       const response = await fetch('/api/panel/browse-folder', { method: 'POST' });
-      const data = await response.json() as { path?: string | null };
-      if (!response.ok) throw new Error('Folder picker unavailable.');
+      const data = await response.json() as { path?: string | null; unavailable?: boolean };
+      if (!response.ok || data.unavailable) throw new Error('Folder picker unavailable.');
       if (typeof data.path === 'string') folderPath = data.path;
     } catch (error) {
       if (!promptFallback) throw error;

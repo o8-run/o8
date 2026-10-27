@@ -1,19 +1,18 @@
+import { prepareRegisteredWebCache } from './release-web-cache-ownership.mjs';
 import { createRequire } from 'node:module';
-import { lstatSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, lstatSync, readFileSync } from 'node:fs';
+import { join, relative } from 'node:path';
 import { resolveReleaseConfig } from './release-config.mjs';
 import { assertTauriExportInputsSafe } from './tauri-export-safety.mjs';
 
 /** Invoked only after generated-output exclusion and producer reservation. */
-export async function runRegisteredBuild(run) {
+export async function runRegisteredBuild(run, { restoredCache = null } = {}) {
   const root = process.cwd();
   const require = createRequire(join(root, 'package.json'));
   const heapMiB = process.env.O8_BUILD_HEAP_MIB === undefined ? 24576 : Number(process.env.O8_BUILD_HEAP_MIB);
   if (!Number.isSafeInteger(heapMiB) || heapMiB < 1024 || heapMiB > 24576) {
     throw new Error('O8_BUILD_HEAP_MIB must be an integer from 1024 through 24576.');
   }
-  const bust = await run(process.execPath, ['scripts/bust-stale-patch-cache.mjs']);
-  if (bust !== 0) return bust;
   const env = { ...process.env };
   const releaseConfig = resolveReleaseConfig(root, env);
   if (!env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY && releaseConfig.clerkPublishableKey) {
@@ -23,13 +22,27 @@ export async function runRegisteredBuild(run) {
   for (const key of ['TURBOPACK', 'NEXT_DEPLOYMENT_ID', '__NEXT_PRIVATE_ORIGIN', '__NEXT_PRIVATE_STANDALONE_CONFIG']) {
     delete env[key];
   }
+  const buildOutput = run.buildOutput?.directory || join(root, '.next');
+  const writer = run.buildOutput?.writer;
+  if (run.buildOutput) {
+    const distDir = relative(root, buildOutput).split('\\').join('/');
+    if (distDir !== '.next/.o8-release-build') throw new Error('Build output reservation is invalid.');
+    env.O8_RELEASE_NEXT_DIST_DIR = distDir;
+    await prepareRegisteredWebCache(root, buildOutput, restoredCache, writer);
+  } else if (lstatSync(join(root, '.next/cache'), { throwIfNoEntry: false })) {
+    throw new Error('Preserved unowned entries in .next/cache; cache invalidation requires a verified build reservation.');
+  }
+  if (!run.buildOutput) delete env.O8_RELEASE_NEXT_DIST_DIR;
   env.NODE_ENV = 'production';
   env.NODE_OPTIONS = `--max-old-space-size=${heapMiB}`;
   const code = await run(process.execPath, [require.resolve('next/dist/bin/next'), 'build', '--webpack'], env);
   if (code !== 0) return code;
-  const standalone = join(root, '.next', 'standalone');
-  if (!lstatSync(standalone, { throwIfNoEntry: false })) return 0;
-  for (const path of [join(root, '.next'), standalone]) {
+  const standalone = join(buildOutput, 'standalone');
+  if (!lstatSync(standalone, { throwIfNoEntry: false })) {
+    await run.buildOutput?.complete();
+    return 0;
+  }
+  for (const path of [buildOutput, standalone]) {
     const entry = lstatSync(path);
     if (!entry.isDirectory() || entry.isSymbolicLink()) throw new Error('Standalone output must be an isolated generated directory.');
   }
@@ -40,8 +53,30 @@ export async function runRegisteredBuild(run) {
     const entry = lstatSync(path, { throwIfNoEntry: false });
     if (!entry) continue;
     if (!entry.isFile() || entry.isSymbolicLink()) throw new Error('Standalone environment copy must be a regular generated file.');
-    rmSync(path);
+    if (!writer) throw new Error(`Preserved unowned standalone/${name}; environment scrubbing requires a verified build reservation.`);
+    writer.api.unlinkSync(path);
+  }
+  if (run.buildOutput) {
+    // Normalize the private compiler layout before packaging its own output.
+    const nested = join(standalone, env.O8_RELEASE_NEXT_DIST_DIR);
+    if (existsSync(nested)) {
+      const normalized = join(standalone, '.next-runtime');
+      writer.api.renameSync(nested, normalized);
+      writer.api.rmdirSync(join(standalone, '.next'));
+      writer.api.renameSync(normalized, join(standalone, '.next'));
+    }
+    const server = join(standalone, 'server.js');
+    if (existsSync(server)) writer.api.writeFileSync(server, readFileSync(server, 'utf8')
+      .replaceAll(JSON.stringify(env.O8_RELEASE_NEXT_DIST_DIR), JSON.stringify('.next'))
+      .replaceAll(JSON.stringify('./' + env.O8_RELEASE_NEXT_DIST_DIR), JSON.stringify('.next')));
+    const required = join(buildOutput, 'required-server-files.json');
+    if (existsSync(required)) {
+      const manifest = JSON.parse(readFileSync(required, 'utf8'));
+      manifest.config.distDir = '.next';
+      writer.api.writeFileSync(required, JSON.stringify(manifest));
+    }
   }
   assertTauriExportInputsSafe(standalone);
+  await run.buildOutput?.complete();
   return 0;
 }

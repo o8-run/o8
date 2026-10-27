@@ -15,6 +15,7 @@ import { ensureMaintenanceDiscoverySchema } from '@/lib/worktree/maintenance-dis
 import { readWorktreeMetaSnapshot } from '@/lib/worktree/metadata-store';
 import { LEGACY_WORKTREE_DIR_NAME, resolveWorktreeRootLayout } from '@/lib/worktree/root-layout';
 import { createExactChildDirectory, readExactChildFile, writeExactChildFile } from './exact-parent-operation';
+import type { ExactDirectoryManifest } from './exact-directory-purge';
 import type { GeneratedOutputBank } from './generated-output-bank';
 import type { ExactWorkspaceClaimRecord } from './exact-workspace-claim-state';
 import { readExactWorkspaceClaim } from './exact-workspace-claim-state';
@@ -60,6 +61,8 @@ export interface GeneratedOutputResource {
   attempt?: { id: string; mode: string; ownerPid: number; ownerIdentity: MetadataLockProcessIdentity;
     children: Array<{ pid: number; identity: MetadataLockProcessIdentity | null; exitCode: number | null;
       signal: string | null; observedClosed: boolean }> };
+  buildOwnership?: { scope: WorktreeMaterializationIdentity; state: 'reserved' | 'complete';
+    proof?: 'write-receipts-v1'; manifest?: ExactDirectoryManifest };
   bank?: GeneratedOutputBank;
   bankCapture?: { operationId: string; path: string; parent: WorktreeMaterializationIdentity;
     ownerPid: number; ownerIdentity: MetadataLockProcessIdentity;
@@ -176,6 +179,10 @@ export function saveGeneratedOutputResource(resource: GeneratedOutputResource,
     || JSON.stringify(next.owner) !== JSON.stringify(resource.owner)
     || JSON.stringify(next.creationAuthority) !== JSON.stringify(resource.creationAuthority)
     || JSON.stringify(next.continuedFrom) !== JSON.stringify(resource.continuedFrom)
+    || (resource.buildOwnership && next.attempt?.id === resource.attempt?.id
+      && (JSON.stringify(next.buildOwnership?.scope) !== JSON.stringify(resource.buildOwnership.scope)
+        || (resource.buildOwnership.state === 'complete'
+          && JSON.stringify(next.buildOwnership) !== JSON.stringify(resource.buildOwnership))))
     || (resource.bank && JSON.stringify(next.bank) !== JSON.stringify(resource.bank))
     || (resource.disposal && (next.state !== 'retired'
       || JSON.stringify(next.disposal) !== JSON.stringify(resource.disposal)

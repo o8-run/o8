@@ -13,7 +13,7 @@ let repoPath = '';
 let socket: WebSocket;
 const snapshots: string[] = [];
 const payload = (text: string): ComposerQueuePayload => ({ text, wireMessage: text, images: [], routing: {
-  backend: 'pi', model: 'pi', effort: 'medium', permissionMode: 'plan', mode: 'single', pickedMode: 'solo', collide: false,
+  backend: 'pi', model: 'pi', effort: 'adaptive', permissionMode: 'plan', mode: 'single', pickedMode: 'solo', collide: false,
 } });
 async function api(path: string, method = 'GET', body?: unknown) {
   return fetch(`${origin}${path}`, { method, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
@@ -51,6 +51,8 @@ beforeAll(async () => {
   const inventory = await (await api('/api/runtime/inventory?fresh=1')).json();
   expect(inventory.agents, 'the fixture must never discover installed provider sessions').toEqual([]);
   repoPath = sessions.threads.find((row: { id: string }) => row.id === threadId).repoPath;
+  const context = await (await api(`/api/v2/chat-history?tabId=${threadId}`)).json();
+  expect(context.messages.at(-1).receipt).toMatchObject({ effort: 'adaptive', effortSource: 'runtime-default' });
   const ws = await (await api('/api/panel/ws-info')).json();
   socket = new WebSocket(`ws://127.0.0.1:${ws.wsPort}/ws?token=${encodeURIComponent(ws.wsToken)}`);
   socket.on('error', () => {});
@@ -97,3 +99,15 @@ it('sends, steers, queues, promotes and removes through production session APIs 
   await mutate('POST', { id: 'native-next', intent: 'send-next', payload: payload('Queued instruction') });
   expect((await history()).transcript.filter(row => row.role === 'user' && row.text === 'Queued instruction')).toHaveLength(1);
 }, 70_000);
+
+it('retains the real refusal for an unsupported concrete effort pin', async () => {
+  const requested = payload('Unsupported effort fixture');
+  requested.routing.effort = 'medium';
+  await mutate('POST', { id: 'unsupported-effort', intent: 'send-next', payload: requested });
+  await vi.waitFor(async () => {
+    const item = (await queue()).items.find((row: { id: string }) => row.id === 'unsupported-effort');
+    expect(item).toMatchObject({ status: 'held', payload: { routing: { effort: 'medium' } } });
+    expect(item.reason).toContain('no verified mapping');
+  }, { timeout: 15_000 });
+  expect((await history()).transcript.find(row => row.id === 'assistant-queued-unsupported-effort')?.text ?? '').toBe('');
+}, 20_000);

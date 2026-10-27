@@ -124,7 +124,7 @@ fn issues_worker_receives_linked_context_through_stream(cx: &mut TestAppContext)
         .as_array()
         .unwrap()
         .iter()
-        .map(|i| i["status"].clone())
+        .map(|i| (i["status"].clone(), i["reason"].clone()))
         .collect::<Vec<_>>();
     panic!(
         "real fixture worker must receive issue context and persist its streamed reply: {state}; {statuses:?}"

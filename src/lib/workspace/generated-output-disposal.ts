@@ -10,7 +10,7 @@ import { assertWorktreeMaterializationIdentity, captureWorktreeMaterializationId
 import { probeMetadataLockProcessIdentity, sameMetadataLockProcessIdentity } from '@/lib/worktree/metadata-lock-process-identity';
 import { assertGeneratedTreeHasSafeLinks } from '../../../scripts/postship-cleanup.mjs';
 import { collectReleaseArtifactRecipe, verifyReleaseArtifactManifest } from '../../../scripts/lib/release-artifacts.mjs';
-import { captureExactDirectoryManifest, purgeExactDirectory, readCapturedPurgeCwdSnapshot,
+import { purgeExactDirectory, readCapturedPurgeCwdSnapshot,
   type CapturedPurgeProcessWitness, type ExactDirectoryManifest } from './exact-directory-purge';
 import { admitExactManagedFinalization, assertExactManagedFinalizationClaim,
   completeExactManagedFinalization, readExactManagedFinalization } from './exact-managed-finalization-state';
@@ -64,11 +64,27 @@ export async function disposeSuccessfulPrebuildOutput(workspacePath: string, ver
         || !child.observedClosed || child.exitCode !== 0 || child.signal)) {
       throw new Error('Postship output lacks disposable successful prebuild authority.');
     }
-    const recipe = collectReleaseArtifactRecipe(workspace.canonicalPath, version, { env: process.env });
-    if (!verifyReleaseArtifactManifest(workspace.canonicalPath, recipe).reusable) {
-      throw new Error('Postship disposal requires a preserved verified release artifact.');
+    if (resource.buildOwnership?.state !== 'complete' || !resource.buildOwnership.manifest
+      || resource.buildOwnership.proof !== 'write-receipts-v1') {
+      console.info('Preserved unowned entries in .next; no completed write-time writer proof.');
+      return 'skipped';
     }
     let claim = readExactWorkspaceClaim('generated-output-retirement', workspace.canonicalPath, resource.resourceId);
+    // A pending claim already binds the original artifact recipe (including its
+    // release version). A later version bump must not strand that exact claim.
+    // New disposals still require the current clean recipe and build environment.
+    const recordedRecipe = claim?.authority?.artifactRecipeSha256;
+    if (claim && (claim.authority?.purpose !== 'postship'
+      || typeof recordedRecipe !== 'string' || !/^[a-f0-9]{64}$/.test(recordedRecipe))) {
+      throw new Error('Postship disposal claim has no recorded artifact recipe.');
+    }
+    const recipe = claim ? { recipeSha256: recordedRecipe as string }
+      : collectReleaseArtifactRecipe(workspace.canonicalPath, version, { env: process.env });
+    const artifact = verifyReleaseArtifactManifest(workspace.canonicalPath, recipe);
+    if (!artifact.reusable || (claim?.authority?.releaseVersion
+      && claim.authority.releaseVersion !== artifact.manifest?.recipe.version)) {
+      throw new Error('Postship disposal requires a preserved verified release artifact.');
+    }
     const verify = async (captured?: CapturedPurgeProcessWitness) => {
       await assertLinkedGitBuildCustody(workspace, resource.creationAuthority!.linkedGit);
       await assertWorktreeMaterializationIdentity(workspace.canonicalPath, resource.workspace);
@@ -109,14 +125,15 @@ export async function disposeSuccessfulPrebuildOutput(workspacePath: string, ver
     await verify();
     if (!claim) {
       assertGeneratedOutputClaimsReleased(workspace);
-      // Capture must succeed on the original identity. Absence never creates a disposal receipt.
-      const manifest = await captureExactDirectoryManifest(outputPath, resource.output);
+      // This inventory came only from the namespace reserved before compilation.
+      // Never grant deletion authority by inventorying the shared directory here.
+      const manifest = resource.buildOwnership.manifest;
       await verify();
       claim = prepareExactWorkspaceClaim({ kind: 'generated-output-retirement', repositoryPath: workspace.canonicalPath,
         worktreeId: resource.resourceId, operationId: randomUUID(), expectedPath: outputPath,
         sourcePath: outputPath, claimPath: outputPath, parentIdentity: workspace, sourceIdentity: resource.output,
         contentDigest: manifest.fingerprint, authority: { purpose: 'postship', resourceId: resource.resourceId,
-          resourceVersion: resource.version, artifactRecipeSha256: recipe.recipeSha256, purgeManifest: manifest } });
+          resourceVersion: resource.version, releaseVersion: version, artifactRecipeSha256: recipe.recipeSha256, purgeManifest: manifest } });
     }
     if (claim.kind !== 'generated-output-retirement' || claim.repositoryPath !== workspace.canonicalPath
       || claim.worktreeId !== resource.resourceId || claim.sourcePath !== outputPath || claim.expectedPath !== outputPath
@@ -145,7 +162,7 @@ export async function disposeSuccessfulPrebuildOutput(workspacePath: string, ver
       > 16 * 1024 ** 2) throw new Error('Postship disposal receipt exceeds its resource bound.');
     await verify();
     if (await present(outputPath)) {
-      await purgeExactDirectory(outputPath, resource.output, async () => { await verify(); }, async (_candidate, captured) => {
+      const kept = await purgeExactDirectory(outputPath, resource.output, async () => { await verify(); }, async (_candidate, captured) => {
         if (!captured) throw new Error('Postship purge has no captured process witness.');
         await verify(captured);
       }, async () => {
@@ -153,7 +170,12 @@ export async function disposeSuccessfulPrebuildOutput(workspacePath: string, ver
         if ((await readdir(outputPath)).length) throw new Error('Postship finalization is not empty.');
         admitExactManagedFinalization(claim!);
         await hooks.afterFinalAdmission?.();
-      }, manifest.fingerprint, manifest.entries);
+      }, manifest.fingerprint, manifest.entries, true);
+      for (const entry of kept ?? []) console.info(`Kept ${JSON.stringify('.next/' + entry.relative)} because ${entry.reason}.`);
+      if (await present(outputPath)) {
+        console.info('Preserved unowned entries in .next; release-owned entries were cleared.');
+        return 'skipped';
+      }
       await hooks.afterFinalRemoval?.();
       await verify();
       completeExactManagedFinalization(claim, 'removed');
