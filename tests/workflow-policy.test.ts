@@ -210,6 +210,8 @@ describe('workflow policy — every workflow is classified from the filesystem',
   });
 
   it('limits macOS runners to manual work and the bounded native regression checks', () => {
+    const prebuild = workflowFiles.find(file => file.name === 'macos-prebuild-profile.yml');
+    expect(prebuild, 'prebuild lifetime fixtures need a bounded native macOS check').toBeDefined();
     const violations: string[] = [];
     for (const file of workflowFiles) {
       const triggers = triggerNames(file.workflow);
@@ -250,6 +252,33 @@ describe('workflow policy — every workflow is classified from the filesystem',
         expect(job.strategy).toBeUndefined();
         expect(job.steps).toHaveLength(2);
       }
+      const prebuildProfile = file.name === 'macos-prebuild-profile.yml';
+      if (prebuildProfile) {
+        expect([...triggers].sort()).toEqual(['pull_request', 'workflow_dispatch']);
+        expect((file.workflow.on as RecordValue).pull_request).toEqual({ branches: ['main'], paths: [
+          'tests/tauri-prebuild-profile.test.ts',
+          'tests/workflow-policy.test.ts',
+          'scripts/lib/generated-output-launch.mjs',
+          'scripts/lib/prebuild-continuation.mjs',
+          'scripts/lib/release-build-profile.mjs',
+          'src/lib/workspace/generated-output-producer.ts',
+          '.github/workflows/macos-prebuild-profile.yml',
+        ] });
+        expect(jobsIn(file)).toHaveLength(1);
+        const job = jobsIn(file)[0][1];
+        expect(job['runs-on']).toBe('macos-15-intel');
+        expect(job['timeout-minutes']).toBe(15);
+        expect(job.strategy).toBeUndefined();
+        const steps = job.steps as RecordValue[];
+        const setup = steps.find(step => step.uses === 'actions/setup-node@v4');
+        expect((setup?.with as RecordValue)?.['node-version']).toBe('22.23.4');
+        expect(steps.filter(step => String(step.run).includes('npx vitest run')).map(step => step.run)).toEqual([
+          'env -u CI npx vitest run tests/tauri-prebuild-profile.test.ts tests/workflow-policy.test.ts --reporter=verbose',
+          "env -u CI npx vitest run tests/tauri-prebuild-profile.test.ts -t 'retains linked' --reporter=verbose",
+          "env -u CI npx vitest run tests/tauri-prebuild-profile.test.ts -t 'retains ordinary' --reporter=verbose",
+          'npx vitest run tests/tauri-prebuild-profile.test.ts --reporter=verbose',
+        ]);
+      }
       const localVerification = file.name === 'verify-ci-macos.yml';
       if (localVerification) {
         expect([...triggers]).toEqual(['workflow_dispatch']);
@@ -259,7 +288,7 @@ describe('workflow policy — every workflow is classified from the filesystem',
         expect(job.strategy).toEqual({ 'fail-fast': false, matrix: { scenario: ['clean', 'integration', 'dependency', 'bundle'] } });
       }
       for (const [jobName, job] of jobsIn(file)) {
-        if (usesMacOsRunner(job) && !manualOnly && !weeklyResources && !minimumOsDmg && !localVerification) {
+        if (usesMacOsRunner(job) && !manualOnly && !weeklyResources && !minimumOsDmg && !prebuildProfile && !localVerification) {
           violations.push(`${file.name}: jobs.${jobName}`);
         }
       }
