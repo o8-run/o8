@@ -39,14 +39,15 @@ process.env.CORTEX_IDE_OWNED_CLAUDE_CODE_ROOT = ownedRoot;
 const { closeDb, getSqlite } = await import('@/lib/db');
 const { createLane, getLane, setLaneStatus, updateLane } = await import('@/lib/lane/registry');
 const { recordLaneEvent } = await import('@/lib/lane/events');
-const { persistLanePacketHold } = await import('@/lib/lane/packet-stop-hold');
+const { packetAutomaticRecoveryHoldReason, packetRecoveryStopReason, persistLanePacketHold } = await import('@/lib/lane/packet-stop-hold');
 const { readOrchestratorControlPlaneState, writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
 const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
 const { getOrCreateWsToken } = await import('@/lib/ws-auth');
 const { handleAgentCompletion } = await import('@/lib/supervisor/agent-completion');
 const { getWatchedAgents, ingestAgentCompletionSignal, registerWatchedAgent,
-  startSupervisorLoop, stopSupervisorLoop, unregisterWatchedAgent } = await import('@/lib/supervisor/agent-supervisor');
+  runSupervisorTickForTesting, startSupervisorLoop, stopSupervisorLoop, unregisterWatchedAgent } = await import('@/lib/supervisor/agent-supervisor');
 const steerRoute = await import('@/app/api/orchestrator/steer-packet/route');
+const { assertAutomaticRecoveryGeneration, readOwnedCompletionState, readOwnedRecoveryState } = await import('@/lib/runtimes/shared/owned-session/automatic-recovery');
 const runsRoute = await import('@/app/api/panel/managed-runs/route');
 const headlessRoute = await import('@/app/api/orchestrator/headless-tick/route');
 const { readMissionRegistryEntry } = await import('@/lib/orchestrator/mission-registry');
@@ -69,7 +70,7 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
-function fixture() {
+function fixture(options: { queueState?: OrchestratorPacket['queueState']; capHit?: boolean; reviewable?: boolean } = {}) {
   const id = `pkt-completion-race-${++sequence}`;
   const repoPath = join(dataDir, id);
   const sessionKey = `claude-code-owned:${id}`;
@@ -120,12 +121,15 @@ function fixture() {
     });
     return finished.id;
   }
-  setLaneStatus(lane.id, 'reviewing', 'system', 'review_requested');
+  setLaneStatus(lane.id, options.reviewable ? 'reviewing' : 'running', 'system', options.reviewable ? 'review_requested' : 'runtime_started');
   const packet: OrchestratorPacket = {
     id, referenceLabel: id, title: id, summary: id, runtime: 'claude-code',
     workspaceTargetPath: repoPath, branchTarget: `inline/${id}`,
-    dependencyLabels: [], dependencyPacketIds: [], queueState: 'held',
-    releaseState: 'pending', status: 'awaiting_review', operatorStopped: false,
+    // Reviewable work is queued; an explicit held queue is a durable stop.
+    dependencyLabels: [], dependencyPacketIds: [], queueState: options.queueState ?? 'queued',
+    releaseState: 'pending', status: options.reviewable ? 'awaiting_review' : 'running', operatorStopped: false,
+    ...(options.capHit ? { spendTelemetry: { capHit: true, costUsd: null, inputTokens: 1, outputTokens: 0,
+      costSource: 'unknown' as const, updatedAt: now } } : {}),
     blockedReason: null, lastEventAt: null, lastEventLabel: null, archivedAt: null, review: null,
     lane: { tileId: lane.id, tabId: lane.id, laneId: lane.id, repoPath,
       worktreePath: repoPath, runtime: 'claude-code', sessionKey },
@@ -154,7 +158,8 @@ function fixture() {
   });
   registerWatchedAgent(sessionKey, repoPath, id, 'test');
   broadcast.mockClear();
-  return { packet, lane, sessionKey, runId: session.recentRuns[0].id, finishRun };
+  return { packet, lane, sessionKey, runId: session.recentRuns[0].id, finishRun,
+    readSession: () => JSON.parse(readFileSync(metadataPath, 'utf8')) as OwnedSessionRecord };
 }
 
 function request(path: string, body: unknown) {
@@ -268,7 +273,7 @@ describe('completion and steer overlap through production callbacks and routes',
   });
 
   it('rejects raw release IDs at the scheduler route without changing review state', async () => {
-    const { packet, lane } = fixture();
+    const { packet, lane } = fixture({ reviewable: true });
     const response = await headlessRoute.POST(request('/api/orchestrator/headless-tick', {
       releasePacketIds: [packet.id],
     }));
@@ -447,6 +452,139 @@ describe('completion and steer overlap through production callbacks and routes',
     expect(getLane(lane.id)).toMatchObject({ status: 'awaiting_input',
       lastEventLabel: 'agent_failed_work_present' });
     expect(dependencies.enqueueAutoReview).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['queue', 'completed'], ['queue', 'failed'], ['cap', 'completed'], ['cap', 'failed'],
+  ] as const)('preserves an explicit %s hold before a %s completion without an operator-stop flag', async (hold, outcome) => {
+    const { packet, lane, sessionKey } = fixture(hold === 'queue' ? { queueState: 'held' } : { capHit: true });
+    const before = readOrchestratorControlPlaneState().packets.find(entry => entry.id === packet.id)!;
+    expect(Boolean(before.operatorStopped)).toBe(false);
+    expect(before.queueState).toBe(hold === 'queue' ? 'held' : 'queued');
+    expect(Boolean(before.spendTelemetry?.capHit)).toBe(hold === 'cap');
+    expect(packetRecoveryStopReason(packet.id)).toBe(hold === 'queue' ? 'packet_held' : 'spend_cap_hit');
+    expect(await handleAgentCompletion(sessionKey, outcome, dependencies)).toEqual({ superseded: true });
+    closeDb();
+    expect(readOrchestratorControlPlaneState().packets.find(entry => entry.id === packet.id)).toEqual(before);
+    expect(getLane(lane.id)?.status).toBe('running');
+    expect(h.verify).not.toHaveBeenCalled();
+    expect(h.commit).not.toHaveBeenCalled();
+    expect(h.capture).not.toHaveBeenCalled();
+    expect(h.perform).not.toHaveBeenCalled();
+    expect(dependencies.enqueueAutoReview).not.toHaveBeenCalled();
+    expect(dependencies.triggerHeadlessSprintTick).not.toHaveBeenCalled();
+    expect(dependencies.queueReviewContinuation).not.toHaveBeenCalled();
+    expect(dependencies.enqueueVerificationFailureInboxItem).not.toHaveBeenCalled();
+  });
+
+  it.each(['queue', 'cap'] as const)('preserves a %s hold arriving during verification without settling its watcher', async hold => {
+    const { packet, lane, sessionKey, runId } = fixture();
+    expect(packetRecoveryStopReason(packet.id)).toBeNull();
+    const delayed = delayVerification();
+    const completion = ingestAgentCompletionSignal(sessionKey, runId);
+    await delayed.entered;
+    const state = readOrchestratorControlPlaneState();
+    const current = state.packets.find(entry => entry.id === packet.id)!;
+    if (hold === 'queue') current.queueState = 'held';
+    else current.spendTelemetry = { capHit: true, costUsd: null, inputTokens: 1, outputTokens: 0,
+      costSource: 'unknown', updatedAt: new Date().toISOString() };
+    writeOrchestratorControlPlaneState(state);
+    const held = readOrchestratorControlPlaneState().packets.find(entry => entry.id === packet.id)!;
+    expect(Boolean(held.operatorStopped)).toBe(false);
+    expect(held.queueState).toBe(hold === 'queue' ? 'held' : 'queued');
+    expect(Boolean(held.spendTelemetry?.capHit)).toBe(hold === 'cap');
+    expect(packetRecoveryStopReason(packet.id)).toBe(hold === 'queue' ? 'packet_held' : 'spend_cap_hit');
+    closeDb();
+    delayed.resolve(verified);
+    expect(await completion).toBe(true);
+    expect(readOrchestratorControlPlaneState().packets.find(entry => entry.id === packet.id)).toEqual(held);
+    expect(getLane(lane.id)?.status).toBe('running');
+    expect(h.verify).toHaveBeenCalledTimes(1);
+    expect(h.commit).toHaveBeenCalledTimes(1);
+    expect(h.capture).not.toHaveBeenCalled();
+    expect(h.perform).not.toHaveBeenCalled();
+    expect(dependencies.enqueueAutoReview).not.toHaveBeenCalled();
+    expect(dependencies.triggerHeadlessSprintTick).not.toHaveBeenCalled();
+    expect(dependencies.queueReviewContinuation).not.toHaveBeenCalled();
+    expect(dependencies.enqueueVerificationFailureInboxItem).not.toHaveBeenCalled();
+    expect(getWatchedAgents().find(entry => entry.surfaceId === sessionKey)?.completionReported).toBe(false);
+    expect(broadcast).not.toHaveBeenCalledWith(expect.objectContaining({ status: 'completed' }));
+  });
+
+  it.each(['push', 'poll'] as const)('verifies the current exited steer through %s without admitting automatic recovery', async observer => {
+    const { packet, lane, sessionKey, finishRun, readSession } = fixture();
+    expect((await steer(packet.id)).status).toBe(200);
+    const runId = finishRun();
+    expect(packetRecoveryStopReason(packet.id)).toBeNull();
+    expect(packetAutomaticRecoveryHoldReason(packet.id)).toBe('packet_terminal');
+    expect(await readOwnedRecoveryState(sessionKey)).toMatchObject({ owned: true, runId, outcome: 'finished',
+      packetHoldReason: 'packet_terminal', automaticRecoveryAllowed: false });
+    if (observer === 'push') expect(await ingestAgentCompletionSignal(sessionKey, runId)).toBe(true);
+    else {
+      // Exercise the real poll and its unchanged 15-second finish grace.
+      vi.setSystemTime(Date.now() + 31_000);
+      await runSupervisorTickForTesting();
+      expect(h.verify).not.toHaveBeenCalled();
+      vi.setSystemTime(Date.now() + 16_000);
+      await runSupervisorTickForTesting();
+    }
+    expect(h.verify).toHaveBeenCalledTimes(1);
+    expect(getLane(lane.id)?.status).toBe('reviewing');
+    expect(dependencies.enqueueAutoReview).toHaveBeenCalledTimes(1);
+    expect(packetAutomaticRecoveryHoldReason(packet.id)).toBe('packet_terminal');
+    expect(await readOwnedRecoveryState(sessionKey)).toMatchObject({ owned: true, runId, outcome: 'finished',
+      packetHoldReason: 'packet_terminal', automaticRecoveryAllowed: false });
+    expect(() => assertAutomaticRecoveryGeneration(readSession(), runId)).toThrow('Automatic recovery refused: packet_terminal');
+    expect(h.perform).toHaveBeenCalledTimes(1);
+    expect(readOrchestratorControlPlaneState().packets.find(entry => entry.id === packet.id)?.releaseState).toBe('pending');
+  });
+
+  it.each([
+    ['missing', 'push'], ['missing', 'poll'], ['released', 'push'], ['released', 'poll'], ['archived', 'push'], ['archived', 'poll'],
+  ] as const)('keeps %s owner refusal through the %s completion observer', async (terminal, observer) => {
+    const { packet, lane, sessionKey, runId } = fixture();
+    const state = readOrchestratorControlPlaneState();
+    if (terminal === 'missing') state.packets = [];
+    else {
+      const current = state.packets.find(entry => entry.id === packet.id)!;
+      current.status = terminal;
+      if (terminal === 'released') {
+        current.releaseState = 'released';
+        current.releaseStatePayload = { source: 'read_only_completed', evidenceKind: 'read_only_no_merge_required' };
+      } else current.archivedAt = new Date().toISOString();
+    }
+    writeOrchestratorControlPlaneState(state);
+    closeDb();
+    const saved = readOrchestratorControlPlaneState();
+    const savedBytes = readFileSync(join(dataDir, 'orchestrator-state.json'), 'utf8');
+    if (terminal === 'missing') expect(saved.packets).toEqual([]);
+    else expect(saved.packets.find(entry => entry.id === packet.id)?.status).toBe(terminal);
+    expect(await readOwnedCompletionState(sessionKey)).toMatchObject({ owned: true, packetHoldReason: expect.any(String), automaticRecoveryAllowed: false });
+    if (observer === 'push') expect(await ingestAgentCompletionSignal(sessionKey, runId)).toBe(true);
+    else {
+      vi.setSystemTime(Date.now() + 31_000); await runSupervisorTickForTesting();
+      vi.setSystemTime(Date.now() + 16_000); await runSupervisorTickForTesting();
+    }
+    expect(readFileSync(join(dataDir, 'orchestrator-state.json'), 'utf8')).toBe(savedBytes);
+    expect(getLane(lane.id)?.status).toBe('running');
+    expect(h.verify).not.toHaveBeenCalled();
+    expect(h.commit).not.toHaveBeenCalled();
+    expect(h.capture).not.toHaveBeenCalled();
+    expect(h.perform).not.toHaveBeenCalled();
+    expect(dependencies.enqueueAutoReview).not.toHaveBeenCalled();
+    expect(dependencies.triggerHeadlessSprintTick).not.toHaveBeenCalled();
+    expect(getWatchedAgents().find(entry => entry.surfaceId === sessionKey)?.completionReported).toBe(false);
+  });
+
+  it('does not re-verify an already-reviewable owned turn on a duplicate exit signal', async () => {
+    const { packet, lane, sessionKey, runId } = fixture({ reviewable: true });
+    expect(packetRecoveryStopReason(packet.id)).toBeNull();
+    expect(await ingestAgentCompletionSignal(sessionKey, runId)).toBe(true);
+    expect(getLane(lane.id)?.status).toBe('reviewing');
+    expect(h.verify).not.toHaveBeenCalled();
+    expect(h.commit).not.toHaveBeenCalled();
+    expect(dependencies.enqueueAutoReview).not.toHaveBeenCalled();
+    expect(dependencies.triggerHeadlessSprintTick).not.toHaveBeenCalled();
   });
 
   it('wires the server callback to this production completion path', () => {

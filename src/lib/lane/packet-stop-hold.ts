@@ -99,6 +99,22 @@ export function packetAutomaticRecoveryHoldReason(packetId: string): string | nu
   return admission.allowed ? null : admission.reason;
 }
 
+/** Observe a finished current turn without granting automatic resume authority. */
+export function packetCompletionHoldReason(packetId: string): string | null {
+  const packet = readManagedRunPacket(packetId);
+  if (!packet) return 'packet_not_found';
+  const stopped = recoveryStopReason(packet) || packetSteerHoldReason(packetId);
+  if (stopped) return stopped;
+  if (packet.releaseState === 'released' || packet.status === 'released' || packet.status === 'archived' || packet.archivedAt) {
+    return 'packet_terminal';
+  }
+  const admission = managedRunAdmissionForPacket(packet);
+  // Exiting closes a steer's managed-run grant before its completion callback.
+  // The still-running lane needs that callback to verify and become reviewable.
+  if (admission.reason === 'packet_terminal' && findLaneByPacket(packetId)?.status === 'running') return null;
+  return admission.allowed ? null : admission.reason;
+}
+
 /** A steer is not authority to undo an operator stop, archive, or proven release. */
 export function packetSteerHoldReason(packetId: string): string | null {
   const packet = readManagedRunPacket(packetId);
