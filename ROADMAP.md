@@ -343,3 +343,9 @@ Activity refresh [#3460](https://github.com/o8-run/o8/issues/3460) excludes tran
 
 <!-- issue3131-activity-reliability -->
 Activity folder-state follow-up (#3131): selected local folders retain their scope, local Git failures stay visible beside remote history, and Retry rechecks the same folder. Review/Workspace existing remedies are preserved. Source verification and native acceptance remain separate; no release is included.
+
+Artifact-bound beta enrollment [#4798](https://github.com/o8-run/o8/issues/4798)
+is under review. Publication and updater entry-point regressions cover signed
+channel identity, stable isolation, ordered results and returning to Stable
+without downgrade. Promotion remains separate in #4857; installed-build smoke
+acceptance remains draft #4813. No release or installed acceptance is claimed.

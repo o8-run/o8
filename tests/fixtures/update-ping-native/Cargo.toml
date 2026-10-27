@@ -5,6 +5,7 @@ edition = "2021"
 publish = false
 
 [dependencies]
+semver = "1"
 base64 = "0.22"
 tauri = { version = "=2.11.1", default-features = false, features = ["test"] }
 tauri-plugin-updater = "=2.10.0"

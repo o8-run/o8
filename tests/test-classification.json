@@ -1673,6 +1673,16 @@
       ]
     },
     {
+      "path": "tests/artifact-channel-publication-real-path.test.ts",
+      "reasons": [
+        "apfs-tool",
+        "child-process",
+        "git-cli",
+        "native-build",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/attempt-learnings-respawn.test.ts",
       "reasons": [
         "child-process",
@@ -3600,6 +3610,14 @@
     {
       "path": "tests/lifecycle-mcp-errors-real-path.test.ts",
       "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/linux-build-channel-boundary-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "native-build",
         "real-path"
       ]
     },
@@ -7034,6 +7052,18 @@
     },
     {
       "path": "tests/update-auto-apply-wait-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/update-channel-order-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/update-channel-settings-real-path.test.ts",
       "reasons": [
         "real-path"
       ]
