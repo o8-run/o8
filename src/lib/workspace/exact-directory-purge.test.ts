@@ -224,9 +224,18 @@ describe('exact directory purge', () => {
       path.join(process.cwd(), 'src/lib/workspace/exact-directory-purge.ts'),
     ).href;
     writeFileSync(runnerPath, `
-      import { purgeExactDirectory } from ${JSON.stringify(moduleUrl)};
-      const input = JSON.parse(process.env.O8_PURGE_TEST_INPUT);
-      void purgeExactDirectory(
+      // The production environment allowlist deliberately omits test controls.
+      // Inject this fixture's stop marker only at the native test spawn edge.
+      const cp = require('node:child_process');
+      const nativeSpawn = cp.spawn;
+      cp.spawn = (command, args, options) => nativeSpawn(command, args, args?.[0] === '-e'
+        && args[1].includes('O8_PURGE_CAPTURED') ? { ...options, env: { ...options.env,
+          NODE_ENV: 'test', O8_TEST_PURGE_STOP_MARKER: process.env.O8_TEST_PURGE_STOP_MARKER } } : options);
+      require('node:module').syncBuiltinESMExports();
+      void import(${JSON.stringify(moduleUrl)}).then(namespace => {
+        const { purgeExactDirectory } = namespace.default ?? namespace;
+        const input = JSON.parse(process.env.O8_PURGE_TEST_INPUT);
+        return purgeExactDirectory(
         input.directoryPath,
         input.identity,
         undefined,
@@ -234,7 +243,8 @@ describe('exact directory purge', () => {
         undefined,
         input.manifest.fingerprint,
         input.manifest.entries,
-      );
+        );
+      });
     `);
     const child = spawn(process.execPath, ['--import', 'tsx', runnerPath], {
       cwd: process.cwd(),
@@ -252,12 +262,14 @@ describe('exact directory purge', () => {
           .filter(Boolean)
           .join(' '),
       },
-      stdio: 'ignore',
+      stdio: ['ignore', 'ignore', 'pipe'],
     });
+    let childErrors = '';
+    child.stderr?.on('data', chunk => { childErrors += chunk; });
     const deadline = Date.now() + 15_000;
     while (!existsSync(markerPath)) {
       if (child.exitCode !== null || child.signalCode !== null) {
-        throw new Error('Exact purge crash child exited before namespace release.');
+        throw new Error('Exact purge crash child exited before namespace release: ' + childErrors);
       }
       if (Date.now() >= deadline) throw new Error('Exact purge crash child timed out.');
       await new Promise((resolve) => setTimeout(resolve, 20));

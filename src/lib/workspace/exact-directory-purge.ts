@@ -172,6 +172,8 @@ export interface ExactDirectoryManifest {
   entries: ExactDirectoryManifestEntry[];
 }
 
+export interface ExactDirectoryKeptEntry { relative: string; reason: string }
+
 const PURGE_CAPTURE_SCRIPT = String.raw`
 const crypto = require('node:crypto');
 const fs = require('node:fs');
@@ -389,6 +391,37 @@ function verifyMonotonicManifest(current, expected) {
   }
 }
 
+function selectOwnedSubset(current, expected) {
+  const priorByPath = new Map(expected.map(entry => [entry.relative, entry]));
+  const originalNames = countFileNames(expected);
+  const sameInodes = current.filter(entry => {
+    const prior = priorByPath.get(entry.relative);
+    return prior && entry.device === prior.device && entry.inode === prior.inode && entry.kind === prior.kind;
+  });
+  const remainingNames = countFileNames(sameInodes);
+  const selected = new Set();
+  return current.filter(entry => {
+    const prior = priorByPath.get(entry.relative);
+    let reason;
+    if (!prior) reason = 'it is not in the release-owned inventory';
+    else if (entry.device !== prior.device || entry.inode !== prior.inode || entry.kind !== prior.kind) {
+      reason = 'its build ownership identity changed';
+    } else if (entry.kind === 'file' && (entry.linkCount !== prior.linkCount
+      - (originalNames.get(inodeKey(entry)) - remainingNames.get(inodeKey(entry)))
+      || !sameFileRevision(entry, prior, entry.linkCount))) reason = 'its build ownership revision changed';
+    else if (entry.relative !== '.' && !selected.has(path.dirname(entry.relative))) {
+      reason = 'its parent ownership changed';
+    }
+    if (reason) {
+      if (entry.relative === '.') throw new Error('Exact purge root ownership changed.');
+      process.stdout.write('O8_PURGE_KEPT ' + JSON.stringify({relative:entry.relative,reason}) + '\n');
+      return false;
+    }
+    selected.add(entry.relative);
+    return true;
+  });
+}
+
 async function releaseContent(manifest) {
   // Preflight the entire tree before unlinking anything. Never chmod or
   // truncate: another name or an already-open descriptor may own those bytes.
@@ -485,8 +518,10 @@ async function main() {
   beginPhase('capture');
   const capturedManifest = await manifestAt();
   const owned = new Set(expectedManifest.map(entry => entry.relative));
-  const manifest = process.env.O8_PURGE_PRESERVE_UNLISTED === '1'
-    ? capturedManifest.filter(entry => owned.has(entry.relative)) : capturedManifest;
+  const manifest = process.env.O8_PURGE_PRESERVE_CHANGED === '1'
+    ? selectOwnedSubset(capturedManifest, expectedManifest)
+    : process.env.O8_PURGE_PRESERVE_UNLISTED === '1'
+      ? capturedManifest.filter(entry => owned.has(entry.relative)) : capturedManifest;
   const fingerprint = crypto.createHash('sha256').update(JSON.stringify(manifest)).digest('hex');
   const expectedFingerprint = process.env.O8_PURGE_EXPECTED_FINGERPRINT || '';
   if (expectedManifest.length > 0) {
@@ -519,10 +554,11 @@ async function runCapturedPurge(
   afterTreeCapture: AfterTreeCapture | undefined,
   namespace: PurgeNamespace,
   preserveUnlisted = false,
-): Promise<void> {
+  preserveChanged = false,
+): Promise<ExactDirectoryKeptEntry[]> {
   const child = spawn(process.execPath, ['-e', PURGE_CAPTURE_SCRIPT], {
     cwd: namespace.canonicalPath,
-    env: childEnvironment({ env: { O8_PURGE_PRESERVE_UNLISTED: preserveUnlisted ? '1' : '0', O8_PURGE_EXPECTED_DEVICE: String(identity.device), O8_PURGE_EXPECTED_INODE: String(identity.inode), ...(expectedFingerprint ? { O8_PURGE_EXPECTED_FINGERPRINT: expectedFingerprint } : {}) } }),
+    env: childEnvironment({ env: { O8_PURGE_PRESERVE_UNLISTED: preserveUnlisted ? '1' : '0', O8_PURGE_PRESERVE_CHANGED: preserveChanged ? '1' : '0', O8_PURGE_EXPECTED_DEVICE: String(identity.device), O8_PURGE_EXPECTED_INODE: String(identity.inode), ...(expectedFingerprint ? { O8_PURGE_EXPECTED_FINGERPRINT: expectedFingerprint } : {}) } }),
     stdio: ['pipe', 'pipe', 'pipe'],
     windowsHide: true,
   });
@@ -607,6 +643,8 @@ async function runCapturedPurge(
   const code = await closed;
   reportPurgePhases(stdout);
   if (code !== 0) throw new Error(stderr.trim() || 'Exact purge content release failed.');
+  return stdout.split('\n').filter(line => line.startsWith('O8_PURGE_KEPT '))
+    .map(line => JSON.parse(line.slice('O8_PURGE_KEPT '.length)) as ExactDirectoryKeptEntry);
 }
 
 function reportPurgePhases(stdout: string): void {
@@ -683,11 +721,11 @@ export async function purgeExactDirectory(
   expectedFingerprint?: string,
   expectedManifest?: ExactDirectoryManifestEntry[],
   preserveUnlisted = false,
-): Promise<void> {
+): Promise<ExactDirectoryKeptEntry[] | void> {
   const namespace = await capturePurgeNamespace(candidatePath, identity);
   await beforeCapture?.(candidatePath);
   await assertPurgeNamespace(namespace, identity);
-  await runCapturedPurge(
+  const kept = await runCapturedPurge(
     candidatePath,
     identity,
     expectedFingerprint,
@@ -695,8 +733,9 @@ export async function purgeExactDirectory(
     afterTreeCapture,
     namespace,
     preserveUnlisted,
+    preserveUnlisted,
   );
-  if (preserveUnlisted && (await readdir(namespace.canonicalPath)).length > 0) return;
+  if (preserveUnlisted && (await readdir(namespace.canonicalPath)).length > 0) return kept;
   await afterContentRelease?.(candidatePath);
   await assertPurgeNamespace(namespace, identity);
   // The caller already journals this exact namespace. Keep it replayable until
@@ -704,4 +743,5 @@ export async function purgeExactDirectory(
   await removeExactEmptyChildDirectory(
     namespace.parentIdentity.canonicalPath, namespace.parentIdentity, namespace.canonicalPath, identity,
   );
+  if (preserveUnlisted) return kept;
 }

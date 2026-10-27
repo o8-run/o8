@@ -5638,6 +5638,14 @@
       ]
     },
     {
+      "path": "tests/release-output-round1-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/release-preflight.test.ts",
       "reasons": [
         "child-process",

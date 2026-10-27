@@ -162,7 +162,7 @@ export async function disposeSuccessfulPrebuildOutput(workspacePath: string, ver
       > 16 * 1024 ** 2) throw new Error('Postship disposal receipt exceeds its resource bound.');
     await verify();
     if (await present(outputPath)) {
-      await purgeExactDirectory(outputPath, resource.output, async () => { await verify(); }, async (_candidate, captured) => {
+      const kept = await purgeExactDirectory(outputPath, resource.output, async () => { await verify(); }, async (_candidate, captured) => {
         if (!captured) throw new Error('Postship purge has no captured process witness.');
         await verify(captured);
       }, async () => {
@@ -171,6 +171,7 @@ export async function disposeSuccessfulPrebuildOutput(workspacePath: string, ver
         admitExactManagedFinalization(claim!);
         await hooks.afterFinalAdmission?.();
       }, manifest.fingerprint, manifest.entries, true);
+      for (const entry of kept ?? []) console.info(`Kept ${JSON.stringify('.next/' + entry.relative)} because ${entry.reason}.`);
       if (await present(outputPath)) {
         console.info('Preserved unowned entries in .next; release-owned entries were cleared.');
         return 'skipped';

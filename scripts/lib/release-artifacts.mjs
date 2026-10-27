@@ -36,6 +36,7 @@ const RECIPE_FILES = [
   'src/lib/workspace/generated-output-producer.ts',
   'src/lib/workspace/generated-output-build-ownership.ts',
   'scripts/lib/build-output-writer.cjs',
+  'scripts/lib/build-output-capture.c',
   'scripts/lib/build-output-entry-create.cjs',
   'src/lib/workspace/generated-output-state.ts',
   'src/lib/workspace/generated-output-validation.ts',

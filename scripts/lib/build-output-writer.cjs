@@ -49,6 +49,90 @@ function writing(flags) {
     : /[wa+]/.test(flags);
 }
 
+let captureExecutable;
+function captureNoReplace(source, destination, parent, holder) {
+  if (!captureExecutable) {
+    const directory = raw.mkdtempSync(path.join(require('node:os').tmpdir(), 'o8-build-capture-'));
+    const executable = path.join(directory, 'capture');
+    const compiled = rawSpawnSync('cc', ['-std=c11', '-Wall', '-Wextra', '-Werror',
+      path.join(__dirname, 'build-output-capture.c'), '-o', executable], {
+      env: { PATH: process.env.PATH, LANG: 'C', LC_ALL: 'C' }, encoding: 'utf8', timeout: 30_000,
+    });
+    if (compiled.status !== 0) throw new Error('Build output capture requires the native C toolchain; preserve output.');
+    captureExecutable = executable;
+  }
+  const result = rawSpawnSync(captureExecutable, [source, destination, String(parent.dev), String(parent.ino),
+    String(holder.dev), String(holder.ino)], { env: { PATH: process.env.PATH }, encoding: 'utf8', timeout: 30_000 });
+  if (result.status !== 0) {
+    const error = new Error(result.stderr?.trim() || 'Build output capture failed; preserve output.');
+    error.code = result.status === 73 ? 'EEXIST' : 'EIO';
+    throw error;
+  }
+}
+
+// Unlinking a shared pathname after lstat can delete a new writer's inode.
+// First atomically capture that name in a private directory. Only the captured
+// entry can be removed, after comparison with the original writer receipt.
+function removeCapturedEntry(file, expected, validateParents) {
+  const parent = path.dirname(file);
+  validateParents();
+  const parentStat = raw.lstatSync(parent);
+  const linkFlags = process.platform === 'linux' ? 0x200000 | fs.constants.O_NOFOLLOW : fs.constants.O_SYMLINK;
+  const flags = expected.kind === 'symlink' ? linkFlags : fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW
+    | fs.constants.O_NONBLOCK | (expected.kind === 'directory' ? fs.constants.O_DIRECTORY : 0);
+  if (flags === undefined || expected.kind === 'other') refuse(expected.relative);
+  const originalFd = raw.openSync(file, flags);
+  if (!matches(receipt(expected.relative, raw.fstatSync(originalFd)), expected)) {
+    raw.closeSync(originalFd); refuse(expected.relative);
+  }
+  const directory = raw.mkdtempSync(path.join(parent, '.o8-remove-'));
+  const held = path.join(directory, 'entry');
+  const directoryFd = raw.openSync(directory, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW);
+  const privateIdentity = raw.fstatSync(directoryFd);
+  let captured = false;
+  function verifyPrivate() {
+    validateParents();
+    const currentParent = raw.lstatSync(parent);
+    const named = raw.lstatSync(directory);
+    if (currentParent.dev !== parentStat.dev || currentParent.ino !== parentStat.ino
+      || !named.isDirectory() || named.isSymbolicLink() || (named.mode & 0o777) !== 0o700
+      || named.dev !== privateIdentity.dev || named.ino !== privateIdentity.ino
+      || raw.realpathSync(directory) !== directory) refuse(expected.relative);
+  }
+  try {
+    verifyPrivate();
+    captureNoReplace(file, held, parentStat, privateIdentity);
+    captured = true;
+    verifyPrivate();
+    const stat = raw.lstatSync(held);
+    // rename changes ctime. It cannot change the captured inode, kind, bytes,
+    // permissions, mtime or link count into the earlier writer's receipt.
+    const moved = receipt(expected.relative, stat);
+    if (!matches({ ...moved, ctimeMs: expected.ctimeMs }, expected)) {
+      // link is exclusive: a new occupant at the original name is never
+      // overwritten. Keep the captured inode as well, even if restoration wins.
+      if (stat.isFile() || stat.isSymbolicLink()) {
+        try { raw.linkSync(held, file); }
+        catch (error) { if (error.code !== 'EEXIST') throw error; }
+      }
+      throw new Error(`Preserved changed build output: ${expected.relative}; ownership changed during removal. Captured entry kept at ${path.join(path.dirname(expected.relative), path.basename(directory), 'entry')}.`);
+    }
+    verifyPrivate();
+    const pinned = receipt(expected.relative, raw.fstatSync(originalFd));
+    if (!matches(pinned, moved) || !matches(receipt(expected.relative, raw.lstatSync(held)), pinned)) refuse(expected.relative);
+    // The unlink now addresses our private captured name, never the compiler's
+    // shared filename. A replacement at the original filename remains intact.
+    if (expected.kind === 'directory') raw.rmdirSync(held);
+    else raw.unlinkSync(held);
+    captured = false;
+  } finally {
+    raw.closeSync(directoryFd);
+    raw.closeSync(originalFd);
+    if (!captured) { verifyPrivate(); if (!raw.readdirSync(directory).length) raw.rmdirSync(directory); }
+  }
+  if (raw.lstatSync(file, { throwIfNoEntry: false })) refuse(expected.relative);
+}
+
 function createEntry(file, parent, options) {
   const parentPath = path.dirname(file);
   const result = rawSpawnSync(process.execPath, [path.join(__dirname, 'build-output-entry-create.cjs'),
@@ -107,7 +191,7 @@ function transferOwnedEntry(source, destination, inventory, sourceParent, destin
       output.set(relative, { relative, ...createEntry(to, parent, { kind: 'directory', mode: expected.mode & 0o777 }) });
       for (const name of raw.readdirSync(from)) move(relative === '.' ? name : path.join(relative, name));
       parents(relative); sourceEntry(relative);
-      raw.rmdirSync(from);
+      removeCapturedEntry(from, expected, () => parents(relative));
       return;
     }
     if (expected.kind !== 'file' && expected.kind !== 'symlink') refuse(relative);
@@ -116,7 +200,7 @@ function transferOwnedEntry(source, destination, inventory, sourceParent, destin
       const parent = relative === '.' ? destinationParent : output.get(path.dirname(relative));
       const created = createEntry(to, parent, { kind: 'symlink', target: expected.symlinkTarget });
       parents(relative); sourceEntry(relative);
-      raw.unlinkSync(from);
+      removeCapturedEntry(from, expected, () => parents(relative));
       output.set(relative, { relative, ...created });
       return;
     }
@@ -135,7 +219,7 @@ function transferOwnedEntry(source, destination, inventory, sourceParent, destin
         || !matches(receipt(relative, raw.lstatSync(to)), linked)) refuse(relative);
       parents(relative);
       if (!matches(receipt(relative, raw.lstatSync(from)), linked)) refuse(relative);
-      raw.unlinkSync(from);
+      removeCapturedEntry(from, linked, () => parents(relative));
       const moved = receipt(relative, descriptor === undefined ? raw.lstatSync(to) : raw.fstatSync(descriptor));
       if (moved.device !== expected.device || moved.inode !== expected.inode || moved.linkCount !== expected.linkCount
         || moved.size !== expected.size || moved.mtimeMs !== expected.mtimeMs
@@ -325,14 +409,15 @@ function connect(config, initialRoot) {
   function remove(file, options = {}, directoryOnly = false) {
     const name = relative(file);
     if (name === null) return directoryOnly ? raw.rmdirSync(file, options) : raw.rmSync(file, options);
+    if (name === '.') refuse('removal of the compiler reservation');
     parents(name);
     const stat = raw.lstatSync(file, { throwIfNoEntry: false });
     if (!stat && options.force) return;
     check(name, stat);
     if (stat.isDirectory()) {
       if (options.recursive) for (const child of raw.readdirSync(file)) remove(path.join(file, child), options);
-      check(name); raw.rmdirSync(file);
-    } else { check(name); raw.unlinkSync(file); }
+      const expected = check(name); removeCapturedEntry(absolute(name), expected, () => parents(name));
+    } else { const expected = check(name); removeCapturedEntry(absolute(name), expected, () => parents(name)); }
     drop(name);
   }
   function copyFileSync(source, destination, flags = 0) {

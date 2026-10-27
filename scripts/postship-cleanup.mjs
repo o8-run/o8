@@ -134,6 +134,9 @@ export async function cleanupPostshipOutputs(repoRoot = process.cwd(), symbolsOp
         if (completed.stdout.includes('Preserved unowned entries in .next;')) {
           console.info('[postship-cleanup] Preserved unowned entries in .next; release-owned cleanup left them in place.');
         }
+        for (const line of completed.stdout.split('\n')) {
+          if (line.startsWith('Kept ')) console.info('[postship-cleanup]', line);
+        }
         const status = /\[postship-generated-output\] (removed|skipped)\s*$/.exec(completed.stdout)?.[1];
         if (!status) throw new Error('Postship output has no completed lifecycle receipt.');
         result[status].push(relativePath);

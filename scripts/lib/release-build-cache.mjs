@@ -59,6 +59,7 @@ const PHASE_CONFIG = Object.freeze({
       'scripts/lib/registered-build.mjs', 'scripts/lib/release-web-cache-ownership.mjs',
       'src/lib/workspace/generated-output-build-ownership.ts',
       'scripts/lib/build-output-writer.cjs',
+      'scripts/lib/build-output-capture.c',
       'scripts/lib/build-output-entry-create.cjs',
       'scripts/lib/release-build-profile.mjs',
       'scripts/lib/generated-output-launch.mjs',

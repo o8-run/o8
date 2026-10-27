@@ -192,3 +192,148 @@ it.each(['empty-destination', 'owned-destination', 'publication'] as const)('nev
   expect(readFileSync(actualDestination, 'utf8')).toBe('foreign move destination');
   expect(readFileSync(from, 'utf8')).toBe('owned move source');
 });
+
+it.each(['scrub', 'rotation', 'publication'] as const)('preserves a replacement at source removal during %s', async operation => {
+  const root = await createRetainedGeneratedOutputFixture('o8-writer-source-remove-');
+  const output = path.join(root, '.next'); mkdirSync(output);
+  const scope = path.join(output, '.o8-release-build'); mkdirSync(scope);
+  const file = path.join(scope, 'owned');
+  const script = `
+    const fs=require('node:fs');const cp=require('node:child_process');let replaced=false;const nativeSpawn=cp.spawnSync;
+    for(const method of ['renameSync','unlinkSync']) {
+      const original=fs[method];fs[method]=(from,...args)=>{
+        if(from===${JSON.stringify(file)}&&!replaced) {
+          replaced=true;
+          const result=cp.spawnSync(process.execPath,['-e',
+            "const fs=require('node:fs');fs.renameSync(process.argv[1],process.argv[2]);fs.writeFileSync(process.argv[1],'foreign source');",
+            from,${JSON.stringify(path.join(root, 'old'))}],{env:{PATH:process.env.PATH,NODE_ENV:'test'},encoding:'utf8'});
+          if(result.status)throw new Error(result.stderr);
+        }
+        return original(from,...args);
+      };
+    }
+    cp.spawnSync=(command,args,options)=>{
+      if(command.endsWith('/capture')&&args[0]===${JSON.stringify(file)}&&!replaced){
+        replaced=true;const result=nativeSpawn(process.execPath,['-e',
+          "const fs=require('node:fs');fs.renameSync(process.argv[1],process.argv[2]);fs.writeFileSync(process.argv[1],'foreign source');",
+          args[0],${JSON.stringify(path.join(root, 'old'))}],{env:{PATH:process.env.PATH,NODE_ENV:'test'},encoding:'utf8'});
+        if(result.status)throw new Error(result.stderr);
+      }
+      return nativeSpawn(command,args,options);
+    };
+    const root=fs.lstatSync(${JSON.stringify(scope)});
+    const writer=require(${JSON.stringify(writerModule)}).createBuildOutputWriter(${JSON.stringify(scope)},{device:root.dev,inode:root.ino});
+    try {
+      writer.api.writeFileSync(${JSON.stringify(file)},'owned source');
+      try {
+        ${operation === 'scrub' ? `writer.api.unlinkSync(${JSON.stringify(file)});` : operation === 'rotation'
+          ? `writer.api.renameSync(${JSON.stringify(file)},${JSON.stringify(path.join(scope, 'rotated'))});` : `
+          const inventory=['.','owned'].map(relative=>{const s=fs.lstatSync(relative==='.'?${JSON.stringify(scope)}:${JSON.stringify(file)});
+            return {relative,device:s.dev,inode:s.ino,kind:s.isDirectory()?'directory':'file',mode:s.mode,linkCount:s.nlink,size:s.size,mtimeMs:s.mtimeMs,ctimeMs:s.ctimeMs};});
+          writer.prove(inventory);const parent=fs.lstatSync(${JSON.stringify(output)});
+          writer.promote({canonicalPath:${JSON.stringify(output)},device:parent.dev,inode:parent.ino},inventory);`}
+        throw new Error('Changed source removal succeeded');
+      }catch(error){if(!/Preserved.*(changed|unowned)/.test(error.message))throw error;}
+    }finally{writer.close();}
+  `;
+  const result = spawnSync(process.execPath, ['-e', script], { encoding: 'utf8', timeout: 30_000 });
+  expect(result.status, result.stderr).toBe(0);
+  expect(readFileSync(file, 'utf8')).toBe('foreign source');
+});
+
+it.each(['new-original', 'restore-collision', 'interrupted-capture'] as const)('retains private removal evidence after %s', async edge => {
+  const root = await createRetainedGeneratedOutputFixture('o8-writer-remove-edge-');
+  const scope = path.join(root, 'output'); mkdirSync(scope);
+  const file = path.join(scope, 'owned');
+  const script = `
+    const fs=require('node:fs');const cp=require('node:child_process');
+    const rename=fs.renameSync,unlink=fs.unlinkSync,link=fs.linkSync,nativeSpawn=cp.spawnSync;let captured;
+    function actor(code,...args){const r=cp.spawnSync(process.execPath,['-e',code,...args],
+      {env:{PATH:process.env.PATH,NODE_ENV:'test'},encoding:'utf8'});if(r.status)throw new Error(r.stderr);}
+    function capture(from,to,operation){
+      if(from===${JSON.stringify(file)}&&to.includes('/.o8-remove-')){
+        captured=to;
+        ${edge === 'restore-collision' ? `actor("const fs=require('node:fs');fs.renameSync(process.argv[1],process.argv[2]);fs.writeFileSync(process.argv[1],'first foreign');",from,${JSON.stringify(path.join(root, 'old'))});` : ''}
+        const result=operation();
+        ${edge === 'interrupted-capture' ? 'process.exit(86);' : ''}
+        return result;
+      }
+      return operation();
+    }
+    fs.renameSync=(from,to)=>capture(from,to,()=>rename(from,to));
+    cp.spawnSync=(command,args,options)=>command.endsWith('/capture')
+      ? capture(args[0],args[1],()=>nativeSpawn(command,args,options)) : nativeSpawn(command,args,options);
+    fs.unlinkSync=name=>{
+      ${edge === 'new-original' ? `if(name===captured)actor("require('node:fs').writeFileSync(process.argv[1],'new original',{flag:'wx'})",${JSON.stringify(file)});` : ''}
+      return unlink(name);
+    };
+    fs.linkSync=(from,to)=>{
+      ${edge === 'restore-collision' ? `if(from===captured)actor("require('node:fs').writeFileSync(process.argv[1],'second foreign',{flag:'wx'})",to);` : ''}
+      return link(from,to);
+    };
+    const root=fs.lstatSync(${JSON.stringify(scope)});
+    const writer=require(${JSON.stringify(writerModule)}).createBuildOutputWriter(${JSON.stringify(scope)},{device:root.dev,inode:root.ino});
+    try {
+      writer.api.writeFileSync(${JSON.stringify(file)},'owned bytes');
+      try{writer.api.unlinkSync(${JSON.stringify(file)});throw new Error('Changed removal succeeded');}
+      catch(error){if(!/Preserved.*(changed|unowned)/.test(error.message))throw error;}
+    }finally{writer.close();}
+  `;
+  const result = spawnSync(process.execPath, ['-e', script], { encoding: 'utf8', timeout: 30_000 });
+  expect(result.status, result.stderr).toBe(edge === 'interrupted-capture' ? 86 : 0);
+  const fs = require('node:fs') as typeof import('node:fs');
+  const held = fs.readdirSync(scope).filter(name => name.startsWith('.o8-remove-'));
+  if (edge === 'new-original') {
+    expect(readFileSync(file, 'utf8')).toBe('new original');
+    expect(held).toEqual([]);
+  } else {
+    expect(held).toHaveLength(1);
+    const captured = path.join(scope, held[0], 'entry');
+    expect(readFileSync(captured, 'utf8')).toBe(edge === 'restore-collision' ? 'first foreign' : 'owned bytes');
+    if (edge === 'restore-collision') expect(readFileSync(file, 'utf8')).toBe('second foreign');
+    // A fresh writer cannot acquire an interrupted holder by sweeping it.
+    const writer = createBuildOutputWriter(scope);
+    try { expect(() => writer.api.rmSync(path.dirname(captured), { recursive: true })).toThrow(/Preserved unowned/); }
+    finally { writer.close(); }
+    expect(existsSync(captured)).toBe(true);
+  }
+});
+
+it.each(['relative', 'url'])('removes receipted %s paths without adopting a new holder', async style => {
+  const root = await createRetainedGeneratedOutputFixture('o8-writer-relative-remove-');
+  const script = `
+    const fs=require('node:fs');const s=fs.lstatSync(process.cwd());
+    const writer=require(${JSON.stringify(writerModule)}).createBuildOutputWriter(process.cwd(),{device:s.dev,inode:s.ino});
+    const file=${style === 'url' ? "require('node:url').pathToFileURL(process.cwd()+'/owned')" : "'owned'"};
+    try{writer.api.writeFileSync(file,'owned bytes');writer.api.unlinkSync(file);}finally{writer.close();}
+  `;
+  const result = spawnSync(process.execPath, ['-e', script], { cwd: root, encoding: 'utf8', timeout: 30_000 });
+  expect(result.status, result.stderr).toBe(0);
+  expect(existsSync(path.join(root, 'owned'))).toBe(false);
+});
+
+it('never overwrites an occupied private capture destination', async () => {
+  const root = await createRetainedGeneratedOutputFixture('o8-writer-capture-collision-');
+  const file = path.join(root, 'owned');
+  const script = `
+    const fs=require('node:fs');const cp=require('node:child_process');const rename=fs.renameSync,spawn=cp.spawnSync;
+    function occupy(from,to){
+      if(from!==${JSON.stringify(file)}||!to.includes('/.o8-remove-'))return;
+      const r=spawn(process.execPath,['-e',"require('node:fs').writeFileSync(process.argv[1],'foreign capture destination',{flag:'wx'})",to],
+        {env:{PATH:process.env.PATH,NODE_ENV:'test'},encoding:'utf8'});if(r.status)throw new Error(r.stderr);
+      fs.writeFileSync(${JSON.stringify(path.join(root, 'held-location'))},to);
+    }
+    fs.renameSync=(from,to)=>{occupy(from,to);return rename(from,to);};
+    cp.spawnSync=(command,args,options)=>{if(command.endsWith('/capture'))occupy(args[0],args[1]);return spawn(command,args,options);};
+    const s=fs.lstatSync(${JSON.stringify(root)});
+    const writer=require(${JSON.stringify(writerModule)}).createBuildOutputWriter(${JSON.stringify(root)},{device:s.dev,inode:s.ino});
+    try{writer.api.writeFileSync(${JSON.stringify(file)},'owned bytes');try{writer.api.unlinkSync(${JSON.stringify(file)});}catch{} }
+    finally{writer.close();}
+  `;
+  const result = spawnSync(process.execPath, ['-e', script], { encoding: 'utf8', timeout: 30_000 });
+  expect(result.status, result.stderr).toBe(0);
+  const held = readFileSync(path.join(root, 'held-location'), 'utf8');
+  expect(existsSync(held), 'the capture must not overwrite its late destination').toBe(true);
+  expect(readFileSync(held, 'utf8')).toBe('foreign capture destination');
+  expect(readFileSync(file, 'utf8')).toBe('owned bytes');
+});
