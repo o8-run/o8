@@ -90,7 +90,7 @@ fn glass_shell_probe(cx: &mut TestAppContext) {
     assert!(!shell.read_with(cx, |s, _| s.palette));
     cx.simulate_resize(size(px(900.), px(700.)));
     draw(cx);
-    assert!(cx.simulate_close());
+    close(cx);
     let saved = State::load(&fixture.root.join("glass.json")).unwrap();
     assert_eq!(saved.bounds[2..], [900., 700.]);
     // A closing window can still have session/inventory reads in flight.
@@ -100,7 +100,7 @@ fn glass_shell_probe(cx: &mut TestAppContext) {
         State::default(),
         &mut cx.cx,
     );
-    assert!(pending.simulate_close());
+    close(&mut pending);
     pending.run_until_parked();
     let (reopened, mut reopened_visual) = open(
         fixture.client.clone(),
@@ -572,7 +572,7 @@ fn shell_palette_switch_restart_and_server_down(cx: &mut TestAppContext) {
     cx.cx
         .simulate_window_resize(handle, size(px(1024.), px(720.)));
     draw(cx);
-    assert!(cx.simulate_close());
+    close(cx);
     let saved = State::load(&file).unwrap();
     assert_eq!(saved.bounds[..2], [100., 100.]);
     assert_eq!(saved.bounds[2..], [1024., 720.]);

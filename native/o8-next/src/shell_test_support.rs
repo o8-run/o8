@@ -155,3 +155,33 @@ pub(super) fn ready(shell: &Entity<Shell>, cx: &mut VisualTestContext) {
     }
     panic!("selected fixture history must reach CPU scene paint through the existing surface");
 }
+
+pub(super) fn close(cx: &mut VisualTestContext) {
+    let handle = cx.update(|window, _| window.window_handle());
+    assert!(
+        !cx.simulate_close(),
+        "close must wait for the final state write"
+    );
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while cx.cx.windows().contains(&handle) && Instant::now() < deadline {
+        cx.run_until_parked();
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert!(
+        !cx.cx.windows().contains(&handle),
+        "close must finish after saving state"
+    );
+}
+
+pub(super) fn wait_saved(shell: &Entity<Shell>, cx: &mut VisualTestContext) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    // Wait only for already-requested saves. Captured focus metadata may remain
+    // in memory until close, and pending UI work belongs after this assertion.
+    while !shell.read_with(cx, |s, _| s.writer.is_idle()) && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert!(
+        shell.read_with(cx, |s, _| s.writer.is_idle()),
+        "pending autosaves must finish before reading the real file"
+    );
+}

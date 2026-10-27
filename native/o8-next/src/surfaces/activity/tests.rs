@@ -35,6 +35,7 @@ fn activity_palette_reaches_native_pane(cx: &mut TestAppContext) {
         cx.debug_bounds("activity-pane").is_some(),
         "Activity command must open a native pane through the real shell palette"
     );
+    wait_saved(&shell, cx);
     let saved = State::load(&file).unwrap();
     let workspace = &saved.workspaces[saved.selected.as_ref().unwrap()];
     assert_eq!(workspace.tabs[workspace.active], Tab::Activity);
@@ -358,6 +359,7 @@ fn activity_empty_local_auth_and_scoped_retention(cx: &mut TestAppContext) {
     }));
     assert!(cx.debug_bounds("activity-empty").is_some());
     let file = fixture.root.join("activity.json");
+    wait_saved(&shell, cx);
     assert!(
         State::load(&file)
             .unwrap()

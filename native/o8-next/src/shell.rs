@@ -72,6 +72,8 @@ pub struct Shell {
     client: Client,
     file: PathBuf,
     state: State,
+    writer: crate::shell_state::Writer,
+    closing: bool,
     sessions: Vec<Session>,
     workspaces: Vec<String>,
     content: HashMap<String, Content>,
@@ -100,12 +102,29 @@ impl Shell {
     ) -> Self {
         let focus = cx.focus_handle();
         focus.focus(window);
+        let (writer, errors) = crate::shell_state::Writer::new(file.clone());
+        cx.spawn(async move |this, cx| {
+            while let Ok(error) = errors.recv().await {
+                if this
+                    .update(cx, |this, cx| {
+                        this.notice = format!("{error}. View state remains in memory.");
+                        cx.notify();
+                    })
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        })
+        .detach();
         let mut shell = Self {
             system_glass: false,
             chrome: crate::render_region::Regions::default(),
             client,
             file,
             state,
+            writer,
+            closing: false,
             sessions: vec![],
             workspaces: vec![],
             content: HashMap::new(),
@@ -127,22 +146,15 @@ impl Shell {
         shell
             .subscriptions
             .push(cx.observe_window_bounds(window, |this, window, _| {
-                let bounds = window.window_bounds().get_bounds();
-                this.state.bounds = [
-                    bounds.origin.x.into(),
-                    bounds.origin.y.into(),
-                    bounds.size.width.into(),
-                    bounds.size.height.into(),
-                ];
+                this.capture_bounds(window);
                 this.persist();
             }));
         let view = cx.weak_entity();
         window.on_window_should_close(cx, move |window, cx| {
             let _ = view.update(cx, |this, cx| {
-                this.capture(window, cx);
-                this.persist();
+                this.close(window, cx);
             });
-            true
+            false
         });
         for registration in registrations() {
             (registration.initialize)(&mut shell, window, cx);
@@ -151,9 +163,52 @@ impl Shell {
         shell
     }
     fn persist(&mut self) {
-        if let Err(error) = self.state.save(&self.file) {
-            self.notice = format!("{error}. View state remains in memory.");
+        self.writer.submit(self.state.clone());
+    }
+    fn close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.closing {
+            return;
         }
+        self.closing = true;
+        self.capture(window, cx);
+        let saved = self.writer.flush(self.state.clone());
+        cx.spawn_in(window, async move |this, cx| {
+            let result = saved
+                .recv()
+                .await
+                .unwrap_or_else(|_| Err("Shell state writer unavailable".into()));
+            let _ = this.update_in(cx, |this, window, cx| {
+                this.closing = false;
+                match result {
+                    Ok(()) => {
+                        let saved_bounds = this.state.bounds;
+                        this.capture_bounds(window);
+                        // Input and bounds events may continue while a close
+                        // flush is in flight. Include them before removing the window.
+                        if this.writer.is_idle() && this.state.bounds == saved_bounds {
+                            window.remove_window();
+                        } else {
+                            this.close(window, cx);
+                        }
+                    }
+                    Err(error) => {
+                        this.notice =
+                            format!("{error}. View state remains in memory. Close again to retry.");
+                        cx.notify();
+                    }
+                }
+            });
+        })
+        .detach();
+    }
+    fn capture_bounds(&mut self, window: &Window) {
+        let bounds = window.window_bounds().get_bounds();
+        self.state.bounds = [
+            bounds.origin.x.into(),
+            bounds.origin.y.into(),
+            bounds.size.width.into(),
+            bounds.size.height.into(),
+        ];
     }
     fn load(&mut self, cx: &mut Context<Self>) {
         if registry::extensions().any(|extension| extension.load(self, cx)) {
@@ -308,6 +363,7 @@ impl Shell {
         cx.notify();
     }
     fn capture(&mut self, window: &Window, cx: &App) {
+        self.capture_bounds(window);
         if self.palette || registrations().iter().any(|r| (r.overlay_open)(self)) {
             return;
         }

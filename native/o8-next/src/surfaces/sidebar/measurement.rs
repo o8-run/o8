@@ -165,7 +165,7 @@ fn sidebar_2000_thread_first_paint_and_scroll_measurement(cx: &mut TestAppContex
                     > 1900
             )
         });
-        assert!(cx.simulate_close());
+        close(cx);
     }
     let percentile = |samples: &[f64], p: f64| {
         let mut sorted = samples.to_vec();

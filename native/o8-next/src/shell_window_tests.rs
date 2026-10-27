@@ -2,6 +2,117 @@ use super::test_support::*;
 use super::*;
 
 #[gpui::test]
+fn window_state_io_barrier_keeps_bounds_and_input_live(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    let file = fixture.root.join("held-writer.json");
+    let (shell, mut visual) = open(fixture.client.clone(), file.clone(), State::default(), cx);
+    ready(&shell, &mut visual);
+    let mut held = crate::shell_state::barrier::hold(&file);
+    let (input_done, watchdog) = held.input_watchdog();
+    let handle = visual.update(|window, _| window.window_handle());
+    visual
+        .cx
+        .simulate_window_move(handle, point(px(240.), px(160.)));
+    draw(&mut visual);
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while held.writes().is_empty() && Instant::now() < deadline {
+        visual.run_until_parked();
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert!(
+        !held.writes().is_empty(),
+        "the real writer must enter the barrier"
+    );
+    let input_started = Instant::now();
+    for offset in 0..3 {
+        visual
+            .cx
+            .simulate_window_move(handle, point(px(240. + offset as f32), px(160.)));
+        visual
+            .cx
+            .simulate_window_resize(handle, size(px(900. + offset as f32), px(700.)));
+        draw(&mut visual);
+    }
+    visual.simulate_keystrokes("ctrl-k w r i t e r");
+    println!(
+        "held writer input: {:.3}s, forced={}, attempted writes={}",
+        input_started.elapsed().as_secs_f64(),
+        held.forced(),
+        held.writes().len()
+    );
+    let _ = input_done.send(());
+    watchdog.join().unwrap();
+    assert!(
+        !held.forced(),
+        "bounds and input blocked on the held state writer"
+    );
+    assert_eq!(shell.read_with(&visual, |s, _| s.query.clone()), "writer");
+    assert_eq!(
+        shell.read_with(&visual, |s, _| s.state.bounds),
+        [242., 160., 902., 700.]
+    );
+    assert_eq!(
+        held.writes().len(),
+        1,
+        "bounds writes must coalesce behind the in-flight write"
+    );
+    // Close before the final bounds observer runs. The window must survive
+    // until the held writer commits these actual bounds.
+    visual
+        .cx
+        .simulate_window_move(handle, point(px(320.), px(220.)));
+    visual
+        .cx
+        .simulate_window_resize(handle, size(px(980.), px(740.)));
+    assert!(!visual.simulate_close(), "close must await the held writer");
+    assert!(visual.cx.windows().contains(&handle));
+    held.release();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while visual.cx.windows().contains(&handle) && Instant::now() < deadline {
+        visual.run_until_parked();
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert!(
+        !visual.cx.windows().contains(&handle),
+        "close must finish after the final write"
+    );
+    let saved = State::load(&file).unwrap();
+    assert_eq!(saved.bounds, [320., 220., 980., 740.]);
+    assert!(
+        held.writes().len() <= 2,
+        "close writes only the final pending snapshot"
+    );
+}
+
+#[gpui::test]
+fn window_state_failed_close_keeps_input_and_retries(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    let file = fixture.root.join("retry-writer.json");
+    let (shell, mut visual) = open(fixture.client.clone(), file.clone(), State::default(), cx);
+    ready(&shell, &mut visual);
+    wait_saved(&shell, &mut visual);
+    fs::remove_file(&file).unwrap();
+    fs::create_dir(&file).unwrap();
+    let handle = visual.update(|window, _| window.window_handle());
+    assert!(!visual.simulate_close());
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while shell.read_with(&visual, |s, _| s.closing) && Instant::now() < deadline {
+        visual.run_until_parked();
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert!(!shell.read_with(&visual, |s, _| s.closing));
+    assert!(visual.cx.windows().contains(&handle));
+    assert!(shell.read_with(&visual, |s, _| {
+        s.notice.contains("View state remains in memory")
+    }));
+    visual.simulate_keystrokes("ctrl-k r e t r y");
+    assert_eq!(shell.read_with(&visual, |s, _| s.query.clone()), "retry");
+    fs::remove_dir(&file).unwrap();
+    close(&mut visual);
+    assert!(!State::load(&file).unwrap().workspaces.is_empty());
+}
+
+#[gpui::test]
 fn corrupt_shell_state_is_preserved_before_autosave(cx: &mut TestAppContext) {
     preserves_recovered_state(cx, b"{broken state");
 }
@@ -42,6 +153,7 @@ fn preserves_recovered_state(cx: &mut TestAppContext, original: &[u8]) {
             })
             .collect::<Vec<_>>()
     };
+    wait_saved(&shell, &mut visual);
     let retained = backups();
     assert_eq!(
         retained.len(),
@@ -55,7 +167,7 @@ fn preserves_recovered_state(cx: &mut TestAppContext, original: &[u8]) {
         !saved.workspaces.is_empty(),
         "replacement contains the live shell state"
     );
-    assert!(visual.simulate_close());
+    close(&mut visual);
     assert_eq!(
         backups(),
         retained,
@@ -90,7 +202,7 @@ fn shell_restart_reads_geometry_surfaces_and_focus_from_the_same_file(cx: &mut T
     // Close before the next draw/observer flush, as with a native resize/quit race.
     cx.cx
         .simulate_window_resize(handle, size(px(900.), px(700.)));
-    assert!(cx.simulate_close());
+    close(cx);
     let saved = State::load(&file).unwrap();
     assert_eq!(saved.bounds, [0., 0., 900., 700.]);
     assert_eq!(saved.selected, selected);
@@ -157,7 +269,7 @@ fn shell_corrupt_or_missing_file_opens_defaults_without_crashing(cx: &mut TestAp
         ready(&shell, &mut visual);
         assert!(shell.read_with(&visual, |s, _| s.connected
             && matches!(s.active(), Some(Tab::Session(_)))));
-        assert!(visual.simulate_close());
+        close(&mut visual);
         assert_eq!(State::load(&file).unwrap().bounds, State::default().bounds);
     }
 }
@@ -185,7 +297,7 @@ fn shell_restart_keeps_surface_focus_when_palette_is_open_at_quit(cx: &mut TestA
             );
         });
         visual_cx.simulate_keystrokes("ctrl-k");
-        assert!(visual_cx.simulate_close());
+        close(visual_cx);
         let saved = State::load(&file).unwrap();
         assert_eq!(
             saved.workspaces[saved.selected.as_deref().unwrap()].composer,
@@ -203,7 +315,7 @@ fn shell_restart_keeps_surface_focus_when_palette_is_open_at_quit(cx: &mut TestA
             assert_eq!(view.read(cx).shell_selection(window, cx).1, composer);
             assert!(!restarted.read(cx).focus.is_focused(window));
         });
-        assert!(visual.simulate_close());
+        close(&mut visual);
     }
 }
 
@@ -225,7 +337,7 @@ fn correction_unreadable_state_opens_defaults_and_preserves_the_input(cx: &mut T
         assert_eq!(state.bounds, State::default().bounds);
         let (shell, mut visual) = open(fixture.client.clone(), file.clone(), state, cx);
         ready(&shell, &mut visual);
-        assert!(visual.simulate_close());
+        close(&mut visual);
         assert!(
             fs::symlink_metadata(&file)
                 .unwrap()
@@ -262,7 +374,7 @@ fn correction_offscreen_geometry_is_clamped_before_the_window_opens(cx: &mut Tes
             "a removed display must not leave the restored window off screen"
         );
     });
-    assert!(visual.simulate_close());
+    close(&mut visual);
     let saved = State::load(&file).unwrap();
     assert!(saved.bounds[0] < 1920.);
 }

@@ -108,6 +108,7 @@ fn new_surface_routes_renders_and_gets_navigation(cx: &mut gpui::TestAppContext)
         cx,
     );
     ready(&shell, &mut visual);
+    wait_saved(&shell, &mut visual);
     let before =
         serde_json::to_value(State::load(&fixture.root.join("fake.json")).unwrap()).unwrap();
     for workspace in before["workspaces"].as_object().unwrap().values() {
@@ -183,6 +184,7 @@ fn new_surface_routes_renders_and_gets_navigation(cx: &mut gpui::TestAppContext)
     draw(&mut visual);
     assert_eq!(shell.read_with(&visual, |s, _| s.active()), Some(Tab::Fake));
     assert_eq!(shell.read_with(&visual, |s, _| s.surfaces.fake.opens), 3);
+    wait_saved(&shell, &mut visual);
     let saved = State::load(&fixture.root.join("fake.json")).unwrap();
     assert!(
         saved

@@ -352,6 +352,7 @@ fn projects_switch_active_without_saved_sessions(cx: &mut TestAppContext) {
         json!({"endpoint":"first completed GPUI TestAppContext CPU scene paint; debug build; test text system; no GPU/compositor", "interactionToFrameMs":interaction_ms})
     );
     click(cx, "project-activate-empty-beta");
+    crate::shell::test_support::wait_saved(&shell, cx);
     let saved = State::load(&fixture.root.join("active.json")).unwrap();
     let (restarted, mut restart_visual) = open(
         fixture.client.clone(),
