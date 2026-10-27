@@ -8,14 +8,20 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { collectLaunchStageProfile } from './launch-stage-summary.mjs';
 
-test('observes real listener, request and module-load work in a private server process', { timeout: 15000 }, async () => {
+test('waits for a busy real server to flush listener, request, module and child snapshots', { timeout: 30000 }, async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'o8-launch-stage-test-'));
   const observer = fileURLToPath(new URL('./launch-stage-preload.cjs', import.meta.url));
   fs.writeFileSync(path.join(root, 'slow.cjs'), 'const end = performance.now() + 30; while (performance.now() < end) {} module.exports = 1;');
   fs.writeFileSync(path.join(root, 'server.js'), `require('./slow.cjs');
     const server = require('node:http').createServer((req, res) => {
       const child = require('node:child_process').spawn(process.execPath, ['-e', 'process.exit(0)']);
-      child.once('exit', () => setTimeout(() => res.end('ok'), 25));
+      child.once('exit', () => setTimeout(() => {
+        res.end('ok');
+        if (req.headers.accept === 'text/html') setImmediate(() => {
+          const end = performance.now() + 1200;
+          while (performance.now() < end) {}
+        });
+      }, 25));
     });
     server.listen(0, '127.0.0.1', () => console.log(JSON.stringify({ port: server.address().port })));`);
   const started = Date.now();
@@ -30,7 +36,7 @@ test('observes real listener, request and module-load work in a private server p
       const response = await fetch(`http://127.0.0.1:${port}/dashboard`, { headers });
       assert.equal(await response.text(), 'ok');
     }
-    const [result] = await collectLaunchStageProfile(root, started);
+    const [result] = await collectLaunchStageProfile(root, started, { roles: ['http'] });
     assert.equal(result.role, 'http');
     assert.equal(result.listeners.length, 1);
     assert(result.listeners[0].atMs >= result.entryMs);

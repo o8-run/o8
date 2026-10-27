@@ -106,11 +106,15 @@ if (data && /^(server\.js|ws-server\.mjs)$/.test(entry)) {
     http.Server.prototype.emit = emit;
     if (originalLoad) require('node:module')._load = originalLoad;
     restoreChildren?.();
-    fs.writeFileSync(`${stem}.timing.json`, JSON.stringify({ role, entry, timeOrigin: performance.timeOrigin,
+    const write = (file, value) => {
+      fs.writeFileSync(`${file}.tmp`, JSON.stringify(value));
+      fs.renameSync(`${file}.tmp`, file);
+    };
+    write(`${stem}.timing.json`, { role, entry, timeOrigin: performance.timeOrigin, profiled: Boolean(session),
       stoppedEpochMs: epoch(), listeners, requests, children,
-      modules: [...modules.values()].sort((a, b) => b.exclusiveMs - a.exclusiveMs).slice(0, 64) }));
+      modules: [...modules.values()].sort((a, b) => b.exclusiveMs - a.exclusiveMs).slice(0, 64) });
     if (session) session.post('Profiler.stop', (error, result) => {
-      if (!error && result?.profile) fs.writeFileSync(`${stem}.cpuprofile`, JSON.stringify(result.profile));
+      if (!error && result?.profile) write(`${stem}.cpuprofile`, result.profile);
       session.disconnect();
     });
   }

@@ -11,11 +11,21 @@ function normalized(value) {
     : value.replace(/\/Users\/[^/]+/g, '<runner>').replace(/\/private\/(?:tmp|var)\/[^:]+/g, '<profile>')).slice(0, 300);
 }
 
-export async function collectLaunchStageProfile(dataDir, startedEpochMs) {
+export async function collectLaunchStageProfile(dataDir, startedEpochMs, { roles = ['http', 'realtime'] } = {}) {
   const directory = path.join(dataDir, 'launch-profile');
   fs.writeFileSync(path.join(directory, 'stop'), '1');
-  await new Promise(resolve => setTimeout(resolve, 500));
-  return fs.readdirSync(directory).filter(file => file.endsWith('.timing.json')).map(file => {
+  const deadline = Date.now() + 20_000;
+  let files;
+  for (;;) {
+    files = fs.readdirSync(directory).filter(file => file.endsWith('.timing.json'));
+    const snapshots = files.map(file => ({ file, data: JSON.parse(fs.readFileSync(path.join(directory, file), 'utf8')) }));
+    const ready = roles.every(role => snapshots.some(row => row.data.role === role && row.data.listeners.length > 0))
+      && snapshots.every(row => !row.data.profiled || fs.existsSync(path.join(directory, row.file.replace('.timing.json', '.cpuprofile'))));
+    if (ready) break;
+    if (Date.now() >= deadline) throw new Error('Launch observers did not flush complete listener and CPU snapshots for: ' + roles.join(', '));
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+  return files.map(file => {
     const data = JSON.parse(fs.readFileSync(path.join(directory, file), 'utf8'));
     const cpuFile = path.join(directory, file.replace('.timing.json', '.cpuprofile'));
     let cpu = [];
