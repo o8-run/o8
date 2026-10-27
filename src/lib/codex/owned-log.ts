@@ -347,10 +347,12 @@ export function codexParseRunLog(
           const command = String(item.command ?? '').trim();
           const output = toolOutputPreview(item.aggregated_output);
           const itemId = `${run.id}:${readStringField(item, 'id') ?? lineIndex}`;
-          const id = `${run.id}:tool:${readStringField(item, 'id') ?? lineIndex}`;
+          // Completion is a later event, not a rewrite behind a sync cursor.
+          // The shared tool-call identity still folds it into the running row.
+          const id = `${run.id}:tool-output:${readStringField(item, 'id') ?? lineIndex}`;
           const existing = entries.find(entry => entry.id === id);
           const entry: OwnedTailEntry = {
-            id, kind: 'tool', label: 'exec_command', text: command ? `Run ${command}` : 'Run shell command',
+            id, kind: 'tool-output', label: 'Tool output', text: command ? `Run ${command}` : 'Run shell command',
             timestamp: existing?.timestamp ?? timestamp, timestampLabel: existing?.timestampLabel ?? timestampLabel,
             toolCall: { id: itemId, name: 'exec_command', args: { command },
               status: item.exit_code != null && item.exit_code !== 0 || item.status === 'failed' ? 'error' : 'done', result: output },
