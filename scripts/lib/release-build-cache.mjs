@@ -1,3 +1,4 @@
+import { captureRestoredWebCache } from './release-web-cache-ownership.mjs';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
@@ -55,7 +56,11 @@ const PHASE_CONFIG = Object.freeze({
       'scripts/tauri-export.mjs',
       'scripts/tauri-prebuild.mjs',
       'scripts/lib/prebuild-continuation.mjs',
-      'scripts/lib/registered-build.mjs',
+      'scripts/lib/registered-build.mjs', 'scripts/lib/release-web-cache-ownership.mjs',
+      'src/lib/workspace/generated-output-build-ownership.ts',
+      'scripts/lib/build-output-writer.cjs',
+      'scripts/lib/build-output-capture.c',
+      'scripts/lib/build-output-entry-create.cjs',
       'scripts/lib/release-build-profile.mjs',
       'scripts/lib/generated-output-launch.mjs',
       'scripts/generated-output-run.ts',
@@ -548,6 +553,7 @@ export async function restoreReleaseBuildCache(root, phase, options = {}) {
         sameCachedTree(join(restoreRoot, target), join(root, target), sha256File)))).every(Boolean)) {
         await staging.clean(); lastReason = 'destination_occupied'; continue;
       }
+      const webOwnership = phase === 'web' && !occupied ? await captureRestoredWebCache(join(restoreRoot, '.next/cache'), join(root, '.next/cache')) : undefined;
       if (!occupied) for (const target of verified.manifest.targets) {
         const extracted = join(restoreRoot, target);
         const destination = join(root, target);
@@ -558,7 +564,7 @@ export async function restoreReleaseBuildCache(root, phase, options = {}) {
       return {
         phase,
         status: verified.manifest.entrySha256 === identity.entrySha256 ? 'hit_exact' : 'hit_compatible',
-        reason: 'verified',
+        reason: 'verified', webOwnership,
         entrySha256: verified.manifest.entrySha256,
         producerSourceSha256: verified.manifest.sourceSha256,
         archiveBytes: verified.manifest.archive.size,
