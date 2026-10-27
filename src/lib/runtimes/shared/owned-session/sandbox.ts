@@ -18,13 +18,13 @@
  *
  * NOTE: `sandbox-exec` is deprecated by Apple (since 10.14) but remains fully
  * functional and is still how Chrome/Firefox/many tools sandbox helpers today.
- * The module is intentionally shaped as a policy backend so a future
- * container/uid backend can slot in behind {@link prepareWorkerSandbox} without
- * touching the spawn chokepoint.
+ * The module is intentionally shaped as a policy backend: on Linux the same
+ * canonical policy is rendered as a bubblewrap mount namespace instead (see
+ * `sandbox-linux.ts`) without touching the spawn chokepoint.
  *
  * FEATURE GATE: off by default. Enable with `O8_WORKER_SANDBOX=on` (or
  * 1/true/yes). When ON the semantics are FAIL-CLOSED — if the profile cannot be
- * built (non-macOS host, missing `sandbox-exec`, unwritable profile file) the
+ * built (unsupported host, missing `sandbox-exec`/`bwrap`, unwritable profile) the
  * caller refuses to spawn rather than silently running the worker unsandboxed.
  */
 
@@ -36,19 +36,16 @@ import os from 'node:os';
 import path from 'node:path';
 import { backingProjectConfigPaths } from './project-config';
 import { ownerInstructionPaths } from './owner-instructions';
+import { SandboxUnavailableError } from './sandbox-error';
+import { homeToolchainPolicy } from './sandbox-toolchain';
+import { assertBwrapExpressible, prepareBwrapSandbox, requireBwrap } from './sandbox-linux';
+
+export { SandboxUnavailableError };
 
 const execFileAsync = promisify(execFile);
 
 /** Absolute path to Apple's seatbelt runner. */
 export const SANDBOX_EXEC_PATH = '/usr/bin/sandbox-exec';
-
-/** Raised when a sandbox was requested but cannot be provided. Fail-closed. */
-export class SandboxUnavailableError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'SandboxUnavailableError';
-  }
-}
 
 /**
  * Is Tier-2 worker sandboxing enabled? Off by default so day-one dispatch can
@@ -272,32 +269,12 @@ export function buildSeatbeltProfile(input: SeatbeltProfileInput): string {
     '/tmp', '/private/tmp',
   ]);
 
-  // User-owned CLI/global prefixes are executable inputs, never general HOME.
-  const homeToolchainReadDirs = uniq([
-    '.nvm', '.volta', '.n', '.local', '.npm-global', '.config', '.asdf',
-    '.rustup', '.cargo', '.bun', '.deno', 'bin', 'Library/pnpm',
-  ].map((d) => path.join(home, d)));
-
-  // Normal packet work writes caches and model-CLI session state. Global
-  // executable prefixes remain read-only above so a worker cannot persist a
-  // replacement npm/cargo binary outside its packet.
-  const homeToolchainWriteDirs = uniq([
-    '.npm', '.cache', '.yarn', '.pnpm-store',
-    path.join('.cargo', 'registry'), path.join('.cargo', 'git'),
-    path.join('.bun', 'install', 'cache'), '.deno', '.codex', '.claude', '.gemini',
-    path.join('.config', 'gemini'),
-  ].map((d) => path.join(home, d)));
-
-  // Individual dotfiles the CLIs read (git identity, npm registry, etc.).
-  // `.zshenv` is deliberately ABSENT: it commonly exports the operator's API
-  // keys, and workers inherit their env from the trusted parent — a shell that
-  // can't read it just skips it.
-  const homeToolchainFiles = uniq([
-    '.gitconfig', '.gitignore', '.npmrc', '.yarnrc',
-  ].map((f) => path.join(home, f)));
-  // Claude Code 2.1.x persists per-project/session state in this legacy root
-  // file even when its main state directory is ~/.claude.
-  const homeToolchainMutableFiles = [path.join(home, '.claude.json')];
+  // User-owned CLI/global prefixes, caches, and dotfiles (see sandbox-toolchain).
+  const toolchain = homeToolchainPolicy(home);
+  const homeToolchainReadDirs = toolchain.readDirs;
+  const homeToolchainWriteDirs = toolchain.writeDirs;
+  const homeToolchainFiles = toolchain.files;
+  const homeToolchainMutableFiles = toolchain.mutableFiles;
   const homeToolchainMutableFileFilters = homeToolchainMutableFiles.flatMap((file) => [
     `(literal ${sbplString(file)})`,
     `(regex #"^${regexFragment(file)}(?:\\..*)?$")`,
@@ -331,17 +308,7 @@ export function buildSeatbeltProfile(input: SeatbeltProfileInput): string {
     ...(input.extraDenyPaths ?? []),
   ]);
 
-  // Keep model credentials and launch policy immutable even though the CLIs
-  // need mutable session databases inside the same home directories.
-  const immutableToolchainPaths = uniq([
-    '.codex/auth.json', '.codex/config.toml', '.codex/AGENTS.md',
-    '.codex/agents', '.codex/plugins', '.codex/rules', '.codex/skills',
-    '.claude/.credentials.json', '.claude/settings.json', '.claude/settings.local.json',
-    '.claude/agents', '.claude/hooks', '.claude/mcp-servers', '.claude/plugins',
-    '.claude/skills', '.claude/statusline.sh',
-    '.gemini/google_accounts.json', '.gemini/settings.json', '.gemini/policies',
-    '.gemini/skills', '.gemini/trustedFolders.json',
-  ].map((entry) => path.join(home, entry)));
+  const immutableToolchainPaths = toolchain.immutablePaths;
 
   const trustedReadWritePaths = uniq(input.trustedReadWritePaths ?? []);
   const finalDenyPaths = uniq(input.finalDenyPaths ?? []);
@@ -544,9 +511,9 @@ export function buildSeatbeltProfile(input: SeatbeltProfileInput): string {
 }
 
 export interface PreparedSandbox {
-  /** The wrapper binary to spawn instead of the raw CLI (sandbox-exec). */
+  /** The wrapper binary to spawn instead of the raw CLI (sandbox-exec or bwrap). */
   binary: string;
-  /** `['-f', <profilePath>, <origBinary>, ...origArgs]`. */
+  /** sandbox-exec: `['-f', <profilePath>, <origBinary>, ...origArgs]`; bwrap: `[...mounts, '--', <origBinary>, ...origArgs]`. */
   args: string[];
   /** Where the generated profile was written. */
   profilePath: string;
@@ -611,16 +578,21 @@ export interface PrepareWorkerSandboxInput {
  * unsandboxed worker.
  */
 export async function prepareWorkerSandbox(input: PrepareWorkerSandboxInput): Promise<PreparedSandbox> {
-  if (process.platform !== 'darwin') {
+  let bwrapPath: string | null = null;
+  if (process.platform === 'linux') {
+    assertBwrapExpressible(input);
+    bwrapPath = await requireBwrap();
+  } else if (process.platform !== 'darwin') {
     throw new SandboxUnavailableError(
-      `Worker sandbox is macOS-only (sandbox-exec); host platform is '${process.platform}'. `
+      `Worker sandbox needs macOS (sandbox-exec) or Linux (bubblewrap); host platform is '${process.platform}'. `
       + `Unset O8_WORKER_SANDBOX to dispatch unsandboxed.`,
     );
-  }
-  try {
-    await access(SANDBOX_EXEC_PATH, fsConstants.X_OK);
-  } catch {
-    throw new SandboxUnavailableError(`sandbox-exec not found or not executable at ${SANDBOX_EXEC_PATH}.`);
+  } else {
+    try {
+      await access(SANDBOX_EXEC_PATH, fsConstants.X_OK);
+    } catch {
+      throw new SandboxUnavailableError(`sandbox-exec not found or not executable at ${SANDBOX_EXEC_PATH}.`);
+    }
   }
 
   const home = input.homeDir ?? os.homedir();
@@ -755,7 +727,7 @@ export async function prepareWorkerSandbox(input: PrepareWorkerSandboxInput): Pr
   // re-open-narrow-child idiom on `finalDenyWritePaths` is legitimate.
   assertNoRegrantOverlap(finalAllowReadWrite, readOnlyDenyWrite);
 
-  const profileText = buildSeatbeltProfile({
+  const policy: SeatbeltProfileInput = {
     worktreePath: worktreeReal,
     repoPath: repoReal,
     homeDir: homeReal,
@@ -777,7 +749,14 @@ export async function prepareWorkerSandbox(input: PrepareWorkerSandboxInput): Pr
     finalAllowExecPaths: finalAllowExec,
     readOnlyDenyWritePaths: readOnlyDenyWrite,
     finalCredentialPolicy,
-  });
+  };
+  if (bwrapPath) {
+    return prepareBwrapSandbox({
+      bwrapPath, policy, cwd: input.cwd, binary: input.binary, args: input.args,
+      profilePath: path.join(input.profileDir, `${input.runId}.bwrap`),
+    });
+  }
+  const profileText = buildSeatbeltProfile(policy);
 
   const profilePath = path.join(input.profileDir, `${input.runId}.sb`);
   try {

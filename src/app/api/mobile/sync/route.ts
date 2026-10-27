@@ -1,4 +1,7 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { viewerGitJson } from '@/lib/viewers/git-response';
+import { getDefaultLlmRepoRoot } from '@/lib/llm/repo-scope';
+import { viewerJson } from '@/lib/viewers/response';
+import { NextRequest } from 'next/server';
 import { performance } from 'node:perf_hooks';
 import { getOwnedCodexRuntimeTail } from '@/lib/codex/owned';
 import { getCodexRuntimeTail } from '@/lib/codex/sessions';
@@ -285,7 +288,7 @@ export async function POST(request: NextRequest) {
   try {
     body = (await request.json()) as SyncRequest;
   } catch {
-    return NextResponse.json({ error: 'Invalid or empty request body' }, { status: 400 });
+    return viewerJson({ error: 'Invalid or empty request body' }, { status: 400 });
   }
   const errors: Record<string, string> = {};
 
@@ -336,7 +339,7 @@ export async function POST(request: NextRequest) {
     response.errors = errors;
   }
 
-  return NextResponse.json(response, {
+  return viewerGitJson(response, getDefaultLlmRepoRoot(), {}, {
     headers: {
       'Cache-Control': 'no-store, max-age=0',
       'Server-Timing': `total;dur=${Math.max(0, performance.now() - startedAt).toFixed(1)}`,
