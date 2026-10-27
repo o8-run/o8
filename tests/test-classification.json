@@ -6333,6 +6333,12 @@
       ]
     },
     {
+      "path": "tests/sidebar-window-layout-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/sign-and-notarize.test.ts",
       "reasons": [
         "child-process",
