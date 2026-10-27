@@ -476,6 +476,7 @@ async function sendToCodexOrchestratorAttempt(
         cwd: session.repoPath,
         threadId: session.threadId,
         developerInstructions: prompt.instructions,
+        turnDeveloperInstructions: prompt.turnInstructions,
         message: prompt.message,
         imagePaths,
         model,

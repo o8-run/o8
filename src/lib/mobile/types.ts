@@ -190,6 +190,8 @@ export interface MobileReviewFileDetail {
   currentPath?: string;
   note: string;
   preview: string;
+  /** Producer provenance: partial patches require complete-source certification. */
+  previewKind?: 'file' | 'diff';
   /** Last commit message that touched this file (free — from git log) */
   commitSummary?: string;
   /** Commit author */

@@ -165,7 +165,7 @@ async fn check_with<R: Runtime>(
             }));
         }
     }
-    guarded_builder(app, app.updater_builder(), force)
+    let result = guarded_builder(app, app.updater_builder(), force)
         .clear_headers()
         .endpoints(fallback.to_vec())
         .map_err(|e| e.to_string())?
@@ -173,8 +173,68 @@ async fn check_with<R: Runtime>(
         .build()
         .map_err(|e| e.to_string())?
         .check()
-        .await
-        .map_err(|e| e.to_string())
+        .await;
+    settle_check(result, tauri::utils::platform::bundle_type())
+}
+
+/// A .deb or .rpm install is updated by the system package manager, never in
+/// place. When the release manifest has no entry for that package
+/// (`linux-x86_64-deb`, `linux-x86_64`), the release ships no Linux build, so
+/// there is nothing to offer: report "no update" instead of failing every
+/// scheduled check with the same "None of the fallback platforms" warning.
+fn settle_check(
+    result: Result<Option<Update>, tauri_plugin_updater::Error>,
+    bundle: Option<tauri::utils::config::BundleType>,
+) -> Result<Option<Update>, String> {
+    use tauri::utils::config::BundleType;
+    match result {
+        Err(tauri_plugin_updater::Error::TargetsNotFound(targets))
+            if matches!(bundle, Some(BundleType::Deb | BundleType::Rpm)) =>
+        {
+            log::debug!(
+                "[updater] release has no {:?} entry; package installs update through the package manager",
+                targets
+            );
+            Ok(None)
+        }
+        other => other.map_err(|e| e.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod settle_check_tests {
+    use super::settle_check;
+    use tauri::utils::config::BundleType;
+    use tauri_plugin_updater::Error;
+
+    fn targets_missing() -> Error {
+        Error::TargetsNotFound(vec!["linux-x86_64-deb".into(), "linux-x86_64".into()])
+    }
+
+    #[test]
+    fn package_installs_treat_a_release_without_linux_entries_as_no_update() {
+        for bundle in [BundleType::Deb, BundleType::Rpm] {
+            assert!(matches!(
+                settle_check(Err(targets_missing()), Some(bundle)),
+                Ok(None)
+            ));
+        }
+    }
+
+    #[test]
+    fn other_installs_still_report_missing_targets() {
+        for bundle in [Some(BundleType::AppImage), Some(BundleType::App), None] {
+            let error = settle_check(Err(targets_missing()), bundle)
+                .err()
+                .expect("missing targets stay an error");
+            assert!(error.contains("None of the fallback platforms"));
+        }
+    }
+
+    #[test]
+    fn package_installs_still_report_other_failures() {
+        assert!(settle_check(Err(Error::ReleaseNotFound), Some(BundleType::Deb)).is_err());
+    }
 }
 
 #[derive(Serialize)]
