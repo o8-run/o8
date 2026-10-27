@@ -36,6 +36,23 @@ beforeEach(async () => { root = await realpath(await mkdtemp(join(tmpdir(), 'o8-
 afterEach(async () => { await Promise.all(backends.map(value => value.closeAll())); vi.unstubAllEnvs(); await rm(root, { recursive: true, force: true }); });
 
 describe('Muse orchestrator persisted entry point', () => {
+  it.each([undefined, 'adaptive'] as const)('records runtime-default provenance without reasoning input on a %s cold resume', async thinkingEffort => {
+    const first = fakeHost(repo);
+    const make = (host: MuseHost) => {
+      const backend = createMuseBackend({ stateRoot: () => join(root, 'state'), openHost: async () => host });
+      backends.push(backend); return backend;
+    };
+    await make(first.host).sendTurn(repo, 'first', () => {}, { threadId: 'default-effort' });
+    await backends[0].closeAll();
+    const second = fakeHost(repo);
+    const events: OrchestratorEvent[] = [];
+    await make(second.host).sendTurn(repo, 'second', event => events.push(event), { threadId: 'default-effort', thinkingEffort });
+    expect(second.command).toHaveBeenCalledWith('session/resume', expect.objectContaining({ sessionId: 'native-session' }));
+    const request = second.command.mock.calls.find(([method]) => method === 'turn/start')![1];
+    expect(request).not.toHaveProperty('reasoningEffort');
+    expect(events).toContainEqual(expect.objectContaining({ type: 'turn_receipt', effort: 'adaptive', effortSource: 'runtime-default' }));
+  });
+
   it('resumes the recorded session and pins its configuration after a cold restart', async () => {
     const first = fakeHost(repo);
     const make = (host: MuseHost) => { const backend = createMuseBackend({ stateRoot: () => join(root, 'state'), openHost: vi.fn(async () => host) }); backends.push(backend); return backend; };

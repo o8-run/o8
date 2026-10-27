@@ -1,15 +1,17 @@
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { getDataDir } from '@/lib/data-dir-migration';
 import { NextRequest } from 'next/server';
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CODEX_MODEL_IDS, SUPPORTED_MODEL_IDS } from '@/lib/models';
 import { ORCHESTRATOR_RUNTIME_IDS, getRuntimeCapability, type OrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
-import { MANUAL_THINKING_EFFORTS, type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
+import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import { codexLaunchArgs, codexResumeArgs } from '@/lib/codex/owned';
 import { buildClaudeStreamJsonArgs } from '@/lib/claude-code/interactive-session';
 import { museWorkerArgs } from '@/lib/muse/owned';
 import { workerLaunchPayload } from '@/lib/cloud/worker-payload';
-import type { RuntimeLaunchRequest, RuntimeLaunchResult } from '@/lib/runtime/actions';
 
-const h = vi.hoisted(() => ({ launch: vi.fn<(request: RuntimeLaunchRequest) => Promise<RuntimeLaunchResult>>() }));
+const h = vi.hoisted(() => ({ launch: vi.fn<typeof import('@/lib/runtime/actions').launchRuntimeSurface>() }));
 vi.mock('@/lib/runtime/actions', async importOriginal => ({
   ...await importOriginal<typeof import('@/lib/runtime/actions')>(), launchRuntimeSurface: h.launch,
 }));
@@ -19,6 +21,13 @@ vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: vi.fn(asyn
 vi.mock('@/lib/command-center/snapshot', () => ({ invalidateCommandCenterSnapshotCaches: vi.fn() }));
 vi.mock('@/lib/mobile/inbox', () => ({ invalidateInboxCache: vi.fn() }));
 
+const configHome = join(getDataDir(), 'matrix-codex-home');
+mkdirSync(configHome, { recursive: true });
+// Isolate discovery from the host and keep the golden legacy contract explicit.
+writeFileSync(join(configHome, 'models_cache.json'), JSON.stringify({ models: CODEX_MODEL_IDS.map(slug => ({
+  slug, supported_reasoning_levels: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'].map(effort => ({ effort })),
+})) }));
+vi.stubEnv('CODEX_HOME', configHome);
 const { POST } = await import('@/app/api/runtime/launch/route');
 const { closeDb } = await import('@/lib/db');
 const { updateOperatorDefaults } = await import('@/lib/operator/defaults');
@@ -27,7 +36,7 @@ await updateOperatorDefaults({ defaultDispatchModel: '' });
 // Golden app-adapter contract. Dynamic model catalogs remain runtime-owned;
 // representative unknown ids exercise that boundary, not provider entitlement.
 const BASIC: readonly ThinkingEffort[] = ['low', 'medium', 'high', 'xhigh'];
-const ALL = MANUAL_THINKING_EFFORTS;
+const ALL: readonly ThinkingEffort[] = ['low', 'medium', 'high', 'max', 'xhigh', 'ultra'];
 const HIGH_END = new Set(['gpt-6.1-sol', 'gpt-6-astra', 'gpt-6-sol', 'gpt-5.6-sol', 'gpt-5.6-terra']);
 const DEFAULT_ONLY: OrchestratorRuntime[] = [
   'gemini', 'antigravity', 'magnitude', 'opencode', 'copilot-cli', 'crush', 'openhands',
@@ -60,7 +69,7 @@ beforeEach(() => {
     cwd: '', repoPath: '', worktree: null, laneId: null,
   }));
 });
-afterAll(() => closeDb());
+afterAll(() => { closeDb(); vi.unstubAllEnvs(); rmSync(configHome, { recursive: true, force: true }); });
 
 describe('runtime and selectable-model effort matrix through the actual launch POST', () => {
   it('requires an explicit audit row for every canonical runtime', () => {
@@ -78,7 +87,12 @@ describe('runtime and selectable-model effort matrix through the actual launch P
       expect(await response.json()).toMatchObject({ code: expect.stringMatching(/^invalid_effort$|^effort_/) });
       return;
     }
-    expect(h.launch).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ runtime, model, effort }));
+    const expectedRequest = expect.objectContaining({ runtime, model, effort });
+    if (runtime === 'codex') {
+      expect(h.launch).toHaveBeenCalledExactlyOnceWith(expectedRequest, {
+        id: 'codex-local-default', label: 'Current local sign-in', configHomeRef: configHome,
+      });
+    } else expect(h.launch).toHaveBeenCalledExactlyOnceWith(expectedRequest);
     closeDb();
     expect((await invoke()).headers.get('x-o8-idempotency-replayed')).toBe('1');
     expect(h.launch).toHaveBeenCalledTimes(1);

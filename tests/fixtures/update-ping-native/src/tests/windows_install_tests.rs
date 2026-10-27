@@ -135,7 +135,7 @@ fn windows_install_child() {
             } else if headers.contains("/api/panel/release-health") {
                 b"{\"pulled\":false}".to_vec()
             } else {
-                serde_json::json!({"version":"0.2.0","url":format!("{origin}/artifact"),
+                serde_json::json!({"channel":"stable","version":"0.2.0","url":format!("{origin}/artifact"),
                 "signature":include_str!("../../artifacts/windows.signature.b64").trim()})
                 .to_string()
                 .into_bytes()
@@ -152,7 +152,7 @@ fn windows_install_child() {
     let mut context = mock_context(noop_assets());
     context.package_info_mut().version = "0.1.0".parse().unwrap();
     context.config_mut().plugins.0.insert("updater".into(), serde_json::json!({
-        "endpoints":[format!("{base}/primary"),format!("{base}/fallback")],
+        "endpoints":[format!("{base}/primary"),format!("{base}/latest.json")],
         "pubkey":include_str!("../../artifacts/windows-public-key.b64").trim(), "dangerousInsecureTransportProtocol":true,
     }));
     let app = mock_builder()

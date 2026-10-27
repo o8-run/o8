@@ -617,7 +617,8 @@ export async function sendToOrchestrator(
   const systemPrompt = buildOrchestratorSystemPrompt(session.repoPath, { backend: 'claude', toolProfile });
   const promptFingerprint = orchestratorPromptFingerprint(systemPrompt);
 
-  onEvent({ type: 'turn_receipt', leadModel: model, effort: thinkingEffort });
+  onEvent({ type: 'turn_receipt', leadModel: model, effort: thinkingEffort,
+    ...(effortPin.selectedEffort === null ? { effortSource: 'runtime-default' as const } : {}) });
   if (session.proc && !orchestratorProcessPolicyCurrent(session.proc)) killOrchestratorProc(session, w, true);
   // Spawn a fresh proc when there's no warm one (first turn / after recycle).
   if (!session.proc) {

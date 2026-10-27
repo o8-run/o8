@@ -1,8 +1,14 @@
 name: o8 next Linux setup
 description: Shared native headless build prerequisites
 inputs:
+  cache-key:
+    description: Separate release and test build outputs.
+    default: ''
   browser:
     description: Install the parity browser
+    default: 'false'
+  headless-tests:
+    description: Install compile prerequisites without graphical capture tools or driver upgrades.
     default: 'false'
 runs:
   using: composite
@@ -21,12 +27,13 @@ runs:
     - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       with:
         workspaces: native/o8-next
+        key: ${{ inputs.cache-key }}
         save-if: ${{ github.ref == 'refs/heads/main' }}
     - name: Install X11, fonts and software Vulkan
       shell: bash
-      run: |
-        sudo apt-get update -qq
-        sudo apt-get install -y --no-install-recommends libfontconfig1-dev libfreetype-dev libxkbcommon-dev libxkbcommon-x11-dev libxcb1-dev libx11-xcb-dev libvulkan-dev mesa-vulkan-drivers xvfb xauth x11-xserver-utils imagemagick fonts-dejavu-core xdotool tesseract-ocr
+      env:
+        O8_NATIVE_HEADLESS_TESTS: ${{ inputs.headless-tests }}
+      run: bash scripts/ci/install-native-linux-deps.sh
     - name: Install parity browser
       if: inputs.browser == 'true'
       shell: bash

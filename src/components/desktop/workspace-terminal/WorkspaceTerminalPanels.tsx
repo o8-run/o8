@@ -14,6 +14,7 @@ import { useTheme } from '@/lib/theme/context';
 import { isWebMachineBrowserSurface } from '@/lib/connect/web-machine-surface';
 import { shellLacksGlass } from '@/lib/desktop/host-platform';
 import { WorkspaceBootLoaderClaim } from '@/components/desktop/workspace-terminal/workspace-boot-loader-claim';
+import { WorkspaceBootLoader } from '@/components/desktop/workspace-terminal/WorkspaceBootLoader';
 import { updateResidentTabIds } from '@/components/desktop/workspace-terminal/resident-tabs';
 import { retryingLazy } from '@/lib/react/retrying-lazy';
 import { OUTSIDE_WORKER_HOST_EMPTY_EVENT } from './use-session-tiles';
@@ -544,7 +545,7 @@ const ChatResidentPanel = memo(function ChatResidentPanel({
 
 const FleetCanvasResidentPanel = memo(function FleetCanvasResidentPanel({ active, repoPath }: { active: boolean; repoPath: string | null }) {
   return (
-    <Suspense fallback={null}>
+    <Suspense fallback={active ? <WorkspaceBootLoader contained /> : null}>
       <LazyFleetCanvasTab active={active} repoPath={repoPath} />
     </Suspense>
   );
@@ -680,7 +681,7 @@ const CanvasPanel = memo(function CanvasPanel({
         overflow: 'hidden',
       }}
     >
-      <Suspense fallback={null}>
+      <Suspense fallback={active ? <WorkspaceBootLoader contained /> : null}>
         <LazyCanvas
           active={active}
           tabs={[tab.canvasTab]}

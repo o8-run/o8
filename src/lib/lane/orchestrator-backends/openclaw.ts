@@ -425,7 +425,8 @@ async function sendToOpenclawOrchestrator(
       emitEvent({ type: 'thinking', text: `Model ${requestedModel} isn't configured for the OpenClaw agent "${session.agentId}" — using its default model instead.` });
     }
   }
-  emitEvent({ type: 'turn_receipt', leadModel: effectiveModel, effort: thinking ?? 'adaptive' });
+  emitEvent({ type: 'turn_receipt', leadModel: effectiveModel, effort: thinking ?? 'adaptive',
+    ...(thinking === null ? { effortSource: 'runtime-default' as const } : {}) });
   console.log(`[openclaw-diag] spawn args: ${args.map((a, i) => (args[i - 1] === '--message' ? `<message ${fullMessage.length} chars>` : a)).join(' ')}`);
   return new Promise<void>((promiseResolve, promiseReject) => {
     const launch = cliInvocation(openclawBin, args);

@@ -339,3 +339,50 @@ it.each(['dispatch', 'launch'] as const)('admits a packet pinned to account A af
   expect(calls().slice(start).filter(call => call.method === 'model/list').map(call => call.config)).toEqual(expect.arrayContaining([account]));
   expect(calls().slice(start).filter(call => call.method === 'model/list').some(call => call.config === other)).toBe(false);
 });
+
+it.each(['saved', 'explicit', 'server'] as const)('uses shared identity precedence for a %s Muse packet account', async precedence => {
+  const identities = await import('@/lib/runtime/identity-catalog');
+  const packetId = crypto.randomUUID();
+  writeFileSync(join(account, 'models.json'), JSON.stringify(rows(['low'])));
+  const first = await identities.registerRuntimeIdentity({ runtime: 'muse', label: 'Saved fixture', configHomeRef: account });
+  await identities.selectRuntimeIdentity('muse', first.id);
+  const store = createOwnedSessionStore(museOwnedAdapter, { workspaceSpawnGuard: async () => ({ status: 'available', source: 'no-snapshot' }) });
+  stores.push(store);
+  const seed = await store.launch({ cwd: repo, model: 'muse-fixture', effort: 'low', prompt: 'fixture', packetId });
+  expect(seed.ok, seed.note).toBe(true);
+  await vi.waitFor(async () => expect((await store.getRuntimeTail(seed.surfaceId)).surface.lifecycle?.lastOutcome).toBe('finished'), { timeout: 10_000 });
+  const other = join(root, `precedence-${precedence}`); mkdirSync(other);
+  writeFileSync(join(other, 'models.json'), JSON.stringify(rows(['ultra'])));
+  const second = await identities.registerRuntimeIdentity({ runtime: 'muse', label: 'Other fixture', configHomeRef: other });
+  await identities.selectRuntimeIdentity('muse', second.id);
+  // A conflicting binding cannot displace the saved execution identity.
+  const catalogPath = join(data, 'runtime-identities.json');
+  const catalog = JSON.parse(readFileSync(catalogPath, 'utf8'));
+  catalog.packetBindings[`muse\0${packetId}`] = precedence === 'saved' ? second : first;
+  writeFileSync(catalogPath, JSON.stringify(catalog));
+  const expectedHome = precedence === 'saved' ? account : other;
+  const effort = precedence === 'saved' ? 'low' : 'ultra';
+  const start = calls().length;
+  const serverLaunch = async () => {
+    const { museOwnedStore } = await import('@/lib/muse/owned');
+    // Use this suite's workspace edge; identity, admission and execution remain real.
+    const forward = vi.spyOn(museOwnedStore, 'launch').mockImplementation(request => store.launch(request));
+    try { return await (await import('@/lib/runtimes/muse')).museRuntime.launch({ cwd: repo, model: 'muse-fixture', effort, prompt: 'fixture', packetId, runtimeIdentity: second }); }
+    finally { forward.mockRestore(); }
+  };
+  const launched = precedence === 'server'
+    ? await serverLaunch()
+    : await store.launch({ cwd: repo, model: 'muse-fixture', effort, prompt: 'fixture', packetId,
+      ...(precedence === 'explicit' ? { runtimeConfig: { museConfigRoot: other, museDataRoot: join(root, 'native-data') } } : {}) });
+  const surfaceId = 'surfaceId' in launched ? launched.surfaceId : launched.sessionKey!;
+
+  expect(launched.ok, launched.note).toBe(true);
+  await vi.waitFor(async () => expect((await store.getRuntimeTail(surfaceId)).surface.lifecycle?.lastOutcome).toBe('finished'), { timeout: 10_000 });
+  const probes = calls().slice(start).filter(call => call.method === 'model/list');
+  expect(probes.length).toBeGreaterThan(0);
+  expect(probes.every(call => call.config === expectedHome)).toBe(true);
+  expect(calls().filter(call => call.method === 'exec').at(-1)).toMatchObject({ config: expectedHome,
+    args: expect.arrayContaining(['--reasoning-effort', effort]) });
+  const saved = JSON.parse(readFileSync(join(sessions, surfaceId.replace('muse-owned:', ''), 'session.json'), 'utf8'));
+  expect(saved.identity.configHomeRef).toBe(expectedHome);
+});

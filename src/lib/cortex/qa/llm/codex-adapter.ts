@@ -34,7 +34,10 @@ import { promisify } from 'node:util';
 
 import { resolveBrainCodexRouteSync } from '@/lib/operator/brain-routing';
 import { codexModelArgs } from '@/lib/codex/local-model';
+import { resolveCodexLaunchContext } from '@/lib/codex/launch-context';
 import { resolveCodexReasoningEffort } from '@/lib/codex/reasoning-effort';
+import { EffortPinRejectionError } from '@/lib/orchestrator/effort-pin';
+import type { ManualThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import { MODEL_IDS } from '@/lib/models';
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 
@@ -111,7 +114,7 @@ export interface CallCodexOptions {
   /** Explicit resolved binary, used when the caller already ran auth detection. */
   binary?: string;
   /** Optional Codex config effort passed as `-c model_reasoning_effort=...`. */
-  reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra';
+  reasoningEffort?: ManualThinkingEffort;
   /** CLI invocation timeout. Default 30s — Codex bootstrap is ~15s. */
   timeoutMs?: number;
   readOnly?: boolean;
@@ -128,6 +131,7 @@ export const CODEX_DEFAULT_MODEL = MODEL_IDS.codexWorkerDefault;
 function resolveCodexQaRoute(options: CallCodexOptions): {
   model: string;
   reasoningEffort?: CallCodexOptions['reasoningEffort'];
+  env: { CODEX_HOME: string };
 } {
   let configured: ReturnType<typeof resolveBrainCodexRouteSync> = {
     model: MODEL_IDS.codexWorkerDefault,
@@ -140,10 +144,13 @@ function resolveCodexQaRoute(options: CallCodexOptions): {
   }
   const model = options.model ?? configured.model;
   const requestedEffort = options.reasoningEffort ?? configured.reasoningEffort;
+  const launch = resolveCodexLaunchContext({ model,
+    requestedEffort: requestedEffort === 'none' || requestedEffort === 'minimal' ? requestedEffort : undefined });
+  if (!launch.effortPin.ok) throw new EffortPinRejectionError(launch.effortPin.code, launch.effortPin.message);
   const reasoningEffort = requestedEffort
     ? resolveCodexReasoningEffort(requestedEffort, model) as CallCodexOptions['reasoningEffort']
     : undefined;
-  return { model, ...(reasoningEffort ? { reasoningEffort } : {}) };
+  return { model, ...(reasoningEffort ? { reasoningEffort } : {}), env: launch.env };
 }
 
 export function buildCodexQaArgs(options: {
@@ -221,7 +228,7 @@ export async function callCodex(prompt: string, opts: CallCodexOptions = {}): Pr
 
   // tmpdir cwd so no project .codex/ config bleeds in.
   const cwd = os.tmpdir();
-  const env = buildCodexQaEnv();
+  const env = { ...buildCodexQaEnv(), ...route.env };
 
   try {
     await new Promise<void>((resolve, reject) => {

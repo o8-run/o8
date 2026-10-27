@@ -27,6 +27,9 @@ const home = join(root, 'home');
 const ownedRoot = join(root, 'owned');
 const binary = join(root, 'codex');
 mkdirSync(join(home, '.codex'), { recursive: true });
+writeFileSync(join(home, '.codex', 'models_cache.json'), JSON.stringify({ models: [{
+  slug: 'gpt-6.1-sol', supported_reasoning_levels: ['none', 'minimal'].map(effort => ({ effort })),
+}] }));
 vi.stubEnv('O8_SOL_TEST_HOME', home);
 vi.stubEnv('CODEX_HOME', join(home, '.codex'));
 vi.stubEnv('O8_CODEX_BIN', binary);
@@ -141,7 +144,6 @@ describe.skipIf(process.platform === 'win32')('GPT-6.1 Sol real CLI entry points
   });
 
   it.each(['low', 'medium', 'high', 'xhigh', 'max', 'ultra', 'none', 'minimal'])('launches both seats with valid effort for %s', async (effort) => {
-    const expected = effort === 'none' || effort === 'minimal' ? 'low' : effort;
     const cwd = repo(`effort-${effort}`, false);
     await codexBackend.sendTurn(cwd, 'Reply once', () => {}, { model: 'gpt-6.1-sol', thinkingEffort: effort as ThinkingEffort });
     const launched = await launchOwnedCodexSession({ cwd, prompt: 'Reply once', model: 'gpt-6.1-sol', effort: effort as ThinkingEffort });
@@ -149,7 +151,7 @@ describe.skipIf(process.platform === 'win32')('GPT-6.1 Sol real CLI entry points
     expect(calls(cwd)).toHaveLength(2);
     for (const call of calls(cwd)) {
       expect(call.model).toBe('gpt-6.1-sol');
-      expect(call.args).toContain(`model_reasoning_effort=${expected}`);
+      expect(call.args).toContain(`model_reasoning_effort=${effort}`);
     }
   });
 

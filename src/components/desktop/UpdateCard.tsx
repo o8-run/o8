@@ -2,7 +2,7 @@
 
 /** App update controller, with a legacy card outside the compact rail. */
 
-import { publishAppUpdateView, refreshCliUpdateView, registerAppUpdateCheck } from '@/lib/app-update/update-hub-client';
+import { publishAppUpdateView, registerAppUpdateCheck } from '@/lib/app-update/update-hub-client';
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { confirmExplicitRestart } from '@/lib/app-update/confirm-explicit-restart';
@@ -32,6 +32,7 @@ import {
 } from '@/lib/app-update/install-target';
 
 import { subscribeRecordedUpdate } from '@/lib/app-update/recorded-update-client';
+import { acceptNativeUpdateCheck, acceptUpdateCheck, readNativeUpdateCheck } from '@/lib/app-update/check-order';
 
 /** Tells the server about an install attempt, so a remote apply can read its outcome (#3588). */
 async function reportInstall(install: { outcome: 'started' | 'installed' | 'failed' | 'cancelled'; version: string | null; error?: string }) {
@@ -125,7 +126,6 @@ function AppUpdateCard({ quiet }: { quiet: boolean }) {
       packageManager: action.kind === 'download' && action.packageManager === true,
       progress, blockers });
   }, [update, checkReport, installing, blockedNote, installError, installInfo, progress, blockers]);
-  useEffect(() => { void refreshCliUpdateView(); }, []);
 
   useEffect(() => {
     updateRef.current = update;
@@ -165,6 +165,7 @@ function AppUpdateCard({ quiet }: { quiet: boolean }) {
   // check is the operator asking to see it.
   useEffect(() => {
     const onFound = (event: Event) => {
+      if (!acceptUpdateCheck((event as CustomEvent<unknown>).detail)) return;
       const next = normalizeUpdateInfo((event as CustomEvent<unknown>).detail);
       if (!next) return;
       try {
@@ -191,9 +192,12 @@ function AppUpdateCard({ quiet }: { quiet: boolean }) {
 
   const checkForUpdate = useCallback(async () => {
     if (!canUseTauriEvents()) return { version: null, error: 'o8 update checking is available in the desktop app.' };
+    const context = await readNativeUpdateCheck().catch(() => undefined);
+    if (context === undefined) return { version: null, error: 'The update check could not start. Try again.' };
     try {
       const { requestFreshAppUpdateCheck } = await import('@/lib/app-update/recorded-update-client');
-      const { info: result } = await requestFreshAppUpdateCheck();
+      const { info: result, check: report } = await requestFreshAppUpdateCheck();
+      if (!await acceptNativeUpdateCheck(report)) return { version: null, error: 'The update check was replaced by a newer check. Check again.' };
       if (result) {
         setUpdate({
           version: result.version,
@@ -201,14 +205,22 @@ function AppUpdateCard({ quiet }: { quiet: boolean }) {
           notes: result.notes ?? undefined,
           date: result.date ?? undefined,
         });
-        setCheckReport(updateCheckReport('available'));
+        setCheckReport(report);
         return { version: result.version };
       } else {
         setUpdate(null);
-        setCheckReport(updateCheckReport('current'));
+        setCheckReport(report);
         return { version: null };
       }
     } catch (error) {
+      // A transport failure has no result ticket. It can affect the view only
+      // while the native context captured before the request is still current.
+      const current = await readNativeUpdateCheck().catch(() => undefined);
+      if (current === undefined) return { version: null, error: 'The latest update check could not be verified. Try again.' };
+      const unchanged = context === null ? current === null
+        : current !== null && (['checkSequence', 'checkSession', 'channel', 'generation'] as const)
+          .every(key => context[key] === current[key]);
+      if (!unchanged || !acceptUpdateCheck(current)) return { version: null, error: 'The update check was replaced by a newer check. Check again.' };
       setCheckReport(updateCheckReport('failed', error));
       return { version: null, error: error instanceof Error ? error.message : 'o8 update check failed.' };
     }
@@ -234,7 +246,8 @@ function AppUpdateCard({ quiet }: { quiet: boolean }) {
     let integrityUnlisten: Promise<() => void> | null = null;
     void import('@tauri-apps/api/event').then(({ listen }) => {
       if (cancelled) return;
-      availableUnlisten = listen<UpdateInfo>(UPDATE_AVAILABLE_EVENT, (event) => {
+      availableUnlisten = listen<UpdateInfo>(UPDATE_AVAILABLE_EVENT, async (event) => {
+        if (!await acceptNativeUpdateCheck(event.payload) || cancelled) return;
         const next = normalizeUpdateInfo(event.payload);
         if (next) {
           const payload = event.payload as unknown as Record<string, unknown>;
@@ -246,7 +259,8 @@ function AppUpdateCard({ quiet }: { quiet: boolean }) {
           ));
         }
       });
-      clearUnlisten = listen<unknown>(UPDATE_CLEAR_EVENT, (event) => {
+      clearUnlisten = listen<unknown>(UPDATE_CLEAR_EVENT, async (event) => {
+        if (!await acceptNativeUpdateCheck(event.payload) || cancelled) return;
         const nextReport = normalizeUpdateCheckReport(event.payload) ?? updateCheckReport('current');
         setCheckReport(nextReport);
         if (nextReport.outcome === 'current') {
@@ -270,6 +284,7 @@ function AppUpdateCard({ quiet }: { quiet: boolean }) {
 
   useEffect(() => {
     return subscribeRecordedUpdate((info, report, activity) => {
+      if (!acceptUpdateCheck(report)) return;
       setUpdate(info); setCheckReport(report);
       if (!activity) return;
       setInstalling(activity.phase === 'installing' || activity.phase === 'restarting');

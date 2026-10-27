@@ -9,7 +9,7 @@ import {
 } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 const root = mkdtempSync(path.join(os.tmpdir(), 'o8-hermes-worker-real-'));
 const userHome = path.join(root, 'user-home');
@@ -39,20 +39,22 @@ async function waitForAssistant(
   throw new Error(`Timed out waiting for ${count} Hermes assistant messages.`);
 }
 
-beforeAll(() => {
+beforeAll(async () => {
   mkdirSync(workspace, { recursive: true });
   mkdirSync(path.join(userHome, '.hermes'), { recursive: true });
   writeFileSync(path.join(userHome, '.hermes', 'config.yaml'), 'model: fixture\n', 'utf8');
   writeFileSync(path.join(userHome, '.hermes', '.env'), 'FIXTURE_TOKEN=1\n', 'utf8');
   writeFileSync(
     wrapper,
-    `#!/bin/sh\nexec "${process.execPath}" "${fixture}" "$@"\n`,
+    `#!/bin/sh\nexport O8_HERMES_PID_LOG="${pidLog}"\nexport O8_HERMES_PERMISSION_LOG="${permissionLog}"\nexport O8_HERMES_LAUNCH_LOG="${launchLog}"\nexport O8_HERMES_MODEL_LOG="${modelLog}"\nexport O8_HERMES_EXECUTED_MODEL_LOG="${executedModelLog}"\nexec "${process.execPath}" "${fixture}" "$@"\n`,
     { encoding: 'utf8', mode: 0o755 },
   );
   chmodSync(wrapper, 0o755);
 
   process.env.HOME = userHome;
   process.env.O8_DATA_DIR = path.join(root, 'data');
+  vi.stubEnv('CORTEX_IDE_DATA_DIR', path.join(root, 'data'));
+  vi.stubEnv('CORTEX_IDE_DB_PATH', path.join(root, 'data', 'hermes-fixture.db'));
   process.env.O8_OWNED_HERMES_ROOT = sessionsRoot;
   process.env.O8_HERMES_BIN = wrapper;
   process.env.O8_HERMES_PID_LOG = pidLog;
@@ -60,9 +62,14 @@ beforeAll(() => {
   process.env.O8_HERMES_LAUNCH_LOG = launchLog;
   process.env.O8_HERMES_MODEL_LOG = modelLog;
   process.env.O8_HERMES_EXECUTED_MODEL_LOG = executedModelLog;
-});
+  await import('@/lib/runtimes/hermes');
+  await import('@/lib/orchestrator/control-plane');
+  await import('@/lib/orchestrator/store');
+}, 120_000); // Cold production imports are setup; turn deadlines remain unchanged.
 
-afterAll(() => {
+afterAll(async () => {
+  (await import('@/lib/db')).closeDb();
+  vi.unstubAllEnvs();
   if (previousHome === undefined) delete process.env.HOME;
   else process.env.HOME = previousHome;
   delete process.env.O8_DATA_DIR;
@@ -158,6 +165,75 @@ describe('Hermes worker production runtime seam', () => {
       expect.objectContaining({ sessionKey, runtimeId: 'hermes', ownership: 'owned' }),
     ]);
     await expect(hermesRuntime.interrupt(sessionKey)).resolves.toMatchObject({ ok: true });
+  });
+
+  it.each(['before resume', 'after snapshot'] as const)('rebuilds packet context and starts a fresh ACP thread when forgotten %s', async timing => {
+    const { hermesRuntime } = await import('@/lib/runtimes/hermes');
+    const { writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
+    const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
+    const packetId = 'hermes-forgotten-packet';
+    writeOrchestratorControlPlaneState({ ...createEmptyOrchestratorMissionState(), packets: [{
+      id: packetId, branchTarget: 'fixture-forget', title: 'Current retained packet authority', summary: 'Inspect the fixture.',
+      workspaceTargetPath: workspace, referenceLabel: packetId, runtime: 'hermes',
+      status: 'running', queueState: 'held', releaseState: 'pending', dependencyPacketIds: [], dependencyLabels: [],
+    }] });
+    const launched = await hermesRuntime.launch({ cwd: workspace, prompt: 'forgotten ACP context canary',
+      packetId, model: 'fixture/model' });
+    expect(launched.ok, launched.note).toBe(true);
+    const key = launched.sessionKey!;
+    try {
+      await waitForAssistant(() => hermesRuntime.readTranscript(key), 1, async () =>
+        (await hermesRuntime.discoverSessions()).some(session => session.sessionKey === key && session.lifecycle?.lastOutcome === 'finished'));
+      const { getSqlite } = await import('@/lib/db');
+      const { advanceMemoryRevision } = await import('@/lib/cortex/memory-revision');
+      if (timing === 'before resume') getSqlite().transaction(() => advanceMemoryRevision(getSqlite()))();
+      else {
+        const memory = await import('@/lib/dispatch/worker-memory-context');
+        const needsRefresh = memory.workerMemoryNeedsRefresh;
+        vi.spyOn(memory, 'workerMemoryNeedsRefresh').mockImplementationOnce(session => {
+          const prior = needsRefresh(session);
+          getSqlite().transaction(() => advanceMemoryRevision(getSqlite()))();
+          return prior;
+        });
+      }
+      const resumed = await hermesRuntime.resume(key, 'Keep this fresh operator request');
+      expect(resumed, resumed.note).toMatchObject({ ok: true });
+      await vi.waitFor(async () => {
+        const entries = await hermesRuntime.readTranscript(key);
+        expect(entries.filter(entry => entry.role === 'assistant')).toHaveLength(2);
+        expect(entries.filter(entry => entry.role === 'assistant').at(-1)?.text).toBe('hermes fixture response 1');
+        const prompt = entries.filter(entry => entry.role === 'user').at(-1)?.text;
+        expect(prompt).toContain('Current retained packet authority');
+        expect(prompt).toContain('Keep this fresh operator request');
+        expect(prompt).not.toContain('forgotten ACP context canary');
+      }, { timeout: 10_000 });
+    } finally { vi.restoreAllMocks(); await hermesRuntime.interrupt(key); }
+  });
+
+  it('preserves a newly assembled handoff after an earlier forget', async () => {
+    const { hermesRuntime } = await import('@/lib/runtimes/hermes');
+    const { getSqlite } = await import('@/lib/db');
+    const { advanceMemoryRevision, readMemoryRevision } = await import('@/lib/cortex/memory-revision');
+    const { writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
+    const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
+    const packetId = 'hermes-fresh-handoff-packet';
+    writeOrchestratorControlPlaneState({ ...createEmptyOrchestratorMissionState(), packets: [{
+      id: packetId, branchTarget: 'fixture-fresh', title: 'Current retained packet authority', summary: 'Inspect the fixture.',
+      workspaceTargetPath: workspace, referenceLabel: packetId, runtime: 'hermes',
+      status: 'running', queueState: 'held', releaseState: 'pending', dependencyPacketIds: [], dependencyLabels: [],
+    }] });
+    getSqlite().transaction(() => advanceMemoryRevision(getSqlite()))();
+    const prompt = 'Fresh handoff request plus current verified workspace observations';
+    const result = await hermesRuntime.launch({ cwd: workspace, prompt, packetId,
+      promptMemoryRevision: readMemoryRevision(), model: 'fixture/model' });
+    expect(result.ok, result.note).toBe(true);
+    try {
+      await vi.waitFor(async () => {
+        const entries = await hermesRuntime.readTranscript(result.sessionKey!);
+        expect(entries.filter(entry => entry.role === 'user').at(-1)?.text).toBe(prompt);
+        expect(entries.filter(entry => entry.role === 'assistant')).toHaveLength(1);
+      }, { timeout: 10_000 });
+    } finally { await hermesRuntime.interrupt(result.sessionKey!); }
   });
 
   it.each([

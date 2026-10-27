@@ -1,4 +1,8 @@
-import { asc, eq, or } from 'drizzle-orm';
+import { isCorrectionForgotten } from '@/lib/cortex/operator-corrections';
+import { outcomeMemoryFingerprint } from '@/lib/cortex/outcome-identity';
+import { completionOutcomeId } from '@/lib/cortex/outcome-exclusion';
+import { readMemoryRevision } from '@/lib/cortex/memory-revision';
+import { asc, eq } from 'drizzle-orm';
 import { listApprovalsForContext } from '@/lib/approvals/store';
 import type { ApprovalAuditEvent, OrchestratorReviewFinding } from '@/lib/approvals/types';
 import { getDb, laneEvents, sessionOutcomes, usageLogs } from '@/lib/db';
@@ -8,15 +12,13 @@ import type { Lane } from '@/lib/lane/types';
 import type { CloseUnmergedDisposition } from '@/lib/orchestrator/close-unmerged';
 import type { AgentSummary } from '@/lib/fleet/types';
 import { extractReviewFindings, extractReviewPatterns } from '@/lib/orchestrator/review-lessons';
-import { outcomeFromPacketSelfReview } from '@/lib/orchestrator/context-relay-outcome';
+import { closeOutcomeRows, completionTimestamp, outcomeFromPacketSelfReview } from '@/lib/orchestrator/context-relay-outcome';
 import {
   buildMissingPacketSelfReview,
   parsePacketSelfReview,
   stripPacketSelfReview,
 } from '@/lib/orchestrator/self-review';
-import {
-  stripPacketTaskContract,
-} from '@/lib/orchestrator/packet-task-contract';
+import { stripPacketTaskContract } from '@/lib/orchestrator/packet-task-contract';
 import {
   findFirstTaskContractCapture,
 } from '@/lib/orchestrator/task-contract-cost';
@@ -156,17 +158,6 @@ function findRecentNote(entries: RuntimeTranscriptEntry[], excludedEntryId?: str
     return normalizeSummaryText(text, NOTE_LIMIT);
   }
   return '';
-}
-
-function latestTranscriptTimestamp(entries: RuntimeTranscriptEntry[]): string | null {
-  for (let index = entries.length - 1; index >= 0; index -= 1) {
-    const timestamp = entries[index]?.timestamp;
-    if (!(timestamp instanceof Date) || Number.isNaN(timestamp.getTime())) {
-      continue;
-    }
-    return timestamp.toISOString();
-  }
-  return null;
 }
 
 function findLatestSelfReview(entries: RuntimeTranscriptEntry[]): PacketContext['selfReview'] {
@@ -377,7 +368,7 @@ export async function recordPacketReviewContext(
   const existing = await readPacketCompletionContext(normalizedPacketId);
   const lane = existing ? null : findLaneByPacket(normalizedPacketId);
   const projectId = existing?.projectId
-    ?? getActiveProjectScopeForRepoSync(lane?.repoPath ?? null).projectId;
+    ?? lane?.projectId ?? getActiveProjectScopeForRepoSync(lane?.repoPath ?? null).projectId;
   const nextContext: PacketContext = existing
     ? {
         ...existing,
@@ -407,13 +398,14 @@ export async function recordPacketReviewContext(
 }
 
 export async function capturePacketCompletionContext(packetId: string, sessionKey: string, options: { fallbackSummary?: string } = {}): Promise<PacketContext> {
+  const memoryRevision = readMemoryRevision();
   const normalizedPacketId = packetId.trim();
   const normalizedSessionKey = sessionKey.trim();
   const runtimeId = inferRuntimeId(normalizedSessionKey);
   const runtime = runtimeId ? getRuntime(runtimeId) : undefined;
   const lane = findLaneByPacket(normalizedPacketId) ?? findLatestLaneByPacket(normalizedPacketId);
   const handoffCapture = await beginCompletionHandoffCapture(lane, normalizedSessionKey);
-  const projectId = getActiveProjectScopeForRepoSync(lane?.repoPath ?? null).projectId;
+  const projectId = lane?.projectId ?? getActiveProjectScopeForRepoSync(lane?.repoPath ?? null).projectId;
 
   const [transcriptResult, changedFilesResult, agentResult, telemetryResult, spokenDiffResult] = await Promise.allSettled([
     runtime?.readTranscript(normalizedSessionKey, undefined, TRANSCRIPT_CAPTURE_LIMIT) ?? Promise.resolve([]),
@@ -444,7 +436,7 @@ export async function capturePacketCompletionContext(packetId: string, sessionKe
     sessionKey: normalizedSessionKey,
   });
   const approvalReviewContext = extractApprovalReviewContext(
-    matchingApprovals.flatMap((approval) => approval.audit),
+    matchingApprovals.filter(approval => !isCorrectionForgotten(`approval:${approval.id}`)).flatMap((approval) => approval.audit),
     changedFiles,
   );
   const context: PacketContext = {
@@ -468,9 +460,8 @@ export async function capturePacketCompletionContext(packetId: string, sessionKe
     changedFiles,
     selfReview,
     ...(taskContract ? { taskContract } : {}),
-    completedAt: agent?.runtimeSurface?.lifecycle?.lastRunFinishedAt
-      ?? latestTranscriptTimestamp(transcript)
-      ?? new Date().toISOString(),
+    completedAt: completionTimestamp(transcript, handoffCapture?.provider.finishedAt,
+      agent?.runtimeSurface?.lifecycle?.lastRunFinishedAt),
     model: telemetry?.model?.trim()
       || agent?.model?.trim()
       || lane?.model?.trim()
@@ -478,6 +469,9 @@ export async function capturePacketCompletionContext(packetId: string, sessionKe
     ...approvalReviewContext,
   };
 
+  context.sourceOutcomeId = completionOutcomeId(context);
+  if (lane?.repoPath) context.sourceOutcomeFingerprint = outcomeMemoryFingerprint({ ...context, repoPath: lane.repoPath });
+  context.memoryRevision = memoryRevision;
   await finishCompletionHandoffCapture(context, handoffCapture);
   await persistTaskContractCapture({ packetId: normalizedPacketId, sessionKey: normalizedSessionKey, contract: taskContract, lane, runtime: runtimeId, transcript, capture: taskContractCapture, telemetry });
 
@@ -515,7 +509,7 @@ export async function capturePacketCompletionContext(packetId: string, sessionKe
 /**
  * Insert one `session_outcomes` row per captured completion (mergedClean NULL
  * until merge). Idempotent: id = packetId + sessionKey + completedAt, so
- * same-second re-captures collapse via onConflictDoNothing. True on a new row.
+ * identical re-captures collapse via onConflictDoNothing. True on a new row.
  */
 // Runtimes the ledger tracks: a subset of RuntimeId ('remote-customer' etc. are not scored).
 type LedgerRuntime = OrchestratorRuntime;
@@ -624,11 +618,9 @@ async function persistSessionOutcome(
   const db = getDb();
   if (!db) return false;
 
-  // Deterministic id keyed on the unique-per-second tuple — re-captures of the
-  // exact same completion (auto-review re-pulling context) collapse cleanly.
+  // Share the deterministic identity with every read-time recall guard.
   const completedAt = context.completedAt;
-  const sessionFingerprint = context.sessionKey.replace(/[^a-z0-9]/gi, '').slice(-24);
-  const id = `outcome-${context.packetId.slice(0, 16)}-${sessionFingerprint}-${completedAt.slice(0, 19)}`;
+  const id = completionOutcomeId(context);
   const start = deriveOutcomeStartFromLaneEvents(db, lane, completedAt);
   console.log(
     `[context-relay] ${start.source} packet=${context.packetId} lane=${lane.id} startedAt=${start.startedAt} completedAt=${completedAt} durationMs=${start.durationMs ?? 'null'} detail=${start.detail}`,
@@ -653,6 +645,7 @@ async function persistSessionOutcome(
   try {
     const insert = await db.insert(sessionOutcomes).values({
       id,
+      memoryFingerprint: context.sourceOutcomeFingerprint,
       projectId: context.projectId ?? null,
       repoPath: lane.repoPath,
       branch: lane.branch ?? null,
@@ -743,7 +736,7 @@ export async function markOutcomeClosedUnmerged({
   laneId?: string | null;
   packetId?: string | null;
   disposition: CloseUnmergedDisposition;
-  lane?: Pick<Lane, 'id' | 'repoPath' | 'branch' | 'runtime' | 'sessionKey' | 'createdAt'> | null;
+  lane?: (Pick<Lane, 'id' | 'repoPath' | 'branch' | 'runtime' | 'sessionKey' | 'createdAt'> & { projectId?: string | null }) | null;
   summary?: string | null;
 }): Promise<void> {
   const db = getDb();
@@ -755,24 +748,15 @@ export async function markOutcomeClosedUnmerged({
   try {
     const completedAt = new Date().toISOString();
     const outcomeSummary = summary?.trim() || 'Closed unmerged by the operator.';
-    const targets = [
-      trimmedLane ? eq(sessionOutcomes.laneId, trimmedLane) : null,
-      trimmedPacket ? eq(sessionOutcomes.packetId, trimmedPacket) : null,
-    ].filter((target): target is NonNullable<typeof target> => target !== null);
-    const updated = await db.update(sessionOutcomes)
-      .set({
-        outcome: disposition,
-        summary: outcomeSummary,
-        completedAt,
-        mergedClean: false,
-      })
-      .where(targets.length === 1 ? targets[0] : or(...targets))
-      .run();
-    const changes = (updated as unknown as { changes?: number }).changes ?? 0;
+    const changes = closeOutcomeRows({ laneId: trimmedLane, packetId: trimmedPacket,
+      outcome: disposition, summary: outcomeSummary, completedAt });
     if (changes === 0 && lane) {
+      const projectId = 'projectId' in lane ? lane.projectId ?? null : getActiveProjectScopeForRepoSync(lane.repoPath).projectId;
       const outcomeId = `outcome-close-${trimmedPacket ?? trimmedLane}-${completedAt.slice(0, 19)}`;
       await db.insert(sessionOutcomes).values({
         id: outcomeId,
+        projectId,
+        memoryFingerprint: outcomeMemoryFingerprint({ projectId, repoPath: lane.repoPath, packetId: trimmedPacket, sessionKey: lane.sessionKey, summary: outcomeSummary }),
         repoPath: lane.repoPath,
         branch: lane.branch,
         runtime: lane.runtime,

@@ -5,6 +5,7 @@ import { resolveSubscriptionProfileRouting } from '@/lib/operator/subscription-p
 import { assertExecutionCarrierDispatchable } from '@/lib/runtimes/shared/execution-carrier-preflight';
 import { getDispatchableRuntimeAvailability } from '@/lib/runtimes/shared/auth-detect';
 import { getCodexSpeedCatalogue } from '@/lib/codex/service-tier-catalogue';
+import { resolveCodexLaunchIdentity } from '@/lib/codex/launch-context';
 import { parseLocalModel } from '@/lib/codex/local-model';
 import { readCodexSubscriptionProxyModels } from '@/lib/claude-code/codex-subscription-proxy';
 import { resolveClaudeCodeWorkerSelection } from '@/lib/claude-code/worker-profile';
@@ -15,7 +16,7 @@ import { resolveAcpLaunch } from '@/lib/lane/orchestrator-backends/acp';
 import { probeAcpModels } from './acp-model-probe';
 import { museWorkerModelContext, probeMuseModels } from '@/lib/muse/models';
 import { getRuntimeCapability, type OrchestratorRuntime } from './runtime-capabilities';
-import { resolveCodexWorkerConfigHome, resolveEffortPin } from './effort-pin';
+import { resolveEffortPin } from './effort-pin';
 import { THINKING_EFFORTS, type ThinkingEffort } from './thinking-effort';
 
 export interface WorkerModelCatalog {
@@ -37,6 +38,7 @@ export function configuredWorkerPool(snapshot = getOperatorDefaultsSync()): Orch
 }
 
 export async function workerModelCatalog(runtime: OrchestratorRuntime, repoPath: string): Promise<WorkerModelCatalog> {
+  const codexHome = runtime === 'codex' ? resolveCodexLaunchIdentity().configHomeRef : undefined;
   const defaults = getOperatorDefaultsSync().values;
   const capability = getRuntimeCapability(runtime);
   let defaultModel = runtime === 'opencode' ? defaults.opencodeWorkerModel
@@ -69,7 +71,7 @@ export async function workerModelCatalog(runtime: OrchestratorRuntime, repoPath:
     ids = defaultModel ? [defaultModel] : [];
     source = 'configured-execution-carrier-model';
   } else if (runtime === 'codex') {
-    const catalog = await getCodexSpeedCatalogue(await resolveCodexWorkerConfigHome(), true);
+    const catalog = await getCodexSpeedCatalogue(codexHome, true);
     ids = Object.keys(catalog.models);
     modelEfforts = new Map(ids.map(id => [id, catalog.reasoningEfforts?.[id] ?? null]));
     defaultModel = runtime === defaults.defaultDispatchRuntime && defaults.defaultDispatchModel
@@ -98,10 +100,14 @@ export async function workerModelCatalog(runtime: OrchestratorRuntime, repoPath:
   }
   return {
     models: [...new Set(ids)].map(id => ({ id, efforts: THINKING_EFFORTS.filter(effort => {
-      // Report the installed catalog faithfully. Transport admission may still
-      // refuse a choice that the current adapter cannot apply exactly.
-      if (runtime === 'codex' && modelEfforts?.has(id)) return effort === 'adaptive' || modelEfforts.get(id)?.includes(effort);
-      return resolveEffortPin({ runtime, model: id, requestedEffort: effort, modelEfforts: modelEfforts?.get(id) }).ok;
+      // Preserve discovered variants even when transport admission must refuse one.
+      if (runtime === 'codex' && modelEfforts?.has(id)) {
+        if (effort === 'none' || effort === 'minimal') return modelEfforts.get(id)?.includes(effort)
+          && resolveEffortPin({ runtime, model: id, requestedEffort: effort, codexHome }).ok;
+        return effort === 'adaptive' || modelEfforts.get(id)?.includes(effort);
+      }
+      return resolveEffortPin({ runtime, model: id, requestedEffort: effort, codexHome,
+        ...(modelEfforts ? { modelEfforts: modelEfforts.get(id) } : {}) }).ok;
     }) })),
     defaultModel, carrier, source, observedAt: new Date().toISOString(),
   };

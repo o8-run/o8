@@ -272,6 +272,10 @@ export interface RuntimeSessionTransformProviderResult {
  * Options for launching a new session.
  */
 export interface LaunchOptions {
+  /** Server-resolved account shared by admission and owned execution. */
+  runtimeIdentity?: import('@/lib/runtime/identity-catalog').RuntimeLaunchIdentity;
+  /** Recall epoch bound before assembling this launch prompt. */
+  promptMemoryRevision?: string;
   cwd: string;
   controlledTask?: import('@/lib/mcp/task-execution-store').ControlledTaskBinding;
   executionPolicy?: 'single-attempt';

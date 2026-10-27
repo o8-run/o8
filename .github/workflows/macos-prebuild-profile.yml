@@ -1,0 +1,71 @@
+name: macOS Prebuild Profile
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'tests/tauri-prebuild-profile.test.ts'
+      - 'tests/workflow-policy.test.ts'
+      - 'scripts/lib/generated-output-launch.mjs'
+      - 'scripts/lib/prebuild-continuation.mjs'
+      - 'scripts/lib/release-build-profile.mjs'
+      - 'src/lib/workspace/generated-output-producer.ts'
+      - '.github/workflows/macos-prebuild-profile.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-prebuild-profile-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  prebuild-profile:
+    name: Native prebuild lifetime fixtures
+    runs-on: macos-15-intel
+    timeout-minutes: 15
+    env:
+      NODE_OPTIONS: --max-old-space-size=8192
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.23.4'
+          cache: npm
+      - run: npm install -g "$(node -p 'require("./package.json").packageManager')"
+      - run: npm ci --prefer-offline
+      - name: Run the combined reproduction with CI unset before warming the fixtures
+        run: env -u CI npx vitest run tests/tauri-prebuild-profile.test.ts tests/workflow-policy.test.ts --reporter=verbose
+      - name: Reproduce the linked lifetime with CI unset
+        run: env -u CI npx vitest run tests/tauri-prebuild-profile.test.ts -t 'retains linked' --reporter=verbose
+      - name: Run the ordinary lifetime with CI unset
+        run: env -u CI npx vitest run tests/tauri-prebuild-profile.test.ts -t 'retains ordinary' --reporter=verbose
+      - name: Run the fixture file in the CI environment
+        run: npx vitest run tests/tauri-prebuild-profile.test.ts --reporter=verbose
+      - name: Report fixture command receipts
+        if: always()
+        run: |
+          node --input-type=module <<'NODE'
+          import { readdirSync, readFileSync, realpathSync } from 'node:fs';
+          import { tmpdir } from 'node:os';
+          import path from 'node:path';
+          const parent = realpathSync(tmpdir());
+          for (const run of readdirSync(parent).filter(name => /^o8-test-data-run-[A-Za-z0-9]{6}$/.test(name))) {
+            const runRoot = path.join(parent, run);
+            for (const fixture of readdirSync(runRoot).filter(name => name.startsWith('o8-prebuild-lifetime-'))) {
+              const root = path.join(runRoot, fixture);
+              for (const name of readdirSync(root).filter(name => /^command-\d+\.json$/.test(name))) {
+                const receipt = JSON.parse(readFileSync(path.join(root, name), 'utf8'));
+                if (receipt.exit === 0 && Number(name.match(/\d+/)[0]) > 6) continue;
+                console.log(JSON.stringify({ command: name, kind: receipt.kind, label: receipt.label,
+                  exit: receipt.exit, signal: receipt.signal,
+                  elapsedMs: receipt.elapsedMs, timeoutMs: receipt.timeoutMs, error: receipt.error,
+                  stdout: receipt.stdout?.slice(-24000), stderr: receipt.stderr?.slice(-24000) }, null, 2)
+                  .replaceAll(root, '<fixture>').replaceAll(process.cwd(), '<checkout>'));
+              }
+            }
+          }
+          NODE

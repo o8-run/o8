@@ -4,7 +4,7 @@ import { memo, useEffect, useMemo, useState, type RefObject } from 'react';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import { TranscriptPeek } from './TranscriptPeek';
 
-export function TranscriptNavigator({ entries, scrollRef }: {
+export const TranscriptNavigator = memo(function TranscriptNavigator({ entries, scrollRef }: {
   entries: MobileTranscriptEntry[]; scrollRef: RefObject<HTMLDivElement | null>;
 }) {
   const prompts = useMemo(() => entries.flatMap((entry, index) => {
@@ -81,7 +81,7 @@ export function TranscriptNavigator({ entries, scrollRef }: {
       width={hovered >= 0 ? Math.max(6, 23 - Math.abs(index - hovered) * 5) : active === prompt.id ? 16 : 7}
       height={Math.max(5, Math.min(18, 500 / prompts.length))} />)}
   </nav>;
-}
+});
 
 const TranscriptPrompt = memo(function TranscriptPrompt({ id, title, answer, index, scrollRef, active, onHover, highlighted, width, height }: {
   id: string; title: string; answer: string; index: number;

@@ -7,7 +7,8 @@ import { getOperatorDefaults } from '@/lib/operator/defaults';
 import { getApiBase } from '@/lib/panel/api-port';
 
 const UNAVAILABLE = 'o8 next is unavailable. Reinstall the app and try again.';
-const STARTUP_TIMEOUT_MS = 15_000;
+// Only spawn-to-first-paint is parent-owned; server loads stay in the window.
+const WINDOW_OPEN_TIMEOUT_MS = 15_000;
 export class NextWindowStartupError extends Error {
   constructor(readonly code: 'NEXT_STARTUP_FAILED' | 'NEXT_STARTUP_TIMEOUT') {
     super(code === 'NEXT_STARTUP_TIMEOUT'
@@ -28,7 +29,7 @@ function waitForStartup(child: ChildProcess): Promise<void> {
       if (error) reject(error); else resolve();
     };
     const failed = () => finish(new NextWindowStartupError('NEXT_STARTUP_FAILED'));
-    const timer = setTimeout(() => finish(new NextWindowStartupError('NEXT_STARTUP_TIMEOUT')), STARTUP_TIMEOUT_MS);
+    const timer = setTimeout(() => finish(new NextWindowStartupError('NEXT_STARTUP_TIMEOUT')), WINDOW_OPEN_TIMEOUT_MS);
     child.once('exit', failed); child.once('error', failed);
     lines.on('line', line => {
       if (line === 'o8-next-ready') {

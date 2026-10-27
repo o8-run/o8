@@ -6,13 +6,17 @@ import path from 'node:path';
 import { assertWorktreeMaterializationIdentity, captureWorktreeMaterializationIdentity, type WorktreeMaterializationIdentity } from '@/lib/worktree/materialization-identity';
 import { probeMetadataLockProcessIdentity } from '@/lib/worktree/metadata-lock-process-identity';
 import { assertWorkspaceRetentionReleased } from './retention-holds';
+import { reserveBuildOutput, publishBuildOutput } from './generated-output-build-ownership';
+import { createBuildOutputWriter, type BuildOutputWriter } from '../../../scripts/lib/build-output-writer.cjs';
 import { retainedFailedPrebuild } from './failed-prebuild-parking';
 import { assertLinkedGitBuildCustody, captureLinkedGitBuildCustody } from './linked-git-build-custody';
 import { assertGeneratedOutputClaimsReleased, generatedOutputOwner, generatedOutputRevision,
   currentGeneratedOutputResource, registerGeneratedOutputLocked, saveGeneratedOutputResource, withGeneratedOutputExclusion,
   lastDisposedPrebuildOutput, type GeneratedOutputResource } from './generated-output-state';
 
-export type GeneratedOutputSpawn = (command: string, args: string[], env?: NodeJS.ProcessEnv) => Promise<number>;
+export type GeneratedOutputSpawn = ((command: string, args: string[], env?: NodeJS.ProcessEnv) => Promise<number>) & {
+  buildOutput?: { directory: string; writer: BuildOutputWriter; complete: () => Promise<void> };
+};
 
 // Pause before the real producer executes, including commands too short to
 // probe after ordinary spawn. The parent's durable acknowledgement owns it.
@@ -51,6 +55,14 @@ process.once('message', message => {
 });
 process.send({ phase: 'ready' });
 `;
+
+function spawnReservedChild(workspace: WorktreeMaterializationIdentity, output: WorktreeMaterializationIdentity,
+  command: string, args: string[], env: NodeJS.ProcessEnv, writer?: BuildOutputWriter) {
+  return spawn(process.execPath, ['-e', PRODUCER_START, JSON.stringify({ workspace, output, command, args })], {
+    cwd: workspace.canonicalPath, env: writer ? writer.environment(env) : env,
+    stdio: ['inherit', 'inherit', 'inherit', 'ipc'],
+  });
+}
 
 /** Ordinary checkouts retain their build behavior until they have a managed owner. */
 async function runUnmanagedProducer(input: {
@@ -131,12 +143,19 @@ async function runReservedProducer(workspace: WorktreeMaterializationIdentity, r
   const owner = await probeMetadataLockProcessIdentity(process.pid);
   if (owner.state !== 'live') throw new Error('Generated-output producer identity is unknown.');
   const previousState = resource.state;
+  const previousBuildOwnership = resource.buildOwnership;
+  const reservedBuild = !resource.owner && resource.creationAuthority && input.mode === 'build';
+  if (reservedBuild && previousBuildOwnership?.state === 'complete' && previousBuildOwnership.proof !== 'write-receipts-v1') {
+    throw new Error('Preserved legacy build output without write-time writer proof.');
+  }
   resource = saveGeneratedOutputResource(resource, { state: 'active', revision: await generatedOutputRevision(workspace),
+    ...(reservedBuild ? { buildOwnership: undefined } : {}),
     attempt: { id: randomUUID(), mode: input.mode, ownerPid: process.pid, ownerIdentity: owner.identity, children: [] } });
   let activeChild: ReturnType<typeof spawn> | null = null;
   let activeRun: Promise<number> | null = null;
   let abortRequested = false;
   let requestedStop: NodeJS.Signals | null = null;
+  let writer: BuildOutputWriter | undefined;
   const forward = (signal: NodeJS.Signals) => { abortRequested = true; requestedStop = signal; activeChild?.kill(signal); };
   const interrupt = () => forward('SIGINT');
   const terminate = () => forward('SIGTERM');
@@ -149,9 +168,7 @@ async function runReservedProducer(workspace: WorktreeMaterializationIdentity, r
     if (!resource.owner && resource.creationAuthority) await assertLinkedGitBuildCustody(workspace, resource.creationAuthority.linkedGit);
     await assertWorktreeMaterializationIdentity(resource.output!.canonicalPath, resource.output!);
     if (abortRequested) throw new Error('Generated-output producer admission is closed.');
-    const child = spawn(process.execPath, ['-e', PRODUCER_START, JSON.stringify({ workspace, output: resource.output, command, args })], {
-      cwd: workspace.canonicalPath, env, stdio: ['inherit', 'inherit', 'inherit', 'ipc'],
-    });
+    const child = spawnReservedChild(workspace, resource.output!, command, args, env, writer);
     activeChild = child;
     let spawnError: Error | undefined;
     const closed = new Promise<{ code: number | null; signal: NodeJS.Signals | null; error?: Error }>((resolve) => {
@@ -170,6 +187,7 @@ async function runReservedProducer(workspace: WorktreeMaterializationIdentity, r
       if (!child.pid) throw new Error('Generated-output child spawn has uncertain ownership.');
       const probe = await probeMetadataLockProcessIdentity(child.pid);
       if (probe.state !== 'live') throw new Error('Generated-output producer birth is unknown.');
+      writer?.admit(child.pid, probe.identity);
       resource = saveGeneratedOutputResource(resource, { attempt: { ...resource.attempt!, children: [...resource.attempt!.children,
         { pid: child.pid, identity: probe.identity, exitCode: null, signal: null, observedClosed: false }] } });
       if (abortRequested) throw new Error('Generated-output producer admission is closed.');
@@ -184,6 +202,7 @@ async function runReservedProducer(workspace: WorktreeMaterializationIdentity, r
     const result = await closed;
     if (result.error) throw result.error;
     const children = [...resource.attempt!.children];
+    writer?.observedClose(children[index].pid, children[index].identity!);
     children[index] = { ...children[index], exitCode: result.code, signal: result.signal, observedClosed: true };
     resource = saveGeneratedOutputResource(resource, { attempt: { ...resource.attempt!, children } });
     activeChild = null;
@@ -207,6 +226,17 @@ async function runReservedProducer(workspace: WorktreeMaterializationIdentity, r
     if (unsettled) await unsettled.catch(() => {});
   };
   try {
+    if (reservedBuild) {
+      const ownership = await reserveBuildOutput(resource, previousBuildOwnership);
+      resource = saveGeneratedOutputResource(resource, { buildOwnership: ownership });
+      writer = createBuildOutputWriter(ownership.scope.canonicalPath, ownership.scope);
+      run.buildOutput = { directory: ownership.scope.canonicalPath, writer, complete: async () => {
+        if (activeRun || activeChild || resource.buildOwnership?.state !== 'reserved') {
+          throw new Error('Build output publication requires closed compiler children and its original reservation.');
+        }
+        resource = saveGeneratedOutputResource(resource, { buildOwnership: await publishBuildOutput(resource, writer!) });
+      } };
+    }
     const code = await input.operation(run);
     if (activeRun || activeChild || !resource.attempt!.children.length || resource.attempt!.children.some(child => !child.observedClosed)) {
       throw new Error('Generated-output attempt lacks complete observed child exits.');
@@ -224,6 +254,7 @@ async function runReservedProducer(workspace: WorktreeMaterializationIdentity, r
     saveGeneratedOutputResource(resource, { state: 'failed-held' });
     throw error;
   } finally {
+    writer?.close();
     process.off('SIGINT', interrupt); process.off('SIGTERM', terminate);
   }
 

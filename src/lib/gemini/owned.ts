@@ -39,6 +39,7 @@ import { getDataDir } from '@/lib/data-dir-migration';
 export type OwnedGeminiLaunchRequest = {
   cwd: string;
   prompt: string;
+  promptMemoryRevision?: string;
   clientMutationId?: string;
   model?: string;
   effort?: ThinkingEffort;

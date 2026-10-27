@@ -1,3 +1,4 @@
+import { getRuntimeLaunchIdentitySync } from '@/lib/runtime/identity-catalog';
 import { NextRequest, NextResponse } from 'next/server';
 import { invalidateCommandCenterSnapshotCaches } from '@/lib/command-center/snapshot';
 import { invalidateInboxCache } from '@/lib/mobile/inbox';
@@ -21,6 +22,7 @@ import { assertSingleAttemptLaunch } from '@/lib/runtime/single-attempt-launch';
 import { EFFORT_CHOICE_LIST, resolveRuntimeEffortPin } from '@/lib/orchestrator/effort-pin';
 import { isThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import { resolveDefaultDispatchModelSync } from '@/lib/operator/defaults';
+import { resolveCodexLaunchIdentity } from '@/lib/codex/launch-context';
 import { knowledgeSourceWriteRefusal } from '@/lib/cortex/knowledge/sources';
 
 export const runtime = 'nodejs';
@@ -96,6 +98,8 @@ export async function POST(request: NextRequest) {
   }
 
   const launchRequest = canonicalLaunchRequest(payload, runtimeName, clientMutationId);
+  const launchIdentity = runtimeName === 'codex' ? resolveCodexLaunchIdentity(launchRequest.packetId)
+    : runtimeName === 'muse' ? getRuntimeLaunchIdentitySync('muse', launchRequest.packetId) ?? undefined : undefined;
   // A concrete pin must survive the adapter's mapping. Validate before the
   // receipt binding so a rejected selection can be corrected with the same ID.
   if (launchRequest.effort && launchRequest.effort !== 'adaptive') {
@@ -104,12 +108,15 @@ export async function POST(request: NextRequest) {
       runtime: runtimeName,
       model: launchRequest.model
         ?? (runtimeName === 'codex' ? resolveDefaultDispatchModelSync() || null : null),
-    }, { cwd: launchRequest.cwd ?? launchRequest.repoPath, packetId: launchRequest.packetId });
+      codexHome: runtimeName === 'codex' && (launchRequest.effort === 'none' || launchRequest.effort === 'minimal')
+        ? launchIdentity?.configHomeRef
+        : undefined,
+    }, { cwd: launchRequest.cwd ?? launchRequest.repoPath, packetId: launchRequest.packetId, identity: launchIdentity, configHome: launchIdentity?.configHomeRef });
     if (!effortPin.ok) {
       return NextResponse.json({ error: effortPin.message, code: effortPin.code }, { status: 400 });
     }
   }
-  try { assertSingleAttemptLaunch({ ...launchRequest, executionCarrier: payload.executionCarrier }, launchRequest.workMode); }
+  try { assertSingleAttemptLaunch({ ...launchRequest, executionCarrier: payload.executionCarrier }, launchRequest.workMode, launchIdentity?.configHomeRef); }
   catch { return NextResponse.json({ error: 'Single-attempt workers require exact native runtime, model, effort and read-only pins.' }, { status: 400 }); }
   const canonicalBody = JSON.stringify(launchRequest);
 
@@ -184,7 +191,9 @@ export async function POST(request: NextRequest) {
       },
       async () => {
         try {
-          return await launchRuntimeSurface(launchRequest);
+          return await (launchIdentity
+            ? launchRuntimeSurface(launchRequest, launchIdentity)
+            : launchRuntimeSurface(launchRequest));
         } catch (error) {
           if (error instanceof RuntimeLaunchPostEffectError) {
             return {

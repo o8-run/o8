@@ -1,3 +1,6 @@
+import { assertWorkerMemoryCurrent } from '@/lib/dispatch/worker-memory-context';
+import { assertRuntimeSpawnDeadline } from '@/lib/runtime/launch-deadline';
+import { getLane } from '@/lib/lane/registry';
 import type { ChildProcess } from 'node:child_process';
 import { fstatSync } from 'node:fs';
 import { spawnWithWorkAdmission as spawn } from '@/lib/app-update/work-launch-admission';
@@ -10,7 +13,7 @@ import { assertControlledLaunchGrantCurrent } from '@/lib/mcp/task-execution-adm
 import { ownedSpawnEnvironment } from './restricted-spawn-env';
 import { assertOwnedActionAdmission } from './action-admission';
 import type { OwnedSessionRecord } from './types';
-import { withChildEnvironment } from '@/lib/providers/child-process';
+import { withChildCreationGuard, withChildEnvironment } from '@/lib/providers/child-process';
 import { reserveWorkLaunch } from '@/lib/app-update/work-launch-admission';
 import { ownedSupervisorClient, type SupervisorReceipt } from '@/lib/runtime/o8d-supervisor';
 import { getDataDir } from '@/lib/data-dir-migration';
@@ -47,8 +50,15 @@ function withCheckedLaunch<T>(input: LaunchInput, create: (launch: { command: st
     assertControlledLaunchGrantCurrent(input.session);
     assertOwnedActionAdmission(input.session, input.runId);
     input.assertWorkerO8Current?.();
+    assertWorkerMemoryCurrent(input.session);
     input.onSubmit?.();
-    return create(launch, env);
+    return withChildCreationGuard(() => {
+      assertOwnedActionAdmission(input.session, input.runId);
+      assertRuntimeSpawnDeadline();
+      if (input.session.laneId && getLane(input.session.laneId)?.lastEventLabel === 'runtime_launch_timeout') {
+        throw new Error('Original launch timed out; inspect its held receipt before starting another worker.');
+      }
+    }, () => create(launch, env));
   });
 }
 

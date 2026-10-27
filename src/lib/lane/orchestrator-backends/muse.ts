@@ -181,7 +181,8 @@ export function createMuseBackend(deps: {
         options.signal?.addEventListener('abort', abort, { once: true });
         if (options.signal?.aborted) abort();
         watchdog = setTimeout(abort, deps.turnTimeoutMs ?? 30 * 60_000); watchdog.unref();
-        onEvent({ type: 'turn_receipt', leadModel: current.model ?? 'Muse default', effort: options.thinkingEffort ?? 'adaptive' });
+        onEvent({ type: 'turn_receipt', leadModel: current.model ?? 'Muse default', effort: options.thinkingEffort ?? 'adaptive',
+          ...(!options.thinkingEffort || options.thinkingEffort === 'adaptive' ? { effortSource: 'runtime-default' as const } : {}) });
         const prompt = `${buildOrchestratorSystemPrompt(repo, { backend: 'muse', toolProfile: current.readOnly ? 'propose' : options.toolProfile ?? 'full' })}\n\n${message}`;
         const started = await boundedMuseRequest(current.host.connection.command('turn/start', { sessionId: current.sessionId,
           input: [{ type: 'text', text: prompt }], ifBusy: 'reject', ...(options.thinkingEffort && options.thinkingEffort !== 'adaptive' ? { reasoningEffort: options.thinkingEffort } : {}) }, { commandId }), current.host);

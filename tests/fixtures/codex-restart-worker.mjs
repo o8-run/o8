@@ -2,6 +2,7 @@
 // Offline provider substitute. The launch route, spawn, files and lane are real.
 import { appendFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 if (process.argv.includes('--version') || process.argv.includes('--help')) {
   console.log('codex-cli 1.0.0');
@@ -15,7 +16,7 @@ if (process.argv.includes('--version') || process.argv.includes('--help')) {
     console.log(JSON.stringify({ id: message.id, result }));
   }).on('close', () => process.exit(0));
 } else {
-  const root = process.env.O8_RESTART_FIXTURE_ROOT;
+  const root = fileURLToPath(new URL('.', import.meta.url));
   appendFileSync(join(root, 'launches.jsonl'), `${JSON.stringify({ pid: process.pid, args: process.argv.slice(2) })}\n`);
   writeFileSync(join(root, 'worker.pid'), String(process.pid));
   console.log(JSON.stringify({ type: 'thread.started', thread_id: 'restart-fixture-provider-session' }));

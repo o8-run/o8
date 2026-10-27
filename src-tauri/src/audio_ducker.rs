@@ -8,6 +8,9 @@
 //! Uses `osascript` to drive the system volume. Core Audio would be cleaner but
 //! pulls in an FFI dependency for what is a 2-line shell-out. Ported from
 //! aqua/Symon `audio_ducker.rs`.
+//!
+//! On Linux the same API ducks the default sink through `pactl` (PipeWire or
+//! PulseAudio; see `o8_linux_voice::ducker`), and is a no-op without `pactl`.
 
 use std::sync::mpsc::{channel, Receiver};
 use std::sync::Mutex;
@@ -109,7 +112,18 @@ pub fn duck() -> DuckHandle {
             *saved = Some(current);
         });
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "linux")]
+    {
+        if !o8_linux_voice::ducker::voice_pref_bool("ducking_enabled", true) {
+            let _ = tx.send(());
+            return DuckHandle { done: rx };
+        }
+        std::thread::spawn(move || {
+            let _guard = SendOnDrop(Some(tx));
+            crate::linux_voice::ducker().duck();
+        });
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     {
         let _ = tx.send(());
     }
@@ -118,10 +132,10 @@ pub fn duck() -> DuckHandle {
 
 /// Fires its channel on drop so the duck worker signals completion no matter
 /// which early return it takes.
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 struct SendOnDrop(Option<std::sync::mpsc::Sender<()>>);
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 impl Drop for SendOnDrop {
     fn drop(&mut self) {
         if let Some(tx) = self.0.take() {
@@ -147,5 +161,9 @@ pub fn restore() {
             return;
         };
         set_output_volume(original);
+    });
+    #[cfg(target_os = "linux")]
+    std::thread::spawn(|| {
+        crate::linux_voice::ducker().restore();
     });
 }

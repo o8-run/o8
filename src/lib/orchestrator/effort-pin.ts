@@ -1,7 +1,7 @@
-import { homedir } from 'node:os';
-import { join } from 'node:path';
 import { getCodexSpeedCatalogue } from '@/lib/codex/service-tier-catalogue';
-import { getOrPinPacketRuntimeIdentity, getSelectedRuntimeIdentity } from '@/lib/runtime/identity-catalog';
+import { resolveCodexLaunchIdentity } from '@/lib/codex/launch-context';
+import { getOrPinPacketRuntimeIdentity, getRuntimeLaunchIdentitySync, type RuntimeLaunchIdentity } from '@/lib/runtime/identity-catalog';
+import { readCodexModelDiscovery } from '@/lib/codex/model-discovery-cache';
 import { codexCliSupportsUltraEfforts, resolveCodexReasoningEffort } from '@/lib/codex/reasoning-effort';
 import { parseLocalModel } from '@/lib/codex/local-model';
 import { getRuntimeCapability, isOrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
@@ -18,7 +18,7 @@ import { museRoot } from '@/lib/muse/roots';
 /**
  * Explicit mission reasoning-effort pinning.
  *
- * A caller may pin a concrete tier (`low`…`ultra`). This route only accepts a
+ * A caller may pin a concrete tier (`none`…`ultra`). This route only accepts a
  * pin when the selected runtime + model will pass it through UNCHANGED. It is
  * the o8 route that cannot honor a coerced or dropped tier — NOT a claim that
  * the provider never supports that effort. The provider's own catalog drift
@@ -123,8 +123,19 @@ export interface ResolveEffortPinInput {
   modelDisposition?: WorkerModelDisposition;
   /** Present when the launch boundary has resolved the installed executable. */
   installedCliVersion?: string | null;
-  /** Fresh model/list evidence from the account that will run this selection. */
+  /** Fresh evidence for the model and account being admitted. */
   modelEfforts?: readonly string[] | null;
+  /** Discovery home for the account that will actually launch. */
+  codexHome?: string;
+}
+
+/** Read the selected account's model evidence without starting a provider turn. */
+function codexAdvertisedEfforts(model: string | null, codexHome?: string): string[] | null {
+  if (!model) return null;
+  const entry = readCodexModelDiscovery(codexHome)?.find(candidate => candidate.slug === model);
+  if (!Array.isArray(entry?.supported_reasoning_levels)) return null;
+  return entry.supported_reasoning_levels.flatMap(level =>
+    typeof level?.effort === 'string' ? [level.effort] : []);
 }
 
 export function resolveEffortPin(input: ResolveEffortPinInput): ResolveEffortPinResult {
@@ -182,6 +193,18 @@ export function resolveEffortPin(input: ResolveEffortPinInput): ResolveEffortPin
     return { ok: false, code: 'effort_unsupported_model',
       message: `Cannot honor effort "${raw}" for model "${actualModel ?? 'runtime default'}": its current account catalog does not establish that selection. Choose a listed model and effort or omit effort.` };
   }
+  const discoveryOnly = raw === 'none' || raw === 'minimal';
+  if (discoveryOnly && (input.runtime === 'codex' || input.runtime === 'cloud')) {
+    const advertised = codexAdvertisedEfforts(actualModel, input.codexHome);
+    if (!advertised?.includes(raw)) {
+      return { ok: false, code: 'effort_unsupported_model', message: advertised === null
+        ? `Cannot honor effort "${raw}" for Codex model "${actualModel ?? 'runtime default'}": no usable model discovery evidence advertises this effort. Refresh the Codex model catalogue or omit effort.`
+        : `Codex model "${actualModel}" does not advertise the requested effort "${raw}". Advertised efforts: ${advertised.join(', ') || 'no tiers'}. Choose an advertised effort or omit effort.` };
+    }
+  } else if (discoveryOnly && input.runtime !== 'muse') {
+    return { ok: false, code: 'effort_unsupported_runtime',
+      message: `Runtime "${input.runtime}" does not advertise an independent effort "${raw}" through this route. Choose a supported effort or omit effort.` };
+  }
   const applied = resolveAdapterEffort(input.runtime, actualModel, raw);
   if (applied !== raw) {
     return {
@@ -198,42 +221,32 @@ export function resolveEffortPin(input: ResolveEffortPinInput): ResolveEffortPin
   return { ok: true, requestedEffort: raw, selectedEffort: raw };
 }
 
-/** Match the owned worker's selected account, or its durable packet binding. */
-export async function resolveCodexWorkerConfigHome(packetId?: string): Promise<string> {
-  const home = process.env.CODEX_HOME?.trim() || join(homedir(), '.codex');
-  const identity = packetId
-    ? await getOrPinPacketRuntimeIdentity({ runtime: 'codex', packetId,
-      fallback: { id: 'codex-local-default', label: 'Current local sign-in', configHomeRef: home } })
-    : await getSelectedRuntimeIdentity('codex');
-  return identity?.configHomeRef ?? home;
+export interface RuntimeEffortContext {
+  cwd?: string; runtimeConfig?: Record<string, string>; configHome?: string; packetId?: string; identity?: RuntimeLaunchIdentity;
 }
 
-/** Shared last admission boundary for owned launch, cold resume and automatic retries. */
-export async function resolveRuntimeEffortPin(input: ResolveEffortPinInput, context: { cwd?: string; runtimeConfig?: Record<string, string>; configHome?: string; packetId?: string } = {}): Promise<ResolveEffortPinResult> {
+/** Fresh evidence uses the same identity precedence as the owned store. */
+export async function resolveRuntimeEffortPin(input: ResolveEffortPinInput, context: RuntimeEffortContext = {}): Promise<ResolveEffortPinResult> {
   if (!isThinkingEffort(input.requestedEffort) || input.requestedEffort === 'adaptive') return resolveEffortPin(input);
   if (input.runtime !== 'muse' && input.runtime !== 'codex') return resolveEffortPin(input);
-  if (input.runtime === 'codex') {
-    const transport = resolveEffortPin(input);
-    if (!transport.ok) return transport;
-    try {
-      const home = context.configHome ?? await resolveCodexWorkerConfigHome(context.packetId);
+  try {
+    if (input.runtime === 'codex') {
+      const home = input.codexHome ?? context.configHome ?? resolveCodexLaunchIdentity(context.packetId).configHomeRef;
+      const transport = resolveEffortPin({ ...input, codexHome: home });
+      if (!transport.ok) return transport;
+      if (input.requestedEffort === 'none' || input.requestedEffort === 'minimal') return transport;
       const catalog = await getCodexSpeedCatalogue(home, true);
       const model = input.model?.trim() || catalog.nativeDefaultModel || null;
-      return resolveEffortPin({ ...input, model, modelEfforts: model ? catalog.reasoningEfforts?.[model] ?? null : null });
-    } catch {
-      return { ok: false, code: 'effort_unsupported_model', message: 'Cannot verify this model effort with the selected account. Refresh the model catalog or omit effort; no worker was started.' };
+      return resolveEffortPin({ ...input, model, codexHome: home,
+        modelEfforts: model ? catalog.reasoningEfforts?.[model] ?? null : null });
     }
-  }
-  try {
     const config = await museWorkerModelContext(context.runtimeConfig);
-    // Packet launches retain their durable account after the selection changes.
-    // Resume/retry pass the session's roots explicitly and keep that association.
-    const identity = context.packetId ? await getOrPinPacketRuntimeIdentity({
-      runtime: 'muse', packetId: context.packetId,
-      fallback: { id: 'muse-local-default', label: 'Current local sign-in', configHomeRef: config.museConfigRoot },
-    }) : null;
-    const configHome = context.configHome ?? identity?.configHomeRef;
-    const discoveryConfig = configHome ? { ...config, museConfigRoot: museRoot(configHome, true) } : config;
+    let identity = getRuntimeLaunchIdentitySync('muse', context.packetId, {
+      identity: context.identity, configHome: context.configHome ?? context.runtimeConfig?.museConfigRoot,
+    });
+    if (context.packetId) identity = await getOrPinPacketRuntimeIdentity({ runtime: 'muse', packetId: context.packetId,
+      preferred: identity ?? undefined, fallback: { id: 'muse-local-default', label: 'Current local sign-in', configHomeRef: config.museConfigRoot } });
+    const discoveryConfig = identity ? { ...config, museConfigRoot: museRoot(identity.configHomeRef, true) } : config;
     const catalog = await probeMuseModels(context.cwd ?? process.cwd(), true, discoveryConfig);
     const model = input.model?.trim() || catalog.models.find(row => row.isDefault)?.id || null;
     return resolveEffortPin({ ...input, model, modelEfforts: catalog.models.find(row => row.id === model)?.efforts });
@@ -242,8 +255,14 @@ export async function resolveRuntimeEffortPin(input: ResolveEffortPinInput, cont
   }
 }
 
-export async function assertRuntimeEffortPin(runtime: string, model: string | null | undefined, effort: unknown,
-  context?: { cwd?: string; runtimeConfig?: Record<string, string>; configHome?: string; packetId?: string }): Promise<void> {
+export async function assertRuntimeModelEffortPin(runtime: string, model: string | null | undefined, effort: unknown,
+  context?: RuntimeEffortContext): Promise<void> {
   const pin = await resolveRuntimeEffortPin({ runtime, model: model ?? null, requestedEffort: effort }, context);
+  if (!pin.ok) throw new EffortPinRejectionError(pin.code, pin.message);
+}
+
+/** Shared last admission boundary for owned launch, cold resume and automatic retries. */
+export function assertRuntimeEffortPin(runtime: string, model: string | null | undefined, effort: unknown, codexHome?: string): void {
+  const pin = resolveEffortPin({ runtime, model: model ?? null, requestedEffort: effort, codexHome });
   if (!pin.ok) throw new EffortPinRejectionError(pin.code, pin.message);
 }

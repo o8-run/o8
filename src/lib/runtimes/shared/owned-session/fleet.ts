@@ -1,3 +1,4 @@
+import { retireUnstartedSession } from './retire-unstarted';
 import { signalBridgeTerminalSession } from '@/lib/runtime/pty-bridge';
 import { timestampMillis } from '@/lib/util/relative-age';
 import { assertOwnedSessionProcessIdentity } from './process-identity';
@@ -89,6 +90,7 @@ export function createFleetComputer({
             const current = await io.loadSession(sessionDir);
             if (current.detachedAt) return null;
             await runController.refreshSession(current, true);
+            if (await retireUnstartedSession(runtimeId, root, sessionDir, current, io)) return null;
             return current;
           });
         } catch {
