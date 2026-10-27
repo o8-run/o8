@@ -52,9 +52,9 @@ try {
   const identities = new Map();
   if (args.stats) {
     const visit = modules => {
-      for (const module of modules || []) {
-        if (module.id !== null && module.id !== undefined) identities.set(String(module.id), module.name);
-        visit(module.modules);
+      for (const item of modules || []) {
+        if (item.id !== null && item.id !== undefined) identities.set(String(item.id), item.name);
+        visit(item.modules);
       }
     };
     visit(JSON.parse(fs.readFileSync(String(args.stats), 'utf8')).modules);
@@ -63,7 +63,7 @@ try {
     prefetchPatch: '4874 measurement-only', stageHarnessSha: execFileSync('git', ['-C', fileURLToPath(new URL('../..', import.meta.url)), 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
     clientModulesMapped: identities.size > 0,
     samples: receipt.samples.map(row => ({ ...row, intervals: launchStageIntervals(row),
-      clientModules: row.clientModules.map(module => ({ ...module, owner: identities.get(module.id) ?? null })) })) };
+      clientModules: row.clientModules.map(item => ({ ...item, owner: identities.get(item.id) ?? null })) })) };
   fs.writeFileSync(path.join(String(args.output), 'stages.json'), JSON.stringify(result, null, 2) + '\n');
   const { printLaunchStageReceipt } = await import('./print-launch-stage-receipt.mjs');
   await printLaunchStageReceipt(result);

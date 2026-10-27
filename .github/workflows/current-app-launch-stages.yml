@@ -1,8 +1,6 @@
 name: Current app launch stage profile
 
 on:
-  push:
-    branches: [perf/current-app-launch-stages]
   workflow_dispatch:
 
 permissions:
