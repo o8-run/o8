@@ -112,6 +112,7 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
       if (!step.uses) continue;
       const supported = setupActions.some(prefix => step.uses.startsWith(prefix))
         || (id === 'security' && step.uses.startsWith(auditAction))
+        || (id === 'integration-changed' && step.uses === './.github/actions/linux-package-prerequisites')
         || (id === 'o8-next-tests' && step.uses === './.github/actions/next-linux-setup');
       requireCondition(supported, `action ${step.uses} in ${id} has no verify:ci equivalent`);
     }
@@ -223,6 +224,32 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
   checks.push({ id: 'test', after: ['classification'], requiredResults: nativeLocal ? ['o8-next-tests'] : [], name: jobs.test.name, steps: unitSteps });
   appendJob('server-bundle-size');
   const integration = jobs['integration-changed'];
+  const packageAction = './.github/actions/linux-package-prerequisites';
+  const packageSetup = parse(readFileSync(path.join(root, `${packageAction}/action.yml`), 'utf8'));
+  const cachePin = '5a3ec84eff668545956fd18022155c47e93e2684';
+  const archivePaths = '${{ steps.identity.outputs.path }}/*.deb\n${{ steps.identity.outputs.path }}/manifest.json\n';
+  const expectedPackages = [
+    { id: 'identity', shell: 'bash', env: { O8_PACKAGE_GROUP: '${{ inputs.group }}' },
+      run: 'node scripts/ci/linux-package-prerequisites.mjs key --group="$O8_PACKAGE_GROUP"' },
+    { uses: `actions/cache/restore@${cachePin}`, id: 'archives', with: {
+      path: archivePaths, key: '${{ steps.identity.outputs.key }}',
+    } },
+    { id: 'install', shell: 'bash', env: { O8_PACKAGE_GROUP: '${{ inputs.group }}',
+      O8_PACKAGE_CACHE: '${{ steps.identity.outputs.path }}' },
+    run: 'node scripts/ci/linux-package-prerequisites.mjs install --group="$O8_PACKAGE_GROUP" --cache="$O8_PACKAGE_CACHE"' },
+    { uses: `actions/cache/save@${cachePin}`,
+      if: "github.ref == 'refs/heads/main' && steps.archives.outputs.cache-hit != 'true' && steps.install.outputs.source == 'download'",
+      with: { path: archivePaths, key: '${{ steps.identity.outputs.key }}' } },
+  ];
+  requireCondition(packageSetup.runs?.using === 'composite'
+    && isDeepStrictEqual(packageSetup.runs.steps, expectedPackages)
+    && isDeepStrictEqual(packageSetup.inputs?.group, { description: 'Package group, rust or resources.', required: true }),
+  'Linux package prerequisite action needs a verify:ci equivalent');
+  const resourceSetup = integration.steps.filter(step => step.uses === packageAction);
+  requireCondition(resourceSetup.length === 1
+    && isDeepStrictEqual(Object.fromEntries(Object.entries(resourceSetup[0]).filter(([key]) => key !== 'name')), {
+      if: "steps.select.outputs.count != '0'", uses: packageAction, with: { group: 'resources' },
+    }), 'Linux package prerequisite selection needs a verify:ci equivalent');
   const selection = integration.steps.find(step => step.id === 'select');
   requireCondition(selection?.run === 'node scripts/ci/resource-owning-changed.mjs "$BASE_REF" "$HEAD_REF"',
     'integration selection needs a verify:ci equivalent');
@@ -236,11 +263,10 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
   const browserSteps = integration.steps.filter(step => step.if === browserCondition
     && step.run === 'npx --no-install playwright-core install --with-deps chromium');
   requireCondition(browserSteps.length === 1, 'CI must declare exactly one metadata-selected browser prerequisite');
-  const prerequisites = 'sudo apt-get update\nsudo apt-get install -y ripgrep openssh-server\nrg --version';
   for (const step of integration.steps.filter(step => step.run)) {
     requireCondition(step.shell === undefined && step['working-directory'] === undefined, 'unsupported integration execution metadata');
     requireCondition(step === selection || browserSteps.includes(step) || (step.if === "steps.select.outputs.count != '0'"
-      && (bootstrapCommands.has(step.run.trim()) || step.run.trim() === prerequisites || step === integrationRun)),
+      && (bootstrapCommands.has(step.run.trim()) || step === integrationRun)),
     'integration step needs a verify:ci equivalent');
   }
   checks.push({ id: 'integration-changed', after: dependencies(integration), name: integration.name, steps: [
@@ -276,5 +302,6 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
   for (const file of new Set([...expectedBrowsers, ...actualBrowsers])) {
     requireCondition(expectedBrowsers.has(file) === actualBrowsers.has(file), `${file}: browser metadata drifted; run npm run test:classify`);
   }
-  return { checks, hostedJobs, nodeMajor, notes: ['Hosted check publication remains on the runner.'] };
+  return { checks, hostedJobs, nodeMajor, notes: ['Hosted check publication remains on the runner.',
+    'Linux package archive caching and privileged system installation remain hosted setup; install the documented resource-test prerequisites locally.'] };
 }

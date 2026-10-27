@@ -102,7 +102,9 @@ describe('required CI gates through workflow commands', () => {
     '.cargo/config.toml', 'rust-toolchain.toml', 'src-tauri/tauri.conf.json',
     'src-tauri/capabilities/fixture.json', 'tauri-plugin-mcp/src/fixture.rs',
     'tests/fixtures/update-ping-native/src/lib.rs', 'scripts/test-update-ping-native.mjs',
-    '.github/workflows/ci.yml', 'scripts/ci/native-changes.mjs'])('compiles when %s changes', (file) => {
+    '.github/workflows/ci.yml', 'scripts/ci/native-changes.mjs',
+    '.github/actions/linux-package-prerequisites/action.yml',
+    'scripts/ci/linux-package-prerequisites.mjs', 'scripts/ci/linux-package-prerequisites.json'])('compiles when %s changes', (file) => {
     const before = git('rev-parse', 'HEAD');
     const head = commit(file);
     expect(select('push', { before, after: head })).toBe('changed=true');

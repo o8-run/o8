@@ -3678,6 +3678,14 @@
       ]
     },
     {
+      "path": "tests/linux-package-prerequisites-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/linux-worker-sandbox-real-path.test.ts",
       "reasons": [
         "child-process",

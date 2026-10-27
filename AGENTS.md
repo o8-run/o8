@@ -33,6 +33,14 @@ Governance Smoke, and Security Audit. Fetch `origin/main` before running. Change
 integration files use CI's merge-base selector, including staged, unstaged and untracked
 classified tests locally, and the same integration configuration and baseline as CI.
 Install `ripgrep` and the system secure-shell tools for resource-owning tests.
+Linux CI restores prerequisite `.deb` archives for Rust and resource tests using
+the package definitions, installer version, architecture and exact runner image
+version. A valid hit installs offline; missing or damaged archives use ordinary
+APT resolution. Only main saves shared caches. This privileged runner setup is
+explicitly hosted in the coverage guard; local verification uses the installed
+system prerequisites. The package-cache proof workflow transfers a short-lived
+archive artifact between fresh runners to measure miss and offline hit behavior
+without allowing a PR to save the shared cache.
 Browser tests declare Chromium through their runtime import, or a first-line
 `// @o8-test-browser` marker for an indirect launcher. Classification generates
 `browser: true`; CI and local verification select the prerequisite from that same
