@@ -552,6 +552,7 @@ jobs:
         if: steps.native.outputs.changed == 'true'
         with:
           cache-key: tests-${{ hashFiles('crates/o8d/Cargo.lock') }}
+          headless-tests: 'true'
       - name: Build the persisted-history fixture daemon
         if: steps.native.outputs.changed == 'true'
         run: cargo build --locked --manifest-path crates/o8d/Cargo.toml --features experimental-http --bin o8d

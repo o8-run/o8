@@ -54,9 +54,13 @@ fixed-rate terminal probes run without sibling native tests and share the local
 Vitest execution queue, retaining their original byte and time bounds. Local queue
 waiting pauses the native job clock, matching CI's independent runners. Native
 build/cache outputs are excluded from lint and type checking; source fixtures remain checked. Install
-the system prerequisites listed in `.github/actions/next-linux-setup/action.yml` and
+the system prerequisites listed in `scripts/ci/install-native-linux-deps.sh` and
 the stable Rust toolchain. Its selector compares against `origin/main` and includes
-committed, staged, unstaged and untracked native inputs. A TS-only change prints SKIP
+committed, staged, unstaged and untracked native inputs. The selector derives fixture
+inputs from native source file references, transitive host imports and discovered
+fixture directories; deleting an input also selects the suite. Headless CI installs
+only missing compile prerequisites, leaving capture tools and drivers to graphical jobs.
+A TS-only change outside that dependency closure prints SKIP
 and runs no native build. Other platforms print HOSTED with the Linux x64 requirement.
 Hosted reporting, other native target builds and weekly integration lanes remain hosted
 checks. The CI coverage guard rejects an unclassified

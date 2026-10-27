@@ -146,6 +146,7 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
     && isDeepStrictEqual(native.steps[0].with, { 'fetch-depth': 0, filter: 'blob:none' })
     && JSON.stringify(native.steps[2].with) === JSON.stringify({
       'cache-key': "tests-${{ hashFiles('crates/o8d/Cargo.lock') }}",
+      'headless-tests': 'true',
     }),
   'native selection or setup needs a verify:ci equivalent');
   const build = 'cargo build --locked --manifest-path crates/o8d/Cargo.toml --features experimental-http --bin o8d';
@@ -174,12 +175,14 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
     { uses: 'Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32', with: {
       workspaces: 'native/o8-next', key: '${{ inputs.cache-key }}', 'save-if': "${{ github.ref == 'refs/heads/main' }}",
     } },
-    { shell: 'bash', run: 'sudo apt-get update -qq\nsudo apt-get install -y --no-install-recommends libfontconfig1-dev libfreetype-dev libxkbcommon-dev libxkbcommon-x11-dev libxcb1-dev libx11-xcb-dev libvulkan-dev mesa-vulkan-drivers xvfb xauth x11-xserver-utils imagemagick fonts-dejavu-core xdotool tesseract-ocr\n' },
+    { shell: 'bash', env: { O8_NATIVE_HEADLESS_TESTS: '${{ inputs.headless-tests }}' },
+      run: 'bash scripts/ci/install-native-linux-deps.sh' },
     { if: "inputs.browser == 'true'", shell: 'bash', run: 'npx --no-install playwright-core install --with-deps chromium' },
   ];
   const execution = setup.runs?.steps?.map(step => Object.fromEntries(Object.entries(step).filter(([key]) => key !== 'name')));
   requireCondition(setup.runs?.using === 'composite' && isDeepStrictEqual(execution, expectedSetup)
-    && setup.inputs?.browser?.default === 'false' && setup.inputs?.['cache-key']?.default === '',
+    && setup.inputs?.browser?.default === 'false' && setup.inputs?.['cache-key']?.default === ''
+    && setup.inputs?.['headless-tests']?.default === 'false',
   'native setup action needs a verify:ci equivalent');
   const shardJob = jobs['test-shards'];
   const shards = shardJob.strategy?.matrix?.shard;

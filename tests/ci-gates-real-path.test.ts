@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
@@ -30,11 +30,11 @@ git('add', '.');
 git('commit', '-qm', 'fixture base');
 const base = git('rev-parse', 'HEAD');
 
-function commit(file: string, remove = false): string {
+function commit(file: string, remove = false, retainContents = false): string {
   const target = path.join(root, file);
   mkdirSync(path.dirname(target), { recursive: true });
   if (remove) rmSync(target);
-  else writeFileSync(target, `${git('rev-parse', 'HEAD')}\n`);
+  else writeFileSync(target, retainContents ? readFileSync(target, 'utf8') + '\n' : `${git('rev-parse', 'HEAD')}\n`);
   git('add', '--', file);
   git('commit', '-qm', 'fixture change');
   return git('rev-parse', 'HEAD');
@@ -201,7 +201,7 @@ describe('required CI gates through workflow commands', () => {
   }, 60_000);
 });
 
-function selectNext(eventName: string, event: object): string {
+function selectNext(eventName: string, event: object, script = nativeScript): string {
   const job = workflow.jobs['o8-next-tests'];
   expect(job, 'native tests must have an automatic CI job').toBeDefined();
   const step = job.steps.find((entry: { id?: string }) => entry.id === 'native');
@@ -209,7 +209,7 @@ function selectNext(eventName: string, event: object): string {
   const outputPath = path.join(root, 'next-output.txt');
   writeFileSync(eventPath, JSON.stringify(event));
   writeFileSync(outputPath, '');
-  const result = spawnSync(step.run.replace('scripts/ci/native-changes.mjs', nativeScript), {
+  const result = spawnSync(step.run.replace('scripts/ci/native-changes.mjs', script), {
     shell: true, cwd: root, encoding: 'utf8',
     env: { ...process.env, GITHUB_EVENT_NAME: eventName, GITHUB_EVENT_PATH: eventPath, GITHUB_OUTPUT: outputPath },
   });
@@ -218,8 +218,84 @@ function selectNext(eventName: string, event: object): string {
 }
 
 describe('native next CI through persisted fixtures', () => {
+  it('discovers new native literals, transitive imports, aliases and dynamic fixture directories without a maintained list', () => {
+    const files = {
+      'native/o8-next/src/dependency_probe.rs': 'const CONTRACT: &str = include_str!("../../../fixtures/native-contract.json"); const HOST: &str = "scripts/next/dependency-probe.mjs"; fn family() { std::fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/native-family").join(format!("{name}.json"))); }',
+      'scripts/next/dependency-probe.mjs': "import '../../fixtures/native-adapter.mjs';",
+      'fixtures/native-contract.json': '{}',
+      'fixtures/native-adapter.mjs': "import '@/lib/native-probe'; import(`./native-records/${name}.json`); const template = 'native-template.md'; readFileSync(join(here, 'prompts', template));",
+      'src/lib/native-probe.ts': "import '../../fixtures/native-bootstrap'; export { value } from '../../fixtures/native-leaf';",
+      'fixtures/native-bootstrap.mjs': 'globalThis.fixtureReady = true;',
+      'fixtures/native-leaf.ts': 'export const value = 1;',
+      'fixtures/native-records/one.json': '{}',
+      'fixtures/native-family/one.json': '{}',
+      'fixtures/prompts/native-template.md': 'fixture template',
+    };
+    for (const [file, contents] of Object.entries(files)) {
+      mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
+      writeFileSync(path.join(root, file), contents);
+    }
+    mkdirSync(path.join(root, 'scripts/ci'), { recursive: true });
+    copyFileSync(nativeScript, path.join(root, 'scripts/ci/native-changes.mjs'));
+    const helper = 'scripts/ci/native-test-inputs.mjs';
+    if (existsSync(path.join(repo, helper))) copyFileSync(path.join(repo, helper), path.join(root, helper));
+    git('add', '.');
+    git('commit', '-qm', 'native dependency fixture');
+    const script = path.join(root, 'scripts/ci/native-changes.mjs');
+    for (const file of Object.keys(files).filter(file => !/^(native|scripts)\//.test(file))) {
+      const before = git('rev-parse', 'HEAD');
+      const after = commit(file, false, true);
+      expect(selectNext('push', { before, after }, script), file).toBe('changed=true');
+      expect(selectNext('pull_request', { pull_request: { base: { sha: before }, head: { sha: after } } }, script), file)
+        .toBe('changed=true');
+      expect(selectNext('merge_group', { merge_group: { base_sha: before, head_sha: after } }, script), file)
+        .toBe('changed=true');
+    }
+    for (const file of ['fixtures/native-contract.json', 'fixtures/native-records/one.json', 'fixtures/native-family/one.json',
+      'fixtures/prompts/native-template.md']) {
+      const before = git('rev-parse', 'HEAD');
+      const after = commit(file, true);
+      expect(selectNext('push', { before, after }, script), `deleted ${file}`).toBe('changed=true');
+    }
+    const before = git('rev-parse', 'HEAD');
+    const after = commit('fixtures/unrelated.ts');
+    expect(selectNext('push', { before, after }, script)).toBe('changed=false');
+  });
+
+  it.each([true, false])('installs only missing native prerequisites, headless=%s', headless => {
+    const setup = parse(readFileSync(path.join(repo, '.github/actions/next-linux-setup/action.yml'), 'utf8'));
+    const step = setup.runs.steps.find((entry: { name?: string }) => entry.name?.startsWith('Install X11'));
+    const bin = path.join(probeRoot, 'setup-bin');
+    mkdirSync(bin, { recursive: true });
+    const receipt = path.join(probeRoot, 'apt-calls.jsonl');
+    for (const [name, body] of Object.entries({
+      sudo: `require('node:fs').appendFileSync(${JSON.stringify(receipt)}, JSON.stringify(process.argv.slice(2)) + '\\n');`,
+      'dpkg-query': "if (process.env.FIXTURE_PACKAGES_INSTALLED === 'true') console.log('install ok installed'); else process.exit(1);",
+    })) {
+      const file = path.join(bin, name);
+      writeFileSync(file, `#!${process.execPath}\n${body}\n`);
+      chmodSync(file, 0o700);
+    }
+    const run = (installed: boolean) => {
+      writeFileSync(receipt, '');
+      const result = spawnSync('bash', ['-e', '-o', 'pipefail', '-c', step.run], { cwd: repo, encoding: 'utf8',
+        env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, O8_NATIVE_HEADLESS_TESTS: String(headless),
+          FIXTURE_PACKAGES_INSTALLED: String(installed) } });
+      expect(result.status, result.stderr).toBe(0);
+      return readFileSync(receipt, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line) as string[]);
+    };
+    expect(run(true), 'installed runner packages must not be upgraded or fetched again').toEqual([]);
+    const missing = run(false);
+    expect(missing).toHaveLength(2);
+    expect(missing[1]).toContain('libfontconfig1-dev');
+    for (const graphical of ['mesa-vulkan-drivers', 'xvfb', 'tesseract-ocr']) {
+      expect(missing[1].includes(graphical)).toBe(!headless);
+    }
+  });
+
   it.each(['native/o8-next/src/main.rs', 'native/o8-next/README.md',
     'native/o8-next/fixtures/state.json', 'scripts/next/dev-server.ts',
+    'scripts/parity/surfaces.json', 'tests/helpers/chatgpt-plan-fixture.ts',
     'crates/o8d/src/main.rs', 'package-lock.json', '.cargo/config.toml', 'rust-toolchain.toml', '.github/workflows/ci.yml',
     'scripts/ci/native-changes.mjs', 'scripts/ci/native-test-shard.mjs'])('selects native tests for %s', file => {
     const before = git('rev-parse', 'HEAD');

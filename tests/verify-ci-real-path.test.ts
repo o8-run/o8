@@ -92,7 +92,8 @@ function executeFixture(selectedFile: string, nestedDependency = false,
   const directory = mkdtempSync(path.join(root, 'verifier-fixture-'));
   const files = ['scripts/verify-ci.mjs', 'scripts/lib/verify-ci.mjs', 'scripts/ci/check-verify-ci.mjs',
     'scripts/ci/resource-owning-changed.mjs', 'scripts/ci/review-dependency-changes.mjs', 'scripts/ci/native-changes.mjs',
-    '.github/workflows/ci.yml', '.github/actions/next-linux-setup/action.yml', 'scripts/ci/native-test-shard.mjs'];
+    '.github/workflows/ci.yml', '.github/actions/next-linux-setup/action.yml', 'scripts/ci/native-test-shard.mjs',
+    'scripts/ci/native-test-inputs.mjs', 'scripts/ci/install-native-linux-deps.sh'];
   for (const file of files) {
     mkdirSync(path.dirname(path.join(directory, file)), { recursive: true });
     copyFileSync(path.join(repo, file), path.join(directory, file));
@@ -125,6 +126,9 @@ function executeFixture(selectedFile: string, nestedDependency = false,
   writeFileSync(path.join(directory, browserFile), 'base\n');
   writeFileSync(path.join(directory, 'tests/test-classification.json'), JSON.stringify({ resourceOwning: [{ path: browserFile }] }));
   writeFileSync(path.join(directory, 'package.json'), JSON.stringify(manifest));
+  mkdirSync(path.join(directory, 'native/o8-next/src'), { recursive: true });
+  writeFileSync(path.join(directory, 'native/o8-next/src/input_fixture.rs'),
+    'const MANIFEST: &str = include_str!("../../../scripts/parity/surfaces.json"); const HELPER: &str = "tests/helpers/chatgpt-plan-fixture.ts";');
   const git = (...args: string[]) => {
     const result = spawnSync('git', args, { cwd: directory, encoding: 'utf8' });
     expect(result.status, result.stderr).toBe(0);
@@ -132,7 +136,7 @@ function executeFixture(selectedFile: string, nestedDependency = false,
   git('init', '-q', '-b', 'main');
   git('config', 'user.name', 'CI Fixture');
   git('config', 'user.email', 'fixture@example.invalid');
-  git('add', 'scripts', '.github', 'tests', 'package.json');
+  git('add', 'scripts', '.github', 'tests', 'native', 'package.json');
   if (nativeChange && nativeState !== 'untracked') {
     mkdirSync(path.dirname(path.join(directory, nativeChange)), { recursive: true });
     writeFileSync(path.join(directory, nativeChange), 'base native fixture\n');
@@ -261,11 +265,13 @@ describe('local CI verification through its command entry point', () => {
     }, 60_000,
   );
 
-  nativeIt.each(['committed', 'staged', 'unstaged', 'untracked'])('selects a %s native change against origin/main', nativeState => {
-    const result = executeFixture('tests/fixture.test.ts', false, { nativeChange: 'native/o8-next/src/main.rs', nativeState });
-    expect(result.status, result.stderr + result.stdout).toBe(0);
-    expect(result.calls.filter(call => call.tool === 'cargo')).toHaveLength(12);
-  }, 60_000);
+  nativeIt.each(['native/o8-next/src/main.rs', 'scripts/parity/surfaces.json', 'tests/helpers/chatgpt-plan-fixture.ts']
+    .flatMap(nativeChange => ['committed', 'staged', 'unstaged', 'untracked'].map(nativeState => ({ nativeChange, nativeState }))))(
+    'selects $nativeState input $nativeChange against origin/main', ({ nativeChange, nativeState }) => {
+      const result = executeFixture('tests/fixture.test.ts', false, { nativeChange, nativeState });
+      expect(result.status, result.stderr + result.stdout).toBe(0);
+      expect(result.calls.filter(call => call.tool === 'cargo')).toHaveLength(12);
+    }, 60_000);
 
   nativeIt('runs native and hermetic work concurrently while retaining the required aggregate', () => {
     const result = executeFixture('tests/fixture.test.ts', false, { nativeChange: 'native/o8-next/src/main.rs', parallel: true });

@@ -1976,6 +1976,7 @@
       "path": "tests/ci-gates-real-path.test.ts",
       "reasons": [
         "child-process",
+        "executable-fixture",
         "git-cli",
         "native-build",
         "real-path"

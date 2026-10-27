@@ -3,6 +3,8 @@
 // reports a successful check. Dispatch and unavailable history compile fully.
 import { spawnSync } from 'node:child_process';
 import { appendFileSync, readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { nativeTestInputs } from './native-test-inputs.mjs';
 
 function git(args) {
   const result = spawnSync('git', args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
@@ -42,8 +44,11 @@ function changedNativeInputs() {
 function isNative(changedPaths) {
   const paths = changedPaths.split('\0');
   if (process.argv.includes('--o8-next')) {
+    const inputs = nativeTestInputs(fileURLToPath(new URL('../../', import.meta.url)));
     return paths.some(file =>
-      /^(\.cargo\/|rust-toolchain(?:\.toml)?$|Cargo\.(?:toml|lock)$)/.test(file)
+      inputs.has(file)
+      || ['scripts/ci/native-test-inputs.mjs', 'scripts/ci/install-native-linux-deps.sh', 'tsconfig.json'].includes(file)
+      || /^(\.cargo\/|rust-toolchain(?:\.toml)?$|Cargo\.(?:toml|lock)$)/.test(file)
       || /^(native\/o8-next|scripts\/next|crates\/o8d|\.github\/actions\/next-linux-setup)\//.test(file)
       || ['package.json', 'package-lock.json', '.github/workflows/ci.yml',
         '.github/workflows/next-linux.yml', 'scripts/ci/native-changes.mjs', 'scripts/ci/native-test-shard.mjs',
