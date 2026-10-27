@@ -5,7 +5,7 @@ import { withOwnedActionGuard } from '@/lib/runtimes/shared/owned-session/action
 
 export const POST_WORKTREE_LAUNCH_MS = 30_000;
 type Launch = { laneId?: string; packetId?: string };
-interface Deadline { started: number; step: string; expired: boolean; effectStarted: boolean; effectCreated: boolean }
+interface Deadline { started: number; step: string; expired: boolean; effectStarted: boolean; effectCreated: boolean; cancelRead?: (error: unknown) => void }
 const deadline = new AsyncLocalStorage<Deadline>();
 
 export class RuntimeLaunchTimeoutError extends Error {
@@ -31,7 +31,15 @@ export async function withRuntimeLaunchDeadline<T>(input: Launch & { runtime: st
     let timer: ReturnType<typeof setInterval> | undefined;
     try {
       const expired = new Promise<never>((_, reject) => {
-        timer = setInterval(() => { try { check(context); } catch (error) { reject(error); } }, 25);
+        timer = setInterval(() => {
+          try { check(context); } catch (error) {
+            clearInterval(timer);
+            // A read can abandon its result safely. Let its owning stack retire
+            // the unstarted session and release leases before returning failure.
+            if (context.cancelRead && !context.effectStarted) context.cancelRead(error);
+            else reject(error);
+          }
+        }, 25);
       });
       return await Promise.race([operation(), expired]);
     } catch (error) {
@@ -75,3 +83,14 @@ export async function runtimeLaunchStep<T>(launch: Launch, step: string, operati
 export function hasRuntimeLaunchDeadline(): boolean { return deadline.getStore() !== undefined; }
 
 export function assertRuntimeSpawnDeadline(): void { const context = deadline.getStore(); if (context) check(context); }
+
+/** Only for preparation reads whose late result cannot create or mutate a run. */
+export async function runtimeLaunchRead<T>(operation: () => Promise<T>): Promise<T> {
+  const context = deadline.getStore();
+  if (!context || context.effectStarted) return operation();
+  check(context);
+  const parent = context.cancelRead;
+  const cancelled = new Promise<never>((_, reject) => { context.cancelRead = reject; });
+  try { return await Promise.race([operation(), cancelled]); }
+  finally { context.cancelRead = parent; }
+}

@@ -1,4 +1,5 @@
-import { runtimeLaunchStep } from '@/lib/runtime/launch-deadline';
+import { RuntimeLaunchTimeoutError, runtimeLaunchStep } from '@/lib/runtime/launch-deadline';
+import { retireUnstartedSession } from './retire-unstarted';
 import { providerFromConfig } from './controlled-provider';
 import { assertOwnedActionFence } from './action-fence';
 import { assertRuntimeEffortPin } from '@/lib/orchestrator/effort-pin';
@@ -274,6 +275,9 @@ export function createOwnedSessionStore(
       await runtimeLaunchStep(request, 'session_persistence', () => io.saveSession(session));
       run = await runtimeLaunchStep(request, 'workspace_spawn_admission', () => runController.spawnOwnedRun(session, prompt, 'launch'));
     } catch (error) {
+      if (error instanceof RuntimeLaunchTimeoutError && !error.effectStarted) {
+        await retireUnstartedSession(runtimeId, root, sessionDir, session, io, true);
+      }
       if (error instanceof OwnedWorkspaceUnavailableError || error instanceof OwnedArtifactAdmissionError || error instanceof OwnedProcessIdentityError) {
         return {
           ok: false, runtime: runtimeId, surfaceId: session.surfaceId,

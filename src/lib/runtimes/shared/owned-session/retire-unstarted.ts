@@ -25,17 +25,18 @@ async function processClear(run: OwnedRunRecord, surfaceId: string): Promise<boo
   return absent(run.pid) && absent(-run.processGroupId) && await probeOwnedRunMarker(run.processMarker) === 'clear';
 }
 
-function candidate(session: OwnedSessionRecord): boolean {
+function candidate(session: OwnedSessionRecord, timedOutBeforeSpawn: boolean): boolean {
   const ledger = session.runIdentityLedger;
   const age = Date.now() - Date.parse(session.createdAt);
-  return !session.threadId && !session.activeRun && !session.detachedAt && Number.isFinite(age) && age >= POST_WORKTREE_LAUNCH_MS
+  return !session.threadId && !session.activeRun && !session.detachedAt && Number.isFinite(age)
+    && (timedOutBeforeSpawn ? session.recentRuns.length === 0 : age >= POST_WORKTREE_LAUNCH_MS)
     && ledger?.version === 1 && ledger.complete === true && Number.isSafeInteger(ledger.totalRuns)
     && ledger.totalRuns === session.recentRuns.length;
 }
 
 /** Exact directory and fresh absence proof share the existing cross-process spawn lock. */
-export async function retireUnstartedSession(runtime: string, root: string, sessionDir: string, observed: OwnedSessionRecord, io: OwnedSessionIo): Promise<boolean> {
-  if (runtime !== 'antigravity' || !candidate(observed)) return false;
+export async function retireUnstartedSession(runtime: string, root: string, sessionDir: string, observed: OwnedSessionRecord, io: OwnedSessionIo, timedOutBeforeSpawn = false): Promise<boolean> {
+  if ((!timedOutBeforeSpawn && runtime !== 'antigravity') || !candidate(observed, timedOutBeforeSpawn)) return false;
   return withOwnedArtifactRootLock(root, async () => {
     const canonicalRoot = await realpath(root);
     const directory = await lstat(sessionDir);
@@ -43,9 +44,9 @@ export async function retireUnstartedSession(runtime: string, root: string, sess
     if (!directory.isDirectory() || directory.isSymbolicLink() || await realpath(sessionDir) !== path.join(canonicalRoot, name)) return false;
     const session = await io.loadSession(sessionDir);
     if (session.surfaceId !== `${runtime}-owned:${name}` || path.resolve(session.sessionDir) !== path.resolve(sessionDir)
-      || !candidate(session)) return false;
+      || !candidate(session, timedOutBeforeSpawn)) return false;
     const started = Date.parse(session.createdAt);
-    if (!Number.isFinite(started) || Date.now() - started < POST_WORKTREE_LAUNCH_MS) return false;
+    if (!Number.isFinite(started) || (!timedOutBeforeSpawn && Date.now() - started < POST_WORKTREE_LAUNCH_MS)) return false;
     for (const run of session.recentRuns) if (!await processClear(run, session.surfaceId)) return false;
     const current = await lstat(sessionDir);
     if (current.dev !== directory.dev || current.ino !== directory.ino || current.isSymbolicLink()) return false;

@@ -1,4 +1,4 @@
-import { hasRuntimeLaunchDeadline, runtimeLaunchStep } from '@/lib/runtime/launch-deadline';
+import { hasRuntimeLaunchDeadline, runtimeLaunchRead, runtimeLaunchStep } from '@/lib/runtime/launch-deadline';
 import { createWorkerFailureHandler } from './worker-failure';
 import { assertRuntimeEffortPin } from '@/lib/orchestrator/effort-pin';
 import { assertOwnedActionFence, hasOwnedActionFence } from './action-fence';
@@ -413,12 +413,12 @@ export function createOwnedRunController({
 
     let binary: string;
     try {
-      binary = (await runtimeLaunchStep(session, 'binary_resolution', () => resolveCli({
+      binary = (await runtimeLaunchStep(session, 'binary_resolution', () => runtimeLaunchRead(() => resolveCli({
         runtimeId,
         binaryName: adapter.binaryName,
         envOverride: adapter.binaryEnvOverride,
         extraEnvOverrides: adapter.binaryExtraEnvOverrides,
-      }))).path;
+      })))).path;
     } catch (error) {
       if (!(error instanceof CliNotFoundError)) {
         if (hasRuntimeLaunchDeadline() || session.executionPolicy !== undefined) throw error;

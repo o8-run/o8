@@ -1,4 +1,5 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { expect, it, vi } from 'vitest';
 import type { OrchestratorMissionState, OrchestratorPacket } from '@/lib/orchestrator/types';
 
@@ -63,7 +64,7 @@ export function declarativeLaunchDeadlineTest(fixture: {
     const lane = registry.findLatestLaneByPacket(id)!;
     await vi.waitFor(() => expect(registry.getLaneEvents(lane.id, 100).some(event => event.verb === 'runtime_process_exit')).toBe(true));
   }, 60_000);
-  it('bounds a post-worktree CLI-resolution stall and fences its late spawn', async () => {
+  it.each([1, 2])('retires a suspended CLI-resolution launch and releases admission before its resolver settles (%s)', async attempt => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })));
     const repo = fixture.repo();
     await import('@/lib/repos/registry').then(({ addRepo }) => addRepo(repo));
@@ -75,14 +76,15 @@ export function declarativeLaunchDeadlineTest(fixture: {
     const gate = new Promise<void>(resolve => { release = resolve; });
     let completed!: () => void;
     const resolved = new Promise<void>(resolve => { completed = resolve; });
+    let suspended = false;
     const spy = vi.spyOn(resolver, 'resolveCli').mockImplementation(async options => {
-      if (options.runtimeId === 'qoder') { entered(); await gate; }
+      if (options.runtimeId === 'qoder' && !suspended) { suspended = true; entered(); await gate; }
       try { return await original(options); } finally { completed(); }
     });
     const [{ runDispatchTick }, registry] = await Promise.all([
       import('@/lib/orchestrator/scheduling'), import('@/lib/lane/registry'),
     ]);
-    const id = 'pkt-post-worktree-stall';
+    const id = `pkt-post-worktree-stall-${attempt}`;
     const capture = () => existsSync(fixture.capturePath) ? readFileSync(fixture.capturePath, 'utf8') : '';
     const before = capture();
     const pending = runDispatchTick(await fixture.mission(repo, fixture.packet(repo, id)), { launchBudget: { maxLaunches: 1 } });
@@ -90,12 +92,36 @@ export function declarativeLaunchDeadlineTest(fixture: {
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       await held;
+      const { getSqlite } = await import('@/lib/db');
+      const root = process.env.O8_OWNED_QODER_ROOT!;
+      const sessionDir = readdirSync(root).map(name => join(root, name)).find(directory => {
+        const file = join(directory, 'session.json');
+        return existsSync(file) && JSON.parse(readFileSync(file, 'utf8')).packetId === id;
+      })!;
+      const initial = JSON.parse(readFileSync(join(sessionDir, 'session.json'), 'utf8'));
+      expect(initial.recentRuns).toEqual([]);
+      expect(initial.activeRun).toBeUndefined();
+      const leases = () => getSqlite().prepare("SELECT packet_id FROM workspace_lifecycle_leases WHERE packet_id LIKE 'owned-artifacts:%' OR packet_id LIKE 'owned-cli-artifacts:%'").all();
+      expect(leases()).toHaveLength(2);
       const now = performance.now();
       clock = vi.spyOn(performance, 'now').mockReturnValue(now + 31_000);
       const result = await Promise.race([pending, new Promise<never>((_, reject) => {
         timer = setTimeout(() => reject(new Error('Post-worktree launch remained silent after its deadline.')), 1_000);
       })]);
       expect(result.packets[0].blockedReason).toContain('runtime_launch_timeout');
+      expect.soft(leases(), 'The expired zero-run launch must release both artifact leases.').toEqual([]);
+      expect.soft(existsSync(sessionDir), 'The expired zero-run session must leave active discovery.').toBe(false);
+      const archiveFile = join(`${root}-archive`, sessionDir.slice(root.length + 1), 'session.json');
+      expect.soft(existsSync(archiveFile), 'Retirement must preserve an archived receipt.').toBe(true);
+      if (existsSync(archiveFile)) {
+        expect(JSON.parse(readFileSync(archiveFile, 'utf8'))).toMatchObject({
+          orphanedReason: expect.stringMatching(/no persistent thread or active process after the launch deadline/),
+          recentRuns: [], runIdentityLedger: { version: 1, complete: true, totalRuns: 0 },
+        });
+      }
+      expect(capture()).toBe(before);
+      const { withOwnedArtifactAdmission } = await import('@/lib/runtimes/shared/owned-session/artifact-admission');
+      await expect(withOwnedArtifactAdmission(root, async () => 'admitted')).resolves.toBe('admitted');
       const lane = registry.findLatestLaneByPacket(id)!;
       expect(lane.status).not.toBe('launching');
       expect(registry.getLaneEvents(lane.id, 100)).toEqual(expect.arrayContaining([
