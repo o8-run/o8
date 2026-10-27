@@ -7194,6 +7194,18 @@
       ]
     },
     {
+      "path": "tests/workspace-cleanup-plan-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "network-listener",
+        "process-signal",
+        "real-path",
+        "worktree-api"
+      ]
+    },
+    {
       "path": "tests/workspace-dependency-recipe-route-real-path.test.ts",
       "reasons": [
         "child-process",
