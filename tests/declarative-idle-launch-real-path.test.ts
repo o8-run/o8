@@ -147,7 +147,12 @@ it('refuses a symlinked sessions-archive through inventory without changing anyt
   symlinkSync(outside, archive, 'dir');
   const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
   try {
-    await snapshot();
+    // Fresh inventory can return while another owned discovery is settling.
+    // Observe this exact refusal before checking the external canary.
+    await vi.waitFor(async () => {
+      await snapshot();
+      expect(warning.mock.calls.flat().join(' ')).toMatch(/sessions-archive.*symbolic link/i);
+    });
     expect.soft(outsideSnapshot(outside)).toEqual(before);
     expect.soft(existsSync(sessionDir)).toBe(true);
     if (existsSync(sessionDir)) expect.soft(readFileSync(join(sessionDir, 'session.json'), 'utf8')).toBe(metadata);
