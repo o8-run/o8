@@ -87,3 +87,38 @@ Full TypeScript, fast typecheck, test classification, touched-file lint, rule
 checks and the full hermetic suite are completion gates. No tag, signing,
 notarization, release publication, promotion or installed-app acceptance is
 performed by this matrix. #4813 remains a draft.
+
+## Install handoff regression
+
+Round 1 baseline: `999203913`. Before production changes, the deterministic
+native fixture recorded:
+
+```text
+update_ping_channel_change_cancels_pending_install_after_epoch_guard ... FAILED
+update_ping_channel_change_invalidates_in_flight_download ... FAILED
+update_ping_install_start_serializes_channel_changes_without_blocking_callbacks ... FAILED
+test result: FAILED. 10 passed; 3 failed; 24 filtered out
+```
+
+Both manual IPC and automatic candidate installation called the platform stub
+once after Stable had been saved; the automatic path also left an install
+marker. The manual download returned an installable resource after the switch.
+
+After the fix:
+
+```text
+update_ping_channel_change_cancels_pending_install_after_epoch_guard ... ok
+update_ping_channel_change_invalidates_in_flight_download ... ok
+update_ping_install_start_serializes_channel_changes_without_blocking_callbacks ... ok
+update_ping_installer_refusal_does_not_poison_channel_gate ... ok
+test result: ok. 13 passed; 0 failed; 24 filtered out
+```
+
+Channel saves and synchronous installation now share a gate. A successful save
+invalidates older candidates before installation and before an automatic journal
+marker is created. If installation has already claimed the gate, a channel save
+returns a retry error without changing persisted enrollment or its generation.
+The clock mutex is separate so installer callbacks can read it. Expected restart
+refusals are caught before releasing the gate, allowing subsequent channel saves.
+The fixture's source-copy instrumentation and stub scope are documented in
+[the native fixture](../../tests/fixtures/update-ping-native/README.md).

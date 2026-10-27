@@ -69,3 +69,9 @@ checks and uses the usual version comparison, so a newer installed beta waits
 for a newer stable release. See [release channels](release-channels.md) for the
 independent beta mirror anchor, shared publication lock and Linux completion
 rules. Promotion remains outside this recovery path (#4857).
+
+A channel change also invalidates downloads and pending installs from the old
+enrollment. The native install handoff rechecks that generation while holding
+the same gate used to save channel preferences. Once an installer has started,
+a channel save reports that it must be retried after installation finishes;
+it does not claim to have changed enrollment during replacement.

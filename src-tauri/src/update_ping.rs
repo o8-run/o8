@@ -16,7 +16,12 @@ const FALLBACK_TIMEOUT: Duration = Duration::from_secs(15);
 struct UpdateIdentity(String);
 
 struct UpdateSettingsPath(std::path::PathBuf);
-struct UpdateCheckClock(Mutex<UpdateCheckClockState>);
+struct UpdateCheckClock {
+    state: Mutex<UpdateCheckClockState>,
+    // Saving enrollment and starting an installer are one serialized handoff.
+    // Separate from state: the updater's exit hook reads the epoch itself.
+    installation: Mutex<()>,
+}
 struct UpdateCheckClockState {
     session: String,
     sequence: u64,
@@ -34,18 +39,21 @@ pub struct UpdateCheckTicket {
 
 fn clock<R: Runtime>(app: &AppHandle<R>) -> tauri::State<'_, UpdateCheckClock> {
     if app.try_state::<UpdateCheckClock>().is_none() {
-        app.manage(UpdateCheckClock(Mutex::new(UpdateCheckClockState {
-            session: Uuid::new_v4().to_string(),
-            sequence: 0,
-            generation: 0,
-        })));
+        app.manage(UpdateCheckClock {
+            state: Mutex::new(UpdateCheckClockState {
+                session: Uuid::new_v4().to_string(),
+                sequence: 0,
+                generation: 0,
+            }),
+            installation: Mutex::new(()),
+        });
     }
     app.state::<UpdateCheckClock>()
 }
 fn epoch<R: Runtime>(app: &AppHandle<R>) -> u64 {
-    clock(app).0.lock().unwrap().generation
+    clock(app).state.lock().unwrap().generation
 }
-fn ensure_epoch<R: Runtime>(app: &AppHandle<R>, expected: u64) -> Result<(), String> {
+pub(crate) fn ensure_epoch<R: Runtime>(app: &AppHandle<R>, expected: u64) -> Result<(), String> {
     if epoch(app) != expected {
         return Err("Update channel changed; check again.".into());
     }
@@ -55,7 +63,7 @@ fn ensure_epoch<R: Runtime>(app: &AppHandle<R>, expected: u64) -> Result<(), Str
 #[tauri::command]
 pub fn begin_update_check<R: Runtime>(app: AppHandle<R>) -> UpdateCheckTicket {
     let clock = clock(&app);
-    let mut state = clock.0.lock().unwrap();
+    let mut state = clock.state.lock().unwrap();
     state.sequence += 1;
     UpdateCheckTicket {
         check_sequence: state.sequence,
@@ -68,7 +76,7 @@ pub fn begin_update_check<R: Runtime>(app: AppHandle<R>) -> UpdateCheckTicket {
 #[tauri::command]
 pub fn read_update_check_ticket<R: Runtime>(app: AppHandle<R>) -> Option<UpdateCheckTicket> {
     let clock = clock(&app);
-    let state = clock.0.lock().unwrap();
+    let state = clock.state.lock().unwrap();
     (state.sequence > 0).then(|| UpdateCheckTicket {
         check_sequence: state.sequence,
         check_session: state.session.clone(),
@@ -79,7 +87,7 @@ pub fn read_update_check_ticket<R: Runtime>(app: AppHandle<R>) -> Option<UpdateC
 
 pub(crate) fn is_current_check<R: Runtime>(app: &AppHandle<R>, ticket: &UpdateCheckTicket) -> bool {
     let clock = clock(app);
-    let state = clock.0.lock().unwrap();
+    let state = clock.state.lock().unwrap();
     state.session == ticket.check_session
         && state.sequence == ticket.check_sequence
         && state.generation == ticket.generation
@@ -92,7 +100,7 @@ pub(crate) fn with_current_check<R: Runtime, T>(
     action: impl FnOnce() -> T,
 ) -> Option<T> {
     let clock = clock(app);
-    let state = clock.0.lock().unwrap();
+    let state = clock.state.lock().unwrap();
     if state.session != ticket.check_session
         || state.sequence != ticket.check_sequence
         || state.generation != ticket.generation
@@ -159,7 +167,10 @@ pub fn set_update_channel<R: Runtime>(
         return Err("Unknown update channel.".into());
     }
     let clock = clock(&app);
-    let mut state = clock.0.lock().unwrap();
+    let _installation = clock.installation.try_lock().map_err(|_| {
+        "Update installation has started; retry changing channels after it finishes."
+    })?;
+    let mut state = clock.state.lock().unwrap();
     let path = app.state::<UpdateSettingsPath>();
     let store = app
         .store_builder(&path.0)
@@ -192,6 +203,29 @@ pub(crate) fn ensure_update_channel<R: Runtime>(
     }
     Ok(())
 }
+/// Capture even a directly constructed candidate before network or admission work.
+pub(crate) fn update_generation<R: Runtime>(app: &AppHandle<R>, update: &Update) -> u64 {
+    update.raw_json["_o8Epoch"]
+        .as_u64()
+        .unwrap_or_else(|| epoch(app))
+}
+
+/// No await and no clock guard may span the installer. The installation guard
+/// excludes a successful channel save until this synchronous effect has finished.
+pub(crate) fn install_in_channel<R: Runtime, T>(
+    app: &AppHandle<R>,
+    generation: u64,
+    operation: impl FnOnce() -> Result<T, String>,
+) -> Result<T, String> {
+    let clock = clock(app);
+    let _installation = clock
+        .installation
+        .try_lock()
+        .map_err(|_| "Update installation is already in progress.")?;
+    ensure_epoch(app, generation)?;
+    operation()
+}
+
 pub(crate) struct RestartRefused(pub String);
 
 pub fn initialize<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
@@ -557,6 +591,7 @@ pub async fn download_app_update<R: Runtime>(
         },
     )
     .await?;
+    ensure_epoch(webview.app_handle(), checked.generation)?;
     Ok(webview
         .resources_table()
         .add(DownloadedUpdate { checked, bytes }))
@@ -596,14 +631,16 @@ pub async fn install_app_update<R: Runtime>(
         .store(force == Some(true), Ordering::Release);
     // Never let the plugin's infallible Windows hook strand an IPC promise on
     // refusal. Other platforms keep their normal stage-then-restart behavior.
-    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        downloaded.checked.update.install(&downloaded.bytes)
-    }))
-    .map_err(|error| {
-        error
-            .downcast_ref::<RestartRefused>()
-            .map(|error| error.0.clone())
-            .unwrap_or_else(|| "Native installer stopped before restart.".into())
-    })?
-    .map_err(|error| error.to_string())
+    install_in_channel(webview.app_handle(), downloaded.checked.generation, || {
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            downloaded.checked.update.install(&downloaded.bytes)
+        }))
+        .map_err(|error| {
+            error
+                .downcast_ref::<RestartRefused>()
+                .map(|error| error.0.clone())
+                .unwrap_or_else(|| "Native installer stopped before restart.".into())
+        })?
+        .map_err(|error| error.to_string())
+    })
 }

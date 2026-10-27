@@ -1,10 +1,9 @@
 // Compile the production command without starting the desktop app or sidecars.
-#[path = "../../../../src-tauri/src/launch_updater.rs"]
-mod launch_updater;
+include!(concat!(env!("OUT_DIR"), "/native_modules.rs"));
+mod install_race_edge;
 #[path = "../../../../src-tauri/src/restart_job_drain.rs"]
 mod restart_job_drain;
-#[path = "../../../../src-tauri/src/update_ping.rs"]
-mod update_ping;
+
 fn resolve_ws_token() -> String {
     "scheduler-fixture".into()
 }
@@ -12,6 +11,7 @@ fn resolve_ws_token() -> String {
 #[cfg(test)]
 mod tests {
     mod auto_apply_failure_tests;
+    mod update_ping_install_race_tests;
     #[path = "channel_boundary_tests.rs"]
     mod update_ping_channel_boundary_tests;
     mod download_timeout_tests;
