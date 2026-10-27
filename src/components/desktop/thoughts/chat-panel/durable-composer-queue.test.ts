@@ -95,6 +95,33 @@ async function enter(metaKey = false) {
 }
 
 describe('durable Send next through the normal composer', () => {
+  it('keeps a fresh idle send on the direct send path without inventing a pending retry', async () => {
+    await render('thoughts-one', 'original-model', 'solo', false, 'codex', false);
+    await enter();
+    expect(posts).toEqual([]);
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+  it('refuses a fresh image on an unsupported backend without inventing a pending retry', async () => {
+    await render('thoughts-one', 'original-model', 'solo', false, 'pi');
+    await enter();
+    expect(posts).toEqual([]);
+    expect(send).not.toHaveBeenCalled();
+    expect(host.querySelector('textarea')!.value).toBe('Queue this message');
+    expect(host.textContent).toContain('proof.png');
+    expect(host.querySelector('[role="alert"]')?.textContent).toContain('cannot receive images');
+  });
+  it('surfaces an unavailable recovery read without posting or losing its draft', async () => {
+    await render();
+    const read = vi.spyOn(window, 'localStorage', 'get').mockImplementation(() => { throw new DOMException('Blocked', 'SecurityError'); });
+    try {
+      await enter();
+      expect(posts).toEqual([]);
+      expect(send).not.toHaveBeenCalled();
+      expect(host.querySelector('textarea')!.value).toBe('Queue this message');
+      expect(host.textContent).toContain('proof.png');
+      expect(host.querySelector('[role="alert"]')?.textContent).toContain('Browser storage is unavailable');
+    } finally { read.mockRestore(); }
+  });
   it('keeps the original destination, attachment and routing across navigation/reload and removes a cancelled item durably', async () => {
     writeComposerServiceTier('codex', 'original-model', 'priority');
     await render(); await enter();
@@ -298,7 +325,28 @@ describe('durable Send next through the normal composer', () => {
       expect(posts).toHaveLength(0);
       expect(host.querySelector('textarea')!.value).toBe('Queue this message');
       expect(host.textContent).toContain('proof.png');
-      expect(host.querySelector('[role="alert"]')?.textContent).toContain('recovery could not be saved');
+      expect(host.querySelector('[role="alert"]')?.textContent).toContain('Message was not queued');
+    } finally { write.mockRestore(); }
+  });
+
+  it.each([
+    [new DOMException('Full', 'QuotaExceededError'), 'Browser storage is full'],
+    [new DOMException('Blocked', 'SecurityError'), 'Browser storage is unavailable'],
+    [new Error('Unknown write failure'), 'The draft could not be saved'],
+  ])('reports the actual preparation failure without claiming queue acceptance: %s', async (failure, advice) => {
+    await render();
+    const write = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw failure; });
+    try {
+      await enter();
+      expect(posts).toEqual([]);
+      expect(rows).toEqual([]);
+      expect(host.querySelector('textarea')!.value).toBe('Queue this message');
+      expect(host.textContent).toContain('proof.png');
+      const error = host.querySelector('[role="alert"]')?.textContent;
+      expect(error).toContain('Message was not queued');
+      expect(error).toContain(advice);
+      expect(error).not.toContain('Send next recovery');
+      if (!(failure instanceof DOMException && failure.name === 'QuotaExceededError')) expect(error).not.toContain('Free browser storage');
     } finally { write.mockRestore(); }
   });
 
