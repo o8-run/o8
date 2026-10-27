@@ -90,7 +90,7 @@ export async function runQueuedComposerSend(item: QueuedComposerSendRecord, hook
       .catch(error => console.warn('[composer-queue] Lead status bridge failed:', error));
     return;
   }
-  await runBoundChatContinuation({ repoPath, origin: originFor(item), message: item.payload.wireMessage,
+  await runBoundChatContinuation({ repoPath, source: 'user', origin: originFor(item), message: item.payload.wireMessage,
     displayMessage: item.payload.text, images: item.payload.images, assistantMessageId: `assistant-queued-${item.id}`,
     serviceTier: item.payload.routing.serviceTier,
     collideBaseBackend: originFor(item).backend === 'collide' ? item.payload.routing.backend : undefined,

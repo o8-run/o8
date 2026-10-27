@@ -10,6 +10,27 @@ if (mode === 'reject') {
   console.log('complete');
   process.exit(0);
 }
+if (mode === 'stop-tree') {
+  const { spawn } = require('node:child_process');
+  const child = spawn(process.execPath, ['-e', "process.send('ready'); setInterval(() => {}, 1000);"], {
+    detached: true, stdio: ['ignore', 'ignore', 'ignore', 'ipc'], env: process.env,
+  });
+  child.once('message', () => fs.writeFileSync(file('descendant.json'), JSON.stringify({ pid: child.pid })));
+  let stopping = false;
+  for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => {
+    if (stopping) return;
+    stopping = true;
+    fs.writeFileSync(file('stop-requested'), signal);
+    const timer = setInterval(() => {
+      if (!fs.existsSync(file('release-stop'))) return;
+      clearInterval(timer);
+      child.once('exit', () => { fs.writeFileSync(file('tree-stopped'), 'stopped'); process.exit(0); });
+      child.kill('SIGTERM');
+    }, 20);
+  });
+  process.stdin.resume();
+  return;
+}
 const chunks = [];
 let bytes = 0;
 let first = true;
