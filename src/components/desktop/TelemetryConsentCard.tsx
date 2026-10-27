@@ -405,7 +405,7 @@ export function TelemetryConsentCard({
                 Usage analytics
               </h2>
               <span style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace', fontSize: 10, color: 'var(--t-text-faint)' }}>
-                (six events)
+                ({PRODUCT_EVENT_DISCLOSURES.length} events)
               </span>
             </div>
             <p style={{ marginTop: 0, marginBottom: 12, fontSize: 12.5, fontWeight: 300, lineHeight: 1.5, color: 'var(--t-text-secondary)' }}>

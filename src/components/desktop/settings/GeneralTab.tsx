@@ -344,7 +344,7 @@ export function GeneralTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTa
           <SettingsRow
             icon={<ShieldIcon />}
             label="Share usage data"
-            subtitle="Share six basic feature-use events. No code, prompts, file paths, repo names, or file contents. Changes take effect immediately."
+            subtitle="Share nine basic feature-use events. No code, prompts, file paths, repo names, or file contents. Changes take effect immediately."
             checked={shareUsage}
             disabled={!values || busyField === 'productTelemetryEnabled'}
             onToggle={(next) => { void updateField('productTelemetryEnabled', next); }}

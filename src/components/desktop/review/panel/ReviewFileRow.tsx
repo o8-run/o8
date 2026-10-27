@@ -243,6 +243,7 @@ const ReviewFileRow = memo(function ReviewFileRow({
 
   return (
     <div
+      data-review-file={file.path}
       ref={(node) => { rowRef.current = node; setRowRef(file.path, node); }}
       style={{
         borderBottom: '1px solid var(--t-divider-subtle)',

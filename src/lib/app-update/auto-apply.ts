@@ -7,7 +7,8 @@ import { randomUUID } from 'node:crypto';
 import { getOperatorDefaults } from '@/lib/operator/defaults';
 import { checkFreshness, UPDATE_CHECK_INTERVAL_MS } from './fresh-check';
 import { getUpdateIdleWindow } from './idle-window';
-import { isSelfUpdatableInstall, normalizeInstallPlatform } from './install-target';
+import { isSelfUpdatableInstall } from './install-target';
+import { getRunningInstallInfo } from './install-info';
 import { getAppUpdateState, recordAppUpdateInstall, recordAutoApply, recordAutoApplyWait } from './relaunch-state';
 import { describeUpdateBlockers } from './update-card-view';
 
@@ -49,8 +50,7 @@ export async function controlAutoApply(input: Record<string, unknown>) {
     }
     return result(false);
   }
-  if (!isSelfUpdatableInstall({ platform: normalizeInstallPlatform(process.platform), arch: process.arch,
-    appImagePath: process.env.APPIMAGE ?? null, updaterSelfUpdatable: null })) return result(false);
+  if (!isSelfUpdatableInstall(await getRunningInstallInfo())) return result(false);
   if (input.action === 'admit') {
     if (current?.manualRetryRequired && current.version === state.version) return result(false);
     if (current?.attemptId && current.attemptId === input.attemptId && current.phase !== 'failed') {

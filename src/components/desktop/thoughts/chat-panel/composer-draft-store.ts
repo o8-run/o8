@@ -18,9 +18,34 @@ const drafts = new Map<string, ComposerDraft>();
 const listeners = new Set<() => void>();
 const WARNING = 'Your latest draft changes could not be saved. Keep this window open to retain them.';
 
-/** A workspace tab and its selected conversation own a draft independently of visibility. */
+/** Bound drafts follow the conversation through panes and repository aliases.
+ * Unsent new conversations remain scoped to their repository and tab. */
 export function composerDraftKey(repoPath: string | null | undefined, tabId: string | undefined, threadId: string | null) {
-  return tabId ? JSON.stringify([repoPath ?? null, threadId ? ['thread', threadId] : ['tab', tabId]]) : null;
+  return tabId ? JSON.stringify([threadId ? null : repoPath ?? null, threadId ? ['thread', threadId] : ['tab', tabId]]) : null;
+}
+
+function threadFromKey(key: string): string | null {
+  try {
+    const [, binding] = JSON.parse(key);
+    return Array.isArray(binding) && binding[0] === 'thread' && typeof binding[1] === 'string' ? binding[1] : null;
+  } catch { return null; }
+}
+
+/** Import the prior repository-scoped format; keep the original as a fallback. */
+function legacyThreadDraft(key: string): string | null {
+  const threadId = threadFromKey(key);
+  if (!threadId) return null;
+  for (const candidate of Object.keys(window.localStorage).reverse()) {
+    if (!candidate.startsWith(PREFIX) || candidate === PREFIX + key) continue;
+    if (threadFromKey(candidate.slice(PREFIX.length)) !== threadId) continue;
+    const raw = window.localStorage.getItem(candidate);
+    if (!raw || raw.length > LIMIT) continue;
+    try {
+      const value: unknown = JSON.parse(raw);
+      if (validDraft(value) && (value.input || value.images.length || value.files.length)) return raw;
+    } catch { /* An unrelated unreadable draft must not hide this conversation. */ }
+  }
+  return null;
 }
 
 function read(key: string): ComposerDraft {
@@ -28,12 +53,17 @@ function read(key: string): ComposerDraft {
   if (cached) return cached;
   let draft = EMPTY;
   try {
-    const raw = window.localStorage.getItem(PREFIX + key);
+    const stored = window.localStorage.getItem(PREFIX + key);
+    const raw = stored ?? legacyThreadDraft(key);
     if (raw) {
       if (raw.length > LIMIT) throw new Error('Draft exceeds storage limit');
       const value: unknown = JSON.parse(raw);
       if (!validDraft(value)) throw new Error('Unreadable draft');
       draft = { input: value.input, images: value.images, files: value.files };
+      if (stored === null) {
+        try { window.localStorage.setItem(PREFIX + key, raw); }
+        catch { draft.warning = WARNING; }
+      }
     }
   } catch { draft = { ...EMPTY, warning: WARNING }; }
   drafts.set(key, draft);
@@ -53,7 +83,9 @@ function validDraft(value: unknown): value is ComposerDraft {
 function write(key: string, draft: ComposerDraft) {
   const next: ComposerDraft = { ...draft, warning: undefined };
   try {
-    if (!next.input && !next.images.length && !next.files.length) window.localStorage.removeItem(PREFIX + key);
+    // Keep an empty bound record so clearing/sending cannot resurrect a
+    // draft from the previous repository-scoped storage format on restart.
+    if (!next.input && !next.images.length && !next.files.length && !threadFromKey(key)) window.localStorage.removeItem(PREFIX + key);
     else {
       const raw = JSON.stringify({ input: next.input, images: next.images, files: next.files });
       if (raw.length > LIMIT) throw new Error('Draft exceeds storage limit');

@@ -49,9 +49,7 @@ impl Render for Shell {
             .line_height(gpui::relative(crate::theme::TYPE.chrome_line))
             .track_focus(&self.focus)
             .capture_key_down(cx.listener(Self::key_down))
-            .when(self.system_glass && crate::theme::all_glass(), |view| {
-                view.child(material::veil())
-            })
+            .when(self.system_glass, |view| view.child(material::veil()))
             .child(chrome)
             .child(
                 registrations().iter().fold(

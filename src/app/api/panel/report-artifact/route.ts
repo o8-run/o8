@@ -1,7 +1,7 @@
+import { viewerJson } from '@/lib/viewers/response';
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-import { NextResponse } from 'next/server';
 import { readFile } from 'node:fs/promises';
 import { getArtifact, artifactAbsPath } from '@/lib/artifacts/store';
 
@@ -15,18 +15,18 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const id = searchParams.get('id');
   if (!id) {
-    return NextResponse.json({ error: 'id param required' }, { status: 400 });
+    return viewerJson({ error: 'id param required' }, { status: 400 });
   }
 
   const record = getArtifact(id);
   if (!record || record.kind !== 'report') {
-    return NextResponse.json({ error: 'Report not found' }, { status: 404 });
+    return viewerJson({ error: 'Report not found' }, { status: 404 });
   }
 
   try {
     const html = await readFile(artifactAbsPath(record.relPath), 'utf8');
-    return NextResponse.json({ html }, { headers: { 'Cache-Control': 'no-store' } });
+    return viewerJson({ html }, { headers: { 'Cache-Control': 'no-store' } });
   } catch {
-    return NextResponse.json({ error: 'Could not read report' }, { status: 500 });
+    return viewerJson({ error: 'Could not read report' }, { status: 500 });
   }
 }

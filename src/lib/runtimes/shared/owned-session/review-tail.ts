@@ -67,7 +67,7 @@ export function createReviewTailController({
     let discoveredThreadId = session.threadId;
 
     for (const run of runs) {
-      const { parsed, stderrRaw } = await runController.readRunArtifacts(run);
+      const { parsed, stderrRaw } = await runController.readRunArtifacts(run, false);
       const parsedEntries = run.modelFallback ? [...parsed.entries, {
         id: `${run.id}:model-fallback`, kind: 'event', label: 'Codex CLI update',
         text: run.modelFallback.notice, timestamp: run.finishedAt,

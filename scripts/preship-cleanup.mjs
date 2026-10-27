@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 /** Read-only collision guard. Producer termination and lock disposal require separate authority. */
-import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
 import path from 'node:path';
+import { assertNoProducer } from './lib/generated-output-producer-check.mjs';
 
 const require = createRequire(import.meta.url);
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -75,44 +75,6 @@ function assertIdentity(directory, expected) {
     || expected.canonicalPath !== realpathSync(directory)
     || expected.device !== stat.dev || expected.inode !== stat.ino) {
     throw new Error('generated-output directory identity is unknown or changed');
-  }
-}
-
-function processSnapshot(args) {
-  return execFileSync('ps', args, { encoding: 'utf8', timeout: 5_000, maxBuffer: 4 * 1024 ** 2 });
-}
-
-function assertNoProducer(workspace) {
-  // The registered producer executes node + Next's CLI path + mode directly.
-  // Select that executable position or Next's process title, never prompt text.
-  // This observation never grants stop authority.
-  const candidates = processSnapshot(['-axo', 'pid=,command=']).split('\n').flatMap(line => {
-    const match = line.trim().match(/^(\d+)\s+(.*)$/);
-    const producer = match && (
-      /^(?:(?:\S*\/)?(?:node|nodejs|bun)\s+)?(?:\S*\/)?next(?:\/dist\/bin\/next)?\s+(?:build|dev|start)(?:\s|$)/.test(match[2])
-      || /^next-(?:build|server)(?:\s|\(|$)/.test(match[2])
-    );
-    return producer
-      ? [Number(match[1])] : [];
-  });
-  for (const pid of candidates) {
-    if (pid === process.pid) continue;
-    let cwd;
-    try {
-      if (process.platform === 'linux') cwd = realpathSync(`/proc/${pid}/cwd`);
-      else if (process.platform === 'darwin') {
-        const names = execFileSync('lsof', ['-a', '-p', String(pid), '-d', 'cwd', '-Fn'],
-          { encoding: 'utf8', timeout: 5_000, maxBuffer: 64 * 1024 }).split('\n').filter(line => line.startsWith('n'));
-        if (names.length !== 1) throw new Error('ambiguous producer working directory');
-        cwd = realpathSync(names[0].slice(1));
-      } else throw new Error('producer working-directory probe is unavailable');
-    } catch {
-      // A vanished candidate is harmless. Unknown live candidates remain a refusal.
-      try { if (!processSnapshot(['-p', String(pid), '-o', 'pid=']).trim()) continue; }
-      catch (error) { if (error.status === 1 && !error.stdout?.trim()) continue; }
-      throw new Error('possible live producer has an unknown working directory');
-    }
-    if (cwd === workspace) throw new Error('workspace has a live generated-output producer');
   }
 }
 

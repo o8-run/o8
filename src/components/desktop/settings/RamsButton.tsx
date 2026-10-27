@@ -11,6 +11,7 @@ export function RamsButton({
   variant = 'primary',
   type = 'button',
   busy = false,
+  size = 'default',
   icon,
   width,
   'aria-label': ariaLabel,
@@ -24,6 +25,7 @@ export function RamsButton({
   variant?: 'primary' | 'solid' | 'ghost' | 'danger';
   type?: 'button' | 'submit';
   busy?: boolean;
+  size?: 'default' | 'touch';
   icon?: ReactNode;
   width?: number | string;
   'aria-label'?: string;
@@ -58,6 +60,7 @@ export function RamsButton({
       aria-describedby={ariaDescribedBy}
       style={{
         ...RAMS_BUTTON_GEOMETRY,
+        height: size === 'touch' ? 44 : RAMS_BUTTON_GEOMETRY.height,
         width,
         gap: 7,
         borderColor: disabled && variant !== 'solid' ? RAMS_HAIRLINE_SOFT : border,

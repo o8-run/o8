@@ -1,3 +1,5 @@
+import { isMaskedViewerReplay } from '@/lib/viewers/copy-safety';
+import { viewerJson } from '@/lib/viewers/response';
 /**
  * POST /api/v2/files — Write/edit files in the workspace
  * GET /api/v2/files?path=... — Read a file
@@ -7,7 +9,7 @@
 
 export const dynamic = 'force-dynamic';
 
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { isAbsolute, relative } from 'node:path';
 import { homedir } from 'node:os';
 import { getDefaultLlmRepoRoot, resolveRegisteredRepoScope } from '@/lib/llm/repo-scope';
@@ -71,23 +73,23 @@ async function resolveFileTarget(filePath: string, workspace?: string | null) {
 
 function fileError(error: unknown) {
   if (error instanceof KnowledgeSourceWriteError) {
-    return NextResponse.json({ error: error.message, code: 'knowledge_source_read_only' }, { status: 403 });
+    return viewerJson({ error: error.message, code: 'knowledge_source_read_only' }, { status: 403 });
   }
   if (isWorkspaceFileError(error)) {
-    return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
+    return viewerJson({ error: error.message, code: error.code }, { status: error.status });
   }
-  return NextResponse.json({ error: 'Workspace file operation failed', code: 'workspace_file_operation_failed' }, { status: 500 });
+  return viewerJson({ error: 'Workspace file operation failed', code: 'workspace_file_operation_failed' }, { status: 500 });
 }
 
 export async function GET(request: NextRequest) {
   const path = request.nextUrl.searchParams.get('path');
   if (!path) {
-    return NextResponse.json({ error: 'path required' }, { status: 400 });
+    return viewerJson({ error: 'path required' }, { status: 400 });
   }
 
   const target = await resolveFileTarget(path, request.nextUrl.searchParams.get('workspace'));
   if ('error' in target) {
-    return NextResponse.json({ error: target.error, code: target.code }, { status: target.status });
+    return viewerJson({ error: target.error, code: target.code }, { status: target.status });
   }
 
   try {
@@ -103,15 +105,15 @@ export async function GET(request: NextRequest) {
           offset += bytesRead;
         }
         const content = buffer.subarray(0, offset).toString('utf-8');
-        return NextResponse.json({ content, path, exists: true, size, truncated: size > buffer.length });
+        return viewerJson({ content, path, exists: true, size, truncated: size > buffer.length });
       } finally { await opened.handle.close(); }
     }
     const opened = await readWorkspaceFile(target.root, target.relativePath);
     const content = opened.bytes.toString('utf-8');
-    return NextResponse.json({ content, contentHash: await contentHash(content), path, exists: true });
+    return viewerJson({ content, contentHash: await contentHash(content), path, exists: true });
   } catch (err) {
     if (isWorkspaceFileError(err) && err.code === 'workspace_file_not_found') {
-      return NextResponse.json({ error: 'File not found', code: err.code, exists: false }, { status: 404 });
+      return viewerJson({ error: 'File not found', code: err.code, exists: false }, { status: 404 });
     }
     return fileError(err);
   }
@@ -127,13 +129,13 @@ export async function POST(request: NextRequest) {
     const force = body?.force === true;
 
     if (!path || content === undefined) {
-      return NextResponse.json({ error: 'path and content required' }, { status: 400 });
+      return viewerJson({ error: 'path and content required' }, { status: 400 });
     }
 
     assertNotKnowledgeSource(workspace || getDefaultLlmRepoRoot());
     const target = await resolveFileTarget(path, workspace);
     if ('error' in target) {
-      return NextResponse.json({ error: target.error, code: target.code }, { status: target.status });
+      return viewerJson({ error: target.error, code: target.code }, { status: target.status });
     }
 
     if (expectedHash !== undefined && !force) {
@@ -146,7 +148,7 @@ export async function POST(request: NextRequest) {
       }
       const currentHash = currentContent === null ? null : await contentHash(currentContent);
       if (currentHash !== expectedHash) {
-        return NextResponse.json({
+        return viewerJson({
           error: 'changed-on-disk',
           contentHash: currentHash,
           content: currentContent,
@@ -154,10 +156,18 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Existing editors must not turn an opaque display chip into source text.
+    // This refusal applies even when a caller forces an otherwise valid save.
+    let source = '';
+    try { source = (await readWorkspaceFile(target.root, target.relativePath)).bytes.toString('utf8'); }
+    catch (error) { if (!isWorkspaceFileError(error) || error.code !== 'workspace_file_not_found') throw error; }
+    if (isMaskedViewerReplay(source, content)) {
+      return viewerJson({ error: 'Masked viewer content is read-only', code: 'redacted_content_read_only' }, { status: 409 });
+    }
     const result = await writeWorkspaceFile(target.root, target.relativePath, content);
     const oldContent = result.previousBytes?.toString('utf-8') ?? null;
 
-    return NextResponse.json({
+    return viewerJson({
       success: true,
       path,
       isNew: result.created,
