@@ -16,6 +16,8 @@ const h = vi.hoisted(() => ({
   })),
 }));
 
+vi.mock('@/lib/codex/service-tier-catalogue', async () => ({ getCodexSpeedCatalogue: async () =>
+  (await import('./helpers/codex-model-list-fixture')).codexEffortCatalogFixture }));
 vi.mock('@/lib/runtime/actions', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/lib/runtime/actions')>(), launchRuntimeSurface: h.launch,
 }));

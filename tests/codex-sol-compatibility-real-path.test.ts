@@ -1,3 +1,4 @@
+import { codexModelListFixtureScript } from './helpers/codex-model-list-fixture';
 import { execFileSync } from 'node:child_process';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -38,6 +39,7 @@ import { appendFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 const args = process.argv.slice(2);
 if (args.includes('--version')) { console.log('codex-cli 0.159.2'); process.exit(0); }
+${codexModelListFixtureScript()}
 const model = args.includes('--model') ? args[args.indexOf('--model') + 1]
   : args.find((arg) => arg.startsWith('model='))?.slice(6).replaceAll('"', '');
 appendFileSync(join(process.cwd(), 'calls.jsonl'), JSON.stringify({ args, model }) + '\\n');
@@ -52,6 +54,7 @@ if (existsSync(join(process.cwd(), 'reject-all')) || (existsSync(join(process.cw
 console.log(JSON.stringify({ type: 'thread.started', thread_id: 'sol-fixture-thread' }));
 console.log(JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'Completed on ' + model } }));
 console.log(JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 300000, cached_input_tokens: 20000, output_tokens: 10000 } }));
+}
 `);
 chmodSync(binary, 0o700);
 

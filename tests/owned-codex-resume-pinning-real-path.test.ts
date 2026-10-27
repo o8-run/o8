@@ -1,3 +1,4 @@
+import { codexModelListFixtureScript } from './helpers/codex-model-list-fixture';
 import { execFileSync } from 'node:child_process';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -72,6 +73,7 @@ const args = process.argv.slice(2);
 if (args.includes('--version')) {
   console.log('codex-fixture 1.0.0');
 } else {
+${codexModelListFixtureScript()}
   const resumeIndex = args.indexOf('resume');
   const threadId = resumeIndex < 0 ? 'fixture-saved-thread' : args[resumeIndex + 1];
   const modelIndex = args.indexOf('--model');
@@ -86,6 +88,7 @@ if (args.includes('--version')) {
     id: 'reply', type: 'agent_message', text: 'Offline fixture completed.',
   } }));
   console.log(JSON.stringify({ type: 'turn.completed' }));
+}
 }
 `);
 chmodSync(binary, 0o700);

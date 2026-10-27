@@ -5,6 +5,15 @@ import { join } from 'node:path';
 
 if (process.argv.includes('--version') || process.argv.includes('--help')) {
   console.log('codex-cli 1.0.0');
+} else if (process.argv[2] === 'app-server') {
+  const { createInterface } = await import('node:readline');
+  createInterface({ input: process.stdin }).on('line', line => {
+    const message = JSON.parse(line); if (!message.id) return;
+    const result = message.method === 'model/list' ? { data: [{ model: 'gpt-6.1-sol', isDefault: true,
+      supportedReasoningEfforts: [{ reasoningEffort: 'high' }] }] }
+      : message.method === 'config/read' ? { config: {} } : {};
+    console.log(JSON.stringify({ id: message.id, result }));
+  }).on('close', () => process.exit(0));
 } else {
   const root = process.env.O8_RESTART_FIXTURE_ROOT;
   appendFileSync(join(root, 'launches.jsonl'), `${JSON.stringify({ pid: process.pid, args: process.argv.slice(2) })}\n`);

@@ -162,7 +162,7 @@ export function createOwnedSessionStore(
       const pin = resolveEffortPin({ runtime: runtimeId, model: request.model ?? adapter.defaultModel ?? null, requestedEffort: request.effort });
       if (!pin.ok) throw new EffortPinRejectionError(pin.code, pin.message);
     } else {
-      await assertRuntimeEffortPin(runtimeId, request.model ?? adapter.defaultModel, request.effort, { cwd: request.cwd, runtimeConfig: request.runtimeConfig });
+      await assertRuntimeEffortPin(runtimeId, request.model ?? adapter.defaultModel, request.effort, { cwd: request.cwd, runtimeConfig: request.runtimeConfig, packetId: request.packetId });
     }
     const prompt = request.prompt.trim();
     if (!prompt) {

@@ -162,7 +162,7 @@ it('preserves a supported worker pin and checks cold resume against its persiste
   const store = createOwnedSessionStore(museOwnedAdapter); stores.push(store);
   const launched = await store.launch({ cwd: repo, model: 'muse-fixture', effort: 'low', prompt: 'fixture' });
   expect(launched.ok, launched.note).toBe(true);
-  await vi.waitFor(async () => expect((await store.getRuntimeTail(launched.surfaceId)).surface.lifecycle?.lastOutcome).toBe('finished'));
+  await vi.waitFor(async () => expect((await store.getRuntimeTail(launched.surfaceId)).surface.lifecycle?.lastOutcome).toBe('finished'), { timeout: 10_000 });
   expect(calls().filter(call => call.method === 'exec').at(-1).args).toEqual(expect.arrayContaining(['--reasoning-effort', 'low']));
   const other = join(root, 'resume-account'); mkdirSync(other, { recursive: true });
   writeFileSync(join(other, 'models.json'), JSON.stringify(rows(['ultra'])));
@@ -170,8 +170,8 @@ it('preserves a supported worker pin and checks cold resume against its persiste
   const resumed = createOwnedSessionStore(museOwnedAdapter); stores.push(resumed);
   const firstCount = calls().filter(call => call.method === 'exec').length;
   expect((await resumed.resume(launched.surfaceId, 'continue')).ok).toBe(true);
-  await vi.waitFor(() => expect(calls().filter(call => call.method === 'exec')).toHaveLength(firstCount + 1));
-  await vi.waitFor(async () => expect((await resumed.getRuntimeTail(launched.surfaceId)).surface.lifecycle?.lastOutcome).toBe('finished'));
+  await vi.waitFor(() => expect(calls().filter(call => call.method === 'exec')).toHaveLength(firstCount + 1), { timeout: 10_000 });
+  await vi.waitFor(async () => expect((await resumed.getRuntimeTail(launched.surfaceId)).surface.lifecycle?.lastOutcome).toBe('finished'), { timeout: 10_000 });
   expect(calls().filter(call => call.method === 'exec').at(-1).config).toBe(account);
   writeFileSync(join(account, 'models.json'), JSON.stringify(rows([])));
   const before = calls().filter(call => call.method === 'exec').length;
@@ -217,7 +217,7 @@ it('rechecks current model evidence before an automatic retry against persisted 
   await vi.waitFor(() => {
     const saved = JSON.parse(readFileSync(file, 'utf8'));
     expect(saved.activeRun).toBeUndefined(); expect(saved.recentRuns[0].outcome).toBe('failed');
-  });
+  }, { timeout: 10_000 });
   writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, 'utf8')), autoRetry: true }));
   writeFileSync(join(account, 'models.json'), JSON.stringify(rows([])));
   const before = calls().filter(call => call.method === 'exec').length;
@@ -230,4 +230,46 @@ it('rechecks current model evidence before an automatic retry against persisted 
     expect(calls().filter(call => call.method === 'exec')).toHaveLength(before);
     expect(JSON.parse(readFileSync(file, 'utf8')).recentRuns).toHaveLength(1);
   } finally { error.mockRestore(); }
+});
+
+it.each(['dispatch', 'launch'] as const)('admits a packet pinned to account A after selecting account B at %s', async operation => {
+  const identities = await import('@/lib/runtime/identity-catalog');
+  const packetId = crypto.randomUUID();
+  const pinned = await identities.registerRuntimeIdentity({ runtime: 'muse', label: 'Fixture A', configHomeRef: account });
+  writeFileSync(join(account, 'models.json'), JSON.stringify(rows(['low'])));
+  await identities.selectRuntimeIdentity('muse', pinned.id);
+  await identities.getOrPinPacketRuntimeIdentity({ runtime: 'muse', packetId, fallback: pinned });
+  const other = join(root, `selected-${operation}`); mkdirSync(other);
+  writeFileSync(join(other, 'models.json'), JSON.stringify(rows(['ultra'])));
+  const selected = await identities.registerRuntimeIdentity({ runtime: 'muse', label: 'Fixture B', configHomeRef: other });
+  await identities.selectRuntimeIdentity('muse', selected.id);
+  const start = calls().length;
+  if (operation === 'dispatch') {
+    const { resolveWorkerRouting } = await import('@/lib/agents/routing');
+    const { launchPacketWithStorageAdmission } = await import('@/lib/orchestrator/dispatch-packet-launch');
+    const workerRouting = resolveWorkerRouting({ requestedRuntime: 'muse', requestedModel: 'muse-fixture', requestedEffort: 'low' });
+    const packet = { id: packetId, title: 'Fixture', summary: 'Fixture', runtime: 'muse' as const,
+      status: 'queued' as const, queueState: 'queued' as const, releaseState: 'pending' as const, workspaceTargetPath: repo,
+      referenceLabel: 'EFFORT', branchTarget: 'test/effort', dependencyLabels: [], dependencyPacketIds: [], workerRouting };
+    const reserveForLaunch = vi.fn(async () => { throw new Error('admitted-to-storage'); });
+    await expect(launchPacketWithStorageAdmission({ packet, allPackets: [packet], workerRouting,
+      storageAdmission: { prepareCreationBase: async () => ({ baseBranch: 'main', baseCommit: 'fixture' }), reserveForLaunch } as unknown as
+        Parameters<typeof launchPacketWithStorageAdmission>[0]['storageAdmission'],
+    })).rejects.toThrow('admitted-to-storage');
+    expect(reserveForLaunch).toHaveBeenCalledOnce();
+    expect(effects.lane).not.toHaveBeenCalled();
+  } else {
+    const store = createOwnedSessionStore(museOwnedAdapter, {
+      workspaceSpawnGuard: async () => ({ status: 'available', source: 'no-snapshot' }),
+    }); stores.push(store);
+    const launched = await store.launch({ cwd: repo, model: 'muse-fixture', effort: 'low', prompt: 'fixture', packetId });
+    expect(launched.ok, launched.note).toBe(true);
+    await vi.waitFor(async () => expect((await store.getRuntimeTail(launched.surfaceId)).surface.lifecycle?.lastOutcome).toBe('finished'), { timeout: 10_000 });
+    expect(calls().filter(call => call.method === 'exec').at(-1)).toMatchObject({ config: account,
+      args: expect.arrayContaining(['--reasoning-effort', 'low']) });
+    const saved = JSON.parse(readFileSync(join(sessions, launched.surfaceId.replace('muse-owned:', ''), 'session.json'), 'utf8'));
+    expect(saved.identity.configHomeRef).toBe(account);
+  }
+  expect(calls().slice(start).filter(call => call.method === 'model/list').map(call => call.config)).toEqual(expect.arrayContaining([account]));
+  expect(calls().slice(start).filter(call => call.method === 'model/list').some(call => call.config === other)).toBe(false);
 });

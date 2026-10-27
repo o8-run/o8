@@ -1,3 +1,4 @@
+import { codexModelListFixtureScript } from './helpers/codex-model-list-fixture';
 import { execFileSync } from 'node:child_process';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -38,6 +39,7 @@ writeFileSync(shimPath, `#!/usr/bin/env node
 const fs = require('node:fs');
 const args = process.argv.slice(2);
 if (args[0] === '--version') { console.log('codex-cli 0.130.0'); process.exit(0); }
+${codexModelListFixtureScript()}
 if (args[0] === 'exec') {
   const path = ${JSON.stringify(execCountPath)};
   const count = Number(fs.existsSync(path) ? fs.readFileSync(path, 'utf8') : '0') + 1;
@@ -57,6 +59,7 @@ if (args[0] === 'exec') {
   process.exit(1);
 }
 process.exit(64);
+}
 `);
 chmodSync(shimPath, 0o700);
 
@@ -205,6 +208,7 @@ async function waitForRuntimeExit(laneId: string, surfaceId: string) {
 }
 
 beforeEach(() => {
+  vi.stubEnv('O8_WORKER_ENV_ALLOW', 'O8_TEST_AUTH_SHIM_MODE');
   exitOrderingRace.enabled = false;
   exitOrderingRace.injected = false;
   inventoryRace.enabled = false;
@@ -216,6 +220,7 @@ beforeEach(() => {
 });
 
 afterAll(() => {
+  vi.unstubAllEnvs();
   rmSync(root, { recursive: true, force: true });
 });
 
