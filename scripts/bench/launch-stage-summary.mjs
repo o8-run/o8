@@ -4,10 +4,11 @@ import path from 'node:path';
 const round = value => Math.round(value * 100) / 100;
 
 function normalized(value) {
+  if (value.includes('data:') || value.startsWith('blob:')) return '<generated>';
   const marker = '/Contents/Resources/server/';
   const index = value.indexOf(marker);
-  return index >= 0 ? '<bundle>/' + value.slice(index + marker.length)
-    : value.replace(/\/Users\/[^/]+/g, '<runner>').replace(/\/private\/(?:tmp|var)\/[^:]+/g, '<profile>');
+  return (index >= 0 ? '<bundle>/' + value.slice(index + marker.length)
+    : value.replace(/\/Users\/[^/]+/g, '<runner>').replace(/\/private\/(?:tmp|var)\/[^:]+/g, '<profile>')).slice(0, 300);
 }
 
 export async function collectLaunchStageProfile(dataDir, startedEpochMs) {
@@ -27,7 +28,7 @@ export async function collectLaunchStageProfile(dataDir, startedEpochMs) {
         samples.set(id, (samples.get(id) || 0) + (profile.timeDeltas[index] || 0));
       }
       cpu = [...samples].sort((a, b) => b[1] - a[1]).slice(0, 24).map(([id, microseconds]) => ({
-        function: nodes.get(id)?.callFrame.functionName || '<anonymous>',
+        function: (nodes.get(id)?.callFrame.functionName || '<anonymous>').slice(0, 120),
         source: normalized(nodes.get(id)?.callFrame.url || ''), sampledMs: round(microseconds / 1000),
       }));
     }
