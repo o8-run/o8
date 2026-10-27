@@ -1,4 +1,8 @@
+import { assertWorkerMemoryCurrent } from '@/lib/dispatch/worker-memory-context';
+import { assertRuntimeSpawnDeadline } from '@/lib/runtime/launch-deadline';
+import { getLane } from '@/lib/lane/registry';
 import type { ChildProcess } from 'node:child_process';
+import { fstatSync } from 'node:fs';
 import { spawnWithWorkAdmission as spawn } from '@/lib/app-update/work-launch-admission';
 import { bindDeferredCodexMcpLaunch } from '@/lib/providers/deferred-mcp-arguments';
 import { withProviderStoreLock } from '@/lib/providers/store-lock';
@@ -9,11 +13,12 @@ import { assertControlledLaunchGrantCurrent } from '@/lib/mcp/task-execution-adm
 import { ownedSpawnEnvironment } from './restricted-spawn-env';
 import { assertOwnedActionAdmission } from './action-admission';
 import type { OwnedSessionRecord } from './types';
-import { withChildEnvironment } from '@/lib/providers/child-process';
+import { withChildCreationGuard, withChildEnvironment } from '@/lib/providers/child-process';
 import { reserveWorkLaunch } from '@/lib/app-update/work-launch-admission';
 import { ownedSupervisorClient, type SupervisorReceipt } from '@/lib/runtime/o8d-supervisor';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { join } from 'node:path';
+import { stagedStdinDeliveryPath, workerOwnedStdinInvocation } from './staged-stdin';
 
 export function assertLaunchCredentialPolicy(runtimeId: string, expected: string): void {
   if (credentialPolicyFingerprint(runtimeId) !== expected) throw new Error('Credentials or billing changed during launch preparation. Retry the launch.');
@@ -23,7 +28,7 @@ export function assertLaunchCredentialPolicy(runtimeId: string, expected: string
 type LaunchInput = {
   session: OwnedSessionRecord; runtimeId: string; policy: string; runId: string;
   binary: string; args: string[]; env: Record<string, string>;
-  stdinFd?: number; stdoutFd: number; stderrFd: number; mcpConfigPath?: string;
+  stdinFd?: number; stdinBytes?: number; stdinPath?: string; stdoutFd: number; stderrFd: number; mcpConfigPath?: string;
   mcpServers?: readonly { name: string; env?: Record<string, string> | null }[];
   materializationIdentity: Parameters<typeof guardedWorkspaceInvocation>[2];
   assertWorkerO8Current?: () => void;
@@ -45,18 +50,34 @@ function withCheckedLaunch<T>(input: LaunchInput, create: (launch: { command: st
     assertControlledLaunchGrantCurrent(input.session);
     assertOwnedActionAdmission(input.session, input.runId);
     input.assertWorkerO8Current?.();
+    assertWorkerMemoryCurrent(input.session);
     input.onSubmit?.();
-    return create(launch, env);
+    return withChildCreationGuard(() => {
+      assertOwnedActionAdmission(input.session, input.runId);
+      assertRuntimeSpawnDeadline();
+      if (input.session.laneId && getLane(input.session.laneId)?.lastEventLabel === 'runtime_launch_timeout') {
+        throw new Error('Original launch timed out; inspect its held receipt before starting another worker.');
+      }
+    }, () => create(launch, env));
   });
 }
 
-/** No await between the shared policy check and direct OS process creation. */
+/**
+ * No await between the shared policy check and direct OS process creation.
+ *
+ * The server hands off a regular descriptor. A relay in the detached worker
+ * group supplies the CLI's pipe, so server death cannot truncate buffered input.
+ */
 export function spawnCredentialCheckedChild(input: LaunchInput): ChildProcess {
-  return withCheckedLaunch(input, (launch, env) => spawn(launch.command, launch.args, {
+  return withCheckedLaunch(input, (launch, env) => {
+    const invocation = input.stdinFd === undefined ? launch
+      : workerOwnedStdinInvocation(launch, input.stdinBytes ?? fstatSync(input.stdinFd).size, stagedStdinDeliveryPath(input.stdinPath!));
+    return spawn(invocation.command, invocation.args, {
       windowsHide: true, cwd: input.session.repoPath, detached: true,
       stdio: [input.stdinFd ?? 'ignore', input.stdoutFd, input.stderrFd],
       env,
-  }));
+    });
+  });
 }
 
 /** Only native, finite-input Codex uses this opt-in submission boundary. */

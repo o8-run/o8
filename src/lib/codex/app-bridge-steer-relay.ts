@@ -10,6 +10,7 @@ import { getDataDir } from '@/lib/data-dir-migration';
 import { isPidAlive } from '@/lib/lane/orchestrator-crash-survival';
 import { composerQueueRepoKey, readComposerSend } from '@/lib/orchestrator/composer-queue';
 import type { OrchestratorBackend } from '@/lib/lane/orchestrator-backends/types';
+import { assertCodexLiveSteerEffort } from './app-bridge-steer-effort';
 
 type LiveSteer = NonNullable<OrchestratorBackend['liveSteer']>;
 interface Target { repoPath: string; threadId: string }
@@ -115,6 +116,7 @@ export function getRemoteCodexAppBridgeSteer(target: Target): LiveSteer | undefi
   const receipt = readReceipt(target);
   if (!receipt) return undefined;
   return async (_repoPath, message, options) => {
+    assertCodexLiveSteerEffort(options.thinkingEffort);
     if (options.attachments?.length) return { accepted: false };
     return new Promise<{ accepted: boolean }>((resolve, reject) => {
       const socket = createConnection(receipt.address);

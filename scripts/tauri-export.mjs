@@ -8,6 +8,7 @@ import { cpSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, rea
 import { execFileSync as runFileSync } from 'child_process';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { writeBuildChannel } from './lib/build-channel.mjs';
 import { prepareNativeBundle } from './native-bundle.mjs';
 import { exportTauriSafetyHookResources } from './tauri-hook-resources.mjs';
 import { resolveReleaseConfig } from './lib/release-config.mjs';
@@ -761,3 +762,6 @@ try { size = execSync(`du -sh "${server}" 2>/dev/null`).toString().trim().split(
 console.log('\\n✅ Export complete');
 console.log(`   frontend/ → loader HTML`);
 console.log(`   server/ → ${size}`);
+
+// Written before packaging: the app seal and updater signature cover this manifest.
+writeBuildChannel(root, server, loaderAppVersion);

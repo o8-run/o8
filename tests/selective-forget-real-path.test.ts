@@ -1,3 +1,4 @@
+import { outcomeMemoryFingerprint } from '@/lib/cortex/outcome-identity';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -58,8 +59,9 @@ async function directive(id: string) {
   expect(response.status).toBe(200);
 }
 function outcome(id: string, project = projectId) {
-  getSqlite().prepare(`INSERT INTO session_outcomes (id, project_id, repo_path, runtime, outcome, summary, started_at, completed_at)
-    VALUES (?, ?, ?, 'codex', 'succeeded', 'forgetneedle', datetime('now'), datetime('now'))`).run(id, project, repoPath);
+  getSqlite().prepare(`INSERT INTO session_outcomes (id, project_id, repo_path, runtime, outcome, summary, memory_fingerprint, started_at, completed_at)
+    VALUES (?, ?, ?, 'codex', 'succeeded', ?, ?, datetime('now'), datetime('now'))`).run(id, project, repoPath, `forgetneedle ${id}`,
+      outcomeMemoryFingerprint({ projectId: project, repoPath, summary: `forgetneedle ${id}` }));
   seedFact('outcome', id);
 }
 
@@ -93,6 +95,38 @@ describe('selective forget through persisted production routes', () => {
     const listed = await outcomesRoute.GET(new NextRequest(`http://localhost/api/cortex/recent-outcomes?repoPath=${encodeURIComponent(repoPath)}&projectId=${projectId}`));
     expect((await listed.json()).outcomes.map((o: { id: string }) => o.id)).toEqual(['keep-outcome']);
     expect((await (await diagnostics()).json()).outcomesCount).toBe(2);
+  });
+
+  it('refuses stale outcome and derived-memory reindex writes after a persisted forget while retaining neighboring identities', async () => {
+    outcome('removed-reindex'); outcome('retained-reindex');
+    expect((await remove('outcome', { id: 'removed-reindex', repoPath, projectId })).status).toBe(200);
+    closeDb(); getSqlite();
+    // A reindexer holding old source data can insert a source/fact or retarget
+    // an existing row. Neither operation may reintroduce the forgotten ID.
+    outcome('removed-reindex');
+    getSqlite().prepare(`INSERT INTO facts_queue (id, source_kind, source_id) VALUES ('late-job', 'outcome', 'outcome:removed-reindex')`).run();
+    getSqlite().prepare("UPDATE session_outcomes SET id = 'removed-reindex' WHERE id = 'retained-reindex'").run();
+    getSqlite().prepare("UPDATE facts SET source_id = 'outcome:removed-reindex' WHERE id = 'outcome-retained-reindex'").run();
+    getSqlite().prepare(`INSERT INTO facts_queue (id, source_kind, source_id) VALUES ('kept-job', 'outcome', 'outcome:retained-reindex')`).run();
+    getSqlite().prepare("UPDATE facts_queue SET source_id = 'outcome:removed-reindex' WHERE id = 'kept-job'").run();
+    expect(getSqlite().prepare('SELECT id FROM session_outcomes').all()).toEqual([{ id: 'retained-reindex' }]);
+    expect(getSqlite().prepare('SELECT source_id FROM facts').all()).toEqual([{ source_id: 'outcome:retained-reindex' }]);
+    expect(getSqlite().prepare('SELECT source_id FROM facts_queue').all()).toEqual([{ source_id: 'outcome:retained-reindex' }]);
+    expect(getSqlite().prepare('SELECT outcome_id FROM outcomes_fts').all()).toEqual([{ outcome_id: 'retained-reindex' }]);
+  });
+
+  it('rolls back outcome deletion and its exclusion together when the transaction fails', async () => {
+    outcome('prime-exclusion');
+    expect((await remove('outcome', { id: 'prime-exclusion', repoPath, projectId })).status).toBe(200);
+    outcome('rollback-outcome');
+    const { readMemoryRevision } = await import('@/lib/cortex/memory-revision');
+    const revision = readMemoryRevision();
+    getSqlite().exec("CREATE TRIGGER fixture_refuse_outcome_forget BEFORE DELETE ON session_outcomes BEGIN SELECT RAISE(ABORT, 'fixture refusal'); END");
+    expect((await remove('outcome', { id: 'rollback-outcome', repoPath, projectId })).status).toBe(500);
+    expect(getSqlite().prepare("SELECT id FROM forgotten_session_outcomes WHERE id = 'rollback-outcome'").get()).toBeUndefined();
+    expect(getSqlite().prepare("SELECT id FROM session_outcomes WHERE id = 'rollback-outcome'").get()).toBeDefined();
+    expect(getSqlite().prepare("SELECT id FROM facts WHERE source_id = 'outcome:rollback-outcome'").get()).toBeDefined();
+    expect(readMemoryRevision()).toBe(revision);
   });
 
   it('refuses path identifiers, ambiguous directives and symlinked storage without deleting any source', async () => {

@@ -5,8 +5,8 @@ export const dynamic = 'force-dynamic';
 /**
  * /api/panel/file-io — the canvas file card's backend (#1232).
  *
- * Open ANY file on the machine: pick (native macOS choose-file via
- * osascript, same pattern as browse-folder), read, and save back.
+ * Open ANY file on the machine: pick (native choose-file dialog, shared
+ * with browse-folder), read, and save back.
  * Loopback + token gated under /api/panel/. Absolute paths only — the
  * card is an operator tool with terminal-grade trust, not a repo-scoped
  * agent surface (agents keep using /api/v2/files).
@@ -18,8 +18,7 @@ export const dynamic = 'force-dynamic';
  */
 
 import { NextResponse } from 'next/server';
-import { execFile } from '@/lib/providers/child-process';
-import { promisify } from 'node:util';
+import { pickNativePath } from '@/lib/desktop/native-picker';
 import { readFile, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { isAbsolute, normalize, basename, dirname } from 'node:path';
@@ -46,8 +45,6 @@ async function authorizeFileAccess(request: Request, absPath: string): Promise<N
     { status: 403 },
   );
 }
-
-const execFileAsync = promisify(execFile);
 
 const MAX_EDIT_BYTES = 2 * 1024 * 1024;
 
@@ -143,8 +140,9 @@ export async function PUT(request: Request) {
   }
 }
 
-/** POST {action:'pick'} — native macOS choose-file dialog (osascript, the
- *  browse-folder pattern). Returns { path } or { path: null } on cancel. */
+/** POST {action:'pick'} — native choose-file dialog (osascript on macOS,
+ *  zenity or kdialog on Linux). Returns { path }, { path: null } on cancel, or
+ *  { path: null, unavailable: true } when the host has no picker program. */
 export async function POST(request: Request) {
   if (resolveRequestPrincipal(request) !== 'operator') {
     return viewerJson({ error: 'Choosing arbitrary local files is operator-only.' }, { status: 403 });
@@ -158,16 +156,5 @@ export async function POST(request: Request) {
   if (body.action !== 'pick') {
     return viewerJson({ error: 'Unknown action' }, { status: 400 });
   }
-  try {
-    const script = [
-      'tell application "System Events" to activate',
-      'POSIX path of (choose file with prompt "Open a file on the canvas" with invisibles)',
-    ].join('\n');
-    const { stdout } = await execFileAsync('osascript', ['-e', script], { windowsHide: true, timeout: 120000 });
-    const path = stdout.trim();
-    return viewerJson({ path: path || null });
-  } catch {
-    // Cancelled (osascript exits non-zero) or dialog unavailable.
-    return viewerJson({ path: null });
-  }
+  return viewerJson(await pickNativePath('file', 'Open a file on the canvas'));
 }

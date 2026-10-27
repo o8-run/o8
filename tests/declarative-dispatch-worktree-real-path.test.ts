@@ -10,26 +10,41 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { join, sep } from 'node:path';
+import { dirname, join, sep } from 'node:path';
 import { NextRequest } from 'next/server';
 
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { declarativeLaunchDeadlineTest } from './fixtures/declarative-launch-deadline';
 import type { OrchestratorMissionState, OrchestratorPacket } from '@/lib/orchestrator/types';
 
 const queueProbe = vi.hoisted(() => ({ entered: 0 }));
-const artifactRace = vi.hoisted(() => ({ file: '', reads: 0, continuous: false }));
+const artifactRace = vi.hoisted(() => ({ file: '', accounting: false, injected: false, continuous: false }));
 
 vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs/promises')>();
   return {
     ...actual,
-    lstat: async (...args: Parameters<typeof actual.lstat>) => {
-      if (String(args[0]) === artifactRace.file
-        && (++artifactRace.reads === 2 || (artifactRace.continuous && artifactRace.reads % 2 === 0))) {
-        await actual.appendFile(artifactRace.file, 'writer update\n');
+    opendir: async (...args: Parameters<typeof actual.opendir>) => {
+      const directory = await actual.opendir(...args);
+      // Artifact accounting enumerates this directory; ownership validation
+      // can stat the same file before that traversal starts.
+      if (artifactRace.file && String(args[0]) === dirname(artifactRace.file)) {
+        artifactRace.accounting = true;
       }
-      return actual.lstat(...args);
+      return directory;
+    },
+    lstat: async (...args: Parameters<typeof actual.lstat>) => {
+      const stat = await actual.lstat(...args);
+      if (artifactRace.accounting && String(args[0]) === artifactRace.file) {
+        artifactRace.accounting = false;
+        if (!artifactRace.injected || artifactRace.continuous) {
+          // Change the measured file after its snapshot, before verification.
+          await actual.appendFile(artifactRace.file, 'writer update\n');
+          artifactRace.injected = true;
+        }
+      }
+      return stat;
     },
   };
 });
@@ -131,6 +146,7 @@ const dataDir = join(root, 'data');
 const ownedRoot = join(root, 'owned-qoder');
 const capturePath = join(root, 'qoder-spawns.jsonl');
 const fakeQoderPath = join(root, 'qodercli');
+const bundledCliDir = join(root, 'bundled-cli');
 const priorEnv = new Map<string, string | undefined>();
 const envKeys = [
   'CORTEX_IDE_DATA_DIR',
@@ -140,6 +156,7 @@ const envKeys = [
   'O8_FAKE_QODER_CAPTURE',
   'O8_CRASH_SURVIVABLE_WORKERS',
   'O8_PACKAGED_APP',
+  'O8_BUNDLED_MCP_DIR',
   'O8_APFS_DEPENDENCY_IMAGES',
   'O8_SKIP_PRELAUNCH_TYPECHECK',
 ] as const;
@@ -152,6 +169,7 @@ process.env.O8_QODER_BIN = fakeQoderPath;
 process.env.O8_FAKE_QODER_CAPTURE = capturePath;
 process.env.O8_CRASH_SURVIVABLE_WORKERS = '1';
 process.env.O8_PACKAGED_APP = '0';
+process.env.O8_BUNDLED_MCP_DIR = bundledCliDir;
 process.env.O8_APFS_DEPENDENCY_IMAGES = '0';
 process.env.O8_SKIP_PRELAUNCH_TYPECHECK = '1';
 
@@ -165,7 +183,7 @@ writeFileSync(
     '  process.exit(0);',
     '}',
     'fs.appendFileSync(',
-    '  process.env.O8_FAKE_QODER_CAPTURE,',
+    `  ${JSON.stringify(capturePath)},`,
     "  `${JSON.stringify({ cwd: process.cwd(), argv: process.argv.slice(2) })}\\n`,",
     ');',
     "process.stderr.write('fake qoder fatal exit\\n');",
@@ -174,6 +192,13 @@ writeFileSync(
   'utf8',
 );
 chmodSync(fakeQoderPath, 0o755);
+// Build the real packaged CLI once. Each launch still copies and verifies it,
+// without serializing repeated source builds inside the runtime-root lock.
+mkdirSync(join(bundledCliDir, 'bin'), { recursive: true });
+execFileSync(process.execPath, [join(process.cwd(), 'cli/esbuild.config.mjs'),
+  '--worker-output', join(bundledCliDir, 'bin/o8.mjs')], {
+  cwd: process.cwd(), stdio: 'pipe', env: { PATH: process.env.PATH, NODE_ENV: 'test' },
+});
 
 function git(cwd: string, ...args: string[]): void {
   execFileSync('git', args, { cwd, stdio: 'pipe' });
@@ -290,6 +315,7 @@ async function waitFor<T>(
 }
 
 describe('declarative packet dispatch worktree reachability', () => {
+  declarativeLaunchDeadlineTest({ repo: createRemoteBackedRepo, packet, mission, capturePath });
   beforeEach(() => {
     readinessBoundary.real = false;
     worktreeFailure.enabled = false;
@@ -331,13 +357,14 @@ describe('declarative packet dispatch worktree reachability', () => {
 
     const spawn = await waitFor(() => {
       if (!existsSync(capturePath)) return null;
-      const line = readFileSync(capturePath, 'utf8').trim().split('\n').filter(Boolean)[0];
+      const line = readFileSync(capturePath, 'utf8').trim().split('\n').filter(Boolean)
+        .find(row => realpathSync(JSON.parse(row).cwd) === realpathSync(launchedLane!.worktreePath!));
       return line ? JSON.parse(line) as { cwd: string; argv: string[] } : null;
     }, 'fake qoder spawn');
     expect(realpathSync(spawn.cwd)).not.toBe(realpathSync(repoPath));
     expect(launchedLane?.worktreePath).toBeTruthy();
     expect(laneRegistry.getLaneEvents(launchedLane!.id, 200)
-      .filter((event) => event.verb === 'runtime_launch_step').map((event) => event.payload.phase))
+      .filter((event) => event.verb === 'runtime_launch_step' && event.payload.step === 'backend_readiness').map((event) => event.payload.phase))
       .toEqual(['started', 'completed']);
     expect(launchedPacket.lane?.worktreePath).toBe(launchedLane?.worktreePath);
     const worktreePath = realpathSync(launchedLane!.worktreePath!);
@@ -451,8 +478,9 @@ describe('declarative packet dispatch worktree reachability', () => {
   it('retries changing artifact accounting before spawning and records the admission cause', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })));
     mkdirSync(ownedRoot, { recursive: true });
-    artifactRace.file = join(ownedRoot, 'active-writer.log');
-    artifactRace.reads = 0;
+    artifactRace.file = join(realpathSync(ownedRoot), 'active-writer.log');
+    artifactRace.accounting = false;
+    artifactRace.injected = false;
     writeFileSync(artifactRace.file, 'initial writer output\n');
     const repoPath = createRemoteBackedRepo();
     await import('@/lib/repos/registry').then(({ addRepo }) => addRepo(repoPath));
@@ -484,8 +512,9 @@ describe('declarative packet dispatch worktree reachability', () => {
   it('stops after three admission retries when the writer never settles, without spawning or deleting evidence', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })));
     mkdirSync(ownedRoot, { recursive: true });
-    artifactRace.file = join(ownedRoot, 'continuous-writer.log');
-    artifactRace.reads = 0;
+    artifactRace.file = join(realpathSync(ownedRoot), 'continuous-writer.log');
+    artifactRace.accounting = false;
+    artifactRace.injected = false;
     artifactRace.continuous = true;
     writeFileSync(artifactRace.file, 'initial writer output\n');
     const repoPath = createRemoteBackedRepo();
@@ -560,7 +589,7 @@ describe('declarative packet dispatch worktree reachability', () => {
     });
     const lane = lanes.findLatestLaneByPacket(packetId)!;
     const events = lanes.getLaneEvents(lane.id, 200);
-    const steps = events.filter((event) => event.verb === 'runtime_launch_step');
+    const steps = events.filter((event) => event.verb === 'runtime_launch_step' && event.payload.step === 'backend_readiness');
     expect(steps.map((event) => event.payload.phase)).toEqual(['started', 'failed']);
     expect(steps[0].payload).toMatchObject({ packetId, runtime: 'qoder', step: 'backend_readiness', deadlineMs: 20_000 });
     expect(steps[1].payload).toMatchObject({

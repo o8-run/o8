@@ -12,8 +12,9 @@ import { repoSlugFromRemote, shortenPath } from '@/components/desktop/workspace-
 import { XtermPanel, type XtermPanelHandle } from '@/components/desktop/workspace-terminal/XtermPanel';
 import { useTheme } from '@/lib/theme/context';
 import { isWebMachineBrowserSurface } from '@/lib/connect/web-machine-surface';
-import { isNonMacShell } from '@/lib/desktop/host-platform';
+import { shellLacksGlass } from '@/lib/desktop/host-platform';
 import { WorkspaceBootLoaderClaim } from '@/components/desktop/workspace-terminal/workspace-boot-loader-claim';
+import { WorkspaceBootLoader } from '@/components/desktop/workspace-terminal/WorkspaceBootLoader';
 import { updateResidentTabIds } from '@/components/desktop/workspace-terminal/resident-tabs';
 import { retryingLazy } from '@/lib/react/retrying-lazy';
 import { OUTSIDE_WORKER_HOST_EMPTY_EVENT } from './use-session-tiles';
@@ -544,7 +545,7 @@ const ChatResidentPanel = memo(function ChatResidentPanel({
 
 const FleetCanvasResidentPanel = memo(function FleetCanvasResidentPanel({ active, repoPath }: { active: boolean; repoPath: string | null }) {
   return (
-    <Suspense fallback={null}>
+    <Suspense fallback={active ? <WorkspaceBootLoader contained /> : null}>
       <LazyFleetCanvasTab active={active} repoPath={repoPath} />
     </Suspense>
   );
@@ -585,7 +586,7 @@ export const TerminalResidentPanel = memo(function TerminalResidentPanel({
 }) {
   const { workspaceGlass } = useTheme();
   const connectionEpoch = useWsConnectionEpoch();
-  const transparentTerminal = workspaceGlass && !isWebMachineBrowserSurface() && !isNonMacShell();
+  const transparentTerminal = workspaceGlass && !isWebMachineBrowserSurface() && !shellLacksGlass();
   useEffect(() => {
     if (window.__o8TerminalBenchEnabled !== true) return;
     console.warn('[workspace-terminal:bench]', JSON.stringify({
@@ -680,7 +681,7 @@ const CanvasPanel = memo(function CanvasPanel({
         overflow: 'hidden',
       }}
     >
-      <Suspense fallback={null}>
+      <Suspense fallback={active ? <WorkspaceBootLoader contained /> : null}>
         <LazyCanvas
           active={active}
           tabs={[tab.canvasTab]}

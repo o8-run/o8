@@ -140,3 +140,54 @@ it.each([
   }
   expect(transport.sends).toEqual([]);
 });
+
+it.each([
+  { width: 1440, zoom: 1.5, overlay: true },
+  { width: 900, zoom: 0.67, overlay: false },
+])('uses available layout width for the sidebar at $width with saved zoom $zoom', async ({ width, zoom, overlay }) => {
+  Object.defineProperty(window, 'innerWidth', { configurable: true, value: width });
+  localStorage.setItem('o8:ui-zoom', String(zoom));
+  localStorage.setItem('o8:sidebar:visible', 'true');
+  localStorage.setItem('o8:sidebar:width', '500');
+  await act(async () => root.render(createElement(DashboardPage)));
+  await vi.dynamicImportSettled();
+  const aside = host.querySelector<HTMLElement>('#o8-chat-list')!;
+  await settle();
+  expect(document.documentElement.style.zoom).toBe(String(zoom));
+  expect(aside.style.position).toBe(overlay ? 'absolute' : 'relative');
+  const toggle = [...host.querySelectorAll<HTMLButtonElement>('[aria-label="Toggle sidebar"]')]
+    .find(button => !button.closest('[aria-hidden="true"]'))!;
+  if (aside.style.display === 'none') await act(async () => toggle.click());
+  await settle();
+  expect(aside.style.display).toBe('flex');
+  expect(localStorage.getItem('o8:sidebar:width')).toBe('500');
+  expect(transport.sends).toEqual([]);
+});
+
+it('reflows an open sidebar on zoom shortcuts without a native resize and preserves the active draft', async () => {
+  localStorage.setItem('o8:sidebar:visible', 'true');
+  await import('@/components/desktop/workspace-terminal/OrchestratorTab');
+  await act(async () => root.render(createElement(DashboardPage)));
+  await vi.dynamicImportSettled();
+  await expect.poll(async () => { await settle(); return host.querySelectorAll('textarea').length; }, { timeout: 10000 }).toBeGreaterThan(0);
+  const input = host.querySelector<HTMLTextAreaElement>('textarea')!;
+  await type(input, 'Retain this exact zoom draft.');
+  const workspace = input.closest('[data-o8-workspace-root]')!;
+  const selected = workspace.getAttribute('data-o8-active-tab-id');
+  const aside = host.querySelector<HTMLElement>('#o8-chat-list')!;
+  expect(aside.style.position).toBe('relative');
+  for (let step = 0; step < 2; step++) await act(async () => input.dispatchEvent(new KeyboardEvent('keydown', { key: '+', metaKey: true, bubbles: true, cancelable: true })));
+  await settle();
+  expect(document.documentElement.style.zoom).toBe('1.25');
+  expect(aside.style.position).toBe('absolute');
+  const toggle = [...host.querySelectorAll<HTMLButtonElement>('[aria-label="Toggle sidebar"]')]
+    .find(button => !button.closest('[aria-hidden="true"]'))!;
+  if (aside.style.display === 'none') await act(async () => toggle.click());
+  await settle(); expect(aside.style.display).toBe('flex');
+  await act(async () => input.dispatchEvent(new KeyboardEvent('keydown', { key: '0', metaKey: true, bubbles: true, cancelable: true })));
+  await settle(); expect(aside.style.position).toBe('relative'); expect(aside.style.display).toBe('flex');
+  expect(workspace.getAttribute('data-o8-active-tab-id')).toBe(selected);
+  expect(workspace.querySelector('textarea')).toBe(input); expect(input.value).toBe('Retain this exact zoom draft.');
+  expect(localStorage.getItem('o8:sidebar:visible')).toBe('true');
+  expect(transport.sends).toEqual([]);
+});

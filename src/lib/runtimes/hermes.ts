@@ -106,6 +106,7 @@ export const hermesRuntime: AgentRuntime = {
     const result = await launchOwnedHermesSession({
       cwd: opts.cwd,
       prompt: opts.prompt,
+      promptMemoryRevision: opts.promptMemoryRevision,
       clientMutationId: opts.clientMutationId,
       model: opts.model,
       laneId: opts.laneId,

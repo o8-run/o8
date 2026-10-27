@@ -14,6 +14,7 @@ import { useDurableComposerQueue } from './useDurableComposerQueue';
 
 interface UseDefaultComposerSendBufferOptions {
   active: boolean;
+  blocked?: boolean;
   backend: string;
   capabilityBackend?: string;
   busy: boolean;
@@ -37,6 +38,7 @@ interface UseDefaultComposerSendBufferOptions {
 
 export function useDefaultComposerSendBuffer({
   active,
+  blocked = false,
   backend,
   capabilityBackend = backend,
   busy,
@@ -109,7 +111,7 @@ export function useDefaultComposerSendBuffer({
   }, [clearSendBuffer, repoPath, threadId]);
 
   const submit = useCallback((intent: 'send-next' | 'steer-now') => {
-    if (savingRef.current || uploading || uploadError) return;
+    if (blocked || savingRef.current || uploading || uploadError) return;
     const draft = latestInputRef.current;
     const text = latestInputRef.current.trim() || (attachedImages.length > 0 ? '[Image attached]' : '');
     if (!text) return;
@@ -178,7 +180,7 @@ export function useDefaultComposerSendBuffer({
     setInput('');
     latestInputRef.current = '';
     clearAttachments();
-  }, [active, attachedImages, backend, busy, uploading, uploadError, captureQueuedSend, clearAttachments, durable, latestInputRef, sendBuffer, sendUnbuffered, setInput, shouldBypass]);
+  }, [active, attachedImages, backend, blocked, busy, uploading, uploadError, captureQueuedSend, clearAttachments, durable, latestInputRef, sendBuffer, sendUnbuffered, setInput, shouldBypass]);
 
   const handleSend = useCallback(() => submit('send-next'), [submit]);
   const supportsSteer = durable.canSteer;

@@ -61,6 +61,7 @@ impl Fixture {
         if !projects {
             command.args(option.split_whitespace());
         }
+        command.arg("--owned-stdio");
         let mut server = command
             .current_dir(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.."))
             .env(
@@ -68,6 +69,7 @@ impl Fixture {
                 root.join("brain-requests.json"),
             )
             .env("O8_NEXT_API_TOKEN", "fixture-shell-bearer")
+            .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::from(
                 fs::File::create(root.join("fixture.log")).unwrap(),

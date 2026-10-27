@@ -71,7 +71,7 @@ fn stalled_artifact_unwinds_ownership_and_scheduler_serves_a_freshness_request()
             std::thread::spawn(move || { while !end.load(Ordering::Acquire) { std::thread::sleep(Duration::from_millis(10)); } drop(stream); });
             continue;
         } else if path.starts_with("/v1/") || path == "/latest.json" {
-            serde_json::json!({"version":"0.2.0", "url": format!("{origin}/artifact"), "signature":"fixture"})
+            serde_json::json!({"channel": "stable", "version":"0.2.0", "url": format!("{origin}/artifact"), "signature":"fixture"})
         } else if path.starts_with("/api/panel/release-health") {
             serde_json::json!({"pulled":false})
         } else if headers.starts_with("get ") {
@@ -83,7 +83,7 @@ fn stalled_artifact_unwinds_ownership_and_scheduler_serves_a_freshness_request()
                 let allowed = action == "admit" && data["admitted"] == false;
                 if allowed { data["admitted"] = true.into(); }
                 if action == "failed" { data["failed"] = true.into(); }
-                serde_json::json!({"allowed":allowed, "version":"0.2.0", "attemptId":body["autoApply"]["attemptId"]})
+                serde_json::json!({"allowed":allowed, "channel": "stable", "version":"0.2.0", "attemptId":body["autoApply"]["attemptId"]})
             } else {
                 data["checkedAt"] = body["checkedAt"].clone();
                 data["reports"] = (data["reports"].as_u64().unwrap() + 1).into();
