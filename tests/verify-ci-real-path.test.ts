@@ -29,7 +29,14 @@ fs.appendFileSync(process.env.VERIFY_FIXTURE_RECEIPT, JSON.stringify({
   cargoHome: process.env.CARGO_HOME, targetDir: process.env.CARGO_TARGET_DIR,
   daemon: process.env.O8D_HTTP_TEST_BINARY, display: process.env.DISPLAY, wayland: process.env.WAYLAND_DISPLAY,
   nativeShard: process.env.O8_NATIVE_TEST_SHARD, nativePhase: process.env.O8_NATIVE_TEST_PHASE,
+  integrationShard: process.env.O8_INTEGRATION_SHARD,
 }) + '\\n');
+if ('${name}' === 'npm' && args.includes('test:integration') && process.env.VERIFY_FIXTURE_REAL_INTEGRATION === '1') {
+  const separator = args.indexOf('--');
+  const result = require('node:child_process').spawnSync(process.execPath,
+    ['scripts/integration-test-gate.mjs', ...(separator < 0 ? [] : args.slice(separator + 1))], { stdio: 'inherit' });
+  process.exit(result.status ?? 1);
+}
 const barrier = process.env.VERIFY_FIXTURE_BARRIER;
 if (barrier) {
   const path = require('node:path');
@@ -88,7 +95,7 @@ function coverage(workflow: object) {
 }
 function executeFixture(selectedFile: string, nestedDependency = false,
   { fail = '', parallel = false, discoveryMs = 0, nativeChange = '', nativeState = 'untracked', setupChange = '',
-    nativeDeadlineMinutes = 0, nativeDelayMs = 0 } = {}) {
+    nativeDeadlineMinutes = 0, nativeDelayMs = 0, main = false, mainFailure = false, detachedMain = false } = {}) {
   const directory = mkdtempSync(path.join(root, 'verifier-fixture-'));
   const files = ['scripts/verify-ci.mjs', 'scripts/lib/verify-ci.mjs', 'scripts/ci/check-verify-ci.mjs',
     'scripts/ci/resource-owning-changed.mjs', 'scripts/ci/review-dependency-changes.mjs', 'scripts/ci/native-changes.mjs',
@@ -124,7 +131,26 @@ function executeFixture(selectedFile: string, nestedDependency = false,
   mkdirSync(path.join(directory, 'tests'));
   const browserFile = selectedFile;
   writeFileSync(path.join(directory, browserFile), 'base\n');
-  writeFileSync(path.join(directory, 'tests/test-classification.json'), JSON.stringify({ resourceOwning: [{ path: browserFile }] }));
+  const integrationFiles = main ? Array.from({ length: 6 }, (_, index) => `tests/unchanged-integration-${index}.test.mjs`) : [browserFile];
+  writeFileSync(path.join(directory, 'tests/test-classification.json'), JSON.stringify({ resourceOwning: integrationFiles.map(path => ({ path })) }));
+  if (main) {
+    for (const file of ['scripts/integration-test-gate.mjs', 'scripts/lib/red-baseline.mjs']) {
+      copyFileSync(path.join(repo, file), path.join(directory, file));
+    }
+    mkdirSync(path.join(directory, 'config/vitest'), { recursive: true });
+    writeFileSync(path.join(directory, 'config/vitest/vitest.integration.config.ts'), `export default {
+      test: { include: ['tests/*.test.mjs'], maxWorkers: 1, reporters: ['json'], outputFile: process.env.O8_TEST_GATE_REPORT_PATH }
+    };`);
+    writeFileSync(path.join(directory, 'tests/integration-linux-baseline.json'), JSON.stringify({ files: [] }));
+    for (const [index, file] of integrationFiles.entries()) {
+      writeFileSync(path.join(directory, file), `import { it } from 'vitest';
+        import { appendFileSync } from 'node:fs';
+        it('unchanged integration fixture ${index}', () => {
+          appendFileSync(${JSON.stringify(path.join(directory, 'executed.jsonl'))}, '${index}\\n');
+          ${mainFailure && index === 0 ? "throw new Error('unchanged integration failure');" : ''}
+        });`);
+    }
+  }
   writeFileSync(path.join(directory, 'package.json'), JSON.stringify(manifest));
   mkdirSync(path.join(directory, 'native/o8-next/src'), { recursive: true });
   writeFileSync(path.join(directory, 'native/o8-next/src/input_fixture.rs'),
@@ -144,7 +170,9 @@ function executeFixture(selectedFile: string, nestedDependency = false,
   }
   git('commit', '-qm', 'fixture base');
   git('update-ref', 'refs/remotes/origin/main', 'HEAD');
-  writeFileSync(path.join(directory, browserFile), 'changed\n');
+  if (detachedMain) git('checkout', '--detach', '-q');
+  else if (!main) git('checkout', '-qb', 'fixture-branch');
+  if (!main) writeFileSync(path.join(directory, browserFile), 'changed\n');
   if (nestedDependency) {
     const nested = path.join(directory, 'nested');
     mkdirSync(nested);
@@ -169,6 +197,8 @@ function executeFixture(selectedFile: string, nestedDependency = false,
     cwd: directory, encoding: 'utf8', timeout: 60_000,
     env: { ...process.env, PATH: bin + path.delimiter + process.env.PATH, CI: '', NODE_ENV: 'development',
       VERIFY_FIXTURE_RECEIPT: receipt, VERIFY_FIXTURE_FAIL: fail,
+      VERIFY_FIXTURE_REAL_INTEGRATION: main ? '1' : '',
+      ...(detachedMain ? { GITHUB_EVENT_NAME: 'push', GITHUB_REF: 'refs/heads/main' } : {}),
       VERIFY_FIXTURE_NATIVE_DELAY_MS: String(nativeDelayMs),
       DISPLAY: 'fixture-display', WAYLAND_DISPLAY: 'fixture-wayland',
       VERIFY_FIXTURE_BARRIER: parallel ? mkdtempSync(path.join(root, 'parallel-')) : '' },
@@ -178,6 +208,39 @@ function executeFixture(selectedFile: string, nestedDependency = false,
 }
 
 describe('local CI verification through its command entry point', () => {
+  it.each([
+    { mainFailure: true, detachedMain: false },
+    { mainFailure: false, detachedMain: false },
+    { mainFailure: true, detachedMain: true },
+  ])('runs unchanged integration fixtures on main and propagates failure ($mainFailure, detached=$detachedMain)', options => {
+    const result = executeFixture('tests/fixture.test.ts', false, { main: true, ...options });
+    expect(result.error).toBeUndefined();
+    expect(result.status, result.stderr + result.stdout).toBe(options.mainFailure ? 1 : 0);
+    const integration = result.calls.filter(call => call.args.includes('test:integration'));
+    expect(integration.map(call => call.integrationShard)).toEqual(['1/6', '2/6', '3/6', '4/6', '5/6', '6/6']);
+    expect(integration.every(call => !call.args.some((arg: string) => arg.endsWith('.test.mjs')))).toBe(true);
+    expect(result.stderr).not.toContain('[resource-owning-changed]');
+    expect(readFileSync(path.join(result.directory, 'executed.jsonl'), 'utf8').trim().split('\n')).toEqual(['0', '1', '2', '3', '4', '5']);
+    expect(spawnSync('git', ['diff', '--exit-code', 'HEAD', '--', 'tests'], { cwd: result.directory }).status).toBe(0);
+    if (options.mainFailure) expect(result.stdout).toContain('FAIL tests/unchanged-integration-0.test.mjs');
+  }, 60_000);
+
+  it.each(['main trigger', 'missing shard', 'filtered command', 'missing browser', 'tolerated failure', 'uncovered action'])(
+    'rejects a hidden main integration coverage change: %s', change => {
+      const workflow = parse(readFileSync(workflowPath, 'utf8'));
+      const job = workflow.jobs['integration-weekly'];
+      if (change === 'main trigger') job.if = "github.event.schedule == '17 5 * * 0'";
+      if (change === 'missing shard') job.strategy.matrix.shard.pop();
+      if (change === 'filtered command') job.steps.find((step: { run?: string }) => step.run === 'npm run test:integration').run += ' -- tests/selected.test.ts';
+      if (change === 'missing browser') job.steps = job.steps.filter((step: { run?: string }) => !step.run?.includes('playwright-core'));
+      if (change === 'tolerated failure') job['continue-on-error'] = true;
+      if (change === 'uncovered action') job.steps.push({ uses: './.github/actions/uncovered-fixture' });
+      const result = coverage(workflow);
+      expect(result.status, result.stdout).toBe(1);
+      expect(result.stderr).toContain('verify:ci');
+    },
+  );
+
   it('runs the CI commands, environments, classification and all four shards', () => {
     expect(manifest.scripts['verify:ci']).toBe('node scripts/verify-ci.mjs');
     const result = execute();

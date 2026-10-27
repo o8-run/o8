@@ -78,7 +78,13 @@ async function runStep(step, onQueueWait = () => {}) {
 }
 
 try {
-  const plan = readVerificationPlan(root);
+  const branch = spawnSync('git', ['symbolic-ref', '--quiet', '--short', 'HEAD'], {
+    cwd: root, encoding: 'utf8', env: environment(),
+  }).stdout?.trim();
+  const fullIntegration = branch ? branch === 'main'
+    : process.env.GITHUB_EVENT_NAME === 'push' && process.env.GITHUB_REF === 'refs/heads/main';
+  const plan = readVerificationPlan(root, undefined, { fullIntegration });
+  if (fullIntegration) console.log('[verify:ci] main branch: full integration coverage');
   if (process.versions.node.split('.')[0] !== plan.nodeMajor) throw new Error(`Use Node ${plan.nodeMajor} to match CI.`);
   const expectedNpm = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8')).packageManager.split('@')[1];
   const npm = spawnSync('npm --version', { shell: true, encoding: 'utf8', env: environment() });
