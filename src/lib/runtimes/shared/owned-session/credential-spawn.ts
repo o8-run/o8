@@ -1,3 +1,4 @@
+import { assertWorkerMemoryCurrent } from '@/lib/dispatch/worker-memory-context';
 import { assertRuntimeSpawnDeadline } from '@/lib/runtime/launch-deadline';
 import { getLane } from '@/lib/lane/registry';
 import type { ChildProcess } from 'node:child_process';
@@ -49,6 +50,7 @@ function withCheckedLaunch<T>(input: LaunchInput, create: (launch: { command: st
     assertControlledLaunchGrantCurrent(input.session);
     assertOwnedActionAdmission(input.session, input.runId);
     input.assertWorkerO8Current?.();
+    assertWorkerMemoryCurrent(input.session);
     input.onSubmit?.();
     return withChildCreationGuard(() => {
       assertOwnedActionAdmission(input.session, input.runId);

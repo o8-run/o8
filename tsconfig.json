@@ -40,6 +40,7 @@
     "tests/e2e",
     "playwright.config.ts",
     "cli",
-    "src-tauri/vendor"
+    "src-tauri/vendor",
+    "native/o8-next/target"
   ]
 }

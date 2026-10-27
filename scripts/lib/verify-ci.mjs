@@ -1,10 +1,11 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import { parse } from 'yaml';
 
 // Every job must be either executable locally or explicitly hosted. Unknown
 // jobs fail closed, including jobs added without updating a separate inventory.
-const hostedJobs = {
+const alwaysHostedJobs = {
   'typecheck-parity': 'weekly comparison',
   'integration-weekly': 'weekly integration lane',
   'integration-weekly-report': 'hosted reporting',
@@ -14,7 +15,7 @@ const hostedJobs = {
   'rust-check-linux': 'native target runner',
   'roadmap-check': 'authenticated issue inventory',
 };
-const localJobs = ['typecheck', 'server-bundle-size', 'lint', 'test-shards', 'test', 'security', 'governance-smoke', 'integration-changed'];
+const alwaysLocalJobs = ['typecheck', 'server-bundle-size', 'lint', 'test-shards', 'test', 'security', 'governance-smoke', 'integration-changed'];
 const setupActions = ['actions/checkout@', 'actions/setup-node@', 'actions/cache/restore@',
   'actions/cache/save@', 'actions/upload-artifact@'];
 const auditAction = 'rustsec/audit-check@';
@@ -39,7 +40,7 @@ function expand(value, shard) {
   return result;
 }
 function usesTestProcess(command, scripts, seen = new Set()) {
-  if (/\bvitest\b|npm run test:(?:unit|integration|classification:check)\b|scripts\/ci\/check-hermetic-shards\.mjs/.test(command)) return true;
+  if (/\bvitest\b|npm run test:(?:unit|integration|classification:check)\b|scripts\/ci\/check-hermetic-shards\.mjs|native-test-shard\.mjs --cargo --phase=timed/.test(command)) return true;
   return [...command.matchAll(/\bnpm run ([\w:-]+)/g)].some(([, name]) => {
     if (seen.has(name) || typeof scripts[name] !== 'string') return false;
     return usesTestProcess(scripts[name], scripts, new Set([...seen, name]));
@@ -80,7 +81,13 @@ function selectedSteps(job, shard) {
   });
 }
 
-export function readVerificationPlan(root, workflowPath = path.join(root, '.github/workflows/ci.yml')) {
+export function readVerificationPlan(root, workflowPath = path.join(root, '.github/workflows/ci.yml'),
+  { platform = process.platform, arch = process.arch } = {}) {
+  const nativeLocal = platform === 'linux' && arch === 'x64';
+  const hostedJobs = { ...alwaysHostedJobs, ...(!nativeLocal ? {
+    'o8-next-tests': 'Linux x64 GPUI/X11 suite requires the hosted Linux x64 runner on this platform',
+  } : {}) };
+  const localJobs = [...alwaysLocalJobs, ...(nativeLocal ? ['o8-next-tests'] : [])];
   const scripts = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8')).scripts;
   const workflow = parse(readFileSync(workflowPath, 'utf8'));
   const jobs = workflow.jobs;
@@ -94,26 +101,89 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
   }
   for (const id of localJobs) {
     const job = jobs[id];
+    requireCondition(!job['continue-on-error'] && job.steps.every(step => !step['continue-on-error']),
+      `${id} failure tolerance needs a verify:ci equivalent`);
     requireCondition(job.defaults?.run === undefined, `${id} run defaults need a verify:ci equivalent`);
     job.env = { ...workflow.env, ...job.env };
     requireCondition(typeof job.name === 'string', `${id} needs a CI check name`);
-    requireCondition(!job.strategy || id === 'test-shards', `${id} has an unsupported matrix`);
+    requireCondition(!job.strategy || ['test-shards', 'o8-next-tests'].includes(id), `${id} has an unsupported matrix`);
     for (const step of job.steps ?? []) {
       if (!step.uses) continue;
       const supported = setupActions.some(prefix => step.uses.startsWith(prefix))
-        || (id === 'security' && step.uses.startsWith(auditAction));
+        || (id === 'security' && step.uses.startsWith(auditAction))
+        || (id === 'o8-next-tests' && step.uses === './.github/actions/next-linux-setup');
       requireCondition(supported, `action ${step.uses} in ${id} has no verify:ci equivalent`);
     }
   }
-  requireCondition(Array.isArray(jobs.test.needs) && jobs.test.needs.length === 1
-    && jobs.test.needs[0] === 'test-shards', 'the hermetic aggregate must require the shard job');
+  requireCondition(JSON.stringify(jobs.test.needs) === JSON.stringify(['test-shards', 'o8-next-tests']),
+    'the hermetic aggregate must require both shard and native jobs');
+  const testCondition = "github.event.schedule != '41 13 * * 1'";
+  requireCondition(jobs['test-shards'].if === testCondition && jobs.test.if === `always() && ${testCondition}`
+    && !jobs.test['continue-on-error'], 'required test conditions or failure tolerance need a verify:ci equivalent');
   const aggregate = jobs.test.steps;
-  requireCondition(aggregate?.length === 1
-    && aggregate[0].run?.trim() === 'echo "Hermetic shard result: $SHARD_RESULT"\ntest "$SHARD_RESULT" = success'
+  requireCondition(aggregate?.length === 1 && !aggregate[0].if && !aggregate[0]['continue-on-error']
+    && aggregate[0].run?.trim() === 'echo "Hermetic shard result: $SHARD_RESULT"\necho "Native test result: $NATIVE_RESULT"\ntest "$SHARD_RESULT" = success && test "$NATIVE_RESULT" = success'
     && aggregate[0].shell === undefined && aggregate[0]['working-directory'] === undefined
-    && aggregate[0].env?.SHARD_RESULT === '${{ needs.test-shards.result }}'
-    && Object.keys(aggregate[0].env).length === 1,
-  'hermetic aggregate steps changed; update verify:ci coverage');
+    && JSON.stringify(aggregate[0].env) === JSON.stringify({
+      SHARD_RESULT: '${{ needs.test-shards.result }}', NATIVE_RESULT: '${{ needs.o8-next-tests.result }}',
+    }), 'hermetic aggregate steps changed; update verify:ci coverage');
+  const native = jobs['o8-next-tests'];
+  requireCondition(native.name === 'o8 next Native Tests (Linux)' && native['runs-on'] === 'ubuntu-24.04'
+    && native.if === testCondition && !native.defaults && !native.needs
+    && isDeepStrictEqual(native.strategy, { 'fail-fast': false, matrix: { shard: [1, 2, 3, 4] } })
+    && !native['continue-on-error'] && native.steps.every(step => !step['continue-on-error']),
+  'native test runner or condition needs a verify:ci equivalent');
+  const nativeCondition = "steps.native.outputs.changed == 'true'";
+  const nativeRunSteps = native.steps.filter(step => step.run);
+  requireCondition(native.steps.length === 6 && nativeRunSteps.length === 4
+    && nativeRunSteps[0].id === 'native' && nativeRunSteps[0].run === 'node scripts/ci/native-changes.mjs --o8-next'
+    && !nativeRunSteps[0].if && !nativeRunSteps[0].env && !nativeRunSteps[0].shell
+    && !nativeRunSteps[0]['working-directory']
+    && native.steps[0].uses === 'actions/checkout@v4'
+    && native.steps[2].uses === './.github/actions/next-linux-setup'
+    && native.steps[2].if === nativeCondition
+    && !native.steps[0].if && !native.steps[0].env && !native.steps[2].env
+    && isDeepStrictEqual(native.steps[0].with, { 'fetch-depth': 0, filter: 'blob:none' })
+    && JSON.stringify(native.steps[2].with) === JSON.stringify({
+      'cache-key': "tests-${{ hashFiles('crates/o8d/Cargo.lock') }}",
+      'headless-tests': 'true',
+    }),
+  'native selection or setup needs a verify:ci equivalent');
+  const build = 'cargo build --locked --manifest-path crates/o8d/Cargo.toml --features experimental-http --bin o8d';
+  const test = "unset DISPLAY WAYLAND_DISPLAY\nTIMEFORMAT='o8 next native tests wall=%3R s'\ntime node scripts/ci/native-test-shard.mjs --cargo --phase=regular";
+  const probes = "unset DISPLAY WAYLAND_DISPLAY\nTIMEFORMAT='o8 next native probes wall=%3R s'\ntime node scripts/ci/native-test-shard.mjs --cargo --phase=timed";
+  requireCondition(nativeRunSteps[1].run === build && nativeRunSteps[2].run.trim() === test
+    && nativeRunSteps[3].run.trim() === probes
+    && nativeRunSteps.slice(1).every(step => step.if === nativeCondition
+      && !step.shell && !step['working-directory'] && !step['continue-on-error'] && !step.env),
+  'native test commands need a verify:ci equivalent');
+  const nativeEnv = {
+    CARGO_HOME: '${{ github.workspace }}/.o8-next-cargo',
+    CARGO_TARGET_DIR: '${{ github.workspace }}/native/o8-next/target',
+    CARGO_PROFILE_DEV_DEBUG: '0', CARGO_INCREMENTAL: '0',
+    O8D_HTTP_TEST_BINARY: '${{ github.workspace }}/native/o8-next/target/debug/o8d',
+    O8_NATIVE_TEST_SHARD: '${{ matrix.shard }}/4',
+  };
+  requireCondition(JSON.stringify(native.env) === JSON.stringify(nativeEnv), 'native environment needs a verify:ci equivalent');
+  const setup = parse(readFileSync(path.join(root, '.github/actions/next-linux-setup/action.yml'), 'utf8'));
+  const setupNodeVersion = jobs.typecheck.steps.find(step => step.uses?.startsWith('actions/setup-node@'))?.with?.['node-version'];
+  const expectedSetup = [
+    { uses: 'actions/setup-node@v4', with: { 'node-version': setupNodeVersion, cache: 'npm' } },
+    { shell: 'bash', run: `npm install -g "$(node -p 'require("./package.json").packageManager')"` },
+    { shell: 'bash', run: 'npm ci --prefer-offline' },
+    { uses: 'dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c', with: { toolchain: 'stable' } },
+    { uses: 'Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32', with: {
+      workspaces: 'native/o8-next', key: '${{ inputs.cache-key }}', 'save-if': "${{ github.ref == 'refs/heads/main' }}",
+    } },
+    { shell: 'bash', env: { O8_NATIVE_HEADLESS_TESTS: '${{ inputs.headless-tests }}' },
+      run: 'bash scripts/ci/install-native-linux-deps.sh' },
+    { if: "inputs.browser == 'true'", shell: 'bash', run: 'npx --no-install playwright-core install --with-deps chromium' },
+  ];
+  const execution = setup.runs?.steps?.map(step => Object.fromEntries(Object.entries(step).filter(([key]) => key !== 'name')));
+  requireCondition(setup.runs?.using === 'composite' && isDeepStrictEqual(execution, expectedSetup)
+    && setup.inputs?.browser?.default === 'false' && setup.inputs?.['cache-key']?.default === ''
+    && setup.inputs?.['headless-tests']?.default === 'false',
+  'native setup action needs a verify:ci equivalent');
   const shardJob = jobs['test-shards'];
   const shards = shardJob.strategy?.matrix?.shard;
   requireCondition(Array.isArray(shards) && shards.length > 0, 'hermetic shard matrix is missing');
@@ -129,6 +199,17 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
   };
   appendJob('typecheck');
   appendJob('lint');
+  if (nativeLocal) checks.push({ id: 'o8-next-tests', after: [], name: native.name, nativeInputs: true,
+    timeoutMs: native['timeout-minutes'] * 60_000,
+    // Each matrix job shares one build/test deadline. Run the same pairs
+    // serially against a shared cache without charging earlier shard time.
+    steps: [1, 2, 3, 4].flatMap(shard => nativeRunSteps.slice(1).map(step => ({
+      ...runStep({ ...step, env: {} }, {
+        ...native, env: Object.fromEntries(Object.entries(nativeEnv).map(([key, value]) =>
+          [key, value.replaceAll('${{ github.workspace }}', root)])),
+      }, shard, scripts), budgetGroup: shard,
+    }))),
+  });
   checks.push({ id: 'classification', after: dependencies(shardJob), name: classification[0].name ?? 'Test Classification',
     steps: classification.map(step => runStep(step, shardJob, 1, scripts)) });
   const unitSteps = shards.flatMap(shard => selectedSteps(shardJob, shard)
@@ -138,7 +219,7 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
       return { ...unit, env: { NODE_ENV: 'test', ...unit.env } };
     }));
   requireCondition(unitSteps.some(step => step.command.startsWith('npm run test:unit -- ')), 'CI must execute its hermetic unit entry point');
-  checks.push({ id: 'test', after: ['classification'], name: jobs.test.name, steps: unitSteps });
+  checks.push({ id: 'test', after: ['classification'], requiredResults: nativeLocal ? ['o8-next-tests'] : [], name: jobs.test.name, steps: unitSteps });
   appendJob('server-bundle-size');
   const integration = jobs['integration-changed'];
   const selection = integration.steps.find(step => step.id === 'select');
@@ -151,7 +232,7 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
   const integrationRun = integration.steps.find(step => step.run === 'npm run test:integration -- ${{ steps.select.outputs.files }}');
   requireCondition(integrationRun?.if === "steps.select.outputs.count != '0'", 'integration command changed');
   const browserFiles = ['tests/next-parity-route-ownership-real-path.test.ts', 'tests/review-diff-position-real-path.test.ts',
-    'tests/sidebar-window-layout-real-path.test.ts', 'tests/composer-screenshot-recovery-real-path.test.ts'];
+    'tests/sidebar-window-layout-real-path.test.ts', 'tests/compaction-progress-inference-real-path.test.ts', 'tests/composer-screenshot-recovery-real-path.test.ts'];
   const browserCondition = browserFiles.map(file => `contains(steps.select.outputs.files, '${file}')`).join(' || ');
   const browserSteps = integration.steps.filter(step => step.if === browserCondition
     && step.run === 'npx --no-install playwright-core install --with-deps chromium');

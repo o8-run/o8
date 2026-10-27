@@ -4,6 +4,7 @@ import type { SurfaceContext, SurfaceRoutes } from '../surface-routes';
 
 export async function prepare({ dataDir }: SurfaceContext): Promise<SurfaceRoutes> {
   process.env.O8_OWNED_PI_ROOT = join(dataDir, 'owned-pi');
+  process.env.O8_OWNED_PI_BUILTIN_ROOT = join(dataDir, 'owned-pi-builtin');
   return {};
 }
 export default async function register({ dataDir, root, seeds, fixtureToken, transcriptFixtures }: SurfaceContext): Promise<SurfaceRoutes> {
@@ -38,11 +39,11 @@ export default async function register({ dataDir, root, seeds, fixtureToken, tra
       }
       if (route === history && !seeds.some(seed => `llm-chat:${seed.id}` === url.searchParams.get('sessionKey'))
         && !(transcriptFixtures && url.searchParams.get('sessionKey') === 'opencode-owned:next-worker')
-        && url.searchParams.get('sessionKey') !== 'pi-owned:grid-runtime') return 404;
+        && url.searchParams.get('sessionKey') !== 'pi-builtin-owned:grid-runtime') return 404;
       if (route === context && !seeds.some(seed => seed.id === url.searchParams.get('tabId'))) return 404;
       if (!body) return 200;
       const target = JSON.parse(body);
-      return (route === runtimeArchive.POST ? target.sessionKey === 'pi-owned:grid-runtime'
+      return (route === runtimeArchive.POST ? target.sessionKey === 'pi-builtin-owned:grid-runtime'
         : (route === patchHistory || route === saveHistory) && seeds.some(seed => seed.id === target.tabId)) ? 200 : 400;
     },
     run: async (route, request) => {

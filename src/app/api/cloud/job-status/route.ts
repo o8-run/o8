@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 
 import { verifyCloudWorkerKey } from '@/lib/cloud/worker-auth';
-import { workerLaunchPayload } from '@/lib/cloud/worker-payload';
+import { ForgottenCloudContextError, workerLaunchPayload } from '@/lib/cloud/worker-payload';
 import { getJob, getJobMetrics, listJobControls, readJobEvents } from '@/lib/cloud/job-queue';
 
 export const runtime = 'nodejs';
@@ -33,8 +33,13 @@ export async function GET(request: Request) {
       { status: 404, headers: NO_STORE_HEADERS },
     );
   }
+  let launch: ReturnType<typeof workerLaunchPayload>;
+  try { launch = workerLaunchPayload(job.launch); } catch (error) {
+    if (error instanceof ForgottenCloudContextError) return NextResponse.json({ error: error.message, reason: 'memory_changed' }, { status: 409, headers: NO_STORE_HEADERS });
+    return NextResponse.json({ error: 'Could not read cloud worker context.' }, { status: 500, headers: NO_STORE_HEADERS });
+  }
   return NextResponse.json({
-    job: { ...job, launch: workerLaunchPayload(job.launch) },
+    job: { ...job, launch },
     metrics: getJobMetrics(auth.teamId, jobId),
     controls: listJobControls(auth.teamId, jobId),
     events: readJobEvents(auth.teamId, jobId, sinceId),

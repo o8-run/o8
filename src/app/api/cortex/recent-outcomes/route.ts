@@ -35,6 +35,10 @@ import { getActiveProjectScopeForRepo } from '@/lib/repos/projects';
 
 export async function GET(request: NextRequest) {
   const params = request.nextUrl.searchParams;
+  if (params.has('inventory')) {
+    const { outcomeMemoryInventory } = await import('@/lib/cortex/outcome-memory');
+    return outcomeMemoryInventory(request);
+  }
   const repoPath = params.get('repoPath')?.trim() ?? '';
   if (!repoPath) {
     return NextResponse.json({ ok: false, error: 'repoPath is required.' }, { status: 400 });

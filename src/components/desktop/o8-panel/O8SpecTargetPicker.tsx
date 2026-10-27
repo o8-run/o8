@@ -136,7 +136,9 @@ async function pickO8MdFile(): Promise<{ path: string | null; error: string | nu
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'pick' }),
       });
-      const data = await response.json() as { path?: string | null };
+      const data = await response.json() as { path?: string | null; unavailable?: boolean };
+      // No picker program on this host: fall through to typed path entry.
+      if (data.unavailable) throw new Error('native picker unavailable');
       if (typeof data.path === 'string') selected = data.path;
     } catch {
       selected = await requestPrompt({

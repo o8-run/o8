@@ -28,7 +28,7 @@ export async function startWorkerServer() {
   writeFileSync(join(data, 'chat-history', 'thoughts-composer-first.json'), JSON.stringify({
     title: 'Fixture worker', repoPath: repo, backend: 'pi', model: 'pi', orchestratorVisible: true,
     savedAt: '2026-10-01T00:00:00.000Z', messages: [{ id: 'initial', role: 'assistant', content: 'Fixture ready',
-      timestamp: 1790812800000, receipt: { permissionMode: 'plan' } }],
+      timestamp: 1790812800000, receipt: { permissionMode: 'plan', effort: 'adaptive', effortSource: 'runtime-default' } }],
   }));
   const wsPort = await freePort();
   Object.assign(process.env, { NODE_ENV: 'test', O8_DATA_DIR: data, CORTEX_IDE_DATA_DIR: data,

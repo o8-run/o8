@@ -10,17 +10,25 @@ const root = mkdtempSync(path.join(tmpdir(), 'o8-verify-ci-'));
 const workflowPath = path.join(repo, '.github/workflows/ci.yml');
 const guard = path.join(repo, 'scripts/ci/check-verify-ci.mjs');
 const manifest = JSON.parse(readFileSync(path.join(repo, 'package.json'), 'utf8'));
+const nativeLocal = process.platform === 'linux' && process.arch === 'x64';
+const nativeIt = it.skipIf(!nativeLocal);
 const bin = path.join(root, 'bin');
 mkdirSync(bin);
-for (const name of ['npm', 'npx', 'cargo-audit']) {
+for (const name of ['npm', 'npx', 'cargo-audit', 'cargo']) {
   const file = path.join(bin, name);
   writeFileSync(file, `#!${process.execPath}
 const fs = require('node:fs');
 const args = process.argv.slice(2);
 if (args[0] === '--version') { console.log('${manifest.packageManager.split('@')[1]}'); process.exit(0); }
+if ('${name}' === 'cargo' && process.env.VERIFY_FIXTURE_NATIVE_DELAY_MS) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Number(process.env.VERIFY_FIXTURE_NATIVE_DELAY_MS));
+}
 fs.appendFileSync(process.env.VERIFY_FIXTURE_RECEIPT, JSON.stringify({
-  tool: '${name}', args, ci: process.env.CI, nodeEnv: process.env.NODE_ENV,
+  tool: '${name}', args, startedAt: Date.now(), ci: process.env.CI, nodeEnv: process.env.NODE_ENV,
   nodeOptions: process.env.NODE_OPTIONS, dataDir: process.env.CORTEX_IDE_DATA_DIR,
+  cargoHome: process.env.CARGO_HOME, targetDir: process.env.CARGO_TARGET_DIR,
+  daemon: process.env.O8D_HTTP_TEST_BINARY, display: process.env.DISPLAY, wayland: process.env.WAYLAND_DISPLAY,
+  nativeShard: process.env.O8_NATIVE_TEST_SHARD, nativePhase: process.env.O8_NATIVE_TEST_PHASE,
 }) + '\\n');
 const barrier = process.env.VERIFY_FIXTURE_BARRIER;
 if (barrier) {
@@ -36,7 +44,14 @@ if (barrier) {
     while (!fs.existsSync(peer) && Date.now() < deadline) wait();
     if (!fs.existsSync(peer)) process.exit(9);
   }
-  const testCommand = args.includes('vitest') || args.includes('typecheck') || args.includes('test:unit') || args.includes('test:integration') || args.includes('test:classification:check');
+  if (args.includes('test:unit')) fs.writeFileSync(path.join(barrier, 'unit-started'), 'started');
+  if ('${name}' === 'cargo' && args.includes('test')) {
+    const deadline = Date.now() + 15000;
+    while (!fs.existsSync(path.join(barrier, 'unit-started')) && Date.now() < deadline) wait();
+    if (!fs.existsSync(path.join(barrier, 'unit-started'))) process.exit(9);
+  }
+  const testCommand = args.includes('vitest') || args.includes('typecheck') || args.includes('test:unit') || args.includes('test:integration') || args.includes('test:classification:check')
+    || ('${name}' === 'cargo' && process.env.O8_NATIVE_TEST_PHASE === 'timed');
   if (testCommand) {
     const lock = path.join(barrier, 'test-process');
     try { fs.writeFileSync(lock, 'active', { flag: 'wx' }); } catch { process.exit(8); }
@@ -55,6 +70,7 @@ if ('${name}' === 'npm' && args[0] === 'audit') {
   else console.log('found 0 vulnerabilities');
 } else console.log('fixture command completed');
 process.exit(process.env.VERIFY_FIXTURE_FAIL && (args.includes(process.env.VERIFY_FIXTURE_FAIL)
+  || ('${name}' === 'cargo' && process.env.VERIFY_FIXTURE_FAIL === 'timed phase' && process.env.O8_NATIVE_TEST_PHASE === 'timed')
   || ('${name}' === 'cargo-audit' && process.env.VERIFY_FIXTURE_FAIL === 'audit')) ? 7 : 0);
 `);
   chmodSync(file, 0o700);
@@ -71,13 +87,29 @@ function coverage(workflow: object) {
   return spawnSync(process.execPath, [guard, '--workflow', fixture], { cwd: repo, encoding: 'utf8' });
 }
 function executeFixture(selectedFile: string, nestedDependency = false,
-  { fail = '', parallel = false, discoveryMs = 0 } = {}) {
+  { fail = '', parallel = false, discoveryMs = 0, nativeChange = '', nativeState = 'untracked', setupChange = '',
+    nativeDeadlineMinutes = 0, nativeDelayMs = 0 } = {}) {
   const directory = mkdtempSync(path.join(root, 'verifier-fixture-'));
   const files = ['scripts/verify-ci.mjs', 'scripts/lib/verify-ci.mjs', 'scripts/ci/check-verify-ci.mjs',
-    'scripts/ci/resource-owning-changed.mjs', 'scripts/ci/review-dependency-changes.mjs', '.github/workflows/ci.yml'];
+    'scripts/ci/resource-owning-changed.mjs', 'scripts/ci/review-dependency-changes.mjs', 'scripts/ci/native-changes.mjs',
+    '.github/workflows/ci.yml', '.github/actions/next-linux-setup/action.yml', 'scripts/ci/native-test-shard.mjs',
+    'scripts/ci/native-test-inputs.mjs', 'scripts/ci/install-native-linux-deps.sh'];
   for (const file of files) {
     mkdirSync(path.dirname(path.join(directory, file)), { recursive: true });
     copyFileSync(path.join(repo, file), path.join(directory, file));
+  }
+  if (nativeDeadlineMinutes) {
+    const file = path.join(directory, '.github/workflows/ci.yml');
+    const workflow = parse(readFileSync(file, 'utf8'));
+    workflow.jobs['o8-next-tests']['timeout-minutes'] = nativeDeadlineMinutes;
+    writeFileSync(file, stringify(workflow));
+  }
+  if (setupChange) {
+    const file = path.join(directory, '.github/actions/next-linux-setup/action.yml');
+    const setup = parse(readFileSync(file, 'utf8'));
+    if (setupChange === 'architecture') setup.runs.steps[0].with.architecture = 'arm64';
+    if (setupChange === 'missing install') setup.runs.steps = setup.runs.steps.filter((step: { run?: string }) => step.run !== 'npm ci --prefer-offline');
+    writeFileSync(file, stringify(setup));
   }
   symlinkSync(path.join(repo, 'node_modules'), path.join(directory, 'node_modules'), 'junction');
   // The verifier's scheduler is under test. Keep unrelated bundle building and
@@ -94,6 +126,9 @@ function executeFixture(selectedFile: string, nestedDependency = false,
   writeFileSync(path.join(directory, browserFile), 'base\n');
   writeFileSync(path.join(directory, 'tests/test-classification.json'), JSON.stringify({ resourceOwning: [{ path: browserFile }] }));
   writeFileSync(path.join(directory, 'package.json'), JSON.stringify(manifest));
+  mkdirSync(path.join(directory, 'native/o8-next/src'), { recursive: true });
+  writeFileSync(path.join(directory, 'native/o8-next/src/input_fixture.rs'),
+    'const MANIFEST: &str = include_str!("../../../scripts/parity/surfaces.json"); const HELPER: &str = "tests/helpers/chatgpt-plan-fixture.ts";');
   const git = (...args: string[]) => {
     const result = spawnSync('git', args, { cwd: directory, encoding: 'utf8' });
     expect(result.status, result.stderr).toBe(0);
@@ -101,7 +136,12 @@ function executeFixture(selectedFile: string, nestedDependency = false,
   git('init', '-q', '-b', 'main');
   git('config', 'user.name', 'CI Fixture');
   git('config', 'user.email', 'fixture@example.invalid');
-  git('add', 'scripts', '.github', 'tests', 'package.json');
+  git('add', 'scripts', '.github', 'tests', 'native', 'package.json');
+  if (nativeChange && nativeState !== 'untracked') {
+    mkdirSync(path.dirname(path.join(directory, nativeChange)), { recursive: true });
+    writeFileSync(path.join(directory, nativeChange), 'base native fixture\n');
+    git('add', nativeChange);
+  }
   git('commit', '-qm', 'fixture base');
   git('update-ref', 'refs/remotes/origin/main', 'HEAD');
   writeFileSync(path.join(directory, browserFile), 'changed\n');
@@ -114,16 +154,27 @@ function executeFixture(selectedFile: string, nestedDependency = false,
         'node_modules/is-number': { version: '7.0.0' } } }));
   }
 
+  if (nativeChange) {
+    const file = path.join(directory, nativeChange);
+    mkdirSync(path.dirname(file), { recursive: true });
+    writeFileSync(file, nativeChange.endsWith('package-lock.json')
+      ? JSON.stringify({ lockfileVersion: 3, packages: {} }) : 'native fixture change\n');
+    if (nativeState === 'staged' || nativeState === 'committed') git('add', nativeChange);
+    if (nativeState === 'committed') git('commit', '-qm', 'fixture native change');
+  }
+
   const receipt = path.join(root, 'browser-receipt.jsonl');
   writeFileSync(receipt, '');
   const result = spawnSync(process.execPath, [path.join(directory, 'scripts/verify-ci.mjs')], {
     cwd: directory, encoding: 'utf8', timeout: 60_000,
     env: { ...process.env, PATH: bin + path.delimiter + process.env.PATH, CI: '', NODE_ENV: 'development',
       VERIFY_FIXTURE_RECEIPT: receipt, VERIFY_FIXTURE_FAIL: fail,
+      VERIFY_FIXTURE_NATIVE_DELAY_MS: String(nativeDelayMs),
+      DISPLAY: 'fixture-display', WAYLAND_DISPLAY: 'fixture-wayland',
       VERIFY_FIXTURE_BARRIER: parallel ? mkdtempSync(path.join(root, 'parallel-')) : '' },
   });
-  const calls = readFileSync(receipt, 'utf8').trim().split('\n').map(line => JSON.parse(line));
-  return { ...result, calls };
+  const calls = readFileSync(receipt, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
+  return { ...result, calls, directory };
 }
 
 describe('local CI verification through its command entry point', () => {
@@ -190,6 +241,175 @@ describe('local CI verification through its command entry point', () => {
     expect(result.calls.find(call => call.args.includes('test:integration'))?.args).toContain('tests/fixture.test.ts');
   }, 60_000);
 
+  nativeIt.each(['native/o8-next/src/main.rs', 'crates/o8d/src/main.rs', 'package-lock.json', '.cargo/config.toml', 'rust-toolchain.toml'])(
+    'runs the native CI cargo commands on a local %s change', nativeChange => {
+      const result = executeFixture('tests/fixture.test.ts', false, { nativeChange });
+      expect(result.status, result.stderr + result.stdout).toBe(0);
+      expect(result.stdout).toContain('PASS o8 next Native Tests (Linux)');
+      const calls = result.calls.filter(call => call.tool === 'cargo');
+      const build = ['build', '--locked', '--manifest-path', 'crates/o8d/Cargo.toml', '--features', 'experimental-http', '--bin', 'o8d'];
+      const test = ['--config', `target.x86_64-unknown-linux-gnu.runner=${JSON.stringify([process.execPath, path.join(result.directory, 'scripts/ci/native-test-shard.mjs')])}`,
+        'test', '--locked', '--manifest-path', 'native/o8-next/Cargo.toml', '--', '--test-threads=4'];
+      const probes = [...test.slice(0, -1), '--test-threads=1'];
+      expect(calls.map(call => call.args)).toEqual([1, 2, 3, 4].flatMap(() => [build, test, probes]));
+      expect(calls.map(call => call.nativeShard)).toEqual([1, 2, 3, 4].flatMap(shard => Array(3).fill(`${shard}/4`)));
+      expect(calls.map(call => call.nativePhase)).toEqual([1, 2, 3, 4].flatMap(() => [undefined, 'regular', 'timed']));
+      for (const call of calls) {
+        expect(call.ci).toBe('true');
+        expect(call.targetDir).toMatch(/native\/o8-next\/target$/);
+        expect(call.cargoHome).toMatch(/\.o8-next-cargo$/);
+        expect(call.daemon).toBe(call.targetDir + '/debug/o8d');
+      }
+      expect(calls[1].display).toBeUndefined();
+      expect(calls[1].wayland).toBeUndefined();
+    }, 60_000,
+  );
+
+  nativeIt.each(['native/o8-next/src/main.rs', 'scripts/parity/surfaces.json', 'tests/helpers/chatgpt-plan-fixture.ts']
+    .flatMap(nativeChange => ['committed', 'staged', 'unstaged', 'untracked'].map(nativeState => ({ nativeChange, nativeState }))))(
+    'selects $nativeState input $nativeChange against origin/main', ({ nativeChange, nativeState }) => {
+      const result = executeFixture('tests/fixture.test.ts', false, { nativeChange, nativeState });
+      expect(result.status, result.stderr + result.stdout).toBe(0);
+      expect(result.calls.filter(call => call.tool === 'cargo')).toHaveLength(12);
+    }, 60_000);
+
+  nativeIt('runs native and hermetic work concurrently while retaining the required aggregate', () => {
+    const result = executeFixture('tests/fixture.test.ts', false, { nativeChange: 'native/o8-next/src/main.rs', parallel: true });
+    expect(result.status, result.stderr + result.stdout).toBe(0);
+    expect(result.stdout).toContain('PASS o8 next Native Tests (Linux)');
+    expect(result.stdout).toContain('PASS Hermetic Unit Tests');
+  }, 60_000);
+
+  nativeIt('gives each native CI shard its own combined build and test deadline', () => {
+    // Each command takes 1.5 s. A job's build + both phases fit in six seconds;
+    // the complete serial matrix exceeds six seconds. Two seconds must fail
+    // because the build and test share one budget inside each CI job.
+    for (const [nativeDeadlineMinutes, status] of [[0.1, 0], [2 / 60, 1]]) {
+      const result = executeFixture('tests/fixture.test.ts', false, {
+        nativeChange: 'native/o8-next/src/main.rs', nativeDeadlineMinutes, nativeDelayMs: 1500,
+      });
+      expect(result.status, result.stderr + result.stdout).toBe(status);
+      expect(result.stdout).toContain(`${status === 0 ? 'PASS' : 'FAIL'} o8 next Native Tests (Linux)`);
+      expect(result.stdout).toContain(`${status === 0 ? 'PASS' : 'FAIL'} Hermetic Unit Tests`);
+    }
+  }, 60_000);
+
+  nativeIt('pauses native job budgets during local queue contention while enforcing active execution time', () => {
+    for (const [nativeDeadlineMinutes, status] of [[0.1, 0], [4 / 60, 1]]) {
+      const result = executeFixture('tests/fixture.test.ts', false, {
+        nativeChange: 'native/o8-next/src/main.rs', nativeDeadlineMinutes,
+        nativeDelayMs: 1500, discoveryMs: 8000,
+      });
+      expect(result.status, result.stderr + result.stdout).toBe(status);
+      expect(result.stdout).toContain('excludes local queue wait from o8 next Native Tests (Linux)');
+      if (status === 0) {
+        const calls = result.calls.filter(call => call.tool === 'cargo');
+        expect(calls.find(call => call.nativePhase === 'timed').startedAt - calls[0].startedAt).toBeGreaterThan(6000);
+      } else expect(result.stdout).toContain('FAIL Hermetic Unit Tests');
+    }
+  }, 90_000);
+
+  it('skips native compilation for a TS-only local change while keeping required checks green', () => {
+    const result = execute();
+    expect(result.status, result.stderr + result.stdout).toBe(0);
+    expect(result.stdout).toContain(nativeLocal
+      ? 'SKIP o8 next Native Tests (Linux): no native inputs changed'
+      : 'HOSTED o8-next-tests: Linux x64');
+    expect(result.calls.some(call => call.tool === 'cargo')).toBe(false);
+    expect(result.stdout).toContain('PASS Hermetic Unit Tests');
+  }, 60_000);
+
+  nativeIt.each(['build', 'test', 'timed phase'])('fails verification when the native cargo %s fails', fail => {
+    const result = executeFixture('tests/fixture.test.ts', false, { nativeChange: 'native/o8-next/src/main.rs', fail });
+    expect(result.status, result.stderr + result.stdout).toBe(1);
+    expect(result.stdout).toContain('FAIL o8 next Native Tests (Linux)');
+    expect(result.stdout).toContain('FAIL Hermetic Unit Tests');
+  }, 60_000);
+
+  it.each(['darwin', 'win32'])('explicitly classifies the Linux native suite as hosted on %s', platform => {
+    const source = `import { readVerificationPlan } from './scripts/lib/verify-ci.mjs';
+      const plan = readVerificationPlan(process.cwd(), undefined, { platform: '${platform}', arch: 'x64' });
+      console.log(JSON.stringify({ hosted: plan.hostedJobs['o8-next-tests'], ids: plan.checks.map(check => check.id),
+        required: plan.checks.find(check => check.id === 'test').requiredResults }));`;
+    const result = spawnSync(process.execPath, ['--input-type=module', '-e', source], { cwd: repo, encoding: 'utf8' });
+    expect(result.status, result.stderr).toBe(0);
+    const plan = JSON.parse(result.stdout);
+    expect(plan.hosted).toContain('Linux x64');
+    expect(plan.ids).not.toContain('o8-next-tests');
+    expect(plan.required).toEqual([]);
+  });
+
+  it.each(['command', 'action', 'condition', 'native tolerance', 'native step tolerance',
+    'aggregate tolerance', 'aggregate step tolerance', 'aggregate condition', 'checkout ref',
+    'shard tolerance', 'shard step tolerance', 'missing native shard', 'native fail fast',
+    'timed phase command', 'timed phase condition'])('rejects uncovered native execution changes: %s', change => {
+    const workflow = parse(readFileSync(workflowPath, 'utf8'));
+    const job = workflow.jobs['o8-next-tests'];
+    if (change === 'command') job.steps.push({ run: 'cargo test --required-fixture' });
+    if (change === 'action') job.steps.push({ uses: './.github/actions/required-fixture' });
+    if (change === 'checkout ref') job.steps[0].with.ref = 'main';
+    if (change === 'missing native shard') job.strategy.matrix.shard.pop();
+    if (change === 'native fail fast') job.strategy['fail-fast'] = true;
+    if (change === 'timed phase command') job.steps.at(-1).run += '\necho unchecked';
+    if (change === 'timed phase condition') job.steps.at(-1).if = 'false';
+    if (change === 'shard tolerance') workflow.jobs['test-shards']['continue-on-error'] = true;
+    if (change === 'shard step tolerance') workflow.jobs['test-shards'].steps.find((step: { run?: string }) => step.run?.startsWith('npm run test:unit'))['continue-on-error'] = true;
+    if (change === 'native tolerance') job['continue-on-error'] = true;
+    if (change === 'native step tolerance') job.steps.find((step: { run?: string }) => step.run?.includes('native-test-shard.mjs'))['continue-on-error'] = true;
+    if (change === 'aggregate tolerance') workflow.jobs.test['continue-on-error'] = true;
+    if (change === 'aggregate step tolerance') workflow.jobs.test.steps[0]['continue-on-error'] = true;
+    if (change === 'aggregate condition') workflow.jobs.test.if = 'false';
+    if (change === 'condition') job.steps.find((step: { run?: string }) => step.run?.includes('native-test-shard.mjs')).if = 'false';
+    const result = coverage(workflow);
+    expect(result.status, result.stdout).toBe(1);
+    expect(result.stderr).toContain('verify:ci');
+  });
+
+  it.each(['architecture', 'missing install'])('rejects uncovered native prerequisite changes: %s', setupChange => {
+    const result = executeFixture('tests/fixture.test.ts', false, { setupChange });
+    expect(result.error).toBeUndefined();
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('verify:ci');
+  }, 60_000);
+
+  it('excludes Cargo scratch TypeScript while retaining native source fixtures in the real compiler config', () => {
+    const target = path.join(repo, 'native/o8-next/target');
+    mkdirSync(target, { recursive: true });
+    const scratch = mkdtempSync(path.join(target, 'verify-ci-types-'));
+    const file = path.join(scratch, 'copied-fixture.ts');
+    writeFileSync(file, 'import missing from "./unavailable-fixture";\n');
+    try {
+      const result = spawnSync(process.execPath, ['node_modules/typescript/bin/tsc', '--showConfig'], {
+        cwd: repo, encoding: 'utf8', timeout: 30_000, maxBuffer: 8 * 1024 * 1024,
+      });
+      expect(result.error).toBeUndefined();
+      expect(result.status, result.stderr).toBe(0);
+      const files = JSON.parse(result.stdout).files.map((entry: string) => path.resolve(repo, entry));
+      expect(files).not.toContain(file);
+      expect(files).toContain(path.join(repo, 'native/o8-next/src/surfaces/shortcuts/fixtures/grid_host.ts'));
+    } finally {
+      rmSync(scratch, { recursive: true, force: true });
+    }
+  }, 40_000);
+
+  it.each(['native/o8-next/target', '.o8-next-cargo'])('excludes generated %s files from the real lint command', generated => {
+    const directory = path.join(repo, generated);
+    mkdirSync(directory, { recursive: true });
+    const scratch = mkdtempSync(path.join(directory, 'verify-ci-lint-'));
+    const file = path.join(scratch, 'generated.ts');
+    writeFileSync(file, 'const = ;\n');
+    try {
+      const result = spawnSync(process.execPath, ['node_modules/eslint/bin/eslint.js', file], {
+        cwd: repo, encoding: 'utf8', timeout: 30_000,
+      });
+      expect(result.error).toBeUndefined();
+      expect(result.status, result.stderr + result.stdout).toBe(0);
+      expect(result.stdout).toContain('ignored');
+    } finally {
+      rmSync(scratch, { recursive: true, force: true });
+    }
+  }, 40_000);
+
   it('rejects a newly added CI check before running verification work', () => {
     const workflow = parse(readFileSync(workflowPath, 'utf8'));
     workflow.jobs['required-fixture'] = { name: 'Required Fixture', 'runs-on': 'ubuntu-latest', steps: [{ run: 'npm run fixture' }] };
@@ -213,7 +433,7 @@ describe('local CI verification through its command entry point', () => {
       .filter((step: { name?: string }) => step.name !== 'Install touched browser-test prerequisites');
     workflow.jobs['integration-changed'].steps.splice(-1, 0, {
       name: 'Install touched browser-test prerequisites',
-      if: "contains(steps.select.outputs.files, 'tests/next-parity-route-ownership-real-path.test.ts') || contains(steps.select.outputs.files, 'tests/review-diff-position-real-path.test.ts') || contains(steps.select.outputs.files, 'tests/sidebar-window-layout-real-path.test.ts') || contains(steps.select.outputs.files, 'tests/composer-screenshot-recovery-real-path.test.ts')",
+      if: "contains(steps.select.outputs.files, 'tests/next-parity-route-ownership-real-path.test.ts') || contains(steps.select.outputs.files, 'tests/review-diff-position-real-path.test.ts') || contains(steps.select.outputs.files, 'tests/sidebar-window-layout-real-path.test.ts') || contains(steps.select.outputs.files, 'tests/compaction-progress-inference-real-path.test.ts') || contains(steps.select.outputs.files, 'tests/composer-screenshot-recovery-real-path.test.ts')",
       run: 'npx --no-install playwright-core install --with-deps chromium',
     });
     const result = coverage(workflow);
@@ -223,6 +443,7 @@ describe('local CI verification through its command entry point', () => {
   it.each(['tests/next-parity-route-ownership-real-path.test.ts',
     'tests/review-diff-position-real-path.test.ts',
     'tests/sidebar-window-layout-real-path.test.ts',
+    'tests/compaction-progress-inference-real-path.test.ts',
     'tests/composer-screenshot-recovery-real-path.test.ts',
     'tests/next-parity-route-ownership-real-path.test.ts-extra.test.ts',
     'tests/NEXT-PARITY-ROUTE-OWNERSHIP-REAL-PATH.test.ts'])('runs the CI conditional prerequisite for %s through the verifier entry point', selectedFile => {

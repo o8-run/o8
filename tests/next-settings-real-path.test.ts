@@ -1,9 +1,54 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import { createInterface } from 'node:readline';
-import { readFileSync, realpathSync } from 'node:fs';
+import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, expect, it } from 'vitest';
+
+it('keeps an owned settings host alive past the interactive deadline and closes it with its owner pipe', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'o8-settings-lifetime-'));
+  const preload = join(root, 'clock.mjs');
+  writeFileSync(preload, `
+    const original = globalThis.setTimeout;
+    globalThis.setTimeout = (callback, delay, ...args) =>
+      original(callback, delay === 120000 ? 100 : delay, ...args);
+  `);
+  const child = spawn(process.execPath, ['--import', preload,
+    '--import', './scripts/register-server-only-stub.mjs', '--import', 'tsx',
+    'scripts/next/dev-server.ts', '--settings', '--shell', '--owned-stdio'], {
+    env: { ...process.env, O8_NEXT_API_TOKEN: 'fixture-next-settings-operator' },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  const closed = once(child, 'close');
+  let stderr = '';
+  child.stderr!.on('data', chunk => { stderr += chunk; });
+  let fixtureOrigin = '';
+  let fixtureData = '';
+  try {
+    const lines = createInterface({ input: child.stdout! });
+    for await (const line of lines) {
+      try {
+        const receipt = JSON.parse(line);
+        fixtureOrigin = receipt.origin || fixtureOrigin;
+        fixtureData = receipt.configDir || fixtureData;
+      } catch { continue; }
+      if (fixtureOrigin && fixtureData) { lines.close(); break; }
+    }
+    await new Promise(resolve => setTimeout(resolve, 250));
+    expect(child.exitCode, `owned host must outlive the interactive deadline; stderr:\n${stderr}`).toBeNull();
+    const saved = await fetch(fixtureOrigin + '/api/panel/operator-defaults?include=values', { headers });
+    expect(saved.status).toBe(200);
+    expect((await saved.json()).values.parallelCap).toBeTypeOf('number');
+    child.stdin!.end();
+    expect((await closed)[0], stderr).toBe(0);
+    expect(() => realpathSync(fixtureData)).toThrow();
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM');
+    await closed;
+    rmSync(root, { recursive: true, force: true });
+  }
+}, 30_000);
 
 let host: ChildProcess;
 let origin = '';
