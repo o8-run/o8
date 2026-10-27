@@ -30,7 +30,8 @@ fn main() {
     ] {
         let path = source.join(name);
         println!("cargo:rerun-if-changed={}", path.display());
-        let mut code = fs::read_to_string(path).unwrap();
+        // Windows checkouts use CRLF; the multi-line edges below are written with LF.
+        let mut code = fs::read_to_string(path).unwrap().replace("\r\n", "\n");
         if name == "update_channel_persistence.rs" {
             replace_once(&mut code, "    std::fs::rename(&temporary, path)",
                 "    crate::channel_save_edge::before_commit(path, &temporary)?;\n    std::fs::rename(&temporary, path)");
