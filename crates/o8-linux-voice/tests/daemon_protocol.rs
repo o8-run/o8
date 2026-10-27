@@ -127,6 +127,17 @@ struct Harness {
 
 impl Harness {
     fn new(tag: &str, mic: Mic, partials: bool) -> Self {
+        Self::with_transcriber(tag, mic, partials, |languages| {
+            Box::new(CountingTranscriber { languages })
+        })
+    }
+
+    fn with_transcriber(
+        tag: &str,
+        mic: Mic,
+        partials: bool,
+        make_transcriber: impl FnOnce(Arc<Mutex<Vec<Option<String>>>>) -> Box<dyn Transcriber>,
+    ) -> Self {
         let wav_dir = std::env::temp_dir().join(format!("o8-daemon-{tag}-{}", std::process::id()));
         std::fs::create_dir_all(&wav_dir).unwrap();
         let (stdin, rx) = channel();
@@ -138,19 +149,14 @@ impl Harness {
             tick: Duration::from_millis(20),
             locale: "en-US".into(),
         };
-        let (o, m, l) = (out.clone(), mic.clone(), languages.clone());
+        let (o, m) = (out.clone(), mic.clone());
+        let transcriber = make_transcriber(languages.clone());
         let thread = std::thread::spawn(move || {
             let input = BufReader::new(ChannelReader {
                 rx,
                 pending: Vec::new(),
             });
-            daemon::run(
-                input,
-                o,
-                Box::new(m),
-                Box::new(CountingTranscriber { languages: l }),
-                options,
-            );
+            daemon::run(input, o, Box::new(m), transcriber, options);
         });
         Self {
             stdin,
@@ -371,6 +377,10 @@ fn capture_failures_become_session_errors_not_crashes() {
     };
     let h = Harness::new("refuse", refusing, false);
     h.send("start:8");
+    h.wait_for("capture refusal", |e| {
+        e.iter()
+            .any(|e| e.kind == "error" && e.session_id == Some(8))
+    });
     h.send("stop:8");
     let events = h.wait_for("complete", |e| count(e, "complete") == 1);
     assert_eq!(kinds(&events, Some(8)), ["error", "complete"]);
@@ -413,4 +423,132 @@ fn eof_on_stdin_finalizes_and_exits() {
         .iter()
         .any(|e| e.kind == "complete" && e.session_id == Some(10)));
     let _ = std::fs::remove_dir_all(wav_dir);
+}
+
+struct ControlledTranscriber {
+    prepares: Sender<(Option<String>, Sender<Result<(), String>>)>,
+}
+
+impl Transcriber for ControlledTranscriber {
+    fn prepare(&mut self, language: Option<&str>, _: &dyn Fn(Event)) -> Result<(), String> {
+        let (tx, rx) = channel();
+        self.prepares
+            .send((language.map(str::to_owned), tx))
+            .unwrap();
+        rx.recv_timeout(Duration::from_secs(5))
+            .expect("preparation result")
+    }
+
+    fn transcribe(
+        &mut self,
+        _: &[f32],
+        _: Option<&str>,
+        _: &dyn Fn(Event),
+    ) -> Result<String, String> {
+        Ok("prepared transcript".into())
+    }
+}
+
+#[test]
+fn capture_waits_for_current_model_and_stop_cancels_pending_start() {
+    let (tx, rx) = channel();
+    let h = Harness::with_transcriber("model-gate", Mic::default(), false, |_| {
+        Box::new(ControlledTranscriber { prepares: tx })
+    });
+    let (language, boot) = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert_eq!(language.as_deref(), Some("en"));
+    h.send("start:11");
+    h.send("locale:fr-FR");
+    h.wait_for("locale change", |e| {
+        e.iter().any(|e| e.text == "locale:fr-FR")
+    });
+    assert!(
+        h.mic.sink.lock().unwrap().is_none(),
+        "capture must wait for a usable model"
+    );
+    // A stale boot success cannot open capture for the new locale.
+    boot.send(Ok(())).unwrap();
+    let (language, french) = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert_eq!(language.as_deref(), Some("fr"));
+    h.send("start:12");
+    h.send("stop:12");
+    let events = h.wait_for("cancelled pending session", |e| {
+        e.iter()
+            .any(|e| e.kind == "complete" && e.session_id == Some(12))
+    });
+    assert!(
+        !events.iter().any(|e| e.text == "listening"),
+        "preparation must precede capture: {events:#?}"
+    );
+    assert!(
+        h.mic.sink.lock().unwrap().is_none(),
+        "capture source must remain unopened"
+    );
+    french.send(Ok(())).unwrap();
+    h.send("start:13");
+    h.wait_for("prepared session", |e| {
+        e.iter()
+            .any(|e| e.text == "listening" && e.session_id == Some(13))
+    });
+    h.mic.say(&[0.1; 3200]);
+    h.send("stop:13");
+    let events = h.wait_for("usable model finalization", |e| {
+        e.iter()
+            .any(|e| e.kind == "complete" && e.session_id == Some(13))
+    });
+    assert!(events
+        .iter()
+        .any(|e| e.kind == "audio_file" && e.session_id == Some(13)));
+    assert!(!events
+        .iter()
+        .any(|e| e.kind == "audio_file" && e.session_id != Some(13)));
+    h.quit();
+}
+
+#[test]
+fn failed_model_preparation_refuses_a_waiting_start() {
+    let (tx, rx) = channel();
+    let h = Harness::with_transcriber("model-refusal", Mic::default(), false, |_| {
+        Box::new(ControlledTranscriber { prepares: tx })
+    });
+    let (_, prepare) = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    h.send("start:14");
+    h.send("input_device:default");
+    h.wait_for("start processed", |e| {
+        e.iter().any(|e| e.text == "input_device:default")
+    });
+    assert!(
+        h.mic.sink.lock().unwrap().is_none(),
+        "no capture while preparation is pending"
+    );
+    prepare
+        .send(Err("Voice is off: model download requires approval.".into()))
+        .unwrap();
+    let events = h.wait_for("refused start", |e| {
+        e.iter()
+            .any(|e| e.kind == "complete" && e.session_id == Some(14))
+    });
+    assert!(events
+        .iter()
+        .any(|e| e.kind == "error" && e.session_id == Some(14) && e.text.contains("approval")));
+    assert!(!events
+        .iter()
+        .any(|e| e.text == "listening" || matches!(e.kind.as_str(), "level" | "audio_file")));
+    assert_eq!(std::fs::read_dir(&h.wav_dir).unwrap().count(), 0);
+    // Installing a usable model does not require restarting the helper. A
+    // later explicit start rechecks readiness without opening capture early.
+    h.send("start:15");
+    let (_, retry) = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert!(h.mic.sink.lock().unwrap().is_none());
+    retry.send(Ok(())).unwrap();
+    h.wait_for("installed model", |e| {
+        e.iter()
+            .any(|e| e.text == "listening" && e.session_id == Some(15))
+    });
+    h.send("stop:15");
+    h.wait_for("retried session complete", |e| {
+        e.iter()
+            .any(|e| e.kind == "complete" && e.session_id == Some(15))
+    });
+    h.quit();
 }

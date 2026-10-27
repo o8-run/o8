@@ -204,7 +204,7 @@ export function GeneralTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTa
 
   const values = data?.values;
   const sources = data?.sources;
-  const shareUsage = values?.productTelemetryEnabled === true;
+  const shareUsage = Boolean(values) && values?.productTelemetryEnabled !== false;
   const envLocked = (field: keyof OperatorDefaults) => sources?.[field] === 'env';
   const lockedSub = (field: keyof OperatorDefaults, normal: string) =>
     envLocked(field) ? ENV_LOCKED_REASON : normal;
@@ -339,12 +339,12 @@ export function GeneralTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTa
       <section style={{ marginTop: 28 }}>
         <SettingsGroup
           header="Privacy"
-          footnote="Choose what to share. Usage analytics, error reports, and local crash logs are separate choices. All sharing is optional and off by default."
+          footnote="Usage analytics are on by default until you turn them off. Earlier choices are preserved. Crash reports and local crash-log uploads are separate opt-ins."
         >
           <SettingsRow
             icon={<ShieldIcon />}
             label="Share usage data"
-            subtitle="Share basic feature-use events to help improve o8. Does not include prompts, code, or file paths."
+            subtitle="Share nine basic feature-use events. No code, prompts, file paths, repo names, or file contents. Changes take effect immediately."
             checked={shareUsage}
             disabled={!values || busyField === 'productTelemetryEnabled'}
             onToggle={(next) => { void updateField('productTelemetryEnabled', next); }}

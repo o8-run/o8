@@ -226,6 +226,7 @@ export const geminiRuntime: AgentRuntime = {
     const result = await launchOwnedGeminiSession({
       cwd: opts.cwd,
       prompt: opts.prompt,
+      promptMemoryRevision: opts.promptMemoryRevision,
       clientMutationId: opts.clientMutationId,
       model: opts.model,
       laneId: opts.laneId,

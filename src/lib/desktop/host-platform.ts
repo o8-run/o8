@@ -46,3 +46,20 @@ export function isNonMacShell(): boolean {
 export function isLinuxShell(): boolean {
   return stampedPlatform() === 'linux';
 }
+
+/**
+ * Local Linux patch: true when the Linux shell was launched with
+ * O8_LINUX_GLASS=1 (stamped as window.__O8_LINUX_GLASS__ by lib.rs). There is
+ * still no native vibrancy material, so the glass styling composites over a
+ * painted backdrop (globals.css `html[data-linux-glass='true']`).
+ */
+export function isLinuxGlassShell(): boolean {
+  if (typeof window === 'undefined') return false;
+  const w = window as unknown as { __O8_HOST_PLATFORM__?: unknown; __O8_LINUX_GLASS__?: unknown };
+  return w.__O8_HOST_PLATFORM__ === 'linux' && w.__O8_LINUX_GLASS__ === true;
+}
+
+/** True when the shell is non-macOS AND has no glass styling enabled. */
+export function shellLacksGlass(): boolean {
+  return isNonMacShell() && !isLinuxGlassShell();
+}

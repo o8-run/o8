@@ -8,6 +8,7 @@ import { APP_FONT_STACK, MONO_FONT_STACK, RAMS_CONTROL_ACTIVE_BG, RAMS_CONTROL_A
 import { SettingsAdvanced } from './SettingsAdvanced';
 import { SettingsGroup, SettingsRow, ValuePill } from './grouped';
 import { fetchOperatorDefaults } from './operator-defaults-client';
+import { ReviewedCleanupSection } from './ReviewedCleanupSection';
 
 const ENV_LOCKED_REASON = 'Locked by an environment variable. Unset it to manage from Settings.';
 const CONTROL_TARGET_PX = 44;
@@ -589,6 +590,7 @@ export function WorktreeRetentionSection() {
               </span>
             }
           />
+          <ReviewedCleanupSection />
         </SettingsGroup>
       </section>
 

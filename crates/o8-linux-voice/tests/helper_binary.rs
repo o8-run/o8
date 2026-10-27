@@ -85,9 +85,11 @@ fn a_missing_model_is_an_error_event_not_a_crash() {
         complete.is_some(),
         "the session still completes: {events:#?}"
     );
-    assert!(events
-        .iter()
-        .any(|e| e.kind == "audio_file" && e.session_id == Some(42)));
+    assert!(!events.iter().any(|e| e.text == "listening"
+        || matches!(
+            e.kind.as_str(),
+            "level" | "partial" | "final" | "audio_file"
+        )));
 }
 
 #[test]

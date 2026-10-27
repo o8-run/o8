@@ -87,9 +87,27 @@ fn press_reorder(cx: &mut TestAppContext, follow_pressed: bool) {
     );
     ready(&shell, &mut cx);
     let (a, b) = sidebar(&shell, &cx).read_with(&cx, |s, _| {
-        assert_eq!(s.rows[2].workspace, s.rows[3].workspace);
-        assert_eq!(s.rows[2].status, s.rows[3].status);
-        (s.rows[2].id.clone().unwrap(), s.rows[3].id.clone().unwrap())
+        let a = s
+            .rows
+            .iter()
+            .find(|r| {
+                r.id.as_deref()
+                    .is_some_and(|id| id.starts_with("thoughts-sidebar-"))
+            })
+            .unwrap();
+        let b = s
+            .rows
+            .iter()
+            .find(|r| {
+                r.id != a.id
+                    && r.workspace == a.workspace
+                    && r.status == a.status
+                    && r.id
+                        .as_deref()
+                        .is_some_and(|id| id.starts_with("thoughts-sidebar-"))
+            })
+            .unwrap();
+        (a.id.clone().unwrap(), b.id.clone().unwrap())
     });
     cx.simulate_keystrokes("ctrl-k");
     cx.simulate_input("thoughts-composer-first");
@@ -103,7 +121,10 @@ fn press_reorder(cx: &mut TestAppContext, follow_pressed: bool) {
     cx.simulate_mouse_down(pressed, MouseButton::Left, Default::default());
     draw(&mut cx);
     promote(&fixture, &b, 1791000000000);
-    wait(&shell, &mut cx, |s, _| s.rows[2].id.as_deref() == Some(&b));
+    wait(&shell, &mut cx, |s, _| {
+        s.rows.iter().position(|r| r.id.as_deref() == Some(&b))
+            < s.rows.iter().position(|r| r.id.as_deref() == Some(&a))
+    });
     let release = if follow_pressed {
         row_bounds(&shell, &mut cx, &a).center()
     } else {
@@ -119,7 +140,10 @@ fn press_reorder(cx: &mut TestAppContext, follow_pressed: bool) {
     if follow_pressed {
         cx.simulate_keystrokes("f8");
         promote(&fixture, &a, 1791000000001);
-        wait(&shell, &mut cx, |s, _| s.rows[2].id.as_deref() == Some(&a));
+        wait(&shell, &mut cx, |s, _| {
+            s.rows.iter().position(|r| r.id.as_deref() == Some(&a))
+                < s.rows.iter().position(|r| r.id.as_deref() == Some(&b))
+        });
         cx.simulate_keystrokes("enter");
         settle(&shell, &mut cx);
         assert_eq!(
@@ -154,7 +178,15 @@ fn pending_save(cx: &mut TestAppContext, mode: &str) {
     );
     ready(&shell, &mut cx);
     let (a, b) = sidebar(&shell, &cx).read_with(&cx, |s, _| {
-        (s.rows[2].id.clone().unwrap(), s.rows[3].id.clone().unwrap())
+        let ids: Vec<_> = s
+            .rows
+            .iter()
+            .filter_map(|r| r.id.as_ref())
+            .filter(|id| id.starts_with("thoughts-sidebar-"))
+            .take(2)
+            .cloned()
+            .collect();
+        (ids[0].clone(), ids[1].clone())
     });
     let bounds = row_bounds(&shell, &mut cx, &a);
     cx.simulate_click(bounds.center(), Default::default());

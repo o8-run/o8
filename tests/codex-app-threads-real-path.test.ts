@@ -10,6 +10,8 @@ import { formatSessionRulesBlock } from '@/lib/orchestrator/session-rules-prompt
 import { withOrchestratorTurnReceiptContext } from '@/lib/orchestrator/turn-receipt-context';
 import { applyOrchestrationMode } from '@/lib/lane/orchestrator-backends/orchestration-mode';
 import { withOperatingAgreement } from '@/lib/operator/operating-agreement';
+import { writePersistedLlmChat } from '@/lib/llm/chat-history-store';
+import { probeAppBridgeWire } from './fixtures/app-bridge-wire-probe';
 
 // #3573. Only the Codex executable and unrelated prewarm/readiness calls are
 // stubbed. The setting store, session, bridge process, spec file and argv are real.
@@ -43,14 +45,13 @@ const userConfig = [
 writeFileSync(join(userCodexHome, 'config.toml'), userConfig);
 vi.stubEnv('O8_CODEX_APP_TEST_HOME', home);
 vi.stubEnv('O8_CODEX_BIN', binary);
-vi.stubEnv('O8_FAKE_CODEX_LOG', log);
 vi.stubEnv('O8_CRASH_SURVIVABLE_ORCHESTRATOR', '0');
 writeFileSync(binary, `#!/usr/bin/env node
 import { appendFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 const args = process.argv.slice(2);
 if (args.includes('--version')) { console.log('codex-cli 0.161.0'); process.exit(0); }
-const record = (entry) => appendFileSync(process.env.O8_FAKE_CODEX_LOG, JSON.stringify({ ...entry, codexHome: process.env.CODEX_HOME }) + '\\n');
+const record = (entry) => appendFileSync(${JSON.stringify(log)}, JSON.stringify({ ...entry, codexHome: process.env.CODEX_HOME }) + '\\n');
 if (args[0] !== 'app-server') {
   record({ argv: args });
   console.log(JSON.stringify({ type: 'thread.started', thread_id: 'exec-thread' }));
@@ -80,7 +81,8 @@ process.stdin.on('data', (chunk) => {
         send({ id: message.id, error: { code: -32600, message: 'no rollout found for thread id ' + message.params.threadId } });
       } else {
         thread = message.params.threadId;
-        send({ id: message.id, result: { thread: { id: thread, source: 'vscode' } } });
+        send({ id: message.id, result: { thread: { id: thread, source: 'vscode' },
+          collaborationMode: { mode: existsSync(join(process.cwd(), 'native-plan')) ? 'plan' : 'default' } } });
       }
     }
     if (message.method === 'turn/start') {
@@ -93,6 +95,7 @@ process.stdin.on('data', (chunk) => {
       notify('thread/tokenUsage/updated', { tokenUsage: { last: { inputTokens: 1000, cachedInputTokens: 200, outputTokens: 50 } } });
       notify('turn/completed', { turn: { id: 'turn-1', status: 'completed' } });
     }
+    if (message.method === 'thread/inject_items') send({ id: message.id, result: {} });
     if (message.method === 'turn/interrupt') {
       send({ id: message.id, result: {} });
       notify('turn/completed', { turn: { id: 'turn-1', status: 'interrupted' } });
@@ -137,6 +140,44 @@ afterAll(() => {
 });
 
 describe.skipIf(process.platform === 'win32')('Codex orchestrator chats in the Codex app (#3573)', () => {
+  it.skipIf(!process.env.O8_CODEX_WIRE_TEST_BIN)('delivers complete current-turn context through the real CLI across cold resume and compaction (#3629)', async () => {
+    const result = await probeAppBridgeWire(process.env.O8_CODEX_WIRE_TEST_BIN!, root);
+    const control = JSON.stringify((result.captured.find(entry => entry.phase === 'control-resumed')!.body.input as Array<{ role: string }>)
+      .filter(item => item.role === 'developer'));
+    expect(control).toContain('RECEIPT_control-first');
+    expect(control).not.toContain('RECEIPT_control-resumed');
+    for (const [phase, context] of Object.entries(result.contexts)) {
+      const requests = result.captured.filter(entry => entry.phase === phase);
+      expect(requests.length).toBeGreaterThan(0);
+      const last = requests.at(-1)!.body;
+      const input = last.input as Array<{ role: string; content: unknown }>;
+      const developer = JSON.stringify(input.filter(item => item.role === 'developer'));
+      const expectedPhase = phase === 'resumed' || phase === 'compacted' ? 'fresh'
+        : phase === 'midturn' || phase === 'post-auto' ? 'updated' : phase;
+      for (const marker of [`OWNER_${expectedPhase}`, `PROJECT_${expectedPhase}`, `MIDDLE_${expectedPhase}`, `MODE_${expectedPhase}`, `RECEIPT_${expectedPhase}`]) {
+        expect.soft(developer).toContain(marker);
+      }
+      expect.soft(developer.includes(context.replaceAll('\n', '\\n'))).toBe(true);
+      const answer = `Project: fixture-${expectedPhase}\nScope: src/${expectedPhase}\nRules: review-${expectedPhase}`;
+      expect.soft(result.answers[phase]).toContain(answer);
+      const occurrences = developer.split(context.replaceAll('\n', '\\n')).length - 1;
+      const turnText = `Turn receipt: ${phase}\n\n${result.messages[phase]}`;
+      const turnContext = JSON.stringify(turnText).slice(1, -1);
+      const turnCopies = developer.split(turnContext).length - 1;
+      expect.soft(turnCopies).toBe(1);
+      const baseBytes = occurrences * Buffer.byteLength(context);
+      const turnBytes = turnCopies * Buffer.byteLength(turnText);
+      process.stdout.write(`[context-bytes] ${phase}: base=${baseBytes} turn=${turnBytes} total=${baseBytes + turnBytes}; copies=${occurrences}/${turnCopies}\n`);
+      expect.soft(occurrences).toBe(1);
+    }
+    const history = result.history.thread as { turns: Array<{ items: Array<{ type: string; content?: unknown }> }> };
+    const items = history.turns.flatMap(turn => turn.items);
+    expect(items.filter(item => item.type === 'userMessage').map(item => item.content))
+      .toEqual(Object.values(result.messages).map(text => [{ type: 'text', text, text_elements: [] }]));
+    expect(items.filter(item => item.type === 'contextCompaction').length).toBeGreaterThanOrEqual(2);
+    expect(result.captured.filter(entry => entry.phase === 'midturn').length).toBeGreaterThanOrEqual(3);
+  }, 120_000);
+
   it('keeps the private codex exec path while the setting is off', async () => {
     const cwd = repo('setting-off');
     const start = calls().length;
@@ -194,7 +235,7 @@ describe.skipIf(process.platform === 'win32')('Codex orchestrator chats in the C
     expect(state!.threadId).toBe(getCodexOrchestratorSession(cwd, 'thoughts-codex-app-recorded')!.threadId);
   }, 60_000);
 
-  it.each(['fleet', 'fusion'] as const)('keeps only operator text visible with every wrapper in developer instructions (%s, #3629)', async (orchestrationMode) => {
+  it.each(['fleet', 'fusion'] as const)('keeps operator text visible and refreshes every wrapper through turn instructions (%s, #3629)', async (orchestrationMode) => {
     await updateOperatorDefaults({ codexAppThreads: true });
     const cwd = repo(`raw-operator-${orchestrationMode}`);
     const agreementPath = join(getDataDir(), 'OPERATING_AGREEMENT.md');
@@ -228,8 +269,17 @@ describe.skipIf(process.platform === 'win32')('Codex orchestrator chats in the C
         const made = since(start);
         const thread = made.find((call) => call.method === (index === 0 ? 'thread/start' : 'thread/resume'))!;
         const turnStart = made.find((call) => call.method === 'turn/start')!;
+        expect(made.find(call => call.method === 'initialize')!.params!.capabilities).toEqual({ experimentalApi: true });
         expect.soft(turnStart.params!.input).toEqual([{ type: 'text', text: operatorMessage, text_elements: [] }]);
-        expect.soft(thread.params!.developerInstructions).toBe(expectedPrompt);
+        const marker = '\n\n## USER MESSAGE\n\n';
+        const at = expectedPrompt.indexOf(marker);
+        expect.soft(thread.params!.developerInstructions).toContain(expectedPrompt.slice(0, at));
+        expect.soft(thread.params!.developerInstructions).toContain(expectedPrompt.slice(at + marker.length));
+        expect.soft(turnStart.params!.collaborationMode).toBeUndefined();
+        const injected = made.find(call => call.method === 'thread/inject_items');
+        if (index === 0) expect(injected).toBeUndefined();
+        else expect((injected!.params!.items as Array<{ content: Array<{ text: string }> }>)
+          .flatMap(item => item.content).map(part => part.text).join('\n\n')).toBe(thread.params!.developerInstructions);
       }
     } finally {
       rmSync(agreementPath, { force: true });
@@ -248,17 +298,41 @@ describe.skipIf(process.platform === 'win32')('Codex orchestrator chats in the C
       .toBe(buildCodexOrchestratorPrompt(cwd, '').split('\n\n## USER MESSAGE\n\n')[0]);
   }, 60_000);
 
+  it('preserves a resumed native plan mode while refreshing turn context (#3629)', async () => {
+    await updateOperatorDefaults({ codexAppThreads: true });
+    const cwd = repo('resume-native-plan');
+    await turn(cwd, 'First', { rawMessage: 'First' });
+    writeFileSync(join(cwd, 'native-plan'), 'plan');
+    const start = calls().length;
+    await turn(cwd, 'Plan this change', { rawMessage: 'Plan this change', permissionMode: 'plan' });
+    const made = since(start);
+    expect(made.find(call => call.method === 'thread/resume')!.params!.sandbox).toBe('read-only');
+    expect(made.find(call => call.method === 'turn/start')!.params!.collaborationMode).toBeUndefined();
+    expect(made.find(call => call.method === 'thread/resume')!.params!.developerInstructions).toContain('Plan this change');
+  }, 60_000);
+
   it('starts a fresh Codex app thread when the saved one is gone', async () => {
     const cwd = repo('gone-thread');
-    await turn(cwd, 'First');
-    getCodexOrchestratorSession(cwd)!.threadId = 'thread-from-the-private-home';
+    const threadId = 'thoughts-missing-app-session';
+    await turn(cwd, 'First', { threadId });
+    writePersistedLlmChat(threadId, { repoPath: cwd, messages: [
+      { id: 'prior-user', role: 'user', content: 'The identifier is widget-731 and the accent is copper.', timestamp: 1 },
+      { id: 'prior-assistant', role: 'assistant', content: 'Both facts are retained.', timestamp: 2 },
+      { id: 'current-user', role: 'user', content: 'Second', timestamp: 3 },
+    ] });
+    getCodexOrchestratorSession(cwd, threadId)!.threadId = 'thread-from-the-private-home';
     const start = calls().length;
-    const events = await turn(cwd, 'Second');
+    const events = await turn(cwd, 'Second', { threadId, rawMessage: 'Second' });
     const methods = since(start).map((call) => call.method).filter(Boolean);
     expect(methods).toContain('thread/resume');
     expect(methods.indexOf('thread/start')).toBeGreaterThan(methods.indexOf('thread/resume'));
     expect(events.filter((event) => event.type === 'error')).toEqual([]);
     expect(events).toContainEqual({ type: 'text', text: 'Answer from the Codex app thread' });
+    const recovered = since(start).find(call => call.method === 'thread/start')!;
+    expect(recovered.params!.developerInstructions).toContain('widget-731');
+    expect(recovered.params!.developerInstructions).toContain('copper');
+    expect(since(start).find(call => call.method === 'turn/start')!.params!.input)
+      .toEqual([{ type: 'text', text: 'Second', text_elements: [] }]);
   }, 60_000);
 
   it('interrupts the Codex app turn when the operator stops it', async () => {

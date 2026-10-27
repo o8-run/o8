@@ -1,0 +1,40 @@
+PQCHBW - fix round 1
+Reviewed head: 054129fad1709302f1768b4e78a82957fe1f8982
+
+Reproduction, before implementation:
+npx vitest run src/components/desktop/repo-registry/AddRepoDialog.clone-link.test.ts src/components/desktop/repo-registry/fast-add-repo.test.ts -t 'successful clone|pending state|workspace-refresh error|without a helper'
+
+Red failures:
+- Successful clone + one project PATCH 503: expected 2 PATCH attempts, received 1.
+- Successful clone + repeated PATCH 503: expected no alert, received "Could not clone this repository...".
+- Workspace refresh after successful clone: expected an opening error, received a clone error.
+- Registered path: expected no helper status, received "Already added. Open Example.".
+
+Red tail:
+ Test Files  2 failed (2)
+      Tests  4 failed | 9 skipped (13)
+   Start at  15:39:30
+   Duration  2.63s (transform 443ms, setup 72ms, import 851ms, tests 300ms, environment 1.10s)
+
+Same command after implementation, green tail:
+ Test Files  2 passed (2)
+      Tests  4 passed | 9 skipped (13)
+   Start at  15:44:19
+   Duration  5.06s (transform 1.13s, setup 149ms, import 1.95s, tests 509ms, environment 1.94s)
+
+Focused folder-picker, entry, membership and surface checks:
+ Test Files  7 passed (7)
+      Tests  49 passed (49)
+   Start at  15:40:38
+   Duration  10.67s (transform 1.10s, setup 157ms, import 2.89s, tests 3.23s, environment 3.62s)
+
+The transient 503 case now opens automatically after one link retry. The persistent case shows one neutral "Cloned. Link pending." state and a Retry action; the user retry sends only a PATCH and does not clone again. The successful folder path still opens directly without another confirmation, preserving the 5-to-2 click count.
+
+Completion gates:
+ Test Files  1260 passed | 3 skipped (1263)
+      Tests  9472 passed | 5 skipped (9477)
+   Duration  271.24s (transform 18.77s, setup 28.03s, import 339.55s, tests 311.30s, environment 245.52s)
+npm run typecheck: passed (route shapes, app and CLI)
+npm run typecheck:fast: passed
+Touched-file lint: passed
+Rule check against reviewed head: 2 source files, zero violations

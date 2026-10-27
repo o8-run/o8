@@ -317,9 +317,11 @@ describe('durable Send next through the normal composer', () => {
     await act(async () => ws.options!.onRealtimeEvent({ channel: 'mutation', data: { mutation: { action: 'composer-queue', surfaceId: 'thoughts-one' } } }));
     expect(host.querySelector('[role="list"]')?.textContent).toContain('Sending');
     expect(host.querySelector<HTMLButtonElement>('[title="Cancel queued message"]')!.disabled).toBe(true);
-    rows[0] = { ...rows[0], status: 'held', reason: 'Delivery interrupted. Inspect the chat.' };
+    const reason = 'This lead cannot apply the independent thinking effort "high": its transport has no verified mapping.';
+    rows[0] = { ...rows[0], status: 'held', reason };
     await act(async () => window.dispatchEvent(new Event('o8:lifecycle-reconcile')));
-    expect(host.querySelector('[role="status"]')?.getAttribute('title')).toContain('Delivery interrupted. Inspect the chat.');
+    expect(host.querySelector('[role="status"]')?.getAttribute('title')).toContain(reason);
+    expect(host.querySelector('[role="list"]')?.textContent).toContain(reason);
     expect(host.querySelector<HTMLButtonElement>('[title="Cancel queued message"]')!.disabled).toBe(false);
     expect(host.textContent).not.toMatch(/Steering applied|Steer applied/);
   });

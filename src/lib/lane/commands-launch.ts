@@ -1,3 +1,4 @@
+import { RuntimeLaunchTimeoutError } from '@/lib/runtime/launch-deadline';
 import { assertLaunchAttachment } from '@/lib/lane/commands-launch-admission';
 import { withPreRunLaunchCancellation } from '@/lib/lane/pre-run-cancellation';
 import { assertOwnedActionGuard } from '@/lib/runtimes/shared/owned-session/action-admission';
@@ -245,6 +246,7 @@ async function launchSessionInner(
     const result = await launchRuntimeSurface({
       runtime: lane.runtime,
       prompt: command.prompt,
+      promptMemoryRevision: command.promptMemoryRevision,
       repoPath: lane.worktreePath ?? lane.repoPath,
       projectRepoPath: lane.repoPath,
       branchName: lane.branch,
@@ -344,6 +346,7 @@ async function launchSessionInner(
       dependencyMaterializationMode: result.worktree?.dependencyMaterialization?.mode ?? null,
     };
   } catch (err) {
+    if (err instanceof RuntimeLaunchTimeoutError) return { ok: false, laneId: command.laneId, note: err.message };
     const refusal = assertLaunchAttachment(command.laneId,
       err instanceof RuntimeLaunchPostEffectError ? err.result.surfaceId : undefined);
     if (refusal) {

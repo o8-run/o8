@@ -11,6 +11,10 @@ struct Sessions {
 }
 impl Client {
     pub(crate) fn sidebar_threads(&self) -> Result<Vec<Session>, String> {
+        self.sidebar_threads_with_state()
+            .map(|(sessions, _)| sessions)
+    }
+    fn sidebar_threads_with_state(&self) -> Result<(Vec<Session>, Value), String> {
         let mut sessions = Vec::new();
         let mut seen = HashSet::new();
         let mut offset = 0;
@@ -136,7 +140,7 @@ impl Client {
                     .is_some_and(|path| same_workspace(path, workspace))
             });
         }
-        Ok(sessions)
+        Ok((sessions, state))
     }
 
     pub(crate) fn search_thread_ids(&self, query: &str) -> Result<HashSet<String>, String> {
@@ -166,8 +170,15 @@ impl Client {
             })).map_err(|_| "Invalid worker inventory".to_string()))
         }).collect()
     }
+    #[cfg(test)]
     pub(crate) fn sidebar_sessions(&self) -> Result<Vec<Session>, String> {
-        let mut sessions = self.sessions()?;
+        self.sidebar_sessions_with_branches()
+            .map(|(sessions, _)| sessions)
+    }
+    pub(crate) fn sidebar_sessions_with_branches(
+        &self,
+    ) -> Result<(Vec<Session>, HashSet<String>), String> {
+        let (mut sessions, state) = self.sidebar_threads_with_state()?;
         let archived: Value = self.get(
             "/api/v2/chat-history/list",
             &[("include", "orchestrator"), ("archived", "only")],
@@ -189,43 +200,23 @@ impl Client {
             session.title = crate::text::sanitize(&session.title);
             sessions.push(session);
         }
-        Ok(sessions)
-    }
-    pub(crate) fn patch_thread(&self, id: &str, patch: Value) -> Result<(), String> {
-        let mut body = patch;
-        body["tabId"] = json!(id);
-        self.patch_metadata(body)
-    }
-    pub(crate) fn patch_metadata(&self, body: Value) -> Result<(), String> {
-        let url = self.url("/api/v2/chat-history").unwrap();
-        let request = self.request("PATCH", &url);
-        let response = request.send_json(body).map_err(|error| match error {
-            ureq::Error::Status(code, _) => format!("Thread update rejected (HTTP {code})."),
-            _ => "Thread update is unconfirmed. Refresh before retrying.".into(),
-        })?;
-        let result: Value = Self::read(response)?;
-        if result["ok"] != true {
-            return Err("Thread update was not confirmed.".into());
-        }
-        Ok(())
-    }
-    pub(crate) fn archive_worker(&self, id: &str, mutation: &str) -> Result<(), String> {
-        let url = self.url("/api/runtime/archive").unwrap();
-        let request = self.request("POST", &url);
-        let response = request
-            .send_json(json!({"sessionKey":id,"clientMutationId":mutation}))
-            .map_err(|error| match error {
-                ureq::Error::Status(code, _) => format!("Worker archive rejected (HTTP {code})."),
-                _ => {
-                    "Worker archive is unconfirmed. Retry retains the same action identity.".into()
-                }
-            })?;
-        let result: Value = Self::read(response)?;
-        if result["ok"] != true || result["archived"] != true {
-            return Err(
-                "Worker archive is not confirmed. Retry retains the same action identity.".into(),
-            );
-        }
-        Ok(())
+        let branches = state["mission"]["packets"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|p| {
+                p["status"] != "archived"
+                    && p["branchTarget"].as_str().is_some_and(|b| !b.is_empty())
+            })
+            .flat_map(|p| {
+                [
+                    p["orchestratorThreadId"].as_str(),
+                    p["lane"]["sessionKey"].as_str(),
+                ]
+            })
+            .flatten()
+            .map(|id| id.strip_prefix("llm-chat:").unwrap_or(id).to_owned())
+            .collect();
+        Ok((sessions, branches))
     }
 }

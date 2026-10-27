@@ -7,7 +7,10 @@ import type { OrchestratorMissionState, OrchestratorPacket } from '@/lib/orchest
 import type { GitHubPullRequestSnapshot } from '@/lib/github-broker/store';
 
 vi.mock('@/lib/lane/terminal-lane-cleanup', () => ({ scheduleTerminalLaneCleanup: vi.fn() }));
-vi.mock('@/lib/lane/worktree-cleanup', () => ({ pruneRepoWorktrees: vi.fn(async () => []) }));
+vi.mock('@/lib/lane/worktree-cleanup', () => ({
+  pruneRepoWorktrees: vi.fn(async () => []),
+  cleanupLaneWorktree: vi.fn(async () => false), // Retirement stays held; this fixture proves release/archival.
+}));
 vi.mock('@/lib/github-broker/sync', () => ({
   ensureGitHubPullRequest: vi.fn(async () => ({ pr: null })),
   ensureGitHubPullRequestByHead: vi.fn(async () => ({ pr: null })),
@@ -21,12 +24,14 @@ const dataDir = mkdtempSync(join(tmpdir(), 'o8-automatic-release-'));
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
 process.env.O8_DATA_DIR = dataDir;
 const roots = [dataDir];
-const { closeDb } = await import('@/lib/db');
+const { closeDb, getSqlite } = await import('@/lib/db');
 const { archiveLane, createLane, getLane, listLanes, updateLane } = await import('@/lib/lane/registry');
 const { recordLaneEvent } = await import('@/lib/lane/events');
 const { recordMission } = await import('@/lib/db/missions-store');
 const { upsertGitHubPullRequest } = await import('@/lib/github-broker/store');
 const { runWorktreeReaperTick } = await import('@/lib/lane/worktree-reaper');
+const { MAINTENANCE_PHASES, readMaintenanceState, writeMaintenanceState } = await import('@/lib/worktree/maintenance-discovery');
+const { WORKTREE_MAINTENANCE_POLICY } = await import('@/lib/worktree/maintenance-budget');
 const control = await import('@/lib/orchestrator/control-plane');
 const { readMissionRegistryEntry } = await import('@/lib/orchestrator/mission-registry');
 const { createEmptyOrchestratorMissionState, packetReleaseBlockedBy } = await import('@/lib/orchestrator/store');
@@ -90,6 +95,41 @@ function fixture(location: 'current' | 'registry' = 'current') {
   return { repoPath, worktreePath, lane: getLane(lane.id)!, packet, mission, pull, persist, read };
 }
 
+interface MaintenancePass {
+  candidates: number;
+  discoveryPages: number;
+  readBytes: number;
+  admissionMilliseconds: number;
+  outcomes: Array<{ phase: string; scope: string; outcome: string }>;
+}
+
+function maintenanceProgress(): string {
+  return JSON.stringify([readMaintenanceState('next-phase'),
+    ...MAINTENANCE_PHASES.map(phase => readMaintenanceState(`cursor:${phase}`))]);
+}
+
+/** Reach the exact target through real bounded passes; visitation is not permission to release. */
+async function runReaperUntilVisited(laneId: string) {
+  const trace: MaintenancePass[] = [];
+  for (let passes = 1; passes <= 16; passes += 1) {
+    const before = maintenanceProgress();
+    await runWorktreeReaperTick();
+    const pass = readMaintenanceState<MaintenancePass>('last-pass')!;
+    trace.push(pass);
+    expect(pass.candidates).toBeLessThanOrEqual(WORKTREE_MAINTENANCE_POLICY.candidates);
+    expect(pass.discoveryPages).toBeLessThanOrEqual(WORKTREE_MAINTENANCE_POLICY.candidates + MAINTENANCE_PHASES.length);
+    expect(pass.readBytes).toBeLessThanOrEqual(WORKTREE_MAINTENANCE_POLICY.metadataBytes);
+    expect(pass.admissionMilliseconds).toBe(WORKTREE_MAINTENANCE_POLICY.admissionMilliseconds);
+    const outcome = pass.outcomes.find(outcome => outcome.phase === 'active' && outcome.scope === laneId);
+    if (outcome) {
+      expect(outcome.outcome, JSON.stringify(trace)).toBe('reconciled');
+      return { passes, outcome };
+    }
+    expect(maintenanceProgress(), `No cursor progress toward ${laneId}: ${JSON.stringify(trace)}`).not.toBe(before);
+  }
+  throw new Error(`Target ${laneId} not visited within 16 bounded passes: ${JSON.stringify(trace)}`);
+}
+
 afterEach(() => {
   vi.restoreAllMocks();
   // Worktree maintenance is bounded per tick (#3439), so an earlier test's lane
@@ -122,7 +162,7 @@ describe('automatic PR release through the real reaper and durable missions', ()
   it.each(['current', 'registry'] as const)('releases proved %s work and unblocks its sequential dependent', async (location) => {
     const f = fixture(location);
     expect(packetReleaseBlockedBy(f.mission.packets[1], f.mission.packets)?.id).toBe(f.packet.id);
-    await runWorktreeReaperTick();
+    await runReaperUntilVisited(f.lane.id);
     await runHeadlessSprintTick();
     const saved = f.read();
     expect(saved.packets[0]).toMatchObject({ releaseState: 'released', releaseStatePayload: {
@@ -136,7 +176,7 @@ describe('automatic PR release through the real reaper and durable missions', ()
   it.each(['current', 'registry'] as const)('preserves a newer unmerged commit in a %s mission', async (location) => {
     const f = fixture(location);
     const successor = commit(f.worktreePath, 'unmerged successor');
-    await runWorktreeReaperTick();
+    await runReaperUntilVisited(f.lane.id);
     expect(f.read().packets[0].releaseState).toBe('pending');
     expect(getLane(f.lane.id)?.status).toBe('reviewing');
     expect(git(f.worktreePath, 'rev-parse', 'HEAD')).toBe(successor);
@@ -149,7 +189,7 @@ describe('automatic PR release through the real reaper and durable missions', ()
     if (reason === 'missing-proof') upsertGitHubPullRequest({ ...f.pull, headSha: null, mergeCommit: null });
     if (reason === 'dirty') writeFileSync(join(f.worktreePath, 'app.txt'), 'dirty successor');
     f.persist();
-    await runWorktreeReaperTick();
+    await runReaperUntilVisited(f.lane.id);
     expect(f.read().packets[0].releaseState).toBe('pending');
     expect(getLane(f.lane.id)?.status).toBe('reviewing');
   });
@@ -166,7 +206,7 @@ describe('automatic PR release through the real reaper and durable missions', ()
     inventory.mockImplementation(async () => ({ ...LIVE_INVENTORY, agents: [{ sessionKey, runtime: 'codex', status: 'running',
       runtimeSurface: { ownership: 'owned', capabilities: { interrupt: true, sendInput: true }, lifecycle: { availability: 'running' } } }] }) as never);
     try {
-      await runWorktreeReaperTick();
+      await runReaperUntilVisited(f.lane.id);
       expect(f.read().packets[0].releaseState).toBe('pending');
       expect(getLane(f.lane.id)?.status).toBe('reviewing');
     } finally {
@@ -183,7 +223,7 @@ describe('automatic PR release through the real reaper and durable missions', ()
     const inventory = vi.mocked(getRuntimeInventorySnapshot);
     inventory.mockImplementation(async () => ({ meta: { mode: 'stale', observablePending: true }, agents: [] }) as never);
     try {
-      await runWorktreeReaperTick();
+      await runReaperUntilVisited(f.lane.id);
       expect(f.read().packets[0].releaseState).toBe('pending');
       expect(getLane(f.lane.id)?.status).toBe('reviewing');
     } finally {
@@ -204,11 +244,43 @@ describe('automatic PR release through the real reaper and durable missions', ()
     expect(f.read().packets[0].releaseState).toBe('pending');
   });
 
+  it('replays an interrupted release behind a retained active-lane backlog', async () => {
+    const earlier = fixture();
+    for (let i = 0; i <= WORKTREE_MAINTENANCE_POLICY.candidates; i += 1) {
+      const lane = createLane({ repoPath: earlier.repoPath, branch: `backlog-${i}`,
+        runtime: 'codex', packetId: `pkt-backlog-${i}` });
+      updateLane(lane.id, { status: 'running' }, 'system');
+    }
+    const f = fixture();
+    expect(await releaseMergedPullRequestPacket(f.lane, f.pull)).toBe('released');
+    writeMaintenanceState('next-phase', 0);
+    getSqlite().prepare("DELETE FROM worktree_maintenance_state WHERE key = 'cursor:active'").run();
+    await runWorktreeReaperTick();
+    const first = readMaintenanceState<MaintenancePass>('last-pass')!;
+    expect(first.candidates).toBeLessThanOrEqual(WORKTREE_MAINTENANCE_POLICY.candidates);
+    expect(first.outcomes.some(outcome => outcome.phase === 'active' && outcome.scope === f.lane.id)).toBe(false);
+    const deferredCursor = readMaintenanceState<{ after: string; upper: string }>('cursor:active')!;
+    expect(deferredCursor.after).not.toBe('');
+    expect(deferredCursor.after < deferredCursor.upper).toBe(true);
+    expect(getLane(f.lane.id)?.status).toBe('reviewing');
+    const replay = await runReaperUntilVisited(f.lane.id);
+    expect(getLane(f.lane.id)?.status).toBe('archived');
+    expect(replay.outcome).toEqual({ phase: 'active', scope: f.lane.id, outcome: 'reconciled' });
+    for (const lane of listLanes().filter(lane => lane.packetId?.startsWith('pkt-backlog-'))) {
+      expect(lane.status).toBe('running');
+    }
+    process.stdout.write('[bounded-release-replay] ' + JSON.stringify({ firstPassCandidates: first.candidates,
+      firstPassDiscoveryPages: first.discoveryPages, firstPassTargetVisited: false,
+      deferredCursorAdvanced: Boolean(deferredCursor.after), replayPasses: replay.passes,
+      targetOutcome: replay.outcome.outcome }) + '\n');
+    expect(f.read().packets[0].releaseStatePayload?.headSha).toBe(f.pull.headSha);
+  });
+
   it('can finish archiving after release was persisted by an interrupted reaper', async () => {
     const f = fixture();
     expect(await releaseMergedPullRequestPacket(f.lane, f.pull)).toBe('released');
     expect(getLane(f.lane.id)?.status).toBe('reviewing');
-    await runWorktreeReaperTick();
+    await runReaperUntilVisited(f.lane.id);
     expect(getLane(f.lane.id)?.status).toBe('archived');
     expect(f.read().packets[0].releaseStatePayload?.headSha).toBe(f.pull.headSha);
   });

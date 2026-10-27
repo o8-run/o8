@@ -21,14 +21,13 @@ import { isThinkingEffort, type ThinkingEffort } from '@/lib/orchestrator/thinki
 import {
   computeCost,
   isSupportedProvider,
-  OPERATOR_OPENROUTER_MODELS,
   OPERATOR_GEMINI_MODEL,
   OPERATOR_GEMINI_ROLLBACK_MODEL,
   PROVIDERS,
   resolveApiKey,
   type Message,
 } from './provider-config';
-import { resolveOpenRouterRoute } from '@/lib/cortex/qa/llm/inference-route';
+import { openRouterTextModels, resolveOpenRouterRoute } from '@/lib/cortex/qa/llm/inference-route';
 import { requireDesktopAccount } from '@/lib/auth/desktop-account';
 import { getChatGPTPlanService } from '@/lib/chatgpt-plan/service';
 import { ChatGPTPlanError } from '@/lib/chatgpt-plan/types';
@@ -475,7 +474,9 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
     // OpenRouter and the managed proxy retain the two-model fallback chain.
     if (operatorEndpoint || openRouterKey) {
       let lastFailure: Response | null = null;
-      const operatorModels = localOperatorModel ? [localOperatorModel] : OPERATOR_OPENROUTER_MODELS;
+      const operatorModels = localOperatorModel
+        ? [localOperatorModel]
+        : openRouterTextModels(inferenceRoute?.via ?? 'direct');
       for (const freeModel of operatorModels) {
         const response = await streamOpenRouterFallback({
           apiKey: openRouterKey ?? '',

@@ -1,0 +1,37 @@
+CI before review fix: run 40264190413, job 121382853666
+First mode: Fixture deadline expired; requests expected 4, received 0.
+Following three modes passed. Old receipt did not identify the stalled phase.
+
+Fail-first local startup case, before document-bootstrap traffic:
+ RUN  v4.1.11 <repo>
+
+[fixture-cleanup] Reclaimed 0 fixture bytes from 0 stale o8-* directories; detached 0 orphaned o8-apfs-* images; skipped 0 mounted directories; held 0 live, 0 retained and 0 unknown or changed owners; receipt <fixture-temp>
+ ❯ tests/next-parity-route-ownership-real-path.test.ts (5 tests | 1 failed | 4 skipped) 1630ms
+   × handles each Settings request once with overlapping routes (startup) 1623ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/next-parity-route-ownership-real-path.test.ts > handles each Settings request once with overlapping routes (startup)
+AssertionError: expected +0 to be 4 // Object.is equality
+
+- Expected
++ Received
+
+- 4
++ 0
+
+ ❯ tests/next-parity-route-ownership-real-path.test.ts:23:51
+     21|         requests: Array<{ path: string; method: string; attempts: numb…
+     22|       };
+     23|       expect(data.requests.length, result.stderr).toBe(4);
+       |                                                   ^
+     24|       expect(data.overlap).toBe(4);
+     25|       expect(data.requests.map(request => request.attempts), result.st…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 4 skipped (5)
+   Start at  06:39:26
+   Duration  2.27s (transform 36ms, setup 50ms, import 376ms, tests 1.63s, environment 0ms)

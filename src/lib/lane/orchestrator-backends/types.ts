@@ -102,7 +102,7 @@ export interface OrchestratorBackend {
   /** Human-readable label, used in logs. */
   readonly label: string;
   /** Present only for native live input. A normal sendTurn may interrupt or restart work. */
-  readonly liveSteer?: (repoPath: string, message: string, options: Pick<OrchestratorTurnOptions, 'threadId' | 'permissionMode' | 'model' | 'toolProfile' | 'attachments' | 'orchestrationMode'> & { beforeAdmit: () => void; clientUserMessageId?: string }) => Promise<{ accepted: boolean }>;
+  readonly liveSteer?: (repoPath: string, message: string, options: Pick<OrchestratorTurnOptions, 'threadId' | 'permissionMode' | 'model' | 'thinkingEffort' | 'toolProfile' | 'attachments' | 'orchestrationMode'> & { beforeAdmit: () => void; clientUserMessageId?: string }) => Promise<{ accepted: boolean }>;
   /**
    * Look up the repo's session WITHOUT creating one — null if none exists.
    * `agent` selects the openclaw agent (openclaw backend only).

@@ -5,8 +5,9 @@
 //!
 //! 1. Boot: emit `status capture:<source>` and `ready`, then warm the model on
 //!    the worker thread (installed files only, see [`crate::model`]).
-//! 2. `start:<id>`: open capture, emit `status listening`, stream `level`
-//!    events and periodic `partial` transcripts.
+//! 2. `start:<id>`: wait for successful model preparation before opening capture,
+//!    then emit `status listening`, `level` events and periodic `partial`
+//!    transcripts. An unavailable model refuses the session without recording.
 //! 3. `stop:<id>` (a stale id is ignored): close capture, transcribe, then emit
 //!    `final` (when non-empty), `audio_file` (a 16 kHz WAV), `complete`, and
 //!    `ready`.
@@ -85,10 +86,12 @@ enum Msg {
     Line(String),
     Eof,
     CaptureFailed(u64, String),
+    Prepared(u64, Result<(), String>),
 }
 
 enum Job {
     Prepare {
+        generation: u64,
         language: Option<String>,
     },
     Partial {
@@ -108,6 +111,52 @@ struct Session {
     buffer: Arc<Mutex<Vec<f32>>>,
     metered: usize,
     partial_at: usize,
+}
+
+impl Session {
+    fn start(
+        id: u64,
+        source: &mut dyn AudioSource,
+        tx: &mpsc::Sender<Msg>,
+        current: &AtomicU64,
+        emitter: &Emitter,
+    ) -> Self {
+        let buffer = Arc::new(Mutex::new(Vec::new()));
+        let sink_buffer = buffer.clone();
+        let sink: SampleSink = Arc::new(move |chunk: &[f32]| {
+            sink_buffer
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .extend_from_slice(chunk)
+        });
+        let fail_tx = Mutex::new(tx.clone());
+        let on_failure: FailureSink = Arc::new(move |text: String| {
+            let _ = fail_tx
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .send(Msg::CaptureFailed(id, text));
+        });
+        current.store(id, Ordering::SeqCst);
+        match source.start(sink, on_failure) {
+            Ok(()) => emitter.emit(Event::status("listening", Some(id))),
+            // Keep the session so its stop still completes cleanly.
+            Err(text) => emitter.emit(Event::error(text, Some(id))),
+        }
+        Self {
+            id,
+            buffer,
+            metered: 0,
+            partial_at: 0,
+        }
+    }
+}
+
+fn complete_without_capture(emitter: &Emitter, id: u64, error: Option<&str>) {
+    if let Some(error) = error {
+        emitter.emit(Event::error(format!("Voice is off. {error}"), Some(id)));
+    }
+    emitter.emit(Event::new("complete", "", Some(id)));
+    emitter.emit(Event::ready());
 }
 
 /// Run the daemon until `quit` or EOF on `input`.
@@ -143,12 +192,19 @@ pub fn run<R, W>(
         current.clone(),
         partial_busy.clone(),
         options.wav_dir.clone(),
+        tx.clone(),
     );
 
     let mut language = whisper_language(&options.locale);
+    let mut generation = 0;
+    // None means preparation is still pending. Only its matching success may
+    // open the audio source; an earlier locale's success cannot grant readiness.
+    let mut model_state: Option<Result<(), String>> = None;
+    let mut pending_start = None;
     emitter.emit(Event::status(source.describe(), None));
     emitter.emit(Event::ready());
     let _ = job_tx.send(Job::Prepare {
+        generation,
         language: language.clone(),
     });
 
@@ -181,6 +237,25 @@ pub fn run<R, W>(
         match msg {
             None => {}
             Some(Msg::Eof) => break,
+            Some(Msg::Prepared(prepared_generation, result)) => {
+                if prepared_generation == generation {
+                    if let Some(id) = pending_start.take() {
+                        match &result {
+                            Ok(()) => {
+                                active = Some(Session::start(
+                                    id,
+                                    source.as_mut(),
+                                    &tx,
+                                    &current,
+                                    &emitter,
+                                ));
+                            }
+                            Err(error) => complete_without_capture(&emitter, id, Some(error)),
+                        }
+                    }
+                    model_state = Some(result);
+                }
+            }
             Some(Msg::CaptureFailed(id, text)) => {
                 if active.as_ref().map(|s| s.id) == Some(id) {
                     emitter.emit(Event::error(text, Some(id)));
@@ -191,35 +266,35 @@ pub fn run<R, W>(
                 Some(Command::Quit) => break,
                 Some(Command::Start(id)) => {
                     finalize(&mut active, &mut source, &language);
-                    let buffer = Arc::new(Mutex::new(Vec::new()));
-                    let sink_buffer = buffer.clone();
-                    let sink: SampleSink = Arc::new(move |chunk: &[f32]| {
-                        sink_buffer
-                            .lock()
-                            .unwrap_or_else(|p| p.into_inner())
-                            .extend_from_slice(chunk)
-                    });
-                    let fail_tx = Mutex::new(tx.clone());
-                    let on_failure: FailureSink = Arc::new(move |text: String| {
-                        let _ = fail_tx
-                            .lock()
-                            .unwrap_or_else(|p| p.into_inner())
-                            .send(Msg::CaptureFailed(id, text));
-                    });
-                    current.store(id, Ordering::SeqCst);
-                    active = Some(Session {
-                        id,
-                        buffer,
-                        metered: 0,
-                        partial_at: 0,
-                    });
-                    match source.start(sink, on_failure) {
-                        Ok(()) => emitter.emit(Event::status("listening", Some(id))),
-                        // Keep the session so its stop still completes cleanly.
-                        Err(text) => emitter.emit(Event::error(text, Some(id))),
+                    if let Some(previous) = pending_start.take() {
+                        complete_without_capture(&emitter, previous, None);
+                    }
+                    match &model_state {
+                        Some(Ok(())) => {
+                            active =
+                                Some(Session::start(id, source.as_mut(), &tx, &current, &emitter));
+                        }
+                        Some(Err(_)) => {
+                            // An explicit installation may have completed since
+                            // the failure. Recheck installed files only, keeping
+                            // capture closed until the worker confirms success.
+                            generation += 1;
+                            model_state = None;
+                            pending_start = Some(id);
+                            let _ = job_tx.send(Job::Prepare {
+                                generation,
+                                language: language.clone(),
+                            });
+                        }
+                        None => pending_start = Some(id),
                     }
                 }
                 Some(Command::Stop(requested)) => {
+                    if pending_start.is_some()
+                        && (requested.is_none() || requested == pending_start)
+                    {
+                        complete_without_capture(&emitter, pending_start.take().unwrap(), None);
+                    }
                     let matches = match (requested, active.as_ref()) {
                         (_, None) => false,
                         (None, Some(_)) => true,
@@ -230,9 +305,13 @@ pub fn run<R, W>(
                     }
                 }
                 Some(Command::Locale(locale)) => {
+                    finalize(&mut active, &mut source, &language);
                     language = whisper_language(&locale);
+                    generation += 1;
+                    model_state = None;
                     emitter.emit(Event::status(format!("locale:{locale}"), None));
                     let _ = job_tx.send(Job::Prepare {
+                        generation,
                         language: language.clone(),
                     });
                 }
@@ -284,6 +363,7 @@ fn spawn_worker(
     current: Arc<AtomicU64>,
     partial_busy: Arc<AtomicBool>,
     wav_dir: PathBuf,
+    result_tx: mpsc::Sender<Msg>,
 ) -> (mpsc::Sender<Job>, std::thread::JoinHandle<()>) {
     let (job_tx, job_rx) = mpsc::channel::<Job>();
     let handle = std::thread::spawn(move || {
@@ -291,10 +371,15 @@ fn spawn_worker(
         let notify = move |event: Event| notify_emitter.emit(event);
         for job in job_rx {
             match job {
-                Job::Prepare { language } => {
-                    if let Err(e) = transcriber.prepare(language.as_deref(), &notify) {
-                        emitter.emit(Event::error(e, None));
+                Job::Prepare {
+                    generation,
+                    language,
+                } => {
+                    let result = transcriber.prepare(language.as_deref(), &notify);
+                    if let Err(error) = &result {
+                        emitter.emit(Event::error(error, None));
                     }
+                    let _ = result_tx.send(Msg::Prepared(generation, result));
                 }
                 Job::Partial {
                     session_id,

@@ -1,10 +1,12 @@
+import { cleanupWorkerO8Cli } from './worker-o8-cli-cleanup';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { withOwnedArtifactRootLock } from './artifact-admission';
 import { readOwnedSessionMetadata } from './metadata-read';
+import { assertOwnedSessionPath, assertOwnedSessionTree, refuseOwnedSessionPath } from './owned-path';
 import { lstat, mkdir, readdir, realpath, rename } from 'node:fs/promises';
 
-import { metadataPath, nowIso, pathExists, readJsonFile, writeJsonFile } from './helpers';
+import { metadataPath, nowIso, writeJsonFile } from './helpers';
 import type { OwnedSessionRecord, OwnedSessionState } from './types';
 
 export interface ArchiveOwnedSessionResult {
@@ -31,10 +33,11 @@ export async function archivedSessionPathForSurfaceId(
   surfaceId: string,
   surfacePrefix: string,
 ) {
-  const sessionDirName = sessionDirNameFromSurfaceId(surfaceId, surfacePrefix);
-  if (!sessionDirName) return null;
+  const sessionDirName = surfaceId.startsWith(surfacePrefix) ? surfaceId.slice(surfacePrefix.length) : '';
+  if (!/^[A-Za-z0-9_-][A-Za-z0-9._-]*$/.test(sessionDirName)) return null;
   const archivePath = path.join(archiveRootForOwnedSessionRoot(root), sessionDirName);
-  return (await pathExists(archivePath)) ? archivePath : null;
+  const entry = await assertOwnedSessionPath(root, archivePath, { missing: true, kind: 'directory' });
+  return entry ? archivePath : null;
 }
 
 export async function readOwnedSessionState(
@@ -42,17 +45,21 @@ export async function readOwnedSessionState(
   surfaceId: string,
   surfacePrefix: string,
 ): Promise<OwnedSessionState> {
+  await assertOwnedSessionPath(root, root, { missing: true, kind: 'directory' });
   const entries = await readdir(root, { withFileTypes: true }).catch(() => []);
   for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
     const sessionDir = path.join(root, entry.name);
+    try {
+      const node = await assertOwnedSessionPath(root, sessionDir, { kind: 'entry' });
+      if (!node?.isDirectory()) continue;
+    } catch { continue; }
     const filePath = metadataPath(sessionDir);
-    if (!(await pathExists(filePath))) continue;
-    const session = await readJsonFile<OwnedSessionRecord>(filePath);
+    if (!await assertOwnedSessionPath(root, filePath, { missing: true, kind: 'file' })) continue;
+    const session = await readOwnedSessionMetadata<OwnedSessionRecord>(filePath);
     if (session.surfaceId === surfaceId) return 'active';
   }
   const archivePath = await archivedSessionPathForSurfaceId(root, surfaceId, surfacePrefix);
-  if (archivePath && await pathExists(metadataPath(archivePath))) return 'archived';
+  if (archivePath && await assertOwnedSessionPath(root, metadataPath(archivePath), { missing: true, kind: 'file' })) return 'archived';
   return 'missing';
 }
 
@@ -77,6 +84,7 @@ export async function assertArchivedWorkspaceSessionRestorable(
   }
   const archiveRoot = archiveRootForOwnedSessionRoot(root);
   const archivePath = path.join(archiveRoot, name);
+  await assertOwnedSessionPath(root, archivePath, { kind: 'directory' });
   const node = await lstat(archivePath);
   if (!node.isDirectory() || node.isSymbolicLink()
     || await realpath(archivePath) !== path.join(await realpath(archiveRoot), name)) {
@@ -120,18 +128,25 @@ async function restoreArchivedOwnedSessionDirLocked(
     return { restored: false, note: 'No archived session directory was found.' };
   }
   const activePath = path.join(root, path.basename(archivePath));
-  if (await pathExists(activePath)) {
+  if (await assertOwnedSessionPath(root, activePath, { missing: true, kind: 'directory' })) {
     return { restored: false, note: `Active session path already exists: ${activePath}` };
   }
+  await assertOwnedSessionPath(root, root, { missing: true, kind: 'directory' });
   await mkdir(root, { recursive: true });
   if (strictRecordFingerprint) {
     await assertArchivedWorkspaceSessionRestorable(root, surfaceId, surfacePrefix, strictRecordFingerprint);
   }
+  const source = await assertOwnedSessionPath(root, archivePath, { kind: 'directory' });
+  await assertOwnedSessionTree(root, archivePath);
+  if (await assertOwnedSessionPath(root, activePath, { missing: true, kind: 'directory' })) refuseOwnedSessionPath('active session destination became occupied');
+  await assertOwnedSessionPath(root, archivePath, { kind: 'directory', identity: source! });
   await rename(archivePath, activePath);
 
   try {
     const activeMetadataPath = metadataPath(activePath);
-    const record = await readJsonFile<OwnedSessionRecord>(activeMetadataPath);
+    await assertOwnedSessionPath(root, activeMetadataPath, { kind: 'file' });
+    const record = await readOwnedSessionMetadata<OwnedSessionRecord>(activeMetadataPath);
+    await assertOwnedSessionPath(root, activeMetadataPath, { kind: 'file' });
     await writeJsonFile(activeMetadataPath, {
       ...record,
       sessionDir: activePath,
@@ -148,6 +163,13 @@ async function restoreArchivedOwnedSessionDirLocked(
   return { restored: true, sessionPath: activePath, note: `Session restored from archive at ${activePath}.` };
 }
 
+export async function assertOwnedSessionArchivable(root: string, sessionDir: string): Promise<boolean> {
+  if (path.dirname(path.resolve(sessionDir)) !== path.resolve(root)) refuseOwnedSessionPath('session directory is outside its active owned root');
+  await assertOwnedSessionTree(root, sessionDir);
+  const archivePath = path.join(archiveRootForOwnedSessionRoot(root), path.basename(sessionDir));
+  return !(await assertOwnedSessionPath(root, archivePath, { missing: true, kind: 'directory' }));
+}
+
 export async function archiveOwnedSessionDir(
   root: string,
   session: OwnedSessionRecord,
@@ -161,14 +183,17 @@ async function archiveOwnedSessionDirLocked(
   const archiveRoot = archiveRootForOwnedSessionRoot(root);
   const archivePath = path.join(archiveRoot, path.basename(session.sessionDir));
 
-  if (!(await pathExists(session.sessionDir))) {
-    if (await pathExists(archivePath)) {
+  if (path.dirname(path.resolve(session.sessionDir)) !== path.resolve(root)) refuseOwnedSessionPath('session directory is outside its active owned root');
+  const source = await assertOwnedSessionPath(root, session.sessionDir, { missing: true, kind: 'directory' });
+  const destination = await assertOwnedSessionPath(root, archivePath, { missing: true, kind: 'directory' });
+  if (!source) {
+    if (destination) {
       return { archived: true, archivePath, note: 'Session already archived.' };
     }
     return { archived: false, note: 'Session directory was not found.' };
   }
 
-  if (await pathExists(archivePath)) {
+  if (destination) {
     return {
       archived: false,
       archivePath,
@@ -176,12 +201,19 @@ async function archiveOwnedSessionDirLocked(
     };
   }
 
+  await assertOwnedSessionTree(root, session.sessionDir);
+  await assertOwnedSessionPath(root, archiveRoot, { missing: true, kind: 'directory' });
+  await cleanupWorkerO8Cli(root, session);
   await mkdir(archiveRoot, { recursive: true });
+  if (await assertOwnedSessionPath(root, archivePath, { missing: true, kind: 'directory' })) refuseOwnedSessionPath('archive session destination became occupied');
+  await assertOwnedSessionPath(root, session.sessionDir, { kind: 'directory', identity: source });
   await rename(session.sessionDir, archivePath);
 
   try {
     const archiveMetadataPath = metadataPath(archivePath);
-    const archivedSession = await readJsonFile<OwnedSessionRecord>(archiveMetadataPath);
+    await assertOwnedSessionPath(root, archiveMetadataPath, { kind: 'file' });
+    const archivedSession = await readOwnedSessionMetadata<OwnedSessionRecord>(archiveMetadataPath);
+    await assertOwnedSessionPath(root, archiveMetadataPath, { kind: 'file' });
     await writeJsonFile(archiveMetadataPath, {
       ...archivedSession,
       sessionDir: archivePath,
