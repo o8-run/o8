@@ -1,0 +1,131 @@
+// Measure the production Updates panel as deferred discovery publishes rows.
+import fs from 'node:fs';
+import path from 'node:path';
+import esbuild from 'esbuild';
+import { chromium, type Browser, type Page } from 'playwright-core';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { resolveBrowserPath } from '../scripts/bench/measure-browser-boot.mjs';
+import { getPalette, resolveTheme } from '../src/lib/theme/registry';
+
+const executablePath = resolveBrowserPath();
+const hubFixture = `
+import { useSyncExternalStore } from 'react';
+let state = { app: { currentVersion: '0.1.0' }, tools: [], checking: false,
+  checkingAll: false, cliBusy: null, cliProgress: {}, syncing: false,
+  cliError: null, cliMessage: null, checkMessage: null, checkedAt: 0 };
+const listeners = new Set();
+window.publishTools = patch => { state = { ...state, ...patch }; listeners.forEach(fn => fn()); };
+export const useUpdateHub = () => useSyncExternalStore(fn => { listeners.add(fn); return () => listeners.delete(fn); }, () => state);
+export const refreshCliUpdateView = async () => window.publishTools({ checking: true });
+export const checkAppUpdates = async () => ({ hasUpdates: false });
+export const synchronizeConnectedClis = async () => {};
+export const loadCachedReleaseNotes = async () => ({ source: 'changelog', summary: 'Published changes',
+  overview: window.fullNotes ? 'The latest published release includes these changes.' : '',
+  entries: window.fullNotes ? Array.from({length: 8}, (_, i) => ({text: 'Published change ' + i + ': improvements to workspace navigation, saved state and update feedback.'})) : [],
+});
+`;
+const fixture = `
+import { createElement } from 'react';
+import { createRoot } from 'react-dom/client';
+import { RailUpdateControl } from '@/components/desktop/shell/RailUpdateControl';
+createRoot(document.querySelector('main')).render(createElement(RailUpdateControl, {
+  buttonStyle: { position: 'fixed', left: 12, bottom: 16, width: 32, height: 32 }
+}));
+`;
+
+describe.skipIf(!executablePath)('Updates panel discovery layout in a real browser', () => {
+  let browser: Browser;
+  let page: Page;
+  let bundle: string;
+  beforeAll(async () => {
+    const result = await esbuild.build({
+      stdin: { contents: fixture, resolveDir: process.cwd(), loader: 'jsx' },
+      bundle: true, write: false, format: 'iife', platform: 'browser', jsx: 'automatic',
+      define: { 'process.env.NODE_ENV': '"production"' },
+      alias: { '@': path.resolve('src') },
+      plugins: [{ name: 'deferred-update-state', setup(build) {
+        build.onResolve({ filter: /update-hub-client$/ }, () => ({ path: 'hub', namespace: 'fixture' }));
+        build.onResolve({ filter: /ConfirmToastHost$/ }, () => ({ path: 'toast', namespace: 'fixture' }));
+        build.onResolve({ filter: /theme\/context$/ }, () => ({ path: 'theme', namespace: 'fixture' }));
+        build.onLoad({ filter: /.*/, namespace: 'fixture' }, ({ path: name }) => ({
+          contents: name === 'hub' ? hubFixture : name === 'theme'
+            ? 'export const useTheme = () => ({ workspaceGlass: false, surface: "solid", paletteId: "dark" });'
+            : 'export const toast = () => {};',
+          resolveDir: process.cwd(),
+        }));
+      } }],
+      logLevel: 'silent',
+    });
+    bundle = result.outputFiles[0].text;
+    browser = await chromium.launch({ executablePath: executablePath!, headless: true });
+    page = await browser.newPage({ reducedMotion: 'reduce' });
+  }, 60_000);
+  afterAll(async () => { await browser?.close(); });
+
+  for (const theme of ['light', 'dark'] as const) {
+    for (const [width, height] of [[900, 700], [1440, 900], [1680, 1050]]) {
+      for (const fullNotes of [false, true]) {
+        it(`keeps the Tools header fixed with ${fullNotes ? 'full' : 'short'} notes at ${width}x${height} in ${theme}`, async () => {
+          await page.setViewportSize({ width, height });
+          await page.setContent(`<style>${fs.readFileSync('src/app/globals.css', 'utf8')}</style><main></main>`);
+          await page.evaluate(({ tokens, fullNotes }) => {
+            for (const [key, value] of Object.entries(tokens)) document.documentElement.style.setProperty(key, value);
+            Object.assign(window, { fullNotes });
+          }, { tokens: resolveTheme(getPalette(theme), 'solid').cssVars, fullNotes });
+          await page.addScriptTag({ content: bundle });
+          const updates = page.getByRole('button', { name: 'Updates', exact: true });
+          await updates.focus();
+          await updates.press('ArrowUp');
+          const panel = page.getByRole('dialog', { name: 'Updates and release notes' });
+          await panel.getByText('Latest published changes', { exact: true }).waitFor();
+          const tools = page.getByRole('button', { name: 'Tools updates', exact: true });
+          const before = await tools.boundingBox();
+          await tools.click();
+          const progress = page.getByRole('progressbar', { name: 'Tool discovery' });
+          await progress.waitFor();
+          const checking = await tools.boundingBox();
+          const progressVisible = await progress.evaluate(node => {
+            const box = node.getBoundingClientRect();
+            const panel = node.closest('[role="dialog"]')!.getBoundingClientRect();
+            return box.top >= panel.top && box.bottom <= panel.bottom;
+          });
+          // Publish partial rows before completion, as the real stream does.
+          const publish = async (count: number, checking: boolean) => page.evaluate(({ count, checking }) => {
+            (window as unknown as { publishTools: (patch: unknown) => void }).publishTools({ checking,
+              checkedAt: checking ? 0 : Date.now(),
+              tools: Array.from({ length: count }, (_, i) => ({ runtimeId: 'tool-' + i,
+                label: 'Installed tool ' + i, status: 'unknown', installedVersion: '1.0.0' })),
+            });
+          }, { count, checking });
+          await publish(3, true);
+          await panel.locator('[data-cli-update-row]').nth(2).waitFor();
+          const partial = await tools.boundingBox();
+          await publish(10, false);
+          await panel.locator('[data-cli-update-row]').nth(9).waitFor();
+          const loaded = await tools.boundingBox();
+          const firstRowsVisible = await panel.locator('[data-cli-update-row]').evaluateAll(rows => rows.slice(0, 2).every(node => {
+            const box = node.getBoundingClientRect();
+            const panel = node.closest('[role="dialog"]')!.getBoundingClientRect();
+            return box.top >= panel.top && box.bottom <= panel.bottom;
+          }));
+          console.info('[updates-panel-layout]', JSON.stringify({ theme, width, height, fullNotes,
+            y: [before?.y, checking?.y, partial?.y, loaded?.y], progressVisible, firstRowsVisible }));
+          expect(loaded?.y, 'Tools header moves when discovery rows arrive').toBe(checking?.y);
+          expect(checking).toEqual(before);
+          expect(partial).toEqual(before);
+          expect(loaded).toEqual(before);
+          expect(progressVisible, 'checking must be visible without scrolling').toBe(true);
+          expect(firstRowsVisible, 'first rows must be visible without scrolling').toBe(true);
+          // The last result and release history must remain reachable by keyboard.
+          await panel.locator('[data-cli-update-row]').last().getByRole('button').focus();
+          await page.getByRole('button', { name: 'View release on GitHub' }).focus();
+          expect(await page.getByRole('button', { name: 'View release on GitHub' }).evaluate(node => {
+            const box = node.getBoundingClientRect();
+            const panel = node.closest('[role="dialog"]')!.getBoundingClientRect();
+            return box.top >= panel.top && box.bottom <= panel.bottom;
+          })).toBe(true);
+        });
+      }
+    }
+  }
+});

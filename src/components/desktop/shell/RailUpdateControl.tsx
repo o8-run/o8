@@ -147,7 +147,8 @@ export function RailUpdateControl({ buttonStyle }: { buttonStyle: CSSProperties 
       transition={{ duration: 0.14, ease: [0.16, 1, 0.3, 1] }} style={{ position: 'fixed', ...position, width: 'min(340px, calc(100vw - 24px))', zIndex: 220 }}>
       <FloatingSurface ref={panel} id={id} role="dialog" aria-label="Updates and release notes" aria-modal="false"
       onMouseEnter={cancel} onMouseLeave={leave} onFocus={cancel}
-      contentStyle={{ maxHeight: position.maxHeight, overflowY: 'auto' }}>
+      // Reserve the bounded frame before discovery; rows must not lift the clicked header.
+      contentStyle={{ height: position.maxHeight, overflowY: 'auto' }}>
       <div style={{ padding: 16, display: 'grid', gap: 12 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
           <div><div style={{ fontSize: 14, fontWeight: 500 }}>{available ? 'Updates ready' : 'Updates'}</div>
@@ -183,21 +184,7 @@ export function RailUpdateControl({ buttonStyle }: { buttonStyle: CSSProperties 
           </button> : null}
           <span style={{ fontSize: 10.5, lineHeight: 1.5, color: 'var(--t-text-muted)' }}>Updates o8 only. Other tools stay under Tools.</span>
         </div> : null}
-        <section style={{ borderTop: '1px solid var(--t-divider-subtle)', paddingTop: 14 }}>
-          <div style={{ fontSize: 12.5, fontWeight: 500 }}>{notes?.source === 'changelog' ? 'Latest published changes' : 'What’s changed'}</div>
-          {notes?.source === 'changelog' && notes.publishedAt ? <div style={{ fontSize: 10.5, marginTop: 4, color: 'var(--t-text-muted)' }}>Published {notes.publishedAt.slice(0, 10)}</div> : null}
-          {notes?.overview && notes.entries.length && !sameNote(notes.overview, notes.entries[0]?.text) ? <p style={{ marginTop: 10, marginBottom: 10, fontSize: 12, lineHeight: 1.6, color: 'var(--t-text-secondary)' }}>{notes.overview}</p> : null}
-          {notes?.entries.length ? <ul style={{ marginTop: 10, marginBottom: 10, paddingLeft: 17, display: 'grid', gap: 9, fontSize: 12, lineHeight: 1.6, color: 'var(--t-text-secondary)' }}>
-            {notes.entries.slice(0, allNotes ? undefined : 5).map((entry, index) => <li key={index}>
-              {entry.text.replace(/^(?:feat|fix|refactor|perf|chore|docs|style)(?:\([^)]*\))?:\s*/i, '')}
-            </li>)}
-          </ul> : <p style={{ fontSize: 12, lineHeight: 1.5, color: 'var(--t-text-muted)' }}>{notesError ? 'Published notes are unavailable right now. Open the release history for details.' : notes ? notes.summary : 'Loading published notes…'}</p>}
-          {notes && notes.entries.length > 5 ? <button type="button" aria-expanded={allNotes} onClick={() => setAllNotes(value => !value)}
-            style={{ ...button, minHeight: 24, padding: 0, background: 'transparent', color: 'var(--t-text-secondary)', fontSize: 11 }}>
-            {allNotes ? 'Show fewer changes' : `${notes.entries.length - 5} more changes`}
-          </button> : null}
-          <div><button type="button" onClick={() => openExternalUrl(notes?.releaseUrl ?? 'https://github.com/hurttlocker/o8-releases/releases')} style={{ ...button, minHeight: 24, paddingLeft: 0, paddingRight: 0, background: 'transparent', color: 'var(--t-text-muted)', fontSize: 10.5, textDecoration: 'underline', textUnderlineOffset: 3 }}>View release on GitHub</button></div>
-        </section>
+        {/* Tools precedes notes so checking and the first results are visible on open. */}
         <section style={{ borderTop: '1px solid var(--t-divider-subtle)', paddingTop: 10 }}>
           <button type="button" aria-label="Tools updates" aria-expanded={toolsExpanded} aria-controls={`${id}-tools`}
             onClick={() => { setToolsExpanded(value => !value); if (!toolsExpanded) {
@@ -224,6 +211,21 @@ export function RailUpdateControl({ buttonStyle }: { buttonStyle: CSSProperties 
             {hub.cliError || hub.cliMessage ? <div role={hub.cliError ? 'alert' : 'status'} style={{ fontSize: 11, lineHeight: 1.5, color: hub.cliError ? 'var(--t-danger)' : 'var(--t-text-secondary)' }}>{hub.cliError || hub.cliMessage}</div> : null}
             {!visibleTools.length && !hub.checking && !hub.cliError ? <span role="status" style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>No supported CLI installation was found.</span> : null}
           </div> : null}
+        </section>
+        <section style={{ borderTop: '1px solid var(--t-divider-subtle)', paddingTop: 14 }}>
+          <div style={{ fontSize: 12.5, fontWeight: 500 }}>{notes?.source === 'changelog' ? 'Latest published changes' : 'What’s changed'}</div>
+          {notes?.source === 'changelog' && notes.publishedAt ? <div style={{ fontSize: 10.5, marginTop: 4, color: 'var(--t-text-muted)' }}>Published {notes.publishedAt.slice(0, 10)}</div> : null}
+          {notes?.overview && notes.entries.length && !sameNote(notes.overview, notes.entries[0]?.text) ? <p style={{ marginTop: 10, marginBottom: 10, fontSize: 12, lineHeight: 1.6, color: 'var(--t-text-secondary)' }}>{notes.overview}</p> : null}
+          {notes?.entries.length ? <ul style={{ marginTop: 10, marginBottom: 10, paddingLeft: 17, display: 'grid', gap: 9, fontSize: 12, lineHeight: 1.6, color: 'var(--t-text-secondary)' }}>
+            {notes.entries.slice(0, allNotes ? undefined : 5).map((entry, index) => <li key={index}>
+              {entry.text.replace(/^(?:feat|fix|refactor|perf|chore|docs|style)(?:\([^)]*\))?:\s*/i, '')}
+            </li>)}
+          </ul> : <p style={{ fontSize: 12, lineHeight: 1.5, color: 'var(--t-text-muted)' }}>{notesError ? 'Published notes are unavailable right now. Open the release history for details.' : notes ? notes.summary : 'Loading published notes…'}</p>}
+          {notes && notes.entries.length > 5 ? <button type="button" aria-expanded={allNotes} onClick={() => setAllNotes(value => !value)}
+            style={{ ...button, minHeight: 24, padding: 0, background: 'transparent', color: 'var(--t-text-secondary)', fontSize: 11 }}>
+            {allNotes ? 'Show fewer changes' : `${notes.entries.length - 5} more changes`}
+          </button> : null}
+          <div><button type="button" onClick={() => openExternalUrl(notes?.releaseUrl ?? 'https://github.com/hurttlocker/o8-releases/releases')} style={{ ...button, minHeight: 24, paddingLeft: 0, paddingRight: 0, background: 'transparent', color: 'var(--t-text-muted)', fontSize: 10.5, textDecoration: 'underline', textUnderlineOffset: 3 }}>View release on GitHub</button></div>
         </section>
       </div>
     </FloatingSurface></motion.div>, document.body) : null}
