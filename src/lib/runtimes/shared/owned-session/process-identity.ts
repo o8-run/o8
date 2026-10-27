@@ -5,6 +5,7 @@ import { isMetadataLockProcessIdentity, probeMetadataLockProcessIdentity, sameMe
   type MetadataLockProcessIdentity, type MetadataLockProcessProbe } from '@/lib/worktree/metadata-lock-process-identity';
 import type { OwnedRunRecord, OwnedSessionRecord } from './types';
 import { probeOwnedRunProcessClaim } from './run-process-proof';
+import type { ChildProcess } from 'node:child_process';
 
 const execFileAsync = promisify(execFile);
 export type OwnedIdentitySource = 'native-helper' | 'ps' | 'platform';
@@ -17,6 +18,19 @@ type OwnedProcessProbe = Exclude<MetadataLockProcessProbe, { state: 'live' }>
 export class OwnedProcessIdentityError extends Error {
   constructor(state: 'mismatch' | 'unknown') {
     super(`Owned worker process identity is ${state}; its saved run remains held without reattachment or automatic retry.`);
+  }
+}
+
+/** A known exit of the exact journaled child is a post-launch outcome. Keep
+ * its queued exit bookkeeping; this does not prove descendant clearance. */
+export async function verifyStartedChildIdentity(
+  verify: () => Promise<void>, run: OwnedRunRecord, child: ChildProcess | undefined, persisted: boolean,
+): Promise<void> {
+  try { await verify(); }
+  catch (error) {
+    if (!(error instanceof OwnedProcessIdentityError) || !persisted || run.spawnState !== 'started'
+      || child?.pid !== run.pid
+      || !(typeof child.exitCode === 'number' || typeof child.signalCode === 'string')) throw error;
   }
 }
 

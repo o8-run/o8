@@ -107,6 +107,32 @@ describe.skipIf(process.platform === 'win32')('worker-owned stdin across server 
     expect((await request('inspect', session.surfaceId)).recentRuns[0].outcome).toBe('finished');
   }, 40_000);
 
+  it('keeps the relay alive until an interrupted provider reaps its detached child', async () => {
+    setup();
+    await startParent('stop-tree');
+    const session = await request('launch');
+    run = session.recentRuns[0];
+    const descendant = await waitForJson<{ pid: number }>(file('descendant.json'), 'detached child ready');
+    try {
+      await request('interrupt', session.surfaceId);
+      await waitFor(() => existsSync(file('stop-requested')), 'provider received Stop');
+      // The provider deliberately holds Stop open. Neither its relay nor the
+      // journal may claim exit while the detached child still needs reaping.
+      expect(() => process.kill(run!.pid, 0)).not.toThrow();
+      expect(JSON.parse(readFileSync(join(session.sessionDir, 'session.json'), 'utf8')).recentRuns[0].childExit)
+        .toBeUndefined();
+      expect(() => process.kill(descendant.pid, 0)).not.toThrow();
+    } finally {
+      writeFileSync(file('release-stop'), 'finish stopping');
+      await waitFor(() => existsSync(file('tree-stopped')), 'provider reaped its detached child');
+    }
+    await waitFor(() => JSON.parse(readFileSync(join(session.sessionDir, 'session.json'), 'utf8')).recentRuns[0].childExit,
+      'real relay exit recorded');
+    expect((await request('inspect', session.surfaceId)).recentRuns[0].outcome).toBe('interrupted');
+    expect(() => process.kill(descendant.pid, 0)).toThrow();
+    expect(() => process.kill(run!.pid, 0)).toThrow();
+  }, 40_000);
+
   it('publishes only complete delivery JSON during a 500 ms receipt write', async () => {
     setup();
     const stdinPath = file('input');

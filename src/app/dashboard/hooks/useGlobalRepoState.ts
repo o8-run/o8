@@ -445,7 +445,9 @@ export function useGlobalRepoState({
     } catch {
       try {
         const response = await fetch('/api/panel/browse-folder', { method: 'POST' });
-        const data = await response.json() as { path?: string | null };
+        const data = await response.json() as { path?: string | null; unavailable?: boolean };
+        // No picker program on this host: fall through to typed path entry.
+        if (data.unavailable) throw new Error('native picker unavailable');
         if (data.path) folderPath = data.path;
       } catch {
         folderPath = await requestPrompt({ title: 'Open folder', message: 'Enter the folder path to add as a repository.', placeholder: '/path/to/folder' });

@@ -5,7 +5,7 @@ import { Suspense, useState, useCallback, useEffect, useRef, useMemo } from 'rea
 import type { WorkspaceHeaderTab } from '@/components/desktop/shell/workspace-header-strip-types';
 import { usePaletteFileSelection } from './hooks/usePaletteFileSelection';
 import { isTauri, canUseTauriEvents, browserViewHide } from '@/lib/tauri/bridge';
-import { isNonMacShell } from '@/lib/desktop/host-platform';
+import { isNonMacShell, shellLacksGlass } from '@/lib/desktop/host-platform';
 import { subscribeTauriEvent } from '@/lib/tauri/events';
 import { useAppOpenedTelemetry } from '@/lib/analytics/startup';
 import { AnimatePresence, motion } from 'framer-motion';
@@ -69,6 +69,7 @@ import { BrowserPipCard, BROWSER_PIP_EVENT } from '@/components/desktop/BrowserP
 import { O8SpecPipCard, O8_SPEC_PIP_EVENT } from '@/components/desktop/O8SpecPipCard';
 import { ThreadDragGhost } from '@/components/desktop/ThreadDragGhost';
 import { WorkspaceBootLoaderHost } from '@/components/desktop/workspace-terminal/workspace-boot-loader-claim';
+import { WorkspaceBootLoader } from '@/components/desktop/workspace-terminal/WorkspaceBootLoader';
 import { SpawnErrorToast } from '@/components/desktop/SpawnErrorToast';
 import { captureAnomaly } from '@/lib/telemetry/sentry-browser';
 import { recordSpawnEvent } from '@/lib/feedback/workspace-introspect';
@@ -106,7 +107,6 @@ import {
 } from '@/lib/events/o8-panel-focus';
 import { fetchOnce, fetchSWRJson } from '@/lib/panel/fetch-cache';
 import { safeCancelIdleCallback, safeRequestIdleCallback } from '@/lib/util/webview-safe';
-import { prefetchConnectedAutomations } from '@/components/desktop/automations-page/connected-cache';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
 import type { WorktreeInfo } from '@/lib/worktree/types';
 import type { MobileInboxSnapshot } from '@/lib/mobile/types';
@@ -1002,19 +1002,12 @@ function DashboardInner() {
     sidebarManualIntentRef,
   });
 
-  // ── Prefetch heavy lazy chunks on idle so Suspense fallbacks are never visible ──
-  // Workspace + side-panel chunks are deferred off the critical path so the
-  // initial render is small. We then warm them on the first idle frame so
-  // when the user actually clicks (or the right rail mounts), the chunk is
-  // already parsed.
+  // Warm the default workspace and composer while saved state loads.
+  // An idle frame can occur before startup requests have settled.
   useEffect(() => {
     const prefetch = () => {
       import('@/components/desktop/WorkspaceTerminal');
-      import('@/components/desktop/Canvas');
       import('@/components/desktop/workspace-terminal/OrchestratorTab');
-      import('@/components/desktop/O8Panel');
-      import('@/components/desktop/AutomationsPage');
-      prefetchConnectedAutomations();
     };
     const id = safeRequestIdleCallback(prefetch, { fallbackDelayMs: 100 });
     return () => safeCancelIdleCallback(id);
@@ -4278,7 +4271,7 @@ function DashboardInner() {
       height: 'calc(100vh / var(--ui-zoom, 1))',
       display: 'flex',
       flexDirection: 'column',
-      background: inTauri && !isNonMacShell() && paletteId === 'dark' ? DARK_FRAME_GLASS_TINT : effectiveGlassSurface ? 'var(--t-bg-gradient)' : 'var(--t-shell-frame-bg, var(--t-bg-gradient))',
+      background: inTauri && !shellLacksGlass() && paletteId === 'dark' ? DARK_FRAME_GLASS_TINT : effectiveGlassSurface ? 'var(--t-bg-gradient)' : 'var(--t-shell-frame-bg, var(--t-bg-gradient))',
       ...(!compactShell ? {
         ['--o8-shell-header-height' as string]: `${SHELL_HEADER_HEIGHT}px`,
         ['--o8-shell-edge-inset' as string]: `${SHELL_EDGE_INSET}px`,
@@ -4706,7 +4699,7 @@ function DashboardInner() {
           ] : []}
         />
 
-        {activeNavSection === 'projects' ? <Suspense fallback={null}><LazyProjectsPage key={projectLibraryRequest.revision} initialProjectId={projectLibraryRequest.projectId} onClose={() => setActiveNavSection('agents')} /></Suspense> : null}
+        {activeNavSection === 'projects' ? <Suspense fallback={<WorkspaceBootLoader contained />}><LazyProjectsPage key={projectLibraryRequest.revision} initialProjectId={projectLibraryRequest.projectId} onClose={() => setActiveNavSection('agents')} /></Suspense> : null}
           <div
             ref={workspaceSurfaceRef}
             aria-hidden={workspaceSurfaceHidden}
@@ -4845,7 +4838,7 @@ function DashboardInner() {
                       flexDirection: 'column',
                     }}
                   >
-                    <Suspense fallback={<div aria-hidden style={{ flex: 1, minHeight: 0, background: 'var(--t-chrome)' }} />}>
+                    <Suspense fallback={rightPanelKind === 'o8' ? <WorkspaceBootLoader contained /> : null}>
                       <OrchestratorDataProvider
                         activeProjectId={dashboardProjects.ledger?.activeProjectId ?? null}
                         agents={parsedAgents}
@@ -4933,7 +4926,7 @@ function DashboardInner() {
                       flexDirection: 'column',
                     }}
                   >
-                    <Suspense fallback={<div aria-hidden style={{ flex: 1, minHeight: 0, background: 'var(--t-chrome)' }} />}>
+                    <Suspense fallback={rightPanelKind === 'review' ? <WorkspaceBootLoader contained /> : null}>
                       <OrchestratorDataProvider
                         activeProjectId={dashboardProjects.ledger?.activeProjectId ?? null}
                         agents={parsedAgents}
@@ -4964,7 +4957,7 @@ function DashboardInner() {
       <AlertToast alerts={activeAlerts} compact={compactShell} onAction={handleAlertAction} />
 
       {showCompactNavigationRail ? <CompactNavigationRail
-        glassSurface={chromeMounted && (isGlassSurface || (workspaceGlass && inTauri && !isNonMacShell()))}
+        glassSurface={chromeMounted && (isGlassSurface || (workspaceGlass && inTauri && !shellLacksGlass()))}
         workspacePage={isWorkspaceUtilityKind(focusedWorkspaceTab?.canvasKind) ? focusedWorkspaceTab.canvasKind : undefined}
         activeDestination={activeNavSection}
         onHome={leaveNavTakeover}

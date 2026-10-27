@@ -8316,7 +8316,12 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            update_ping::begin_update_check,
+            update_ping::read_update_check_ticket,
             update_ping::check_app_update,
+            update_ping::read_update_channel,
+            update_ping::read_update_channel_status,
+            update_ping::set_update_channel,
             update_ping::download_app_update,
             update_ping::discard_app_update_download,
             update_ping::install_app_update,
@@ -9138,6 +9143,11 @@ pub fn run() {
                             .unwrap_or_else(|_| "\"\"".into()),
                         html_traffic_lights,
                         std::env::consts::OS,
+                    );
+                    #[cfg(target_os = "linux")]
+                    let init_script = format!(
+                        "{init_script} window.__O8_LINUX_GLASS__ = {};",
+                        std::env::var("O8_LINUX_GLASS").map(|v| v.trim() == "1").unwrap_or(false),
                     );
                     tauri::WebviewWindowBuilder::from_config(app, config)?
                         .initialization_script(init_script)

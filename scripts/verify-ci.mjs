@@ -65,12 +65,14 @@ function run(step) {
   });
 }
 
-async function runStep(step) {
+async function runStep(step, onQueueWait = () => {}) {
   if (!step.testProcess) return interrupted ? false : run(step);
   const previous = testQueue;
   let release;
   testQueue = new Promise(resolve => { release = resolve; });
+  const queuedAt = Date.now();
   await previous;
+  onQueueWait(Date.now() - queuedAt);
   try { return interrupted ? false : await run(step); }
   finally { release(); }
 }
@@ -84,22 +86,52 @@ try {
   const tasks = new Map();
   for (const check of plan.checks) {
     tasks.set(check.id, (async () => {
-      await Promise.all(check.after.map(id => tasks.get(id)));
+      const dependencies = await Promise.all(check.after.map(id => tasks.get(id)));
+      if (check.nativeInputs) {
+        const selection = spawnSync(process.execPath, ['scripts/ci/native-changes.mjs', '--o8-next', '--worktree'], {
+          cwd: root, env: environment(), encoding: 'utf8', timeout: 30_000,
+        });
+        if (selection.error || selection.status !== 0 || !/^changed=(true|false)\s*$/.test(selection.stdout)) {
+          console.error(selection.stderr);
+          console.log(`[verify:ci] FAIL ${check.name}: cannot select native inputs`);
+          return false;
+        }
+        if (selection.stdout.trim() === 'changed=false') {
+          console.log(`[verify:ci] SKIP ${check.name}: no native inputs changed`);
+          return true;
+        }
+      }
       if (interrupted) return false;
       console.log(`[verify:ci] RUN ${check.name}`);
-      let passed = true;
+      let passed = check.id !== 'test' || dependencies.every(Boolean);
+      let deadline = check.timeoutMs ? Date.now() + check.timeoutMs : Infinity;
+      let budgetGroup;
       for (const step of check.steps) {
+        if (step.budgetGroup !== undefined && step.budgetGroup !== budgetGroup) {
+          budgetGroup = step.budgetGroup;
+          deadline = Date.now() + check.timeoutMs;
+        }
         console.log(`[verify:ci] ${step.command}`);
-        if (!await runStep(step)) passed = false;
+        const remaining = deadline - Date.now();
+        if (remaining <= 0 || !await runStep({ ...step, timeoutMs: Math.min(step.timeoutMs, remaining) }, waitMs => {
+          // CI has independent runners. Local resource scheduling is not
+          // execution time, so pause this job's clock while it awaits admission.
+          if (check.timeoutMs) {
+            deadline += waitMs;
+            if (waitMs > 0) console.log(`[verify:ci] excludes local queue wait from ${check.name}: ${waitMs}ms`);
+          }
+        })) passed = false;
         if (interrupted) break;
       }
+      const required = await Promise.all((check.requiredResults ?? []).map(id => tasks.get(id)));
+      if (!required.every(Boolean)) passed = false;
       console.log(`[verify:ci] ${passed ? 'PASS' : 'FAIL'} ${check.name}`);
       return passed;
     })());
   }
   const results = await Promise.all(tasks.values());
   for (const note of plan.notes) console.log(`[verify:ci] ${note}`);
-  console.log(`[verify:ci] Hosted lanes: ${Object.keys(plan.hostedJobs).join(', ')}`);
+  for (const [id, reason] of Object.entries(plan.hostedJobs)) console.log(`[verify:ci] HOSTED ${id}: ${reason}`);
   process.exitCode = interrupted ? 130 : results.every(Boolean) ? 0 : 1;
 } catch (error) {
   console.error(`[verify:ci] ${error.message}`);

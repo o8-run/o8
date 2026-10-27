@@ -1,6 +1,5 @@
 import {
   copyFileSync,
-  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -10,17 +9,19 @@ import {
   utimesSync,
   writeFileSync,
 } from 'node:fs';
-import { createHash, generateKeyPairSync, sign } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { afterEach, describe, expect, it } from 'vitest';
 import { resolveReleaseChannel } from '../scripts/lib/release-channel.mjs';
-import { bundleContentSha256, macosExecutablePayloadSha256, resolveMacosCpuArtifacts } from '../scripts/lib/macos-release-artifacts.mjs';
+import { bundleContentSha256, resolveMacosCpuArtifacts } from '../scripts/lib/macos-release-artifacts.mjs';
 
 const roots: string[] = [];
 const releaseScript = join(process.cwd(), 'scripts/release.mjs');
 const speechBuildScript = join(process.cwd(), 'scripts/build-speech-local.mjs');
+const signedFixtures = join(process.cwd(), 'tests/fixtures/release-channel');
+const realReleaseRangeModule = pathToFileURL(join(process.cwd(), 'scripts/lib/fixed-reports.mjs')).href + '?fixture-real-range';
 const CPU_TYPE_X86_64 = 0x01000007;
 const CPU_TYPE_ARM64 = 0x0100000c;
 
@@ -31,59 +32,14 @@ function thinMachO(cpuType: number) {
   return binary;
 }
 
-function universalMachO() {
-  const slices = [thinMachO(CPU_TYPE_X86_64), thinMachO(CPU_TYPE_ARM64)];
-  const binary = Buffer.alloc(8 + slices.length * 20 + slices.reduce((sum, slice) => sum + slice.length, 0));
-  binary.writeUInt32BE(0xcafebabe, 0);
-  binary.writeUInt32BE(slices.length, 4);
-  let offset = 8 + slices.length * 20;
-  slices.forEach((slice, index) => {
-    const entry = 8 + index * 20;
-    binary.writeUInt32BE(index === 0 ? CPU_TYPE_X86_64 : CPU_TYPE_ARM64, entry);
-    binary.writeUInt32BE(offset, entry + 8);
-    binary.writeUInt32BE(slice.length, entry + 12);
-    slice.copy(binary, offset);
-    offset += slice.length;
-  });
-  return binary;
+/** Public precomputed bytes; tests never create keys or signatures. */
+function copySignedArchive(channel: 'stable' | 'preview', variant: string, archive: string, signature: string) {
+  const source = join(signedFixtures, `${channel}-${variant}.tar.gz`);
+  copyFileSync(source, archive);
+  copyFileSync(source + '.sig', signature);
 }
 
-function infoPlist(version: string) {
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-<key>CFBundleExecutable</key><string>o8</string>
-<key>CFBundleIdentifier</key><string>run.o8.app</string>
-<key>CFBundleShortVersionString</key><string>${version}</string>
-<key>CFBundleVersion</key><string>${version}</string>
-</dict></plist>\n`;
-}
-
-function configureUpdaterSignature(root: string, archive: string, signaturePath: string) {
-  configureUpdaterSignatures(root, [[archive, signaturePath]]);
-}
-
-function configureUpdaterSignatures(root: string, archives: string[][]) {
-  const { privateKey, publicKey } = generateKeyPairSync('ed25519');
-  const keyId = Buffer.from('o8fixtur');
-  const publicDer = publicKey.export({ format: 'der', type: 'spki' });
-  const publicPacket = Buffer.concat([Buffer.from('Ed'), keyId, publicDer.subarray(-32)]);
-  const standardPublicKey = `untrusted comment: fixture updater key\n${publicPacket.toString('base64')}\n`;
-  const publicKeyConfig = Buffer.from(standardPublicKey).toString('base64');
-  mkdirSync(join(root, 'src-tauri'), { recursive: true });
-  writeFileSync(join(root, 'src-tauri', 'tauri.conf.json'), JSON.stringify({
-    plugins: { updater: { pubkey: publicKeyConfig } },
-  }));
-
-  for (const [archive, signaturePath] of archives) {
-    const message = createHash('blake2b512').update(readFileSync(archive)).digest();
-    const signaturePacket = Buffer.concat([Buffer.from('ED'), keyId, sign(null, message, privateKey)]);
-    const standardSignature = `untrusted comment: fixture updater signature\n${signaturePacket.toString('base64')}\n`;
-    writeFileSync(signaturePath, Buffer.from(standardSignature).toString('base64'));
-  }
-}
-
-function fixture(version = '0.1.741-preview.1') {
+function fixture(version = '0.1.741-preview.1', variant = 'universal') {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'o8-release-channel-')));
   roots.push(root);
   const bundle = join(root, 'src-tauri/target/universal-apple-darwin/release/bundle');
@@ -91,38 +47,33 @@ function fixture(version = '0.1.741-preview.1') {
   mkdirSync(join(bundle, 'dmg'), { recursive: true });
   writeFileSync(join(root, 'package.json'), JSON.stringify({ version }));
   writeFileSync(join(bundle, 'dmg', `o8_${version}_universal.dmg`), 'fixture');
-  for (const name of ['o8', 'speech_recognizer', 'speech-local', 'o8-pi-write', 'o8-next']) {
-    const path = join(bundle, 'macos', 'o8.app', 'Contents', 'MacOS', name);
-    mkdirSync(join(path, '..'), { recursive: true });
-    writeFileSync(path, universalMachO(), { mode: 0o755 });
-  }
-  writeFileSync(join(bundle, 'macos', 'o8.app', 'Contents', 'Info.plist'), infoPlist(version));
-  const app = join(bundle, 'macos/o8.app');
-  const receipt = { schema: 'o8/next-build/v1', commit: 'a'.repeat(40), payloadBytes: { x86_64: 32, arm64: 32 }, payloadSha256: Object.fromEntries(
-    (['x86_64', 'arm64'] as const).map(arch => [arch, macosExecutablePayloadSha256(join(app, 'Contents/MacOS/o8-next'), arch)])) };
+  const channel = version.includes('-preview.') ? 'preview' : 'stable';
+  const archive = join(bundle, 'macos/o8.app.tar.gz');
+  copySignedArchive(channel, variant, archive, archive + '.sig');
+  const extracted = spawnSync('tar', ['xzf', archive, '-C', join(bundle, 'macos')]);
+  if (extracted.status !== 0) throw new Error(`failed to extract public updater fixture: ${extracted.stderr}`);
   mkdirSync(join(root, 'src-tauri/helpers'), { recursive: true });
-  mkdirSync(join(app, 'Contents/Resources'));
-  writeFileSync(join(root, 'src-tauri/helpers/o8-next-build.json'), JSON.stringify(receipt));
-  writeFileSync(join(app, 'Contents/Resources/o8-next-build.json'), JSON.stringify(receipt));
-  const archive = spawnSync('tar', ['czf', join(bundle, 'macos', 'o8.app.tar.gz'), '-C', join(bundle, 'macos'), 'o8.app']);
-  if (archive.status !== 0) throw new Error(`failed to create updater fixture: ${archive.stderr}`);
-  configureUpdaterSignature(
-    root,
-    join(bundle, 'macos', 'o8.app.tar.gz'),
-    join(bundle, 'macos', 'o8.app.tar.gz.sig'),
-  );
+  copyFileSync(join(signedFixtures, 'next-build.json'), join(root, 'src-tauri/helpers/o8-next-build.json'));
+  writeFileSync(join(root, 'src-tauri/tauri.conf.json'), JSON.stringify({
+    plugins: { updater: { pubkey: readFileSync(join(signedFixtures, 'public-key.txt'), 'utf8').trim() } },
+  }));
   const dmgApp = join(root, 'dmg-fixture', 'o8.app');
   mkdirSync(join(dmgApp, '..'), { recursive: true });
-  cpSync(join(bundle, 'macos', 'o8.app'), dmgApp, { recursive: true, preserveTimestamps: true });
+  // Preserve archived directory modes as well as bytes in the simulated DMG.
+  const copied = spawnSync('cp', ['-pR', join(bundle, 'macos', 'o8.app'), dmgApp]);
+  if (copied.status !== 0) throw new Error(`DMG fixture copy failed: ${copied.stderr}`);
   const log = join(root, 'effects.jsonl');
   const prelude = `import { appendFileSync } from 'node:fs';
 const record = (name, args = []) => appendFileSync(process.env.O8_CHANNEL_TEST_LOG, JSON.stringify({name, args}) + '\\n');`;
   const childProcess = `${prelude}
-import { cpSync, readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 const realChildProcess = process.getBuiltinModule('node:child_process');
 export function execFileSync(command, args = [], options = {}) {
   if (command === 'tar') return realChildProcess.execFileSync(command, args, options);
+  if (args.includes('--sign') || args.includes('-s') || command === 'cargo' || (command === 'xcrun' && !args.includes('validate'))) {
+    throw new Error('Tests cannot build, sign, or notarize');
+  }
   record(command, args);
   if (command === 'codex') {
     writeFileSync(args[args.indexOf('--output-last-message') + 1], JSON.stringify({ summary: 'Clearer workspace feedback.', entries: [{ text: 'Workspace feedback is easier to follow.', sourceIndices: [0] }] }));
@@ -133,7 +84,7 @@ export function execFileSync(command, args = [], options = {}) {
       const mountpoint = args[args.indexOf('-mountpoint') + 1];
       const cpuApps = JSON.parse(process.env.O8_CHANNEL_TEST_CPU_DMG_APPS || '{}');
       const source = cpuApps[basename(args.at(-1))] || process.env.O8_CHANNEL_TEST_DMG_APP;
-      cpSync(source, join(mountpoint, 'o8.app'), { recursive: true, preserveTimestamps: true });
+      realChildProcess.execFileSync('cp', ['-pR', source, join(mountpoint, 'o8.app')]);
       return '<plist><dict><key>system-entities</key><array><dict><key>dev-entry</key><string>/dev/disk99</string></dict></array></dict></plist>';
     }
     return '';
@@ -149,13 +100,17 @@ export function execFileSync(command, args = [], options = {}) {
     if (!value) throw new Error('missing fixture version');
     return value + '\\n';
   }
+  if (command === 'gh' && args[0] === 'api') {
+    if (process.env.O8_CHANNEL_TEST_NO_BASELINE === '1') throw new Error('published evidence unavailable');
+    return JSON.stringify({ tag_name: 'v0.1.740', draft: false, prerelease: false, published_at: '2026-09-01T00:00:00Z' });
+  }
   if (command === 'gh' && args[0] === 'release' && args[1] === 'view') {
     if (args.includes('--json')) return '2026-09-07T00:00:00Z';
     if (process.env.O8_CHANNEL_TEST_EXISTING === '1') return '{}';
     throw new Error('release not found');
   }
   if (command === 'gh' && args[1] === 'create' && args.includes('hurttlocker/o8-releases') && process.env.O8_CHANNEL_TEST_FAIL_MIRROR === '1') throw new Error('mirror unavailable');
-  if (command === 'git' && args[0] === 'rev-parse') return 'a'.repeat(40);
+  if (command === 'git' && args[0] === 'rev-parse') return (args.includes('refs/tags/v0.1.740^{commit}') ? 'b' : 'a').repeat(40);
   if (command === 'git' && args[0] === 'describe') return 'v' + process.env.O8_CHANNEL_TEST_VERSION;
   if (command === 'git' && args[0] === 'ls-remote') return 'a'.repeat(40) + '\\trefs/tags/v' + process.env.O8_CHANNEL_TEST_VERSION;
   if (command === 'git' && args[0] === 'log') return args.includes('--format=%H%x09%s') ? 'a'.repeat(40) + '\\tfix: improve workspace feedback' : 'fix: improve workspace feedback';
@@ -163,6 +118,7 @@ export function execFileSync(command, args = [], options = {}) {
 }
 export const spawn = () => { throw new Error('unexpected spawn'); };
 export function spawnSync(command, args) {
+  if (args.includes('--sign') || args.includes('-s')) throw new Error('Tests cannot sign');
   if (command === 'codesign') return { status: 0, stdout: '', stderr: 'TeamIdentifier=FIXTURE\\nCodeDirectory flags=0x10000(runtime)' };
   if (command !== '/usr/bin/codesign') throw new Error('unexpected spawnSync');
   if (args.includes('--verbose=4')) return { status: 0, stdout: '', stderr: 'Identifier=fixture\\nTeamIdentifier=not set\\nCodeDirectory flags=0x10000(runtime)\\nRuntime Version=15.0.0' };
@@ -174,7 +130,7 @@ export function spawnSync(command, args) {
     '/scripts/sync-reports.mjs': `${prelude}\nexport async function syncReports() { record('syncReports'); return { status: 'disabled', fresh: [] }; }`,
     '/scripts/publish-fixed.mjs': `${prelude}\nexport async function publishFixed() { record('publishFixed'); }`,
     '/scripts/lib/fixed-reports.mjs': `${prelude}
-export const releaseRange = () => 'HEAD~1..HEAD';
+export { releaseRange } from '${realReleaseRangeModule}';
 export function resolveNewFixes() { record('resolveNewFixes'); return { entries: [{ id: 'fixture-report' }], missing: [] }; }
 export function readPublished() { record('readPublished'); return []; }
 export const buildManifest = (fixed) => ({ fixed });`,
@@ -205,6 +161,7 @@ function run(f: ReturnType<typeof fixture>, channel: string, args: string[] = []
       O8_DATA_DIR: join(f.root, 'data'),
       CORTEX_IDE_DATA_DIR: join(f.root, 'data'),
       O8_RELEASE_CHANNEL: channel,
+      O8_RELEASE_FEED_LOCK: join(f.root, 'publication.lock'),
       O8_RELEASE_SUMMARY_CACHE_DIR: join(f.root, 'summary-cache'),
       O8_CHANNEL_TEST_VERSION: f.version,
       O8_CHANNEL_TEST_LOG: f.log,
@@ -234,27 +191,13 @@ function addCpuFixtures(f: ReturnType<typeof fixture>, architectures: Array<'x86
   for (const architecture of architectures) {
     const cpu = resolveMacosCpuArtifacts(f.root, f.version, architecture);
     mkdirSync(join(cpu.app, '..'), { recursive: true });
-    cpSync(source, cpu.app, { recursive: true, preserveTimestamps: true });
-    for (const name of ['o8', 'speech_recognizer', 'speech-local', 'o8-pi-write', 'o8-next']) {
-      writeFileSync(join(cpu.app, 'Contents/MacOS', name), thinMachO(architecture === 'x86_64' ? CPU_TYPE_X86_64 : CPU_TYPE_ARM64));
-    }
-    const archive = spawnSync('tar', ['czf', cpu.updaterArchive, '-C', join(cpu.app, '..'), 'o8.app']);
-    if (archive.status !== 0) throw new Error(`CPU archive fixture failed: ${archive.stderr}`);
-    // All three archive signatures must use the same configured updater key.
-    // The fixture helper generates that key; re-sign all archives under the
-    // final fixture key below rather than retaining earlier generated keys.
+    copySignedArchive(f.version.includes('-preview.') ? 'preview' : 'stable', architecture, cpu.updaterArchive, cpu.updaterSignature);
+    const archive = spawnSync('tar', ['xzf', cpu.updaterArchive, '-C', join(cpu.app, '..')]);
+    if (archive.status !== 0) throw new Error(`CPU archive fixture extraction failed: ${archive.stderr}`);
     mkdirSync(join(cpu.dmg, '..'), { recursive: true });
     writeFileSync(cpu.dmg, 'fixture');
     dmgApps[cpu.dmg.split('/').at(-1)!] = cpu.app;
   }
-  const allArchives = [
-    [join(f.bundle, 'macos/o8.app.tar.gz'), join(f.bundle, 'macos/o8.app.tar.gz.sig')],
-    ...architectures.map(architecture => {
-      const cpu = resolveMacosCpuArtifacts(f.root, f.version, architecture);
-      return [cpu.updaterArchive, cpu.updaterSignature];
-    }),
-  ];
-  configureUpdaterSignatures(f.root, allArchives);
   writeFileSync(join(f.bundle, 'cpu/derivation.json'), JSON.stringify({
     schema: 'o8/macos-cpu-derivation/v1', version: f.version, sourceBundleSha256: bundleContentSha256(source),
   }));
@@ -269,9 +212,8 @@ describe('release channels through the publication entry point', () => {
   it.each(['app', 'updater', 'installer'] as const)('refuses publication when the required o8 next binary is missing from the %s', (distribution) => {
     const f = fixture('0.1.741');
     if (distribution === 'updater') {
-      const archive = spawnSync('tar', ['czf', join(f.bundle, 'macos/o8.app.tar.gz'),
-        '--exclude=o8.app/Contents/MacOS/o8-next', '-C', join(f.bundle, 'macos'), 'o8.app']);
-      expect(archive.status, String(archive.stderr)).toBe(0);
+      const archive = join(f.bundle, 'macos/o8.app.tar.gz');
+      copySignedArchive('stable', 'missing-next', archive, archive + '.sig');
     } else {
       const app = distribution === 'app' ? join(f.bundle, 'macos/o8.app') : f.dmgApp;
       rmSync(join(app, 'Contents/MacOS/o8-next'), { force: true });
@@ -284,21 +226,7 @@ describe('release channels through the publication entry point', () => {
   });
 
   it.each(['hash', 'commit'] as const)('refuses matching stale app, archive and DMG with an old sidecar %s before publication', kind => {
-    const f = fixture('0.1.741');
-    const app = join(f.bundle, 'macos/o8.app');
-    for (const copy of [app, f.dmgApp]) {
-      if (kind === 'hash') {
-        const binary = join(copy, 'Contents/MacOS/o8-next');
-        const bytes = readFileSync(binary); bytes[bytes.length - 1] ^= 1; writeFileSync(binary, bytes);
-      } else {
-        const path = join(copy, 'Contents/Resources/o8-next-build.json');
-        const receipt = JSON.parse(readFileSync(path, 'utf8')); receipt.commit = 'b'.repeat(40);
-        writeFileSync(path, JSON.stringify(receipt));
-      }
-    }
-    const archive = join(f.bundle, 'macos/o8.app.tar.gz');
-    expect(spawnSync('tar', ['czf', archive, '-C', join(f.bundle, 'macos'), 'o8.app']).status).toBe(0);
-    configureUpdaterSignature(f.root, archive, archive + '.sig');
+    const f = fixture('0.1.741', `stale-next-${kind}`);
     const result = run(f, 'stable');
     expect(result.status, result.stdout + result.stderr).toBe(1);
     expect(result.stderr).toMatch(/o8 next.*current build/);
@@ -464,6 +392,9 @@ describe('release channels through the publication entry point', () => {
     const result = run(f, 'stable');
     expect(result.status, result.stderr).toBe(0);
     const calls = effects(f);
+    expect(calls.some(c => c.name === 'gh' && c.args[0] === 'api')).toBe(true);
+    expect(calls.some(c => c.name === 'git' && c.args[0] === 'merge-base'
+      && c.args.includes('b'.repeat(40)) && c.args.includes('a'.repeat(40)))).toBe(true);
     expect(calls.filter(c => c.name === 'gh' && c.args[1] === 'create')).toHaveLength(2);
     expect(calls.some(c => c.args.includes('--prerelease'))).toBe(false);
     for (const name of ['syncReports', 'resolveNewFixes', 'publishFixed', 'announceRelease', 'bash']) {
@@ -473,6 +404,14 @@ describe('release channels through the publication entry point', () => {
     expect(existsSync(join(f.bundle, 'macos', 'fixed.json'))).toBe(true);
     expect(existsSync(join(f.root, 'release-notes', 'next.md'))).toBe(true);
     expect(calls.some(c => c.name === 'git' && ['add', 'commit', 'push'].includes(c.args[0]))).toBe(false);
+  });
+
+  it('refuses Stable publication when its real published-ancestor lookup has no evidence', () => {
+    const f = fixture('0.1.741');
+    const result = run(f, 'stable', [], { O8_CHANNEL_TEST_NO_BASELINE: '1' });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('Cannot read published release evidence');
+    expectNoPublicationMutation(f);
   });
 
   it('refuses publication when the app backing the arm64 updater entry is x86_64-only', () => {
@@ -489,11 +428,8 @@ describe('release channels through the publication entry point', () => {
 
   it('refuses publication when the separately staged updater archive is thin', () => {
     const f = fixture('0.1.741');
-    const main = join(f.bundle, 'macos', 'o8.app', 'Contents', 'MacOS', 'o8');
-    writeFileSync(main, thinMachO(CPU_TYPE_X86_64));
-    const archive = spawnSync('tar', ['czf', join(f.bundle, 'macos', 'o8.app.tar.gz'), '-C', join(f.bundle, 'macos'), 'o8.app']);
-    if (archive.status !== 0) throw new Error(`failed to replace updater fixture: ${archive.stderr}`);
-    writeFileSync(main, universalMachO());
+    const archive = join(f.bundle, 'macos/o8.app.tar.gz');
+    copySignedArchive('stable', 'thin-main', archive, archive + '.sig');
 
     const result = run(f, 'stable');
     expect(result.status).toBe(1);
@@ -596,14 +532,37 @@ describe('release channels through the publication entry point', () => {
   });
 
   it.each([
-    ['stable', '0.1.741-preview.1', {}],
-    ['preview', '0.1.741', {}],
-    ['nightly', '0.1.741-preview.1', {}],
-    ['preview', '0.1.741-preview.1', { O8_RELEASE_CLOBBER: '1' }],
-  ])('rejects mismatched or unsafe %s publication before side effects', (channel, version, extraEnv) => {
+    { environment: 'stable', version: '0.1.741-preview.1', channel: 'preview', manifest: 'preview.json' },
+    { environment: 'preview', version: '0.1.741', channel: 'stable', manifest: 'latest.json' },
+    { environment: 'nightly', version: '0.1.741-preview.1', channel: 'preview', manifest: 'preview.json' },
+  ])('uses signed $channel artifact identity despite the $environment environment', ({ environment, version, channel, manifest }) => {
     const f = fixture(version);
-    const result = run(f, channel, [], extraEnv);
+    const result = run(f, environment);
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(readFileSync(join(f.bundle, 'macos', manifest), 'utf8'))).toMatchObject({ version, channel });
+    if (channel === 'preview') {
+      expect(existsSync(join(f.bundle, 'macos/latest.json'))).toBe(false);
+      expect(effects(f).some(call => ['syncReports', 'publishFixed', 'announceRelease', 'bash'].includes(call.name))).toBe(false);
+    }
+  });
+
+  it.each([
+    ['0.1.741', '0.1.741-preview.1'],
+    ['0.1.741-preview.1', '0.1.741'],
+  ])('refuses relabelling the signed %s archive as %s', (artifactVersion, requestedVersion) => {
+    const f = fixture(artifactVersion);
+    writeFileSync(join(f.root, 'package.json'), JSON.stringify({ version: requestedVersion }));
+    const result = run(f, requestedVersion.includes('-preview.') ? 'preview' : 'stable');
+    expect(result.status, result.stderr).toBe(1);
+    expect(result.stderr).toContain('Signed build channel identity does not match this publisher.');
+    expectNoPublicationMutation(f);
+  });
+
+  it('refuses preview clobber before artifact or publication effects', () => {
+    const f = fixture();
+    const result = run(f, 'preview', [], { O8_RELEASE_CLOBBER: '1' });
     expect(result.status).toBe(1);
+    expect(result.stderr).toContain('Preview artifacts are immutable');
     expect(effects(f)).toEqual([]);
   });
 

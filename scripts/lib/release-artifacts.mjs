@@ -15,6 +15,8 @@ import { compilerEnvironment } from './release-native-inputs.mjs';
 export const RELEASE_ARTIFACT_MANIFEST = 'out/.o8-release-artifact-manifest.json';
 
 const RECIPE_FILES = [
+  'release-build.json',
+  'scripts/lib/build-channel.mjs',
   'package-lock.json',
   'src-tauri/Cargo.lock',
   'src-tauri/tauri.conf.json',

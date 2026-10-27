@@ -540,7 +540,8 @@ describe('completion and steer overlap through production callbacks and routes',
   });
 
   it.each([
-    ['missing', 'push'], ['missing', 'poll'], ['released', 'push'], ['released', 'poll'], ['archived', 'push'], ['archived', 'poll'],
+    ['missing', 'push'], ['missing', 'poll'], ['failed', 'push'], ['failed', 'poll'],
+    ['blocked', 'push'], ['blocked', 'poll'], ['released', 'push'], ['released', 'poll'], ['archived', 'push'], ['archived', 'poll'],
   ] as const)('keeps %s owner refusal through the %s completion observer', async (terminal, observer) => {
     const { packet, lane, sessionKey, runId } = fixture();
     const state = readOrchestratorControlPlaneState();
@@ -551,7 +552,7 @@ describe('completion and steer overlap through production callbacks and routes',
       if (terminal === 'released') {
         current.releaseState = 'released';
         current.releaseStatePayload = { source: 'read_only_completed', evidenceKind: 'read_only_no_merge_required' };
-      } else current.archivedAt = new Date().toISOString();
+      } else if (terminal === 'archived') current.archivedAt = new Date().toISOString();
     }
     writeOrchestratorControlPlaneState(state);
     closeDb();
@@ -559,12 +560,12 @@ describe('completion and steer overlap through production callbacks and routes',
     const savedBytes = readFileSync(join(dataDir, 'orchestrator-state.json'), 'utf8');
     if (terminal === 'missing') expect(saved.packets).toEqual([]);
     else expect(saved.packets.find(entry => entry.id === packet.id)?.status).toBe(terminal);
-    expect(await readOwnedCompletionState(sessionKey)).toMatchObject({ owned: true, packetHoldReason: expect.any(String), automaticRecoveryAllowed: false });
     if (observer === 'push') expect(await ingestAgentCompletionSignal(sessionKey, runId)).toBe(true);
     else {
       vi.setSystemTime(Date.now() + 31_000); await runSupervisorTickForTesting();
       vi.setSystemTime(Date.now() + 16_000); await runSupervisorTickForTesting();
     }
+    expect(await readOwnedCompletionState(sessionKey)).toMatchObject({ owned: true, packetHoldReason: expect.any(String), automaticRecoveryAllowed: false });
     expect(readFileSync(join(dataDir, 'orchestrator-state.json'), 'utf8')).toBe(savedBytes);
     expect(getLane(lane.id)?.status).toBe('running');
     expect(h.verify).not.toHaveBeenCalled();

@@ -10,6 +10,46 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+it.each(['loaded', 'failed'] as const)('keeps cold activity unknown until connected schedules are %s', async outcome => {
+  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  let resolveConnected!: (response: Response) => void;
+  let rejectConnected!: (error: Error) => void;
+  const connected = new Promise<Response>((resolve, reject) => { resolveConnected = resolve; rejectConnected = reject; });
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+    if (String(input) === '/api/automations') return Response.json({ automations: [] });
+    if (String(input) === '/api/panel/repos') return Response.json({ repos: [] });
+    if (String(input) === '/api/automations/connected') return connected;
+    throw new Error('Unexpected automation request');
+  }));
+  const host = document.createElement('div');
+  document.body.append(host);
+  const root = createRoot(host);
+  try {
+    await act(async () => root.render(createElement(AutomationsPage, { currentOwner: 'operator' })));
+    expect(host.textContent).not.toContain('0 active');
+    expect(host.querySelector('[aria-busy="true"] [role="status"]')?.textContent).toContain('Reading connected schedules');
+    await act(async () => {
+      if (outcome === 'failed') rejectConnected(new Error('Schedule read unavailable'));
+      else resolveConnected(Response.json({ ok: true, available: true, jobs: [{
+        id: 'delayed-job', name: 'Delayed schedule', agentId: 'agent', enabled: true,
+        schedule: { kind: 'every', everyMs: 3_600_000 }, nextRunAt: null, lastRunAt: null,
+      }] }));
+    });
+    expect(host.querySelector('[aria-busy="true"]')).toBeNull();
+    if (outcome === 'loaded') {
+      expect(host.textContent).toContain('Delayed schedule');
+      expect(host.textContent).toContain('1 active');
+    } else {
+      expect(host.textContent).toContain('Schedule read unavailable');
+      expect(host.textContent).toContain('Activity unavailable');
+      expect(host.textContent).not.toContain('0 active');
+    }
+  } finally {
+    await act(async () => root.unmount());
+    host.remove();
+  }
+});
+
 it('shows connected schedules without empty Mine or placeholder Team tabs', async () => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {

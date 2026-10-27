@@ -111,7 +111,8 @@ export function packetCompletionHoldReason(packetId: string): string | null {
   const admission = managedRunAdmissionForPacket(packet);
   // Exiting closes a steer's managed-run grant before its completion callback.
   // The still-running lane needs that callback to verify and become reviewable.
-  if (admission.reason === 'packet_terminal' && findLaneByPacket(packetId)?.status === 'running') return null;
+  if (admission.reason === 'packet_terminal' && acceptedSteerRunState(packetId) === 'closed'
+    && findLaneByPacket(packetId)?.status === 'running') return null;
   return admission.allowed ? null : admission.reason;
 }
 

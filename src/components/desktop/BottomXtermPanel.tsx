@@ -10,7 +10,7 @@
 
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { useTheme } from '@/lib/theme/context';
-import { isNonMacShell } from '@/lib/desktop/host-platform';
+import { shellLacksGlass } from '@/lib/desktop/host-platform';
 import { isWebMachineBrowserSurface } from '@/lib/connect/web-machine-surface';
 import { buildXtermTheme } from '@/components/desktop/workspace-terminal/constants';
 import { recordXtermSelectionSnapshot, registerXtermSelectionSource } from '@/components/desktop/workspace-terminal/xterm-selection-registry';
@@ -54,7 +54,7 @@ export const BottomXtermPanel = forwardRef<XtermPanelHandle, {
   // solid near-black slab (Q ruling 2026-07-14). Solid surface keeps the
   // opaque paper terminal. Kept in a ref so the init effect sees the current
   // value without re-initializing the terminal.
-  const glass = surface === 'glass' || (workspaceGlass && !isWebMachineBrowserSurface() && !isNonMacShell());
+  const glass = surface === 'glass' || (workspaceGlass && !isWebMachineBrowserSurface() && !shellLacksGlass());
   const glassRef = useRef(glass);
   glassRef.current = glass;
   const containerRef = useRef<HTMLDivElement>(null);

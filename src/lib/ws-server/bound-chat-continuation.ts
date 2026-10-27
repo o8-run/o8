@@ -1,3 +1,5 @@
+import { isUnmappedEffortLead, unmappedEffortError } from '@/lib/lane/orchestrator-backends/unmapped-effort';
+import { EffortPinRejectionError } from '@/lib/orchestrator/effort-pin';
 import { getOrchestratorBackend } from '@/lib/lane/orchestrator-backends/registry';
 import { sendOrchestratorBackendTurn, resolveTurnReceiptMode } from '@/lib/lane/orchestrator-send-entry';
 import type { OrchestratorTurnOptions } from '@/lib/lane/orchestrator-backends/types';
@@ -23,6 +25,8 @@ export async function runBoundChatContinuation(
   input: { repoPath: string; origin: ReviewChatOrigin; message: string; assistantMessageId: string;
     check: () => void; claim?: () => boolean; legacyPermissionMode?: 'full' | 'plan';
     permissionMode?: OrchestratorPermissionMode;
+    /** Queued user sends carry explicit routing; automatic continuations inherit it. */
+    source?: 'user' | 'system';
     displayMessage?: string; images?: ComposerImageAttachment[]; admit?: () => boolean;
     serviceTier?: OrchestratorTurnOptions['serviceTier']; collideBaseBackend?: OrchestratorTurnOptions['collideBaseBackend'] },
   hooks: BoundChatContinuationHooks,
@@ -30,6 +34,10 @@ export async function runBoundChatContinuation(
   const { origin: expected, message, assistantMessageId } = input;
   const permissionMode = input.permissionMode ?? expected.permissionMode;
   input.check();
+  const unmapped = isUnmappedEffortLead(expected.backend);
+  const thinkingEffort = unmapped && input.source !== 'user' ? undefined : expected.effort;
+  const effortError = unmapped ? unmappedEffortError(thinkingEffort) : null;
+  if (effortError?.type === 'error') throw new EffortPinRejectionError('effort_unsupported_runtime', effortError.error);
   const backend = getOrchestratorBackend(expected.backend);
   const controller = new AbortController();
   const release = hooks.registerAbort(input.repoPath, expected, controller);
@@ -37,7 +45,8 @@ export async function runBoundChatContinuation(
   let text = '';
   let completed = false;
   let turnError: string | null = null;
-  let receipt: MobileTurnReceipt = { leadModel: expected.model, effort: expected.effort,
+  let receipt: MobileTurnReceipt = { leadModel: expected.model, effort: thinkingEffort ?? 'adaptive',
+    ...(unmapped && thinkingEffort === undefined ? { effortSource: 'runtime-default' as const } : {}),
     mode: resolveTurnReceiptMode(expected.backend, expected.mode, expected.pickedMode),
     permissionMode, pickedMode: expected.pickedMode };
   const data = { repoPath: input.repoPath, threadId: expected.threadId, backend: backend.id, model: expected.model, assistantMessageId };
@@ -92,7 +101,7 @@ export async function runBoundChatContinuation(
         case 'turn_retry': text = ''; persist(null); break;
         case 'collide_phase': case 'collide_proposal': case 'handoff': break;
       }
-    }, { threadId: expected.threadId, model: expected.model, thinkingEffort: expected.effort,
+    }, { threadId: expected.threadId, model: expected.model, thinkingEffort,
       permissionMode: permissionMode ?? input.legacyPermissionMode ?? 'plan', signal: controller.signal,
       attachments: input.images,
       serviceTier: input.serviceTier, collideBaseBackend: input.collideBaseBackend,

@@ -6,9 +6,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
-export function prepareNativeRunner(bundleId, stageRoot) {
+export function prepareNativeRunner(bundleId, stageRoot, { managePrivacy = true } = {}) {
   assert.equal(process.platform, 'darwin');
-  assert.equal(process.env.RUNNER_ENVIRONMENT, 'github-hosted');
+  if (managePrivacy) assert.equal(process.env.RUNNER_ENVIRONMENT, 'github-hosted');
   assert(/^ai\.o8\.desktop\.(launchbench|memorybench)$/.test(bundleId));
   const source = path.join(stageRoot, 'activate.swift');
   const executable = path.join(stageRoot, 'activate');
@@ -21,6 +21,8 @@ guard CommandLine.arguments.count == 3,
 exit(app.activate(options: [.activateAllWindows, .activateIgnoringOtherApps]) ? 0 : 1)
 `);
   execFileSync('/usr/bin/swiftc', [source, '-o', executable], { stdio: 'pipe' });
+  // Local disposable accounts keep their manually configured permission state.
+  if (!managePrivacy) return { executable, services: [], privacySetupError: null, restore() {} };
   const file = path.join(os.homedir(), 'Library/Application Support/com.apple.TCC/TCC.db');
   let db, privacySetupError;
   const previous = [];

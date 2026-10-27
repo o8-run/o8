@@ -88,6 +88,7 @@ export const piBuiltinRuntime: AgentRuntime = {
     const result = await launchOwnedPiBuiltinSession({
       cwd: opts.cwd,
       prompt: opts.prompt,
+      promptMemoryRevision: opts.promptMemoryRevision,
       clientMutationId: opts.clientMutationId,
       laneId: opts.laneId,
       packetId: opts.packetId,

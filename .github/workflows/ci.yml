@@ -181,17 +181,19 @@ jobs:
   # always() prevents a failed/cancelled matrix from skipping this check.
   test:
     name: Hermetic Unit Tests
-    needs: [test-shards]
+    needs: [test-shards, o8-next-tests]
     if: always() && github.event.schedule != '41 13 * * 1'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Require every hermetic shard
+      - name: Require unit and native tests
         env:
           SHARD_RESULT: ${{ needs.test-shards.result }}
+          NATIVE_RESULT: ${{ needs.o8-next-tests.result }}
         run: |
           echo "Hermetic shard result: $SHARD_RESULT"
-          test "$SHARD_RESULT" = success
+          echo "Native test result: $NATIVE_RESULT"
+          test "$SHARD_RESULT" = success && test "$NATIVE_RESULT" = success
 
   # PR lane (#2391): runs exactly the resource-owning test files the branch
   # touches, diffed from the merge-base with the base branch. No touched files
@@ -233,7 +235,7 @@ jobs:
           sudo apt-get install -y ripgrep openssh-server
           rg --version
       - name: Install touched browser-test prerequisites
-        if: contains(steps.select.outputs.files, 'tests/next-parity-route-ownership-real-path.test.ts') || contains(steps.select.outputs.files, 'tests/review-diff-position-real-path.test.ts') || contains(steps.select.outputs.files, 'tests/sidebar-window-layout-real-path.test.ts')
+        if: contains(steps.select.outputs.files, 'tests/next-parity-route-ownership-real-path.test.ts') || contains(steps.select.outputs.files, 'tests/review-diff-position-real-path.test.ts') || contains(steps.select.outputs.files, 'tests/sidebar-window-layout-real-path.test.ts') || contains(steps.select.outputs.files, 'tests/compaction-progress-inference-real-path.test.ts')
         run: npx --no-install playwright-core install --with-deps chromium
       - if: steps.select.outputs.count != '0'
         run: npm run test:integration -- ${{ steps.select.outputs.files }}
@@ -521,6 +523,51 @@ jobs:
       - name: Experimental o8d delivery bus
         if: steps.native.outputs.changed == 'true'
         run: cargo test --locked --manifest-path crates/o8d/Cargo.toml --all-features
+
+  o8-next-tests:
+    name: o8 next Native Tests (Linux)
+    if: github.event.schedule != '41 13 * * 1'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    env:
+      CARGO_HOME: ${{ github.workspace }}/.o8-next-cargo
+      CARGO_TARGET_DIR: ${{ github.workspace }}/native/o8-next/target
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      CARGO_INCREMENTAL: '0'
+      O8D_HTTP_TEST_BINARY: ${{ github.workspace }}/native/o8-next/target/debug/o8d
+      O8_NATIVE_TEST_SHARD: ${{ matrix.shard }}/4
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          filter: blob:none
+      - name: Select native next inputs
+        id: native
+        run: node scripts/ci/native-changes.mjs --o8-next
+      - uses: ./.github/actions/next-linux-setup
+        if: steps.native.outputs.changed == 'true'
+        with:
+          cache-key: tests-${{ hashFiles('crates/o8d/Cargo.lock') }}
+          headless-tests: 'true'
+      - name: Build the persisted-history fixture daemon
+        if: steps.native.outputs.changed == 'true'
+        run: cargo build --locked --manifest-path crates/o8d/Cargo.toml --features experimental-http --bin o8d
+      - name: Headless native tests
+        if: steps.native.outputs.changed == 'true'
+        run: |
+          unset DISPLAY WAYLAND_DISPLAY
+          TIMEFORMAT='o8 next native tests wall=%3R s'
+          time node scripts/ci/native-test-shard.mjs --cargo --phase=regular
+      - name: Fixed-rate native terminal probes without sibling tests
+        if: steps.native.outputs.changed == 'true'
+        run: |
+          unset DISPLAY WAYLAND_DISPLAY
+          TIMEFORMAT='o8 next native probes wall=%3R s'
+          time node scripts/ci/native-test-shard.mjs --cargo --phase=timed
 
   roadmap-check:
     name: Roadmap Drift Check

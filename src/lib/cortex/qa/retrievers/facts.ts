@@ -86,6 +86,7 @@ interface FactRow {
 function buildScopedRepoScope(input: RetrieverInput): {
   repoPaths: Set<string>;
   primaryRepoPath: string | null;
+  projectId: string;
 } {
   const active = getActiveProjectScopeForRepoSync(input.repoPath);
   const explicitRepoPath = input.repoPath?.trim();
@@ -95,6 +96,7 @@ function buildScopedRepoScope(input: RetrieverInput): {
     ? (active.repoInActiveProject ? projectRepoPaths : [])
     : projectRepoPaths;
   return {
+    projectId: input.projectId?.trim() || active.projectId,
     repoPaths: new Set(repoPaths),
     primaryRepoPath: active.repoInActiveProject ? normalizedExplicitRepoPath : null,
   };
@@ -139,6 +141,7 @@ function factsFtsSearch(
   sqlite: ReturnType<typeof getSqlite>,
   match: string,
   limit: number,
+  projectId: string,
 ): FactsFtsHit[] {
   try {
     const sql = `
@@ -147,10 +150,14 @@ function factsFtsSearch(
              snippet(facts_fts, -1, '«', '»', '…', 8) AS excerpt
       FROM facts_fts
       WHERE facts_fts MATCH ?
+        AND EXISTS (SELECT 1 FROM facts f WHERE f.id = facts_fts.fact_id
+          AND (f.source_kind != 'outcome' OR EXISTS (
+            SELECT 1 FROM session_outcomes so WHERE ('outcome:' || so.id = f.source_id OR so.id = f.source_id)
+              AND so.project_id IS ?)))
       ORDER BY bm25(facts_fts)
       LIMIT ${limit}
     `;
-    return sqlite.prepare(sql).all(match) as FactsFtsHit[];
+    return sqlite.prepare(sql).all(match, projectId) as FactsFtsHit[];
   } catch (error) {
     // Likely the v17 migration hasn't been applied (FTS5 missing or migration
     // skipped) — return empty so the rest of the retrieval pipeline still works.
@@ -200,7 +207,7 @@ export async function retrieveFacts(input: RetrieverInput): Promise<RetrieverRes
       // Search a generous slice per variant so the post-confidence-filter
       // population isn't starved when many low-confidence rows top the BM25
       // ordering. limit*4 keeps us inside ~32 rows in the worst case.
-      const variantHits = factsFtsSearch(sqlite, match, limit * 4);
+      const variantHits = factsFtsSearch(sqlite, match, limit * 4, scopedRepoScope.projectId);
       for (const hit of variantHits) {
         const prev = hits.get(String(hit.rowId));
         if (!prev || hit.rank > prev.rank) {
@@ -293,6 +300,8 @@ export async function retrieveFacts(input: RetrieverInput): Promise<RetrieverRes
       if (rows.length >= limit) break;
       const record = byId.get(id);
       if (!record) continue;
+      if (record.source_kind === 'outcome' && !sqlite.prepare(`SELECT 1 FROM session_outcomes
+        WHERE (id = ? OR 'outcome:' || id = ?) AND project_id IS ?`).get(record.source_id, record.source_id, scopedRepoScope.projectId)) continue;
       const knowledge = record.source_kind === 'knowledge' ? knowledgeProvenance(record.source_id) : null;
       if (record.source_kind === 'knowledge' ? !knowledge : !factRepoInScope(record.repo_path, scopedRepoScope.repoPaths)) continue;
       if (record.confidence < CONFIDENCE_FLOOR) continue;

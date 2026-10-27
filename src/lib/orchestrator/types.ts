@@ -1,3 +1,4 @@
+import type { OutcomeMemoryProvenance } from '@/lib/cortex/memory-provenance';
 // Orchestrator domain types — runtimes, packets, lanes
 import type { OrchestratorReviewFinding } from '@/lib/approvals/types';
 import type { ClaudeCodeModelSource } from '@/lib/claude-code/worker-profile-types';
@@ -671,7 +672,7 @@ export interface PacketSelfReview {
   recurrenceProtection?: string;
 }
 
-export interface PacketContext {
+export interface PacketContext extends OutcomeMemoryProvenance {
   /** Current recovery availability; the immutable completion handoff remains historical. */
   recovery?: {
     source: 'retained-source' | 'verified-preservation' | 'unavailable';
