@@ -49,16 +49,34 @@ describe('completed activity through the shared renderer', () => {
     act(() => { details.open = true; details.dispatchEvent(new Event('toggle')); });
     render(false); expect(host.textContent).toContain('Inspecting');
   });
-  it('retains expanded work and message identity when a growing history starts deferring layout', () => {
+  it('reuses turn derivation for fresh elements with unchanged props, but accepts changed content', () => {
+    let derivations = 0;
+    const tracked = new Proxy(entries, { get(target, key, receiver) {
+      if (key === 'flatMap') derivations++;
+      return Reflect.get(target, key, receiver);
+    } });
+    const renderNodes = (final = 'Final answer') => act(() => root.render(<TranscriptTurns entries={tracked} busy={false}
+      nodes={entries.map(entry => <div key={entry.id}>{entry.id === 'f' ? final : entry.text}</div>)} />));
+    renderNodes();
+    expect(derivations).toBeGreaterThan(0);
+    derivations = 0;
+    renderNodes();
+    expect(derivations).toBe(0);
+    renderNodes('Revised final answer');
+    expect(derivations).toBeGreaterThan(0);
+    expect(host.textContent).toContain('Revised final answer');
+  });
+  it('retains expanded work and message identity when the full 200-entry window defers layout', () => {
     render(false);
     const details = host.querySelector('details')!;
     act(() => { details.open = true; details.dispatchEvent(new Event('toggle')); });
     const original = host.querySelector('[data-o8-message-id="a"]');
-    const growing: MobileTranscriptEntry[] = [...entries, ...Array.from({ length: 200 }, (_, index) => ({
+    const growing: MobileTranscriptEntry[] = [...entries, ...Array.from({ length: 200 - entries.length }, (_, index) => ({
       id: `later-${index}`, role: 'user' as const, text: `Later request ${index}`,
     }))];
     act(() => root.render(<TranscriptTurns entries={growing} busy={false} repoPath="/repo"
       nodes={growing.map(entry => <div key={entry.id} data-o8-message-id={entry.id}>{entry.text}</div>)} />));
+    expect(host.querySelector<HTMLElement>('[data-o8-turn-id="u"]')!.style.contentVisibility).toBe('auto');
     expect(host.querySelector('[data-o8-message-id="a"]')).toBe(original);
     expect(host.querySelector('details')).toBe(details);
     expect(details.open).toBe(true);
