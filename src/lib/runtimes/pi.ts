@@ -101,6 +101,7 @@ export const piRuntime: AgentRuntime = {
     const result = await launchOwnedPiSession({
       cwd: opts.cwd,
       prompt: opts.prompt,
+      promptMemoryRevision: opts.promptMemoryRevision,
       clientMutationId: opts.clientMutationId,
       model: opts.model,
       laneId: opts.laneId,

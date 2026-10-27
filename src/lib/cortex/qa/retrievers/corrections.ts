@@ -92,7 +92,8 @@ export async function correctionsRetriever(input: RetrieverInput): Promise<Retri
 
   const tokens = questionTokens(input.question);
   const intent = CORRECTION_INTENT.test(input.question);
-  const rows = readOperatorCorrections({ repoPaths, limit: SCAN_LIMIT })
+  const projectId = input.projectId ?? getActiveProjectScopeForRepoSync(input.repoPath).projectId;
+  const rows = readOperatorCorrections({ repoPaths, projectId, limit: SCAN_LIMIT })
     .map((correction) => ({ correction, score: scoreCorrection(correction, tokens, input.question) }))
     .filter(({ score }) => score > 0 || intent)
     // Stable sort keeps the reader's newest-first order within equal scores.

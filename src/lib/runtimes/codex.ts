@@ -356,6 +356,7 @@ export const codexRuntime: AgentRuntime = {
     const result = await launchOwnedCodexSession({
       cwd: opts.cwd,
       prompt: opts.prompt,
+      promptMemoryRevision: opts.promptMemoryRevision,
       taskName: opts.taskName,
       clientMutationId: opts.clientMutationId,
       executionPolicy: opts.executionPolicy,
