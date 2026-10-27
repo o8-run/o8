@@ -71,7 +71,6 @@ export function RailUpdateControl({ buttonStyle }: { buttonStyle: CSSProperties 
   const [notes, setNotes] = useState<ReleaseNotes | null>(null);
   const [notesError, setNotesError] = useState(false);
   const [toolsExpanded, setToolsExpanded] = useState(false);
-  const [currentExpanded, setCurrentExpanded] = useState(false);
   const [allNotes, setAllNotes] = useState(false);
   const pending = hub.app.installing || hub.syncing;
   const status = hub.checkMessage || hub.app.message;
@@ -79,8 +78,6 @@ export function RailUpdateControl({ buttonStyle }: { buttonStyle: CSSProperties 
   const available = Boolean(hub.app.version);
   // The filled icon means an o8 update. Connected-CLI updates alone show a small dot.
   const appReady = Boolean(hub.app.version);
-  const actionTools = visibleTools.filter(tool => tool.status !== 'current' || hub.cliProgress[tool.runtimeId]);
-  const currentTools = visibleTools.filter(tool => tool.status === 'current' && !hub.cliProgress[tool.runtimeId]);
   const rawError = hub.app.error;
   const error = rawError && /abort|timed?\s*out|failed to fetch|fetch is/i.test(rawError) ? 'Update checks couldn’t finish. Try again.' : rawError;
   const cancel = () => { if (timer.current) clearTimeout(timer.current); timer.current = null; };
@@ -188,7 +185,6 @@ export function RailUpdateControl({ buttonStyle }: { buttonStyle: CSSProperties 
         <section style={{ borderTop: '1px solid var(--t-divider-subtle)', paddingTop: 10, height: 280, display: 'flex', flexDirection: 'column' }}>
           <button type="button" aria-label="Tools updates" aria-expanded={toolsExpanded} aria-controls={`${id}-tools`}
             onClick={() => { setToolsExpanded(value => !value); if (!toolsExpanded) {
-              if (!hub.checkedAt) setCurrentExpanded(true);
               if (!hub.checking) void refreshCliUpdateView(true);
             } }}
             style={{ ...button, flexShrink: 0, width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingLeft: 0, paddingRight: 0, background: 'transparent' }}>
@@ -203,11 +199,8 @@ export function RailUpdateControl({ buttonStyle }: { buttonStyle: CSSProperties 
                 {hub.cliDiscovery ? `Checking tools… ${hub.cliDiscovery.completed} of ${hub.cliDiscovery.total} checked` : 'Checking installed tools…'}
               </div> : hub.checkedAt ? <span role="status">Tool discovery complete.</span> : null}
             </div>
-            {actionTools.length ? <ConnectedCliUpdateRows tools={actionTools} busy={hub.cliBusy} progress={hub.cliProgress} checking={hub.checking} checked={hub.cliDiscoveryChecked} disabled={pending || hub.checkingAll || hub.checking} onUpdate={runtime => { setPinned(true); void synchronizeConnectedClis(runtime).catch(() => {}); }} /> : null}
-            {currentTools.length ? <div>
-              <button type="button" aria-expanded={currentExpanded} aria-controls={`${id}-current`} onClick={() => setCurrentExpanded(value => !value)} style={{ ...button, minHeight: 26, width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: 0, background: 'transparent', color: 'var(--t-text-muted)', fontSize: 11 }}><span>Current CLIs · {currentTools.length}</span><ChevronDown size={13} style={{ transform: currentExpanded ? 'rotate(180deg)' : undefined }} /></button>
-              {currentExpanded ? <div id={`${id}-current`} style={{ paddingTop: 9 }}><ConnectedCliUpdateRows tools={currentTools} busy={hub.cliBusy} progress={hub.cliProgress} checking={hub.checking} checked={hub.cliDiscoveryChecked} /></div> : null}
-            </div> : null}
+            {/* Preserve the hub's arrival order so later discoveries cannot displace a visible row. */}
+            {visibleTools.length ? <ConnectedCliUpdateRows tools={visibleTools} busy={hub.cliBusy} progress={hub.cliProgress} checking={hub.checking} checked={hub.cliDiscoveryChecked} disabled={pending || hub.checkingAll || hub.checking} onUpdate={runtime => { setPinned(true); void synchronizeConnectedClis(runtime).catch(() => {}); }} /> : null}
             {hub.cliError || hub.cliMessage ? <div role={hub.cliError ? 'alert' : 'status'} style={{ fontSize: 11, lineHeight: 1.5, color: hub.cliError ? 'var(--t-danger)' : 'var(--t-text-secondary)' }}>{hub.cliError || hub.cliMessage}</div> : null}
             {!visibleTools.length && !hub.checking && !hub.cliError ? <span role="status" style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>No supported CLI installation was found.</span> : null}
           </div> : null}

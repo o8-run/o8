@@ -64,6 +64,60 @@ describe.skipIf(!executablePath)('Updates panel discovery layout in a real brows
 
   for (const theme of ['light', 'dark'] as const) {
     for (const [width, height] of [[900, 700], [1440, 900], [1680, 1050]]) {
+      for (const firstStatus of ['current', 'update-available'] as const) {
+        it(`keeps the same first row fixed when ${firstStatus} arrives first at ${width}x${height} in ${theme}`, async () => {
+          await page.setViewportSize({ width, height });
+          await page.setContent(`<style>${fs.readFileSync('src/app/globals.css', 'utf8')}</style><main></main>`);
+          await page.evaluate(tokens => {
+            for (const [key, value] of Object.entries(tokens)) document.documentElement.style.setProperty(key, value);
+            Object.assign(window, { fullNotes: true });
+          }, resolveTheme(getPalette(theme), 'solid').cssVars);
+          await page.addScriptTag({ content: bundle });
+          await page.getByRole('button', { name: 'Updates', exact: true }).press('ArrowUp');
+          const panel = page.getByRole('dialog', { name: 'Updates and release notes' });
+          await panel.getByText('Latest published changes', { exact: true }).waitFor();
+          const tools = page.getByRole('button', { name: 'Tools updates', exact: true });
+          await tools.click();
+          await page.getByRole('progressbar', { name: 'Tool discovery' }).waitFor();
+          const publish = async (count: number, checking: boolean) => page.evaluate(({ count, checking, firstStatus }) => {
+            const tools = Array.from({ length: count }, (_, i) => ({ runtimeId: 'tool-' + i,
+              label: 'Installed tool ' + i, installedVersion: '1.0.0', latestVersion: '1.1.0',
+              status: i === 0 ? firstStatus : i % 2 ? 'unknown' : firstStatus === 'current' ? 'update-available' : 'current' }));
+            (window as unknown as { publishTools: (patch: unknown) => void }).publishTools({ tools, checking,
+              cliDiscoveryChecked: tools.map(tool => tool.runtimeId), checkedAt: checking ? 0 : Date.now() });
+          }, { count, checking, firstStatus });
+          await publish(1, true);
+          const first = panel.locator('[data-cli-update-row="tool-0"]');
+          await first.waitFor();
+          const initial = await first.boundingBox();
+          let previousPositions = [{ id: 'tool-0', y: initial!.y }];
+          for (const [count, checking] of [[3, true], [10, true], [10, false]] as const) {
+            await publish(count, checking);
+            await panel.locator('[data-cli-update-row]').nth(count - 1).waitFor();
+            if (!checking) await page.getByRole('progressbar', { name: 'Tool discovery' }).waitFor({ state: 'detached' });
+            expect((await first.boundingBox())?.y, 'the original row moves as mixed results arrive').toBe(initial?.y);
+            const positions = await panel.locator('[data-cli-update-row]').evaluateAll(rows => rows.map(row => ({
+              id: row.getAttribute('data-cli-update-row')!, y: row.getBoundingClientRect().y,
+            })));
+            for (const previous of previousPositions) {
+              expect(positions.find(row => row.id === previous.id)?.y, `${previous.id} moves as mixed results arrive`).toBe(previous.y);
+            }
+            previousPositions = positions;
+            expect(await panel.locator('[data-cli-update-row]').evaluateAll(rows => rows.map(row => row.getAttribute('data-cli-update-row'))))
+              .toEqual(Array.from({ length: count }, (_, i) => 'tool-' + i));
+          }
+          await tools.click();
+          await tools.click();
+          await page.getByRole('progressbar', { name: 'Tool discovery' }).waitFor();
+          expect((await first.boundingBox())?.y, 'the original row moves on reopening and rechecking').toBe(initial?.y);
+          await publish(10, false);
+        });
+      }
+    }
+  }
+
+  for (const theme of ['light', 'dark'] as const) {
+    for (const [width, height] of [[900, 700], [1440, 900], [1680, 1050]]) {
       for (const fullNotes of [false, true]) {
         it(`keeps visible content fixed with ${fullNotes ? 'full' : 'short'} notes at ${width}x${height} in ${theme}`, async () => {
           await page.setViewportSize({ width, height });
