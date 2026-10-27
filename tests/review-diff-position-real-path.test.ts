@@ -181,3 +181,82 @@ it('restores the original source after whitespace refetch and honors a later Fil
     }
   } finally { await page.close(); }
 }, 60_000);
+
+it.each(['unified', 'split'])('keeps the final source line at its viewport offset at the scroll limit starting in %s', async startMode => {
+  const page = await browser.newPage({ viewport: { width: 1680, height: 1050 } });
+  try {
+    await page.setContent('<html><body style="margin:0"><div id="root" style="width:100vw;height:100vh"></div></body></html>');
+    await page.addScriptTag({ content: bundle });
+    await page.locator('button[title="View options"]').click();
+    await page.getByRole('menuitem', { name: 'Expand all' }).click();
+    await expect.poll(() => page.getByText('anchor-file-', { exact: false }).count()).toBe(72);
+    if (startMode === 'split') {
+      await page.locator('button[title="Switch to split diff"]').click();
+      await frames(page);
+    }
+    const target = page.locator('[data-review-file="file-17.txt"] [data-review-line~="R:102"]');
+    const before = await target.evaluate(node => {
+      let scroll = node.parentElement;
+      while (scroll && (getComputedStyle(scroll).overflowY !== 'auto' || scroll.scrollHeight <= scroll.clientHeight)) scroll = scroll.parentElement;
+      if (!scroll) throw new Error('Review scroller missing');
+      scroll.scrollTop = scroll.scrollHeight;
+      return node.getBoundingClientRect().top - scroll.getBoundingClientRect().top;
+    });
+    await frames(page);
+    for (const mode of startMode === 'unified' ? ['split', 'unified', 'split', 'unified'] : ['unified', 'split', 'unified', 'split']) {
+      await page.locator(`button[title="Switch to ${mode} diff"]`).click();
+      await frames(page);
+      await page.waitForTimeout(120);
+      const after = await target.evaluate(node => {
+        let scroll = node.parentElement;
+        while (scroll && (getComputedStyle(scroll).overflowY !== 'auto' || scroll.scrollHeight <= scroll.clientHeight)) scroll = scroll.parentElement;
+        if (!scroll) throw new Error('Review scroller missing');
+        const rect = node.getBoundingClientRect(), view = scroll.getBoundingClientRect();
+        return { offset: rect.top - view.top, visible: rect.top < view.bottom && rect.bottom > view.top };
+      });
+      expect(after.visible).toBe(true);
+      expect(Math.abs(after.offset - before)).toBeLessThanOrEqual(2);
+    }
+  } finally { await page.close(); }
+}, 60_000);
+
+it('keeps a partially scrolled wrapped L70 anchored through split and unified round trips', async () => {
+  const page = await browser.newPage({ viewport: { width: 900, height: 700 } });
+  try {
+    await page.setContent('<html><body style="margin:0"><div id="root" style="width:440px;height:100vh;margin-left:auto"></div></body></html>');
+    await page.addScriptTag({ content: bundle });
+    await page.locator('button[title="View options"]').click();
+    await page.getByRole('menuitem', { name: 'Expand all' }).click();
+    await expect.poll(() => page.getByText('anchor-file-', { exact: false }).count()).toBe(72);
+    await page.locator('button[title="Switch to split diff"]').click();
+    await frames(page);
+    const target = page.locator('[data-review-file="file-12.txt"] [data-review-line~="L:70"]');
+    const before = await target.evaluate(node => {
+      let scroll = node.parentElement;
+      while (scroll && (getComputedStyle(scroll).overflowY !== 'auto' || scroll.scrollHeight <= scroll.clientHeight)) scroll = scroll.parentElement;
+      if (!scroll) throw new Error('Review scroller missing');
+      scroll.scrollTop += node.getBoundingClientRect().top - scroll.getBoundingClientRect().top + 140;
+      const rect = node.getBoundingClientRect(), top = scroll.getBoundingClientRect().top;
+      return { offset: rect.top - top, fraction: (top + 8 - rect.top) / rect.height };
+    });
+    expect(Math.abs(before.offset + 140)).toBeLessThanOrEqual(1);
+    expect(before.fraction).toBeLessThan(1);
+    await frames(page);
+    for (const mode of ['unified', 'split', 'unified', 'split']) {
+      await page.locator(`button[title="Switch to ${mode} diff"]`).click();
+      await frames(page);
+      await page.waitForTimeout(120);
+      const after = await target.evaluate((node, fraction) => {
+        let scroll = node.parentElement;
+        while (scroll && (getComputedStyle(scroll).overflowY !== 'auto' || scroll.scrollHeight <= scroll.clientHeight)) scroll = scroll.parentElement;
+        if (!scroll) throw new Error('Review scroller missing');
+        const rect = node.getBoundingClientRect(), view = scroll.getBoundingClientRect();
+        return { point: rect.top + fraction * rect.height - view.top, offset: rect.top - view.top,
+          visible: rect.bottom > view.top && rect.top < view.bottom };
+      }, before.fraction);
+      expect(after.visible).toBe(true);
+      expect(Math.abs(after.point - 8)).toBeLessThanOrEqual(2);
+      if (mode === 'split') expect(Math.abs(after.offset - before.offset)).toBeLessThanOrEqual(2);
+    }
+  } finally { await page.close(); }
+}, 60_000);
