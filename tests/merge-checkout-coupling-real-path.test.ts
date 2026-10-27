@@ -593,8 +593,9 @@ describe('merge checkout coupling through real handlers', () => {
       .toBe(payload.result.mergeSha);
   }, 30_000);
 
-  it('surfaces a conflicting dirty base checkout in the review state with both branch names', async () => {
+  it('surfaces a conflicting local-only dirty base checkout in the review state with both branch names', async () => {
     const fixture = await createFixture('base-dirty-review', false);
+    git(fixture.repo, ['remote', 'remove', 'origin']);
     writeFileSync(join(fixture.repo, 'file.txt'), 'base\noperator wip\n');
 
     const response = await reviewStateRoute.GET(reviewStateRequest(fixture.packetId));

@@ -4,6 +4,7 @@ import {
   git,
   gitErrorMessage,
   isAncestor,
+  pushExactBase,
 } from '@/lib/lane/worktree-merge-git';
 
 import { LaneGitMetadataError } from '@/lib/lane/lane-git';
@@ -156,4 +157,37 @@ export async function fastForwardBaseBranch(input: {
       `o8 found operator checkout branch "${foundBranch}"; merge needs base branch "${input.baseBranch}". Fast-forward failed: ${gitErrorMessage(error)}`,
     );
   }
+}
+
+/** Remote publication can succeed while the operator keeps their checkout unchanged. */
+async function operatorCheckoutUpdateDeferral(repoPath: string, baseBranch: string): Promise<string | null> {
+  if (await currentBranch(repoPath) !== baseBranch) {
+    return null;
+  }
+  const paths = [...new Set((await Promise.all([
+    changedPaths(repoPath, ['diff', '--name-only', '-z']),
+    changedPaths(repoPath, ['diff', '--cached', '--name-only', '-z']),
+    changedPaths(repoPath, ['ls-files', '--others', '--exclude-standard', '-z']),
+  ])).flat())];
+  return paths.length
+    ? `Local checkout unchanged: uncommitted changes in ${paths.join(', ')}. Commit or save your edits, then fast-forward ${baseBranch} from origin.`
+    : null;
+}
+
+export async function advanceMergeBase(input: {
+  repoPath: string;
+  baseBranch: string;
+  candidateRef: string;
+  candidateSha: string;
+  originPushAvailable: boolean;
+  expectedRemoteBaseSha?: string;
+}): Promise<{ pushedToOrigin: boolean; localUpdateNote: string | null }> {
+  const localUpdateNote = input.originPushAvailable
+    ? await operatorCheckoutUpdateDeferral(input.repoPath, input.baseBranch) : null;
+  if (localUpdateNote) {
+    await pushExactBase(input.repoPath, input.baseBranch, input.candidateSha, input.expectedRemoteBaseSha);
+  } else {
+    await fastForwardBaseBranch(input);
+  }
+  return { pushedToOrigin: localUpdateNote !== null, localUpdateNote };
 }

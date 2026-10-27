@@ -148,7 +148,7 @@ it('lists simultaneous gates, then merges after clearing exactly the reported ga
     expect.arrayContaining([expect.stringContaining(held.approvalId)]));
   claimApprovalResolution(held.approvalId, 'approve', 'desktop', 'Operator inspected the size override.');
   writeFileSync(join(f.repo, 'change.txt'), 'operator work must survive\n');
-  expect(await preview(f.packetId)).toMatchObject({ wouldMerge: false, blockers: expect.arrayContaining(['clean-worktree']) });
+  expect(await preview(f.packetId)).toMatchObject({ wouldMerge: true, blockers: [] });
   rmSync(join(f.repo, 'change.txt'));
   const clear = await preview(f.packetId);
   expect(clear.blockers).toEqual([]);

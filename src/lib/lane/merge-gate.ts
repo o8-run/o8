@@ -29,6 +29,7 @@ import { checkUntrackedImports } from './check-untracked-imports';
 import { getRelocatedDeletionCredits } from './diff-relocation';
 import { hasScopePartitionToken } from './review-risk';
 import { inspectOperatorCheckoutMergeSafety } from './operator-checkout-merge';
+import { hasPushRemote } from './worktree-merge-git';
 import type { Lane } from './types';
 
 // ── Budget Constants (shared with dispatch.ts preservation envelope) ──
@@ -438,15 +439,18 @@ export async function runMergeGate(
     candidateGit: (args) => laneGit(cwd, lane.repoPath, args),
     baseBranch,
   });
+  const remotePublicationAvailable = checkoutSafety.conflictingPaths.length > 0 && await hasPushRemote(lane.repoPath);
   const checkoutViolations: MergeViolation[] = checkoutSafety.status === 'safe'
     ? []
     : [{
       category: 'integrity',
-      severity: checkoutSafety.status === 'unsafe' ? 'block' : 'warn',
+      severity: checkoutSafety.status === 'unsafe' && !remotePublicationAvailable ? 'block' : 'warn',
       label: checkoutSafety.status === 'unsafe'
         ? 'Operator checkout blocks base fast-forward'
         : 'Operator checkout safety could not be verified',
-      detail: checkoutSafety.detail ?? `o8 found branch "${checkoutSafety.foundBranch}"; merge needs branch "${checkoutSafety.neededBranch}".`,
+      detail: remotePublicationAvailable
+        ? `${checkoutSafety.detail} The approved commit can be published to origin while the local checkout update is deferred.`
+        : checkoutSafety.detail ?? `o8 found branch "${checkoutSafety.foundBranch}"; merge needs branch "${checkoutSafety.neededBranch}".`,
     }];
 
   const gateSelfUpdate = await changesMergeGate(cwd, comparisonRef, lane.repoPath);

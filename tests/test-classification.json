@@ -1673,6 +1673,16 @@
       ]
     },
     {
+      "path": "tests/approved-merge-dirty-checkout-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "real-path",
+        "worktree-api"
+      ]
+    },
+    {
       "path": "tests/artifact-channel-publication-real-path.test.ts",
       "reasons": [
         "apfs-tool",

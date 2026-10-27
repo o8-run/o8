@@ -716,8 +716,9 @@ describe('worktree-side merge with real git repos', () => {
     }
   }, 45_000);
 
-  it('escalates a dirty operator checkout instead of stashing or force-merging it', async () => {
+  it('escalates a dirty operator checkout for a local-only merge instead of stashing it', async () => {
     const { repo } = makeRepo('o8-merge-dirty');
+    git(repo, ['remote', 'remove', 'origin']);
     const worktree = await makeWorktree(repo, 'pkt-dirty', 'inline/dirty');
     writeFileSync(join(worktree.path, 'file.txt'), 'base\nworker\n');
     commitAll(worktree.path, 'worker change');
