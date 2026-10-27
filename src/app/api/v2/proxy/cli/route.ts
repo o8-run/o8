@@ -12,6 +12,7 @@ import { spawnsViaInterpreter } from '@/lib/runtimes/shared/cli-spawn';
 import { CODEX_MODEL_IDS, MODEL_IDS } from '@/lib/models';
 import { CODEX_SOL_FALLBACK_MODEL, CODEX_SOL_UPDATE_NOTICE, isCodexSolUnsupported } from '@/lib/codex/model-compatibility';
 import { EFFORT_CHOICE_LIST, resolveEffortPin } from '@/lib/orchestrator/effort-pin';
+import { resolveCodexLaunchContext } from '@/lib/codex/launch-context';
 import { isThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 
 /**
@@ -196,12 +197,15 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: `Unsupported runtime: ${runtime}` }, { status: 400 });
     }
 
-    const effortPin = resolveEffortPin({
+    const effortInput = {
       requestedEffort: body.effort,
       runtime,
       model: codexModel ?? modelKey,
       explicitModel: runtime === 'codex' ? modelKey : undefined,
-    });
+    };
+    const codexLaunch = runtime === 'codex'
+      ? resolveCodexLaunchContext({ ...effortInput, runtime }) : undefined;
+    const effortPin = codexLaunch?.effortPin ?? resolveEffortPin(effortInput);
     if (!effortPin.ok) {
       return NextResponse.json({ error: effortPin.message, code: effortPin.code }, { status: 400 });
     }
@@ -270,7 +274,7 @@ export async function POST(request: Request) {
             windowsHide: true,
             cwd: repoRoot,
             stdio: ['ignore', 'pipe', 'pipe'],
-            env: providerSpawnEnvironment(childEnvironment({ runtimeId: runtime, env: { FORCE_COLOR: '0', NO_COLOR: '1' } }), { runtimeId: runtime }),
+            env: providerSpawnEnvironment(childEnvironment({ runtimeId: runtime, env: { FORCE_COLOR: '0', NO_COLOR: '1', ...codexLaunch?.env } }), { runtimeId: runtime }),
           });
 
           let buffer = '';

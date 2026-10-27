@@ -8,6 +8,7 @@ import { GithubReadDeferredError, githubScopeDeadline } from '@/lib/github-clien
 import { relativeAge } from './shared';
 import type { ActivityItem, GHIssue, GHPullRequest } from './types';
 import type { CIRun } from '@/lib/github-client/ci-runs';
+import { GitHubOrgNotCoveredError } from '@/lib/github/org-access';
 
 type ActivityExtras = { issues: ActivityItem[]; prs: ActivityItem[]; ciRuns: ActivityItem[]; repoCommits: ActivityItem[] };
 type Payload = { error?: string; issues?: GHIssue[]; prs?: GHPullRequest[]; runs?: CIRun[]; commits?: Array<{ hash?: string; message?: string; date?: string }> };
@@ -47,7 +48,7 @@ export function useActivityExtras(repo: string | null, allRepos: string[], isAll
   specs.forEach(({ repo: repoSlug, kind }, index) => {
     const query = queries[index];
     if (query.error) errors.push(query.error instanceof GithubReadDeferredError ? 'GitHub rate limit — paused until reset' : 'Unable to load repo activity');
-    const payload = query.data as Payload | undefined;
+    const payload = (query.error instanceof GitHubOrgNotCoveredError ? undefined : query.data) as Payload | undefined;
     if (payload?.error) errors.push(payload.error);
     const mapStream = (target: ActivityListKind, map: (data: Payload) => ActivityItem[]) => target === kind && payload ? map(payload) : [];
     const issueItems = mapStream('issues', (data) => {

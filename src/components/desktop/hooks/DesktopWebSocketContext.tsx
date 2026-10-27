@@ -25,6 +25,7 @@ import {
 } from 'react';
 import type { DesktopWsCallbacks } from './useDesktopWebSocket';
 import type {
+  RealtimeBatchMessage,
   RealtimeEventEnvelope,
   RealtimeStreamKey,
   RealtimeSubscription,
@@ -359,7 +360,7 @@ export function DesktopWebSocketProvider({ children }: { children: ReactNode }) 
                 previousStreamSeq,
                 realtimeEvent.seq,
               );
-              dispatch('onRealtimeEvent', realtimeEvent);
+              dispatch('onRealtimeEvent', { ...realtimeEvent, delivery: (data as unknown as RealtimeBatchMessage).delivery ?? realtimeEvent.delivery });
               if (
                 realtimeEvent.event === 'history.snapshot'
                 && isNewerEvent

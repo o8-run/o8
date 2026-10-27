@@ -85,7 +85,7 @@ export async function runPrebuild({ runBuild, canReuse }) {
     const buildStarted = Date.now();
     if (cachePhase === 'web') {
       const { runRegisteredBuild } = await import('./registered-build.mjs');
-      const code = await runRegisteredBuild(producerRun);
+      const code = await runRegisteredBuild(producerRun, { restoredCache: restore.webOwnership });
       if (code !== 0) throw new Error(`web build failed with exit ${code}`);
     } else if (restore.status === 'hit_exact' || restore.status === 'hit_compatible') {
       console.log(`[tauri-prebuild] ${label} skipped (verified executable cache)`);
@@ -143,6 +143,7 @@ export async function runPrebuild({ runBuild, canReuse }) {
         console.log(`[tauri-prebuild] rebuilding artifact: ${verification.reason}`);
         await cachedPhase('speech', 'speech sidecar', process.execPath, ['scripts/build-speech-local.mjs']);
         await phase('Pi write helper', process.execPath, ['scripts/build-pi-write.mjs']);
+        await phase('o8 next sidecar', process.execPath, ['scripts/next/build-sidecar.mjs']);
         await cachedPhase('web', 'web build', 'npm', ['run', 'build']);
         await phase('Tauri export', process.execPath, ['scripts/tauri-export.mjs']);
         const builtRecipe = collectReleaseArtifactRecipe(root, version, { env });

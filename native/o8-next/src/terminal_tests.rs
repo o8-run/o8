@@ -8,18 +8,25 @@ use std::{
     thread,
 };
 
-struct Fixture(Child);
+struct Fixture(Child, Option<std::path::PathBuf>);
 impl Drop for Fixture {
     fn drop(&mut self) {
         let _ = Command::new("kill")
             .args(["-TERM", &self.0.id().to_string()])
             .status();
         let _ = self.0.wait();
+        if let Some(gate) = &self.1 {
+            let _ = std::fs::remove_dir_all(gate.parent().unwrap());
+        }
     }
 }
 fn fixture() -> (Fixture, Client, String) {
+    fixture_with_tail_gate(None)
+}
+fn fixture_with_tail_gate(gate: Option<std::path::PathBuf>) -> (Fixture, Client, String) {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut child = Command::new("node")
+    let mut command = Command::new("node");
+    command
         .current_dir(root)
         .args([
             "--import",
@@ -31,9 +38,11 @@ fn fixture() -> (Fixture, Client, String) {
         ])
         .env("O8_NEXT_API_TOKEN", "fixture-next-terminal-operator")
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .expect("disposable terminal host");
+        .stderr(Stdio::null());
+    if let Some(gate) = &gate {
+        command.env("O8_NEXT_TERMINAL_FLOOD_TAIL_GATE", gate);
+    }
+    let mut child = command.spawn().expect("disposable terminal host");
     let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
     let metadata = lines
         .find_map(|line| {
@@ -47,7 +56,7 @@ fn fixture() -> (Fixture, Client, String) {
     )
     .unwrap();
     (
-        Fixture(child),
+        Fixture(child, gate),
         client,
         metadata["terminalSession"].as_str().unwrap().into(),
     )
@@ -62,15 +71,17 @@ fn draw(pane: &Entity<Pane>, cx: &mut VisualTestContext) -> f64 {
     start.elapsed().as_secs_f64() * 1000.
 }
 fn until(pane: &Entity<Pane>, cx: &mut VisualTestContext, condition: impl Fn(&Pane) -> bool) {
-    let deadline = Instant::now() + Duration::from_secs(45);
+    let started = Instant::now();
+    let bound = Duration::from_secs(45);
     loop {
         draw(pane, cx);
-        if pane.read_with(cx, |pane, _| condition(pane)) {
+        let elapsed = started.elapsed();
+        if elapsed <= bound && pane.read_with(cx, |pane, _| condition(pane)) {
             break;
         }
         assert!(
-            Instant::now() < deadline,
-            "terminal condition timed out: {}",
+            elapsed < bound,
+            "terminal condition timed out; elapsed={elapsed:?}; bound={bound:?}; notice={}",
             pane.read_with(cx, |pane, _| pane.notice)
         );
         thread::sleep(Duration::from_millis(1));
@@ -114,17 +125,68 @@ fn rss() -> f64 {
     }
 }
 
+// The marker can arrive before its trailing newline in another transport chunk.
+fn line_received(grid: &Grid, marker: &str) -> bool {
+    grid.text().contains(marker)
+        && grid.cursor().is_some_and(|(column, row, _)| {
+            column == 0
+                && grid
+                    .cells()
+                    .iter()
+                    .filter(|cell| cell.y == row)
+                    .all(|cell| cell.text.trim().is_empty())
+        })
+}
+
+fn wait_for_flood(
+    pane: &Entity<Pane>,
+    cx: &mut VisualTestContext,
+    before: u64,
+) -> (Vec<f64>, Duration) {
+    let mut frames = vec![];
+    let started = Instant::now();
+    let bound = Duration::from_secs(90);
+    loop {
+        let previous = pane.read_with(cx, |pane, _| pane.painted.get());
+        let frame_ms = draw(pane, cx);
+        let (received, painted, complete, notice) = pane.read_with(cx, |pane, _| {
+            let grid = pane.grid.lock().unwrap();
+            let received = grid.bytes - before;
+            (
+                received,
+                pane.painted_bytes.get().saturating_sub(before),
+                received >= 50_000_012
+                    && line_received(&grid, "FLOOD-DONE")
+                    && pane.painted_bytes.get() >= grid.bytes,
+                pane.notice,
+            )
+        });
+        if pane.read_with(cx, |pane, _| pane.painted.get() != previous) {
+            frames.push(frame_ms);
+        }
+        let elapsed = started.elapsed();
+        assert!(
+            elapsed <= bound,
+            "50 MB flood timed out; elapsed={elapsed:?}; bound={bound:?}; received={received}; painted={painted}; notice={notice}"
+        );
+        if complete {
+            return (frames, elapsed);
+        }
+        thread::sleep(Duration::from_millis(1));
+    }
+}
+
 #[gpui::test]
 fn production_pty_to_gpui_terminal(cx: &mut TestAppContext) {
     let (_server, client, session) = fixture();
     let (pane, cx) = cx.add_window_view(|window, cx| Pane::new(client, session, window, cx));
     until(&pane, cx, |pane| {
-        pane.ready && pane.grid.lock().unwrap().text().contains("READY")
+        pane.ready && line_received(&pane.grid.lock().unwrap(), "READY")
     });
     // Input originates in GPUI's native platform handler, not a helper encoder.
     command("key", cx);
     until(&pane, cx, |pane| {
-        pane.grid.lock().unwrap().text().contains("KEY")
+        line_received(&pane.grid.lock().unwrap(), "KEY")
     });
     let key_revision = pane.read_with(cx, |pane, _| pane.grid.lock().unwrap().revision);
     until(&pane, cx, |pane| pane.painted.get() >= key_revision);
@@ -223,7 +285,7 @@ fn production_pty_to_gpui_terminal(cx: &mut TestAppContext) {
     }
     command("scroll", cx);
     until(&pane, cx, |pane| {
-        pane.grid.lock().unwrap().text().contains("SCROLL-DONE")
+        line_received(&pane.grid.lock().unwrap(), "SCROLL-DONE")
     });
     assert_eq!(
         pane.read_with(cx, |pane, _| pane
@@ -258,32 +320,11 @@ fn production_pty_to_gpui_terminal(cx: &mut TestAppContext) {
     // terminal workload pattern. Unpaced saturation remains a separate probe.
     let before = pane.read_with(cx, |pane, _| pane.grid.lock().unwrap().bytes);
     command("flood", cx);
-    let mut frames = vec![];
-    let deadline = Instant::now() + Duration::from_secs(90);
-    loop {
-        let previous = pane.read_with(cx, |pane, _| pane.painted.get());
-        let elapsed = draw(&pane, cx);
-        let changed = pane.read_with(cx, |pane, _| pane.painted.get() != previous);
-        if changed {
-            frames.push(elapsed);
-        }
-        if pane.read_with(cx, |pane, _| {
-            let grid = pane.grid.lock().unwrap();
-            grid.text().contains("FLOOD-DONE") && pane.painted_bytes.get() >= grid.bytes
-        }) {
-            break;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "50 MB flood must finish; received {} bytes",
-            pane.read_with(cx, |pane, _| pane.grid.lock().unwrap().bytes - before)
-        );
-        thread::sleep(Duration::from_millis(1));
-    }
+    let (frames, flood_elapsed) = wait_for_flood(&pane, cx, before);
     let received = pane.read_with(cx, |pane, _| pane.grid.lock().unwrap().bytes - before);
     assert_eq!(
         received, 50_000_012,
-        "no silent terminal transport loss during flood"
+        "no silent terminal transport loss during flood; elapsed={flood_elapsed:?}"
     );
     assert!(frames.len() > 20);
     assert_eq!(
@@ -307,6 +348,43 @@ fn production_pty_to_gpui_terminal(cx: &mut TestAppContext) {
         std::fs::write(path, serde_json::to_vec_pretty(&result).unwrap()).unwrap();
     }
     println!("O8_NEXT_TERMINAL_EVIDENCE {result}");
+}
+
+#[gpui::test]
+fn production_pty_flood_waits_for_delayed_tail(cx: &mut TestAppContext) {
+    let directory = std::env::temp_dir().join(format!(
+        "o8-terminal-tail-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir(&directory).unwrap();
+    let gate = directory.join("release");
+    let (_server, client, session) = fixture_with_tail_gate(Some(gate.clone()));
+    let (pane, cx) = cx.add_window_view(|window, cx| Pane::new(client, session, window, cx));
+    until(&pane, cx, |pane| {
+        pane.ready && line_received(&pane.grid.lock().unwrap(), "READY")
+    });
+    let before = pane.read_with(cx, |pane, _| pane.grid.lock().unwrap().bytes);
+    command("flood", cx);
+    until(&pane, cx, |pane| {
+        pane.grid.lock().unwrap().text().contains("FLOOD-DONE")
+    });
+    thread::scope(|scope| {
+        scope.spawn(move || {
+            // Delay the final output event after the marker has already arrived.
+            thread::sleep(Duration::from_secs(2));
+            std::fs::write(gate, b"release").unwrap();
+        });
+        let (_, elapsed) = wait_for_flood(&pane, cx, before);
+        let received = pane.read_with(cx, |pane, _| pane.grid.lock().unwrap().bytes - before);
+        assert_eq!(
+            received, 50_000_012,
+            "complete flood tail must be received and painted; elapsed={elapsed:?}"
+        );
+    });
 }
 
 #[test]

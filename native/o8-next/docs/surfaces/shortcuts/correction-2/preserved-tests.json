@@ -1,0 +1,23 @@
+{
+  "mainTestFunctions": 99,
+  "missingMainTestFunctions": [],
+  "originalShortcutTestFunctions": [
+    "shortcuts_overlay_bindings_dismissal_and_typing",
+    "shortcuts_reopen_retains_list_scroll",
+    "shortcuts_focused_grid_terminal_keeps_question_and_close_keys",
+    "shortcuts_focused_text_field_keeps_help_and_close_keys",
+    "shortcuts_control_alt_arrows_belong_to_grid_panes"
+  ],
+  "shortcutTestFunctions": [
+    "shortcuts_overlay_bindings_dismissal_and_typing",
+    "shortcuts_reopen_retains_list_scroll",
+    "shortcuts_focused_grid_terminal_keeps_question_and_close_keys",
+    "shortcuts_focused_text_field_keeps_help_and_close_keys",
+    "shortcuts_control_alt_arrows_belong_to_grid_panes",
+    "shortcuts_every_binding_respects_the_focused_secret_field",
+    "shortcuts_text_fields_pass_palette_chords",
+    "shortcuts_control_k_reaches_the_focused_grid_pty",
+    "shortcuts_settings_chords_do_not_steal_pty_focus",
+    "shortcuts_restored_field_is_observed_before_its_first_key"
+  ]
+}

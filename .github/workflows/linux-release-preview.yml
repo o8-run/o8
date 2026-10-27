@@ -1,0 +1,51 @@
+name: Linux Release Preview
+
+# Ships the Linux preview packages (#1672) with every stable release. Stable
+# releases are published from the release host (scripts/release.mjs), not from
+# Actions, so this workflow only starts Port Build for the published tag with
+# publish_target linux. Port Build keeps every existing gate: the tag must match
+# package.json, the release must be public, the packages are GPG-signed and
+# attested, and existing assets are never replaced. workflow_dispatch is the one
+# event GITHUB_TOKEN is allowed to start.
+#
+# Not covered: the updater mirror copy and the minisign .sig stay the manual
+# steps in docs/operations/linux-updater-mirror-publish.md.
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linux-release-preview-${{ github.event.release.tag_name }}
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    name: Start Port Build for the stable tag
+    if: ${{ !github.event.release.prerelease && !github.event.release.draft }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Dispatch Port Build (Linux only)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Skipping $RELEASE_TAG: not a stable vX.Y.Z tag."
+            exit 0
+          fi
+          # Run Port Build from the tag itself: it builds the released source,
+          # and its per-ref concurrency group cannot cancel or be cancelled by
+          # a manual or scheduled run on main.
+          gh workflow run port-build.yml --ref "$RELEASE_TAG" \
+            -f release_tag="$RELEASE_TAG" \
+            -f publish_target=linux
+          echo "Port Build dispatched for $RELEASE_TAG (Linux previews)."

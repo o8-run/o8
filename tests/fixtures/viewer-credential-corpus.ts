@@ -1,0 +1,50 @@
+export const knownViewerOperatorFixture = 'fixture-operator-' + 'x'.repeat(32);
+export const knownViewerDeviceFixture = 'd'.repeat(64);
+export const knownViewerEnvironmentFixture = 'fixture-environment-' + 'z'.repeat(24);
+
+/** Synthetic controls shared by route and matcher regressions. */
+export const viewerCredentialCorpus = [
+  { name: 'pasted assignment', text: 'PASSWORD=fixture-pasted-value', clear: 'fixture-pasted-value' },
+  { name: 'computed key', text: "process.env['PASS' + 'WORD'] = 'fixture-computed-value'", clear: 'fixture-computed-value' },
+  { name: 'quoted command', text: "curl --user 'fixture:fixture-command-value' https://example.invalid", clear: 'fixture-command-value' },
+  { name: 'double quoted command', text: 'curl -u "fixture:fixture-double-value"', clear: 'fixture-double-value' },
+  { name: 'quoted spaces', text: 'password = "fixture spaced value"', clear: 'fixture spaced value' },
+  { name: 'single quoted spaces', text: "password = 'fixture single value'", clear: 'fixture single value' },
+  { name: 'template quoted value', text: 'password = `fixture template value`', clear: 'fixture template value' },
+  { name: 'escaped object', text: String.raw`{\"password\":\"fixture-escaped-value\"}`, clear: 'fixture-escaped-value' },
+  { name: 'escaped key', text: String.raw`{"\u0070assword":"fixture-key-value"}`, clear: 'fixture-key-value' },
+  { name: 'unicode split key', text: 'pass\u200bword=fixture-unicode-value', clear: 'fixture-unicode-value' },
+  { name: 'unicode split value', text: 'password=fixture-split\u200b-value', clear: 'fixture-split\u200b-value' },
+  { name: 'encoded assignment', text: 'password%3Dfixture-percent-value', clear: 'fixture-percent-value' },
+  { name: 'nested encoding', text: 'password%253Dfixture-nested-value', clear: 'fixture-nested-value' },
+  { name: 'authorization', text: 'Authorization: Bearer fixture-bearer-value', clear: 'fixture-bearer-value' },
+  { name: 'basic authorization', text: 'Basic Zml4dHVyZTpjb250cm9s', clear: 'Zml4dHVyZTpjb250cm9s' },
+  { name: 'session format', text: 'eyJmaXh0dXJl.Y29udHJvbA.c2lnbmF0dXJl', clear: 'eyJmaXh0dXJl.Y29udHJvbA.c2lnbmF0dXJl' },
+  { name: 'daemon credential', text: 'o8d_fixturecredential', clear: 'o8d_fixturecredential' },
+  { name: 'worker credential', text: 'o8pw_fixturecredential', clear: 'o8pw_fixturecredential' },
+  { name: 'spectator credential', text: 'o8sp_fixturecredential', clear: 'o8sp_fixturecredential' },
+  { name: 'worker legacy credential', text: 'cwk_fixturecredential', clear: 'cwk_fixturecredential' },
+  { name: 'live key', text: 'sk_live_fixturecredential', clear: 'sk_live_fixturecredential' },
+  { name: 'restricted key', text: 'rk_test_fixturecredential', clear: 'rk_test_fixturecredential' },
+  { name: 'authorization code', text: 'https://example.invalid?code=fixture-code-value', clear: 'fixture-code-value' },
+  { name: 'mask in quoted value', text: 'password="[redacted] fixture-mask-value"', clear: 'fixture-mask-value' },
+  { name: 'equals command', text: "curl --user='fixture:fixture-equals-value'", clear: 'fixture-equals-value' },
+  { name: 'unquoted command', text: 'curl -ufixture:fixture-short-value', clear: 'fixture-short-value' },
+  ...['ghp_', 'github_pat_', 'sk-', 'xoxb-', 'AKIA', 'ASIA', 'AIza'].map((prefix, index) => ({
+    name: `prefixed credential ${index}`, text: `${prefix}${'F'.repeat(24)}`, clear: `${prefix}${'F'.repeat(24)}`,
+  })),
+  { name: 'URL credentials', text: 'https://fixture:fixture-url-value@example.invalid', clear: 'fixture-url-value' },
+  { name: 'escaped value', text: String.raw`password="fixture-\u0065scaped-value"`, clear: String.raw`fixture-\u0065scaped-value` },
+  { name: 'private key', text: '-----BEGIN PRIVATE KEY----- fixture-private-value -----END PRIVATE KEY-----', clear: 'fixture-private-value' },
+  { name: 'escaped delimiter', text: String.raw`password="fixture\"escaped-tail"`, clear: 'escaped-tail' },
+  { name: 'escaped command delimiter', text: String.raw`curl --user 'fixture:one\'command-tail'`, clear: 'command-tail' },
+  { name: 'unterminated quoted value', text: 'password="fixture first unterminated-tail', clear: 'unterminated-tail' },
+  { name: 'concatenated value', text: 'password="fixture" + "concatenated-tail"', clear: 'concatenated-tail' },
+  { name: 'encoded unicode splitter', text: 'pass%E2%80%8Bword=fixture-encoded-splitter', clear: 'fixture-encoded-splitter' },
+  { name: 'known operator literal', text: knownViewerOperatorFixture, clear: knownViewerOperatorFixture },
+  { name: 'known environment literal', text: `prefix ${knownViewerEnvironmentFixture} suffix`, clear: knownViewerEnvironmentFixture },
+  { name: 'known device literal', text: `prefix ${knownViewerDeviceFixture} suffix`, clear: knownViewerDeviceFixture },
+  ...['api_key', 'access_token', 'refresh_token', 'id_token', 'ticket', 'jwt', 'session', 'secret', 'passwd', 'credential', 'cookie'].map((key, index) => ({
+    name: `credential field ${key}`, text: `${key}=fixture-field-${index}-value`, clear: `fixture-field-${index}-value`,
+  })),
+];

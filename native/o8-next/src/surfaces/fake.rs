@@ -191,3 +191,6 @@ fn new_surface_routes_renders_and_gets_navigation(cx: &mut gpui::TestAppContext)
             .any(|w| w.tabs.contains(&Tab::Fake) && w.surfaces.fake.probe_visits == 3)
     );
 }
+
+#[path = "fake/parity_tests.rs"]
+mod parity_tests;

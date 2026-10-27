@@ -1,4 +1,6 @@
-import { NextResponse, type NextRequest } from 'next/server';
+import { viewerGitJson } from '@/lib/viewers/git-response';
+import { viewerJson } from '@/lib/viewers/response';
+import { type NextRequest } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import { resolveRequestPrincipalContext, workerPacketRefusal } from '@/lib/auth/principal';
 import { findLatestLaneByPacket, getLane } from '@/lib/lane/registry';
@@ -34,11 +36,11 @@ export async function GET(
   const { id } = await params;
   const lane = getLane(id) ?? findLatestLaneByPacket(id);
   if (!lane) {
-    return NextResponse.json({ ok: false, note: 'No lane found for that id/packet.' }, { status: 404 });
+    return viewerJson({ ok: false, note: 'No lane found for that id/packet.' }, { status: 404 });
   }
   const ownershipRefusal = workerPacketRefusal(resolveRequestPrincipalContext(req), lane.packetId);
   if (ownershipRefusal) {
-    return NextResponse.json({ ok: false, error: ownershipRefusal }, { status: 403 });
+    return viewerJson({ ok: false, error: ownershipRefusal }, { status: 403 });
   }
 
   const url = new URL(req.url);
@@ -54,7 +56,7 @@ export async function GET(
       ? `${Buffer.from(review.full, 'utf8').subarray(0, maxBytes).toString('utf8')}\n\n…[diff truncated at ${maxBytes} bytes of ${sizeBytes} — raise maxBytes or read the file directly]`
       : review.full;
 
-    return NextResponse.json({
+    return viewerGitJson({
       ok: true,
       laneId: lane.id,
       packetId: lane.packetId ?? null,
@@ -74,16 +76,16 @@ export async function GET(
       sizeBytes,
       truncated,
       maxBytes,
-    }, { headers: { 'Cache-Control': 'no-store, max-age=0' } });
+    }, review.source.cwd, {}, { headers: { 'Cache-Control': 'no-store, max-age=0' } });
   } catch (error) {
     if (error instanceof LaneBranchUnresolvedError) {
-      return NextResponse.json(branchUnresolvedPayload(error), { status: 409 });
+      return viewerJson(branchUnresolvedPayload(error), { status: 409 });
     }
     if (error instanceof ImmutableReviewUnavailableError) {
-      return NextResponse.json(immutableReviewUnavailablePayload(error), { status: 409 });
+      return viewerJson(immutableReviewUnavailablePayload(error), { status: 409 });
     }
     console.error('[api] lanes/[id]/diff failed:', error);
     const message = 'Unable to compute diff.';
-    return NextResponse.json({ ok: false, note: message }, { status: 500 });
+    return viewerJson({ ok: false, note: message }, { status: 500 });
   }
 }

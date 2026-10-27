@@ -1,0 +1,27 @@
+running 3 tests
+test shell::shortcuts::tests::review::shortcuts_control_alt_arrows_belong_to_grid_panes ...
+thread 'shell::shortcuts::tests::review::shortcuts_control_alt_arrows_belong_to_grid_panes' (90252) panicked at src/surfaces/shortcuts/review_tests.rs:180:5:
+assertion `left == right` failed: Ctrl+Alt+Right must not switch shell tabs
+  left: Some(Session("thoughts-long"))
+ right: Some(Grid)
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+test shell::shortcuts::tests::review::shortcuts_focused_grid_terminal_keeps_question_and_close_keys ...
+thread 'shell::shortcuts::tests::review::shortcuts_focused_grid_terminal_keeps_question_and_close_keys' (90301) panicked at src/surfaces/shortcuts/review_tests.rs:128:5:
+typing ? in the focused PTY must not open Help
+FAILED
+test shell::shortcuts::tests::review::shortcuts_focused_text_field_keeps_help_and_close_keys ...
+thread 'shell::shortcuts::tests::review::shortcuts_focused_text_field_keeps_help_and_close_keys' (90667) panicked at src/surfaces/shortcuts/review_tests.rs:156:5:
+a focused text field owns typing
+FAILED
+
+failures:
+
+failures:
+    shell::shortcuts::tests::review::shortcuts_control_alt_arrows_belong_to_grid_panes
+    shell::shortcuts::tests::review::shortcuts_focused_grid_terminal_keeps_question_and_close_keys
+    shell::shortcuts::tests::review::shortcuts_focused_text_field_keeps_help_and_close_keys
+
+test result: FAILED. 0 passed; 3 failed; 0 ignored; 0 measured; 83 filtered out; finished in 25.15s
+
+error: test failed, to rerun pass `--bin o8-next`

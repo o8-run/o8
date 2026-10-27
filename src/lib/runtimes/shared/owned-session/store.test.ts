@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'n
 import os from 'node:os';
 import path from 'node:path';
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { DispatchBackendWaitResult } from '@/lib/runtimes/shared/dispatch-readiness';
 import type { OwnedRuntimeAdapter, OwnedSessionRecord, ParsedRunLog } from './types';
@@ -34,6 +34,13 @@ vi.mock('@/lib/runtime/pty-bridge', async (importOriginal) => {
 });
 
 describe('createOwnedSessionStore launch readiness gate', () => {
+  beforeAll(async () => {
+    await import('./store');
+    await import('@/lib/orchestrator/control-plane');
+    await import('@/lib/orchestrator/store');
+    await import('@/lib/orchestrator/packet-prompt');
+  }, 120_000); // Cold imports are fixture setup; operation deadlines stay unchanged.
+
   let tempRoot: string;
   let repoPath: string;
   let priorRoot: string | undefined;
@@ -223,28 +230,34 @@ describe('createOwnedSessionStore launch readiness gate', () => {
     ensureDispatchBackendReadyMock.mockResolvedValue(readyResult());
     let workerToken = '';
     let processMarker = '';
+    const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
+    let child: import('node:child_process').ChildProcess | undefined;
     spawnMock.mockImplementationOnce((_command, _args, options: { env?: NodeJS.ProcessEnv }) => {
       workerToken = options.env?.O8_WORKER_TOKEN ?? '';
       processMarker = options.env?.O8_OWNED_RUN_MARKER ?? '';
-      return { pid: 42, unref: vi.fn(), once: vi.fn() };
+      child = actual.spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], options);
+      return child;
     });
 
     const store = createOwnedSessionStore(testAdapter(), {
       workspaceSpawnGuard: async () => ({ status: 'available', source: 'no-snapshot' }),
     });
-    await expect(store.launch({
-      cwd: repoPath,
-      prompt: 'bind packet identity',
-      packetId: 'packet-process-binding',
-    })).resolves.toMatchObject({ ok: true });
+    try {
+      await expect(store.launch({
+        cwd: repoPath,
+        prompt: 'bind packet identity',
+        packetId: 'packet-process-binding',
+      })).resolves.toMatchObject({ ok: true });
 
-    expect(workerToken).toMatch(/^o8pw_/);
-    expect(processMarker).not.toBe('');
-    expect(resolvePacketWorkerToken(workerToken)).toMatchObject({
-      packetId: 'packet-process-binding',
-      leaseProcessMarker: processMarker,
-      leaseProcessPid: 42,
-    });
+      expect(child?.pid).toBeGreaterThan(0);
+      expect(workerToken).toMatch(/^o8pw_/);
+      expect(processMarker).not.toBe('');
+      expect(resolvePacketWorkerToken(workerToken)).toMatchObject({
+        packetId: 'packet-process-binding',
+        leaseProcessMarker: processMarker,
+        leaseProcessPid: child?.pid,
+      });
+    } finally { child?.kill('SIGKILL'); }
   });
 
   it('reconciles a confirmed pre-spawn failure without incrementing the ledger twice', async () => {
@@ -371,6 +384,107 @@ describe('createOwnedSessionStore launch readiness gate', () => {
       expectedVersion: 1,
     })).resolves.toMatchObject({ status: 'idempotent' });
   });
+  it.each(['resume', 'forget during preparation'] as const)('fences forgotten worker memory at %s through the owned store', async kind => {
+    const { createOwnedSessionStore } = await import('./store');
+    const { writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
+    const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
+    const { advanceMemoryRevision, readMemoryRevision } = await import('@/lib/cortex/memory-revision');
+    const { getSqlite } = await import('@/lib/db');
+    const db = getSqlite();
+    const prior = readMemoryRevision();
+    const packetId = 'packet-forget-owned-store';
+    writeOrchestratorControlPlaneState({ ...createEmptyOrchestratorMissionState(), packets: [{
+      id: packetId, branchTarget: 'fixture-forget', workspaceTargetPath: repoPath, referenceLabel: packetId,
+      title: 'Current retained worker task', summary: 'Inspect the fixture.', runtime: 'codex',
+      status: 'running', queueState: 'held', releaseState: 'pending', dependencyPacketIds: [], dependencyLabels: [],
+    }] });
+    ensureDispatchBackendReadyMock.mockResolvedValue(readyResult());
+    const store = createOwnedSessionStore(testAdapter(), {
+      workspaceSpawnGuard: async () => ({ status: 'available', source: 'no-snapshot' }),
+    });
+    const children: import('node:child_process').ChildProcess[] = [];
+    const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
+    try {
+      const launched = await store.launch({ cwd: repoPath, prompt: 'forgotten assembled context canary', packetId });
+      const session = readSingleSession(process.env.O8_TEST_OWNED_ROOT!);
+      session.threadId = 'old-provider-thread';
+      session.recentRuns[0] = { ...session.recentRuns[0], outcome: 'finished', pid: 0, finishedAt: new Date().toISOString() };
+      session.activeRun = undefined;
+      writeFileSync(path.join(session.sessionDir, 'session.json'), JSON.stringify(session));
+      spawnMock.mockClear();
+      if (kind === 'forget during preparation') {
+        ensureDispatchBackendReadyMock.mockImplementationOnce(async () => {
+          db.transaction(() => advanceMemoryRevision(db))();
+          return readyResult();
+        });
+        await expect(store.resume(launched.surfaceId, 'fresh operator instruction')).rejects.toThrow(/memory changed/i);
+        expect(spawnMock).not.toHaveBeenCalled();
+      } else {
+        db.transaction(() => advanceMemoryRevision(db))();
+        const expectedRevision = readMemoryRevision();
+        spawnMock.mockImplementationOnce((_command, _args, options) => {
+          const prepared = readSingleSession(process.env.O8_TEST_OWNED_ROOT!);
+          expect(prepared.threadId).toBeUndefined();
+          expect(prepared.promptMemoryRevision).toBe(expectedRevision);
+          expect(prepared.initialPrompt).toContain('Current retained worker task');
+          expect(prepared.activeRun?.mode).toBe('launch');
+          expect(prepared.activeRun?.prompt).toContain('fresh operator instruction');
+          expect(prepared.activeRun?.prompt).not.toContain('forgotten assembled context canary');
+          const child = actual.spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], options);
+          children.push(child);
+          return child;
+        });
+        await expect(store.resume(launched.surfaceId, 'fresh operator instruction')).resolves.toMatchObject({ ok: true });
+        expect(spawnMock).toHaveBeenCalledTimes(1);
+      }
+    } finally {
+      for (const child of children) child.kill('SIGKILL');
+      if (prior === '0') db.exec('DROP TABLE IF EXISTS memory_forget_revision');
+      else db.prepare('UPDATE memory_forget_revision SET revision = ? WHERE singleton = 1').run(prior);
+    }
+  });
+
+  it('keeps a current newly assembled packet prompt after an earlier forget', async () => {
+    const { createOwnedSessionStore } = await import('./store');
+    const { getSqlite } = await import('@/lib/db');
+    const { advanceMemoryRevision, readMemoryRevision } = await import('@/lib/cortex/memory-revision');
+    const { writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
+    const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
+    const db = getSqlite(), prior = readMemoryRevision();
+    const packetId = 'packet-fresh-memory-launch';
+    writeOrchestratorControlPlaneState({ ...createEmptyOrchestratorMissionState(), packets: [{
+      id: packetId, branchTarget: 'fixture-fresh', workspaceTargetPath: repoPath, referenceLabel: packetId,
+      title: 'Canonical retained task', summary: 'Inspect the fixture.', runtime: 'codex',
+      status: 'running', queueState: 'held', releaseState: 'pending', dependencyPacketIds: [], dependencyLabels: [],
+    }] });
+    ensureDispatchBackendReadyMock.mockResolvedValue(readyResult());
+    const store = createOwnedSessionStore(testAdapter(), {
+      workspaceSpawnGuard: async () => ({ status: 'available', source: 'no-snapshot' }),
+    });
+    const children: import('node:child_process').ChildProcess[] = [];
+    const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
+    try {
+      db.transaction(() => advanceMemoryRevision(db))();
+      const promptMemoryRevision = readMemoryRevision();
+      const prompt = 'Current retained task plus fresh handoff request and verified observations';
+      spawnMock.mockImplementationOnce((_command, _args, options) => {
+        const child = actual.spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], options);
+        children.push(child);
+        return child;
+      });
+      await expect(store.launch({ cwd: repoPath, prompt, packetId, promptMemoryRevision })).resolves.toMatchObject({ ok: true });
+      const session = readSingleSession(process.env.O8_TEST_OWNED_ROOT!);
+      expect(session.recentRuns[0]?.prompt).toBe(prompt);
+      expect(session.initialPrompt).toBe(prompt);
+      expect(session.promptMemoryRevision).toBe(promptMemoryRevision);
+      expect(session.threadId).toBeUndefined();
+    } finally {
+      for (const child of children) child.kill('SIGKILL');
+      if (prior === '0') db.exec('DROP TABLE IF EXISTS memory_forget_revision');
+      else db.prepare('UPDATE memory_forget_revision SET revision = ? WHERE singleton = 1').run(prior);
+    }
+  });
+
 });
 
 function testAdapter(binaryName = 'node'): OwnedRuntimeAdapter {

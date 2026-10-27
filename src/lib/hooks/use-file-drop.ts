@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { isTauri } from '@/lib/tauri/bridge';
 import { useTauriFileDrop } from './use-tauri-file-drop';
 
-const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB
+export const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB
 
 /**
  * Max images a single composer message may carry. Shared so the orchestrator
@@ -49,7 +49,7 @@ export interface UseFileDropOptions {
 }
 
 export interface FileUploadOptions { isCurrent?: () => boolean; requestId?: string; backgroundAgent?: boolean }
-export interface FileUploadResult { status: 'read' | 'skipped' | 'error' }
+export interface FileUploadResult { status: 'read' | 'skipped' | 'error'; error?: string }
 export type FileUploadHandler = (files: FileList | File[], options?: FileUploadOptions) => Promise<FileUploadResult[]> | void;
 
 export interface UseFileDropResult {

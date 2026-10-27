@@ -9,7 +9,9 @@
  *   mirrors back through the `o8:tts-state` event. Uses the app's read-aloud
  *   voice (Google Neural2-J / ElevenLabs), matching the dock / Ask panel.
  * Browser / mobile: server-side edge-tts via /api/tts (en-US-SteffanNeural),
- *   then browser SpeechSynthesis (offline fallback).
+ *   then browser SpeechSynthesis (offline fallback). On the Linux shell the
+ *   offline floor is the system engine (`system_tts_speak`: piper / espeak-ng
+ *   / spd-say) first, because WebKitGTK's SpeechSynthesis is usually silent.
  *
  * The desktop reroute exists because the old edge-tts path synthesized the
  * ENTIRE response before a word played (1–2 min on long replies) and cold-
@@ -18,7 +20,9 @@
  * Used by both desktop and mobile message action bars.
  */
 
+import { isLinuxShell } from '@/lib/desktop/host-platform';
 import { isTauri } from '@/lib/tauri/bridge';
+import { isEdgeVoiceError, type EdgeVoiceError } from '@/lib/tts/edge-voice-error';
 
 export type PlaybackState = 'idle' | 'loading' | 'playing' | 'paused' | 'error';
 
@@ -29,6 +33,7 @@ export interface TTSEngineState {
   playbackRate: number;
   activeMessageId: string | null;
   usingFallback: boolean;
+  voiceError: EdgeVoiceError | null;
   /** The source block currently being spoken, for voice-playback line
    *  highlighting (desktop native path only — mirrors the Rust `o8:tts-chunk`
    *  event). `null` when idle or on the web fallback (no boundary signal). */
@@ -55,12 +60,15 @@ class TTSEngineImpl {
     playbackRate: 1,
     activeMessageId: null,
     usingFallback: false,
+    voiceError: null,
     activeChunk: null,
   };
   private animFrameId: number | null = null;
   // Set up the native `o8:tts-state` subscription exactly once (desktop only).
   private tauriListenerSetup = false;
   private webPlayback = false;
+  // Message whose Linux `system_tts_speak` is in flight, so cleanup can stop it.
+  private systemSpeechId: string | null = null;
 
   subscribe(listener: StateListener): () => void {
     this.listeners.add(listener);
@@ -125,6 +133,7 @@ class TTSEngineImpl {
       currentTime: 0,
       duration: 0,
       usingFallback: false,
+      voiceError: null,
     });
     try {
       const { invoke } = await import('@tauri-apps/api/core');
@@ -151,8 +160,20 @@ class TTSEngineImpl {
     this.tauriListenerSetup = true;
     import('@tauri-apps/api/event')
       .then(({ listen }) => {
-        void listen<{ state?: 'idle' | 'playing' | 'paused' }>('o8:tts-state', (e) => {
+        void listen<{ state?: 'idle' | 'playing' | 'paused'; messageId?: string | null; usingFallback?: boolean; voiceError?: unknown }>('o8:tts-state', (e) => {
           if (this.webPlayback) return;
+          if (e.payload?.usingFallback) {
+            // A late native fallback must not warn on a stopped/new message or
+            // on unrelated Symon read-back (which has no message ID).
+            if (typeof e.payload.messageId !== 'string' || e.payload.messageId !== this._state.activeMessageId) return;
+            this.updateState({
+              state: 'playing',
+              usingFallback: true,
+              voiceError: isEdgeVoiceError(e.payload.voiceError) ? e.payload.voiceError : null,
+              activeChunk: null,
+            });
+            return;
+          }
           const next = e.payload?.state;
           if (next === 'playing') {
             this.updateState({ state: 'playing' });
@@ -205,6 +226,7 @@ class TTSEngineImpl {
       currentTime: 0,
       duration: 0,
       usingFallback: false,
+      voiceError: null,
     });
 
     const cleanText = stripMarkdown(text);
@@ -220,6 +242,11 @@ class TTSEngineImpl {
 
       if (!resp.ok) {
         const errText = await resp.text();
+        if (this._state.activeMessageId !== messageId) return;
+        try {
+          const { code } = JSON.parse(errText);
+          if (isEdgeVoiceError(code)) this.updateState({ voiceError: code });
+        } catch { /* Older servers may return a plain-text error. */ }
         throw new Error(`TTS API ${resp.status}: ${errText}`);
       }
 
@@ -259,7 +286,7 @@ class TTSEngineImpl {
       this.audio.onerror = () => {
         console.warn('[TTS] Audio playback error, trying fallback');
         this.cleanup();
-        this.playFallback(cleanText, messageId);
+        void this.playFallback(cleanText, messageId);
       };
 
       await this.audio.play();
@@ -267,12 +294,38 @@ class TTSEngineImpl {
       return;
     } catch (err) {
       console.warn('[TTS] Server-side TTS failed, using fallback:', err);
-      if (this._state.activeMessageId === messageId) this.playFallback(cleanText, messageId);
+      if (this._state.activeMessageId === messageId) void this.playFallback(cleanText, messageId);
     }
   }
 
-  /** Fallback: browser SpeechSynthesis API */
-  private playFallback(text: string, messageId: string) {
+  /** Linux shell: speak through the system engine. Resolves false when no
+   *  engine is installed (or it failed) so the caller can try SpeechSynthesis. */
+  private async playViaLinuxSystem(text: string, messageId: string): Promise<boolean> {
+    this.systemSpeechId = messageId;
+    this.updateState({ state: 'playing', activeMessageId: messageId, usingFallback: true });
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      if (this._state.activeMessageId !== messageId) return true;
+      await invoke<boolean>('system_tts_speak', { text, speed: this._state.playbackRate });
+      if (this.systemSpeechId === messageId) this.systemSpeechId = null;
+      // `false` means a stop or newer speech cut it off; either way this
+      // message is done unless something else already took over.
+      if (this._state.activeMessageId === messageId) {
+        this.updateState({ state: 'idle', activeMessageId: null, currentTime: 0, duration: 0 });
+      }
+      return true;
+    } catch (err) {
+      if (this.systemSpeechId === messageId) this.systemSpeechId = null;
+      if (this._state.activeMessageId !== messageId) return true;
+      console.warn('[TTS] Linux system speech unavailable:', err);
+      return false;
+    }
+  }
+
+  /** Fallback: Linux system speech (desktop shell), then browser SpeechSynthesis */
+  private async playFallback(text: string, messageId: string) {
+    if (isTauri() && isLinuxShell() && await this.playViaLinuxSystem(text, messageId)) return;
+    if (this._state.activeMessageId !== messageId) return;
     if (!('speechSynthesis' in window)) {
       this.updateState({ state: 'error', activeMessageId: null });
       return;
@@ -384,6 +437,10 @@ class TTSEngineImpl {
 
   private cleanup() {
     this.stopTimeTracking();
+    if (this.systemSpeechId) {
+      this.systemSpeechId = null;
+      this.invokeTauri('system_tts_stop');
+    }
     if (this.audio) {
       this.audio.pause();
       this.audio.onplay = null;

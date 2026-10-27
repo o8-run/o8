@@ -1,3 +1,4 @@
+import { assertWorkerMemoryCurrent } from '@/lib/dispatch/worker-memory-context';
 import { reserveWorkLaunch, WorkAdmissionExpiredError } from '@/lib/app-update/work-launch-admission';
 /**
  * Bundled Pi as a packet worker (#3258): the Pi SDK session from
@@ -218,6 +219,7 @@ async function createRun(surfaceId: string, prompt: string, mode: 'launch' | 're
   return withSession(surfaceId, async () => {
     const session = await findSession(surfaceId, false);
     if (!session) throw new Error('Pi session was not found.');
+    assertWorkerMemoryCurrent(session);
     if (session.detachedAt) throw new Error('Pi session was detached from its closed packet and cannot be resumed.');
     if (session.activeRun?.outcome === 'running') throw new Error('Pi is still working on the previous turn.');
     await ensureDir(path.join(session.sessionDir, RUNS_DIR));
@@ -238,12 +240,6 @@ async function createRun(surfaceId: string, prompt: string, mode: 'launch' | 're
   });
 }
 
-/** True while `runId` is still the session's current run and no Stop was recorded for it. */
-async function isCurrentRun(surfaceId: string, runId: string) {
-  const active = (await findSession(surfaceId, false))?.activeRun;
-  return active?.id === runId && active.outcome === 'running' && !active.interruptRequestedAt;
-}
-
 /**
  * Runs the prompt on its own Pi process, unless the turn was stopped or replaced
  * while the process started; resolves once the process is closed and the turn
@@ -253,7 +249,10 @@ async function runTurn(turn: LiveTurn, surfaceId: string, run: PiWorkerRunRecord
   let outcome: OwnedRunOutcome = 'failed';
   let summary = 'Pi run failed.';
   try {
-    const current = await isCurrentRun(surfaceId, run.id);
+    const memory = await findSession(surfaceId, false);
+    if (!memory) throw new Error('Pi session disappeared.');
+    assertWorkerMemoryCurrent(memory);
+    const current = memory.activeRun?.id === run.id && memory.activeRun.outcome === 'running' && !memory.activeRun.interruptRequestedAt;
     // No await between this check and prompt(), which marks the session busy before
     // its first await, so a later Stop always finds a run to abort.
     const result: { text?: string; errorMessage?: string } = turn.stopped || !current
@@ -420,6 +419,7 @@ async function launch(request: OwnedLaunchRequest & { workMode?: WorkerWorkMode 
     createdAt: nowIso(),
     updatedAt: nowIso(),
     latestPrompt: prompt,
+    promptMemoryRevision: request.promptMemoryRevision,
     latestSummary: compactText(prompt, 140),
     // The managed model unless the packet pins an OpenRouter model (#3584); any other request keeps the managed route.
     model: isOpenRouterPiModelChoice(request.model) ? request.model : O8_MANAGED_PI_MODEL.id,

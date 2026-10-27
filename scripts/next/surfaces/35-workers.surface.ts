@@ -31,6 +31,7 @@ export default async function register({ repo }: SurfaceContext): Promise<Surfac
     ...(process.argv.includes('--workers-navigation') ? [
       ['running-next', 'running', 'running'] as const,
       ['running-third', 'running', 'running'] as const,
+      ['review-next', 'awaiting_review', 'reviewing'] as const,
     ] : []),
   ] as const) {
     const id = `worker-${suffix}`;

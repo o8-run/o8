@@ -6,6 +6,7 @@ import {
   lstatSync,
   openSync,
   readFileSync,
+  realpathSync,
   rmSync,
   statfsSync,
   writeFileSync,
@@ -16,15 +17,17 @@ import { inspectIntakeReconciliation } from './intake-reconciliation.mjs';
 import { resolveReleaseConfig } from './release-config.mjs';
 import { resolveNotarizationCredentials } from './notarization.mjs';
 import { parseReleaseNotes } from './public-release.mjs';
+import { assertNoProducer } from './generated-output-producer-check.mjs';
 
 const DEFAULT_MIN_FREE_GIB = 25;
 
-function commandReceipt(command, args, options = {}) {
+export function commandReceipt(command, args, options = {}) {
+  const timeoutMs = options.timeoutMs ?? 15_000;
   const result = spawnSync(command, args, {
     cwd: options.cwd,
     encoding: 'utf8',
     env: options.env,
-    timeout: options.timeoutMs ?? 15_000,
+    timeout: timeoutMs,
     ...(options.maxBuffer ? { maxBuffer: options.maxBuffer } : {}),
     ...(options.detached ? { detached: true } : {}),
     windowsHide: true,
@@ -32,7 +35,10 @@ function commandReceipt(command, args, options = {}) {
   return {
     status: result.status ?? (result.error ? 127 : 0),
     stdout: result.stdout ?? '',
-    stderr: result.stderr ?? result.error?.message ?? '',
+    // A timeout leaves no exit status; say so instead of reporting a bare 127.
+    stderr: result.error?.code === 'ETIMEDOUT'
+      ? `timed out after ${timeoutMs} ms`
+      : result.stderr ?? result.error?.message ?? '',
     ...(options.detached ? { pid: result.pid ?? null } : {}),
   };
 }
@@ -110,7 +116,9 @@ function assertNoCompetingBuilds(run, root, env) {
   if (receipt.status !== 0) {
     throw new Error(`could not inspect competing release processes: ${receipt.stderr.trim() || `exit ${receipt.status}`}`);
   }
-  const buildPattern = /(?:next[^ ]* build|cargo(?: +tauri)? +build|cargo-tauri.*build|scripts\/release\.mjs +--ship)/;
+  // The shared cwd-aware guard owns output producers. Keep the independent
+  // native-build and ship collision checks from overriding its warnings.
+  const buildPattern = /(?:cargo(?: +tauri)? +build|cargo-tauri.*build|scripts\/release\.mjs +--ship)/;
   const competing = receipt.stdout
     .split('\n')
     .map((line) => line.trim())
@@ -181,6 +189,19 @@ export function performShipPreflight(options) {
   // Missing notes remain valid: the feed can be built from public commits.
   const notesPath = join(root, 'release-notes', 'next.md');
   parseReleaseNotes(existsSync(notesPath) ? readFileSync(notesPath, 'utf8') : '');
+  // Refuse a colliding producer before source/network checks or the advisory
+  // benchmark. Prebuild repeats this observation to catch later arrivals.
+  assertNoProducer(realpathSync(root), {
+    run(command, args, options) {
+      const receipt = run(command, args, { cwd: root, env,
+        timeoutMs: options.timeout, maxBuffer: options.maxBuffer });
+      if (receipt.status !== 0) {
+        throw Object.assign(new Error(`could not inspect producer: ${receipt.stderr.trim() || `exit ${receipt.status}`}`),
+          { status: receipt.status, stdout: receipt.stdout });
+      }
+      return receipt.stdout;
+    },
+  });
   const tag = `v${version}`;
   const head = requireSuccess(
     run('git', ['rev-parse', 'HEAD'], { cwd: root, env }),
@@ -209,17 +230,16 @@ export function performShipPreflight(options) {
   // so a stale manifest reaches the tag unnoticed and turns every open PR's
   // Hermetic Unit Tests job red for a reason unrelated to its diff (#2053).
   // Reuse the exact same script + remedy text CI prints on failure.
-  const classification = run(process.execPath, ['scripts/classify-tests.mjs', '--check'], {
+  const classification = run(process.execPath, ['scripts/classify-tests.mjs', '--check-manifest'], {
     cwd: root,
     env,
-    timeoutMs: 15_000,
+    timeoutMs: 60_000,
   });
   if (classification.status !== 0) {
-    throw new Error(
+    throw new Error(`test classification check: ${
       classification.stderr.trim()
         || classification.stdout.trim()
-        || `test classification check exited ${classification.status}`,
-    );
+        || `exited ${classification.status}`}`);
   }
   const repo = env.O8_RELEASE_REPO?.trim() || repositoryFromRemote(requireSuccess(
     run('git', ['remote', 'get-url', 'origin'], { cwd: root, env }),
@@ -371,12 +391,14 @@ function benchmarkStatePath(root) {
 // Process-group membership is visible for every process of this user, even
 // where macOS hides a process's environment (system binaries, hardened apps).
 function processGroups() {
-  const receipt = commandReceipt('ps', ['-axo', 'pid=,pgid='], { timeoutMs: 15_000, maxBuffer: MARKER_SCAN_MAX_BUFFER });
+  const receipt = commandReceipt('ps', ['-axo', 'pid=,pgid=,stat='], { timeoutMs: 15_000, maxBuffer: MARKER_SCAN_MAX_BUFFER });
   if (receipt.status !== 0) return null;
   const table = new Map();
   for (const line of receipt.stdout.split('\n')) {
-    const match = /^\s*(\d+)\s+(\d+)\s*$/.exec(line);
-    if (match) table.set(Number(match[1]), Number(match[2]));
+    const match = /^\s*(\d+)\s+(\d+)\s+(\S+)\s*$/.exec(line);
+    // Exited children can remain as zombies until their parent reaps them.
+    // They no longer run or hold build files.
+    if (match && !match[3].startsWith('Z')) table.set(Number(match[1]), Number(match[2]));
   }
   return table;
 }
@@ -500,7 +522,7 @@ export function runQuickBenchmarkPreflight(options) {
   // before recording or spawning a new run. This is a preflight failure, not
   // an unavailable speed measurement that the ship can ignore.
   if (lstatSync(join(root, '.next'), { throwIfNoEntry: false })) {
-    throw new Error('.next already exists; the ship benchmark requires absent output. Stop checkout users and use a clean release checkout; preserve the existing output for recovery.');
+    throw new Error('.next already exists; the ship benchmark requires absent output. After stopping checkout users, run `node scripts/postship-cleanup.mjs` to clear verified release-owned output; unknown output is preserved and requires a clean release checkout.');
   }
 
   const current = {

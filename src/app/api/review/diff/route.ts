@@ -1,4 +1,5 @@
-import { NextResponse } from 'next/server';
+import { viewerGitJson } from '@/lib/viewers/git-response';
+import { viewerJson } from '@/lib/viewers/response';
 import { execFile } from '@/lib/providers/child-process';
 import os from 'node:os';
 import path from 'node:path';
@@ -110,7 +111,7 @@ export async function GET(request: Request) {
     }
 
     const truncated = diff.length > MAX_BYTES;
-    return NextResponse.json({
+    return viewerGitJson({
       ok: true,
       source,
       branch: snapshot.branch,
@@ -121,10 +122,10 @@ export async function GET(request: Request) {
       prNumber: lead?.number ?? null,
       prTitle: lead?.title ?? null,
       prUrl: lead?.url ?? null,
-    });
+    }, source === 'local' && snapshot.repoPath ? expandHome(snapshot.repoPath) : '');
   } catch (error) {
     const message = error instanceof Error ? error.message : 'failed to load review diff';
     console.error('[review/diff]', message);
-    return NextResponse.json({ ok: false, reason: message }, { status: 500 });
+    return viewerJson({ ok: false, reason: message }, { status: 500 });
   }
 }

@@ -24,6 +24,8 @@ const HISTORY_STALE_LOCK_MS = 30_000;
 const historyLockWaiter = new Int32Array(new SharedArrayBuffer(4));
 
 export interface PersistedLlmChatMessage {
+  steerAnchor?: import('@/lib/transcripts/steer-anchor').SteerTranscriptAnchor;
+
   id: string;
   role: MobileTranscriptEntry['role'];
   content: string;
@@ -210,13 +212,17 @@ export function writePersistedLlmChat(
     let planText: string | undefined;
     let existingPendingTurnWorkers: MobilePendingTurnWorkers | undefined;
     let existingMessages: PersistedLlmChatMessage[] = [];
+    let sessionMetadata: Record<string, unknown> = {};
     try {
-      const existing = JSON.parse(readFileSync(filePath, 'utf-8')) as PersistedLlmChatHistory;
+      const existing = JSON.parse(readFileSync(filePath, 'utf-8')) as PersistedLlmChatHistory & Record<string, unknown>;
       existingMessages = Array.isArray(existing.messages) ? existing.messages : [];
       starred = existing.starred || false;
       title = existing.title;
       planText = normalizePlanText(existing.planText);
       existingPendingTurnWorkers = existing.pendingTurnWorkers;
+      sessionMetadata = { codexSessionHandoff: existing.codexSessionHandoff,
+        orchestratorSessionIds: existing.orchestratorSessionIds,
+        orchestratorSessionUpdatedAt: existing.orchestratorSessionUpdatedAt };
     } catch {
       // no existing history
     }
@@ -239,6 +245,7 @@ export function writePersistedLlmChat(
     );
     const persistedRecord = {
       ...history,
+      ...sessionMetadata,
       messages: consumed.messages,
       savedAt: new Date().toISOString(),
       starred: history.starred ?? starred,
@@ -302,6 +309,7 @@ export function mapLlmHistoryToMobileTranscript(
     recalledFacts: message.recalledFacts,
     command: message.command,
     handoff: message.handoff,
+    steerAnchor: message.steerAnchor,
     compaction: message.compaction,
   }));
 }

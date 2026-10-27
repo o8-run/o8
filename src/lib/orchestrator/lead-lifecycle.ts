@@ -271,6 +271,7 @@ async function executeTurn(lead: LeadRow, turn: TurnRow): Promise<void> {
         if (item.type === 'error') turnError = item.error;
       },
       {
+        transcriptMessageId: `lead-assistant-${turn.id}`,
         model: lead.model,
         thinkingEffort: lead.effort,
         threadId: lead.thread_id,

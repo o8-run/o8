@@ -1,0 +1,2 @@
+o8 next surface boundary: 12 surface files on main; cargo check --all-targets --locked
+o8 next surface boundary: isolated cargo check passed

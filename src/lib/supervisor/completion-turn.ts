@@ -1,6 +1,6 @@
 import { getSqlite } from '@/lib/db';
 import { getLane } from '@/lib/lane/registry';
-import { packetSteerHoldReason } from '@/lib/lane/packet-stop-hold';
+import { packetRecoveryStopReason } from '@/lib/lane/packet-stop-hold';
 import type { Lane } from '@/lib/lane/types';
 
 export class SupersededCompletionError extends Error {
@@ -29,7 +29,7 @@ export function createCompletionTurnGuard(lane: Lane, options: { allowRuntimeExi
     const current = getLane(lane.id);
     if (!current || current.sessionKey !== lane.sessionKey || current.packetId !== lane.packetId
       || ['paused', 'merging', 'completed', 'archived'].includes(current.status)
-      || (current.packetId && packetSteerHoldReason(current.packetId))
+      || (current.packetId && packetRecoveryStopReason(current.packetId))
       || turnCursor(lane.id, allowRuntimeExit) !== cursor) {
       throw new SupersededCompletionError();
     }

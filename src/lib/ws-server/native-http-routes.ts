@@ -3,6 +3,7 @@ import { once } from 'node:events';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { NextRequest } from 'next/server';
 import { panelGateMiddleware } from '@/middleware';
+import { mutationWorkspace } from '@/lib/repos/mutation-workspace';
 import { matchNativeHttpRoute } from './native-http-registry';
 export { nativeSurfaceRoutes } from './native-http-registry';
 
@@ -36,6 +37,8 @@ export async function handleNativeHttp(req: IncomingMessage, res: ServerResponse
     if (gate.headers.get('x-middleware-next') !== '1') response = gate;
     else if (!match.route.methods.includes(req.method ?? 'GET')) {
       response = Response.json({ error: 'Method not allowed' }, { status: 405, headers: { Allow: match.route.methods.join(', ') } });
+    } else if (match.route.path === '/api/runtime/archive' && typeof mutationWorkspace({ url: url.href }) !== 'string') {
+      response = Response.json({ error: 'An absolute workspace is required for native archive' }, { status: 400 });
     } else {
       let size = 0;
       const chunks: Buffer[] = [];

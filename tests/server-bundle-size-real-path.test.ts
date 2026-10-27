@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { bundleServers, SERVER_ENTRIES } from '../scripts/lib/server-bundles.mjs';
@@ -39,12 +39,19 @@ function run(root: string, budget: string) {
 
 describe('server size check CLI', () => {
   it('keeps the actual server export inside the committed size gate', () => {
-    const result = spawnSync(process.execPath, [check], {
+    const temporary = mkdtempSync(join(tmpdir(), 'o8-previous-ceiling-'));
+    roots.push(temporary);
+    const committed = JSON.parse(readFileSync('scripts/server-bundle-budget.json', 'utf8'));
+    const previousBudget = join(temporary, 'budget.json');
+    writeFileSync(previousBudget, JSON.stringify({ ...committed,
+      totalBytes: Math.min(committed.totalBytes, 13_077_919) }));
+    const result = spawnSync(process.execPath, [check, '--budget', previousBudget], {
       encoding: 'utf8', timeout: 120_000,
       env: { PATH: process.env.PATH, NODE_ENV: 'test' },
     });
     expect(result.status, result.stdout + result.stderr).toBe(0);
     expect(result.stdout).toContain('Server bundle size check passed.');
+    expect(committed.totalBytes + 1_000_000).toBeLessThanOrEqual(14_077_919);
   }, 120_000);
 
   it('rejects an oversized export against the unchanged committed total gate', () => {
@@ -92,6 +99,41 @@ describe('server size check CLI', () => {
     expect(executed.status, executed.stderr).toBe(0);
     expect(JSON.parse(executed.stdout)).toEqual({ sameRequest: true, sameResponse: true, instance: true, body: { value: 'one' },
       cookie: 'two', setCookie: 'three', continuation: '1', redirect: 307 });
+  });
+
+  it.each(['native', 'darwin'])('shares the lazy compiler runtime through a packaged CLI against saved source on %s', platform => {
+    const { root } = fixture();
+    symlinkSync(join(process.cwd(), 'node_modules'), join(root, 'node_modules'), 'junction');
+    const saved = join(root, 'saved.ts');
+    writeFileSync(saved, "import type { Value } from './value';\nexport function fixture(value: Value) { return value; }\n");
+    writeFileSync(join(root, entries[0]), `
+      import { readFileSync } from 'node:fs';
+      import { loadTypeScriptCompiler } from ${JSON.stringify(join(process.cwd(), 'src/lib/typescript-compiler.ts'))};
+      const [compiler, same] = await Promise.all([loadTypeScriptCompiler(), loadTypeScriptCompiler()]);
+      const source = readFileSync(process.argv[2], 'utf8');
+      const parsed = compiler.createSourceFile('saved.ts', source, compiler.ScriptTarget.Latest, true);
+      const names = [];
+      compiler.forEachChild(parsed, node => {
+        if (compiler.isFunctionDeclaration(node) && node.name) names.push(node.name.text);
+      });
+      const config = compiler.parseConfigFileTextToJson('config.json', '{"compilerOptions":{"baseUrl":"."}}');
+      console.log(JSON.stringify({ same: compiler === same, names,
+        imports: compiler.preProcessFile(source, true, true).importedFiles.map(entry => entry.fileName),
+        baseUrl: config.config.compilerOptions.baseUrl }));
+    `);
+    const outDir = join(root, 'built');
+    const report = bundleServers({ root, outDir });
+    rmSync(join(root, 'node_modules'), { recursive: true, force: true });
+    writeFileSync(join(outDir, 'native-addon-runtime.cjs'), 'exports.prepareNativeAddons = () => {};');
+    const preload = join(root, 'platform.cjs');
+    writeFileSync(preload, "Object.defineProperty(process, 'platform', { value: 'darwin' });");
+    const executed = spawnSync(process.execPath, [...(platform === 'darwin' ? ['--require', preload] : []), join(outDir, 'ws-server.mjs'), saved], {
+      encoding: 'utf8', timeout: 10_000,
+    });
+    expect(executed.status, executed.stderr).toBe(0);
+    expect(JSON.parse(executed.stdout)).toEqual({ same: true, names: ['fixture'], imports: ['./value'], baseUrl: '.' });
+    expect(Object.keys(report.metafile.inputs).some(input => /node_modules\/typescript\//.test(input))).toBe(false);
+    expect(existsSync(join(outDir, 'node_modules/typescript/lib/typescript.js'))).toBe(true);
   });
 
   it('excludes orphan lazy chunks and executes retained lazy imports', () => {

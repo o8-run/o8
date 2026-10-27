@@ -45,6 +45,7 @@ export interface OwnedRunRecord {
   id: string;
   mode: OwnedRunMode;
   prompt: string;
+  memoryRevision?: string;
   startedAt: string;
   finishedAt?: string;
   pid: number;
@@ -112,6 +113,8 @@ export interface OwnedSessionRecord {
   updatedAt: string;
   threadId?: string;
   initialPrompt?: string;
+  /** Recall revision for opaque assembled worker prompts and provider thread context. */
+  promptMemoryRevision?: string;
   latestPrompt: string;
   latestSummary: string;
   model?: string;
@@ -236,6 +239,7 @@ export interface OwnedTailGroup {
   mode: OwnedRunMode;
   outcome: OwnedRunOutcome;
   prompt: string;
+  memoryRevision?: string;
   startedAt: string;
   finishedAt?: string;
   startedAtLabel?: string;
@@ -280,6 +284,10 @@ export type OwnedCodexFleetAdditions = OwnedFleetAdditions;
 // ── Public launch I/O ────────────────────────────────────────────────────────
 
 export interface OwnedLaunchRequest {
+  /** Authoritative server-resolved account shared by admission and execution. */
+  runtimeIdentity?: import('@/lib/runtime/identity-catalog').RuntimeLaunchIdentity;
+  /** Recall epoch bound before assembling this launch prompt. */
+  promptMemoryRevision?: string;
   cwd: string;
   controlledTask?: ControlledTaskBinding;
   executionPolicy?: 'single-attempt';
@@ -491,7 +499,7 @@ export interface OwnedSessionStore {
   getReviewPacket(surfaceId: string): Promise<RuntimeReviewPacket>;
   getFleetAdditions(options?: { fresh?: boolean }): Promise<OwnedFleetAdditions>;
   sessionState(surfaceId: string): Promise<OwnedSessionState>;
-  archiveSession(surfaceId: string): Promise<OwnedArchiveResponse>;
+  archiveSession(surfaceId: string, workspace?: string): Promise<OwnedArchiveResponse>;
   setDetachedSession?(surfaceId: string, reason: string | null): Promise<{
     updated: boolean;
     previouslyDetached: boolean;

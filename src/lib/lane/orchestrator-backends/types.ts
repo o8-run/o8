@@ -53,6 +53,8 @@ export type OrchestratorSessionStatus = 'ready' | 'busy' | 'dead';
 export interface OrchestratorTurnOptions {
   /** Operator-authored text, kept separate from model-facing wrappers for Codex app history. */
   rawMessage?: string;
+  /** Canonical assistant row observed for mid-turn transcript insertion. */
+  transcriptMessageId?: string;
   /** Full access keeps the built-in command workspace boundary; outside-workspace explicitly lifts it. Plan is read-only. */
   permissionMode?: import('@/lib/orchestrator/permission-mode').OrchestratorPermissionMode;
   /** Set on a review turn: its metered calls are recorded as reviewer usage on this lane and packet (#3742). */
@@ -102,7 +104,7 @@ export interface OrchestratorBackend {
   /** Human-readable label, used in logs. */
   readonly label: string;
   /** Present only for native live input. A normal sendTurn may interrupt or restart work. */
-  readonly liveSteer?: (repoPath: string, message: string, options: Pick<OrchestratorTurnOptions, 'threadId' | 'permissionMode' | 'model' | 'toolProfile' | 'attachments' | 'orchestrationMode'> & { beforeAdmit: () => void; clientUserMessageId?: string }) => Promise<{ accepted: boolean }>;
+  readonly liveSteer?: (repoPath: string, message: string, options: Pick<OrchestratorTurnOptions, 'threadId' | 'permissionMode' | 'model' | 'thinkingEffort' | 'toolProfile' | 'attachments' | 'orchestrationMode'> & { beforeAdmit: () => void; clientUserMessageId?: string }) => Promise<{ accepted: boolean }>;
   /**
    * Look up the repo's session WITHOUT creating one — null if none exists.
    * `agent` selects the openclaw agent (openclaw backend only).

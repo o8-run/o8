@@ -32,7 +32,7 @@ ship; wait for that owner to settle or surface it to Q.
 
 ## Preview boundary
 
-Read `docs/operations/release-channels.md` before preview work. A separately approved preview uses a unique `X.Y.Z-preview.N` version and `O8_RELEASE_CHANNEL=preview npm run ship`. Both repositories receive immutable prereleases, never latest stable; the manifest is `preview.json`. Stable feeds, report receipts, and announcements are skipped. Preview publication does not authorize stable promotion. No in-app preview selector or side-by-side data isolation is implemented by this publishing path.
+Read `docs/operations/release-channels.md` before preview work. A separately approved preview uses a unique `X.Y.Z-preview.N` version and `npm run ship`. The build embeds its channel before signing; publication never reads a channel environment override. Both repositories receive immutable prereleases, never latest stable; the manifest is `preview.json`. Stable feeds, report receipts, and announcements are skipped. Preview publication does not authorize stable promotion. The normal stable-number ship uses source beta build intent and the separate beta publisher. Stable and Beta enrollment is available in Settings; preview enrollment and side-by-side data isolation remain separate.
 
 Publication must not commit or push release-note archives onto protected main. Archive `release-notes/next.md` through a reviewed follow-up PR. Never disable branch protection to perform a version bump or archive.
 

@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { activityListQuery } from './activity-queries';
 import { useGithubWindowHidden } from './visibility';
 import { GithubReadDeferredError as CIRunsDeferredError } from './refresh-policy';
+import { GitHubOrgNotCoveredError } from '@/lib/github/org-access';
 
 export interface CIRun {
   databaseId: number;
@@ -40,7 +41,7 @@ export function useRepoCIRuns(repo?: string, enabled = true) {
     enabled: entry => enabled && !(entry.state.error instanceof CIRunsDeferredError
       && Math.max(now, entry.state.errorUpdatedAt) < entry.state.error.retryAt),
     // Keep configured ordinary-error retries, but never retry a quota refusal immediately.
-    retry: (failures, error) => !(error instanceof CIRunsDeferredError) && (typeof inheritedRetry === 'function'
+    retry: (failures, error) => !(error instanceof CIRunsDeferredError || error instanceof GitHubOrgNotCoveredError) && (typeof inheritedRetry === 'function'
       ? inheritedRetry(failures, error) : inheritedRetry === true || (typeof inheritedRetry === 'number' && failures < inheritedRetry)),
     queryFn: async context => await options.queryFn(context) as CIRunList,
   });
@@ -54,5 +55,5 @@ export function useRepoCIRuns(repo?: string, enabled = true) {
     const manual = activityListQuery(repoScope ?? '', 'ci', { manual: true });
     try { return await client.fetchQuery({ ...manual, staleTime: 0 }); } catch { return undefined; }
   }, [client, repoScope]);
-  return { ...query, repoScope, refetch };
+  return { ...query, data: query.error instanceof GitHubOrgNotCoveredError ? undefined : query.data, repoScope, refetch };
 }

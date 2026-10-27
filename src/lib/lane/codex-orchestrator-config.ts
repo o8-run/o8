@@ -7,12 +7,12 @@ import { buildToolRegistry } from '@/lib/mcp/tool-spine/build';
 import { serializeCodexMcpServers, toCodexServersMap } from '@/lib/mcp/tool-spine/emit-codex';
 import type { ToolProfile } from '@/lib/mcp/tool-spine/registry';
 import { MODEL_IDS } from '@/lib/models';
+import { readCodexModelDiscovery } from '@/lib/codex/model-discovery-cache';
 import type { OrchestratorMcpServersConfig } from './orchestrator-mcp-config';
 import { normalizeRepoPath, orchestratorDataDir, repoHash } from './orchestrator-session-core';
 
 const USER_CODEX_HOME = join(homedir(), '.codex');
 const USER_CODEX_CONFIG_PATH = join(USER_CODEX_HOME, 'config.toml');
-const USER_CODEX_MODELS_CACHE_PATH = join(USER_CODEX_HOME, 'models_cache.json');
 const CODEX_ORCHESTRATOR_HOME_DIR = orchestratorDataDir('codex-orchestrator');
 
 export interface PreparedCodexHome {
@@ -48,21 +48,10 @@ export function mergeCodexMcpConfig(baseConfigToml: string, servers: Orchestrato
 }
 
 function cachedCodexModelIds(): string[] | null {
-  if (!existsSync(USER_CODEX_MODELS_CACHE_PATH)) return null;
-  try {
-    const parsed = JSON.parse(readFileSync(USER_CODEX_MODELS_CACHE_PATH, 'utf8')) as {
-      models?: Array<{ slug?: unknown }>;
-    };
-    if (!Array.isArray(parsed.models)) return null;
-    return parsed.models
-      .map((model) => typeof model.slug === 'string' ? model.slug.trim() : '')
-      .filter(Boolean);
-  } catch {
-    return null;
-  }
+  return readCodexModelDiscovery(USER_CODEX_HOME)?.map(model => model.slug.trim()).filter(Boolean) ?? null;
 }
 
-function resolveCachedCodexOrchestratorModel(requestedModel: string): {
+export function resolveCachedCodexOrchestratorModel(requestedModel: string): {
   model: string;
   note: string | null;
 } {

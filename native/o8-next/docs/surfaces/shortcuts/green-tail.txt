@@ -1,0 +1,6 @@
+test shell::tests::shell_palette_switch_restart_and_server_down ... O8_NEXT_SHELL_EVIDENCE {"endpoint":"GPUI TestAppContext CPU scene paint; test text system; no GPU/compositor","platform":"linux","launchToInteractiveMs":315.191015,"paletteOpenToFrameMs":[17.839167999999997,17.860022999999998,18.057565,18.230254000000002,17.832465,17.702901999999998,17.436759,17.282811,17.110753,16.938157,18.324315000000002,17.194609,17.251466999999998,17.537615,18.043521,17.521296,17.191629,22.312652,17.780078,18.294862],"workspaceSwitchMs":[26.826981,20.057206,16.079138999999998,19.324489,17.372035,20.272699000000003,15.829444000000002,19.576764999999998,15.776267,18.981254],"idleMemoryMiB":31.73828125,"workspaces":2,"restoredSurfaces":3}
+ok
+test shell::tests::shell_retains_sidebar_selection_and_view_identity ... ok
+test shell::tests::shortcuts_overlay_bindings_dismissal_and_typing ... O8_NEXT_SHORTCUTS_EVIDENCE {"endpoint":"headless GPUI CPU scene; no GPU/compositor","openToFirstFrameMs":34.445051,"interactionToFrameMs":22.862414}
+ok
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 31 filtered out; finished in 10.40s

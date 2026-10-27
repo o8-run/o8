@@ -1,9 +1,13 @@
+import { hasForgottenPacketOutcome } from '@/lib/cortex/outcome-exclusion';
+import { readMemoryRevision } from '@/lib/cortex/memory-revision';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { readClaudeCodeWorkerProfileSync } from '@/lib/claude-code/worker-profile';
 import { buildContextBlock } from '@/lib/codebase-memory/build-context';
 import { buildPacketCorrectionsSection } from '@/lib/cortex/operator-corrections';
+import { findLatestLaneByPacket } from '@/lib/lane/registry';
+import { getActiveProjectScopeForRepoSync } from '@/lib/repos/projects';
 import { resolvePacketAlignment } from '@/lib/orchestrator/alignment-access';
 import { BRAIN_PROMPT_SECTION, resolvePacketBrainEnabled } from '@/lib/orchestrator/brain-access';
 import { renderEdgeCaseSections } from '@/lib/dispatch/edge-case-surfacer';
@@ -307,7 +311,7 @@ async function buildDependencyContextSections(
         ?? value.dependencyPacketId;
       const reviewSections = value.context
         ? buildReviewLessonSections(dependencyTitle, value.context)
-        : value.dependencyPacket
+        : value.dependencyPacket && !hasForgottenPacketOutcome(value.dependencyPacketId) && readMemoryRevision() === '0'
           ? formatPacketReviewFallback(value.dependencyPacket)
           : [];
 
@@ -328,7 +332,7 @@ async function buildDependencyContextSections(
     });
 }
 
-export async function buildPacketPrompt(
+async function assemblePacketPrompt(
   packet: OrchestratorPacket,
   allPackets: OrchestratorPacket[],
   baseBranch = 'main',
@@ -345,7 +349,9 @@ export async function buildPacketPrompt(
   );
   // #2219 — a rejection reason or steer message recorded against this packet
   // reaches the next worker dispatched or rerun on it.
-  const operatorCorrectionsSection = buildPacketCorrectionsSection(packet.id);
+  const projectId = packet.projectId ?? findLatestLaneByPacket(packet.id)?.projectId
+    ?? getActiveProjectScopeForRepoSync(packet.workspaceTargetPath).projectId;
+  const operatorCorrectionsSection = buildPacketCorrectionsSection(packet.id, projectId);
   const fileSizeSections = checkFileSizeThresholds(packet);
   const preservationSections = buildPreservationEnvelope(packet);
   const packetType = packet.title.trim().split(/\s+/)[0]?.toLowerCase() || 'feat';
@@ -426,6 +432,7 @@ export async function buildPacketPrompt(
   const contextBlock = packet.workspaceTargetPath
     ? await buildContextBlock({
         repoPath: packet.workspaceTargetPath,
+        projectId,
         excludeCorrectionsForPacketId: packet.id,
         packetBody: [packet.title, packet.summary, packet.issue?.body]
           .filter((value): value is string => Boolean(value))
@@ -517,4 +524,16 @@ export async function buildPacketPrompt(
     readOnlyPacket ? null : 'If the task requires a path outside the packet allowlist, request a bounded audited expansion with `o8 packet expand-scope --paths <path[,path]> --reason "<why the task requires it>"` before editing that path.',
     'Stay within this packet scope. Surface blockers, review handoffs, and required operator decisions explicitly.',
   ].filter((value): value is string => Boolean(value)).join('\n');
+}
+
+/** A concurrent forget invalidates all fragments assembled before its commit. */
+export async function buildPacketPrompt(
+  packet: OrchestratorPacket, allPackets: OrchestratorPacket[], baseBranch = 'main', worktreePath?: string | null,
+): Promise<string> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const revision = readMemoryRevision();
+    const prompt = await assemblePacketPrompt(packet, allPackets, baseBranch, worktreePath);
+    if (revision === readMemoryRevision()) return prompt;
+  }
+  throw new Error('Worker memory changed during prompt assembly. Retry dispatch.');
 }

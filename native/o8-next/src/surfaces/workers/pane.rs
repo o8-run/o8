@@ -15,6 +15,7 @@ pub struct Workers {
     pub cards: HashMap<String, Entity<Card>>,
     order: Vec<String>,
     pub filter: usize,
+    rendered_filter: usize,
     pub compact: bool,
     pub selected: Option<String>,
     pub scroll: [ScrollHandle; 3],
@@ -39,6 +40,7 @@ impl Workers {
             cards: HashMap::new(),
             order: vec![],
             filter: 0,
+            rendered_filter: 0,
             compact: false,
             selected: None,
             scroll: std::array::from_fn(|_| ScrollHandle::new()),
@@ -52,20 +54,20 @@ impl Workers {
         this.load(cx);
         this
     }
-    fn select(&mut self, id: String, cx: &mut Context<Self>) {
+    fn select(&mut self, id: Option<String>, cx: &mut Context<Self>) {
         if let Some(previous) = self.selected.as_ref().and_then(|id| self.cards.get(id)) {
             previous.update(cx, |card, cx| {
                 card.selected = false;
                 cx.notify();
             });
         }
-        if let Some(card) = self.cards.get(&id) {
+        if let Some(card) = id.as_ref().and_then(|id| self.cards.get(id)) {
             card.update(cx, |card, cx| {
                 card.selected = true;
                 cx.notify();
             });
         }
-        self.selected = Some(id);
+        self.selected = id;
     }
     fn key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         if event.keystroke.modifiers.control
@@ -113,7 +115,7 @@ impl Workers {
                         (Some(i), _) => (i + 1).min(ids.len() - 1),
                         _ => 0,
                     };
-                    self.select(ids[next].clone(), cx);
+                    self.select(Some(ids[next].clone()), cx);
                     if card_focused {
                         self.cards[&ids[next]].read(cx).focus.focus(window);
                     }
@@ -145,7 +147,7 @@ impl Workers {
                             .cloned()
                     });
                 if let Some(id) = id {
-                    self.select(id.clone(), cx);
+                    self.select(Some(id.clone()), cx);
                     self.cards[&id].read(cx).focus_actions(window);
                 }
             }
@@ -255,7 +257,27 @@ impl Workers {
     }
 }
 impl Render for Workers {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.filter != self.rendered_filter {
+            self.rendered_filter = self.filter;
+            self.focus.focus(window);
+            let selected = self
+                .selected
+                .as_ref()
+                .filter(|id| {
+                    self.cards
+                        .get(*id)
+                        .is_some_and(|card| card.read(cx).task.filter == self.filter)
+                })
+                .cloned()
+                .or_else(|| {
+                    self.order
+                        .iter()
+                        .find(|id| self.cards[*id].read(cx).task.filter == self.filter)
+                        .cloned()
+                });
+            self.select(selected, cx);
+        }
         let counts: [usize; 3] = std::array::from_fn(|f| {
             self.cards
                 .values()
@@ -347,7 +369,7 @@ impl Render for Workers {
                     .capture_any_mouse_down(cx.listener(
                         move |this, event: &gpui::MouseDownEvent, window, cx| {
                             if event.button == gpui::MouseButton::Left {
-                                this.select(select.clone(), cx);
+                                this.select(Some(select.clone()), cx);
                                 this.cards[&select].read(cx).focus.focus(window);
                             }
                         },

@@ -142,7 +142,10 @@ async function main() {
       ...Object.assign({}, ...surfaces.map(surface => surface.receipt)),
       ...(peer ? { terminalSession: peer.sessionName } : {}) })}\n`);
   });
+  let closing = false;
   async function close() {
+    if (closing) return;
+    closing = true;
     for (const surface of surfaces) await surface.close?.();
     await closeTerminal();
     closeSockets();
@@ -152,7 +155,12 @@ async function main() {
     rmSync(root, { recursive: true, force: true }); process.exit(0);
   }
   process.once('SIGTERM', close); process.once('SIGINT', close);
-  setTimeout(close, 120_000).unref();
+  if (process.argv.includes('--owned-stdio')) {
+    // The native test owns this pipe. Keep long interaction cases alive until
+    // teardown, and close if the owner exits unexpectedly and releases it.
+    process.stdin.resume();
+    process.stdin.once('end', close);
+  } else setTimeout(close, 120_000).unref();
 
 }
 void main().catch(error => { console.error('[o8-next]', error); process.exitCode = 1; });

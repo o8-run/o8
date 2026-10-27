@@ -55,7 +55,7 @@ fn fixture_options(worker: bool, empty: bool) -> (Server, Client) {
     let anonymous = Client::authenticated(&origin, None).unwrap();
     assert_eq!(
         anonymous.sessions().unwrap_err(),
-        "Server returned HTTP 401"
+        "/api/mobile/orchestrator/threads: Server returned HTTP 401"
     );
     let client = Client::authenticated(&origin, Some("fixture-operator-bearer".into())).unwrap();
     let sessions = client.sessions().unwrap();
@@ -156,7 +156,8 @@ fn correction_composer_has_no_shortcut_or_mode_helper(cx: &mut TestAppContext) {
         );
     }
     assert!(
-        cx.debug_bounds("send-mode").is_some(),
+        cx.debug_bounds("send-mode-steer").is_some()
+            || cx.debug_bounds("send-mode-queue").is_some(),
         "mode selection remains available without helper text"
     );
 }
@@ -202,6 +203,11 @@ fn placement_empty_state_composer_and_right_panel(cx: &mut TestAppContext) {
             .expect("existing Brain uses the right slot");
         let card = cx.debug_bounds("composer-card").unwrap();
         assert!(right.left() >= card.right());
+        let send = cx.debug_bounds("send").unwrap();
+        assert!(
+            send.right() <= card.right(),
+            "composer controls must fit beside the right panel"
+        );
         assert!(right.right() <= px(width));
         assert!(right.size.height > card.size.height);
         layouts.push(json!({"viewport":[width,height], "composer":[f32::from(card.origin.x),f32::from(card.origin.y),f32::from(card.size.width),f32::from(card.size.height)],"rightPanel":[f32::from(right.origin.x),f32::from(right.origin.y),f32::from(right.size.width),f32::from(right.size.height)]}));

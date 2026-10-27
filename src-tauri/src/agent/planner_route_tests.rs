@@ -4,6 +4,16 @@
 use super::*;
 use serde_json::json;
 
+#[test]
+fn bound_effort_pins_survive_every_catalog_model() {
+    for model in claude().pinnable_models {
+        for effort in ["low", "medium", "high", "xhigh"] {
+            let seat = selected(resolve_bound_with(claude().id, model, effort, all_installed));
+            assert_eq!(seat.effort, effort, "bound effort changed for {model}");
+        }
+    }
+}
+
 fn all_installed(adapter: &PlannerAdapter) -> Option<String> {
     Some(format!("/mock/{}", adapter.binary))
 }
