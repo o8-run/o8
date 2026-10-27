@@ -18,6 +18,9 @@ for (const name of ['npm', 'npx', 'cargo-audit', 'cargo']) {
 const fs = require('node:fs');
 const args = process.argv.slice(2);
 if (args[0] === '--version') { console.log('${manifest.packageManager.split('@')[1]}'); process.exit(0); }
+if ('${name}' === 'cargo' && process.env.VERIFY_FIXTURE_NATIVE_DELAY_MS) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Number(process.env.VERIFY_FIXTURE_NATIVE_DELAY_MS));
+}
 fs.appendFileSync(process.env.VERIFY_FIXTURE_RECEIPT, JSON.stringify({
   tool: '${name}', args, ci: process.env.CI, nodeEnv: process.env.NODE_ENV,
   nodeOptions: process.env.NODE_OPTIONS, dataDir: process.env.CORTEX_IDE_DATA_DIR,
@@ -80,7 +83,8 @@ function coverage(workflow: object) {
   return spawnSync(process.execPath, [guard, '--workflow', fixture], { cwd: repo, encoding: 'utf8' });
 }
 function executeFixture(selectedFile: string, nestedDependency = false,
-  { fail = '', parallel = false, discoveryMs = 0, nativeChange = '', nativeState = 'untracked', setupChange = '' } = {}) {
+  { fail = '', parallel = false, discoveryMs = 0, nativeChange = '', nativeState = 'untracked', setupChange = '',
+    nativeDeadlineMinutes = 0, nativeDelayMs = 0 } = {}) {
   const directory = mkdtempSync(path.join(root, 'verifier-fixture-'));
   const files = ['scripts/verify-ci.mjs', 'scripts/lib/verify-ci.mjs', 'scripts/ci/check-verify-ci.mjs',
     'scripts/ci/resource-owning-changed.mjs', 'scripts/ci/review-dependency-changes.mjs', 'scripts/ci/native-changes.mjs',
@@ -88,6 +92,12 @@ function executeFixture(selectedFile: string, nestedDependency = false,
   for (const file of files) {
     mkdirSync(path.dirname(path.join(directory, file)), { recursive: true });
     copyFileSync(path.join(repo, file), path.join(directory, file));
+  }
+  if (nativeDeadlineMinutes) {
+    const file = path.join(directory, '.github/workflows/ci.yml');
+    const workflow = parse(readFileSync(file, 'utf8'));
+    workflow.jobs['o8-next-tests']['timeout-minutes'] = nativeDeadlineMinutes;
+    writeFileSync(file, stringify(workflow));
   }
   if (setupChange) {
     const file = path.join(directory, '.github/actions/next-linux-setup/action.yml');
@@ -151,6 +161,7 @@ function executeFixture(selectedFile: string, nestedDependency = false,
     cwd: directory, encoding: 'utf8', timeout: 60_000,
     env: { ...process.env, PATH: bin + path.delimiter + process.env.PATH, CI: '', NODE_ENV: 'development',
       VERIFY_FIXTURE_RECEIPT: receipt, VERIFY_FIXTURE_FAIL: fail,
+      VERIFY_FIXTURE_NATIVE_DELAY_MS: String(nativeDelayMs),
       DISPLAY: 'fixture-display', WAYLAND_DISPLAY: 'fixture-wayland',
       VERIFY_FIXTURE_BARRIER: parallel ? mkdtempSync(path.join(root, 'parallel-')) : '' },
   });
@@ -228,12 +239,11 @@ describe('local CI verification through its command entry point', () => {
       expect(result.status, result.stderr + result.stdout).toBe(0);
       expect(result.stdout).toContain('PASS o8 next Native Tests (Linux)');
       const calls = result.calls.filter(call => call.tool === 'cargo');
-      expect(calls.map(call => call.args)).toEqual([
-        ['build', '--locked', '--manifest-path', 'crates/o8d/Cargo.toml', '--features', 'experimental-http', '--bin', 'o8d'],
-        ...[1, 2, 3, 4].map(() => ['--config', `target.x86_64-unknown-linux-gnu.runner=${JSON.stringify([process.execPath, path.join(result.directory, 'scripts/ci/native-test-shard.mjs')])}`,
-          'test', '--locked', '--manifest-path', 'native/o8-next/Cargo.toml', '--', '--test-threads=4']),
-      ]);
-      expect(calls.slice(1).map(call => call.nativeShard)).toEqual(['1/4', '2/4', '3/4', '4/4']);
+      const build = ['build', '--locked', '--manifest-path', 'crates/o8d/Cargo.toml', '--features', 'experimental-http', '--bin', 'o8d'];
+      const test = ['--config', `target.x86_64-unknown-linux-gnu.runner=${JSON.stringify([process.execPath, path.join(result.directory, 'scripts/ci/native-test-shard.mjs')])}`,
+        'test', '--locked', '--manifest-path', 'native/o8-next/Cargo.toml', '--', '--test-threads=4'];
+      expect(calls.map(call => call.args)).toEqual([1, 2, 3, 4].flatMap(() => [build, test]));
+      expect(calls.map(call => call.nativeShard)).toEqual([1, 2, 3, 4].flatMap(shard => [`${shard}/4`, `${shard}/4`]));
       for (const call of calls) {
         expect(call.ci).toBe('true');
         expect(call.targetDir).toMatch(/native\/o8-next\/target$/);
@@ -248,7 +258,7 @@ describe('local CI verification through its command entry point', () => {
   it.each(['committed', 'staged', 'unstaged', 'untracked'])('selects a %s native change against origin/main', nativeState => {
     const result = executeFixture('tests/fixture.test.ts', false, { nativeChange: 'native/o8-next/src/main.rs', nativeState });
     expect(result.status, result.stderr + result.stdout).toBe(0);
-    expect(result.calls.filter(call => call.tool === 'cargo')).toHaveLength(5);
+    expect(result.calls.filter(call => call.tool === 'cargo')).toHaveLength(8);
   }, 60_000);
 
   it('runs native and hermetic work concurrently while retaining the required aggregate', () => {
@@ -256,6 +266,20 @@ describe('local CI verification through its command entry point', () => {
     expect(result.status, result.stderr + result.stdout).toBe(0);
     expect(result.stdout).toContain('PASS o8 next Native Tests (Linux)');
     expect(result.stdout).toContain('PASS Hermetic Unit Tests');
+  }, 60_000);
+
+  it('gives each native CI shard its own combined build and test deadline', () => {
+    // Each command takes 1.5 s. A job's build + test fits in six seconds;
+    // the complete serial matrix exceeds six seconds. Two seconds must fail
+    // because the build and test share one budget inside each CI job.
+    for (const [nativeDeadlineMinutes, status] of [[0.1, 0], [2 / 60, 1]]) {
+      const result = executeFixture('tests/fixture.test.ts', false, {
+        nativeChange: 'native/o8-next/src/main.rs', nativeDeadlineMinutes, nativeDelayMs: 1500,
+      });
+      expect(result.status, result.stderr + result.stdout).toBe(status);
+      expect(result.stdout).toContain(`${status === 0 ? 'PASS' : 'FAIL'} o8 next Native Tests (Linux)`);
+      expect(result.stdout).toContain(`${status === 0 ? 'PASS' : 'FAIL'} Hermetic Unit Tests`);
+    }
   }, 60_000);
 
   it('skips native compilation for a TS-only local change while keeping required checks green', () => {

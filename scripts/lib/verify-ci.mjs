@@ -196,12 +196,14 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
   appendJob('lint');
   if (nativeLocal) checks.push({ id: 'o8-next-tests', after: [], name: native.name, nativeInputs: true,
     timeoutMs: native['timeout-minutes'] * 60_000,
-    // Build the shared daemon once, then run every CI shard serially against
-    // the same target cache. The shared deadline remains at least as strict.
-    steps: [nativeRunSteps[1], ...[1, 2, 3, 4].map(() => nativeRunSteps[2])].map((step, index) => runStep({ ...step, env: {} }, {
-      ...native, env: Object.fromEntries(Object.entries(nativeEnv).map(([key, value]) =>
-        [key, value.replaceAll('${{ github.workspace }}', root)])),
-    }, index || 1, scripts)),
+    // Each matrix job shares one build/test deadline. Run the same pairs
+    // serially against a shared cache without charging earlier shard time.
+    steps: [1, 2, 3, 4].flatMap(shard => nativeRunSteps.slice(1).map(step => ({
+      ...runStep({ ...step, env: {} }, {
+        ...native, env: Object.fromEntries(Object.entries(nativeEnv).map(([key, value]) =>
+          [key, value.replaceAll('${{ github.workspace }}', root)])),
+      }, shard, scripts), budgetGroup: shard,
+    }))),
   });
   checks.push({ id: 'classification', after: dependencies(shardJob), name: classification[0].name ?? 'Test Classification',
     steps: classification.map(step => runStep(step, shardJob, 1, scripts)) });

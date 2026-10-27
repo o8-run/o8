@@ -102,8 +102,13 @@ try {
       if (interrupted) return false;
       console.log(`[verify:ci] RUN ${check.name}`);
       let passed = check.id !== 'test' || dependencies.every(Boolean);
-      const deadline = check.timeoutMs ? Date.now() + check.timeoutMs : Infinity;
+      let deadline = check.timeoutMs ? Date.now() + check.timeoutMs : Infinity;
+      let budgetGroup;
       for (const step of check.steps) {
+        if (step.budgetGroup !== undefined && step.budgetGroup !== budgetGroup) {
+          budgetGroup = step.budgetGroup;
+          deadline = Date.now() + check.timeoutMs;
+        }
         console.log(`[verify:ci] ${step.command}`);
         const remaining = deadline - Date.now();
         if (remaining <= 0 || !await runStep({ ...step, timeoutMs: Math.min(step.timeoutMs, remaining) })) passed = false;
