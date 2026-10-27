@@ -25,8 +25,8 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { deserializeStoredTranscript, serializeTranscriptForStorage, type StoredTranscriptMessage } from '@/lib/transcripts/history-serde';
-import { placeSteerTranscriptEntries } from '@/lib/transcripts/steer-anchor';
+import { serializeTranscriptForStorage, type StoredTranscriptMessage } from '@/lib/transcripts/history-serde';
+import { historyToMobileTranscript as historyToTranscript, placeMobileTranscript, rememberMobileToolBoundary, useMobileSteerHistory, type MobileToolBoundary } from './orchestrator-mobile-history';
 import { getBrowserWsPort } from '@/lib/panel/ws-port-client';
 import { getMobileWsToken } from '@/lib/mobile/ws-token-client';
 import { skipDuplicateBySeq } from '@/lib/orchestrator/replay-cursor';
@@ -112,33 +112,6 @@ function toolPreviewFromOutput(value: unknown): string | undefined {
   return firstLine.length > 80 ? `${firstLine.slice(0, 80)}…` : firstLine;
 }
 
-function historyToTranscript(messages: StoredTranscriptMessage[]) {
-  const entries: MobileOrchestratorTranscriptEntry[] = [];
-  const canonical: StoredTranscriptMessage[] = [];
-  let counter = 0;
-  for (const message of messages) {
-    const text = message.text ?? message.content;
-    if (typeof text !== 'string' || !text.trim()) continue;
-    const role: MobileOrchestratorTranscriptEntry['role'] =
-      message.role === 'user' ? 'user'
-        : message.role === 'assistant' ? 'assistant'
-          : message.role === 'tool' ? 'tool'
-            : 'system';
-    const entryId = typeof message.id === 'string' && message.id.trim()
-      ? message.id
-      : `history-${counter}`;
-    counter += 1;
-    const timestamp = message.timestamp ?? Date.now() - (messages.length - counter);
-    canonical.push({ ...message, id: entryId, role, timestamp });
-    entries.push({
-      id: entryId,
-      role,
-      text,
-      timestamp,
-    });
-  }
-  return { entries, sources: new Map(deserializeStoredTranscript(canonical, { dropInvalid: true }).map(entry => [entry.id, entry])) };
-}
 
 export function useOrchestratorMobile({
   activeThread,
@@ -146,9 +119,12 @@ export function useOrchestratorMobile({
   const [connectionState, setConnectionState] = useState<MobileOrchestratorConnectionState>('disconnected');
   const [turnStatus, setTurnStatus] = useState<MobileOrchestratorTurnStatus>('idle');
   const [transcript, setTranscript] = useState<MobileOrchestratorTranscriptEntry[]>([]);
+  const [toolBoundaries, setToolBoundaries] = useState<ReadonlyMap<string, MobileToolBoundary>>(new Map());
   const [historySources, setHistorySources] = useState<ReadonlyMap<string, MobileTranscriptEntry>>(new Map());
   const [transcriptLoading, setTranscriptLoading] = useState(false);
   const [errorNote, setErrorNote] = useState<string | null>(null);
+  const transcriptRef = useRef(transcript);
+  useEffect(() => { transcriptRef.current = transcript; }, [transcript]);
 
   const wsRef = useRef<WebSocket | null>(null);
   const disposedRef = useRef(false);
@@ -240,11 +216,12 @@ export function useOrchestratorMobile({
     buffer.flushed = true;
 
     setTranscript((current) => {
-      const last = current[current.length - 1];
-      if (last && last.id === buffer.id) {
+      const index = current.findIndex(entry => entry.id === buffer.id);
+      const last = current[index];
+      if (last) {
         if (last.text === buffer.text && last.thinking === buffer.thinking) return current;
-        const next = current.slice(0, -1);
-        next.push({ ...last, text: buffer.text, thinking: buffer.thinking });
+        const next = current.slice();
+        next[index] = { ...last, text: buffer.text, thinking: buffer.thinking };
         return next;
       }
       return [
@@ -274,7 +251,9 @@ export function useOrchestratorMobile({
   // server-side yet). Keying on .id keeps the transcript stable across
   // polling refreshes for the same thread.
   const activeThreadId = activeThread?.id ?? null;
+  const receiveSteerHistory = useMobileSteerHistory(activeThreadId, setHistorySources, setTranscript);
   useEffect(() => {
+    setToolBoundaries(new Map());
     if (!activeThreadId) {
       setHistorySources(new Map());
       setTranscript([]);
@@ -390,6 +369,7 @@ export function useOrchestratorMobile({
         // Defer one tick so the subscription send above lands first.
         setTimeout(() => drainQueueRef.current?.(), 0);
       }
+      if (channel === 'realtime') { receiveSteerHistory(raw); return; }
       if (channel !== 'orchestrator') return;
       // Skip replayed events we've already applied (no double tokens).
       if (skipDuplicateBySeq(raw, lastSeqRef)) return;
@@ -431,11 +411,15 @@ export function useOrchestratorMobile({
           const thinking = data.thinking === true;
           if (!text) return;
           setTurnStatus('busy');
-          const buffer = streamingBufferRef.current;
+          const messageId = typeof data.assistantMessageId === 'string' ? data.assistantMessageId : null;
+          let buffer = streamingBufferRef.current;
+          if (buffer && messageId && buffer.id !== messageId) { sealStreamingBuffer(); buffer = null; }
           if (!buffer) {
+            const id = messageId ?? transcriptIdFor('assistant');
+            const previous = transcriptRef.current.find(entry => entry.id === id);
             streamingBufferRef.current = {
-              id: transcriptIdFor('assistant'),
-              text,
+              id,
+              text: (previous?.text ?? '') + text,
               thinking,
               flushed: false,
             };
@@ -451,10 +435,16 @@ export function useOrchestratorMobile({
           const toolUseId = typeof data.toolUseId === 'string' ? data.toolUseId : null;
           // Seal any in-flight assistant buffer so the tool entry slots in
           // after the assistant's prose, not before it.
+          const output = streamingBufferRef.current;
+          const assistantId = typeof data.assistantMessageId === 'string' ? data.assistantMessageId : output?.id;
+          const entryId = toolUseId ? `tool:${toolUseId}` : transcriptIdFor('tool');
+          if (assistantId) {
+            const prefix = output?.text ?? transcriptRef.current.find(entry => entry.id === assistantId)?.text ?? '';
+            setToolBoundaries(current => rememberMobileToolBoundary(current, entryId, assistantId, prefix));
+          }
           sealStreamingBuffer();
           // Stable id keyed off toolUseId when we have one, so tool-result
           // can find the matching entry deterministically.
-          const entryId = toolUseId ? `tool:${toolUseId}` : transcriptIdFor('tool');
           setTranscript((current) => [
             ...current,
             {
@@ -540,6 +530,7 @@ export function useOrchestratorMobile({
         wsRef.current = ws;
         backoffRef.current = INITIAL_BACKOFF;
         sendSubscription(ws);
+        ws.send(JSON.stringify({ type: 'realtime-subscribe', subscriptions: [{ stream: 'global' }] }));
         pingTimerRef.current = setInterval(() => {
           if (ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({ type: 'ping' }));
@@ -602,7 +593,7 @@ export function useOrchestratorMobile({
       subscribedRouteRef.current = null;
       setConnectionState('disconnected');
     };
-  }, [flushStreamingBuffer, sealStreamingBuffer, sendSubscription]);
+  }, [flushStreamingBuffer, receiveSteerHistory, sealStreamingBuffer, sendSubscription]);
 
   // ── Pending offline-queue (packet #646) ──
   // When the WS is disconnected/reconnecting, user sends are persisted to
@@ -770,12 +761,8 @@ export function useOrchestratorMobile({
 
   // Split only the returned view. Persistence above retains each aggregate and
   // its original metadata, using the same placement as the desktop renderer.
-  const presentedTranscript = useMemo(() => {
-    const originals = new Map(transcript.map(entry => [entry.id, entry]));
-    return placeSteerTranscriptEntries(transcript.map(entry => ({ ...historySources.get(entry.id),
-      id: entry.id, role: entry.role, text: entry.text, timestamp: entry.timestamp })))
-      .map(entry => ({ ...originals.get(entry.id), id: entry.id, role: entry.role, text: entry.text, timestamp: entry.timestamp ?? 0 }));
-  }, [transcript, historySources]);
+  const presentedTranscript = useMemo(() => placeMobileTranscript(transcript, historySources, toolBoundaries),
+    [transcript, historySources, toolBoundaries]);
   return {
     connectionState,
     turnStatus,
