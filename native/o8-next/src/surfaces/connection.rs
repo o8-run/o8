@@ -183,7 +183,6 @@ impl ShellExtension for Connection {
                 }
                 .into();
             }
-            report_startup(s.connected);
         }
         if !s.connected && !management(s) {
             if !s.surfaces.connection.hidden {
