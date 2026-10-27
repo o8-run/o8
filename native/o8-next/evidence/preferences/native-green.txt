@@ -1,0 +1,6 @@
+running 3 tests
+test shell::preferences::tests::launch_preferences_reject_invalid_snapshot_and_retain_saved_bounds ... ok
+test shell::preferences::tests::launch_preferences_apply_glass_and_collapsed_sidebar_without_stealing_input ... ok
+test shell::preferences::tests::launch_preferences_match_palette_sidebar_and_window_before_input ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 133 filtered out; finished in 1.59s

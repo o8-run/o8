@@ -184,14 +184,16 @@ impl ThreadList {
             })
             .collect();
         let mut count = repos.len().min(3);
+        let available = crate::theme::sidebar_width(280.) - 43.;
         while count > 1
             && widths[..count].iter().sum::<f32>()
                 + (count - 1) as f32 * 3.
                 + if count < repos.len() { 41. } else { 0. }
-                > 237.
+                > available
         {
             count -= 1;
         }
+        let chip_width = (available - if count < repos.len() { 41. } else { 0. }).clamp(0., 140.);
         let chips = repos
             .iter()
             .take(count)
@@ -203,7 +205,7 @@ impl ThreadList {
                     .id(gpui::ElementId::Name(format!("sidebar-chip-{id}").into()))
                     .debug_selector(move || format!("sidebar-repo-{index}"))
                     .h(px(24.))
-                    .max_w(px(140.))
+                    .max_w(px(chip_width))
                     .min_w_0()
                     .pl(px(4.))
                     .pr(px(7.))

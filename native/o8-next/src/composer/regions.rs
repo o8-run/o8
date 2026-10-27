@@ -61,7 +61,7 @@ impl Surface {
     ) -> gpui::AnyElement {
         let width = (f32::from(window.viewport_size().width) * 0.25)
             .min(crate::theme::GEOMETRY.sidebar_width);
-        self.session_sidebar(px(width), cx)
+        self.session_sidebar(px(crate::theme::sidebar_width(width)), cx)
     }
     pub(super) fn session_transcript(
         &mut self,

@@ -1,7 +1,7 @@
 //! Native counterparts of src/app/globals.css. Keep appearance selection here;
 //! views consume semantic tokens and never choose their own palette or fonts.
 use gpui::{Rgba, rgb};
-use std::sync::LazyLock;
+use std::{cell::Cell, sync::LazyLock};
 
 #[derive(Clone, Copy, Debug)]
 pub enum Appearance {
@@ -12,6 +12,7 @@ pub enum Appearance {
 
 pub struct Theme {
     pub background: Rgba,
+    pub shell_background: Rgba,
     pub surface: Rgba,
     pub surface_raised: Rgba,
     pub text: Rgba,
@@ -50,14 +51,89 @@ static SELECTED: LazyLock<Appearance> =
         _ => Appearance::Dark,
     });
 static CURRENT: LazyLock<Theme> = LazyLock::new(|| Theme::for_appearance(*SELECTED));
+
+// Startup preferences select semantic tokens before opening the shell. GPUI
+// owns one UI thread; a test window's selection stays on its own test thread.
+static DARK: LazyLock<Theme> = LazyLock::new(|| Theme::for_appearance(Appearance::Dark));
+static LIGHT: LazyLock<Theme> = LazyLock::new(|| Theme::for_appearance(Appearance::Light));
+static DARK_GLASS: LazyLock<Theme> = LazyLock::new(|| glass_theme(Appearance::Dark));
+static LIGHT_GLASS: LazyLock<Theme> = LazyLock::new(|| glass_theme(Appearance::Light));
+static ALL_GLASS: LazyLock<Theme> = LazyLock::new(|| Theme::for_appearance(Appearance::Glass));
+#[derive(Clone, Copy)]
+struct Choice {
+    light: bool,
+    glass: bool,
+    all_glass: bool,
+    width: f32,
+    visible: bool,
+}
+thread_local! {
+    static CHOICE: Cell<Option<Choice>> = const { Cell::new(None) };
+}
+pub fn configure(palette: &str, glass: bool, all_glass: bool, width: f32, visible: bool) {
+    let glass = glass && cfg!(target_os = "macos");
+    CHOICE.set(Some(Choice {
+        light: palette == "light" && !(glass && all_glass),
+        glass,
+        all_glass: glass && all_glass,
+        width: width.clamp(160., 500.),
+        visible,
+    }));
+}
+pub fn reset_preferences() {
+    CHOICE.set(None);
+}
+pub fn glass_enabled() -> bool {
+    CHOICE
+        .get()
+        .map_or(matches!(*SELECTED, Appearance::Glass), |choice| {
+            choice.glass
+        })
+}
+pub fn all_glass() -> bool {
+    CHOICE
+        .get()
+        .map_or(matches!(*SELECTED, Appearance::Glass), |choice| {
+            choice.all_glass
+        })
+}
+pub fn sidebar_width(default: f32) -> f32 {
+    CHOICE.get().map_or(
+        default,
+        |choice| if choice.visible { choice.width } else { 0. },
+    )
+}
+fn glass_theme(appearance: Appearance) -> Theme {
+    let mut theme = Theme::for_appearance(appearance);
+    theme.shell_background.a = 0.;
+    theme
+}
 pub fn current() -> &'static Theme {
-    &CURRENT
+    let Some(choice) = CHOICE.get() else {
+        return &CURRENT;
+    };
+    if choice.all_glass {
+        &ALL_GLASS
+    } else if choice.glass && choice.light {
+        &LIGHT_GLASS
+    } else if choice.glass {
+        &DARK_GLASS
+    } else if choice.light {
+        &LIGHT
+    } else {
+        &DARK
+    }
 }
 pub fn glass() -> bool {
-    matches!(*SELECTED, Appearance::Glass)
+    glass_enabled()
 }
 pub fn plain_background() -> Rgba {
-    Theme::for_appearance(Appearance::Dark).background
+    let appearance = if CHOICE.get().is_some_and(|choice| choice.light) {
+        Appearance::Light
+    } else {
+        Appearance::Dark
+    };
+    Theme::for_appearance(appearance).background
 }
 
 // src/lib/theme/glass-material.ts: the only window-wide fill in All Glass.
@@ -167,6 +243,7 @@ impl Theme {
                 let mut theme = Self::for_appearance(Appearance::Dark);
                 // WORKSPACE_GLASS_OVERRIDES in src/lib/theme/context.tsx.
                 theme.background = translucent(0x000000, 0.);
+                theme.shell_background = theme.background;
                 theme.surface = theme.background;
                 theme.code_background = theme.background;
                 theme.surface_raised = translucent(0xffffff, 0.05);
@@ -180,6 +257,7 @@ impl Theme {
             }
             Appearance::Dark => Self {
                 background: rgb(0x1c1c1e),
+                shell_background: rgb(0x1c1c1e),
                 surface: translucent(0x1c1c1e, 0.82),
                 surface_raised: rgb(0x1c1c1e),
                 text: rgb(0xf5f5f7),
@@ -207,6 +285,7 @@ impl Theme {
             },
             Appearance::Light => Self {
                 background: rgb(0xf5f7fb),
+                shell_background: rgb(0xf5f7fb),
                 surface: translucent(0xffffff, 0.82),
                 surface_raised: rgb(0xffffff),
                 text: rgb(0x111827),

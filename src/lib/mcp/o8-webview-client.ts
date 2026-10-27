@@ -38,6 +38,7 @@ export class O8WebviewClient {
   private authToken?: string;
   private readonly pending = new Map<string, PendingRequest>();
   private typeQueue: Promise<unknown> = Promise.resolve();
+  private cancelled = false;
 
   constructor() {
     this.socketPath = resolveO8WebviewSocketPath();
@@ -70,6 +71,17 @@ export class O8WebviewClient {
 
   async inspectDirectoryDialog(): Promise<Record<string, unknown>> {
     return unwrapCommandData(await this.sendCommand('inspect_directory_dialog', {}));
+  }
+
+  /** Narrow read route for native appearance; never request the whole store. */
+  async readNativePreference(key: string): Promise<string | null> {
+    if (!['cortex-theme-palette', 'cortex-theme', 'cortex-reduce-transparency',
+      'cortex-workspace-glass', 'o8:sidebar:visible', 'o8:sidebar:width'].includes(key)) {
+      throw new Error('Unsupported native preference');
+    }
+    const value = await this.sendCommand('manage_local_storage', { action: 'get', key, window_label: 'main' });
+    if (value === null || typeof value === 'string' && value.length <= 4096) return value;
+    throw new Error('Invalid native preference response');
   }
 
   async resolveDirectoryDialog(args: DirectoryResolve): Promise<Record<string, unknown>> {
@@ -507,10 +519,15 @@ export class O8WebviewClient {
     return { ok: true, message: typeof data.message === 'string' ? data.message : undefined };
   }
 
+  cancel(): void {
+    this.cancelled = true;
+    this.dispose();
+  }
+
   dispose(): void {
     for (const [requestId, pending] of Array.from(this.pending.entries())) {
       clearTimeout(pending.timeout);
-      pending.reject(createCodedError('Socket connection closed', 'ECONNRESET'));
+      pending.reject(createCodedError('Socket connection closed', this.cancelled ? 'ECANCELED' : 'ECONNRESET'));
       this.pending.delete(requestId);
     }
 
@@ -623,6 +640,7 @@ export class O8WebviewClient {
   }
 
   private async ensureConnected(): Promise<void> {
+    if (this.cancelled) throw createCodedError('Webview read cancelled', 'ECANCELED');
     if (this.isConnected && this.socket && !this.socket.destroyed) {
       return;
     }

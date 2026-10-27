@@ -56,22 +56,30 @@ pub(super) const REGISTRATION: Registration = Registration {
             });
     },
     decorate: |shell, content| {
+        let width = crate::theme::sidebar_width(280.);
         div()
             .flex()
             .flex_1()
             .min_h_0()
             .child(
-                gpui::AnyView::from(shell.surfaces.sidebar.view.as_ref().unwrap().clone()).cached(
-                    gpui::StyleRefinement::default()
-                        .w(px(280.))
-                        .h_full()
-                        .flex_shrink_0(),
-                ),
+                div()
+                    .id("shell-sidebar")
+                    .debug_selector(|| "shell-sidebar".into())
+                    .w(px(width))
+                    .h_full()
+                    .flex_shrink_0()
+                    .overflow_hidden()
+                    .when(width > 0., |rail| rail.child(
+                        gpui::AnyView::from(shell.surfaces.sidebar.view.as_ref().unwrap().clone()).cached(
+                            gpui::StyleRefinement::default().w_full().h_full(),
+                        ),
+                    )),
             )
             .child(div().flex().flex_col().flex_1().min_w_0().child(content))
             .into_any_element()
     },
     key_down: |shell, event, window, cx| {
+        if crate::theme::sidebar_width(280.) == 0. { return false; }
         if shell.surfaces.sidebar.view.as_ref().is_some_and(|view| {
             view.update(cx, |sidebar, cx| sidebar.header_key(event, window, cx))
         }) {
@@ -112,6 +120,7 @@ pub(super) const REGISTRATION: Registration = Registration {
         }
     },
     ..Registration::new("", "", |shell, _, window, cx| {
+        if crate::theme::sidebar_width(280.) == 0. { return None; }
         shell
             .surfaces
             .sidebar

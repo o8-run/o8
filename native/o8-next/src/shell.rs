@@ -35,6 +35,8 @@ fn report_startup() {
 }
 
 pub const HELP: &str = "App shell: --app-shell --shell-state ABSOLUTE_FILE --server ORIGIN [--offscreen]. The o8 next launcher resolves existing local configuration.";
+#[path = "preferences.rs"]
+mod preferences;
 #[path = "surface_registry.rs"]
 mod registry;
 use registry::{

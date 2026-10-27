@@ -40,7 +40,7 @@ impl Render for Shell {
             .flex()
             .flex_col()
             .bg(if self.system_glass {
-                theme().background
+                theme().shell_background
             } else {
                 crate::theme::plain_background()
             })
@@ -413,6 +413,35 @@ pub(super) fn open_window(
     offscreen: bool,
     cx: &mut App,
 ) -> gpui::WindowHandle<Shell> {
+    let prefs = std::env::var("O8_NEXT_PREFERENCES")
+        .ok()
+        .and_then(|v| preferences::Preferences::parse(&v));
+    open_window_with_preferences(client, file, state, offscreen, prefs, cx)
+}
+
+pub(super) fn open_window_with_preferences(
+    client: Client,
+    file: PathBuf,
+    mut state: State,
+    offscreen: bool,
+    prefs: Option<preferences::Preferences>,
+    cx: &mut App,
+) -> gpui::WindowHandle<Shell> {
+    if let Some(prefs) = prefs {
+        crate::theme::configure(
+            &prefs.palette,
+            prefs.glass,
+            prefs.all_glass,
+            prefs.sidebar_width,
+            prefs.sidebar_visible,
+        );
+        if let Some([w, h]) = prefs.window_size {
+            state.bounds[2] = w;
+            state.bounds[3] = h;
+        }
+    } else {
+        crate::theme::reset_preferences();
+    }
     let [x, y, w, h] = state.bounds;
     let bounds = geometry::visible(
         Bounds::new(point(px(x), px(y)), size(px(w), px(h))),

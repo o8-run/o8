@@ -356,7 +356,8 @@ impl Render for Surface {
         let geometry = &crate::theme::GEOMETRY;
         let typography = &crate::theme::TYPE;
         let viewport = f32::from(window.viewport_size().width);
-        let sidebar_width = (viewport * 0.25).min(geometry.sidebar_width);
+        let sidebar_width =
+            crate::theme::sidebar_width((viewport * 0.25).min(geometry.sidebar_width));
         let right_width = (viewport * 0.30).min(geometry.right_width);
         let empty = self.transcript.is_some() && self.rows.is_empty();
         let header = self.regions.view(

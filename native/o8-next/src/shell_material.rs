@@ -48,6 +48,9 @@ pub(super) fn apply_for(window: &mut Window, offscreen: bool, reduced: bool) -> 
 }
 
 pub(super) fn veil() -> gpui::AnyElement {
+    if !theme::all_glass() {
+        return gpui::Empty.into_any_element();
+    }
     // GPUI 0.2.2 has two-stop gradients. Two contiguous pieces preserve the
     // desktop's middle stop exactly, without layers of alpha or a blur shader.
     div()
