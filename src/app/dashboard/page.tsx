@@ -69,6 +69,7 @@ import { BrowserPipCard, BROWSER_PIP_EVENT } from '@/components/desktop/BrowserP
 import { O8SpecPipCard, O8_SPEC_PIP_EVENT } from '@/components/desktop/O8SpecPipCard';
 import { ThreadDragGhost } from '@/components/desktop/ThreadDragGhost';
 import { WorkspaceBootLoaderHost } from '@/components/desktop/workspace-terminal/workspace-boot-loader-claim';
+import { WorkspaceBootLoader } from '@/components/desktop/workspace-terminal/WorkspaceBootLoader';
 import { SpawnErrorToast } from '@/components/desktop/SpawnErrorToast';
 import { captureAnomaly } from '@/lib/telemetry/sentry-browser';
 import { recordSpawnEvent } from '@/lib/feedback/workspace-introspect';
@@ -4775,7 +4776,7 @@ function DashboardInner() {
           ] : []}
         />
 
-        {activeNavSection === 'projects' ? <Suspense fallback={null}><LazyProjectsPage key={projectLibraryRequest.revision} initialProjectId={projectLibraryRequest.projectId} onClose={() => setActiveNavSection('agents')} /></Suspense> : null}
+        {activeNavSection === 'projects' ? <Suspense fallback={<WorkspaceBootLoader contained />}><LazyProjectsPage key={projectLibraryRequest.revision} initialProjectId={projectLibraryRequest.projectId} onClose={() => setActiveNavSection('agents')} /></Suspense> : null}
           <div
             ref={workspaceSurfaceRef}
             aria-hidden={workspaceSurfaceHidden}
@@ -4914,7 +4915,7 @@ function DashboardInner() {
                       flexDirection: 'column',
                     }}
                   >
-                    <Suspense fallback={<div aria-hidden style={{ flex: 1, minHeight: 0, background: 'var(--t-chrome)' }} />}>
+                    <Suspense fallback={rightPanelKind === 'o8' ? <WorkspaceBootLoader contained /> : null}>
                       <OrchestratorDataProvider
                         activeProjectId={dashboardProjects.ledger?.activeProjectId ?? null}
                         agents={parsedAgents}
@@ -5002,7 +5003,7 @@ function DashboardInner() {
                       flexDirection: 'column',
                     }}
                   >
-                    <Suspense fallback={<div aria-hidden style={{ flex: 1, minHeight: 0, background: 'var(--t-chrome)' }} />}>
+                    <Suspense fallback={rightPanelKind === 'review' ? <WorkspaceBootLoader contained /> : null}>
                       <OrchestratorDataProvider
                         activeProjectId={dashboardProjects.ledger?.activeProjectId ?? null}
                         agents={parsedAgents}

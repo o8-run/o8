@@ -261,6 +261,7 @@ export function AutomationsPage({ currentOwner, onClose }: { currentOwner: strin
       <div style={{
         width: '100%',
         maxWidth: WORKSPACE_PAGE_MAX_WIDTH,
+        minHeight: '100%',
         display: 'flex',
         flexDirection: 'column',
         gap: 14,
@@ -318,7 +319,7 @@ export function AutomationsPage({ currentOwner, onClose }: { currentOwner: strin
           />
         ) : null}
 
-        <div style={{ paddingTop: 4, color: 'var(--t-text-faint)', fontSize: 9.5, fontWeight: 260, letterSpacing: '-0.4px', lineHeight: 1.25 }}>
+        <div style={{ marginTop: 'auto', paddingTop: 4, color: 'var(--t-text-faint)', fontSize: 9.5, fontWeight: 260, letterSpacing: '-0.4px', lineHeight: 1.25 }}>
           Automations refresh every 15 seconds while this page is open.
         </div>
       </div>

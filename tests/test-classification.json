@@ -1719,6 +1719,13 @@
       ]
     },
     {
+      "path": "tests/automations-loading-layout-real-path.test.ts",
+      "reasons": [
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/bench-design-gesture-real-path.test.ts",
       "reasons": [
         "real-path"
@@ -4089,6 +4096,12 @@
         "child-process",
         "native-build",
         "real-path"
+      ]
+    },
+    {
+      "path": "tests/native-launch-pending-request.test.ts",
+      "reasons": [
+        "child-process"
       ]
     },
     {
