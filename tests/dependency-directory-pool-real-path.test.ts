@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
@@ -8,6 +8,8 @@ import { dependencyDirectoryPoolStatus, waitForDependencyDirectoryPool } from '@
 import * as storage from '@/lib/worktree/storage-telemetry';
 import * as leaf from '@/lib/worktree/materialization-leaf-io';
 import { getDataDir } from '@/lib/data-dir-migration';
+import { captureWorktreeMaterializationIdentity } from '@/lib/worktree/materialization-identity';
+import { inspectDependencyPayload } from '@/lib/workspace/dependency-payload';
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -169,4 +171,33 @@ it.skipIf(process.platform !== 'darwin')('keeps dispatch on the current clone pa
   const selected = vi.fn();
   await materializeDependencyInstall(workspace, 'npm ci --ignore-scripts', { ...options(source), onSelection: selected });
   expect(selected).toHaveBeenCalledWith(expect.objectContaining({ path: 'directory-clone', reason: 'matching-inputs' }));
+}, 180_000);
+
+it.skipIf(process.platform !== 'darwin')('reuses an APFS content seal after harmless payload timestamp changes', async () => {
+  const { source, workspace, root } = await fixture();
+  const payload = path.join(source, 'node_modules/fixture/deep');
+  mkdirSync(payload);
+  writeFileSync(path.join(payload, 'data.js'), 'module.exports = 42;\n');
+  await installBaseline(source);
+  // A seal describes bytes and the locked graph, not filesystem bookkeeping.
+  utimesSync(path.join(payload, 'data.js'), 1, 1);
+  await warm(source, root);
+  const slot = path.join(getDataDir(), 'dependency-directory-pool-v1/slot-0/node_modules');
+  utimesSync(path.join(slot, 'fixture/deep/data.js'), 2, 2);
+  const result = await materializeDependencyInstall(workspace, 'npm ci --ignore-scripts', options(source));
+  expect(result.receipt.source).toBe('dependency-pool');
+  expect(readFileSync(path.join(workspace, 'node_modules/fixture/deep/data.js'), 'utf8')).toBe('module.exports = 42;\n');
+}, 180_000);
+
+it.skipIf(process.platform !== 'darwin')('hashes same-size hidden payload bytes outside declared entrypoints', async () => {
+  const { source } = await fixture();
+  const payload = path.join(source, 'node_modules/.cache/deep');
+  mkdirSync(payload, { recursive: true });
+  const file = path.join(payload, 'data.js');
+  writeFileSync(file, 'module.exports = 42;\n');
+  const identity = await captureWorktreeMaterializationIdentity(source);
+  const before = await inspectDependencyPayload(source, identity, ['tool.js']);
+  writeFileSync(file, 'module.exports = 13;\n');
+  const after = await inspectDependencyPayload(source, identity, ['tool.js']);
+  expect(after.contents).not.toBe(before.contents);
 }, 180_000);

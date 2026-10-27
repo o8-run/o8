@@ -62,3 +62,13 @@ an interruption before the owner receipt is written, stays held. Such a slot
 reduces available pool capacity and remains visible; cleanup never adopts or
 deletes an unreceipted directory. Both slots held means the existing path remains
 in use until that ownership is resolved.
+
+Installed payload receipts seal the lockfile-derived graph and the SHA-256 digest
+of every regular payload file, including hidden data. Names, file types, modes
+and symlink targets are covered; inode metadata and directory link counts are
+not content. Directory identities still fence ownership. Absolute, escaping,
+cyclic and unresolved symlinks refuse reuse before lifecycle or worker execution.
+A pool consumer validates this seal before publication and checks the resulting
+clone before use. Missing, corrupt or older unsealed payloads force a full native
+install, with a `payload-*` or `pool-payload-*` selection reason persisted by worker
+preparation. A completed install establishes a fresh seal.

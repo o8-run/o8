@@ -98,8 +98,7 @@ export async function tryCloneDependencyDirectory(input: {
   if (!target || target.digest !== graph.digest) return discard('installed-graph-ineligible');
   try {
     const payload = await inspectDependencyPayload(workspace, identity, target.entrypoints);
-    if (payload.device !== clone.device || payload.inode !== clone.inode || payload.contents !== expectedPayload.contents
-      || pooled && payload.identity !== expectedPayload.identity) return discard('payload-changed');
+    if (payload.device !== clone.device || payload.inode !== clone.inode || payload.contents !== expectedPayload.contents) return discard('payload-changed');
   } catch (error) { if (error instanceof DependencyPayloadRefusal) return discard(error.reason); throw error; }
   await finishDependencyClone({ workspace, identity, recipe, options });
   const final = await profile('final-manifests', () => validateDependencyCloneGraph(workspace, recipe.lockfile.path));

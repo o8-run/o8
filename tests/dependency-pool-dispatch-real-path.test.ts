@@ -88,7 +88,6 @@ it.skipIf(process.platform !== 'darwin')('dispatches from a ready dependency poo
   writeFileSync(path.join(repo, 'node_modules', 'fixture', 'index.js'), 'module.exports = 42;\n');
   writeFileSync(path.join(repo, 'node_modules', 'fixture', 'package.json'), '{"name":"fixture","version":"1.0.0"}\n');
   writeFileSync(path.join(repo, 'node_modules', '.package-lock.json'), JSON.stringify({ lockfileVersion: 3, packages: installedPackages }));
-  writeFileSync(path.join(repo, 'README.md'), 'source WIP\n');
   // The external package-manager fixture never installs packages or uses the network.
   writeFileSync(path.join(bin, 'npm'), [
     '#!/usr/bin/env node',
@@ -110,6 +109,8 @@ it.skipIf(process.platform !== 'darwin')('dispatches from a ready dependency poo
   ].join('\n'));
   chmodSync(path.join(bin, 'qodercli'), 0o755);
   const { materializeDependencyInstall } = await import('@/lib/workspace/dependency-materializer');
+  await materializeDependencyInstall(repo, 'npm ci --offline', { run: async () => {}, useDependencyPool: false });
+  writeFileSync(path.join(repo, 'README.md'), 'source WIP\n');
   const seed = path.join(root, 'seed');
   execFileSync('git', ['clone', '--local', '-q', repo, seed]);
   await materializeDependencyInstall(seed, 'npm ci --offline', { cloneSourceWorkspace: repo, useDependencyPool: true });

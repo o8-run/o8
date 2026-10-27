@@ -247,6 +247,9 @@ it('dispatches through a matching warm worktree without dependency preparation',
     "const isolatedConfig = process.env.npm_config_userconfig === path.join(path.dirname(process.env.HOME), 'config/user.rc') && process.env.npm_config_globalconfig === path.join(path.dirname(process.env.HOME), 'config/global.rc');",
     "fs.writeFileSync('installer-runtime.json', JSON.stringify({ contained, isolatedConfig }));",
     "fs.writeFileSync('node_modules/fixture/index.js', 'module.exports = 42;\\n');",
+    ...(process.env.O8_SPEED_DEPENDENCY_DEFECT ? [
+      "fs.mkdirSync('node_modules/.cache/deep', { recursive: true }); fs.writeFileSync('node_modules/.cache/deep/data.js', 'module.exports = 42;\\n');",
+    ] : []),
     "fs.mkdirSync('node_modules/.bin', { recursive: true }); fs.writeFileSync('node_modules/fixture/bin.js', '#!/usr/bin/env node\\n'); fs.symlinkSync('../fixture/bin.js', 'node_modules/.bin/o8-fixture');",
     ...(process.env.O8_SPEED_ABSOLUTE_LINK ? ["fs.symlinkSync(require('node:path').resolve('node_modules/fixture/index.js'), 'node_modules/fixture/absolute');"] : []),
     "const result = cp.spawnSync(process.execPath, [npmCli, 'rebuild', '.', '--offline'], { stdio: 'inherit' }); process.exit(result.status ?? 1);",
@@ -255,12 +258,12 @@ it('dispatches through a matching warm worktree without dependency preparation',
   writeFileSync(path.join(bin, 'qodercli'), [
     '#!/usr/bin/env node',
     "if (process.argv.includes('--version')) { console.log('qodercli 1.0.0'); process.exit(0); }",
-    ...(process.env.O8_SPEED_DEPENDENCY_DEFECT ? ["if (require(require('node:path').join(process.cwd(), 'node_modules/fixture')) !== 42) throw new Error('Required dependency payload is corrupt');"] : []),
+    ...(process.env.O8_SPEED_DEPENDENCY_DEFECT ? ["if (require(require('node:path').join(process.cwd(), 'node_modules/fixture')) !== 42 || require(require('node:path').join(process.cwd(), 'node_modules/.cache/deep/data.js')) !== 42) throw new Error('Required dependency payload is corrupt');"] : []),
     "console.log(JSON.stringify({ type: 'assistant', message: { content: 'SPEED_READY' }, fixture: { pid: process.pid, cwd: process.cwd(), prepared: require('node:fs').existsSync('generated.ready'), outputAt: Date.now() } }));",
     // Keep the fixture signalable until the real owned runtime records its PID.
     // Test cleanup interrupts only the session returned by this dispatch.
     ...(process.env.O8_SPEED_DEPENDENCY_DEFECT ? [
-      "const fs = require('node:fs'); let written = false; setInterval(() => { if (!written && fs.existsSync('write-payload')) { fs.writeFileSync('node_modules/fixture/index.js', 'module.exports = 99;\\n'); fs.writeFileSync('payload-written', 'done'); written = true; } }, 10);",
+      "const fs = require('node:fs'); let written = false; setInterval(() => { if (!written && fs.existsSync('write-payload')) { const value = fs.readFileSync('write-payload', 'utf8'); fs.writeFileSync('node_modules/fixture/index.js', 'module.exports = ' + value + ';\\n'); fs.writeFileSync('node_modules/.cache/deep/data.js', 'module.exports = ' + value + ';\\n'); fs.writeFileSync('payload-written', 'done'); written = true; } }, 10);",
     ] : ['setInterval(() => {}, 1000);']),
   ].join('\n'));
   chmodSync(path.join(bin, 'qodercli'), 0o755);
@@ -707,4 +710,4 @@ it('dispatches through a matching warm worktree without dependency preparation',
   git('gc', '--prune=now');
   git('worktree', 'prune', '--expire=now');
   expect(workerGit('cat-file', '-p', unpublished)).toBe('unpublished packet object');
-}, 120_000);
+}, process.env.O8_SPEED_DEPENDENCY_DEFECT ? 180_000 : 120_000);

@@ -466,3 +466,40 @@ it.skipIf(process.platform !== 'darwin')('refuses late source changes without re
   expect(persistReceipt).not.toHaveBeenCalled();
   expect(readFileSync(path.join(workspace, 'generated.log'), 'utf8')).toBe('one lifecycle execution');
 });
+
+it.skipIf(process.platform !== 'darwin').each(['absolute-link', 'escaping-link', 'same-size'])(
+  'discards a clone with a hidden %s before any lifecycle or worker can use it', async defect => {
+    const { source, workspace } = await fixture();
+    const hidden = 'node_modules/.cache/data.js';
+    mkdirSync(path.join(source, 'node_modules/.cache'));
+    writeFileSync(path.join(source, hidden), 'module.exports = 42;\n');
+    await installBaseline(source);
+    let cloned = false;
+    const selected = vi.fn();
+    const run = vi.fn(async () => {
+      expect(() => lstatSync(path.join(workspace, 'node_modules'))).toThrow();
+      mkdirSync(path.join(workspace, 'node_modules'));
+      writeFileSync(path.join(workspace, 'node_modules/fresh'), 'full install');
+    });
+    const result = await materializeDependencyInstall(workspace, 'npm ci --ignore-scripts', {
+      cloneSourceWorkspace: source, resolveVersion: async () => '11.8.0',
+      env: { O8_APFS_DEPENDENCY_IMAGES: '0' }, run, onSelection: selected,
+      afterDependencyDirectoryClone: async () => {
+        cloned = true;
+        if (defect === 'same-size') writeFileSync(path.join(workspace, hidden), 'module.exports = 13;\n');
+        else {
+          const donor = path.join(source, hidden);
+          const link = path.join(workspace, 'node_modules/.cache/alias.js');
+          symlinkSync(defect === 'absolute-link' ? donor : path.relative(path.dirname(link), donor), link);
+        }
+      },
+    });
+    expect(cloned).toBe(true);
+    expect(run).toHaveBeenCalledOnce();
+    expect(result.receipt.source).toBeUndefined();
+    const reason = defect === 'same-size' ? 'payload-changed' : `payload-${defect}`;
+    expect(selected).toHaveBeenCalledWith({ path: 'native-install', reason });
+    expect(readFileSync(path.join(source, hidden), 'utf8')).toBe('module.exports = 42;\n');
+    expect(readFileSync(path.join(workspace, 'node_modules/fresh'), 'utf8')).toBe('full install');
+  }, 180_000,
+);

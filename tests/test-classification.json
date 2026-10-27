@@ -2635,6 +2635,7 @@
     {
       "path": "tests/dependency-directory-pool-real-path.test.ts",
       "reasons": [
+        "apfs-tool",
         "child-process",
         "git-cli",
         "real-path"
