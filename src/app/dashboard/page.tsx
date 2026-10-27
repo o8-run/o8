@@ -80,6 +80,7 @@ import { FileOpenBridge } from '@/components/desktop/FileOpenBridge';
 import { AttendanceHeartbeat } from '@/components/desktop/AttendanceHeartbeat';
 import { TelemetryCrashCapture } from '@/components/desktop/TelemetryCrashCapture';
 import { SentryBrowserInit } from '@/components/desktop/SentryBrowserInit';
+import { readViewportLayoutWidth, UI_ZOOM_CHANGED_EVENT } from '@/lib/appearance/ui-zoom';
 import { UiZoomLayer } from '@/components/desktop/UiZoomLayer';
 import { ReportIssueHost } from '@/components/desktop/ReportIssueHost';
 import {
@@ -701,15 +702,15 @@ function DashboardInner() {
   // fires per-frame and a changing number re-renders this entire page tree every
   // frame (the top-chrome "lags then snaps" jank, 2026-07-15). Only the derived
   // threshold BANDS live in state; the functional setState returns the previous
-  // object between crossings so React bails out of the render entirely. The raw
-  // number lives in viewportWidthRef for imperative reads.
+  // object between crossings so React bails out of the render entirely. The last
+  // logical width is retained for SSR-safe reads; input reads the applied zoom.
   const [viewportBands, setViewportBands] = useState<{ compact: boolean; belowLeftCollapse: boolean; belowRightCollapse: boolean } | null>(null);
   const viewportWidthRef = useRef<number | null>(null);
   const responsiveManualOpenRef = useRef({ left: false });
   useEffect(() => {
     if (typeof window === 'undefined') return undefined;
     const update = () => {
-      const next = window.innerWidth;
+      const next = readViewportLayoutWidth();
       viewportWidthRef.current = next;
       const compact = next < RESPONSIVE_COMPACT_SHELL_WIDTH;
       const belowLeftCollapse = next < RESPONSIVE_LEFT_PANEL_COLLAPSE_WIDTH;
@@ -736,8 +737,10 @@ function DashboardInner() {
       });
     };
     window.addEventListener('resize', onResize);
+    window.addEventListener(UI_ZOOM_CHANGED_EVENT, onResize);
     return () => {
       window.removeEventListener('resize', onResize);
+      window.removeEventListener(UI_ZOOM_CHANGED_EVENT, onResize);
       if (frame) window.cancelAnimationFrame(frame);
     };
   }, []);
@@ -778,7 +781,7 @@ function DashboardInner() {
   const joinedWorkspaceFrame = !compactShell && !effectiveGlassSurface;
   const rightColumnChrome = joinedWorkspaceFrame ? 1 : RIGHT_COLUMN_CHROME;
   const getResponsiveViewportWidth = useCallback(() => (
-    viewportWidthRef.current ?? (typeof window !== 'undefined' ? window.innerWidth : Number.POSITIVE_INFINITY)
+    typeof window !== 'undefined' ? readViewportLayoutWidth() : viewportWidthRef.current ?? Number.POSITIVE_INFINITY
   ), []);
   const noteSidebarManualIntent = useCallback((nextVisible: boolean) => {
     sidebarManualIntentRef.current = true;
@@ -2137,7 +2140,7 @@ function DashboardInner() {
   useThreadWorkspaceNavigation({
     currentWorkspaceId: () => workspaceHeaderActive.workspaceId,
     availability: () => threadPanelAvailability(
-      typeof window !== 'undefined' ? window.innerWidth : getResponsiveViewportWidth(),
+      getResponsiveViewportWidth(),
       RESPONSIVE_RIGHT_PANEL_COLLAPSE_WIDTH,
     ),
     resolve: (target) => {
