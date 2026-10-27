@@ -55,15 +55,18 @@ async function openTools(discovery: (options: RequestInit | undefined) => Promis
   await act(async () => panel().querySelector<HTMLButtonElement>('[aria-label="Tools updates"]')!.click());
   return fetcher;
 }
-function delayedReport(options: RequestInit | undefined, tools = [tool()]) {
+function delayedReport(options: RequestInit | undefined, tools = [tool()], delay = 20_000) {
   return new Promise<Response>((resolve, reject) => {
-    const timer = setTimeout(() => resolve(Response.json({ tools })), 20_000);
+    const timer = setTimeout(() => resolve(Response.json({ tools })), delay);
     options?.signal?.addEventListener('abort', () => { clearTimeout(timer); reject(options.signal!.reason); }, { once: true });
   });
 }
-function stream() {
+function stream(signal?: AbortSignal | null) {
   let controller!: ReadableStreamDefaultController<Uint8Array>;
-  const body = new ReadableStream<Uint8Array>({ start(value) { controller = value; streams.push(value); } });
+  const body = new ReadableStream<Uint8Array>({ start(value) {
+    controller = value; streams.push(value);
+    signal?.addEventListener('abort', () => controller.error(signal.reason), { once: true });
+  } });
   return { response: new Response(body, { headers: { 'Content-Type': 'text/event-stream' } }),
     send: (event: string, data: unknown) => controller.enqueue(new TextEncoder().encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)),
     end: () => controller.close() };
@@ -76,6 +79,41 @@ it('finishes the first Tools open when cold discovery takes longer than fifteen 
   await tick(5_000);
   expect(panel().textContent).toContain('Fixture tool');
   expect(panel().querySelector('[role="alert"]')).toBeNull();
+});
+it('keeps the first Tools open loading past the headers guard until slow discovery finishes', async () => {
+  const fetcher = await openTools(options => delayedReport(options, [tool()], 48_800));
+  await tick(45_300);
+  expect(panel().querySelector('[role="alert"]')).toBeNull();
+  expect(panel().textContent).toContain('Checking installed tools');
+  await act(async () => panel().querySelector<HTMLButtonElement>('[aria-label="Tools updates"]')!.click());
+  await act(async () => panel().querySelector<HTMLButtonElement>('[aria-label="Tools updates"]')!.click());
+  await tick(3_500);
+  expect(panel().textContent).toContain('Fixture tool');
+  expect(panel().querySelector('[role="alert"]')).toBeNull();
+  expect(fetcher.mock.calls.filter(([input]) => String(input).startsWith('/api/setup/cli-updates'))).toHaveLength(1);
+  expect(budgetHolders?.()).toEqual([]);
+});
+it('fails discovery that never sends headers at its own five-minute deadline', async () => {
+  await openTools(options => delayedReport(options, [tool()], 301_000));
+  await tick(299_999);
+  expect(panel().querySelector('[role="alert"]')).toBeNull();
+  expect(panel().textContent).toContain('Checking installed tools');
+  await tick(1);
+  expect(panel().querySelector('[role="alert"]')).not.toBeNull();
+  expect(panel().querySelector('[aria-label="Retry tool discovery"]')).not.toBeNull();
+  expect(budgetHolders?.()).toEqual([]);
+});
+it('fails a stream that keeps sending progress without finishing within five minutes', async () => {
+  let result!: ReturnType<typeof stream>;
+  await openTools(async options => { result = stream(options?.signal); return result.response; });
+  for (let elapsed = 0; elapsed < 299_000; elapsed += 1_000) {
+    await act(async () => result.send('progress', { completed: 0, total: 1 }));
+    await tick(1_000);
+  }
+  expect(panel().querySelector('[role="alert"]')).toBeNull();
+  await tick(1_000);
+  expect(panel().querySelector('[role="alert"]')).not.toBeNull();
+  expect(budgetHolders?.()).toEqual([]);
 });
 it('streams found rows and discovery progress before the slowest tool finishes', async () => {
   const result = stream();

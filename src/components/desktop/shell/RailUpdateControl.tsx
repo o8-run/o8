@@ -202,7 +202,7 @@ export function RailUpdateControl({ buttonStyle }: { buttonStyle: CSSProperties 
           <button type="button" aria-label="Tools updates" aria-expanded={toolsExpanded} aria-controls={`${id}-tools`}
             onClick={() => { setToolsExpanded(value => !value); if (!toolsExpanded) {
               if (!hub.checkedAt) setCurrentExpanded(true);
-              void refreshCliUpdateView(true);
+              if (!hub.checking) void refreshCliUpdateView(true);
             } }}
             style={{ ...button, width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingLeft: 0, paddingRight: 0, background: 'transparent' }}>
             <span>Tools{visibleTools.some(tool => tool.status === 'update-available') ? ' · updates available' : ''}</span><ChevronDown size={13} style={{ transform: toolsExpanded ? 'rotate(180deg)' : undefined }} />

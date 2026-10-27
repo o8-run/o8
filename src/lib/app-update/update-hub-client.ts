@@ -1,6 +1,7 @@
 'use client';
 
 import { useSyncExternalStore } from 'react';
+import { fetchWithLongLivedBudget } from '@/lib/connection-budget';
 import type { StableCli } from '@/lib/setup/cli-installation';
 import type { CliUpdateProgress, CliUpdateStage } from '@/lib/setup/cli-update-progress';
 import { readCliUpdateResponse } from './cli-update-response';
@@ -123,10 +124,11 @@ export async function refreshCliUpdateView(fresh = false): Promise<void> {
   hub.check = (async () => {
     patch({ checking: true, cliError: null, cliMessage: null, cliDiscovery: null, cliDiscoveryChecked: [], checkedAt: 0 });
     try {
-      const response = await fetch(`/api/setup/cli-updates${fresh ? '?refresh=1' : ''}`, {
-        // Cold discovery can include many bounded version probes.
+      const response = await fetchWithLongLivedBudget(`/api/setup/cli-updates${fresh ? '?refresh=1' : ''}`, {
+        // Cold probes can delay headers too. Keep the whole discovery bounded at
+        // five minutes without the generic 45-second headers guard racing it.
         cache: 'no-store', headers: { Accept: 'text/event-stream' }, signal: AbortSignal.timeout(300_000),
-      });
+      }, 300_000);
       const tools = await readCliDiscoveryResponse(response, {
         progress: cliDiscovery => {
           if (hub.snapshot.cliDiscovery?.completed !== cliDiscovery.completed || hub.snapshot.cliDiscovery?.total !== cliDiscovery.total) patch({ cliDiscovery });
