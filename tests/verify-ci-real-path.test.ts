@@ -10,6 +10,8 @@ const root = mkdtempSync(path.join(tmpdir(), 'o8-verify-ci-'));
 const workflowPath = path.join(repo, '.github/workflows/ci.yml');
 const guard = path.join(repo, 'scripts/ci/check-verify-ci.mjs');
 const manifest = JSON.parse(readFileSync(path.join(repo, 'package.json'), 'utf8'));
+const nativeLocal = process.platform === 'linux' && process.arch === 'x64';
+const nativeIt = it.skipIf(!nativeLocal);
 const bin = path.join(root, 'bin');
 mkdirSync(bin);
 for (const name of ['npm', 'npx', 'cargo-audit', 'cargo']) {
@@ -233,7 +235,7 @@ describe('local CI verification through its command entry point', () => {
     expect(result.calls.find(call => call.args.includes('test:integration'))?.args).toContain('tests/fixture.test.ts');
   }, 60_000);
 
-  it.each(['native/o8-next/src/main.rs', 'crates/o8d/src/main.rs', 'package-lock.json', '.cargo/config.toml', 'rust-toolchain.toml'])(
+  nativeIt.each(['native/o8-next/src/main.rs', 'crates/o8d/src/main.rs', 'package-lock.json', '.cargo/config.toml', 'rust-toolchain.toml'])(
     'runs the native CI cargo commands on a local %s change', nativeChange => {
       const result = executeFixture('tests/fixture.test.ts', false, { nativeChange });
       expect(result.status, result.stderr + result.stdout).toBe(0);
@@ -255,20 +257,20 @@ describe('local CI verification through its command entry point', () => {
     }, 60_000,
   );
 
-  it.each(['committed', 'staged', 'unstaged', 'untracked'])('selects a %s native change against origin/main', nativeState => {
+  nativeIt.each(['committed', 'staged', 'unstaged', 'untracked'])('selects a %s native change against origin/main', nativeState => {
     const result = executeFixture('tests/fixture.test.ts', false, { nativeChange: 'native/o8-next/src/main.rs', nativeState });
     expect(result.status, result.stderr + result.stdout).toBe(0);
     expect(result.calls.filter(call => call.tool === 'cargo')).toHaveLength(8);
   }, 60_000);
 
-  it('runs native and hermetic work concurrently while retaining the required aggregate', () => {
+  nativeIt('runs native and hermetic work concurrently while retaining the required aggregate', () => {
     const result = executeFixture('tests/fixture.test.ts', false, { nativeChange: 'native/o8-next/src/main.rs', parallel: true });
     expect(result.status, result.stderr + result.stdout).toBe(0);
     expect(result.stdout).toContain('PASS o8 next Native Tests (Linux)');
     expect(result.stdout).toContain('PASS Hermetic Unit Tests');
   }, 60_000);
 
-  it('gives each native CI shard its own combined build and test deadline', () => {
+  nativeIt('gives each native CI shard its own combined build and test deadline', () => {
     // Each command takes 1.5 s. A job's build + test fits in six seconds;
     // the complete serial matrix exceeds six seconds. Two seconds must fail
     // because the build and test share one budget inside each CI job.
@@ -285,12 +287,14 @@ describe('local CI verification through its command entry point', () => {
   it('skips native compilation for a TS-only local change while keeping required checks green', () => {
     const result = execute();
     expect(result.status, result.stderr + result.stdout).toBe(0);
-    expect(result.stdout).toContain('SKIP o8 next Native Tests (Linux): no native inputs changed');
+    expect(result.stdout).toContain(nativeLocal
+      ? 'SKIP o8 next Native Tests (Linux): no native inputs changed'
+      : 'HOSTED o8-next-tests: Linux x64');
     expect(result.calls.some(call => call.tool === 'cargo')).toBe(false);
     expect(result.stdout).toContain('PASS Hermetic Unit Tests');
   }, 60_000);
 
-  it.each(['build', 'test'])('fails verification when the native cargo %s fails', fail => {
+  nativeIt.each(['build', 'test'])('fails verification when the native cargo %s fails', fail => {
     const result = executeFixture('tests/fixture.test.ts', false, { nativeChange: 'native/o8-next/src/main.rs', fail });
     expect(result.status, result.stderr + result.stdout).toBe(1);
     expect(result.stdout).toContain('FAIL o8 next Native Tests (Linux)');
@@ -300,12 +304,14 @@ describe('local CI verification through its command entry point', () => {
   it.each(['darwin', 'win32'])('explicitly classifies the Linux native suite as hosted on %s', platform => {
     const source = `import { readVerificationPlan } from './scripts/lib/verify-ci.mjs';
       const plan = readVerificationPlan(process.cwd(), undefined, { platform: '${platform}', arch: 'x64' });
-      console.log(JSON.stringify({ hosted: plan.hostedJobs['o8-next-tests'], ids: plan.checks.map(check => check.id) }));`;
+      console.log(JSON.stringify({ hosted: plan.hostedJobs['o8-next-tests'], ids: plan.checks.map(check => check.id),
+        required: plan.checks.find(check => check.id === 'test').requiredResults }));`;
     const result = spawnSync(process.execPath, ['--input-type=module', '-e', source], { cwd: repo, encoding: 'utf8' });
     expect(result.status, result.stderr).toBe(0);
     const plan = JSON.parse(result.stdout);
     expect(plan.hosted).toContain('Linux x64');
     expect(plan.ids).not.toContain('o8-next-tests');
+    expect(plan.required).toEqual([]);
   });
 
   it.each(['command', 'action', 'condition', 'native tolerance', 'native step tolerance',
