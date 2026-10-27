@@ -1,3 +1,4 @@
+import { assertCloudLaunchMemory } from '@/lib/cloud/worker-payload';
 /**
  * Cloud Runtime Adapter
  *
@@ -205,6 +206,7 @@ export const cloudRuntime: AgentRuntime = {
     try {
       const jobId = randomUUID();
       assertOwnedActionGuard();
+      assertCloudLaunchMemory(opts);
       const job = enqueueCloudJob(DEFAULT_TEAM_ID, jobId, { ...opts, remoteSource });
       return {
         ok: true,

@@ -1,3 +1,4 @@
+import { assertWorkerMemoryCurrent, mergePreparedWorkerMemory, refreshOwnedWorkerMemory } from '@/lib/dispatch/worker-memory-context';
 import { hasRuntimeLaunchDeadline, runtimeLaunchRead, runtimeLaunchStep } from '@/lib/runtime/launch-deadline';
 import { createWorkerFailureHandler } from './worker-failure';
 import { assertRuntimeEffortPin } from '@/lib/orchestrator/effort-pin';
@@ -90,8 +91,7 @@ export interface OwnedRunController {
   reconcilePreparedRuns(session: OwnedSessionRecord): Promise<OwnedSessionRecord>;
   spawnOwnedRun(
     session: OwnedSessionRecord,
-    prompt: string,
-    mode: OwnedRunMode,
+    prompt: string, mode: OwnedRunMode, options?: { freshRequest?: boolean },
   ): Promise<OwnedRunRecord>;
 }
 
@@ -396,15 +396,16 @@ export function createOwnedRunController({
     return session;
   }
 
-  async function spawnOwnedRun(session: OwnedSessionRecord, prompt: string, mode: OwnedRunMode) {
+  async function spawnOwnedRun(session: OwnedSessionRecord, prompt: string, mode: OwnedRunMode, options?: { freshRequest?: boolean }) {
     return withOwnedArtifactAdmission(root, () => (
       withPacketLifecycleSpawnLock(session.packetId ?? session.workspaceBinding?.packetId ?? null, () => (
-        spawnOwnedRunInner(session, prompt, mode)
+        spawnOwnedRunInner(session, prompt, mode, options?.freshRequest)
       ))
     ));
   }
 
-  async function spawnOwnedRunInner(session: OwnedSessionRecord, prompt: string, mode: OwnedRunMode) {
+  async function spawnOwnedRunInner(session: OwnedSessionRecord, prompt: string, mode: OwnedRunMode, freshRequest = false) {
+    ({ prompt, mode } = await refreshOwnedWorkerMemory(session, prompt, mode, freshRequest));
     assertRuntimeEffortPin(runtimeId, session.model, session.effort, session.identity?.configHomeRef ?? adapter.defaultConfigHome?.());
     assertOwnedSingleAttemptSpawn(session, runtimeId, mode);
     await runtimeLaunchStep(session, 'run_directory', () => ensureDir(path.join(session.sessionDir, RUNS_DIR)));
@@ -521,6 +522,7 @@ export function createOwnedRunController({
           : `${humanLabel} dispatch refused: worker sandbox preparation failed — ${(error as Error).message}`;
         console.error(`[owned-session] ${runtimeId} sandbox prep failed (fail-closed):`, error);
         const failedRun = await stageOwnedLaunchFailure({ session, runId, mode, prompt, stdoutPath, stderrPath, message });
+        failedRun.memoryRevision = session.promptMemoryRevision;
         await io.saveSession(session);
         return failedRun;
       }
@@ -571,7 +573,7 @@ export function createOwnedRunController({
       const durableSession = await runtimeLaunchStep(session, 'durable_session', () => io.findSession(session.surfaceId));
       assertOwnedActionAdmission(durableSession);
       assertDurableOwnedSpawn(durableSession, session, runtimeId, mode);
-      Object.assign(session, durableSession);
+      mergePreparedWorkerMemory(session, durableSession);
       return await withControlledTaskSpawn(session, runtimeId, runId, async () => {
         const spawnDecision = await runtimeLaunchStep(session, 'workspace_spawn_guard', () => assertOwnedWorkspaceSpawnAvailable({
           surfaceId: session.surfaceId, sessionPacketId: session.packetId ?? null, laneId: session.laneId ?? null,
@@ -588,6 +590,7 @@ export function createOwnedRunController({
           id: runId,
           mode,
           prompt,
+          memoryRevision: session.promptMemoryRevision,
           startedAt: nowIso(),
           pid: 0,
           ...(useSupervisor ? { supervisor: { id: runId, owner: session.surfaceId, epoch: '', cursor: 0 } } : {}),
@@ -610,6 +613,7 @@ export function createOwnedRunController({
 
         try {
           assertOwnedActionAdmission(session, runId);
+          assertWorkerMemoryCurrent(session);
           assertLaunchCredentialPolicy(runtimeId, credentialPolicy);
           const bridgeEnv = ownedSpawnEnvironment(session, spawnEnv, true);
           const hasProviderCredentials = Object.entries(bridgeEnv).some(([name, value]) => value && providerCredentialName(name));

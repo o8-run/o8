@@ -48,6 +48,8 @@ interface DesktopAgentMessageProps {
   isStreaming?: boolean;
   /** Hidden transcripts skip cosmetic frame-by-frame text reveals. */
   animateStreaming?: boolean;
+  /** Release the visibility signal once the final streamed reveal has drained. */
+  onRevealSettled?: (messageId: string) => void;
   repoPath?: string | null;
   onApplyToFile?: (code: string, language: string) => void;
   onOpenInCanvas?: (code: string, language: string) => void;
@@ -185,7 +187,7 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
   onRunInTerminal,
   onRetryDelivery,
   visualizations,
-  userDelivery, animateStreaming = true,
+  userDelivery, animateStreaming = true, onRevealSettled,
 }: DesktopAgentMessageProps) {
   const isUser = entry.role === 'user';
   // Sanitize regex chain runs on every render unless memoized — heavy on
@@ -211,6 +213,9 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
   // streaming reveal (and the post-stream drain) so nothing parses per frame.
   const isAssistantStreaming = entry.role === 'assistant' && isStreaming;
   const revealSettled = revealedText.length >= displayText.length;
+  useEffect(() => {
+    if (!isStreaming && revealSettled) onRevealSettled?.(entry.id);
+  }, [entry.id, isStreaming, onRevealSettled, revealSettled]);
   const showMarkdown = !isAssistantStreaming && revealSettled;
   const sanitizedThinking = useMemo(
     () => entry.thinking ? sanitizeTranscriptText(entry.thinking) : '',

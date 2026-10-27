@@ -7,7 +7,7 @@ import { buildTurnSummaryStats, type TurnSummary } from '../thoughts/chat-panel/
 import { TurnChevron } from '../thoughts/chat-panel/turn-line';
 import { transcriptTurns, transcriptTurnFiles } from './turns';
 
-export function TranscriptTurns({ entries, nodes, busy, repoPath, summary, turnContent }: {
+export const TranscriptTurns = memo(function TranscriptTurns({ entries, nodes, busy, repoPath, summary, turnContent }: {
   entries: MobileTranscriptEntry[];
   nodes: ReactNode[];
   busy: boolean;
@@ -20,11 +20,14 @@ export function TranscriptTurns({ entries, nodes, busy, repoPath, summary, turnC
     const end = starts[index + 1] ?? entries.length;
     const turnEntries = entries.slice(start, end);
     return <TranscriptTurn key={entries[start].id} entries={turnEntries} nodes={nodes.slice(start, end)}
-      busy={busy && end === entries.length} repoPath={repoPath} deferLayout={entries.length > 200}
+      busy={busy && end === entries.length} repoPath={repoPath} deferLayout={entries.length >= 200}
       summary={summary && turnEntries.some(entry => entry.id === summary.assistantMessageId) ? summary : null}
       content={turnContent?.get(entries[start].id)} />;
   });
-}
+}, (previous, next) => previous.busy === next.busy && previous.repoPath === next.repoPath
+  && previous.summary === next.summary && previous.turnContent === next.turnContent
+  && sameArray(previous.entries, next.entries) && previous.nodes.length === next.nodes.length
+  && previous.nodes.every((node, index) => sameNode(node, next.nodes[index])));
 
 interface TranscriptTurnProps {
   deferLayout: boolean;

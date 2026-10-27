@@ -93,6 +93,7 @@ function ftsSearch(
   rowIdCol: string,
   match: string,
   limit: number = PER_INDEX_LIMIT,
+  outcomeScope?: ReturnType<typeof buildScope>,
 ): FtsRow[] {
   try {
     // bm25() returns a negative rank — lower is better. We negate so higher
@@ -103,10 +104,14 @@ function ftsSearch(
              snippet(${table}, -1, '«', '»', '…', 8) AS excerpt
       FROM ${table}
       WHERE ${table} MATCH ?
+      ${outcomeScope ? `AND EXISTS (SELECT 1 FROM session_outcomes source
+        WHERE source.id = outcomes_fts.outcome_id AND source.project_id IS ?
+        AND source.repo_path IN (SELECT value FROM json_each(?)))` : ''}
       ORDER BY bm25(${table})
       LIMIT ${limit}
     `;
-    return sqlite.prepare(sql).all(match) as FtsRow[];
+    return sqlite.prepare(sql).all(...(outcomeScope
+      ? [match, outcomeScope.projectId, JSON.stringify([...outcomeScope.repoPaths])] : [match])) as FtsRow[];
   } catch (error) {
     console.warn(
       `[qa][fts] ${table} match failed for ${JSON.stringify(match)}:`,
@@ -118,6 +123,7 @@ function ftsSearch(
 
 interface OutcomeRow {
   id: string;
+  project_id: string | null;
   outcome: string;
   summary: string;
   plan_text: string | null;
@@ -206,7 +212,7 @@ function buildScope(input: RetrieverInput) {
     projectSlugs: new Set([active.projectSlug.toLowerCase()]),
     repoInActiveProject: active.repoInActiveProject,
   };
-  return { repoPaths: new Set(repoPaths), repoNames, repoFullNames, primaryRepoPath, primaryRepoName, primaryRepoFullName, directiveScope };
+  return { projectId: input.projectId?.trim() || active.projectId, repoPaths: new Set(repoPaths), repoNames, repoFullNames, primaryRepoPath, primaryRepoName, primaryRepoFullName, directiveScope };
 }
 
 function pathInScope(repoPath: string | null | undefined, scopedPaths: Set<string>): boolean {
@@ -371,7 +377,7 @@ export async function ftsRetriever(input: RetrieverInput): Promise<RetrieverResu
     };
 
     for (const match of matches) {
-      merge(outcomesHits, ftsSearch(sqlite, 'outcomes_fts', 'outcome_id', match));
+      merge(outcomesHits, ftsSearch(sqlite, 'outcomes_fts', 'outcome_id', match, PER_INDEX_LIMIT, scope));
       merge(prsHits, ftsSearch(sqlite, 'prs_fts', 'pr_id', match));
       merge(issuesHits, ftsSearch(sqlite, 'issues_fts', 'issue_id', match));
       // Over-fetch (#1228): scope-filtering happens after this cut, so a wider
@@ -414,13 +420,13 @@ export async function ftsRetriever(input: RetrieverInput): Promise<RetrieverResu
         .map(([id]) => id);
       const records = sqlite
         .prepare(
-          `SELECT id, outcome, summary, COALESCE(plan_text, '') AS plan_text, repo_path, completed_at
+          `SELECT id, project_id, outcome, summary, COALESCE(plan_text, '') AS plan_text, repo_path, completed_at
            FROM session_outcomes
            WHERE id IN (${sortedIds.map(() => '?').join(',')})`,
         )
         .all(...sortedIds) as OutcomeRow[];
       const byId = new Map(records
-        .filter((record) => pathInScope(record.repo_path, scope.repoPaths))
+        .filter((record) => record.project_id === scope.projectId && pathInScope(record.repo_path, scope.repoPaths))
         .map((r) => [r.id, r]));
       sortedIds.forEach((id, idx) => {
         const record = byId.get(id);

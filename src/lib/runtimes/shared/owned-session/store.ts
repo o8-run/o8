@@ -18,7 +18,6 @@ import { assertAutomaticRecoveryGeneration, requestedAutomaticRecoveryRun, regis
 import { assertOwnedActionAdmission, assertOwnedStopAdmission, holdPendingOwnedCorrections } from './action-admission';
 import { randomUUID } from 'node:crypto';
 import { OwnedArtifactAdmissionError, withOwnedArtifactAdmission } from './artifact-admission';
-
 import { signalBridgeTerminalSession } from '@/lib/runtime/pty-bridge';
 import { recordLaneEvent } from '@/lib/lane/events';
 import { chainOnKey } from '@/lib/util/keyed-promise-chain';
@@ -250,6 +249,7 @@ export function createOwnedSessionStore(
       createdAt,
       updatedAt: createdAt,
       initialPrompt: prompt,
+      promptMemoryRevision: request.promptMemoryRevision,
       latestPrompt: prompt,
       latestSummary: compactText(prompt, 140) || `Owned ${adapter.squadShortName} session launched from o8.`,
       model: request.model?.trim() || adapter.defaultModel || undefined,
@@ -373,7 +373,7 @@ export function createOwnedSessionStore(
       if (automaticRunId) assertAutomaticRecoveryGeneration(await io.findSession(surfaceId), automaticRunId);
       assertOwnedActionAdmission(await io.findSession(surfaceId));
       await assertOwnedActionFence(surfaceId, await io.findSession(surfaceId));
-      const run = await runController.spawnOwnedRun(session, prompt.trim(), 'resume');
+      const run = await runController.spawnOwnedRun(session, prompt.trim(), 'resume', { freshRequest: !automaticRunId });
       if (run.outcome === 'failed' && coldRestored) {
         await rollbackColdRestore();
       }

@@ -246,6 +246,7 @@ async function launchSessionInner(
     const result = await launchRuntimeSurface({
       runtime: lane.runtime,
       prompt: command.prompt,
+      promptMemoryRevision: command.promptMemoryRevision,
       repoPath: lane.worktreePath ?? lane.repoPath,
       projectRepoPath: lane.repoPath,
       branchName: lane.branch,
