@@ -3,6 +3,7 @@
 import { Profiler, forwardRef, memo, useCallback } from 'react';
 import type { ComponentPropsWithoutRef, ProfilerOnRenderCallback } from 'react';
 import { ChatMessageList } from './ChatMessageList';
+import { useLiveCompaction } from './useLiveCompaction';
 
 type ProfiledChatMessageListProps = ComponentPropsWithoutRef<typeof ChatMessageList>;
 
@@ -32,6 +33,7 @@ function logListCommit(phase: string, actualDuration: number, count: number): vo
 
 export const ProfiledChatMessageList = memo(forwardRef<HTMLDivElement, ProfiledChatMessageListProps>(
   function ProfiledChatMessageList(props, ref) {
+    const liveCompaction = useLiveCompaction(props.isOrchestratorMode ? props.repoPath : null, props.threadId);
     const count = props.displayMessages.length;
     const handleRender = useCallback<ProfilerOnRenderCallback>((_id, phase, actualDuration) => {
       logListCommit(phase, actualDuration, count);
@@ -39,7 +41,7 @@ export const ProfiledChatMessageList = memo(forwardRef<HTMLDivElement, ProfiledC
 
     return (
       <Profiler id="chat-message-list" onRender={handleRender}>
-        <ChatMessageList {...props} ref={ref} />
+        <ChatMessageList {...props} liveCompaction={liveCompaction} ref={ref} />
       </Profiler>
     );
   },

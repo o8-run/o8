@@ -12,6 +12,7 @@ import { getCanonicalChatHistoryPath, persistCanonicalChatHistoryRecord } from '
 import { logUsage } from '@/lib/db/usage';
 import { scoreCompactionSegment } from '@/lib/orchestrator/compaction-scorer';
 import { clipCompactionText, compactionEntryText } from './compaction-text';
+import { withLiveCompaction } from './live-compaction';
 const ARCHIVE_DIR = path.join(getDataDir(), 'orchestrator-archives');
 const inFlight = new Map<string, Promise<AutoCompactResult>>();
 type PersistedThread = { tabId: string; payload: Record<string, unknown>; messages: MobileTranscriptEntry[] };
@@ -338,64 +339,66 @@ export async function autoCompactOrchestratorThread(input: {
     if (compactedTurns.length === 0) {
       return notApplied(transcript);
     }
-    const compactedAt = new Date();
-    const compactedStamp = fmtStamp(compactedAt);
-    // Record-only judgment scores (#2465), asked beside the summarizer; nothing reads them.
-    const scorerJob = scoreCompactionSegment(compactedTurns);
-    const summaryResult = await summarizeWithCodex(repoPath, ['Summarize this orchestrator thread segment using exactly these sections and terse bullets:', 'Decisions made', 'Files touched', 'Open questions', 'Current mission state', 'Use file paths verbatim. If a section is empty, write "- None."', '', buildExcerpt(compactedTurns, 90_000)].join('\n'));
-    const summary = summaryResult.text;
-    recordCompactionUsage(repoPath, thread.tabId, summaryResult, compactedAt);
-    const displaySummary = `<compacted_context turns="${compactedTurns.length}" at="${compactedStamp}">\n${summary}\n</compacted_context>`;
-    const compactionEntry: MobileTranscriptEntry = {
-      id: `orch-compaction-${compactedAt.getTime()}`,
-      role: 'system',
-      text: 'Context compaction event',
-      type: 'compaction',
-      timestamp: compactedAt.getTime(),
-      timestampLabel: compactedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      compaction: {
+    return withLiveCompaction({ repoPath, threadId }, async () => {
+      const compactedAt = new Date();
+      const compactedStamp = fmtStamp(compactedAt);
+      // Record-only judgment scores (#2465), asked beside the summarizer; nothing reads them.
+      const scorerJob = scoreCompactionSegment(compactedTurns);
+      const summaryResult = await summarizeWithCodex(repoPath, ['Summarize this orchestrator thread segment using exactly these sections and terse bullets:', 'Decisions made', 'Files touched', 'Open questions', 'Current mission state', 'Use file paths verbatim. If a section is empty, write "- None."', '', buildExcerpt(compactedTurns, 90_000)].join('\n'));
+      const summary = summaryResult.text;
+      recordCompactionUsage(repoPath, thread.tabId, summaryResult, compactedAt);
+      const displaySummary = `<compacted_context turns="${compactedTurns.length}" at="${compactedStamp}">\n${summary}\n</compacted_context>`;
+      const compactionEntry: MobileTranscriptEntry = {
+        id: `orch-compaction-${compactedAt.getTime()}`,
+        role: 'system',
+        text: 'Context compaction event',
+        type: 'compaction',
         timestamp: compactedAt.getTime(),
-        tokensBefore: typeof input.runningTotal === 'number' ? input.runningTotal : undefined,
-        contextSource: input.contextSource,
-        tokensAfter: undefined,
-        trigger: input.trigger === 'handoff' ? 'manual' : input.trigger ?? 'auto',
-        source: 'summary',
-        summary: displaySummary,
+        timestampLabel: compactedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        compaction: {
+          timestamp: compactedAt.getTime(),
+          tokensBefore: typeof input.runningTotal === 'number' ? input.runningTotal : undefined,
+          contextSource: input.contextSource,
+          tokensAfter: undefined,
+          trigger: input.trigger === 'handoff' ? 'manual' : input.trigger ?? 'auto',
+          source: 'summary',
+          summary: displaySummary,
+          compactedBy: ORCHESTRATOR_COMPACTION_PROVENANCE,
+        },
+      };
+      const nextTranscript = [compactionEntry, ...pinnedTurns, ...liveTurns];
+      const resumePrelude = [`Compaction summary (${compactedStamp})`, summary, '', 'Most recent uncompressed turns:', buildExcerpt(retainedTurns, 80_000) || '- None.', '', 'Continue from that context. The operator message follows below.'].join('\n');
+      const tokensAfter = approxTokens(resumePrelude);
+      compactionEntry.compaction!.tokensAfter = tokensAfter;
+      const scorer = await scorerJob;
+      if (scorer) compactionEntry.compaction!.scorer = scorer;
+      await mkdir(ARCHIVE_DIR, { recursive: true });
+      const archiveRef = `${thread.tabId}-${compactionEntry.id}.json`;
+      compactionEntry.compaction!.archiveRef = archiveRef;
+      await writeFile(path.join(ARCHIVE_DIR, archiveRef), JSON.stringify({
+        repoPath,
+        tabId: thread.tabId,
+        archivedAt: compactedAt.toISOString(),
+        compactedCount: compactedTurns.length,
+        turns: compactedTurns.map(toStoredMessage),
+        summary,
         compactedBy: ORCHESTRATOR_COMPACTION_PROVENANCE,
-      },
-    };
-    const nextTranscript = [compactionEntry, ...pinnedTurns, ...liveTurns];
-    const resumePrelude = [`Compaction summary (${compactedStamp})`, summary, '', 'Most recent uncompressed turns:', buildExcerpt(retainedTurns, 80_000) || '- None.', '', 'Continue from that context. The operator message follows below.'].join('\n');
-    const tokensAfter = approxTokens(resumePrelude);
-    compactionEntry.compaction!.tokensAfter = tokensAfter;
-    const scorer = await scorerJob;
-    if (scorer) compactionEntry.compaction!.scorer = scorer;
-    await mkdir(ARCHIVE_DIR, { recursive: true });
-    const archiveRef = `${thread.tabId}-${compactionEntry.id}.json`;
-    compactionEntry.compaction!.archiveRef = archiveRef;
-    await writeFile(path.join(ARCHIVE_DIR, archiveRef), JSON.stringify({
-      repoPath,
-      tabId: thread.tabId,
-      archivedAt: compactedAt.toISOString(),
-      compactedCount: compactedTurns.length,
-      turns: compactedTurns.map(toStoredMessage),
-      summary,
-      compactedBy: ORCHESTRATOR_COMPACTION_PROVENANCE,
-      ...(scorer ? { scorer } : {}),
-    }));
-    persistCanonicalChatHistoryRecord(thread.tabId, {
-      ...thread.payload,
-      messages: nextTranscript.map(toStoredMessage),
-      savedAt: compactedAt.toISOString(),
+        ...(scorer ? { scorer } : {}),
+      }));
+      persistCanonicalChatHistoryRecord(thread.tabId, {
+        ...thread.payload,
+        messages: nextTranscript.map(toStoredMessage),
+        savedAt: compactedAt.toISOString(),
+      });
+      return {
+        applied: true,
+        transcript: nextTranscript,
+        resumePrelude,
+        tokensAfter,
+        compactedBy: ORCHESTRATOR_COMPACTION_PROVENANCE,
+        archiveRef,
+      };
     });
-    return {
-      applied: true,
-      transcript: nextTranscript,
-      resumePrelude,
-      tokensAfter,
-      compactedBy: ORCHESTRATOR_COMPACTION_PROVENANCE,
-      archiveRef,
-    };
   })().finally(() => {
     inFlight.delete(inFlightKey);
   });
