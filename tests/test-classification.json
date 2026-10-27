@@ -6385,6 +6385,12 @@
       ]
     },
     {
+      "path": "tests/steer-transcript-boundary-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/steered-review-settlement-real-path.test.ts",
       "reasons": [
         "child-process",

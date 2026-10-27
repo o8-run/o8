@@ -8,6 +8,7 @@ export function appendUserHistoryMessage(input: {
   messageId?: string;
   media?: MobileTranscriptEntry['media'];
   handoff?: MobileTranscriptEntry['handoff'];
+  steerAnchor?: MobileTranscriptEntry['steerAnchor'];
   timestamp: number;
 }): ChatHistoryMessage[] {
   const next = [...input.messages];
@@ -27,6 +28,7 @@ export function appendUserHistoryMessage(input: {
       id: input.messageId?.trim() || `user-${input.timestamp}`,
       role: 'user',
       content: input.content,
+      ...(input.steerAnchor ? { steerAnchor: input.steerAnchor } : {}),
       ...(input.media?.length ? { media: input.media } : {}),
       timestamp: input.handoff ? input.timestamp + 1 : input.timestamp,
     });

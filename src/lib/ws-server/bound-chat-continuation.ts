@@ -92,7 +92,7 @@ export async function runBoundChatContinuation(
         case 'turn_retry': text = ''; persist(null); break;
         case 'collide_phase': case 'collide_proposal': case 'handoff': break;
       }
-    }, { threadId: expected.threadId, model: expected.model, thinkingEffort: expected.effort,
+    }, { transcriptMessageId: assistantMessageId, threadId: expected.threadId, model: expected.model, thinkingEffort: expected.effort,
       permissionMode: permissionMode ?? input.legacyPermissionMode ?? 'plan', signal: controller.signal,
       attachments: input.images,
       serviceTier: input.serviceTier, collideBaseBackend: input.collideBaseBackend,

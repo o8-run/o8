@@ -366,6 +366,7 @@ export interface MobileTranscriptEntry {
   id: string;
   role: 'user' | 'assistant' | 'system' | 'tool';
   text: string;
+  steerAnchor?: import('@/lib/transcripts/steer-anchor').SteerTranscriptAnchor;
   /** Monotonic server persistence revision for this message. */
   persistedVersion?: number;
   pinned?: boolean;

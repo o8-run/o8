@@ -1,5 +1,7 @@
 'use client';
 
+import { placeSteerTranscriptEntries } from '@/lib/transcripts/steer-anchor';
+
 import { Fragment, forwardRef, memo, useEffect, useRef, useState, type RefObject } from 'react';
 import { DesktopAgentMessage } from '../../DesktopAgentMessage';
 import { ComposerEntryDelivery, ComposerQueuedMessages, type ComposerTranscriptQueue } from './ComposerQueuedMessages';
@@ -194,7 +196,7 @@ const ChatMessageListPresentation = memo(forwardRef<HTMLDivElement, ChatMessageL
   // line) instead of a stack of shimmer rows. Render-time derivation — the
   // underlying message state is untouched.
   const scrollRef = useRef<HTMLDivElement>(null);
-  const displayMessages = mergeAdjacentToolOnlyEntries(rawDisplayMessages);
+  const displayMessages = mergeAdjacentToolOnlyEntries(placeSteerTranscriptEntries(rawDisplayMessages, composerQueue?.items));
   const items = buildMissionRenderItems(displayMessages);
   const visualizations = useTranscriptVisualizations({ repoPath, threadId, active, length: rawDisplayMessages.length });
   const visualsByIndex = placeTranscriptVisualizations(visualizations, displayMessages);
