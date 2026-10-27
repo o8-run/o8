@@ -1,3 +1,4 @@
+import { readMemoryRevision } from '@/lib/cortex/memory-revision';
 import { correctionStopVersion } from '@/lib/db/worker-correction-fences';
 import { withOwnedActionGuard } from '@/lib/runtimes/shared/owned-session/action-admission';
 import { workerFallbackGuard } from './worker-fallback-guard';
@@ -291,9 +292,13 @@ export async function handleWorkerQuotaExhaustion(input: {
   }
 
   let handoffPrompt: string;
+  let promptMemoryRevision: string | undefined;
   try {
     checkHandoff();
+    const revision = readMemoryRevision();
     handoffPrompt = await input.buildHandoffContext?.() ?? input.prompt;
+    if (readMemoryRevision() !== revision) throw new Error('Worker memory changed during handoff.');
+    if (input.buildHandoffContext) promptMemoryRevision = revision;
     const currentSource = source.owned ? await readOwnedRecoveryState(input.surfaceId) : null;
     if (currentSource?.owned && (currentSource.runId !== (source.owned ? source.runId : undefined) || currentSource.interrupted || !currentSource.automaticRecoveryAllowed)) {
       return { handled: false, action: 'ignored' };
@@ -321,6 +326,7 @@ export async function handleWorkerQuotaExhaustion(input: {
     const result = await withOwnedActionGuard(() => checkHandoff(true), () => launchRuntimeSurface({
       runtime: decision.toRuntime,
       prompt: handoffPrompt,
+      promptMemoryRevision,
       repoPath: lane.worktreePath ?? lane.repoPath,
       projectRepoPath: lane.repoPath,
       branchName: lane.branch,

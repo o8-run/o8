@@ -1,3 +1,4 @@
+import { readMemoryRevision } from '@/lib/cortex/memory-revision';
 import { resolveCapturedMissionProject } from '@/lib/orchestrator/mission-project-context';
 import 'server-only';
 
@@ -379,15 +380,15 @@ export async function launchPacketWithStorageAdmission(input: {
           authenticated: carrierPreflight.authenticated,
         });
       }
+      const promptMemoryRevision = readMemoryRevision();
+      const prompt = await buildPacketPrompt(packet, allPackets,
+        laneResult.lane?.baseBranch ?? baseBranch, laneResult.lane?.worktreePath ?? null);
+      if (promptMemoryRevision !== readMemoryRevision()) throw new Error('Worker memory changed during prompt assembly. Retry dispatch.');
       launchResult = await dispatchLaneCommand({
         verb: 'launch_session',
         laneId: laneResult.laneId,
-        prompt: await buildPacketPrompt(
-          packet,
-          allPackets,
-          laneResult.lane?.baseBranch ?? baseBranch,
-          laneResult.lane?.worktreePath ?? null,
-        ),
+        prompt,
+        promptMemoryRevision,
         model: workerRouting.selectedModel ?? undefined,
         claudeCodeModel: packet.claudeCodeModel ?? undefined,
         claudeCodeCarrier: packet.claudeCodeCarrier ?? undefined,
