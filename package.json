@@ -45,6 +45,7 @@
     "research:daily": "tsx scripts/research/run-cortex-autoresearch.ts --trigger daily --max-loops 1",
     "research:post-merge": "tsx scripts/research/run-cortex-autoresearch.ts --trigger post-merge --max-loops 1",
     "reports": "node scripts/reports.mjs",
+    "metrics:daily": "node scripts/metrics-daily.mjs",
     "downloads": "node scripts/downloads.mjs",
     "publish:fixed": "node scripts/publish-fixed.mjs",
     "sync:reports": "node scripts/sync-reports.mjs",
