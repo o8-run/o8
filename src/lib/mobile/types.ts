@@ -190,6 +190,8 @@ export interface MobileReviewFileDetail {
   currentPath?: string;
   note: string;
   preview: string;
+  /** Producer provenance: partial patches require complete-source certification. */
+  previewKind?: 'file' | 'diff';
   /** Last commit message that touched this file (free — from git log) */
   commitSummary?: string;
   /** Commit author */
@@ -344,6 +346,8 @@ export interface MobileTurnReceipt {
   permissionMode?: import('@/lib/orchestrator/permission-mode').OrchestratorPermissionMode;
   leadModel: string;
   effort: ThinkingEffort;
+  effortSource?: import('@/lib/orchestrator/thinking-effort').EffortReceiptSource;
+  serviceTier?: import('@/lib/orchestrator/thinking-effort').LeadServiceTier;
   mode: 'solo' | 'multitask' | 'fast' | 'moa' | 'fusion';
   pickedMode?: 'solo' | 'multitask' | 'fast' | 'moa' | 'fusion';
   workers?: Array<{

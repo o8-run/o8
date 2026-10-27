@@ -43,6 +43,10 @@ export async function register(): Promise<void> {
       warnOptionalStartupFailure('telemetry');
     }
     if (process.env.NEXT_PHASE !== PHASE_PRODUCTION_BUILD) {
+      // Optional voice preparation must never hold up server registration.
+      void import('@/lib/tts/ensure-edge-tts')
+        .then(({ ensureEdgeTtsInstalled }) => ensureEdgeTtsInstalled())
+        .catch(() => { console.warn('[startup] Optional voice preparation failed.'); });
       const { scheduleNextServerStartup } = await import('@/lib/startup/schedule');
       scheduleNextServerStartup();
     }

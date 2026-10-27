@@ -1,0 +1,5 @@
+Main baseline: 73d71ce898f4d585d09f05c403a25602696b814e.
+Reviewed chrome changes from #4716 were replayed during rebase.
+Original test/doc conflicts with #4719 were removed by isolating shell look tests
+and retaining its documentation insertion anchor. The final merge-tree check
+with fix/next-system-glass exits zero. No material implementation is copied here.

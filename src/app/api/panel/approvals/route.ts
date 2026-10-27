@@ -1,3 +1,4 @@
+import { viewerJson } from '@/lib/viewers/response';
 import { NextRequest, NextResponse } from 'next/server';
 import {
   resolveRequestPrincipal,
@@ -86,7 +87,7 @@ export async function GET(request: NextRequest) {
     packetId || (laneId ? getLane(laneId)?.packetId : null) || (sessionKey ? findLaneBySession(sessionKey)?.packetId : null),
   );
   if (ownershipRefusal) {
-    return NextResponse.json({ ok: false, error: ownershipRefusal }, { status: 403 });
+    return viewerJson({ ok: false, error: ownershipRefusal }, { status: 403 });
   }
   const approvals = isContextQuery
     ? listApprovalsForContext({ packetId, laneId, sessionKey })
@@ -98,7 +99,7 @@ export async function GET(request: NextRequest) {
         ]
       : listApprovals({ status, sessionKey, projectId });
 
-  return NextResponse.json({
+  return viewerJson({
     approvals: (isContextQuery || includeDiff) ? approvals : stripDiffPreviews(approvals),
     ...(terminalSession !== null ? {
       terminalAdapter: sessionKey ? await readTerminalApprovalAdapter(sessionKey, terminalSession) : null,
@@ -170,7 +171,7 @@ export async function POST(request: NextRequest) {
         fresh: true,
       });
 
-      return NextResponse.json({ ok: true, approval }, {
+      return viewerJson({ ok: true, approval }, {
         status: 201,
         headers: { 'Cache-Control': 'no-store, max-age=0' },
       });
@@ -202,7 +203,7 @@ export async function POST(request: NextRequest) {
       sessionKeys: [approval.sessionKey],
       fresh: true,
     });
-    return NextResponse.json({ ok: true, approval }, {
+    return viewerJson({ ok: true, approval }, {
       headers: { 'Cache-Control': 'no-store, max-age=0' },
     });
   }
@@ -276,7 +277,7 @@ export async function POST(request: NextRequest) {
     }
   }
   if (current.status !== 'pending') {
-    return NextResponse.json({ ok: true, approval: current, resolved: action, note: 'Approval was already resolved.' }, {
+    return viewerJson({ ok: true, approval: current, resolved: action, note: 'Approval was already resolved.' }, {
       headers: { 'Cache-Control': 'no-store, max-age=0' },
     });
   }
@@ -361,7 +362,7 @@ export async function POST(request: NextRequest) {
       const continuationPending = approval.resolution?.continuationStatus === 'pending'
         || approval.resolution?.continuationStatus === 'outcome_unknown';
       const status = approval.status === 'pending' || continuationPending ? 409 : 200;
-      return NextResponse.json({
+      return viewerJson({
         ok: approval.status !== 'pending' && !continuationPending,
         approval,
         resolved: action,
@@ -389,7 +390,7 @@ export async function POST(request: NextRequest) {
             ? reopenApprovalAfterEvidenceDrift(id, resolutionClaim.claimId, applyResult.error)
             : approval;
         invalidateApprovalCaches();
-        return NextResponse.json({
+        return viewerJson({
           ok: false,
           error: applyResult.error,
           code: applyResult.code,
@@ -424,7 +425,7 @@ export async function POST(request: NextRequest) {
           ? finalizeApprovalContinuation(id, resolutionClaim.claimId, 'outcome_unknown', applyResult.message)
           : approval;
         invalidateApprovalCaches();
-        return NextResponse.json({
+        return viewerJson({
           ok: false,
           error: applyResult.message,
           code: applyResult.error,
@@ -520,7 +521,7 @@ export async function POST(request: NextRequest) {
           sessionKeys: [approval.sessionKey],
           fresh: true,
         });
-        return NextResponse.json({
+        return viewerJson({
           ok: false,
           error: result.note,
           code: 'spoken_review_changed',
@@ -594,7 +595,7 @@ export async function POST(request: NextRequest) {
       fresh: continuationOutcome === 'completed',
     });
 
-    return NextResponse.json({
+    return viewerJson({
       ok: true,
       approval: settledApproval,
       resolved: action,

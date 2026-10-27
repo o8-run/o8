@@ -210,13 +210,17 @@ export function writePersistedLlmChat(
     let planText: string | undefined;
     let existingPendingTurnWorkers: MobilePendingTurnWorkers | undefined;
     let existingMessages: PersistedLlmChatMessage[] = [];
+    let sessionMetadata: Record<string, unknown> = {};
     try {
-      const existing = JSON.parse(readFileSync(filePath, 'utf-8')) as PersistedLlmChatHistory;
+      const existing = JSON.parse(readFileSync(filePath, 'utf-8')) as PersistedLlmChatHistory & Record<string, unknown>;
       existingMessages = Array.isArray(existing.messages) ? existing.messages : [];
       starred = existing.starred || false;
       title = existing.title;
       planText = normalizePlanText(existing.planText);
       existingPendingTurnWorkers = existing.pendingTurnWorkers;
+      sessionMetadata = { codexSessionHandoff: existing.codexSessionHandoff,
+        orchestratorSessionIds: existing.orchestratorSessionIds,
+        orchestratorSessionUpdatedAt: existing.orchestratorSessionUpdatedAt };
     } catch {
       // no existing history
     }
@@ -239,6 +243,7 @@ export function writePersistedLlmChat(
     );
     const persistedRecord = {
       ...history,
+      ...sessionMetadata,
       messages: consumed.messages,
       savedAt: new Date().toISOString(),
       starred: history.starred ?? starred,

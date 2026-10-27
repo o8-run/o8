@@ -1,0 +1,10 @@
+note: to see what the problems were, use the option `--future-incompat-report`, or run `cargo report future-incompatibilities --id 1`
+     Running unittests src/main.rs (/workspace/o8/work/glass-target/debug/deps/o8_next-f96529fb57d58ecd)
+
+running 3 tests
+test shell::tests::glass_and_plain_open_through_the_production_shell ... ok
+test shell::tests::glass_shell_probe ... ignored, isolated appearance probe, invoked by glass_and_plain_open_through_the_production_shell
+test shell::tests::shell_palette_switch_restart_and_server_down ... O8_NEXT_SHELL_EVIDENCE {"endpoint":"GPUI TestAppContext CPU scene paint; test text system; no GPU/compositor","platform":"linux","launchToInteractiveMs":151.459487,"paletteOpenToFrameMs":[12.956702,12.379444999999999,12.259907,12.511141,12.006821,12.536048,12.131086,12.289321000000001,12.041633,12.231855,12.547846,12.368839,12.166317,12.177273000000001,12.613893,12.286657,12.580453,12.328339000000001,12.086569,12.536047],"workspaceSwitchMs":[24.427768,12.996630999999999,10.467433999999999,12.562406,10.481074999999999,12.485042,10.576338,12.847545,10.544649,12.590047],"idleMemoryMiB":36.75390625,"workspaces":2,"restoredSurfaces":3}
+ok
+
+test result: ok. 2 passed; 0 failed; 1 ignored; 0 measured; 155 filtered out; finished in 7.24s

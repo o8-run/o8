@@ -1,9 +1,12 @@
 name: o8 next Linux setup
-description: Install cached native build and fixture prerequisites.
+description: Shared native headless build prerequisites
 inputs:
   cache-key:
     description: Separate release and test build outputs.
     default: ''
+  browser:
+    description: Install the parity browser
+    default: 'false'
 runs:
   using: composite
   steps:
@@ -11,10 +14,10 @@ runs:
       with:
         node-version: 22
         cache: npm
-    - run: npm install -g "$(node -p 'require("./package.json").packageManager')"
-      shell: bash
-    - run: npm ci --prefer-offline
-      shell: bash
+    - shell: bash
+      run: npm install -g "$(node -p 'require("./package.json").packageManager')"
+    - shell: bash
+      run: npm ci --prefer-offline
     - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
       with:
         toolchain: stable
@@ -27,4 +30,8 @@ runs:
       shell: bash
       run: |
         sudo apt-get update -qq
-        sudo apt-get install -y --no-install-recommends libfontconfig1-dev libfreetype-dev libxkbcommon-dev libxkbcommon-x11-dev libxcb1-dev libx11-xcb-dev libvulkan-dev mesa-vulkan-drivers xvfb xauth x11-xserver-utils imagemagick fonts-dejavu-core
+        sudo apt-get install -y --no-install-recommends libfontconfig1-dev libfreetype-dev libxkbcommon-dev libxkbcommon-x11-dev libxcb1-dev libx11-xcb-dev libvulkan-dev mesa-vulkan-drivers xvfb xauth x11-xserver-utils imagemagick fonts-dejavu-core xdotool tesseract-ocr
+    - name: Install parity browser
+      if: inputs.browser == 'true'
+      shell: bash
+      run: npx --no-install playwright-core install --with-deps chromium

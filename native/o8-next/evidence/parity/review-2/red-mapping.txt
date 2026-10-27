@@ -1,0 +1,65 @@
+ FAIL  tests/next-parity-preflight-real-path.test.ts > maps Workers through the real CLI with the existing route fixture and native selectors
+AssertionError: Parity harness failed; inspect the local capture logs.
+: expected 1 to be +0 // Object.is equality
+
+- Expected
++ Received
+
+- 0
++ 1
+
+ ❯ tests/next-parity-preflight-real-path.test.ts:14:40
+     12| it('maps Workers through the real CLI with the existing route fixture …
+     13|   const result = run(entry, '--list');
+     14|   expect(result.status, result.stderr).toBe(0);
+       |                                        ^
+     15|   const workers = JSON.parse(result.stdout).surfaces.find((row: { id: …
+     16|   expect(workers).toMatchObject({ tab: 'Workers', flags: ['--workers']…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  tests/next-parity-preflight-real-path.test.ts > names unmapped registered surfaces through the CLI instead of hiding inventory drift
+AssertionError: expected 'Parity harness failed; inspect the lo…' to contain 'Unmapped registered surfaces: workers'
+
+- Expected
++ Received
+
+- Unmapped registered surfaces: workers
++ Parity harness failed; inspect the local capture logs.
++
+
+ ❯ tests/next-parity-preflight-real-path.test.ts:40:27
+     38|     const result = run(fixture.entry, '--list');
+     39|     expect(result.status).toBe(1);
+     40|     expect(result.stderr).toContain('Unmapped registered surfaces: wor…
+       |                           ^
+     41|     expect(result.stderr).toContain('scripts/parity/surfaces.json');
+     42|   } finally { rmSync(fixture.root, { recursive: true, force: true }); }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+ FAIL  tests/next-parity-preflight-real-path.test.ts > compares an existing report even when a newer registration has no capture mapping
+AssertionError: Parity harness failed; inspect the local capture logs.
+: expected 1 to be +0 // Object.is equality
+
+- Expected
++ Received
+
+- 0
++ 1
+
+ ❯ tests/next-parity-preflight-real-path.test.ts:51:42
+     49|     writeFileSync(input, '[]');
+     50|     const result = run(fixture.entry, '--compare', input, '--output', …
+     51|     expect(result.status, result.stderr).toBe(0);
+       |                                          ^
+     52|     expect(JSON.parse(readFileSync(join(fixture.root, 'report/report.j…
+     53|   } finally { rmSync(fixture.root, { recursive: true, force: true }); }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  3 failed | 1 skipped (4)
+   Start at  23:24:52
+   Duration  396ms (transform 57ms, setup 64ms, import 15ms, tests 129ms, environment 0ms)

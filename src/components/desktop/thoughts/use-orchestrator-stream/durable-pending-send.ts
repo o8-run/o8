@@ -194,6 +194,14 @@ export function useDurablePendingSend(options: DurablePendingSendOptions) {
 
   const observeActivity = useCallback((event: OrchestratorActivity) => {
     const record = activeRecordRef.current;
+    if (record?.attachmentsRequired && event.event === 'error' && event.data?.clientMessageId === record.clientMessageId) {
+      cancelPending(record.clientMessageId);
+      setMessages(previous => {
+        const next = previous.filter(entry => entry.id !== `orch-user-${record.clientMessageId}`);
+        messagesRef.current = next; return next;
+      });
+      return;
+    }
     if (settleOrchestratorSendWatchdog(pendingRef, event)) return;
     const ackClientMessageId = event.event === 'send-ack' && typeof event.data?.clientMessageId === 'string'
       ? event.data.clientMessageId
@@ -236,7 +244,7 @@ export function useDurablePendingSend(options: DurablePendingSendOptions) {
     ) {
       void deliverRecord(record);
     }
-  }, [deliverRecord, messagesRef, pendingRef, repoPath, settleRecord, threadId]);
+  }, [cancelPending, deliverRecord, messagesRef, pendingRef, repoPath, setMessages, settleRecord, threadId]);
 
   const retryPending = useCallback(async (clientMessageId: string) => {
     if (!threadId) return;

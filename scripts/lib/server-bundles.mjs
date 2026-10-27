@@ -1,6 +1,6 @@
 // One build contract for the desktop export, size gate, and packaged-layout tests.
 import { buildSync } from 'esbuild';
-import { mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 export const SERVER_ENTRIES = {
@@ -23,6 +23,27 @@ const ESM_BANNER = [
   'const __filename = __o8_fileURLToPath(import.meta.url);',
   'const __dirname = __o8_dirname(__filename);',
 ].join(' ');
+
+function stageSharedCompiler(root, outDir, metafile) {
+  if (!Object.values(metafile.outputs).some(output =>
+    output.imports.some(item => item.external && item.path === 'typescript'))) return;
+  // The desktop export already traces this runtime for its AST consumers.
+  // Reuse it instead of embedding a second compiler in a lazy server chunk.
+  // Native-only packages receive the same runtime without checkout resolution.
+  const source = join(root, 'node_modules', 'typescript');
+  const destination = join(outDir, 'node_modules', 'typescript');
+  const manifest = join(destination, 'package.json');
+  if (existsSync(manifest) && JSON.parse(readFileSync(manifest, 'utf8')).version
+    !== JSON.parse(readFileSync(join(source, 'package.json'), 'utf8')).version) {
+    throw new Error('Shared compiler runtime does not match the build');
+  }
+  for (const file of ['package.json', 'LICENSE.txt', 'ThirdPartyNoticeText.txt', 'lib/typescript.js']) {
+    const target = join(destination, file);
+    if (existsSync(target)) continue;
+    mkdirSync(dirname(target), { recursive: true });
+    cpSync(join(source, file), target);
+  }
+}
 
 // esbuild can emit a lazy entry even after its importer was tree-shaken.
 // Package the full import closure of every shipped entry, including lazy edges.
@@ -73,7 +94,12 @@ export function bundleServers({ root, outDir }) {
     platform: 'node',
     format: 'esm',
     target: 'node22',
-    alias: { 'server-only': join(root, 'scripts/server-only-stub.js') },
+    alias: {
+      'server-only': join(root, 'scripts/server-only-stub.js'),
+      // The native bridge needs the original request/response classes, without
+      // the CommonJS barrel's unused image, user-agent and rendering APIs.
+      'next/server': join(root, 'scripts/lib/next-server-exports.mjs'),
+    },
     banner: { js: ESM_BANNER },
     metafile: true,
     logLevel: 'warning',
@@ -83,7 +109,7 @@ export function bundleServers({ root, outDir }) {
     ...options,
     entryPoints: entryPoints.filter(entry => !PURE_NODE_ENTRIES.has(entry.out.replace(/-impl$/, ''))),
     splitting: true,
-    external: ['node-pty', 'better-sqlite3', 'bindings'],
+    external: ['node-pty', 'better-sqlite3', 'bindings', 'typescript'],
   });
   // Sharing can hoist an otherwise-unused native import into a common chunk.
   // Keep the dependency-light proxy standalone: it does not run the native-addon
@@ -97,6 +123,7 @@ export function bundleServers({ root, outDir }) {
   }
 
   pruneOrphanOutputs(root, outDir, metafile);
+  stageSharedCompiler(root, outDir, metafile);
 
   for (const label of Object.keys(SERVER_ENTRIES)) {
     // Selection must precede the dynamic import: shared modules may load SQLite.

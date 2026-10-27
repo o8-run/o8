@@ -3,10 +3,10 @@ name: o8 next Linux shell
 on:
   pull_request:
     branches: [main]
-    paths: ['native/o8-next/**', 'scripts/next/**', '.github/workflows/next-linux.yml', '.github/actions/next-linux-setup/**', 'package.json', 'package-lock.json']
+    paths: ['native/o8-next/**', 'scripts/next/**', '.github/actions/next-linux-setup/**', '.github/workflows/next-linux.yml', 'package.json', 'package-lock.json']
   push:
     branches: [main]
-    paths: ['native/o8-next/**', 'scripts/next/**', '.github/workflows/next-linux.yml', '.github/actions/next-linux-setup/**', 'package.json', 'package-lock.json']
+    paths: ['native/o8-next/**', 'scripts/next/**', '.github/actions/next-linux-setup/**', '.github/workflows/next-linux.yml', 'package.json', 'package-lock.json']
 
 permissions:
   contents: read
@@ -28,7 +28,7 @@ jobs:
       - uses: ./.github/actions/next-linux-setup
       - name: Build native release
         run: cargo build --release --locked --manifest-path native/o8-next/Cargo.toml
-      - name: Three fresh fixture hosts, native frames and budgets
+      - name: Warm-up and three fresh fixture hosts, native frames and budgets
         run: |
           export VK_ICD_FILENAMES="$(find /usr/share/vulkan/icd.d -name 'lvp_icd*.json' -print -quit)"
           test -n "$VK_ICD_FILENAMES"

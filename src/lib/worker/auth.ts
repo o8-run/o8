@@ -26,7 +26,7 @@ export function verifyWorkerToken(authHeader: string | null): VerifyOk | VerifyE
   }
 
   const token = authHeader.slice(7).trim();
-  if (token.startsWith('o8ro_')) return { ok: false, status: 403 };
+  if (token.startsWith('o8ro_') || token.startsWith('o8br_')) return { ok: false, status: 403 };
   if (!token) {
     return { ok: false, status: 401 };
   }

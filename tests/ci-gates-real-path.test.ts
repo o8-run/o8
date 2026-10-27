@@ -220,7 +220,7 @@ function selectNext(eventName: string, event: object): string {
 describe('native next CI through persisted fixtures', () => {
   it.each(['native/o8-next/src/main.rs', 'native/o8-next/README.md',
     'native/o8-next/fixtures/state.json', 'scripts/next/dev-server.ts',
-    'crates/o8d/src/main.rs', 'package-lock.json', '.github/workflows/ci.yml',
+    'crates/o8d/src/main.rs', 'package-lock.json', '.cargo/config.toml', 'rust-toolchain.toml', '.github/workflows/ci.yml',
     'scripts/ci/native-changes.mjs'])('selects native tests for %s', file => {
     const before = git('rev-parse', 'HEAD');
     const after = commit(file);
@@ -235,6 +235,9 @@ describe('native next CI through persisted fixtures', () => {
     const before = git('rev-parse', 'HEAD');
     const after = commit('src/unrelated.ts');
     expect(selectNext('push', { before, after })).toBe('changed=false');
+    expect(selectNext('pull_request', { pull_request: { base: { sha: before }, head: { sha: after } } }))
+      .toBe('changed=false');
+    expect(selectNext('merge_group', { merge_group: { base_sha: before, head_sha: after } })).toBe('changed=false');
     const renameBase = commit('native/o8-next/removed.txt');
     git('mv', 'native/o8-next/removed.txt', 'renamed-outside.txt');
     git('commit', '-qm', 'fixture rename outside native');
@@ -250,7 +253,7 @@ describe('native next CI through persisted fixtures', () => {
     const job = workflow.jobs['o8-next-tests'];
     expect(job, 'native tests must have an automatic CI job').toBeDefined();
     expect(job['runs-on']).toBe('ubuntu-24.04');
-    expect(job['timeout-minutes']).toBe(10);
+    expect(job['timeout-minutes']).toBe(20);
     expect(job.if).toBe(workflow.jobs['test-shards'].if);
     const step = job.steps.find((entry: { run?: string }) => entry.run?.includes('cargo test'));
     expect(step.if).toBe("steps.native.outputs.changed == 'true'");
@@ -277,15 +280,23 @@ fn persisted_state() {
     });
     writeFileSync(path.join(crate, 'state'), 'blocked');
     const red = run();
-    expect(red.error).toBeUndefined();
+    expect(red.error, red.stderr + red.stdout).toBeUndefined();
     expect(red.status, red.stderr).toBe(101);
     expect(red.stdout).toContain('persisted_state ... FAILED');
+    const source = path.join(crate, 'src/main.rs');
+    const valid = readFileSync(source, 'utf8');
+    writeFileSync(source, valid + '\nfn required_signature(_: bool) {}\nfn probe() { required_signature(); }\n');
+    const compileRed = run();
+    expect(compileRed.error, compileRed.stderr + compileRed.stdout).toBeUndefined();
+    expect(compileRed.status, compileRed.stderr).toBe(101);
+    expect(compileRed.stderr).toContain('E0061');
+    writeFileSync(source, valid);
     writeFileSync(path.join(crate, 'state'), 'ready');
     const green = run();
-    expect(green.error).toBeUndefined();
+    expect(green.error, green.stderr + green.stdout).toBeUndefined();
     expect(green.status, green.stderr).toBe(0);
     expect(green.stdout).toContain('1 passed; 0 failed');
-    console.log('declared native command: persisted red exit=101, green exit=0');
+    console.log('declared native command: assertion red=101, E0061 red=101, green=0');
   });
 
   it('fails the required aggregate for every unsuccessful native result', () => {

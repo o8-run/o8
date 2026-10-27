@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { OnboardingFeedback } from './onboarding/OnboardingFeedback';
 
 import { PRODUCT_EVENT_DISCLOSURES } from '@/lib/analytics/events';
+import { PRODUCT_TELEMETRY_READY_EVENT } from '@/lib/analytics/startup';
 import { SCRUBBED_CRASH_SAMPLE } from '@/lib/telemetry/consent-sample';
 import { fetchOperatorDefaults } from './settings/operator-defaults-client';
 
@@ -199,10 +200,11 @@ export function TelemetryConsentCard({
         if (!response.ok) throw new Error('Could not load your privacy choices.');
         if (alive) {
           const answered = payload.values?.telemetryConsentAnswered === true;
-          if (embedded && answered) {
-            setCrashReports(typeof payload.values?.crashReportsEnabled === 'boolean' ? payload.values.crashReportsEnabled : null);
-            setProductUsage(typeof payload.values?.productTelemetryEnabled === 'boolean' ? payload.values.productTelemetryEnabled : null);
-          }
+          // Preserve either earlier choice even if the combined card was never
+          // answered. Missing product choice uses the default without inventing
+          // an explicit opt-in; crash sharing still needs its own decision.
+          setCrashReports(answered && typeof payload.values?.crashReportsEnabled === 'boolean' ? payload.values.crashReportsEnabled : null);
+          setProductUsage(typeof payload.values?.productTelemetryEnabled === 'boolean' ? payload.values.productTelemetryEnabled : null);
           setError(null);
           setLoadState(answered && !embedded ? 'hidden' : 'visible');
         }
@@ -224,7 +226,7 @@ export function TelemetryConsentCard({
   </div> : null;
 
   const inverseColor = embedded ? 'var(--t-onboarding-bg)' : 'var(--t-chat-surface-bg)';
-  const canSave = crashReports !== null && productUsage !== null && !saving;
+  const canSave = crashReports !== null && !saving;
   const keepFocusInDialog = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (event.key === 'Escape') {
       event.preventDefault();
@@ -250,7 +252,7 @@ export function TelemetryConsentCard({
     }
   };
   const saveChoices = async () => {
-    if (crashReports === null || productUsage === null || saving) return;
+    if (crashReports === null || saving) return;
     setSaving(true);
     setError(null);
     try {
@@ -269,10 +271,34 @@ export function TelemetryConsentCard({
         throw new Error(typeof payload.error === 'string' ? payload.error : 'Your choices could not be saved.');
       }
       setSavedChoices(JSON.stringify([crashReports, productUsage]));
+      window.dispatchEvent(new Event(PRODUCT_TELEMETRY_READY_EVENT));
       if (embedded) await onContinue?.();
       else setLoadState('hidden');
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : 'Your choices could not be saved.');
+    } finally {
+      setSaving(false);
+    }
+  };
+  const changeProductUsage = async (next: boolean) => {
+    if (saving) return;
+    // A lost response may follow a successful write. Retain the user's choice
+    // so the final save cannot restore default-on after a requested opt-out.
+    setProductUsage(next);
+    setSaving(true);
+    setError(null);
+    try {
+      const response = await request({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ productTelemetryEnabled: next }),
+      });
+      const payload = await response.json().catch(() => ({})) as ConsentResponse;
+      if (!response.ok || payload.values?.productTelemetryEnabled !== next) {
+        throw new Error(typeof payload.error === 'string' ? payload.error : 'Your usage choice could not be saved.');
+      }
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : 'Your usage choice could not be saved.');
     } finally {
       setSaving(false);
     }
@@ -363,7 +389,7 @@ export function TelemetryConsentCard({
               lineHeight: 1.55,
               color: 'var(--t-text-secondary)',
             }}>
-              Both are optional. New installs share neither. Choose each independently; you can change them later in Settings → General → Privacy.
+              Usage analytics are on by default for installs without an earlier choice. Default-on sharing starts after you finish this screen. Turn them off with one click. Crash reports are a separate opt-in. You can change either choice in Settings → General → Privacy.
             </p>
           </div>
         </header>
@@ -373,6 +399,68 @@ export function TelemetryConsentCard({
           gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 390px), 1fr))',
           gap: 16,
         }}>
+          <DisclosureCard>
+            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, marginBottom: 8 }}>
+              <h2 style={{ marginTop: 0, marginBottom: 0, fontSize: 16, fontWeight: 400, letterSpacing: -0.1, color: 'var(--t-text)' }}>
+                Usage analytics
+              </h2>
+              <span style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace', fontSize: 10, color: 'var(--t-text-faint)' }}>
+                ({PRODUCT_EVENT_DISCLOSURES.length} events)
+              </span>
+            </div>
+            <p style={{ marginTop: 0, marginBottom: 12, fontSize: 12.5, fontWeight: 300, lineHeight: 1.5, color: 'var(--t-text-secondary)' }}>
+              Helps us understand which features get used. These are the complete event names and fields. No identity is collected beyond sign-in; the event payload contains no identity fields.
+            </p>
+            <p role="status" style={{ marginTop: 16, marginBottom: 8, fontSize: 12.5, color: 'var(--t-text-secondary)' }}>
+              {error ? 'Check the save status above before continuing.' : productUsage === false ? 'Usage analytics are off.' : 'Usage analytics are on.'}
+            </p>
+            <ChoiceButton label={productUsage === false ? 'Turn on' : 'Turn off'} inverseColor={inverseColor} selected={false} disabled={saving}
+              onPress={() => { void changeProductUsage(productUsage === false); }} />
+            <div style={{ display: 'flex', flexDirection: 'column', borderTop: '1px solid var(--t-divider-subtle)' }}>
+              {PRODUCT_EVENT_DISCLOSURES.map(({ event, fields }) => (
+                <div key={event} style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'minmax(132px, 0.8fr) minmax(0, 1.4fr)',
+                  gap: 12,
+                  paddingTop: 10,
+                  paddingBottom: 10,
+                  borderBottom: '1px solid var(--t-divider-subtle)',
+                }}>
+                  <code style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace', fontSize: 10.5, color: 'var(--t-text)' }}>
+                    {event}
+                  </code>
+                  <span style={{ fontSize: 10.5, fontWeight: 300, lineHeight: 1.4, color: 'var(--t-text-muted)' }}>
+                    {fields}
+                  </span>
+                </div>
+              ))}
+            </div>
+            <div style={{ marginTop: 12, marginBottom: 6, fontSize: 11, color: 'var(--t-text-secondary)' }}>Example payload when a project is added</div>
+            <pre style={{
+              marginTop: 0, marginBottom: 0, paddingTop: 12, paddingBottom: 12, paddingLeft: 12, paddingRight: 12,
+              borderRadius: 10, background: 'var(--t-code-bg)', color: 'var(--t-text-secondary)',
+              fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+              fontSize: 10.5, lineHeight: 1.5, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere',
+            }}>{JSON.stringify({ event: 'repo.added', props: { hasRemote: true, isGitRepo: true } }, null, 2)}</pre>
+            <div style={{
+              marginTop: 12,
+              paddingTop: 12,
+              paddingBottom: 12,
+              paddingLeft: 12,
+              paddingRight: 12,
+              borderRadius: 10,
+              border: '1px solid var(--t-divider-subtle)',
+              background: 'var(--t-code-bg)',
+            }}>
+              <div style={{ marginBottom: 5, fontSize: 10, fontWeight: 400, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--t-text)' }}>
+                Never sent in product usage
+              </div>
+              <div style={{ fontSize: 11, fontWeight: 300, lineHeight: 1.5, color: 'var(--t-text-secondary)' }}>
+                Code, prompts, repo names, file paths, diffs, transcripts, file contents, credentials, user identity, or machine identity.
+              </div>
+            </div>
+          </DisclosureCard>
+
           <DisclosureCard>
             <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, marginBottom: 8 }}>
               <h2 style={{ marginTop: 0, marginBottom: 0, fontSize: 16, fontWeight: 400, letterSpacing: -0.1, color: 'var(--t-text)' }}>
@@ -426,86 +514,25 @@ export function TelemetryConsentCard({
               onChange={setCrashReports}
             />
           </DisclosureCard>
-
-          <DisclosureCard>
-            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, marginBottom: 8 }}>
-              <h2 style={{ marginTop: 0, marginBottom: 0, fontSize: 16, fontWeight: 400, letterSpacing: -0.1, color: 'var(--t-text)' }}>
-                Product usage
-              </h2>
-              <span style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace', fontSize: 10, color: 'var(--t-text-faint)' }}>
-                (six events)
-              </span>
-            </div>
-            <p style={{ marginTop: 0, marginBottom: 12, fontSize: 12.5, fontWeight: 300, lineHeight: 1.5, color: 'var(--t-text-secondary)' }}>
-              Helps us understand which features get used. Sends six basic events, such as opening o8 or adding a project. Code, prompts, project names, and identities are never included.
-            </p>
-            <details style={{ fontSize: 12, color: 'var(--t-text-secondary)' }}>
-              <summary style={{ cursor: 'pointer', marginBottom: 8 }}>See exactly what is shared</summary>
-            <div style={{ display: 'flex', flexDirection: 'column', borderTop: '1px solid var(--t-divider-subtle)' }}>
-              {PRODUCT_EVENT_DISCLOSURES.map(({ event, fields }) => (
-                <div key={event} style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'minmax(132px, 0.8fr) minmax(0, 1.4fr)',
-                  gap: 12,
-                  paddingTop: 10,
-                  paddingBottom: 10,
-                  borderBottom: '1px solid var(--t-divider-subtle)',
-                }}>
-                  <code style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace', fontSize: 10.5, color: 'var(--t-text)' }}>
-                    {event}
-                  </code>
-                  <span style={{ fontSize: 10.5, fontWeight: 300, lineHeight: 1.4, color: 'var(--t-text-muted)' }}>
-                    {fields}
-                  </span>
-                </div>
-              ))}
-            </div>
-            <div style={{
-              marginTop: 12,
-              paddingTop: 12,
-              paddingBottom: 12,
-              paddingLeft: 12,
-              paddingRight: 12,
-              borderRadius: 10,
-              border: '1px solid var(--t-divider-subtle)',
-              background: 'var(--t-code-bg)',
-            }}>
-              <div style={{ marginBottom: 5, fontSize: 10, fontWeight: 400, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--t-text)' }}>
-                Never sent in product usage
-              </div>
-              <div style={{ fontSize: 11, fontWeight: 300, lineHeight: 1.5, color: 'var(--t-text-secondary)' }}>
-                Code, prompts, repo names, paths, diffs, transcripts, file contents, credentials, user identity, or machine identity.
-              </div>
-            </div>
-            </details>
-            <DecisionButtons
-              value={productUsage}
-              inverseColor={inverseColor}
-              shareLabel="Share product usage"
-              declineLabel="Keep product usage off"
-              disabled={saving}
-              onChange={setProductUsage}
-            />
-          </DisclosureCard>
         </div>
-
         {embedded && choicesSaved ? <div style={{ marginTop: 16 }}><OnboardingFeedback title="Privacy choices saved">You can change either choice later in Settings.</OnboardingFeedback></div> : null}
         <footer style={{
-          position: embedded ? 'sticky' : undefined,
-          bottom: embedded ? 0 : undefined,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          flexWrap: 'wrap',
           gap: 16,
-          marginTop: 20,
-          paddingTop: 20,
-          paddingBottom: embedded ? 12 : undefined,
+          position: embedded ? 'sticky' : undefined,
+          bottom: embedded ? 0 : undefined,
+          zIndex: 1,
           background: embedded ? 'var(--t-onboarding-dock-bg, var(--t-onboarding-bg))' : undefined,
-          borderTop: '1px solid var(--t-divider-subtle)',
+          flexWrap: 'wrap',
+          marginTop: 20,
+          paddingTop: 8,
+          paddingBottom: 12,
+          borderBottom: '1px solid var(--t-divider-subtle)',
         }}>
           <div style={{ minHeight: 20, fontSize: 11.5, fontWeight: 300, lineHeight: 1.45, color: error ? 'var(--t-danger)' : 'var(--t-text-muted)' }} role={error ? 'alert' : undefined}>
-            {error ?? (embedded && choicesSaved ? 'Continue when you’re ready.' : canSave ? 'Both choices are ready to save.' : 'Choose one option in each card to continue.')}
+            {error ?? (embedded && choicesSaved ? 'Continue when you’re ready.' : canSave ? 'Your privacy choices are ready to save.' : 'Choose whether to share crash reports to continue.')}
           </div>
           <button
             type="button"
@@ -530,9 +557,10 @@ export function TelemetryConsentCard({
               transition: 'background 150ms cubic-bezier(0.22, 1, 0.36, 1), color 150ms cubic-bezier(0.22, 1, 0.36, 1)',
             }}
           >
-            {saving ? choicesSaved && embedded ? 'Opening workspace…' : 'Saving choices…' : embedded && choicesSaved ? 'Continue' : 'Save both choices'}
+            {saving ? choicesSaved && embedded ? 'Opening workspace…' : 'Saving choices…' : embedded && choicesSaved ? 'Continue' : 'Save privacy choices'}
           </button>
         </footer>
+
       </div>
     </div>
   );

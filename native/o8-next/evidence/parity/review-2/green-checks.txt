@@ -1,0 +1,51 @@
+Required completion gates. All commands exited 0; raw diagnostics remain local.
+
+cargo test --locked --manifest-path native/o8-next/Cargo.toml -- --test-threads=1:
+test result: ok. 186 passed; 0 failed; 6 ignored; 0 measured; 0 filtered out; finished in 616.99s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+clippy-green:
+    Finished `dev` profile [unoptimized] target(s) in 4.70s
+
+green-cli:
+ Test Files  3 passed (3)
+      Tests  21 passed (21)
+
+green-preflight-final:
+ Test Files  2 passed (2)
+      Tests  9 passed (9)
+
+gpui-final:
+test shell::fake::parity_tests::parity_capture_real_shell ... ok
+test shell::fake::parity_tests::parity_native_error_receipt_follows_real_surface_error ... ok
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 190 filtered out; finished in 5.64s
+
+retained-checks:
+ Test Files  2 passed (2)
+      Tests  26 passed (26)
+
+capture-final:
+30 captures; 0 crashes; visual differences do not gate
+
+workers-fixed:
+2 captures; 0 crashes; visual differences do not gate
+
+npm-test:
+ Test Files  1247 passed | 3 skipped (1250)
+      Tests  9111 passed | 5 skipped (9116)
+
+classify:
+[test-classification] 1242 hermetic, 928 resource-owning
+
+rule-check-staged:
+[rule-check] OK — scanned 2 file(s), zero violations vs origin/main
+
+NODE_OPTIONS=--max-old-space-size=8192 npx tsc --noEmit: exit 0
+npm run typecheck:fast: exit 0
+Touched-file ESLint: exit 0
+Touched Rust formatting: exit 0

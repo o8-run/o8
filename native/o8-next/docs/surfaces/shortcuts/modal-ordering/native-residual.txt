@@ -1,0 +1,12 @@
+test result: FAILED. 1 passed; 5 failed; 0 ignored; 0 measured; 232 filtered out; finished in 22.09s
+
+failures:
+    shell::activity::tests::activity_empty_local_auth_and_scoped_retention
+    shell::issues::tests::review_tests::round1_symlink_worker_survives_real_refresh_and_send
+    shell::tests::glass_and_plain_open_through_the_production_shell
+    shell::tests::look::placement_shell_tabs_use_compact_rows
+    shell::tests::look::shell_chrome_fifteen_workspaces_keeps_one_switcher
+
+test result: FAILED. 1 passed; 5 failed; 0 ignored; 0 measured; 232 filtered out; finished in 22.09s
+
+error: test failed, to rerun pass `--bin o8-next`

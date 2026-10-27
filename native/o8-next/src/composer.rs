@@ -4,15 +4,19 @@ use gpui::{prelude::*, *};
 use std::ops::Range;
 use unicode_segmentation::UnicodeSegmentation;
 
+pub(crate) mod controls;
+
 #[derive(Clone)]
 struct Snapshot {
     text: String,
     selection: Range<usize>,
+    anchor: usize,
 }
 pub struct Submit(pub bool);
 impl EventEmitter<Submit> for Composer {}
 pub struct Composer {
     pub focus: FocusHandle,
+    pub context: &'static str,
     pub text: String,
     selection: Range<usize>,
     anchor: usize,
@@ -27,11 +31,16 @@ pub struct Composer {
     height: Pixels,
     scroll: ScrollHandle,
     reveal_cursor: bool,
+    typing: Option<std::time::Instant>,
+    pub(crate) placeholder: String,
+    pub(crate) framed: bool,
+    pub(crate) controls: controls::State,
 }
 impl Composer {
     pub fn new(cx: &mut Context<Self>) -> Self {
         Self {
             focus: cx.focus_handle(),
+            context: "TextInput",
             text: String::new(),
             selection: 0..0,
             anchor: 0,
@@ -43,9 +52,13 @@ impl Composer {
             selecting: false,
             revision: 0,
             painted: 0,
-            height: px(20.),
+            height: px(crate::theme::TYPE.body_line),
             scroll: ScrollHandle::new(),
             reveal_cursor: true,
+            typing: None,
+            placeholder: String::new(),
+            framed: true,
+            controls: controls::State::default(),
         }
     }
     pub fn composing(&self) -> bool {
@@ -55,17 +68,20 @@ impl Composer {
         Snapshot {
             text: self.text.clone(),
             selection: self.selection.clone(),
+            anchor: self.anchor,
         }
     }
     fn restore(&mut self, snapshot: Snapshot, cx: &mut Context<Self>) {
         self.text = snapshot.text;
         self.selection = snapshot.selection;
-        self.anchor = self.selection.start;
+        self.anchor = snapshot.anchor;
         self.marked = None;
         self.composition = None;
+        self.typing = None;
         self.changed(cx);
     }
     pub fn clear(&mut self, cx: &mut Context<Self>) {
+        self.typing = None;
         self.text.clear();
         self.selection = 0..0;
         self.anchor = 0;
@@ -76,6 +92,7 @@ impl Composer {
         self.changed(cx);
     }
     pub fn set_text(&mut self, text: &str, cx: &mut Context<Self>) {
+        self.typing = None;
         self.undo.push(self.snapshot());
         self.redo.clear();
         self.text = text.to_owned();
@@ -133,6 +150,20 @@ impl Composer {
             .map(|(i, _)| i)
             .unwrap_or(0)
     }
+    fn previous_word(&self, cursor: usize) -> usize {
+        self.text[..cursor]
+            .unicode_word_indices()
+            .next_back()
+            .map(|(i, _)| i)
+            .unwrap_or(0)
+    }
+    fn next_word(&self, cursor: usize) -> usize {
+        self.text[cursor..]
+            .unicode_word_indices()
+            .next()
+            .map(|(i, word)| cursor + i + word.len())
+            .unwrap_or(self.text.len())
+    }
     fn next(&self, cursor: usize) -> usize {
         cursor
             + self.text[cursor..]
@@ -143,11 +174,15 @@ impl Composer {
     }
     fn index_at(&self, point: Point<Pixels>) -> usize {
         for (offset, line, origin) in &self.layout {
-            let height = px(20.) * line.wrap_boundaries.len().saturating_add(1) as f32;
+            let height = px(crate::theme::TYPE.body_line)
+                * line.wrap_boundaries.len().saturating_add(1) as f32;
             if point.y < origin.y + height {
                 return (offset
                     + line
-                        .closest_index_for_position(point - *origin, px(20.))
+                        .closest_index_for_position(
+                            point - *origin,
+                            px(crate::theme::TYPE.body_line),
+                        )
                         .unwrap_or_else(|i| i))
                 .min(offset + line.len())
                 .min(self.text.len());
@@ -156,14 +191,24 @@ impl Composer {
         self.text.len()
     }
     fn key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        let key = &event.keystroke;
+        self.edit_key(&event.keystroke, window, cx);
+    }
+    fn edit_key(&mut self, key: &Keystroke, window: &mut Window, cx: &mut Context<Self>) {
         // IME owns confirmation, arrows and deletion while a marked range exists.
         if self.composing() {
             cx.stop_propagation();
             return;
         }
         let command = key.modifiers.control || key.modifiers.platform;
+        if command || key.key.chars().count() != 1 {
+            self.typing = None;
+        }
         let mac_command = cfg!(target_os = "macos") && key.modifiers.platform;
+        let word = if cfg!(target_os = "macos") {
+            key.modifiers.alt
+        } else {
+            key.modifiers.control
+        };
         let cursor = self.cursor();
         let line_start = self.text[..cursor].rfind('\n').map(|i| i + 1).unwrap_or(0);
         let line_end = self.text[cursor..]
@@ -180,6 +225,10 @@ impl Composer {
                 self.changed(cx);
             }
             "c" | "x" if command => {
+                if self.selection.is_empty() {
+                    cx.stop_propagation();
+                    return;
+                }
                 cx.write_to_clipboard(ClipboardItem::new_string(
                     self.text[self.selection.clone()].into(),
                 ));
@@ -197,8 +246,8 @@ impl Composer {
                     );
                 }
             }
-            "z" if command => {
-                let redo = key.modifiers.shift;
+            "z" | "y" if command => {
+                let redo = key.modifiers.shift || key.key == "y";
                 let snapshot = if redo {
                     self.redo.pop()
                 } else {
@@ -217,6 +266,8 @@ impl Composer {
             "left" => self.move_to(
                 if mac_command {
                     line_start
+                } else if word {
+                    self.previous_word(cursor)
                 } else if !key.modifiers.shift && !self.selection.is_empty() {
                     self.selection.start
                 } else {
@@ -228,6 +279,8 @@ impl Composer {
             "right" => self.move_to(
                 if mac_command {
                     line_end
+                } else if word {
+                    self.next_word(cursor)
                 } else if !key.modifiers.shift && !self.selection.is_empty() {
                     self.selection.end
                 } else {
@@ -244,7 +297,12 @@ impl Composer {
             "up" | "down" => {
                 let position = self.layout.iter().find_map(|(offset, line, origin)| {
                     (cursor >= *offset && cursor <= offset + line.len())
-                        .then(|| line.position_for_index(cursor - offset, px(20.)))
+                        .then(|| {
+                            line.position_for_index(
+                                cursor - offset,
+                                px(crate::theme::TYPE.body_line),
+                            )
+                        })
                         .flatten()
                         .map(|p| *origin + p)
                 });
@@ -270,12 +328,16 @@ impl Composer {
                     self.selection = if key.key == "backspace" {
                         (if mac_command {
                             line_start
+                        } else if word {
+                            self.previous_word(cursor)
                         } else {
                             self.previous(cursor)
                         })..cursor
                     } else {
                         cursor..(if mac_command {
                             line_end
+                        } else if word {
+                            self.next_word(cursor)
                         } else {
                             self.next(cursor)
                         })
@@ -335,8 +397,17 @@ impl EntityInputHandler for Composer {
             .map(|r| self.range(r))
             .or(self.marked.clone())
             .unwrap_or(self.selection.clone());
-        let snapshot = self.composition.take().unwrap_or_else(|| self.snapshot());
-        self.undo.push(snapshot);
+        let typing = self.marked.is_none() && text.chars().count() == 1 && text != "\n";
+        let coalesce = range.is_empty()
+            && typing
+            && self
+                .typing
+                .is_some_and(|last| last.elapsed().as_secs_f32() < 1.);
+        if !coalesce {
+            let snapshot = self.composition.take().unwrap_or_else(|| self.snapshot());
+            self.undo.push(snapshot);
+        }
+        self.typing = typing.then(std::time::Instant::now);
         self.redo.clear();
         self.replace(range, text);
         self.marked = None;
@@ -353,6 +424,7 @@ impl EntityInputHandler for Composer {
         if self.composition.is_none() {
             self.composition = Some(self.snapshot());
         }
+        self.typing = None;
         let range = range
             .map(|r| self.range(r))
             .or(self.marked.clone())
@@ -374,12 +446,32 @@ impl EntityInputHandler for Composer {
         _: &mut Window,
         _: &mut Context<Self>,
     ) -> Option<Bounds<Pixels>> {
-        let index = self.range(range).start;
+        let range = self.range(range);
+        let index = range.start;
         self.layout.iter().find_map(|(offset, line, origin)| {
-            (index >= *offset && index <= offset + line.len())
-                .then(|| line.position_for_index(index - offset, px(20.)))
-                .flatten()
-                .map(|position| Bounds::new(*origin + position, size(px(1.), px(20.))))
+            if index < *offset || index > offset + line.len() {
+                return None;
+            }
+            let start =
+                line.position_for_index(index - offset, px(crate::theme::TYPE.body_line))?;
+            let end = line.position_for_index(
+                range.end.min(offset + line.len()) - offset,
+                px(crate::theme::TYPE.body_line),
+            )?;
+            // The platform asks for the first visual line's rectangle. A range
+            // can run in either direction after shaping, or cross a soft wrap.
+            let end_x = if end.y == start.y {
+                end.x
+            } else {
+                line.wrap_width.unwrap_or(line.unwrapped_layout.width)
+            };
+            Some(Bounds::new(
+                *origin + point(start.x.min(end_x), start.y),
+                size(
+                    (end_x - start.x).abs().max(px(1.)),
+                    px(crate::theme::TYPE.body_line),
+                ),
+            ))
         })
     }
     fn character_index_for_point(
@@ -392,33 +484,70 @@ impl EntityInputHandler for Composer {
     }
 }
 impl Render for Composer {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if !self.focus.is_focused(window) {
+            self.selecting = false;
+            self.typing = None;
+        }
         let input = cx.entity();
         let height = self.height;
         div()
             .id("composer-input")
             .debug_selector(|| "composer-input".into())
             .track_focus(&self.focus)
+            .key_context(self.context)
+            .tab_stop(true)
             .cursor(CursorStyle::IBeam)
-            .max_h(px(176.))
+            .max_h(px(if self.framed { 176. } else { 52. }))
             .overflow_y_scroll()
             .track_scroll(&self.scroll)
-            .border_1()
+            .when(self.framed, |d| d.border_1())
             .border_color(theme().border)
-            .rounded(px(8.))
+            .rounded(px(crate::theme::GEOMETRY.row_radius))
             .p(px(8.))
+            .when(!self.framed, |d| {
+                d.min_h(px(52.)).pt(px(11.)).px(px(14.)).pb(px(4.))
+            })
             .on_key_down(cx.listener(Self::key))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, event: &MouseDownEvent, window, cx| {
                     this.focus.focus(window);
                     this.selecting = true;
-                    this.move_to(this.index_at(event.position), event.modifiers.shift, cx);
+                    this.typing = None;
+                    let cursor = this.index_at(event.position);
+                    let range = match event.click_count {
+                        2 => this
+                            .text
+                            .split_word_bound_indices()
+                            .find(|(i, word)| *i <= cursor && cursor < i + word.len())
+                            .map(|(i, word)| i..i + word.len()),
+                        3.. => Some(
+                            this.text[..cursor].rfind('\n').map(|i| i + 1).unwrap_or(0)
+                                ..this.text[cursor..]
+                                    .find('\n')
+                                    .map(|i| cursor + i + 1)
+                                    .unwrap_or(this.text.len()),
+                        ),
+                        _ => None,
+                    };
+                    if let Some(range) = range {
+                        this.anchor = range.start;
+                        this.selection = range;
+                        this.changed(cx);
+                    } else {
+                        this.move_to(cursor, event.modifiers.shift, cx);
+                    }
                 }),
             )
-            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _, cx| {
-                if this.selecting {
+            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
+                if this.selecting
+                    && this.focus.is_focused(window)
+                    && event.pressed_button == Some(MouseButton::Left)
+                {
                     this.move_to(this.index_at(event.position), true, cx);
+                } else {
+                    this.selecting = false;
                 }
             }))
             .on_mouse_up(
@@ -433,7 +562,7 @@ impl Render for Composer {
                 canvas(
                     |_, _, _| (),
                     move |bounds, _, window, cx| {
-                        let (text, marked, selection, cursor, focus) = {
+                        let (text, marked, selection, cursor, focus, placeholder) = {
                             let i = input.read(cx);
                             (
                                 i.text.clone(),
@@ -441,6 +570,7 @@ impl Render for Composer {
                                 i.selection.clone(),
                                 i.cursor(),
                                 i.focus.clone(),
+                                i.placeholder.clone(),
                             )
                         };
                         window.handle_input(
@@ -453,58 +583,83 @@ impl Render for Composer {
                         let mut y = bounds.top();
                         let mut layouts = vec![];
                         // Hard lines retain their byte offsets; wrapped positions stay native.
-                        for part in text.split('\n') {
+                        let display_text = if text.is_empty() {
+                            placeholder.as_str()
+                        } else {
+                            text.as_str()
+                        };
+                        for part in display_text.split('\n') {
                             let display: SharedString = if part.is_empty() {
                                 " ".into()
                             } else {
                                 part.to_owned().into()
                             };
-                            let run = TextRun {
-                                len: display.len(),
-                                font: style.font(),
-                                color: style.color,
-                                background_color: None,
-                                underline: None,
-                                strikethrough: None,
-                            };
+                            // Decorations belong to shaped runs. Looking up
+                            // every selected character's wrapped position is
+                            // quadratic for long single-line pastes and loses
+                            // the visual direction of right-to-left clusters.
+                            let mut boundaries = vec![0, display.len()];
+                            for range in [Some(&selection), marked.as_ref()].into_iter().flatten() {
+                                for endpoint in [range.start, range.end] {
+                                    if endpoint > offset && endpoint < offset + part.len() {
+                                        boundaries.push(endpoint - offset);
+                                    }
+                                }
+                            }
+                            boundaries.sort_unstable();
+                            boundaries.dedup();
+                            let runs: Vec<_> = boundaries
+                                .windows(2)
+                                .map(|span| {
+                                    let index = offset + span[0];
+                                    TextRun {
+                                        len: span[1] - span[0],
+                                        font: style.font(),
+                                        color: if text.is_empty() {
+                                            theme().text_muted.into()
+                                        } else {
+                                            style.color
+                                        },
+                                        background_color: (!text.is_empty()
+                                            && selection.contains(&index))
+                                        .then(|| theme().selection.into()),
+                                        underline: marked
+                                            .as_ref()
+                                            .is_some_and(|r| r.contains(&index))
+                                            .then_some(UnderlineStyle {
+                                                thickness: px(1.),
+                                                color: None,
+                                                wavy: false,
+                                            }),
+                                        strikethrough: None,
+                                    }
+                                })
+                                .collect();
                             let lines = window
                                 .text_system()
-                                .shape_text(display, px(13.), &[run], Some(bounds.size.width), None)
+                                .shape_text(
+                                    display,
+                                    px(crate::theme::TYPE.body),
+                                    &runs,
+                                    Some(bounds.size.width),
+                                    None,
+                                )
                                 .expect("shape input");
                             for line in lines {
                                 let origin = point(bounds.left(), y);
                                 let end = offset + part.len();
-                                for index in part.char_indices().map(|(i, _)| offset + i) {
-                                    if selection.contains(&index)
-                                        || marked.as_ref().is_some_and(|r| r.contains(&index))
-                                    {
-                                        if let Some(position) =
-                                            line.position_for_index(index - offset, px(20.))
-                                        {
-                                            let next = text[index..]
-                                                .chars()
-                                                .next()
-                                                .map(char::len_utf8)
-                                                .unwrap_or(0);
-                                            let right = line
-                                                .position_for_index(index + next - offset, px(20.))
-                                                .unwrap_or(position + point(px(8.), px(0.)));
-                                            window.paint_quad(fill(
-                                                Bounds::new(
-                                                    origin + position,
-                                                    size(
-                                                        (right.x - position.x).max(px(2.)),
-                                                        px(20.),
-                                                    ),
-                                                ),
-                                                theme().selection,
-                                            ));
-                                        }
-                                    }
-                                }
+                                line.paint_background(
+                                    origin,
+                                    px(crate::theme::TYPE.body_line),
+                                    TextAlign::Left,
+                                    Some(bounds),
+                                    window,
+                                    cx,
+                                )
+                                .expect("paint selection");
                                 line.paint(
                                     origin,
-                                    px(20.),
+                                    px(crate::theme::TYPE.body_line),
                                     TextAlign::Left,
                                     Some(bounds),
                                     window,
@@ -512,22 +667,27 @@ impl Render for Composer {
                                 )
                                 .expect("paint input");
                                 if focus.is_focused(window) && cursor >= offset && cursor <= end {
-                                    if let Some(position) =
-                                        line.position_for_index(cursor - offset, px(20.))
-                                    {
+                                    if let Some(position) = line.position_for_index(
+                                        cursor - offset,
+                                        px(crate::theme::TYPE.body_line),
+                                    ) {
                                         window.paint_quad(fill(
-                                            Bounds::new(origin + position, size(px(1.), px(20.))),
+                                            Bounds::new(
+                                                origin + position,
+                                                size(px(1.), px(crate::theme::TYPE.body_line)),
+                                            ),
                                             theme().accent,
                                         ));
                                     }
                                 }
-                                y += px(20.) * (line.wrap_boundaries.len() + 1) as f32;
+                                y += px(crate::theme::TYPE.body_line)
+                                    * (line.wrap_boundaries.len() + 1) as f32;
                                 layouts.push((offset, line, origin));
                             }
                             offset += part.len() + 1;
                         }
                         input.update(cx, |input, cx| {
-                            let height = (y - bounds.top()).max(px(20.));
+                            let height = (y - bounds.top()).max(px(crate::theme::TYPE.body_line));
                             if input.height != height {
                                 input.height = height;
                                 cx.notify();
@@ -537,7 +697,10 @@ impl Render for Composer {
                                     layouts.iter().find_map(|(offset, line, origin)| {
                                         (cursor >= *offset && cursor <= offset + line.len())
                                             .then(|| {
-                                                line.position_for_index(cursor - offset, px(20.))
+                                                line.position_for_index(
+                                                    cursor - offset,
+                                                    px(crate::theme::TYPE.body_line),
+                                                )
                                             })
                                             .flatten()
                                             .map(|p| *origin + p)
@@ -547,12 +710,14 @@ impl Render for Composer {
                                     let cursor_y = position.y - bounds.top();
                                     let top = -scroll.y;
                                     // The viewport excludes the input's padding and border.
-                                    let visible = height.min(px(158.));
+                                    let visible = (input.scroll.bounds().size.height
+                                        - px(if input.framed { 18. } else { 15. }))
+                                    .max(px(20.));
                                     let bottom = top + visible;
                                     let next = if cursor_y < top {
                                         -cursor_y
-                                    } else if cursor_y + px(20.) > bottom {
-                                        visible - px(20.) - cursor_y
+                                    } else if cursor_y + px(crate::theme::TYPE.body_line) > bottom {
+                                        visible - px(crate::theme::TYPE.body_line) - cursor_y
                                     } else {
                                         scroll.y
                                     };
@@ -575,3 +740,7 @@ impl Render for Composer {
 #[cfg(test)]
 #[path = "input_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "composer/native_tests.rs"]
+mod native_tests;

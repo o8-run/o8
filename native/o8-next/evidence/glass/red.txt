@@ -1,0 +1,34 @@
+running 1 test
+test shell::tests::glass_and_plain_open_through_the_production_shell ... 
+thread 'shell::tests::glass_and_plain_open_through_the_production_shell' (26325) panicked at src/shell_tests.rs:14:9:
+glass shell probe:
+
+running 1 test
+test shell::tests::glass_shell_probe ... FAILED
+
+failures:
+
+failures:
+    shell::tests::glass_shell_probe
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 134 filtered out; finished in 1.72s
+
+
+
+thread 'shell::tests::glass_shell_probe' (26327) panicked at src/shell_tests.rs:27:5:
+assertion `left == right` failed: requested glass must leave the native backdrop visible
+  left: 1.0
+ right: 0.0
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    shell::tests::glass_and_plain_open_through_the_production_shell
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 134 filtered out; finished in 1.73s
+
+error: test failed, to rerun pass `--bin o8-next`

@@ -1,0 +1,9 @@
+note: to see what the problems were, use the option `--future-incompat-report`, or run `cargo report future-incompatibilities --id 1`
+     Running unittests src/main.rs (/workspace/o8/work/glass-target/debug/deps/o8_next-f96529fb57d58ecd)
+
+running 3 tests
+test theme_tests::every_theme_token_resolves_for_both_appearances_and_matches_desktop_css ... ok
+test theme_tests::glass_tokens_match_the_desktop_overrides_and_window_veil ... ok
+test theme_tests::native_styles_use_theme_tokens ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 155 filtered out; finished in 0.43s

@@ -1,0 +1,37 @@
+name: Local CI parity on macOS
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-ci-macos-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Local CI parity (macOS, ${{ matrix.scenario }})
+    runs-on: macos-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario: [clean, integration, dependency, bundle]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm install -g "$(node -p 'require("./package.json").packageManager')"
+      - run: npm ci --prefer-offline
+      - name: Install local verification prerequisites
+        run: brew install ripgrep cargo-audit
+      - name: Verify clean checkout or injected failure
+        env:
+          SCENARIO: ${{ matrix.scenario }}
+        run: node scripts/ci/verify-ci-proof.mjs "$SCENARIO"

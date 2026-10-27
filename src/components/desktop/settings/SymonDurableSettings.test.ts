@@ -178,22 +178,34 @@ it.each([null, { id: 'x', role: 'assistant', text: null }, { id: 'x', role: 'too
   expect(container.textContent).toContain('This conversation is unavailable');
 });
 
-it.each(['linux', 'windows', 'unsupported'])('blocks native enable on %s and keeps disable available', async (platform) => {
+it.each(['linux', 'windows', 'unsupported'])('hides the native receiver on %s while it is off, but still reports its state', async (platform) => {
   if (platform !== 'unsupported') (window as unknown as { __O8_HOST_PLATFORM__: string }).__O8_HOST_PLATFORM__ = platform;
-  let enabled = false;
+  const notify = vi.fn();
+  const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, enabled: false, handles: [], state: platform === 'unsupported' ? 'unsupported' : 'off' }));
+  vi.stubGlobal('fetch', fetchMock);
+  await act(async () => { root.render(createElement(SymonMessagesReceiverSection, { onEnabledChange: notify })); });
+  expect(notify).toHaveBeenLastCalledWith(false);
+  expect(container.textContent).not.toContain('Native Messages receiver');
+  expect(container.textContent).not.toContain('Messages are unavailable');
+  expect(container.querySelector('textarea')).toBeNull();
+  expect(fetchMock.mock.calls.every((call) => call[1]?.method !== 'POST')).toBe(true);
+});
+
+it.each(['linux', 'windows', 'unsupported'])('keeps a saved receiver on %s visible until it is disabled, and blocks enable', async (platform) => {
+  if (platform !== 'unsupported') (window as unknown as { __O8_HOST_PLATFORM__: string }).__O8_HOST_PLATFORM__ = platform;
+  let enabled = true;
   const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
     if (init?.method === 'POST') enabled = JSON.parse(String(init.body)).enabled;
     return Response.json({ ok: true, enabled, handles: ['+15555550100'], state: platform === 'unsupported' ? 'unsupported' : 'off' });
   });
   vi.stubGlobal('fetch', fetchMock);
   await act(async () => { root.render(createElement(SymonMessagesReceiverSection)); });
-  expect([...container.querySelectorAll('button')].find((button) => button.textContent === 'Enable receiver')?.disabled).toBe(true);
-  expect(fetchMock.mock.calls.every((call) => call[1]?.method !== 'POST')).toBe(true);
-  enabled = true;
-  await click('Refresh status');
+  expect(container.textContent).toContain('Native Messages replies require macOS. You can still disable a saved receiver.');
   expect([...container.querySelectorAll('button')].find((button) => button.textContent === 'Disable receiver')?.disabled).toBe(false);
   await click('Disable receiver');
   expect(JSON.parse(String(fetchMock.mock.calls.at(-1)?.[1]?.body))).toEqual({ enabled: false, handles: ['+15555550100'] });
+  expect(container.textContent).not.toContain('Native Messages receiver');
+  expect([...container.querySelectorAll('button')].some((button) => button.textContent === 'Enable receiver')).toBe(false);
 });
 
 it.each(['native', 'bridge'])('shares a pending write lock and reconciles both receivers after a %s write', async (writer) => {
@@ -304,4 +316,36 @@ it('shows unavailable and empty history, and aborts pending history reads when c
   await click('Close history');
   expect((pendingSignal as AbortSignal | null)?.aborted).toBe(true);
   expect(container.textContent).not.toContain('Reading saved history');
+});
+
+it.each(['linux', 'windows', 'macos', 'browser'])('keeps receiver errors and retry reachable on %s without remounting Settings', async platform => {
+  if (platform !== 'browser') (window as unknown as { __O8_HOST_PLATFORM__: string }).__O8_HOST_PLATFORM__ = platform;
+  let nativeReads = 0;
+  let finishRetry!: (response: Response) => void;
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+    if (String(input).endsWith('/messages-receiver')) {
+      nativeReads += 1;
+      return nativeReads === 1 ? Response.json({ ok: false }, { status: 503 })
+        : new Promise<Response>(resolve => { finishRetry = resolve; });
+    }
+    if (String(input).endsWith('/imessage-access')) return Response.json({ ok: true, configured: true, enabled: true, groups: [] });
+    return Response.json({ ok: true, enabled: false, connected: false, locked: false });
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  await act(async () => { root.render(createElement(ConnectionsTab)); });
+  const bridgeSwitch = () => [...container.querySelectorAll<HTMLButtonElement>('[role="switch"]')]
+    .find(button => button.closest('section')?.textContent?.includes('iMessage bridge access'))!;
+  expect(bridgeSwitch().disabled).toBe(true);
+  expect(container.textContent).toContain('Native Messages receiver status is unavailable');
+  const refresh = [...container.querySelectorAll('button')].find(button => button.textContent === 'Refresh status');
+  expect(refresh, 'a failed read needs a reachable retry').toBeDefined();
+  await act(async () => { refresh!.click(); });
+  expect(container.contains(refresh!)).toBe(true);
+  expect(refresh!.disabled).toBe(true);
+  expect(bridgeSwitch().disabled).toBe(true);
+  await act(async () => { finishRetry(Response.json({ ok: true, enabled: false, handles: [], state: 'off' })); });
+  expect(nativeReads).toBe(2);
+  expect(bridgeSwitch().disabled).toBe(false);
+  expect(container.textContent).not.toContain('Native Messages receiver status is unavailable');
+  expect(fetchMock.mock.calls.every(call => call[1]?.method !== 'POST')).toBe(true);
 });

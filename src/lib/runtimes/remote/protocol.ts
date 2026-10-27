@@ -1,3 +1,5 @@
+import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
+
 export interface LaunchRequest {
   runId: string;
   laneId?: string;
@@ -6,6 +8,9 @@ export interface LaunchRequest {
   remoteBranch: string;
   packetPrompt: string;
   modelHint?: string;
+  /** Customer transport supports omitted/adaptive defaults only. Concrete pins
+   * require a verified remote effort transport and are refused before enqueue. */
+  effort?: ThinkingEffort;
 }
 
 export interface LaunchResponse {

@@ -3,11 +3,11 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 
-export function seedShellWorkspace(dataDir: string, root: string) {
-  const repo = join(root, 'second-repo');
+export function seedShellWorkspace(dataDir: string, root: string, index = 1) {
+  const repo = join(root, index === 1 ? 'second-repo' : `workspace-${index}`);
   mkdirSync(repo);
   execFileSync('git', ['init', '-q', repo]);
-  const seed = { id: 'thoughts-shell-second', title: 'Second workspace session', messages: [
+  const seed = { id: index === 1 ? 'thoughts-shell-second' : `thoughts-shell-${index}`, title: index === 1 ? 'Second workspace session' : `Workspace ${index}`, messages: [
     { id: 'shell-second-ready', role: 'assistant', content: 'Second workspace ready', timestamp: 1790812800000 },
   ] };
   writeFileSync(join(dataDir, 'chat-history', `${seed.id}.json`), JSON.stringify({ ...seed,

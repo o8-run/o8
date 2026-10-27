@@ -1,4 +1,5 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { viewerJson } from '@/lib/viewers/response';
+import { NextRequest } from 'next/server';
 import { resolveRequestPrincipalContext, workerPacketRefusal } from '@/lib/auth/principal';
 import { previewPacketMerge } from '@/lib/lane/preview-merge';
 import { branchUnresolvedPayload, LaneBranchUnresolvedError } from '@/lib/lane/review-target';
@@ -34,27 +35,27 @@ export async function GET(request: NextRequest) {
   const packetId = request.nextUrl.searchParams.get('packetId')?.trim();
   const ownershipRefusal = workerPacketRefusal(principal, packetId);
   if (ownershipRefusal) {
-    return NextResponse.json({ ok: false, error: ownershipRefusal }, { status: 403 });
+    return viewerJson({ ok: false, error: ownershipRefusal }, { status: 403 });
   }
   if (!packetId) {
-    return NextResponse.json({ error: 'packetId is required.' }, { status: 400 });
+    return viewerJson({ error: 'packetId is required.' }, { status: 400 });
   }
 
   try {
     const preview = await previewPacketMerge(packetId);
-    return NextResponse.json(preview);
+    return viewerJson(preview);
   } catch (error) {
     console.error('[api] orchestrator/merge-preview failed:', error);
     if (error instanceof LaneBranchUnresolvedError) {
-      return NextResponse.json({ ...branchUnresolvedPayload(error), packetId, wouldMerge: false,
+      return viewerJson({ ...branchUnresolvedPayload(error), packetId, wouldMerge: false,
         blockers: ['worktree-branch'], checks: [{ name: 'worktree-branch', verdict: 'fail', detail: error.reason,
           actions: [`Restore the packet checkout to its recorded branch ${error.lane.branch} at the reviewed HEAD, then rerun merge-preview.`] }],
       }, { status: 409 });
     }
     if (error instanceof ImmutableReviewUnavailableError) {
-      return NextResponse.json(immutableReviewUnavailablePayload(error), { status: 409 });
+      return viewerJson(immutableReviewUnavailablePayload(error), { status: 409 });
     }
     const message = 'merge preview failed';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return viewerJson({ error: message }, { status: 500 });
   }
 }

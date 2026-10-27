@@ -23,7 +23,7 @@ function normalizeFindingSeverity(value: unknown): OrchestratorReviewFinding['se
   if (normalized === 'note' || normalized === 'low' || normalized === 'info') {
     return 'note';
   }
-  throw new Error(`Unsupported finding severity: ${formatUnsupportedValue(value)}`);
+  throw new Error(`Unsupported finding severity: ${formatUnsupportedValue(value)}. Set severity to bug, rule_violation, or note.`);
 }
 
 function normalizeFindingStatus(

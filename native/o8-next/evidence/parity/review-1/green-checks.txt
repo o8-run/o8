@@ -1,0 +1,42 @@
+Required completion gates (all exit 0). Raw fixture diagnostics remain local.
+
+
+cargo-test:
+test result: ok. 165 passed; 0 failed; 4 ignored; 0 measured; 0 filtered out; finished in 910.74s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+gpui:
+test shell::fake::parity_tests::parity_capture_real_shell ... ok
+test shell::fake::parity_tests::parity_native_error_receipt_follows_real_surface_error ... ok
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 167 filtered out; finished in 3.05s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+clippy:
+    Finished `dev` profile [unoptimized] target(s) in 15.32s
+
+npm-test:
+ Test Files  1244 passed | 3 skipped (1247)
+      Tests  9099 passed | 5 skipped (9104)
+
+retained-checks:
+ Test Files  2 passed (2)
+      Tests  26 passed (26)
+
+classify:
+[test-classification] 1239 hermetic, 925 resource-owning
+
+rule-check:
+[rule-check] OK — scanned 2 file(s), zero violations vs origin/main
+
+all-surfaces:
+28 captures; 0 crashes; visual differences do not gate
+
+NODE_OPTIONS=--max-old-space-size=8192 npx tsc --noEmit: exit 0
+npm run typecheck:fast: exit 0
+Touched-file ESLint: exit 0

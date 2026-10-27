@@ -1,0 +1,26 @@
+ ✓ tests/next-parity-render-failure-real-path.test.ts > the capture CLI rejects pageerror on a named fixture surface 38520ms
+ ✓ tests/next-parity-render-failure-real-path.test.ts > the capture CLI rejects console on a named fixture surface 22823ms
+ ✓ tests/next-parity-render-failure-real-path.test.ts > the capture CLI rejects boundary on a named fixture surface 24849ms
+ ✓ tests/next-parity-render-failure-real-path.test.ts > the capture CLI rejects boundary-reset on a named fixture surface 20733ms
+ ✓ tests/next-parity-render-failure-real-path.test.ts > the capture CLI rejects http404 on a named fixture surface 2796ms
+ ✓ tests/next-parity-render-failure-real-path.test.ts > the capture CLI rejects http500 on a named fixture surface 2973ms
+ ✓ tests/next-parity-render-failure-real-path.test.ts > the capture CLI rejects late-http500 on a named fixture surface 16016ms
+ ✓ tests/next-parity-render-failure-real-path.test.ts > the capture CLI rejects surface-fetch500 on a named fixture surface 21110ms
+ ✓ tests/next-parity-render-failure-real-path.test.ts > the capture CLI rejects native-blank on a named fixture surface 16111ms
+ ✓ tests/next-parity-render-failure-real-path.test.ts > the capture CLI rejects native-error on a named fixture surface 10870ms
+ ✓ tests/next-parity-render-failure-real-path.test.ts > the capture CLI rejects native-receipt-error on a named fixture surface 12444ms
+ ✓ tests/next-parity-render-failure-real-path.test.ts > keeps a healthy fixture surface successful through the same CLI and real browser 20353ms
+ ✓ tests/next-parity-harness-real-path.test.ts > discovers every production registration and both viewport sizes through the harness CLI 120ms
+ ✓ tests/next-parity-harness-real-path.test.ts > reports signed numeric gaps, preserves missing measurements and never gates on a visual difference 211ms
+ ✓ tests/next-parity-harness-real-path.test.ts > recomputes all 52 recorded numeric gaps without changing the accepted measurements 102ms
+ ✓ tests/next-parity-harness-real-path.test.ts > serves the same persisted history and selected desktop tab through production fixture routes 4299ms
+ ✓ tests/next-parity-preflight-real-path.test.ts > maps Workers through the real CLI with the existing route fixture and native selectors 109ms
+ ✓ tests/next-parity-preflight-real-path.test.ts > names unmapped registered surfaces through the CLI instead of hiding inventory drift 87ms
+ ✓ tests/next-parity-preflight-real-path.test.ts > compares an existing report even when a newer registration has no capture mapping 65ms
+ ✓ tests/next-parity-preflight-real-path.test.ts > rejects an unknown --only before starting hosts and leaves no capture processes 737ms
+ ✓ tests/next-parity-preflight-real-path.test.ts > stops a started web host when native test compilation fails 1238ms
+
+ Test Files  3 passed (3)
+      Tests  21 passed (21)
+   Start at  23:27:07
+   Duration  218.59s (transform 164ms, setup 194ms, import 894ms, tests 216.62s, environment 0ms)

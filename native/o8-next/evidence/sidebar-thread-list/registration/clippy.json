@@ -1,0 +1,34 @@
+{
+  "errors": 0,
+  "sidebarDiagnostics": [],
+  "existingTouchedFileWarnings": [
+    {
+      "level": "warning",
+      "file": "native/o8-next/src/client.rs",
+      "line": 58,
+      "message": "this `if` statement can be collapsed",
+      "touched": true
+    },
+    {
+      "level": "warning",
+      "file": "native/o8-next/src/conversation.rs",
+      "line": 164,
+      "message": "this `if` statement can be collapsed",
+      "touched": true
+    },
+    {
+      "level": "warning",
+      "file": "native/o8-next/src/conversation.rs",
+      "line": 215,
+      "message": "this `if` statement can be collapsed",
+      "touched": true
+    },
+    {
+      "level": "warning",
+      "file": "native/o8-next/src/ui.rs",
+      "line": 102,
+      "message": "this `if` statement can be collapsed",
+      "touched": true
+    }
+  ]
+}

@@ -72,14 +72,14 @@ it('checks readiness through the setup route, saves real settings, and resumes t
   await click('Continue to Sample project');
   await expect.poll(async () => {
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
-    return Boolean(button('Save both choices'));
+    return Boolean(button('Save privacy choices'));
   }).toBe(true);
   const saved = await (await route.GET(new Request('http://127.0.0.1/api/panel/operator-defaults?include=values'))).json();
   expect(saved.values).toMatchObject({ orchestratorBackend: 'codex', workerRuntimes: ['codex'] });
   expect(saved.sources.workerRuntimes).toBe('file');
   expect(readFileSync(join(dataDir, 'settings.toml'), 'utf8')).toContain('codex');
   expect(complete).not.toHaveBeenCalled();
-  await click('Keep crash reports off'); await click('Keep product usage off'); await click('Save both choices');
+  await click('Keep crash reports off'); await click('Turn off'); await click('Save privacy choices');
   await expect.poll(async () => {
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
     return complete.mock.calls.length;

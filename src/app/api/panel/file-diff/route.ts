@@ -1,6 +1,7 @@
+import { viewerGitJson } from '@/lib/viewers/git-response';
+import { viewerJson } from '@/lib/viewers/response';
 export const dynamic = 'force-dynamic';
 
-import { NextResponse } from 'next/server';
 import { execFileSync } from '@/lib/providers/child-process';
 import { lstat } from 'node:fs/promises';
 import { expandHome, safeJoin } from '@/lib/fs/safe-path';
@@ -48,17 +49,17 @@ export async function GET(request: Request) {
   const root = expandHome(searchParams.get('workspace') ?? searchParams.get('repoPath') ?? DEFAULT_ROOT);
   const wsArgs = searchParams.get('ignoreWhitespace') === '1' ? ['-w'] : [];
   const baseRef = (searchParams.get('base') || '').trim();
-  if (!filePath) return NextResponse.json({ error: 'path param required' }, { status: 400 });
-  if (baseRef.startsWith('-') || [...baseRef].some((character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127)) return NextResponse.json({ error: 'Invalid comparison revision.' }, { status: 400 });
-  if (!safeJoin(root, filePath)) return NextResponse.json({ error: 'File path must stay inside the workspace.' }, { status: 403 });
+  if (!filePath) return viewerJson({ error: 'path param required' }, { status: 400 });
+  if (baseRef.startsWith('-') || [...baseRef].some((character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127)) return viewerJson({ error: 'Invalid comparison revision.' }, { status: 400 });
+  if (!safeJoin(root, filePath)) return viewerJson({ error: 'File path must stay inside the workspace.' }, { status: 403 });
   const metadata = await presentation(root, filePath);
   // Media and nested repositories have no useful line diff. Keep the inventory
   // row, with its current-copy metadata, without dumping Git's binary headers.
   if (metadata.diffStatus === 'binary' || metadata.diffStatus === 'directory') {
-    return NextResponse.json({ path: filePath, diff: '', hasDiff: false, ...metadata });
+    return viewerJson({ path: filePath, diff: '', hasDiff: false, ...metadata });
   }
   let result = readDiff(root, [...wsArgs, baseRef ? `${baseRef}...HEAD` : 'HEAD', '--', filePath]);
-  if (baseRef && result.failed) return NextResponse.json({ path: filePath, diff: '', ...metadata, error: 'The committed diff could not be loaded.' });
+  if (baseRef && result.failed) return viewerJson({ path: filePath, diff: '', ...metadata, error: 'The committed diff could not be loaded.' });
   if (!baseRef && !result.diff && !result.tooLarge) result = readDiff(root, [...wsArgs, '--cached', '--', filePath]);
   let isUntracked = false;
   if (!baseRef && !result.diff && !result.tooLarge) {
@@ -70,10 +71,10 @@ export async function GET(request: Request) {
   const binary = isBinaryPatch(result.diff);
   const directory = isDirectoryPatch(result.diff);
   const truncated = result.diff.length > DIFF_LIMIT;
-  return NextResponse.json({
+  return viewerGitJson({
     path: filePath, isUntracked, hasDiff: Boolean(result.diff), ...metadata,
     diff: binary || directory ? '' : result.diff.slice(0, DIFF_LIMIT),
     diffStatus: result.tooLarge ? 'too_large' : directory ? 'directory' : binary ? 'binary' : truncated ? 'truncated' : result.diff ? 'ready' : 'empty',
     ...(binary ? { kind: 'binary' } : directory ? { kind: 'directory' } : {}),
-  });
+  }, root);
 }

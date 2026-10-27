@@ -1,5 +1,5 @@
 import { parseLocalModel } from '@/lib/codex/local-model';
-import { resolveCodexReasoningEffort } from '@/lib/codex/reasoning-effort';
+import { EffortPinRejectionError, resolveEffortPin } from '@/lib/orchestrator/effort-pin';
 import { resolveDefaultDispatchModelSync } from '@/lib/operator/defaults';
 import { MODEL_IDS } from '@/lib/models';
 import { BRAIN_PROMPT_SECTION } from '@/lib/orchestrator/brain-access';
@@ -26,15 +26,16 @@ export function sandboxFlagsForMode(mode: CodexOrchestratorPermissionMode): stri
   return ['--dangerously-bypass-approvals-and-sandbox'];
 }
 
+/** Omitted and adaptive lead choices leave effort to the runtime; explicit pins never normalize. */
 export function reasoningEffortFromThinkingEffort(
   effort: ThinkingEffort | undefined,
   model?: string,
-): Exclude<ThinkingEffort, 'adaptive'> {
-  if (!effort || effort === 'adaptive') return 'xhigh';
-  // Codex effort tiers: low, medium, high, xhigh, max, ultra. The `max`/`ultra`
-  // tiers are honored only on flagship models; every other model clamps to
-  // xhigh. See resolveCodexReasoningEffort.
-  return resolveCodexReasoningEffort(effort, model) as Exclude<ThinkingEffort, 'adaptive'>;
+  compatibility: { installedCliVersion?: string | null; explicitModel?: string } = {},
+): Exclude<ThinkingEffort, 'adaptive'> | undefined {
+  const pin = resolveEffortPin({ runtime: 'codex', model: model ?? null,
+    requestedEffort: effort, ...compatibility });
+  if (!pin.ok) throw new EffortPinRejectionError(pin.code, pin.message);
+  return (pin.selectedEffort as Exclude<ThinkingEffort, 'adaptive'> | null) ?? undefined;
 }
 
 /**
@@ -63,16 +64,15 @@ export function resolveOrchestratorModelSync(explicit?: string): string {
 /**
  * Build the model `-c`/flag pairs for `codex exec`. A local model expands to the
  * `--oss --local-provider … --model` form (no reasoning-effort tier — local
- * models don't have one). A cloud model keeps the historical `-c model=` +
- * `-c model_reasoning_effort=` pair verbatim, so the default path is unchanged.
- * Exported for the unit test that locks the cloud-path invariant.
+ * models don't have one). A cloud model sends an effort override only for a
+ * concrete pin; omission leaves the runtime's configured default in effect.
  */
-export function codexOrchestratorModelFlags(model: string, reasoningEffort: string): string[] {
+export function codexOrchestratorModelFlags(model: string, reasoningEffort?: string): string[] {
   const local = parseLocalModel(model);
   if (local) {
     return ['--oss', '--local-provider', local.provider, '--model', local.model];
   }
-  return ['-c', `model=${model}`, '-c', `model_reasoning_effort=${reasoningEffort}`];
+  return ['-c', `model=${model}`, ...(reasoningEffort ? ['-c', `model_reasoning_effort=${reasoningEffort}`] : [])];
 }
 
 function codexBrainFirstSection(mcpServers: boolean): string {

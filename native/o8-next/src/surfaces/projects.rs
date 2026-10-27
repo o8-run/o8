@@ -121,6 +121,9 @@ impl Shell {
                         }
                         None => {}
                     }
+                    for registration in registrations() {
+                        (registration.catalog_changed)(this, cx);
+                    }
                     this.persist();
                     this.revision += 1;
                     cx.notify();

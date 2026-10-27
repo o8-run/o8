@@ -5,10 +5,12 @@ fn control(id: &'static str, label: &str) -> Stateful<Div> {
         .on_mouse_down(MouseButton::Left, |_, window, _| window.prevent_default())
         .debug_selector(move || id.into())
         .px(px(10.))
-        .h(px(26.))
-        .rounded(px(7.))
+        .h(px(crate::theme::GEOMETRY.tab_height))
+        .flex()
+        .items_center()
+        .rounded(px(crate::theme::GEOMETRY.tab_radius))
         .cursor_pointer()
-        .text_size(px(11.))
+        .text_size(px(crate::theme::TYPE.chrome))
         .child(label.to_owned())
 }
 impl Render for Brain {
@@ -42,8 +44,8 @@ impl Render for Brain {
             .min_w_0()
             .bg(theme().background)
             .font_family(theme().font_ui)
-            .font_weight(FontWeight::LIGHT)
-            .text_size(px(13.))
+            .font_weight(crate::theme::TYPE.weight)
+            .text_size(px(crate::theme::TYPE.body))
             .text_color(theme().text)
             .track_focus(&self.focus)
             .capture_key_down(cx.listener(Self::key))
@@ -54,32 +56,36 @@ impl Render for Brain {
                     .px(px(16.))
                     .py(px(8.))
                     .items_center()
+                    .flex_wrap()
                     .child("Brain")
                     .child(
-                        div().flex_1().text_color(theme().text_muted).child(
-                            std::path::Path::new(&self.repo)
-                                .file_name()
-                                .unwrap_or_default()
-                                .to_string_lossy()
-                                .to_string(),
-                        ),
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .text_color(theme().text_muted)
+                            .child(
+                                std::path::Path::new(&self.repo)
+                                    .file_name()
+                                    .unwrap_or_default()
+                                    .to_string_lossy()
+                                    .to_string(),
+                            ),
                     )
+                    .child(control("brain-find", "Search").on_click(cx.listener(
+                        |this, _, window, cx| {
+                            this.searching = !this.searching;
+                            if this.searching {
+                                this.search.read(cx).focus.focus(window);
+                            } else {
+                                this.search.update(cx, |editor, cx| editor.clear(cx));
+                                this.focus(window, cx);
+                            }
+                            cx.notify();
+                        },
+                    )))
                     .child(
-                        control("brain-find", "Search conversation").on_click(cx.listener(
-                            |this, _, window, cx| {
-                                this.searching = !this.searching;
-                                if this.searching {
-                                    this.search.read(cx).focus.focus(window);
-                                } else {
-                                    this.search.update(cx, |editor, cx| editor.clear(cx));
-                                    this.focus(window, cx);
-                                }
-                                cx.notify();
-                            },
-                        )),
-                    )
-                    .child(
-                        control("brain-minimize", "Minimize Brain")
+                        control("brain-minimize", "Close")
                             .on_click(cx.listener(|this, _, window, cx| this.toggle(window, cx))),
                     ),
             )
@@ -92,15 +98,7 @@ impl Render for Brain {
                 )
             })
             .when(self.messages.is_empty(), |view| {
-                view.child(
-                    div()
-                        .debug_selector(|| "brain-empty".into())
-                        .p(px(16.))
-                        .child("Let’s think it through.")
-                        .child(div().text_color(theme().text_muted).child(
-                            "Ask about this repo, plan a next step, or talk through a decision.",
-                        )),
-                )
+                view.child(div().debug_selector(|| "brain-empty".into()).p(px(16.)))
             })
             .when(!self.filter.is_empty() && self.rows.is_empty(), |view| {
                 view.child(
@@ -186,7 +184,7 @@ impl Render for Brain {
                     .border_color(theme().border)
                     .child(div().flex_1().min_w_0().child(self.composer.clone()))
                     .child(
-                        control("brain-send", "Send to Brain")
+                        control("brain-send", "Send")
                             .bg(if enabled {
                                 theme().accent
                             } else {
@@ -206,9 +204,16 @@ impl Render for Brain {
                     .px(px(16.))
                     .pb(px(8.))
                     .gap(px(8.))
-                    .text_size(px(9.5))
+                    .text_size(px(crate::theme::TYPE.row_meta))
+                    .font_weight(crate::theme::TYPE.meta_weight)
                     .text_color(theme().text_faint)
-                    .child(div().flex_1().child(self.route.clone()))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .child(self.route.clone()),
+                    )
                     .when(!self.messages.is_empty(), |view| {
                         view.child(
                             control("brain-clear", "Clear conversation")

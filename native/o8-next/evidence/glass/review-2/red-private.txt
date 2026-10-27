@@ -1,0 +1,30 @@
+    | ---------- associated function in this implementation
+102 |     pub fn for_appearance(appearance: Appearance) -> Self {
+    |            ^^^^^^^^^^^^^^
+
+error: type `gpui::window::DispatchEventResult` is private
+  --> test-support/window_occlusion.rs:82:9
+   |
+82 | /         window.dispatch_event(
+83 | |             PlatformInput::MouseDown(MouseDownEvent {
+84 | |                 button: MouseButton::Left,
+85 | |                 position,
+...  |
+90 | |             cx,
+91 | |         );
+   | |_________^ private type
+
+error: type `gpui::window::DispatchEventResult` is private
+   --> test-support/window_occlusion.rs:92:9
+    |
+ 92 | /         window.dispatch_event(
+ 93 | |             PlatformInput::MouseUp(MouseUpEvent {
+ 94 | |                 button: MouseButton::Left,
+ 95 | |                 position,
+...   |
+ 99 | |             cx,
+100 | |         );
+    | |_________^ private type
+
+warning: `o8-next` (example "window-occlusion") generated 25 warnings
+error: could not compile `o8-next` (example "window-occlusion") due to 2 previous errors; 25 warnings emitted

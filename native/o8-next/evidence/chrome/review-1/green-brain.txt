@@ -1,0 +1,7 @@
+running 3 tests
+test shell::brain::tests::brain_fixture_actions_sources_search_clear_and_refusals ... O8_NEXT_BRAIN_EVIDENCE {"endpoint":"GPUI TestAppContext CPU scene paint with test text; no GPU/compositor","platform":"linux","openToFirstFrameMs":66.279241,"askToAnswerFrameMs":256.904574,"clearToFrameMs":75.442044,"inputToFrameP95Ms":38.376317,"inputToFrameMsSorted":[13.543682,14.331585,14.554364999999999,14.557349,15.289166999999999,15.3117,15.736262,15.76251,15.832365000000001,16.088265,16.276595,17.067120000000003,19.002888,21.733897,23.304712000000002,23.575975,28.37625,28.853711,38.376317,46.406022]}
+ok
+test shell::brain::tests::brain_fixture_errors_cancel_retention_and_workspace_isolation ... ok
+test shell::brain::tests::brain_opens_from_the_real_shell_palette ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 160 filtered out; finished in 12.55s

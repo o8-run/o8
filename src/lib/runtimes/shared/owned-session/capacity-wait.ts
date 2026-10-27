@@ -2,7 +2,7 @@ import { CAPACITY_WAIT_LABEL, capacityWaitMessage } from '@/lib/lane/capacity-wa
 import { correctionStopVersion } from '@/lib/db/worker-correction-fences';
 import { recordLaneEvent } from '@/lib/lane/events';
 import { getLane, updateLane } from '@/lib/lane/registry';
-import { packetSteerHoldReason } from '@/lib/lane/packet-stop-hold';
+import { packetAutomaticRecoveryHoldReason } from '@/lib/lane/packet-stop-hold';
 import type { Lane } from '@/lib/lane/types';
 import type { RuntimeCapacitySnapshot } from '@/lib/runtimes/types';
 import { withOwnedActionGuard } from './action-admission';
@@ -83,7 +83,7 @@ export function createCapacityRecovery(options: {
     const current = getLane(lane.id);
     if (!resetsAt || !ownsLane(session, current) || current.status !== lane.status
       || correctionStopVersion(`worker:${surfaceId}`) !== stopVersion
-      || (session.packetId && packetSteerHoldReason(session.packetId))) return null;
+      || (session.packetId && packetAutomaticRecoveryHoldReason(session.packetId))) return null;
     session.capacityWait = { runId: run.id, resetsAt, stopVersion,
       laneCheckpoint: { updatedAt: current.updatedAt, status: current.status, lastEventLabel: current.lastEventLabel } };
     session.latestSummary = capacityWaitMessage(resetsAt);
@@ -106,7 +106,7 @@ export function createCapacityRecovery(options: {
         const resumed = run && run.id !== claim.runId && run.mode === 'resume'
           && run.spawnState === 'started' && nativeSession(adapter, session) && run.outcome !== 'failed'
           && correctionStopVersion(`worker:${session.surfaceId}`) === claim.stopVersion
-          && !(session.packetId && packetSteerHoldReason(session.packetId));
+          && !(session.packetId && packetAutomaticRecoveryHoldReason(session.packetId));
         updateLane(lane.id, { status: resumed ? 'running' : 'awaiting_input',
           lastEventLabel: resumed ? 'limit_reset_resumed' : 'limit_reset_resume_held',
           outcomeNote: resumed ? null : 'Capacity resume was interrupted before its start could be confirmed. Inspect the worker before resuming.' }, 'system');
@@ -121,7 +121,7 @@ export function createCapacityRecovery(options: {
       && lane.updatedAt === checkpoint.updatedAt && lane.status === checkpoint.status
       && lane.lastEventLabel === checkpoint.lastEventLabel && currentRecoveryRun(session)?.id === wait.runId
       && correctionStopVersion(`worker:${session.surfaceId}`) === wait.stopVersion
-      && !(session.packetId && packetSteerHoldReason(session.packetId))) {
+      && !(session.packetId && packetAutomaticRecoveryHoldReason(session.packetId))) {
       // Recover a crash between the durable wait write and its lane checkpoint.
       updateLane(lane.id, { status: 'paused', lastEventLabel: `${CAPACITY_WAIT_LABEL}${wait.resetsAt}`,
         outcomeNote: capacityWaitMessage(wait.resetsAt) }, 'system');
@@ -135,7 +135,7 @@ export function createCapacityRecovery(options: {
         || correctionStopVersion(`worker:${session.surfaceId}`) !== wait.stopVersion
         || (currentSession && run?.id !== (preparedRunId ?? wait.runId))
         || (!preparedRunId && currentSession && (currentSession.activeRun || run?.outcome !== 'failed'))
-        || (session.packetId && packetSteerHoldReason(session.packetId))) {
+        || (session.packetId && packetAutomaticRecoveryHoldReason(session.packetId))) {
         throw new Error('Capacity resume cancelled because the worker or lane changed.');
       }
     };

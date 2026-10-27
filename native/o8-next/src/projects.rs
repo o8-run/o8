@@ -31,6 +31,9 @@ pub struct Projects {
 }
 impl EventEmitter<Changed> for Projects {}
 impl Projects {
+    pub(crate) fn workspace_ledger(&self) -> Ledger {
+        self.snapshot.ledger.clone()
+    }
     pub fn new(client: Client, cx: &mut Context<Self>) -> Self {
         let search = cx.new(Composer::new);
         let name = cx.new(Composer::new);

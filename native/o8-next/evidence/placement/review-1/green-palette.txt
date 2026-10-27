@@ -1,0 +1,15 @@
+running 11 tests
+test shell::palette::target::tests::target_choices_compare_canonical_workspace_paths ... ok
+test shell::palette::target::tests::target_click_keeps_identity_when_inventory_reorders ... ok
+test shell::palette::target::tests::target_load_finishing_after_workspace_switch_keeps_composer_focus ... ok
+test shell::palette::target::tests::target_reopen_cancels_pending_restore ... ok
+test shell::palette::tests::palette_and_keyboard_workspace_frame_measurements ... O8_NEXT_PALETTE_EVIDENCE {"endpoint":"GPUI TestAppContext CPU scene; debug build; test text; no GPU/compositor","platform":"linux","paletteOpenToFrameMs":[13.750073,13.543055,13.095821,13.167897,14.390013999999999,13.750174000000001,13.742051,13.929038,14.034015,13.146867,14.658282999999999,13.696093,13.598868,14.42769,14.075696,13.999533999999999,13.223400999999999,13.025186,13.033958,12.948011000000001,12.843947,12.898107000000001,12.855764,12.87337,12.898757999999999,12.897967,12.848692999999999,12.982271,12.983034,12.996143],"keyboardWorkspaceSwitchMs":[58.160609,10.737836000000001,8.606929,10.694310999999999,7.800751,10.69976,7.508848,10.623617,7.657780000000001,10.766929999999999,7.5789029999999995,10.617018,7.811679,10.616256,7.674975,10.71311,7.486856,14.083498,10.035433,10.516809]}
+ok
+test shell::palette::tests::palette_keyboard_opens_all_surfaces_and_switches_workspaces ... ok
+test shell::palette::tests::palette_keyboard_workspace_command_is_filtered_and_cancel_keeps_focus ... ok
+test shell::palette::tests::round1_focused_pty_receives_ctrl_k ... ok
+test shell::palette::tests::round1_focused_text_field_keeps_ctrl_and_cmd_k ... ok
+test shell::palette::tests::round1_palette_owns_workspace_commands_and_renderer ... ok
+test shell::palette::tests::round1_reading_surface_can_open_palette_with_ctrl_k ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 171 filtered out; finished in 20.33s

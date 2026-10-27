@@ -1,7 +1,7 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 const state = vi.hoisted(() => ({ token: 'fixture-a' }));
 vi.mock('./env', () => ({ getGitHubAppConfig: () => null }));
-vi.mock('./managed', () => ({ readManagedGithubToken: () => ({ token: state.token, installationId: 7001 }) }));
+vi.mock('./managed', () => ({ readManagedGithubToken: () => ({ token: state.token, installationId: 7001, accountLogin: 'example' }) }));
 import { githubInstallationFetch } from './auth';
 
 beforeEach(() => { state.token = 'fixture-a'; vi.unstubAllGlobals(); });

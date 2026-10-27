@@ -1,9 +1,10 @@
-import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import { execFile, spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
+import { promisify } from 'node:util';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { bundleServers, SERVER_ENTRIES } from '../scripts/lib/server-bundles.mjs';
 import { stagePackagedNativeAddons } from './helpers/packaged-native-addons';
@@ -66,8 +67,8 @@ async function stop(child: ChildProcess) {
 beforeAll(async () => {
   mkdirSync(state);
   report = bundleServers({ root: process.cwd(), outDir: serverDir });
-  // Only native externals are installed. All JavaScript dependencies must come
-  // from the generated entries/chunks, with no checkout node_modules above them.
+  // The build stages the shared compiler runtime; add only host native addons.
+  // No checkout node_modules directory exists above this generated package.
   stagePackagedNativeAddons({ projectRoot: process.cwd(), serverRoot: serverDir });
   cpSync('src/lib/lane/orchestrator.md', join(serverDir, 'orchestrator.md'));
   api = createServer((request, response) => {
@@ -95,6 +96,62 @@ afterAll(async () => {
 });
 
 describe('shared server bundles in the packaged layout', () => {
+  it('excludes the unused Next server barrel and test fixtures from the shipped graph', () => {
+    const outputs = Object.values(report.metafile.outputs);
+    const shippedInputs = outputs.flatMap(output => Object.keys(output.inputs));
+    expect(shippedInputs).not.toContain('node_modules/next/server.js');
+    expect(shippedInputs).not.toContain('node_modules/next/dist/compiled/ua-parser-js/ua-parser.js');
+    expect(shippedInputs.filter(input => /(^|\/)(tests|fixtures)\/|\.test\.[cm]?[jt]sx?$/.test(input))).toEqual([]);
+  });
+
+  it('keeps native implementations outside the default server entry import closure', () => {
+    const outputs = report.metafile.outputs;
+    const pending = Object.keys(outputs).filter(file => file.endsWith('/ws-server-impl.mjs'));
+    expect(pending).toHaveLength(1);
+    const visited = new Set<string>();
+    while (pending.length) {
+      const file = pending.pop()!;
+      if (visited.has(file)) continue;
+      visited.add(file);
+      expect(Object.keys(outputs[file].inputs).filter(input => /^src\/app\/api\/|native-http-(?:handlers|routes)\.ts$/.test(input))).toEqual([]);
+      pending.push(...outputs[file].imports.filter(imported => !imported.external && imported.kind !== 'dynamic-import').map(imported => imported.path));
+    }
+  });
+
+  it('serves native surface handlers through packaged o8d with no Next listener', async () => {
+    const binary = resolve(process.env.O8D_TEST_BINARY ?? join('crates/o8d/target/debug', process.platform === 'win32' ? 'o8d.exe' : 'o8d'));
+    if (!process.env.O8D_TEST_BINARY) await promisify(execFile)('cargo', ['build', '--locked', '--manifest-path', 'crates/o8d/Cargo.toml', '--features', 'experimental-ws']);
+    const wsPort = await freePort();
+    const absentNextPort = await freePort();
+    const token = 'packaged-native-fixture-credential';
+    writeFileSync(join(state, 'ws-token'), token);
+    const started = performance.now();
+    const { child } = launch('ws-server', { O8_NEXT_O8D: '1', O8_WS_O8D: '1', O8D_BINARY: binary,
+      O8_WS_PORT: String(wsPort), NEXT_ORIGIN: `http://127.0.0.1:${absentNextPort}` });
+    const origin = `http://127.0.0.1:${wsPort}`;
+    try {
+      await waitFor(async () => {
+        try { return (await (await fetch(origin + '/health')).json()).delivery?.transport === 'o8d'; }
+        catch { return false; }
+      });
+      const paths = ['/api/panel/operator-defaults?include=native', '/api/panel/projects', '/api/panel/repos',
+        '/api/panel/approvals', '/api/prompt-library', '/api/customize/inventory'];
+      // Race the first lazy handler load with rejected requests. A concurrent
+      // import must neither skip the gate nor lose a response during startup.
+      await Promise.all(paths.flatMap(path => [true, false].map(async authorized => {
+        const response = await fetch(origin + path, { headers: { authorization: `Bearer ${authorized ? token : 'wrong-fixture-credential'}` } });
+        expect(response.status, path).toBe(authorized ? 200 : 401);
+        expect(response.headers.get('content-type')).toContain('application/json');
+        await response.arrayBuffer();
+      })));
+      expect(performance.now() - started).toBeLessThan(5_000);
+      const brain = await fetch(origin + '/api/cortex/ask', { method: 'POST',
+        headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: '{}' });
+      expect(brain.status).toBe(400);
+      expect(await brain.json()).toEqual({ ok: false, error: 'question is required' });
+    } finally { await stop(child); }
+  }, 180_000);
+
   it('keeps all launcher and implementation paths, sibling chunks, names, and no maps', () => {
     const files = readdirSync(serverDir);
     for (const label of Object.keys(SERVER_ENTRIES)) {
