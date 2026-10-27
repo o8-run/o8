@@ -3,6 +3,7 @@ import { assertRuntimeEffortPin } from '@/lib/orchestrator/effort-pin';
 import { assertOwnedActionFence, hasOwnedActionFence } from './action-fence';
 import { createCapacityRecovery } from './capacity-wait';
 import { packetCargoEnvironment } from '@/lib/worktree/cargo-target-cache';
+import { createRunArtifactReader } from './run-artifact-reader';
 import { controlledProviderSandbox } from './controlled-provider-sandbox';
 import { providerCredentialName } from '@/lib/providers/spawn-environment';
 import { credentialPolicyFingerprint } from '@/lib/providers/credential-policy';
@@ -43,7 +44,6 @@ import { crashSurvivableWorkersEnabled } from './crash-survival';
 import { assertOwnedSessionProcessIdentity, captureOwnedRunIdentity } from './process-identity';
 import { emitRuntimeFallbackNotification, notifySupervisorOfCleanExit } from './run-notifications';
 import { observeChildExit, readAbnormalStderrTail, silentCleanExitMessage } from './exit-outcome';
-import { createRunArtifactReader } from './run-artifacts';
 import { prepareOwnedLaunchArgs } from './launch-args';
 import { WorkerO8CliUnavailableError } from './worker-o8-cli';
 import { stageOwnedLaunchFailure } from './launch-failure';
@@ -79,7 +79,7 @@ import type {
   OwnedSessionRecord,
 } from './types';
 export interface OwnedRunController {
-  readRunArtifacts(run: OwnedRunRecord): Promise<{
+  readRunArtifacts(run: OwnedRunRecord, includeStdout?: boolean): Promise<{
     stdoutRaw: string;
     stderrRaw: string;
     parsed: ReturnType<OwnedRuntimeAdapter['parseRunLog']>;
@@ -117,8 +117,8 @@ export function createOwnedRunController({
   workspaceSpawnGuard: OwnedWorkspaceSpawnGuard;
   invalidateFleetCache: () => void;
 }): OwnedRunController {
-  const readRunArtifacts = createRunArtifactReader(adapter);
   const capacityRecovery = createCapacityRecovery({ adapter, io, spawnOwnedRun });
+  const readRunArtifacts = createRunArtifactReader(adapter, detectRunSandboxDenial);
   const handleWorkerFailure = createWorkerFailureHandler({ adapter, io, readRunArtifacts, park: capacityRecovery.park });
   const recoverModelCompatibility = createModelCompatibilityRecovery({ adapter, io, withSurfaceLock, readRunArtifacts, spawnOwnedRun });
   const scheduleFailureRetry = createFailureRetry({ adapter, io, withSurfaceLock, readRunArtifacts, spawnOwnedRun,
@@ -304,7 +304,7 @@ export function createOwnedRunController({
       // A prepared journal is deliberately preserved until the binding path,
       // under the same surface lock as spawn, reconciles its durable marker.
       if (run.spawnState === 'prepared') continue;
-      const { stdoutRaw, stderrRaw, parsed } = await readRunArtifacts(run);
+      const { stderrRaw, parsed, sandboxDenial } = await readRunArtifacts(run, false, false);
 
       if (!session.threadId && parsed.threadId) {
         session.threadId = parsed.threadId;
@@ -325,7 +325,9 @@ export function createOwnedRunController({
       }
 
       if (run.sandboxed && !run.sandboxDenial) {
-        const denial = detectRunSandboxDenial(runtimeId, stdoutRaw, stderrRaw);
+        const denial = sandboxDenial === undefined
+          ? (await readRunArtifacts(run, false, false, true)).sandboxDenial
+          : sandboxDenial;
         if (denial) {
           run.sandboxDenial = denial;
           session.latestSummary = sandboxDenialOperatorMessage(runtimeId, denial);
