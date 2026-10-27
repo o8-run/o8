@@ -3502,6 +3502,13 @@
       ]
     },
     {
+      "path": "tests/lead-unmapped-effort-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/legacy-output-parking-real-path.test.ts",
       "reasons": [
         "child-process",

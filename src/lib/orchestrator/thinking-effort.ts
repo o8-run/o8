@@ -3,6 +3,19 @@
 // effort resolver for other models, and mapped down for Claude.
 export type ThinkingEffort = 'adaptive' | 'low' | 'medium' | 'high' | 'max' | 'xhigh' | 'ultra';
 
+/** Whether an effort value describes provider reasoning or a different runtime contract. */
+export type EffortReceiptSource = 'transport' | 'runtime-default' | 'service-tier';
+
+export function isEffortReceiptSource(value: unknown): value is EffortReceiptSource {
+  return value === 'transport' || value === 'runtime-default' || value === 'service-tier';
+}
+
+/** Managed inference tier, separate from provider reasoning effort. */
+export type LeadServiceTier = 'low' | 'high';
+export function isLeadServiceTier(value: unknown): value is LeadServiceTier {
+  return value === 'low' || value === 'high';
+}
+
 export type ManualThinkingEffort = Exclude<ThinkingEffort, 'adaptive'>;
 
 export const THINKING_EFFORTS: ThinkingEffort[] = ['adaptive', 'low', 'medium', 'high', 'max', 'xhigh', 'ultra'];
