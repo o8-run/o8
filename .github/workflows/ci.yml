@@ -232,6 +232,9 @@ jobs:
       - name: Install parity routing test browser
         if: contains(steps.select.outputs.files, 'tests/next-parity-route-ownership-real-path.test.ts')
         run: npx --no-install playwright-core install --with-deps chromium
+      - name: Install compaction status rendering browser
+        if: contains(steps.select.outputs.files, 'tests/compaction-progress-inference-real-path.test.ts')
+        run: npx --no-install playwright-core install --with-deps chromium
       - if: steps.select.outputs.count != '0'
         run: npm run test:integration -- ${{ steps.select.outputs.files }}
         env:

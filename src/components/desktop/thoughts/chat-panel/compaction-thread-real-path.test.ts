@@ -17,7 +17,8 @@ const fixture = await vi.hoisted(async () => {
   const { mkdtempSync } = await import('node:fs');
   const { tmpdir } = await import('node:os');
   const { join } = await import('node:path');
-  return { root: mkdtempSync(join(tmpdir(), 'o8-compaction-render-')), socket: null as WebSocket | null, contextTokens: 0 };
+  return { root: mkdtempSync(join(tmpdir(), 'o8-compaction-render-')), socket: null as WebSocket | null, contextTokens: 0,
+    compactGate: null as Promise<void> | null, compactStarted: () => {} };
 });
 vi.mock('@/lib/data-dir-migration', () => ({ getDataDir: () => fixture.root }));
 vi.mock('@/lib/search/conversations', () => ({ syncChatHistorySearchRecord: vi.fn(), deleteChatHistorySearchRecord: vi.fn() }));
@@ -38,7 +39,7 @@ function Harness({ restored = [] }: { restored?: MobileTranscriptEntry[] }) {
   return createElement(ChatMessageList, {
     displayMessages: resolveVisibleChatMessages({ historyEntries: [], chatMessages: restored, streamMessages: restored.length ? [] : result.messages,
       isOrchestratorMode: true, isChatMode: false }),
-    displayWaiting: result.status === 'busy', activeTargetLabel: 'Lead', activeTargetColor: 'var(--t-accent)',
+    displayWaiting: result.status === 'busy', isOrchestratorMode: true, activeTargetLabel: 'Lead', activeTargetColor: 'var(--t-accent)',
     thoughtsMutedGlass: 'var(--t-hover)', thoughtsElevatedBorder: 'var(--t-divider-subtle)', thoughtsElevatedShadow: 'none', emptyStateFallback: null,
   });
 }
@@ -52,13 +53,18 @@ function persist(entries: MobileTranscriptEntry[]) {
 }
 beforeEach(async () => {
   fixture.contextTokens = 0;
+  fixture.compactGate = null;
+  fixture.compactStarted = () => {};
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   vi.stubGlobal('matchMedia', () => ({ matches: true, addEventListener() {}, removeEventListener() {} }));
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({ font: '', measureText: (text: string) => ({ width: text.length * 6 }) } as unknown as CanvasRenderingContext2D);
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
-  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => new Response(JSON.stringify(String(input) === '/api/orchestrator/compact'
-    ? { ok: true, applied: true, tokensAfter: 20, resumePrelude: 'Synthetic session context', transcript: [compactionThread[2], compactionThread[0]] }
-    : String(input).startsWith('/api/runtime/telemetry') ? { telemetry: { contextTokens: fixture.contextTokens } } : {}), { status: 200 })));
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+    if (String(input) === '/api/orchestrator/compact') { fixture.compactStarted(); await fixture.compactGate; }
+    return new Response(JSON.stringify(String(input) === '/api/orchestrator/compact'
+      ? { ok: true, applied: true, tokensAfter: 20, resumePrelude: 'Synthetic session context', transcript: [compactionThread[2], compactionThread[0]] }
+      : String(input).startsWith('/api/runtime/telemetry') ? { telemetry: { contextTokens: fixture.contextTokens } } : {}), { status: 200 });
+  }));
   fixture.socket = { readyState: WebSocket.OPEN, send: vi.fn(), close: vi.fn() } as unknown as WebSocket;
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
   await act(async () => root.render(createElement(Harness)));
@@ -72,6 +78,50 @@ afterEach(async () => {
 afterAll(() => rmSync(fixture.root, { recursive: true, force: true }));
 
 describe('compaction through persisted history, live stream and real transcript components', () => {
+  it.each([
+    ['completed boundary', compactionThread[2]],
+    ['operator prose', { id: 'operator-compact', role: 'user', text: 'Keep the compact layout.' }],
+    ['assistant prose', { id: 'assistant-compact', role: 'assistant', text: 'The compaction check finished; now running the tests.' }],
+    ['tool result', { id: 'tool-compact', role: 'tool', text: 'compact-status test passed' }],
+    ['old failure', { id: 'old-compact-error', role: 'system', text: 'Compaction failed before send. Re-send this message.' }],
+    ['old local status', { id: 'orch-compacting-123', role: 'system', text: 'Compacting to keep turn fast…' }],
+  ] as const)('does not infer an active compaction from persisted %s during a busy turn', async (_name, last) => {
+    const restored = persist([...compactionThread.slice(0, 2), { ...last, timestamp: compactionThread[2].timestamp! + 1 }]);
+    act(() => stream.replaceTranscript(restored));
+    await act(async () => receive('status', { status: 'busy' }));
+    expect(stream.status).toBe('busy');
+    expect(messageIds().at(-1)).toBe(last.id);
+    expect(host.textContent).not.toContain('Compaction in progress');
+    expect(host.textContent).not.toContain('Messages sent now will be queued and delivered after compaction completes.');
+    expect(host.textContent).toContain('Planning next moves');
+  });
+  it('shows explicit pre-send compaction status without inferring a warning, then sends once', async () => {
+    act(() => stream.replaceTranscript(persist(compactionThread.slice(0, 2))));
+    fixture.contextTokens = 850_001;
+    await act(async () => { receive('status', { status: 'ready' }); await stream.fetchTelemetrySnapshot(); });
+    let release = () => {};
+    fixture.compactGate = new Promise<void>(resolve => { release = resolve; });
+    const started = new Promise<void>(resolve => { fixture.compactStarted = resolve; });
+    let handle: ReturnType<OrchestratorStreamResult['send']> = null;
+    try {
+      act(() => { handle = stream.send('Continue the original check.', { backend: 'codex' }); });
+      await act(async () => { await started; });
+      expect(host.textContent).toContain('Compacting to keep turn fast…');
+      expect(host.textContent).not.toContain('Compaction in progress');
+      expect(host.textContent).not.toContain('Messages sent now will be queued');
+      await act(async () => { release(); await new Promise(resolve => setTimeout(resolve, 0)); });
+      expect(host.textContent).not.toContain('Compacting to keep turn fast…');
+      expect(messageIds().slice(0, 3)).toEqual(compactionThread.slice(0, 3).map(entry => entry.id));
+      const sends = (fixture.socket!.send as ReturnType<typeof vi.fn>).mock.calls.map(([raw]) => JSON.parse(raw as string))
+        .filter(message => message.type === 'orchestrator-send');
+      expect(sends).toHaveLength(1);
+      expect(sends[0].displayMessage).toBe('Continue the original check.');
+      expect(stream.messages.filter(entry => entry.text === 'Continue the original check.')).toHaveLength(1);
+    } finally {
+      release();
+      if (handle) act(() => stream.undoSend(handle!));
+    }
+  });
   it('adds one boundary through the real automatic-compaction effect', async () => {
     vi.useFakeTimers();
     act(() => stream.replaceTranscript(persist(compactionThread.slice(0, 2))));
