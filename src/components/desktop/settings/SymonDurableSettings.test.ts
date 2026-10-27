@@ -317,3 +317,35 @@ it('shows unavailable and empty history, and aborts pending history reads when c
   expect((pendingSignal as AbortSignal | null)?.aborted).toBe(true);
   expect(container.textContent).not.toContain('Reading saved history');
 });
+
+it.each(['linux', 'windows', 'macos', 'browser'])('keeps receiver errors and retry reachable on %s without remounting Settings', async platform => {
+  if (platform !== 'browser') (window as unknown as { __O8_HOST_PLATFORM__: string }).__O8_HOST_PLATFORM__ = platform;
+  let nativeReads = 0;
+  let finishRetry!: (response: Response) => void;
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+    if (String(input).endsWith('/messages-receiver')) {
+      nativeReads += 1;
+      return nativeReads === 1 ? Response.json({ ok: false }, { status: 503 })
+        : new Promise<Response>(resolve => { finishRetry = resolve; });
+    }
+    if (String(input).endsWith('/imessage-access')) return Response.json({ ok: true, configured: true, enabled: true, groups: [] });
+    return Response.json({ ok: true, enabled: false, connected: false, locked: false });
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  await act(async () => { root.render(createElement(ConnectionsTab)); });
+  const bridgeSwitch = () => [...container.querySelectorAll<HTMLButtonElement>('[role="switch"]')]
+    .find(button => button.closest('section')?.textContent?.includes('iMessage bridge access'))!;
+  expect(bridgeSwitch().disabled).toBe(true);
+  expect(container.textContent).toContain('Native Messages receiver status is unavailable');
+  const refresh = [...container.querySelectorAll('button')].find(button => button.textContent === 'Refresh status');
+  expect(refresh, 'a failed read needs a reachable retry').toBeDefined();
+  await act(async () => { refresh!.click(); });
+  expect(container.contains(refresh!)).toBe(true);
+  expect(refresh!.disabled).toBe(true);
+  expect(bridgeSwitch().disabled).toBe(true);
+  await act(async () => { finishRetry(Response.json({ ok: true, enabled: false, handles: [], state: 'off' })); });
+  expect(nativeReads).toBe(2);
+  expect(bridgeSwitch().disabled).toBe(false);
+  expect(container.textContent).not.toContain('Native Messages receiver status is unavailable');
+  expect(fetchMock.mock.calls.every(call => call[1]?.method !== 'POST')).toBe(true);
+});
