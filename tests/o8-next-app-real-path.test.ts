@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
+import { createServer } from 'node:http';
 import { pathToFileURL } from 'node:url';
 import { createInterface } from 'node:readline';
 import { act, createElement } from 'react';
@@ -400,6 +401,76 @@ it.skipIf(process.platform !== 'darwin' || !process.env.O8_NEXT_MACOS_TEST_BUNDL
       display.mockRestore(); lines.close();
       if (native?.pid && alive(native.pid)) native.kill('SIGKILL');
       if (host.exitCode === null && host.signalCode === null) { const done = once(host, 'exit'); host.kill('SIGTERM'); await done; }
+    }
+  }, 60_000,
+);
+
+
+it.skipIf(process.platform !== 'darwin' || !process.env.O8_NEXT_MACOS_TEST_BUNDLE).each(['slow', 'failed'])(
+  'keeps the compiled offscreen window through a %s first load via Settings', async mode => {
+    const nativeBinary = realpathSync(join(process.env.O8_NEXT_MACOS_TEST_BUNDLE!, 'Contents/MacOS/o8-next'));
+    const timers: Array<ReturnType<typeof setTimeout>> = [];
+    let threadRequests = 0;
+    const server = createServer((request, response) => {
+      const path = new URL(request.url!, 'http://fixture').pathname;
+      const bodies: Record<string, unknown> = {
+        '/api/mobile/orchestrator/threads': { threads: [] },
+        '/api/orchestrator/state': { mission: { packets: [] } },
+        '/api/runtime/inventory': { agents: [] },
+        '/api/v2/chat-history/list': { conversations: [] },
+        '/api/panel/repos': { repos: [] },
+        '/api/panel/projects': { projects: [{ id: 'startup', name: 'Startup fixture', color: null,
+          sqliteProjectId: null, repoPaths: [dataDir] }], activeProjectId: 'startup' },
+      };
+      const respond = () => response.writeHead(bodies[path] ? 200 : 404,
+        { 'content-type': 'application/json' }).end(JSON.stringify(bodies[path] ?? {}));
+      if (path === '/api/mobile/orchestrator/threads') {
+        threadRequests++;
+        if (mode === 'failed') { response.writeHead(503).end('{}'); return; }
+        timers.push(setTimeout(respond, 30_000));
+      } else respond();
+    });
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('Missing startup fixture port');
+    const providers = await import('@/lib/providers/child-process');
+    const productionSpawn = providers.spawn;
+    let native: ChildProcess | undefined;
+    const display = vi.spyOn(providers, 'spawn').mockImplementation((command, args, options) => {
+      const child = productionSpawn(command, command === nativeBinary ? [...(args ?? []), '--offscreen'] : (args ?? []), options);
+      if (command === nativeBinary) native = child;
+      return child;
+    });
+    try {
+      vi.stubEnv('O8_API_PORT', String(address.port));
+      vi.stubEnv('O8_NEXT_BIN', nativeBinary);
+      const started = performance.now();
+      expect((await post(true)).status).toBe(200);
+      const windowMs = performance.now() - started;
+      expect(windowMs).toBeLessThan(15_000);
+      expect(alive(native!.pid!)).toBe(true);
+      expect((await getOperatorDefaults()).values.experimentalNext).toBe(true);
+      await vi.waitFor(() => expect(threadRequests).toBeGreaterThan(0), { timeout: 5_000 });
+      if (mode === 'slow') {
+        await vi.waitFor(() => {
+          expect(alive(native!.pid!)).toBe(true);
+          expect(existsSync(join(dataDir, 'next-shell.json'))).toBe(true);
+          expect(JSON.parse(readFileSync(join(dataDir, 'next-shell.json'), 'utf8')).selected).toBe(dataDir);
+        }, { timeout: 40_000, interval: 50 });
+        console.info('Slow startup measurement:', JSON.stringify({ windowMs, windowToLoadMs: performance.now() - started - windowMs }));
+      } else {
+        await new Promise(resolve => setTimeout(resolve, 500));
+        expect(alive(native!.pid!)).toBe(true);
+        expect((await getOperatorDefaults()).values.experimentalNext).toBe(true);
+      }
+      expect((await post(false)).status).toBe(200);
+      expect(alive(native!.pid!)).toBe(false);
+    } finally {
+      display.mockRestore();
+      timers.forEach(clearTimeout);
+      if (native?.pid && alive(native.pid)) { const exited = once(native, 'exit'); native.kill('SIGTERM'); await exited; }
+      server.closeAllConnections();
+      await new Promise<void>(resolve => server.close(() => resolve()));
     }
   }, 60_000,
 );
