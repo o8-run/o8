@@ -2693,6 +2693,15 @@
       ]
     },
     {
+      "path": "tests/declarative-idle-launch-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/deepseek-harness-real-path.test.ts",
       "reasons": [
         "real-path"
@@ -4912,6 +4921,14 @@
       "reasons": [
         "child-process",
         "git-cli",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/owned-stop-absent-run-real-path.test.ts",
+      "reasons": [
+        "child-process",
         "process-signal",
         "real-path"
       ]

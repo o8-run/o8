@@ -37,6 +37,16 @@ if (payload.length !== expectedBytes) {
 const child = withO8ChildPolicy(env => spawn(process.argv[3], process.argv.slice(4), {
   env, windowsHide: true, stdio: ['pipe', 1, 2],
 }), { preserveStamp: true });
+// Stop addresses the detached group, but the provider may own children in
+// another group. Stay alive until it has handled Stop and reaped those children;
+// otherwise its persisted owner disappears before tree clearance can finish.
+const stopSignals = ['SIGINT', 'SIGTERM'];
+const forwardStop = signal => { try { child.kill(signal); } catch {} };
+const stopHandlers = stopSignals.map(signal => {
+  const handler = () => forwardStop(signal);
+  process.on(signal, handler);
+  return [signal, handler];
+});
 let delivered = false;
 child.stdin.on('error', inputFailure);
 // Count only writes acknowledged by the pipe, never bytes merely queued in Node.
@@ -56,6 +66,7 @@ function deliverNext() {
 deliverNext();
 child.on('error', inputFailure);
 child.on('close', (code, signal) => {
+  for (const [stopSignal, handler] of stopHandlers) process.off(stopSignal, handler);
   if (failed || !delivered) {
     if (!failed) inputFailure('worker closed before staged input was delivered');
     process.exit(74);
