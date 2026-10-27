@@ -111,7 +111,11 @@ export function AutomationsPage({ currentOwner, onClose }: { currentOwner: strin
   const [error, setError] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingRow, setEditingRow] = useState<AutomationRecord | null>(null);
-  const [connectedActiveCount, setConnectedActiveCount] = useState(0);
+  const [connectedActiveCount, setConnectedActiveCount] = useState<number | null>(() => {
+    const cached = readConnectedAutomationsSnapshot();
+    return cached ? cached.installed === false ? 0 : (cached.jobs ?? []).filter(job => job.enabled).length : null;
+  });
+  const [connectedLoading, setConnectedLoading] = useState(() => !readConnectedAutomationsSnapshot());
   const [connectedCount, setConnectedCount] = useState<number | null>(() => {
     const cached = readConnectedAutomationsSnapshot();
     return cached ? cached.installed === false ? 0 : cached.jobs?.length ?? 0 : null;
@@ -270,7 +274,9 @@ export function AutomationsPage({ currentOwner, onClose }: { currentOwner: strin
       }}>
         <WorkspacePageHeader title="Automations" subtitle="Automate repetitive tasks with agents that run on schedules and triggers." onClose={onClose}>
           <span style={{ color: 'var(--t-text-faint)', fontSize: 9.5, fontWeight: 260, letterSpacing: '-0.4px', whiteSpace: 'nowrap' }}>
-            {activeCount + connectedActiveCount} active
+            {loading || connectedLoading ? 'Loading activity…'
+              : error || connectedActiveCount === null ? 'Activity unavailable'
+                : `${activeCount + connectedActiveCount} active`}
           </span>
           <RamsButton onClick={handleNew} icon={addGlyph}>New automation</RamsButton>
         </WorkspacePageHeader>
@@ -303,7 +309,7 @@ export function AutomationsPage({ currentOwner, onClose }: { currentOwner: strin
           </div>
         ) : null}
 
-        <ConnectedAgentAutomations onActiveCountChange={setConnectedActiveCount} onTotalCountChange={setConnectedCount} />
+        <ConnectedAgentAutomations onActiveCountChange={setConnectedActiveCount} onTotalCountChange={setConnectedCount} onLoadingChange={setConnectedLoading} />
 
         {!loading && !error && mineRows.length === 0 && connectedCount === 0 ? (
           <EmptyState

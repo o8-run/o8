@@ -1,5 +1,5 @@
 // Release-app process spawn to an acknowledged edit in the real composer.
-// Normal startup runs only on a disposable hosted macOS runner. No installed app is used.
+// Normal startup uses a disposable macOS environment. No installed app is used.
 import assert from 'node:assert/strict';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -18,18 +18,9 @@ const edit = 'Launch input check';
 
 export const COMPOSER_PROBE_JS = `(() => {
   if (!window.__o8StartupFetchObserved) {
-    window.__o8StartupFetchObserved = true;
-    window.__o8OptionalStartupRequests = 0;
-    const originalFetch = window.fetch;
-    window.fetch = function (...args) {
-      try {
-        const input = args[0];
-        const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url, location.href);
-        if (url.pathname === '/api/automations/connected') window.__o8OptionalStartupRequests++;
-      } catch {}
-      return originalFetch.apply(this, args);
-    };
+    return JSON.stringify({ state: 'startup-observer-missing', hydrated: document.documentElement.getAttribute('data-o8-dashboard-hydrated') === '1' });
   }
+  if (window.__o8StartupObserverVersion !== 1) return JSON.stringify({ state: 'startup-observer-missing', hydrated: true });
   const editor = document.querySelector('textarea[data-o8-active-composer="true"]')
     || document.querySelector('[data-o8-composer-root] textarea');
   const box = editor?.getBoundingClientRect();
@@ -54,6 +45,7 @@ export const COMPOSER_PROBE_JS = `(() => {
   }
   const navigation = performance.getEntriesByType('navigation')[0];
   return JSON.stringify({ state: 'ready', acknowledged: true, focused: document.hasFocus(),
+    startupObserver: 'document-start/v1',
     timeOrigin: performance.timeOrigin, pageNow: performance.now(),
     optionalStartupRequests: Math.max(window.__o8OptionalStartupRequests, performance.getEntriesByType('resource').filter(row => new URL(row.name, location.href).pathname === '/api/automations/connected').length),
     marks: performance.getEntriesByType('mark').filter(row => /^o8:dashboard:/.test(row.name)).map(row => ({ name: row.name, atMs: row.startTime })),
@@ -85,17 +77,19 @@ function wholeAppRss(rootPid) {
     includes: 'native shell, server descendants and all webview helpers on the disposable runner' };
 }
 
-function requireDisposableRunner(app) {
+export function requireDisposableRunner(app, { disposableRoot, readIdentifier = file => execFileSync('/usr/libexec/PlistBuddy',
+  ['-c', 'Print :CFBundleIdentifier', file], { encoding: 'utf8' }).trim() } = {}) {
   assert.equal(process.platform, 'darwin', 'Native launch measurements require macOS');
-  assert.equal(process.env.GITHUB_ACTIONS, 'true', 'Use a disposable hosted runner');
-  assert.equal(process.env.RUNNER_ENVIRONMENT, 'github-hosted', 'Normal startup must not run beside an installed app');
-  const relative = path.relative(fs.realpathSync(process.env.GITHUB_WORKSPACE), fs.realpathSync(app));
+  if (!disposableRoot) {
+    assert.equal(process.env.GITHUB_ACTIONS, 'true', 'Use a disposable hosted runner or an explicit --disposable-root on a disposable Mac');
+    assert.equal(process.env.RUNNER_ENVIRONMENT, 'github-hosted', 'Normal startup must not run beside an installed app');
+  }
+  const relative = path.relative(fs.realpathSync(disposableRoot || process.env.GITHUB_WORKSPACE), fs.realpathSync(app));
   assert(relative && !relative.startsWith('..') && !path.isAbsolute(relative), 'Use the freshly built workspace artifact');
   for (const installed of ['/Applications/o8.app', path.join(os.homedir(), 'Applications/o8.app')]) {
     assert(!fs.existsSync(installed), 'An installed app is present; refusing normal-startup measurements');
   }
-  const identifier = execFileSync('/usr/libexec/PlistBuddy', ['-c', 'Print :CFBundleIdentifier',
-    path.join(app, 'Contents/Info.plist')], { encoding: 'utf8' }).trim();
+  const identifier = readIdentifier(path.join(app, 'Contents/Info.plist'));
   assert.equal(identifier, 'ai.o8.desktop.launchbench', 'Build with the isolated measurement identifier');
 }
 
@@ -111,9 +105,9 @@ function childEnvironment(dataDir, repoDir, socketPath) {
     CODEX_HOME: path.join(dataDir, 'provider-profile'), CLAUDE_CONFIG_DIR: path.join(dataDir, 'provider-config') };
 }
 
-export async function measureNativeLaunch({ app, output, sourceSha, samples = 3 }) {
+export async function measureNativeLaunch({ app, output, sourceSha, samples = 3, disposableRoot }) {
   app = path.resolve(app); output = path.resolve(output);
-  requireDisposableRunner(app);
+  requireDisposableRunner(app, { disposableRoot });
   assert(/^[a-f0-9]{40}$/.test(sourceSha), 'Record an exact source commit');
   assert(Number.isSafeInteger(samples) && samples > 0 && samples <= 10);
   fs.mkdirSync(output, { recursive: true });
@@ -132,7 +126,9 @@ export async function measureNativeLaunch({ app, output, sourceSha, samples = 3 
     pollMs: 10, probeDeadlineMs: 250, limitMs: 1000,
     fixture: 'configured private profile, one fresh composer, no bound thread', samples: [] };
   try {
-    runner = prepareNativeRunner('ai.o8.desktop.launchbench', stageRoot);
+    runner = prepareNativeRunner('ai.o8.desktop.launchbench', stageRoot, { managePrivacy: !disposableRoot });
+    receipt.runnerMode = disposableRoot ? 'disposable-local' : 'hosted';
+    receipt.privacyMode = disposableRoot ? 'manual' : 'managed';
     receipt.privacyPrecondition = runner.services.map(service => `${service}: denied`);
     receipt.privacySetupError = runner.privacySetupError ?? null;
     execFileSync('ditto', [app, stagedApp], { stdio: 'pipe' });
@@ -220,6 +216,10 @@ export async function measureNativeLaunch({ app, output, sourceSha, samples = 3 
                 nativeWindow = main && { visible: main.visible, focused: main.focused };
               }
               lastProbe = JSON.parse(await executeJs(client, COMPOSER_PROBE_JS));
+              if (lastProbe.state === 'startup-observer-missing' && lastProbe.hydrated) {
+                launchError = new Error('The app lacks the document-start observer. Rebuild its disposable source copy with native-launch-config.mjs.');
+                throw launchError;
+              }
               const phase = Object.fromEntries(['state', 'editor', 'visible', 'disabled', 'readOnly', 'focused', 'acknowledged', 'hit', 'coveringLayer']
                 .filter(key => lastProbe[key] !== undefined).map(key => [key, lastProbe[key]]));
               const phaseKey = JSON.stringify(phase);
@@ -234,7 +234,8 @@ export async function measureNativeLaunch({ app, output, sourceSha, samples = 3 
                 const interactiveComposerMs = round(performance.now() - started);
                 receipt.samples.push({ sample, interactiveComposerMs, socketReadyMs, acknowledged: lastProbe.acknowledged,
                   focused: lastProbe.focused, hydrated: lastProbe.hydrated, probeTimeouts, controlCalls: [...controlCalls], phases: [...phases], editorSeenMs, editAcknowledgedMs, marks: lastProbe.marks, resources: lastProbe.resources, optionalStartupRequests: lastProbe.optionalStartupRequests, nativeStages: [...nativeStages],
-                  documentStartMs: round(lastProbe.timeOrigin - epoch), navigation: lastProbe.navigation });
+                  documentStartMs: round(lastProbe.timeOrigin - epoch), navigation: lastProbe.navigation,
+                  startupObserver: lastProbe.startupObserver });
                 break;
               }
             } catch (error) { lastProbe = { state: 'control-pending', error: String(error.message).slice(0, 160) }; }
@@ -273,7 +274,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     const [key, value] = arg.replace(/^--/, '').split('='); return [key, value ?? true];
   }));
   const receipt = await measureNativeLaunch({ app: String(args.app), output: String(args.output),
-    sourceSha: String(args.sha), samples: Number(args.samples ?? 3) });
+    sourceSha: String(args.sha), samples: Number(args.samples ?? 3),
+    disposableRoot: args['disposable-root'] ? path.resolve(String(args['disposable-root'])) : undefined });
   if (args['check-startup-loads']) {
     const counts = receipt.samples.map(sample => sample.optionalStartupRequests);
     assert(counts.every(Number.isInteger), 'Missing startup request observations');
