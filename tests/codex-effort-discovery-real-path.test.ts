@@ -48,6 +48,11 @@ if (process.argv.includes('app-server')) {
       : method === 'config/read' ? { config: {} } : {} }));
   });
 } else {
+const outputIndex = process.argv.indexOf('--output-last-message');
+if (outputIndex >= 0) {
+  fs.writeFileSync(process.argv[outputIndex + 1], JSON.stringify({ args: process.argv.slice(2), configHome: process.env.CODEX_HOME }));
+  process.exit(0);
+}
 fs.appendFileSync(require('node:path').join(process.cwd(), 'calls.jsonl'), JSON.stringify({ args: process.argv.slice(2), configHome: process.env.CODEX_HOME }) + '\\n');
 console.log(JSON.stringify({ type: 'thread.started', thread_id: 'discovery-fixture' }));
 console.log(JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 1, output_tokens: 1 } }));
@@ -63,6 +68,7 @@ const { updateOperatorDefaults } = await import('@/lib/operator/defaults');
 const { assertSingleAttemptLaunch } = await import('@/lib/runtime/single-attempt-launch');
 const { resolveEffortPin } = await import('@/lib/orchestrator/effort-pin');
 const { workerModelCatalog } = await import('@/lib/orchestrator/worker-catalog');
+const { callCodex } = await import('@/lib/cortex/qa/llm/codex-adapter');
 const { POST } = await import('@/app/api/runtime/launch/route');
 const { closeDb } = await import('@/lib/db');
 function cache(config: string, model: string, efforts: string[]) {
@@ -98,6 +104,25 @@ beforeEach(async () => {
   await updateOperatorDefaults({ codexAppThreads: false });
 });
 afterAll(() => { closeDb(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); rmSync(root, { recursive: true, force: true }); });
+
+it.each((['none', 'minimal'] as const).flatMap(effort =>
+  [false, true].map(advertised => ({ effort, advertised })),
+))('QA validates and spawns with the selected home for $effort (advertised=$advertised)', async ({ effort, advertised }) => {
+  const identityHome = join(root, `qa-identity-${effort}-${advertised}`);
+  cache(identityHome, 'gpt-6.1-sol', advertised ? [effort] : ['low']);
+  cache(configHome, 'gpt-6.1-sol', advertised ? ['low'] : [effort]);
+  const identity = await registerRuntimeIdentity({ runtime: 'codex', label: 'Fixture', configHomeRef: identityHome });
+  await selectRuntimeIdentity('codex', identity.id);
+  const answer = callCodex('fixture', { binary, model: 'gpt-6.1-sol', reasoningEffort: effort });
+  if (!advertised) {
+    await expect(answer).rejects.toMatchObject({ name: 'EffortPinRejectionError' });
+    return;
+  }
+  expect(JSON.parse(await answer)).toMatchObject({
+    configHome: identityHome,
+    args: expect.arrayContaining([`model_reasoning_effort=${effort}`]),
+  });
+});
 
 it.each(['none', 'minimal'] as const)('launch POST uses selected worker discovery for %s before binding a receipt', async effort => {
   const identityHome = join(root, `route-identity-${effort}`);

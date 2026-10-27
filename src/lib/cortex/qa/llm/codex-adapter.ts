@@ -34,6 +34,7 @@ import { promisify } from 'node:util';
 
 import { resolveBrainCodexRouteSync } from '@/lib/operator/brain-routing';
 import { codexModelArgs } from '@/lib/codex/local-model';
+import { codexModelDiscoveryHome } from '@/lib/codex/model-discovery-cache';
 import { resolveCodexReasoningEffort } from '@/lib/codex/reasoning-effort';
 import { assertRuntimeEffortPin } from '@/lib/orchestrator/effort-pin';
 import type { ManualThinkingEffort } from '@/lib/orchestrator/thinking-effort';
@@ -127,7 +128,7 @@ export const CODEX_DEFAULT_MODEL = MODEL_IDS.codexWorkerDefault;
  * route. Brain model and effort are separate from worker/orchestrator defaults
  * so a visible Settings choice always matches the CLI process that launches.
  */
-function resolveCodexQaRoute(options: CallCodexOptions): {
+function resolveCodexQaRoute(options: CallCodexOptions, codexHome: string): {
   model: string;
   reasoningEffort?: CallCodexOptions['reasoningEffort'];
 } {
@@ -143,7 +144,7 @@ function resolveCodexQaRoute(options: CallCodexOptions): {
   const model = options.model ?? configured.model;
   const requestedEffort = options.reasoningEffort ?? configured.reasoningEffort;
   if (requestedEffort === 'none' || requestedEffort === 'minimal') {
-    assertRuntimeEffortPin('codex', model, requestedEffort);
+    assertRuntimeEffortPin('codex', model, requestedEffort, codexHome);
   }
   const reasoningEffort = requestedEffort
     ? resolveCodexReasoningEffort(requestedEffort, model) as CallCodexOptions['reasoningEffort']
@@ -201,7 +202,8 @@ export function buildCodexQaEnv(
  */
 export async function callCodex(prompt: string, opts: CallCodexOptions = {}): Promise<string> {
   const timeoutMs = opts.timeoutMs ?? 30_000;
-  const route = resolveCodexQaRoute(opts);
+  const codexHome = codexModelDiscoveryHome();
+  const route = resolveCodexQaRoute(opts, codexHome);
 
   const codexBin = opts.binary ?? await resolveCodexBin();
   if (!codexBin) {
@@ -227,6 +229,7 @@ export async function callCodex(prompt: string, opts: CallCodexOptions = {}): Pr
   // tmpdir cwd so no project .codex/ config bleeds in.
   const cwd = os.tmpdir();
   const env = buildCodexQaEnv();
+  env.CODEX_HOME = codexHome;
 
   try {
     await new Promise<void>((resolve, reject) => {
