@@ -122,6 +122,106 @@ beforeEach(async () => {
 });
 afterAll(() => { closeDb(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); rmSync(root, { recursive: true, force: true }); });
 
+const savedPacketCases = ['launch-route', 'single-attempt', 'runtime-adapter'].flatMap(entry =>
+  (['none', 'minimal'] as const).map(effort => ({ entry, effort, conflictingBinding: false })),
+);
+// The saved session records who executed this packet. A newer catalog binding
+// must not move its admission or execution to another account.
+savedPacketCases.push({ entry: 'launch-route', effort: 'minimal', conflictingBinding: true });
+it.each(savedPacketCases)('saved packet A wins at $entry for $effort (conflictingBinding=$conflictingBinding)', async ({ entry, effort, conflictingBinding }) => {
+  const packetId = `saved-${entry}-${effort}-${conflictingBinding}`;
+  const aHome = join(root, `${packetId}-A`);
+  const bHome = join(root, `${packetId}-B`);
+  cache(aHome, 'gpt-6.1-sol', ['none', 'minimal']);
+  cache(bHome, 'gpt-6.1-sol', ['low']);
+  cache(configHome, 'gpt-6.1-sol', ['low']);
+  const a = await registerRuntimeIdentity({ runtime: 'codex', label: 'A', configHomeRef: aHome });
+  const b = await registerRuntimeIdentity({ runtime: 'codex', label: 'B', configHomeRef: bHome });
+  await selectRuntimeIdentity('codex', a.id);
+  const cwd = repo(packetId);
+  const request: RuntimeLaunchRequest = { runtime: 'codex', packetId, cwd, prompt: 'retry saved packet',
+    model: 'gpt-6.1-sol', effort, executionPolicy: 'single-attempt', workMode: 'read-only',
+    clientMutationId: packetId, skipSetup: true, isolate: false };
+  const seed = await launchOwnedCodexSession(request as Parameters<typeof launchOwnedCodexSession>[0]);
+  expect(seed.ok, seed.note).toBe(true);
+  await finished(seed.surfaceId);
+  expect(saved(seed.surfaceId).identity).toMatchObject({ id: a.id, configHomeRef: aHome });
+  const catalogFile = join(getDataDir(), 'runtime-identities.json');
+  const catalog = JSON.parse(readFileSync(catalogFile, 'utf8'));
+  catalog.packetBindings = conflictingBinding ? { [`codex\0${packetId}`]: b } : {};
+  writeFileSync(catalogFile, JSON.stringify(catalog));
+  await selectRuntimeIdentity('codex', b.id);
+
+  let failure: unknown;
+  let status: number | undefined;
+  let surfaceId: string | undefined;
+  try {
+    if (entry === 'launch-route') {
+      const response = await POST(new NextRequest('http://localhost/api/runtime/launch', {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(request),
+      }));
+      status = response.status;
+      const result = await response.json();
+      if (result.ok) surfaceId = result.surfaceId;
+      else failure = result;
+    } else if (entry === 'single-attempt') {
+      assertSingleAttemptLaunch(request, 'read-only');
+      const { launchRuntimeSurface } = await import('@/lib/runtime/actions');
+      const result = await launchRuntimeSurface(request);
+      expect(result.ok, result.note).toBe(true);
+      surfaceId = result.surfaceId;
+    } else {
+      const result = await codexRuntime.launch({ ...request, cwd });
+      expect(result.ok, result.note).toBe(true);
+      surfaceId = result.sessionKey;
+    }
+    if (surfaceId) {
+      await finished(surfaceId);
+      expect(saved(surfaceId)).toMatchObject({ identity: { id: a.id, configHomeRef: aHome },
+        effort, executionPolicy: { mode: 'single-attempt', effort } });
+    }
+  } catch (error) { failure = error; }
+
+  // On the old head all six unbound owned controls succeed even though early
+  // admission refuses. Run the control after the entry point so it cannot pin A.
+  const control = await launchOwnedCodexSession(request as Parameters<typeof launchOwnedCodexSession>[0]);
+  expect(control.ok, control.note).toBe(true);
+  await finished(control.surfaceId);
+  expect(saved(control.surfaceId).identity).toMatchObject({ id: a.id, configHomeRef: aHome });
+  expect(calls(cwd)).toHaveLength(surfaceId ? 3 : 2);
+  expect(calls(cwd).every(call => call.configHome === aHome
+    && call.args.includes(`model_reasoning_effort=${effort}`))).toBe(true);
+  if (entry === 'launch-route') expect(status, JSON.stringify(failure)).toBe(200);
+  expect(failure).toBeUndefined();
+  expect(surfaceId).toBeTruthy();
+});
+
+it.each(['none', 'minimal'] as const)('explicit server identity beats saved packet and catalog identities for %s', async effort => {
+  const packetId = `explicit-saved-${effort}`;
+  const aHome = join(root, `${packetId}-A`);
+  const bHome = join(root, `${packetId}-B`);
+  cache(aHome, 'gpt-6.1-sol', ['low']);
+  cache(bHome, 'gpt-6.1-sol', ['none', 'minimal']);
+  const a = await registerRuntimeIdentity({ runtime: 'codex', label: 'A', configHomeRef: aHome });
+  const b = await registerRuntimeIdentity({ runtime: 'codex', label: 'B', configHomeRef: bHome });
+  await selectRuntimeIdentity('codex', a.id);
+  const cwd = repo(packetId);
+  const seed = await launchOwnedCodexSession({ packetId, cwd, prompt: 'seed A', model: 'gpt-6.1-sol',
+    effort: 'low', executionPolicy: 'single-attempt', workMode: 'read-only' });
+  expect(seed.ok, seed.note).toBe(true);
+  await finished(seed.surfaceId);
+  const result = await codexRuntime.launch({ packetId, cwd, prompt: 'explicit server B', model: 'gpt-6.1-sol',
+    effort, runtimeIdentity: b, executionPolicy: 'single-attempt', workMode: 'read-only' });
+  expect(result.ok, result.note).toBe(true);
+  await finished(result.sessionKey!);
+  expect(saved(seed.surfaceId).identity?.id).toBe(a.id);
+  expect(saved(result.sessionKey!).identity).toMatchObject({ id: b.id, configHomeRef: bHome });
+  expect(calls(cwd)).toEqual([
+    { configHome: aHome, args: expect.arrayContaining(['model_reasoning_effort=low']) },
+    { configHome: bHome, args: expect.arrayContaining([`model_reasoning_effort=${effort}`]) },
+  ]);
+});
+
 it.each(['launch-route', 'single-attempt', 'runtime-adapter'].flatMap(entry =>
   (['none', 'minimal'] as const).map(effort => ({ entry, effort })),
 ))('$entry uses pinned A after selection changes to B for $effort', async ({ entry, effort }) => {

@@ -179,7 +179,7 @@ export function getSelectedRuntimeIdentitySync(runtime: string): RuntimeIdentity
   return getRuntimeLaunchIdentitySync(runtime);
 }
 
-/** A durable packet binding takes precedence over the current worker selection. */
+/** Catalog fallback after explicit and saved-session identities are resolved. */
 export function getRuntimeLaunchIdentitySync(runtime: string, packetId?: string): RuntimeIdentityRecord | null {
   let catalog: RuntimeIdentityCatalog;
   try {
@@ -240,7 +240,10 @@ export async function getOrPinPacketRuntimeIdentity(input: {
     const catalog = await readCatalog();
     const bindingKey = `${input.runtime}\0${input.packetId}`;
     const existing = catalog.packetBindings[bindingKey];
-    if (existing) return existing;
+    // A server-resolved or saved-session identity is authoritative for this
+    // launch. Persist it so a stale catalog binding cannot change the child.
+    if (existing && (!input.preferred || (existing.id === input.preferred.id
+      && existing.configHomeRef === input.preferred.configHomeRef))) return existing;
     const selectedId = catalog.selectedByRuntime[input.runtime];
     const selected = catalog.identities.find(
       (identity) => identity.id === selectedId && identity.runtime === input.runtime,

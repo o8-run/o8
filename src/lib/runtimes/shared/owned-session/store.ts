@@ -56,6 +56,7 @@ import {
   type OwnedWorkspaceSpawnGuard,
 } from './workspace-spawn-guard';
 import { resolveOwnedLaunchPolicy, refuseOwnedSingleAttemptResume } from './execution-policy';
+import { readPacketSessionIdentitySync } from './packet-identity';
 import type {
   OwnedFleetAdditions,
   OwnedLaunchRequest,
@@ -190,24 +191,12 @@ export function createOwnedSessionStore(
       let selectedIdentity: OwnedSessionRecord['identity'] | null = null;
       if (adapter.isolatedConfigHomeEnv && adapter.defaultConfigHome && request.packetId) {
         const defaultConfigHome = adapter.defaultConfigHome();
-        let latestPacketSession: OwnedSessionRecord | null = null;
-        for (const sessionDir of await io.listSessionDirs()) {
-          try {
-            const candidate = await io.loadSession(sessionDir);
-            if (candidate.packetId === request.packetId
-              && candidate.identity
-              && (!latestPacketSession || candidate.updatedAt > latestPacketSession.updatedAt)) {
-              latestPacketSession = candidate;
-            }
-          } catch {
-            // One corrupt legacy session must not block a new, otherwise valid launch.
-          }
-        }
-        const existingPacketIdentity = latestPacketSession?.identity;
+        const preferred = request.runtimeIdentity
+          ?? readPacketSessionIdentitySync(root, surfacePrefix, request.packetId);
         selectedIdentity = await getOrPinPacketRuntimeIdentity({
           runtime: runtimeId,
           packetId: request.packetId,
-          preferred: existingPacketIdentity ?? request.runtimeIdentity,
+          preferred: preferred ?? undefined,
           fallback: {
             id: `${runtimeId}-local-default`,
             label: 'Current local sign-in',
