@@ -81,6 +81,7 @@ interface ChatMessageListProps {
   threadId?: string | null;
   active?: boolean;
   displayWaiting: boolean;
+  liveCompaction?: boolean;
   repoPath?: string | null;
   activeTargetLabel: string;
   activeTargetColor: string;
@@ -159,6 +160,7 @@ const ChatMessageListPresentation = memo(forwardRef<HTMLDivElement, ChatMessageL
   displayMessages: rawDisplayMessages,
   logLabel,
   displayWaiting,
+  liveCompaction = false,
   threadId,
   active = false,
   repoPath,
@@ -274,8 +276,6 @@ const ChatMessageListPresentation = memo(forwardRef<HTMLDivElement, ChatMessageL
     onSelectSuggestion, onDismissSuggestions, suggestedRepliesCollapsed, onRestoreSuggestions, suggestedRepliesPending]);
   const showEmptyWithOverride = displayMessages.length === 0 && !displayWaiting && emptyStateOverride;
   const showEmptyWithFallback = displayMessages.length === 0 && !displayWaiting && !emptyStateOverride;
-  const isCompacting = displayWaiting && displayMessages.length > 0 &&
-    displayMessages[displayMessages.length - 1]?.text?.toLowerCase().includes('compact');
 
   return (
     <div ref={visibilityRef} style={{ position: 'relative', display: 'flex', flexDirection: 'column', minHeight: 0, flex: composeFirst ? '0 1 auto' : 1 }}>
@@ -345,35 +345,24 @@ const ChatMessageListPresentation = memo(forwardRef<HTMLDivElement, ChatMessageL
         {bottomContent}
         {composerQueue ? <ComposerQueuedMessages queue={composerQueue} messages={displayMessages} /> : null}
 
-        {isCompacting ? (
-          <div style={{
-            padding: '12px 14px',
-            borderRadius: 14,
-            background: 'linear-gradient(180deg, rgba(254, 249, 195, 0.72), rgba(254, 240, 138, 0.22))',
-            border: '1px solid rgba(245, 158, 11, 0.18)',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 7,
-            boxShadow: '0 12px 30px rgba(245, 158, 11, 0.08)',
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 400, color: '#b45309', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-              <div style={{ width: 14, height: 14, borderRadius: '50%', border: '2px solid rgba(245, 158, 11, 0.3)', borderTopColor: '#f59e0b', animation: 'spin 1s linear infinite' }} />
-              Compaction in progress
-            </div>
-            <div style={{ fontSize: 11, color: '#92400e', lineHeight: 1.5 }}>
+        {liveCompaction && isOrchestratorMode ? (
+          <div role="status" style={{ alignSelf: 'stretch', paddingTop: 10, paddingRight: 14, paddingBottom: 10, paddingLeft: 14, borderRadius: 12,
+            background: 'var(--t-hover)', border: '1px solid var(--t-divider-subtle)' }}>
+            <div style={{ fontSize: 12, fontWeight: 400, color: 'var(--t-text)' }}>Compaction in progress</div>
+            <div style={{ fontSize: 11, fontWeight: 300, color: 'var(--t-text-secondary)', lineHeight: 1.5 }}>
               Context is being compressed. Messages sent now will be queued and delivered after compaction completes.
             </div>
           </div>
         ) : null}
 
-        {displayWaiting && !isCompacting && isOrchestratorMode && displayMessages.length > 0 ? (
+        {displayWaiting && !liveCompaction && isOrchestratorMode && displayMessages.length > 0 ? (
           // Cursor's trailing anchor (vid2 study): while the turn is live, a
           // shimmering status line sits at the bottom of the process block and
           // is pushed down as new lines land above it. Text, never a bubble.
           <ShimmerLine style={{ alignSelf: 'flex-start', flexShrink: 0 }}>Planning next moves</ShimmerLine>
         ) : null}
 
-        {displayWaiting && !isCompacting && !isOrchestratorMode ? (
+        {displayWaiting && !isOrchestratorMode ? (
           <div style={{
             alignSelf: 'flex-start',
             display: 'flex',

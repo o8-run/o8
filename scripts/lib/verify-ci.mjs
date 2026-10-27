@@ -151,7 +151,7 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
   const integrationRun = integration.steps.find(step => step.run === 'npm run test:integration -- ${{ steps.select.outputs.files }}');
   requireCondition(integrationRun?.if === "steps.select.outputs.count != '0'", 'integration command changed');
   const browserFiles = ['tests/next-parity-route-ownership-real-path.test.ts', 'tests/review-diff-position-real-path.test.ts',
-    'tests/sidebar-window-layout-real-path.test.ts'];
+    'tests/sidebar-window-layout-real-path.test.ts', 'tests/compaction-progress-inference-real-path.test.ts'];
   const browserCondition = browserFiles.map(file => `contains(steps.select.outputs.files, '${file}')`).join(' || ');
   const browserSteps = integration.steps.filter(step => step.if === browserCondition
     && step.run === 'npx --no-install playwright-core install --with-deps chromium');
