@@ -38,6 +38,7 @@ export function configuredWorkerPool(snapshot = getOperatorDefaultsSync()): Orch
 }
 
 export async function workerModelCatalog(runtime: OrchestratorRuntime, repoPath: string): Promise<WorkerModelCatalog> {
+  const codexHome = runtime === 'codex' ? codexModelDiscoveryHome() : undefined;
   const defaults = getOperatorDefaultsSync().values;
   const capability = getRuntimeCapability(runtime);
   let defaultModel = runtime === 'opencode' ? defaults.opencodeWorkerModel
@@ -69,7 +70,7 @@ export async function workerModelCatalog(runtime: OrchestratorRuntime, repoPath:
     ids = defaultModel ? [defaultModel] : [];
     source = 'configured-execution-carrier-model';
   } else if (runtime === 'codex') {
-    ids = Object.keys((await getCodexSpeedCatalogue(codexModelDiscoveryHome())).models);
+    ids = Object.keys((await getCodexSpeedCatalogue(codexHome)).models);
     if (defaultModel && parseLocalModel(defaultModel)) ids.push(defaultModel);
     source = 'installed-model-list';
   } else if (runtime === '3code') {
@@ -91,7 +92,7 @@ export async function workerModelCatalog(runtime: OrchestratorRuntime, repoPath:
     ids = defaultModel ? [defaultModel] : [];
   }
   return {
-    models: [...new Set(ids)].map(id => ({ id, efforts: THINKING_EFFORTS.filter(effort => resolveEffortPin({ runtime, model: id, requestedEffort: effort }).ok) })),
+    models: [...new Set(ids)].map(id => ({ id, efforts: THINKING_EFFORTS.filter(effort => resolveEffortPin({ runtime, model: id, requestedEffort: effort, codexHome }).ok) })),
     defaultModel, carrier, source, observedAt: new Date().toISOString(),
   };
 }

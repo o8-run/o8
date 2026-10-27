@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 import { NextRequest } from 'next/server';
 import { afterAll, beforeEach, expect, it, vi } from 'vitest';
 import { getDataDir } from '@/lib/data-dir-migration';
@@ -32,6 +32,7 @@ mkdirSync(configHome, { recursive: true });
 vi.stubEnv('O8_TEST_DISCOVERY_HOME', home);
 vi.stubEnv('CODEX_HOME', configHome);
 vi.stubEnv('O8_CODEX_BIN', binary);
+vi.stubEnv('PATH', `${root}${delimiter}${process.env.PATH}`);
 vi.stubEnv('CORTEX_IDE_OWNED_CODEX_ROOT', ownedRoot);
 vi.stubEnv('O8_CRASH_SURVIVABLE_WORKERS', '0');
 vi.stubEnv('O8_CRASH_SURVIVABLE_ORCHESTRATOR', '0');
@@ -43,6 +44,13 @@ if (process.argv.includes('app-server')) {
   require('node:readline').createInterface({ input: process.stdin }).on('line', line => {
     const { id, method } = JSON.parse(line);
     if (!id) return;
+    const switchFile = require('node:path').join(process.env.CODEX_HOME, 'switch-identity.json');
+    if (method === 'model/list' && fs.existsSync(switchFile)) {
+      const { file, identityId } = JSON.parse(fs.readFileSync(switchFile, 'utf8'));
+      const catalog = JSON.parse(fs.readFileSync(file, 'utf8'));
+      catalog.selectedByRuntime.codex = identityId;
+      fs.writeFileSync(file, JSON.stringify(catalog));
+    }
     const models = JSON.parse(fs.readFileSync(require('node:path').join(process.env.CODEX_HOME, 'models_cache.json'), 'utf8')).models;
     console.log(JSON.stringify({ id, result: method === 'model/list' ? { data: models.map(model => ({ model: model.slug })) }
       : method === 'config/read' ? { config: {} } : {} }));
@@ -55,12 +63,14 @@ if (outputIndex >= 0) {
 }
 fs.appendFileSync(require('node:path').join(process.cwd(), 'calls.jsonl'), JSON.stringify({ args: process.argv.slice(2), configHome: process.env.CODEX_HOME }) + '\\n');
 console.log(JSON.stringify({ type: 'thread.started', thread_id: 'discovery-fixture' }));
+console.log(JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: JSON.stringify({ configHome: process.env.CODEX_HOME }) } }));
 console.log(JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 1, output_tokens: 1 } }));
 setTimeout(() => {}, 100);
 }
 `);
 chmodSync(binary, 0o700);
 const { codexBackend } = await import('@/lib/lane/orchestrator-backends/codex');
+const { makeMoaBackend } = await import('@/lib/lane/orchestrator-backends/moa');
 const { codexOwnedAdapter, launchOwnedCodexSession } = await import('@/lib/codex/owned');
 const { createOwnedSessionStore } = await import('@/lib/runtimes/shared/owned-session');
 const { registerRuntimeIdentity, selectRuntimeIdentity } = await import('@/lib/runtime/identity-catalog');
@@ -70,6 +80,8 @@ const { resolveEffortPin } = await import('@/lib/orchestrator/effort-pin');
 const { workerModelCatalog } = await import('@/lib/orchestrator/worker-catalog');
 const { callCodex } = await import('@/lib/cortex/qa/llm/codex-adapter');
 const { POST } = await import('@/app/api/runtime/launch/route');
+const { POST: cliPOST } = await import('@/app/api/v2/proxy/cli/route');
+const { startCodex } = await import('../scripts/worker/run-codex');
 const { closeDb } = await import('@/lib/db');
 function cache(config: string, model: string, efforts: string[]) {
   mkdirSync(config, { recursive: true });
@@ -303,4 +315,84 @@ it.each(['launch-route', 'single-attempt', 'effort-pin', 'worker-dispatch', 'lea
       if (!advertised) expect(records()).toEqual(before);
     }
   } finally { vi.stubEnv('CODEX_HOME', configHome); }
+});
+
+// Each independent process entry point must carry its validated account into spawn.
+it.each(['cli-proxy', 'external-worker'].flatMap(entry =>
+  (['none', 'minimal'] as const).flatMap(effort => [false, true].map(advertised => ({ entry, effort, advertised }))),
+))('$entry validates and spawns one home for $effort (advertised=$advertised)', async ({ entry, effort, advertised }) => {
+  const identityHome = join(root, `${entry}-${effort}-${advertised}-home`);
+  const cwd = repo(`${entry}-${effort}-${advertised}-repo`);
+  cache(identityHome, 'gpt-6.1-sol', advertised ? [effort] : ['low']);
+  cache(configHome, 'gpt-6.1-sol', advertised ? ['low'] : [effort]);
+  const identity = await registerRuntimeIdentity({ runtime: 'codex', label: 'Fixture', configHomeRef: identityHome });
+  await selectRuntimeIdentity('codex', identity.id);
+  if (entry === 'cli-proxy') {
+    writeFileSync(join(getDataDir(), 'repos.json'), JSON.stringify([{ path: cwd }]));
+    const response = await cliPOST(new NextRequest('http://localhost/api/v2/proxy/cli', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ runtime: 'codex', model: 'cli:codex:gpt-6.1-sol', effort,
+        repoPath: cwd, messages: [{ role: 'user', content: 'fixture' }] }),
+    }));
+    // Consume even an unexpected successful stream so red runs leave no child.
+    const text = await response.text();
+    expect(response.status).toBe(advertised ? 200 : 400);
+    if (advertised) expect(text).toContain(identityHome);
+    else expect(JSON.parse(text)).toMatchObject({ code: 'effort_unsupported_model' });
+  } else {
+    const running = startCodex({ cwd, prompt: 'fixture', model: 'gpt-6.1-sol', effort, onChunk: async () => {} });
+    const result = await running.then(process => process.result).catch(() => null);
+    if (advertised) {
+      await expect(running).resolves.toBeDefined();
+      expect(result?.exitCode).toBe(0);
+    } else await expect(running).rejects.toMatchObject({ name: 'EffortPinRejectionError' });
+  }
+  expect(calls(cwd)).toEqual(advertised ? [{
+    configHome: identityHome, args: expect.arrayContaining([`model_reasoning_effort=${effort}`]),
+  }] : []);
+});
+
+it.each(['none', 'minimal'] as const)('worker discovery keeps one home across its asynchronous probe for %s', async effort => {
+  const identityHome = join(root, `discovery-pinned-${effort}`);
+  const nextHome = join(root, `discovery-next-${effort}`);
+  cache(identityHome, 'gpt-6.1-sol', [effort]);
+  cache(nextHome, 'other-model', ['low']);
+  cache(configHome, 'other-model', ['low']);
+  const first = await registerRuntimeIdentity({ runtime: 'codex', label: 'First fixture', configHomeRef: identityHome });
+  const next = await registerRuntimeIdentity({ runtime: 'codex', label: 'Next fixture', configHomeRef: nextHome });
+  await selectRuntimeIdentity('codex', first.id);
+  // The real app-server fixture changes the persisted selection during model/list.
+  writeFileSync(join(identityHome, 'switch-identity.json'), JSON.stringify({
+    file: join(getDataDir(), 'runtime-identities.json'), identityId: next.id,
+  }));
+  const catalog = await workerModelCatalog('codex', repo(`probe-pinned-${effort}`));
+  expect(catalog.models).toEqual([{ id: 'gpt-6.1-sol', efforts: expect.arrayContaining([effort]) }]);
+  const selected = JSON.parse(readFileSync(join(getDataDir(), 'runtime-identities.json'), 'utf8'));
+  expect(selected.selectedByRuntime.codex).toBe(next.id);
+});
+
+it.each((['none', 'minimal'] as const).flatMap(effort =>
+  [false, true].map(advertised => ({ effort, advertised })),
+))('Collide validates the lead source home for $effort (advertised=$advertised)', async ({ effort, advertised }) => {
+  const identityHome = join(root, `collide-worker-${effort}-${advertised}`);
+  cache(identityHome, 'gpt-6.1-sol', advertised ? ['low'] : [effort]);
+  cache(configHome, 'gpt-6.1-sol', advertised ? [effort] : ['low']);
+  const identity = await registerRuntimeIdentity({ runtime: 'codex', label: 'Worker fixture', configHomeRef: identityHome });
+  await selectRuntimeIdentity('codex', identity.id);
+  writeFileSync(join(configHome, 'auth.json'), JSON.stringify({ fixture: 'lead-source' }));
+  const cwd = repo(`collide-home-${effort}-${advertised}`);
+  const participant = { backend: 'codex' as const, model: 'gpt-6.1-sol', thinkingEffort: effort };
+  const backend = makeMoaBackend({ id: 'collide', label: 'Fixture', proposers: [participant], aggregator: participant });
+  const events: OrchestratorEvent[] = [];
+  await backend.sendTurn(cwd, 'fixture', event => events.push(event), { threadId: `collide-home-${effort}-${advertised}` });
+  expect(events.some(event => event.type === 'collide_phase')).toBe(advertised);
+  expect(calls(cwd)).toHaveLength(advertised ? 2 : 0);
+  if (advertised) {
+    expect(events).toContainEqual(expect.objectContaining({ type: 'turn_receipt', effort }));
+    expect(calls(cwd).every(call => call.args.includes(`model_reasoning_effort=${effort}`))).toBe(true);
+    // Prepared lead homes derive from the lead source, never the selected worker.
+    for (const call of calls(cwd)) {
+      expect(JSON.parse(readFileSync(join(call.configHome, 'auth.json'), 'utf8'))).toEqual({ fixture: 'lead-source' });
+    }
+  } else expect(events).toContainEqual(expect.objectContaining({ type: 'error', error: expect.stringMatching(/does not advertise.*effort/i) }));
 });
