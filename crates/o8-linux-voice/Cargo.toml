@@ -23,3 +23,9 @@ whisper-rs = { version = "0.16", optional = true }
 name = "o8-speech-recognizer"
 path = "src/bin/o8-speech-recognizer.rs"
 required-features = ["whisper"]
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+global-hotkey = "=0.8.0"
+log = "0.4"
+libc = "0.2"
+x11rb = { version = "=0.13.2", features = ["xinput"] }

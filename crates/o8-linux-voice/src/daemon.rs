@@ -4,7 +4,7 @@
 //! Lifecycle, matching the Swift helper:
 //!
 //! 1. Boot: emit `status capture:<source>` and `ready`, then warm the model on
-//!    the worker thread (which may download it, see [`crate::model`]).
+//!    the worker thread (installed files only, see [`crate::model`]).
 //! 2. `start:<id>`: open capture, emit `status listening`, stream `level`
 //!    events and periodic `partial` transcripts.
 //! 3. `stop:<id>` (a stale id is ignored): close capture, transcribe, then emit
@@ -32,8 +32,8 @@ const PARTIAL_MAX_SAMPLES: usize = 30 * audio::SAMPLE_RATE as usize;
 
 /// Turns 16 kHz mono samples into text. Owned by the worker thread.
 pub trait Transcriber: Send {
-    /// Load (or download) whatever `language` needs. Called at boot and on
-    /// locale changes; `notify` emits progress such as `model_downloading`.
+    /// Verify and load the installed model that `language` needs. Called at boot and on
+    /// locale changes; missing models are reported without downloading.
     fn prepare(&mut self, _language: Option<&str>, _notify: &dyn Fn(Event)) -> Result<(), String> {
         Ok(())
     }

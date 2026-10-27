@@ -8,7 +8,7 @@ Three surfaces are macOS-native code paths with no Linux implementation. Each ha
 
 | Surface | Status on Linux | Why | Fallback |
 | --- | --- | --- | --- |
-| Voice dictation (Symon push-to-talk, `Fn`/right-`Option` hotkeys, on-device Apple transcription) | Partial | The Swift Symon helper is macOS-only. On Linux the shell's `stt_engine` drives `o8-speech-recognizer` from `crates/o8-linux-voice` (same line protocol, on-device whisper.cpp, model downloaded on demand to `~/.o8/models/whisper`), so the composer mic and the `o8_stt_*` / input-device / voice-prefs commands work, with the same Whisper/Gemini finalize chain. On X11, holding `Control+Alt+Space` (prefs `linux_ptt_enabled`, `linux_ptt_shortcut`) dictates system-wide: it ducks with `pactl` and types into the focused window with `xdotool`. The helper is found through `O8_SPEECH_RECOGNIZER`, beside the executable, or on `PATH`; it is not bundled yet. Wayland has no global push-to-talk, and the Linux shell has no dock or caret overlay. | Install `o8-speech-recognizer` (and `xdotool` for typing into other apps). On Wayland, use the composer mic. Read-aloud's offline floor is the system engine (`system_tts_speak`: piper, espeak-ng or spd-say), then WebKitGTK speechSynthesis. |
+| Voice dictation (Symon push-to-talk, `Fn`/right-`Option` hotkeys, on-device Apple transcription) | Partial | The Swift Symon helper is macOS-only. On Linux the shell's `stt_engine` drives `o8-speech-recognizer` from `crates/o8-linux-voice` (same line protocol, on-device whisper.cpp, models installed only after explicit size approval in `~/.o8/models/whisper`, with checksums verified on load), so the composer mic and the `o8_stt_*` / input-device / voice-prefs commands work, with the same Whisper/Gemini finalize chain. On X11, holding `Control+Alt+Space` (prefs `linux_ptt_enabled`, `linux_ptt_shortcut`) dictates system-wide: it ducks with `pactl` and types into the focused window with `xdotool`. The helper is found through `O8_SPEECH_RECOGNIZER`, beside the executable, or on `PATH`; it is not bundled yet. Wayland has no global push-to-talk, and the Linux shell has no dock or caret overlay. | Install `o8-speech-recognizer` (and `xdotool` for typing into other apps). On Wayland, use the composer mic. Read-aloud's offline floor is the system engine (`system_tts_speak`: piper, espeak-ng or spd-say), then WebKitGTK speechSynthesis. |
 | Native browser pane (embedded Browser tab / canvas browser cards, agent-grab) | Unsupported | `src-tauri/src/browser_view.rs` builds the pane as a native AppKit child window; the `#[cfg(not(target_os = "macos"))]` stubs for `open`/`eval`/`navigate` compile to no-ops (`open` returns `Ok(())` with no window ever created, `eval` returns `false`, `eval_result` returns the literal error `"native browser-view is macOS-only"`). | The pane's own "Open in Browser tab" / external-open control (`openExternal` in `src/components/desktop/O8BrowserPane.tsx`, backed by `openExternalUrl`) opens the same URL in the system default browser instead of the embedded webview. |
 | Folder/file picker (`osascript`-backed native chooser) | Unsupported | `src/app/api/panel/browse-folder/route.ts` and the `pick` action in `src/app/api/panel/file-io/route.ts` shell out to `osascript`/AppleScript. On Linux `osascript` does not exist, so the `execSync`/`execFileAsync` call throws `ENOENT`; both routes catch that and return `{ path: null }` — the same shape as a user cancelling. | Callers (`pickRepoFolder.ts`, `AddRepoDialog.tsx`, `OnboardingReposStep.tsx`) treat a null path as "no native picker available" and fall through to a manual path-entry prompt (`requestPrompt`) — the operator types the absolute folder/file path directly. |
 
@@ -303,3 +303,17 @@ No credit taken for these already-known items:
 - Merge via local-path fetch is the central remote-node wall.
 - tmux persistence is a good Linux primitive and should remain part of the headless node design.
 - Windows is a larger and separate campaign.
+
+### Installing a local dictation model
+
+Helper startup and locale changes only load installed models. To see the download
+size, run `o8-speech-recognizer --download-model base.en`. It prints
+`147964211 bytes (148.0 MB)` and exits without downloading. To approve that transfer,
+repeat with `--accept-model-size 147964211`. Use `--model-dir DIR` on both commands
+for a custom cache. A missing or corrupt cache reports the same explicit action;
+it never repairs itself through a background download.
+
+On X11, push-to-talk releases when focus leaves or changes windows, or any source
+releases a chord key. The hold monitor must be ready before capture starts; losing
+the monitor ends capture. Focus release uses the existing dictation finalization
+path, just like releasing the shortcut.

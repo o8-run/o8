@@ -1,9 +1,8 @@
-//! On-demand whisper.cpp model management.
+//! Explicit installation and verified loading of whisper.cpp models.
 //!
-//! Models are never bundled. The first session that needs one downloads it
-//! into `<o8 data dir>/models/whisper/` (the same `~/.o8` root the shell's
-//! voice prefs use, honoring `O8_DATA_DIR` and `CORTEX_IDE_DATA_DIR`), checks
-//! its SHA-256 against a pinned value, and renames it into place atomically.
+//! Models are never bundled. Loading only uses an installed, verified file.
+//! Installation requires approval of the model's advertised byte count and
+//! checks its SHA-256 before renaming it into place atomically.
 
 use sha2::{Digest, Sha256};
 use std::ffi::OsStr;
@@ -97,7 +96,7 @@ pub fn default_model_dir() -> PathBuf {
 /// What the helper should load.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ModelChoice {
-    /// A known model, downloaded on demand.
+    /// A known model, installed only after explicit approval.
     Managed(&'static ModelSpec),
     /// A user-supplied ggml file, used as-is.
     Path(PathBuf),
@@ -119,6 +118,27 @@ pub fn choose(requested: Option<&str>, language: Option<&str>) -> Result<ModelCh
 /// Fetches a URL to a local file.
 pub trait Downloader {
     fn fetch(&self, url: &str, dest: &Path) -> Result<(), String>;
+
+    /// Ordinary daemon loaders have no download approval.
+    fn approved_size(&self) -> Option<u64> {
+        None
+    }
+}
+
+/// Used only by the explicit install command after the size was acknowledged.
+pub struct ApprovedDownload<'a> {
+    pub downloader: &'a dyn Downloader,
+    pub size: u64,
+}
+
+impl Downloader for ApprovedDownload<'_> {
+    fn fetch(&self, url: &str, dest: &Path) -> Result<(), String> {
+        self.downloader.fetch(url, dest)
+    }
+
+    fn approved_size(&self) -> Option<u64> {
+        Some(self.size)
+    }
 }
 
 /// Downloads with `curl` or `wget`, whichever is installed.
@@ -185,8 +205,9 @@ pub fn sha256_file(path: &Path) -> Result<String, String> {
         .collect())
 }
 
-/// Return the path of a usable model, downloading it first when needed.
-/// `on_download` is called once before a download begins.
+/// Verify an installed model. Missing or corrupt files require an explicit
+/// size-approved installer; the daemon's ordinary downloader cannot fetch.
+/// `on_download` reports progress, and does not grant download approval.
 pub fn ensure(
     choice: &ModelChoice,
     dir: &Path,
@@ -203,13 +224,20 @@ pub fn ensure(
         ModelChoice::Managed(spec) => *spec,
     };
     let target = dir.join(spec.file_name());
-    // A present file of the pinned size was verified when it was installed.
-    if target
-        .metadata()
-        .map(|m| m.len() == spec.size)
-        .unwrap_or(false)
-    {
-        return Ok(target);
+    let reason = match target.metadata() {
+        Ok(metadata) if metadata.len() == spec.size => match sha256_file(&target) {
+            Ok(digest) if digest == spec.sha256 => return Ok(target),
+            Ok(_) => "checksum mismatch".to_string(),
+            Err(error) => error,
+        },
+        Ok(_) => "size mismatch".to_string(),
+        Err(error) => format!("not readable: {error}"),
+    };
+    if downloader.approved_size() != Some(spec.size) {
+        return Err(format!(
+            "model_unavailable: {} ({reason}); download requires approval of {} bytes. Run o8-speech-recognizer --download-model {} --model-dir {:?} to review the size first.",
+            spec.name, spec.size, spec.name, dir
+        ));
     }
     std::fs::create_dir_all(dir)
         .map_err(|e| format!("model_unavailable: create {}: {e}", dir.display()))?;
@@ -217,7 +245,16 @@ pub fn ensure(
     let part = dir.join(format!("{}.part-{}", spec.file_name(), std::process::id()));
     let result = downloader
         .fetch(&spec.url(), &part)
-        .and_then(|()| sha256_file(&part))
+        .and_then(|()| {
+            let size = part
+                .metadata()
+                .map_err(|e| format!("download size: {e}"))?
+                .len();
+            if size != spec.size {
+                return Err(format!("size mismatch (got {size} bytes)"));
+            }
+            sha256_file(&part)
+        })
         .and_then(|digest| {
             if digest == spec.sha256 {
                 Ok(())
@@ -274,7 +311,11 @@ mod tests {
         let announced = Cell::new(0);
         let spec: &'static ModelSpec = Box::leak(Box::new(HELLO));
         let choice = ModelChoice::Managed(spec);
-        let path = ensure(&choice, dir.path(), &dl, &|_| {
+        let approved = ApprovedDownload {
+            downloader: &dl,
+            size: spec.size,
+        };
+        let path = ensure(&choice, dir.path(), &approved, &|_| {
             announced.set(announced.get() + 1)
         })
         .unwrap();
@@ -295,7 +336,11 @@ mod tests {
             calls: Cell::new(0),
         };
         let spec: &'static ModelSpec = Box::leak(Box::new(HELLO));
-        let err = ensure(&ModelChoice::Managed(spec), dir.path(), &dl, &|_| {}).unwrap_err();
+        let approved = ApprovedDownload {
+            downloader: &dl,
+            size: spec.size,
+        };
+        let err = ensure(&ModelChoice::Managed(spec), dir.path(), &approved, &|_| {}).unwrap_err();
         assert!(
             err.starts_with("model_unavailable: could not download test (checksum mismatch"),
             "{err}"

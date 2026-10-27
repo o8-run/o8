@@ -13,12 +13,39 @@
 //! Prefs (`~/.o8/dictation.json`): `linux_ptt_enabled` (default true) and
 //! `linux_ptt_shortcut` (default `Control+Alt+Space`).
 
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{mpsc, Arc, Mutex};
+use std::time::Duration;
+
+#[path = "linux_ptt/x11.rs"]
+mod x11;
 
 pub(crate) const DEFAULT_SHORTCUT: &str = "Control+Alt+Space";
 
-static HELD: AtomicBool = AtomicBool::new(false);
-static SESSION: AtomicU64 = AtomicU64::new(0);
+#[derive(Default)]
+struct HoldState {
+    generation: u64,
+    held: Option<u64>,
+    session: Option<(u64, u64)>,
+}
+
+type SharedHold = Arc<Mutex<HoldState>>;
+
+enum Work {
+    Begin(u64, mpsc::Receiver<Result<(), String>>),
+    End(u64),
+}
+
+fn active(state: &SharedHold, token: u64) -> bool {
+    state.lock().unwrap().held == Some(token)
+}
+
+fn release(state: &SharedHold, worker: &mpsc::Sender<Work>, token: u64) {
+    let mut state = state.lock().unwrap();
+    if state.held == Some(token) {
+        state.held = None;
+        let _ = worker.send(Work::End(token));
+    }
+}
 
 /// Whether this desktop session allows global key grabs: an X11 display and
 /// not a Wayland session (XWayland grabs only see X11 clients). Pure for tests.
@@ -51,23 +78,6 @@ pub(crate) fn chord(enabled: bool, configured: Option<String>) -> Option<String>
     Some(configured.unwrap_or_else(|| DEFAULT_SHORTCUT.to_string()))
 }
 
-/// Edge of the hold the hotkey thread hands us.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Edge {
-    Begin,
-    End,
-}
-
-/// Press / release → begin / end, once per hold. A repeated press while held,
-/// or a release with no hold, is ignored. Pure apart from the `HELD` latch.
-fn edge_for(pressed: bool, held: &AtomicBool) -> Option<Edge> {
-    if pressed {
-        (!held.swap(true, Ordering::SeqCst)).then_some(Edge::Begin)
-    } else {
-        held.swap(false, Ordering::SeqCst).then_some(Edge::End)
-    }
-}
-
 /// Register the push-to-talk chord. Logs and returns on any failure: a chord
 /// another app owns, a Wayland session, or push-to-talk turned off.
 pub(crate) fn register(app: &tauri::App) {
@@ -91,20 +101,48 @@ pub(crate) fn register(app: &tauri::App) {
             return;
         }
     };
+    let state = Arc::new(Mutex::new(HoldState::default()));
+    let (worker, jobs) = mpsc::channel();
     let handle = app.handle().clone();
+    let audio_state = state.clone();
+    // One worker orders all engine effects. A slow preparation from an old
+    // hold cannot start or stop the following hold's session.
+    std::thread::spawn(move || {
+        for job in jobs {
+            match job {
+                Work::Begin(token, ready) => begin(&handle, &audio_state, token, ready),
+                Work::End(token) => end(&audio_state, token),
+            }
+        }
+    });
+    let cancel_state = state.clone();
+    let cancel_worker = worker.clone();
+    let monitor_state = state.clone();
+    let monitor = x11::Monitor::new(
+        shortcut,
+        move |token| active(&monitor_state, token),
+        move |token| release(&cancel_state, &cancel_worker, token),
+    );
     let result = app
         .global_shortcut()
         .on_shortcut(shortcut, move |_app, _sc, event| {
-            let Some(edge) = edge_for(event.state == ShortcutState::Pressed, &HELD) else {
-                return;
-            };
-            // Starting the mic and stopping the session block briefly; keep them
-            // off the hotkey thread.
-            let app = handle.clone();
-            std::thread::spawn(move || match edge {
-                Edge::Begin => begin(&app),
-                Edge::End => end(),
-            });
+            if event.state == ShortcutState::Pressed {
+                let mut hold = state.lock().unwrap();
+                if hold.held.is_some() {
+                    return;
+                }
+                hold.generation += 1;
+                let token = hold.generation;
+                hold.held = Some(token);
+                // Arm focus/key observation before opening the microphone.
+                let ready = monitor.watch(token);
+                let _ = worker.send(Work::Begin(token, ready));
+            } else {
+                let token = state.lock().unwrap().held;
+                if let Some(token) = token {
+                    release(&state, &worker, token);
+                }
+            }
         });
     match result {
         Ok(()) => log::info!("[ptt] hold {chord} to dictate (X11)"),
@@ -112,15 +150,40 @@ pub(crate) fn register(app: &tauri::App) {
     }
 }
 
-fn begin(app: &tauri::AppHandle) {
+fn begin(
+    app: &tauri::AppHandle,
+    state: &SharedHold,
+    token: u64,
+    ready: mpsc::Receiver<Result<(), String>>,
+) {
+    let observed = ready.recv_timeout(Duration::from_millis(500));
+    if !active(state, token) {
+        return;
+    }
+    if !matches!(observed, Ok(Ok(()))) {
+        let mut hold = state.lock().unwrap();
+        if hold.held == Some(token) {
+            hold.held = None;
+            drop(hold);
+            surface_error(app, "Could not monitor the focused window and held keys.");
+        }
+        return;
+    }
     let input = match crate::stt_engine::prepare_input() {
         Ok(input) => input,
         Err(error) => {
-            HELD.store(false, Ordering::SeqCst);
-            surface_error(app, &error);
+            let mut hold = state.lock().unwrap();
+            if hold.held == Some(token) {
+                hold.held = None;
+                drop(hold);
+                surface_error(app, &error);
+            }
             return;
         }
     };
+    if !active(state, token) {
+        return;
+    }
     crate::linux_voice::stop_speaking();
     let _ = crate::audio_ducker::duck();
     crate::fn_hotkey::set_system_origin(true);
@@ -130,35 +193,38 @@ fn begin(app: &tauri::AppHandle) {
     );
     match crate::stt_engine::start_prepared(input, None) {
         Ok(sid) => {
-            SESSION.store(sid, Ordering::SeqCst);
-            log::info!("[ptt] dictation started (session={sid})");
-            // Released before the mic opened: finish now.
-            if !HELD.load(Ordering::SeqCst) {
-                end_session(sid);
+            let mut hold = state.lock().unwrap();
+            if hold.held == Some(token) {
+                hold.session = Some((token, sid));
+            } else {
+                drop(hold);
+                stop(sid);
             }
         }
         Err(error) => {
-            HELD.store(false, Ordering::SeqCst);
+            let mut hold = state.lock().unwrap();
+            if hold.held == Some(token) {
+                hold.held = None;
+            }
+            drop(hold);
             crate::fn_hotkey::set_system_origin(false);
             surface_error(app, &error);
         }
     }
 }
 
-fn end() {
-    let sid = SESSION.load(Ordering::SeqCst);
-    if sid != 0 {
-        end_session(sid);
+fn end(state: &SharedHold, token: u64) {
+    let mut hold = state.lock().unwrap();
+    if let Some((owner, sid)) = hold.session {
+        if owner == token {
+            hold.session = None;
+            drop(hold);
+            stop(sid);
+        }
     }
 }
 
-fn end_session(sid: u64) {
-    if SESSION
-        .compare_exchange(sid, 0, Ordering::SeqCst, Ordering::SeqCst)
-        .is_err()
-    {
-        return;
-    }
+fn stop(sid: u64) {
     crate::audio_ducker::restore();
     if let Err(e) = crate::stt_engine::stop_session(sid) {
         log::warn!("[ptt] stop failed: {e}");
@@ -256,16 +322,5 @@ mod tests {
         assert!(DEFAULT_SHORTCUT
             .parse::<tauri_plugin_global_shortcut::Shortcut>()
             .is_ok());
-    }
-
-    #[test]
-    fn one_begin_and_one_end_per_hold() {
-        let held = AtomicBool::new(false);
-        assert_eq!(edge_for(false, &held), None);
-        assert_eq!(edge_for(true, &held), Some(Edge::Begin));
-        assert_eq!(edge_for(true, &held), None);
-        assert_eq!(edge_for(false, &held), Some(Edge::End));
-        assert_eq!(edge_for(false, &held), None);
-        assert_eq!(edge_for(true, &held), Some(Edge::Begin));
     }
 }

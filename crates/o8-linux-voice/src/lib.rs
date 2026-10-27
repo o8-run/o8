@@ -10,7 +10,7 @@
 //!   stdin/stdout line protocol of `src-tauri/helpers/speech_recognizer.swift`
 //!   (`start:<id>` / `stop:<id>` in, `{"type":..,"text":..,"session_id":..}`
 //!   out). The `o8-speech-recognizer` binary (feature `whisper`) runs it with
-//!   whisper.cpp, downloading the model on demand ([`model`]).
+//!   whisper.cpp, loading explicitly installed models ([`model`]).
 //! - [`tts`]: a cancellable, single-flight speech fallback over `piper`
 //!   (when a voice model is installed), `espeak-ng` or `spd-say`, in that
 //!   order, mirroring `tts/native_say.rs`.

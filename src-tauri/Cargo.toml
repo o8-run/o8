@@ -221,6 +221,7 @@ tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 # which this dependency does not enable.
 [target.'cfg(target_os = "linux")'.dependencies]
 o8-linux-voice = { path = "../crates/o8-linux-voice" }
+x11rb = { version = "=0.13.2", features = ["xinput"] }
 
 # ── System-wide Symon fold: paste + global Fn hotkey (macOS only) ──
 # Versions pinned to aqua/Symon's exact stack so the lifted `paste.rs` +

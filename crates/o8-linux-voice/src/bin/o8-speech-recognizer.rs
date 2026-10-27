@@ -6,6 +6,7 @@
 //!   o8-speech-recognizer [--audio-fifo PATH | --audio-file WAV]
 //!                        [--model NAME|PATH] [--model-dir DIR] [--no-partials]
 //!   o8-speech-recognizer --input-devices-json
+//!   o8-speech-recognizer --download-model NAME [--accept-model-size BYTES]
 //!
 //! Environment: `O8_WHISPER_MODEL` (model name or path), `O8_DATA_DIR`.
 
@@ -24,6 +25,8 @@ fn main() {
         .ok()
         .filter(|s| !s.is_empty());
     let mut model_dir = model::default_model_dir();
+    let mut download_model = None;
+    let mut accepted_size = None;
     let mut options = DaemonOptions::default();
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -31,17 +34,60 @@ fn main() {
             "--audio-file" => file = args.next().map(PathBuf::from),
             "--model" => requested_model = args.next(),
             "--model-dir" => model_dir = args.next().map(PathBuf::from).unwrap_or(model_dir),
+            "--download-model" => download_model = Some(args.next().unwrap_or_default()),
+            "--accept-model-size" => accepted_size = Some(args.next().unwrap_or_default()),
             "--no-partials" => options.partial_interval = None,
             "--input-devices-json" => {
                 println!("{}", devices::input_devices_json(&tools::system_path()));
                 return;
             }
             "--help" | "-h" => {
-                eprintln!("usage: o8-speech-recognizer [--audio-fifo PATH | --audio-file WAV] [--model NAME|PATH] [--model-dir DIR] [--no-partials] | --input-devices-json");
+                eprintln!("usage: o8-speech-recognizer [--audio-fifo PATH | --audio-file WAV] [--model NAME|PATH] [--model-dir DIR] [--no-partials] | --input-devices-json | --download-model NAME [--model-dir DIR] [--accept-model-size BYTES]");
                 return;
             }
             other => eprintln!("o8-speech-recognizer: ignoring unknown argument {other}"),
         }
+    }
+
+    if let Some(name) = download_model {
+        let Some(spec) = model::spec(&name) else {
+            eprintln!("Unknown model: {name}");
+            std::process::exit(2);
+        };
+        eprintln!(
+            "Model {}: {} bytes ({:.1} MB)",
+            spec.name,
+            spec.size,
+            spec.size as f64 / 1_000_000.0
+        );
+        if accepted_size.as_deref().and_then(|s| s.parse::<u64>().ok()) != Some(spec.size) {
+            eprintln!("No download started. To approve this size, repeat this command with --accept-model-size {}.", spec.size);
+            std::process::exit(2);
+        }
+        let downloader = CommandDownloader {
+            search_path: tools::system_path(),
+        };
+        let approved = model::ApprovedDownload {
+            downloader: &downloader,
+            size: spec.size,
+        };
+        match model::ensure(
+            &model::ModelChoice::Managed(spec),
+            &model_dir,
+            &approved,
+            &|_| {},
+        ) {
+            Ok(path) => eprintln!("Model ready: {}", path.display()),
+            Err(error) => {
+                eprintln!("{error}");
+                std::process::exit(2);
+            }
+        }
+        return;
+    }
+    if accepted_size.is_some() {
+        eprintln!("--accept-model-size requires --download-model NAME");
+        std::process::exit(2);
     }
 
     let source: Box<dyn AudioSource> = if let Some(path) = file {
