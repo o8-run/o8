@@ -146,6 +146,7 @@ const dataDir = join(root, 'data');
 const ownedRoot = join(root, 'owned-qoder');
 const capturePath = join(root, 'qoder-spawns.jsonl');
 const fakeQoderPath = join(root, 'qodercli');
+const bundledCliDir = join(root, 'bundled-cli');
 const priorEnv = new Map<string, string | undefined>();
 const envKeys = [
   'CORTEX_IDE_DATA_DIR',
@@ -155,6 +156,7 @@ const envKeys = [
   'O8_FAKE_QODER_CAPTURE',
   'O8_CRASH_SURVIVABLE_WORKERS',
   'O8_PACKAGED_APP',
+  'O8_BUNDLED_MCP_DIR',
   'O8_APFS_DEPENDENCY_IMAGES',
   'O8_SKIP_PRELAUNCH_TYPECHECK',
 ] as const;
@@ -166,7 +168,8 @@ process.env.O8_OWNED_QODER_ROOT = ownedRoot;
 process.env.O8_QODER_BIN = fakeQoderPath;
 process.env.O8_FAKE_QODER_CAPTURE = capturePath;
 process.env.O8_CRASH_SURVIVABLE_WORKERS = '1';
-process.env.O8_PACKAGED_APP = '';
+process.env.O8_PACKAGED_APP = '1';
+process.env.O8_BUNDLED_MCP_DIR = bundledCliDir;
 process.env.O8_APFS_DEPENDENCY_IMAGES = '0';
 process.env.O8_SKIP_PRELAUNCH_TYPECHECK = '1';
 
@@ -189,6 +192,13 @@ writeFileSync(
   'utf8',
 );
 chmodSync(fakeQoderPath, 0o755);
+// Build the real packaged CLI once. Each launch still copies and verifies it,
+// without serializing repeated source builds inside the runtime-root lock.
+mkdirSync(join(bundledCliDir, 'bin'), { recursive: true });
+execFileSync(process.execPath, [join(process.cwd(), 'cli/esbuild.config.mjs'),
+  '--worker-output', join(bundledCliDir, 'bin/o8.mjs')], {
+  cwd: process.cwd(), stdio: 'pipe', env: { PATH: process.env.PATH, NODE_ENV: 'test' },
+});
 
 function git(cwd: string, ...args: string[]): void {
   execFileSync('git', args, { cwd, stdio: 'pipe' });
