@@ -1,14 +1,12 @@
 name: Current app launch stage profile
 
 on:
-  push:
-    branches: [perf/current-app-launch-stages]
   workflow_dispatch:
     inputs:
       main_run_id:
         description: Run containing the clean main app with identical measurement probes
-        default: '40429122856'
-        required: true
+        default: ''
+        required: false
 
 permissions:
   contents: read
@@ -19,6 +17,55 @@ env:
   MEASUREMENT_HARNESS: 01ab614f9de8a3b597edb23137df1991859e9871
 
 jobs:
+  build-main:
+    if: inputs.main_run_id == ''
+    runs-on: macos-latest
+    timeout-minutes: 120
+    env:
+      NEXT_TELEMETRY_DISABLED: '1'
+      O8_RELEASE_BUILD_CACHE: 'off'
+      APPLE_SIGNING_IDENTITY: '-'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: lab
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.MAIN_SOURCE }}
+          path: app
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.23.4
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - name: Install build tools
+        run: |
+          npm install -g npm@11.21.1
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+      - run: npm ci --prefer-offline
+        working-directory: app
+      - name: Apply identical measurement-only startup and frame probes
+        run: node lab/scripts/bench/prepare-launch-stage-build.mjs app
+      - name: Build clean main with the local startup prefetch patch
+        uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5
+        with:
+          projectPath: app
+          args: --features dev-mcp-plugin --bundles app --config work/native-launch.json
+      - name: Preserve the exact main app
+        run: tar -C app/src-tauri/target/release/bundle/macos -cf "$RUNNER_TEMP/main-app.tar" o8.app
+      - uses: actions/upload-artifact@v4
+        with:
+          name: current-app-launch-stage-main-app
+          path: ${{ runner.temp }}/main-app.tar
+          compression-level: 0
+          retention-days: 1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: current-app-launch-stage-main-modules
+          path: app/work/launch-client-modules.json
+          retention-days: 1
+
   build-head:
     runs-on: macos-latest
     timeout-minutes: 120
@@ -68,7 +115,8 @@ jobs:
           retention-days: 1
 
   compare:
-    needs: build-head
+    needs: [build-main, build-head]
+    if: always() && needs.build-head.result == 'success' && (needs.build-main.result == 'success' || needs.build-main.result == 'skipped')
     runs-on: macos-latest
     timeout-minutes: 40
     steps:
@@ -92,13 +140,13 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: current-app-launch-stage-main-app
-          run-id: ${{ inputs.main_run_id || '40429122856' }}
+          run-id: ${{ inputs.main_run_id || github.run_id }}
           github-token: ${{ github.token }}
           path: ${{ runner.temp }}/main
       - uses: actions/download-artifact@v4
         with:
           name: current-app-launch-stage-main-modules
-          run-id: ${{ inputs.main_run_id || '40429122856' }}
+          run-id: ${{ inputs.main_run_id || github.run_id }}
           github-token: ${{ github.token }}
           path: ${{ runner.temp }}/main
       - uses: actions/download-artifact@v4
