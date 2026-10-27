@@ -9,4 +9,16 @@ Free plans keep the existing route behavior in Auto. Existing explicit Brain CLI
 
 ## Text model on your own OpenRouter key
 
-When a request goes directly to OpenRouter with your own key, Brain answers, dictation polish and the o8 Operator chat ask for `openai/gpt-6-luna` first and `nvidia/nemotron-3.5-lightning:free` second. Set `O8_OPENROUTER_TEXT_MODEL` to an OpenRouter id such as `deepseek/deepseek-v4-flash` in the app's environment to replace the first model. The `$0` fallback stays in place. The managed endpoint and local runtimes ignore the variable, and a value that is not a `vendor/model` id is ignored.
+For direct OpenRouter requests, the default primary model for Brain answers, dictation polish, and Operator chat is `openai/gpt-6-luna`. Set `O8_OPENROUTER_TEXT_MODEL` in the app's environment to a `vendor/model[:variant]` id, such as `deepseek/deepseek-v4-flash`, to replace that default primary. Unset, blank, or malformed values keep the default. For Brain calls, an explicit `model` option takes precedence over the environment variable. Managed endpoints and local runtimes ignore the variable.
+
+The fallback depends on the caller:
+
+| Caller | Default fallbacks after the primary, in order |
+| --- | --- |
+| Brain (`callOpenRouter`) | Paid: `google/gemini-2.5-flash-lite`, then `openai/gpt-5.4-nano`, then `x-ai/grok-4.3` |
+| Dictation polish | `nvidia/nemotron-3.5-lightning:free` |
+| Operator chat's OpenRouter chain | `nvidia/nemotron-3.5-lightning:free` |
+
+Brain sends its fallback list in OpenRouter's `models[]` field within one request. A caller can replace that list with `fallbackModels`, or disable it with `fallbackModels: []`. An explicit `model` option changes the primary but keeps the default fallback list unless `fallbackModels` is also supplied. A `:free` primary alone therefore does not guarantee free Brain calls.
+
+These are the existing runtime fallback rules; the environment variable changes only the default primary model.
