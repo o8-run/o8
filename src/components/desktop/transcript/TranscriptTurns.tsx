@@ -24,7 +24,10 @@ export const TranscriptTurns = memo(function TranscriptTurns({ entries, nodes, b
       summary={summary && turnEntries.some(entry => entry.id === summary.assistantMessageId) ? summary : null}
       content={turnContent?.get(entries[start].id)} />;
   });
-});
+}, (previous, next) => previous.busy === next.busy && previous.repoPath === next.repoPath
+  && previous.summary === next.summary && previous.turnContent === next.turnContent
+  && sameArray(previous.entries, next.entries) && previous.nodes.length === next.nodes.length
+  && previous.nodes.every((node, index) => sameNode(node, next.nodes[index])));
 
 interface TranscriptTurnProps {
   deferLayout: boolean;

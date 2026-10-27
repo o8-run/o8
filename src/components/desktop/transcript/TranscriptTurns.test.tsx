@@ -49,6 +49,23 @@ describe('completed activity through the shared renderer', () => {
     act(() => { details.open = true; details.dispatchEvent(new Event('toggle')); });
     render(false); expect(host.textContent).toContain('Inspecting');
   });
+  it('reuses turn derivation for fresh elements with unchanged props, but accepts changed content', () => {
+    let derivations = 0;
+    const tracked = new Proxy(entries, { get(target, key, receiver) {
+      if (key === 'flatMap') derivations++;
+      return Reflect.get(target, key, receiver);
+    } });
+    const renderNodes = (final = 'Final answer') => act(() => root.render(<TranscriptTurns entries={tracked} busy={false}
+      nodes={entries.map(entry => <div key={entry.id}>{entry.id === 'f' ? final : entry.text}</div>)} />));
+    renderNodes();
+    expect(derivations).toBeGreaterThan(0);
+    derivations = 0;
+    renderNodes();
+    expect(derivations).toBe(0);
+    renderNodes('Revised final answer');
+    expect(derivations).toBeGreaterThan(0);
+    expect(host.textContent).toContain('Revised final answer');
+  });
   it('retains expanded work and message identity when a growing history starts deferring layout', () => {
     render(false);
     const details = host.querySelector('details')!;
