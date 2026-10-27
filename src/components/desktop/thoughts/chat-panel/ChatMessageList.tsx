@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, forwardRef, memo, useEffect, useRef, useState, type RefObject } from 'react';
+import { Fragment, forwardRef, memo, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { DesktopAgentMessage } from '../../DesktopAgentMessage';
 import { ComposerEntryDelivery, ComposerQueuedMessages, type ComposerTranscriptQueue } from './ComposerQueuedMessages';
 import { SuggestedReplies } from '../SuggestedReplies';
@@ -196,17 +196,17 @@ const ChatMessageListPresentation = memo(forwardRef<HTMLDivElement, ChatMessageL
   // line) instead of a stack of shimmer rows. Render-time derivation — the
   // underlying message state is untouched.
   const scrollRef = useRef<HTMLDivElement>(null);
-  const displayMessages = mergeAdjacentToolOnlyEntries(rawDisplayMessages);
-  const items = buildMissionRenderItems(displayMessages);
+  const displayMessages = useMemo(() => mergeAdjacentToolOnlyEntries(rawDisplayMessages), [rawDisplayMessages]);
+  const items = useMemo(() => buildMissionRenderItems(displayMessages), [displayMessages]);
   const visualizations = useTranscriptVisualizations({ repoPath, threadId, active, length: rawDisplayMessages.length });
-  const visualsByIndex = placeTranscriptVisualizations(visualizations, displayMessages);
+  const visualsByIndex = useMemo(() => placeTranscriptVisualizations(visualizations, displayMessages), [visualizations, displayMessages]);
   const renderVisualizations = (index: number) => (visualsByIndex.get(index) ?? []).map(reference => (
     <VisualizationFrame key={reference.id} reference={reference} />
   ));
   // Each artifact renders after the last transcript entry that precedes its
   // creation; anything newer than the transcript lands at the end. Key -1 is
   // the "no entries yet" bucket.
-  const taskArtifactsByIndex = placeTaskArtifacts(taskArtifacts ?? [], displayMessages);
+  const taskArtifactsByIndex = useMemo(() => placeTaskArtifacts(taskArtifacts ?? [], displayMessages), [taskArtifacts, displayMessages]);
   const renderTaskArtifacts = (index: number) => {
     const bucket = taskArtifactsByIndex.get(index);
     if (!bucket || !onTaskArtifactDeliver) return null;
@@ -243,6 +243,37 @@ const ChatMessageListPresentation = memo(forwardRef<HTMLDivElement, ChatMessageL
       break;
     }
   }
+  const latestAssistantId = displayMessages[lastAssistantIndex]?.id ?? null;
+  const [animatingTailId, setAnimatingTailId] = useState<string | null>(() => displayWaiting ? latestAssistantId : null);
+  if (displayWaiting && animatingTailId !== latestAssistantId) setAnimatingTailId(latestAssistantId);
+  const settleTail = useCallback((messageId: string) => {
+    setAnimatingTailId(previous => previous === messageId ? null : previous);
+  }, []);
+  // Completed histories have no visibility-dependent row props. A streamed
+  // answer keeps that signal until its visible post-stream tail has drained.
+  const animateLatestAssistant = active && (displayWaiting || animatingTailId === latestAssistantId);
+  const turnEntries = useMemo(() => items.map(item => item.kind === 'msg' ? item.msg : item.entries[0]), [items]);
+  const turnNodes = useMemo(() => items.map(item => {
+    const msg = item.kind === 'msg' ? item.msg : item.entries[0];
+    const index = item.kind === 'msg' ? item.index : item.lastIndex;
+    return <ChatMessageItem key={msg.id} msg={msg}
+      missionEntries={item.kind === 'mission-group' ? item.entries : undefined}
+      isLast={index === displayMessages.length - 1 && !displayWaiting}
+      isStreaming={index === lastAssistantIndex && displayWaiting}
+      animateStreaming={animateLatestAssistant && index === lastAssistantIndex}
+      onRevealSettled={index === lastAssistantIndex ? settleTail : undefined}
+      repoPath={repoPath} onRetryDelivery={onRetryDelivery} composerQueue={composerQueue}
+      visualizations={visualsByIndex.get(index)} artifacts={taskArtifactsByIndex.get(index)}
+      taskArtifactThreadBusy={taskArtifactsByIndex.has(index) && taskArtifactThreadBusy} onTaskArtifactDeliver={onTaskArtifactDeliver}
+      showChips={Boolean(index === lastAssistantIndex && hasSuggestedReplies && msg.id === suggestedReplyMessageId)}
+      displayWaiting={index === lastAssistantIndex && displayWaiting} suggestedReplies={suggestedReplies}
+      onSelectSuggestion={onSelectSuggestion} onDismissSuggestions={onDismissSuggestions}
+      suggestedRepliesCollapsed={suggestedRepliesCollapsed} onRestoreSuggestions={onRestoreSuggestions}
+      suggestedRepliesPending={suggestedRepliesPending} />;
+  }), [items, displayMessages.length, displayWaiting, lastAssistantIndex, animateLatestAssistant, settleTail,
+    repoPath, onRetryDelivery, composerQueue, visualsByIndex, taskArtifactsByIndex, taskArtifactThreadBusy,
+    onTaskArtifactDeliver, hasSuggestedReplies, suggestedReplyMessageId, suggestedReplies,
+    onSelectSuggestion, onDismissSuggestions, suggestedRepliesCollapsed, onRestoreSuggestions, suggestedRepliesPending]);
   const showEmptyWithOverride = displayMessages.length === 0 && !displayWaiting && emptyStateOverride;
   const showEmptyWithFallback = displayMessages.length === 0 && !displayWaiting && !emptyStateOverride;
 
@@ -308,23 +339,7 @@ const ChatMessageListPresentation = memo(forwardRef<HTMLDivElement, ChatMessageL
         {renderVisualizations(-1)}
 
         <TranscriptTurns busy={displayWaiting} repoPath={repoPath} summary={turnSummary} turnContent={turnContent}
-          entries={items.map(item => item.kind === 'msg' ? item.msg : item.entries[0])}
-          nodes={items.map(item => {
-            const msg = item.kind === 'msg' ? item.msg : item.entries[0];
-            const index = item.kind === 'msg' ? item.index : item.lastIndex;
-            return <ChatMessageItem key={msg.id} msg={msg}
-              missionEntries={item.kind === 'mission-group' ? item.entries : undefined}
-              isLast={index === displayMessages.length - 1 && !displayWaiting}
-              isStreaming={index === lastAssistantIndex && displayWaiting}
-              animateStreaming={active && index === lastAssistantIndex} repoPath={repoPath} onRetryDelivery={onRetryDelivery} composerQueue={composerQueue}
-              visualizations={visualsByIndex.get(index)} artifacts={taskArtifactsByIndex.get(index)}
-              taskArtifactThreadBusy={taskArtifactsByIndex.has(index) && taskArtifactThreadBusy} onTaskArtifactDeliver={onTaskArtifactDeliver}
-              showChips={Boolean(index === lastAssistantIndex && hasSuggestedReplies && msg.id === suggestedReplyMessageId)}
-              displayWaiting={index === lastAssistantIndex && displayWaiting} suggestedReplies={suggestedReplies}
-              onSelectSuggestion={onSelectSuggestion} onDismissSuggestions={onDismissSuggestions}
-              suggestedRepliesCollapsed={suggestedRepliesCollapsed} onRestoreSuggestions={onRestoreSuggestions}
-              suggestedRepliesPending={suggestedRepliesPending} />;
-          })} />
+          entries={turnEntries} nodes={turnNodes} />
 
         {renderTaskArtifacts(-1)}
         {bottomContent}
@@ -384,13 +399,14 @@ interface ChatMessageItemProps extends Pick<ChatMessageListProps,
   isLast: boolean;
   isStreaming: boolean;
   animateStreaming: boolean;
+  onRevealSettled?: (messageId: string) => void;
   visualizations?: VisualizationReference[];
   artifacts?: TaskArtifactView[];
   showChips: boolean;
   displayWaiting: boolean;
 }
 
-function ChatMessageItem({ msg, missionEntries, isLast, isStreaming, animateStreaming, repoPath, onRetryDelivery, composerQueue,
+function ChatMessageItem({ msg, missionEntries, isLast, isStreaming, animateStreaming, onRevealSettled, repoPath, onRetryDelivery, composerQueue,
   visualizations, artifacts, taskArtifactThreadBusy, onTaskArtifactDeliver, showChips, displayWaiting,
   suggestedReplies, onSelectSuggestion, onDismissSuggestions, suggestedRepliesCollapsed,
   onRestoreSuggestions, suggestedRepliesPending,
@@ -404,6 +420,7 @@ function ChatMessageItem({ msg, missionEntries, isLast, isStreaming, animateStre
     {msg.role === 'assistant' && msg.receipt ? <TurnSummaryCard persistedEntry={msg} /> : null}
     <div data-o8-message-id={msg.id} style={{ minWidth: 0 }}>
       <DesktopAgentMessage entry={msg} isLast={isLast} isStreaming={isStreaming} animateStreaming={animateStreaming}
+        onRevealSettled={onRevealSettled}
         repoPath={repoPath} onRetryDelivery={onRetryDelivery}
         visualizations={msg.role === 'assistant' ? visualizations : undefined}
         userDelivery={<ComposerEntryDelivery id={msg.id} queue={composerQueue} />} />

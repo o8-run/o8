@@ -54,10 +54,12 @@ function main() {
     console.error('usage: node scripts/ci/resource-owning-changed.mjs <base-ref> [head-ref]');
     process.exit(2);
   }
-  const mergeBase = runGit(['merge-base', base, head]).trim();
-  const diff = runGit(['diff', '--name-status', '-z', '-M', mergeBase, head]);
+  const workingTree = head === '--worktree';
+  const mergeBase = runGit(['merge-base', base, workingTree ? 'HEAD' : head]).trim();
+  const diff = runGit(['diff', '--name-status', '-z', '-M', mergeBase, ...(workingTree ? [] : [head])]);
   const classification = JSON.parse(readFileSync(join(process.cwd(), 'tests/test-classification.json'), 'utf8'));
-  const files = selectResourceOwning(parseNameStatus(diff), classification);
+  const untracked = workingTree ? runGit(['ls-files', '--others', '--exclude-standard', '-z']).split('\0').filter(Boolean) : [];
+  const files = selectResourceOwning([...parseNameStatus(diff), ...untracked], classification);
   for (const file of files) console.log(file);
   console.error(`[resource-owning-changed] ${files.length} resource-owning test file(s) touched since ${mergeBase.slice(0, 12)}`);
   if (process.env.GITHUB_OUTPUT) {

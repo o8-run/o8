@@ -23,8 +23,13 @@ function scheduleLabel(job: ConnectedJob): string {
   return 'Schedule unavailable';
 }
 
-export function ConnectedAgentAutomations({ onActiveCountChange, onTotalCountChange }: { onActiveCountChange: (count: number) => void; onTotalCountChange?: (count: number | null) => void }) {
+export function ConnectedAgentAutomations({ onActiveCountChange, onTotalCountChange, onLoadingChange }: {
+  onActiveCountChange: (count: number | null) => void;
+  onTotalCountChange?: (count: number | null) => void;
+  onLoadingChange?: (loading: boolean) => void;
+}) {
   const [jobs, setJobs] = useState<ConnectedJob[]>(() => readConnectedAutomationsSnapshot()?.jobs ?? []);
+  const [loading, setLoading] = useState(() => !readConnectedAutomationsSnapshot());
   const [available, setAvailable] = useState<boolean | null>(() => {
     const cached = readConnectedAutomationsSnapshot();
     return cached ? cached.installed === false ? null : true : null;
@@ -56,11 +61,14 @@ export function ConnectedAgentAutomations({ onActiveCountChange, onTotalCountCha
       }
       setJobs([]);
       setAvailable(false);
-      onActiveCountChange(0);
+      onActiveCountChange(null);
       onTotalCountChange?.(null);
       setError(failure instanceof Error ? failure.message : 'Connected agent scheduler unavailable.');
+    } finally {
+      setLoading(false);
+      onLoadingChange?.(false);
     }
-  }, [onActiveCountChange, onTotalCountChange]);
+  }, [onActiveCountChange, onTotalCountChange, onLoadingChange]);
 
   useEffect(() => {
     void refresh();
@@ -91,6 +99,13 @@ export function ConnectedAgentAutomations({ onActiveCountChange, onTotalCountCha
     }
   };
 
+  if (loading) return (
+    <section aria-busy="true" style={{ paddingTop: 14 }}>
+      <span role="status" style={{ color: 'var(--t-text-muted)', fontSize: 11, fontWeight: 300 }}>
+        Reading connected schedules…
+      </span>
+    </section>
+  );
   if (available === null || (available && jobs.length === 0)) return null;
 
   return (

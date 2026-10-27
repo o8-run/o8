@@ -179,7 +179,7 @@ export function RailUpdateControl({ buttonStyle }: { buttonStyle: CSSProperties 
           {hub.app.version && !hub.app.blockers ? <button type="button" disabled={pending || hub.checkingAll}
             onClick={() => { setPinned(true); window.dispatchEvent(new Event('o8:install-app-update')); }}
             style={{ ...button, minHeight: 30, color: 'var(--t-accent-contrast, #fff)', background: 'var(--t-accent)', opacity: pending ? 0.65 : 1 }}>
-            {hub.app.installing ? 'Updating o8…' : hub.app.downloadOnly ? 'Download o8' : 'Update o8'}
+            {hub.app.installing ? 'Updating o8…' : hub.app.packageManager ? 'Release page' : hub.app.downloadOnly ? 'Download o8' : 'Update o8'}
           </button> : null}
           <span style={{ fontSize: 10.5, lineHeight: 1.5, color: 'var(--t-text-muted)' }}>Updates o8 only. Other tools stay under Tools.</span>
         </div> : null}
