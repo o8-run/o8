@@ -36,7 +36,16 @@ mod voice_input;
 mod managed_voice_window;
 mod launch_updater;
 mod update_ping;
+#[cfg(target_os = "linux")]
+mod linux_ptt;
+#[cfg(target_os = "linux")]
+mod linux_voice;
 #[cfg(target_os = "macos")]
+mod live_dictation;
+// Live caret streaming drives the macOS Accessibility API. Linux keeps the
+// same call sites in `stt_engine` behind inert stand-ins.
+#[cfg(target_os = "linux")]
+#[path = "live_dictation_linux.rs"]
 mod live_dictation;
 #[cfg(target_os = "macos")]
 mod macos_webview_scale;
@@ -56,7 +65,7 @@ mod shell_env;
 mod sidecar_lifecycle;
 mod sound;
 mod speech_text;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 mod stt;
 #[cfg(target_os = "macos")]
 mod tts;
@@ -70,9 +79,9 @@ mod windows_node_locate;
 // #1741: PATH string logic is unconditional so `cargo test --lib` exercises
 // it on every host OS; only its `windows_impl` submodule is cfg-gated.
 mod windows_cli_path;
-// Plan-token + managed-inference proxy routing. macOS-only: reads keys via the
-// (macOS-gated) stt module, consumed by the macOS-gated agent / ai / stt paths.
-#[cfg(target_os = "macos")]
+// Plan-token + managed-inference proxy routing: reads keys via the stt module,
+// consumed by the agent / ai paths (macOS) and the stt engine (macOS + Linux).
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 mod entitlement;
 // #2158: scopes the Control-as-Fn dictation substitute to an attached
 // non-Apple external keyboard instead of leaving it a global toggle. macOS-only
@@ -4334,7 +4343,7 @@ fn ensure_cli_on_path(_cli_source: &Path) {
 // Anthropic is intentionally NOT a provider here — polish is Gemini-only,
 // transcription is Whisper-via-OpenRouter. Both bill outside the Anthropic
 // subscription pool, so this engine never touches the Claude REPL path.
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 mod stt_engine {
     use super::*;
     use std::collections::VecDeque;
@@ -4517,6 +4526,9 @@ mod stt_engine {
         if payload["type"] == "system-start" && payload["startId"].is_null() {
             payload["startId"] = serde_json::Value::String(uuid::Uuid::new_v4().to_string());
         }
+        #[cfg(not(target_os = "macos"))]
+        let _ = origin;
+        #[cfg(target_os = "macos")]
         if origin == "system" {
             let _ = app.emit_to(
                 crate::dock_window::DOCK_LABEL,
@@ -4661,7 +4673,7 @@ mod stt_engine {
                     }
                     crate::fn_hotkey::set_system_origin(false);
                     let _ = crate::fn_hotkey::take_smart_compose_mode();
-                    #[cfg(target_os = "macos")]
+                    #[cfg(any(target_os = "macos", target_os = "linux"))]
                     crate::audio_ducker::restore();
                     // Teardown path — restore ink click-through + clear strokes.
                     #[cfg(target_os = "macos")]
@@ -5048,8 +5060,13 @@ mod stt_engine {
                                 serde_json::json!({ "type": "system-idle", "origin": "system" });
                             emit_stt(&app, "system", idle);
                         }
-                        #[cfg(not(target_os = "macos"))]
-                        let _ = t;
+                        #[cfg(target_os = "linux")]
+                        {
+                            crate::linux_voice::speak_in_background(t);
+                            let idle =
+                                serde_json::json!({ "type": "system-idle", "origin": "system" });
+                            emit_stt(&app, "system", idle);
+                        }
                         return;
                     }
                 }
@@ -5065,6 +5082,7 @@ mod stt_engine {
             // the surrounding window's tone. Best-effort — empty/None for canvas /
             // Electron apps that don't expose AX text. (System-wide Symon fold P1.)
             let window_ctx = crate::paste::gather_window_context();
+            #[cfg(target_os = "macos")]
             let compose_window_ctx = window_ctx.clone();
 
             let ctx = crate::stt::polish::PolishContext {
@@ -5590,14 +5608,14 @@ mod stt_engine {
 
 /// Begin a dictation via the native Apple-Speech sidecar. Returns the session
 /// id so the frontend can correlate `o8:stt-event` payloads. macOS only.
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 #[tauri::command]
 fn o8_stt_start() -> Result<u64, String> {
     stt_engine::start()
 }
 
 /// End the active native dictation; triggers the finalize chain. macOS only.
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 #[tauri::command]
 fn o8_stt_stop() -> Result<(), String> {
     stt_engine::stop()
@@ -5611,7 +5629,7 @@ fn o8_system_dictation_finish() -> Result<(), String> {
 }
 
 /// Set the native recognizer locale (e.g. "en-US"). macOS only.
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 #[tauri::command]
 fn o8_stt_locale(locale: String) -> Result<(), String> {
     stt_engine::set_locale(&locale)
@@ -5626,7 +5644,7 @@ pub struct InputDeviceDto {
 }
 
 /// List connected audio input devices for the Settings mic picker. macOS only.
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 #[tauri::command]
 fn stt_list_input_devices() -> Result<Vec<InputDeviceDto>, String> {
     stt_engine::list_input_devices()
@@ -5634,7 +5652,7 @@ fn stt_list_input_devices() -> Result<Vec<InputDeviceDto>, String> {
 
 /// Route dictation to a specific microphone (uid); applied live + saved per-start
 /// via the `dictation_microphone_uid` pref. macOS only.
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 #[tauri::command]
 fn stt_set_input_device(device_uid: String) -> Result<(), String> {
     let uid = device_uid.trim();
@@ -5648,7 +5666,7 @@ fn stt_set_input_device(device_uid: String) -> Result<(), String> {
 /// DictationHost's delivery receipt for a nonce-carrying `system-fill` event
 /// (J5PHEN root fix): the emitter blocks on this ack before claiming the
 /// paste happened. See stt_engine::ack_fill.
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 #[tauri::command]
 fn o8_stt_fill_ack(nonce: u64, delivered: bool, via: Option<String>) {
     stt_engine::ack_fill(nonce, delivered, via);
@@ -6067,7 +6085,7 @@ fn make_window_zoom_instant(win: &tauri::WebviewWindow) {
 /// Read the voice preferences (`~/.o8/dictation.json`) for the settings panel,
 /// with API keys stripped. The config is mtime-cached, so writes apply live.
 /// macOS only — the pref store lives in the macOS-gated stt module (#1673).
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 #[tauri::command]
 async fn voice_prefs_get() -> Result<serde_json::Value, String> {
     // Even metadata-only Keychain I/O must not hold the native event loop.
@@ -6080,7 +6098,7 @@ async fn voice_prefs_get() -> Result<serde_json::Value, String> {
 /// Takes effect on the next read without a relaunch (mtime cache). Keys:
 /// `ducking_enabled`, `sounds_enabled`, `dictionary` (array), `polish_instructions`,
 /// `reading_speed`, `tts_provider`, `tts_voice_id`, etc. macOS only (#1673).
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 #[tauri::command]
 fn voice_prefs_set(app: tauri::AppHandle, key: String, value: serde_json::Value) -> Result<(), String> {
     let top_pill = if key == "dictation_top_pill" { value.as_bool() } else { None };
@@ -6097,7 +6115,10 @@ fn voice_prefs_set(app: tauri::AppHandle, key: String, value: serde_json::Value)
     if let Some(enabled) = external_symon_left_control {
         // #2158: hand the pref to the device watcher, which re-evaluates at once
         // and arms the tap only while a non-Apple external keyboard is attached.
+        #[cfg(target_os = "macos")]
         crate::external_keyboard::set_pref_enabled(enabled);
+        #[cfg(not(target_os = "macos"))]
+        let _ = enabled;
     }
     Ok(())
 }
@@ -8363,7 +8384,7 @@ pub fn run() {
             master_key_get,
             #[cfg(target_os = "macos")]
             master_key_ensure,
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
             o8_stt_start,
             managed_voice_window::managed_voice_overlay_update,
             managed_voice_window::managed_voice_presentation_epoch,
@@ -8383,17 +8404,17 @@ pub fn run() {
             visual_capture::o8_visual_capture_finish,
             #[cfg(target_os = "macos")]
             visual_capture::o8_visual_capture_cancel,
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
             o8_stt_stop,
             #[cfg(target_os = "macos")]
             o8_system_dictation_finish,
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
             o8_stt_locale,
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
             o8_stt_fill_ack,
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
             stt_list_input_devices,
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
             stt_set_input_device,
             #[cfg(target_os = "macos")]
             tts_speak,
@@ -8409,6 +8430,12 @@ pub fn run() {
             tts_set_speed,
             #[cfg(target_os = "macos")]
             tts_is_active,
+            #[cfg(target_os = "linux")]
+            linux_voice::system_tts_speak,
+            #[cfg(target_os = "linux")]
+            linux_voice::system_tts_stop,
+            #[cfg(target_os = "linux")]
+            linux_voice::system_tts_backend,
             #[cfg(target_os = "macos")]
             dock_set_expanded,
             dock_set_hit_rect,
@@ -8436,9 +8463,9 @@ pub fn run() {
             remote_preview::remote_preview_close,
             #[cfg(target_os = "macos")]
             open_voice_settings,
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
             voice_prefs_get,
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
             voice_prefs_set,
             #[cfg(target_os = "macos")]
             external_keyboard_fn_state,
@@ -8741,7 +8768,21 @@ pub fn run() {
             // logs surface (idempotent — `try_init` no-ops if one already set),
             // then spawn the Apple-Speech sidecar daemon ONCE. Both are
             // best-effort: a missing Swift helper or a poisoned mutex is logged
-            // and skipped, leaving the existing dictation path intact. macOS only.
+            // and skipped, leaving the existing dictation path intact.
+            // Linux runs the whisper.cpp helper (`o8-speech-recognizer`, #1672)
+            // behind the same daemon protocol; the macOS-only extras (sound
+            // cues, screen dock TTS, Fn hotkey) stay in the block below.
+            #[cfg(target_os = "linux")]
+            if !preship_gate {
+                let _ = tracing_subscriber::fmt()
+                    .with_env_filter(
+                        tracing_subscriber::EnvFilter::try_from_default_env()
+                            .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+                    )
+                    .try_init();
+                stt_engine::spawn(app.handle().clone());
+                linux_ptt::register(app);
+            }
             #[cfg(target_os = "macos")]
             if !preship_gate {
                 let _ = tracing_subscriber::fmt()

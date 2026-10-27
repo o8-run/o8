@@ -25,14 +25,26 @@
 
 const NON_MAC_SHELLS = new Set(['windows', 'linux']);
 
+function stampedPlatform(): unknown {
+  if (typeof window === 'undefined') return undefined;
+  return (window as unknown as { __O8_HOST_PLATFORM__?: unknown }).__O8_HOST_PLATFORM__;
+}
+
 /**
  * True only when the page is hosted by a Windows or Linux native shell.
  * False in a browser, on macOS, and on shells that predate the stamp.
  */
 export function isNonMacShell(): boolean {
-  if (typeof window === 'undefined') return false;
-  const stamped = (window as unknown as { __O8_HOST_PLATFORM__?: unknown }).__O8_HOST_PLATFORM__;
+  const stamped = stampedPlatform();
   return typeof stamped === 'string' && NON_MAC_SHELLS.has(stamped);
+}
+
+/**
+ * True only when the page is hosted by the Linux native shell, which exposes
+ * Linux-only commands such as `system_tts_speak`.
+ */
+export function isLinuxShell(): boolean {
+  return stampedPlatform() === 'linux';
 }
 
 /**

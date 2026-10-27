@@ -214,6 +214,16 @@ windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Securit
 tauri-plugin-deep-link = "2"
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 
+# ── Linux voice floor (#1672) ──
+# System speech (piper / espeak-ng / spd-say) and `pactl` ducking, detected at
+# runtime and shelled out to, so no ALSA/PipeWire headers or C++ toolchain
+# enter the shell build. Whisper (whisper-rs) lives only in the crate's
+# separate `o8-speech-recognizer` helper binary behind its `whisper` feature,
+# which this dependency does not enable.
+[target.'cfg(target_os = "linux")'.dependencies]
+o8-linux-voice = { path = "../crates/o8-linux-voice" }
+x11rb = { version = "=0.13.2", features = ["xinput"] }
+
 # ── System-wide Symon fold: paste + global Fn hotkey (macOS only) ──
 # Versions pinned to aqua/Symon's exact stack so the lifted `paste.rs` +
 # `fn_hotkey.rs` compile verbatim and so this objc2 generation links cleanly
