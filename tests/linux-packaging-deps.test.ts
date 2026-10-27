@@ -4,8 +4,9 @@ import { describe, expect, it } from 'vitest';
 
 // #2055 — a clean Linux install launched straight to the Node pre-flight
 // dialog because the deb/rpm bundler config declared no nodejs dependency.
-// `bundle.externalBin` stays null on Linux (the Tauri sidecar wants a
-// SYSTEM Node), so the packaging config tells the package manager about Node.
+// The Linux bundle has no Node sidecar (its only externalBin is the
+// o8-pi-write helper; the server runs on a SYSTEM Node), so the packaging
+// config tells the package manager about Node.
 //
 // It is a soft dependency (`Recommends`), not `Depends`: Debian 13 and
 // other distributions can ship older Node, so a hard `nodejs (>= 22)` refused the
