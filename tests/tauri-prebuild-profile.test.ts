@@ -126,25 +126,21 @@ it.each(['ordinary', 'linked'] as const)('retains %s prebuild creation authority
   mkdirSync(scripts, { recursive: true });
   mkdirSync(home);
   mkdirSync(path.join(repo, '.fixture'));
-  const versionProbe = path.join(repo, '.fixture/version-probe.cjs');
-  writeFileSync(versionProbe, `
-    const cp = require('node:child_process'); const fs = require('node:fs');
-    const original = cp.execFileSync;
-    cp.execFileSync = (command, args, options) => {
-      const observe = args?.[0] === '--version' || args?.[0] === '--show-sdk-version'
-        || command === 'git' && args?.[0] === 'status';
-      if (!observe) return original(command, args, options);
-      const started = Date.now();
-      const record = { command: require('node:path').basename(command), args };
-      try {
-        const value = original(command, args, options);
-        record.stdout = String(value).trim().slice(0, 1000); return value;
-      } catch (error) { record.status = error.status; record.code = error.code; throw error; }
-      finally { record.elapsedMs = Date.now() - started;
-        fs.appendFileSync(${JSON.stringify(path.join(repo, '.fixture/version-probes.jsonl'))}, JSON.stringify(record) + '\\n'); }
-    };
-    require('node:module').syncBuiltinESMExports();
-  `);
+  // Compilation is synthetic, so its version inputs must be synthetic too.
+  // Cold host compiler/SDK probes can time out or change the artifact recipe.
+  const toolchains = path.join(root, 'toolchain-bin');
+  mkdirSync(toolchains);
+  for (const [name, argument] of [['cargo', '--version'], ['rustc', '--version'],
+    ['swift', '--version'], ['xcrun', '--show-sdk-version']]) {
+    writeFileSync(path.join(toolchains, name), `#!/bin/sh
+if [ "$#" -eq 1 ] && [ "$1" = '${argument}' ]; then
+  printf '%s\\n' 'fixture ${name} 1'
+else
+  printf '%s\\n' 'unexpected fixture compiler invocation' >&2
+  exit 97
+fi
+`, { mode: 0o700 });
+  }
   writeFileSync(path.join(repo, '.gitignore'), '.next\nout\nnode_modules\n.fixture\n.o8-generated-output-store\n');
   writeFileSync(path.join(repo, 'package.json'), JSON.stringify({ name: 'prebuild-fixture', version: '0.0.0',
     scripts: { build: `${JSON.stringify(process.execPath)} ${JSON.stringify(path.join(source, 'scripts/build.mjs'))}` } }));
@@ -199,12 +195,11 @@ it.each(['ordinary', 'linked'] as const)('retains %s prebuild creation authority
     expect(linked.status, linked.stderr).toBe(0);
     renameSync(path.join(primary, 'node_modules'), path.join(repo, 'node_modules'));
     mkdirSync(path.join(repo, '.fixture'));
-    writeFileSync(versionProbe, readFileSync(path.join(primary, '.fixture/version-probe.cjs')));
   }
   const env = { ...process.env, HOME: home, O8_RELEASE_BUILD_CACHE_DIR: path.join(root, 'cache'),
     O8_RELEASE_BUILD_CACHE_MAX_BYTES: '10485760', O8_RELEASE_LOCK_PATH: path.join(root, 'release.lock'),
     O8_RELEASE_BROADCAST_CLI: 'true', TSX_TSCONFIG_PATH: path.join(source, 'tsconfig.json'),
-    NODE_OPTIONS: `${process.env.NODE_OPTIONS || ''} --require=${JSON.stringify(versionProbe)}`.trim() };
+    PATH: `${toolchains}${path.delimiter}${process.env.PATH ?? ''}` };
   for (const key of ['O8_DATA_DIR', 'CORTEX_IDE_DATA_DIR', 'CORTEX_IDE_DB_PATH', 'O8_OPERATOR_DATA_DIR',
     'O8_RELEASE_BUILD_DATA_DIR', 'O8_RELEASE_CACHE_RUN_ID', 'O8_RELEASE_CACHE_PREBUILD_MARKER']) {
     delete (env as NodeJS.ProcessEnv)[key];

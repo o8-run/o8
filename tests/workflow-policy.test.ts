@@ -269,6 +269,8 @@ describe('workflow policy — every workflow is classified from the filesystem',
         expect(job['timeout-minutes']).toBe(15);
         expect(job.strategy).toBeUndefined();
         expect(stringsIn(job.steps).some(value => value.includes("env -u CI npx vitest run tests/tauri-prebuild-profile.test.ts -t 'retains linked'"))).toBe(true);
+        expect(stringsIn(job.steps).some(value => value.includes("env -u CI npx vitest run tests/tauri-prebuild-profile.test.ts -t 'retains ordinary'"))).toBe(true);
+        expect(stringsIn(job.steps).some(value => value === 'npx vitest run tests/tauri-prebuild-profile.test.ts --reporter=verbose')).toBe(true);
       }
       for (const [jobName, job] of jobsIn(file)) {
         if (usesMacOsRunner(job) && !manualOnly && !weeklyResources && !minimumOsDmg && !prebuildProfile) {

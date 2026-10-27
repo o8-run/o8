@@ -38,13 +38,15 @@ jobs:
       - run: npm ci --prefer-offline
       - name: Reproduce the linked lifetime with CI unset
         run: env -u CI npx vitest run tests/tauri-prebuild-profile.test.ts -t 'retains linked' --reporter=verbose
-      - name: Run both lifetime fixtures in the CI environment
-        run: npx vitest run tests/tauri-prebuild-profile.test.ts -t 'retains (ordinary|linked)' --reporter=verbose
+      - name: Run the ordinary lifetime with CI unset
+        run: env -u CI npx vitest run tests/tauri-prebuild-profile.test.ts -t 'retains ordinary' --reporter=verbose
+      - name: Run the fixture file in the CI environment
+        run: npx vitest run tests/tauri-prebuild-profile.test.ts --reporter=verbose
       - name: Report fixture command receipts
         if: always()
         run: |
           node --input-type=module <<'NODE'
-          import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
+          import { readdirSync, readFileSync, realpathSync } from 'node:fs';
           import { tmpdir } from 'node:os';
           import path from 'node:path';
           const parent = realpathSync(tmpdir());
@@ -60,9 +62,6 @@ jobs:
                   stdout: receipt.stdout?.slice(-24000), stderr: receipt.stderr?.slice(-24000) }, null, 2)
                   .replaceAll(root, '<fixture>').replaceAll(process.cwd(), '<checkout>'));
               }
-              const probes = path.join(root, 'repo/.fixture/version-probes.jsonl');
-              if (existsSync(probes)) console.log(readFileSync(probes, 'utf8')
-                .replaceAll(root, '<fixture>').replaceAll(process.cwd(), '<checkout>'));
             }
           }
           NODE
