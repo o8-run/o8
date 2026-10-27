@@ -1,4 +1,6 @@
 use super::*;
+#[path = "shell_geometry.rs"]
+mod geometry;
 use crate::theme::current as theme;
 impl Render for Shell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -396,20 +398,30 @@ pub(super) fn start_pump(
 pub(super) fn open_window(
     client: Client,
     file: PathBuf,
-    state: State,
+    mut state: State,
     offscreen: bool,
     cx: &mut App,
 ) -> gpui::WindowHandle<Shell> {
     let [x, y, w, h] = state.bounds;
+    let bounds = geometry::visible(
+        Bounds::new(point(px(x), px(y)), size(px(w), px(h))),
+        &cx.displays()
+            .iter()
+            .map(|display| display.bounds())
+            .collect::<Vec<_>>(),
+    );
+    state.bounds = [
+        bounds.origin.x.into(),
+        bounds.origin.y.into(),
+        bounds.size.width.into(),
+        bounds.size.height.into(),
+    ];
     cx.open_window(
         WindowOptions {
             window_background: material::background(offscreen),
             focus: false,
             show: !offscreen,
-            window_bounds: Some(WindowBounds::Windowed(Bounds::new(
-                point(px(x), px(y)),
-                size(px(w), px(h)),
-            ))),
+            window_bounds: Some(WindowBounds::Windowed(bounds)),
             window_min_size: Some(size(px(600.), px(400.))),
             titlebar: Some(gpui::TitlebarOptions {
                 title: Some("o8 next".into()),
@@ -418,8 +430,9 @@ pub(super) fn open_window(
             ..Default::default()
         },
         |window, cx| {
+            let system_glass = material::apply(window, offscreen);
+            geometry::restore_size(window, bounds.size);
             cx.new(|cx| {
-                let system_glass = material::apply(window, offscreen);
                 let mut shell = Shell::new(client, file, state, window, cx);
                 shell.system_glass = system_glass;
                 shell

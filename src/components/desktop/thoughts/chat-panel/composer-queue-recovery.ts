@@ -1,6 +1,7 @@
 import { validateComposerImageAttachments } from '@/lib/mobile/composer-image-validation';
 import type { ComposerQueuePayload, ComposerQueueTarget } from '@/lib/orchestrator/composer-queue-types';
 import { readComposerAttachmentPayload, removeComposerAttachmentPayload, saveComposerAttachmentPayload } from './composer-queue-attachment-store';
+import { readComposerDraftQueueAttempt, retainComposerDraftQueueAttempt } from './composer-draft-store';
 
 interface QueueAttempt { id: string; payload: ComposerQueuePayload }
 const PREFIX = 'o8:composer-queue-recovery:v1:';
@@ -50,8 +51,13 @@ async function read(target: ComposerQueueTarget): Promise<QueueAttempt[]> {
   }
 }
 
+async function recoveredDraftAttempt(target: ComposerQueueTarget, draft: Pick<ComposerQueuePayload, 'text' | 'images'>) {
+  const recovered = await readComposerDraftQueueAttempt(target.threadId);
+  return validAttempt(recovered) && sameDraft(recovered, draft) ? recovered : undefined;
+}
+
 export async function findPendingComposerSend(target: ComposerQueueTarget, draft: Pick<ComposerQueuePayload, 'text' | 'images'>) {
-  return (await read(target)).find(attempt => sameDraft(attempt, draft));
+  return (await read(target)).find(attempt => sameDraft(attempt, draft)) ?? await recoveredDraftAttempt(target, draft);
 }
 
 export { composerQueuePayloadMatches } from '@/lib/composer/queue-payload-match';
@@ -59,8 +65,12 @@ export { composerQueuePayloadMatches } from '@/lib/composer/queue-payload-match'
 /** Separate keys keep one completion from overwriting another window's pending send. */
 export async function prepareComposerSend(target: ComposerQueueTarget, payload: ComposerQueuePayload) {
   const entries = await read(target);
-  const existing = entries.find(attempt => sameDraft(attempt, payload));
-  if (existing) return { attempt: existing, fresh: false };
+  const existing = entries.find(attempt => sameDraft(attempt, payload)) ?? await recoveredDraftAttempt(target, payload);
+  if (existing) {
+    try { await retainComposerDraftQueueAttempt(target.threadId, existing); }
+    catch (error) { throw new Error(`Saved messages could not be checked. ${storageAdvice(error)} Inspect this chat before sending again.`); }
+    return { attempt: existing, fresh: false };
+  }
   if (entries.length >= 20) throw new Error('There are 20 unconfirmed sends in this chat. Inspect the chat and retry those messages before adding more.');
   const attempt = { id: `queue-${crypto.randomUUID()}`, payload: { ...payload, images: normalizeImages(payload.images) } };
   const key = keyFor(target) + attempt.id;
@@ -71,6 +81,7 @@ export async function prepareComposerSend(target: ComposerQueueTarget, payload: 
   let storedPayload = false;
   try {
     if (raw.length > LIMIT) { await saveComposerAttachmentPayload(key, attempt); storedPayload = true; }
+    await retainComposerDraftQueueAttempt(target.threadId, attempt);
     window.localStorage.setItem(key, storedPayload ? JSON.stringify({ id: attempt.id, storedPayload: true }) : raw);
   } catch (error) {
     if (storedPayload) await removeComposerAttachmentPayload(key).catch(() => {});

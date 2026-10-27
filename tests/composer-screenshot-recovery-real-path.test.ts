@@ -20,23 +20,29 @@ const queue = await import('@/lib/orchestrator/composer-queue');
 const api = await import('@/app/api/orchestrator/composer-queue/route');
 const proofDir = process.env.O8_SCREENSHOT_QUEUE_PROOF_DIR;
 const pixel = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a5S8AAAAASUVORK5CYII=', 'base64');
-const imageUri = (large: boolean) => `data:image/png;base64,${(large ? Buffer.concat([pixel, Buffer.alloc(3_100_000)]) : pixel).toString('base64')}`;
+const imageUri = (large: boolean) => `data:image/png;base64,${(large ? Buffer.concat([pixel, Buffer.alloc(3_136_623 - pixel.length)]) : pixel).toString('base64')}`;
 let browser: Browser; let bundle: string;
 beforeAll(async () => {
   const build = await esbuild.build({
     stdin: { resolveDir: process.cwd(), loader: 'jsx', contents: `
       import { createElement, useEffect, useRef, useState } from 'react'; import { createRoot } from 'react-dom/client';
       import { ThemeProvider } from '@/lib/theme/context';
+      import { useComposerDraftValue, composerDraftKey, captureComposerDraft, moveComposerDraft } from '@/components/desktop/thoughts/chat-panel/composer-draft-store';
       import { ComposerArea } from '@/components/desktop/thoughts/chat-panel/ComposerArea';
       import { ComposerSendBufferStatus } from '@/components/desktop/thoughts/chat-panel/ComposerSendBufferStatus';
       import { useDefaultComposerSendBuffer } from '@/components/desktop/thoughts/chat-panel/useDefaultComposerSendBuffer';
       import { useBufferedOrchestratorSend } from '@/components/desktop/thoughts/chat-panel/useBufferedOrchestratorSend';
       const config = window.fixtureConfig;
       function Surface() {
-        const [input, setInput] = useState('Queue the screenshot.'); const [images, setImages] = useState(config.image ? [{ name: 'screenshot.png', mimeType: 'image/png', dataUri: config.image }] : []);
+        const [transientInput, setTransientInput] = useState('Queue the screenshot.'); const [transientImages, setTransientImages] = useState(config.image ? [{ name: config.imageName, mimeType: 'image/png', dataUri: config.image }] : []);
+        const key = composerDraftKey(config.repo, 'review-tab', 'thoughts-screenshot');
+        window.moveDraft = () => moveComposerDraft(key, composerDraftKey(config.repo, 'review-tab', 'thoughts-moved'), captureComposerDraft(key));
+        const draftInput = useComposerDraftValue(key, 'input', ''); const draftImages = useComposerDraftValue(key, 'images', []);
+        const [input, setInput] = config.productionDraft ? [draftInput.value, draftInput.setValue] : [transientInput, setTransientInput];
+        const [images, setImages] = config.productionDraft ? [draftImages.value, draftImages.setValue] : [transientImages, setTransientImages];
         const latestInputRef = useRef(input); latestInputRef.current = input; const inputRef = useRef(null);
         const [threadId, setThreadId] = useState('thoughts-screenshot');
-        useEffect(() => { window.changeDraft = (thread, text, image) => { setThreadId(thread); setInput(text); latestInputRef.current = text; setImages(image ? [{ name: 'screenshot.png', mimeType: 'image/png', dataUri: image }] : []); }; }, []);
+        useEffect(() => { window.changeDraft = (thread, text, image) => { setThreadId(thread); setInput(text); latestInputRef.current = text; setImages(image ? [{ name: config.imageName, mimeType: 'image/png', dataUri: image }] : []); }; }, []);
         const model = new URLSearchParams(location.search).get('model') || 'original-model';
         const { dispatch, capture } = useBufferedOrchestratorSend({ active: true, backend: 'codex', model, mode: 'solo', solo: false,
           effort: 'low', permissionMode: 'plan', collide: false, projectId: 'fixture-project', context: 'Fixture context', send: () => { throw new Error('Unexpected direct send'); } });
@@ -73,9 +79,9 @@ beforeEach(() => {
 });
 afterAll(async () => { await browser?.close(); closeDb(); vi.unstubAllEnvs(); fs.rmSync(fixture.root, { recursive: true, force: true }); });
 
-async function mount(page: Page, image: string, url = 'http://localhost/screenshot') {
+async function mount(page: Page, image: string, url = 'http://localhost/screenshot', productionDraft = false, imageName = 'screenshot.png') {
   await page.goto(url);
-  await page.evaluate(config => { (window as unknown as { fixtureConfig: unknown }).fixtureConfig = config; }, { image, repo: fixture.repo });
+  await page.evaluate(config => { (window as unknown as { fixtureConfig: unknown }).fixtureConfig = config; }, { image, repo: fixture.repo, productionDraft, imageName });
   await page.addStyleTag({ content: fs.readFileSync('src/app/globals.css', 'utf8') });
   await page.addScriptTag({ content: bundle });
   await page.getByRole('textbox', { name: 'Screenshot composer' }).waitFor({ timeout: 5000 });
@@ -250,5 +256,215 @@ it('reports the application message limit without quota advice or a queue POST',
     expect(await page.getByRole('alert').textContent()).not.toContain('storage is full');
     expect(posts).toEqual([]);
     expect((await page.getByRole('textbox').inputValue()).length).toBe(2_000_100);
+  } finally { await page.close(); }
+});
+
+
+it.each([['Queue the screenshot.', 'screenshot.png'], ['', 'screenshot.png'], ['Queue the screenshot.', ' screenshot.png ']])('restores a large screenshot and its original queue id after a real draft reload: %s / %s', async (text, imageName) => {
+  const page = await browser.newPage(); const posts: Parameters<typeof connect>[1] = []; const attemptedIds: string[] = [];
+  try {
+    await connect(page, posts);
+    await page.route('**/api/orchestrator/composer-queue', route => { if (route.request().method() !== 'POST') return route.fallback(); attemptedIds.push(route.request().postDataJSON().id); return route.abort('connectionrefused'); });
+    await mount(page, '', 'http://localhost/screenshot', true, imageName);
+    await page.evaluate(({ image, text }) => (window as unknown as { changeDraft: (thread: string, text: string, image: string) => void }).changeDraft('thoughts-screenshot', text, image), { image: imageUri(true), text });
+    await page.getByRole('textbox').press('Enter');
+    await expect.poll(() => page.getByRole('alert').count()).toBe(1);
+    expect(attemptedIds).toHaveLength(1);
+    expect(queue.listQueuedComposerSends({ repoPath: fixture.repo, threadId: 'thoughts-screenshot' })).toHaveLength(0);
+    await mount(page, '', 'http://localhost/screenshot', true);
+    expect(await page.getByRole('textbox').inputValue()).toBe(text);
+    await expect.poll(() => page.getByText('screenshot.png', { exact: true }).count()).toBeGreaterThan(0);
+    expect(await page.locator('img[alt]').evaluateAll(images => images.map(image => image.getAttribute('alt')))).toContain(imageName);
+    if (proofDir) { fs.mkdirSync(proofDir, { recursive: true }); await page.screenshot({ path: path.join(proofDir, `restored-production-${text ? 'text' : 'image-only'}.png`) }); }
+    await page.unroute('**/api/orchestrator/composer-queue');
+    await page.getByRole('textbox').press('Enter');
+    await expect.poll(() => posts.length).toBe(1);
+    expect(posts[0].id).toBe(attemptedIds[0]);
+    expect((posts[0].payload.images[0] as { name?: string }).name).toBe('screenshot.png');
+    expect(posts[0].payload.images[0].dataUri).toBe(imageUri(true));
+    expect(imageUri(true).length).toBe(4_182_186);
+    await expect.poll(() => page.getByRole('textbox').inputValue()).toBe('');
+    await page.getByRole('textbox').press('Enter');
+    expect(posts).toHaveLength(1);
+    expect(queue.listQueuedComposerSends({ repoPath: fixture.repo, threadId: 'thoughts-screenshot' })).toHaveLength(1);
+  } finally { await page.close(); }
+});
+
+it('review: a native localStorage quota failure gives storage advice, without monkeypatching storage', async () => {
+  const page = await browser.newPage(); const posts: Parameters<typeof connect>[1] = [];
+  try {
+    await connect(page, posts); await mount(page, imageUri(false));
+    const quota = await page.evaluate(() => {
+      let count = 0;
+      let name = 'no quota hit';
+      for (const size of [131072, 1024, 64, 1]) {
+        try { while (count < 10000) localStorage.setItem('review-filler-' + count++, 'x'.repeat(size)); }
+        catch (error) { name = (error as DOMException).name; }
+      }
+      return { count, name };
+    });
+    expect(quota.name).toBe('QuotaExceededError');
+    await page.getByRole('textbox').press('Enter');
+    await expect.poll(() => page.getByRole('alert').textContent()).toContain('Browser storage is full');
+    expect(posts).toEqual([]);
+    expect(await page.getByRole('textbox').inputValue()).toBe('Queue the screenshot.');
+    expect(await page.getByText('screenshot.png', { exact: true }).count()).toBeGreaterThan(0);
+  } finally { await page.close(); }
+});
+
+async function failLargeDraft(page: Page, posts: Parameters<typeof connect>[1]) {
+  await connect(page, posts);
+  let id = '';
+  await page.route('**/api/orchestrator/composer-queue', route => {
+    if (route.request().method() !== 'POST') return route.fallback();
+    id = route.request().postDataJSON().id; return route.abort('connectionrefused');
+  });
+  await mount(page, '', 'http://localhost/screenshot', true);
+  await page.evaluate(image => (window as unknown as { changeDraft: (thread: string, text: string, image: string) => void })
+    .changeDraft('thoughts-screenshot', 'Queue the screenshot.', image), imageUri(true));
+  await page.getByRole('textbox').press('Enter');
+  await expect.poll(() => page.getByRole('alert').count()).toBe(1);
+  expect(id).not.toBe(''); return id;
+}
+
+async function holdRestoration(page: Page) {
+  await page.addInitScript(() => {
+    const open = indexedDB.open.bind(indexedDB);
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    (window as unknown as { releaseDraftReads: () => void }).releaseDraftReads = release;
+    const setter = Object.getOwnPropertyDescriptor(IDBRequest.prototype, 'onsuccess')!.set!;
+    indexedDB.open = (...args) => {
+      const request = open(...args);
+      Object.defineProperty(request, 'onsuccess', { configurable: true,
+        set(callback: (event: Event) => void) { setter.call(request, (event: Event) => { void gate.then(() => callback.call(request, event)); }); } });
+      return request;
+    };
+  });
+}
+
+it('retries a saved screenshot without rewriting attachments when new storage writes fail', async () => {
+  const page = await browser.newPage(); const posts: Parameters<typeof connect>[1] = [];
+  try {
+    const id = await failLargeDraft(page, posts); await page.unroute('**/api/orchestrator/composer-queue');
+    await page.evaluate(() => { IDBObjectStore.prototype.put = () => { throw new DOMException('Fixture quota', 'QuotaExceededError'); }; });
+    await page.getByRole('textbox').press('Enter');
+    await expect.poll(() => posts.length).toBe(1);
+    expect(posts[0].id).toBe(id);
+    expect(posts[0].payload.images[0].dataUri).toBe(imageUri(true));
+    await expect.poll(() => page.getByRole('textbox').inputValue()).toBe('');
+    expect(queue.listQueuedComposerSends({ repoPath: fixture.repo, threadId: 'thoughts-screenshot' })).toHaveLength(1);
+  } finally { await page.close(); }
+});
+
+it('blocks a text-only send when the saved draft image copy is missing', async () => {
+  const page = await browser.newPage(); const posts: Parameters<typeof connect>[1] = [];
+  try {
+    await failLargeDraft(page, posts); await page.unroute('**/api/orchestrator/composer-queue');
+    await page.evaluate(() => new Promise<void>((resolve, reject) => {
+      const key = Object.keys(localStorage).find(key => key.startsWith('o8:composer-draft:'))!;
+      const reference = JSON.parse(localStorage.getItem(key)!).storedImages;
+      const opening = indexedDB.open('o8.composer-queue-attachments.v1');
+      opening.onsuccess = () => { const db = opening.result; const tx = db.transaction('attempts', 'readwrite'); tx.objectStore('attempts').delete(reference);
+        tx.oncomplete = () => { db.close(); resolve(); }; tx.onerror = () => reject(tx.error); };
+      opening.onerror = () => reject(opening.error);
+    }));
+    await mount(page, '', 'http://localhost/screenshot', true);
+    await page.getByRole('textbox').press('Enter');
+    await expect.poll(() => page.getByRole('alert').textContent()).toContain('Saved draft attachments could not be restored');
+    expect(posts).toEqual([]);
+    expect(queue.listQueuedComposerSends({ repoPath: fixture.repo, threadId: 'thoughts-screenshot' })).toHaveLength(0);
+  } finally { await page.close(); }
+});
+
+it('refuses a draft move during restoration and retains text edited while the image loads', async () => {
+  const page = await browser.newPage(); const posts: Parameters<typeof connect>[1] = [];
+  try {
+    await failLargeDraft(page, posts); await holdRestoration(page);
+    await mount(page, '', 'http://localhost/screenshot', true);
+    const before = await page.evaluate(() => Object.entries(localStorage).find(([key]) => key.startsWith('o8:composer-draft:')));
+    expect(await page.evaluate(() => (window as unknown as { moveDraft: () => boolean }).moveDraft())).toBe(false);
+    expect(await page.evaluate(() => Object.entries(localStorage).find(([key]) => key.startsWith('o8:composer-draft:')))).toEqual(before);
+    await page.getByRole('textbox').fill('Edited while restoring.');
+    await page.evaluate(() => (window as unknown as { releaseDraftReads: () => void }).releaseDraftReads());
+    await expect.poll(() => page.getByText('screenshot.png', { exact: true }).count()).toBeGreaterThan(0);
+    expect(await page.getByRole('textbox').inputValue()).toBe('Edited while restoring.');
+    expect(posts).toEqual([]);
+  } finally { await page.close(); }
+});
+
+it('does not resurrect an image explicitly removed during restoration', async () => {
+  const page = await browser.newPage(); const posts: Parameters<typeof connect>[1] = [];
+  try {
+    await failLargeDraft(page, posts); await holdRestoration(page);
+    await mount(page, '', 'http://localhost/screenshot', true);
+    await page.evaluate(() => (window as unknown as { changeDraft: (thread: string, text: string, image: string) => void })
+      .changeDraft('thoughts-screenshot', 'Keep only this text.', ''));
+    await page.evaluate(() => (window as unknown as { releaseDraftReads: () => void }).releaseDraftReads());
+    await expect.poll(() => page.evaluate(() => new Promise<number>((resolve, reject) => {
+      const opening = indexedDB.open('o8.composer-queue-attachments.v1');
+      opening.onsuccess = () => { const db = opening.result; const request = db.transaction('attempts').objectStore('attempts').count();
+        request.onsuccess = () => { db.close(); resolve(request.result); }; request.onerror = () => reject(request.error); };
+      opening.onerror = () => reject(opening.error);
+    }))).toBe(1); // The uncertain queue attempt remains; its draft copy retired.
+    expect(await page.getByText('screenshot.png', { exact: true }).count()).toBe(0);
+    await mount(page, '', 'http://localhost/screenshot', true);
+    expect(await page.getByRole('textbox').inputValue()).toBe('Keep only this text.');
+    expect(await page.getByText('screenshot.png', { exact: true }).count()).toBe(0);
+    expect(posts).toEqual([]);
+  } finally { await page.close(); }
+});
+
+it('does not replace another window’s saved draft before its storage event arrives', async () => {
+  const page = await browser.newPage(); const posts: Parameters<typeof connect>[1] = [];
+  try {
+    await failLargeDraft(page, posts); await page.unroute('**/api/orchestrator/composer-queue');
+    const other = await page.evaluate(() => {
+      const key = Object.keys(localStorage).find(key => key.startsWith('o8:composer-draft:'))!;
+      const raw = JSON.stringify({ input: 'Another window owns this edit.', images: [], files: [], revision: 'other-window' });
+      localStorage.setItem(key, raw); return { key, raw };
+    });
+    await page.getByRole('textbox').press('Enter');
+    await expect.poll(() => page.getByRole('alert').textContent()).toContain('Saved draft attachments could not be restored');
+    expect(await page.evaluate(key => localStorage.getItem(key), other.key)).toBe(other.raw);
+    expect(posts).toEqual([]);
+  } finally { await page.close(); }
+});
+
+it('retains image and identity when clearing fails after acceptance and queue recovery is retired', async () => {
+  const page = await browser.newPage(); const posts: Parameters<typeof connect>[1] = [];
+  try {
+    const id = await failLargeDraft(page, posts); await page.unroute('**/api/orchestrator/composer-queue');
+    await page.evaluate(() => {
+      const set = Storage.prototype.setItem;
+      Storage.prototype.setItem = function(key, raw) {
+        if (key.startsWith('o8:composer-draft:')) {
+          const value = JSON.parse(raw);
+          if (!value.input && !value.images.length && !value.storedImages) throw new DOMException('Fixture clear denied', 'SecurityError');
+        }
+        return set.call(this, key, raw);
+      };
+    });
+    await page.getByRole('textbox').press('Enter');
+    await expect.poll(() => posts.length).toBe(1);
+    await expect.poll(() => page.getByRole('alert').textContent()).toContain('draft could not be cleared');
+    expect(posts[0].id).toBe(id);
+    // Another owner may confirm this same send and retire its queue recovery.
+    await page.evaluate(() => new Promise<void>((resolve, reject) => {
+      const keys = Object.keys(localStorage).filter(key => key.startsWith('o8:composer-queue-recovery:'));
+      const opening = indexedDB.open('o8.composer-queue-attachments.v1');
+      opening.onsuccess = () => { const db = opening.result; const tx = db.transaction('attempts', 'readwrite');
+        for (const key of keys) { tx.objectStore('attempts').delete(key); localStorage.removeItem(key); }
+        tx.oncomplete = () => { db.close(); resolve(); }; tx.onerror = () => reject(tx.error); };
+      opening.onerror = () => reject(opening.error);
+    }));
+    await mount(page, '', 'http://localhost/screenshot?model=changed-model&idle', true);
+    await expect.poll(() => page.getByText('screenshot.png', { exact: true }).count()).toBeGreaterThan(0);
+    await page.getByRole('textbox').press('Enter');
+    await expect.poll(() => posts.length).toBe(2);
+    expect(posts[1]).toEqual(posts[0]);
+    await expect.poll(() => page.getByRole('textbox').inputValue()).toBe('');
+    expect(queue.listQueuedComposerSends({ repoPath: fixture.repo, threadId: 'thoughts-screenshot' })).toHaveLength(1);
+    expect(posts[1].payload.images[0].dataUri).toBe(imageUri(true));
   } finally { await page.close(); }
 });

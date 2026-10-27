@@ -1,8 +1,11 @@
 // Disposable session workload. Raw logs/snapshots stay in work/; receipts contain no paths.
 // Production: npm run build, then node scripts/bench/session-memory.mjs
-//   --standalone --sessions=96 --transcript-mib=4 --output=work/session-memory
+//   --standalone --sessions=96 --worker-sessions=48 --transcript-mib=4
+//   --idle-ms=600000 --passive --check --output=work/session-memory
 // Add --snapshots for a separate diagnostic run; RSS is sampled before snapshots.
+// Use --snapshots=raw for heaps too large to load into the diagnostic JSON parser.
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { build } from 'esbuild';
 import { createHash, randomBytes } from 'node:crypto';
 import fs from 'node:fs';
@@ -10,23 +13,35 @@ import { createRequire } from 'node:module';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { WebSocket } from 'ws';
-import { freePort, healthy, launch, root, sleep, stop, writeJson } from '../speed/common.mjs';
+import { evidencePath, freePort, healthy, launch, root, rss, sleep, stop, writeJson } from '../speed/common.mjs';
 import { inspector, postGc, summarizeHeap } from '../speed/memory.mjs';
 import { retainedOwners } from './standalone-heap.mjs';
+import { bundleServers } from '../lib/server-bundles.mjs';
+import { seedWorkerSessions, countSandboxDenials } from './session-memory-workers.mjs';
 
 const mib = bytes => Math.round(bytes / 1024 / 1024 * 100) / 100;
 const digest = file => createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+const persistedFile = entry => fs.existsSync(entry.file) ? entry.file : entry.archivedFile ?? entry.file;
 function memory(usage) {
   return Object.fromEntries(['rss', 'heapUsed', 'heapTotal', 'external', 'arrayBuffers']
     .map(key => [`${key}MiB`, mib(usage[key])]));
 }
 
-export async function bundleWs(outfile) {
+async function retainedUsage(client) {
+  // Native-buffer finalizers can run after the first collection callback.
+  let usage;
+  for (let pass = 0; pass < 3; pass++) usage = await postGc(client);
+  return usage;
+}
+
+async function bundleFixture(entryPoint, outfile) {
   const require = createRequire(import.meta.url);
   // Same ESM format, native externals and server-only shim as the existing WS probe.
   await build({
-    entryPoints: ['src/ws-server.ts'], outfile, bundle: true, platform: 'node', format: 'esm',
-    alias: { 'server-only': path.join(root, 'scripts/server-only-stub.js') },
+    entryPoints: [entryPoint], outfile, bundle: true, platform: 'node', format: 'esm',
+    minify: true, keepNames: true, target: 'node22', external: ['typescript'],
+    alias: { 'server-only': path.join(root, 'scripts/server-only-stub.js'),
+      'next/server': path.join(root, 'scripts/lib/next-server-exports.mjs') },
     // The CI fixture can live outside the checkout. Resolve native externals
     // against the installed repository dependencies instead of its temp parent.
     plugins: [{ name: 'fixture-native-externals', setup(builder) {
@@ -45,11 +60,20 @@ export async function bundleWs(outfile) {
   });
 }
 
-async function openAndCloseSession(wsPort, token, sessionKey) {
+export async function bundleWs(outfile) {
+  const outDir = outfile + '.modules';
+  fs.mkdirSync(outDir, { recursive: true });
+  fs.symlinkSync(path.join(root, 'node_modules'), path.join(outDir, 'node_modules'), 'dir');
+  // Exercise the exact minified, split entry shipped by the desktop exporter.
+  bundleServers({ root, outDir });
+  fs.writeFileSync(outfile, `await import(${JSON.stringify(pathToFileURL(path.join(outDir, 'ws-server.mjs')).href)});\n`);
+}
+
+async function openAndCloseSession(wsPort, token, sessionKey, worker = false) {
   const socket = new WebSocket(`ws://127.0.0.1:${wsPort}/ws?token=${token}`);
   try {
     await new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('Session bootstrap deadline exceeded')), 30_000);
+      const timer = setTimeout(() => reject(new Error('Session bootstrap deadline exceeded')), 120_000);
       socket.once('error', error => { clearTimeout(timer); reject(error); });
       socket.once('open', () => socket.send(JSON.stringify({ type: 'realtime-subscribe',
         subscriptions: [{ stream: `session:${sessionKey}` }] })));
@@ -60,8 +84,9 @@ async function openAndCloseSession(wsPort, token, sessionKey) {
         if (!history) return;
         clearTimeout(timer);
         try {
-          assert.equal(history.data.entries.length, 32, 'WS must deliver every fixture row');
-          assert(history.data.entries.at(-1).text.startsWith('fixture-output-31:'), 'WS transcript payload missing');
+          if (!worker) assert.equal(history.data.entries.length, 32, 'WS must deliver every fixture row');
+          assert(history.data.entries.some(entry => entry.text.startsWith(worker ? 'worker-output-31:' : 'fixture-output-31:')),
+            'WS transcript payload missing');
           resolve();
         } catch (error) { reject(error); }
       });
@@ -74,10 +99,77 @@ async function openAndCloseSession(wsPort, token, sessionKey) {
   }
 }
 
+export async function exerciseSessionWorkload({ data, repo, env, wsPort, token, read,
+  sessions, workerSessions, transcriptMiB, projectIds, settleMs = 3000 }) {
+  const files = [];
+  const transcriptDigest = createHash('sha256');
+  let payloadUtf8Bytes = 0;
+  for (let index = 0; index < sessions; index++) {
+    const id = `thoughts-memory-${index}`;
+    const messages = Array.from({ length: 32 }, (_, row) => {
+      const pattern = `${index}-${row}-transcript `;
+      const length = Math.floor(transcriptMiB * 1024 * 1024 / 32);
+      const content = `fixture-output-${row}:` + pattern.repeat(Math.ceil(length / pattern.length)).slice(0, length);
+      payloadUtf8Bytes += Buffer.byteLength(content);
+      return { id: `entry-${index}-${row}`, role: row % 2 ? 'assistant' : 'user', content,
+        timestamp: 1790812800000 + row * 10_000 };
+    });
+    transcriptDigest.update(JSON.stringify(messages));
+    const file = path.join(data, 'chat-history', `${id}.json`);
+    fs.writeFileSync(file, JSON.stringify({ id, title: `Memory fixture ${index}`, messages,
+      repoPath: repo, backend: 'claude', model: 'claude-code', savedAt: '2026-10-01T01:00:00.000Z',
+      orchestratorVisible: true }));
+    files.push({ id, file, hash: digest(file) });
+  }
+  const listed = await read(`/api/mobile/orchestrator/threads?limit=${sessions}`);
+  assert.equal(listed.threads.length, sessions, 'Every persisted session must be discoverable');
+  let completedSessions = 0;
+  for (const { id } of files) {
+    const projectId = projectIds[completedSessions % projectIds.length];
+    const ledger = await read('/api/panel/projects/active', { projectId });
+    assert.equal(ledger.activeProjectId, projectId, 'Project selection must persist');
+    const history = await read(`/api/mobile/history?sessionKey=llm-chat:${id}&limit=200`);
+    assert.equal(history.transcript.length, 32, 'HTTP must deliver every fixture row');
+    assert(history.transcript.at(-1).text.startsWith('fixture-output-31:'), 'HTTP transcript payload missing');
+    const sync = await read('/api/mobile/sync', { history: { sessionKey: `llm-chat:${id}`, limit: 200 } });
+    assert.equal(sync.history?.sessionKey, `llm-chat:${id}`, 'Chat sync history must resolve');
+    assert(sync.history.entries.some(entry => entry.text.startsWith('fixture-output-31:')), 'Sync chat payload missing');
+    await openAndCloseSession(wsPort, token, `llm-chat:${id}`);
+    completedSessions++;
+    if (completedSessions % 12 === 0) console.log(JSON.stringify({ phase: 'chats', completed: completedSessions }));
+  }
+  await sleep(settleMs);
+  const workers = seedWorkerSessions({ count: workerSessions, transcriptMiB,
+    ownedRoot: env.CORTEX_IDE_OWNED_CODEX_ROOT, repo, env });
+  for (const worker of workers) worker.hash = digest(worker.file);
+  let completedWorkers = 0;
+  for (const { sessionKey } of workers) {
+    const history = await read(`/api/mobile/history?sessionKey=${sessionKey}&limit=200`);
+    assert(history.transcript.some(entry => entry.text.startsWith('worker-output-31:')), 'HTTP worker payload missing');
+    const sync = await read('/api/mobile/sync', { history: { sessionKey, limit: 200 } });
+    assert.equal(sync.history?.sessionKey, sessionKey, 'Worker sync history must resolve');
+    assert(sync.history.entries.some(entry => entry.text.startsWith('worker-output-31:')), 'Sync worker payload missing');
+    await openAndCloseSession(wsPort, token, sessionKey, true);
+    completedWorkers++;
+    if (completedWorkers % 12 === 0) console.log(JSON.stringify({ phase: 'workers', completed: completedWorkers }));
+  }
+  await sleep(settleMs);
+  return { files, workers, payloadUtf8Bytes, transcriptDigest: transcriptDigest.digest('hex'),
+    completedSessions, completedWorkers };
+}
+
+export function verifySessionWorkload({ files, workers }) {
+  return [...files, ...workers].every(entry => digest(persistedFile(entry)) === entry.hash);
+}
+
 export async function measureSessionMemory({ output, sessions = 12, transcriptMiB = 4,
-  standalone = false, snapshots = false, settleMs = 3000, wsBundle } = {}) {
+  workerSessions = 0, idleMs = 0, standalone = false, standaloneServer,
+  snapshots = false, passive = false, settleMs = 3000, wsBundle, registerCleanup } = {}) {
+  output = path.resolve(output);
   assert(Number.isSafeInteger(sessions) && sessions > 0 && sessions <= 500);
   assert(Number.isFinite(transcriptMiB) && transcriptMiB > 0 && transcriptMiB <= 16);
+  assert(Number.isSafeInteger(workerSessions) && workerSessions >= 0 && workerSessions <= 500);
+  assert(Number.isSafeInteger(idleMs) && idleMs >= 0);
   fs.mkdirSync(output, { recursive: true });
   assert(!fs.existsSync(path.join(output, 'next.log')), 'Use a fresh evidence directory');
   fs.writeFileSync(path.join(output, '.gitignore'), '*\n');
@@ -86,6 +178,9 @@ export async function measureSessionMemory({ output, sessions = 12, transcriptMi
   const repo = path.join(fixture, 'repo');
   fs.mkdirSync(path.join(data, 'chat-history'), { recursive: true });
   fs.mkdirSync(repo);
+  execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: repo, stdio: 'ignore' });
+  execFileSync('git', ['-c', 'user.name=o8 fixture', '-c', 'user.email=fixture@invalid',
+    '-c', 'commit.gpgsign=false', 'commit', '--allow-empty', '-qm', 'memory fixture'], { cwd: repo, stdio: 'ignore' });
   const token = randomBytes(32).toString('hex');
   fs.writeFileSync(path.join(data, 'ws-token'), token, { mode: 0o600 });
   const apiPort = await freePort(), wsPort = await freePort();
@@ -102,86 +197,119 @@ export async function measureSessionMemory({ output, sessions = 12, transcriptMi
     'O8_OWNED_PI_ROOT', 'O8_OWNED_PI_BUILTIN_ROOT', 'O8_OWNED_PRIME_AGENT_ROOT',
     'O8_OWNED_DEEPSEEK_HARNESS_ROOT', 'O8_OWNED_HERMES_ROOT']) env[key] = path.join(data, key.toLowerCase());
   const wsEntry = wsBundle ?? path.join(fixture, 'ws-server.mjs');
-  if (!wsBundle) await bundleWs(wsEntry);
-  const nextArgs = standalone ? [path.join(root, '.next/standalone/server.js')]
-    : ['--import', path.join(root, 'scripts/register-server-only-stub.mjs'), '--import', 'tsx',
-      path.join(root, 'scripts/bench/session-memory-route-host.ts')];
+  const routeHost = path.join(fixture, 'route-host.mjs');
+  const nextArgs = standalone ? [standaloneServer ? evidencePath(standaloneServer) : path.join(root, '.next/standalone/server.js')]
+    : [routeHost];
   const processes = {}, clients = {};
+  let cleanupPromise;
+  const cleanup = () => cleanupPromise ??= (async () => {
+    for (const client of Object.values(clients)) client.close();
+    await Promise.all(Object.values(processes).map(stop));
+    fs.rmSync(fixture, { recursive: true, force: true });
+  })();
+  registerCleanup?.(cleanup);
+  const processTree = () => Object.fromEntries(Object.entries(rss(Object.fromEntries(
+    Object.entries(processes).map(([name, owned]) => [name, owned.child.pid]),
+  ))).map(([name, rows]) => [name, { count: rows.length,
+    rssMiB: Math.round(rows.reduce((sum, row) => sum + row.rssMiB, 0) * 100) / 100 }]));
+  const sampleUsage = client => passive ? client.usage() : retainedUsage(client);
+  const natural = {};
+  const trees = {};
   const origin = `http://127.0.0.1:${apiPort}`;
-  const read = async route => {
-    const response = await fetch(origin + route, { headers: { Authorization: `Bearer ${token}` },
+  const read = async (route, body) => {
+    // Large histories can outlast a pooled socket's idle timeout between steps.
+    const response = await fetch(origin + route, { headers: { Authorization: `Bearer ${token}`, Connection: 'close',
+      ...(body ? { 'Content-Type': 'application/json' } : {}) },
+      ...(body ? { method: 'POST', body: JSON.stringify(body) } : {}),
       signal: AbortSignal.timeout(60_000) });
     assert.equal(response.status, 200, `HTTP fixture rejected ${route.split('?')[0]}`);
     return response.json();
   };
   try {
-    processes.next = launch(['--inspect=127.0.0.1:0', ...nextArgs], env, path.join(output, 'next.log'));
+    if (!wsBundle) await bundleWs(wsEntry);
+    if (!standalone) await bundleFixture('scripts/bench/session-memory-route-host.ts', routeHost);
+    assert(!cleanupPromise, 'Memory fixture was cancelled');
+    processes.next = launch(['--inspect=127.0.0.1:0', ...nextArgs], env, path.join(output, 'next.log'), process.execPath, repo);
     await healthy(`${origin}/api/mobile/orchestrator/threads`, processes.next, token);
-    processes.ws = launch(['--inspect=127.0.0.1:0', wsEntry], env, path.join(output, 'ws.log'));
+    assert(!cleanupPromise, 'Memory fixture was cancelled');
+    processes.ws = launch(['--inspect=127.0.0.1:0', wsEntry], env, path.join(output, 'ws.log'), process.execPath, repo);
     await healthy(`http://127.0.0.1:${wsPort}/health`, processes.ws, token);
     for (const name of ['next', 'ws']) clients[name] = await inspector(processes[name]);
     // Warm the exact HTTP modules against an empty store before establishing baseline.
     await read('/api/mobile/orchestrator/threads');
     await read('/api/mobile/history?sessionKey=llm-chat:thoughts-empty');
+    await read('/api/mobile/sync', { history: { sessionKey: 'llm-chat:thoughts-empty', limit: 200 } });
+    const projectIds = [];
+    for (let index = 0; index < 4; index++) {
+      const ledger = await read('/api/panel/projects', { name: `Memory project ${index}` });
+      projectIds.push(ledger.projects.find(project => project.name === `Memory project ${index}`).id);
+    }
     await sleep(settleMs);
+    natural.start = processTree();
     const idle = {};
-    for (const name of ['next', 'ws']) idle[name] = memory(await postGc(clients[name]));
-    const files = [];
-    const transcriptDigest = createHash('sha256');
-    let payloadUtf8Bytes = 0;
-    for (let index = 0; index < sessions; index++) {
-      const id = `thoughts-memory-${index}`;
-      const messages = Array.from({ length: 32 }, (_, row) => {
-        const pattern = `${index}-${row}-transcript `;
-        const length = Math.floor(transcriptMiB * 1024 * 1024 / 32);
-        const content = `fixture-output-${row}:` + pattern.repeat(Math.ceil(length / pattern.length)).slice(0, length);
-        payloadUtf8Bytes += Buffer.byteLength(content);
-        return { id: `entry-${index}-${row}`, role: row % 2 ? 'assistant' : 'user', content,
-          timestamp: 1790812800000 + row * 10_000 };
-      });
-      transcriptDigest.update(JSON.stringify(messages));
-      const file = path.join(data, 'chat-history', `${id}.json`);
-      fs.writeFileSync(file, JSON.stringify({ id, title: `Memory fixture ${index}`, messages,
-        repoPath: repo, backend: 'claude', model: 'claude-code', savedAt: '2026-10-01T01:00:00.000Z',
-        orchestratorVisible: true }));
-      files.push({ id, file, hash: digest(file) });
-    }
-    const listed = await read(`/api/mobile/orchestrator/threads?limit=${sessions}`);
-    assert.equal(listed.threads.length, sessions, 'Every persisted session must be discoverable');
-    let completedSessions = 0;
-    for (const { id } of files) {
-      const history = await read(`/api/mobile/history?sessionKey=llm-chat:${id}&limit=200`);
-      assert.equal(history.transcript.length, 32, 'HTTP must deliver every fixture row');
-      assert(history.transcript.at(-1).text.startsWith('fixture-output-31:'), 'HTTP transcript payload missing');
-      await openAndCloseSession(wsPort, token, `llm-chat:${id}`);
-      completedSessions++;
-    }
-    await sleep(settleMs);
+    for (const name of ['next', 'ws']) idle[name] = memory(await sampleUsage(clients[name]));
+    trees.start = processTree();
+    console.log(JSON.stringify({ phase: 'start', processes: trees.start }));
+    const workload = await exerciseSessionWorkload({ data, repo, env, wsPort, token, read,
+      sessions, workerSessions, transcriptMiB, projectIds, settleMs });
+    const { workers, payloadUtf8Bytes, transcriptDigest, completedSessions, completedWorkers } = workload;
+    natural.afterRun = processTree();
     const after = {};
-    for (const name of ['next', 'ws']) after[name] = memory(await postGc(clients[name]));
+    for (const name of ['next', 'ws']) after[name] = memory(await sampleUsage(clients[name]));
+    trees.afterRun = processTree();
+    console.log(JSON.stringify({ phase: 'afterRun', processes: trees.afterRun }));
+    const afterIdle = {};
+    if (idleMs) {
+      await sleep(idleMs);
+      natural.afterIdle = processTree();
+      for (const name of ['next', 'ws']) afterIdle[name] = memory(await sampleUsage(clients[name]));
+      trees.afterIdle = processTree();
+      console.log(JSON.stringify({ phase: 'afterIdle', processes: trees.afterIdle }));
+    }
     const receipt = { schema: 'o8/session-idle-memory/v1', node: process.version, platform: process.platform,
       entry: standalone ? 'Next standalone + ws-server bundle' : 'production route handlers + ws-server bundle',
-      sessions, transcriptMiB, payloadUtf8Bytes, transcriptDigest: transcriptDigest.digest('hex'),
-      completedSessions, settleMs, idle, after,
-      persistedOutputUnchanged: files.every(({ file, hash }) => digest(file) === hash),
-      budgets: { postActivityHeapMiBPerProcess: 96, retainedHeapGrowthMiBPerProcess: 24 },
+      sessions, transcriptMiB, payloadUtf8Bytes, transcriptDigest,
+      workerPayloadUtf8Bytes: workers.reduce((sum, worker) => sum + fs.statSync(persistedFile(worker)).size, 0),
+      workerTranscriptDigest: createHash('sha256').update(workers.map(worker => worker.hash).join('')).digest('hex'),
+      completedSessions, completedWorkers, workerSessions, projects: projectIds.length,
+      sandboxedWorkers: workerSessions, sandboxDenials: countSandboxDenials(workers),
+      archivedWorkers: workers.filter(worker => !fs.existsSync(worker.file) && fs.existsSync(worker.archivedFile)).length,
+      settleMs, idleMs, gcPasses: passive ? 0 : 3, idle, after, afterIdle,
+      processTrees: { natural, ...(passive ? { passive: trees } : { postGc: trees }) },
+      persistedOutputUnchanged: verifySessionWorkload(workload),
+      budgets: { postActivityHeapMiBPerProcess: 96, retainedHeapGrowthMiBPerProcess: 24,
+        idleCachedBufferGrowthMiBPerProcess: 8, serverTreesRssBytes: 500_000_000 },
     };
     // Finish both RSS checkpoints before either process takes a snapshot.
+    writeJson(path.join(output, 'receipt.json'), receipt);
     if (snapshots) {
       receipt.heaps = {};
       for (const name of ['next', 'ws']) {
         const file = path.join(output, `${name}-after.heapsnapshot`);
         await clients[name].snapshot(file);
-        receipt.heaps[name] = { shallow: summarizeHeap(file), retained: retainedOwners(file) };
+        if (snapshots === 'raw') {
+          receipt.heaps[name] = { snapshotBytes: fs.statSync(file).size };
+          globalThis.gc?.();
+          continue;
+        }
+        const shallow = summarizeHeap(file);
+        globalThis.gc?.();
+        receipt.heaps[name] = { shallow, retained: retainedOwners(file) };
+        globalThis.gc?.();
       }
+      writeJson(path.join(output, 'receipt.json'), receipt);
     }
-    writeJson(path.join(output, 'receipt.json'), receipt);
     return receipt;
   } finally {
-    for (const client of Object.values(clients)) client.close();
-    for (const owned of Object.values(processes)) await stop(owned);
-    fs.rmSync(fixture, { recursive: true, force: true });
+    await cleanup();
   }
+}
+
+export function assertIdleRssBudget(receipt) {
+  const trees = receipt.processTrees.natural.afterIdle;
+  assert(trees, 'An idle checkpoint is required');
+  const bytes = Object.values(trees).reduce((sum, server) => sum + server.rssMiB, 0) * 1024 * 1024;
+  assert(bytes < 500_000_000, `Idle server trees exceed 500 MB (${Math.round(bytes)} bytes)`);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
@@ -190,13 +318,38 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     return [key, value ?? true];
   }));
   const receipt = await measureSessionMemory({ output: path.resolve(String(args.output ?? 'work/session-memory')),
-    standalone: Boolean(args.standalone), snapshots: Boolean(args.snapshots),
+    registerCleanup: cleanup => {
+      process.once('SIGINT', () => { void cleanup().finally(() => process.exit(130)); });
+      process.once('SIGTERM', () => { void cleanup().finally(() => process.exit(143)); });
+    },
+    standalone: Boolean(args.standalone), passive: Boolean(args.passive), snapshots: args.snapshots === 'raw' ? 'raw' : Boolean(args.snapshots),
     wsBundle: args['ws-bundle'] ? path.resolve(String(args['ws-bundle'])) : undefined,
+    standaloneServer: args.server ? String(args.server) : undefined,
+    workerSessions: Number(args['worker-sessions'] ?? 0), idleMs: Number(args['idle-ms'] ?? 0),
     sessions: Number(args.sessions ?? 96), transcriptMiB: Number(args['transcript-mib'] ?? 4) });
   console.log(JSON.stringify(receipt));
-  if (args.check) for (const name of ['next', 'ws']) {
-    assert(receipt.after[name].heapUsedMiB < 96, `${name} post-activity idle heap exceeds 96 MiB`);
-    assert(receipt.after[name].heapUsedMiB - receipt.idle[name].heapUsedMiB < 24,
-      `${name} retained heap growth exceeds 24 MiB`);
+  if (args.check) {
+    assert(receipt.persistedOutputUnchanged, 'Persisted transcript output changed');
+    assert.equal(receipt.sandboxDenials, Number(receipt.workerSessions > 0), 'Sandbox diagnostics must remain visible');
+    if (receipt.idleMs) assertIdleRssBudget(receipt);
+    if (!args.passive) {
+      const checkpoints = { afterRun: receipt.after, ...(receipt.idleMs ? { afterIdle: receipt.afterIdle } : {}) };
+      for (const [phase, sample] of Object.entries(checkpoints)) {
+        for (const name of ['next', 'ws']) {
+          assert(sample[name].heapUsedMiB < 96, `${name} ${phase} idle heap exceeds 96 MiB`);
+          if (phase === 'afterIdle') {
+            assert(sample[name].heapUsedMiB - receipt.idle[name].heapUsedMiB < 24,
+              `${name} ${phase} retained heap growth exceeds 24 MiB`);
+            assert(sample[name].arrayBuffersMiB - receipt.idle[name].arrayBuffersMiB < 8,
+              `${name} ${phase} cached-buffer growth exceeds 8 MiB`);
+          }
+        }
+      }
+      const trees = receipt.processTrees.postGc;
+      for (const phase of [trees.afterRun, ...(receipt.idleMs ? [trees.afterIdle] : [])]) {
+        assert(Object.values(phase).reduce((sum, server) => sum + server.rssMiB, 0) * 1024 * 1024 < 500_000_000,
+          'Server trees exceed 500 MB');
+      }
+    }
   }
 }

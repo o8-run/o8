@@ -9139,6 +9139,11 @@ pub fn run() {
                         html_traffic_lights,
                         std::env::consts::OS,
                     );
+                    #[cfg(target_os = "linux")]
+                    let init_script = format!(
+                        "{init_script} window.__O8_LINUX_GLASS__ = {};",
+                        std::env::var("O8_LINUX_GLASS").map(|v| v.trim() == "1").unwrap_or(false),
+                    );
                     tauri::WebviewWindowBuilder::from_config(app, config)?
                         .initialization_script(init_script)
                         .build()?;

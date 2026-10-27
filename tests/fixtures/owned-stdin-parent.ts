@@ -27,6 +27,10 @@ async function main() {
         const sessionPath = join(root, 'sessions', result.surfaceId.split(':')[1], 'session.json');
         process.send?.({ sessionPath, session: JSON.parse(readFileSync(sessionPath, 'utf8')) });
       } else {
+        if (message.action === 'interrupt') {
+          const result = await store.interrupt(message.surfaceId!);
+          if (!result.interrupted) throw new Error(result.note);
+        }
         await store.getReviewPacket(message.surfaceId!);
         const sessionPath = join(root, 'sessions', message.surfaceId!.split(':')[1], 'session.json');
         process.send?.({ sessionPath, session: JSON.parse(readFileSync(sessionPath, 'utf8')) });

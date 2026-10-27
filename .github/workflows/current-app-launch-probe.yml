@@ -1,0 +1,175 @@
+name: Current app launch measurements
+
+on:
+  workflow_dispatch:
+    inputs:
+      main_artifact_run:
+        description: Optional run containing a clean main app from the same base commit
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  baseline:
+    runs-on: macos-latest
+    timeout-minutes: 120
+    concurrency:
+      group: current-app-launch-baseline
+      cancel-in-progress: true
+    outputs:
+      base: ${{ steps.base.outputs.sha }}
+    env:
+      NEXT_TELEMETRY_DISABLED: '1'
+      O8_RELEASE_BUILD_CACHE: 'off'
+      APPLE_SIGNING_IDENTITY: '-'
+      SAVED_MAIN_RUN_ID: ${{ github.event.inputs.main_artifact_run || '' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: harness
+          fetch-depth: 0
+      - name: Pin main at the branch point
+        id: base
+        run: |
+          launch_base_sha=$(git -C harness merge-base origin/main HEAD)
+          echo "sha=$launch_base_sha" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        if: env.SAVED_MAIN_RUN_ID == ''
+        with:
+          ref: ${{ steps.base.outputs.sha }}
+          path: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.23.4
+          cache: npm
+          cache-dependency-path: harness/package-lock.json
+      - name: Install build tools
+        run: |
+          npm install -g npm@11.21.1
+          if [ -z "$SAVED_MAIN_RUN_ID" ]; then
+            rustup toolchain install stable --profile minimal
+            rustup default stable
+          fi
+      - run: npm ci --prefer-offline
+        if: env.SAVED_MAIN_RUN_ID == ''
+        working-directory: main
+      - run: npm ci --prefer-offline
+        if: env.SAVED_MAIN_RUN_ID != ''
+        working-directory: harness
+      - name: Prepare the isolated release configuration
+        if: env.SAVED_MAIN_RUN_ID == ''
+        run: |
+          node harness/scripts/bench/native-launch-config.mjs main
+          ln -s "$GITHUB_WORKSPACE/main/node_modules" harness/node_modules
+      - name: Build main from the clean checkout
+        if: env.SAVED_MAIN_RUN_ID == ''
+        uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5
+        with:
+          projectPath: main
+          args: --features dev-mcp-plugin --bundles app --config work/native-launch.json
+      - name: Preserve the exact main artifact
+        if: env.SAVED_MAIN_RUN_ID == ''
+        run: tar -C main/src-tauri/target/release/bundle/macos -cf "$RUNNER_TEMP/main-app.tar" o8.app
+      - uses: actions/download-artifact@v4
+        if: env.SAVED_MAIN_RUN_ID != ''
+        with:
+          name: current-app-launch-main-app
+          run-id: ${{ env.SAVED_MAIN_RUN_ID }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}
+      - name: Restore the preserved main app
+        if: env.SAVED_MAIN_RUN_ID != ''
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/main-artifact"
+          tar -C "$GITHUB_WORKSPACE/main-artifact" -xf "$RUNNER_TEMP/main-app.tar"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: current-app-launch-main-app
+          path: ${{ runner.temp }}/main-app.tar
+          compression-level: 0
+          retention-days: 1
+      - name: Measure main three times before the fix
+        continue-on-error: true
+        run: node harness/scripts/bench/native-launch.mjs --app=${{ env.SAVED_MAIN_RUN_ID != '' && 'main-artifact/o8.app' || 'main/src-tauri/target/release/bundle/macos/o8.app' }} --sha=${{ steps.base.outputs.sha }} --samples=3 --check-startup-loads --check --output="$RUNNER_TEMP/o8-launch-before"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: current-app-launch-before
+          path: ${{ runner.temp }}/o8-launch-before/receipt.json
+          retention-days: 1
+      - name: Require real composer measurements
+        env:
+          EXPECTED_SAMPLES: '3'
+        run: |
+          node - <<'JS'
+          const fs = require('node:fs');
+          const report = JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP + '/o8-launch-before/receipt.json', 'utf8'));
+          if (!report.teardownVerified || report.samples.length !== Number(process.env.EXPECTED_SAMPLES) || report.samples.some(sample => !sample.acknowledged)) process.exit(1);
+          JS
+
+  compare:
+    needs: baseline
+    runs-on: macos-latest
+    timeout-minutes: 120
+    concurrency:
+      group: current-app-launch-comparison
+      cancel-in-progress: true
+    env:
+      NEXT_TELEMETRY_DISABLED: '1'
+      O8_RELEASE_BUILD_CACHE: 'off'
+      APPLE_SIGNING_IDENTITY: '-'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: head
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.23.4
+          cache: npm
+          cache-dependency-path: head/package-lock.json
+      - name: Install build tools
+        run: |
+          npm install -g npm@11.21.1
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+      - run: npm ci --prefer-offline
+        working-directory: head
+      - run: node head/scripts/bench/native-launch-config.mjs head
+      - name: Build head from the clean checkout
+        uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5
+        with:
+          projectPath: head
+          args: --features dev-mcp-plugin --bundles app --config work/native-launch.json
+      - name: Preserve the exact candidate artifact
+        run: tar -C head/src-tauri/target/release/bundle/macos -cf "$RUNNER_TEMP/head-app.tar" o8.app
+      - uses: actions/upload-artifact@v4
+        with:
+          name: current-app-launch-head-app
+          path: ${{ runner.temp }}/head-app.tar
+          compression-level: 0
+          retention-days: 1
+      - uses: actions/download-artifact@v4
+        with:
+          name: current-app-launch-main-app
+          path: ${{ runner.temp }}/main-artifact
+      - name: Restore the exact main artifact
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/main-artifact"
+          tar -C "$GITHUB_WORKSPACE/main-artifact" -xf "$RUNNER_TEMP/main-artifact/main-app.tar"
+      - name: Measure main and head back to back on this runner
+        run: |
+          node head/scripts/bench/native-launch.mjs --app=main-artifact/o8.app --sha=${{ needs.baseline.outputs.base }} --samples=3 --output="$RUNNER_TEMP/o8-launch-paired-main"
+          node head/scripts/bench/native-launch.mjs --app=head/src-tauri/target/release/bundle/macos/o8.app --sha=${{ github.sha }} --samples=3 --check-startup-loads --check --output="$RUNNER_TEMP/o8-launch-paired-head"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: current-app-launch-paired
+          path: |
+            ${{ runner.temp }}/o8-launch-paired-main/receipt.json
+            ${{ runner.temp }}/o8-launch-paired-head/receipt.json
+          retention-days: 1

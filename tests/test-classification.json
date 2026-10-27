@@ -1739,6 +1739,13 @@
       ]
     },
     {
+      "path": "tests/automations-loading-layout-real-path.test.ts",
+      "reasons": [
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/bench-design-gesture-real-path.test.ts",
       "reasons": [
         "real-path"
@@ -2699,6 +2706,15 @@
       ]
     },
     {
+      "path": "tests/declarative-idle-launch-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/deepseek-harness-real-path.test.ts",
       "reasons": [
         "real-path"
@@ -3542,6 +3558,13 @@
       ]
     },
     {
+      "path": "tests/linux-glass-init-script.test.ts",
+      "reasons": [
+        "child-process",
+        "native-build"
+      ]
+    },
+    {
       "path": "tests/linux-worker-sandbox-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -4207,6 +4230,12 @@
         "child-process",
         "native-build",
         "real-path"
+      ]
+    },
+    {
+      "path": "tests/native-launch-pending-request.test.ts",
+      "reasons": [
+        "child-process"
       ]
     },
     {
@@ -4911,6 +4940,14 @@
       "reasons": [
         "child-process",
         "git-cli",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/owned-stop-absent-run-real-path.test.ts",
+      "reasons": [
+        "child-process",
         "process-signal",
         "real-path"
       ]

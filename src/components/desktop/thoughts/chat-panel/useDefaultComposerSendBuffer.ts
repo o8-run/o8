@@ -11,6 +11,7 @@ import type { OrchestratorSendHandle } from '../useOrchestratorStream';
 import type { ThoughtsAttachedImage } from './useThoughtsComposerAttachments';
 import type { ComposerQueuePayload } from '@/lib/orchestrator/composer-queue-types';
 import { useDurableComposerQueue } from './useDurableComposerQueue';
+import { composerDraftKey, consumeRecoveredComposerDraft, restoreComposerDraftImages } from './composer-draft-store';
 
 interface UseDefaultComposerSendBufferOptions {
   active: boolean;
@@ -112,14 +113,17 @@ export function useDefaultComposerSendBuffer({
 
   const submit = useCallback((intent: 'send-next' | 'steer-now') => {
     if (blocked || savingRef.current || uploading || uploadError) return;
-    const draft = latestInputRef.current;
-    const text = latestInputRef.current.trim() || (attachedImages.length > 0 ? '[Image attached]' : '');
-    if (!text) return;
-    const images = attachedImages.map((image) => ({ name: image.name, dataUri: image.dataUri }));
     const owner = queueOwnerRef.current;
     savingRef.current = true; setSaving(true);
     void (async () => {
       try {
+        const restored = await restoreComposerDraftImages(threadId ? composerDraftKey(repoPath, 'queue-recovery', threadId) : null);
+        if (queueOwnerRef.current !== owner) return;
+        const draft = restored?.input ?? latestInputRef.current;
+        const attachments = restored?.images ?? imagesRef.current;
+        const text = draft.trim() || (attachments.length > 0 ? '[Image attached]' : '');
+        if (!text) return;
+        const images = attachments.map(({ name, dataUri }) => ({ name, dataUri }));
         const retryPending = active && !shouldBypass(text) && await durable.hasPending(text, images);
         if (queueOwnerRef.current !== owner) return;
         if (images.length > 0) {
@@ -145,10 +149,11 @@ export function useDefaultComposerSendBuffer({
           const attachmentSnapshot = JSON.stringify(images);
           const confirm = await durable.enqueue({ text, images }, () => captureQueuedSend(text, images), intent);
           if (queueOwnerRef.current !== owner) return;
-          confirm();
           if (latestInputRef.current === draft && JSON.stringify(imagesRef.current.map(image => ({ name: image.name, dataUri: image.dataUri }))) === attachmentSnapshot) {
+            if (threadId && !consumeRecoveredComposerDraft(threadId, text, images)) throw new Error('The message is queued, but its draft could not be cleared. Retry to check the same send.');
             setInput(''); latestInputRef.current = ''; clearAttachments();
           }
+          confirm();
           return;
         }
 
@@ -178,7 +183,7 @@ export function useDefaultComposerSendBuffer({
         if (queueOwnerRef.current === owner) { savingRef.current = false; setSaving(false); }
       }
     })();
-  }, [active, attachedImages, backend, blocked, busy, uploading, uploadError, captureQueuedSend, clearAttachments, durable, latestInputRef, sendBuffer, sendUnbuffered, setInput, shouldBypass]);
+  }, [active, backend, blocked, busy, uploading, uploadError, captureQueuedSend, clearAttachments, durable, latestInputRef, repoPath, sendBuffer, sendUnbuffered, setInput, shouldBypass, threadId]);
 
   const handleSend = useCallback(() => submit('send-next'), [submit]);
   const supportsSteer = durable.canSteer;
