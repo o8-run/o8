@@ -40,7 +40,7 @@ function expand(value, shard) {
   return result;
 }
 function usesTestProcess(command, scripts, seen = new Set()) {
-  if (/\bvitest\b|npm run test:(?:unit|integration|classification:check)\b|scripts\/ci\/check-hermetic-shards\.mjs/.test(command)) return true;
+  if (/\bvitest\b|npm run test:(?:unit|integration|classification:check)\b|scripts\/ci\/check-hermetic-shards\.mjs|native-test-shard\.mjs --cargo --phase=timed/.test(command)) return true;
   return [...command.matchAll(/\bnpm run ([\w:-]+)/g)].some(([, name]) => {
     if (seen.has(name) || typeof scripts[name] !== 'string') return false;
     return usesTestProcess(scripts[name], scripts, new Set([...seen, name]));
@@ -135,7 +135,7 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
   'native test runner or condition needs a verify:ci equivalent');
   const nativeCondition = "steps.native.outputs.changed == 'true'";
   const nativeRunSteps = native.steps.filter(step => step.run);
-  requireCondition(native.steps.length === 5 && nativeRunSteps.length === 3
+  requireCondition(native.steps.length === 6 && nativeRunSteps.length === 4
     && nativeRunSteps[0].id === 'native' && nativeRunSteps[0].run === 'node scripts/ci/native-changes.mjs --o8-next'
     && !nativeRunSteps[0].if && !nativeRunSteps[0].env && !nativeRunSteps[0].shell
     && !nativeRunSteps[0]['working-directory']
@@ -149,8 +149,10 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
     }),
   'native selection or setup needs a verify:ci equivalent');
   const build = 'cargo build --locked --manifest-path crates/o8d/Cargo.toml --features experimental-http --bin o8d';
-  const test = "unset DISPLAY WAYLAND_DISPLAY\nTIMEFORMAT='o8 next native tests wall=%3R s'\ntime node scripts/ci/native-test-shard.mjs --cargo";
+  const test = "unset DISPLAY WAYLAND_DISPLAY\nTIMEFORMAT='o8 next native tests wall=%3R s'\ntime node scripts/ci/native-test-shard.mjs --cargo --phase=regular";
+  const probes = "unset DISPLAY WAYLAND_DISPLAY\nTIMEFORMAT='o8 next native probes wall=%3R s'\ntime node scripts/ci/native-test-shard.mjs --cargo --phase=timed";
   requireCondition(nativeRunSteps[1].run === build && nativeRunSteps[2].run.trim() === test
+    && nativeRunSteps[3].run.trim() === probes
     && nativeRunSteps.slice(1).every(step => step.if === nativeCondition
       && !step.shell && !step['working-directory'] && !step['continue-on-error'] && !step.env),
   'native test commands need a verify:ci equivalent');

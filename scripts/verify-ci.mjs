@@ -65,12 +65,14 @@ function run(step) {
   });
 }
 
-async function runStep(step) {
+async function runStep(step, onQueueWait = () => {}) {
   if (!step.testProcess) return interrupted ? false : run(step);
   const previous = testQueue;
   let release;
   testQueue = new Promise(resolve => { release = resolve; });
+  const queuedAt = Date.now();
   await previous;
+  onQueueWait(Date.now() - queuedAt);
   try { return interrupted ? false : await run(step); }
   finally { release(); }
 }
@@ -111,7 +113,14 @@ try {
         }
         console.log(`[verify:ci] ${step.command}`);
         const remaining = deadline - Date.now();
-        if (remaining <= 0 || !await runStep({ ...step, timeoutMs: Math.min(step.timeoutMs, remaining) })) passed = false;
+        if (remaining <= 0 || !await runStep({ ...step, timeoutMs: Math.min(step.timeoutMs, remaining) }, waitMs => {
+          // CI has independent runners. Local resource scheduling is not
+          // execution time, so pause this job's clock while it awaits admission.
+          if (check.timeoutMs) {
+            deadline += waitMs;
+            if (waitMs > 0) console.log(`[verify:ci] excludes local queue wait from ${check.name}: ${waitMs}ms`);
+          }
+        })) passed = false;
         if (interrupted) break;
       }
       const required = await Promise.all((check.requiredResults ?? []).map(id => tasks.get(id)));

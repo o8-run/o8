@@ -560,7 +560,13 @@ jobs:
         run: |
           unset DISPLAY WAYLAND_DISPLAY
           TIMEFORMAT='o8 next native tests wall=%3R s'
-          time node scripts/ci/native-test-shard.mjs --cargo
+          time node scripts/ci/native-test-shard.mjs --cargo --phase=regular
+      - name: Fixed-rate native terminal probes without sibling tests
+        if: steps.native.outputs.changed == 'true'
+        run: |
+          unset DISPLAY WAYLAND_DISPLAY
+          TIMEFORMAT='o8 next native probes wall=%3R s'
+          time node scripts/ci/native-test-shard.mjs --cargo --phase=timed
 
   roadmap-check:
     name: Roadmap Drift Check

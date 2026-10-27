@@ -50,6 +50,9 @@ Cargo build for the HTTP fixture daemon and all four headless suite shards. CI r
 the shards on separate jobs; local verification runs them serially against one Cargo
 target cache, retaining every discovered test exactly once. Each native shard shares
 CI's combined daemon-build/test deadline. Native
+fixed-rate terminal probes run without sibling native tests and share the local
+Vitest execution queue, retaining their original byte and time bounds. Local queue
+waiting pauses the native job clock, matching CI's independent runners. Native
 build/cache outputs are excluded from lint and type checking; source fixtures remain checked. Install
 the system prerequisites listed in `.github/actions/next-linux-setup/action.yml` and
 the stable Rust toolchain. Its selector compares against `origin/main` and includes

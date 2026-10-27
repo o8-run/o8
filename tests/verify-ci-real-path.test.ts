@@ -24,11 +24,11 @@ if ('${name}' === 'cargo' && process.env.VERIFY_FIXTURE_NATIVE_DELAY_MS) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Number(process.env.VERIFY_FIXTURE_NATIVE_DELAY_MS));
 }
 fs.appendFileSync(process.env.VERIFY_FIXTURE_RECEIPT, JSON.stringify({
-  tool: '${name}', args, ci: process.env.CI, nodeEnv: process.env.NODE_ENV,
+  tool: '${name}', args, startedAt: Date.now(), ci: process.env.CI, nodeEnv: process.env.NODE_ENV,
   nodeOptions: process.env.NODE_OPTIONS, dataDir: process.env.CORTEX_IDE_DATA_DIR,
   cargoHome: process.env.CARGO_HOME, targetDir: process.env.CARGO_TARGET_DIR,
   daemon: process.env.O8D_HTTP_TEST_BINARY, display: process.env.DISPLAY, wayland: process.env.WAYLAND_DISPLAY,
-  nativeShard: process.env.O8_NATIVE_TEST_SHARD,
+  nativeShard: process.env.O8_NATIVE_TEST_SHARD, nativePhase: process.env.O8_NATIVE_TEST_PHASE,
 }) + '\\n');
 const barrier = process.env.VERIFY_FIXTURE_BARRIER;
 if (barrier) {
@@ -50,7 +50,8 @@ if (barrier) {
     while (!fs.existsSync(path.join(barrier, 'unit-started')) && Date.now() < deadline) wait();
     if (!fs.existsSync(path.join(barrier, 'unit-started'))) process.exit(9);
   }
-  const testCommand = args.includes('vitest') || args.includes('typecheck') || args.includes('test:unit') || args.includes('test:integration') || args.includes('test:classification:check');
+  const testCommand = args.includes('vitest') || args.includes('typecheck') || args.includes('test:unit') || args.includes('test:integration') || args.includes('test:classification:check')
+    || ('${name}' === 'cargo' && process.env.O8_NATIVE_TEST_PHASE === 'timed');
   if (testCommand) {
     const lock = path.join(barrier, 'test-process');
     try { fs.writeFileSync(lock, 'active', { flag: 'wx' }); } catch { process.exit(8); }
@@ -69,6 +70,7 @@ if ('${name}' === 'npm' && args[0] === 'audit') {
   else console.log('found 0 vulnerabilities');
 } else console.log('fixture command completed');
 process.exit(process.env.VERIFY_FIXTURE_FAIL && (args.includes(process.env.VERIFY_FIXTURE_FAIL)
+  || ('${name}' === 'cargo' && process.env.VERIFY_FIXTURE_FAIL === 'timed phase' && process.env.O8_NATIVE_TEST_PHASE === 'timed')
   || ('${name}' === 'cargo-audit' && process.env.VERIFY_FIXTURE_FAIL === 'audit')) ? 7 : 0);
 `);
   chmodSync(file, 0o700);
@@ -244,8 +246,10 @@ describe('local CI verification through its command entry point', () => {
       const build = ['build', '--locked', '--manifest-path', 'crates/o8d/Cargo.toml', '--features', 'experimental-http', '--bin', 'o8d'];
       const test = ['--config', `target.x86_64-unknown-linux-gnu.runner=${JSON.stringify([process.execPath, path.join(result.directory, 'scripts/ci/native-test-shard.mjs')])}`,
         'test', '--locked', '--manifest-path', 'native/o8-next/Cargo.toml', '--', '--test-threads=4'];
-      expect(calls.map(call => call.args)).toEqual([1, 2, 3, 4].flatMap(() => [build, test]));
-      expect(calls.map(call => call.nativeShard)).toEqual([1, 2, 3, 4].flatMap(shard => [`${shard}/4`, `${shard}/4`]));
+      const probes = [...test.slice(0, -1), '--test-threads=1'];
+      expect(calls.map(call => call.args)).toEqual([1, 2, 3, 4].flatMap(() => [build, test, probes]));
+      expect(calls.map(call => call.nativeShard)).toEqual([1, 2, 3, 4].flatMap(shard => Array(3).fill(`${shard}/4`)));
+      expect(calls.map(call => call.nativePhase)).toEqual([1, 2, 3, 4].flatMap(() => [undefined, 'regular', 'timed']));
       for (const call of calls) {
         expect(call.ci).toBe('true');
         expect(call.targetDir).toMatch(/native\/o8-next\/target$/);
@@ -260,7 +264,7 @@ describe('local CI verification through its command entry point', () => {
   nativeIt.each(['committed', 'staged', 'unstaged', 'untracked'])('selects a %s native change against origin/main', nativeState => {
     const result = executeFixture('tests/fixture.test.ts', false, { nativeChange: 'native/o8-next/src/main.rs', nativeState });
     expect(result.status, result.stderr + result.stdout).toBe(0);
-    expect(result.calls.filter(call => call.tool === 'cargo')).toHaveLength(8);
+    expect(result.calls.filter(call => call.tool === 'cargo')).toHaveLength(12);
   }, 60_000);
 
   nativeIt('runs native and hermetic work concurrently while retaining the required aggregate', () => {
@@ -271,7 +275,7 @@ describe('local CI verification through its command entry point', () => {
   }, 60_000);
 
   nativeIt('gives each native CI shard its own combined build and test deadline', () => {
-    // Each command takes 1.5 s. A job's build + test fits in six seconds;
+    // Each command takes 1.5 s. A job's build + both phases fit in six seconds;
     // the complete serial matrix exceeds six seconds. Two seconds must fail
     // because the build and test share one budget inside each CI job.
     for (const [nativeDeadlineMinutes, status] of [[0.1, 0], [2 / 60, 1]]) {
@@ -284,6 +288,21 @@ describe('local CI verification through its command entry point', () => {
     }
   }, 60_000);
 
+  nativeIt('pauses native job budgets during local queue contention while enforcing active execution time', () => {
+    for (const [nativeDeadlineMinutes, status] of [[0.1, 0], [4 / 60, 1]]) {
+      const result = executeFixture('tests/fixture.test.ts', false, {
+        nativeChange: 'native/o8-next/src/main.rs', nativeDeadlineMinutes,
+        nativeDelayMs: 1500, discoveryMs: 8000,
+      });
+      expect(result.status, result.stderr + result.stdout).toBe(status);
+      expect(result.stdout).toContain('excludes local queue wait from o8 next Native Tests (Linux)');
+      if (status === 0) {
+        const calls = result.calls.filter(call => call.tool === 'cargo');
+        expect(calls.find(call => call.nativePhase === 'timed').startedAt - calls[0].startedAt).toBeGreaterThan(6000);
+      } else expect(result.stdout).toContain('FAIL Hermetic Unit Tests');
+    }
+  }, 90_000);
+
   it('skips native compilation for a TS-only local change while keeping required checks green', () => {
     const result = execute();
     expect(result.status, result.stderr + result.stdout).toBe(0);
@@ -294,7 +313,7 @@ describe('local CI verification through its command entry point', () => {
     expect(result.stdout).toContain('PASS Hermetic Unit Tests');
   }, 60_000);
 
-  nativeIt.each(['build', 'test'])('fails verification when the native cargo %s fails', fail => {
+  nativeIt.each(['build', 'test', 'timed phase'])('fails verification when the native cargo %s fails', fail => {
     const result = executeFixture('tests/fixture.test.ts', false, { nativeChange: 'native/o8-next/src/main.rs', fail });
     expect(result.status, result.stderr + result.stdout).toBe(1);
     expect(result.stdout).toContain('FAIL o8 next Native Tests (Linux)');
@@ -316,7 +335,8 @@ describe('local CI verification through its command entry point', () => {
 
   it.each(['command', 'action', 'condition', 'native tolerance', 'native step tolerance',
     'aggregate tolerance', 'aggregate step tolerance', 'aggregate condition', 'checkout ref',
-    'shard tolerance', 'shard step tolerance', 'missing native shard', 'native fail fast'])('rejects uncovered native execution changes: %s', change => {
+    'shard tolerance', 'shard step tolerance', 'missing native shard', 'native fail fast',
+    'timed phase command', 'timed phase condition'])('rejects uncovered native execution changes: %s', change => {
     const workflow = parse(readFileSync(workflowPath, 'utf8'));
     const job = workflow.jobs['o8-next-tests'];
     if (change === 'command') job.steps.push({ run: 'cargo test --required-fixture' });
@@ -324,6 +344,8 @@ describe('local CI verification through its command entry point', () => {
     if (change === 'checkout ref') job.steps[0].with.ref = 'main';
     if (change === 'missing native shard') job.strategy.matrix.shard.pop();
     if (change === 'native fail fast') job.strategy['fail-fast'] = true;
+    if (change === 'timed phase command') job.steps.at(-1).run += '\necho unchecked';
+    if (change === 'timed phase condition') job.steps.at(-1).if = 'false';
     if (change === 'shard tolerance') workflow.jobs['test-shards']['continue-on-error'] = true;
     if (change === 'shard step tolerance') workflow.jobs['test-shards'].steps.find((step: { run?: string }) => step.run?.startsWith('npm run test:unit'))['continue-on-error'] = true;
     if (change === 'native tolerance') job['continue-on-error'] = true;

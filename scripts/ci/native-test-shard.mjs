@@ -5,11 +5,19 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 if (process.argv[2] === '--cargo') {
+  const phase = /^--phase=(regular|timed)$/.exec(process.argv[3] ?? '')?.[1];
+  if (!phase || process.argv.length !== 4) {
+    console.error('[native-tests] usage: --cargo --phase=regular|timed');
+    process.exit(2);
+  }
   // Cargo runner environment strings split on whitespace without unquoting.
   // A TOML array preserves checkout paths containing spaces.
   const runner = JSON.stringify([process.execPath, fileURLToPath(import.meta.url)]);
   const result = spawnSync('cargo', ['--config', `target.x86_64-unknown-linux-gnu.runner=${runner}`,
-    'test', '--locked', '--manifest-path', 'native/o8-next/Cargo.toml', '--', '--test-threads=4'], { stdio: 'inherit' });
+    'test', '--locked', '--manifest-path', 'native/o8-next/Cargo.toml', '--',
+    `--test-threads=${phase === 'timed' ? 1 : 4}`], {
+    stdio: 'inherit', env: { ...process.env, O8_NATIVE_TEST_PHASE: phase },
+  });
   if (result.error) console.error('[native-tests] Cargo execution failed:', result.error.message);
   process.exit(result.error || result.signal ? 1 : result.status ?? 1);
 }
@@ -18,7 +26,8 @@ const [binary, ...args] = process.argv.slice(2);
 const shard = /^(\d+)\/(\d+)$/.exec(process.env.O8_NATIVE_TEST_SHARD ?? '');
 const index = Number(shard?.[1]);
 const count = Number(shard?.[2]);
-if (!binary || !shard || index < 1 || index > count || count > 32) {
+const phase = process.env.O8_NATIVE_TEST_PHASE;
+if (!binary || !shard || index < 1 || index > count || count > 32 || !['regular', 'timed'].includes(phase)) {
   console.error('[native-tests] O8_NATIVE_TEST_SHARD must be INDEX/COUNT, with 1 <= INDEX <= COUNT <= 32');
   process.exit(2);
 }
@@ -42,8 +51,10 @@ if (new Set(names).size !== names.length) {
   console.error('[native-tests] duplicate harness test names');
   process.exit(2);
 }
-const selected = names.filter(name => createHash('sha256').update(name).digest().readUInt32BE(0) % count === index - 1);
-console.log(`[native-tests] shard=${index}/${count} selected=${selected.length} total=${names.length}`);
+const selected = names.filter(name =>
+  createHash('sha256').update(name).digest().readUInt32BE(0) % count === index - 1
+  && (name.startsWith('terminal::tests::production_pty_') ? 'timed' : 'regular') === phase);
+console.log(`[native-tests] shard=${index}/${count} phase=${phase} selected=${selected.length} total=${names.length}`);
 // An empty filter runs everything in libtest; do not launch an empty shard.
 if (selected.length) {
   const result = spawnSync(binary, [...args, '--exact', ...selected], { stdio: 'inherit' });
