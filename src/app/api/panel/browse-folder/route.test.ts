@@ -49,3 +49,20 @@ it('keeps macOS cancellation distinct from an unavailable folder picker', async 
   expect(unavailable.status).toBe(503);
   expect((await unavailable.json()).error).toContain('Paste');
 });
+
+vi.mock('@/lib/auth/principal', () => ({ resolveRequestPrincipal: () => 'operator' }));
+
+it.each([
+  ['linux', 'folder'], ['linux', 'file'], ['darwin', 'folder'], ['darwin', 'file'],
+] as const)('returns an intact newline selection through the %s %s route', async (platform, kind) => {
+  setPlatform(platform);
+  const selected = '/tmp/chosen\nthen other';
+  fixture.execFile.mockResolvedValue({ stdout: selected + (kind === 'folder' ? '/' : '') + '\n', stderr: '' });
+  const response = kind === 'folder'
+    ? await (await import('./route')).POST()
+    : await (await import('../file-io/route')).POST(new Request('http://localhost/api/panel/file-io', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'pick' }),
+    }));
+  expect(response.status).toBe(200);
+  expect((await response.json()).path).toBe(selected);
+});

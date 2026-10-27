@@ -63,3 +63,46 @@ describe('pickNativePath', () => {
   });
 
 });
+
+it('falls back to kdialog after a GTK startup failure exits 1', async () => {
+  const run = vi.fn<PickerRunner>(async command => {
+    if (command === 'zenity') throw Object.assign(failure(1), { stderr: '(zenity:12): Gtk-WARNING **: cannot open display: :77\n' });
+    return '/tmp/selected\n';
+  });
+  await expect(pickNativePath('folder', 'Pick', { platform: 'linux', run })).resolves.toEqual({ path: '/tmp/selected' });
+  expect(run.mock.calls.map(([command]) => command)).toEqual(['zenity', 'kdialog']);
+});
+
+it('reports unavailable when both pickers fail to start with exit 1', async () => {
+  const run = vi.fn<PickerRunner>(async () => { throw Object.assign(failure(1), { stderr: Buffer.from('cannot connect to display\n') }); });
+  await expect(pickNativePath('file', 'Pick', { platform: 'linux', run })).resolves.toEqual({ path: null, unavailable: true });
+  expect(run).toHaveBeenCalledTimes(2);
+});
+
+it('keeps informational GTK cancellation from opening a second picker', async () => {
+  const run = vi.fn<PickerRunner>(async () => { throw Object.assign(failure(1), {
+    stderr: 'Gtk-Message: 12:00:00.000: GtkDialog mapped without a transient parent. This is discouraged.\n',
+  }); });
+  await expect(pickNativePath('folder', 'Pick', { platform: 'linux', run })).resolves.toEqual({ path: null });
+  expect(run).toHaveBeenCalledOnce();
+});
+
+it.each([
+  ['linux', 'folder'], ['linux', 'file'], ['darwin', 'folder'], ['darwin', 'file'],
+] as const)('preserves exact newline and whitespace paths for %s %s', async (platform, kind) => {
+  for (const selected of ['/tmp/chosen\nthen other ', '/tmp/quotes "and\' spaces\t', '/tmp/trailing-newline\n']) {
+    const run = vi.fn<PickerRunner>(async () => selected + (kind === 'folder' ? '/' : '') + '\n');
+    await expect(pickNativePath(kind, 'Pick', { platform, run })).resolves.toEqual({ path: selected });
+  }
+});
+
+it('keeps cancellation after nonfatal EGL and accessibility diagnostics', async () => {
+  const run = vi.fn<PickerRunner>(async () => { throw Object.assign(failure(1), { stderr: [
+    'libEGL warning: DRI3 error: Could not get DRI3 device',
+    'libEGL warning: Ensure your X server supports DRI3 to get accelerated rendering',
+    '(zenity:12): Gtk-WARNING **: 12:00:00: Unable to acquire the address of the accessibility bus: GDBus.Error:org.freedesktop.DBus.Error.ServiceUnknown: The name org.a11y.Bus was not provided by any .service files.',
+    'Gtk-Message: 12:00:00: GtkDialog mapped without a transient parent. This is discouraged.',
+  ].join('\n') }); });
+  await expect(pickNativePath('folder', 'Pick', { platform: 'linux', run })).resolves.toEqual({ path: null });
+  expect(run).toHaveBeenCalledOnce();
+});

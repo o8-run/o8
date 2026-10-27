@@ -11,6 +11,7 @@
 
 import { promisify } from 'node:util';
 import { execFile } from '@/lib/providers/child-process';
+import { workerParentEnvironment } from '@/lib/providers/worker-environment';
 
 export type PickerKind = 'folder' | 'file';
 export type PickerResult = { path: string | null; unavailable?: true };
@@ -19,7 +20,18 @@ export type PickerRunner = (command: string, args: string[], timeoutMs: number) 
 const execFileAsync = promisify(execFile);
 
 const defaultRunner: PickerRunner = async (command, args, timeoutMs) => {
-  const { stdout } = await execFileAsync(command, args, { windowsHide: true, timeout: timeoutMs, encoding: 'utf8' });
+  const linuxPicker = command === 'zenity' || command === 'kdialog';
+  const { stdout } = await execFileAsync(command, args, {
+    windowsHide: true, timeout: timeoutMs, encoding: 'utf8',
+    ...(linuxPicker ? { env: {
+      ...workerParentEnvironment(process.env),
+      NODE_ENV: process.env.NODE_ENV, // Already inherited; required by Next's ProcessEnv type.
+      DISPLAY: process.env.DISPLAY,
+      WAYLAND_DISPLAY: process.env.WAYLAND_DISPLAY,
+      XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR,
+      DBUS_SESSION_BUS_ADDRESS: process.env.DBUS_SESSION_BUS_ADDRESS,
+    } } : {}),
+  });
   return String(stdout);
 };
 
@@ -37,13 +49,25 @@ function linuxCandidates(kind: PickerKind, prompt: string, home: string): Array<
 }
 
 function cleanPath(raw: string, kind: PickerKind): string | null {
-  const path = raw.split('\n')[0]?.trim() ?? '';
+  // Each chooser appends one protocol newline; all other bytes belong to the path.
+  const path = raw.endsWith('\n') ? raw.slice(0, -1) : raw;
   if (!path) return null;
   return kind === 'folder' && path.length > 1 && path.endsWith('/') ? path.slice(0, -1) : path;
 }
 
-function exitCode(error: unknown): unknown {
-  return (error as { code?: unknown } | null)?.code;
+function isCancellation(error: unknown): boolean {
+  const failure = error as { code?: unknown; stderr?: unknown } | null;
+  if (failure?.code !== 1) return false;
+  const stderr = Buffer.isBuffer(failure.stderr) ? failure.stderr.toString('utf8')
+    : typeof failure.stderr === 'string' ? failure.stderr : '';
+  // GTK prints some nonfatal rendering/accessibility hints on working dialogs.
+  // Other diagnostics distinguish startup failure from a plain cancellation.
+  const informational = [
+    /Gtk-Message:.*GtkDialog mapped without a transient parent\. This is discouraged\.\s*$/,
+    /^libEGL warning: (?:DRI3 error: Could not get DRI3 device|Ensure your X server supports DRI3 to get accelerated rendering)\s*$/,
+    /Gtk-WARNING.*Unable to acquire the address of the accessibility bus:.*ServiceUnknown:.*org\.a11y\.Bus/,
+  ];
+  return stderr.split('\n').every(line => !line.trim() || informational.some(pattern => pattern.test(line)));
 }
 
 export async function pickNativePath(
@@ -73,8 +97,8 @@ export async function pickNativePath(
     try {
       return { path: cleanPath(await run(command, args, timeoutMs), kind) };
     } catch (error) {
-      // zenity and kdialog both exit 1 when the user cancels.
-      if (exitCode(error) === 1) return { path: null };
+      // Both tools use exit 1 for cancellation and some startup failures.
+      if (isCancellation(error)) return { path: null };
       // Missing program (ENOENT), no display, or a crash: try the next one.
     }
   }
