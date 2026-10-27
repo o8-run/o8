@@ -1918,6 +1918,13 @@
       ]
     },
     {
+      "path": "tests/build-output-writer.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture"
+      ]
+    },
+    {
       "path": "tests/bust-stale-patch-cache.test.ts",
       "reasons": [
         "child-process"
@@ -5611,6 +5618,23 @@
       "path": "tests/release-native-module-check.test.ts",
       "reasons": [
         "child-process"
+      ]
+    },
+    {
+      "path": "tests/release-output-delete-ownership-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/release-output-legacy-inventory-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
       ]
     },
     {

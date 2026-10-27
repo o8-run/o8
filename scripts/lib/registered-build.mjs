@@ -1,6 +1,6 @@
 import { prepareRegisteredWebCache } from './release-web-cache-ownership.mjs';
 import { createRequire } from 'node:module';
-import { existsSync, lstatSync, readFileSync, renameSync, rmdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { resolveReleaseConfig } from './release-config.mjs';
 import { assertTauriExportInputsSafe } from './tauri-export-safety.mjs';
@@ -23,11 +23,12 @@ export async function runRegisteredBuild(run, { restoredCache = null } = {}) {
     delete env[key];
   }
   const buildOutput = run.buildOutput?.directory || join(root, '.next');
+  const writer = run.buildOutput?.writer;
   if (run.buildOutput) {
     const distDir = relative(root, buildOutput).split('\\').join('/');
     if (distDir !== '.next/.o8-release-build') throw new Error('Build output reservation is invalid.');
     env.O8_RELEASE_NEXT_DIST_DIR = distDir;
-    await prepareRegisteredWebCache(root, buildOutput, restoredCache);
+    await prepareRegisteredWebCache(root, buildOutput, restoredCache, writer);
   } else if (lstatSync(join(root, '.next/cache'), { throwIfNoEntry: false })) {
     throw new Error('Preserved unowned entries in .next/cache; cache invalidation requires a verified build reservation.');
   }
@@ -52,26 +53,27 @@ export async function runRegisteredBuild(run, { restoredCache = null } = {}) {
     const entry = lstatSync(path, { throwIfNoEntry: false });
     if (!entry) continue;
     if (!entry.isFile() || entry.isSymbolicLink()) throw new Error('Standalone environment copy must be a regular generated file.');
-    rmSync(path);
+    if (!writer) throw new Error(`Preserved unowned standalone/${name}; environment scrubbing requires a verified build reservation.`);
+    writer.api.unlinkSync(path);
   }
   if (run.buildOutput) {
     // Normalize the private compiler layout before packaging its own output.
     const nested = join(standalone, env.O8_RELEASE_NEXT_DIST_DIR);
     if (existsSync(nested)) {
       const normalized = join(standalone, '.next-runtime');
-      renameSync(nested, normalized);
-      rmdirSync(join(standalone, '.next'));
-      renameSync(normalized, join(standalone, '.next'));
+      writer.api.renameSync(nested, normalized);
+      writer.api.rmdirSync(join(standalone, '.next'));
+      writer.api.renameSync(normalized, join(standalone, '.next'));
     }
     const server = join(standalone, 'server.js');
-    if (existsSync(server)) writeFileSync(server, readFileSync(server, 'utf8')
+    if (existsSync(server)) writer.api.writeFileSync(server, readFileSync(server, 'utf8')
       .replaceAll(JSON.stringify(env.O8_RELEASE_NEXT_DIST_DIR), JSON.stringify('.next'))
       .replaceAll(JSON.stringify('./' + env.O8_RELEASE_NEXT_DIST_DIR), JSON.stringify('.next')));
     const required = join(buildOutput, 'required-server-files.json');
     if (existsSync(required)) {
       const manifest = JSON.parse(readFileSync(required, 'utf8'));
       manifest.config.distDir = '.next';
-      writeFileSync(required, JSON.stringify(manifest));
+      writer.api.writeFileSync(required, JSON.stringify(manifest));
     }
   }
   assertTauriExportInputsSafe(standalone);

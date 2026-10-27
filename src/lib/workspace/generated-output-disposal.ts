@@ -64,8 +64,9 @@ export async function disposeSuccessfulPrebuildOutput(workspacePath: string, ver
         || !child.observedClosed || child.exitCode !== 0 || child.signal)) {
       throw new Error('Postship output lacks disposable successful prebuild authority.');
     }
-    if (resource.buildOwnership?.state !== 'complete' || !resource.buildOwnership.manifest) {
-      console.info('Preserved unowned entries in .next; no completed pre-build ownership reservation.');
+    if (resource.buildOwnership?.state !== 'complete' || !resource.buildOwnership.manifest
+      || resource.buildOwnership.proof !== 'write-receipts-v1') {
+      console.info('Preserved unowned entries in .next; no completed write-time writer proof.');
       return 'skipped';
     }
     let claim = readExactWorkspaceClaim('generated-output-retirement', workspace.canonicalPath, resource.resourceId);

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { constants, copyFileSync, createReadStream, existsSync, lstatSync, readdirSync, realpathSync } from 'node:fs';
+import { constants, createReadStream, existsSync, lstatSync, readdirSync, realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { require as tsxRequire } from 'tsx/cjs/api';
@@ -14,7 +14,7 @@ function tsRequire(path) {
   }
 }
 const { captureExactDirectoryManifest, clearExactDirectoryContents } = tsRequire('../../src/lib/workspace/exact-directory-purge.ts');
-const { createExactChildDirectory, removeExactEmptyChildDirectory } = tsRequire('../../src/lib/workspace/exact-parent-operation.ts');
+const { removeExactEmptyChildDirectory } = tsRequire('../../src/lib/workspace/exact-parent-operation.ts');
 
 function directoryIdentity(path) {
   const stat = lstatSync(path);
@@ -59,7 +59,7 @@ async function assertInventory(cache, ownership) {
 
 /** Never move a shared tree into the compiler namespace or inventory it again as owned.
  * Copy only verified names; release only that original inventory with native per-delete checks. */
-export async function prepareRegisteredWebCache(root, compiler, ownership) {
+export async function prepareRegisteredWebCache(root, compiler, ownership, writer) {
   const cache = join(root, '.next/cache');
   if (!lstatSync(cache, { throwIfNoEntry: false })) return;
   await assertInventory(cache, ownership);
@@ -70,7 +70,7 @@ export async function prepareRegisteredWebCache(root, compiler, ownership) {
   if (!stale) {
     const target = join(compiler, 'cache');
     const directories = new Map([['.', directoryIdentity(compiler)]]);
-    await createExactChildDirectory(compiler, directories.get('.'), target);
+    writer.api.mkdirSync(target);
     directories.set('.', directoryIdentity(target));
     for (const entry of ownership.manifest.entries) {
       if (entry.relative === '.') continue;
@@ -79,12 +79,12 @@ export async function prepareRegisteredWebCache(root, compiler, ownership) {
       if (!parent) refuse('restoration inventory has a detached child.');
       assertDirectory(parent.canonicalPath, parent);
       if (entry.kind === 'directory') {
-        await createExactChildDirectory(parent.canonicalPath, parent, destination);
+        writer.api.mkdirSync(destination);
         directories.set(entry.relative, directoryIdentity(destination));
       } else if (entry.kind === 'file') {
         // The destination is newly created with exclusive file creation. Its hash
         // must match the verified extraction before it can become compiler input.
-        copyFileSync(join(cache, entry.relative), destination, constants.COPYFILE_EXCL);
+        writer.api.copyFileSync(join(cache, entry.relative), destination, constants.COPYFILE_EXCL);
         const hash = createHash('sha256');
         for await (const chunk of createReadStream(destination)) hash.update(chunk);
         if (hash.digest('hex') !== entry.contentSha256) refuse('restored file bytes changed during import.');

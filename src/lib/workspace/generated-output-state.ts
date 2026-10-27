@@ -61,7 +61,8 @@ export interface GeneratedOutputResource {
   attempt?: { id: string; mode: string; ownerPid: number; ownerIdentity: MetadataLockProcessIdentity;
     children: Array<{ pid: number; identity: MetadataLockProcessIdentity | null; exitCode: number | null;
       signal: string | null; observedClosed: boolean }> };
-  buildOwnership?: { scope: WorktreeMaterializationIdentity; state: 'reserved' | 'complete'; manifest?: ExactDirectoryManifest };
+  buildOwnership?: { scope: WorktreeMaterializationIdentity; state: 'reserved' | 'complete';
+    proof?: 'write-receipts-v1'; manifest?: ExactDirectoryManifest };
   bank?: GeneratedOutputBank;
   bankCapture?: { operationId: string; path: string; parent: WorktreeMaterializationIdentity;
     ownerPid: number; ownerIdentity: MetadataLockProcessIdentity;

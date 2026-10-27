@@ -100,6 +100,7 @@ export function validateGeneratedOutputResource(resource: GeneratedOutputResourc
       || !identity(ownership.scope) || ownership.scope.device !== resource.output.device
       || ownership.scope.canonicalPath !== path.join(outputPath, '.o8-release-build')
       || !['reserved', 'complete'].includes(ownership.state)
+      || (ownership.proof !== undefined && (ownership.state !== 'complete' || ownership.proof !== 'write-receipts-v1'))
       || (ownership.state === 'complete' && (!ownership.manifest?.entries.length || !sha.test(ownership.manifest.fingerprint)
         || createHash('sha256').update(JSON.stringify(ownership.manifest.entries)).digest('hex') !== ownership.manifest.fingerprint
         || ownership.manifest.entries.some(entry => entry.relative !== '.' && (path.isAbsolute(entry.relative)
