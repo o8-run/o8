@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
-import { act, createElement } from 'react';
+import { act, createElement, type ComponentProps, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
-const observed = vi.hoisted(() => ({ rows: [] as Array<{ id: string; streaming: boolean; animate: boolean }> }));
+import type { VisualizationReference } from '@/lib/visualizations/types';
+const observed = vi.hoisted(() => ({ rows: [] as Array<{ id: string; streaming: boolean; animate: boolean }>, turns: 0 }));
 // jsdom has no canvas text metrics; browser coverage uses the real measurement.
 vi.mock('@/lib/pretext/hooks', () => ({ usePretextHeight: () => 24 }));
 vi.mock('../../DesktopAgentMessage', async (original) => {
@@ -13,6 +14,23 @@ vi.mock('../../DesktopAgentMessage', async (original) => {
     return createElement(actual.DesktopAgentMessage, props);
   } };
 });
+vi.mock('../../transcript/TranscriptTurns', async (original) => {
+  const actual = await original<typeof import('../../transcript/TranscriptTurns')>();
+  const component = actual.TranscriptTurns as typeof actual.TranscriptTurns & {
+    type: (props: ComponentProps<typeof actual.TranscriptTurns>) => ReactNode;
+  };
+  // Observe the production render body while retaining its real memo comparator.
+  return { ...actual, TranscriptTurns: { ...component, type: (props: ComponentProps<typeof actual.TranscriptTurns>) => {
+    observed.turns++;
+    return component.type(props);
+  } } };
+});
+// Document rendering is covered separately; observe metadata reaching its boundary.
+vi.mock('../../visualizations/VisualizationFrame', () => ({
+  VisualizationFrame: ({ reference }: { reference: VisualizationReference }) => createElement('div', {
+    'data-saved-visualization': reference.id,
+  }, JSON.stringify(reference)),
+}));
 const { ChatMessageList } = await import('./ChatMessageList');
 let root: Root;
 let host: HTMLDivElement;
@@ -25,8 +43,9 @@ const live: MobileTranscriptEntry[] = [...history,
   { id: 'live-user', role: 'user', text: 'Current request' },
   { id: 'live-assistant', role: 'assistant', text: 'Current output' },
 ];
-async function render(active: boolean, messages = live, waiting = true) {
+async function render(active: boolean, messages = live, waiting = true, scope?: { repoPath: string; threadId: string }) {
   await act(async () => root.render(createElement(ChatMessageList, {
+    ...scope,
     active, displayMessages: messages, displayWaiting: waiting, isOrchestratorMode: true,
     activeTargetLabel: 'Fixture', activeTargetColor: 'var(--t-accent)', thoughtsMutedGlass: 'transparent',
     thoughtsElevatedBorder: 'none', thoughtsElevatedShadow: 'none', emptyStateFallback: null,
@@ -42,7 +61,7 @@ beforeEach(() => {
     unobserve(target: Element) { this.targets.delete(target); }
     disconnect() { this.targets.clear(); }
   });
-  host = document.createElement('div'); document.body.append(host); root = createRoot(host); observed.rows = [];
+  host = document.createElement('div'); document.body.append(host); root = createRoot(host); observed.rows = []; observed.turns = 0;
 });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); });
 it('reuses closed turns when a retained transcript becomes hidden and visible', async () => {
@@ -142,4 +161,53 @@ it('reuses the final turn after its streamed tail has drained', async () => {
     await render(true, messages, false);
     expect(observed.rows).toEqual([]);
   } finally { vi.useRealTimers(); }
+});
+
+const visual: VisualizationReference = {
+  kind: 'o8-visualization', id: 'vis-12345678-1234-1234-1234-123456789abc',
+  title: 'Saved visualization', height: 100, createdAt: '2026-10-26T00:00:00.000Z', version: 1,
+};
+const visualScope = { repoPath: '/fixture/repo', threadId: 'thoughts-visual-reuse' };
+function visualizationResponses(initial: VisualizationReference[]) {
+  let refs = initial;
+  const fetch = vi.fn(async () => Response.json({ result: { visualizations: refs } }));
+  vi.stubGlobal('fetch', fetch);
+  return { fetch, replace: (next: VisualizationReference[]) => { refs = next; } };
+}
+
+it('reuses rows and turn derivation across five returns with unchanged saved visualization metadata', async () => {
+  const responses = visualizationResponses([visual]);
+  await render(true, history, false, visualScope);
+  expect(host.querySelector('[data-saved-visualization]')?.textContent).toContain(visual.title);
+  expect(observed.turns).toBeGreaterThan(0);
+  for (let visit = 0; visit < 5; visit++) {
+    observed.rows = []; observed.turns = 0;
+    await render(false, history, false, visualScope);
+    await render(true, history, false, visualScope);
+    expect({ rows: observed.rows, turns: observed.turns }).toEqual({ rows: [], turns: 0 });
+  }
+  expect(responses.fetch).toHaveBeenCalledTimes(6);
+});
+
+it('refreshes changed visualization metadata after a hidden return, scope changes, and removal', async () => {
+  const responses = visualizationResponses([visual]);
+  await render(true, history, false, visualScope);
+  const revised = { ...visual, id: 'vis-87654321-4321-4321-4321-cba987654321', rootId: visual.id,
+    parentId: visual.id, version: 2, title: 'Revised visualization', height: 180 };
+  await render(false, history, false, visualScope);
+  responses.replace([revised]);
+  observed.rows = []; observed.turns = 0;
+  await render(false, history, false, visualScope);
+  expect(responses.fetch).toHaveBeenCalledTimes(1);
+  expect(observed.rows).toEqual([]);
+  await render(true, history, false, visualScope);
+  expect(host.querySelector('[data-saved-visualization]')?.textContent).toBe(JSON.stringify(revised));
+  expect(observed.rows.length).toBeGreaterThan(0);
+  expect(observed.turns).toBeGreaterThan(0);
+  await render(true, history, false, { ...visualScope, threadId: 'thoughts-other-scope' });
+  expect(host.querySelector('[data-saved-visualization]')?.textContent).toBe(JSON.stringify(revised));
+  responses.replace([]);
+  await render(false, history, false, visualScope);
+  await render(true, history, false, visualScope);
+  expect(host.querySelector('[data-saved-visualization]')).toBeNull();
 });
