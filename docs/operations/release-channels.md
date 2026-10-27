@@ -1,33 +1,102 @@
-# Stable and preview releases
+# Release channels
 
-`main` is the integration branch. Pull requests must be up to date, resolve review conversations, and pass the seven required CI checks from the GitHub Actions app: Type Check, Lint, Hermetic Unit Tests, Security Audit, Governance Smoke, and both Rust Compile Gates. The rules apply to administrators. A second human approval is not required; merge approval remains an operator decision. Force pushes and branch deletion remain blocked.
+`main` is the integration branch. Pull requests retain the required checks and
+operator merge decision. This runbook changes neither signing nor notarization,
+release workflow permissions, or publication credentials.
+
+## Build identity and candidate shipping
+
+`release-build.json` records build intent in source. Its default is `beta`.
+The export step embeds `o8-build-channel.json` in the packaged server resources
+before the existing app and updater signing steps. It contains the schema,
+version and channel. The build recipe includes this source input, so changing
+intent invalidates retained build output. Preview versions embed `preview`.
+
+After the version change is reviewed, the normal `npm run ship` command uses
+the existing preflight, build, signing and notarization steps, then the separate
+beta publisher. That publisher verifies the updater signature before reading
+the embedded identity. It also checks universal and selected CPU archives,
+installer identity, the current sidecar receipt and native dependencies.
+`O8_RELEASE_CHANNEL` cannot relabel an existing artifact or choose its publisher.
+An interrupted beta publication retried through `npm run release` fails before
+any stable publication effect. A repeated immutable candidate requires a fresh
+version.
+
+Beta publication creates prereleases with `--latest=false` and `beta.json`.
+It never writes `latest.json`, `fixed.json`, stable receipts or announcements.
+Both repositories must already have a published prerelease anchor tagged
+`beta`; provisioning that anchor is a separate operator action. The publisher
+neither creates nor moves that tag. The rolling feed is
+`releases/download/beta/beta.json`, independent of the latest stable release.
+Both destinations are checked before the first remote mutation. Invalid,
+repeated or older candidates are refused.
+
+All feed writers share a local publication lock. Concurrent publication fails
+closed. A killed process can leave a lock; confirm that its recorded process is
+no longer publishing before explicitly removing it. Use one release host and
+one lock location for all writers. Never override the lock to overlap writers.
+A channel feed must never move backwards. Linux completion can only add or
+replace its platform entry when the feed already names that exact version.
+
+## Installed checks
+
+Settings offers Stable (the default) and Beta. Enrollment persists locally.
+Stable reads the existing stable endpoints and accepts only manifests explicitly
+marked `stable`. Beta reads its own primary feed and the mirror feed where
+available, then checks Stable and chooses the newest acceptable version. Each
+feed must have the expected channel identity, including fallback responses.
+Unmarked legacy manifests fail closed; the first feed produced by this change
+must include the explicit marker before clients rely on it.
+
+Checks use native session, sequence, channel and enrollment-generation tickets
+across all windows, launch checks and background checks. The server and UI reject
+superseded completions and queued events. Returning to Stable uses the normal
+version comparator: an older stable version reports current and never installs
+over a newer installed build. It waits for a newer stable release.
+
+## Linux signature completion
+
+The Linux build must include the same embedded build identity in the AppImage.
+On the release host, install `unsquashfs` as a read-only inspection prerequisite.
+`npm run ship:linux-sig -- --tag <vX.Y.Z>` downloads the candidate AppImage, uses the
+existing updater signer, verifies its signature, then reads the identity from
+its authenticated filesystem without executing the binary. Publication selects
+`beta.json`, `latest.json` or `preview.json` from that artifact identity, never
+from the environment. Every fetched manifest must carry its matching marker.
+
+The command validates all destination manifests before writing, preserves every
+other platform entry, and holds the shared lock throughout. An older beta
+candidate may receive its immutable release's Linux entry, but cannot replace a
+newer rolling beta feed. Only the matching version on the independent beta
+anchor is completed. Missing or invalid identities, extraction failures and
+mixed-channel AppImages refuse publication.
+
+Local `.deb` and `.rpm` installers have no authenticated channel identity and
+are refused in publisher upload lists. Remove them from the candidate bundle
+or add separately reviewed authenticated packaging support; an unsigned JSON
+marker is insufficient. The AppImage and its signature remain supported.
+
+## Stable and preview
+
+The stable publisher retains its existing archive, installer, sidecar, native,
+receipt and announcement guards. It requires a signed `stable` build identity
+and contains no beta branch or beta guard exemption. The normal ship command
+requires candidate build intent. Stable manifests keep the existing
+`releases/latest/download/latest.json` address.
+
+Preview versions use the existing prerelease path and `preview.json`; neither
+stable effects nor clobbering an existing candidate are allowed. Inspect policy
+with `node scripts/release.mjs --dry-run`. Beta artifact inspection uses
+`node scripts/release-beta.mjs --dry-run`; neither command signs, notarizes or
+publishes during a dry run.
+
+Promotion is separate work in #4857. Installed-build smoke acceptance remains
+in draft #4813. This change does not establish a smoke receipt or perform a
+release, tag operation or promotion.
 
 ## Development and nightly verification
 
-Develop in a short-lived feature or fix branch, preferably in its own worktree. Open a pull request against `main`, retain the required checks, and merge only after approval. There is no permanent `dev` or `nightly` branch to keep synchronized. A development branch does not isolate application data. Source dev servers must use a disposable `CORTEX_IDE_DATA_DIR` and `O8_DATA_DIR` when testing state-changing behavior beside the installed app, with separate API and WebSocket ports.
-
-The `Nightly Verification` workflow checks the default branch once a day at 06:23 UTC. It skips a commit that already passed this workflow; manual dispatch reruns the checks. A single job has a 20-minute ceiling, read-only repository permissions, and runs protocol, TypeScript, classification, and hermetic unit checks. The existing weekly resource-owning integration and security lane remains separate.
-
-This is nightly source verification, not a downloadable nightly app or installed Mac acceptance. It creates no installer, tag, release, updater manifest, or announcement. The schedule becomes active only when its reviewed workflow reaches the default branch. Installable nightlies require the preview identity and data-isolation work described below, followed by an explicit publication-policy decision.
-
-## Stable
-
-The installed app uses the public mirror's `releases/latest/download/latest.json`. Keep that endpoint unchanged for normal users. `npm run ship` remains the explicitly approved stable publication path and requires a plain `X.Y.Z` version. Version changes go through a PR before tagging the merged commit. Release-note archives also go through a PR; publication never pushes archive commits to main.
-
-## Preview publishing
-
-Preview publishing requires a separate operator decision. It does not run on a schedule or on every push, and it does not create another permanent development branch.
-
-1. Prepare a unique version such as `0.1.741-preview.1`, keeping all manifests synchronized. Review and merge the version PR before tagging the exact commit.
-2. Inspect the publication policy with `O8_RELEASE_CHANNEL=preview node scripts/release.mjs --dry-run`. This does not build or publish.
-3. After approval, use `O8_RELEASE_CHANNEL=preview npm run ship`. Signing, notarization, and the normal preflight still apply.
-4. Verify that both repository releases are prereleases, neither is latest stable, and the tag contains `preview.json` plus signed installers. Preview publication does not upload `latest.json` or `fixed.json`, publish the stable changelog, archive release notes, reconcile report receipts, or post stable announcements.
-5. Verify that the public latest stable release and its updater manifest remain unchanged. Preserve the candidate's test and install receipts.
-
-Preview versions cannot use the clobber override. A repeated or failed candidate needs a fresh version; never replace an existing candidate's bytes. The manual Actions fallback only accepts preview-version tags and stages a draft prerelease. It does not publish a stable release or launch on a nightly timer.
-
-## Boundaries still to implement
-
-This is a publishing boundary, not an installed preview channel. Preview artifacts are reached explicitly by tag. The app does not yet offer a preview selector or a rolling preview feed, and stable and preview installs still share the application identity and user data. Do not install them side by side or use a preview to migrate the daily database as an acceptance shortcut.
-
-Stable promotion requires a separate operator approval and verified installed acceptance. This path does not rename preview versions, retag artifacts, or promote automatically. A stable-number build needs its own exact signed-artifact receipt. App-side channel selection and data isolation must be reviewed separately before promising seamless preview enrollment.
+Develop in short-lived branches. Source testing beside an installed app uses
+disposable data directories and separate API and WebSocket ports. The existing
+nightly workflow verifies source; it creates no installer or release and does
+not establish installed-build acceptance.

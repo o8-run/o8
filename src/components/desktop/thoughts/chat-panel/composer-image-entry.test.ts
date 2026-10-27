@@ -273,7 +273,7 @@ describe('registered image tool -> normal installed composer handler', () => {
     expect((await call('o8_view_inspect_composer')).code).toBe('no_active_composer');
     // Explicit test-only submit through the production composer send hook. The
     // agent tool did not send; dispatch is a fixture and never reaches a provider.
-    act(() => submitDraft!());
+    await act(async () => { submitDraft!(); });
     expect(sent).toHaveBeenCalledExactlyOnceWith('unsent', [{ name: 'fixture.png', dataUri: `data:image/png;base64,${image}` }]);
   });
   it('promotes background work without consuming mixed manual queues or cancelled frames', async () => {

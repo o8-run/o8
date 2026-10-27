@@ -98,3 +98,6 @@ docs/private/
 
 src-tauri/helpers/o8-next
 src-tauri/helpers/o8-next-*
+
+# Local required native suite dependency cache
+/.o8-next-cargo/

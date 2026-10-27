@@ -141,10 +141,10 @@ it('uses the Open action without a helper when a registered path is pasted', asy
   expect(onRepoAdded).toHaveBeenCalledExactlyOnceWith(repo);
 });
 
-it('explains an unavailable system picker without opening a second prompt', async () => {
+it.each([200, 503])('explains an unavailable system picker without opening a second prompt (HTTP %s)', async status => {
   vi.mocked(pickDirectory).mockRejectedValueOnce(new Error('Native picker unavailable'));
   fetchMock.mockImplementation(async url => String(url).endsWith('browse-folder')
-    ? Response.json({ error: 'Folder picker unavailable' }, { status: 503 })
+    ? Response.json({ path: null, unavailable: true, error: 'Folder picker unavailable' }, { status })
     : Response.json({ repos: [] }));
   await render();
   expect(document.querySelector('[role="alert"]')?.textContent).toContain('Paste a folder path or Git URL');

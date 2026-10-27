@@ -429,6 +429,7 @@ export async function buildContextBlock({
   const outcomes = await readRecentOutcomes(repoPath, activeProjectId);
   const corrections = readOperatorCorrections({
     repoPaths: [repoPath],
+    projectId: activeProjectId,
     excludePacketId: excludeCorrectionsForPacketId,
     limit: MAX_CORRECTIONS,
   });

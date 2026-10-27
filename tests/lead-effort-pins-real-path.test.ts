@@ -128,7 +128,14 @@ it.each([undefined, 'adaptive', 'max'] as const)('resident lead default or suppo
   const args = JSON.parse(readFileSync(record, 'utf8')).args;
   if (!effort || effort === 'adaptive') expect(args).not.toContain('--effort');
   else expect(args[args.indexOf('--effort') + 1]).toBe(effort);
-  expect(events).toContainEqual({ type: 'turn_receipt', leadModel: 'claude-opus-4-8', effort: effort ?? 'adaptive' });
+  expect(events).toContainEqual({ type: 'turn_receipt', leadModel: 'claude-opus-4-8', effort: effort ?? 'adaptive',
+    ...(!effort || effort === 'adaptive' ? { effortSource: 'runtime-default' } : {}) });
+});
+
+it.each([undefined, 'adaptive'] as const)('records runtime-default provenance for a resident lead selection of %s', async effort => {
+  const events = await send('claude', 'claude-opus-4-8', effort);
+  expect(JSON.parse(readFileSync(record, 'utf8')).args).not.toContain('--effort');
+  expect(events).toContainEqual({ type: 'turn_receipt', leadModel: 'claude-opus-4-8', effort: 'adaptive', effortSource: 'runtime-default' });
 });
 
 

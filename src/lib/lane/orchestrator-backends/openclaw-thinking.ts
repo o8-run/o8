@@ -56,7 +56,7 @@ async function installedChoices(binary: string): Promise<ReadonlySet<string>> {
 
 /** Read the selected executable's vocabulary before starting a gateway or turn. */
 export async function openclawThinkingFlag(binary: string, effort: ThinkingEffort | undefined): Promise<ThinkingEffort | null> {
-  if (!effort) return null;
+  if (!effort || effort === 'adaptive') return null;
   try {
     if ((await installedChoices(binary)).has(effort)) return effort;
   } catch {

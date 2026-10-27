@@ -1,3 +1,6 @@
+import type { OutcomeMemoryProvenance } from '@/lib/cortex/memory-provenance';
+import { isOutcomeForgotten } from '@/lib/cortex/outcome-exclusion';
+import { readMemoryRevision } from '@/lib/cortex/memory-revision';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
@@ -14,7 +17,7 @@ const MAX_ERROR_LINES = 3;
 const MAX_ERROR_LINE_CHARS = 240;
 const FILE_REFERENCE_PATTERN = /([A-Za-z0-9_./-]+\.(?:tsx|ts|jsx|js|mjs|cjs|mts|cts|json|css|scss|md))(?:\(\d+,\d+\)|:\d+(?::\d+)?)?/g;
 
-export interface AttemptLearning {
+export interface AttemptLearning extends OutcomeMemoryProvenance {
   attempt: number;
   timestamp: string;
   typecheckOutput?: string;
@@ -91,6 +94,9 @@ function normalizeAttemptLearning(value: unknown): StoredAttemptLearning | null 
   });
 
   return {
+    sourceOutcomeId: typeof learning.sourceOutcomeId === 'string' ? learning.sourceOutcomeId : undefined,
+    sourceOutcomeFingerprint: typeof learning.sourceOutcomeFingerprint === 'string' ? learning.sourceOutcomeFingerprint : undefined,
+    memoryRevision: typeof learning.memoryRevision === 'string' ? learning.memoryRevision : undefined,
     packetId: typeof learning.packetId === 'string' && learning.packetId.trim() ? learning.packetId.trim() : undefined,
     attempt,
     timestamp,
@@ -104,6 +110,9 @@ function normalizeAttemptLearning(value: unknown): StoredAttemptLearning | null 
 function serializeAttemptLearning(learning: StoredAttemptLearning) {
   return JSON.stringify({
     packetId: learning.packetId,
+    sourceOutcomeId: learning.sourceOutcomeId,
+    sourceOutcomeFingerprint: learning.sourceOutcomeFingerprint,
+    memoryRevision: learning.memoryRevision,
     attempt: learning.attempt,
     timestamp: learning.timestamp,
     typecheckOutput: learning.typecheckOutput,
@@ -308,8 +317,17 @@ export function buildAttemptLearningFromFailure(
   };
 }
 
+function retainedLearning(entry: StoredAttemptLearning): boolean {
+  // Legacy flattened content cannot be traced after a forget; never replay it from disk.
+  return (entry.memoryRevision ?? '0') === readMemoryRevision()
+    && (!entry.sourceOutcomeId || !isOutcomeForgotten(entry.sourceOutcomeId, entry.sourceOutcomeFingerprint));
+}
+
 function toPublicLearning(entry: StoredAttemptLearning): AttemptLearning {
   return {
+    sourceOutcomeId: entry.sourceOutcomeId,
+    sourceOutcomeFingerprint: entry.sourceOutcomeFingerprint,
+    memoryRevision: entry.memoryRevision,
     attempt: entry.attempt,
     timestamp: entry.timestamp,
     typecheckOutput: entry.typecheckOutput,
@@ -321,7 +339,7 @@ function toPublicLearning(entry: StoredAttemptLearning): AttemptLearning {
 
 export async function readAttemptLearnings(worktreePath: string): Promise<AttemptLearning[]> {
   const entries = await readStoredAttemptLearnings(worktreePath);
-  return entries.map(toPublicLearning);
+  return entries.filter(retainedLearning).map(toPublicLearning);
 }
 
 /**
@@ -337,7 +355,7 @@ export async function readPacketAttemptLearnings(
     readStoredPacketLearnings(packetId),
     worktreePath?.trim() ? readStoredAttemptLearnings(worktreePath) : Promise.resolve([]),
   ]);
-  return mergeLearningEntries(packetEntries, worktreeEntries).map(toPublicLearning);
+  return mergeLearningEntries(packetEntries, worktreeEntries).filter(retainedLearning).map(toPublicLearning);
 }
 
 export async function persistAttemptLearnings(
@@ -353,6 +371,7 @@ export async function persistAttemptLearnings(
     packetId: normalizedPacketId || undefined,
     attempt,
     timestamp: new Date().toISOString(),
+    memoryRevision: readMemoryRevision(),
     ...learning,
   });
   if (!nextEntry) {

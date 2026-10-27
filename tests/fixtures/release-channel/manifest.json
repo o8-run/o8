@@ -1,0 +1,88 @@
+{
+  "schema": "o8/release-channel-fixtures/v1",
+  "origin": "Handcrafted non-runnable Mach-O headers, synthetic plist, receipts, and build-channel identity. Precomputed offline with a disposable fixture-only Ed25519 key; no production signing credentials or code-signing tools.",
+  "publicKey": "public-key.txt",
+  "receipt": "next-build.json",
+  "archives": [
+    {
+      "file": "stable-universal.tar.gz",
+      "signature": "stable-universal.tar.gz.sig",
+      "channel": "stable",
+      "version": "0.1.741",
+      "variant": "universal",
+      "sha256": "6624c9040c6ed226c54a1b3ae82e5de1b82ccc46d739e51dc8ede4e6e49360bf"
+    },
+    {
+      "file": "stable-x86_64.tar.gz",
+      "signature": "stable-x86_64.tar.gz.sig",
+      "channel": "stable",
+      "version": "0.1.741",
+      "variant": "x86_64",
+      "sha256": "d4eb5a709f736031f05b34009a950fbaaa6eae7ea1a590067bae00e0a2c2d842"
+    },
+    {
+      "file": "stable-arm64.tar.gz",
+      "signature": "stable-arm64.tar.gz.sig",
+      "channel": "stable",
+      "version": "0.1.741",
+      "variant": "arm64",
+      "sha256": "90a81f5d9413c2c665b5f2abfadec46bc5c369c33bd97ea2f5272e8819769df2"
+    },
+    {
+      "file": "stable-missing-next.tar.gz",
+      "signature": "stable-missing-next.tar.gz.sig",
+      "channel": "stable",
+      "version": "0.1.741",
+      "variant": "missing-next",
+      "sha256": "c1dfc3361a7f22e3621b79ee56e338e87f74572b5e6bdee3735288dce4385620"
+    },
+    {
+      "file": "stable-thin-main.tar.gz",
+      "signature": "stable-thin-main.tar.gz.sig",
+      "channel": "stable",
+      "version": "0.1.741",
+      "variant": "thin-main",
+      "sha256": "fcc4d4b5b342511d1a14caba60d21e2e7aeeb2a363a3ec9fc7e73345b51e9e6f"
+    },
+    {
+      "file": "stable-stale-next-hash.tar.gz",
+      "signature": "stable-stale-next-hash.tar.gz.sig",
+      "channel": "stable",
+      "version": "0.1.741",
+      "variant": "stale-next-hash",
+      "sha256": "c5f9ef7c204b2045abc0f578bab87867cbba57c0748b2831dd9d7da1764b1a83"
+    },
+    {
+      "file": "stable-stale-next-commit.tar.gz",
+      "signature": "stable-stale-next-commit.tar.gz.sig",
+      "channel": "stable",
+      "version": "0.1.741",
+      "variant": "stale-next-commit",
+      "sha256": "3a6a04e5bca5d71ecea5230e708d63e10700d915d1fd1de0bc4f773923ee6dfd"
+    },
+    {
+      "file": "preview-universal.tar.gz",
+      "signature": "preview-universal.tar.gz.sig",
+      "channel": "preview",
+      "version": "0.1.741-preview.1",
+      "variant": "universal",
+      "sha256": "ac027153b8d72d050fc1eca23da30b30db2d76ec9e481be7f5db79bc7f95bb7c"
+    },
+    {
+      "file": "preview-x86_64.tar.gz",
+      "signature": "preview-x86_64.tar.gz.sig",
+      "channel": "preview",
+      "version": "0.1.741-preview.1",
+      "variant": "x86_64",
+      "sha256": "bfdb2a6bbbb44420e68abccb118741ea28a9e47d7124ef8b74eb8e6a7a9d256b"
+    },
+    {
+      "file": "preview-arm64.tar.gz",
+      "signature": "preview-arm64.tar.gz.sig",
+      "channel": "preview",
+      "version": "0.1.741-preview.1",
+      "variant": "arm64",
+      "sha256": "b371a75f31c9fac5886836179bc8a5f113997854cc1df30501d8e792d7c8ba8c"
+    }
+  ]
+}

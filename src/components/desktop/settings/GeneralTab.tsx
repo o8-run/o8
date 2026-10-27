@@ -21,6 +21,7 @@ import {
   SETTINGS_CONTENT_MAX_WIDTH,
   type SettingsTab,
 } from './shared';
+import { UpdateChannelSection } from './UpdateChannelSection';
 import { SettingsGroup, SettingsRow } from './grouped';
 import { fetchOperatorDefaults } from './operator-defaults-client';
 import {
@@ -287,6 +288,8 @@ export function GeneralTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTa
           </SettingsGroup>
         </section>
       ) : null}
+
+      {tauri ? <UpdateChannelSection /> : null}
 
       <section style={{ marginTop: 28 }}>
         <SettingsGroup

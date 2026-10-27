@@ -53,3 +53,20 @@ it('persists rename and archive in the records read by both thread routes', asyn
   expect(record.archivedAt).toBe('2026-10-02T00:00:00.000Z');
   expect((await threads()).some(thread => thread.id === tabId)).toBe(false);
 });
+
+it('archives the registered worker only from its workspace through the production handler', async () => {
+  const sessionKey = 'pi-builtin-owned:grid-runtime';
+  const inventory = await (await fetch(`${origin}/api/runtime/inventory?fresh=1`, { headers })).json();
+  const worker = inventory.agents.find((row: { sessionKey: string }) => row.sessionKey === sessionKey);
+  expect(worker).toBeTruthy();
+  const other = (await threads()).find(row => row.repoPath !== worker.workspace)!.repoPath;
+  const archive = (workspace: string) => fetch(`${origin}/api/runtime/archive?${new URLSearchParams({ workspace })}`, {
+    method: 'POST', headers, body: JSON.stringify({ sessionKey, clientMutationId: 'fixture-owned-worker-archive' }),
+  });
+  const state = async () => (await (await fetch(`${origin}/api/runtime/archive?${new URLSearchParams({ sessionKeys: sessionKey })}`, { headers })).json()).states[sessionKey];
+  expect((await archive(other)).status).toBe(404);
+  expect(await state()).toBe('active');
+  const accepted = await archive(worker.workspace);
+  expect(accepted.status, await accepted.clone().text()).toBe(200);
+  expect(await state()).toBe('archived');
+});

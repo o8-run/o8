@@ -15,6 +15,8 @@ import { compilerEnvironment } from './release-native-inputs.mjs';
 export const RELEASE_ARTIFACT_MANIFEST = 'out/.o8-release-artifact-manifest.json';
 
 const RECIPE_FILES = [
+  'release-build.json',
+  'scripts/lib/build-channel.mjs',
   'package-lock.json',
   'src-tauri/Cargo.lock',
   'src-tauri/tauri.conf.json',
@@ -34,6 +36,10 @@ const RECIPE_FILES = [
   'scripts/lib/generated-output-launch.mjs',
   'scripts/generated-output-run.ts',
   'src/lib/workspace/generated-output-producer.ts',
+  'src/lib/workspace/generated-output-build-ownership.ts',
+  'scripts/lib/build-output-writer.cjs',
+  'scripts/lib/build-output-capture.c',
+  'scripts/lib/build-output-entry-create.cjs',
   'src/lib/workspace/generated-output-state.ts',
   'src/lib/workspace/generated-output-validation.ts',
   'src/lib/workspace/generated-output-disposal.ts',
