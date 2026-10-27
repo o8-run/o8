@@ -30,6 +30,7 @@
     "typecheck:fast": "node scripts/typecheck-fast.mjs --noEmit",
     "typecheck:parity": "node scripts/typecheck-parity.mjs",
     "typecheck": "npm run verify:routes && node scripts/typecheck.mjs",
+    "verify:ci": "node scripts/verify-ci.mjs",
     "verify:routes": "vitest run tests/route-coverage.test.ts -t \"route module shape\"",
     "rule-check": "tsx scripts/rule-check.ts",
     "eval:qa": "tsx src/lib/cortex/qa/eval/runner.ts",
@@ -45,6 +46,7 @@
     "research:daily": "tsx scripts/research/run-cortex-autoresearch.ts --trigger daily --max-loops 1",
     "research:post-merge": "tsx scripts/research/run-cortex-autoresearch.ts --trigger post-merge --max-loops 1",
     "reports": "node scripts/reports.mjs",
+    "metrics:daily": "node scripts/metrics-daily.mjs",
     "downloads": "node scripts/downloads.mjs",
     "publish:fixed": "node scripts/publish-fixed.mjs",
     "sync:reports": "node scripts/sync-reports.mjs",
@@ -230,6 +232,7 @@
     "postcss": "8.5.26",
     "uuid": "11.1.1",
     "sharp": "0.35.5",
-    "metro": "0.84.6"
+    "metro": "0.84.6",
+    "katex": "0.19.1"
   }
 }

@@ -1961,6 +1961,11 @@ export class WorktreeManager {
         || path.resolve(await this.resolveManagedWorktreePath(worktreeId)) !== path.resolve(expected.path)) return false;
     }
 
+    if (opts?.reviewedCleanup && entry?.dependencyMaterialization?.mode === 'image') {
+      console.error('[worktree-cleanup] REFUSED reviewed dependency-image shadow retirement; retain its exact namespaces.');
+      return false;
+    }
+
     if (entry?.claudeManaged) {
       // Claude-managed: just remove our metadata; Claude handles its own cleanup
       await this.removeMeta(worktreeId);
@@ -2152,6 +2157,8 @@ export class WorktreeManager {
             directoryPath: worktreePath,
             identity: cleanupIdentity,
             parentIdentity: entry.materializationParentIdentity,
+            beforeSourceRemoval: opts?.beforeSourceRemoval,
+            reviewedCleanup: opts?.reviewedCleanup,
           });
         }
       } catch (error) {

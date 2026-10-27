@@ -180,7 +180,7 @@ const path = require('node:path');
 const readline = require('node:readline');
 let rootCanonical;
 const directories = [];
-const sealBuffer = process.env.O8_PURGE_CAPTURE_CONTENTS === '1' ? Buffer.allocUnsafe(1024 * 1024) : null;
+let sealBuffer = process.env.O8_PURGE_CAPTURE_CONTENTS === '1' ? Buffer.allocUnsafe(1024 * 1024) : null;
 let sealBytes = 0;
 let phase = 'capture';
 let phaseStarted = Date.now();
@@ -258,7 +258,31 @@ function sameFileRevision(actual, expected, links = expected.linkCount) {
     && (links !== expected.linkCount || actual.ctimeMs === expected.ctimeMs);
 }
 
-async function manifestAt() {
+// Read from the no-follow descriptor and pin the current revision even when
+// our earlier unlinks legitimately changed its original ctime/link count.
+function hashOpenedFile(handle, expected, links = expected.linkCount) {
+  const before = fs.fstatSync(handle.fd);
+  if (!sameNamespaceIdentity(before, expected) || before.nlink !== links
+    || !sameFileRevision(before, expected, links)) throw new Error('Sealed file contents changed before reading.');
+  const revision = { ...expected, linkCount: links, ctimeMs: before.ctimeMs };
+  const hash = crypto.createHash('sha256');
+  const buffer = sealBuffer ||= Buffer.allocUnsafe(1024 * 1024);
+  let read = 0;
+  for (;;) {
+    const bytesRead = fs.readSync(handle.fd, buffer, 0, buffer.length, read);
+    if (!bytesRead) break;
+    read += bytesRead;
+    if (read > before.size) throw new Error('Sealed file contents grew while reading.');
+    hash.update(buffer.subarray(0, bytesRead));
+  }
+  const after = fs.fstatSync(handle.fd);
+  if (read !== before.size || !sameNamespaceIdentity(after, revision)
+    || after.nlink !== links || !sameFileRevision(after, revision)) throw new Error('Sealed file contents changed while reading.');
+  return { digest: hash.digest('hex'), revision };
+}
+
+async function manifestAt(durable = []) {
+  const durableByPath = new Map(durable.map(entry => [entry.relative, entry]));
   const entries = [];
   const byPath = new Map([[ '.', directories[0].entry ]]);
   const pending = ['.'];
@@ -277,29 +301,18 @@ async function manifestAt() {
       mtimeMs: stat.mtimeMs,
       ctimeMs: stat.ctimeMs,
     };
-    if (process.env.O8_PURGE_CAPTURE_CONTENTS === '1' && kind === 'file') {
+    const prior = durableByPath.get(relative);
+    if (kind === 'file' && (process.env.O8_PURGE_CAPTURE_CONTENTS === '1' || stat.nlink > 1
+      || prior?.linkCount > 1 || prior?.contentSha256 !== undefined)) {
       sealBytes += stat.size;
-      if (sealBytes > 4 * 1024 ** 3) throw new Error('Warm seal byte budget exceeded.');
+      if (sealBytes > 4 * 1024 ** 3) throw new Error('File seal byte budget exceeded.');
       entry.contentSha256 = await inDirectory(path.dirname(relative), byPath, async () => {
         const handle = await fsp.open(path.basename(relative), fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
         try {
-          const before = await handle.stat();
-          if (!sameIdentity(before, entry) || !sameFileRevision(before, entry) || before.nlink !== entry.linkCount) throw new Error('Sealed file changed before reading.');
-          const hash = crypto.createHash('sha256');
-          const buffer = sealBuffer;
-          let read = 0;
-          for (;;) {
-            const { bytesRead } = await handle.read(buffer, 0, buffer.length, null);
-            if (!bytesRead) break;
-            read += bytesRead;
-            if (read > before.size) throw new Error('Sealed file grew while reading.');
-            hash.update(buffer.subarray(0, bytesRead));
-          }
-          const after = await handle.stat();
-          const named = await fsp.lstat(path.basename(relative));
-          if (read !== before.size || !sameIdentity(after, entry) || !sameFileRevision(after, entry) || after.nlink !== entry.linkCount
-            || !sameIdentity(named, entry) || !sameFileRevision(named, entry)) throw new Error('Sealed file changed while reading.');
-          return hash.digest('hex');
+          const sealed = hashOpenedFile(handle, entry);
+          const named = fs.lstatSync(path.basename(relative));
+          if (!sameIdentity(named, entry) || !sameFileRevision(named, sealed.revision)) throw new Error('Sealed file contents changed while reading.');
+          return sealed.digest;
         } finally { await handle.close(); }
       });
     } else if (process.env.O8_PURGE_CAPTURE_CONTENTS === '1' && kind === 'symlink') {
@@ -378,6 +391,12 @@ function verifyMonotonicManifest(current, expected) {
       if (!sameFileRevision(actual, prior, actual.linkCount)) {
         throw new Error('Exact purge file contents changed after its durable manifest.');
       }
+      if (actual.linkCount !== prior.linkCount && !prior.contentSha256) {
+        throw new Error('Exact purge changed-link replay lacks a durable content digest.');
+      }
+      if (prior.contentSha256 !== undefined && actual.contentSha256 !== prior.contentSha256) {
+        throw new Error('Exact purge file contents differ from their durable digest: ' + actual.relative);
+      }
     }
     let parent = path.dirname(actual.relative);
     while (parent !== '.' && parent !== actual.relative) {
@@ -437,9 +456,15 @@ async function releaseContent(manifest) {
             || !sameFileRevision(fs.fstatSync(handle.fd), expected, links)))) {
           throw new Error('Exact purge tree identity or file contents changed before namespace release.');
         }
+        let revision = expected;
+        if (handle && expected.contentSha256 !== undefined) {
+          const sealed = hashOpenedFile(handle, expected, links);
+          if (sealed.digest !== expected.contentSha256) throw new Error('Exact purge file contents changed before namespace release: ' + expected.relative);
+          revision = sealed.revision;
+        }
         const final = fs.lstatSync(name);
         if (!sameNamespaceIdentity(final, expected)
-          || (handle && (final.nlink !== links || !sameFileRevision(final, expected, links)))) {
+          || (handle && (final.nlink !== links || !sameFileRevision(final, revision, links)))) {
           throw new Error('Exact purge file changed during descriptor verification.');
         }
         verifyLocation();
@@ -480,7 +505,7 @@ async function main() {
   const rootHandle = await fsp.open('.', fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW);
   directories.push({ relative: '.', entry: { device: captured.dev, inode: captured.ino, kind: 'directory' }, handle: rootHandle });
   beginPhase('capture');
-  const manifest = await manifestAt();
+  const manifest = await manifestAt(expectedManifest);
   const fingerprint = crypto.createHash('sha256').update(JSON.stringify(manifest)).digest('hex');
   const expectedFingerprint = process.env.O8_PURGE_EXPECTED_FINGERPRINT || '';
   if (expectedManifest.length > 0) {
@@ -635,7 +660,8 @@ export async function captureExactDirectoryManifest(
   child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
   child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
   child.stdin.end('{"entries":[]}\n');
-  const deadline = options.contents ? setTimeout(() => child.kill('SIGKILL'), 60_000) : undefined;
+  // Metadata captures can also hash hardlinks; every capture has a read bound.
+  const deadline = setTimeout(() => child.kill('SIGKILL'), 60_000);
   const code = await new Promise<number | null>((resolve) => child.once('close', resolve));
   clearTimeout(deadline);
   reportPurgePhases(stdout);

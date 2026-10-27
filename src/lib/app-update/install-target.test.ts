@@ -81,8 +81,26 @@ describe('resolveUpdateAction', () => {
     }), '0.1.726')).toEqual({ kind: 'restart' });
   });
 
-  it('renders a download link on a deb/rpm Linux install', () => {
-    expect(resolveUpdateAction(info({ platform: 'linux', arch: 'x64' }), '0.1.726')).toEqual({
+  it('sends a deb/rpm Linux install to its package manager and the release page', () => {
+    expect(resolveUpdateAction(info({ platform: 'linux', arch: 'x64', packageManager: 'deb' }), '0.1.726')).toEqual({
+      kind: 'download',
+      url: 'https://github.com/o8-run/o8/releases/tag/v0.1.726',
+      packageManager: true,
+    });
+    expect(resolveUpdateAction(info({ platform: 'linux', arch: 'arm64', packageManager: 'rpm' }), null)).toEqual({
+      kind: 'download',
+      url: 'https://github.com/o8-run/o8/releases/latest',
+      packageManager: true,
+    });
+  });
+
+  it('keeps the AppImage download when the updater refuses an AppImage install', () => {
+    expect(resolveUpdateAction(info({
+      platform: 'linux',
+      arch: 'x64',
+      appImagePath: '/home/o8/Apps/o8.AppImage',
+      updaterSelfUpdatable: false,
+    }), '0.1.726')).toEqual({
       kind: 'download',
       url: 'https://github.com/o8-run/o8/releases/download/v0.1.726/o8_0.1.726_linux_amd64_preview.AppImage',
     });

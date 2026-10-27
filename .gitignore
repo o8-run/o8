@@ -17,6 +17,7 @@ next-env.d.ts
 # baked into signed builds by scripts/tauri-export.mjs. Track only the template.
 o8.release.json
 coverage/
+.cache/eslint
 *.log
 *.tsbuildinfo
 *.png

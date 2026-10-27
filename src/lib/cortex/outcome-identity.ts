@@ -8,10 +8,10 @@ export interface OutcomeMemoryIdentity {
   summary?: string | null;
 }
 
-/** Match ledger text and provenance, independently of generated IDs and capture timestamps. */
+/** Match content within its project/repository scope, independently of capture provenance. */
 export function outcomeMemoryFingerprint(value: OutcomeMemoryIdentity): string {
   return createHash('sha256').update(JSON.stringify([
-    value.projectId ?? null, value.repoPath, value.packetId ?? null, value.sessionKey ?? null,
+    value.projectId ?? null, value.repoPath,
     (value.summary || '(no summary)').slice(0, 4000),
   ])).digest('hex');
 }

@@ -29,7 +29,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { join, resolve } from 'node:path';
 import type { OrchestratorEvent } from '@/lib/lane/orchestrator-stream-events';
-import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
+import { EffortPinRejectionError } from '@/lib/orchestrator/effort-pin';
+import { openclawThinkingFlag } from './openclaw-thinking';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
 import type { RealtimeMutationRecord } from '@/lib/realtime/types';
 import type {
@@ -317,13 +318,6 @@ function buildRepoContextPreamble(repoPath: string): string {
   ].join('\n');
 }
 
-function thinkingFlag(effort: ThinkingEffort | undefined): string | null {
-  if (!effort) return null;
-  // openclaw --thinking accepts: off|minimal|low|medium|high|xhigh|adaptive|max.
-  // o8's ThinkingEffort values are a subset, so they pass through directly.
-  return effort;
-}
-
 function publishOpenclawRealtimeEvent(
   session: OpenclawOrchestratorSession,
   event: OrchestratorEvent,
@@ -385,14 +379,17 @@ async function sendToOpenclawOrchestrator(
   const emitEvent = (event: OrchestratorEvent) => { onEvent(event); publishOpenclawRealtimeEvent(session, event, options.threadId ?? null); };
 
   let openclawBin: string;
+  let thinking: Awaited<ReturnType<typeof openclawThinkingFlag>>;
   try {
     openclawBin = await resolveOpenclawSpawnBinary(session.repoPath);
+    thinking = await openclawThinkingFlag(openclawBin, options.thinkingEffort);
     const gatewayPort = await ensureOpenclawGatewayPort();
     ensureOpenclawProfile();
     await ensureOpenclawGateway(gatewayPort, openclawBin);
   } catch (err) {
     session.status = 'dead';
-    emitEvent({ type: 'error', error: err instanceof Error ? err.message : String(err) });
+    emitEvent({ type: 'error', error: err instanceof Error ? err.message : String(err),
+      ...(err instanceof EffortPinRejectionError ? { code: err.code } : {}) });
     emitEvent({ type: 'done', sessionId: session.sessionName, cost: null });
     return;
   }
@@ -412,7 +409,6 @@ async function sendToOpenclawOrchestrator(
     '--session-id', session.sessionName,
     '--message', fullMessage,
   ];
-  const thinking = thinkingFlag(options.thinkingEffort);
   if (thinking) args.push('--thinking', thinking);
   const requestedModel = options.model?.trim();
   let effectiveModel = readOpenclawAgentPrimaryModel(OPENCLAW_O8_CONFIG, session.agentId);
@@ -429,7 +425,7 @@ async function sendToOpenclawOrchestrator(
       emitEvent({ type: 'thinking', text: `Model ${requestedModel} isn't configured for the OpenClaw agent "${session.agentId}" — using its default model instead.` });
     }
   }
-  emitEvent({ type: 'turn_receipt', leadModel: effectiveModel, effort: options.thinkingEffort ?? 'adaptive' });
+  emitEvent({ type: 'turn_receipt', leadModel: effectiveModel, effort: thinking ?? 'adaptive' });
   console.log(`[openclaw-diag] spawn args: ${args.map((a, i) => (args[i - 1] === '--message' ? `<message ${fullMessage.length} chars>` : a)).join(' ')}`);
   return new Promise<void>((promiseResolve, promiseReject) => {
     const launch = cliInvocation(openclawBin, args);

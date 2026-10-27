@@ -18,6 +18,7 @@
  * restart, failure or idle close resumes the same conversation.
  */
 
+import { unmappedEffortError } from './unmapped-effort';
 import { join } from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { sessionNameForRepo } from '@/lib/lane/orchestrator-session-core';
@@ -36,6 +37,7 @@ import type { createPiSdkSession, PiSdkSessionOptions } from '@/lib/pi/sdk/sessi
 import { newestPiSessionFile, prunePiSessionFiles } from '@/lib/pi/sdk/session-files';
 import { piOrchestratorStateDir } from '@/lib/pi/orchestrator/context';
 import { assertOrchestratorPermissionMode } from '@/lib/orchestrator/permission-mode';
+import { EffortPinRejectionError } from '@/lib/orchestrator/effort-pin';
 import type { OrchestratorBackend, OrchestratorSessionInfo, OrchestratorTurnOptions } from './types';
 
 /** Per-turn limits. A turn that dispatches and waits on a mission needs more than the prototype's defaults. */
@@ -301,7 +303,7 @@ export function createPiOrchestratorBackend(deps: PiOrchestratorDeps = {}): Orch
     turnReceipts = current.receipts;
     for (const key of Object.keys(current.attribution)) delete current.attribution[key as keyof PiUsageAttribution];
     Object.assign(current.attribution, piUsageAttribution(name, repoPath, options));
-    onEvent({ type: 'turn_receipt', leadModel: route.carrier === 'openrouter' ? route.choice : 'pi', effort: options.thinkingEffort ?? 'medium',
+    onEvent({ type: 'turn_receipt', leadModel: route.carrier === 'openrouter' ? route.choice : 'pi', effort: 'adaptive', effortSource: 'runtime-default',
       permissionMode: options.permissionMode ?? 'full' });
     const stop = () => { void current.session.abort(); };
     options.signal?.addEventListener('abort', stop, { once: true });
@@ -330,6 +332,11 @@ export function createPiOrchestratorBackend(deps: PiOrchestratorDeps = {}): Orch
 
   function sendTurn(repoPath: string, message: string, onEvent: (event: OrchestratorEvent) => void,
     options: OrchestratorTurnOptions = {}): Promise<void> {
+    const effortError = unmappedEffortError(options.thinkingEffort);
+    if (effortError) {
+      onEvent(effortError); onEvent({ type: 'done', sessionId: null, cost: null });
+      return Promise.resolve();
+    }
     try {
       assertOrchestratorPermissionMode('pi', options.permissionMode, options.toolProfile);
     } catch (error) {
@@ -355,6 +362,8 @@ export function createPiOrchestratorBackend(deps: PiOrchestratorDeps = {}): Orch
 
   const status = (name: string) => (active.has(name) ? 'busy' as const : 'ready' as const);
   const liveSteer: NonNullable<OrchestratorBackend['liveSteer']> = async (repoPath, message, options) => {
+    const effortError = unmappedEffortError(options.thinkingEffort);
+    if (effortError?.type === 'error') throw new EffortPinRejectionError('effort_unsupported_runtime', effortError.error);
     assertOrchestratorPermissionMode('pi', options.permissionMode, options.toolProfile);
     const route = await resolveLeadRoute(deps, options.model);
     const routeId = route.carrier === 'openrouter' ? route.choice : route.model.id;

@@ -18,9 +18,7 @@ export function excludeOutcomeFromMemory(db: Database.Database, id: string): str
   ensureOutcomeExclusionStorage(db, true);
   const selected = db.prepare('SELECT * FROM session_outcomes WHERE id = ?').get(id) as OutcomeIdentityRow;
   const digest = fingerprint(selected);
-  const aliases = (db.prepare(`SELECT * FROM session_outcomes WHERE project_id IS ? AND repo_path = ?
-    AND packet_id IS ? AND session_key IS ?`).all(selected.project_id, selected.repo_path,
-    selected.packet_id, selected.session_key) as OutcomeIdentityRow[]).filter(row => fingerprint(row) === digest);
+  const aliases = (db.prepare(`SELECT * FROM session_outcomes WHERE project_id IS ? AND repo_path = ?`).all(selected.project_id, selected.repo_path) as OutcomeIdentityRow[]).filter(row => fingerprint(row) === digest);
   const remember = db.prepare(`INSERT OR IGNORE INTO forgotten_session_outcomes
     (id, forgotten_at, packet_id, project_id, repo_path, session_key, fingerprint) VALUES (?, ?, ?, ?, ?, ?, ?)`);
   for (const row of aliases) remember.run(row.id, new Date().toISOString(), row.packet_id,

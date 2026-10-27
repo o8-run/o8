@@ -21,6 +21,7 @@ const root = realpathSync(mkdtempSync(join(tmpdir(), 'o8-forgotten-content-')));
 const repo = join(root, 'repo');
 const token = 'fixture-forgotten-content-operator';
 const timestamp = new Date().toISOString();
+let transcriptTime = timestamp;
 let projectA = 'forget-a', projectB = 'forget-b';
 let db: typeof import('@/lib/db');
 let outcomes: typeof import('@/app/api/cortex/recent-outcomes/route');
@@ -85,7 +86,7 @@ beforeAll(async () => {
       reviewDiffs: false, costTelemetry: false, streaming: false },
     discoverSessions: async () => [], getChangedFiles: async () => [],
     readTranscript: async key => [{ id: 'completed', role: 'assistant',
-      text: `memorycanary ${key.endsWith('erase') ? 'forgotten parser choice' : 'retained neighbor choice'}`, timestamp: new Date(timestamp) }],
+      text: `memorycanary ${key.includes('erase') ? 'forgotten parser choice' : 'retained neighbor choice'}`, timestamp: new Date(transcriptTime) }],
     launch: async () => ({ ok: false, note: 'fixture' }), resume: async () => ({ ok: false, note: 'fixture' }),
     interrupt: async () => ({ ok: false, note: 'fixture' }),
   });
@@ -103,6 +104,7 @@ beforeAll(async () => {
   }
   legacyRow = sql().prepare('SELECT * FROM session_outcomes WHERE id = ?').get('legacy-before-upgrade') as Record<string, string | null>;
   oldInsert('legacy-shadow-before-upgrade');
+  oldInsert('cross-worker-before-forget', { packet_id: 'earlier-packet', session_key: 'codex:earlier-worker' });
   for (const id of ['legacy-before-upgrade', 'legacy-shadow-before-upgrade']) {
     const sourceId = id === 'legacy-before-upgrade' ? `outcome:${id}` : id;
     sql().prepare(`INSERT INTO facts (id, kind, content, source_kind, source_id, source_excerpt, fingerprint, repo_path)
@@ -124,7 +126,8 @@ it('keeps pre-upgrade outcome content forgotten through identical capture, cache
   expect(oldInsert('stale-unrelated-neighbor', { packet_id: keep.id, session_key: 'codex:fixture-keep', summary: 'memorycanary unrelated retained sibling' }).changes).toBe(1);
   for (let pass = 0; pass < 2; pass += 1) {
     if (pass) { db.closeDb(); db.getSqlite(); }
-    await relay.capturePacketCompletionContext(erase.id, 'codex:fixture-erase');
+    transcriptTime = new Date(Date.parse(timestamp) + (pass + 1) * 60_000).toISOString();
+    await relay.capturePacketCompletionContext(erase.id, `codex:fixture-erase-worker-${pass}`);
     await new Promise<void>(resolve => setImmediate(resolve));
     expect.soft((await inventory()).some(row => row.summary.includes('forgotten parser choice'))).toBe(false);
     expect.soft(sql().prepare("SELECT id FROM session_outcomes WHERE summary LIKE '%forgotten parser choice%'").all()).toEqual([]);
@@ -137,6 +140,15 @@ it('keeps pre-upgrade outcome content forgotten through identical capture, cache
     expect.soft(prompt).not.toContain('forgotten parser choice');
     expect.soft(prompt).toContain('retained neighbor choice');
   }
+  const other = packet('other-capture');
+  const { createLane } = await import('@/lib/lane/registry');
+  createLane({ repoPath: repo, projectId: projectA, branch: 'fixture', runtime: 'codex', packetId: other.id });
+  await relay.capturePacketCompletionContext(other.id, 'codex:fixture-erase-another-packet');
+  await new Promise<void>(resolve => setImmediate(resolve));
+  expect.soft(sql().prepare('SELECT id FROM session_outcomes WHERE packet_id = ?').all(other.id)).toEqual([]);
+  const { buildPacketPrompt } = await import('@/lib/orchestrator/packet-prompt');
+  const next = { ...packet('cross-dependent'), dependencyPacketIds: [other.id, keep.id] };
+  expect.soft(await buildPacketPrompt(next, [other, keep, next])).not.toContain('forgotten parser choice');
 });
 
 it('keeps outcome recall in the selected project when projects share the same repository', async () => {
@@ -216,12 +228,22 @@ it('upgrades an old exclusion ledger on normal database reopen before fresh or o
     db.exec("CREATE TABLE forgotten_session_outcomes (id TEXT PRIMARY KEY, forgotten_at TEXT NOT NULL, packet_id TEXT)");
     db.prepare('INSERT INTO forgotten_session_outcomes VALUES (?,?,?)').run('old-deleted-id','fixture','old-forgotten-packet');
     const old=new Database(process.env.CORTEX_IDE_DB_PATH);
+    const {outcomeMemoryFingerprint}=load(${JSON.stringify(join(process.cwd(), 'src/lib/cortex/outcome-identity.ts'))});
     const write=old.prepare("INSERT INTO session_outcomes (id,project_id,repo_path,packet_id,runtime,outcome,summary,started_at,completed_at) VALUES (?,'fixture','/fixture/repo',?,'codex','succeeded','memorycanary',datetime('now'),datetime('now'))");
-    assert.equal(write.run('restored-before-upgrade','old-forgotten-packet').changes,1);
+    assert.equal(write.run('old-deleted-id','old-forgotten-packet').changes,1);
+    assert.equal(write.run('retained-same-packet','old-forgotten-packet').changes,1);
+    old.prepare("UPDATE session_outcomes SET session_key='different-session', summary='retained different summary', memory_fingerprint=? WHERE id='retained-same-packet'").run(outcomeMemoryFingerprint({projectId:'fixture',repoPath:'/fixture/repo',packetId:'old-forgotten-packet',sessionKey:'different-session',summary:'retained different summary'}));
+    old.prepare("INSERT INTO facts (id,kind,content,source_kind,source_id,source_excerpt,fingerprint,repo_path) VALUES ('retained-fact','convention','retained','outcome','outcome:retained-same-packet','retained','retained-fingerprint','/fixture/repo')").run();
+    old.prepare("INSERT INTO facts_queue (id,source_kind,source_id) VALUES ('retained-queue','outcome','retained-same-packet')").run();
     core.closeDb(); db=core.getSqlite();
-    assert.equal(write.run('new-id-after-upgrade','old-forgotten-packet').changes,0);
+    assert.ok(db.prepare("SELECT 1 FROM session_outcomes WHERE id='retained-same-packet'").get());
+    assert.equal(write.run('old-deleted-id','old-forgotten-packet').changes,0);
+    assert.equal(write.run('new-id-after-upgrade','old-forgotten-packet').changes,1);
+    assert.ok(db.prepare("SELECT 1 FROM facts WHERE id='retained-fact'").get());
+    assert.ok(db.prepare("SELECT 1 FROM facts_queue WHERE id='retained-queue'").get());
+    assert.equal(db.prepare("SELECT 1 FROM forgotten_session_outcomes WHERE id='retained-same-packet'").get(),undefined);
     assert.equal(write.run('unrelated-neighbor','unrelated-packet').changes,1);
-    assert.deepEqual(db.prepare('SELECT id FROM session_outcomes').all(),[{id:'unrelated-neighbor'}]);
+    assert.deepEqual(db.prepare('SELECT id FROM session_outcomes ORDER BY id').all(),[{id:'new-id-after-upgrade'},{id:'retained-same-packet'},{id:'unrelated-neighbor'}]);
     old.close();core.closeDb();console.log('UPGRADE_GUARDS=passed');
   `);
   const output = execFileSync(process.execPath, ['--import', 'tsx', '--import', join(process.cwd(), 'scripts/register-server-only-stub.mjs'), script], {
@@ -229,4 +251,50 @@ it('upgrades an old exclusion ledger on normal database reopen before fresh or o
       CORTEX_IDE_DB_PATH: join(upgradeRoot, 'upgrade.db'), TSX_TSCONFIG_PATH: join(process.cwd(), 'tsconfig.json') }, encoding: 'utf8', timeout: 30_000,
   });
   expect(output).toContain('UPGRADE_GUARDS=passed');
+});
+
+
+it('lets a retained NULL-fingerprint sibling merge and expire after forgetting its provenance neighbor', async () => {
+  const insert = sql().prepare(`INSERT INTO session_outcomes
+    (id, project_id, repo_path, packet_id, session_key, runtime, outcome, summary, started_at, completed_at, valid_from)
+    VALUES (?, ?, ?, 'metadata-packet', 'codex:metadata', 'codex', 'succeeded', ?, ?, ?, ?)`);
+  const expired = '2020-01-01T00:00:00.000Z';
+  insert.run('metadata-forgotten', projectA, repo, 'metadata forgotten choice', expired, expired, expired);
+  insert.run('metadata-retained', projectA, repo, 'metadata retained choice', expired, expired, expired);
+  expect((await outcomes.DELETE(apiRequest('DELETE', { id: 'metadata-forgotten', projectId: projectA, repoPath: repo }))).status).toBe(200);
+  await relay.markOutcomeMerged({ packetId: 'metadata-packet' });
+  const { decayOutcomes } = await import('@/lib/cortex/decay');
+  await decayOutcomes({ ttlDays: 30 });
+  const row = sql().prepare("SELECT merged_clean, valid_to, memory_fingerprint FROM session_outcomes WHERE id = 'metadata-retained'").get();
+  expect(row).toMatchObject({ merged_clean: 1, valid_to: expect.any(String), memory_fingerprint: null });
+});
+
+it('bounds capture writes with 100,000 durable content exclusions', () => {
+  const remember = sql().prepare(`INSERT INTO forgotten_session_outcomes
+    (id, forgotten_at, packet_id, project_id, repo_path, session_key, fingerprint)
+    VALUES (?, 'fixture', ?, ?, ?, ?, ?)`);
+  sql().transaction(() => {
+    for (let i = 0; i < 100_000; i += 1) remember.run(`perf-${i}`, `perf-packet-${i}`, projectA, repo, `perf-session-${i}`, `perf-fingerprint-${i}`);
+  })();
+  const insert = sql().prepare(`INSERT INTO session_outcomes
+    (id, project_id, repo_path, runtime, outcome, summary, started_at, completed_at, memory_fingerprint)
+    VALUES (?, ?, ?, 'codex', 'succeeded', 'retained performance sample', ?, ?, ?)`);
+  const fact = sql().prepare(`INSERT INTO facts
+    (id, kind, content, source_kind, source_id, source_excerpt, fingerprint, repo_path)
+    VALUES (?, 'convention', 'retained sample', 'outcome', ?, 'retained sample', ?, ?)`);
+  const queue = sql().prepare("INSERT INTO facts_queue (id, source_kind, source_id) VALUES (?, 'outcome', ?)");
+  const start = performance.now();
+  sql().transaction(() => {
+    for (let i = 0; i < 200; i += 1) {
+      insert.run(`perf-retained-${i}`, projectA, repo, timestamp, timestamp, `retained-fingerprint-${i}`);
+      fact.run(`perf-fact-${i}`, `outcome:perf-retained-${i}`, `perf-fact-${i}`, repo);
+      queue.run(`perf-queue-${i}`, `perf-retained-${i}`);
+    }
+  })();
+  const elapsed = performance.now() - start;
+  console.log(`[outcome-exclusion] EXCLUSION_WRITES_200_MS=${elapsed.toFixed(1)}`);
+  expect(elapsed).toBeLessThan(300);
+  expect(sql().prepare("SELECT COUNT(*) AS count FROM session_outcomes WHERE id LIKE 'perf-retained-%'").get()).toEqual({ count: 200 });
+  expect(sql().prepare("SELECT COUNT(*) AS count FROM facts WHERE id LIKE 'perf-fact-%'").get()).toEqual({ count: 200 });
+  expect(sql().prepare("SELECT COUNT(*) AS count FROM facts_queue WHERE id LIKE 'perf-queue-%'").get()).toEqual({ count: 200 });
 });
