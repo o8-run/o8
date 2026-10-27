@@ -70,6 +70,11 @@ const nextConfig: NextConfig = {
     ],
   },
   experimental: {
+    // Persisted dev tasks need not stay resident until the whole host is low
+    // on memory. Evict their native cache after each disk snapshot.
+    turbopackMemoryEviction: 'full',
+    // Avoid compiling unopened widget imports for server rendering.
+    turbopackLazyDynamicImportsSSR: true,
     // Next otherwise requires every route at boot, retaining unused feature
     // chunks and their module-level state for the entire sidecar lifetime.
     preloadEntriesOnStart: false,
