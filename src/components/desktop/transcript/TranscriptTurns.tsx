@@ -7,7 +7,7 @@ import { buildTurnSummaryStats, type TurnSummary } from '../thoughts/chat-panel/
 import { TurnChevron } from '../thoughts/chat-panel/turn-line';
 import { transcriptTurns, transcriptTurnFiles } from './turns';
 
-export function TranscriptTurns({ entries, nodes, busy, repoPath, summary, turnContent }: {
+export const TranscriptTurns = memo(function TranscriptTurns({ entries, nodes, busy, repoPath, summary, turnContent }: {
   entries: MobileTranscriptEntry[];
   nodes: ReactNode[];
   busy: boolean;
@@ -24,7 +24,7 @@ export function TranscriptTurns({ entries, nodes, busy, repoPath, summary, turnC
       summary={summary && turnEntries.some(entry => entry.id === summary.assistantMessageId) ? summary : null}
       content={turnContent?.get(entries[start].id)} />;
   });
-}
+});
 
 interface TranscriptTurnProps {
   deferLayout: boolean;

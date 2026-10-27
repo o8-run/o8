@@ -119,3 +119,27 @@ it('does not walk hidden histories during background output and catches up on re
     expect(host.querySelector('.thoughts-scroll')).toBe(scroller);
   } finally { vi.useRealTimers(); }
 });
+
+it('does not re-render any unchanged settled transcript row on hide and return', async () => {
+  await render(true, history, false);
+  observed.rows = [];
+  await render(false, history, false);
+  await render(true, history, false);
+  expect(observed.rows).toEqual([]);
+});
+
+it('reuses the final turn after its streamed tail has drained', async () => {
+  vi.useFakeTimers();
+  const messages = live.map(entry => entry.id === 'live-assistant'
+    ? { ...entry, text: 'A response that drains before the next tab visit. '.repeat(10) } : entry);
+  try {
+    await render(true, messages);
+    await act(async () => vi.advanceTimersByTime(20));
+    await render(true, messages, false);
+    await act(async () => vi.advanceTimersByTime(2000));
+    observed.rows = [];
+    await render(false, messages, false);
+    await render(true, messages, false);
+    expect(observed.rows).toEqual([]);
+  } finally { vi.useRealTimers(); }
+});
