@@ -5,9 +5,15 @@ import { NextRequest } from 'next/server';
 import { afterAll, beforeEach, expect, it, vi } from 'vitest';
 import { getDataDir } from '@/lib/data-dir-migration';
 import type { OrchestratorEvent } from '@/lib/lane/orchestrator-stream-events';
+import type { RuntimeLaunchRequest } from '@/lib/runtime/actions';
 import type { OwnedSessionRecord } from '@/lib/runtimes/shared/owned-session/types';
 
 // Keep both launchers, the finite process and persisted session state real.
+// The OS wrapper is outside this admission test; the read-only pin stays real.
+vi.mock('@/lib/runtimes/shared/owned-session/sandbox', async original => ({
+  ...await original<typeof import('@/lib/runtimes/shared/owned-session/sandbox')>(),
+  prepareWorkerSandbox: async ({ binary, args }: { binary: string; args: string[] }) => ({ binary, args }),
+}));
 vi.mock('node:os', async original => {
   const os = await original<typeof import('node:os')>();
   const homedir = () => process.env.O8_TEST_DISCOVERY_HOME!;
@@ -33,10 +39,20 @@ vi.stubEnv('O8_WORKER_SANDBOX', 'off');
 writeFileSync(binary, `#!${process.execPath}
 const fs = require('node:fs');
 if (process.argv.includes('--version')) { console.log('codex-cli 0.159.2'); process.exit(0); }
+if (process.argv.includes('app-server')) {
+  require('node:readline').createInterface({ input: process.stdin }).on('line', line => {
+    const { id, method } = JSON.parse(line);
+    if (!id) return;
+    const models = JSON.parse(fs.readFileSync(require('node:path').join(process.env.CODEX_HOME, 'models_cache.json'), 'utf8')).models;
+    console.log(JSON.stringify({ id, result: method === 'model/list' ? { data: models.map(model => ({ model: model.slug })) }
+      : method === 'config/read' ? { config: {} } : {} }));
+  });
+} else {
 fs.appendFileSync(require('node:path').join(process.cwd(), 'calls.jsonl'), JSON.stringify({ args: process.argv.slice(2), configHome: process.env.CODEX_HOME }) + '\\n');
 console.log(JSON.stringify({ type: 'thread.started', thread_id: 'discovery-fixture' }));
 console.log(JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 1, output_tokens: 1 } }));
 setTimeout(() => {}, 100);
+}
 `);
 chmodSync(binary, 0o700);
 const { codexBackend } = await import('@/lib/lane/orchestrator-backends/codex');
@@ -44,6 +60,9 @@ const { codexOwnedAdapter, launchOwnedCodexSession } = await import('@/lib/codex
 const { createOwnedSessionStore } = await import('@/lib/runtimes/shared/owned-session');
 const { registerRuntimeIdentity, selectRuntimeIdentity } = await import('@/lib/runtime/identity-catalog');
 const { updateOperatorDefaults } = await import('@/lib/operator/defaults');
+const { assertSingleAttemptLaunch } = await import('@/lib/runtime/single-attempt-launch');
+const { resolveEffortPin } = await import('@/lib/orchestrator/effort-pin');
+const { workerModelCatalog } = await import('@/lib/orchestrator/worker-catalog');
 const { POST } = await import('@/app/api/runtime/launch/route');
 const { closeDb } = await import('@/lib/db');
 function cache(config: string, model: string, efforts: string[]) {
@@ -189,4 +208,74 @@ it.each((['none', 'minimal'] as const).flatMap(effort =>
     .rejects.toMatchObject({ name: 'EffortPinRejectionError' });
   expect(readFileSync(join(saved(launched.surfaceId).sessionDir, 'session.json'), 'utf8')).toBe(snapshot);
   expect(calls(cwd)).toHaveLength(2);
+});
+
+// One admission matrix covers every public launch boundary with contradictory
+// persisted caches. Changing only the ambient cache must never change admission.
+it.each(['launch-route', 'single-attempt', 'effort-pin', 'worker-dispatch', 'lead-dispatch'].flatMap(entry =>
+  (['none', 'minimal'] as const).flatMap(effort => [false, true].map(advertised => ({ entry, effort, advertised }))),
+))('$entry uses its identity cache for $effort (advertised=$advertised)', async ({ entry, effort, advertised }) => {
+  // The lead uses this source account too, before preparing its isolated home.
+  const identityHome = entry === 'lead-dispatch' ? configHome : join(root, `selected-${entry}-${effort}-${advertised}`);
+  const ambientHome = join(root, 'ambient');
+  const identity = await registerRuntimeIdentity({ runtime: 'codex', label: 'Fixture', configHomeRef: identityHome });
+  await selectRuntimeIdentity('codex', identity.id);
+  cache(identityHome, 'gpt-6.1-sol', advertised ? [effort] : ['low']);
+  vi.stubEnv('CODEX_HOME', ambientHome);
+  try {
+    for (const ambientAdvertised of [!advertised, advertised]) {
+      cache(ambientHome, 'gpt-6.1-sol', ambientAdvertised ? [effort] : ['low']);
+      const cwd = repo(`boundary-${entry}-${effort}-${advertised}-${ambientAdvertised}`);
+      const before = records();
+      const request: RuntimeLaunchRequest = { runtime: 'codex', model: 'gpt-6.1-sol', effort,
+        prompt: 'fixture', cwd, executionPolicy: 'single-attempt', workMode: 'read-only',
+        clientMutationId: `boundary-${entry}-${effort}-${advertised}-${ambientAdvertised}`, skipSetup: true, isolate: false };
+      if (entry === 'effort-pin') {
+        expect(resolveEffortPin({ runtime: 'codex', model: request.model!, requestedEffort: effort }).ok).toBe(advertised);
+      } else if (entry === 'single-attempt') {
+        const validate = () => assertSingleAttemptLaunch(request, 'read-only');
+        if (advertised) expect(validate).not.toThrow();
+        else expect(validate).toThrow();
+      } else if (entry === 'launch-route') {
+        const response = await POST(new NextRequest('http://localhost/api/runtime/launch', {
+          method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(request),
+        }));
+        expect(response.status).toBe(advertised ? 200 : 400);
+        if (advertised) {
+          const launched = await response.json();
+          await finished(launched.surfaceId);
+          expect(saved(launched.surfaceId)).toMatchObject({ effort, identity: { id: identity.id },
+            executionPolicy: { mode: 'single-attempt', effort } });
+        }
+      } else if (entry === 'worker-dispatch') {
+        // A different source account must not determine the worker's model list.
+        cache(configHome, 'other-model', ['low']);
+        const catalog = await workerModelCatalog('codex', cwd);
+        expect(catalog.models).toEqual([{ id: request.model, efforts: advertised
+          ? ['adaptive', effort, 'low', 'medium', 'high', 'max', 'xhigh', 'ultra']
+          : ['adaptive', 'low', 'medium', 'high', 'max', 'xhigh', 'ultra'] }]);
+        const launched = await launchOwnedCodexSession({ cwd, prompt: 'fixture', model: request.model!, effort }).catch(error => {
+          expect(advertised).toBe(false);
+          expect(error).toMatchObject({ name: 'EffortPinRejectionError' });
+          return null;
+        });
+        expect(Boolean(launched)).toBe(advertised);
+        if (launched) {
+          await finished(launched.surfaceId);
+          expect(saved(launched.surfaceId)).toMatchObject({ effort, identity: { id: identity.id } });
+        }
+      } else {
+        const events: OrchestratorEvent[] = [];
+        await codexBackend.sendTurn(cwd, 'fixture', event => events.push(event), { model: request.model!, thinkingEffort: effort });
+        expect(events.some(event => event.type === 'turn_receipt')).toBe(advertised);
+        if (advertised) expect(events).toContainEqual({ type: 'turn_receipt', leadModel: request.model, effort });
+        else expect(events).toContainEqual(expect.objectContaining({ type: 'error', error: expect.stringMatching(/does not advertise.*effort/i) }));
+      }
+      const runsProcess = advertised && ['launch-route', 'worker-dispatch', 'lead-dispatch'].includes(entry);
+      expect(calls(cwd)).toHaveLength(runsProcess ? 1 : 0);
+      if (runsProcess) expect(calls(cwd)[0].args).toContain(`model_reasoning_effort=${effort}`);
+      if (runsProcess && entry !== 'lead-dispatch') expect(calls(cwd)[0].configHome).toBe(identityHome);
+      if (!advertised) expect(records()).toEqual(before);
+    }
+  } finally { vi.stubEnv('CODEX_HOME', configHome); }
 });

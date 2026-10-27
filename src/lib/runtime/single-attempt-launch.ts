@@ -1,4 +1,5 @@
 import { controlledProviderConfig } from '@/lib/runtimes/shared/owned-session/controlled-provider';
+import { codexModelDiscoveryHome } from '@/lib/codex/model-discovery-cache';
 import { createOwnedExecutionPolicy } from '@/lib/runtimes/shared/owned-session/execution-policy';
 import type { RuntimeLaunchRequest } from './actions';
 import type { WorkerWorkMode } from '@/lib/orchestrator/types';
@@ -13,7 +14,8 @@ export function assertSingleAttemptLaunch(input: RuntimeLaunchRequest, workMode?
     controlledTask: input.controlledTask, executionPolicy: input.executionPolicy, model: input.model, effort: input.effort,
     runtimeConfig: { ...controlledProviderConfig(input.controlledProvider), ...(workMode ? { workMode } : {}),
       ...(input.executionCarrier ? { executionCarrier: input.executionCarrier } : {}),
-      ...(input.claudeCodeCarrier ? { modelSource: input.claudeCodeCarrier } : {}) } }, input.runtime);
+      ...(input.claudeCodeCarrier ? { modelSource: input.claudeCodeCarrier } : {}) } }, input.runtime,
+  input.runtime === 'codex' ? codexModelDiscoveryHome() : undefined);
   if (input.claudeCodeModel !== undefined && input.claudeCodeModel !== input.model) {
     throw new Error('Single-attempt worker model pins disagree.');
   }

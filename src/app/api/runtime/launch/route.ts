@@ -21,7 +21,7 @@ import { assertSingleAttemptLaunch } from '@/lib/runtime/single-attempt-launch';
 import { EFFORT_CHOICE_LIST, resolveEffortPin } from '@/lib/orchestrator/effort-pin';
 import { isThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import { resolveDefaultDispatchModelSync } from '@/lib/operator/defaults';
-import { getSelectedRuntimeIdentity } from '@/lib/runtime/identity-catalog';
+import { codexModelDiscoveryHome } from '@/lib/codex/model-discovery-cache';
 import { knowledgeSourceWriteRefusal } from '@/lib/cortex/knowledge/sources';
 
 export const runtime = 'nodejs';
@@ -106,7 +106,7 @@ export async function POST(request: NextRequest) {
       model: launchRequest.model
         ?? (runtimeName === 'codex' ? resolveDefaultDispatchModelSync() || null : null),
       codexHome: runtimeName === 'codex' && (launchRequest.effort === 'none' || launchRequest.effort === 'minimal')
-        ? (await getSelectedRuntimeIdentity('codex'))?.configHomeRef
+        ? codexModelDiscoveryHome()
         : undefined,
     });
     if (!effortPin.ok) {

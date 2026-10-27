@@ -1,6 +1,7 @@
 import 'server-only';
 
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 
@@ -169,6 +170,19 @@ export async function getSelectedRuntimeIdentity(runtime: string): Promise<Runti
   const selectedId = catalog.selectedByRuntime[runtime];
   if (!selectedId) return null;
   return catalog.identities.find((entry) => entry.id === selectedId && entry.runtime === runtime) ?? null;
+}
+
+/** Synchronous admission boundaries use the same persisted, validated selection. */
+export function getSelectedRuntimeIdentitySync(runtime: string): RuntimeIdentityRecord | null {
+  let catalog: RuntimeIdentityCatalog;
+  try {
+    catalog = normalizeCatalog(JSON.parse(readFileSync(catalogPath(), 'utf8')) as unknown);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw new Error('identity_catalog_unavailable');
+  }
+  const selectedId = catalog.selectedByRuntime[runtime];
+  return catalog.identities.find(entry => entry.id === selectedId && entry.runtime === runtime) ?? null;
 }
 
 export async function reconcileRuntimeIdentityMutation(input:

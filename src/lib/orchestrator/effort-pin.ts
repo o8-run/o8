@@ -1,6 +1,4 @@
-import { readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { readCodexModelDiscovery } from '@/lib/codex/model-discovery-cache';
 import { codexCliSupportsUltraEfforts, resolveCodexReasoningEffort } from '@/lib/codex/reasoning-effort';
 import { parseLocalModel } from '@/lib/codex/local-model';
 import { getRuntimeCapability, isOrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
@@ -127,16 +125,10 @@ export interface ResolveEffortPinInput {
 /** Read the selected account's model evidence without starting a provider turn. */
 function codexAdvertisedEfforts(model: string | null, codexHome?: string): string[] | null {
   if (!model) return null;
-  try {
-    const cache = JSON.parse(readFileSync(join(codexHome ?? (process.env.CODEX_HOME?.trim() || join(homedir(), '.codex')), 'models_cache.json'), 'utf8'));
-    if (!Array.isArray(cache?.models)) return null;
-    const entry = cache.models.find((candidate: { slug?: unknown } | null) => candidate?.slug === model);
-    if (!Array.isArray(entry?.supported_reasoning_levels)) return null;
-    return entry.supported_reasoning_levels.flatMap((level: { effort?: unknown } | null) =>
-      typeof level?.effort === 'string' ? [level.effort] : []);
-  } catch {
-    return null;
-  }
+  const entry = readCodexModelDiscovery(codexHome)?.find(candidate => candidate.slug === model);
+  if (!Array.isArray(entry?.supported_reasoning_levels)) return null;
+  return entry.supported_reasoning_levels.flatMap(level =>
+    typeof level?.effort === 'string' ? [level.effort] : []);
 }
 
 export function resolveEffortPin(input: ResolveEffortPinInput): ResolveEffortPinResult {
