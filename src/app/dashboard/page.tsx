@@ -5,14 +5,14 @@ import { Suspense, useState, useCallback, useEffect, useRef, useMemo } from 'rea
 import type { WorkspaceHeaderTab } from '@/components/desktop/shell/workspace-header-strip-types';
 import { usePaletteFileSelection } from './hooks/usePaletteFileSelection';
 import { isTauri, canUseTauriEvents, browserViewHide } from '@/lib/tauri/bridge';
-import { isNonMacShell } from '@/lib/desktop/host-platform';
+import { isNonMacShell, shellLacksGlass } from '@/lib/desktop/host-platform';
 import { subscribeTauriEvent } from '@/lib/tauri/events';
 import { useAppOpenedTelemetry } from '@/lib/analytics/startup';
 import { AnimatePresence, motion } from 'framer-motion';
 import { DashboardFrame as SmoothCorners } from './DashboardFrame';
 import { ChatListCard } from './ChatListCard';
 import { WORKSPACE_RAIL_CORNER_RADIUS } from '@/components/desktop/branch-rail-geometry';
-import { DesktopWebSocketProvider, useSharedDesktopWs, useWsConnectionState } from '@/components/desktop/hooks/DesktopWebSocketContext';
+import { DesktopWebSocketProvider, useSharedDesktopWs } from '@/components/desktop/hooks/DesktopWebSocketContext';
 import { bootstrapTranscripts } from '@/lib/transcripts/bootstrap';
 import { buildTranscriptWsCallbacks } from '@/lib/transcripts/wireWsBridge';
 import { HISTORY_NAVIGATION_SUPERSEDED_EVENT, mergeTranscriptEntries, WORKSPACE_THREAD_ID_EVENT } from '@/components/desktop/workspace-terminal/utils';
@@ -69,6 +69,7 @@ import { BrowserPipCard, BROWSER_PIP_EVENT } from '@/components/desktop/BrowserP
 import { O8SpecPipCard, O8_SPEC_PIP_EVENT } from '@/components/desktop/O8SpecPipCard';
 import { ThreadDragGhost } from '@/components/desktop/ThreadDragGhost';
 import { WorkspaceBootLoaderHost } from '@/components/desktop/workspace-terminal/workspace-boot-loader-claim';
+import { WorkspaceBootLoader } from '@/components/desktop/workspace-terminal/WorkspaceBootLoader';
 import { SpawnErrorToast } from '@/components/desktop/SpawnErrorToast';
 import { captureAnomaly } from '@/lib/telemetry/sentry-browser';
 import { recordSpawnEvent } from '@/lib/feedback/workspace-introspect';
@@ -80,6 +81,7 @@ import { FileOpenBridge } from '@/components/desktop/FileOpenBridge';
 import { AttendanceHeartbeat } from '@/components/desktop/AttendanceHeartbeat';
 import { TelemetryCrashCapture } from '@/components/desktop/TelemetryCrashCapture';
 import { SentryBrowserInit } from '@/components/desktop/SentryBrowserInit';
+import { readViewportLayoutWidth, UI_ZOOM_CHANGED_EVENT } from '@/lib/appearance/ui-zoom';
 import { UiZoomLayer } from '@/components/desktop/UiZoomLayer';
 import { ReportIssueHost } from '@/components/desktop/ReportIssueHost';
 import {
@@ -105,10 +107,9 @@ import {
 } from '@/lib/events/o8-panel-focus';
 import { fetchOnce, fetchSWRJson } from '@/lib/panel/fetch-cache';
 import { safeCancelIdleCallback, safeRequestIdleCallback } from '@/lib/util/webview-safe';
-import { prefetchConnectedAutomations } from '@/components/desktop/automations-page/connected-cache';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
 import type { WorktreeInfo } from '@/lib/worktree/types';
-import type { MobileInboxSnapshot, MobileOrchestratorThread } from '@/lib/mobile/types';
+import type { MobileInboxSnapshot } from '@/lib/mobile/types';
 import type { AgentSummary } from '@/lib/fleet/types';
 import type {
   OrchestratorLaneBinding,
@@ -227,6 +228,7 @@ import { useMissionCompleteDetector } from '@/components/desktop/thoughts/missio
 const LazyReviewPanel = retryingLazy(() => import('@/components/desktop/review/ReviewPanel').then(m => ({ default: m.ReviewPanel })), { label: 'Review panel' });
 import { TileContainer } from '@/components/desktop/TileContainer';
 import { useWorkspacePageLayouts } from './hooks/useWorkspacePageLayouts';
+import { useDashboardThreadReveals } from './hooks/useDashboardThreadReveals';
 import { waitForWorkspaceTerminalHandle } from './hooks/workspace-terminal-readiness';
 import { createOnboardingCompletionHandler } from './hooks/onboarding-completion';
 import { DashboardHydrationMarker } from './DashboardHydrationMarker';
@@ -280,16 +282,6 @@ const O8_ACTIVE_TAB_PREF_VERSION = '2';
  *  (source, config, docs, svg) opens in the 'file' viewer, which itself routes
  *  .html/.htm to HtmlPreview. */
 const WORKSPACE_IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'ico', 'avif']);
-
-function historyRepoContextFromMobileThread(thread: MobileOrchestratorThread): SavedChatRepoContext | null {
-  if (!thread.repoPath) return null;
-  return {
-    name: thread.repoName ?? undefined,
-    localPath: thread.repoPath,
-    branch: thread.repoBranch ?? null,
-    remoteUrl: null,
-  };
-}
 
 /** One line per element sampled under a Design Mode stroke — leads with the
  *  React component name (Cursor parity) when discovered, e.g.
@@ -701,15 +693,15 @@ function DashboardInner() {
   // fires per-frame and a changing number re-renders this entire page tree every
   // frame (the top-chrome "lags then snaps" jank, 2026-07-15). Only the derived
   // threshold BANDS live in state; the functional setState returns the previous
-  // object between crossings so React bails out of the render entirely. The raw
-  // number lives in viewportWidthRef for imperative reads.
+  // object between crossings so React bails out of the render entirely. The last
+  // logical width is retained for SSR-safe reads; input reads the applied zoom.
   const [viewportBands, setViewportBands] = useState<{ compact: boolean; belowLeftCollapse: boolean; belowRightCollapse: boolean } | null>(null);
   const viewportWidthRef = useRef<number | null>(null);
   const responsiveManualOpenRef = useRef({ left: false });
   useEffect(() => {
     if (typeof window === 'undefined') return undefined;
     const update = () => {
-      const next = window.innerWidth;
+      const next = readViewportLayoutWidth();
       viewportWidthRef.current = next;
       const compact = next < RESPONSIVE_COMPACT_SHELL_WIDTH;
       const belowLeftCollapse = next < RESPONSIVE_LEFT_PANEL_COLLAPSE_WIDTH;
@@ -736,8 +728,10 @@ function DashboardInner() {
       });
     };
     window.addEventListener('resize', onResize);
+    window.addEventListener(UI_ZOOM_CHANGED_EVENT, onResize);
     return () => {
       window.removeEventListener('resize', onResize);
+      window.removeEventListener(UI_ZOOM_CHANGED_EVENT, onResize);
       if (frame) window.cancelAnimationFrame(frame);
     };
   }, []);
@@ -778,7 +772,7 @@ function DashboardInner() {
   const joinedWorkspaceFrame = !compactShell && !effectiveGlassSurface;
   const rightColumnChrome = joinedWorkspaceFrame ? 1 : RIGHT_COLUMN_CHROME;
   const getResponsiveViewportWidth = useCallback(() => (
-    viewportWidthRef.current ?? (typeof window !== 'undefined' ? window.innerWidth : Number.POSITIVE_INFINITY)
+    typeof window !== 'undefined' ? readViewportLayoutWidth() : viewportWidthRef.current ?? Number.POSITIVE_INFINITY
   ), []);
   const noteSidebarManualIntent = useCallback((nextVisible: boolean) => {
     sidebarManualIntentRef.current = true;
@@ -1008,19 +1002,12 @@ function DashboardInner() {
     sidebarManualIntentRef,
   });
 
-  // ── Prefetch heavy lazy chunks on idle so Suspense fallbacks are never visible ──
-  // Workspace + side-panel chunks are deferred off the critical path so the
-  // initial render is small. We then warm them on the first idle frame so
-  // when the user actually clicks (or the right rail mounts), the chunk is
-  // already parsed.
+  // Warm the default workspace and composer while saved state loads.
+  // An idle frame can occur before startup requests have settled.
   useEffect(() => {
     const prefetch = () => {
       import('@/components/desktop/WorkspaceTerminal');
-      import('@/components/desktop/Canvas');
       import('@/components/desktop/workspace-terminal/OrchestratorTab');
-      import('@/components/desktop/O8Panel');
-      import('@/components/desktop/AutomationsPage');
-      prefetchConnectedAutomations();
     };
     const id = safeRequestIdleCallback(prefetch, { fallbackDelayMs: 100 });
     return () => safeCancelIdleCallback(id);
@@ -1362,78 +1349,7 @@ function DashboardInner() {
     return () => window.removeEventListener('o8:open-pr-conversation', open);
   }, [handleOpenHistoryChatFromPanel]);
 
-  const wsConnectionState = useWsConnectionState();
-  const wsConnectedRef = useRef<typeof wsConnectionState>('disconnected');
-  wsConnectedRef.current = wsConnectionState;
-  const mobileRevealCursorRef = useRef(new Date(Date.now() - 3000).toISOString());
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const seen = new Set<string>();
-    let disposed = false;
-    let inFlight = false;
-
-    const openRevealRequest = (requestedAt: string | null, thread: MobileOrchestratorThread | undefined) => {
-      if (!requestedAt || !thread?.id || !thread.title) return;
-      if (Date.parse(requestedAt) > Date.parse(mobileRevealCursorRef.current)) {
-        mobileRevealCursorRef.current = requestedAt;
-      }
-      const seenKey = `${thread.id}:${requestedAt}`;
-      if (seen.has(seenKey)) return;
-      seen.add(seenKey);
-      handleOpenHistoryChatFromPanel(
-        thread.id,
-        thread.title,
-        historyRepoContextFromMobileThread(thread),
-      );
-    };
-
-    const handleThreadEvent = (event: Event) => {
-      const detail = (event as CustomEvent<{
-        event?: string;
-        data?: { requestedAt?: string; thread?: MobileOrchestratorThread };
-      }>).detail;
-      if (detail?.event !== 'reveal') return;
-      openRevealRequest(
-        typeof detail.data?.requestedAt === 'string' ? detail.data.requestedAt : null,
-        detail.data?.thread,
-      );
-    };
-
-    const pollMobileRevealRequests = async () => {
-      if (disposed || inFlight) return;
-      inFlight = true;
-      try {
-        const res = await fetch(`/api/mobile/orchestrator/threads/reveal?since=${encodeURIComponent(mobileRevealCursorRef.current)}`, { cache: 'no-store' });
-        if (!res.ok || disposed) return;
-        const data = await res.json() as {
-          requests?: Array<{ requestedAt?: string; thread?: MobileOrchestratorThread }>;
-        };
-        const requests = Array.isArray(data.requests) ? data.requests : [];
-        for (const request of requests) {
-          openRevealRequest(
-            typeof request.requestedAt === 'string' ? request.requestedAt : null,
-            request.thread,
-          );
-        }
-      } catch {
-        // Best-effort mobile reveal bridge; the normal history list still works.
-      } finally {
-        inFlight = false;
-      }
-    };
-
-    window.addEventListener('o8:orchestrator-threads', handleThreadEvent);
-    void pollMobileRevealRequests();
-    const timer = window.setInterval(() => {
-      if (wsConnectedRef.current === 'connected') return;
-      void pollMobileRevealRequests();
-    }, 30000);
-    return () => {
-      disposed = true;
-      window.clearInterval(timer);
-      window.removeEventListener('o8:orchestrator-threads', handleThreadEvent);
-    };
-  }, [handleOpenHistoryChatFromPanel]);
+  useDashboardThreadReveals(workspaceTerminalHandlesRef, handleOpenHistoryChatFromPanel);
 
   // ── Workspace tab hotkeys ──
   // Cmd+1..Cmd+9 jump to the Nth workspace tab, Cmd+Opt+Left / Right cycle
@@ -2137,7 +2053,7 @@ function DashboardInner() {
   useThreadWorkspaceNavigation({
     currentWorkspaceId: () => workspaceHeaderActive.workspaceId,
     availability: () => threadPanelAvailability(
-      typeof window !== 'undefined' ? window.innerWidth : getResponsiveViewportWidth(),
+      getResponsiveViewportWidth(),
       RESPONSIVE_RIGHT_PANEL_COLLAPSE_WIDTH,
     ),
     resolve: (target) => {
@@ -4355,7 +4271,7 @@ function DashboardInner() {
       height: 'calc(100vh / var(--ui-zoom, 1))',
       display: 'flex',
       flexDirection: 'column',
-      background: inTauri && !isNonMacShell() && paletteId === 'dark' ? DARK_FRAME_GLASS_TINT : effectiveGlassSurface ? 'var(--t-bg-gradient)' : 'var(--t-shell-frame-bg, var(--t-bg-gradient))',
+      background: inTauri && !shellLacksGlass() && paletteId === 'dark' ? DARK_FRAME_GLASS_TINT : effectiveGlassSurface ? 'var(--t-bg-gradient)' : 'var(--t-shell-frame-bg, var(--t-bg-gradient))',
       ...(!compactShell ? {
         ['--o8-shell-header-height' as string]: `${SHELL_HEADER_HEIGHT}px`,
         ['--o8-shell-edge-inset' as string]: `${SHELL_EDGE_INSET}px`,
@@ -4783,7 +4699,7 @@ function DashboardInner() {
           ] : []}
         />
 
-        {activeNavSection === 'projects' ? <Suspense fallback={null}><LazyProjectsPage key={projectLibraryRequest.revision} initialProjectId={projectLibraryRequest.projectId} onClose={() => setActiveNavSection('agents')} /></Suspense> : null}
+        {activeNavSection === 'projects' ? <Suspense fallback={<WorkspaceBootLoader contained />}><LazyProjectsPage key={projectLibraryRequest.revision} initialProjectId={projectLibraryRequest.projectId} onClose={() => setActiveNavSection('agents')} /></Suspense> : null}
           <div
             ref={workspaceSurfaceRef}
             aria-hidden={workspaceSurfaceHidden}
@@ -4922,7 +4838,7 @@ function DashboardInner() {
                       flexDirection: 'column',
                     }}
                   >
-                    <Suspense fallback={<div aria-hidden style={{ flex: 1, minHeight: 0, background: 'var(--t-chrome)' }} />}>
+                    <Suspense fallback={rightPanelKind === 'o8' ? <WorkspaceBootLoader contained /> : null}>
                       <OrchestratorDataProvider
                         activeProjectId={dashboardProjects.ledger?.activeProjectId ?? null}
                         agents={parsedAgents}
@@ -5010,7 +4926,7 @@ function DashboardInner() {
                       flexDirection: 'column',
                     }}
                   >
-                    <Suspense fallback={<div aria-hidden style={{ flex: 1, minHeight: 0, background: 'var(--t-chrome)' }} />}>
+                    <Suspense fallback={rightPanelKind === 'review' ? <WorkspaceBootLoader contained /> : null}>
                       <OrchestratorDataProvider
                         activeProjectId={dashboardProjects.ledger?.activeProjectId ?? null}
                         agents={parsedAgents}
@@ -5041,7 +4957,7 @@ function DashboardInner() {
       <AlertToast alerts={activeAlerts} compact={compactShell} onAction={handleAlertAction} />
 
       {showCompactNavigationRail ? <CompactNavigationRail
-        glassSurface={chromeMounted && (isGlassSurface || (workspaceGlass && inTauri && !isNonMacShell()))}
+        glassSurface={chromeMounted && (isGlassSurface || (workspaceGlass && inTauri && !shellLacksGlass()))}
         workspacePage={isWorkspaceUtilityKind(focusedWorkspaceTab?.canvasKind) ? focusedWorkspaceTab.canvasKind : undefined}
         activeDestination={activeNavSection}
         onHome={leaveNavTakeover}

@@ -213,7 +213,7 @@ describe('local CI verification through its command entry point', () => {
       .filter((step: { name?: string }) => step.name !== 'Install touched browser-test prerequisites');
     workflow.jobs['integration-changed'].steps.splice(-1, 0, {
       name: 'Install touched browser-test prerequisites',
-      if: "contains(steps.select.outputs.files, 'tests/next-parity-route-ownership-real-path.test.ts') || contains(steps.select.outputs.files, 'tests/review-diff-position-real-path.test.ts')",
+      if: "contains(steps.select.outputs.files, 'tests/next-parity-route-ownership-real-path.test.ts') || contains(steps.select.outputs.files, 'tests/review-diff-position-real-path.test.ts') || contains(steps.select.outputs.files, 'tests/sidebar-window-layout-real-path.test.ts')",
       run: 'npx --no-install playwright-core install --with-deps chromium',
     });
     const result = coverage(workflow);
@@ -222,6 +222,7 @@ describe('local CI verification through its command entry point', () => {
 
   it.each(['tests/next-parity-route-ownership-real-path.test.ts',
     'tests/review-diff-position-real-path.test.ts',
+    'tests/sidebar-window-layout-real-path.test.ts',
     'tests/next-parity-route-ownership-real-path.test.ts-extra.test.ts',
     'tests/NEXT-PARITY-ROUTE-OWNERSHIP-REAL-PATH.test.ts'])('runs the CI conditional prerequisite for %s through the verifier entry point', selectedFile => {
     const result = executeFixture(selectedFile);

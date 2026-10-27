@@ -60,6 +60,7 @@ describe('ThemeProvider on a non-macOS shell', () => {
     act(() => root.unmount());
     host.remove();
     delete (window as unknown as { __O8_HOST_PLATFORM__?: string }).__O8_HOST_PLATFORM__;
+    delete (window as unknown as { __O8_LINUX_GLASS__?: boolean }).__O8_LINUX_GLASS__;
     for (const element of [document.documentElement, document.body]) {
       element.removeAttribute('data-theme');
       element.removeAttribute('data-palette');
@@ -90,6 +91,28 @@ describe('ThemeProvider on a non-macOS shell', () => {
     stampHostPlatform('linux');
 
     expect(render()?.surface).toBe('solid');
+  });
+
+  it('keeps glass on a Linux shell launched with O8_LINUX_GLASS=1', () => {
+    stampHostPlatform('linux');
+    (window as unknown as { __O8_LINUX_GLASS__?: boolean }).__O8_LINUX_GLASS__ = true;
+
+    const theme = render();
+
+    expect(theme?.surface).toBe('glass');
+    expect(document.documentElement.dataset.surface).toBe('glass');
+    expect(document.documentElement.dataset.workspaceGlass).toBe('true');
+  });
+
+  it('defaults an opted-in Linux shell with no stored choice to All Glass', () => {
+    localStorage.clear();
+    stampHostPlatform('linux');
+    (window as unknown as { __O8_LINUX_GLASS__?: boolean }).__O8_LINUX_GLASS__ = true;
+
+    const theme = render();
+
+    expect(theme?.workspaceGlass).toBe(true);
+    expect(document.documentElement.dataset.workspaceGlass).toBe('true');
   });
 
   it('leaves the macOS stamp on the glass path', () => {
