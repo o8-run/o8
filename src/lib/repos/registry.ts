@@ -1,5 +1,6 @@
 import { assertNotKnowledgeSource, normalizeKnowledgeWritePath } from '@/lib/cortex/knowledge/sources';
 import 'server-only';
+import { RepoFolderError } from './folder-error';
 
 import { execFile } from '@/lib/providers/child-process';
 import { randomUUID } from 'node:crypto';
@@ -19,6 +20,7 @@ import type {
   ValidatedRepoCandidate,
 } from './types';
 import { isRepoWorkspaceIsolationPreference } from './types';
+import { readCurrentOrigin } from './remote';
 import { emitProductEvent } from '@/lib/analytics/server';
 import { withStoragePressurePolicyLock } from '@/lib/orchestrator/storage-pressure-policy-lock';
 import { getRepoDispatchAdmission } from '@/lib/lane/repo-preflight';
@@ -303,16 +305,16 @@ async function detectSetupConfig(repoRoot: string): Promise<RepoSetupConfig> {
 async function resolveRepoRoot(inputPath: string) {
   const expanded = inputPath.replace(/^~(?=\/|$)/, os.homedir());
   if (!expanded.trim()) {
-    throw new Error('Repository path is required.');
+    throw new RepoFolderError('Choose a folder or paste its full path.');
   }
 
   const resolved = normalizeKnowledgeWritePath(expanded);
   const stats = await stat(resolved).catch(() => null);
   if (!stats) {
-    throw new Error('Path not found.');
+    throw new RepoFolderError('Folder not found. Choose an existing folder or check the pasted path.');
   }
   if (!stats.isDirectory()) {
-    throw new Error('Path must point to a local folder.');
+    throw new RepoFolderError('This is a file. Choose the folder containing your project.');
   }
 
   try {
@@ -479,7 +481,27 @@ function fireSignatureRecompute(): void {
 
 export async function listRepos() {
   const store = await readStore();
-  return store.repos;
+  // Maintenance reads must remain bounded and read-only. Ordinary reads repair
+  // moved remotes using local git config, then merge only that field under the
+  // same mutation lock as add/update/remove so concurrent edits survive.
+  if (worktreeMetadataReadLimit() !== undefined) return store.repos;
+  const remotes = await Promise.all(store.repos.map(async repo => ({
+    id: repo.id, localPath: repo.localPath, previousRemote: repo.remoteUrl,
+    remote: repo.isGitRepo ? await readCurrentOrigin(repo.localPath) : undefined,
+  })));
+  if (!remotes.some(value => value.remote !== undefined && store.repos.find(repo => repo.id === value.id)?.remoteUrl !== value.remote)) return store.repos;
+  return withRegistryMutation(async () => {
+    const current = await readStoreFresh();
+    let changed = false;
+    const repos = current.repos.map(repo => {
+      const value = remotes.find(remote => remote.id === repo.id && remote.localPath === repo.localPath);
+      if (!value || value.remote === undefined || value.remote === repo.remoteUrl || value.previousRemote !== repo.remoteUrl) return repo;
+      changed = true;
+      return { ...repo, remoteUrl: value.remote };
+    });
+    if (changed) await writeStore({ version: 1, repos });
+    return repos;
+  });
 }
 
 /** Disk-fresh read for destructive policy decisions made under the registry mutation lock. */

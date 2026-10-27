@@ -26,6 +26,7 @@ import {
   Volume2,
 } from './lucide-shims';
 import { ttsEngine, type PlaybackState, type TTSEngineState } from '@/lib/tts/engine';
+import { edgeVoiceNotice, type EdgeVoiceError } from '@/lib/tts/edge-voice-error';
 
 const THEME_ACCENT = 'var(--t-accent, #2563eb)';
 const THEME_ACCENT_SOFT = 'var(--t-accent-soft, rgba(37, 99, 235, 0.08))';
@@ -82,12 +83,14 @@ export const MessageActions = memo(function MessageActions({
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [rate, setRate] = useState(1);
+  const [voiceError, setVoiceError] = useState<EdgeVoiceError | null>(null);
 
   useEffect(() => {
     return ttsEngine.subscribe((state: TTSEngineState) => {
       const active = state.activeMessageId === messageId;
       setIsThisMessage(active);
       setTtsState(active ? state.state : 'idle');
+      setVoiceError(active ? state.voiceError : null);
       if (active) {
         setCurrentTime(state.currentTime);
         setDuration(state.duration);
@@ -131,6 +134,7 @@ export const MessageActions = memo(function MessageActions({
   }, [messageText]);
 
   const isTransport = isThisMessage && (ttsState === 'playing' || ttsState === 'paused' || ttsState === 'loading');
+  const voiceNotice = edgeVoiceNotice(voiceError);
 
   // ── Transport mode: ⏪ ⏸ ⏩ 1x 0:24/1:47 ■ ──
   if (isTransport) {
@@ -163,7 +167,7 @@ export const MessageActions = memo(function MessageActions({
             if (ttsState === 'playing') ttsEngine.pause();
             else ttsEngine.resume();
           }}
-          title={ttsState === 'playing' ? 'Pause' : 'Resume'}
+          title={voiceNotice ?? (ttsState === 'playing' ? 'Pause' : 'Resume')}
           aria-label={ttsState === 'playing' ? 'Pause' : 'Resume'}
           style={{
             ...iconBtnBase,
@@ -184,6 +188,7 @@ export const MessageActions = memo(function MessageActions({
         </button>
 
         {/* Forward 10s */}
+        {voiceNotice ? <span role="status" style={{ fontSize: 11, fontWeight: 300, color: 'var(--t-text-secondary)' }}>{voiceNotice}</span> : null}
         <button
           type="button"
           onClick={() => ttsEngine.seekRelative(10)}
@@ -274,12 +279,13 @@ export const MessageActions = memo(function MessageActions({
       <button
         type="button"
         onClick={handlePlay}
-        title="Play"
+        title={voiceNotice ?? 'Play'}
         aria-label="Play"
         style={{ ...iconBtnBase }}
       >
         <Play size={14} strokeWidth={1.8} />
       </button>
+      {voiceNotice ? <span role="status" style={{ fontSize: 11, fontWeight: 300, color: 'var(--t-text-secondary)' }}>{voiceNotice}</span> : null}
 
       <button
         type="button"

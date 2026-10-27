@@ -1,3 +1,4 @@
+import { viewerJson } from '@/lib/viewers/response';
 export const dynamic = 'force-dynamic';
 
 /**
@@ -5,7 +6,7 @@ export const dynamic = 'force-dynamic';
  * POST /api/v2/context/files — read file contents for context injection
  */
 
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { execFileSync } from '@/lib/providers/child-process';
 import { resolveRepoScopeFromHeaders } from '@/lib/llm/repo-scope';
 import { openWorkspaceFile } from '@/lib/fs/workspace-file';
@@ -17,12 +18,12 @@ const MAX_FILES = 5; // max files per request
 export async function GET(request: NextRequest) {
   const q = request.nextUrl.searchParams.get('q') || '';
   if (q.length < 1) {
-    return NextResponse.json({ files: [] });
+    return viewerJson({ files: [] });
   }
 
   const { repoRoot } = await resolveRepoScopeFromHeaders(request.headers);
   if (!repoRoot) {
-    return NextResponse.json({ files: [] });
+    return viewerJson({ files: [] });
   }
 
   try {
@@ -47,9 +48,9 @@ export async function GET(request: NextRequest) {
       .slice(0, 20)
       .map((f) => ({ path: f, name: f.split('/').pop() || f }));
 
-    return NextResponse.json({ files });
+    return viewerJson({ files });
   } catch {
-    return NextResponse.json({ files: [] });
+    return viewerJson({ files: [] });
   }
 }
 
@@ -57,12 +58,12 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => null);
   if (!body?.paths || !Array.isArray(body.paths)) {
-    return NextResponse.json({ error: 'paths array required' }, { status: 400 });
+    return viewerJson({ error: 'paths array required' }, { status: 400 });
   }
 
   const { repoRoot } = await resolveRepoScopeFromHeaders(request.headers);
   if (!repoRoot) {
-    return NextResponse.json({ error: 'No repository is scoped to this chat' }, { status: 400 });
+    return viewerJson({ error: 'No repository is scoped to this chat' }, { status: 400 });
   }
 
   const paths: string[] = body.paths.slice(0, MAX_FILES);
@@ -87,5 +88,5 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  return NextResponse.json({ files: results });
+  return viewerJson({ files: results });
 }

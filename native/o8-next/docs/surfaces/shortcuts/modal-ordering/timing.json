@@ -1,0 +1,5 @@
+{
+  "endpoint": "headless GPUI CPU scene; no GPU/compositor",
+  "openToFirstFrameMs": 65.48159000000001,
+  "interactionToFrameMs": 69.289893
+}

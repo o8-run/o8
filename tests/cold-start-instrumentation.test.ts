@@ -93,7 +93,7 @@ afterAll(() => {
 });
 
 describe('cold-start instrumentation', () => {
-  it('performs no outbound warm-up or Python install during server boot', async () => {
+  it('checks the Edge voice in the background at boot without outbound model warm-up', async () => {
     vi.stubGlobal('fetch', mocks.fetch);
     const { register } = await import('@/instrumentation');
 
@@ -103,9 +103,16 @@ describe('cold-start instrumentation', () => {
 
     expect(mocks.warmupOpenRouter).not.toHaveBeenCalled();
     expect(mocks.fetch.mock.calls.every(([url]) => new URL(String(url)).hostname === '127.0.0.1')).toBe(true);
-    expect(mocks.ensureEdgeTtsInstalled).not.toHaveBeenCalled();
-    expect(mocks.pythonSpawn).not.toHaveBeenCalled();
+    expect(mocks.ensureEdgeTtsInstalled).toHaveBeenCalledTimes(1);
     expect(mocks.ensureReviewQueueDrainStarted).not.toHaveBeenCalled();
+  });
+
+  it('does not await Python preparation before completing registration', async () => {
+    mocks.ensureEdgeTtsInstalled.mockImplementationOnce(() => new Promise<void>(() => {}));
+    const { register } = await import('@/instrumentation');
+    await register();
+    await vi.dynamicImportSettled();
+    expect(mocks.ensureEdgeTtsInstalled).toHaveBeenCalledTimes(1);
   });
 
   it('starts packaged server queues without a sibling request', async () => {
@@ -132,5 +139,6 @@ describe('cold-start instrumentation', () => {
     await vi.advanceTimersByTimeAsync(2_000);
     await vi.dynamicImportSettled();
     expect(mocks.ensureReviewQueueDrainStarted).not.toHaveBeenCalled();
+    expect(mocks.ensureEdgeTtsInstalled).not.toHaveBeenCalled();
   });
 });

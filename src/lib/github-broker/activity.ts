@@ -27,10 +27,11 @@ export async function fetchGitHubCommits(repoFullName: string, limit = 15) {
   }));
 }
 
-export async function fetchGitHubWorkflowRuns(repoFullName: string, limit = 15) {
+export async function fetchGitHubWorkflowRuns(repoFullName: string, limit = 15, fresh = false) {
   const { response } = await githubInstallationFetch(
     repoFullName,
     `/repos/${repoFullName}/actions/runs?per_page=${Math.min(limit, 30)}`,
+    fresh ? { cache: 'reload' } : undefined,
   );
   const payload = await parseGithubJson<{
     workflow_runs?: Array<{

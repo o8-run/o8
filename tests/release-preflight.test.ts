@@ -1,3 +1,5 @@
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -5,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { parseReleaseNotes } from '../scripts/lib/public-release.mjs';
 import {
   acquireReleaseLock,
+  commandReceipt,
   performShipPreflight,
   runQuickBenchmarkPreflight,
 } from '../scripts/lib/ship-preflight.mjs';
@@ -213,7 +216,44 @@ describe('ship preflight', () => {
     second.release();
   });
 
-  it('refuses a real competing build without counting the current release parent', () => {
+  it('completes preflight after warning about a build in a deleted external worktree', async () => {
+    const { root, head, env } = fixture();
+    const removed = mkdtempSync(join(tmpdir(), 'o8-removed-review-worktree-'));
+    roots.push(removed);
+    const child = spawn(process.execPath, ['-e', 'process.send("ready"); setInterval(() => {}, 1000);'],
+      { cwd: removed, stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
+    try {
+      await once(child, 'message');
+      rmSync(removed, { recursive: true });
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const run = (command: string, args: string[]) => {
+        if (command === 'ps') return { status: 0, stderr: '', stdout: args[0] === '-p'
+          ? `${child.pid}\n`
+          : args[1] === 'pid=,command=' ? `${child.pid} next build\n`
+            : `${child.pid} ${process.pid} next build\n` };
+        if (command === 'lsof') return { status: 0, stderr: '', stdout: `p${child.pid}\nfcwd\nn${removed}\n` };
+        return passingRun(head)(command, args);
+      };
+
+      const receipt = performShipPreflight({ root, version: '0.1.999', env, run });
+
+      expect(receipt.tag).toBe('v0.1.999');
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining(`pid=${child.pid}`));
+      const reported = process.platform === 'linux' ? `${removed} (deleted)` : removed;
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining(`cwd=${JSON.stringify(reported)}`));
+      expect(child.exitCode).toBeNull();
+      expect(child.signalCode).toBeNull();
+    } finally {
+      if (child.exitCode === null && child.signalCode === null) {
+        const closed = once(child, 'close');
+        child.kill('SIGTERM');
+        await closed;
+      }
+    }
+  });
+
+  it.each(['cargo tauri build', 'node scripts/release.mjs --ship'])
+  ('refuses a competing %s without counting the current release parent', competingCommand => {
     const { root, head, env } = fixture();
     const run = (command: string, args: string[]) => {
       if (command === 'git' && args[0] === 'rev-parse') return { status: 0, stdout: head, stderr: '' };
@@ -231,7 +271,7 @@ describe('ship preflight', () => {
       if (command === 'ps') {
         return {
           status: 0,
-          stdout: `${process.ppid} 1 node scripts/release.mjs --ship\n99999 1 cargo tauri build\n`,
+          stdout: `${process.ppid} 1 node scripts/release.mjs --ship\n99999 1 ${competingCommand}\n`,
           stderr: '',
         };
       }
@@ -287,9 +327,16 @@ describe('ship preflight', () => {
     };
 
     expect(() => performShipPreflight({ root, version: '0.1.999', env, run })).toThrow(remedy);
-    expect(calls).toContain(`${process.execPath} scripts/classify-tests.mjs --check`);
+    expect(calls).toContain(`${process.execPath} scripts/classify-tests.mjs --check-manifest`);
     // No real build ran — the stub above never spawns node/npm/cargo for a build.
     expect(calls.some((call) => call.includes('build'))).toBe(false);
+  });
+
+  it('reports a check that runs past its limit as a timeout, not a missing command', () => {
+    const receipt = commandReceipt(process.execPath, ['-e', 'setTimeout(() => {}, 10_000)'], { timeoutMs: 300 });
+
+    expect(receipt.status).toBe(127);
+    expect(receipt.stderr).toBe('timed out after 300 ms');
   });
 
   it('passes the ship preflight when the test classification manifest is current', () => {
@@ -319,7 +366,7 @@ describe('ship preflight', () => {
     const receipt = performShipPreflight({ root, version: '0.1.999', env, run });
 
     expect(receipt.head).toBe(head);
-    expect(calls).toContain(`${process.execPath} scripts/classify-tests.mjs --check`);
+    expect(calls).toContain(`${process.execPath} scripts/classify-tests.mjs --check-manifest`);
   });
 
   it('keeps an intentionally disabled intake independent from ship readiness', () => {

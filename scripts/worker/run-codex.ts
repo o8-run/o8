@@ -1,7 +1,8 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { resolveCodexReasoningEffort } from '../../src/lib/codex/reasoning-effort';
 import type { ThinkingEffort } from '../../src/lib/orchestrator/thinking-effort';
-import { assertRuntimeEffortPin } from '../../src/lib/orchestrator/effort-pin';
+import { EffortPinRejectionError } from '../../src/lib/orchestrator/effort-pin';
+import { resolveCodexLaunchContext } from '../../src/lib/codex/launch-context';
 import { codexModelArgs } from '../../src/lib/codex/local-model';
 
 export interface RunCodexOptions { cwd: string; prompt: string; model?: string; effort?: ThinkingEffort; onChunk: (text: string) => Promise<void>; }
@@ -34,7 +35,8 @@ function stopProcessTree(child: ChildProcess, signal: NodeJS.Signals): void {
 }
 
 export async function startCodex(opts: RunCodexOptions): Promise<RunningCodex> {
-  assertRuntimeEffortPin('cloud', opts.model, opts.effort);
+  const launch = resolveCodexLaunchContext({ runtime: 'cloud', model: opts.model ?? null, requestedEffort: opts.effort });
+  if (!launch.effortPin.ok) throw new EffortPinRejectionError(launch.effortPin.code, launch.effortPin.message);
   const codexArgs = ['exec', '--dangerously-bypass-approvals-and-sandbox', '--json'];
   codexArgs.push(...codexModelArgs(opts.model));
   if (opts.effort && opts.effort !== 'adaptive') {
@@ -42,7 +44,7 @@ export async function startCodex(opts: RunCodexOptions): Promise<RunningCodex> {
   }
   codexArgs.push('-');
 
-  const childEnv = { ...process.env };
+  const childEnv: NodeJS.ProcessEnv = { ...process.env, ...launch.env };
   delete childEnv.O8_CLOUD_WORKER_KEY;
   const child = spawn('codex', codexArgs, { cwd: opts.cwd, env: childEnv, stdio: ['pipe', 'pipe', 'pipe'], detached: process.platform !== 'win32' });
   child.stdin.on('error', () => { /* The child exit/error handler reports a failed invocation. */ });

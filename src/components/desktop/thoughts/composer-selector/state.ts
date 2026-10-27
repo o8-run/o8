@@ -163,6 +163,8 @@ export const VISIBLE_COMPOSER_SELECTOR_MODES = ['fast', 'multitask'] as const;
 
 const BASE_EFFORTS: readonly ThinkingEffort[] = ['low', 'medium', 'high', 'xhigh', 'max'];
 const EFFORT_RANK: Record<ThinkingEffort, number> = {
+  none: -2,
+  minimal: -1,
   low: 0,
   medium: 1,
   adaptive: 2,

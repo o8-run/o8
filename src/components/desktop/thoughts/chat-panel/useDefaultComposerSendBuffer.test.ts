@@ -58,37 +58,37 @@ describe('desktop composer image send', () => {
     container.remove();
   });
 
-  it('keeps the text and image draft when the format is unsupported', () => {
+  it('keeps the text and image draft when the format is unsupported', async () => {
     act(() => root.render(createElement(Harness, { backend: 'codex', dataUri: 'data:image/heic;base64,aW1hZ2U=' })));
-    act(() => container.querySelector('button')?.click());
+    await act(async () => { container.querySelector('button')?.click(); });
     expect(dispatch).not.toHaveBeenCalled();
     expect(container.querySelector('textarea')?.value).toBe('Inspect this photo');
     expect(container.querySelector('[data-image-count]')?.getAttribute('data-image-count')).toBe('1');
     expect(container.querySelector('[role="alert"]')?.textContent).toContain('PNG, JPEG, GIF, or WebP');
   });
 
-  it('keeps the full draft when the selected backend cannot receive images', () => {
+  it('keeps the full draft when the selected backend cannot receive images', async () => {
     act(() => root.render(createElement(Harness, { backend: 'opencode', dataUri: 'data:image/png;base64,aW1hZ2U=' })));
-    act(() => container.querySelector('button')?.click());
+    await act(async () => { container.querySelector('button')?.click(); });
     expect(dispatch).not.toHaveBeenCalled();
     expect(container.querySelector('textarea')?.value).toBe('Inspect this photo');
     expect(container.querySelector('[data-image-count]')?.getAttribute('data-image-count')).toBe('1');
     expect(container.querySelector('[role="alert"]')?.textContent).toContain('cannot receive images');
   });
 
-  it('sends a supported image and then clears the composer draft', () => {
+  it('sends a supported image and then clears the composer draft', async () => {
     const image = 'data:image/png;base64,aW1hZ2U=';
     act(() => root.render(createElement(Harness, { backend: 'codex', dataUri: image })));
-    act(() => container.querySelector('button')?.click());
+    await act(async () => { container.querySelector('button')?.click(); });
     expect(dispatch).toHaveBeenCalledWith('Inspect this photo', [{ name: 'photo', dataUri: image }]);
     expect(container.querySelector('textarea')?.value).toBe('');
     expect(container.querySelector('[data-image-count]')?.getAttribute('data-image-count')).toBe('0');
   });
 
-  it('sends an image even when the text composer is empty', () => {
+  it('sends an image even when the text composer is empty', async () => {
     const image = 'data:image/png;base64,aW1hZ2U=';
     act(() => root.render(createElement(Harness, { backend: 'codex', dataUri: image, initialInput: '' })));
-    act(() => container.querySelector('button')?.click());
+    await act(async () => { container.querySelector('button')?.click(); });
     expect(dispatch).toHaveBeenCalledWith('[Image attached]', [{ name: 'photo', dataUri: image }]);
     expect(container.querySelector('[data-image-count]')?.getAttribute('data-image-count')).toBe('0');
   });

@@ -1793,6 +1793,7 @@ pub(crate) async fn run_symon_text_turn_with(
             claude::run_phone_text_loop_with_binary(
                 &selection.binary,
                 selection.model_label(),
+                selection.effort,
                 &prompt,
                 &ctx,
                 correlation,

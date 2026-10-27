@@ -59,8 +59,8 @@ mod codex;
 mod text_turn;
 
 mod cli_locate {
-    pub fn resolve_binary(_: &str, _: &[&str]) -> Option<String> {
-        None
+    pub fn resolve_binary(_: &str, overrides: &[&str]) -> Option<String> {
+        overrides.iter().find_map(|name| std::env::var(name).ok())
     }
 }
 fn agent_data_dir() -> std::path::PathBuf {
@@ -78,3 +78,5 @@ mod planner_route;
 
 #[cfg(test)]
 mod terminal_tests;
+#[cfg(all(test, unix))]
+mod phone_effort_tests;

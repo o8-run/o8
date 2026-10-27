@@ -1,3 +1,4 @@
+vi.mock('@/lib/github-broker/repo-access', async (importOriginal) => ({ ...await importOriginal<typeof import('@/lib/github-broker/repo-access')>(), canReadGitHubSnapshot: () => true, usesAnonymousGitHubReads: () => false }));
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const fixture = vi.hoisted(() => ({

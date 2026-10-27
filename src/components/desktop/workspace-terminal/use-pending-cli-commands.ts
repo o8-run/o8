@@ -5,7 +5,7 @@ import type { TerminalTab } from './types';
 
 export function usePendingCliCommands(
   tabs: TerminalTab[],
-  pendingCliCommands: Map<string, string>,
+  pendingCliCommands: MutableRefObject<Map<string, string>>,
   tabsRef: MutableRefObject<TerminalTab[]>,
   setTabs: Dispatch<SetStateAction<TerminalTab[]>>,
   sendTerminalInput: (sessionName: string, data: string) => void,
@@ -13,7 +13,7 @@ export function usePendingCliCommands(
   useEffect(() => {
     flushPendingCliCommands(
       tabs,
-      pendingCliCommands,
+      pendingCliCommands.current,
       sendTerminalInput,
       (tabId, sessionName) => tabsRef.current.some((tab) => tab.id === tabId && tab.tmuxSession === sessionName),
       (tabId, started) => {

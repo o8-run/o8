@@ -238,7 +238,12 @@ impl ThreadList {
         let client = self.client.clone();
         let task = cx.background_executor().spawn(async move {
             let (sessions, branches) = client.sidebar_sessions_with_branches()?;
-            let header = project_header::HeaderSnapshot::load(&client).ok();
+            let header = match project_header::HeaderSnapshot::load(&client) {
+                Ok(header) => Some(header),
+                // Older session-only hosts do not provide project routes.
+                Err(error) if error.ends_with("Server returned HTTP 404") => None,
+                Err(error) => return Err(error),
+            };
             let ledger = header.as_ref().map(|header| header.ledger.clone());
             Ok::<_, String>((sessions, ledger, header, branches))
         });
@@ -598,13 +603,14 @@ impl ThreadList {
         let draft_owner = self.rename.clone();
         let renaming = draft_owner.as_ref() == Some(&id) && patch["title"].is_string();
         let client = self.client.clone();
-        let task = cx.background_executor().spawn(async move {
-            if id.contains(':') {
-                client.archive_worker(&id, patch["clientMutationId"].as_str().unwrap())
-            } else {
-                client.patch_thread(&id, patch)
-            }
-        });
+        let workspace = self
+            .sessions
+            .iter()
+            .find(|session| session.id == id)
+            .and_then(|session| session.repo_path.clone());
+        let task = cx
+            .background_executor()
+            .spawn(async move { client.mutate_sidebar(workspace.as_deref(), &id, patch) });
         cx.spawn(async move |this, cx| {
             let result = task.await;
             let _ = this.update(cx, |this, cx| {

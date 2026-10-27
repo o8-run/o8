@@ -4,6 +4,7 @@ import { githubInstallationFetch } from './auth';
 import { readPullRequestFiles } from './pull-request-files';
 import { readPullRequestChecks } from './pull-request-checks';
 import { GitHubRequestDeferredError, type GitHubReadPriority } from './request-budget';
+import { GitHubReadScopeChangedError } from './read-scope';
 
 async function parseGithubJson<T>(response: Response) {
   const text = await response.text();
@@ -47,7 +48,22 @@ export async function fetchGitHubIssueDetail(repoFullName: string, issueNumber: 
 }
 
 export async function fetchGitHubPullRequestDetail(repoFullName: string, prNumber: number, suppliedReviewDecision?: Promise<string | null>, priority: GitHubReadPriority = 'interactive') {
-  const { response, installation, scope } = await githubInstallationFetch(repoFullName, `/repos/${repoFullName}/pulls/${prNumber}`, { signal: AbortSignal.timeout(18_000) }, { priority, share: true });
+  try {
+    return await readPullRequestDetailAttempt(repoFullName, prNumber, suppliedReviewDecision, priority);
+  } catch (error) {
+    if (!(error instanceof GitHubReadScopeChangedError) || !error.anonymous) throw error;
+    // Discard every first-attempt result, including any supplied review decision.
+    // The second attempt must establish anonymous authority from fresh metadata.
+    return readPullRequestDetailAttempt(repoFullName, prNumber, undefined, priority, true);
+  }
+}
+
+async function readPullRequestDetailAttempt(repoFullName: string, prNumber: number, suppliedReviewDecision: Promise<string | null> | undefined, priority: GitHubReadPriority, requireAnonymous = false) {
+  const { response, installation, scope, anonymous } = await githubInstallationFetch(repoFullName, `/repos/${repoFullName}/pulls/${prNumber}`, { signal: AbortSignal.timeout(18_000) }, { priority, share: true });
+  if (requireAnonymous && !anonymous) {
+    void response.body?.cancel().catch(() => {});
+    throw new Error('GitHub authorization changed before the anonymous pull request retry. Retry.');
+  }
   const pr = await parseGithubJson<{
     id?: number;
     number: number;
@@ -78,15 +94,27 @@ export async function fetchGitHubPullRequestDetail(repoFullName: string, prNumbe
 
   let checksUnavailable = false;
   const checksPromise = pr.head?.sha
-    ? readPullRequestChecks(repoFullName, pr.head.sha, installation?.id, priority, scope).catch(error => { if (error instanceof GitHubRequestDeferredError || (error instanceof Error && error.message.includes('authorization changed'))) throw error; checksUnavailable = true; return []; })
+    ? readPullRequestChecks(repoFullName, pr.head.sha, installation?.id, priority, scope).catch(error => { if (error instanceof GitHubRequestDeferredError || error instanceof GitHubReadScopeChangedError) throw error; checksUnavailable = true; return []; })
     : Promise.resolve([]);
 
   const reviewsPromise = suppliedReviewDecision ?? githubInstallationFetch(repoFullName, `/repos/${repoFullName}/pulls/${prNumber}/reviews?per_page=100`, { signal: AbortSignal.timeout(18_000) })
-    .then(({ response: reviewsResponse }) => parseGithubJson<Array<{ state?: string | null }>>(reviewsResponse))
+    .then(({ response: reviewsResponse, scope: reviewsScope, anonymous: reviewsAnonymous }) => {
+      if (scope && reviewsScope !== scope) {
+        void reviewsResponse.body?.cancel().catch(() => {});
+        throw new GitHubReadScopeChangedError('GitHub authorization changed while reading pull request reviews. Retry.', reviewsAnonymous);
+      }
+      return parseGithubJson<Array<{ state?: string | null }>>(reviewsResponse);
+    })
     .then((reviews) => [...reviews].reverse().find((review) => review.state && review.state !== 'COMMENTED')?.state ?? null)
-    .catch(() => null);
+    .catch(error => { if (error instanceof GitHubReadScopeChangedError) throw error; return null; });
 
-  const [files, statusCheckRollup, reviewDecision] = await Promise.all([filesPromise, checksPromise, reviewsPromise]);
+  const reads = [filesPromise, checksPromise, reviewsPromise] as const;
+  // Drain the entire attempt before retrying; no old response may join the retry.
+  const settled = await Promise.allSettled(reads);
+  const scopeChanges = settled.filter(result => result.status === 'rejected' && result.reason instanceof GitHubReadScopeChangedError);
+  const changed = scopeChanges.find(result => result.status === 'rejected' && !result.reason.anonymous) ?? scopeChanges[0];
+  if (changed?.status === 'rejected') throw changed.reason;
+  const [files, statusCheckRollup, reviewDecision] = await Promise.all(reads);
 
   return {
     githubScope: scope,

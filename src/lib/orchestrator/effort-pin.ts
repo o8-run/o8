@@ -1,4 +1,5 @@
-import { resolveCodexReasoningEffort } from '@/lib/codex/reasoning-effort';
+import { readCodexModelDiscovery } from '@/lib/codex/model-discovery-cache';
+import { codexCliSupportsUltraEfforts, resolveCodexReasoningEffort } from '@/lib/codex/reasoning-effort';
 import { parseLocalModel } from '@/lib/codex/local-model';
 import { getRuntimeCapability, isOrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
 import {
@@ -12,7 +13,7 @@ import type { OrchestratorRuntime, WorkerModelDisposition } from '@/lib/orchestr
 /**
  * Explicit mission reasoning-effort pinning.
  *
- * A caller may pin a concrete tier (`low`…`ultra`). This route only accepts a
+ * A caller may pin a concrete tier (`none`…`ultra`). This route only accepts a
  * pin when the selected runtime + model will pass it through UNCHANGED. It is
  * the o8 route that cannot honor a coerced or dropped tier — NOT a claim that
  * the provider never supports that effort. The provider's own catalog drift
@@ -49,7 +50,8 @@ export type EffortPinErrorCode =
   | 'effort_unsupported_runtime'
   | 'effort_model_incompatible'
   | 'effort_unsupported_model'
-  | 'effort_coerced';
+  | 'effort_coerced'
+  | 'effort_cli_incompatible';
 
 /** Thrown by dispatch/runtime seams so routes can return a typed 400. */
 export class EffortPinRejectionError extends Error {
@@ -108,12 +110,25 @@ export function isHonoredEffortPin(
 export interface ResolveEffortPinInput {
   /** Raw caller value. Omitted / null => no pin (parity). */
   requestedEffort: unknown;
-  runtime: OrchestratorRuntime;
+  runtime: string;
   /** The model that will actually launch (selected, or the runtime default). */
   model: string | null;
   /** The caller's explicit model identity, BEFORE any routing normalization. */
   explicitModel?: string | null;
   modelDisposition?: WorkerModelDisposition;
+  /** Present when the launch boundary has resolved the installed executable. */
+  installedCliVersion?: string | null;
+  /** Discovery home for the account that will actually launch. */
+  codexHome?: string;
+}
+
+/** Read the selected account's model evidence without starting a provider turn. */
+function codexAdvertisedEfforts(model: string | null, codexHome?: string): string[] | null {
+  if (!model) return null;
+  const entry = readCodexModelDiscovery(codexHome)?.find(candidate => candidate.slug === model);
+  if (!Array.isArray(entry?.supported_reasoning_levels)) return null;
+  return entry.supported_reasoning_levels.flatMap(level =>
+    typeof level?.effort === 'string' ? [level.effort] : []);
 }
 
 export function resolveEffortPin(input: ResolveEffortPinInput): ResolveEffortPinResult {
@@ -132,7 +147,7 @@ export function resolveEffortPin(input: ResolveEffortPinInput): ResolveEffortPin
     // Explicit reset: not a concrete pin, so the runtime default applies.
     return { ok: true, requestedEffort: null, selectedEffort: null };
   }
-  if (!getRuntimeCapability(input.runtime).reasoningEffort) {
+  if (!isOrchestratorRuntime(input.runtime) || !getRuntimeCapability(input.runtime).reasoningEffort) {
     return {
       ok: false,
       code: 'effort_unsupported_runtime',
@@ -166,6 +181,18 @@ export function resolveEffortPin(input: ResolveEffortPinInput): ResolveEffortPin
       message: `This o8 mission route cannot honor effort "${raw}" because ${requested} is not compatible with runtime "${input.runtime}" and the launch would silently fall back to a different model. Pin a compatible model or omit --effort.`,
     };
   }
+  const discoveryOnly = raw === 'none' || raw === 'minimal';
+  if (discoveryOnly && (input.runtime === 'codex' || input.runtime === 'cloud')) {
+    const advertised = codexAdvertisedEfforts(actualModel, input.codexHome);
+    if (!advertised?.includes(raw)) {
+      return { ok: false, code: 'effort_unsupported_model', message: advertised === null
+        ? `Cannot honor effort "${raw}" for Codex model "${actualModel ?? 'runtime default'}": no usable model discovery evidence advertises this effort. Refresh the Codex model catalogue or omit effort.`
+        : `Codex model "${actualModel}" does not advertise the requested effort "${raw}". Advertised efforts: ${advertised.join(', ') || 'no tiers'}. Choose an advertised effort or omit effort.` };
+    }
+  } else if (discoveryOnly) {
+    return { ok: false, code: 'effort_unsupported_runtime',
+      message: `Runtime "${input.runtime}" does not advertise an independent effort "${raw}" through this route. Choose a supported effort or omit effort.` };
+  }
   const applied = resolveAdapterEffort(input.runtime, actualModel, raw);
   if (applied !== raw) {
     return {
@@ -174,12 +201,16 @@ export function resolveEffortPin(input: ResolveEffortPinInput): ResolveEffortPin
       message: `This o8 mission route cannot honor effort "${raw}" for runtime "${input.runtime}" model "${actualModel ?? 'runtime default'}": the current adapter would change it to "${applied}". Request a supported tier or omit --effort.`,
     };
   }
+  if ((input.runtime === 'codex' || input.runtime === 'cloud') && Object.hasOwn(input, 'installedCliVersion')
+    && (raw === 'max' || raw === 'ultra') && !codexCliSupportsUltraEfforts(input.installedCliVersion)) {
+    return { ok: false, code: 'effort_cli_incompatible',
+      message: `Cannot honor effort "${raw}" on runtime "${input.runtime}" with installed CLI version "${input.installedCliVersion ?? 'unknown'}": compatibility would change the selection to "xhigh". Update the CLI or choose a supported effort.` };
+  }
   return { ok: true, requestedEffort: raw, selectedEffort: raw };
 }
 
 /** Shared last admission boundary for owned launch, cold resume and automatic retries. */
-export function assertRuntimeEffortPin(runtime: string, model: string | null | undefined, effort: unknown): void {
-  if (!isOrchestratorRuntime(runtime)) return;
-  const pin = resolveEffortPin({ runtime, model: model ?? null, requestedEffort: effort });
+export function assertRuntimeEffortPin(runtime: string, model: string | null | undefined, effort: unknown, codexHome?: string): void {
+  const pin = resolveEffortPin({ runtime, model: model ?? null, requestedEffort: effort, codexHome });
   if (!pin.ok) throw new EffortPinRejectionError(pin.code, pin.message);
 }

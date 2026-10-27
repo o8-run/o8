@@ -19,7 +19,18 @@ export function useTranscriptVisualizations(input: { repoPath?: string | null; t
         const response = await fetch(`/api/visualizations?${new URLSearchParams(query)}`, { signal: controller.signal, cache: 'no-store' });
         const body = await response.json() as { result?: { visualizations?: unknown[] } };
         if (response.ok && Array.isArray(body.result?.visualizations) && !controller.signal.aborted) {
-          setSnapshot({ scope, refs: body.result.visualizations.filter(isVisualizationReference) });
+          const refs = body.result.visualizations.filter(isVisualizationReference);
+          setSnapshot(previous => {
+            // A metadata refresh decodes fresh objects even for unchanged saved visuals.
+            const unchanged = previous.scope === scope && previous.refs.length === refs.length
+              && refs.every((ref, index) => {
+                const prior = previous.refs[index];
+                const keys = Object.keys(ref) as Array<keyof VisualizationReference>;
+                return keys.length === Object.keys(prior).length
+                  && keys.every(key => Object.hasOwn(prior, key) && Object.is(ref[key], prior[key]));
+              });
+            return unchanged ? previous : { scope, refs };
+          });
         }
       } catch { /* Keep content through a missed poll. */ }
       finally { busy = false; }

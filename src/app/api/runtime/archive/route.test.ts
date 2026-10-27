@@ -62,6 +62,9 @@ vi.mock('@/lib/runtime/inventory', () => ({ invalidateRuntimeInventoryCache: vi.
 vi.mock('@/lib/runtime/owned-session-archive', () => ({
   archiveOwnedRuntimeSession: stateMocks.archiveOwned,
 }));
+vi.mock('@/lib/runtimes/shared/owned-session-index', () => ({
+  readOwnedSessionRecord: vi.fn(async () => ({ repoPath: process.cwd() })),
+}));
 vi.mock('@/lib/runtimes', () => ({}));
 vi.mock('@/lib/runtimes/shared/owned-session-lifecycle', () => ({
   getOwnedSessionLifecycle: vi.fn(() => undefined),

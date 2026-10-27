@@ -1,3 +1,4 @@
+import { recordProductMilestone } from '@/lib/analytics/activation';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
 import { isOwnedOrchestratorSessionKey, ORCHESTRATOR_RUNTIMES } from '@/lib/orchestrator/runtime-capabilities';
 import { summarizeTaskName } from '@/lib/runtime/project-launch-brief';
@@ -175,6 +176,7 @@ export async function settleRuntimeLaunchGovernance(input: {
       }
     }
 
+    void recordProductMilestone('worker.first_launched');
     return {
       ok: true,
       runtime: runtimeId,

@@ -11,8 +11,10 @@ import type { ChatRoute } from '../chat/state.js';
 export const CHAT_HELP = `usage: o8 chat [options]
 
 An interactive conversation with the local o8 orchestrator.
-Requires a terminal and a running o8 app or o8 serve.
+Requires a running o8 app or o8 serve.
+Interactive chat requires a terminal; --check also works without one.
 
+  --check            check the transport without opening a conversation
   --repo <path>       workspace (default: current directory)
   --resume <thread>   reopen a thoughts-* conversation
   --backend <id>      session-only backend override
@@ -35,9 +37,11 @@ export function parseChatArgs(args: string[]) {
   let plan = false;
   let execute = false;
   let noMotion = false;
+  let check = false;
   const flags = new Set(['--repo', '--resume', '--backend', '--model', '--effort']);
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index]!;
+    if (arg === '--check') { check = true; continue; }
     if (arg === '--plan') { plan = true; continue; }
     if (arg === '--execute') { execute = true; continue; }
     if (arg === '--no-motion') { noMotion = true; continue; }
@@ -58,11 +62,20 @@ export function parseChatArgs(args: string[]) {
     throw new CliError('invalid_args', '--resume requires a thoughts-* thread id.', EXIT.INVALID_ARGS);
   }
   if (plan && execute) throw new CliError('invalid_args', 'Choose either --plan or --execute.', EXIT.INVALID_ARGS);
-  return { values, execute, noMotion };
+  if (check && (Object.keys(values).length || plan || execute || noMotion)) {
+    throw new CliError('invalid_args', 'Use --check by itself to check the connection without opening a chat.', EXIT.INVALID_ARGS);
+  }
+  return { values, execute, noMotion, check };
 }
 
 export async function runChat(args: string[]): Promise<number> {
   const options = parseChatArgs(args);
+  if (options.check) {
+    const { checkChatConnection } = await import('../chat/check.js');
+    await checkChatConnection(resolveConfig());
+    process.stdout.write('Terminal chat transport is connected.\n');
+    return 0;
+  }
   if (!process.stdin.isTTY || !process.stdout.isTTY || process.env.TERM === 'dumb') {
     throw new CliError('terminal_required', 'o8 chat needs an interactive terminal. Use o8 lead or o8 history for structured output.', EXIT.INVALID_ARGS);
   }

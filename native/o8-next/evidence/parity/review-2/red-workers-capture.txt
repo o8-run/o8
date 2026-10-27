@@ -1,0 +1,6 @@
+Before bounding the Workers geometry probe; its repeated live polls exceeded the GPUI deadline.
+Capturing workers 1024x720
+workers 1024x720: capture process, route or measurement failed
+Capturing workers 1440x900
+workers 1440x900: capture process, route or measurement failed
+30 captures; 2 crashes; visual differences do not gate

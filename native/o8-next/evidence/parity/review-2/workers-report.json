@@ -1,0 +1,1003 @@
+{
+  "schema": 1,
+  "units": "logical px; gap = native - current UI",
+  "sizes": [
+    [
+      1024,
+      720
+    ],
+    [
+      1440,
+      900
+    ]
+  ],
+  "crashes": 0,
+  "limitations": [
+    "Native bounds use GPUI TestAppContext and its test text system, separately from X11 pixel captures.",
+    "Native computed font sizes, weights and paddings are unavailable in the public test API; null means unmeasured.",
+    "Missing selectors or unopened counterparts remain Partial/Missing and never pass as parity.",
+    "Linux captures the plain native fallback; browser All Glass has no desktop wallpaper or system material."
+  ],
+  "cases": [
+    {
+      "surface": "workers",
+      "size": [
+        1024,
+        720
+      ],
+      "native": {
+        "sidebar": null,
+        "rail": null,
+        "top bar": null,
+        "worker pane": null,
+        "transcript": null,
+        "composer": null,
+        "palette": null,
+        "settings": null,
+        "files": null,
+        "diff": null,
+        "terminal": null
+      },
+      "web": {
+        "sidebar": null,
+        "rail": {
+          "x": 6,
+          "y": 40,
+          "width": 48,
+          "height": 676,
+          "fontSize": 16,
+          "fontWeight": 400,
+          "paddingTop": 8,
+          "paddingRight": 0,
+          "paddingBottom": 8,
+          "paddingLeft": 0,
+          "color": "rgb(232, 236, 242)",
+          "background": "rgba(0, 0, 0, 0)",
+          "backdropFilter": "none"
+        },
+        "top bar": {
+          "x": 0,
+          "y": 0,
+          "width": 60,
+          "height": 40,
+          "fontSize": 16,
+          "fontWeight": 400,
+          "paddingTop": 0,
+          "paddingRight": 0,
+          "paddingBottom": 0,
+          "paddingLeft": 8,
+          "color": "rgb(232, 236, 242)",
+          "background": "rgba(0, 0, 0, 0)",
+          "backdropFilter": "none"
+        },
+        "worker pane": {
+          "x": 64,
+          "y": 40,
+          "width": 956,
+          "height": 676,
+          "fontSize": 16,
+          "fontWeight": 400,
+          "paddingTop": 0,
+          "paddingRight": 0,
+          "paddingBottom": 0,
+          "paddingLeft": 0,
+          "color": "rgb(232, 236, 242)",
+          "background": "rgba(0, 0, 0, 0)",
+          "backdropFilter": "none"
+        },
+        "transcript": null,
+        "composer": {
+          "x": 104,
+          "y": 431.19,
+          "width": 876,
+          "height": 52,
+          "fontSize": 13,
+          "fontWeight": 400,
+          "paddingTop": 11,
+          "paddingRight": 14,
+          "paddingBottom": 4,
+          "paddingLeft": 14,
+          "color": "rgb(232, 236, 242)",
+          "background": "rgba(0, 0, 0, 0)",
+          "backdropFilter": "none"
+        },
+        "palette": null,
+        "settings": null,
+        "files": null,
+        "diff": null,
+        "terminal": null
+      },
+      "notes": [
+        "Current UI surface opener unavailable",
+        "Current-UI thread grouping and native worker filters are not yet equivalent"
+      ],
+      "images": {
+        "native": "workers-1024x720/native.png",
+        "web": "workers-1024x720/web.png",
+        "pair": "workers-1024x720/pair.png"
+      },
+      "routes": [
+        {
+          "path": "/api/telemetry/config",
+          "status": 404
+        },
+        {
+          "path": "/api/panel/sidebar-fixtures",
+          "status": 404
+        },
+        {
+          "path": "/api/v2/chat-history/list",
+          "status": 200
+        },
+        {
+          "path": "/api/lanes",
+          "status": 200
+        },
+        {
+          "path": "/api/runtime/inventory",
+          "status": 200
+        },
+        {
+          "path": "/api/panel/approvals",
+          "status": 404
+        },
+        {
+          "path": "/api/panel/app/update-state",
+          "status": 404
+        },
+        {
+          "path": "/api/panel/app/install-info",
+          "status": 404
+        },
+        {
+          "path": "/api/setup/cli-updates",
+          "status": 404
+        },
+        {
+          "path": "/api/panel/projects",
+          "status": 200
+        },
+        {
+          "path": "/api/panel/workspaces",
+          "status": 200
+        },
+        {
+          "path": "/api/panel/telemetry",
+          "status": 404
+        },
+        {
+          "path": "/api/runtime/capacity",
+          "status": 404
+        },
+        {
+          "path": "/api/panel/o8-update-summary",
+          "status": 404
+        },
+        {
+          "path": "/api/panel/terminal-state",
+          "status": 200
+        },
+        {
+          "path": "/api/panel/repos",
+          "status": 200
+        },
+        {
+          "path": "/api/orchestrator/state",
+          "status": 200
+        },
+        {
+          "path": "/api/panel/operator-defaults",
+          "status": 200
+        },
+        {
+          "path": "/api/setup/config",
+          "status": 200
+        },
+        {
+          "path": "/api/mobile/orchestrator/threads/reveal",
+          "status": 404
+        },
+        {
+          "path": "/api/panel/entitlement",
+          "status": 200
+        },
+        {
+          "path": "/api/orchestrator/shared-team/active",
+          "status": 404
+        },
+        {
+          "path": "/api/panel/branches",
+          "status": 200
+        },
+        {
+          "path": "/api/panel/managed-runs",
+          "status": 404
+        },
+        {
+          "path": "/api/cortex/directives",
+          "status": 404
+        },
+        {
+          "path": "/api/runtime/claude-code-profile",
+          "status": 404
+        },
+        {
+          "path": "/api/review/workspace",
+          "status": 404
+        },
+        {
+          "path": "/api/panel/ws-info",
+          "status": 200
+        },
+        {
+          "path": "/api/automations/connected",
+          "status": 404
+        },
+        {
+          "path": "/api/panel/supervisor-inbox",
+          "status": 404
+        },
+        {
+          "path": "/api/worktrees",
+          "status": 404
+        }
+      ],
+      "theme": {
+        "palette": "dark",
+        "surface": "glass"
+      },
+      "elements": {
+        "sidebar": {
+          "native": null,
+          "web": null,
+          "gap": {
+            "x": null,
+            "y": null,
+            "width": null,
+            "height": null,
+            "fontSize": null,
+            "fontWeight": null,
+            "paddingTop": null,
+            "paddingRight": null,
+            "paddingBottom": null,
+            "paddingLeft": null
+          },
+          "status": "Missing"
+        },
+        "rail": {
+          "native": null,
+          "web": {
+            "x": 6,
+            "y": 40,
+            "width": 48,
+            "height": 676,
+            "fontSize": 16,
+            "fontWeight": 400,
+            "paddingTop": 8,
+            "paddingRight": 0,
+            "paddingBottom": 8,
+            "paddingLeft": 0,
+            "color": "rgb(232, 236, 242)",
+            "background": "rgba(0, 0, 0, 0)",
+            "backdropFilter": "none"
+          },
+          "gap": {
+            "x": null,
+            "y": null,
+            "width": null,
+            "height": null,
+            "fontSize": null,
+            "fontWeight": null,
+            "paddingTop": null,
+            "paddingRight": null,
+            "paddingBottom": null,
+            "paddingLeft": null
+          },
+          "status": "Missing"
+        },
+        "top bar": {
+          "native": null,
+          "web": {
+            "x": 0,
+            "y": 0,
+            "width": 60,
+            "height": 40,
+            "fontSize": 16,
+            "fontWeight": 400,
+            "paddingTop": 0,
+            "paddingRight": 0,
+            "paddingBottom": 0,
+            "paddingLeft": 8,
+            "color": "rgb(232, 236, 242)",
+            "background": "rgba(0, 0, 0, 0)",
+            "backdropFilter": "none"
+          },
+          "gap": {
+            "x": null,
+            "y": null,
+            "width": null,
+            "height": null,
+            "fontSize": null,
+            "fontWeight": null,
+            "paddingTop": null,
+            "paddingRight": null,
+            "paddingBottom": null,
+            "paddingLeft": null
+          },
+          "status": "Missing"
+        },
+        "worker pane": {
+          "native": null,
+          "web": {
+            "x": 64,
+            "y": 40,
+            "width": 956,
+            "height": 676,
+            "fontSize": 16,
+            "fontWeight": 400,
+            "paddingTop": 0,
+            "paddingRight": 0,
+            "paddingBottom": 0,
+            "paddingLeft": 0,
+            "color": "rgb(232, 236, 242)",
+            "background": "rgba(0, 0, 0, 0)",
+            "backdropFilter": "none"
+          },
+          "gap": {
+            "x": null,
+            "y": null,
+            "width": null,
+            "height": null,
+            "fontSize": null,
+            "fontWeight": null,
+            "paddingTop": null,
+            "paddingRight": null,
+            "paddingBottom": null,
+            "paddingLeft": null
+          },
+          "status": "Missing"
+        },
+        "transcript": {
+          "native": null,
+          "web": null,
+          "gap": {
+            "x": null,
+            "y": null,
+            "width": null,
+            "height": null,
+            "fontSize": null,
+            "fontWeight": null,
+            "paddingTop": null,
+            "paddingRight": null,
+            "paddingBottom": null,
+            "paddingLeft": null
+          },
+          "status": "Missing"
+        },
+        "composer": {
+          "native": null,
+          "web": {
+            "x": 104,
+            "y": 431.19,
+            "width": 876,
+            "height": 52,
+            "fontSize": 13,
+            "fontWeight": 400,
+            "paddingTop": 11,
+            "paddingRight": 14,
+            "paddingBottom": 4,
+            "paddingLeft": 14,
+            "color": "rgb(232, 236, 242)",
+            "background": "rgba(0, 0, 0, 0)",
+            "backdropFilter": "none"
+          },
+          "gap": {
+            "x": null,
+            "y": null,
+            "width": null,
+            "height": null,
+            "fontSize": null,
+            "fontWeight": null,
+            "paddingTop": null,
+            "paddingRight": null,
+            "paddingBottom": null,
+            "paddingLeft": null
+          },
+          "status": "Missing"
+        },
+        "palette": {
+          "native": null,
+          "web": null,
+          "gap": {
+            "x": null,
+            "y": null,
+            "width": null,
+            "height": null,
+            "fontSize": null,
+            "fontWeight": null,
+            "paddingTop": null,
+            "paddingRight": null,
+            "paddingBottom": null,
+            "paddingLeft": null
+          },
+          "status": "Missing"
+        },
+        "settings": {
+          "native": null,
+          "web": null,
+          "gap": {
+            "x": null,
+            "y": null,
+            "width": null,
+            "height": null,
+            "fontSize": null,
+            "fontWeight": null,
+            "paddingTop": null,
+            "paddingRight": null,
+            "paddingBottom": null,
+            "paddingLeft": null
+          },
+          "status": "Missing"
+        },
+        "files": {
+          "native": null,
+          "web": null,
+          "gap": {
+            "x": null,
+            "y": null,
+            "width": null,
+            "height": null,
+            "fontSize": null,
+            "fontWeight": null,
+            "paddingTop": null,
+            "paddingRight": null,
+            "paddingBottom": null,
+            "paddingLeft": null
+          },
+          "status": "Missing"
+        },
+        "diff": {
+          "native": null,
+          "web": null,
+          "gap": {
+            "x": null,
+            "y": null,
+            "width": null,
+            "height": null,
+            "fontSize": null,
+            "fontWeight": null,
+            "paddingTop": null,
+            "paddingRight": null,
+            "paddingBottom": null,
+            "paddingLeft": null
+          },
+          "status": "Missing"
+        },
+        "terminal": {
+          "native": null,
+          "web": null,
+          "gap": {
+            "x": null,
+            "y": null,
+            "width": null,
+            "height": null,
+            "fontSize": null,
+            "fontWeight": null,
+            "paddingTop": null,
+            "paddingRight": null,
+            "paddingBottom": null,
+            "paddingLeft": null
+          },
+          "status": "Missing"
+        }
+      },
+      "status": "Partial"
+    },
+    {
+      "surface": "workers",
+      "size": [
+        1440,
+        900
+      ],
+      "native": {
+        "sidebar": null,
+        "rail": null,
+        "top bar": null,
+        "worker pane": null,
+        "transcript": null,
+        "composer": null,
+        "palette": null,
+        "settings": null,
+        "files": null,
+        "diff": null,
+        "terminal": null
+      },
+      "web": {
+        "sidebar": {
+          "x": 60,
+          "y": 40,
+          "width": 300,
+          "height": 856,
+          "fontSize": 16,
+          "fontWeight": 400,
+          "paddingTop": 0,
+          "paddingRight": 0,
+          "paddingBottom": 0,
+          "paddingLeft": 0,
+          "color": "rgb(232, 236, 242)",
+          "background": "rgba(0, 0, 0, 0)",
+          "backdropFilter": "none"
+        },
+        "rail": {
+          "x": 6,
+          "y": 40,
+          "width": 48,
+          "height": 856,
+          "fontSize": 16,
+          "fontWeight": 400,
+          "paddingTop": 8,
+          "paddingRight": 0,
+          "paddingBottom": 8,
+          "paddingLeft": 0,
+          "color": "rgb(232, 236, 242)",
+          "background": "rgba(0, 0, 0, 0)",
+          "backdropFilter": "none"
+        },
+        "top bar": {
+          "x": 0,
+          "y": 0,
+          "width": 60,
+          "height": 40,
+          "fontSize": 16,
+          "fontWeight": 400,
+          "paddingTop": 0,
+          "paddingRight": 0,
+          "paddingBottom": 0,
+          "paddingLeft": 8,
+          "color": "rgb(232, 236, 242)",
+          "background": "rgba(0, 0, 0, 0)",
+          "backdropFilter": "none"
+        },
+        "worker pane": {
+          "x": 368,
+          "y": 40,
+          "width": 616,
+          "height": 856,
+          "fontSize": 16,
+          "fontWeight": 400,
+          "paddingTop": 0,
+          "paddingRight": 0,
+          "paddingBottom": 0,
+          "paddingLeft": 0,
+          "color": "rgb(232, 236, 242)",
+          "background": "rgba(0, 0, 0, 0)",
+          "backdropFilter": "none"
+        },
+        "transcript": null,
+        "composer": {
+          "x": 380,
+          "y": 539.19,
+          "width": 592,
+          "height": 52,
+          "fontSize": 13,
+          "fontWeight": 400,
+          "paddingTop": 11,
+          "paddingRight": 14,
+          "paddingBottom": 4,
+          "paddingLeft": 14,
+          "color": "rgb(232, 236, 242)",
+          "background": "rgba(0, 0, 0, 0)",
+          "backdropFilter": "none"
+        },
+        "palette": null,
+        "settings": null,
+        "files": null,
+        "diff": null,
+        "terminal": null
+      },
+      "notes": [
+        "Current UI surface opener unavailable",
+        "Current-UI thread grouping and native worker filters are not yet equivalent"
+      ],
+      "images": {
+        "native": "workers-1440x900/native.png",
+        "web": "workers-1440x900/web.png",
+        "pair": "workers-1440x900/pair.png"
+      },
+      "routes": [
+        {
+          "path": "/api/telemetry/config",
+          "status": 404
+        },
+        {
+          "path": "/api/panel/sidebar-fixtures",
+          "status": 404
+        },
+        {
+          "path": "/api/v2/chat-history/list",
+          "status": 200
+        },
+        {
+          "path": "/api/lanes",
+          "status": 200
+        },
+        {
+          "path": "/api/runtime/inventory",
+          "status": 200
+        },
+        {
+          "path": "/api/panel/projects",
+          "status": 200
+        },
+        {
+          "path": "/api/panel/approvals",
+          "status": 404
+        },
+        {
+          "path": "/api/panel/workspaces",
+          "status": 200
+        },
+        {
+          "path": "/api/setup/cli-updates",
+          "status": 404
+        },
+        {
+          "path": "/api/panel/app/install-info",
+          "status": 404
+        },
+        {
+          "path": "/api/panel/app/update-state",
+          "status": 404
+        },
+        {
+          "path": "/api/panel/o8-update-summary",
+          "status": 404
+        },
+        {
+          "path": "/api/panel/terminal-state",
+          "status": 200
+        },
+        {
+          "path": "/api/panel/repos",
+          "status": 200
+        },
+        {
+          "path": "/api/panel/operator-defaults",
+          "status": 200
+        },
+        {
+          "path": "/api/runtime/capacity",
+          "status": 404
+        },
+        {
+          "path": "/api/panel/telemetry",
+          "status": 404
+        },
+        {
+          "path": "/api/orchestrator/state",
+          "status": 200
+        },
+        {
+          "path": "/api/setup/config",
+          "status": 200
+        },
+        {
+          "path": "/api/mobile/orchestrator/threads/reveal",
+          "status": 404
+        },
+        {
+          "path": "/api/panel/entitlement",
+          "status": 200
+        },
+        {
+          "path": "/api/mobile/orchestrator/threads",
+          "status": 200
+        },
+        {
+          "path": "/api/orchestrator/shared-team/active",
+          "status": 404
+        },
+        {
+          "path": "/api/panel/branches",
+          "status": 200
+        },
+        {
+          "path": "/api/panel/managed-runs",
+          "status": 404
+        },
+        {
+          "path": "/api/cortex/directives",
+          "status": 404
+        },
+        {
+          "path": "/api/runtime/claude-code-profile",
+          "status": 404
+        },
+        {
+          "path": "/api/review/workspace",
+          "status": 404
+        },
+        {
+          "path": "/api/panel/ws-info",
+          "status": 200
+        },
+        {
+          "path": "/api/panel/supervisor-inbox",
+          "status": 404
+        },
+        {
+          "path": "/api/automations/connected",
+          "status": 404
+        },
+        {
+          "path": "/api/worktrees",
+          "status": 404
+        }
+      ],
+      "theme": {
+        "palette": "dark",
+        "surface": "glass"
+      },
+      "elements": {
+        "sidebar": {
+          "native": null,
+          "web": {
+            "x": 60,
+            "y": 40,
+            "width": 300,
+            "height": 856,
+            "fontSize": 16,
+            "fontWeight": 400,
+            "paddingTop": 0,
+            "paddingRight": 0,
+            "paddingBottom": 0,
+            "paddingLeft": 0,
+            "color": "rgb(232, 236, 242)",
+            "background": "rgba(0, 0, 0, 0)",
+            "backdropFilter": "none"
+          },
+          "gap": {
+            "x": null,
+            "y": null,
+            "width": null,
+            "height": null,
+            "fontSize": null,
+            "fontWeight": null,
+            "paddingTop": null,
+            "paddingRight": null,
+            "paddingBottom": null,
+            "paddingLeft": null
+          },
+          "status": "Missing"
+        },
+        "rail": {
+          "native": null,
+          "web": {
+            "x": 6,
+            "y": 40,
+            "width": 48,
+            "height": 856,
+            "fontSize": 16,
+            "fontWeight": 400,
+            "paddingTop": 8,
+            "paddingRight": 0,
+            "paddingBottom": 8,
+            "paddingLeft": 0,
+            "color": "rgb(232, 236, 242)",
+            "background": "rgba(0, 0, 0, 0)",
+            "backdropFilter": "none"
+          },
+          "gap": {
+            "x": null,
+            "y": null,
+            "width": null,
+            "height": null,
+            "fontSize": null,
+            "fontWeight": null,
+            "paddingTop": null,
+            "paddingRight": null,
+            "paddingBottom": null,
+            "paddingLeft": null
+          },
+          "status": "Missing"
+        },
+        "top bar": {
+          "native": null,
+          "web": {
+            "x": 0,
+            "y": 0,
+            "width": 60,
+            "height": 40,
+            "fontSize": 16,
+            "fontWeight": 400,
+            "paddingTop": 0,
+            "paddingRight": 0,
+            "paddingBottom": 0,
+            "paddingLeft": 8,
+            "color": "rgb(232, 236, 242)",
+            "background": "rgba(0, 0, 0, 0)",
+            "backdropFilter": "none"
+          },
+          "gap": {
+            "x": null,
+            "y": null,
+            "width": null,
+            "height": null,
+            "fontSize": null,
+            "fontWeight": null,
+            "paddingTop": null,
+            "paddingRight": null,
+            "paddingBottom": null,
+            "paddingLeft": null
+          },
+          "status": "Missing"
+        },
+        "worker pane": {
+          "native": null,
+          "web": {
+            "x": 368,
+            "y": 40,
+            "width": 616,
+            "height": 856,
+            "fontSize": 16,
+            "fontWeight": 400,
+            "paddingTop": 0,
+            "paddingRight": 0,
+            "paddingBottom": 0,
+            "paddingLeft": 0,
+            "color": "rgb(232, 236, 242)",
+            "background": "rgba(0, 0, 0, 0)",
+            "backdropFilter": "none"
+          },
+          "gap": {
+            "x": null,
+            "y": null,
+            "width": null,
+            "height": null,
+            "fontSize": null,
+            "fontWeight": null,
+            "paddingTop": null,
+            "paddingRight": null,
+            "paddingBottom": null,
+            "paddingLeft": null
+          },
+          "status": "Missing"
+        },
+        "transcript": {
+          "native": null,
+          "web": null,
+          "gap": {
+            "x": null,
+            "y": null,
+            "width": null,
+            "height": null,
+            "fontSize": null,
+            "fontWeight": null,
+            "paddingTop": null,
+            "paddingRight": null,
+            "paddingBottom": null,
+            "paddingLeft": null
+          },
+          "status": "Missing"
+        },
+        "composer": {
+          "native": null,
+          "web": {
+            "x": 380,
+            "y": 539.19,
+            "width": 592,
+            "height": 52,
+            "fontSize": 13,
+            "fontWeight": 400,
+            "paddingTop": 11,
+            "paddingRight": 14,
+            "paddingBottom": 4,
+            "paddingLeft": 14,
+            "color": "rgb(232, 236, 242)",
+            "background": "rgba(0, 0, 0, 0)",
+            "backdropFilter": "none"
+          },
+          "gap": {
+            "x": null,
+            "y": null,
+            "width": null,
+            "height": null,
+            "fontSize": null,
+            "fontWeight": null,
+            "paddingTop": null,
+            "paddingRight": null,
+            "paddingBottom": null,
+            "paddingLeft": null
+          },
+          "status": "Missing"
+        },
+        "palette": {
+          "native": null,
+          "web": null,
+          "gap": {
+            "x": null,
+            "y": null,
+            "width": null,
+            "height": null,
+            "fontSize": null,
+            "fontWeight": null,
+            "paddingTop": null,
+            "paddingRight": null,
+            "paddingBottom": null,
+            "paddingLeft": null
+          },
+          "status": "Missing"
+        },
+        "settings": {
+          "native": null,
+          "web": null,
+          "gap": {
+            "x": null,
+            "y": null,
+            "width": null,
+            "height": null,
+            "fontSize": null,
+            "fontWeight": null,
+            "paddingTop": null,
+            "paddingRight": null,
+            "paddingBottom": null,
+            "paddingLeft": null
+          },
+          "status": "Missing"
+        },
+        "files": {
+          "native": null,
+          "web": null,
+          "gap": {
+            "x": null,
+            "y": null,
+            "width": null,
+            "height": null,
+            "fontSize": null,
+            "fontWeight": null,
+            "paddingTop": null,
+            "paddingRight": null,
+            "paddingBottom": null,
+            "paddingLeft": null
+          },
+          "status": "Missing"
+        },
+        "diff": {
+          "native": null,
+          "web": null,
+          "gap": {
+            "x": null,
+            "y": null,
+            "width": null,
+            "height": null,
+            "fontSize": null,
+            "fontWeight": null,
+            "paddingTop": null,
+            "paddingRight": null,
+            "paddingBottom": null,
+            "paddingLeft": null
+          },
+          "status": "Missing"
+        },
+        "terminal": {
+          "native": null,
+          "web": null,
+          "gap": {
+            "x": null,
+            "y": null,
+            "width": null,
+            "height": null,
+            "fontSize": null,
+            "fontWeight": null,
+            "paddingTop": null,
+            "paddingRight": null,
+            "paddingBottom": null,
+            "paddingLeft": null
+          },
+          "status": "Missing"
+        }
+      },
+      "status": "Partial"
+    }
+  ]
+}

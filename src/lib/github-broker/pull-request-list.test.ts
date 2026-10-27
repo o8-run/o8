@@ -30,15 +30,14 @@ describe('paged pull request reads', () => {
 
   it('keeps public reads available without a connection and marks unavailable stats honestly', async () => {
     hasGitHubBrokerAccess.mockReturnValue(false);
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json([pull(1)]));
-    try {
+    githubInstallationFetch.mockResolvedValue({ response: Response.json([pull(1)]), anonymous: true });
+    {
       const result = await fetchPullRequestListPage('example/repo', 'open', 1);
-      expect(fetchMock).toHaveBeenCalledOnce();
-      expect(githubInstallationFetch).not.toHaveBeenCalled();
+      expect(githubInstallationFetch).toHaveBeenCalledOnce();
       expect(result.prs[0].additions).toBeNull();
       expect(result.prs[0].requestedReviewers).toBeNull();
       expect(result.statsUnavailable).toBe(true);
-    } finally { fetchMock.mockRestore(); }
+    }
   });
 
   it('retains the list when optional summary access fails and distinguishes merged PRs', async () => {

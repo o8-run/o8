@@ -1,4 +1,5 @@
 import { currentRecoveryRun, recoveryInterrupted } from '@/lib/runtimes/shared/owned-session/automatic-recovery';
+import { packetAutomaticRecoveryHoldReason } from '@/lib/lane/packet-stop-hold';
 import { randomUUID } from 'node:crypto';
 import { existsSync, realpathSync } from 'node:fs';
 import { readAbnormalStderrTail } from '@/lib/runtimes/shared/owned-session/exit-outcome';
@@ -25,6 +26,8 @@ export async function relaunchSupervisedAgent(
   if (!lane || !retryOfSurfaceId) {
     return { status: 'held', reason: 'Automatic retry held: the original active lane is unavailable.' };
   }
+  const packetHold = lane.packetId && packetAutomaticRecoveryHoldReason(lane.packetId);
+  if (packetHold) return { status: 'held', reason: `Automatic retry held: ${packetHold}.` };
   if (!['running', 'recovering'].includes(lane.status)) {
     return { status: 'held', reason: 'Automatic retry held: the lane is no longer running or recovering.' };
   }

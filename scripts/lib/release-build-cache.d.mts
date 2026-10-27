@@ -14,6 +14,7 @@ export interface ReleaseBuildCacheIdentity {
 }
 
 export interface ReleaseBuildCacheAction {
+  webOwnership?: import('./release-web-cache-ownership.mjs').RestoredWebCacheOwnership;
   phase: ReleaseBuildCachePhase;
   status: 'hit_exact' | 'hit_compatible' | 'miss' | 'bypass' | 'captured' | 'already_captured';
   reason: string;

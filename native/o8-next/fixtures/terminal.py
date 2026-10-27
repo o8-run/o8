@@ -52,6 +52,13 @@ while True:
                 emit(block)
                 if command == "flood":
                     time.sleep(max(0, started + (i + 1) * 0.004 - time.monotonic()))
-            emit("FLOOD-DONE\r\n")
+            tail_gate = os.environ.get("O8_NEXT_TERMINAL_FLOOD_TAIL_GATE")
+            if tail_gate:
+                emit("FLOOD-DONE")
+                while not os.path.exists(tail_gate):
+                    time.sleep(0.01)
+                emit("\r\n")
+            else:
+                emit("FLOOD-DONE\r\n")
         else:
             emit("\x1b[31mKEY\x1b[0m 界 e\u0301\r\n")

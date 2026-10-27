@@ -5,6 +5,8 @@ use crate::projects_model::Ledger;
 mod thread_list;
 #[path = "sidebar/thread_list_client.rs"]
 mod thread_list_client;
+#[path = "sidebar/thread_mutations_client.rs"]
+mod thread_mutations_client;
 use thread_list::{Event as ThreadEvent, ThreadList};
 pub(super) type Slice = EmptyState;
 #[derive(Default)]
@@ -58,7 +60,14 @@ pub(super) const REGISTRATION: Registration = Registration {
             .flex()
             .flex_1()
             .min_h_0()
-            .child(shell.surfaces.sidebar.view.as_ref().unwrap().clone())
+            .child(
+                gpui::AnyView::from(shell.surfaces.sidebar.view.as_ref().unwrap().clone()).cached(
+                    gpui::StyleRefinement::default()
+                        .w(px(280.))
+                        .h_full()
+                        .flex_shrink_0(),
+                ),
+            )
             .child(div().flex().flex_col().flex_1().min_w_0().child(content))
             .into_any_element()
     },

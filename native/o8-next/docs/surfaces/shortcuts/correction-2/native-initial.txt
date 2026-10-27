@@ -1,0 +1,11 @@
+thread 'diff_tests::diff_real_server_selection_modes_review_and_virtualized_paint' (291018) panicked at src/diff_tests.rs:176:5:
+assertion failed: view.read_with(cx, |s, _| s.notice.contains("truncated"))
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test diff_tests::diff_real_server_selection_modes_review_and_virtualized_paint ... FAILED
+O8_NEXT_BRAIN_EVIDENCE {"endpoint":"GPUI TestAppContext CPU scene paint with test text; no GPU/compositor","platform":"linux","openToFirstFrameMs":295.123491,"askToAnswerFrameMs":426.212445,"clearToFrameMs":57.667342000000005,"inputToFrameP95Ms":62.225044,"inputToFrameMsSorted":[19.156724999999998,19.58723,21.144596,24.115707,25.717406,26.197048000000002,26.756240000000002,30.303438,31.202044,32.628544000000005,34.088082,39.022965,39.729217999999996,39.936641,40.846652999999996,43.751186999999994,48.489454,54.926995,62.225044,66.432697]}
+thread 'shell::tests::shell_palette_switch_restart_and_server_down' (299947) panicked at src/shell_tests.rs:168:5:
+assertion `left == right` failed
+  left: Some(Session("thoughts-long"))
+ right: Some(Grid)
+test shell::tests::shell_palette_switch_restart_and_server_down ... FAILED
+test result: FAILED. 95 passed; 2 failed; 3 ignored; 0 measured; 0 filtered out; finished in 486.60s

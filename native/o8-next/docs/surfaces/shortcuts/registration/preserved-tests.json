@@ -1,0 +1,13 @@
+{
+  "mainTestFunctions": 91,
+  "preservedSurfaceTestFunctions": [
+    "shortcuts_overlay_bindings_dismissal_and_typing"
+  ],
+  "missingMainTestFunctions": [],
+  "newTestFunctions": [
+    "shortcuts_reopen_retains_list_scroll",
+    "shortcuts_focused_grid_terminal_keeps_question_and_close_keys",
+    "shortcuts_focused_text_field_keeps_help_and_close_keys",
+    "shortcuts_control_alt_arrows_belong_to_grid_panes"
+  ]
+}

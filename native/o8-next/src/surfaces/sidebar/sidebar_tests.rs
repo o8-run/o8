@@ -459,20 +459,20 @@ fn sidebar_group_order_search_keyboard_rename_archive_and_live_events(cx: &mut T
             .read(cx)
             .rows
             .iter()
-            .position(|r| r.id.as_deref() == Some("pi-owned:grid-runtime"))
+            .position(|r| r.id.as_deref() == Some("pi-builtin-owned:grid-runtime"))
             .unwrap()
     });
     assert_eq!(row, 2);
     click(cx, "thread-row-2");
     ready(&shell, cx);
-    assert_eq!(active_id(&shell, cx), "pi-owned:grid-runtime");
+    assert_eq!(active_id(&shell, cx), "pi-builtin-owned:grid-runtime");
     cx.simulate_keystrokes("f8");
     draw(cx);
     cx.simulate_keystrokes("escape");
     draw(cx);
     cx.simulate_keystrokes("home down enter");
     ready(&shell, cx);
-    assert_ne!(active_id(&shell, cx), "pi-owned:grid-runtime");
+    assert_ne!(active_id(&shell, cx), "pi-builtin-owned:grid-runtime");
 }
 
 #[gpui::test]
@@ -573,6 +573,10 @@ fn sidebar_worker_archive_real_path(cx: &mut TestAppContext) {
     settle(&shell, cx);
     click(cx, "thread-row-2");
     ready(&shell, cx);
+    // Opening the worker focuses its content. Focus the sidebar through its
+    // real shortcut before clicking the footer control hidden outside it.
+    cx.simulate_keystrokes("f8");
+    settle(&shell, cx);
     click(cx, "thread-archive");
     wait_for(&shell, cx, |s, cx| {
         !s.surfaces
@@ -583,17 +587,17 @@ fn sidebar_worker_archive_real_path(cx: &mut TestAppContext) {
             .read(cx)
             .sessions
             .iter()
-            .any(|s| s.id == "pi-owned:grid-runtime")
+            .any(|s| s.id == "pi-builtin-owned:grid-runtime")
     });
     let state: Value = fixture
         .client
         .get(
             "/api/runtime/archive",
-            &[("sessionKeys", "pi-owned:grid-runtime")],
+            &[("sessionKeys", "pi-builtin-owned:grid-runtime")],
         )
         .unwrap();
     assert_eq!(
-        state["states"]["pi-owned:grid-runtime"], "archived",
+        state["states"]["pi-builtin-owned:grid-runtime"], "archived",
         "native worker archive must persist in the desktop runtime store"
     );
 }

@@ -3,6 +3,8 @@
 // reports a successful check. Dispatch and unavailable history compile fully.
 import { spawnSync } from 'node:child_process';
 import { appendFileSync, readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { nativeTestInputs } from './native-test-inputs.mjs';
 
 function git(args) {
   const result = spawnSync('git', args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
@@ -11,6 +13,12 @@ function git(args) {
 }
 
 function changedNativeInputs() {
+  if (process.argv.includes('--worktree')) {
+    const base = git(['merge-base', 'origin/main', 'HEAD']).trim();
+    return isNative(git(['diff', '--name-only', '--no-renames', '-z', base, 'HEAD', '--'])
+      + git(['diff', '--name-only', '--no-renames', '-z', 'HEAD', '--'])
+      + git(['ls-files', '--others', '--exclude-standard', '-z']));
+  }
   const eventName = process.env.GITHUB_EVENT_NAME;
   if (eventName === 'workflow_dispatch') return true;
   const event = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'));
@@ -30,7 +38,22 @@ function changedNativeInputs() {
   if (eventName === 'pull_request') base = git(['merge-base', base, head]).trim();
   // No rename detection: both the old and new paths must be considered,
   // including deletions. NUL delimiters preserve whitespace in file names.
-  const paths = git(['diff', '--name-only', '--no-renames', '-z', base, head, '--']).split('\0');
+  return isNative(git(['diff', '--name-only', '--no-renames', '-z', base, head, '--']));
+}
+
+function isNative(changedPaths) {
+  const paths = changedPaths.split('\0');
+  if (process.argv.includes('--o8-next')) {
+    const inputs = nativeTestInputs(fileURLToPath(new URL('../../', import.meta.url)));
+    return paths.some(file =>
+      inputs.has(file)
+      || ['scripts/ci/native-test-inputs.mjs', 'scripts/ci/install-native-linux-deps.sh', 'tsconfig.json'].includes(file)
+      || /^(\.cargo\/|rust-toolchain(?:\.toml)?$|Cargo\.(?:toml|lock)$)/.test(file)
+      || /^(native\/o8-next|scripts\/next|crates\/o8d|\.github\/actions\/next-linux-setup)\//.test(file)
+      || ['package.json', 'package-lock.json', '.github/workflows/ci.yml',
+        '.github/workflows/next-linux.yml', 'scripts/ci/native-changes.mjs', 'scripts/ci/native-test-shard.mjs',
+        'scripts/register-server-only-stub.mjs'].includes(file));
+  }
   return paths.some((file) =>
     /\.rs$/.test(file)
     || /(^|\/)Cargo\.(toml|lock)$/.test(file)
@@ -47,5 +70,6 @@ try {
 } catch {
   console.warn('[native-changes] Cannot establish the diff; running the full native gates.');
 }
-console.log(`[native-changes] ${changed ? 'Native inputs changed or full check requested.' : 'No native inputs changed; compile steps skipped.'}`);
+if (process.argv.includes('--worktree')) console.log(`changed=${changed}`);
+else console.log(`[native-changes] ${changed ? 'Native inputs changed or full check requested.' : 'No native inputs changed; compile steps skipped.'}`);
 if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `changed=${changed}\n`);

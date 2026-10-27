@@ -34,7 +34,7 @@ function resolveApiBase(): string {
   if (envBase) return envBase;
   const envPort = process.env.O8_API_PORT?.trim();
   if (envPort) return `http://127.0.0.1:${envPort}`;
-  return `http://localhost:${DEFAULT_API_PORT}`;
+  return `http://127.0.0.1:${DEFAULT_API_PORT}`;
 }
 
 // ── Panel Bearer token ──

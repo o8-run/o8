@@ -17,6 +17,7 @@ next-env.d.ts
 # baked into signed builds by scripts/tauri-export.mjs. Track only the template.
 o8.release.json
 coverage/
+.cache/eslint
 *.log
 *.tsbuildinfo
 *.png
@@ -94,3 +95,9 @@ services/
 # spec-ingest walks the filesystem (not git), so these stay searchable by the Brain
 # while remaining untracked. Do NOT remove this ignore or force-add these files.
 docs/private/
+
+src-tauri/helpers/o8-next
+src-tauri/helpers/o8-next-*
+
+# Local required native suite dependency cache
+/.o8-next-cargo/

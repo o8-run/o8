@@ -1,3 +1,4 @@
+import { viewerBytes } from '@/lib/viewers/bytes';
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
@@ -61,13 +62,7 @@ export async function GET(request: Request) {
     }
 
     const buffer = await opened.handle.readFile();
-    return new NextResponse(new Uint8Array(buffer), {
-      headers: {
-        'Content-Type': mimeType,
-        'Cache-Control': 'public, max-age=3600',
-        'Content-Length': opened.stat.size.toString(),
-      },
-    });
+    return viewerBytes(buffer, mimeType);
   } catch (error) {
     if (isWorkspaceFileError(error)) {
       return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });

@@ -1,6 +1,6 @@
 [package]
 name = "o8"
-version = "0.1.809"
+version = "0.1.811"
 description = "o8 — governance layer for autonomous engineering teams"
 authors = ["hurttlocker"]
 license = "MIT"
@@ -49,6 +49,7 @@ default = []
 dev-mcp-plugin = ["dep:tauri-plugin-mcp"]
 
 [dependencies]
+semver = "1"
 o8-restart-safety = { path = "../crates/o8-restart-safety" }
 serde_json = "1.0"
 uuid = { version = "1", features = ["v4"] }
@@ -81,7 +82,7 @@ tauri-plugin-global-shortcut = "2"
 # for async reqwest synth before handing MP3 bytes to !Send rodio. Zero binary
 # cost; features unify with Tauri's. `sync` adds the oneshot channel + Semaphore
 # the Symon voice-agent loop uses for the confirm gate.
-tokio = { version = "1", features = ["rt", "net", "time", "sync"] }
+tokio = { version = "1.54.1", features = ["rt", "net", "time", "sync"] }
 # Optional: see [features].dev-mcp-plugin above. Vendored in-repo so fresh
 # clones resolve without any sibling checkout (#1673 — cargo reads optional
 # path deps' manifests even when the feature is off).
@@ -212,6 +213,16 @@ windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Securit
 [target.'cfg(any(target_os = "windows", target_os = "linux"))'.dependencies]
 tauri-plugin-deep-link = "2"
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
+
+# ── Linux voice floor (#1672) ──
+# System speech (piper / espeak-ng / spd-say) and `pactl` ducking, detected at
+# runtime and shelled out to, so no ALSA/PipeWire headers or C++ toolchain
+# enter the shell build. Whisper (whisper-rs) lives only in the crate's
+# separate `o8-speech-recognizer` helper binary behind its `whisper` feature,
+# which this dependency does not enable.
+[target.'cfg(target_os = "linux")'.dependencies]
+o8-linux-voice = { path = "../crates/o8-linux-voice" }
+x11rb = { version = "=0.13.2", features = ["xinput"] }
 
 # ── System-wide Symon fold: paste + global Fn hotkey (macOS only) ──
 # Versions pinned to aqua/Symon's exact stack so the lifted `paste.rs` +

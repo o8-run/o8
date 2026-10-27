@@ -26,6 +26,10 @@ it.each([
   ['Brain', 'POST', '/api/cortex/ask', 400],
   ['Setup', 'GET', '/api/setup/config', 200],
   ['Terminal', 'GET', '/api/mobile/terminal-sessions', 200],
+  ['Workers list', 'GET', '/api/lanes?active=true', 200],
+  ['Workers events', 'GET', '/api/orchestrator/lane-events?since=0&timeoutMs=0', 200],
+  ['Sidebar list', 'GET', '/api/v2/chat-history/list?include=orchestrator', 200],
+  ['Sidebar archive validation', 'POST', '/api/runtime/archive', 400],
 ])('serves %s through the production o8d bridge with Next stopped', async (_surface, method, path, status) => {
   const response = await fetch(origin + path, { method, headers: { authorization: `Bearer ${server.token}`, 'content-type': 'application/json' },
     ...(method === 'POST' ? { body: '{}' } : {}) });
@@ -61,13 +65,13 @@ it('persists Setup conversation creation through its existing handler with Next 
 });
 
 it('walks every production surface registration and its HTTP routes', async () => {
-  const { nativeSurfaceRoutes } = await import('@/lib/ws-server/native-http-routes');
+  const { nativeSurfaceRoutes } = await import('@/lib/ws-server/native-http-registry');
   const shell = readFileSync('native/o8-next/src/shell.rs', 'utf8');
   const registered = [...shell.matchAll(/(\w+): \w+(?:\([^)]*\))? = "surfaces\/[^"]+";/g)]
     .map(match => match[1]).filter(name => name !== 'fake');
   expect(Object.keys(nativeSurfaceRoutes).sort()).toEqual(registered.sort());
   for (const [name, routes] of Object.entries(nativeSurfaceRoutes)) {
-    if (!['grid', 'palette'].includes(name)) expect(routes.length, name).toBeGreaterThan(0);
+    if (!['grid', 'palette', 'shortcuts'].includes(name)) expect(routes.length, name).toBeGreaterThan(0);
     for (const route of routes) {
       const path = route.path.replace(/\[\w+\]/g, 'fixture');
       const handlers = await route.load() as Record<string, unknown>;
