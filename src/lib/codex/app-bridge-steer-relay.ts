@@ -1,3 +1,6 @@
+import { readSteerTranscriptAnchor } from '@/lib/ws-server/steer-transcript-anchor';
+import { appendMobileOrchestratorUserMessage } from '@/lib/mobile/orchestrator-thread-history';
+import type { SteerTranscriptAnchor } from '@/lib/transcripts/steer-anchor';
 import { createHash, randomUUID } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { createConnection, createServer, type Socket } from 'node:net';
@@ -69,6 +72,8 @@ export function createCodexSteerRelay(target: Target, steer: LiveSteer, running:
             socket.end(`${JSON.stringify({ accepted: false })}\n`); return;
           }
           const { checkComposerQueueBinding } = await import('@/lib/ws-server/composer-queue-heartbeat');
+          let anchor: SteerTranscriptAnchor | undefined;
+          let admittedAt = Date.now();
           const result = await steer(target.repoPath, message.message, { ...message.options, beforeAdmit: () => {
             const item = readComposerSend(message.options.clientUserMessageId ?? '');
             if (!item || item.admittedAt === null || item.intent !== 'steer-now' || item.threadId !== target.threadId
@@ -78,7 +83,14 @@ export function createCodexSteerRelay(target: Target, steer: LiveSteer, running:
               throw new Error('Codex steer does not match its admitted queue item.');
             }
             checkComposerQueueBinding(item);
+            anchor = readSteerTranscriptAnchor(target.repoPath, target.threadId);
+            admittedAt = Date.now();
           } });
+          if (result.accepted && anchor) {
+            const item = readComposerSend(message.options.clientUserMessageId!)!;
+            appendMobileOrchestratorUserMessage({ tabId: target.threadId, repoPath: target.repoPath,
+              messageId: `composer-steer-${item.id}`, message: item.payload.text, backend: 'codex', timestampMs: admittedAt, steerAnchor: anchor });
+          }
           socket.end(`${JSON.stringify(result)}\n`);
         } catch { socket.end(`${JSON.stringify({ unconfirmed: true })}\n`); }
       })();

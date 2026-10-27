@@ -1,3 +1,4 @@
+import { observeSteerTranscript } from '@/lib/ws-server/steer-transcript-anchor';
 import type { OrchestratorEvent } from '@/lib/lane/orchestrator-stream-events';
 import { createBackendRoleRouteChoice } from '@/lib/operator/role-routing';
 import { recordRoleRoutingReceiptSafely } from '@/lib/operator/role-routing-ledger';
@@ -35,7 +36,7 @@ export function resolveTurnReceiptMode(
 }
 
 /** Backend invocation seam used by ws-server's orchestrator-send handler. */
-export function sendOrchestratorBackendTurn(
+export async function sendOrchestratorBackendTurn(
   backend: OrchestratorBackend,
   repoPath: string,
   message: string,
@@ -77,12 +78,15 @@ export function sendOrchestratorBackendTurn(
       status,
     });
   };
-  return backend.sendTurn(repoPath, message, onEvent, routedOptions)
-    .then(() => {
-      record('selected', `${backend.label} completed the orchestrator turn.`);
-    })
-    .catch((error) => {
-      record('failed', `${backend.label} failed the orchestrator turn: ${error instanceof Error ? error.message : String(error)}`);
-      throw error;
-    });
+  const transcript = observeSteerTranscript(repoPath, options.threadId, options.transcriptMessageId ?? options.crashSurvival?.assistantMessageId);
+  try {
+    return await backend.sendTurn(repoPath, message, event => { transcript.event(event); onEvent(event); }, routedOptions)
+      .then(() => {
+        record('selected', `${backend.label} completed the orchestrator turn.`);
+      })
+      .catch((error) => {
+        record('failed', `${backend.label} failed the orchestrator turn: ${error instanceof Error ? error.message : String(error)}`);
+        throw error;
+      });
+  } finally { transcript.close(); }
 }

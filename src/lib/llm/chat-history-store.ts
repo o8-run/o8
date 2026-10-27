@@ -24,6 +24,8 @@ const HISTORY_STALE_LOCK_MS = 30_000;
 const historyLockWaiter = new Int32Array(new SharedArrayBuffer(4));
 
 export interface PersistedLlmChatMessage {
+  steerAnchor?: import('@/lib/transcripts/steer-anchor').SteerTranscriptAnchor;
+
   id: string;
   role: MobileTranscriptEntry['role'];
   content: string;
@@ -307,6 +309,7 @@ export function mapLlmHistoryToMobileTranscript(
     recalledFacts: message.recalledFacts,
     command: message.command,
     handoff: message.handoff,
+    steerAnchor: message.steerAnchor,
     compaction: message.compaction,
   }));
 }
