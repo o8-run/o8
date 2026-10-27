@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 // SYSTEM Node), so the packaging config tells the package manager about Node.
 //
 // It is a soft dependency (`Recommends`), not `Depends`: Debian 13 and
-// Ubuntu 24.04 ship Node 20, so a hard `nodejs (>= 22)` made apt refuse the
+// other distributions can ship older Node, so a hard `nodejs (>= 22)` refused the
 // install even for users who run Node 22 from nvm, fnm, Volta, asdf or mise.
 // The Rust pre-flight (`run_node_preflight` in src-tauri/src/lib.rs) finds
 // those installs and shows install instructions when none is usable.
