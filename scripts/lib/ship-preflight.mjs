@@ -391,12 +391,14 @@ function benchmarkStatePath(root) {
 // Process-group membership is visible for every process of this user, even
 // where macOS hides a process's environment (system binaries, hardened apps).
 function processGroups() {
-  const receipt = commandReceipt('ps', ['-axo', 'pid=,pgid='], { timeoutMs: 15_000, maxBuffer: MARKER_SCAN_MAX_BUFFER });
+  const receipt = commandReceipt('ps', ['-axo', 'pid=,pgid=,stat='], { timeoutMs: 15_000, maxBuffer: MARKER_SCAN_MAX_BUFFER });
   if (receipt.status !== 0) return null;
   const table = new Map();
   for (const line of receipt.stdout.split('\n')) {
-    const match = /^\s*(\d+)\s+(\d+)\s*$/.exec(line);
-    if (match) table.set(Number(match[1]), Number(match[2]));
+    const match = /^\s*(\d+)\s+(\d+)\s+(\S+)\s*$/.exec(line);
+    // Exited children can remain as zombies until their parent reaps them.
+    // They no longer run or hold build files.
+    if (match && !match[3].startsWith('Z')) table.set(Number(match[1]), Number(match[2]));
   }
   return table;
 }
@@ -520,7 +522,7 @@ export function runQuickBenchmarkPreflight(options) {
   // before recording or spawning a new run. This is a preflight failure, not
   // an unavailable speed measurement that the ship can ignore.
   if (lstatSync(join(root, '.next'), { throwIfNoEntry: false })) {
-    throw new Error('.next already exists; the ship benchmark requires absent output. Stop checkout users and use a clean release checkout; preserve the existing output for recovery.');
+    throw new Error('.next already exists; the ship benchmark requires absent output. After stopping checkout users, run `node scripts/postship-cleanup.mjs` to clear verified release-owned output; unknown output is preserved and requires a clean release checkout.');
   }
 
   const current = {

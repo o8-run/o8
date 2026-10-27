@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
+import { execDependencyInstallProcess } from './dependency-install-process';
+import { timedDependencyInstall } from './dependency-install-timing';
 
 import { guardedWorkspaceInvocation, materializationAwareExecFile } from '@/lib/worktree/materialization-execution';
 import type { WorktreeMaterializationIdentity } from '@/lib/worktree/materialization-identity';
@@ -31,10 +33,10 @@ export async function finishDependencyClone(input: {
   options: DependencyInstallOptions;
 }): Promise<void> {
   const { workspace, identity, recipe, options } = input;
-  const execute = async (command: string, args: string[], env?: NodeJS.ProcessEnv, timeoutMs = 60_000) => {
+  const execute = async (command: string, args: string[], env?: NodeJS.ProcessEnv, timeoutMs = 60_000, signal?: AbortSignal) => {
     const guarded = guardedWorkspaceInvocation(command, args, identity);
-    return materializationAwareExecFile(guarded.command, guarded.args, {
-      cwd: workspace, env, timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024,
+    return execDependencyInstallProcess(guarded.command, guarded.args, {
+      cwd: workspace, env, timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024, signal,
     });
   };
   if (recipe.lifecycleScripts === 'disabled') return;
@@ -59,10 +61,10 @@ export async function finishDependencyClone(input: {
   });
   try {
     const args = ['rebuild', '.', ...recipe.installArgs.slice(1)];
-    await profileDependencyClone('lifecycle-execute', async () => {
-      if (options.run) await options.run({ command: execution.executable, args, cwd: workspace, env, timeoutMs: 45 * 60_000 });
-      else await execute(execution.executable, args, env, 45 * 60_000);
-    });
+    await profileDependencyClone('lifecycle-execute', () => timedDependencyInstall(async signal => {
+      if (options.run) await options.run({ command: execution.executable, args, cwd: workspace, env, timeoutMs: 45 * 60_000, signal });
+      else await execute(execution.executable, args, env, 45 * 60_000, signal);
+    }));
   } finally {
     await profileDependencyClone('lifecycle-retire', () => purgeExactDirectory(runtime, receipt, undefined, options.afterRuntimeTreeCapture));
   }
