@@ -2461,6 +2461,12 @@
       ]
     },
     {
+      "path": "tests/composer-screenshot-recovery-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/composer-session-storage-real-path.test.ts",
       "reasons": [
         "real-path"

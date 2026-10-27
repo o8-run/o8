@@ -65,8 +65,9 @@ export function useDurableComposerQueue(target: ComposerQueueTarget | null, busy
     const snapshot = targetRef.current;
     if (!snapshot) throw new Error('Wait for this chat to be saved before using Send next.');
     const owner = ownerRef.current;
-    const payload = findPendingComposerSend(snapshot, draft)?.payload ?? capture();
-    const { attempt, fresh } = prepareComposerSend(snapshot, payload);
+    const payload = (await findPendingComposerSend(snapshot, draft))?.payload ?? capture();
+    const { attempt, fresh } = await prepareComposerSend(snapshot, payload);
+    if (ownerRef.current !== owner) throw new Error('The chat changed before submission. The message was not queued. Keep the original draft.');
     let item: QueuedComposerSendRecord;
     try {
       const body = await composerQueueRequest<{ item: QueuedComposerSendRecord }>('/api/orchestrator/composer-queue', {
@@ -160,8 +161,8 @@ export function useDurableComposerQueue(target: ComposerQueueTarget | null, busy
       } catch { return 'Unable to confirm cancellation. Inspect the queued messages in this conversation.'; }
     });
   }, [cancelRecord, serialize]);
-  const hasPending = (text: string, images: ComposerQueuePayload['images']) =>
-    Boolean(target && findPendingComposerSend(target, { text, images }));
+  const hasPending = async (text: string, images: ComposerQueuePayload['images']) =>
+    Boolean(target && await findPendingComposerSend(target, { text, images }));
   const steerableIds = useMemo(() => saved?.key === scopeKey && saved.steerableIds ? new Set(saved.steerableIds) : undefined, [saved, scopeKey]);
   return { items, transcriptItems, promoting, steerableIds, canSteer: saved?.key === scopeKey && saved.backend === backend && saved.canSteer, steer, hasPending, enqueue, enqueueVoice, cancel, cancelVoiceFollowups, error, removing, ready: !target || saved?.key === scopeKey };
 }

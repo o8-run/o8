@@ -116,70 +116,68 @@ export function useDefaultComposerSendBuffer({
     const text = latestInputRef.current.trim() || (attachedImages.length > 0 ? '[Image attached]' : '');
     if (!text) return;
     const images = attachedImages.map((image) => ({ name: image.name, dataUri: image.dataUri }));
-    let retryPending = false;
-    try { retryPending = active && !shouldBypass(text) && durable.hasPending(text, images); }
-    catch (error) { setAttachmentError(error instanceof Error ? error.message : 'Unable to read Send next recovery.'); return; }
-    if (images.length > 0) {
+    const owner = queueOwnerRef.current;
+    savingRef.current = true; setSaving(true);
+    void (async () => {
       try {
-        validateComposerImageAttachments(images);
-      } catch (error) {
-        setAttachmentError(error instanceof Error ? error.message : 'Invalid image attachment.');
-        return;
-      }
-      if (!active || shouldBypass(text) || (!retryPending && !composerBackendSupportsImages(backend))) {
-        setAttachmentError('This chat mode cannot receive images. Select a Codex or Claude agent, then send again.');
-        return;
-      }
-    }
-    setAttachmentError(null);
-    if (!active || shouldBypass(text)) {
-      sendUnbuffered(text);
-      return;
-    }
+        const retryPending = active && !shouldBypass(text) && await durable.hasPending(text, images);
+        if (queueOwnerRef.current !== owner) return;
+        if (images.length > 0) {
+          try {
+            validateComposerImageAttachments(images);
+          } catch (error) {
+            setAttachmentError(error instanceof Error ? error.message : 'Invalid image attachment.');
+            return;
+          }
+          if (!active || shouldBypass(text) || (!retryPending && !composerBackendSupportsImages(backend))) {
+            setAttachmentError('This chat mode cannot receive images. Select a Codex or Claude agent, then send again.');
+            return;
+          }
+        }
+        setAttachmentError(null);
+        if (!active || shouldBypass(text)) {
+          sendUnbuffered(text);
+          return;
+        }
 
-    if (!durable.ready) { setAttachmentError('Wait for queued messages to load before sending.'); return; }
-    if (busy || durable.items.length > 0 || retryPending) {
-      const owner = queueOwnerRef.current;
-      const attachmentSnapshot = JSON.stringify(images);
-      savingRef.current = true;
-      setSaving(true);
-      void (async () => {
-        try {
+        if (!durable.ready) { setAttachmentError('Wait for queued messages to load before sending.'); return; }
+        if (busy || durable.items.length > 0 || retryPending) {
+          const attachmentSnapshot = JSON.stringify(images);
           const confirm = await durable.enqueue({ text, images }, () => captureQueuedSend(text, images), intent);
           if (queueOwnerRef.current !== owner) return;
           confirm();
           if (latestInputRef.current === draft && JSON.stringify(imagesRef.current.map(image => ({ name: image.name, dataUri: image.dataUri }))) === attachmentSnapshot) {
             setInput(''); latestInputRef.current = ''; clearAttachments();
           }
-        } catch (error) {
-          if (queueOwnerRef.current === owner) setAttachmentError(error instanceof Error ? error.message : 'Unable to save the queued message.');
-        } finally { if (queueOwnerRef.current === owner) { savingRef.current = false; setSaving(false); } }
-      })();
-      return;
-    }
-
-    if (!sendBuffer.send(text, images)) return;
-    const admission = dispatched.current?.admission;
-    if (images.length && admission) {
-      const owner = queueOwnerRef.current;
-      const attachmentDraft = imagesRef.current;
-      savingRef.current = true; setSaving(true);
-      void admission.then(result => {
-        if (queueOwnerRef.current !== owner) return;
-        if (result.status === 'accepted') {
-          if (latestInputRef.current === draft && imagesRef.current === attachmentDraft && !uploadStateRef.current.uploading && !uploadStateRef.current.uploadError) {
-            setInput(''); latestInputRef.current = ''; clearAttachments();
-          }
-        } else if (result.status !== 'cancelled') {
-          setAttachmentError(result.status === 'rejected' ? `Image was not sent. ${result.error ?? 'The attachment was refused.'} Fix the error or reattach the image, then send again.`
-            : 'Image delivery is unconfirmed. Check the conversation and use Retry there before sending another turn.');
+          return;
         }
-      }).finally(() => { if (queueOwnerRef.current === owner) { savingRef.current = false; setSaving(false); } });
-      return;
-    }
-    setInput('');
-    latestInputRef.current = '';
-    clearAttachments();
+
+        if (!sendBuffer.send(text, images)) return;
+        const admission = dispatched.current?.admission;
+        if (images.length && admission) {
+          const attachmentDraft = imagesRef.current;
+          await admission.then(result => {
+            if (queueOwnerRef.current !== owner) return;
+            if (result.status === 'accepted') {
+              if (latestInputRef.current === draft && imagesRef.current === attachmentDraft && !uploadStateRef.current.uploading && !uploadStateRef.current.uploadError) {
+                setInput(''); latestInputRef.current = ''; clearAttachments();
+              }
+            } else if (result.status !== 'cancelled') {
+              setAttachmentError(result.status === 'rejected' ? `Image was not sent. ${result.error ?? 'The attachment was refused.'} Fix the error or reattach the image, then send again.`
+                : 'Image delivery is unconfirmed. Check the conversation and use Retry there before sending another turn.');
+            }
+          });
+          return;
+        }
+        if (latestInputRef.current === draft && JSON.stringify(imagesRef.current.map(image => ({ name: image.name, dataUri: image.dataUri }))) === JSON.stringify(images)) {
+          setInput(''); latestInputRef.current = ''; clearAttachments();
+        }
+      } catch (error) {
+        if (queueOwnerRef.current === owner) setAttachmentError(error instanceof Error ? error.message : 'Unable to save the queued message.');
+      } finally {
+        if (queueOwnerRef.current === owner) { savingRef.current = false; setSaving(false); }
+      }
+    })();
   }, [active, attachedImages, backend, blocked, busy, uploading, uploadError, captureQueuedSend, clearAttachments, durable, latestInputRef, sendBuffer, sendUnbuffered, setInput, shouldBypass]);
 
   const handleSend = useCallback(() => submit('send-next'), [submit]);
