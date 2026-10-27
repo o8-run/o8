@@ -1,0 +1,108 @@
+name: Current app paired launch validation
+
+on:
+  push:
+    branches: [perf/current-app-launch-stages]
+    paths: [.github/workflows/current-app-launch-pairs.yml]
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  MAIN_SOURCE: 103f4a09922e9ec5015b6bc52cb3000e273d923e
+  MEASURED_HEAD: 3dec26098dc66f04ae495d39fa614920b6a371f5
+  MEASUREMENT_HARNESS: 01ab614f9de8a3b597edb23137df1991859e9871
+
+jobs:
+  wait-head:
+    runs-on: ubuntu-latest
+    timeout-minutes: 70
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            for (let attempt = 0; attempt < 130; attempt++) {
+              const response = await github.rest.actions.listWorkflowRunArtifacts({ ...context.repo, run_id: 40432780141 });
+              const names = new Set(response.data.artifacts.filter(row => !row.expired).map(row => row.name));
+              if (names.has('current-app-launch-stage-head-app') && names.has('current-app-launch-stage-head-modules')) return;
+              if (attempt % 10 === 0) core.info('Waiting for the clean head app and module identities');
+              await new Promise(resolve => setTimeout(resolve, 30000));
+            }
+            throw new Error('Clean head artifact is not available');
+
+  compare:
+    needs: wait-head
+    runs-on: macos-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: lab
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.MEASUREMENT_HARNESS }}
+          path: harness
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.23.4
+          cache: npm
+          cache-dependency-path: harness/package-lock.json
+      - run: npm install -g npm@11.21.1
+      - run: npm ci --prefer-offline
+        working-directory: harness
+      - name: Verify the observer through a real server
+        run: node --test lab/scripts/bench/launch-stage-profile.test.mjs
+      - uses: actions/download-artifact@v4
+        with:
+          name: current-app-launch-stage-main-app
+          run-id: 40429122856
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/main
+      - uses: actions/download-artifact@v4
+        with:
+          name: current-app-launch-stage-main-modules
+          run-id: 40429122856
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/main
+      - uses: actions/download-artifact@v4
+        with:
+          name: current-app-launch-stage-head-app
+          run-id: 40432780141
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/head
+      - uses: actions/download-artifact@v4
+        with:
+          name: current-app-launch-stage-head-modules
+          run-id: 40432780141
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/head
+      - name: Restore the two clean app artifacts
+        run: |
+          mkdir -p main-app head-app
+          tar -C main-app -xf "$RUNNER_TEMP/main/main-app.tar"
+          tar -C head-app -xf "$RUNNER_TEMP/head/head-app.tar"
+      - name: Three main/head pairs on this seat
+        run: |
+          node lab/scripts/bench/native-launch-pairs.mjs --harness=harness --main=main-app/o8.app --main-sha="$MAIN_SOURCE" --head=head-app/o8.app --head-sha="$MEASURED_HEAD" --output="$RUNNER_TEMP/launch-pairs"
+      - name: Main startup discovery budget (red)
+        continue-on-error: true
+        run: node lab/scripts/bench/check-launch-stage-receipt.mjs "$RUNNER_TEMP/launch-pairs/main/stages.json" --check-cli-startup
+      - name: Head startup discovery budget (green)
+        run: node lab/scripts/bench/check-launch-stage-receipt.mjs "$RUNNER_TEMP/launch-pairs/head/stages.json" --check-cli-startup
+      - name: Keep the one-second launch target visible
+        continue-on-error: true
+        run: node lab/scripts/bench/check-launch-stage-receipt.mjs "$RUNNER_TEMP/launch-pairs/head/stages.json" --check
+      - name: Profile main separately from timing
+        run: node lab/scripts/bench/native-launch-stages.mjs --harness=harness --app=main-app/o8.app --sha="$MAIN_SOURCE" --samples=1 --profile --stats="$RUNNER_TEMP/main/launch-client-modules.json" --output="$RUNNER_TEMP/profile-main"
+      - name: Profile head separately from timing
+        run: node lab/scripts/bench/native-launch-stages.mjs --harness=harness --app=head-app/o8.app --sha="$MEASURED_HEAD" --samples=1 --profile --stats="$RUNNER_TEMP/head/launch-client-modules.json" --check-cli-startup --output="$RUNNER_TEMP/profile-head"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: current-app-launch-paired-comparison
+          path: |
+            ${{ runner.temp }}/launch-pairs/**/*.json
+            ${{ runner.temp }}/profile-main/*.json
+            ${{ runner.temp }}/profile-head/*.json
+          retention-days: 7

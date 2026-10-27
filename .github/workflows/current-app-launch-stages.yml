@@ -162,18 +162,17 @@ jobs:
           mkdir -p main-app head-app
           tar -C main-app -xf "$RUNNER_TEMP/main/main-app.tar"
           tar -C head-app -xf "$RUNNER_TEMP/head/head-app.tar"
-      - name: Main three runs, then head three runs on this seat
+      - name: Three main/head pairs on this seat
         run: |
-          node lab/scripts/bench/native-launch-stages.mjs --harness=harness --app=main-app/o8.app --sha="$MAIN_SOURCE" --samples=3 --output="$RUNNER_TEMP/launch-main"
-          node lab/scripts/bench/native-launch-stages.mjs --harness=harness --app=head-app/o8.app --sha="$GITHUB_SHA" --samples=3 --check-cli-startup --output="$RUNNER_TEMP/launch-head"
+          node lab/scripts/bench/native-launch-pairs.mjs --harness=harness --main=main-app/o8.app --main-sha="$MAIN_SOURCE" --head=head-app/o8.app --head-sha="$GITHUB_SHA" --output="$RUNNER_TEMP/launch-pairs"
       - name: Main startup discovery budget (red)
         continue-on-error: true
-        run: node lab/scripts/bench/check-launch-stage-receipt.mjs "$RUNNER_TEMP/launch-main/stages.json" --check-cli-startup
+        run: node lab/scripts/bench/check-launch-stage-receipt.mjs "$RUNNER_TEMP/launch-pairs/main/stages.json" --check-cli-startup
       - name: Head startup discovery budget (green)
-        run: node lab/scripts/bench/check-launch-stage-receipt.mjs "$RUNNER_TEMP/launch-head/stages.json" --check-cli-startup
+        run: node lab/scripts/bench/check-launch-stage-receipt.mjs "$RUNNER_TEMP/launch-pairs/head/stages.json" --check-cli-startup
       - name: Keep the one-second launch target visible
         continue-on-error: true
-        run: node lab/scripts/bench/check-launch-stage-receipt.mjs "$RUNNER_TEMP/launch-head/stages.json" --check
+        run: node lab/scripts/bench/check-launch-stage-receipt.mjs "$RUNNER_TEMP/launch-pairs/head/stages.json" --check
       - name: Profile main separately from timing
         run: node lab/scripts/bench/native-launch-stages.mjs --harness=harness --app=main-app/o8.app --sha="$MAIN_SOURCE" --samples=1 --profile --stats="$RUNNER_TEMP/main/launch-client-modules.json" --output="$RUNNER_TEMP/profile-main"
       - name: Profile head separately from timing
@@ -183,8 +182,7 @@ jobs:
         with:
           name: current-app-launch-stage-comparison
           path: |
-            ${{ runner.temp }}/launch-main/*.json
-            ${{ runner.temp }}/launch-head/*.json
+            ${{ runner.temp }}/launch-pairs/**/*.json
             ${{ runner.temp }}/profile-main/*.json
             ${{ runner.temp }}/profile-head/*.json
           retention-days: 7
