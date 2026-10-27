@@ -1,6 +1,8 @@
 import { readFile, stat } from 'node:fs/promises';
+import { withStagedStdinOutcome } from './exit-outcome';
 import { RunArtifactCache } from './run-artifact-cache';
 import type { detectRunSandboxDenial } from './sandbox-denial';
+import { stagedStdinDeliveryPath } from './staged-stdin';
 import type { OwnedRunRecord, OwnedRuntimeAdapter } from './types';
 
 // Discovery can refresh many completed logs together. Bound their source buffers
@@ -42,9 +44,13 @@ export function createRunArtifactReader(
   const namespace = `${nextReaderId++}:`;
   const rawRetentionMax = 2 * 1024 * 1024;
   return (run: OwnedRunRecord, includeStdout = true, includeEntries = true, inspectSandbox = false) => withReadSlot(async () => {
-    const [stdoutKey, stderrKey] = await Promise.all([statKey(run.stdoutPath), statKey(run.stderrPath)]);
+    // Include relay evidence in cache invalidation even when provider logs stop changing.
+    const deliveryPath = run.stdinPath ? stagedStdinDeliveryPath(run.stdinPath) : undefined;
+    const [stdoutKey, stderrKey, deliveryKey] = await Promise.all([
+      statKey(run.stdoutPath), statKey(run.stderrPath), deliveryPath ? statKey(deliveryPath) : 'absent',
+    ]);
     const key = JSON.stringify([
-      stdoutKey, stderrKey, run.outcome, run.finishedAt, run.interruptRequestedAt, run.childExit, run.sandboxed,
+      stdoutKey, stderrKey, deliveryKey, run.outcome, run.finishedAt, run.interruptRequestedAt, run.childExit, run.sandboxed,
     ]);
     const cacheId = namespace + run.id;
     const prior = summaries.get(cacheId);
@@ -56,12 +62,14 @@ export function createRunArtifactReader(
       ]);
       return { stdoutRaw, stderrRaw, parsed: cached.parsed, sandboxDenial: cached.sandboxDenial };
     }
-    const [stdoutRaw, stderrRaw] = await Promise.all([
+    const [stdoutRaw, stderrRaw, deliveryRaw] = await Promise.all([
       stdoutKey === 'absent' ? '' : readFile(run.stdoutPath, 'utf8').catch(() => ''),
       stderrKey === 'absent' ? '' : readFile(run.stderrPath, 'utf8').catch(() => ''),
+      cached?.key === key || deliveryKey === 'absent' ? '' : readFile(deliveryPath!, 'utf8'),
     ]);
-    const parsed = cached?.key === key ? cached.parsed : adapter.parseRunLog(stdoutRaw, run, stdoutKey === 'absent' ? undefined
-      : new Date(Number(stdoutKey.slice(stdoutKey.indexOf(':') + 1))).toISOString());
+    const parsed = cached?.key === key ? cached.parsed : withStagedStdinOutcome(adapter.parseRunLog(stdoutRaw, run,
+      stdoutKey === 'absent' ? undefined
+        : new Date(Number(stdoutKey.slice(stdoutKey.indexOf(':') + 1))).toISOString()), deliveryRaw);
     // Scan only when reconciliation requests it after the process exits.
     // Preserve a checked result across transcript reads of the same log.
     const sandboxDenial = run.sandboxDenial ?? (inspectSandbox && run.sandboxed

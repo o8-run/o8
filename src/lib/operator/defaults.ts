@@ -204,7 +204,7 @@ export interface OperatorDefaults extends KnowledgeSourceDefaults, StorageReserv
    * fleet-canvas tabs (mirrors `experimentalChat`: tab data stays persisted
    * for when it flips back on).
    */
-  experimentalCanvas: boolean;
+  experimentalCanvas: boolean; experimentalNext: boolean;
   /** Native browser-view: render the embedded Browser pane in a host-owned child
    *  WebviewWindow (origin-sensitive auth apps render natively + stay
    *  agent-grabbable) instead of the iframe/proxy + engine-JPEG fallback.
@@ -285,7 +285,7 @@ export interface OperatorDefaults extends KnowledgeSourceDefaults, StorageReserv
   updateAutoApply: UpdateAutoApply;
   /** Collide aggregator override. Auto follows the active composer backend. */
   collideAggregator: CollideAggregator;
-  /** Coarse product-usage telemetry. Explicit opt-in, persisted, and default off. */ productTelemetryEnabled: boolean;
+  /** Coarse usage analytics: null = never chosen (default on), true = on, false = off. */ productTelemetryEnabled: boolean | null;
   /** First-run telemetry prompt was answered with both independent choices. */ telemetryConsentAnswered: boolean;
   /** Crash-log upload opt-in; local capture continues while off. Env: `O8_TELEMETRY_OPT_IN`. */ telemetryOptIn: boolean;
   /** Crash-log endpoint, consulted only when telemetryOptIn is on. */ telemetryIngestUrl: string;
@@ -364,7 +364,7 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   experimentalOpencode: false,
   experimentalGemini: false,
   experimentalChat: false,
-  experimentalCanvas: false,
+  experimentalCanvas: false, experimentalNext: false,
   nativeBrowserView: true,
   classAComposer: 'auto',
   // ON by default post-#1097; subscription pool, not Agent SDK pool.
@@ -389,7 +389,7 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   targetingAction: { runtime: 'codex', model: '', effort: 'high' },
   updateAutoApply: 'off',
   collideAggregator: 'auto',
-  productTelemetryEnabled: false,
+  productTelemetryEnabled: null,
   telemetryConsentAnswered: false,
   telemetryOptIn: false, // Local capture only, nothing uploaded.
   telemetryIngestUrl: '',
@@ -501,7 +501,7 @@ function resolveFromFile(stored: StoredOperatorDefaults): FileOperatorDefaults {
   }
   if (typeof stored.experimentalCanvas === 'boolean') {
     result.experimentalCanvas = stored.experimentalCanvas;
-  }
+  } if (typeof stored.experimentalNext === 'boolean') result.experimentalNext = stored.experimentalNext;
   if (typeof stored.nativeBrowserView === 'boolean') {
     result.nativeBrowserView = stored.nativeBrowserView;
   }
@@ -541,7 +541,7 @@ function resolveFromFile(stored: StoredOperatorDefaults): FileOperatorDefaults {
   if (isCollideAggregator(stored.collideAggregator)) {
     result.collideAggregator = stored.collideAggregator;
   }
-  if (typeof stored.productTelemetryEnabled === 'boolean') result.productTelemetryEnabled = stored.productTelemetryEnabled;
+  if (stored.productTelemetryEnabled === null || typeof stored.productTelemetryEnabled === 'boolean') result.productTelemetryEnabled = stored.productTelemetryEnabled;
   if (typeof stored.telemetryConsentAnswered === 'boolean') result.telemetryConsentAnswered = stored.telemetryConsentAnswered;
   if (typeof stored.telemetryOptIn === 'boolean') {
     result.telemetryOptIn = stored.telemetryOptIn;
@@ -686,7 +686,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     experimentalOpencode: envOpencode ?? fileValues.experimentalOpencode ?? OPERATOR_DEFAULTS_FALLBACK.experimentalOpencode,
     experimentalGemini: envGemini ?? fileValues.experimentalGemini ?? OPERATOR_DEFAULTS_FALLBACK.experimentalGemini,
     experimentalChat: envChat ?? fileValues.experimentalChat ?? OPERATOR_DEFAULTS_FALLBACK.experimentalChat,
-    experimentalCanvas: envCanvas ?? fileValues.experimentalCanvas ?? OPERATOR_DEFAULTS_FALLBACK.experimentalCanvas,
+    experimentalCanvas: envCanvas ?? fileValues.experimentalCanvas ?? OPERATOR_DEFAULTS_FALLBACK.experimentalCanvas, experimentalNext: fileValues.experimentalNext ?? false,
     nativeBrowserView: envNative ?? fileValues.nativeBrowserView ?? OPERATOR_DEFAULTS_FALLBACK.nativeBrowserView,
     classAComposer: envComposer ?? fileValues.classAComposer ?? OPERATOR_DEFAULTS_FALLBACK.classAComposer,
     inAppOrchestratorEnabled,
@@ -764,7 +764,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     experimentalOpencode: envOpencode !== null ? 'env' : fileValues.experimentalOpencode !== undefined ? 'file' : 'default',
     experimentalGemini: envGemini !== null ? 'env' : fileValues.experimentalGemini !== undefined ? 'file' : 'default',
     experimentalChat: envChat !== null ? 'env' : fileValues.experimentalChat !== undefined ? 'file' : 'default',
-    experimentalCanvas: envCanvas !== null ? 'env' : fileValues.experimentalCanvas !== undefined ? 'file' : 'default',
+    experimentalCanvas: envCanvas !== null ? 'env' : fileValues.experimentalCanvas !== undefined ? 'file' : 'default', experimentalNext: fileValues.experimentalNext !== undefined ? 'file' : 'default',
     nativeBrowserView: envNative !== null ? 'env' : fileValues.nativeBrowserView !== undefined ? 'file' : 'default',
     classAComposer: envComposer !== null ? 'env' : fileValues.classAComposer !== undefined ? 'file' : 'default',
     inAppOrchestratorEnabled:
@@ -958,7 +958,7 @@ async function updateOperatorDefaultsOnce(update: Partial<OperatorDefaults>, exp
   }
   if (update.experimentalCanvas !== undefined) {
     stored.experimentalCanvas = Boolean(update.experimentalCanvas);
-  }
+  } if (update.experimentalNext !== undefined) stored.experimentalNext = Boolean(update.experimentalNext);
   if (update.nativeBrowserView !== undefined) {
     stored.nativeBrowserView = Boolean(update.nativeBrowserView);
   }
@@ -1017,7 +1017,7 @@ async function updateOperatorDefaultsOnce(update: Partial<OperatorDefaults>, exp
     }
     stored.collideAggregator = update.collideAggregator;
   }
-  if (update.productTelemetryEnabled !== undefined) stored.productTelemetryEnabled = Boolean(update.productTelemetryEnabled);
+  if (update.productTelemetryEnabled !== undefined) stored.productTelemetryEnabled = update.productTelemetryEnabled;
   if (update.telemetryConsentAnswered !== undefined) stored.telemetryConsentAnswered = Boolean(update.telemetryConsentAnswered);
   if (update.telemetryOptIn !== undefined) {
     stored.telemetryOptIn = Boolean(update.telemetryOptIn);
@@ -1227,9 +1227,9 @@ export function resolveCollideAggregatorSync(): CollideAggregator {
   return getOperatorDefaultsSync().values.collideAggregator;
 }
 
-/** Whether coarse product telemetry is explicitly opted in (default off). */
+/** Effective usage preference. First-run disclosure is a separate egress gate. */
 export function resolveProductTelemetryEnabledSync(): boolean {
-  return getOperatorDefaultsSync().values.productTelemetryEnabled;
+  return getOperatorDefaultsSync().values.productTelemetryEnabled !== false;
 }
 
 /** Whether crash-telemetry upload is opted in (Rock 2, default off). */

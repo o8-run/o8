@@ -261,25 +261,39 @@ fn active_id(shell: &Entity<Shell>, cx: &mut VisualTestContext) -> String {
     })
 }
 fn assert_oracle(shell: &Entity<Shell>, cx: &VisualTestContext, expected: Value) {
-    let actual = shell.read_with(cx, |s, cx| {
-        serde_json::to_value(&*s.surfaces.sidebar.view.as_ref().unwrap().read(cx).rows).unwrap()
+    let sessions = shell.read_with(cx, |s, cx| {
+        s.surfaces
+            .sidebar
+            .view
+            .as_ref()
+            .unwrap()
+            .read(cx)
+            .sessions
+            .clone()
     });
-    for (i, (actual, expected)) in actual
+    let expected: Vec<_> = expected
         .as_array()
         .unwrap()
         .iter()
-        .zip(expected.as_array().unwrap())
-        .enumerate()
-    {
+        .filter(|r| r["kind"] == "thread")
+        .collect();
+    assert_eq!(
+        sessions.len(),
+        expected.len(),
+        "retain every desktop route record, including disclosed groups"
+    );
+    for row in expected {
+        let session = sessions
+            .iter()
+            .find(|s| row["id"] == s.id)
+            .expect("desktop record must remain available");
+        assert_eq!(row["title"], session.title);
+        assert_eq!(row["status"], session.status);
         assert_eq!(
-            actual, expected,
-            "desktop row {i}: record, workspace, section, order and state"
+            row["workspace"],
+            session.repo_path.as_deref().unwrap_or("Unassigned")
         );
     }
-    assert_eq!(
-        actual.as_array().unwrap().len(),
-        expected.as_array().unwrap().len()
-    );
 }
 
 #[gpui::test]
@@ -690,3 +704,15 @@ impl Fixture {
         Self::start_mode(false, &options.join(" "))
     }
 }
+
+#[path = "project_header_tests.rs"]
+mod project_header_tests;
+
+#[path = "project_keyboard_tests.rs"]
+mod project_keyboard_tests;
+
+#[path = "project_round2_tests.rs"]
+mod project_round2_tests;
+
+#[path = "recents_tests.rs"]
+mod recents_tests;

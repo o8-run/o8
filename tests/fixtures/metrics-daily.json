@@ -1,0 +1,138 @@
+{
+  "schemaVersion": 1,
+  "historyComplete": true,
+  "completeThrough": "2026-10-26T00:00:00.000Z",
+  "events": [
+    {
+      "id": "old-open",
+      "installId": "install-old",
+      "appVersion": "1.0.0",
+      "timestamp": "2026-10-23T12:00:00.000Z",
+      "event": "app.opened"
+    },
+    {
+      "id": "old-worker",
+      "installId": "install-old",
+      "appVersion": "1.0.0",
+      "timestamp": "2026-10-23T12:00:00.000Z",
+      "event": "worker.first_launched"
+    },
+    {
+      "id": "a-open",
+      "installId": "install-a",
+      "appVersion": "1.0.0",
+      "timestamp": "2026-10-24T00:00:00.000Z",
+      "event": "app.opened"
+    },
+    {
+      "id": "a-worker",
+      "installId": "install-a",
+      "appVersion": "1.0.0",
+      "timestamp": "2026-10-24T12:00:00.000Z",
+      "event": "worker.first_launched"
+    },
+    {
+      "id": "a-merge",
+      "installId": "install-a",
+      "appVersion": "1.0.0",
+      "timestamp": "2026-10-24T12:00:00.000Z",
+      "event": "merge.first_completed"
+    },
+    {
+      "id": "a-clean",
+      "installId": "install-a",
+      "appVersion": "1.0.0",
+      "timestamp": "2026-10-24T12:00:00.000Z",
+      "event": "session.ended",
+      "props": {
+        "clean": true
+      }
+    },
+    {
+      "id": "a-clean",
+      "installId": "install-a",
+      "appVersion": "1.0.0",
+      "timestamp": "2026-10-24T12:00:00.000Z",
+      "event": "session.ended",
+      "props": {
+        "clean": true
+      }
+    },
+    {
+      "id": "a-upgrade",
+      "installId": "install-a",
+      "appVersion": "1.1.0",
+      "timestamp": "2026-10-24T13:00:00.000Z",
+      "event": "app.opened"
+    },
+    {
+      "id": "a-worker-repeat",
+      "installId": "install-a",
+      "appVersion": "1.1.0",
+      "timestamp": "2026-10-24T13:00:00.000Z",
+      "event": "worker.first_launched"
+    },
+    {
+      "id": "b-open",
+      "installId": "install-b",
+      "appVersion": "1.1.0",
+      "timestamp": "2026-10-24T00:00:00.000Z",
+      "event": "app.opened"
+    },
+    {
+      "id": "b-worker",
+      "installId": "install-b",
+      "appVersion": "1.1.0",
+      "timestamp": "2026-10-24T12:00:00.000Z",
+      "event": "worker.first_launched"
+    },
+    {
+      "id": "b-unclean",
+      "installId": "install-b",
+      "appVersion": "1.1.0",
+      "timestamp": "2026-10-24T12:00:00.000Z",
+      "event": "session.ended",
+      "props": {
+        "clean": false
+      }
+    },
+    {
+      "id": "old-active",
+      "installId": "install-old",
+      "appVersion": "1.1.0",
+      "timestamp": "2026-10-24T23:59:59.999Z",
+      "event": "app.opened"
+    },
+    {
+      "id": "old-worker-repeat",
+      "installId": "install-old",
+      "appVersion": "1.1.0",
+      "timestamp": "2026-10-24T12:00:00.000Z",
+      "event": "worker.first_launched"
+    },
+    {
+      "id": "old-clean",
+      "installId": "install-old",
+      "appVersion": "1.1.0",
+      "timestamp": "2026-10-24T12:00:00.000Z",
+      "event": "session.ended",
+      "props": {
+        "clean": true
+      }
+    },
+    {
+      "id": "next-merge",
+      "installId": "install-old",
+      "appVersion": "1.1.0",
+      "timestamp": "2026-10-25T00:00:00.000Z",
+      "event": "merge.first_completed"
+    },
+    {
+      "id": "next-install",
+      "installId": "install-next",
+      "appVersion": "2.0.0",
+      "timestamp": "2026-10-25T00:00:00.000Z",
+      "event": "app.opened"
+    }
+  ]
+}

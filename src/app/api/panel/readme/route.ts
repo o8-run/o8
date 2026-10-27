@@ -1,6 +1,6 @@
+import { viewerJson } from '@/lib/viewers/response';
 export const dynamic = 'force-dynamic';
 
-import { NextResponse } from 'next/server';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { existsSync } from 'node:fs';
@@ -24,12 +24,12 @@ export async function GET(request: Request) {
     if (existsSync(filePath)) {
       try {
         const content = await readFile(filePath, 'utf-8');
-        return NextResponse.json({ content, fileName: name, workspace: workspaceParam ?? root });
+        return viewerJson({ content, fileName: name, workspace: workspaceParam ?? root });
       } catch {
         continue;
       }
     }
   }
 
-  return NextResponse.json({ content: null, workspace: workspaceParam ?? root });
+  return viewerJson({ content: null, workspace: workspaceParam ?? root });
 }

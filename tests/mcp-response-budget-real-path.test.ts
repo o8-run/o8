@@ -34,8 +34,29 @@ async function call(name: string, args: Record<string, unknown> = {}) {
   const rpc = await response.json();
   expect(rpc.error).toBeUndefined();
   expect(rpc.result.isError).not.toBe(true);
-  const text = rpc.result.content[0].text as string;
-  return { text, payload: JSON.parse(text) };
+  let text = rpc.result.content[0].text as string;
+  let payload = JSON.parse(text);
+  if (payload.schema === 'o8/mcp/result-page/v1') {
+    let serialized = payload.text;
+    let pages = 1;
+    while (payload.nextArguments) {
+      const page = await POST(new Request('http://localhost/api/mcp', {
+        method: 'POST',
+        headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/call',
+          params: { name: 'o8_result_page', arguments: payload.nextArguments } }),
+      }));
+      expect(page.status).toBe(200);
+      const next = await page.json();
+      expect(next.result.isError).not.toBe(true);
+      payload = JSON.parse(next.result.content[0].text);
+      serialized += payload.text;
+      expect(++pages).toBeLessThan(100);
+    }
+    text = JSON.parse(serialized).content[0].text;
+    payload = JSON.parse(text);
+  }
+  return { text, payload };
 }
 
 beforeAll(() => {

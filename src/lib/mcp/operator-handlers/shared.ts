@@ -33,7 +33,7 @@ export interface McpToolResult {
 
 // ── API Client State ──
 
-let _apiBase = `http://localhost:${DEFAULT_API_PORT}`;
+let _apiBase = `http://127.0.0.1:${DEFAULT_API_PORT}`;
 const MAX_RETRIES = 3;
 const RETRY_DELAYS_MS = [500, 1500, 4000];
 const FETCH_TIMEOUT_MS = 15_000;
@@ -259,7 +259,7 @@ export function errorText(error: unknown) {
 export function requiredString(args: Record<string, unknown>, key: string) {
   const value = args[key];
   if (typeof value !== 'string' || !value.trim()) {
-    throw new McpInputError(`${key} is required`);
+    throw new McpInputError(`${key} is required. Set ${key} to a non-empty string.`);
   }
   return value.trim();
 }

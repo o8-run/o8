@@ -30,7 +30,9 @@ import { contributorCreditLine, creditsForSubjects, ghCreditLookups } from './li
 import { publishFixed } from './publish-fixed.mjs';
 import { syncReports } from './sync-reports.mjs';
 import { verifyNativeBundle } from './native-bundle.mjs';
+import { verifyNextAppSidecar } from './next/verify-app-bundle.mjs';
 import { runShipWorkflow } from './lib/ship-broadcast.mjs';
+import { warmUpdatePublication } from './lib/release-update-warmup.mjs';
 import { buildReleaseManifest } from './lib/release-manifest.mjs';
 import {
   resolveMacosReleaseArtifacts,
@@ -228,6 +230,7 @@ for (const path of [DMG, APP_TAR, APP_SIG]) {
 let darwinIdentity;
 try {
   darwinIdentity = verifyUniversalMacUpdaterArchive(artifacts.app, APP_TAR);
+  verifyNextAppSidecar(artifacts.app);
   console.log('[release] universal macOS updater archive gate passed', JSON.stringify(darwinIdentity));
 } catch (error) {
   console.error(`[release] FATAL: ${error.message}`);
@@ -512,6 +515,15 @@ try {
   if (releaseChannel.preview) {
     console.log('[release] Preview published for explicit tag downloads; the stable updater and announcements are unchanged.');
     process.exit(0);
+  }
+  try {
+    const receipt = await warmUpdatePublication({ root, version,
+      previousVersion: releaseMetadataRange().split('..')[0].replace(/^v/, ''),
+      publishedAt: resolvePublishedAt(pubDate) });
+    const timing = receipt.publishToOfferMs === null ? 'unverified' : `${receipt.publishToOfferMs}ms`;
+    console.log(`[release] update publication ${receipt.status}; publish-to-offer ${timing}; within-five-minutes=${receipt.withinPublishToOfferBudget ?? 'unverified'}`);
+  } catch {
+    console.warn('[release] update publication verification unavailable; no fresh-offer receipt was recorded.');
   }
   // Publish the page feeds from one local mirror checkout and one mirror commit.
   // This runs only after the updater assets are available on the public mirror.

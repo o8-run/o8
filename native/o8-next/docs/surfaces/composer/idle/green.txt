@@ -1,0 +1,37 @@
+After replacing the microphone stroke with four bounded quads:
+native_composer_idle_card_avoids_viewport_path_targets
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 270 filtered out; finished in 1.90s
+
+scripts/next/linux-headless.mjs, real X11/software-Vulkan renderer:
+{"run":"cold","informational":true,"launchToFirstFrameMs":905.34,"idleRssMiB":121.16}
+{"run":1,"launchToFirstFrameMs":912.19,"idleRssMiB":101.49}
+{"run":2,"launchToFirstFrameMs":901.44,"idleRssMiB":100.93}
+{"run":3,"launchToFirstFrameMs":932.79,"idleRssMiB":101.9}
+warm median launchToFirstFrameMs 912.19; three runs within idle RSS budget
+
+Both budgets pass without changing linux-budgets.json:
+- Main maximum 101.11 MiB + 5 MiB = 106.11 MiB.
+- Existing shipping budget: 150 MiB.
+
+Node 22 completion gates:
+npm run typecheck:fast: exit 0
+NODE_OPTIONS=--max-old-space-size=8192 npx tsc --noEmit: exit 0
+npm run test:classify: 1247 hermetic / 934 resource-owning; unchanged manifest
+Touched-file ESLint: exit 0
+npm run rule-check -- --base=origin/main: 3 files, zero violations
+Full npm test: 9165 passed / 5 skipped; 1251 passing / 3 skipped files; 350.47s
+
+Native gates:
+cargo fmt --manifest-path native/o8-next/Cargo.toml --check: exit 0
+cargo check --manifest-path native/o8-next/Cargo.toml: exit 0
+cargo test --manifest-path native/o8-next/Cargo.toml -- --test-threads=2:
+test result: ok. 265 passed; 0 failed; 6 ignored; 0 measured; 0 filtered out; finished in 777.90s
+CLI integration targets: 11 passed; 0 failed
+
+Paired release session CPU-scene measurement, quiet host after the gates:
+BEFORE 2fe766898
+LOADED_COMPOSER_CPU_SCENE platform=linux profile=release messages=200 inputs=100 p50_ms=0.068862 p95_ms=0.092968
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 253 filtered out; finished in 4.25s
+AFTER this change
+LOADED_COMPOSER_CPU_SCENE platform=linux profile=release messages=200 inputs=100 p50_ms=0.071026 p95_ms=0.088031
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 270 filtered out; finished in 1.35s

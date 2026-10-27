@@ -9,6 +9,8 @@ import { buildRepoStateScope, MAX_PERSISTED_TABS, persistedTabStateSavedAt, stri
 import { getDataDir } from '@/lib/data-dir-migration';
 import { restoreFileTabContext } from '@/lib/terminal/restore-file-tabs';
 import { includeRegisteredWorktreeRoots } from '@/lib/terminal/registered-worktree-roots';
+import { isSavedConnectivityCheck } from '@/lib/orchestrator/connectivity-check';
+import { safeOrchestratorHistoryPath } from '@/lib/mobile/orchestrator-thread-path';
 
 const HOME = process.env.HOME ?? '/tmp';
 const STATE_DIR = getDataDir();
@@ -57,9 +59,18 @@ function pathBelongsToRegisteredRepo(candidatePath?: string | null, repoRoots?: 
 // shape only has to be added in one place.
 function stripOrchestratorZombies(data: unknown) {
   if (!data || typeof data !== 'object') return data;
-  const tabs = (data as { tabs?: Array<{ id?: string; kind?: string }> }).tabs;
+  const tabs = (data as { tabs?: Array<{ id?: string; kind?: string; label?: string; orchestratorThreadId?: string }> }).tabs;
   if (!Array.isArray(tabs)) return data;
-  const sanitized = stripPersistedTabs(tabs);
+  const sanitized = stripPersistedTabs(tabs, (tab) => {
+    const threadId = typeof tab.orchestratorThreadId === 'string' ? tab.orchestratorThreadId.trim() || tab.id : tab.id;
+    if (typeof threadId !== 'string' || !threadId) return false;
+    try {
+      return isSavedConnectivityCheck(JSON.parse(readFileSync(safeOrchestratorHistoryPath(threadId), 'utf8')));
+    } catch {
+      // A title alone cannot establish that a missing/unreadable chat was a check.
+      return false;
+    }
+  });
   if (sanitized.length === tabs.length) return data;
   const current = data as { activeTabId?: string };
   const activeStillPresent = sanitized.some((tab) => tab.id === current.activeTabId);

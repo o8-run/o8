@@ -1,0 +1,15 @@
+running 1 test
+test ui::conversation::card_tests::native_composer_card_controls_fit_compact_and_wide_windows ...
+thread 'ui::conversation::card_tests::native_composer_card_controls_fit_compact_and_wide_windows' (66914) panicked at src/composer/card_tests.rs:354:9:
+assertion failed: send.right() <= card.right() && send.bottom() <= card.bottom()
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    ui::conversation::card_tests::native_composer_card_controls_fit_compact_and_wide_windows
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 150 filtered out; finished in 1.08s
+
+error: test failed, to rerun pass `--bin o8-next`
