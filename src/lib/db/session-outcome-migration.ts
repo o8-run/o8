@@ -27,6 +27,9 @@ export function ensureSessionOutcomeColumns(sqlite: Database.Database): void {
   if (!columnExists(sqlite, 'plan_text')) {
     addColumnTolerant(sqlite, 'ALTER TABLE session_outcomes ADD COLUMN plan_text TEXT');
   }
+  if (!columnExists(sqlite, 'memory_fingerprint')) {
+    addColumnTolerant(sqlite, 'ALTER TABLE session_outcomes ADD COLUMN memory_fingerprint TEXT');
+  }
   // SQLite ALTER TABLE ADD COLUMN rejects non-literal defaults, so add this
   // nullable and backfill historical rows. Fresh tables receive the stronger
   // NOT NULL default from the base schema.

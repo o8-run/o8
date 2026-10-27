@@ -245,6 +245,7 @@ export function createOwnedSessionStore(
       createdAt,
       updatedAt: createdAt,
       initialPrompt: prompt,
+      promptMemoryRevision: request.promptMemoryRevision,
       latestPrompt: prompt,
       latestSummary: compactText(prompt, 140) || `Owned ${adapter.squadShortName} session launched from o8.`,
       model: request.model?.trim() || adapter.defaultModel || undefined,
@@ -365,7 +366,7 @@ export function createOwnedSessionStore(
       if (automaticRunId) assertAutomaticRecoveryGeneration(await io.findSession(surfaceId), automaticRunId);
       assertOwnedActionAdmission(await io.findSession(surfaceId));
       await assertOwnedActionFence(surfaceId, await io.findSession(surfaceId));
-      const run = await runController.spawnOwnedRun(session, prompt.trim(), 'resume');
+      const run = await runController.spawnOwnedRun(session, prompt.trim(), 'resume', { freshRequest: !automaticRunId });
       if (run.outcome === 'failed' && coldRestored) {
         await rollbackColdRestore();
       }

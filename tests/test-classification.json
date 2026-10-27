@@ -1076,7 +1076,8 @@
       "path": "src/lib/runtimes/shared/owned-session/store.test.ts",
       "reasons": [
         "child-process",
-        "git-cli"
+        "git-cli",
+        "process-signal"
       ]
     },
     {
@@ -2205,6 +2206,12 @@
       ]
     },
     {
+      "path": "tests/cloud-forgotten-context-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/cloud-job-spine-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -3015,6 +3022,36 @@
     },
     {
       "path": "tests/forced-review-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/forget-corrections-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/forget-project-matrix-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/forgotten-answer-cache-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/forgotten-content-project-recall-real-path.test.ts",
       "reasons": [
         "child-process",
         "git-cli",
@@ -5036,6 +5073,12 @@
       "path": "tests/pi-dev-imports-real-path.test.ts",
       "reasons": [
         "child-process",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/pi-forgotten-context-real-path.test.ts",
+      "reasons": [
         "real-path"
       ]
     },

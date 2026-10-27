@@ -1,3 +1,4 @@
+import { assertWorkerMemoryCurrent } from '@/lib/dispatch/worker-memory-context';
 import type { ChildProcess } from 'node:child_process';
 import { spawnWithWorkAdmission as spawn } from '@/lib/app-update/work-launch-admission';
 import { bindDeferredCodexMcpLaunch } from '@/lib/providers/deferred-mcp-arguments';
@@ -45,6 +46,7 @@ function withCheckedLaunch<T>(input: LaunchInput, create: (launch: { command: st
     assertControlledLaunchGrantCurrent(input.session);
     assertOwnedActionAdmission(input.session, input.runId);
     input.assertWorkerO8Current?.();
+    assertWorkerMemoryCurrent(input.session);
     input.onSubmit?.();
     return create(launch, env);
   });

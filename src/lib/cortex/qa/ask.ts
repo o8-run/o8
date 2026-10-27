@@ -95,6 +95,8 @@ export { findSemanticMatch } from '@/lib/cortex/qa/semantic-cache';
  */
 async function getSemanticCached(question: string, scope: string): Promise<CacheEntry | null> {
   if (currentComposerBrainRoute()?.runtime) return null;
+  const memoryRevision = readMemoryRevision();
+  if (!scope.startsWith(`${memoryRevision}\x00`)) return null;
   const now = Date.now();
   const candidates: Array<{ key: string; vector: number[] }> = [];
   for (const [key, entry] of answerCache) {
@@ -105,7 +107,7 @@ async function getSemanticCached(question: string, scope: string): Promise<Cache
   if (candidates.length === 0) return null;
 
   const vector = await embedQuestion(normalizeQuestionForCache(question));
-  if (!vector) return null;
+  if (!vector || memoryRevision !== readMemoryRevision()) return null;
 
   const match = findSemanticMatch(vector, candidates);
   if (!match) return null;

@@ -22,9 +22,10 @@
 import { NextResponse } from 'next/server';
 import { buildErrorPayload } from '@/lib/api/error-format';
 import { verifyCloudWorkerKey } from '@/lib/cloud/worker-auth';
-import { workerLaunchPayload } from '@/lib/cloud/worker-payload';
+import { ForgottenCloudContextError, workerLaunchPayload } from '@/lib/cloud/worker-payload';
 import { recordCloudWorkerPresence } from '@/lib/cloud/worker-presence';
 import {
+  cancelJob,
   claimNextJob,
   cloudJobLeaseMs,
   getJobDrainStatus,
@@ -39,12 +40,17 @@ const NO_STORE_HEADERS = { 'Cache-Control': 'no-store' };
 const LONG_POLL_TIMEOUT_MS = 25_000;
 
 function jobPayload(job: CloudJob) {
+  let launch: ReturnType<typeof workerLaunchPayload>;
+  try { launch = workerLaunchPayload(job.launch); } catch (error) {
+    if (error instanceof ForgottenCloudContextError) cancelJob(job.teamId, job.id);
+    throw error;
+  }
   return {
     id: job.id,
     cursor: job.cursor,
     // The durable record keeps coordinator paths for operator views. Only the
     // remote checkout contract and task fields cross the worker boundary.
-    launch: workerLaunchPayload(job.launch),
+    launch,
     enqueuedAt: job.enqueuedAt,
     claimedAt: job.claimedAt,
     claimedBy: job.claimedBy,
@@ -152,6 +158,7 @@ export async function GET(request: Request) {
       abort.removeEventListener('abort', onAbort);
     }
   } catch (error) {
+    if (error instanceof ForgottenCloudContextError) return NextResponse.json({ error: error.message, reason: 'memory_changed' }, { status: 409, headers: NO_STORE_HEADERS });
     console.error('[cloud-worker-poll] failed:', error);
     return NextResponse.json(
       buildErrorPayload('cloud_worker_poll_failed'),
