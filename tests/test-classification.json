@@ -4285,6 +4285,20 @@
       ]
     },
     {
+      "path": "tests/native-picker-display-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/native-picker-x11-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/native-pr-stack-read-real-path.test.ts",
       "reasons": [
         "child-process",
