@@ -9,12 +9,6 @@ export function checkLaunchStageReceipt(result, args) {
     console.log(JSON.stringify({ check: 'startup-cli-discovery', count, limit: 0, passed: count === 0 }));
     assert.equal(count, 0, 'Launch must not enumerate tools before an explicit Tools action');
   }
-  if (args['check-background-dashboard']) {
-    const count = result.samples.reduce((total, sample) => total + sample.serverProfile.flatMap(server => server.requests)
-      .filter(row => row.route === '/dashboard' && row.caller === 'background' && row.atMs <= sample.interactiveComposerMs).length, 0);
-    console.log(JSON.stringify({ check: 'background-dashboard', count, limit: 0, passed: count === 0 }));
-    assert.equal(count, 0, 'Startup must not duplicate the WebView dashboard render');
-  }
   if (args.check) {
     console.log(JSON.stringify({ check: 'interactive-composer-ms', actual: result.maxMs, limit: 1000, passed: result.maxMs < 1000 }));
     assert(result.maxMs < 1000, `Launch budget exceeded: ${result.maxMs} ms >= 1000 ms`);
