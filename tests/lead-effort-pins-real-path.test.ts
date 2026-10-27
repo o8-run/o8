@@ -102,10 +102,21 @@ it('carries the exact pin in the app bridge spec and receipt', async () => {
   expect(JSON.parse(readFileSync(record, 'utf8'))).toMatchObject({ model: 'gpt-6-astra', effort: 'max' });
   expect(events).toContainEqual({ type: 'turn_receipt', leadModel: 'gpt-6-astra', effort: 'max' });
 });
-it.each([undefined, 'adaptive'] as const)('keeps the documented omitted/reset default (%s)', async effort => {
-  const events = await send('codex', 'gpt-5.5', effort);
-  expect(JSON.parse(readFileSync(record, 'utf8')).args).toContain('model_reasoning_effort=xhigh');
-  expect(events).toContainEqual({ type: 'turn_receipt', leadModel: 'gpt-5.5', effort: 'xhigh' });
+it.each([
+  [false, false, undefined], [false, false, 'adaptive'], [false, true, undefined], [false, true, 'adaptive'],
+  [true, false, undefined], [true, false, 'adaptive'], [true, true, undefined], [true, true, 'adaptive'],
+] as const)('keeps the runtime default (app=%s, resume=%s, effort=%s)', async (app, resume, effort) => {
+  await updateOperatorDefaults({ codexAppThreads: app });
+  const events = await send('codex', 'gpt-5.5', effort, resume);
+  const request = JSON.parse(readFileSync(record, 'utf8'));
+  if (app) {
+    expect(request).not.toHaveProperty('effort');
+    expect(request.threadId).toBe(resume ? 'saved-pin-thread' : null);
+  } else {
+    expect(request.args.some((arg: string) => arg.startsWith('model_reasoning_effort='))).toBe(false);
+    expect(request.args.includes('resume')).toBe(resume);
+  }
+  expect(events).toContainEqual({ type: 'turn_receipt', leadModel: 'gpt-5.5', effort: 'adaptive', effortSource: 'runtime-default' });
 });
 it('refuses a resident lead pin that would map ultra to max', async () => {
   const events = await send('claude', 'claude-opus-4-8', 'ultra');
@@ -131,8 +142,8 @@ it.each([undefined, 'adaptive'] as const)('records runtime-default provenance fo
 it('keeps a saved worker default separate from omitted lead effort', async () => {
   await updateOperatorDefaults({ codexWorkerEffort: 'max' });
   const events = await send('codex', 'gpt-5.5');
-  expect(JSON.parse(readFileSync(record, 'utf8')).args).toContain('model_reasoning_effort=xhigh');
-  expect(events).toContainEqual({ type: 'turn_receipt', leadModel: 'gpt-5.5', effort: 'xhigh' });
+  expect(JSON.parse(readFileSync(record, 'utf8')).args.some((arg: string) => arg.startsWith('model_reasoning_effort='))).toBe(false);
+  expect(events).toContainEqual({ type: 'turn_receipt', leadModel: 'gpt-5.5', effort: 'adaptive', effortSource: 'runtime-default' });
 });
 it('rejects an incompatible installed version before app bridge dispatch', async () => {
   await updateOperatorDefaults({ codexAppThreads: true }); writeFileSync(version, 'codex-cli 0.136.0');

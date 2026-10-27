@@ -1,5 +1,4 @@
 import { readPersistedLlmChat } from '@/lib/llm/chat-history-store';
-import { EffortPinRejectionError } from '@/lib/orchestrator/effort-pin';
 import { backendSwitchRequiresExplicitHandoff } from '@/lib/orchestrator/backend-switch-carry';
 import { assertComposerSendClaim, admitComposerSend, claimNextComposerSend, listComposerQueueTargets,
   listQueuedComposerSends, recoverComposerSends, settleComposerSend, validateComposerQueueTarget } from '@/lib/orchestrator/composer-queue';
@@ -18,6 +17,7 @@ import { checkComposerQueuePrecondition } from '@/lib/orchestrator/composer-queu
 import { permissionModeRank } from '@/lib/orchestrator/permission-mode';
 import { claimComposerSteer, deferComposerSteer } from '@/lib/orchestrator/composer-queue';
 import { appendMobileOrchestratorUserMessage } from '@/lib/mobile/orchestrator-thread-history';
+import { EffortPinRejectionError } from '@/lib/orchestrator/effort-pin';
 
 export function publishComposerQueueChange(threadId: string) {
   void publishRealtimeMutation({ mutation: { mutationId: `composer-queue-${threadId}-${Date.now()}`,
@@ -58,8 +58,8 @@ export async function runQueuedComposerSteer(item: QueuedComposerSendRecord): Pr
   const backend = getOrchestratorBackend(originFor(item).backend, targetFor(item));
   if (!backend.liveSteer) { deferComposerSteer(item.id, 'Steer declined; queued for the next turn.'); return; }
   const result = await backend.liveSteer(item.repoPath, item.payload.wireMessage, {
-    thinkingEffort: item.payload.routing.effort,
     ...item.payload.routing, threadId: item.threadId, clientUserMessageId: item.id, attachments: item.payload.images, orchestrationMode: item.payload.routing.mode,
+    thinkingEffort: item.payload.routing.effort,
     beforeAdmit: () => { checkComposerQueueBinding(item); if (!admitComposerSend(item.id)) throw new Error('Message admission was cancelled.'); },
   });
   if (result.accepted !== true) { deferComposerSteer(item.id, 'Steer declined; queued for the next turn.'); return; }
