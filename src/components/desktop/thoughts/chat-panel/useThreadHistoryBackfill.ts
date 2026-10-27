@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef } from 'react';
+import { captureTranscriptReadingAnchor, restoreTranscriptReadingAnchor } from './transcript-reading-anchor';
 
 const TOP_LOAD_THRESHOLD_PX = 240;
 
@@ -45,7 +46,6 @@ export function useThreadHistoryBackfill<T>({
     loadingRef.current = true;
     const { tabId, before, generation } = state;
     const container = getScrollContainer();
-    const priorHeight = container?.scrollHeight ?? 0;
     try {
       const result = await fetchPage(tabId, before);
       const current = stateRef.current;
@@ -54,13 +54,20 @@ export function useThreadHistoryBackfill<T>({
       current.hasMore = result.page?.hasMore === true;
       current.before = result.page?.beforeCursor ?? null;
       if (result.messages.length > 0) {
+        // The reader and live tail may both move during the request. Measure
+        // immediately before the prepend, never at the request's start.
+        const anchor = container ? captureTranscriptReadingAnchor(container) : null;
+        const priorHeight = container?.scrollHeight ?? 0;
+        const priorTop = container?.scrollTop ?? 0;
         if (onPrepend(result.messages) === false) {
           current.hasMore = false;
           current.before = null;
         }
         requestAnimationFrame(() => {
-          if (!container?.isConnected) return;
-          container.scrollTop += container.scrollHeight - priorHeight;
+          if (!container?.isConnected || stateRef.current?.generation !== generation || stateRef.current.tabId !== tabId) return;
+          if (!restoreTranscriptReadingAnchor(container, anchor) && !anchor) {
+            container.scrollTop = priorTop + container.scrollHeight - priorHeight;
+          }
         });
       }
     } finally {
@@ -104,7 +111,7 @@ export function useThreadHistoryBackfill<T>({
     }
   }, [cancelIdle, loadOlderPage, scheduleIdlePage]);
 
-  useEffect(() => cancelIdle, [cancelIdle]);
+  useEffect(() => cancelBackfill, [cancelBackfill]);
 
   return { startBackfill, cancelBackfill, onScroll };
 }

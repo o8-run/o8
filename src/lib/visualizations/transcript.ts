@@ -23,27 +23,49 @@ export function toolVisualizationReferences(calls: MobileTranscriptToolCall[] = 
   return [...refs.values()];
 }
 
+/** Conversation-local producing message identities, shared by all revisions. */
+export type TranscriptVisualizationAnchors = Map<string, string>;
+
 /** Fallback for providers that do not retain full tool results. */
-export function placeTranscriptVisualizations(refs: VisualizationReference[], messages: MobileTranscriptEntry[]): Map<number, VisualizationReference[]> {
+export function placeTranscriptVisualizations(refs: VisualizationReference[], messages: MobileTranscriptEntry[], anchors?: TranscriptVisualizationAnchors): Map<number, VisualizationReference[]> {
   const embedded = new Map<string, { index: number; reference: VisualizationReference }>();
   messages.forEach((message, index) => {
-    for (const reference of toolVisualizationReferences(message.toolCalls)) if (!embedded.has(reference.rootId ?? reference.id)) embedded.set(reference.rootId ?? reference.id, { index, reference });
+    for (const reference of toolVisualizationReferences(message.toolCalls)) {
+      const root = reference.rootId ?? reference.id;
+      if (!embedded.has(root)) { embedded.set(root, { index, reference }); anchors?.set(root, message.id); }
+    }
   });
   const buckets = new Map<number, VisualizationReference[]>();
   for (const ref of refs) {
-    const anchor = embedded.get(ref.rootId ?? ref.id);
+    const root = ref.rootId ?? ref.id;
+    const anchor = embedded.get(root);
     if (anchor !== undefined) {
       if ((ref.version ?? 1) > (anchor.reference.version ?? 1)) {
         const bucket = buckets.get(anchor.index) ?? []; bucket.push(ref); buckets.set(anchor.index, bucket);
       }
       continue;
     }
+    const known = anchors?.get(root);
+    if (known) {
+      const index = messages.findIndex(message => message.id === known);
+      // A partial page has not loaded the producing turn. Wait for that turn
+      // instead of attaching the document to an unrelated visible reply.
+      if (index < 0) continue;
+      const bucket = buckets.get(index) ?? []; bucket.push(ref); buckets.set(index, bucket);
+      continue;
+    }
     const time = Date.parse(ref.createdAt);
     let index = -1;
+    let nearestTime = -Infinity;
     for (let i = 0; i < messages.length; i++) {
-      if ((messages[i].timestamp ?? 0) <= time) index = i;
-      else break;
+      const timestamp = messages[i].timestamp;
+      if (typeof timestamp === 'number' && Number.isFinite(timestamp) && timestamp <= time && timestamp >= nearestTime) {
+        nearestTime = timestamp; index = i;
+      }
     }
+    // Legacy transcripts with no clocks used the tail slot. Remember that
+    // identity on first placement so later growth cannot move the document.
+    if (index < 0 && messages.length && !messages.some(message => typeof message.timestamp === 'number' && Number.isFinite(message.timestamp))) index = messages.length - 1;
     // A visual created during a provider turn can precede its final assistant
     // timestamp. Attach it to that reply, before the reply's actions, rather
     // than leaving it underneath the operator's prompt.
@@ -53,6 +75,7 @@ export function placeTranscriptVisualizations(refs: VisualizationReference[], me
         if (messages[i].role === 'assistant') { index = i; break; }
       }
     }
+    if (index >= 0) anchors?.set(root, messages[index].id);
     const bucket = buckets.get(index) ?? [];
     bucket.push(ref);
     buckets.set(index, bucket);

@@ -96,6 +96,7 @@ import { useTranscriptAutoScroll } from './chat-panel/useTranscriptAutoScroll';
 import { useThreadHistoryBackfill } from './chat-panel/useThreadHistoryBackfill';
 import {
   fetchOlderThreadPage,
+  fetchThreadHistoryPage,
   useBoundedThreadHistoryWindow,
 } from './chat-panel/thread-history-window';
 import { ScreenshotAnnotator } from './chat-panel/ScreenshotAnnotator';
@@ -1115,6 +1116,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, ThoughtsCha
     onPrepend: prependThreadHistoryPage,
   });
 
+  const loadTranscriptRef = useRef({ stream: orchStream.messages, retained: chatMessages });
+  loadTranscriptRef.current = { stream: orchStream.messages, retained: chatMessages };
   const handleLoadThread = useCallback(async (tabId: string) => {
     const now = Date.now();
     if (inFlightLoadKeyRef.current === tabId) return;
@@ -1128,20 +1131,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, ThoughtsCha
     cancelBackfill();
     resetThreadHistoryWindow();
     try {
-      const fetchHistoryOnce = async (): Promise<Response | null> => {
-        const controller = new AbortController();
-        const timer = window.setTimeout(() => controller.abort(), 6000);
-        try {
-          const params = new URLSearchParams({ tabId, limit: '60' });
-          return await fetch(`/api/v2/chat-history?${params.toString()}`, { signal: controller.signal });
-        } catch {
-          return null;
-        } finally {
-          window.clearTimeout(timer);
-        }
-      };
-      let res = await fetchHistoryOnce();
-      if (!res || !res.ok) res = await fetchHistoryOnce();
+      let res = await fetchThreadHistoryPage(tabId);
+      if (!res || !res.ok) res = await fetchThreadHistoryPage(tabId);
       if (!res || !res.ok) {
         // Loud on purpose: a silent return here leaves the tab wearing the
         // thread's TITLE over an empty transcript (stale-header class).
@@ -1158,7 +1149,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, ThoughtsCha
       const msgs = mapHistoryMessagesToTranscript(data.messages ?? [], data.pendingTurnWorkers);
       console.log(`[orchestrator] loadThread ${tabId} — applying ${msgs.length} messages`);
       const isSameOpenThread = threadIdRef.current === tabId;
-      const liveTranscript = orchStream.messages.length > 0 ? orchStream.messages : chatMessages;
+      const currentTranscript = loadTranscriptRef.current;
+      const liveTranscript = currentTranscript.stream.length > 0 ? currentTranscript.stream : currentTranscript.retained;
       const mergedLoad = isSameOpenThread
         ? mergeSameThreadHistoryLoad(liveTranscript, msgs)
         : { entries: msgs, preservedLiveEntries: false };
@@ -1217,7 +1209,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, ThoughtsCha
         inFlightLoadKeyRef.current = null;
       }
     }
-  }, [cancelBackfill, chatMessages, clearPolling, orchStream, isOrchestratorMode, resolvedRepoPath, resetThreadHistoryWindow, startBackfill]);
+  }, [cancelBackfill, clearPolling, orchStream, isOrchestratorMode, resolvedRepoPath, resetThreadHistoryWindow, startBackfill]);
 
   settledAssistantRefetchRef.current = () => {
     const activeThreadId = threadIdRef.current;
