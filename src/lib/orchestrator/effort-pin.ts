@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { codexCliSupportsUltraEfforts, resolveCodexReasoningEffort } from '@/lib/codex/reasoning-effort';
 import { parseLocalModel } from '@/lib/codex/local-model';
 import { getRuntimeCapability, isOrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
@@ -12,7 +15,7 @@ import type { OrchestratorRuntime, WorkerModelDisposition } from '@/lib/orchestr
 /**
  * Explicit mission reasoning-effort pinning.
  *
- * A caller may pin a concrete tier (`low`…`ultra`). This route only accepts a
+ * A caller may pin a concrete tier (`none`…`ultra`). This route only accepts a
  * pin when the selected runtime + model will pass it through UNCHANGED. It is
  * the o8 route that cannot honor a coerced or dropped tier — NOT a claim that
  * the provider never supports that effort. The provider's own catalog drift
@@ -119,6 +122,21 @@ export interface ResolveEffortPinInput {
   installedCliVersion?: string | null;
 }
 
+/** Read the selected account's model evidence without starting a provider turn. */
+function codexAdvertisedEfforts(model: string | null): string[] | null {
+  if (!model) return null;
+  try {
+    const cache = JSON.parse(readFileSync(join(process.env.CODEX_HOME || join(homedir(), '.codex'), 'models_cache.json'), 'utf8'));
+    if (!Array.isArray(cache?.models)) return null;
+    const entry = cache.models.find((candidate: { slug?: unknown } | null) => candidate?.slug === model);
+    if (!Array.isArray(entry?.supported_reasoning_levels)) return null;
+    return entry.supported_reasoning_levels.flatMap((level: { effort?: unknown } | null) =>
+      typeof level?.effort === 'string' ? [level.effort] : []);
+  } catch {
+    return null;
+  }
+}
+
 export function resolveEffortPin(input: ResolveEffortPinInput): ResolveEffortPinResult {
   const raw = input.requestedEffort;
   if (raw === undefined || raw === null) {
@@ -168,6 +186,18 @@ export function resolveEffortPin(input: ResolveEffortPinInput): ResolveEffortPin
       code: 'effort_model_incompatible',
       message: `This o8 mission route cannot honor effort "${raw}" because ${requested} is not compatible with runtime "${input.runtime}" and the launch would silently fall back to a different model. Pin a compatible model or omit --effort.`,
     };
+  }
+  const discoveryOnly = raw === 'none' || raw === 'minimal';
+  if (input.runtime === 'codex' || input.runtime === 'cloud') {
+    const advertised = codexAdvertisedEfforts(actualModel);
+    if ((advertised !== null && !advertised.includes(raw)) || (discoveryOnly && advertised === null)) {
+      return { ok: false, code: 'effort_unsupported_model', message: advertised === null
+        ? `Cannot honor effort "${raw}" for Codex model "${actualModel ?? 'runtime default'}": no usable model discovery evidence advertises this effort. Refresh the Codex model catalogue or omit effort.`
+        : `Codex model "${actualModel}" does not advertise the requested effort "${raw}". Advertised efforts: ${advertised.join(', ') || 'no tiers'}. Choose an advertised effort or omit effort.` };
+    }
+  } else if (discoveryOnly) {
+    return { ok: false, code: 'effort_unsupported_runtime',
+      message: `Runtime "${input.runtime}" does not advertise an independent effort "${raw}" through this route. Choose a supported effort or omit effort.` };
   }
   const applied = resolveAdapterEffort(input.runtime, actualModel, raw);
   if (applied !== raw) {

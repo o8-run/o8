@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { afterAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getDataDir } from '@/lib/data-dir-migration';
 import type { OrchestratorEvent } from '@/lib/lane/orchestrator-stream-events';
 import type { OwnedSessionRecord } from '@/lib/runtimes/shared/owned-session/types';
@@ -89,6 +89,14 @@ async function failedBridgeSession(name: string, diagnostic: string) {
   return { cwd, surfaceId: launched.surfaceId };
 }
 
+const modelCache = join(home, '.codex', 'models_cache.json');
+const advertisedEfforts = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
+beforeEach(() => {
+  writeFileSync(modelCache, JSON.stringify({ models: ['gpt-6.1-sol', 'gpt-5.6-sol'].map(slug => ({
+    slug, supported_reasoning_levels: advertisedEfforts.map(effort => ({ effort })),
+  })) }));
+});
+
 afterAll(() => {
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
@@ -138,7 +146,6 @@ describe.skipIf(process.platform === 'win32')('GPT-6.1 Sol real CLI entry points
   });
 
   it.each(['low', 'medium', 'high', 'xhigh', 'max', 'ultra', 'none', 'minimal'])('launches both seats with valid effort for %s', async (effort) => {
-    const expected = effort === 'none' || effort === 'minimal' ? 'low' : effort;
     const cwd = repo(`effort-${effort}`, false);
     await codexBackend.sendTurn(cwd, 'Reply once', () => {}, { model: 'gpt-6.1-sol', thinkingEffort: effort as ThinkingEffort });
     const launched = await launchOwnedCodexSession({ cwd, prompt: 'Reply once', model: 'gpt-6.1-sol', effort: effort as ThinkingEffort });
@@ -146,8 +153,43 @@ describe.skipIf(process.platform === 'win32')('GPT-6.1 Sol real CLI entry points
     expect(calls(cwd)).toHaveLength(2);
     for (const call of calls(cwd)) {
       expect(call.model).toBe('gpt-6.1-sol');
-      expect(call.args).toContain(`model_reasoning_effort=${expected}`);
+      expect(call.args).toContain(`model_reasoning_effort=${effort}`);
     }
+  });
+
+  it.each(['none', 'minimal'] as const)('preserves advertised %s on another Codex model', async effort => {
+    const cwd = repo(`other-model-${effort}`, false);
+    const events: OrchestratorEvent[] = [];
+    await codexBackend.sendTurn(cwd, 'Reply once', event => events.push(event), { model: 'gpt-5.6-sol', thinkingEffort: effort });
+    const launched = await launchOwnedCodexSession({ cwd, prompt: 'Reply once', model: 'gpt-5.6-sol', effort });
+    await vi.waitFor(() => expect(saved(launched.surfaceId).activeRun).toBeUndefined(), { timeout: 10_000 });
+    expect(calls(cwd)).toHaveLength(2);
+    expect(calls(cwd).every(call => call.args.includes(`model_reasoning_effort=${effort}`))).toBe(true);
+    expect(saved(launched.surfaceId).effort).toBe(effort);
+    expect(events).toContainEqual(expect.objectContaining({ type: 'turn_receipt', leadModel: 'gpt-5.6-sol', effort }));
+  });
+
+  it.each([
+    ['none', 'missing'], ['minimal', 'missing'], ['none', 'malformed'], ['minimal', 'malformed'],
+    ['none', 'other-model'], ['minimal', 'other-model'], ['none', 'unadvertised'], ['minimal', 'unadvertised'],
+    ['high', 'unadvertised'],
+  ] as const)('refuses %s with %s evidence before either seat starts work', async (effort, evidence) => {
+    if (evidence === 'missing') rmSync(modelCache);
+    else if (evidence === 'malformed') writeFileSync(modelCache, '{');
+    else writeFileSync(modelCache, JSON.stringify({ models: [{
+      slug: evidence === 'other-model' ? 'gpt-5.6-sol' : 'gpt-6.1-sol',
+      supported_reasoning_levels: [{ effort: 'low' }],
+    }] }));
+    const cwd = repo(`refuse-${effort}-${evidence}`, false);
+    const sessionsBefore = existsSync(ownedRoot) ? readdirSync(ownedRoot) : [];
+    const events: OrchestratorEvent[] = [];
+    await codexBackend.sendTurn(cwd, 'Do not run', event => events.push(event), { model: 'gpt-6.1-sol', thinkingEffort: effort });
+    expect(events).toContainEqual(expect.objectContaining({ type: 'error', error: expect.stringMatching(/does not advertise.*effort|no.*discovery evidence/i) }));
+    expect(events.some(event => event.type === 'turn_receipt')).toBe(false);
+    await expect(launchOwnedCodexSession({ cwd, prompt: 'Do not run', model: 'gpt-6.1-sol', effort }))
+      .rejects.toMatchObject({ name: 'EffortPinRejectionError', message: expect.stringMatching(/does not advertise.*effort|no.*discovery evidence/i) });
+    expect(existsSync(join(cwd, 'calls.jsonl'))).toBe(false);
+    expect(existsSync(ownedRoot) ? readdirSync(ownedRoot) : []).toEqual(sessionsBefore);
   });
 
   it.each(['partial', 'command-start', 'unrelated', 'reject-all'])('bounds retries for %s failures through all entry points', async (mode) => {

@@ -35,6 +35,8 @@ import { promisify } from 'node:util';
 import { resolveBrainCodexRouteSync } from '@/lib/operator/brain-routing';
 import { codexModelArgs } from '@/lib/codex/local-model';
 import { resolveCodexReasoningEffort } from '@/lib/codex/reasoning-effort';
+import { assertRuntimeEffortPin } from '@/lib/orchestrator/effort-pin';
+import type { ManualThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import { MODEL_IDS } from '@/lib/models';
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 
@@ -111,7 +113,7 @@ export interface CallCodexOptions {
   /** Explicit resolved binary, used when the caller already ran auth detection. */
   binary?: string;
   /** Optional Codex config effort passed as `-c model_reasoning_effort=...`. */
-  reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra';
+  reasoningEffort?: ManualThinkingEffort;
   /** CLI invocation timeout. Default 30s — Codex bootstrap is ~15s. */
   timeoutMs?: number;
   readOnly?: boolean;
@@ -140,6 +142,9 @@ function resolveCodexQaRoute(options: CallCodexOptions): {
   }
   const model = options.model ?? configured.model;
   const requestedEffort = options.reasoningEffort ?? configured.reasoningEffort;
+  if (requestedEffort === 'none' || requestedEffort === 'minimal') {
+    assertRuntimeEffortPin('codex', model, requestedEffort);
+  }
   const reasoningEffort = requestedEffort
     ? resolveCodexReasoningEffort(requestedEffort, model) as CallCodexOptions['reasoningEffort']
     : undefined;

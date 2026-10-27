@@ -8,9 +8,13 @@ the adapter contract, not every model that a provider might add.
 
 ## Vocabulary and evidence
 
-The app vocabulary is adaptive, low, medium, high, max, xhigh and ultra. Disabled,
-none, minimal and off are not independent app picker values. Explicit disabled
-strings are rejected. Adaptive means reset to the runtime default on worker paths;
+The app vocabulary is adaptive, none, minimal, low, medium, high, max, xhigh and
+ultra. Codex none and minimal require the selected model to advertise them in its
+installed model discovery cache. Advertised effort lists also constrain the other
+concrete tiers. Missing evidence retains the recorded compatibility rules for the
+older tiers; it never grants none or minimal. Other runtimes refuse these two
+tiers unless this route has a verified mapping. Disabled and off strings are
+rejected. Adaptive means reset to the runtime default on worker paths;
 it does not promise disabled reasoning. Omission may inherit an operator default.
 The desktop manual picker does not offer adaptive as a manual reasoning tier.
 
@@ -104,8 +108,9 @@ claude, codex, openclaw, hermes, acp, opencode, collide, fable, o8, pi and muse.
 
 The native Anthropic budget mapping is an app budget policy, not proof of the
 provider's model-specific native output_config.effort support. API and CLI catalogs
-are not interchangeable. Disabled reasoning would need its own transport-specific
-contract; this change does not invent a new app enum value.
+are not interchangeable. Codex none uses the model-advertised transport contract
+above; this does not
+establish a disabled-reasoning contract for other runtimes or API providers.
 
 ## Persistence, dispatch and coverage
 
