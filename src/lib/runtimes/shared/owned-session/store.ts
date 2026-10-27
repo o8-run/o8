@@ -187,7 +187,7 @@ export function createOwnedSessionStore(
   ): Promise<OwnedLaunchResponse> {
     const sessionDir = path.join(root, id);
     const selectedIdentity = await runtimeLaunchStep(request, 'identity_selection', async () => {
-      let selectedIdentity: Awaited<ReturnType<typeof getSelectedRuntimeIdentity>> = null;
+      let selectedIdentity: OwnedSessionRecord['identity'] | null = null;
       if (adapter.isolatedConfigHomeEnv && adapter.defaultConfigHome && request.packetId) {
         const defaultConfigHome = adapter.defaultConfigHome();
         let latestPacketSession: OwnedSessionRecord | null = null;
@@ -207,7 +207,7 @@ export function createOwnedSessionStore(
         selectedIdentity = await getOrPinPacketRuntimeIdentity({
           runtime: runtimeId,
           packetId: request.packetId,
-          preferred: existingPacketIdentity,
+          preferred: existingPacketIdentity ?? request.runtimeIdentity,
           fallback: {
             id: `${runtimeId}-local-default`,
             label: 'Current local sign-in',
@@ -215,7 +215,7 @@ export function createOwnedSessionStore(
           },
         });
       } else if (adapter.isolatedConfigHomeEnv && !providerFromConfig(request.runtimeConfig)) {
-        selectedIdentity = await getSelectedRuntimeIdentity(runtimeId);
+        selectedIdentity = request.runtimeIdentity ?? await getSelectedRuntimeIdentity(runtimeId);
       }
 
       return selectedIdentity;

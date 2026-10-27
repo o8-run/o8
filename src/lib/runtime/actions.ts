@@ -38,6 +38,8 @@ import { confirmDiscoveredInterrupt } from '@/lib/runtime/confirmed-interrupt';
 import { settleRuntimeLaunchGovernance } from '@/lib/runtime/launch-governance';
 import { holdPendingOwnedCorrections } from '@/lib/runtimes/shared/owned-session/action-admission';
 import { assertSingleAttemptLaunch } from '@/lib/runtime/single-attempt-launch';
+import { resolveCodexLaunchIdentity } from '@/lib/codex/launch-context';
+import type { RuntimeLaunchIdentity } from '@/lib/runtime/identity-catalog';
 export type RuntimeActionKind = 'steer' | 'stop' | 'send_input' | 'interrupt' | 'watch' | 'resolve' | 'launch';
 export interface RuntimeActionRequest {
   /** Restricts automated steering to this uninterrupted owned run. */
@@ -110,7 +112,7 @@ function auditRuntimeSteer(payload: RuntimeActionRequest, sessionKey: string): v
   }
 }
 
-export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promise<RuntimeLaunchResult> {
+export async function launchRuntimeSurface(payload: RuntimeLaunchRequest, codexIdentity?: RuntimeLaunchIdentity): Promise<RuntimeLaunchResult> {
   assertNotKnowledgeSource(payload.repoPath); assertNotKnowledgeSource(payload.cwd);
   if (payload.automaticRecoverySurfaceId || payload.automaticRecoveryRunId) {
     if (!payload.automaticRecoverySurfaceId?.startsWith(`${payload.runtime}-owned:`) || !payload.automaticRecoveryRunId) {
@@ -118,7 +120,7 @@ export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promi
     }
     try {
       return await withOwnedAutomaticRecovery(payload.automaticRecoverySurfaceId, payload.automaticRecoveryRunId,
-        () => launchRuntimeSurfaceInner(payload));
+        () => launchRuntimeSurfaceInner(payload, codexIdentity));
     } catch (error) {
       if (!(error instanceof AutomaticRecoveryRefusedError)) throw error;
       return { ok: false, runtime: payload.runtime, surfaceId: '', note: error.message,
@@ -126,9 +128,9 @@ export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promi
         worktree: null, laneId: payload.existingLaneId ?? null };
     }
   }
-  return launchRuntimeSurfaceInner(payload);
+  return launchRuntimeSurfaceInner(payload, codexIdentity);
 }
-async function launchRuntimeSurfaceInner(payload: RuntimeLaunchRequest): Promise<RuntimeLaunchResult> {
+async function launchRuntimeSurfaceInner(payload: RuntimeLaunchRequest, codexIdentity?: RuntimeLaunchIdentity): Promise<RuntimeLaunchResult> {
   const runtimeId = payload.runtime;
   const prompt = payload.prompt?.trim();
   const repoPath = payload.repoPath?.trim() || payload.cwd?.trim();
@@ -170,7 +172,8 @@ async function launchRuntimeSurfaceInner(payload: RuntimeLaunchRequest): Promise
     };
   }
 
-  assertSingleAttemptLaunch(payload, workModeResolution.workMode);
+  const launchIdentity = runtimeId === 'codex' ? codexIdentity ?? resolveCodexLaunchIdentity(payload.packetId) : undefined;
+  assertSingleAttemptLaunch(payload, workModeResolution.workMode, launchIdentity?.configHomeRef);
   if (payload.controlledTask && (payload.executionPolicy !== 'single-attempt' || payload.isolate !== false
     || payload.skipSetup !== true || payload.automaticRecoverySurfaceId || payload.automaticRecoveryRunId)) {
     throw new Error('Controlled task launch requires its pre-admitted isolated workspace and no recovery.');
@@ -371,6 +374,7 @@ async function launchRuntimeSurfaceInner(payload: RuntimeLaunchRequest): Promise
     await runtimeLaunchStep({ laneId: payload.existingLaneId ?? undefined, packetId: payload.packetId }, 'reviewer_checkout', () => assertReviewerPrCheckout(payload.packetId, cwd));
     assertPreRunAdmission();
     const result = await runtime.launch({
+      runtimeIdentity: launchIdentity,
       cwd,
       sourceRepoPath: repoPath,
       branchName: payload.branchName,

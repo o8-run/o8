@@ -10,9 +10,8 @@ import { codexLaunchArgs, codexResumeArgs } from '@/lib/codex/owned';
 import { buildClaudeStreamJsonArgs } from '@/lib/claude-code/interactive-session';
 import { museWorkerArgs } from '@/lib/muse/owned';
 import { workerLaunchPayload } from '@/lib/cloud/worker-payload';
-import type { RuntimeLaunchRequest, RuntimeLaunchResult } from '@/lib/runtime/actions';
 
-const h = vi.hoisted(() => ({ launch: vi.fn<(request: RuntimeLaunchRequest) => Promise<RuntimeLaunchResult>>() }));
+const h = vi.hoisted(() => ({ launch: vi.fn<typeof import('@/lib/runtime/actions').launchRuntimeSurface>() }));
 vi.mock('@/lib/runtime/actions', async importOriginal => ({
   ...await importOriginal<typeof import('@/lib/runtime/actions')>(), launchRuntimeSurface: h.launch,
 }));
@@ -85,7 +84,12 @@ describe('runtime and selectable-model effort matrix through the actual launch P
       expect(await response.json()).toMatchObject({ code: expect.stringMatching(/^invalid_effort$|^effort_/) });
       return;
     }
-    expect(h.launch).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ runtime, model, effort }));
+    const expectedRequest = expect.objectContaining({ runtime, model, effort });
+    if (runtime === 'codex') {
+      expect(h.launch).toHaveBeenCalledExactlyOnceWith(expectedRequest, {
+        id: 'codex-local-default', label: 'Current local sign-in', configHomeRef: configHome,
+      });
+    } else expect(h.launch).toHaveBeenCalledExactlyOnceWith(expectedRequest);
     closeDb();
     expect((await invoke()).headers.get('x-o8-idempotency-replayed')).toBe('1');
     expect(h.launch).toHaveBeenCalledTimes(1);

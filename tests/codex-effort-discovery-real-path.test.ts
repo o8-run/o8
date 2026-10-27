@@ -14,6 +14,10 @@ vi.mock('@/lib/runtimes/shared/owned-session/sandbox', async original => ({
   ...await original<typeof import('@/lib/runtimes/shared/owned-session/sandbox')>(),
   prepareWorkerSandbox: async ({ binary, args }: { binary: string; args: string[] }) => ({ binary, args }),
 }));
+// Account admission is independent of managed-worktree ownership.
+vi.mock('@/lib/workspace/materialization-guard', () => ({
+  inspectOwnedWorkspaceMaterialization: async () => ({ status: 'available', source: 'no-snapshot' }),
+}));
 vi.mock('node:os', async original => {
   const os = await original<typeof import('node:os')>();
   const homedir = () => process.env.O8_TEST_DISCOVERY_HOME!;
@@ -73,7 +77,8 @@ const { codexBackend } = await import('@/lib/lane/orchestrator-backends/codex');
 const { makeMoaBackend } = await import('@/lib/lane/orchestrator-backends/moa');
 const { codexOwnedAdapter, launchOwnedCodexSession } = await import('@/lib/codex/owned');
 const { createOwnedSessionStore } = await import('@/lib/runtimes/shared/owned-session');
-const { registerRuntimeIdentity, selectRuntimeIdentity } = await import('@/lib/runtime/identity-catalog');
+const { registerRuntimeIdentity, selectRuntimeIdentity, getOrPinPacketRuntimeIdentity } = await import('@/lib/runtime/identity-catalog');
+const { codexRuntime } = await import('@/lib/runtimes/codex');
 const { updateOperatorDefaults } = await import('@/lib/operator/defaults');
 const { assertSingleAttemptLaunch } = await import('@/lib/runtime/single-attempt-launch');
 const { resolveEffortPin } = await import('@/lib/orchestrator/effort-pin');
@@ -116,6 +121,54 @@ beforeEach(async () => {
   await updateOperatorDefaults({ codexAppThreads: false });
 });
 afterAll(() => { closeDb(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); rmSync(root, { recursive: true, force: true }); });
+
+it.each(['launch-route', 'single-attempt', 'runtime-adapter'].flatMap(entry =>
+  (['none', 'minimal'] as const).map(effort => ({ entry, effort })),
+))('$entry uses pinned A after selection changes to B for $effort', async ({ entry, effort }) => {
+  const packetId = `pinned-${entry}-${effort}`;
+  const identityHome = join(root, `${packetId}-A`);
+  const selectedHome = join(root, `${packetId}-B`);
+  cache(identityHome, 'gpt-6.1-sol', [effort]);
+  cache(selectedHome, 'gpt-6.1-sol', ['low']);
+  cache(configHome, 'gpt-6.1-sol', ['low']);
+  const pinned = await registerRuntimeIdentity({ runtime: 'codex', label: 'A', configHomeRef: identityHome });
+  await selectRuntimeIdentity('codex', pinned.id);
+  await getOrPinPacketRuntimeIdentity({ runtime: 'codex', packetId, fallback: pinned });
+  const selected = await registerRuntimeIdentity({ runtime: 'codex', label: 'B', configHomeRef: selectedHome });
+  await selectRuntimeIdentity('codex', selected.id);
+  const cwd = repo(packetId);
+  const request: RuntimeLaunchRequest = { runtime: 'codex', packetId, cwd, prompt: 'fixture',
+    model: 'gpt-6.1-sol', effort, executionPolicy: 'single-attempt', workMode: 'read-only',
+    clientMutationId: packetId, skipSetup: true, isolate: false };
+  // Control: the final owned boundary already executes as A with B selected.
+  const control = await launchOwnedCodexSession(request as Parameters<typeof launchOwnedCodexSession>[0]);
+  expect(control.ok, control.note).toBe(true);
+  await finished(control.surfaceId);
+  expect(saved(control.surfaceId).identity).toMatchObject({ id: pinned.id, configHomeRef: identityHome });
+  let surfaceId: string;
+  if (entry === 'launch-route') {
+    const response = await POST(new NextRequest('http://localhost/api/runtime/launch', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(request),
+    }));
+    expect(response.status).toBe(200);
+    const result = await response.json();
+    expect(result.ok, result.note).toBe(true);
+    surfaceId = result.surfaceId;
+  } else if (entry === 'single-attempt') {
+    expect(() => assertSingleAttemptLaunch(request, 'read-only')).not.toThrow();
+    surfaceId = (await launchOwnedCodexSession(request as Parameters<typeof launchOwnedCodexSession>[0])).surfaceId;
+  } else {
+    const result = await codexRuntime.launch({ ...request, cwd });
+    expect(result.ok, result.note).toBe(true);
+    surfaceId = result.sessionKey!;
+  }
+  await finished(surfaceId);
+  expect(saved(surfaceId)).toMatchObject({ effort, identity: { id: pinned.id, configHomeRef: identityHome },
+    executionPolicy: { mode: 'single-attempt', effort } });
+  expect(calls(cwd)).toHaveLength(2);
+  expect(calls(cwd).every(call => call.configHome === identityHome
+    && call.args.includes(`model_reasoning_effort=${effort}`))).toBe(true);
+});
 
 it.each((['none', 'minimal'] as const).flatMap(effort =>
   [false, true].map(advertised => ({ effort, advertised })),

@@ -21,6 +21,8 @@ export interface RuntimeIdentityRecord {
   updatedAt: string;
 }
 
+export type RuntimeLaunchIdentity = Pick<RuntimeIdentityRecord, 'id' | 'label' | 'configHomeRef'>;
+
 interface RuntimeIdentityCatalog {
   schema: typeof IDENTITY_CATALOG_SCHEMA;
   identities: RuntimeIdentityRecord[];
@@ -174,6 +176,11 @@ export async function getSelectedRuntimeIdentity(runtime: string): Promise<Runti
 
 /** Synchronous admission boundaries use the same persisted, validated selection. */
 export function getSelectedRuntimeIdentitySync(runtime: string): RuntimeIdentityRecord | null {
+  return getRuntimeLaunchIdentitySync(runtime);
+}
+
+/** A durable packet binding takes precedence over the current worker selection. */
+export function getRuntimeLaunchIdentitySync(runtime: string, packetId?: string): RuntimeIdentityRecord | null {
   let catalog: RuntimeIdentityCatalog;
   try {
     catalog = normalizeCatalog(JSON.parse(readFileSync(catalogPath(), 'utf8')) as unknown);
@@ -181,6 +188,8 @@ export function getSelectedRuntimeIdentitySync(runtime: string): RuntimeIdentity
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
     throw new Error('identity_catalog_unavailable');
   }
+  const pinned = packetId ? catalog.packetBindings[`${runtime}\0${packetId}`] : undefined;
+  if (pinned) return pinned;
   const selectedId = catalog.selectedByRuntime[runtime];
   return catalog.identities.find(entry => entry.id === selectedId && entry.runtime === runtime) ?? null;
 }
