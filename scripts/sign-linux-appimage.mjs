@@ -22,6 +22,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -71,6 +72,15 @@ function channelSignatureDeps(root, options, workDir) {
   const manifests = new Map();
   let identity;
   let signature;
+  let installerSha256;
+  const completeManifest = (current) => {
+    const latest = withLinuxPlatform({ latest: current, version, signature });
+    if (identity.channel === 'beta') {
+      const url = latest.platforms['linux-x86_64'].url;
+      latest.installers = [...(current.installers ?? []).filter(entry => entry.url !== url), { url, sha256: installerSha256 }];
+    }
+    return latest;
+  };
   const manifestName = () => ({ stable: 'latest.json', beta: 'beta.json', preview: 'preview.json' })[identity.channel];
   const requireManifest = (latest) => {
     if (latest?.version !== version || latest.channel !== identity.channel) {
@@ -99,6 +109,7 @@ function channelSignatureDeps(root, options, workDir) {
         const sigPath = await original.signAppImage(args);
         identity = readLinuxBuildChannel(root, args.filePath, sigPath, version);
         signature = readFileSync(sigPath, 'utf8').trim();
+        installerSha256 = createHash('sha256').update(readFileSync(args.filePath)).digest('hex');
         return sigPath;
       },
       fetchLatestJson: ({ repo, tag }) => {
@@ -115,7 +126,7 @@ function channelSignatureDeps(root, options, workDir) {
       writeLatestJson: ({ latest }) => { writeManifest(options.repos[0], latest, 'generated'); },
       uploadAssets: ({ repo, tag, files }) => {
         const current = requireManifest(manifests.get(repo));
-        const latest = withLinuxPlatform({ latest: current, version, signature });
+        const latest = completeManifest(current);
         const path = writeManifest(repo, latest, 'tag-completion');
         original.uploadAssets({ repo, tag, files: [files[0], path] });
       },
@@ -134,7 +145,7 @@ function channelSignatureDeps(root, options, workDir) {
           console.log(`${LOG} leaving ${repo} beta anchor at ${current.version}`);
           continue;
         }
-        const latest = withLinuxPlatform({ latest: current, version, signature });
+        const latest = completeManifest(current);
         const path = writeManifest(repo, latest, 'rolling-completion');
         original.uploadAssets({ repo, tag: BETA_FEED_TAG, files: [path] });
       }

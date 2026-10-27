@@ -9,6 +9,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { afterEach, expect, it } from 'vitest';
@@ -150,6 +151,10 @@ it('A1: beta publication uses the signed build identity even with a stable envir
   ).toBe(true);
   const manifest = JSON.parse(readFileSync(join(f.mac, 'beta.json'), 'utf8'));
   expect(manifest.channel).toBe('beta');
+  expect(manifest.installers).toEqual([{
+    url: new URL('o8_0.1.900_universal.dmg', manifest.platforms['darwin-aarch64'].url).href,
+    sha256: createHash('sha256').update('fixture installer').digest('hex'),
+  }]);
   expect(existsSync(join(f.mac, 'latest.json'))).toBe(false);
   expect(existsSync(join(f.mac, 'fixed.json'))).toBe(false);
 });

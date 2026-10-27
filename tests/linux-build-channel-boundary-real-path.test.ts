@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
@@ -132,7 +133,10 @@ describe('signed Linux build channel through the operator CLI', () => {
     for (const event of writes) {
       expect(event.manifests).toHaveLength(1); const item = event.manifests[0]; expect(item.file).toBe('beta.json');
       const repo = event.args[event.args.indexOf('--repo') + 1]; const original = manifest(repo, 'beta');
-      expect(item.data).toEqual({ ...original, platforms: { ...original.platforms, 'linux-x86_64': {
+      expect(item.data).toEqual({ ...original, installers: [{
+        url: `https://github.com/${repo}/releases/download/${tag}/${asset}`,
+        sha256: createHash('sha256').update(readFileSync(f.artifact)).digest('hex'),
+      }], platforms: { ...original.platforms, 'linux-x86_64': {
         signature: readFileSync(join(source, 'beta.AppImage.sig'), 'utf8').trim(),
         url: `https://github.com/${repo}/releases/download/${tag}/${asset}`,
       } } });

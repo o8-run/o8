@@ -21,6 +21,8 @@ The [focus plan through October 27](./docs/operations/focus-through-2026-10-27.m
 
 ## Now
 
+Installed-build smoke receipts and the stable promotion gate remain under review in [#4813](https://github.com/o8-run/o8/pull/4813). Actual macOS installer acceptance needs a local run; source checks do not establish it.
+
 First-run acceptance is the immediate engineering priority. Published stable is [0.1.811](https://github.com/hurttlocker/o8-releases/releases/tag/v0.1.811), released October 26. A fresh stall-free first-run repeat and physical Apple Silicon execution remain unverified. A candidate run is not a public download-to-merge benchmark. Preserve the Solo tools, sent-image, and comparison stop/requeue checks. [#2211](https://github.com/o8-run/o8/issues/2211)
 
 Default-on usage analytics, with a first-run disclosure, preserved opt-outs and matching privacy documentation, is published in 0.1.811 via [#3046](https://github.com/o8-run/o8/pull/3046). Update-service delivery in the installed updater and trustworthy active-install counts remain unverified. Later activation and reporting work is listed below as source work awaiting the next release and installed acceptance.

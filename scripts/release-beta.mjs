@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { assertLinuxArtifactChannels } from './lib/linux-build-channel.mjs';
 import { artifactChannel } from './lib/build-channel.mjs';
 import {
@@ -106,6 +107,11 @@ function main() {
   assertLinuxArtifactChannels(root, version, identity.channel, uploadArgs);
   latestJson.channel = identity.channel;
   latestJson.buildIdentity = identity;
+  latestJson.installers = uploadArgs.filter(path => /\.(dmg|AppImage)$/.test(path)).map(path => ({
+    url: path.endsWith('.AppImage') ? latestJson.platforms['linux-x86_64'].url
+      : new URL(basename(path), latestJson.platforms['darwin-aarch64'].url).href,
+    sha256: createHash('sha256').update(readFileSync(path)).digest('hex'),
+  }));
 
   // One immutable candidate, one lock for all feed writers. Never generate stable receipts or announcements.
   const lock = acquirePublicationLock();

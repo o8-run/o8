@@ -90,9 +90,11 @@ with `node scripts/release.mjs --dry-run`. Beta artifact inspection uses
 `node scripts/release-beta.mjs --dry-run`; neither command signs, notarizes or
 publishes during a dry run.
 
-Promotion is separate work in #4857. Installed-build smoke acceptance remains
-in draft #4813. This change does not establish a smoke receipt or perform a
-release, tag operation or promotion.
+The installed smoke and receipt-gated promotion commands are documented in
+[Beta and stable update feeds](beta-updates.md#installed-smoke-before-promotion).
+Run smoke against every installer in the final beta manifest before promotion.
+The macOS installed-build acceptance remains pending in draft #4813; source
+checks do not establish acceptance or authorize a release or promotion.
 
 ## Development and nightly verification
 
