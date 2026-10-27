@@ -3536,6 +3536,13 @@
       ]
     },
     {
+      "path": "tests/linux-glass-init-script.test.ts",
+      "reasons": [
+        "child-process",
+        "native-build"
+      ]
+    },
+    {
       "path": "tests/linux-worker-sandbox-real-path.test.ts",
       "reasons": [
         "child-process",
