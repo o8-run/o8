@@ -77,6 +77,13 @@ export function SymonMessagesReceiverSection({ onEnabledChange, mutationLocked =
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // The receiver reads the macOS Messages database, so off macOS there is
+  // nothing to set up once a read confirms it is disabled. Keep an enabled
+  // receiver available to turn off. The status read above still runs and
+  // reports to onEnabledChange, which the bridge section relies on.
+  // Unknown or failed reads must keep their error and recovery action reachable.
+  if (unsupported && status?.enabled === false && !error) return null;
+
   return (
     <section style={{ marginTop: 28 }}>
       <SettingsGroup header="Native Messages receiver" footnote="Off by default. Only the senders you authorize can reach Symon. Enabling starts with new messages; old messages are never answered.">

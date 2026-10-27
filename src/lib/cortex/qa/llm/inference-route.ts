@@ -45,6 +45,37 @@ export const O8_MANAGED_TEXT_MODEL = 'openai/gpt-6-luna';
 export const O8_MANAGED_ZERO_COST_MODEL = 'nvidia/nemotron-3.5-lightning:free';
 
 /**
+ * Server environment variable that replaces the managed text model when the
+ * call goes DIRECT to OpenRouter on the user's own key. The managed proxy
+ * always serves its own model and local runtimes keep their configured model,
+ * so the override never applies to either.
+ */
+export const OPENROUTER_TEXT_MODEL_ENV = 'O8_OPENROUTER_TEXT_MODEL';
+
+// OpenRouter ids are `vendor/model`, optionally with a `:variant` suffix.
+const OPENROUTER_MODEL_ID = /^[A-Za-z0-9][\w.-]*\/[\w.-]+(?::[\w.-]+)?$/;
+
+/** The direct-key text model override, or null when unset or malformed. */
+export function directOpenRouterTextModel(env: Readonly<Record<string, string | undefined>> = process.env): string | null {
+  const value = env[OPENROUTER_TEXT_MODEL_ENV]?.trim();
+  return value && OPENROUTER_MODEL_ID.test(value) ? value : null;
+}
+
+/**
+ * The ordered text-model chain for an OpenAI-compatible route: the managed
+ * text model, then the $0 model. On a direct key, a valid
+ * O8_OPENROUTER_TEXT_MODEL takes the first slot; the $0 model stays as the
+ * fallback.
+ */
+export function openRouterTextModels(
+  via: InferenceRoute['via'],
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): readonly [string, string] {
+  const override = via === 'direct' ? directOpenRouterTextModel(env) : null;
+  return [override ?? O8_MANAGED_TEXT_MODEL, O8_MANAGED_ZERO_COST_MODEL];
+}
+
+/**
  * Luna's Chat Completions accepts tools only with reasoning effort none, and
  * these short text tasks gain nothing from reasoning, so its requests set none.
  * Other models, including local runtimes, get no reasoning field.

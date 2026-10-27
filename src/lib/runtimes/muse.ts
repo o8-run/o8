@@ -8,7 +8,7 @@ export const museRuntime = createDeclarativeAgentRuntime({ runtimeId: 'muse', di
 // Pin the durable mode and execution policy before the owned store starts a process.
 museRuntime.launch = async opts => {
   if (opts.controlledProvider) return { ok: false, note: 'Muse Code uses its own account. Select an API runtime for a controlled provider task.' };
-  const result = await museOwnedStore.launch({ cwd: opts.cwd, prompt: opts.prompt, taskName: opts.taskName,
+  const result = await museOwnedStore.launch({ cwd: opts.cwd, prompt: opts.prompt, promptMemoryRevision: opts.promptMemoryRevision, taskName: opts.taskName,
     clientMutationId: opts.clientMutationId, laneId: opts.laneId, packetId: opts.packetId,
     model: opts.model, effort: opts.effort, executionPolicy: opts.executionPolicy, controlledTask: opts.controlledTask,
     runtimeConfig: opts.workMode ? { workMode: opts.workMode } : undefined });

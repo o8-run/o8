@@ -62,7 +62,7 @@ function cachedCodexModelIds(): string[] | null {
   }
 }
 
-function resolveCachedCodexOrchestratorModel(requestedModel: string): {
+export function resolveCachedCodexOrchestratorModel(requestedModel: string): {
   model: string;
   note: string | null;
 } {

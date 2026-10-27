@@ -1,5 +1,5 @@
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, symlinkSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { lstat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -147,10 +147,10 @@ describe('exact directory purge', () => {
     const root = mkdtempSync(path.join(tmpdir(), 'o8-exact-purge-internal-hardlink-'));
     roots.push(root);
     const directoryPath = path.join(root, 'retired-workspace');
-    const firstPath = path.join(directoryPath, 'first.txt');
+    const firstPath = path.join(directoryPath, '0-first.txt');
     mkdirSync(directoryPath);
     writeFileSync(firstPath, 'owned shared bytes');
-    linkSync(firstPath, path.join(directoryPath, 'second.txt'));
+    linkSync(firstPath, path.join(directoryPath, 'a'));
     const stat = await lstat(directoryPath);
 
     await expect(purgeExactDirectory(
@@ -206,18 +206,28 @@ describe('exact directory purge', () => {
     }, 30_000,
   );
 
-  it('resumes an exact monotonic manifest after process death during namespace release', async () => {
+  for (const { mode, name } of [
+    { mode: 'unchanged', name: 'resumes an exact monotonic manifest after process death during namespace release' },
+    { mode: 'edited', name: 'retains changed hardlink contents on cold replay after an owned unlink' },
+    { mode: 'legacy', name: 'holds legacy hardlink replay without a durable content digest' },
+    { mode: 'live-edited', name: 'retains a reviewed hard link edited after its sibling unlink with restored mtime' },
+    { mode: 'preserve-edited', name: 'cleans owned siblings while preserving an edited hardlink and unlisted output on replay' },
+  ]) it(name, async () => {
     const root = mkdtempSync(path.join(tmpdir(), 'o8-exact-purge-namespace-crash-'));
     roots.push(root);
     const directoryPath = path.join(root, 'retired-workspace');
     const nested = path.join(directoryPath, 'nested/deep');
     mkdirSync(nested, { recursive: true });
-    writeFileSync(path.join(nested, 'first.txt'), 'first bytes');
-    writeFileSync(path.join(nested, 'second.txt'), 'shared bytes');
-    linkSync(path.join(nested, 'second.txt'), path.join(nested, 'third.txt'));
+    writeFileSync(path.join(nested, '0-first.txt'), 'first bytes');
+    writeFileSync(path.join(nested, 'a'), 'shared bytes');
+    linkSync(path.join(nested, 'a'), path.join(nested, 'z'));
+    const stamp = new Date('2025-01-01T00:00:00.000Z');
+    utimesSync(path.join(nested, 'a'), stamp, stamp);
     const stat = await lstat(directoryPath);
     const identity = { device: stat.dev, inode: stat.ino };
-    const manifest = await captureExactDirectoryManifest(directoryPath, identity);
+    const originalLink = await lstat(path.join(nested, 'a'));
+    const manifest = await captureExactDirectoryManifest(directoryPath, identity, { contents: mode === 'live-edited' });
+    expect(manifest.entries.find(entry => entry.relative === path.join('nested', 'deep', 'a'))?.contentSha256).toMatch(/^[a-f0-9]{64}$/);
     const markerPath = path.join(root, 'namespace-release.marker');
     const runnerPath = path.join(root, 'namespace-crash-runner.ts');
     const moduleUrl = pathToFileURL(
@@ -253,6 +263,7 @@ describe('exact directory purge', () => {
         ...process.env,
         NODE_ENV: 'test',
         O8_TEST_PURGE_STOP_MARKER: markerPath,
+        O8_WORKER_ENV_ALLOW: 'O8_TEST_PURGE_STOP_MARKER',
         O8_PURGE_TEST_INPUT: JSON.stringify({ directoryPath, identity, manifest }),
         // The crash child is a bare node process, so it never sees Vitest's
         // 'server-only' alias. Load the purge module the way the packaged
@@ -264,29 +275,72 @@ describe('exact directory purge', () => {
       },
       stdio: ['ignore', 'ignore', 'pipe'],
     });
-    let childErrors = '';
-    child.stderr?.on('data', chunk => { childErrors += chunk; });
-    const deadline = Date.now() + 15_000;
-    while (!existsSync(markerPath)) {
-      if (child.exitCode !== null || child.signalCode !== null) {
-        throw new Error('Exact purge crash child exited before namespace release: ' + childErrors);
+    let stderr = ''; child.stderr!.on('data', chunk => { stderr += chunk; });
+    const closed = new Promise<number | null>(resolve => child.once('close', resolve));
+    try {
+      const deadline = Date.now() + 15_000;
+      while (!existsSync(markerPath)) {
+        if (child.exitCode !== null || child.signalCode !== null) {
+          throw new Error(`Exact purge crash child exited before namespace release: ${stderr}`);
+        }
+        if (Date.now() >= deadline) throw new Error('Exact purge crash child timed out.');
+        await new Promise((resolve) => setTimeout(resolve, 20));
       }
-      if (Date.now() >= deadline) throw new Error('Exact purge crash child timed out.');
-      await new Promise((resolve) => setTimeout(resolve, 20));
-    }
-    process.kill(-child.pid!, 'SIGKILL');
-    await new Promise<void>((resolve) => child.once('exit', () => resolve()));
-    expect(readdirSync(directoryPath).length).toBeGreaterThan(0);
+      expect(readFileSync(markerPath, 'utf8')).toBe(path.join('nested', 'deep', 'z'));
+      if (mode === 'live-edited') {
+        const remaining = path.join(nested, 'a'); const before = await lstat(remaining);
+        expect(before.nlink).toBe(1);
+        writeFileSync(remaining, 'edited bytes'); utimesSync(remaining, before.atime, before.mtime);
+        expect((await lstat(remaining)).size).toBe(before.size);
+        expect((await lstat(remaining)).mtimeMs).toBe(before.mtimeMs);
+        process.kill(-child.pid!, 'SIGCONT');
+        expect(await closed, stderr).toBe(1);
+        expect(stderr).toMatch(/contents changed/);
+        expect(stderr).toContain(path.join('nested', 'deep', 'a'));
+        expect(readFileSync(remaining, 'utf8')).toBe('edited bytes');
+        expect(existsSync(path.join(nested, 'z'))).toBe(false);
+        expect(readFileSync(path.join(nested, '0-first.txt'), 'utf8')).toBe('first bytes');
+        return;
+      }
+      process.kill(-child.pid!, 'SIGKILL');
+      await closed;
+      expect(readdirSync(directoryPath).length).toBeGreaterThan(0);
 
-    await expect(purgeExactDirectory(
-      directoryPath,
-      identity,
-      undefined,
-      undefined,
-      undefined,
-      manifest.fingerprint,
-      manifest.entries,
-    )).resolves.toBeUndefined();
-    expect(existsSync(directoryPath)).toBe(false);
+      if (mode === 'edited' || mode === 'preserve-edited') {
+        const survivor = path.join(nested, 'a');
+        const before = await lstat(survivor);
+        expect(before.nlink).toBe(1);
+        writeFileSync(survivor, 'edited bytes');
+        utimesSync(survivor, before.atime, before.mtime);
+        expect((await lstat(survivor)).size).toBe(before.size);
+        expect((await lstat(survivor)).mtimeMs).toBe(before.mtimeMs);
+      }
+      if (mode === 'preserve-edited') writeFileSync(path.join(directoryPath, '.env'), 'unlisted fixture bytes');
+      if (mode === 'legacy') for (const entry of manifest.entries) delete entry.contentSha256;
+      const replay = purgeExactDirectory(directoryPath, identity, undefined, undefined, undefined,
+        manifest.fingerprint, manifest.entries, mode === 'preserve-edited');
+      if (mode === 'unchanged') {
+        await expect(replay).resolves.toBeUndefined();
+        expect(existsSync(directoryPath)).toBe(false);
+      } else if (mode === 'preserve-edited') {
+        const kept = await replay;
+        expect(readFileSync(path.join(nested, 'a'), 'utf8')).toBe('edited bytes');
+        const actual = await lstat(path.join(nested, 'a'));
+        expect({ device: actual.dev, inode: actual.ino }).toEqual({ device: originalLink.dev, inode: originalLink.ino });
+        expect(readFileSync(path.join(directoryPath, '.env'), 'utf8')).toBe('unlisted fixture bytes');
+        expect(existsSync(path.join(nested, '0-first.txt'))).toBe(false);
+        expect(kept).toEqual(expect.arrayContaining([
+          { relative: path.join('nested', 'deep', 'a'), reason: 'its build ownership revision changed' },
+          { relative: '.env', reason: 'it is not in the release-owned inventory' },
+        ]));
+      } else {
+        await expect(replay).rejects.toThrow(/contents|digest|revision/);
+        expect(readFileSync(path.join(nested, 'a'), 'utf8')).toBe(mode === 'edited' ? 'edited bytes' : 'shared bytes');
+        expect(readFileSync(path.join(nested, '0-first.txt'), 'utf8')).toBe('first bytes');
+      }
+    } finally {
+      if (child.exitCode === null && child.signalCode === null) process.kill(-child.pid!, 'SIGKILL');
+      await closed;
+    }
   }, 30_000);
 });

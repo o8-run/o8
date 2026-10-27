@@ -2248,31 +2248,46 @@ fn spawn_bundled_ws_server(
 // would see. If nothing works, returns None and the caller shows a dialog.
 
 const MIN_NODE_MAJOR: u32 = 22;
-// F40 (#1032), #1456: the bundle ships better-sqlite3 and node-pty prebuilds
-// for both Node 22 and Node 24. Prefer the user's login-shell default when it
-// is either first-class runtime; Node 22 discovery remains a fallback when the
-// default is missing or has an unsupported native module ABI.
+// macOS ships multiple native-addon ABIs. Linux keeps the host-built Node 22
+// addons, so it must not accept Node 24 merely because macOS supports it.
+// Linux also loads the actual packaged addons before admitting a runtime.
 const PREFERRED_NODE_MAJOR: u32 = 22;
 const LATEST_SUPPORTED_NODE_MAJOR: u32 = 24;
+#[cfg(target_os = "linux")]
+const SUPPORTED_NATIVE_NODE_MAJORS: &[u32] = &[PREFERRED_NODE_MAJOR];
+#[cfg(not(target_os = "linux"))]
 const SUPPORTED_NATIVE_NODE_MAJORS: &[u32] = &[PREFERRED_NODE_MAJOR, LATEST_SUPPORTED_NODE_MAJOR];
 
 /// Look in well-known places for a Node 22.x install regardless of the user's
 /// nvm/fnm/volta default. Order matches the rough population of users on each.
-fn find_preferred_node_22() -> Option<String> {
+fn find_preferred_node_22(server_dir: &std::path::Path) -> Option<String> {
     let home = std::env::var("HOME").ok()?;
-    find_preferred_node_22_in(&home, check_node_version)
+    find_preferred_node_22_in(&home, |candidate| {
+        let version = check_node_version(candidate)?;
+        supports_packaged_native_addons(candidate, server_dir).then_some(version)
+    })
 }
 
 fn find_preferred_node_22_in<F>(home: &str, mut check_node: F) -> Option<String>
 where
     F: FnMut(&str) -> Option<(u32, String)>,
 {
-    let glob_dirs: [(String, &str); 5] = [
+    let glob_dirs = [
         (format!("{}/.nvm/versions/node", home), "v22"),
         (format!("{}/.fnm/node-versions", home), "v22"),
+        // fnm's default root on Linux is $XDG_DATA_HOME/fnm, not ~/.fnm.
+        #[cfg(target_os = "linux")]
+        (format!("{}/.local/share/fnm/node-versions", home), "v22"),
         (format!("{}/.volta/tools/image/node", home), "22"),
+        // Extra Linux manager roots must not change macOS/Windows discovery.
+        #[cfg(target_os = "linux")]
+        (format!("{}/.asdf/installs/nodejs", home), "22."),
+        #[cfg(target_os = "linux")]
+        (format!("{}/.local/share/mise/installs/node", home), "22"),
         ("/opt/homebrew/opt/node@22".to_string(), ""),
         ("/usr/local/opt/node@22".to_string(), ""),
+        #[cfg(target_os = "linux")]
+        ("/home/linuxbrew/.linuxbrew/opt/node@22".to_string(), ""),
     ];
     for (dir, prefix) in glob_dirs {
         // Homebrew's node@22 keg has node directly at <keg>/bin/node — no
@@ -2408,6 +2423,34 @@ fn check_node_version(node_bin: &str) -> Option<(u32, String)> {
     shell_env::check_node_version_cached(node_bin)
 }
 
+/// Linux exports host-built addons. Loading both catches the actual ABI (and
+/// architecture), including a mismatched Node 22 or a stale addon payload.
+#[cfg(target_os = "linux")]
+fn supports_packaged_native_addons(node_bin: &str, server_dir: &std::path::Path) -> bool {
+    let script = r#"
+        const path = require('node:path');
+        const modules = path.join(process.argv[1], 'node_modules');
+        try {
+            const Database = require(path.join(modules, 'better-sqlite3'));
+            new Database(':memory:').close();
+            require(path.join(modules, 'node-pty'));
+        } catch { process.exit(1); }
+    "#;
+    Command::new(node_bin)
+        .args(["-e", script])
+        .arg(server_dir)
+        .no_window()
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
+}
+
+// Preserve the existing macOS/Windows runtime selection without an extra probe.
+#[cfg(not(target_os = "linux"))]
+fn supports_packaged_native_addons(_node_bin: &str, _server_dir: &std::path::Path) -> bool {
+    true
+}
+
 fn supports_native_node_major(major: u32) -> bool {
     SUPPORTED_NATIVE_NODE_MAJORS.contains(&major)
 }
@@ -2483,10 +2526,10 @@ mod node_preflight_tests {
         if !Path::new(path).exists() {
             return None;
         }
-        if path.contains("/v22.") || path.contains("/node/22.") {
+        if path.contains("/v22.") || path.contains("/22.") {
             return Some((22, "v22.19.0".to_string()));
         }
-        if path.contains("/v24.") || path.contains("/node/24.") {
+        if path.contains("/v24.") || path.contains("/24.") {
             return Some((24, "v24.11.1".to_string()));
         }
         None
@@ -2527,6 +2570,32 @@ mod node_preflight_tests {
         );
     }
 
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn preferred_node_discovery_supports_linux_manager_layouts() {
+        let fnm = TempHome::new("fnm-xdg");
+        let fnm_node =
+            fnm.touch_node(".local/share/fnm/node-versions/v22.18.0/installation/bin/node");
+        assert_eq!(
+            find_preferred_node_22_in(fnm.str(), checker),
+            Some(fnm_node.to_string_lossy().to_string())
+        );
+
+        let asdf = TempHome::new("asdf");
+        let asdf_node = asdf.touch_node(".asdf/installs/nodejs/22.17.0/bin/node");
+        assert_eq!(
+            find_preferred_node_22_in(asdf.str(), checker),
+            Some(asdf_node.to_string_lossy().to_string())
+        );
+
+        let mise = TempHome::new("mise");
+        let mise_node = mise.touch_node(".local/share/mise/installs/node/22.17.0/bin/node");
+        assert_eq!(
+            find_preferred_node_22_in(mise.str(), checker),
+            Some(mise_node.to_string_lossy().to_string())
+        );
+    }
+
     #[test]
     fn preferred_node_discovery_ignores_newer_native_abi_majors() {
         let home = TempHome::new("ignore-newer");
@@ -2540,10 +2609,56 @@ mod node_preflight_tests {
     #[test]
     fn native_abi_support_matches_shipped_node_majors() {
         assert!(supports_native_node_major(PREFERRED_NODE_MAJOR));
-        assert!(supports_native_node_major(24));
+        assert_eq!(supports_native_node_major(24), cfg!(not(target_os = "linux")));
         assert!(!supports_native_node_major(23));
         assert!(!supports_native_node_major(25));
     }
+
+    #[cfg(not(target_os = "linux"))]
+    #[test]
+    fn non_linux_discovery_keeps_main_fallback_order() {
+        let home = TempHome::new("platform-order");
+        home.touch_node(".local/share/fnm/node-versions/v22.18.0/installation/bin/node");
+        home.touch_node(".asdf/installs/nodejs/22.17.0/bin/node");
+        home.touch_node(".local/share/mise/installs/node/22.17.0/bin/node");
+        let brew = "/opt/homebrew/opt/node@22/bin/node";
+        assert_eq!(find_preferred_node_22_in(home.str(), |path| {
+            if path == brew { Some((22, "v22.19.0".into())) } else { checker(path) }
+        }), Some(brew.into()));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_native_abi_support_rejects_node24() {
+        assert!(!supports_native_node_major(24));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_install_hint_avoids_distro_version_claims() {
+        let hint = super::node_install_hint();
+        assert!(!hint.contains("Ubuntu"));
+        assert!(!hint.contains("Debian"));
+        assert!(hint.contains("Node 22"));
+        assert!(hint.contains("nvm install 22"));
+    }
+
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[ignore = "requires a packaged Linux server plus Node 22 and Node 24 binaries"]
+    fn linux_preflight_matches_real_packaged_addons() {
+        let server = PathBuf::from(std::env::var("O8_TEST_NATIVE_SERVER").expect("packaged server"));
+        let node22 = std::env::var("O8_TEST_NODE22").expect("Node 22 binary");
+        let node24 = std::env::var("O8_TEST_NODE24").expect("Node 24 binary");
+        assert!(super::supports_packaged_native_addons(&node22, &server));
+        assert!(!super::supports_packaged_native_addons(&node24, &server));
+        assert_eq!(super::run_node_preflight(Some(&node22), &server).unwrap(), node22);
+        assert!(!matches!(super::run_node_preflight(Some(&node24), &server), Ok(path) if path == node24));
+        let missing = TempHome::new("missing-native-addons");
+        assert!(super::run_node_preflight(Some(&node22), &missing.path).is_err());
+    }
+
 }
 
 #[derive(Debug)]
@@ -2561,23 +2676,29 @@ enum NodePreflightError {
 /// answer instead of spawning another login shell here. Only when the probe
 /// came back empty (no shell answered at all) do we fall back to asking
 /// directly.
-fn run_node_preflight(shell_node: Option<&str>) -> Result<String, NodePreflightError> {
+fn run_node_preflight(
+    shell_node: Option<&str>,
+    server_dir: &std::path::Path,
+) -> Result<String, NodePreflightError> {
     let node_bin = shell_node
         .map(str::to_string)
         .or_else(resolve_node_via_login_shell)
-        .or_else(find_preferred_node_22)
+        .or_else(|| find_preferred_node_22(server_dir))
         .or_else(resolve_node_windows)
         .ok_or(NodePreflightError::Missing)?;
     let (major, raw) = check_node_version(&node_bin).ok_or(NodePreflightError::Missing)?;
-    if major >= MIN_NODE_MAJOR && supports_native_node_major(major) {
+    if major >= MIN_NODE_MAJOR
+        && supports_native_node_major(major)
+        && supports_packaged_native_addons(&node_bin, server_dir)
+    {
         log::info!("Node.js pre-flight OK: {} ({})", raw, node_bin);
         return Ok(node_bin);
     }
 
     // Preserve #1032's rescue path when the user's default is too old or newer
-    // than the ABIs bundled by this release, but do not override a valid 22/24
+    // than the ABIs bundled by this release, but do not override a compatible
     // default merely because another Node 22 installation exists.
-    if let Some(node22) = find_preferred_node_22() {
+    if let Some(node22) = find_preferred_node_22(server_dir) {
         if node22 != node_bin {
             if let Some((22, fallback_raw)) = check_node_version(&node22) {
                 log::info!(
@@ -2610,7 +2731,20 @@ fn node_install_hint() -> String {
         .to_string()
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
+fn node_install_hint() -> String {
+    format!(
+        "Your distribution's Node.js may be too old for this build.\n\
+         Install Node {major} with nvm (`nvm install {major}`), fnm (`fnm install {major}`),\n\
+         or the NodeSource packages at https://github.com/nodesource/distributions,\n\
+         then launch o8 again.\n\n\
+         o8 also finds Node {major} under nvm, fnm, Volta, asdf, mise, and Linuxbrew\n\
+         even when your default `node` is older.",
+        major = PREFERRED_NODE_MAJOR
+    )
+}
+
+#[cfg(all(not(target_os = "windows"), not(target_os = "linux")))]
 fn node_install_hint() -> String {
     format!(
         "Install a supported version with `brew install node@{major}` / `nvm install {major}`\n\
@@ -2625,26 +2759,36 @@ fn node_install_hint() -> String {
 /// Show a native error dialog and exit. Uses platform-native tools so we
 /// don't need to pull in tauri-plugin-dialog.
 fn show_node_error_and_exit(err: NodePreflightError) -> ! {
+    #[cfg(target_os = "linux")]
+    let versions = format!("{}.x", PREFERRED_NODE_MAJOR);
+    #[cfg(not(target_os = "linux"))]
+    let versions = format!("{}.x or {}.x", PREFERRED_NODE_MAJOR, LATEST_SUPPORTED_NODE_MAJOR);
     let (title, body) = match err {
         NodePreflightError::Missing => (
             "Node.js not found",
             format!(
-                "o8 needs Node.js {major}.x or {latest}.x to run its backend.\n\n{hint}",
-                major = PREFERRED_NODE_MAJOR,
-                latest = LATEST_SUPPORTED_NODE_MAJOR,
+                "o8 needs Node.js {versions} to run its backend.\n\n{hint}",
                 hint = node_install_hint()
             ),
         ),
         NodePreflightError::TooOld { raw } => (
             "Node.js is too old",
             format!(
-                "o8 needs Node.js {major}.x or {latest}.x but found {raw}.\n\n{hint}",
-                major = PREFERRED_NODE_MAJOR,
-                latest = LATEST_SUPPORTED_NODE_MAJOR,
+                "o8 needs Node.js {versions} but found {raw}.\n\n{hint}",
                 raw = raw,
                 hint = node_install_hint()
             ),
         ),
+        #[cfg(target_os = "linux")]
+        NodePreflightError::UnsupportedNativeAbi { raw, .. } => (
+            "Node.js is not compatible with this o8 build",
+            format!(
+                "o8 found {raw}, but this Linux build requires Node {major}.x with matching native addons.\n\n{hint}",
+                major = PREFERRED_NODE_MAJOR,
+                hint = node_install_hint()
+            ),
+        ),
+        #[cfg(not(target_os = "linux"))]
         NodePreflightError::UnsupportedNativeAbi { raw, major: found_major } => (
             "Node.js version is not supported by o8 yet",
             format!(
@@ -8995,6 +9139,11 @@ pub fn run() {
                         html_traffic_lights,
                         std::env::consts::OS,
                     );
+                    #[cfg(target_os = "linux")]
+                    let init_script = format!(
+                        "{init_script} window.__O8_LINUX_GLASS__ = {};",
+                        std::env::var("O8_LINUX_GLASS").map(|v| v.trim() == "1").unwrap_or(false),
+                    );
                     tauri::WebviewWindowBuilder::from_config(app, config)?
                         .initialization_script(init_script)
                         .build()?;
@@ -9237,7 +9386,7 @@ pub fn run() {
                     std::thread::spawn(move || {
                         let shell = shell_env::probe_login_shell();
                         log::info!("[boot] login-shell probe done at {}ms (off the main thread)", boot_ms());
-                        let node_bin = match run_node_preflight(shell.node.as_deref()) {
+                        let node_bin = match run_node_preflight(shell.node.as_deref(), &server_dir) {
                             Ok(path) => path,
                             Err(err) => show_node_error_and_exit(err),
                         };
@@ -9269,7 +9418,7 @@ pub fn run() {
                         .unwrap_or_default();
                     std::thread::spawn(move || {
                         let shell = shell_env::probe_login_shell();
-                        let node_bin = match run_node_preflight(shell.node.as_deref()) {
+                        let node_bin = match run_node_preflight(shell.node.as_deref(), &server_dir) {
                             Ok(path) => path,
                             Err(err) => show_node_error_and_exit(err),
                         };

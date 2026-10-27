@@ -1,3 +1,4 @@
+import { completionOutcomeId } from '@/lib/cortex/outcome-exclusion';
 import { findLaneBySession, setLaneStatus, updateLane } from '@/lib/lane/registry';
 import { probeNoChangesProduced } from '@/lib/lane/no-changes-produced';
 import type { Lane } from '@/lib/lane/types';
@@ -251,7 +252,7 @@ export async function handleAgentCompletion(
           const attemptNumber = currentAttempt + 1;
           if (currentAttempt < maxAttempts - 1) {
             const completionContext = await guard.wait(() => capturePacketCompletionContext(packetId, surfaceId));
-            await guard.wait(() => persistAttemptLearnings(completionCwd, packetId, attemptNumber, buildAttemptLearningFromFailure(verification.output, completionContext.selfReview)));
+            await guard.wait(() => persistAttemptLearnings(completionCwd, packetId, attemptNumber, { ...buildAttemptLearningFromFailure(verification.output, completionContext.selfReview), sourceOutcomeId: completionOutcomeId(completionContext), sourceOutcomeFingerprint: completionContext.sourceOutcomeFingerprint, memoryRevision: completionContext.memoryRevision }));
             await guard.wait(() => autoCommitCompletionWorktree(completionCwd, lane.repoPath, lane.label));
             markRalphRetryRequeued(lane.id, packetId);
             await guard.wait(() => withLockedState((state) => {
