@@ -47,11 +47,33 @@ describe('native shutdown registration boundary for detached packet workers', ()
     const launch = read('src/lib/runtimes/shared/owned-session/credential-spawn.ts');
     expect(worker).toContain('const child = spawnCredentialCheckedChild(launchInput);');
     expect(launch).toContain('detached: true,');
-    expect(launch).toContain("stdio: [input.stdinFd ?? 'ignore', input.stdoutFd, input.stderrFd, deliveryFd ?? 'ignore']");
-    expect(launch).toContain('workerOwnedStdinInvocation(launch, input.stdinBytes ?? fstatSync(input.stdinFd).size)');
+    expect(launch).toContain("stdio: [input.stdinFd ?? 'ignore', input.stdoutFd, input.stderrFd]");
+    expect(launch).toContain('const invocation = input.stdinFd === undefined ? launch');
+    expect(launch).toContain('workerOwnedStdinInvocation(launch, input.stdinBytes ?? fstatSync(input.stdinFd).size, stagedStdinDeliveryPath(input.stdinPath!))');
+    expect(launch).toContain('return spawn(invocation.command, invocation.args, {');
     expect(launch).not.toContain('child.stdin');
     expect(worker).toContain('child.unref()');
     expect(`${worker}\n${launch}`).not.toContain('register_child');
+  });
+
+  it('keeps the staged descriptor, provider pipe and delivery receipt owned by the detached relay', () => {
+    const worker = read('src/lib/runtimes/shared/owned-session/run-controller.ts');
+    expect(worker).toContain('stdinFd = openSync(stdinPath, constants.O_RDONLY');
+    expect(worker).toContain('if (!fstatSync(stdinFd).isFile())');
+    expect(worker).toContain('if (stdinFd !== undefined) closeSync(stdinFd);');
+    const relay = read('src/lib/runtimes/shared/owned-session/staged-stdin.ts');
+    expect(relay).toContain("args: ['-e', STAGED_STDIN_RELAY, String(bytes), deliveryPath, launch.command, ...launch.args]");
+    expect(relay).toContain('const payload = fs.readFileSync(0);\nfs.closeSync(0);');
+    const providerSpawn = relay.slice(relay.indexOf('const child = withO8ChildPolicy'), relay.indexOf('let delivered = false;'));
+    expect(providerSpawn).toContain('spawn(process.argv[3], process.argv.slice(4), {');
+    expect(providerSpawn).toContain("stdio: ['pipe', 1, 2]");
+    expect(providerSpawn).not.toMatch(/\bdetached\s*:\s*true/);
+    expect(relay).toContain('child.stdin.write(payload.subarray(deliveredBytes, end), error => {');
+    expect(relay).toContain('child.stdin.end(');
+    expect(relay).toContain('const deliveryPath = process.argv[2];');
+    expect(relay).toContain("const fd = fs.openSync(temporaryPath, 'wx', 0o600);");
+    expect(relay).toContain('fs.renameSync(temporaryPath, deliveryPath);');
+    expect(relay).not.toContain('register_child');
   });
 
   it('requires detached identity only for the detached preparation path, preserving bridge opt-out', () => {
