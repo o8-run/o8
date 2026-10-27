@@ -12,9 +12,9 @@ const marks: Record<string, ProviderMark> = { codex: 'openai', 'claude-code': 'a
 const stages = { checking: 'Checking installation', installing: 'Updating', verifying: 'Verifying version', succeeded: 'Verified', failed: 'Update stopped' };
 
 /** Every installed tool keeps its own progress and result when the panel reopens. */
-export function ConnectedCliUpdateRows({ tools, busy, progress = {}, checking = false, disabled = false, onUpdate }: {
+export function ConnectedCliUpdateRows({ tools, busy, progress = {}, checking = false, checked = [], disabled = false, onUpdate }: {
   tools: CliUpdateRecord[]; busy: string | null; progress?: Record<string, CliUpdateProgress>; checking?: boolean;
-  disabled?: boolean; onUpdate?: (runtime: StableCli) => void;
+  checked?: readonly string[]; disabled?: boolean; onUpdate?: (runtime: StableCli) => void;
 }) {
   const id = useId();
   const [confirming, setConfirming] = useState<string | null>(null);
@@ -23,22 +23,23 @@ export function ConnectedCliUpdateRows({ tools, busy, progress = {}, checking = 
   useEffect(() => { if (!active) return; const timer = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(timer); }, [active]);
   return <div style={{ display: 'grid', gap: 12 }}>
     {tools.map(tool => {
+      const rowChecking = checking && !checked.includes(tool.runtimeId);
       const state = progress[tool.runtimeId];
       const updating = Boolean(state && !['succeeded', 'failed'].includes(state.stage));
       const supportsUpdate = tool.updateSupported ?? ['codex', 'claude-code', 'grok', 'opencode', 'gemini'].includes(tool.runtimeId);
       const seconds = state ? Math.max(0, Math.floor((now - state.startedAt) / 1000)) : 0;
-      return <div key={tool.runtimeId} data-cli-update-row={tool.runtimeId} aria-busy={updating || checking} style={{ display: 'flex', alignItems: 'flex-start', flexWrap: 'wrap', gap: 9 }}>
+      return <div key={tool.runtimeId} data-cli-update-row={tool.runtimeId} aria-busy={updating || rowChecking} style={{ display: 'flex', alignItems: 'flex-start', flexWrap: 'wrap', gap: 9 }}>
         <span aria-hidden="true" style={{ width: 16, height: 16, marginTop: 3, display: 'inline-flex', flexShrink: 0 }}><ProviderMarkGlyph mark={marks[tool.runtimeId] ?? 'terminal'} size={16} /></span>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 12.5 }}>{tool.label}</div>
           <div style={{ marginTop: 2, fontSize: 10.5, color: 'var(--t-text-muted)', fontVariantNumeric: 'tabular-nums', overflowWrap: 'anywhere' }}>
             {tool.installedVersion ?? 'Version unavailable'}{tool.status === 'update-available' && tool.latestVersion ? ` → ${tool.latestVersion}` : ''}
           </div>
-          {state || checking ? <div role="status" aria-live="polite" style={{ marginTop: 4, fontSize: 10.5, lineHeight: 1.5, color: state?.stage === 'failed' ? 'var(--t-danger)' : 'var(--t-text-secondary)' }}>
-            {checking && !updating ? 'Checking version…' : state ? `${stages[state.stage]}${updating ? `… ${seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`}` : ''}${state.message ? ` · ${state.message}` : ''}` : ''}
+          {state || rowChecking ? <div role="status" aria-live="polite" style={{ marginTop: 4, fontSize: 10.5, lineHeight: 1.5, color: state?.stage === 'failed' ? 'var(--t-danger)' : 'var(--t-text-secondary)' }}>
+            {rowChecking && !updating ? 'Checking version…' : state ? `${stages[state.stage]}${updating ? `… ${seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`}` : ''}${state.message ? ` · ${state.message}` : ''}` : ''}
           </div> : null}
         </div>
-        {onUpdate && (tool.status === 'unknown' || tool.status === 'update-available') ? <button type="button" aria-label={`Update ${tool.label}`} disabled={disabled || checking || updating}
+        {onUpdate && (tool.status === 'unknown' || tool.status === 'update-available') ? <button type="button" aria-label={`Update ${tool.label}`} disabled={disabled || rowChecking || updating}
           aria-expanded={confirming === tool.runtimeId} aria-controls={confirming === tool.runtimeId ? `${id}-${tool.runtimeId}` : undefined}
           onClick={() => setConfirming(value => value === tool.runtimeId ? null : tool.runtimeId)} style={actionStyle}>
           {updating || busy === tool.runtimeId ? 'Updating…' : 'Update'}
@@ -47,7 +48,7 @@ export function ConnectedCliUpdateRows({ tools, busy, progress = {}, checking = 
           <div>Updates may introduce breaking changes. Finish active sessions first.</div>
           {!supportsUpdate || tool.status === 'unknown' ? <div style={{ marginTop: 4 }}>This installation uses its original updater. Open it to update, then check the version here.</div> : null}
           <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-            <button type="button" disabled={disabled || checking} aria-label={supportsUpdate && tool.status === 'update-available' ? `Confirm update ${tool.label}` : `Open updater for ${tool.label}`}
+            <button type="button" disabled={disabled || rowChecking} aria-label={supportsUpdate && tool.status === 'update-available' ? `Confirm update ${tool.label}` : `Open updater for ${tool.label}`}
               onClick={() => {
                 setConfirming(null);
                 if (supportsUpdate && tool.status === 'update-available') onUpdate?.(tool.runtimeId as StableCli);

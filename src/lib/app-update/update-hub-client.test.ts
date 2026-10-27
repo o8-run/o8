@@ -26,6 +26,11 @@ describe('the connected CLI synchronization gate', () => {
     await expect(synchronizeConnectedClis('codex')).rejects.toThrow('release');
     expect(vi.mocked(fetch).mock.calls.every(([, options]) => !options?.method)).toBe(true);
   });
+  it('rejects duplicate discovery rows before selecting an installation', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(Response.json({ tools: [record('codex', 'update-available'), record('codex', 'current')] }));
+    await expect(synchronizeConnectedClis('codex')).rejects.toThrow('incomplete');
+    expect(vi.mocked(fetch).mock.calls.every(([, options]) => !options?.method)).toBe(true);
+  });
   it('updates the explicitly chosen CLI when another release is unknown', async () => {
     const tools = [record('codex', 'unknown'), record('claude-code', 'update-available'), record('grok', 'not-installed')];
     vi.mocked(fetch).mockResolvedValueOnce(Response.json({ tools }))

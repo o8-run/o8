@@ -128,34 +128,36 @@ export function beginLongLivedFetchBudget(
 // Headers watchdog (#1359 recurrence, 2026-07-04): a request whose response
 // HEADERS never arrive holds one of the webview's ~6 per-origin connections
 // forever — six stuck server handlers bricked every subsequent fetch/XHR/lazy
-// chunk on the page. Streams are unaffected (their headers arrive instantly);
-// this only aborts requests stuck BEFORE headers.
+// chunk on the page. Explicit long operations may allow a longer finite wait.
+// This only bounds the wait BEFORE headers; callers bound the stream itself.
 const HEADERS_WATCHDOG_MS = 45_000;
 
-function withHeadersWatchdog(init: RequestInit | undefined): { init: RequestInit; cancel: () => void } {
+function withHeadersWatchdog(init: RequestInit | undefined, timeoutMs = HEADERS_WATCHDOG_MS): { init: RequestInit; cancel: () => void } {
   const controller = new AbortController();
   const upstream = init?.signal;
   if (upstream) {
     if (upstream.aborted) controller.abort(upstream.reason);
     else upstream.addEventListener('abort', () => controller.abort(upstream.reason), { once: true });
   }
-  const timer = setTimeout(() => controller.abort(new Error('o8 headers watchdog: no response headers in 45s')), HEADERS_WATCHDOG_MS);
+  const timer = setTimeout(() => controller.abort(new Error(`o8 headers watchdog: no response headers in ${timeoutMs / 1000}s`)), timeoutMs);
   return {
     init: { ...(init ?? {}), signal: controller.signal },
     cancel: () => clearTimeout(timer),
   };
 }
 
+/** A bounded operation may explicitly allow more time for its headers. */
 export async function fetchWithLongLivedBudget(
   input: RequestInfo | URL,
   init?: RequestInit,
+  headersTimeoutMs = HEADERS_WATCHDOG_MS,
 ): Promise<Response> {
   if (typeof window === 'undefined' || !sameAppOrigin(input)) {
     return fetch(input, init);
   }
 
   const release = beginLongLivedFetchBudget(input, init);
-  const watchdog = withHeadersWatchdog(init);
+  const watchdog = withHeadersWatchdog(init, headersTimeoutMs);
   try {
     const budgetedInit = {
       ...watchdog.init,
