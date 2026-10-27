@@ -20,7 +20,7 @@ export const TranscriptTurns = memo(function TranscriptTurns({ entries, nodes, b
     const end = starts[index + 1] ?? entries.length;
     const turnEntries = entries.slice(start, end);
     return <TranscriptTurn key={entries[start].id} entries={turnEntries} nodes={nodes.slice(start, end)}
-      busy={busy && end === entries.length} repoPath={repoPath} deferLayout={entries.length > 200}
+      busy={busy && end === entries.length} repoPath={repoPath} deferLayout={entries.length >= 200}
       summary={summary && turnEntries.some(entry => entry.id === summary.assistantMessageId) ? summary : null}
       content={turnContent?.get(entries[start].id)} />;
   });

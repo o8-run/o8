@@ -66,16 +66,17 @@ describe('completed activity through the shared renderer', () => {
     expect(derivations).toBeGreaterThan(0);
     expect(host.textContent).toContain('Revised final answer');
   });
-  it('retains expanded work and message identity when a growing history starts deferring layout', () => {
+  it('retains expanded work and message identity when the full 200-entry window defers layout', () => {
     render(false);
     const details = host.querySelector('details')!;
     act(() => { details.open = true; details.dispatchEvent(new Event('toggle')); });
     const original = host.querySelector('[data-o8-message-id="a"]');
-    const growing: MobileTranscriptEntry[] = [...entries, ...Array.from({ length: 200 }, (_, index) => ({
+    const growing: MobileTranscriptEntry[] = [...entries, ...Array.from({ length: 200 - entries.length }, (_, index) => ({
       id: `later-${index}`, role: 'user' as const, text: `Later request ${index}`,
     }))];
     act(() => root.render(<TranscriptTurns entries={growing} busy={false} repoPath="/repo"
       nodes={growing.map(entry => <div key={entry.id} data-o8-message-id={entry.id}>{entry.text}</div>)} />));
+    expect(host.querySelector<HTMLElement>('[data-o8-turn-id="u"]')!.style.contentVisibility).toBe('auto');
     expect(host.querySelector('[data-o8-message-id="a"]')).toBe(original);
     expect(host.querySelector('details')).toBe(details);
     expect(details.open).toBe(true);
