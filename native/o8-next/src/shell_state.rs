@@ -6,6 +6,8 @@ use std::{
     fs,
     io::{Read, Write},
     path::Path,
+    sync::{Arc, Mutex},
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 #[derive(Clone, Default, Serialize, Deserialize)]
@@ -35,6 +37,8 @@ pub struct State {
     pub workspaces: BTreeMap<String, Workspace>,
     #[serde(skip)]
     pub(crate) retain_file: bool,
+    #[serde(skip)]
+    pub(crate) backup_file: Arc<Mutex<bool>>,
 }
 impl Default for State {
     fn default() -> Self {
@@ -44,10 +48,17 @@ impl Default for State {
             selected: None,
             workspaces: BTreeMap::new(),
             retain_file: false,
+            backup_file: Arc::default(),
         }
     }
 }
 impl State {
+    fn recovered() -> Self {
+        Self {
+            backup_file: Arc::new(Mutex::new(true)),
+            ..Self::default()
+        }
+    }
     fn validate(&self) -> Result<(), String> {
         let [x, y, w, h] = self.bounds;
         if self.version != 1
@@ -90,11 +101,14 @@ impl State {
             });
         }
         if bytes.len() > 1024 * 1024 {
-            return Ok(Self::default());
+            return Ok(Self::recovered());
         }
-        let state: Self = serde_json::from_slice(&bytes).unwrap_or_default();
+        let state: Self = match serde_json::from_slice(&bytes) {
+            Ok(state) => state,
+            Err(_) => return Ok(Self::recovered()),
+        };
         if state.validate().is_err() {
-            return Ok(Self::default());
+            return Ok(Self::recovered());
         }
         Ok(state)
     }
@@ -109,6 +123,12 @@ impl State {
         if bytes.len() > 1024 * 1024 {
             return Err("Shell state exceeds 1 MiB".into());
         }
+        // State clones share this marker, so only the first successful recovery
+        // moves the input aside. Keep failed saves from bypassing preservation.
+        let mut backup = self
+            .backup_file
+            .lock()
+            .map_err(|_| "Shell state recovery unavailable")?;
         let temporary = file.with_extension(format!("shell-{}.tmp", std::process::id()));
         let mut options = fs::OpenOptions::new();
         options.write(true).create(true).truncate(true);
@@ -124,6 +144,51 @@ impl State {
             .write_all(&bytes)
             .and_then(|_| output.sync_all())
             .map_err(|_| "Cannot save shell state")?;
+        if *backup {
+            preserve(file)?;
+            *backup = false;
+        }
         fs::rename(&temporary, file).map_err(|_| "Cannot commit shell state".into())
     }
+}
+
+fn preserve(file: &Path) -> Result<(), String> {
+    if let Err(error) = fs::symlink_metadata(file) {
+        return if error.kind() == std::io::ErrorKind::NotFound {
+            Ok(())
+        } else {
+            Err("Cannot preserve shell state; original file retained".into())
+        };
+    }
+    let time = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    for suffix in 0..100 {
+        let mut name = file
+            .file_name()
+            .ok_or("Invalid shell state path")?
+            .to_os_string();
+        name.push(format!(".bad-{time}-{}-{suffix}", std::process::id()));
+        let destination = file.with_file_name(name);
+        // Reserve a new name: an earlier recovery copy is never overwritten,
+        // even if the clock repeats or another process saves concurrently.
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&destination)
+        {
+            Ok(reservation) => {
+                drop(reservation);
+                if fs::rename(file, &destination).is_ok() {
+                    return Ok(());
+                }
+                let _ = fs::remove_file(destination);
+                return Err("Cannot preserve shell state; original file retained".into());
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(_) => return Err("Cannot preserve shell state; original file retained".into()),
+        }
+    }
+    Err("Cannot reserve a shell state recovery copy; original file retained".into())
 }

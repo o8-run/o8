@@ -2,6 +2,69 @@ use super::test_support::*;
 use super::*;
 
 #[gpui::test]
+fn corrupt_shell_state_is_preserved_before_autosave(cx: &mut TestAppContext) {
+    preserves_recovered_state(cx, b"{broken state");
+}
+
+#[gpui::test]
+fn empty_shell_state_is_preserved_before_autosave(cx: &mut TestAppContext) {
+    preserves_recovered_state(cx, b"");
+}
+
+#[gpui::test]
+fn future_shell_state_is_preserved_before_autosave(cx: &mut TestAppContext) {
+    let mut future = serde_json::to_value(State::default()).unwrap();
+    future["version"] = json!(999);
+    preserves_recovered_state(cx, &serde_json::to_vec(&future).unwrap());
+}
+
+fn preserves_recovered_state(cx: &mut TestAppContext, original: &[u8]) {
+    let fixture = Fixture::new();
+    let file = fixture.root.join("state.json");
+    fs::write(&file, original).unwrap();
+    let state = State::load(&file).unwrap();
+    assert_eq!(
+        fs::read(&file).unwrap(),
+        original,
+        "loading does not move the input"
+    );
+    let (shell, mut visual) = open(fixture.client.clone(), file.clone(), state, cx);
+    ready(&shell, &mut visual); // The production successful-load path autosaves.
+    let backups = || {
+        fs::read_dir(&fixture.root)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| {
+                path.file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .starts_with("state.json.bad-")
+            })
+            .collect::<Vec<_>>()
+    };
+    let retained = backups();
+    assert_eq!(
+        retained.len(),
+        1,
+        "autosave must preserve the original state before replacing it"
+    );
+    assert_eq!(fs::read(&retained[0]).unwrap(), original);
+    let saved = State::load(&file).unwrap();
+    assert_eq!(saved.version, 1);
+    assert!(
+        !saved.workspaces.is_empty(),
+        "replacement contains the live shell state"
+    );
+    assert!(visual.simulate_close());
+    assert_eq!(
+        backups(),
+        retained,
+        "later saves must not make more recovery copies"
+    );
+    assert_eq!(fs::read(&retained[0]).unwrap(), original);
+}
+
+#[gpui::test]
 fn shell_restart_reads_geometry_surfaces_and_focus_from_the_same_file(cx: &mut TestAppContext) {
     let fixture = Fixture::new();
     let file = fixture.root.join("restart.json");
