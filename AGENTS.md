@@ -37,6 +37,11 @@ Browser tests declare Chromium through their runtime import, or a first-line
 `// @o8-test-browser` marker for an indirect launcher. Classification generates
 `browser: true`; CI and local verification select the prerequisite from that same
 metadata. Adding a browser test does not require editing the workflow or verifier.
+Both coverage and classification guards trace runtime imports, called exports and
+Node script launches. An indirect browser launcher requires the first-line marker;
+the refusal names its test and the marker to add. A file-wide mocked launch does
+not require a browser, while restoring the real launch restores the prerequisite.
+The coverage guard also rejects browser flags that disagree with the source.
 It sets `CI=true`, uses the CI test configuration and environment, gives type checking
 an 8192 MiB heap, and runs the smoke in a fresh temporary data directory with its CI
 timeout. Each check prints PASS or FAIL under its CI name; any failed command makes

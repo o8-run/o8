@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { parse } from 'yaml';
+import { buildTestClassificationReport } from './test-classification.mjs';
 
 // Every job must be either executable locally or explicitly hosted. Unknown
 // jobs fail closed, including jobs added without updating a separate inventory.
@@ -268,5 +269,12 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
   requireCondition(nodeVersions.size === 1, 'local checks must use one supported runtime version');
   const nodeMajor = [...nodeVersions][0];
   requireCondition(/^\d+$/.test(nodeMajor), 'CI runtime version must identify a major version');
+  const browserManifest = JSON.parse(readFileSync(path.join(root, 'tests/test-classification.json'), 'utf8'));
+  const expectedBrowsers = new Set(buildTestClassificationReport(root).manifest.resourceOwning
+    .filter(entry => entry.browser).map(entry => entry.path));
+  const actualBrowsers = new Set((browserManifest.resourceOwning ?? []).filter(entry => entry.browser).map(entry => entry.path));
+  for (const file of new Set([...expectedBrowsers, ...actualBrowsers])) {
+    requireCondition(expectedBrowsers.has(file) === actualBrowsers.has(file), `${file}: browser metadata drifted; run npm run test:classify`);
+  }
   return { checks, hostedJobs, nodeMajor, notes: ['Hosted check publication remains on the runner.'] };
 }

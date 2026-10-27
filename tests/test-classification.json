@@ -4494,20 +4494,24 @@
     {
       "path": "tests/next-parity-harness-real-path.test.ts",
       "reasons": [
+        "browser",
         "child-process",
         "process-signal",
         "real-path"
-      ]
+      ],
+      "browser": true
     },
     {
       "path": "tests/next-parity-preflight-real-path.test.ts",
       "reasons": [
+        "browser",
         "child-process",
         "executable-fixture",
         "native-build",
         "process-signal",
         "real-path"
-      ]
+      ],
+      "browser": true
     },
     {
       "path": "tests/next-parity-render-failure-real-path.test.ts",
@@ -4532,12 +4536,10 @@
     {
       "path": "tests/next-playwright-runtime-real-path.test.ts",
       "reasons": [
-        "browser",
         "child-process",
         "git-cli",
         "real-path"
-      ],
-      "browser": true
+      ]
     },
     {
       "path": "tests/next-pull-requests-real-path.test.ts",

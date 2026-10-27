@@ -13,7 +13,7 @@ it('selects browser prerequisites for a new test from its own declaration before
     return result;
   };
   try {
-    for (const file of ['scripts/ci/resource-owning-changed.mjs', 'scripts/lib/test-classification.mjs']) {
+    for (const file of ['scripts/ci/resource-owning-changed.mjs', 'scripts/lib/test-classification.mjs', 'scripts/lib/browser-prerequisites.mjs']) {
       mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
       copyFileSync(path.join(source, file), path.join(root, file));
     }

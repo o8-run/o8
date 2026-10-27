@@ -18,6 +18,64 @@ function runClassification(root: string, mode: '--check' | '--check-manifest' | 
 }
 
 describe('test factory classification', () => {
+  it.each(['import', 'dynamic import', 'process', 'alias', 'alias-before', 'alias-import', 'barrel', 'promisify'])('rejects an undeclared indirect browser launch through %s', mode => {
+    const root = mkdtempSync(join(tmpdir(), 'o8-browser-guard-'));
+    mkdirSync(join(root, 'tests'));
+    writeFileSync(join(root, 'tests/helper.mjs'), "import { chromium } from 'playwright-core'; export const launch = () => chromium.launch();\n"
+      + (['process', 'promisify'].includes(mode) ? 'await launch();\n' : ''));
+    if (mode === 'alias') writeFileSync(join(root, 'tests/helper.mjs'), "import { chromium } from 'playwright-core'; const launch = () => chromium.launch(); export { launch as start };\n");
+    if (mode === 'alias-before') writeFileSync(join(root, 'tests/helper.mjs'), "import { chromium } from 'playwright-core'; export { launch as start }; function launch() { return chromium.launch(); }\n");
+    if (mode === 'alias-import') {
+      writeFileSync(join(root, 'tests/helper.mjs'), "import { launch } from './launcher.mjs'; export { launch as start };\n");
+      writeFileSync(join(root, 'tests/launcher.mjs'), "import { chromium } from 'playwright-core'; export function launch() { return chromium.launch(); }\n");
+    }
+    if (mode === 'barrel') writeFileSync(join(root, 'tests/barrel.mjs'), "export * from './helper.mjs';\n");
+    const source = mode.startsWith('alias') ? "import { start } from './helper.mjs'; start();\n"
+      : mode === 'barrel' ? "import { launch } from './barrel.mjs'; launch();\n"
+      : mode === 'promisify' ? "import { execFile } from 'node:child_process'; import { promisify } from 'node:util'; const run = promisify(execFile); await run(process.execPath, ['tests/helper.mjs']);\n"
+      : mode === 'import' ? "import { launch } from './helper.mjs'; launch();\n"
+      : mode === 'dynamic import' ? "const { launch } = await import('./helper.mjs'); await launch();\n"
+      : "import { spawnSync } from 'node:child_process'; spawnSync(process.execPath, ['tests/helper.mjs']);\n";
+    writeFileSync(join(root, 'tests/indirect.test.ts'), source);
+    try {
+      for (const check of ['--write', '--check-manifest'] as const) {
+        const result = runClassification(root, check);
+        expect(result.status, result.stderr + result.stdout).toBe(1);
+        expect(result.stderr).toContain('tests/indirect.test.ts');
+        expect(result.stderr).toContain('// @o8-test-browser');
+      }
+      writeFileSync(join(root, 'tests/indirect.test.ts'), '// @o8-test-browser\n' + source);
+      const result = runClassification(root, '--write');
+      expect(result.status, result.stderr).toBe(0);
+      expect(JSON.parse(readFileSync(join(root, 'tests/test-classification.json'), 'utf8')).resourceOwning[0].browser).toBe(true);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it('excludes a mocked browser-process boundary from browser prerequisites', () => {
+    const source = "import { vi } from 'vitest'; import { chromium } from 'playwright-core'; const launch = vi.spyOn(chromium, 'launch').mockResolvedValue({}); chromium.launch();";
+    expect(classifyTestSource('tests/mock.test.ts', source)).not.toContain('browser');
+    const file = 'tests/next-playwright-runtime-real-path.test.ts';
+    expect(classifyTestSource(file, readFileSync(new URL(`../${file}`, import.meta.url), 'utf8'))).not.toContain('browser');
+  });
+
+  it('retains browser prerequisites after a launch spy is restored', () => {
+    expect(classifyTestSource('tests/restored.test.ts', "import { vi } from 'vitest'; import { chromium } from 'playwright-core'; const spy = vi.spyOn(chromium, 'launch').mockResolvedValue({}); spy.mockRestore(); chromium.launch();")).toContain('browser');
+  });
+
+  it('distinguishes an imported utility from the same module\'s browser launcher', () => {
+    const root = mkdtempSync(join(tmpdir(), 'o8-browser-utility-'));
+    mkdirSync(join(root, 'tests'));
+    writeFileSync(join(root, 'tests/helper.mjs'), "import { chromium } from 'playwright-core'; export function launch() { return chromium.launch(); } export const value = () => 1;\n");
+    try {
+      writeFileSync(join(root, 'tests/utility.test.ts'), "import { value } from './helper.mjs'; value();\n");
+      expect(runClassification(root, '--write').status).toBe(0);
+      writeFileSync(join(root, 'tests/utility.test.ts'), "import { launch } from './helper.mjs'; launch();\n");
+      const result = runClassification(root, '--write');
+      expect(result.status, result.stderr).toBe(1);
+      expect(result.stderr).toContain('// @o8-test-browser');
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
   it('derives browser metadata from real Chromium imports or a test-local declaration', () => {
     const root = mkdtempSync(join(tmpdir(), 'o8-browser-classification-'));
     mkdirSync(join(root, 'tests'));
