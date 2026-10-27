@@ -39,13 +39,30 @@ It sets `CI=true`, uses the CI test configuration and environment, gives type ch
 an 8192 MiB heap, and runs the smoke in a fresh temporary data directory with its CI
 timeout. Each check prints PASS or FAIL under its CI name; any failed command makes
 the final exit status non-zero. Audit failures also block CI.
-Independent checks run concurrently; governance waits for Type Check. Test commands
+Independent checks run concurrently; governance waits for Type Check. Vitest commands
 share one local execution queue so their module caches and worker pools do not collide.
 
 Dependency changes use the same credential-free lockfile audit in CI and locally:
 added package versions fail at low severity, while unchanged baseline findings remain
 the responsibility of the full audits. Nested package and native lockfiles are included.
-Hosted reporting, native target builds and weekly integration lanes remain hosted
+The o8 next Native Tests (Linux) check also runs on Linux x64, using CI's locked
+Cargo build for the HTTP fixture daemon and all four headless suite shards. CI runs
+the shards on separate jobs; local verification runs them serially against one Cargo
+target cache, retaining every discovered test exactly once. Each native shard shares
+CI's combined daemon-build/test deadline. Native
+fixed-rate terminal probes run without sibling native tests and share the local
+Vitest execution queue, retaining their original byte and time bounds. Local queue
+waiting pauses the native job clock, matching CI's independent runners. Native
+build/cache outputs are excluded from lint and type checking; source fixtures remain checked. Install
+the system prerequisites listed in `scripts/ci/install-native-linux-deps.sh` and
+the stable Rust toolchain. Its selector compares against `origin/main` and includes
+committed, staged, unstaged and untracked native inputs. The selector derives fixture
+inputs from native source file references, transitive host imports and discovered
+fixture directories; deleting an input also selects the suite. Headless CI installs
+only missing compile prerequisites, leaving capture tools and drivers to graphical jobs.
+A TS-only change outside that dependency closure prints SKIP
+and runs no native build. Other platforms print HOSTED with the Linux x64 requirement.
+Hosted reporting, other native target builds and weekly integration lanes remain hosted
 checks. The CI coverage guard rejects an unclassified
 job or an unsupported action in a local check. Update the local implementation or its
 explicit hosted classification whenever CI changes; unknown checks never silently pass.

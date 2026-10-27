@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
@@ -8,9 +8,13 @@ import { parse } from 'yaml';
 const repo = process.cwd();
 const workflow = parse(readFileSync(path.join(repo, '.github/workflows/ci.yml'), 'utf8'));
 const root = mkdtempSync(path.join(tmpdir(), 'o8-ci-gates-'));
+const probeRoot = mkdtempSync(path.join(tmpdir(), 'o8-ci-native-probe-'));
 const nativeScript = path.join(repo, 'scripts/ci/native-changes.mjs');
 
-afterAll(() => rmSync(root, { recursive: true, force: true }));
+afterAll(() => {
+  rmSync(root, { recursive: true, force: true });
+  rmSync(probeRoot, { recursive: true, force: true });
+});
 
 function git(...args: string[]): string {
   const result = spawnSync('git', args, { cwd: root, encoding: 'utf8' });
@@ -26,11 +30,11 @@ git('add', '.');
 git('commit', '-qm', 'fixture base');
 const base = git('rev-parse', 'HEAD');
 
-function commit(file: string, remove = false): string {
+function commit(file: string, remove = false, retainContents = false): string {
   const target = path.join(root, file);
   mkdirSync(path.dirname(target), { recursive: true });
   if (remove) rmSync(target);
-  else writeFileSync(target, `${git('rev-parse', 'HEAD')}\n`);
+  else writeFileSync(target, retainContents ? readFileSync(target, 'utf8') + '\n' : `${git('rev-parse', 'HEAD')}\n`);
   git('add', '--', file);
   git('commit', '-qm', 'fixture change');
   return git('rev-parse', 'HEAD');
@@ -157,13 +161,13 @@ describe('required CI gates through workflow commands', () => {
   it('runs four independent shards and fails the stable aggregate on every non-success', () => {
     const shards = workflow.jobs['test-shards'];
     expect(shards.strategy).toEqual({ 'fail-fast': false, matrix: { shard: [1, 2, 3, 4] } });
-    expect(workflow.jobs.test.needs).toEqual(['test-shards']);
+    expect(workflow.jobs.test.needs).toEqual(['test-shards', 'o8-next-tests']);
     for (const result of ['success', 'failure', 'cancelled', 'skipped']) {
       expect(condition(workflow.jobs.test.if, { event: {} }, { 'test-shards': { result } })).toBe(true);
       const step = workflow.jobs.test.steps[0];
       const run = spawnSync(step.run, {
         shell: true, encoding: 'utf8',
-        env: { ...process.env, SHARD_RESULT: result },
+        env: { ...process.env, SHARD_RESULT: result, NATIVE_RESULT: 'success' },
       });
       expect(run.status).toBe(result === 'success' ? 0 : 1);
     }
@@ -195,4 +199,195 @@ describe('required CI gates through workflow commands', () => {
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout, result.stderr).toMatch(/\d+ files, 4 shards, 0 missing, 0 duplicates, 0 extra/);
   }, 60_000);
+});
+
+function selectNext(eventName: string, event: object, script = nativeScript): string {
+  const job = workflow.jobs['o8-next-tests'];
+  expect(job, 'native tests must have an automatic CI job').toBeDefined();
+  const step = job.steps.find((entry: { id?: string }) => entry.id === 'native');
+  const eventPath = path.join(root, 'next-event.json');
+  const outputPath = path.join(root, 'next-output.txt');
+  writeFileSync(eventPath, JSON.stringify(event));
+  writeFileSync(outputPath, '');
+  const result = spawnSync(step.run.replace('scripts/ci/native-changes.mjs', script), {
+    shell: true, cwd: root, encoding: 'utf8',
+    env: { ...process.env, GITHUB_EVENT_NAME: eventName, GITHUB_EVENT_PATH: eventPath, GITHUB_OUTPUT: outputPath },
+  });
+  expect(result.status, result.stderr).toBe(0);
+  return readFileSync(outputPath, 'utf8').trim();
+}
+
+describe('native next CI through persisted fixtures', () => {
+  it('discovers new native literals, transitive imports, aliases and dynamic fixture directories without a maintained list', () => {
+    const files = {
+      'native/o8-next/src/dependency_probe.rs': 'const CONTRACT: &str = include_str!("../../../fixtures/native-contract.json"); const HOST: &str = "scripts/next/dependency-probe.mjs"; fn family() { std::fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/native-family").join(format!("{name}.json"))); }',
+      'scripts/next/dependency-probe.mjs': "import '../../fixtures/native-adapter.mjs';",
+      'fixtures/native-contract.json': '{}',
+      'fixtures/native-adapter.mjs': "import '@/lib/native-probe'; import(`./native-records/${name}.json`); const template = 'native-template.md'; readFileSync(join(here, 'prompts', template));",
+      'src/lib/native-probe.ts': "import '../../fixtures/native-bootstrap'; export { value } from '../../fixtures/native-leaf';",
+      'fixtures/native-bootstrap.mjs': 'globalThis.fixtureReady = true;',
+      'fixtures/native-leaf.ts': 'export const value = 1;',
+      'fixtures/native-records/one.json': '{}',
+      'fixtures/native-family/one.json': '{}',
+      'fixtures/prompts/native-template.md': 'fixture template',
+    };
+    for (const [file, contents] of Object.entries(files)) {
+      mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
+      writeFileSync(path.join(root, file), contents);
+    }
+    mkdirSync(path.join(root, 'scripts/ci'), { recursive: true });
+    copyFileSync(nativeScript, path.join(root, 'scripts/ci/native-changes.mjs'));
+    const helper = 'scripts/ci/native-test-inputs.mjs';
+    if (existsSync(path.join(repo, helper))) copyFileSync(path.join(repo, helper), path.join(root, helper));
+    git('add', '.');
+    git('commit', '-qm', 'native dependency fixture');
+    const script = path.join(root, 'scripts/ci/native-changes.mjs');
+    for (const file of Object.keys(files).filter(file => !/^(native|scripts)\//.test(file))) {
+      const before = git('rev-parse', 'HEAD');
+      const after = commit(file, false, true);
+      expect(selectNext('push', { before, after }, script), file).toBe('changed=true');
+      expect(selectNext('pull_request', { pull_request: { base: { sha: before }, head: { sha: after } } }, script), file)
+        .toBe('changed=true');
+      expect(selectNext('merge_group', { merge_group: { base_sha: before, head_sha: after } }, script), file)
+        .toBe('changed=true');
+    }
+    for (const file of ['fixtures/native-contract.json', 'fixtures/native-records/one.json', 'fixtures/native-family/one.json',
+      'fixtures/prompts/native-template.md']) {
+      const before = git('rev-parse', 'HEAD');
+      const after = commit(file, true);
+      expect(selectNext('push', { before, after }, script), `deleted ${file}`).toBe('changed=true');
+    }
+    const before = git('rev-parse', 'HEAD');
+    const after = commit('fixtures/unrelated.ts');
+    expect(selectNext('push', { before, after }, script)).toBe('changed=false');
+  });
+
+  it.each([true, false])('installs only missing native prerequisites, headless=%s', headless => {
+    const setup = parse(readFileSync(path.join(repo, '.github/actions/next-linux-setup/action.yml'), 'utf8'));
+    const step = setup.runs.steps.find((entry: { name?: string }) => entry.name?.startsWith('Install X11'));
+    const bin = path.join(probeRoot, 'setup-bin');
+    mkdirSync(bin, { recursive: true });
+    const receipt = path.join(probeRoot, 'apt-calls.jsonl');
+    for (const [name, body] of Object.entries({
+      sudo: `require('node:fs').appendFileSync(${JSON.stringify(receipt)}, JSON.stringify(process.argv.slice(2)) + '\\n');`,
+      'dpkg-query': "if (process.env.FIXTURE_PACKAGES_INSTALLED === 'true') console.log('install ok installed'); else process.exit(1);",
+    })) {
+      const file = path.join(bin, name);
+      writeFileSync(file, `#!${process.execPath}\n${body}\n`);
+      chmodSync(file, 0o700);
+    }
+    const run = (installed: boolean) => {
+      writeFileSync(receipt, '');
+      const result = spawnSync('bash', ['-e', '-o', 'pipefail', '-c', step.run], { cwd: repo, encoding: 'utf8',
+        env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, O8_NATIVE_HEADLESS_TESTS: String(headless),
+          FIXTURE_PACKAGES_INSTALLED: String(installed) } });
+      expect(result.status, result.stderr).toBe(0);
+      return readFileSync(receipt, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line) as string[]);
+    };
+    expect(run(true), 'installed runner packages must not be upgraded or fetched again').toEqual([]);
+    const missing = run(false);
+    expect(missing).toHaveLength(2);
+    expect(missing[1]).toContain('libfontconfig1-dev');
+    for (const graphical of ['mesa-vulkan-drivers', 'xvfb', 'tesseract-ocr']) {
+      expect(missing[1].includes(graphical)).toBe(!headless);
+    }
+  });
+
+  it.each(['native/o8-next/src/main.rs', 'native/o8-next/README.md',
+    'native/o8-next/fixtures/state.json', 'scripts/next/dev-server.ts',
+    'scripts/parity/surfaces.json', 'tests/helpers/chatgpt-plan-fixture.ts',
+    'crates/o8d/src/main.rs', 'package-lock.json', '.cargo/config.toml', 'rust-toolchain.toml', '.github/workflows/ci.yml',
+    'scripts/ci/native-changes.mjs', 'scripts/ci/native-test-shard.mjs'])('selects native tests for %s', file => {
+    const before = git('rev-parse', 'HEAD');
+    const after = commit(file);
+    expect(selectNext('push', { before, after })).toBe('changed=true');
+    expect(selectNext('pull_request', { pull_request: { base: { sha: before }, head: { sha: after } } }))
+      .toBe('changed=true');
+    expect(selectNext('merge_group', { merge_group: { base_sha: before, head_sha: after } }))
+      .toBe('changed=true');
+  });
+
+  it('skips unrelated changes, includes removed inputs and fails safe on missing history', () => {
+    const before = git('rev-parse', 'HEAD');
+    const after = commit('src/unrelated.ts');
+    expect(selectNext('push', { before, after })).toBe('changed=false');
+    expect(selectNext('pull_request', { pull_request: { base: { sha: before }, head: { sha: after } } }))
+      .toBe('changed=false');
+    expect(selectNext('merge_group', { merge_group: { base_sha: before, head_sha: after } })).toBe('changed=false');
+    const renameBase = commit('native/o8-next/removed.txt');
+    git('mv', 'native/o8-next/removed.txt', 'renamed-outside.txt');
+    git('commit', '-qm', 'fixture rename outside native');
+    expect(selectNext('push', { before: renameBase, after: git('rev-parse', 'HEAD') })).toBe('changed=true');
+    const deleteBase = commit('native/o8-next/deleted.txt');
+    const deleted = commit('native/o8-next/deleted.txt', true);
+    expect(selectNext('push', { before: deleteBase, after: deleted })).toBe('changed=true');
+    expect(selectNext('workflow_dispatch', {})).toBe('changed=true');
+    expect(selectNext('push', { before: 'missing', after })).toBe('changed=true');
+  });
+
+  it('runs the declared headless cargo command against red and green persisted state', () => {
+    const job = workflow.jobs['o8-next-tests'];
+    expect(job, 'native tests must have an automatic CI job').toBeDefined();
+    expect(job['runs-on']).toBe('ubuntu-24.04');
+    expect(job['timeout-minutes']).toBe(20);
+    expect(job.strategy).toEqual({ 'fail-fast': false, matrix: { shard: [1, 2, 3, 4] } });
+    expect(job.if).toBe(workflow.jobs['test-shards'].if);
+    const step = job.steps.find((entry: { run?: string }) => entry.run?.includes('native-test-shard.mjs'));
+    expect(step.if).toBe("steps.native.outputs.changed == 'true'");
+    expect(step['continue-on-error']).toBeUndefined();
+    expect(step.run).toContain('node scripts/ci/native-test-shard.mjs --cargo');
+    const directory = probeRoot;
+    const crate = path.join(directory, 'native/o8-next');
+    mkdirSync(path.join(crate, 'src'), { recursive: true });
+    writeFileSync(path.join(crate, 'Cargo.toml'), '[package]\nname = "native-probe"\nversion = "0.0.0"\nedition = "2024"\n[workspace]\n');
+    writeFileSync(path.join(crate, 'Cargo.lock'), 'version = 4\n\n[[package]]\nname = "native-probe"\nversion = "0.0.0"\n');
+    writeFileSync(path.join(crate, 'src/main.rs'), `fn main() {}
+#[test]
+fn persisted_state() {
+    assert!(std::env::var_os("DISPLAY").is_none());
+    assert!(std::env::var_os("WAYLAND_DISPLAY").is_none());
+    let state = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/state")).unwrap();
+    assert_eq!(state, "ready");
+}
+`);
+    const runner = path.join(repo, 'scripts/ci/native-test-shard.mjs').replaceAll("'", "'\"'\"'");
+    const command = step.run.replace('scripts/ci/native-test-shard.mjs', `'${runner}'`);
+    const run = () => spawnSync('bash', ['-e', '-o', 'pipefail', '-c', command], {
+      cwd: directory, encoding: 'utf8', timeout: 30_000,
+      env: { ...process.env, CARGO_NET_OFFLINE: 'true', CARGO_TARGET_DIR: path.join(directory, 'target'),
+        DISPLAY: 'fixture-display', WAYLAND_DISPLAY: 'fixture-display', O8_NATIVE_TEST_SHARD: '1/1' },
+    });
+    writeFileSync(path.join(crate, 'state'), 'blocked');
+    const red = run();
+    expect(red.error, red.stderr + red.stdout).toBeUndefined();
+    expect(red.status, red.stderr).toBe(101);
+    expect(red.stdout).toContain('persisted_state ... FAILED');
+    const source = path.join(crate, 'src/main.rs');
+    const valid = readFileSync(source, 'utf8');
+    writeFileSync(source, valid + '\nfn required_signature(_: bool) {}\nfn probe() { required_signature(); }\n');
+    const compileRed = run();
+    expect(compileRed.error, compileRed.stderr + compileRed.stdout).toBeUndefined();
+    expect(compileRed.status, compileRed.stderr).toBe(101);
+    expect(compileRed.stderr).toContain('E0061');
+    writeFileSync(source, valid);
+    writeFileSync(path.join(crate, 'state'), 'ready');
+    const green = run();
+    expect(green.error, green.stderr + green.stdout).toBeUndefined();
+    expect(green.status, green.stderr).toBe(0);
+    expect(green.stdout).toContain('1 passed; 0 failed');
+    console.log('declared native command: assertion red=101, E0061 red=101, green=0');
+  });
+
+  it('fails the required aggregate for every unsuccessful native result', () => {
+    const aggregate = workflow.jobs.test;
+    const step = aggregate.steps[0];
+    for (const result of ['success', 'failure', 'cancelled', 'skipped']) {
+      const run = spawnSync(step.run, {
+        shell: true, encoding: 'utf8',
+        env: { ...process.env, SHARD_RESULT: 'success', NATIVE_RESULT: result },
+      });
+      expect(run.status, `native result ${result} must reach the required gate`).toBe(result === 'success' ? 0 : 1);
+    }
+    expect(aggregate.needs).toContain('o8-next-tests');
+  });
 });

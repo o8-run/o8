@@ -1977,6 +1977,7 @@
       "path": "tests/ci-gates-real-path.test.ts",
       "reasons": [
         "child-process",
+        "executable-fixture",
         "git-cli",
         "native-build",
         "real-path"
@@ -4296,6 +4297,14 @@
       "reasons": [
         "child-process",
         "native-build"
+      ]
+    },
+    {
+      "path": "tests/native-test-shard-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "native-build",
+        "real-path"
       ]
     },
     {
