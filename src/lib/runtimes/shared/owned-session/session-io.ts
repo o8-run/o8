@@ -2,6 +2,7 @@ import { revokeReadOnlyWorkerToken } from '@/lib/auth/read-only-worker-token';
 import { executionRunIsClear } from '@/lib/mcp/task-execution-admission';
 import { lstat, readdir } from 'node:fs/promises';
 import path from 'node:path';
+import { assertOwnedSessionPath, refuseOwnedSessionPath } from './owned-path';
 import { saveRestrictedOwnedSession } from './restricted-session-persistence';
 import { readOwnedSessionMetadata } from './metadata-read';
 import { worktreeMetadataReadLimit, WorktreeMaintenanceHeldError } from '@/lib/worktree/maintenance-budget';
@@ -44,21 +45,41 @@ export function createOwnedSessionIo({
   invalidateFleetCache: () => void;
 }): OwnedSessionIo {
   async function ensureRoot() {
+    await ensureDir(path.dirname(path.resolve(root)));
+    await assertOwnedSessionPath(root, root, { missing: true, kind: 'directory' });
     await ensureDir(root);
+    await assertOwnedSessionPath(root, root, { kind: 'directory' });
     return root;
   }
 
   async function listSessionDirs() {
     const resolvedRoot = await ensureRoot();
-    const entries = await readdir(resolvedRoot, { withFileTypes: true }).catch(() => []);
-    return entries.filter((entry) => entry.isDirectory()).map((entry) => path.join(resolvedRoot, entry.name));
+    const entries = await readdir(resolvedRoot).catch(() => []);
+    const directories: string[] = [];
+    for (const name of entries) {
+      const directory = path.join(resolvedRoot, name);
+      try {
+        const entry = await assertOwnedSessionPath(root, directory, { kind: 'entry' });
+        if (entry?.isDirectory()) directories.push(directory);
+      } catch { /* Unsafe entries are logged by the guard and left untouched. */ }
+    }
+    return directories;
   }
 
   async function loadSession(sessionDir: string) {
-    return readOwnedSessionMetadata<OwnedSessionRecord>(metadataPath(sessionDir));
+    await assertOwnedSessionPath(root, sessionDir, { kind: 'directory' });
+    await assertOwnedSessionPath(root, metadataPath(sessionDir), { kind: 'file' });
+    const session = await readOwnedSessionMetadata<OwnedSessionRecord>(metadataPath(sessionDir));
+    if (session.surfaceId !== `${surfacePrefix}${path.basename(sessionDir)}`
+      || path.resolve(session.sessionDir) !== path.resolve(sessionDir)) {
+      refuseOwnedSessionPath('session metadata does not match its owned directory');
+    }
+    return session;
   }
 
   async function saveSession(session: OwnedSessionRecord) {
+    await assertOwnedSessionPath(root, session.sessionDir, { kind: 'directory' });
+    await assertOwnedSessionPath(root, metadataPath(session.sessionDir), { missing: true, kind: 'file' });
     session.updatedAt = nowIso();
     // Archived readers expose physical paths; persistence retains active paths so
     // the existing rename-only cold restore also restores historical artifacts.

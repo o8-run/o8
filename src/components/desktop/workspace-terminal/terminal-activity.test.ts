@@ -16,14 +16,16 @@ describe('createTerminalActivityTracker', () => {
     vi.useFakeTimers();
     let tabs = [terminalTab('tab-1', 'session-1')];
     let commits = 0;
+    const getTabs = vi.fn(() => tabs);
     const tracker = createTerminalActivityTracker({
-      getTabs: () => tabs,
+      getTabs,
       setTabs: (update) => {
         commits += 1;
         tabs = typeof update === 'function' ? update(tabs) : update;
       },
     });
 
+    expect(getTabs).not.toHaveBeenCalled();
     tracker.record('session-1', 200);
     tracker.record('session-1', 300);
     expect(commits).toBe(0);

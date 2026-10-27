@@ -81,3 +81,19 @@ it('describes each update stage', () => {
   expect(sameNote('Faster startup', 'feat: faster startup')).toBe(true);
   expect(sameNote('Faster startup', 'fix: fewer crashes')).toBe(false);
 });
+
+it('uses the release-page action for a package-managed install in the compact rail', async () => {
+  publishAppUpdateView({ ...baseView, downloadOnly: true, packageManager: true });
+  const { host, root, panel } = await openPanel();
+  const install = vi.fn(); window.addEventListener('o8:install-app-update', install);
+  try {
+    const action = [...panel().querySelectorAll('button')].find(button => button.textContent === 'Release page');
+    expect(action).toBeDefined();
+    expect(panel().textContent).not.toContain('Download o8');
+    await act(async () => action!.click());
+    expect(install).toHaveBeenCalledOnce();
+  } finally {
+    window.removeEventListener('o8:install-app-update', install);
+    await act(async () => root.unmount()); host.remove();
+  }
+});

@@ -12,10 +12,15 @@ import { createRetainedGeneratedOutputFixture } from './generated-output-fixture
 const source = process.cwd();
 const require = createRequire(import.meta.url);
 
-function expectSuccessfulPrebuild(result: SpawnSyncReturns<string>): void {
+type PrebuildResult = SpawnSyncReturns<string> & { elapsedMs?: number; timeoutMs?: number; label?: string };
+
+function expectSuccessfulPrebuild(result: PrebuildResult): void {
   const error = result.error as NodeJS.ErrnoException | undefined;
   const diagnostic = [
     `prebuild stderr:\n${result.stderr || '<empty>'}`,
+    ...(result.timeoutMs === undefined ? [] : [
+      `prebuild ${result.label ?? 'command'}: elapsed=${result.elapsedMs}ms; limit=${result.timeoutMs}ms`,
+    ]),
     `prebuild exit=${result.status}; signal=${result.signal ?? 'none'}; spawn error=${error?.code ?? 'none'}`,
     error?.message ?? '',
     `prebuild stdout:\n${result.stdout || '<empty>'}`,
@@ -32,11 +37,21 @@ it.each([0, 1])('reports child stderr and timeouts from failed prebuild commands
   { encoding: 'utf8', timeout: 5_000 });
   expect(() => expectSuccessfulPrebuild(refused)).toThrow(refusal);
 
-  const timedOut = spawnSync(process.execPath, ['-e',
-    `console.log('[db] Connected to fixture database'); process.on('SIGTERM', () => process.exit(${exit})); setInterval(() => {}, 1000);`],
-  { encoding: 'utf8', timeout: 200 });
+  const waiting = 'fixture prebuild stderr: waiting for its final phase';
+  const started = Date.now();
+  const timedOut = Object.assign(spawnSync(process.execPath, ['-e',
+    `console.error(${JSON.stringify(waiting)}); console.log('[db] Connected to fixture database'); process.on('SIGTERM', () => process.exit(${exit})); setInterval(() => {}, 1000);`],
+  { encoding: 'utf8', timeout: 1000 }), { elapsedMs: Date.now() - started, timeoutMs: 1000 });
   expect((timedOut.error as NodeJS.ErrnoException)?.code).toBe('ETIMEDOUT');
   expect(() => expectSuccessfulPrebuild(timedOut)).toThrow('ETIMEDOUT');
+  expect(() => expectSuccessfulPrebuild(timedOut)).toThrow('limit=1000ms');
+  expect(() => expectSuccessfulPrebuild(timedOut)).toThrow(waiting);
+  try { expectSuccessfulPrebuild(timedOut); }
+  catch (error) {
+    const message = String(error);
+    expect(message.indexOf(waiting)).toBeLessThan(message.indexOf('prebuild stdout:'));
+    expect(message).toMatch(/elapsed=\d+ms/);
+  }
 });
 
 it('loads both preloads through the real launcher from a path containing spaces and a URL fragment', async () => {
@@ -205,15 +220,17 @@ fi
     delete (env as NodeJS.ProcessEnv)[key];
   }
   let invocation = 0;
-  function run(args: string[], extra: Partial<NodeJS.ProcessEnv> = {}) {
+  function run(args: string[], extra: Partial<NodeJS.ProcessEnv> = {},
+    { timeoutMs = 60_000, label = 'lifecycle command' } = {}) {
     const started = Date.now();
     const result = spawnSync(process.execPath, args, { cwd: repo, env: { ...env, ...extra },
-      encoding: 'utf8', timeout: 60_000, maxBuffer: 2 * 1024 ** 2 });
-    writeFileSync(path.join(root, `command-${++invocation}.json`), JSON.stringify({ args,
-      pid: result.pid, exit: result.status, signal: result.signal, elapsedMs: Date.now() - started,
+      encoding: 'utf8', timeout: timeoutMs, maxBuffer: 2 * 1024 ** 2 });
+    const elapsedMs = Date.now() - started;
+    writeFileSync(path.join(root, `command-${++invocation}.json`), JSON.stringify({ args, kind, label,
+      pid: result.pid, exit: result.status, signal: result.signal, elapsedMs, timeoutMs,
       error: result.error ? { code: (result.error as NodeJS.ErrnoException).code, message: result.error.message } : null,
       stdout: result.stdout, stderr: result.stderr }, null, 2));
-    return result;
+    return Object.assign(result, { elapsedMs, timeoutMs, label });
   }
   const prebuild = [process.env.O8_PREBUILD_TEST_SCRIPT || path.join(source, 'scripts/tauri-prebuild.mjs')];
   if (kind === 'linked') {
@@ -235,7 +252,10 @@ fi
     expect(readFileSync(path.join(repo, '.next/dev/lock'), 'utf8')).toBe('retained unknown producer evidence');
     renameSync(path.join(repo, '.next'), path.join(repo, '.fixture/retained-legacy-next'));
   }
-  const first = run(prebuild);
+  // A reviewed macOS combined run exhausted 60s on this first call; the native
+  // fixture file has measured 130s overall. Allow 180s for the cold lifecycle
+  // admission/build, within the 420s case bound. Later calls keep their 60s limit.
+  const first = run(prebuild, {}, { timeoutMs: 180_000, label: `${kind} first prebuild` });
   expectSuccessfulPrebuild(first);
   const profile = JSON.parse(readFileSync(path.join(repo, '.fixture/profile.json'), 'utf8')).modern as string;
   expect(existsSync(profile), 'lifecycle profile must survive the first caller').toBe(true);
