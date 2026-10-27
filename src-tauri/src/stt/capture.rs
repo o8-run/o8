@@ -14,13 +14,16 @@
 //! back-to-back dictations off the cold device-open path (#1544) while retaining
 //! the privacy boundary: no session activity extends the deadline forever.
 
+#[cfg(target_os = "macos")]
 use std::fs::OpenOptions;
+#[cfg(target_os = "macos")]
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+#[cfg(target_os = "macos")]
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
 const TARGET_RATE: f64 = 16_000.0;
@@ -243,8 +246,24 @@ fn create_fifo(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// Main-process capture rides cpal, which only the macOS shell links. On Linux
+/// the `o8-speech-recognizer` helper captures through PipeWire / PulseAudio
+/// itself, so the pump refuses and `spawn_daemon` keeps helper-side capture.
+#[cfg(not(target_os = "macos"))]
+fn pump_thread(
+    _fifo_path: PathBuf,
+    _running: Arc<AtomicBool>,
+    _control: Arc<Mutex<PumpControl>>,
+    ready_tx: std::sync::mpsc::Sender<Result<(), String>>,
+) {
+    let _ = ready_tx.send(Err(
+        "main-process capture is macOS-only; the helper captures on this platform".to_string(),
+    ));
+}
+
 /// Worker: open device → open FIFO (blocks until the helper's reader is
 /// attached) → forward resampled mono PCM until stopped.
+#[cfg(target_os = "macos")]
 fn pump_thread(
     fifo_path: PathBuf,
     running: Arc<AtomicBool>,

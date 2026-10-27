@@ -21,6 +21,8 @@ import type { ComposerSelectorController } from './composer-selector/useComposer
 const EFFORT_OPTIONS: ThinkingEffort[] = ['adaptive', 'low', 'medium', 'high', 'xhigh', 'max'];
 const EFFORT_DOT: Record<ThinkingEffort, string> = {
   adaptive: 'var(--t-text-faint)',
+  none: 'var(--t-text-faint)',
+  minimal: 'var(--t-text-faint)',
   low: 'var(--t-text-faint)',
   medium: 'var(--t-text-muted)',
   high: 'var(--t-text-muted)',

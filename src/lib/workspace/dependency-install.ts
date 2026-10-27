@@ -1,4 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { dependencyInstallProcessesStopped, execDependencyInstallProcess } from './dependency-install-process';
+import { timedDependencyInstall } from './dependency-install-timing';
 import { execFile } from '@/lib/providers/child-process';
 import { lstat, readFile, readdir, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
@@ -610,12 +612,13 @@ async function defaultRun(
     invocation.args,
     identity ?? null,
   );
-  await execFileAsync(guarded.command, guarded.args, {
+  await execDependencyInstallProcess(guarded.command, guarded.args, {
     cwd: invocation.cwd,
     timeout: invocation.timeoutMs,
     maxBuffer: 8 * 1024 * 1024,
     windowsHide: true,
     env: invocation.env,
+    signal: invocation.signal,
   });
 }
 
@@ -740,9 +743,11 @@ export async function runDependencyInstall(
     const invocation = nativeInvocation(
       workspacePath, recipe, authority, runtime, execution.executable,
     );
-    executionStarted = true;
-    if (options.run) await options.run(invocation);
-    else await defaultRun(invocation, options.materializationIdentity);
+    await timedDependencyInstall((signal) => {
+      executionStarted = true;
+      return options.run ? options.run({ ...invocation, signal })
+        : defaultRun({ ...invocation, signal }, options.materializationIdentity);
+    });
     executionFinished = true;
     await ensurePinnedWorkspaceDirectory(workspacePath, materializationIdentity, 'node_modules');
     await auditPrivateDependencyView(workspacePath);
@@ -753,11 +758,15 @@ export async function runDependencyInstall(
       completedAt: (options.now ?? (() => new Date()))().toISOString(),
     };
     return receipt;
+  } catch (error) {
+    // Failed installs also release their lease once native teardown has settled.
+    executionFinished ||= dependencyInstallProcessesStopped(error);
+    throw error;
   } finally {
     try {
       if (runtime) await retireInstallRuntime(runtime, options.afterRuntimeTreeCapture);
     } finally {
-      // A failed/aborted runner may leave installer children alive. Keep its cache reservation.
+      // An unconfirmed teardown or an unresolved custom runner still protects live writers.
       if (!executionStarted || executionFinished) {
         const retention = await authority.release();
         if (receipt) receipt.cacheRetention = retention;

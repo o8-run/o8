@@ -1,4 +1,4 @@
-import { packetAutomaticRecoveryHoldReason } from '@/lib/lane/packet-stop-hold';
+import { packetAutomaticRecoveryHoldReason, packetCompletionHoldReason } from '@/lib/lane/packet-stop-hold';
 import { withOwnedActionGuard } from './action-admission';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { ownedRoots, readOwnedSessionRecord } from '../owned-session-index';
@@ -35,20 +35,30 @@ export function recoveryInterrupted(session: OwnedSessionRecord): boolean {
 }
 
 /** Read durable current-generation evidence, without refreshing or retrying it. */
-export async function readOwnedRecoveryState(surfaceId: string, options?: { includeArchived?: boolean }) {
+async function readOwnedState(surfaceId: string, options?: { includeArchived?: boolean }, completion = false) {
   const root = ownedRoots().find(entry => surfaceId.startsWith(entry.marker));
   if (!root) return { owned: false as const };
   const store = stores.get(root.marker);
   const io = store?.io ?? createOwnedSessionIo({ root: root.root, surfacePrefix: root.marker, invalidateFleetCache: () => {} });
   const live = await io.findSession(surfaceId).catch(() => null);
   const session = live ?? (options?.includeArchived ? await readOwnedSessionRecord(surfaceId) : null);
-  const packetHoldReason = session ? recoveryPacketHoldReason(session) : null;
+  const recoveryHoldReason = session ? recoveryPacketHoldReason(session) : null;
+  const packetHoldReason = completion && session?.packetId ? packetCompletionHoldReason(session.packetId) : recoveryHoldReason;
   return { owned: true as const, packetHoldReason, runId: session ? currentRecoveryRun(session)?.id : undefined,
     startedAt: session ? currentRecoveryRun(session)?.startedAt : undefined,
     finishedAt: session ? currentRecoveryRun(session)?.finishedAt : undefined,
-    automaticRecoveryAllowed: Boolean(live && live.executionPolicy === undefined && !packetHoldReason),
+    automaticRecoveryAllowed: Boolean(live && live.executionPolicy === undefined && !recoveryHoldReason),
     outcome: session ? currentRecoveryRun(session)?.outcome : undefined,
     interrupted: session ? recoveryInterrupted(session) : false };
+}
+
+export function readOwnedRecoveryState(surfaceId: string, options?: { includeArchived?: boolean }) {
+  return readOwnedState(surfaceId, options);
+}
+
+/** Completion observation never grants recovery admission. */
+export function readOwnedCompletionState(surfaceId: string) {
+  return readOwnedState(surfaceId, undefined, true);
 }
 
 export function assertAutomaticRecoveryGeneration(session: OwnedSessionRecord | null, runId: string): void {

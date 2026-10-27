@@ -192,9 +192,10 @@ fi
   symlinkSync(path.dirname(require.resolve('better-sqlite3/package.json')), path.join(repo, 'node_modules/better-sqlite3'), 'dir');
   writeFileSync(path.join(next, 'next'), `
     const fs = require('node:fs');
-    fs.mkdirSync('.next/cache', { recursive: true });
-    fs.writeFileSync('.next/cache/proof.bin', 'fixture cache');
-    fs.writeFileSync('.next/BUILD_ID', 'native fixture');
+    const output = process.env.O8_RELEASE_NEXT_DIST_DIR || '.next';
+    fs.mkdirSync(output + '/cache', { recursive: true });
+    fs.writeFileSync(output + '/cache/proof.bin', 'fixture cache');
+    fs.writeFileSync(output + '/BUILD_ID', 'native fixture');
     fs.appendFileSync('.fixture/compiler-calls', 'build\\n');
   `);
   for (const args of [['init', '--initial-branch=main'], ['add', '.'],

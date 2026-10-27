@@ -414,7 +414,9 @@ describe('AgentTilePane worker identity', () => {
         response: new Response(JSON.stringify({ ok: true }), { status: 200 }),
         payload: { ok: true },
       });
-    const randomUUID = vi.fn(() => 'one-steer-id');
+    // Draft revisions also allocate UUIDs; distinct values expose a regenerated mutation id.
+    let nextUuid = 0;
+    const randomUUID = vi.fn(() => `steer-test-id-${++nextUuid}`);
     vi.stubGlobal('crypto', { randomUUID });
     act(() => {
       root?.render(createElement(AgentTilePane, {
@@ -438,15 +440,18 @@ describe('AgentTilePane worker identity', () => {
     await act(async () => form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
     expect(host?.querySelector('[data-worker-steer-receipt]')?.textContent).toContain('Receipt unavailable');
     expect(textarea.disabled).toBe(true);
+    const originalBody = receipt.mock.calls[0]?.[1]?.body;
+    const originalMutationId = JSON.parse(String(originalBody)).clientMutationId;
+    expect(originalMutationId).toMatch(/^steer-test-id-\d+$/);
     await act(async () => {
       const check = [...(host?.querySelectorAll('button') ?? [])].find((button) => button.textContent === 'Check receipt');
       check?.click();
     });
     expect(host?.querySelector('[data-worker-steer-receipt]')).toBeNull();
     expect(receipt).toHaveBeenCalledTimes(2);
-    expect(receipt.mock.calls[0]?.[1]?.body).toBe(receipt.mock.calls[1]?.[1]?.body);
-    expect(JSON.parse(String(receipt.mock.calls[0]?.[1]?.body)).clientMutationId).toBe('one-steer-id');
-    expect(randomUUID).toHaveBeenCalledOnce();
+    expect(receipt.mock.calls[1]?.[1]?.body).toBe(originalBody);
+    expect(receipt.mock.calls.map(([, request]) => JSON.parse(String(request?.body)).clientMutationId))
+      .toEqual([originalMutationId, originalMutationId]);
   });
 
   it('resumes a paused owned worker through the existing correlated steer route', async () => {

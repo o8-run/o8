@@ -24,6 +24,8 @@ const EFFORT_LEVEL: Record<ThinkingEffort, number> = {
   // Between medium (3) and high (4): adaptive auto-picks in that band, so its
   // bars fill 3 solid + a half-lit fourth — reading as "between medium and high".
   adaptive: 3.5,
+  none: 0,
+  minimal: 0.5,
   low: 1,
   medium: 3,
   high: 4,

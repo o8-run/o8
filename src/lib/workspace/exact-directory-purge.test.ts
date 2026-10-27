@@ -211,6 +211,7 @@ describe('exact directory purge', () => {
     { mode: 'edited', name: 'retains changed hardlink contents on cold replay after an owned unlink' },
     { mode: 'legacy', name: 'holds legacy hardlink replay without a durable content digest' },
     { mode: 'live-edited', name: 'retains a reviewed hard link edited after its sibling unlink with restored mtime' },
+    { mode: 'preserve-edited', name: 'cleans owned siblings while preserving an edited hardlink and unlisted output on replay' },
   ]) it(name, async () => {
     const root = mkdtempSync(path.join(tmpdir(), 'o8-exact-purge-namespace-crash-'));
     roots.push(root);
@@ -224,6 +225,7 @@ describe('exact directory purge', () => {
     utimesSync(path.join(nested, 'a'), stamp, stamp);
     const stat = await lstat(directoryPath);
     const identity = { device: stat.dev, inode: stat.ino };
+    const originalLink = await lstat(path.join(nested, 'a'));
     const manifest = await captureExactDirectoryManifest(directoryPath, identity, { contents: mode === 'live-edited' });
     expect(manifest.entries.find(entry => entry.relative === path.join('nested', 'deep', 'a'))?.contentSha256).toMatch(/^[a-f0-9]{64}$/);
     const markerPath = path.join(root, 'namespace-release.marker');
@@ -232,9 +234,18 @@ describe('exact directory purge', () => {
       path.join(process.cwd(), 'src/lib/workspace/exact-directory-purge.ts'),
     ).href;
     writeFileSync(runnerPath, `
-      import { purgeExactDirectory } from ${JSON.stringify(moduleUrl)};
-      const input = JSON.parse(process.env.O8_PURGE_TEST_INPUT);
-      void purgeExactDirectory(
+      // The production environment allowlist deliberately omits test controls.
+      // Inject this fixture's stop marker only at the native test spawn edge.
+      const cp = require('node:child_process');
+      const nativeSpawn = cp.spawn;
+      cp.spawn = (command, args, options) => nativeSpawn(command, args, args?.[0] === '-e'
+        && args[1].includes('O8_PURGE_CAPTURED') ? { ...options, env: { ...options.env,
+          NODE_ENV: 'test', O8_TEST_PURGE_STOP_MARKER: process.env.O8_TEST_PURGE_STOP_MARKER } } : options);
+      require('node:module').syncBuiltinESMExports();
+      void import(${JSON.stringify(moduleUrl)}).then(namespace => {
+        const { purgeExactDirectory } = namespace.default ?? namespace;
+        const input = JSON.parse(process.env.O8_PURGE_TEST_INPUT);
+        return purgeExactDirectory(
         input.directoryPath,
         input.identity,
         undefined,
@@ -242,7 +253,8 @@ describe('exact directory purge', () => {
         undefined,
         input.manifest.fingerprint,
         input.manifest.entries,
-      );
+        );
+      });
     `);
     const child = spawn(process.execPath, ['--import', 'tsx', runnerPath], {
       cwd: process.cwd(),
@@ -294,7 +306,7 @@ describe('exact directory purge', () => {
       await closed;
       expect(readdirSync(directoryPath).length).toBeGreaterThan(0);
 
-      if (mode === 'edited') {
+      if (mode === 'edited' || mode === 'preserve-edited') {
         const survivor = path.join(nested, 'a');
         const before = await lstat(survivor);
         expect(before.nlink).toBe(1);
@@ -303,12 +315,24 @@ describe('exact directory purge', () => {
         expect((await lstat(survivor)).size).toBe(before.size);
         expect((await lstat(survivor)).mtimeMs).toBe(before.mtimeMs);
       }
+      if (mode === 'preserve-edited') writeFileSync(path.join(directoryPath, '.env'), 'unlisted fixture bytes');
       if (mode === 'legacy') for (const entry of manifest.entries) delete entry.contentSha256;
       const replay = purgeExactDirectory(directoryPath, identity, undefined, undefined, undefined,
-        manifest.fingerprint, manifest.entries);
+        manifest.fingerprint, manifest.entries, mode === 'preserve-edited');
       if (mode === 'unchanged') {
         await expect(replay).resolves.toBeUndefined();
         expect(existsSync(directoryPath)).toBe(false);
+      } else if (mode === 'preserve-edited') {
+        const kept = await replay;
+        expect(readFileSync(path.join(nested, 'a'), 'utf8')).toBe('edited bytes');
+        const actual = await lstat(path.join(nested, 'a'));
+        expect({ device: actual.dev, inode: actual.ino }).toEqual({ device: originalLink.dev, inode: originalLink.ino });
+        expect(readFileSync(path.join(directoryPath, '.env'), 'utf8')).toBe('unlisted fixture bytes');
+        expect(existsSync(path.join(nested, '0-first.txt'))).toBe(false);
+        expect(kept).toEqual(expect.arrayContaining([
+          { relative: path.join('nested', 'deep', 'a'), reason: 'its build ownership revision changed' },
+          { relative: '.env', reason: 'it is not in the release-owned inventory' },
+        ]));
       } else {
         await expect(replay).rejects.toThrow(/contents|digest|revision/);
         expect(readFileSync(path.join(nested, 'a'), 'utf8')).toBe(mode === 'edited' ? 'edited bytes' : 'shared bytes');

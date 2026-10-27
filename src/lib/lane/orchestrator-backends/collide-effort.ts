@@ -1,7 +1,7 @@
 import { selectedClaudeCodeWorkerModelSync } from '@/lib/claude-code/worker-profile';
 import { EffortPinRejectionError, resolveEffortPin } from '@/lib/orchestrator/effort-pin';
 import { resolveCli } from '@/lib/runtimes/shared/cli-resolver';
-import { resolveCachedCodexOrchestratorModel } from '../codex-orchestrator-config';
+import { resolveCachedCodexOrchestratorModel, userCodexHome } from '../codex-orchestrator-config';
 import { resolveOrchestratorModelSync } from '../codex-orchestrator-options';
 import { resolveClaudeOrchestratorModel } from '../orchestrator-model-guard';
 import type { MoaParticipant } from './moa';
@@ -19,7 +19,8 @@ export async function assertCollideEffortPins(proposers: readonly MoaParticipant
       : participant.backend === 'codex'
         ? resolveCachedCodexOrchestratorModel(resolveOrchestratorModelSync(participant.model)).model
         : participant.model ?? null;
-    const input = { runtime, model, explicitModel: participant.model, requestedEffort: effort };
+    const input = { runtime, model, explicitModel: participant.model, requestedEffort: effort,
+      codexHome: runtime === 'codex' ? userCodexHome() : undefined };
     const pin = resolveEffortPin(input);
     if (!pin.ok) throw new EffortPinRejectionError(pin.code, `Collide ${role}: ${pin.message}`);
     return [{ input, role }];

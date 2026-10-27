@@ -348,7 +348,12 @@ pub(crate) fn frontmost_is_o8() -> bool {
         .unwrap_or(false)
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "linux")]
+pub(crate) fn frontmost_is_o8() -> bool {
+    crate::linux_ptt::o8_window_focused()
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 pub(crate) fn frontmost_is_o8() -> bool {
     false
 }
@@ -1681,13 +1686,24 @@ pub(crate) fn grab_selection() -> Option<String> {
 }
 
 /// No-op on non-macOS platforms.
-#[cfg(not(target_os = "macos"))]
+/// Linux types into the focused X11 window with xdotool (`linux_ptt`).
+#[cfg(target_os = "linux")]
+pub fn paste_text(text: &str) -> bool {
+    paste_text_with_status(text).did_paste()
+}
+
+#[cfg(target_os = "linux")]
+pub fn paste_text_with_status(text: &str) -> PasteOutcome {
+    crate::linux_ptt::type_text(text)
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 pub fn paste_text(_text: &str) -> bool {
     tracing::warn!("paste: not supported on this platform");
     false
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 pub fn paste_text_with_status(_text: &str) -> PasteOutcome {
     tracing::warn!("paste: not supported on this platform");
     PasteOutcome::Failed("System paste is only available on macOS.".to_string())
