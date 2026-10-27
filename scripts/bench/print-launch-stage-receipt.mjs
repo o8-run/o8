@@ -12,8 +12,16 @@ export async function printLaunchStageReceipt(receipt) {
     const { serverProfile, resources, clientModules, frameCallbacks, ...stages } = sample;
     await write({ stages });
     for (const server of serverProfile || []) {
+      const childCosts = new Map();
+      for (const child of server.children || []) {
+        const route = child.route || '<background>';
+        const total = childCosts.get(route) || { route, count: 0, spawnMs: 0 };
+        total.count++;
+        total.spawnMs += child.spawnMs;
+        childCosts.set(route, total);
+      }
       await write({ sample: sample.sample, server: server.role, entryMs: server.entryMs, listeners: server.listeners,
-        modules: server.modules.slice(0, 12), cpu: server.cpu });
+        modules: server.modules.slice(0, 12), cpu: server.cpu, childCosts: [...childCosts.values()] });
       await write({ sample: sample.sample, server: server.role, requests: server.requests });
       await write({ sample: sample.sample, server: server.role,
         children: (server.children || []).sort((a, b) => b.spawnMs - a.spawnMs).slice(0, 30) });

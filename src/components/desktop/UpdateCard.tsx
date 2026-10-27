@@ -2,7 +2,7 @@
 
 /** App update controller, with a legacy card outside the compact rail. */
 
-import { publishAppUpdateView, refreshCliUpdateView, registerAppUpdateCheck } from '@/lib/app-update/update-hub-client';
+import { publishAppUpdateView, registerAppUpdateCheck } from '@/lib/app-update/update-hub-client';
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { confirmExplicitRestart } from '@/lib/app-update/confirm-explicit-restart';
@@ -122,7 +122,6 @@ function AppUpdateCard({ quiet }: { quiet: boolean }) {
       message: blockedNote, error: installError || checkReport.error, downloadOnly: resolveUpdateAction(installInfo, update?.version ?? null).kind === 'download',
       progress, blockers });
   }, [update, checkReport, installing, blockedNote, installError, installInfo, progress, blockers]);
-  useEffect(() => { void refreshCliUpdateView(); }, []);
 
   useEffect(() => {
     updateRef.current = update;

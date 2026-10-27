@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { launchStageIntervals } from './launch-stage-summary.mjs';
+import { checkLaunchStageReceipt } from './check-launch-stage-receipt.mjs';
 
 const args = Object.fromEntries(process.argv.slice(2).map(arg => {
   const [key, value] = arg.replace(/^--/, '').split('=');
@@ -59,7 +60,8 @@ try {
     };
     visit(JSON.parse(fs.readFileSync(String(args.stats), 'utf8')).modules);
   }
-  const result = { ...receipt, schema: 'o8/native-launch-stages/v1', cpuProfiled: profile,
+  const ordered = receipt.samples.map(row => row.interactiveComposerMs).sort((a, b) => a - b);
+  const result = { ...receipt, medianMs: ordered[Math.floor(ordered.length / 2)], schema: 'o8/native-launch-stages/v1', cpuProfiled: profile,
     prefetchPatch: '4874 measurement-only', stageHarnessSha: execFileSync('git', ['-C', fileURLToPath(new URL('../..', import.meta.url)), 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
     clientModulesMapped: identities.size > 0,
     samples: receipt.samples.map(row => ({ ...row, intervals: launchStageIntervals(row),
@@ -67,13 +69,7 @@ try {
   fs.writeFileSync(path.join(String(args.output), 'stages.json'), JSON.stringify(result, null, 2) + '\n');
   const { printLaunchStageReceipt } = await import('./print-launch-stage-receipt.mjs');
   await printLaunchStageReceipt(result);
-  if (args['check-background-dashboard']) {
-    const count = result.samples.reduce((total, sample) => total + sample.serverProfile.flatMap(server => server.requests)
-      .filter(row => row.route === '/dashboard' && row.caller === 'background' && row.atMs <= sample.interactiveComposerMs).length, 0);
-    console.log(JSON.stringify({ check: 'background-dashboard', count, limit: 0, passed: count === 0 }));
-    assert.equal(count, 0, 'Startup must not duplicate the WebView dashboard render');
-  }
-  if (args.check) assert(result.maxMs < 1000, `Launch budget exceeded: ${result.maxMs} ms >= 1000 ms`);
+  checkLaunchStageReceipt(result, args);
 } finally {
   fs.rmSync(generated, { force: true });
 }
