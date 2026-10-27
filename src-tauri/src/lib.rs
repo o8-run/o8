@@ -8942,15 +8942,17 @@ pub fn run() {
                     // it in <head>, long before any IPC exists, to pick opaque
                     // chrome off macOS. See lib/desktop/host-platform.ts.
                     let init_script = format!(
-                        "window.__O8_PORT_HINT__ = {}; window.__O8_EXPECTED_BOOT_ID__ = {}; window.__O8_HTML_TRAFFIC_LIGHTS__ = {}; window.__O8_HOST_PLATFORM__ = {:?}; window.__O8_LINUX_GLASS__ = {};",
+                        "window.__O8_PORT_HINT__ = {}; window.__O8_EXPECTED_BOOT_ID__ = {}; window.__O8_HTML_TRAFFIC_LIGHTS__ = {}; window.__O8_HOST_PLATFORM__ = {:?};",
                         api_port,
                         serde_json::to_string(&boot_identity.boot_id)
                             .unwrap_or_else(|_| "\"\"".into()),
                         html_traffic_lights,
                         std::env::consts::OS,
-                        // Local Linux patch: opt-in painted glass look (O8_LINUX_GLASS=1).
-                        cfg!(target_os = "linux")
-                            && std::env::var("O8_LINUX_GLASS").map(|v| v.trim() == "1").unwrap_or(false),
+                    );
+                    #[cfg(target_os = "linux")]
+                    let init_script = format!(
+                        "{init_script} window.__O8_LINUX_GLASS__ = {};",
+                        std::env::var("O8_LINUX_GLASS").map(|v| v.trim() == "1").unwrap_or(false),
                     );
                     tauri::WebviewWindowBuilder::from_config(app, config)?
                         .initialization_script(init_script)

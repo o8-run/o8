@@ -3444,6 +3444,13 @@
       ]
     },
     {
+      "path": "tests/linux-glass-init-script.test.ts",
+      "reasons": [
+        "child-process",
+        "native-build"
+      ]
+    },
+    {
       "path": "tests/live-process-guard-deletion-seam.test.ts",
       "reasons": [
         "child-process",
