@@ -39,6 +39,10 @@ export async function collectLaunchStageProfile(dataDir, startedEpochMs) {
         durationMs: row.endEpochMs ? round(row.endEpochMs - row.startEpochMs) : null,
         complete: row.complete ?? false, status: row.status ?? null,
         encoding: row.encoding ?? null, contentLength: row.contentLength ?? null })),
+      children: (data.children || []).map(row => ({ command: row.command, route: row.route,
+        atMs: round(row.startEpochMs - startedEpochMs), spawnMs: round(row.spawnMs),
+        lifetimeMs: row.endEpochMs ? round(row.endEpochMs - row.startEpochMs) : null,
+        stack: row.stack.map(normalized) })),
       modules: data.modules.map(row => ({ owner: normalized(row.owner),
         inclusiveMs: round(row.inclusiveMs), exclusiveMs: round(row.exclusiveMs), calls: row.calls,
         atMs: round(row.firstEpochMs - startedEpochMs) })), cpu };

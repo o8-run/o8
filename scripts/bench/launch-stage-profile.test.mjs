@@ -13,7 +13,10 @@ test('observes real listener, request and module-load work in a private server p
   const observer = fileURLToPath(new URL('./launch-stage-preload.cjs', import.meta.url));
   fs.writeFileSync(path.join(root, 'slow.cjs'), 'const end = performance.now() + 30; while (performance.now() < end) {} module.exports = 1;');
   fs.writeFileSync(path.join(root, 'server.js'), `require('./slow.cjs');
-    const server = require('node:http').createServer((req, res) => setTimeout(() => res.end('ok'), 25));
+    const server = require('node:http').createServer((req, res) => {
+      const child = require('node:child_process').spawn(process.execPath, ['-e', 'process.exit(0)']);
+      child.once('exit', () => setTimeout(() => res.end('ok'), 25));
+    });
     server.listen(0, '127.0.0.1', () => console.log(JSON.stringify({ port: server.address().port })));`);
   const started = Date.now();
   const child = spawn(process.execPath, ['--require', observer, path.join(root, 'server.js')], {
@@ -35,6 +38,8 @@ test('observes real listener, request and module-load work in a private server p
     assert(result.requests.every(row => row.route === '/dashboard' && row.complete && row.durationMs >= 15));
     assert(result.modules.some(row => row.owner.includes('slow.cjs') && row.exclusiveMs >= 25));
     assert(result.cpu.length > 0);
+    assert.equal(result.children.length, 2);
+    assert(result.children.every(row => row.command.startsWith('node') && row.route === '/dashboard' && row.lifetimeMs > 0));
   } finally {
     const exited = once(child, 'exit');
     child.kill('SIGTERM');

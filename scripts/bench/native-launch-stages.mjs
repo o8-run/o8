@@ -39,6 +39,7 @@ if (profile) {
 }
 replace('await sleep(30_000);', `receipt.samples.at(-1).serverProfile = await collectLaunchStageProfile(seeded.dataDir, epoch);
         await sleep(1000);`);
+replace('console.log(JSON.stringify(receipt));', 'console.log(JSON.stringify({ nativeMeasurementComplete: receipt.teardownVerified }));');
 source = `import { collectLaunchStageProfile } from ${JSON.stringify(summary)};\n` + source;
 fs.writeFileSync(generated, source, { flag: 'wx' });
 try {
@@ -64,7 +65,8 @@ try {
     samples: receipt.samples.map(row => ({ ...row, intervals: launchStageIntervals(row),
       clientModules: row.clientModules.map(module => ({ ...module, owner: identities.get(module.id) ?? null })) })) };
   fs.writeFileSync(path.join(String(args.output), 'stages.json'), JSON.stringify(result, null, 2) + '\n');
-  console.log(JSON.stringify(result));
+  const { printLaunchStageReceipt } = await import('./print-launch-stage-receipt.mjs');
+  await printLaunchStageReceipt(result);
   if (args['check-background-dashboard']) {
     const count = result.samples.reduce((total, sample) => total + sample.serverProfile.flatMap(server => server.requests)
       .filter(row => row.route === '/dashboard' && row.caller === 'background' && row.atMs <= sample.interactiveComposerMs).length, 0);

@@ -1,6 +1,8 @@
 name: Current app launch stage profile
 
 on:
+  push:
+    branches: [perf/current-app-launch-stages]
   workflow_dispatch:
 
 permissions:
@@ -12,6 +14,18 @@ env:
   MEASUREMENT_HARNESS: 01ab614f9de8a3b597edb23137df1991859e9871
 
 jobs:
+  read-saved-profile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: current-app-launch-stage-saved
+          run-id: 40429122856
+          github-token: ${{ github.token }}
+          path: saved
+      - run: node scripts/bench/print-launch-stage-receipt.mjs saved/stages.json
+
   saved-profile:
     runs-on: macos-latest
     timeout-minutes: 30
@@ -54,6 +68,7 @@ jobs:
           retention-days: 1
 
   build-main:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: macos-latest
     timeout-minutes: 120
     env:
