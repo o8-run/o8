@@ -130,7 +130,7 @@ async function queuedOutside(id: string) {
     method: 'POST', headers: { host: 'localhost' }, body: JSON.stringify({ repoPath: repo, threadId: parent,
       id, intent: 'send-next', payload: { text: 'Inspect the selected command and delegate work.',
         wireMessage: 'Inspect the selected command and delegate work.', images: [], routing: {
-          backend: 'pi', model: 'pi', effort: 'medium', permissionMode: 'outside-workspace',
+          backend: 'pi', model: 'pi', effort: 'adaptive', permissionMode: 'outside-workspace',
           mode: 'fleet', pickedMode: 'fast', collide: false,
         } } }),
   }));

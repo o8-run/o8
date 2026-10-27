@@ -56,8 +56,8 @@ const relay: typeof fetch = async (_input, init) => {
     + chunk({ choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } })
     + 'data: [DONE]\n\n', { headers: { 'Content-Type': 'text/event-stream' } });
 };
-function acp() {
-  return makeAcpBackend({ id: 'acp', label: 'Fixture agent', resolveLaunch: () => ({ command: process.execPath, args: [peer, capture] }) });
+function acp(id: 'acp' | 'hermes' | 'opencode' = 'acp') {
+  return makeAcpBackend({ id, label: 'Fixture agent', resolveLaunch: () => ({ command: process.execPath, args: [peer, capture] }) });
 }
 function pi() {
   const backend = createPiOrchestratorBackend({ stateRoot: () => join(root, `sdk-${++sequence}`),
@@ -208,4 +208,58 @@ it('records a managed service tier in its own field while reasoning remains at r
   expect(requests[0].thinkingEffort).toBe('low');
   expect(events).toContainEqual(expect.objectContaining({ type: 'turn_receipt', effort: 'adaptive',
     effortSource: 'runtime-default', serviceTier: 'low' }));
+});
+
+it.each(['acp', 'hermes', 'opencode', 'pi', 'o8'] as const)(
+  'continues a legacy %s chat with a saved medium pin at the runtime default', async kind => {
+    const backend = kind === 'pi' ? pi() : kind === 'o8' ? textOnly() : acp(kind);
+    queuedBackend.current = backend;
+    const { writePersistedLlmChat, readPersistedLlmChat } = await import('@/lib/llm/chat-history-store');
+    const { runBoundChatContinuation } = await import('@/lib/ws-server/bound-chat-continuation');
+    const threadId = `thoughts-legacy-medium-${kind}`;
+    const model = kind === 'pi' ? 'pi' : kind === 'o8' ? 'o8-free' : 'fixture/model/low';
+    writePersistedLlmChat(threadId, { repoPath: repo, messages: [{ id: 'legacy-medium', role: 'assistant',
+      backend: kind, model, content: 'Legacy turn', timestamp: 1,
+      receipt: { leadModel: model, effort: 'medium', mode: 'solo', permissionMode: 'full' },
+    }] });
+    const saved = readPersistedLlmChat(threadId)!.history.messages[0];
+    const published: Array<{ event: string; data: Record<string, unknown> }> = [];
+    await runBoundChatContinuation({ repoPath: repo, origin: {
+      threadId, turnId: saved.id, backend: kind, model, effort: saved.receipt!.effort,
+      mode: 'single', permissionMode: 'full',
+    }, message: 'Continue the authorized task', assistantMessageId: 'continued-medium', check: () => {} }, {
+      registerAbort: () => () => {}, publish: (_session, event, data) => { published.push({ event, data }); },
+    });
+    expect(published.filter(row => row.event === 'error')).toEqual([]);
+    const messages = readPersistedLlmChat(threadId)!.history.messages;
+    expect(messages[0].receipt?.effort).toBe('medium');
+    expect(messages.at(-1)).toMatchObject({ id: 'continued-medium', content: expect.stringContaining('Fixture answer'),
+      receipt: { effort: 'adaptive', effortSource: 'runtime-default' } });
+    if (kind === 'pi') {
+      expect(requests).toHaveLength(1);
+      expect(requests[0]).not.toHaveProperty('reasoning_effort');
+      expect(requests[0]).not.toHaveProperty('reasoning');
+    } else if (kind !== 'o8') expect(calls().filter(call => call.method === 'session/prompt')).toHaveLength(1);
+  }, 90_000,
+);
+
+it('refuses a queued user send with an explicit medium pin on Pi before admission', async () => {
+  queuedBackend.current = pi();
+  const { writePersistedLlmChat, readPersistedLlmChat } = await import('@/lib/llm/chat-history-store');
+  const queue = await import('@/lib/orchestrator/composer-queue');
+  const { createComposerQueueHeartbeat } = await import('@/lib/ws-server/composer-queue-heartbeat');
+  const threadId = 'thoughts-explicit-medium-user';
+  writePersistedLlmChat(threadId, { repoPath: repo, messages: [] });
+  queue.enqueueComposerSend({ repoPath: repo, threadId, id: 'explicit-medium-user', intent: 'send-next', payload: {
+    text: 'Use medium effort', wireMessage: 'Use medium effort', images: [], routing: {
+      backend: 'pi', model: 'pi', effort: 'medium', permissionMode: 'full', mode: 'single', pickedMode: 'solo', collide: false,
+    },
+  } });
+  createComposerQueueHeartbeat({ isBusy: () => false, readTranscript: async () => [],
+    registerAbort: () => () => {}, publish: () => {} })();
+  await vi.waitFor(() => expect(queue.readComposerSend('explicit-medium-user')?.status).toBe('held'));
+  expect(queue.readComposerSend('explicit-medium-user')).toMatchObject({ admittedAt: null,
+    reason: expect.stringMatching(/cannot apply.*independent thinking effort "medium".*no verified mapping/i) });
+  expect(readPersistedLlmChat(threadId)?.history.messages).toEqual([]);
+  expect(requests).toEqual([]);
 });

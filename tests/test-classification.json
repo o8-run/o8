@@ -2658,6 +2658,17 @@
       ]
     },
     {
+      "path": "tests/dashboard-chat-pane-isolation-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "network-listener",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/dashboard-startup-real-path.test.ts",
       "reasons": [
         "real-path"
@@ -3530,6 +3541,13 @@
       "path": "tests/lifecycle-mcp-errors-real-path.test.ts",
       "reasons": [
         "real-path"
+      ]
+    },
+    {
+      "path": "tests/linux-glass-init-script.test.ts",
+      "reasons": [
+        "child-process",
+        "native-build"
       ]
     },
     {
@@ -4907,6 +4925,15 @@
       ]
     },
     {
+      "path": "tests/owned-stdin-survival-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/packaged-server-smoke-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -5982,6 +6009,12 @@
       ]
     },
     {
+      "path": "tests/review-diff-position-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/review-file-previews.test.ts",
       "reasons": [
         "child-process",
@@ -6319,6 +6352,12 @@
     },
     {
       "path": "tests/sidebar-review-layout-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/sidebar-window-layout-real-path.test.ts",
       "reasons": [
         "real-path"
       ]

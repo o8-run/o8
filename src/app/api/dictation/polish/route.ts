@@ -3,8 +3,7 @@ export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 import {
   managedTextModelOptions,
-  O8_MANAGED_TEXT_MODEL,
-  O8_MANAGED_ZERO_COST_MODEL,
+  openRouterTextModels,
   resolveOpenRouterRoute,
 } from '@/lib/cortex/qa/llm/inference-route';
 import {
@@ -16,9 +15,9 @@ import {
 import { processVoiceCommands } from '@/lib/dictation/voice-commands';
 
 // Polish runs on the managed text model with reasoning off; the $0 model is the
-// fallback. Re-verify any new id with scripts/founder-polish-sweep.mjs, which
+// fallback (a direct key may replace the first slot with O8_OPENROUTER_TEXT_MODEL).
+// Re-verify any new id with scripts/founder-polish-sweep.mjs, which
 // checks that polish keeps the transcript's meaning.
-const POLISH_MODELS = [O8_MANAGED_TEXT_MODEL, O8_MANAGED_ZERO_COST_MODEL];
 
 interface PolishRequestBody {
   transcript?: string;
@@ -74,7 +73,7 @@ export async function POST(request: Request) {
   ];
 
   const failures: string[] = [];
-  const polishModels = route.model ? [route.model] : POLISH_MODELS;
+  const polishModels = route.model ? [route.model] : openRouterTextModels(route.via);
   for (const model of polishModels) {
     try {
       const response = await fetch(route.url, {

@@ -5,6 +5,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
+import { pathToFileURL } from 'node:url';
 import { setTimeout as sleep } from 'node:timers/promises';
 import {
   buildFootprintSeriesReceipt,
@@ -37,7 +38,7 @@ const POLL_MS = 250;
 const REQUEST_TIMEOUT_MS = 10_000;
 const RELEASE_NOTE_FILE = 'preship-webview-gate-release-note.txt';
 
-class WebviewSocketClient {
+export class WebviewSocketClient {
   constructor(socketPath) {
     this.socketPath = socketPath;
     this.tokenPath = `${socketPath}.token`;
@@ -299,7 +300,7 @@ function normalizeEvalResult(value) {
   return String(value);
 }
 
-async function executeJs(client, code) {
+export async function executeJs(client, code) {
   return normalizeEvalResult(await client.send('execute_js', { window_label: 'main', code }));
 }
 
@@ -675,7 +676,9 @@ async function main() {
   }
 }
 
-await main().catch((error) => {
-  console.error(`[preship-webview-gate] FATAL: ${error?.message ?? error}`);
-  process.exit(1);
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  await main().catch((error) => {
+    console.error(`[preship-webview-gate] FATAL: ${error?.message ?? error}`);
+    process.exit(1);
+  });
+}

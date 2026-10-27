@@ -62,6 +62,8 @@ export interface OrchestratorStreamOptions {
   seededPlanText?: string | null;
   hasHistory?: boolean;
   threadId?: string | null;
+  /** Fresh workspace views wait for their own first send or explicit history load. */
+  allowUnboundRecovery?: boolean;
   /**
    * Called when the hook synchronously mints a threadId inside `send()`
    * because the parent hasn't supplied one yet (first-message-on-empty-tab

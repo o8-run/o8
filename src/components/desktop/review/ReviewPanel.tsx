@@ -3,6 +3,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown } from '../lucide-shims';
 import { useWorkspaceChanges } from '../o8-panel/workspace-rail/ChangesList';
+import { useReviewDiffAnchor } from './useReviewDiffAnchor';
 import { useLaneReviewChanges } from './useLaneReviewChanges';
 import { useLaneReviewSummary } from './useLaneReviewSummary';
 import { LaneReviewSummaryHeader } from './panel/LaneReviewSummaryHeader';
@@ -77,6 +78,10 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath, registeredRepos
   const [lastTurnPaths, setLastTurnPaths] = useState<Set<string>>(new Set());
   const rowRefs = useRef(new Map<string, HTMLDivElement>());
 
+  const { contentRef, capture: captureDiffAnchor, select: selectDiffAnchor, cancel: cancelDiffAnchor } = useReviewDiffAnchor(
+    `${repoPath}:${reviewLaneId}:${scope}`, `${mode}:${wrap}:${wordDiff}:${hideWhitespace}:${richPreview}`,
+  );
+
   // Close the header menus on outside-click or Escape.
   useEffect(() => {
     if (!menuOpen && !scopeOpen && !repoMenuOpen && !filesDrawerOpen) return;
@@ -103,22 +108,27 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath, registeredRepos
   }, [menuOpen, scopeOpen, repoMenuOpen, filesDrawerOpen]);
 
   const handleCollapseAll = () => {
+    cancelDiffAnchor();
     setCollapseSignal((signal) => ({ open: !signal.open, nonce: signal.nonce + 1 }));
     setMenuOpen(false);
   };
   const handleWordWrap = () => {
+    captureDiffAnchor();
     setWrap((value) => !value);
     setMenuOpen(false);
   };
   const handleWordDiff = () => {
+    captureDiffAnchor();
     setWordDiff((value) => !value);
     setMenuOpen(false);
   };
   const handleHideWhitespace = () => {
+    captureDiffAnchor();
     setHideWhitespace((value) => !value);
     setMenuOpen(false);
   };
   const handleRichPreview = () => {
+    captureDiffAnchor();
     setRichPreview((value) => !value);
     setMenuOpen(false);
   };
@@ -135,11 +145,12 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath, registeredRepos
     else rowRefs.current.delete(path);
   }, []);
   const jumpToFile = useCallback((path: string) => {
+    selectDiffAnchor(path);
     setFocusSignal((signal) => ({ path, nonce: signal.nonce + 1 }));
     window.setTimeout(() => {
       rowRefs.current.get(path)?.scrollIntoView({ block: 'start', behavior: 'smooth' });
     }, 40);
-  }, []);
+  }, [selectDiffAnchor]);
   const currentRepo = registeredRepos.find((repo) => repo.localPath === repoPath);
   const repoLabel = currentRepo?.name ?? (repoPath ? (repoPath.split('/').filter(Boolean).pop() ?? 'Repo') : 'Repo');
   const changedFilesKey = useMemo(() => changes.files.map((file) => file.path).join('\n'), [changes.files]);
@@ -355,7 +366,7 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath, registeredRepos
           <ToolbarButton
             title={mode === 'unified' ? 'Switch to split diff' : 'Switch to unified diff'}
             active={mode === 'side'}
-            onClick={() => setMode((current) => (current === 'unified' ? 'side' : 'unified'))}
+            onClick={() => { captureDiffAnchor(); setMode((current) => (current === 'unified' ? 'side' : 'unified')); }}
           >
             {mode === 'unified' ? <IconSplit size={14} /> : <IconUnified size={14} />}
           </ToolbarButton>
@@ -394,6 +405,7 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath, registeredRepos
         </div>
       ) : null}
       <div className="cortex-scroll-fade-y cortex-themed-scroll" style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden' }}>
+        <div ref={contentRef}>
         {!diffRepoPath ? (
           <PanelMessage text="Select a repo to review changes." />
         ) : changes.loading && !hasFiles ? (
@@ -471,6 +483,7 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath, registeredRepos
             ))}
           </>
         )}
+        </div>
       </div>
       {hasFiles ? (
         <FilesDrawer
