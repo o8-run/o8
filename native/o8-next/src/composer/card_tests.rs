@@ -1,4 +1,5 @@
 use super::*;
+mod image_tests;
 use gpui::{Modifiers, TestAppContext, VisualTestContext};
 use std::{
     io::{BufRead, BufReader},

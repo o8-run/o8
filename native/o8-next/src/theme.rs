@@ -42,6 +42,7 @@ pub struct Theme {
 // replace it without changing any view's choice of semantic tokens.
 static SELECTED: LazyLock<Appearance> =
     LazyLock::new(|| match std::env::var("O8_NEXT_APPEARANCE").as_deref() {
+        Ok("light") => Appearance::Light,
         Ok("glass") => Appearance::Glass,
         Ok("plain") => Appearance::Dark,
         _ if cfg!(target_os = "macos") && std::env::args().any(|arg| arg == "--app-shell") => {

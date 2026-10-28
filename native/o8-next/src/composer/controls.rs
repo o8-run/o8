@@ -1,6 +1,6 @@
 //! Composer-only view state. Routing uses the existing durable queue schema.
 use super::Composer;
-use gpui::{Entity, FocusHandle};
+use gpui::{Entity, FocusHandle, RenderImage};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 
@@ -12,6 +12,10 @@ pub(crate) struct State {
     pub overrides: Value,
     pub focus: HashMap<String, FocusHandle>,
     pub images: Vec<Value>,
+    pub previews: HashMap<String, std::sync::Arc<RenderImage>>,
+    pub attachment_target: bool,
+    pub images_enabled: bool,
+    pub pending_images: usize,
 }
 impl Default for State {
     fn default() -> Self {
@@ -23,6 +27,10 @@ impl Default for State {
             overrides: json!({}),
             focus: HashMap::new(),
             images: vec![],
+            previews: HashMap::new(),
+            attachment_target: false,
+            images_enabled: false,
+            pending_images: 0,
         }
     }
 }

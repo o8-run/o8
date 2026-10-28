@@ -41,6 +41,7 @@ impl Surface {
             || !self.queue_ready
             || self.composer.read(cx).composing()
             || self.composer.read(cx).controls.busy
+            || self.composer.read(cx).controls.pending_images > 0
         {
             return;
         }

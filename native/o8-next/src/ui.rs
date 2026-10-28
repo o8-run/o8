@@ -127,6 +127,14 @@ impl Surface {
                         this.send(None, cx);
                     }
                 }));
+            self.subscriptions.push(cx.subscribe(
+                &editor,
+                |this, editor, _: &crate::composer::images::ImagesChanged, cx| {
+                    if this.composer == editor {
+                        cx.notify();
+                    }
+                },
+            ));
             self.drafts.insert(id.clone(), editor);
         }
         self.composer = self.drafts[&id].clone();
