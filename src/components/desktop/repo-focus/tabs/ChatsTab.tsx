@@ -276,19 +276,17 @@ export function ChatsTab({
             const payload = await response.json().catch(() => null) as { error?: string } | null;
             throw new Error(payload?.error ?? `Delete failed (${response.status})`);
           }
+          // Retire mounted writers and restore keys as soon as DELETE succeeds.
+          // A slow or failed list refresh must not keep the deleted chat alive.
+          if (typeof window !== 'undefined') {
+            removeTranscriptReadingPositions(item.tabId);
+            window.dispatchEvent(new CustomEvent('o8:chat-history-deleted', { detail: { tabId: item.tabId } }));
+            // And clear the last-active restore keys — in any repo bucket — that
+            // point at the deleted thread, so a reload can't resurrect it into a
+            // workspace tab.
+            clearLastOrchestratorThreadForId(item.tabId);
+          }
         });
-        // Notify any open workspace tab bound to this thread so it resets to the
-        // fresh new-chat state instead of showing the dead transcript — the row
-        // dropped from this rail, but the center tab had no signal until now
-        // (operator reports v0.1.557/560/580).
-        if (typeof window !== 'undefined') {
-          removeTranscriptReadingPositions(item.tabId);
-          window.dispatchEvent(new CustomEvent('o8:chat-history-deleted', { detail: { tabId: item.tabId } }));
-          // And clear the last-active restore keys — in any repo bucket — that
-          // point at the deleted thread, so a reload can't resurrect it into a
-          // workspace tab.
-          clearLastOrchestratorThreadForId(item.tabId);
-        }
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Delete failed';
         toast(`Couldn't delete "${item.title}": ${message}. Try again — if Codex was busy on this thread the file may have been locked.`);

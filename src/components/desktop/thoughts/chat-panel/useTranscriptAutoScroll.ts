@@ -37,6 +37,7 @@ export function useTranscriptAutoScroll({ endRef, suppressRef, scope, historyCom
     if (!connection.current) {
       const saved = loadTranscriptReadingPosition(scope);
       let following = saved?.following ?? true;
+      end.style.overflowAnchor = following ? 'auto' : 'none';
       let anchor = saved?.anchor ?? null;
       // History may arrive tail-first. Keep the identity until backfill mounts
       // it; an intermediate scroll must not save the tail over that identity.
@@ -55,6 +56,7 @@ export function useTranscriptAutoScroll({ endRef, suppressRef, scope, historyCom
       const capture = () => withOrder(captureTranscriptReadingAnchor(container));
       let savedFollowing = saved?.following;
       const save = () => {
+        end.style.overflowAnchor = following ? 'auto' : 'none';
         if (deleted || restoring) return;
         if (!history.current.messageIds.length && !anchor && (following || lastTop === 0)) {
           removeTranscriptReadingPosition(scope);
@@ -72,6 +74,17 @@ export function useTranscriptAutoScroll({ endRef, suppressRef, scope, historyCom
       };
       const preserve = () => {
         if (following) return;
+        // A scrollTop assignment takes effect before its scroll event. Deferred
+        // turn layout can notify resize in between; do not restore the old
+        // history anchor over a reader who has already returned to the bottom.
+        if (!restoring && container.scrollTop > lastTop + 1
+          && container.scrollHeight - container.scrollTop - container.clientHeight <= 4) {
+          following = true;
+          anchor = null;
+          lastTop = container.scrollTop;
+          save();
+          return;
+        }
         if (restoreTranscriptReadingAnchor(container, anchor)) { restoring = false; anchor = withOrder(anchor); }
         else if (restoring && history.current.complete && anchor) {
           anchor = nearestTranscriptReadingAnchor(container, anchor, saved?.top ?? lastTop, history.current.messageIds);
@@ -149,10 +162,10 @@ export function useTranscriptAutoScroll({ endRef, suppressRef, scope, historyCom
     }
     if (suppressRef.current) {
       suppressRef.current = false;
-      // Backfill owns this frame, but is not a reader gesture. If it adds no
-      // visible height there may be no scroll event to reattach following.
+      // Backfill owns its compensation frame, but is not a reader gesture.
+      // Recheck following afterwards even if overflow layout emits no resize.
       connection.current.cancel();
-      connection.current.preserve();
+      connection.current.follow();
     } else connection.current.follow();
   });
 

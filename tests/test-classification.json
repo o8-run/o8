@@ -2990,6 +2990,12 @@
       ]
     },
     {
+      "path": "tests/dispatch-held-recoverable-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/dispatch-mission-runtime-override-real-path.test.ts",
       "reasons": [
         "child-process",

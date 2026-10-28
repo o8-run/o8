@@ -308,3 +308,58 @@ it('keeps the departing real conversation position when the replacement has no m
   expect(JSON.parse(localStorage.getItem('o8:transcript-reading:v1:real-chat')!)).toMatchObject({ following: false, top: 2100 });
   await render(messages, 'real-chat'); await frame(); expect(top).toBe(2100);
 });
+
+it('accepts a return to bottom before resize delivery can restore the previous history anchor', async () => {
+  const messages = readingLayout();
+  await render(messages, 'pending-bottom'); await frame(); scrollTo(2100);
+  // scrollTop changes synchronously; the browser delivers its scroll event later.
+  // Deferred turns can resize between that change and the event.
+  top = height - 692;
+  resize();
+  await frame();
+  scroller.dispatchEvent(new Event('scroll'));
+  window.dispatchEvent(new Event('pagehide'));
+  expect(top).toBe(height - 692);
+  expect(JSON.parse(localStorage.getItem('o8:transcript-reading:v1:pending-bottom')!))
+    .toMatchObject({ following: true, top: 0, anchor: null });
+  height += 500; resize(); await frame();
+  expect(top).toBe(height - 692);
+});
+
+it('keeps a history anchor when a retained chat is clamped while hidden', async () => {
+  const messages = readingLayout();
+  await render(messages, 'retained-history'); await frame(); scrollTo(2100);
+  height = 692; top = 0;
+  resize();
+  await frame();
+  height = 18853; resize(); await frame();
+  window.dispatchEvent(new Event('pagehide'));
+  expect(top).toBe(2100);
+  expect(JSON.parse(localStorage.getItem('o8:transcript-reading:v1:retained-history')!))
+    .toMatchObject({ following: false, top: 2100 });
+});
+
+it('follows after the final backfill compensation even without another resize notification', async () => {
+  await render(readingLayout(), 'backfilled-bottom'); await frame();
+  // Backfill schedules its compensation before React commits the prepended page.
+  // A live status row can settle afterwards without resizing the overflow box.
+  requestAnimationFrame(() => { scroller.scrollTop = height - 692 - 41; });
+  suppress.current = true;
+  await render(readingLayout(), 'backfilled-bottom');
+  await frame();
+  expect(top).toBe(height - 692);
+});
+
+it('gives the live edge native anchoring only while following, including after remount', async () => {
+  const messages = readingLayout();
+  await render(messages, 'native-bottom'); await frame();
+  const end = () => scroller.firstElementChild!.lastElementChild as HTMLElement;
+  expect(end().style.overflowAnchor).toBe('auto');
+  scrollTo(top - 50);
+  expect(end().style.overflowAnchor).toBe('none');
+  await act(async () => root.unmount()); root = createRoot(host); top = 0;
+  await render(messages, 'native-bottom'); scroller = host.querySelector('.thoughts-scroll')!; await frame();
+  expect(end().style.overflowAnchor).toBe('none');
+  scrollTo(height - 692);
+  expect(end().style.overflowAnchor).toBe('auto');
+});
