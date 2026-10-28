@@ -1,4 +1,5 @@
 import { viewerBytes } from '@/lib/viewers/bytes';
+import { isVerifiableRasterType, viewerImageBytes } from '@/lib/viewers/image-bytes';
 import { viewerJson } from '@/lib/viewers/response';
 export const dynamic = 'force-dynamic';
 
@@ -65,7 +66,9 @@ export async function GET(request: Request) {
       });
     }
 
-    return viewerBytes(buffer, mimeType);
+    // SVG returns as JSON text above; serve verifiable rasters through the image
+    // path (#4773 otherwise refuses them) and keep any other type on the text viewer.
+    return isVerifiableRasterType(mimeType) ? viewerImageBytes(buffer, mimeType) : viewerBytes(buffer, mimeType);
   } catch (error) {
     if (isWorkspaceFileError(error)) {
       return viewerJson({ error: error.message, code: error.code }, { status: error.status });
