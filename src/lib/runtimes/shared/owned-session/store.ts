@@ -1,5 +1,6 @@
 import { RuntimeLaunchTimeoutError, runtimeLaunchStep } from '@/lib/runtime/launch-deadline';
 import { retireUnstartedSession } from './retire-unstarted';
+import { prepareOwnedContinuation, retireOwnedSession } from './continuation';
 import { providerFromConfig } from './controlled-provider';
 import { assertOwnedActionFence } from './action-fence';
 import { assertRuntimeEffortPin } from '@/lib/orchestrator/effort-pin';
@@ -318,7 +319,7 @@ export function createOwnedSessionStore(
       const archived = await io.findArchivedSession(surfaceId);
       if (archived) assertRuntimeEffortPin(runtimeId, archived.model, archived.effort, archived.identity?.configHomeRef ?? adapter.defaultConfigHome?.());
       refuseOwnedSingleAttemptResume(archived);
-      if (archived?.threadId) {
+      if (archived && !archived.retiredAt) {
         const restore = await restoreArchivedOwnedSessionDir(root, surfaceId, surfacePrefix);
         if (restore.restored) {
           session = await io.findSession(surfaceId);
@@ -332,7 +333,7 @@ export function createOwnedSessionStore(
     if (!session) {
       throw new Error(`Owned ${adapter.squadShortName} session was not found.`);
     }
-    if (session.detachedAt) {
+    if (session.detachedAt || session.retiredAt) {
       throw new Error(`This owned ${adapter.squadShortName} session was detached from its closed packet and cannot be resumed.`);
     }
 
@@ -355,14 +356,18 @@ export function createOwnedSessionStore(
       if (session.activeRun && (session.activeRun.supervisor || isPidAlive(session.activeRun.pid))) {
         throw new Error(`This owned ${adapter.squadShortName} session still has an active run. Wait for it to settle or interrupt it first.`);
       }
-      if (!session.threadId) {
+      if (!session.threadId && automaticRunId) {
         throw new Error(`This owned ${adapter.squadShortName} session does not have a thread id yet, so resume is not available.`);
       }
 
       if (automaticRunId) assertAutomaticRecoveryGeneration(await io.findSession(surfaceId), automaticRunId);
       assertOwnedActionAdmission(await io.findSession(surfaceId));
       await assertOwnedActionFence(surfaceId, await io.findSession(surfaceId));
-      const run = await runController.spawnOwnedRun(session, prompt.trim(), 'resume', { freshRequest: !automaticRunId });
+      const continuation = await prepareOwnedContinuation(session, prompt.trim(), adapter, runController);
+      if (automaticRunId && continuation.mode !== 'resume') throw new Error('Automatic recovery requires a resumable runtime thread. Use an explicit resume.');
+      const run = await runController.spawnOwnedRun(session, continuation.prompt, continuation.mode, {
+        freshRequest: !automaticRunId, operatorRequest: prompt.trim(),
+      });
       if (run.outcome === 'failed' && coldRestored) {
         await rollbackColdRestore();
       }
@@ -371,6 +376,8 @@ export function createOwnedSessionStore(
         ok: run.outcome !== 'failed',
         note: run.outcome === 'failed'
           ? session.latestSummary
+          : continuation.mode === 'launch'
+            ? 'Started a fresh run in the same checkout with the saved task and prior transcript summarized.'
           : coldRestored
             ? `Cold resume: the archived IDE-owned ${adapter.squadShortName} session was restored and its saved thread resumed (fresh process, no warm context beyond the thread).`
             : `Queued a new turn on the IDE-owned ${adapter.squadShortName} session via resume.`,
@@ -767,6 +774,7 @@ export function createOwnedSessionStore(
     getFleetAdditions,
     sessionState: (surfaceId) => readOwnedSessionState(root, surfaceId, surfacePrefix),
     archiveSession: (surfaceId, workspace) => withSurfaceLock(surfaceId, () => io.archiveSession(surfaceId, workspace)),
+    retireSession: (surfaceId) => withSurfaceLock(surfaceId, () => retireOwnedSession(surfaceId, io, runController)),
     setDetachedSession,
     sweepOrphanedSessions: fleetComputer.sweepOrphanedSessions,
     getTelemetrySources: reviewTailController.getTelemetrySources,
