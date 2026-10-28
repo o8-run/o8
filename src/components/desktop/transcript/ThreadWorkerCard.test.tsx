@@ -42,6 +42,47 @@ function Conversation({ agents = [], onFocusSession, threadId = 'thoughts-test' 
 }
 
 describe('turn-local worker cards', () => {
+  it('offers recovery on an isolated packet row using its saved session summary', async () => {
+    const fetcher = vi.fn(async () => ({ ok: true, json: async () => ({ session: { status: 'interrupted' }, recovery: {
+      actions: ['resume', 'retire'], worktreePath: '/packet-checkout', branch: 'worker/packet', runId: 'run-packet', retired: false,
+    } }) }));
+    vi.stubGlobal('fetch', fetcher);
+    const packet = { id: 'packet-recovery', title: 'Packet worker', status: 'blocked', runtime: 'codex',
+      lane: { laneId: 'lane-recovery', sessionKey: 'codex-owned:packet-worker' } } as OrchestratorPacket;
+    await act(async () => root.render(<ThreadWorkerCard group={{ packets: [packet], scouts: [], sessions: [] }} />));
+    await act(async () => host.querySelector<HTMLButtonElement>('[aria-expanded]')!.click());
+    expect(fetcher).toHaveBeenCalledWith('/api/runtime/session-summary?sessionKey=codex-owned%3Apacket-worker', expect.any(Object));
+    expect(host.textContent).toContain('Edits preserved on worker/packet at /packet-checkout');
+    expect([...host.querySelectorAll('button')].filter(button => button.textContent === 'Resume' || button.textContent === 'Retire')).toHaveLength(2);
+  });
+
+  it('offers Resume and Retire on the interrupted worker and sends the exact saved session control', async () => {
+    const session = { ...worker('Interrupted worker', 'assistant-1'), sessionKey: 'codex-owned:saved', status: 'interrupted',
+      recovery: { actions: ['resume', 'retire'] as Array<'resume' | 'retire'>, worktreePath: '/checkout', branch: 'worker/saved', runId: 'run', retired: false } };
+    let finish!: (value: unknown) => void;
+    const fetcher = vi.fn((_url: string, _options?: RequestInit) => new Promise(resolve => { finish = resolve; }));
+    vi.stubGlobal('fetch', fetcher);
+    await act(async () => root.render(<ThreadWorkerCard group={{ packets: [], scouts: [], sessions: [session] }} />));
+    await act(async () => host.querySelector<HTMLButtonElement>('[aria-expanded]')!.click());
+    const buttons = () => [...host.querySelectorAll('button')];
+    expect(host.textContent).toContain('Interrupted');
+    expect(buttons().some(button => button.textContent === 'Resume')).toBe(true);
+    expect(buttons().some(button => button.textContent === 'Retire')).toBe(true);
+    await act(async () => buttons().find(button => button.textContent === 'Resume')!.click());
+    expect(buttons().find(button => button.textContent === 'Resuming…')?.disabled).toBe(true);
+    expect(buttons().find(button => button.textContent === 'Retire')?.disabled).toBe(true);
+    expect(fetcher.mock.calls[0][0]).toBe('/api/agent-control/action');
+    expect(JSON.parse((fetcher.mock.calls[0] as unknown as [string, RequestInit])[1].body as string)).toMatchObject({
+      ref: { kind: 'session', id: session.sessionKey }, action: { kind: 'resume' }, clientMutationId: expect.any(String),
+    });
+    await act(async () => finish({ ok: false, json: async () => ({ error: { message: 'Resume held: inspect the checkout.' } }) }));
+    expect(host.querySelector('[role="status"]')?.textContent).toContain('Resume held: inspect the checkout.');
+    await act(async () => buttons().find(button => button.textContent === 'Retire')!.click());
+    await act(async () => finish({ ok: true, json: async () => ({ result: { ok: true, note: 'Retired. Edits remain at /checkout on worker/saved.' } }) }));
+    expect(host.textContent).toContain('Edits remain at /checkout on worker/saved.');
+    expect(buttons().some(button => button.textContent === 'Resume')).toBe(false);
+  });
+
   it('keeps two groups beside their replies through live status, duplicate receipts, hide/reopen and reload', async () => {
     const first = worker('First worker', 'assistant-1');
     const second = worker('Second worker', 'assistant-2');

@@ -52,7 +52,8 @@ export function useThreadWorkers({ threadId, repoPath, busy, agents }: {
   }, [threadId, repoPath, busy, refreshVersion]);
   const workers = saved?.threadId === threadId && saved.repoPath === repoPath ? saved.workers : [];
   return workers.map(worker => ({ ...worker,
-    status: agents.find(agent => agent.sessionKey === worker.sessionKey)?.status ?? worker.status,
+    status: worker.status === 'interrupted' || worker.status === 'retired' ? worker.status
+      : agents.find(agent => agent.sessionKey === worker.sessionKey)?.status ?? worker.status,
   }));
 }
 

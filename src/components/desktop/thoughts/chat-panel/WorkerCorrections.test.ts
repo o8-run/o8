@@ -135,7 +135,7 @@ it('retains stopped worker names and navigation without enabling correction auth
     hasAttachments: false, working: false, onDelivered: delivered, workerContext: { packets: [],
       sessions: [{ sessionKey: worker.surfaceId, name: 'Inspect code', runtime: 'codex', status: 'interrupted' }], onFocusSession: focus } })));
   await act(async () => button('Worker corrections').click());
-  expect(document.body.textContent).toContain('Stopped');
+  expect(document.body.textContent).toContain('Interrupted');
   expect(document.body.textContent).not.toContain(worker.surfaceId);
   expect(document.body.querySelector('input[type=checkbox]')).toBeNull();
   await act(async () => button('Inspect code').click());
@@ -210,6 +210,22 @@ it('shows the membership count on the transparent composer trigger', async () =>
   expect(trigger.style.background).toBe('transparent');
   expect(trigger.style.color).toBe('var(--t-accent)');
   expect(trigger.hasAttribute('title')).toBe(false);
+});
+
+it('keeps recovery actions on the real composer card when the interrupted worker is no longer correctable', async () => {
+  vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ workers: [], corrections: [] }) } as Response);
+  await act(async () => root.render(createElement(WorkerCorrections, { repoPath: '/repo', threadId: 'thoughts-one', draft: '',
+    hasAttachments: false, working: false, onDelivered: delivered, workerContext: { packets: [], sessions: [{
+      sessionKey: worker.surfaceId, name: worker.taskName, runtime: 'codex', status: 'interrupted', recovery: {
+        actions: ['resume', 'retire'], worktreePath: '/checkout', branch: 'worker/saved', runId: 'old-run', retired: false,
+      },
+    }] } })));
+  await act(async () => button('Correct workers').click());
+  expect(button('Resume').disabled).toBe(false);
+  expect(button('Retire').disabled).toBe(false);
+  expect(document.body.textContent).toContain('Edits preserved on worker/saved at /checkout');
+  expect(document.body.querySelector('input[type=checkbox]')).toBeNull();
+  expect(calls).toHaveLength(0);
 });
 
 it('keeps the total stable as a crew settles and preserves native workers without granting controls', async () => {
