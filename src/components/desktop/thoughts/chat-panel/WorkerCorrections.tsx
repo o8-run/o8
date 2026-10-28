@@ -103,7 +103,8 @@ export function WorkerCorrections({ repoPath, threadId, draft, hasAttachments, o
   const sessions: SwarmSessionView[] = [...(workerContext?.sessions ?? [])];
   for (const worker of workers) {
     const saved = sessions.findIndex(item => item.sessionKey === worker.surfaceId);
-    const current = { sessionKey: worker.surfaceId, name: worker.taskName, runtime: worker.runtime, status: worker.running ? 'running' : 'idle' };
+    const current = { sessionKey: worker.surfaceId, name: worker.taskName, runtime: worker.runtime,
+      status: sessions[saved]?.status ?? (worker.running ? 'running' : 'idle') };
     if (saved < 0) sessions.push(current);
     else sessions[saved] = { ...sessions[saved], ...current };
   }

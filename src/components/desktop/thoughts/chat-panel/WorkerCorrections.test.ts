@@ -145,6 +145,20 @@ it('retains stopped worker names and navigation without enabling correction auth
   expect(calls).toHaveLength(0); expect(delivered).not.toHaveBeenCalled();
 });
 
+it.each(['interrupted', 'completed', 'retired', 'failed'])('keeps %s consistent between the composer and turn card when correction discovery is idle', async status => {
+  vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ workers: [{ ...worker, running: false }], corrections: [] }) } as Response);
+  const sessions = [{ sessionKey: worker.surfaceId, name: worker.taskName, runtime: worker.runtime, status }];
+  await act(async () => root.render(createElement(WorkerDisclosureProvider, null,
+    createElement(WorkerCorrections, { key: 'composer', repoPath: '/repo', threadId: 'thoughts-one', draft: '',
+      hasAttachments: false, working: false, onDelivered: delivered, workerContext: { sessions } }),
+    createElement(ThreadWorkerCard, { key: 'turn', group: { sessions, packets: [], scouts: [] } }),
+  )));
+  await act(async () => button('Correct workers').click());
+  const label = status[0].toUpperCase() + status.slice(1);
+  expect(button(worker.taskName).textContent).toContain(label);
+  expect(document.body.textContent).not.toContain('Idle');
+});
+
 it('opens on keyboard focus, closes with Escape, and restores trigger focus without a mutation', async () => {
   await render();
   const trigger = button('Correct workers');

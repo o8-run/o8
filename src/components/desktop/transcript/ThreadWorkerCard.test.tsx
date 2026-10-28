@@ -135,6 +135,15 @@ describe('turn-local worker cards', () => {
     expect(result.unattributed.sessions).toEqual([absent, unloaded]);
   });
 
+  it.each(['interrupted', 'completed', 'retired', 'failed'])('keeps the durable %s state when fleet discovery reports idle', async status => {
+    const saved = { ...worker('Saved worker', 'assistant-1'), status };
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ threadId: 'thoughts-test', workers: [saved] }) })));
+    await act(async () => root.render(<Conversation agents={[{ sessionKey: saved.sessionKey, status: 'idle' }]} />));
+    await act(async () => host.querySelector<HTMLButtonElement>('[aria-expanded]')!.click());
+    expect(host.querySelector('[title="Open Saved worker"]')?.textContent).toContain(status[0].toUpperCase() + status.slice(1));
+    expect(host.textContent).not.toContain('Idle');
+  });
+
   it('leaves conflicting origins unattributed regardless of duplicate receipt order', () => {
     const first = worker('Conflicting', 'assistant-1');
     const second = { ...first, parentTurnId: 'assistant-2', status: 'completed' };

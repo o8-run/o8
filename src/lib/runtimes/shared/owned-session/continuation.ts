@@ -1,3 +1,4 @@
+import { workerMemoryNeedsRefresh } from '@/lib/dispatch/worker-memory-context';
 import { assertOwnedStopAdmission } from './action-admission';
 import type { OwnedSessionIo } from './session-io';
 import type { OwnedRunController } from './run-controller';
@@ -8,6 +9,8 @@ export async function prepareOwnedContinuation(session: OwnedSessionRecord, prom
   const resumable = session.threadId && adapter.resumeArgs({ threadId: session.threadId,
     sessionDir: session.sessionDir, prompt, model: session.model, effort: session.effort, runtimeConfig: session.runtimeConfig });
   if (resumable) return { mode: 'resume' as const, prompt };
+  // Let spawn rebuild stale packet context from authority before reading any history.
+  if (workerMemoryNeedsRefresh(session)) return { mode: 'launch' as const, prompt };
   const transcript: string[] = [];
   for (const run of session.recentRuns.slice(0, 3).reverse()) {
     const { parsed } = await controller.readRunArtifacts(run, false);

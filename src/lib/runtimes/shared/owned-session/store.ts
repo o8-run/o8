@@ -365,7 +365,9 @@ export function createOwnedSessionStore(
       await assertOwnedActionFence(surfaceId, await io.findSession(surfaceId));
       const continuation = await prepareOwnedContinuation(session, prompt.trim(), adapter, runController);
       if (automaticRunId && continuation.mode !== 'resume') throw new Error('Automatic recovery requires a resumable runtime thread. Use an explicit resume.');
-      const run = await runController.spawnOwnedRun(session, continuation.prompt, continuation.mode, { freshRequest: !automaticRunId });
+      const run = await runController.spawnOwnedRun(session, continuation.prompt, continuation.mode, {
+        freshRequest: !automaticRunId, operatorRequest: prompt.trim(),
+      });
       if (run.outcome === 'failed' && coldRestored) {
         await rollbackColdRestore();
       }
