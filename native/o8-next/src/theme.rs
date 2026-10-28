@@ -61,6 +61,15 @@ pub fn glass() -> bool {
 pub fn plain_background() -> Rgba {
     Theme::for_appearance(Appearance::Dark).background
 }
+/// Floating menus stay opaque: glass surfaces are translucent and would show
+/// the transcript through them.
+pub fn menu_fill() -> Rgba {
+    if glass() {
+        Theme::for_appearance(Appearance::Dark).surface_raised
+    } else {
+        current().surface_raised
+    }
+}
 
 // src/lib/theme/glass-material.ts: the only window-wide fill in All Glass.
 pub const GLASS_VEIL: [(f32, f32); 3] = [(0., 0.78), (0.55, 0.44), (1., 0.06)];

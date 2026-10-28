@@ -79,6 +79,8 @@ pub struct ThreadList {
     rename_drafts: HashMap<String, String>,
     editing: bool,
     choice: Option<String>,
+    // A selection made before its thread is listed moves the choice once it arrives.
+    follow_selection: bool,
     edit_generation: u64,
     loading: bool,
     saving: bool,
@@ -146,6 +148,7 @@ impl ThreadList {
             rename_drafts: HashMap::new(),
             editing: false,
             choice: None,
+            follow_selection: false,
             edit_generation: 0,
             loading: false,
             saving: false,
@@ -220,6 +223,13 @@ impl ThreadList {
             .any(|r| r.id.is_some() && r.id == self.choice)
         {
             self.choice = self.rows.iter().find_map(|r| r.id.clone());
+        }
+        if self.follow_selection
+            && let Some(id) = self.selected.clone()
+            && self.rows.iter().any(|r| r.id.as_ref() == Some(&id))
+        {
+            self.choice = Some(id);
+            self.follow_selection = false;
         }
         if let Some(index) = self
             .rows
@@ -512,6 +522,8 @@ impl ThreadList {
         self.rebuild();
         if self.rows.iter().any(|r| r.id.as_deref() == Some(&id)) {
             self.choice = Some(id);
+        } else {
+            self.follow_selection = true;
         }
         cx.notify();
     }
@@ -719,6 +731,7 @@ impl ThreadList {
                     _ => ids.len() - 1,
                 };
                 self.choice = Some(ids[next].1.clone());
+                self.follow_selection = false;
                 self.scroll.scroll_to_item(ids[next].0, ScrollStrategy::Top);
             }
             _ => return,
