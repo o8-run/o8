@@ -625,13 +625,14 @@ describe('orchestrator socket — cortex_ask tool-result (Brain→Fable transpar
     expect(tools[1]?.backend).toBe('fable');
   });
 
-  it('ignores non-cortex_ask tool results entirely (no transcript write)', () => {
+  it('retains non-cortex results for the expanded activity details', () => {
     const h = makeHarness({ status: 'busy', messages: [userMsg] });
 
     h.fire({ channel: 'orchestrator', event: 'tool-use', data: { name: 'Bash', args: { command: 'ls' }, toolUseId: 'tu-9' } });
     const callsAfterUse = h.setMessages.mock.calls.length;
     h.fire({ channel: 'orchestrator', event: 'tool-result', data: { name: 'Bash', toolUseId: 'tu-9', output: 'file-a\nfile-b', backend: 'fable' } });
-    expect(h.setMessages.mock.calls.length).toBe(callsAfterUse);
+    expect(h.setMessages.mock.calls.length).toBe(callsAfterUse + 1);
+    expect(reduceMessages(h).at(-1)?.toolCalls?.[0]).toMatchObject({ status: 'done', result: 'file-a\nfile-b' });
   });
 
   it('an unparseable cortex_ask result still lands result/backend/done — just no brainFeed (card stays a plain chip)', () => {
@@ -669,13 +670,14 @@ describe('orchestrator socket — tool error status (turn grammar)', () => {
     expect(tool?.result).toBe('exit 1: boom');
   });
 
-  it('leaves a successful non-cortex tool-result untouched (no transcript write)', () => {
+  it('settles a successful non-cortex result on its own receipt', () => {
     const h = makeHarness({ status: 'busy', messages: [userMsg] });
 
     h.fire({ channel: 'orchestrator', event: 'tool-use', data: { name: 'Bash', args: { command: 'ls' }, toolUseId: 'tu-2' } });
     const callsAfterUse = h.setMessages.mock.calls.length;
     h.fire({ channel: 'orchestrator', event: 'tool-result', data: { name: 'Bash', toolUseId: 'tu-2', output: 'ok' } });
-    expect(h.setMessages.mock.calls.length).toBe(callsAfterUse);
+    expect(h.setMessages.mock.calls.length).toBe(callsAfterUse + 1);
+    expect(reduceMessages(h).at(-1)?.toolCalls?.[0]).toMatchObject({ status: 'done', result: 'ok' });
   });
 
   it('an errored call falls back to the latest in-flight chip when no toolUseId matches', () => {

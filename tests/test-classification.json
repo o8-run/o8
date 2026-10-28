@@ -2530,6 +2530,14 @@
       ]
     },
     {
+      "path": "tests/composer-cache-pill-real-path.test.ts",
+      "reasons": [
+        "browser",
+        "real-path"
+      ],
+      "browser": true
+    },
+    {
       "path": "tests/composer-chip-layout-real-path.test.ts",
       "reasons": [
         "browser",
@@ -3484,6 +3492,15 @@
         "git-cli",
         "network-listener",
         "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/interrupted-worker-control-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
         "real-path"
       ]
     },
@@ -7509,6 +7526,15 @@
       "reasons": [
         "real-path"
       ]
+    },
+    {
+      "path": "tests/visualization-reload-real-path.test.ts",
+      "reasons": [
+        "browser",
+        "network-listener",
+        "real-path"
+      ],
+      "browser": true
     },
     {
       "path": "tests/voice-codex-realtime-route.test.ts",

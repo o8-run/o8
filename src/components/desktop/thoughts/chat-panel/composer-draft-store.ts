@@ -21,6 +21,8 @@ const LIMIT = 4_000_000;
 const EMPTY: ComposerDraft = { input: '', images: [], files: [] };
 const drafts = new Map<string, ComposerDraft>();
 const listeners = new Set<() => void>();
+const clearListeners = new Set<(threadId: string) => void>();
+export function onComposerDraftCleared(listener: (threadId: string) => void) { clearListeners.add(listener); }
 const WARNING = 'Your latest draft changes could not be saved. Keep this window open to retain them.';
 const RESTORE_WARNING = 'Saved draft attachments could not be restored. Reload this window to retry before sending.';
 const imageCopies = new Map<string, { reference: string; images: ThoughtsAttachedImage[]; attempt: unknown }>();
@@ -126,7 +128,10 @@ function write(key: string, draft: ComposerDraft) {
   } catch { next.warning = WARNING; }
   drafts.set(key, next);
   if (!keepImages) { imageLoads.delete(key); imageCopies.delete(key); }
-  if (!next.warning && previous?.storedImages !== next.storedImages) retireImages(previous?.storedImages);
+  const cleared = !next.input && !next.images.length && !next.files.length;
+  if ((!next.warning || cleared) && previous?.storedImages !== next.storedImages) retireImages(previous?.storedImages);
+  const threadId = threadFromKey(key);
+  if (cleared && threadId) clearListeners.forEach(listener => listener(threadId));
   publish();
   return !next.warning;
 }
@@ -136,7 +141,7 @@ export async function retainComposerDraftQueueAttempt(threadId: string, attempt:
   const key = boundKey(threadId); const draft = drafts.get(key);
   const { images, ...payload } = attempt.payload;
   if (!draft || sendText(draft) !== payload.text || JSON.stringify(sendImages(draft.images)) !== JSON.stringify(images)
-    || JSON.stringify({ input: draft.input, images: draft.images, files: draft.files }).length <= LIMIT) return;
+    || (!images.length && JSON.stringify({ input: draft.input, images: draft.images, files: draft.files }).length <= LIMIT)) return;
   const before = window.localStorage.getItem(PREFIX + key);
   if (!observedRecords.has(key) || observedRecords.get(key) !== before) throw new Error('The draft changed in another window. Reopen this chat before retrying.');
   const copy = imageCopies.get(key);

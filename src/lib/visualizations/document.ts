@@ -89,7 +89,9 @@ async function innerDocument(html: string, nonce: string, theme: VisualizationTh
       new ResizeObserver(queue).observe(document.body);
       new MutationObserver(queue).observe(document.body, { childList: true, subtree: true, attributes: true, characterData: true });
       document.fonts.ready.then(queue);
-      queue();
+      // Background and offscreen frames can suspend animation frames. Send the
+      // first size synchronously so restored cards can finish loading there.
+      measure();
     }, { once: true });
     addEventListener('resize', queue);
     addEventListener('load', queue);

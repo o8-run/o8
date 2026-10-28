@@ -36,7 +36,7 @@ describe('conversation worker hover', () => {
     expect(card().textContent).toContain('3 workers from this conversation');
     expect(rows()).toHaveLength(3);
     expect(rows().map(row => row.textContent)).toEqual(expect.arrayContaining([
-      expect.stringContaining('Completed'), expect.stringContaining('Running'), expect.stringContaining('Stopped'),
+      expect.stringContaining('Completed'), expect.stringContaining('Running'), expect.stringContaining('Interrupted'),
     ]));
     expect(card().textContent).not.toContain('Merged');
     expect(card().textContent).not.toContain('other parent');

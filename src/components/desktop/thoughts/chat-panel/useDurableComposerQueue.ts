@@ -5,7 +5,7 @@ import { useSharedDesktopWs } from '@/components/desktop/hooks/DesktopWebSocketC
 import type { RealtimeMutationRecord } from '@/lib/realtime/types';
 import type { ComposerQueuePayload, ComposerQueueTarget, QueuedComposerSendRecord } from '@/lib/orchestrator/composer-queue-types';
 
-import { composerRecoveryNotice, composerQueuePayloadMatches, confirmComposerSend, findPendingComposerSend, prepareComposerSend } from './composer-queue-recovery';
+import { acceptComposerSend, captureComposerRecoveryReconcile, composerRecoveryNotice, composerQueuePayloadMatches, confirmComposerSend, findPendingComposerSend, prepareComposerSend } from './composer-queue-recovery';
 import { composerQueueRequest, ComposerQueueRequestError } from './composer-queue-request';
 import { voiceFollowupRemovalReceipt } from './managed-voice-followup';
 
@@ -42,11 +42,18 @@ export function useDurableComposerQueue(target: ComposerQueueTarget | null, busy
     const snapshotBackend = backendRef.current;
     const revision = ++revisionRef.current;
     try {
+      const reconcileRecovery = captureComposerRecoveryReconcile(snapshot).catch(() => null);
       const body = await composerQueueRequest<{ items: QueuedComposerSendRecord[]; canSteer?: boolean; steerableIds?: string[] }>(
         `/api/orchestrator/composer-queue?repoPath=${encodeURIComponent(snapshot.repoPath)}&threadId=${encodeURIComponent(snapshot.threadId)}${snapshotBackend ? `&backend=${encodeURIComponent(snapshotBackend)}` : ''}`,
         { cache: 'no-store' }, 'Queued messages could not be loaded. Reopen this chat to retry.');
       if (!Array.isArray(body.items)) throw new Error('Unable to load queued messages.');
-      if (scopeRef.current === key && revision === revisionRef.current) { setSaved({ key, items: body.items, backend: snapshotBackend, canSteer: body.canSteer === true, steerableIds: body.steerableIds }); setError(null); }
+      if (scopeRef.current === key && revision === revisionRef.current) {
+        // Queue visibility must not wait for attachment hydration or cleanup.
+        void reconcileRecovery.then(reconcile => {
+          if (scopeRef.current === key && revision === revisionRef.current) return reconcile?.(body.items);
+        }).catch(() => {});
+        setSaved({ key, items: body.items, backend: snapshotBackend, canSteer: body.canSteer === true, steerableIds: body.steerableIds }); setError(null);
+      }
     } catch (cause) {
       if (scopeRef.current === key && revision === revisionRef.current) setError(cause instanceof Error ? cause.message : 'Unable to load queued messages.');
     }
@@ -88,6 +95,8 @@ export function useDurableComposerQueue(target: ComposerQueueTarget | null, busy
       if (ownerRef.current === owner) await confirmComposerSend(snapshot, attempt.id).catch(() => {});
       throw new Error('The previous send was cancelled. No new message was sent. Send again only if you want a new turn.');
     }
+    await acceptComposerSend(snapshot, attempt);
+    if (item.status === 'applied') await confirmComposerSend(snapshot, attempt.id).catch(() => {});
     if (ownerRef.current === owner) { setError(null); await refresh(); }
     if (recoveryError) throw new Error(composerRecoveryNotice(recoveryError, true));
     // The still-current composer retires recovery immediately before consuming its draft.
@@ -140,6 +149,7 @@ export function useDurableComposerQueue(target: ComposerQueueTarget | null, busy
       await composerQueueRequest('/api/orchestrator/composer-queue', { method: 'DELETE', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ repoPath: item.repoPath, threadId: item.threadId, id: item.id }) },
       'Removal was not confirmed. Inspect the chat, then retry if the message is still queued.');
+      await confirmComposerSend({ repoPath: item.repoPath, threadId: item.threadId }, item.id);
       if (scopeRef.current === JSON.stringify({ repoPath: item.repoPath, threadId: item.threadId })) { setError(null); await refresh(); }
       return true;
     } catch (cause) {

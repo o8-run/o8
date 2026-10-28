@@ -198,7 +198,8 @@ async function activeOperation(view: Awaited<ReturnType<typeof productionPage>>)
   expect(await row.getAttribute('data-compaction-operation')).toBe(pending.mutationId);
   expect(await row.locator('[role="progressbar"]').getAttribute('aria-valuenow')).toBeNull();
   expect((await row.boundingBox())!.height).toBeLessThanOrEqual(22);
-  expect(await view.page.getByText('Planning next moves', { exact: true }).count()).toBe(1);
+  expect(await view.page.getByText('Planning next moves', { exact: true }).count()).toBe(0);
+  expect(await view.page.getByText(/^(Waiting for response|Working · phase unknown)$/).count()).toBe(1);
   return pending;
 }
 
@@ -229,7 +230,8 @@ it('drives active and cleared status through the compact route, real event strea
     await expect.poll(() => row.count()).toBe(0);
     expect(await textarea.boundingBox()).toEqual(settledBounds);
     expect(await textarea.inputValue()).toBe('Keep the next follow-up visible.');
-    expect(await page.getByText('Planning next moves', { exact: true }).count()).toBe(1);
+    expect(await page.getByText('Planning next moves', { exact: true }).count()).toBe(0);
+    expect(await page.getByText(/^(Waiting for response|Working · phase unknown)$/).count()).toBe(1);
     expect(view.errors).toEqual([]);
   } finally { backend.setUnavailable(threadId, false); attempt.release(); await attempt.result; await page.close(); }
 }, 45_000);

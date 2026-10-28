@@ -32,6 +32,7 @@ beforeAll(async () => {
       import { ThemeProvider } from '@/lib/theme/context';
       import { useComposerDraftValue, composerDraftKey, captureComposerDraft, moveComposerDraft } from '@/components/desktop/thoughts/chat-panel/composer-draft-store';
       import { ComposerArea } from '@/components/desktop/thoughts/chat-panel/ComposerArea';
+      import { ComposerQueuedMessages } from '@/components/desktop/thoughts/chat-panel/ComposerQueuedMessages';
       import { ComposerSendBufferStatus } from '@/components/desktop/thoughts/chat-panel/ComposerSendBufferStatus';
       import { useDefaultComposerSendBuffer } from '@/components/desktop/thoughts/chat-panel/useDefaultComposerSendBuffer';
       import { useBufferedOrchestratorSend } from '@/components/desktop/thoughts/chat-panel/useBufferedOrchestratorSend';
@@ -52,13 +53,14 @@ beforeAll(async () => {
         const result = useDefaultComposerSendBuffer({ active: true, backend: 'codex', busy: !location.search.includes('idle'), threadId, repoPath: config.repo,
           attachedImages: images, latestInputRef, inputRef, setInput, addAttachedImage: entry => setImages(previous => [...previous, entry]), clearAttachments: () => setImages([]),
           dispatch, captureQueuedSend: capture, interrupt() {}, undoSend() {}, shouldBypass: () => false, sendUnbuffered() {} });
-        window.fixtureQueueReady = result.durable.ready;
+        window.fixtureQueueReady = result.durable.ready; window.fixtureQueueSaving = result.saving;
         return createElement('main', { style: { maxWidth: 760, margin: '24px auto', color: 'var(--t-text)', background: 'var(--t-chat-surface-bg)' } },
+          createElement(ComposerQueuedMessages, { messages: [], queue: { items: result.durable.transcriptItems, canSteer: false, onSteer: result.durable.steer, onCancel: result.durable.cancel, removing: result.durable.removing } }),
           createElement(ComposerArea, { input, inputLabel: 'Screenshot composer', onInputChange: value => { latestInputRef.current = value; setInput(value); },
             activeComposer: true, isOrchestratorMode: true, displayWaiting: true, chatMessages: [], activeTargetLabel: 'Agent', targetAgentExists: true,
             thoughtsBodyBackground: 'transparent', enhancing: false, preEnhanceInput: null, onEnhance() {}, onUndoEnhance() {},
             onSubmit: result.handleSend, onSteer: result.handleSteer, canSteerLive: false, queueSaving: result.saving, onSlashCommand() {}, modelLabel: model,
-            effort: 'low', onEffortChange() {}, adaptiveEnabled: false, displayMessagesCount: 0, hasAssistantActivity: false, attachedImages: images,
+            effort: 'low', onEffortChange() {}, adaptiveEnabled: false, displayMessagesCount: 0, hasAssistantActivity: false, attachedImages: images, onAttachedImageRemove: index => setImages(previous => previous.filter((_, i) => i !== index)),
             sendBufferStatus: createElement(ComposerSendBufferStatus, { attachmentError: result.attachmentError, queued: [], undoArmed: false, undoSequence: 0, onUndo() {}, onCancelQueued() {} }) }));
       }
       createRoot(document.getElementById('root')).render(createElement(ThemeProvider, null, createElement(Surface)));
@@ -99,7 +101,7 @@ async function connect(page: Page, posts: Array<{ id: string; payload: { images:
       const native = new NextRequest(request.url(), { method, headers: { host: 'localhost', 'Content-Type': 'application/json' }, ...(body ? { body } : {}) });
       const response = process.env.O8_SCREENSHOT_QUEUE_DEV_URL
         ? await fetch(new URL(url.pathname + url.search, process.env.O8_SCREENSHOT_QUEUE_DEV_URL), { method, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + fs.readFileSync(path.join(fixture.root, 'ws-token'), 'utf8').trim() }, ...(body ? { body } : {}) })
-        : method === 'POST' ? await api.POST(native) : await api.GET(native);
+        : method === 'POST' ? await api.POST(native) : method === 'DELETE' ? await api.DELETE(native) : await api.GET(native);
       if (method === 'POST') { posts.push(JSON.parse(body!)); if (loseFirst) { loseFirst = false; await route.abort('failed'); return; } }
       await route.fulfill({ status: response.status, contentType: 'application/json', body: await response.text() }); return;
     }
@@ -537,5 +539,137 @@ it('keeps the original identity in the open composer when both browser stores fa
     expect(posts[1]).toEqual(posts[0]);
     await expect.poll(() => page.getByRole('alert').textContent()).toContain('Message queued.');
     expect(queue.listQueuedComposerSends({ repoPath: fixture.repo, threadId: 'thoughts-screenshot' })).toHaveLength(1);
+  } finally { await page.close(); }
+});
+
+
+async function recoveryBytes(page: Page, queueOnly = false) {
+  return page.evaluate(queueOnly => new Promise<number>((resolve, reject) => {
+    const opening = indexedDB.open('o8.composer-queue-attachments.v1', 1);
+    opening.onupgradeneeded = () => opening.result.createObjectStore('attempts');
+    opening.onerror = () => reject(opening.error);
+    opening.onsuccess = () => {
+      const db = opening.result; const request = db.transaction('attempts').objectStore('attempts').openCursor();
+      let bytes = 0;
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor) { db.close(); resolve(bytes); return; }
+        if (!queueOnly || String(cursor.key).startsWith('o8:composer-queue-recovery:')) bytes += JSON.stringify(cursor.value).length;
+        cursor.continue();
+      };
+      request.onerror = () => { db.close(); reject(request.error); };
+    };
+  }), queueOnly);
+}
+async function fullStorage(page: Page) {
+  await page.evaluate(() => {
+    // Fill the actual browser quota; leave enough space to replace a draft with an empty record.
+    for (let size = 1024 * 1024; size >= 1; size = Math.floor(size / 2)) {
+      while (true) {
+        try { localStorage.setItem('fixture-quota-' + localStorage.length, 'x'.repeat(size)); }
+        catch { break; }
+      }
+    }
+  });
+}
+
+it('retires all browser screenshot recovery after confirmed discard and draft clear, twice across reload', async () => {
+  const page = await browser.newPage(); const posts: Parameters<typeof connect>[1] = [];
+  try {
+    await connect(page, posts); await mount(page, '', 'http://localhost/screenshot', true);
+    const baseline = await recoveryBytes(page);
+    for (let round = 0; round < 2; round++) {
+      await page.evaluate(image => (window as unknown as { changeDraft: (thread: string, text: string, image: string) => void })
+        .changeDraft('thoughts-screenshot', 'Discard screenshot ' + Date.now(), image), imageUri(true));
+      await fullStorage(page);
+      await page.getByRole('textbox').press('Enter');
+      await expect.poll(() => posts.length, { timeout: screenshotPollTimeout }).toBe(round + 1);
+      await expect.poll(() => page.getByRole('alert').textContent()).toContain('Message queued.');
+      await page.getByRole('button', { name: /^Remove queued message:/ }).click();
+      await expect.poll(() => queue.readComposerSend(posts[round].id)?.status).toBe('cancelled');
+      await page.getByRole('textbox').fill('');
+      await page.getByRole('button', { name: 'Remove screenshot.png', exact: true }).click();
+      await expect.poll(() => recoveryBytes(page), { timeout: screenshotPollTimeout }).toBe(baseline);
+      await mount(page, '', 'http://localhost/screenshot?reload=' + round, true);
+      expect(await page.getByRole('textbox').inputValue()).toBe('');
+      expect(await page.getByRole('button', { name: 'Remove screenshot.png', exact: true }).count()).toBe(0);
+      expect(await recoveryBytes(page)).toBe(baseline);
+    }
+    expect(posts).toHaveLength(2);
+  } finally { await page.close(); }
+}, 45_000);
+
+it.each([['live', true], ['reload', true], ['live', false], ['reload', false]] as const)('retires confirmed terminal screenshot attempts through %s reconciliation without deleting the retained draft, large=%s', async (mode, large) => {
+  const page = await browser.newPage(); const posts: Parameters<typeof connect>[1] = [];
+  try {
+    await connect(page, posts); await mount(page, '', 'http://localhost/screenshot', true);
+    await page.evaluate(image => {
+      const set = Storage.prototype.setItem;
+      Storage.prototype.setItem = function(key, value) {
+        if (key.startsWith('o8:composer-queue-recovery:')) throw new DOMException('Fixture quota', 'QuotaExceededError');
+        return set.call(this, key, value);
+      };
+      (window as unknown as { changeDraft: (thread: string, text: string, image: string) => void }).changeDraft('thoughts-screenshot', 'Keep the draft.', image);
+    }, imageUri(large));
+    await page.getByRole('textbox').press('Enter');
+    await expect.poll(() => page.getByRole('alert').textContent()).toContain('Message queued.');
+    expect(posts).toHaveLength(1);
+    expect(await recoveryBytes(page, true)).toBeGreaterThan(0);
+    if (mode === 'live') {
+      const claimed = queue.claimNextComposerSend({ repoPath: fixture.repo, threadId: 'thoughts-screenshot' });
+      expect(claimed?.id).toBe(posts[0].id); expect(queue.admitComposerSend(claimed!.id)).toBe(true);
+      expect(queue.settleComposerSend(claimed!.id, { status: 'applied' })).toBe(true);
+      await page.evaluate(() => window.dispatchEvent(new Event('o8:lifecycle-reconcile')));
+    } else {
+      expect(queue.cancelComposerSend({ repoPath: fixture.repo, threadId: 'thoughts-screenshot' }, posts[0].id)).toBe(true);
+      await mount(page, '', 'http://localhost/screenshot?reload', true);
+    }
+    await expect.poll(() => recoveryBytes(page, true), { timeout: screenshotPollTimeout }).toBe(0);
+    expect(await page.getByRole('textbox').inputValue()).toBe('Keep the draft.');
+    await expect.poll(() => page.getByRole('button', { name: 'Remove screenshot.png', exact: true }).count()).toBe(1);
+    // The unchanged draft retains the old identity through another reload after cleanup.
+    await mount(page, '', 'http://localhost/screenshot?model=changed-model&idle', true);
+    await page.getByRole('textbox').press('Enter');
+    await expect.poll(() => posts.length, { timeout: screenshotPollTimeout }).toBe(2);
+    expect(posts[1]).toEqual(posts[0]);
+    await page.getByRole('textbox').fill('');
+    const remove = page.getByRole('button', { name: 'Remove screenshot.png', exact: true });
+    if (await remove.count()) await remove.click();
+    await expect.poll(() => recoveryBytes(page), { timeout: screenshotPollTimeout }).toBe(0);
+  } finally { await page.close(); }
+}, 30_000);
+
+
+it('retires screenshot recovery on explicit draft clear while the server message stays queued', async () => {
+  const page = await browser.newPage(); const posts: Parameters<typeof connect>[1] = [];
+  try {
+    await connect(page, posts); await mount(page, '', 'http://localhost/screenshot', true);
+    await page.evaluate(image => (window as unknown as { changeDraft: (thread: string, text: string, image: string) => void })
+      .changeDraft('thoughts-screenshot', 'Clear this retained draft.', image), imageUri(true));
+    await fullStorage(page);
+    await page.getByRole('textbox').press('Enter');
+    await expect.poll(() => page.getByRole('alert').textContent()).toContain('Message queued.');
+    expect(await recoveryBytes(page)).toBeGreaterThan(4_000_000);
+    await page.getByRole('textbox').fill('');
+    await page.getByRole('button', { name: 'Remove screenshot.png', exact: true }).click();
+    await expect.poll(() => recoveryBytes(page), { timeout: screenshotPollTimeout }).toBe(0);
+    expect(queue.readComposerSend(posts[0].id)?.status).toBe('queued');
+    await mount(page, '', 'http://localhost/screenshot?cleared', true);
+    expect(await page.getByRole('textbox').inputValue()).toBe('');
+    expect(await recoveryBytes(page)).toBe(0);
+  } finally { await page.close(); }
+}, 30_000);
+
+it('keeps text-only queueing independent of an unavailable attachment store', async () => {
+  const page = await browser.newPage(); const posts: Parameters<typeof connect>[1] = [];
+  try {
+    await connect(page, posts); await mount(page, '');
+    await page.evaluate(() => { indexedDB.open = () => { throw new DOMException('Fixture unavailable', 'SecurityError'); }; });
+    await page.getByRole('textbox').press('Enter');
+    await expect.poll(() => posts.length, { timeout: screenshotPollTimeout }).toBe(1);
+    await expect.poll(() => page.getByRole('textbox').inputValue()).toBe('');
+    await expect.poll(() => page.getByRole('button', { name: /^Remove queued message:/ }).count()).toBe(1);
+    await page.waitForFunction(() => !(window as unknown as { fixtureQueueSaving: boolean }).fixtureQueueSaving);
+    expect(await page.getByRole('alert').allTextContents()).toEqual([]);
   } finally { await page.close(); }
 });

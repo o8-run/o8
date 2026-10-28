@@ -1,13 +1,18 @@
 import { validateComposerImageAttachments } from '@/lib/mobile/composer-image-validation';
 import type { ComposerQueuePayload, ComposerQueueTarget } from '@/lib/orchestrator/composer-queue-types';
 import { listComposerAttachmentKeys, readComposerAttachmentPayload, removeComposerAttachmentPayload, saveComposerAttachmentPayload } from './composer-queue-attachment-store';
-import { readComposerDraftQueueAttempt, retainComposerDraftQueueAttempt } from './composer-draft-store';
+import { composerDraftKey, onComposerDraftCleared, readComposerDraftQueueAttempt, retainComposerDraftQueueAttempt } from './composer-draft-store';
 
-interface QueueAttempt { id: string; payload: ComposerQueuePayload }
+interface QueueAttempt { id: string; payload: ComposerQueuePayload; accepted?: true }
 const PREFIX = 'o8:composer-queue-recovery:v1:';
 const LIMIT = 4_000_000;
 const memory = new Map<string, QueueAttempt>();
 const storedKeys = new Set<string>();
+const retiredKeys = new Set<string>();
+let acceptanceRevision = 0;
+const acceptedVersions = new Map<string, number>();
+const clearRevisions = new Map<string, number>();
+const clearTasks = new Map<string, Promise<void>>();
 const keyFor = (target: ComposerQueueTarget) => PREFIX + JSON.stringify(target) + ':';
 const normalizeImages = (images: ComposerQueuePayload['images']) =>
   validateComposerImageAttachments(images).map(image => ({ name: image.name ?? 'Image', dataUri: image.dataUri }));
@@ -89,10 +94,14 @@ export { composerQueuePayloadMatches } from '@/lib/composer/queue-payload-match'
 
 /** Recovery is best effort; only a matching server receipt confirms queueing. */
 export async function prepareComposerSend(target: ComposerQueueTarget, payload: ComposerQueuePayload) {
+  const revision = clearRevisions.get(target.threadId);
+  await clearTasks.get(target.threadId);
   const { entries, failure } = await read(target);
   const existing = entries.find(attempt => sameDraft(attempt, payload)) ?? await recoveredDraftAttempt(target, payload);
   const attempt = existing ?? { id: `queue-${crypto.randomUUID()}`, payload: { ...payload, images: normalizeImages(payload.images) } };
   const key = keyFor(target) + attempt.id;
+  if (revision !== clearRevisions.get(target.threadId)) throw new Error('The draft was cleared before submission. No message was queued.');
+  retiredKeys.delete(key);
   memory.set(key, attempt);
   let recoveryError = failure;
   try {
@@ -112,18 +121,88 @@ export async function prepareComposerSend(target: ComposerQueueTarget, payload: 
     // A text-only attempt can also survive an unavailable localStorage index.
     if (!attempt.payload.images.length && typeof indexedDB !== 'undefined') await saveComposerAttachmentPayload(key, attempt).then(() => { storedKeys.add(key); }).catch(() => {});
   }
+  if (revision !== clearRevisions.get(target.threadId)) {
+    await confirmComposerSend(target, attempt.id);
+    throw new Error('The draft was cleared before submission. No message was queued.');
+  }
   return { attempt, fresh: !existing, recoveryError };
 }
 
+/** Remember receipt confirmation even when the localStorage manifest failed. */
+export async function acceptComposerSend(target: ComposerQueueTarget, attempt: QueueAttempt) {
+  const key = keyFor(target) + attempt.id;
+  if (retiredKeys.has(key) || (!memory.has(key) && !storedKeys.has(key))) return;
+  acceptedVersions.set(key, ++acceptanceRevision);
+  const accepted: QueueAttempt = { ...attempt, accepted: true };
+  const revision = clearRevisions.get(target.threadId);
+  memory.set(key, accepted);
+  try {
+    if (storedKeys.has(key)) await saveComposerAttachmentPayload(key, accepted);
+    if (!attempt.payload.images.length) window.localStorage.setItem(key, JSON.stringify(accepted));
+  } catch { /* Confirmation is server-owned; storage failure cannot reject it. */ }
+  if (revision !== clearRevisions.get(target.threadId)) await confirmComposerSend(target, attempt.id).catch(() => {});
+}
+
+/** Capture before GET so an older empty response cannot retire a newly accepted send.
+ * Absence is terminal only for a previously confirmed receipt. Unknown sends keep
+ * their original identity until the server confirms them or the operator discards. */
+export async function captureComposerRecoveryReconcile(target: ComposerQueueTarget) {
+  const revision = clearRevisions.get(target.threadId);
+  const acceptedBeforeRead = acceptanceRevision;
+  const { entries } = await read(target);
+  return async (items: readonly { id: string; status: string; payload: ComposerQueuePayload }[]) => {
+    for (const attempt of entries) {
+      const key = keyFor(target) + attempt.id;
+      if (revision !== clearRevisions.get(target.threadId) || retiredKeys.has(key)
+        || (acceptedVersions.get(key) ?? 0) > acceptedBeforeRead) continue;
+      const item = items.find(item => item.id === attempt.id);
+      if ((!item && attempt.accepted) || item?.status === 'applied' || item?.status === 'cancelled') await confirmComposerSend(target, attempt.id);
+      else if (item && !attempt.accepted && JSON.stringify(item.payload) === JSON.stringify(attempt.payload)) {
+        // A successful read also settles a lost POST response.
+        memory.set(keyFor(target) + attempt.id, attempt);
+        await acceptComposerSend(target, attempt);
+      }
+    }
+  };
+}
+
+function threadForRecoveryKey(key: string) {
+  if (!key.startsWith(PREFIX)) return null;
+  try { return (JSON.parse(key.slice(PREFIX.length, key.lastIndexOf(':'))) as ComposerQueueTarget).threadId; }
+  catch { return null; }
+}
+onComposerDraftCleared(threadId => {
+  clearRevisions.set(threadId, (clearRevisions.get(threadId) ?? 0) + 1);
+  const keys = new Set<string>();
+  for (const key of memory.keys()) if (threadForRecoveryKey(key) === threadId) { keys.add(key); memory.delete(key); retiredKeys.add(key); }
+  const pending = (clearTasks.get(threadId) ?? Promise.resolve()).catch(() => {}).then(async () => {
+    // Discover records left by another mount or by a failed manifest write.
+    const draftPrefix = 'o8:composer-draft:v1:' + composerDraftKey(null, 'queue-recovery', threadId) + ':';
+    if (typeof indexedDB !== 'undefined') for (const key of await listComposerAttachmentKeys()) {
+      if (typeof key === 'string' && (threadForRecoveryKey(key) === threadId || key.startsWith(draftPrefix))) keys.add(key);
+    }
+    try { for (const key of Object.keys(window.localStorage)) if (threadForRecoveryKey(key) === threadId) keys.add(key); } catch { /* IndexedDB is independent. */ }
+    for (const key of keys) {
+      if (storedKeys.has(key) || typeof indexedDB !== 'undefined') await removeComposerAttachmentPayload(key);
+      try { window.localStorage.removeItem(key); } catch { /* No image payload remains in the attachment store. */ }
+      storedKeys.delete(key); retiredKeys.add(key);
+    }
+  });
+  clearTasks.set(threadId, pending);
+  void pending.finally(() => { if (clearTasks.get(threadId) === pending) clearTasks.delete(threadId); }).catch(() => {});
+});
+
 export async function confirmComposerSend(target: ComposerQueueTarget, id: string) {
   const key = keyFor(target) + id;
+  retiredKeys.add(key);
   try {
     // Discovery must not resurrect a confirmed attachment while its deletion
     // is still pending. Keep submission busy until the transaction commits.
     if (storedKeys.has(key)) await removeComposerAttachmentPayload(key);
+    else if (typeof indexedDB !== 'undefined') await removeComposerAttachmentPayload(key).catch(() => {});
     window.localStorage.removeItem(key);
     memory.delete(key); storedKeys.delete(key);
-  } catch { throw new Error('The saved send could not be cleared. Inspect this chat before retrying.'); }
+  } catch { retiredKeys.delete(key); throw new Error('The saved send could not be cleared. Inspect this chat before retrying.'); }
 }
 
-export function resetComposerQueueRecoveryMemoryForTests() { memory.clear(); storedKeys.clear(); }
+export function resetComposerQueueRecoveryMemoryForTests() { memory.clear(); storedKeys.clear(); retiredKeys.clear(); acceptedVersions.clear(); acceptanceRevision = 0; clearRevisions.clear(); clearTasks.clear(); }
