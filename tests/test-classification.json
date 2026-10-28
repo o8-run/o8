@@ -3723,6 +3723,14 @@
       ]
     },
     {
+      "path": "tests/linux-package-prerequisites-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/linux-pi-write-helper.test.ts",
       "reasons": [
         "child-process"
