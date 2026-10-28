@@ -343,9 +343,23 @@ fn round1_reconnect_keeps_composer_focus_draft_and_queue(cx: &mut TestAppContext
     // Resume before draining Settings HTTP work against the stopped host.
     let overlay_focus = cx.update(|window, cx| window.focused(cx).unwrap());
     drop(resume);
-    shell.update_in(cx, |s, _, cx| s.load(cx));
-    ready(&shell, cx);
-    settled(&shell, cx);
+    // A request already in flight when the host resumes can still report its
+    // old timeout. Drive the production refresh cadence until recovery is real,
+    // rather than treating an already-painted retained view as connected.
+    let deadline = Instant::now() + crate::client::LOAD_REQUEST_TIMEOUT + Duration::from_secs(5);
+    loop {
+        shell.update_in(cx, |s, window, cx| s.tick(true, window, cx));
+        ready(&shell, cx);
+        settled(&shell, cx);
+        assert!(
+            Instant::now() < deadline,
+            "the resumed host must reconnect within the existing load budget"
+        );
+        if shell.read_with(cx, |s, _| s.connected) {
+            break;
+        }
+        std::thread::sleep(Duration::from_secs(1));
+    }
     cx.update(|window, cx| {
         assert_eq!(
             window.focused(cx),
@@ -355,6 +369,17 @@ fn round1_reconnect_keeps_composer_focus_draft_and_queue(cx: &mut TestAppContext
     });
     cx.simulate_keystrokes("ctrl-,");
     draw(cx);
+    assert!(
+        shell.read_with(cx, |s, _| s.surfaces.settings.view.is_none()),
+        "Settings must close after recovery"
+    );
+    cx.update(|window, cx| {
+        assert!(
+            view.read(cx).shell_selection(window, cx).1,
+            "closing Settings must restore composer focus; saved composer={}",
+            shell.read(cx).current().unwrap().composer
+        )
+    });
     cx.simulate_input(" after reconnect");
     assert_eq!(
         view.read_with(cx, |v, cx| v.shell_issue_state(cx)["draft"].clone()),
