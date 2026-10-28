@@ -1175,6 +1175,10 @@ function broadcastToOrchestratorSession(sessionName: string, rawMsg: string): vo
         || (parsed.event === 'status' && (parsed.data?.status === 'ready' || parsed.data?.status === 'dead'))
       ) {
         latestOrchestratorPlanBySession.delete(sessionName);
+        const threadId = parsed.data?.threadId;
+        if (typeof threadId === 'string' && threadId.startsWith('thoughts-')) {
+          scheduleRealtimeSessionHistoryRefresh(`llm-chat:${threadId}`, true, undefined, { urgent: true });
+        }
       }
       outMsg = orchestratorReplay.record(sessionName, parsed);
     }
@@ -2517,6 +2521,8 @@ const sessionHistoryReadsInFlight = new Map<string, {
   promise: Promise<SessionTranscriptRead>;
 }>();
 const lastRealtimeHistoryId = new Map<string, string>();
+const sessionHistoryPublications = new Map<string, Promise<void>>();
+const freshSessionHistoryRequested = new Set<string>();
 let browserDiscoveryTimer: ReturnType<typeof setInterval> | null = null;
 let attachedBrowserRefreshTimer: ReturnType<typeof setInterval> | null = null;
 let stopHeadlessLoop: (() => void) | null = null;
@@ -3393,10 +3399,32 @@ async function publishMobileInboxRealtimeSnapshot(fresh = false) {
 
 async function publishSessionHistoryRealtimeSnapshot(sessionKey: string, fresh = false) {
   if (!sessionKey || !hasRealtimeSessionSubscriber(sessionKey)) return;
+  if (fresh) freshSessionHistoryRequested.add(sessionKey);
+  const active = sessionHistoryPublications.get(sessionKey);
+  if (active) return active;
+  const nextFresh = freshSessionHistoryRequested.delete(sessionKey);
+  const job = readAndPublishSessionHistory(sessionKey, nextFresh).finally(() => {
+    sessionHistoryPublications.delete(sessionKey);
+    const backoff = sessionHistoryBridgeBackoffs.get(sessionKey);
+    if (freshSessionHistoryRequested.has(sessionKey) && (!backoff || canAttemptRealtimeBridge(backoff))) {
+      scheduleRealtimeSessionHistoryRefresh(sessionKey, true, undefined, { urgent: true });
+    }
+  });
+  sessionHistoryPublications.set(sessionKey, job);
+  return job;
+}
+
+async function readAndPublishSessionHistory(sessionKey: string, fresh: boolean) {
   const backoff = sessionHistoryBridgeBackoffs.get(sessionKey) ?? createRealtimeBridgeBackoffState();
   sessionHistoryBridgeBackoffs.set(sessionKey, backoff);
-  if (!canAttemptRealtimeBridge(backoff) || sessionHistoryReadsInFlight.has(sessionKey)) return;
+  if (!canAttemptRealtimeBridge(backoff)) {
+    if (fresh) freshSessionHistoryRequested.add(sessionKey);
+    return;
+  }
   try {
+    // A bootstrap may already hold a read captured before completion. A fresh
+    // publication must read again after that response, even with the same cursor.
+    if (fresh) await sessionHistoryReadsInFlight.get(sessionKey)?.promise.catch(() => undefined);
     const sinceId = fresh ? undefined : lastRealtimeHistoryId.get(sessionKey);
     const transcript = await getSessionTranscriptSingleFlight(sessionKey, 200, sinceId);
     const entries = transcript.entries;
@@ -3428,6 +3456,7 @@ async function publishSessionHistoryRealtimeSnapshot(sessionKey: string, fresh =
       ),
     ]);
   } catch (error) {
+    if (fresh) freshSessionHistoryRequested.add(sessionKey);
     const failure = recordRealtimeBridgeFailure(backoff, Date.now(), {
       threshold: 1,
       initialDelayMs: REALTIME_SESSION_HISTORY_POLL_MS,
@@ -3482,7 +3511,8 @@ function scheduleRealtimeSessionHistoryRefresh(
   delayMs?: number,
   options: { urgent?: boolean } = {},
 ) {
-  const resolvedDelay = delayMs ?? (options.urgent ? URGENT_HISTORY_REFRESH_MS : 350);
+  if (fresh) freshSessionHistoryRequested.add(sessionKey);
+  const resolvedDelay = delayMs ?? (options.urgent || freshSessionHistoryRequested.has(sessionKey) ? URGENT_HISTORY_REFRESH_MS : 350);
   const existing = sessionHistoryTimers.get(sessionKey);
   if (existing) clearTimeout(existing);
   const timer = setTimeout(() => {
@@ -6578,7 +6608,11 @@ function subscribedRealtimeSessionKeys(): string[] {
     ...sessionKeys,
     ...sessionHistoryTimers.keys(),
     ...sessionHistoryReadsInFlight.keys(),
+    ...sessionHistoryPublications.keys(),
   ]);
+  for (const sessionKey of freshSessionHistoryRequested) {
+    if (!retainedSessionKeys.has(sessionKey)) freshSessionHistoryRequested.delete(sessionKey);
+  }
   for (const sessionKey of sessionHistoryBridgeBackoffs.keys()) {
     if (!retainedSessionKeys.has(sessionKey)) sessionHistoryBridgeBackoffs.delete(sessionKey);
   }

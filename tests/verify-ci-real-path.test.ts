@@ -105,12 +105,14 @@ function coverage(workflow: object) {
 }
 function executeFixture(selectedFile: string, nestedDependency = false,
   { fail = '', parallel = false, discoveryMs = 0, nativeChange = '', nativeState = 'untracked', setupChange = '',
-    nativeDeadlineMinutes = 0, nativeDelayMs = 0, contend = false, lintDependency = '' } = {}) {
+    nativeDeadlineMinutes = 0, nativeDelayMs = 0, contend = false, lintDependency = '',
+    browser = false, indirectBrowser = '', staleBrowser = false } = {}) {
   const directory = mkdtempSync(path.join(root, 'verifier-fixture-'));
   const files = ['scripts/verify-ci.mjs', 'scripts/lib/verify-ci.mjs', 'scripts/ci/check-verify-ci.mjs',
     'scripts/ci/resource-owning-changed.mjs', 'scripts/ci/review-dependency-changes.mjs', 'scripts/ci/native-changes.mjs',
     '.github/workflows/ci.yml', '.github/actions/next-linux-setup/action.yml', 'scripts/ci/native-test-shard.mjs',
-    'scripts/ci/native-test-inputs.mjs', 'scripts/ci/install-native-linux-deps.sh'];
+    'scripts/ci/native-test-inputs.mjs', 'scripts/ci/install-native-linux-deps.sh', 'scripts/lib/test-classification.mjs',
+    'scripts/lib/browser-prerequisites.mjs'];
   for (const file of files) {
     mkdirSync(path.dirname(path.join(directory, file)), { recursive: true });
     copyFileSync(path.join(repo, file), path.join(directory, file));
@@ -154,7 +156,7 @@ function executeFixture(selectedFile: string, nestedDependency = false,
   mkdirSync(path.join(directory, 'tests'));
   const browserFile = selectedFile;
   writeFileSync(path.join(directory, browserFile), 'base\n');
-  writeFileSync(path.join(directory, 'tests/test-classification.json'), JSON.stringify({ resourceOwning: [{ path: browserFile }] }));
+  writeFileSync(path.join(directory, 'tests/test-classification.json'), JSON.stringify({ resourceOwning: [{ path: browserFile, ...(browser && !staleBrowser ? { browser: true } : {}) }] }));
   writeFileSync(path.join(directory, 'package.json'), JSON.stringify(manifest));
   mkdirSync(path.join(directory, 'native/o8-next/src'), { recursive: true });
   writeFileSync(path.join(directory, 'native/o8-next/src/input_fixture.rs'),
@@ -175,6 +177,29 @@ function executeFixture(selectedFile: string, nestedDependency = false,
   git('commit', '-qm', 'fixture base');
   git('update-ref', 'refs/remotes/origin/main', 'HEAD');
   writeFileSync(path.join(directory, browserFile), 'changed\n');
+  if (browser) writeFileSync(path.join(directory, browserFile), "import { chromium } from 'playwright-core';\n// changed\n");
+  if (indirectBrowser) {
+    writeFileSync(path.join(directory, browserFile), "import { launch } from './browser-helper.mjs'; launch();\n");
+    writeFileSync(path.join(directory, 'tests/browser-helper.mjs'), "import { chromium } from 'playwright-core'; export const launch = () => chromium.launch();\n");
+    if (indirectBrowser.startsWith('alias')) {
+      writeFileSync(path.join(directory, browserFile), "import { start } from './browser-helper.mjs'; start();\n");
+      writeFileSync(path.join(directory, 'tests/browser-helper.mjs'), "import { chromium } from 'playwright-core'; const launch = () => chromium.launch(); export { launch as start };\n");
+    }
+    if (indirectBrowser === 'alias-before') writeFileSync(path.join(directory, 'tests/browser-helper.mjs'), "import { chromium } from 'playwright-core'; export { launch as start }; function launch() { return chromium.launch(); }\n");
+    if (indirectBrowser === 'alias-import') {
+      writeFileSync(path.join(directory, 'tests/browser-helper.mjs'), "import { launch } from './launcher.mjs'; export { launch as start };\n");
+      writeFileSync(path.join(directory, 'tests/launcher.mjs'), "import { chromium } from 'playwright-core'; export function launch() { return chromium.launch(); }\n");
+    }
+    if (indirectBrowser === 'barrel') {
+      writeFileSync(path.join(directory, browserFile), "import { launch } from './barrel.mjs'; launch();\n");
+      writeFileSync(path.join(directory, 'tests/barrel.mjs'), "export * from './browser-helper.mjs';\n");
+    }
+    if (indirectBrowser === 'promisify') {
+      writeFileSync(path.join(directory, browserFile), "import { execFile } from 'node:child_process'; import { promisify } from 'node:util'; const run = promisify(execFile); await run(process.execPath, ['tests/browser-helper.mjs']);\n");
+      writeFileSync(path.join(directory, 'tests/browser-helper.mjs'), "import { chromium } from 'playwright-core'; await chromium.launch();\n");
+    }
+    if (indirectBrowser === 'restore') writeFileSync(path.join(directory, browserFile), "import { vi } from 'vitest'; import { chromium } from 'playwright-core'; const spy = vi.spyOn(chromium, 'launch').mockResolvedValue({}); spy.mockRestore(); chromium.launch();\n");
+  }
   if (nestedDependency) {
     const nested = path.join(directory, 'nested');
     mkdirSync(nested);
@@ -279,6 +304,24 @@ describe('local CI verification through its command entry point', () => {
     expect(parse(readFileSync(workflowPath, 'utf8')).jobs.lint['timeout-minutes']).toBe(15);
   }, 60_000);
 
+  it.each(['import', 'alias', 'alias-before', 'alias-import', 'barrel', 'promisify'])('rejects an indirect browser launch through %s without its test-local marker before running checks', indirectBrowser => {
+    const result = executeFixture('tests/undeclared.test.ts', false, { indirectBrowser });
+    expect(result.status, result.stderr + result.stdout).toBe(1);
+    expect(result.stderr).toContain('tests/undeclared.test.ts');
+    expect(result.stderr).toContain('// @o8-test-browser');
+  });
+  it('rejects missing browser metadata after a launch spy is restored', () => {
+    const result = executeFixture('tests/restored.test.ts', false, { indirectBrowser: 'restore' });
+    expect(result.status, result.stderr + result.stdout).toBe(1);
+    expect(result.stderr).toContain('tests/restored.test.ts');
+    expect(result.stderr).toContain('browser metadata drifted');
+  });
+  it('rejects missing browser metadata for the newly added screenshot test', () => {
+    const result = executeFixture('tests/composer-screenshot-recovery-real-path.test.ts', false, { browser: true, staleBrowser: true });
+    expect(result.status, result.stderr + result.stdout).toBe(1);
+    expect(result.stderr).toContain('tests/composer-screenshot-recovery-real-path.test.ts');
+    expect(result.stderr).toContain('browser metadata drifted');
+  });
   it('runs the CI commands, environments, classification and all four shards', () => {
     expect(manifest.scripts['verify:ci']).toBe('node scripts/verify-ci.mjs');
     const result = execute();
@@ -528,34 +571,54 @@ describe('local CI verification through its command entry point', () => {
     expect(result.stderr).toContain('required-fixture');
   });
 
-  it('covers the conditional browser prerequisite added to the changed integration lane', () => {
+  it('covers the browser prerequisite selected by classification metadata', () => {
     const workflow = parse(readFileSync(workflowPath, 'utf8'));
     workflow.jobs['integration-changed'].steps = workflow.jobs['integration-changed'].steps
       .filter((step: { name?: string }) => step.name !== 'Install touched browser-test prerequisites');
     workflow.jobs['integration-changed'].steps.splice(-1, 0, {
       name: 'Install touched browser-test prerequisites',
-      if: "contains(steps.select.outputs.files, 'tests/next-parity-route-ownership-real-path.test.ts') || contains(steps.select.outputs.files, 'tests/review-diff-position-real-path.test.ts') || contains(steps.select.outputs.files, 'tests/sidebar-window-layout-real-path.test.ts') || contains(steps.select.outputs.files, 'tests/compaction-progress-inference-real-path.test.ts') || contains(steps.select.outputs.files, 'tests/composer-screenshot-recovery-real-path.test.ts')",
+      if: "steps.select.outputs.browser == 'true'",
       run: 'npx --no-install playwright-core install --with-deps chromium',
     });
     const result = coverage(workflow);
     expect(result.status, result.stderr).toBe(0);
   });
 
-  it.each(['tests/next-parity-route-ownership-real-path.test.ts',
-    'tests/review-diff-position-real-path.test.ts',
-    'tests/sidebar-window-layout-real-path.test.ts',
-    'tests/compaction-progress-inference-real-path.test.ts',
-    'tests/composer-screenshot-recovery-real-path.test.ts',
-    'tests/next-parity-route-ownership-real-path.test.ts-extra.test.ts',
-    'tests/NEXT-PARITY-ROUTE-OWNERSHIP-REAL-PATH.test.ts'])('runs the CI conditional prerequisite for %s through the verifier entry point', selectedFile => {
-    const result = executeFixture(selectedFile);
+  it.each(['missing', 'duplicate', 'filename condition'])('rejects a %s browser prerequisite contract', change => {
+    const workflow = parse(readFileSync(workflowPath, 'utf8'));
+    const steps = workflow.jobs['integration-changed'].steps;
+    const browser = steps.find((step: { name?: string }) => step.name === 'Install touched browser-test prerequisites');
+    if (change === 'missing') steps.splice(steps.indexOf(browser), 1);
+    if (change === 'duplicate') steps.push({ ...browser });
+    if (change === 'filename condition') browser.if = "contains(steps.select.outputs.files, 'tests/example.test.ts')";
+    const result = coverage(workflow);
+    expect(result.status, result.stderr).toBe(1);
+    expect(result.stderr).toContain('browser prerequisite');
+  });
+
+  it.each([
+    { selectedFile: 'tests/new-layout.test.ts', browser: true },
+    { selectedFile: 'tests/renamed-layout.test.ts', browser: true },
+    { selectedFile: 'tests/next-parity-route-ownership-real-path.test.ts', browser: false },
+    { selectedFile: 'tests/next-parity-route-ownership-real-path.test.ts-extra.test.ts', browser: false },
+    { selectedFile: 'tests/NEXT-PARITY-ROUTE-OWNERSHIP-REAL-PATH.test.ts', browser: false },
+  ])('uses declared browser=$browser for $selectedFile through the verifier entry point', ({ selectedFile, browser }) => {
+    const result = executeFixture(selectedFile, false, { browser });
     expect(result.status, result.stderr + result.stdout).toBe(0);
     const calls = result.calls;
     const prerequisite = calls.findIndex(call => call.args.includes('playwright-core'));
     const integration = calls.findIndex(call => call.args.includes('test:integration'));
-    expect(prerequisite).toBeGreaterThanOrEqual(0);
-    expect(calls[prerequisite].args).toEqual(['--no-install', 'playwright-core', 'install', '--with-deps', 'chromium']);
-    expect(integration).toBeGreaterThan(prerequisite);
+    if (browser) {
+      expect(prerequisite).toBeGreaterThanOrEqual(0);
+      expect(calls[prerequisite].args).toEqual(['--no-install', 'playwright-core', 'install', '--with-deps', 'chromium']);
+      expect(integration).toBeGreaterThan(prerequisite);
+    } else expect(prerequisite).toBe(-1);
+  }, 60_000);
+
+  it('fails local verification when the declared browser prerequisite fails', () => {
+    const result = executeFixture('tests/new-layout.test.ts', false, { browser: true, fail: 'playwright-core' });
+    expect(result.status, result.stderr + result.stdout).toBe(1);
+    expect(result.stdout).toContain('FAIL Integration Tests (changed files)');
   }, 60_000);
 
 
