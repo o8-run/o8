@@ -75,6 +75,10 @@ impl Fixture {
                 "O8_NEXT_BRAIN_REQUEST_LOG",
                 root.join("brain-requests.json"),
             )
+            .env(
+                "O8_NEXT_BRAIN_RESPONSE_GATE",
+                root.join("brain-response-hold"),
+            )
             .env("O8_NEXT_API_TOKEN", "fixture-shell-bearer")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())

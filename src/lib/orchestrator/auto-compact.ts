@@ -1,5 +1,6 @@
 import { childEnvironment } from '@/lib/providers/spawn-environment';
 import 'server-only';
+import { projectModelContext } from '@/lib/transcripts/model-context';
 
 import { spawn } from '@/lib/providers/child-process';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
@@ -8,14 +9,14 @@ import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import { MODEL_IDS } from '@/lib/models';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
-import { getCanonicalChatHistoryPath, persistCanonicalChatHistoryRecord } from '@/lib/llm/chat-history-store';
+import { getCanonicalChatHistoryPath, persistCanonicalChatHistoryRecordUnlocked, readPersistedLlmChat, withCanonicalChatHistoryLock } from '@/lib/llm/chat-history-store';
 import { logUsage } from '@/lib/db/usage';
 import { scoreCompactionSegment } from '@/lib/orchestrator/compaction-scorer';
 import { clipCompactionText, compactionEntryText } from './compaction-text';
 import { withLiveCompaction } from './live-compaction';
 const ARCHIVE_DIR = path.join(getDataDir(), 'orchestrator-archives');
 const inFlight = new Map<string, Promise<AutoCompactResult>>();
-type PersistedThread = { tabId: string; payload: Record<string, unknown>; messages: MobileTranscriptEntry[] };
+type PersistedThread = { tabId: string; messages: MobileTranscriptEntry[] };
 export const ORCHESTRATOR_COMPACTION_PROVENANCE = {
   backend: 'codex',
   model: MODEL_IDS.codexCliDefault,
@@ -62,7 +63,6 @@ async function readThread(repoPath: string, threadId: string): Promise<Persisted
     const messages = Array.isArray(payload.messages) ? payload.messages.map(coerceEntry).filter(Boolean) as MobileTranscriptEntry[] : [];
     return messages.length === 0 ? null : {
       tabId: threadId,
-      payload,
       messages,
     };
   } catch {
@@ -319,7 +319,7 @@ export async function autoCompactOrchestratorThread(input: {
   const job = (async () => {
     const thread = await readThread(repoPath, threadId);
     if (!thread) return notApplied([]);
-    const transcript = thread.messages;
+    const transcript = projectModelContext(thread.messages);
     if (transcript.length < 2) return notApplied(transcript);
     const keepTailCount = typeof input.keepTailCount === 'number' && Number.isFinite(input.keepTailCount)
       ? Math.max(1, Math.floor(input.keepTailCount))
@@ -335,16 +335,24 @@ export async function autoCompactOrchestratorThread(input: {
     while (compactedCount < transcript.length && transcript[compactedCount]!.role !== 'user') {
       compactedCount += 1;
     }
-    const { compactedTurns, pinnedTurns, liveTurns, retainedTurns } = splitCompactionWindow(transcript, compactedCount);
+    const { compactedTurns } = splitCompactionWindow(transcript, compactedCount);
     if (compactedTurns.length === 0) {
       return notApplied(transcript);
     }
+    const activeIds = new Set(transcript.map(entry => entry.id));
+    const priorSummary = thread.messages.findLast(entry => entry.compaction?.source === 'summary');
+    const summarizedIds = new Set([...(priorSummary?.compaction?.summarizedMessageIds ?? []),
+      ...compactedTurns.map(entry => entry.id)]);
+    // Carry prior summary coverage forward from this snapshot, never from the
+    // later commit-time record where unsummarized replies may have arrived.
+    const summarizedMessageIds = thread.messages.filter(entry => entry.type !== 'compaction'
+      && (!activeIds.has(entry.id) || summarizedIds.has(entry.id))).map(entry => entry.id);
     return withLiveCompaction({ repoPath, threadId }, async () => {
-      const compactedAt = new Date();
-      const compactedStamp = fmtStamp(compactedAt);
       // Record-only judgment scores (#2465), asked beside the summarizer; nothing reads them.
       const scorerJob = scoreCompactionSegment(compactedTurns);
       const summaryResult = await summarizeWithCodex(repoPath, ['Summarize this orchestrator thread segment using exactly these sections and terse bullets:', 'Decisions made', 'Files touched', 'Open questions', 'Current mission state', 'Use file paths verbatim. If a section is empty, write "- None."', '', buildExcerpt(compactedTurns, 90_000)].join('\n'));
+      const compactedAt = new Date();
+      const compactedStamp = fmtStamp(compactedAt);
       const summary = summaryResult.text;
       recordCompactionUsage(repoPath, thread.tabId, summaryResult, compactedAt);
       const displaySummary = `<compacted_context turns="${compactedTurns.length}" at="${compactedStamp}">\n${summary}\n</compacted_context>`;
@@ -362,14 +370,12 @@ export async function autoCompactOrchestratorThread(input: {
           tokensAfter: undefined,
           trigger: input.trigger === 'handoff' ? 'manual' : input.trigger ?? 'auto',
           source: 'summary',
+          compactedThroughId: transcript[compactedCount - 1]!.id,
+          summarizedMessageIds,
           summary: displaySummary,
           compactedBy: ORCHESTRATOR_COMPACTION_PROVENANCE,
         },
       };
-      const nextTranscript = [compactionEntry, ...pinnedTurns, ...liveTurns];
-      const resumePrelude = [`Compaction summary (${compactedStamp})`, summary, '', 'Most recent uncompressed turns:', buildExcerpt(retainedTurns, 80_000) || '- None.', '', 'Continue from that context. The operator message follows below.'].join('\n');
-      const tokensAfter = approxTokens(resumePrelude);
-      compactionEntry.compaction!.tokensAfter = tokensAfter;
       const scorer = await scorerJob;
       if (scorer) compactionEntry.compaction!.scorer = scorer;
       await mkdir(ARCHIVE_DIR, { recursive: true });
@@ -385,19 +391,47 @@ export async function autoCompactOrchestratorThread(input: {
         compactedBy: ORCHESTRATOR_COMPACTION_PROVENANCE,
         ...(scorer ? { scorer } : {}),
       }));
-      persistCanonicalChatHistoryRecord(thread.tabId, {
-        ...thread.payload,
-        messages: nextTranscript.map(toStoredMessage),
-        savedAt: compactedAt.toISOString(),
+      return withCanonicalChatHistoryLock(thread.tabId, () => {
+        // Re-read inside the same per-thread lock as every other writer. A
+        // summary may take seconds; its starting snapshot cannot replace live
+        // output, metadata changes, or a deleted/reassigned conversation.
+        const current = readPersistedLlmChat(thread.tabId)?.history;
+        if (!current || current.repoPath?.trim() !== repoPath) {
+          throw new Error('Conversation changed while compaction was running.');
+        }
+        const latest = current.messages.map(coerceEntry).filter(Boolean) as MobileTranscriptEntry[];
+        // Another route process may have committed while this summarizer ran.
+        // Compare the starting boundary under the durable writer lock so only
+        // one summary can advance that snapshot, even across processes.
+        const startingSummary = thread.messages.findLast(entry => entry.compaction?.source === 'summary');
+        const committedSummary = latest.findLast(entry => entry.compaction?.source === 'summary');
+        if (startingSummary?.id !== committedSummary?.id) {
+          return notApplied(projectModelContext(latest), committedSummary?.compaction?.tokensAfter);
+        }
+        const summarized = new Map(compactedTurns.map(entry => [entry.id, JSON.stringify(entry)]));
+        const latestById = new Map(latest.map(entry => [entry.id, JSON.stringify(entry)]));
+        if (compactedTurns.some(entry => latestById.get(entry.id) !== summarized.get(entry.id))) {
+          throw new Error('Summarized messages changed while compaction was running.');
+        }
+        const retainedTurns = projectModelContext(latest).filter(entry => !summarized.has(entry.id));
+        const nextTranscript = [compactionEntry, ...retainedTurns];
+        const resumePrelude = [`Compaction summary (${compactedStamp})`, summary, '', 'Most recent uncompressed turns:', buildExcerpt(retainedTurns, 80_000) || '- None.', '', 'Continue from that context. The operator message follows below.'].join('\n');
+        const tokensAfter = approxTokens(resumePrelude);
+        compactionEntry.compaction!.tokensAfter = tokensAfter;
+        persistCanonicalChatHistoryRecordUnlocked(thread.tabId, {
+          ...current,
+          messages: [...current.messages, toStoredMessage(compactionEntry)],
+          savedAt: compactedAt.toISOString(),
+        }, compactedAt.toISOString());
+        return {
+          applied: true,
+          transcript: nextTranscript,
+          resumePrelude,
+          tokensAfter,
+          compactedBy: ORCHESTRATOR_COMPACTION_PROVENANCE,
+          archiveRef,
+        };
       });
-      return {
-        applied: true,
-        transcript: nextTranscript,
-        resumePrelude,
-        tokensAfter,
-        compactedBy: ORCHESTRATOR_COMPACTION_PROVENANCE,
-        archiveRef,
-      };
     });
   })().finally(() => {
     inFlight.delete(inFlightKey);

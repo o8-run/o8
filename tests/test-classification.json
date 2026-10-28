@@ -3,6 +3,12 @@
   "generatedBy": "node scripts/classify-tests.mjs --write",
   "resourceOwning": [
     {
+      "path": "cli/src/commands/next.test.ts",
+      "reasons": [
+        "child-process"
+      ]
+    },
+    {
       "path": "cli/src/commands/packet/info-surface.test.ts",
       "reasons": [
         "worktree-api"
@@ -3717,6 +3723,14 @@
       ]
     },
     {
+      "path": "tests/linux-package-prerequisites-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/linux-pi-write-helper.test.ts",
       "reasons": [
         "child-process"
@@ -4954,6 +4968,17 @@
       ]
     },
     {
+      "path": "tests/orchestrator-error-text-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "network-listener",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/orchestrator-handoff-transport-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -5144,6 +5169,27 @@
       "reasons": [
         "child-process",
         "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/owner-chat-chronology-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/owner-chat-compaction-race-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/owner-chat-reading-position-real-path.test.ts",
+      "reasons": [
         "real-path"
       ]
     },
@@ -7329,6 +7375,14 @@
       ]
     },
     {
+      "path": "tests/updates-panel-layout-real-path.test.ts",
+      "reasons": [
+        "browser",
+        "real-path"
+      ],
+      "browser": true
+    },
+    {
       "path": "tests/v65-orchestrator-lead-legacy-schema-real-path.test.ts",
       "reasons": [
         "real-path"
@@ -7468,6 +7522,12 @@
       "reasons": [
         "child-process",
         "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/worker-catalog-failure-real-path.test.ts",
+      "reasons": [
         "real-path"
       ]
     },

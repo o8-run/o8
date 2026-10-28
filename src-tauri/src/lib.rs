@@ -5782,9 +5782,10 @@ fn browser_view_open(
     w: f64,
     h: f64,
     init_script: Option<String>,
+    page_zoom: Option<f64>,
 ) -> Result<(), String> {
     require_main_window(&window)?;
-    browser_view::open(&app, &url, x, y, w, h, init_script.as_deref())
+    browser_view::open(&app, &url, x, y, w, h, init_script.as_deref(), page_zoom.unwrap_or(1.0))
 }
 
 /// Reposition/resize the browser-view child window over a new content rect
@@ -5798,10 +5799,10 @@ fn browser_view_set_rect(
     y: f64,
     w: f64,
     h: f64,
+    page_zoom: Option<f64>,
 ) -> Result<(), String> {
     require_main_window(&window)?;
-    browser_view::set_rect(&app, x, y, w, h);
-    Ok(())
+    browser_view::set_rect(&app, x, y, w, h, page_zoom.unwrap_or(1.0))
 }
 
 /// Navigate the browser-view child window to a new URL (URL bar / tab / reload).

@@ -1,25 +1,58 @@
 import { spawn } from 'node:child_process';
+import { accessSync, constants } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import { CliError, EXIT } from '../api.js';
 import { resolveConfig, resolveCliDataDir, resolveCliTokenFiles } from '../config.js';
+import { runServe } from './serve.js';
 
-/** Local configuration discovery is restricted to the opt-in app shell. */
-export async function runNext(args: string[]): Promise<number> {
-  // Keep mode help separate from the shared fixture launcher help.
-  if (args.includes('--help')) {
-    process.stdout.write('App shell: --app-shell [--server ORIGIN] [--shell-state ABSOLUTE_FILE]. Uses existing local port/token configuration.\n');
+const INSTALLED_BINARY = '/Applications/o8.app/Contents/MacOS/o8-next';
+
+async function serverIsHealthy(origin: string): Promise<boolean> {
+  try {
+    const response = await fetch(`${origin}/api/setup/identity`, {
+      signal: AbortSignal.timeout(1_000), redirect: 'error',
+    });
+    if (!response.ok) return false;
+    return (await response.json() as { product?: unknown }).product === 'o8';
+  } catch { return false; }
+}
+
+async function ensureServer(): Promise<void> {
+  if (await serverIsHealthy(resolveConfig().apiBase)) return;
+  process.stderr.write('Starting o8 serve; waiting for the local server to become healthy...\n');
+  try {
+    await runServe({ human: true, verbose: false }, undefined, []);
+  } catch (error) {
+    throw new CliError('next_server_start_failed',
+      `Could not start o8 serve: ${error instanceof Error ? error.message : String(error)}`,
+      EXIT.CONNECTION_REFUSED, 'Run `o8 serve status` and inspect the serve log.');
   }
+  if (!await serverIsHealthy(resolveConfig().apiBase)) {
+    throw new CliError('next_server_unhealthy', 'o8 serve started, but the selected local server is not healthy.',
+      EXIT.CONNECTION_REFUSED, 'Run `o8 serve status` and inspect the serve log.');
+  }
+}
+
+/** The default shell shares the existing local server and credential resolver. */
+export async function runNext(args: string[]): Promise<number> {
   if (args.includes('--help')) {
-    process.stdout.write('o8 next --enable-next --binary /absolute/path/o8-next --server http://127.0.0.1:PORT [--offscreen] [--terminal SESSION_ID]\nSaved sessions, composer and opt-in terminal; build native/o8-next separately. Set O8_NEXT_API_TOKEN for the selected server.\n');
+    process.stdout.write('o8 next [--binary ABSOLUTE_PATH] [--server ORIGIN] [--shell-state ABSOLUTE_FILE]\nOpens the native app shell using /Applications/o8.app/Contents/MacOS/o8-next by default. Reuses a healthy local server or starts o8 serve and waits for health.\nQuitting the window leaves the headless server running. Stop it with: o8 serve stop\nExplicit fixture mode: --enable-next --binary ABSOLUTE_PATH --server ORIGIN [--offscreen] [--terminal SESSION_ID]\n--app-shell explicitly selects the shell. Explicit --server attaches only; existing env-only credentials and numeric loopback HTTP rules apply.\n');
     return 0;
   }
   const at = args.indexOf('--binary');
-  const binary = at >= 0 ? args[at + 1] : undefined;
-  const shell = args.includes('--app-shell');
-  if (!args.includes('--enable-next') || !binary || !isAbsolute(binary) || (!shell && !args.includes('--server'))) {
-    throw new CliError('invalid_args', 'Pass --enable-next, --binary with an absolute executable path, and --server.', EXIT.INVALID_ARGS);
+  const binary = at >= 0 ? args[at + 1] : INSTALLED_BINARY;
+  const shell = args.includes('--app-shell') || !args.includes('--enable-next');
+  if (!binary || !isAbsolute(binary) || (!shell && !args.includes('--server'))) {
+    throw new CliError('invalid_args', 'Pass --binary with an absolute executable path; fixture mode also requires --server.', EXIT.INVALID_ARGS);
   }
-  const forwarded = [...args.slice(0, at), ...args.slice(at + 2)];
+  try { accessSync(binary, constants.X_OK); } catch {
+    throw new CliError('native_unavailable', 'Could not launch the native binary. Install o8 or pass --binary with an absolute executable path.', EXIT.INVALID_ARGS);
+  }
+  const forwarded = at < 0 ? [...args] : [...args.slice(0, at), ...args.slice(at + 2)];
+  if (!forwarded.includes('--enable-next')) forwarded.push('--enable-next');
+  if (shell && !forwarded.includes('--app-shell')) forwarded.push('--app-shell');
+  if (shell && !forwarded.includes('--server')) await ensureServer();
+  if (shell) process.stderr.write('Quitting the window leaves the server running. Stop it with: o8 serve stop\n');
   const env = { ...process.env };
   if (shell) {
     const config = resolveConfig();

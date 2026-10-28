@@ -21,6 +21,8 @@ use std::{
     time::{Duration, Instant},
 };
 
+pub(super) const RAIL_WIDTH: f32 = 280.;
+
 #[derive(Clone)]
 pub enum Event {
     Loaded(Vec<Session>),
@@ -60,10 +62,14 @@ pub struct ThreadList {
     pub selected: Option<String>,
     pub scroll: UniformListScrollHandle,
     focus: FocusHandle,
+    archived_focus: FocusHandle,
     editor: Entity<Composer>,
     query: String,
     expanded: HashSet<String>,
     branch_ids: HashSet<String>,
+    archived_open: bool,
+    #[cfg(test)]
+    pub(super) title_layouts: HashMap<String, gpui::TextLayout>,
     last_age: Instant,
     search_pending: Option<Instant>,
     search_running: bool,
@@ -123,10 +129,14 @@ impl ThreadList {
             selected: None,
             scroll: UniformListScrollHandle::new(),
             focus: cx.focus_handle(),
+            archived_focus: cx.focus_handle().tab_stop(true),
             editor,
             query: String::new(),
             expanded: HashSet::new(),
             branch_ids: HashSet::new(),
+            archived_open: false,
+            #[cfg(test)]
+            title_layouts: HashMap::new(),
             last_age: Instant::now(),
             search_pending: None,
             search_running: false,
@@ -169,20 +179,17 @@ impl ThreadList {
             self.expanded
                 .insert(recents::group(session, recents::now()).into());
         }
-        self.rows = Rc::new(recents::rows(
+        let mut rows = recents::rows(
             &self.sessions,
             &self.query,
             &self.search_matches,
             &self.expanded,
             &self.branch_ids,
-        ));
+        );
         // An incoming message can push the keyboard choice past Show more.
         // Disclosure must follow that thread's identity before choosing a fallback.
         if self.query.trim().is_empty()
-            && !self
-                .rows
-                .iter()
-                .any(|r| r.id.is_some() && r.id == self.choice)
+            && !rows.iter().any(|r| r.id.is_some() && r.id == self.choice)
             && let Some(session) = self
                 .sessions
                 .iter()
@@ -190,14 +197,23 @@ impl ThreadList {
         {
             self.expanded
                 .insert(recents::group(session, recents::now()).into());
-            self.rows = Rc::new(recents::rows(
+            rows = recents::rows(
                 &self.sessions,
                 &self.query,
                 &self.search_matches,
                 &self.expanded,
                 &self.branch_ids,
-            ));
+            );
         }
+        if !self.archived_open
+            && self.query.trim().is_empty()
+            && let Some(index) = rows
+                .iter()
+                .position(|r| r.kind == "section" && r.title == "Archived")
+        {
+            rows.truncate(index);
+        }
+        self.rows = Rc::new(rows);
         if !self
             .rows
             .iter()
@@ -550,10 +566,19 @@ impl ThreadList {
         cx.notify();
     }
     fn archive(&mut self, cx: &mut Context<Self>) {
-        let Some(row) = self.choice_row().cloned() else {
+        if let Some(id) = self.choice.clone() {
+            self.archive_id(id, cx);
+        }
+    }
+    fn archive_id(&mut self, id: String, cx: &mut Context<Self>) {
+        if self.saving {
+            return;
+        }
+        let Some(session) = self.sessions.iter().find(|s| s.id == id) else {
             return;
         };
-        if let Some(id) = row.id.as_ref().filter(|id| id.contains(':')).cloned() {
+        let archived = session.status == "archived";
+        if id.contains(':') {
             let mutation = self
                 .pending_archives
                 .entry(id.clone())
@@ -575,12 +600,12 @@ impl ThreadList {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        let archived = if row.status == "archived" {
+        let archived = if archived {
             serde_json::Value::Null
         } else {
             json!(iso_timestamp(date))
         };
-        self.mutate(row.id.clone().unwrap(), json!({"archivedAt":archived}), cx);
+        self.mutate(id, json!({"archivedAt":archived}), cx);
     }
     fn mutate(&mut self, id: String, patch: serde_json::Value, cx: &mut Context<Self>) {
         if self.saving {
@@ -630,6 +655,9 @@ impl ThreadList {
     }
     fn key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         if self.header_key(event, window, cx) {
+            return;
+        }
+        if self.archived_key(event, window, cx) {
             return;
         }
         let key = event.keystroke.key.as_str();
@@ -730,3 +758,6 @@ mod project_header;
 
 #[path = "recents.rs"]
 mod recents;
+
+#[path = "archive_controls.rs"]
+mod archive_controls;
