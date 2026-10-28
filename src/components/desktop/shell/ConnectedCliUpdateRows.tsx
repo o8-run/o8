@@ -35,9 +35,10 @@ export function ConnectedCliUpdateRows({ tools, busy, progress = {}, checking = 
           <div style={{ marginTop: 2, fontSize: 10.5, color: 'var(--t-text-muted)', fontVariantNumeric: 'tabular-nums', overflowWrap: 'anywhere' }}>
             {tool.installedVersion ?? 'Version unavailable'}{tool.status === 'update-available' && tool.latestVersion ? ` → ${tool.latestVersion}` : ''}
           </div>
-          {state || rowChecking ? <div role="status" aria-live="polite" style={{ marginTop: 4, fontSize: 10.5, lineHeight: 1.5, color: state?.stage === 'failed' ? 'var(--t-danger)' : 'var(--t-text-secondary)' }}>
+          {/* Reserve the status line so rechecking retained rows never shifts their neighbors. */}
+          <div role={state || rowChecking ? 'status' : undefined} aria-live={state || rowChecking ? 'polite' : undefined} style={{ marginTop: 4, minHeight: '1.5em', fontSize: 10.5, lineHeight: 1.5, color: state?.stage === 'failed' ? 'var(--t-danger)' : 'var(--t-text-secondary)' }}>
             {rowChecking && !updating ? 'Checking version…' : state ? `${stages[state.stage]}${updating ? `… ${seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`}` : ''}${state.message ? ` · ${state.message}` : ''}` : ''}
-          </div> : null}
+          </div>
         </div>
         {onUpdate && (tool.status === 'unknown' || tool.status === 'update-available') ? <button type="button" aria-label={`Update ${tool.label}`} disabled={disabled || rowChecking || updating}
           aria-expanded={confirming === tool.runtimeId} aria-controls={confirming === tool.runtimeId ? `${id}-${tool.runtimeId}` : undefined}
