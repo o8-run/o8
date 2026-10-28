@@ -82,7 +82,7 @@ export function BrowserPipCard({
         return (
           <div style={{ position: 'relative', height: shape.frameHeight, overflow: 'hidden', background: 'var(--t-canvas-bg)' }}>
             {tab.surface === 'engine' && !nativeEnabled ? <O8EnginePane url={tab.url} /> : nativeEnabled ? (
-              <NativeBrowserSurface url={tab.url} />
+              <NativeBrowserSurface url={tab.url} viewportWidth={shape.viewport} />
             ) : (
               <>
                 <iframe
