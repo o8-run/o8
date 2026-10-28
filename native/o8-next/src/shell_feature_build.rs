@@ -1,6 +1,9 @@
 //! Discover shell feature modules at build time; runtime never scans source files.
 use std::{env, fs, path::PathBuf};
 fn main() {
+    if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
+        println!("cargo:rustc-link-lib=framework=WebKit");
+    }
     let root = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap());
     let directory = root.join("src/shell_features");
     println!("cargo:rerun-if-changed=src/shell_features");

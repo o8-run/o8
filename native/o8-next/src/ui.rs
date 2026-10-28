@@ -222,7 +222,17 @@ impl Surface {
                 .get(row.id())
                 .and_then(|candidates| candidates.iter().find(|state| state.borrow().row == row))
                 .cloned();
-            states.push(retained.unwrap_or_else(|| Rc::new(RefCell::new(RowState::new(row)))));
+            states.push(retained.unwrap_or_else(|| {
+                let cards = indexed
+                    .get(row.id())
+                    .and_then(|candidates| candidates.first())
+                    .map(|state| state.borrow().cards.clone())
+                    .unwrap_or_default();
+                let mut state = RowState::new(row);
+                state.cards = cards;
+                state.attach_visualizations(&self.client);
+                Rc::new(RefCell::new(state))
+            }));
         }
         self.list
             .splice(prefix..old.len() - suffix, states.len() - prefix - suffix);
@@ -232,6 +242,16 @@ impl Surface {
         }
     }
     fn poll_stream(&mut self, cx: &mut Context<Self>) -> bool {
+        let mut visualizations_changed = false;
+        for (index, row) in self.rows.iter().enumerate() {
+            if row.borrow_mut().poll_visualizations() {
+                self.list.splice(index..index + 1, 1);
+                visualizations_changed = true;
+            }
+        }
+        if visualizations_changed {
+            cx.notify();
+        }
         let follow_tail = !self.rows.is_empty()
             && self
                 .list
@@ -274,7 +294,7 @@ impl Surface {
             }
             cx.notify();
         }
-        changed
+        changed || visualizations_changed
     }
     fn snapshot_label(&self) -> String {
         let count = self
@@ -744,3 +764,7 @@ mod tests;
 #[cfg(test)]
 #[path = "transcript_tests.rs"]
 mod transcript_tests;
+
+#[cfg(test)]
+#[path = "visualization_tests.rs"]
+mod visualization_tests;
