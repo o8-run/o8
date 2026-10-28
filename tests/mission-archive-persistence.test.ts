@@ -75,14 +75,19 @@ function installRealRouteFetch(historyGetOverride?: () => Response) {
 const persistentStorage = new Map<string, string>();
 
 function installWindow() {
+  const storage = {
+    getItem: (key: string) => persistentStorage.get(key) ?? null,
+    setItem: (key: string, value: string) => { persistentStorage.set(key, value); },
+    removeItem: (key: string) => { persistentStorage.delete(key); },
+  };
   vi.stubGlobal('window', {
     // The store patches `window.fetch` at import time (orchestrator turn pins);
     // the archiver itself calls the global, which the route router below owns.
     fetch: (input: RequestInfo | URL, init?: RequestInit) => globalThis.fetch(input, init),
-    localStorage: {
-      getItem: (key: string) => persistentStorage.get(key) ?? null,
-      setItem: (key: string, value: string) => { persistentStorage.set(key, value); },
-    },
+    localStorage: new Proxy(storage, {
+      ownKeys: () => [...persistentStorage.keys()],
+      getOwnPropertyDescriptor: () => ({ enumerable: true, configurable: true }),
+    }),
     setTimeout: () => 1,
   });
 }
@@ -195,6 +200,7 @@ describe('mission archive persistence — real route/store/list path (#1848)', (
       { id: 'user-2', role: 'user', text: 'Add a dark mode toggle to the broadcast strip.', timestamp: 1_002 },
     ]);
     await seedLiveThread(liveTabId, transcript);
+    persistentStorage.set(`o8:transcript-reading:v1:${JSON.stringify([repoPath, 'thread', liveTabId])}`, JSON.stringify({ following: false, top: 100, anchor: null }));
 
     await archiveMissionThread(
       missionDetail('mission-archive-title', 'Add broadcast dark mode toggle'),
@@ -226,6 +232,7 @@ describe('mission archive persistence — real route/store/list path (#1848)', (
 
     // The rotated live thread is retired, so the next boot has nothing to re-cut.
     expect(await readStoredMessages(liveTabId)).toHaveLength(0);
+    expect(persistentStorage.has(`o8:transcript-reading:v1:${JSON.stringify([repoPath, 'thread', liveTabId])}`)).toBe(false);
   });
 
   it('still archives when the lifecycle detector already claimed the completion card', async () => {

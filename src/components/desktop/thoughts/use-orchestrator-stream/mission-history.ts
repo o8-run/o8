@@ -1,3 +1,4 @@
+import { removeTranscriptReadingPositions } from '@/components/desktop/thoughts/chat-panel/transcript-reading-position';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import {
   buildMissionArchiveTitle,
@@ -233,7 +234,10 @@ export async function archiveMissionThread(
     throw new Error('Unable to archive the completed mission thread.');
   }
   if (currentTabId) {
-    await fetch(`/api/v2/chat-history?tabId=${encodeURIComponent(currentTabId)}`, { method: 'DELETE' }).catch(() => null);
+    const deleted = await fetch(`/api/v2/chat-history?tabId=${encodeURIComponent(currentTabId)}`, { method: 'DELETE' }).catch(() => null);
+    if (deleted?.ok && typeof window !== 'undefined') {
+      removeTranscriptReadingPositions(currentTabId);
+    }
   }
 
   await fetch('/api/orchestrator/reset-session', {

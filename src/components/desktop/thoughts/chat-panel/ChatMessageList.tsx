@@ -349,7 +349,7 @@ const ChatMessageListPresentation = memo(forwardRef<HTMLDivElement, ChatMessageL
           && !currentAssistant?.toolCalls?.length
           && !currentAssistant?.thinkingActive
           && !currentAssistant?.receipt?.terminal ? (
-          <span role="status" style={{ minHeight: 22, color: 'var(--t-text-muted)', fontSize: 12, fontWeight: 300 }}>
+          <span role="status" style={{ minHeight: 22, overflowAnchor: 'none', color: 'var(--t-text-muted)', fontSize: 12, fontWeight: 300 }}>
             {currentAssistant?.isError ? 'Failed' : !currentAssistant ? 'Waiting for response' : 'Working · phase unknown'}
           </span>
         ) : null}
@@ -357,6 +357,7 @@ const ChatMessageListPresentation = memo(forwardRef<HTMLDivElement, ChatMessageL
         {displayWaiting && !isOrchestratorMode ? (
           <div style={{
             alignSelf: 'flex-start',
+            overflowAnchor: 'none',
             display: 'flex',
             alignItems: 'center',
             gap: 8,
@@ -376,7 +377,7 @@ const ChatMessageListPresentation = memo(forwardRef<HTMLDivElement, ChatMessageL
           </div>
         ) : null}
 
-        <div ref={chatEndRef} />
+        <div ref={chatEndRef} style={{ height: 1, flexShrink: 0, overflowAnchor: 'auto' }} />
       </div>
     </div></div>
   );
