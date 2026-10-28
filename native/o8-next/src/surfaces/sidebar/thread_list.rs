@@ -98,7 +98,7 @@ impl EventEmitter<Event> for ThreadList {}
 impl ThreadList {
     #[cfg(test)]
     pub(crate) fn diagnostic(&self) -> serde_json::Value {
-        json!({"headerMenu":self.header_menu,"project":self.header.ledger.active_project_id,"notice":self.notice,"rename":self.rename,"editing":self.editing,"saving":self.saving,"loading":self.loading,"selected":self.selected,"choice":self.choice_row()})
+        json!({"headerMenu":self.header_menu,"project":self.header.ledger.active_project_id,"notice":self.notice,"rename":self.rename,"editing":self.editing,"saving":self.saving,"loading":self.loading,"selected":self.selected,"choice":self.choice_row(),"dirty":self.dirty.is_some(),"generation":self.generation})
     }
     pub fn new(client: Client, cx: &mut Context<Self>) -> Self {
         let editor = cx.new(Composer::new);
@@ -235,7 +235,13 @@ impl ThreadList {
         self.dirty.get_or_insert_with(Instant::now);
     }
     pub fn load(&mut self, cx: &mut Context<Self>) {
-        if self.loading || self.saving {
+        if self.loading {
+            return;
+        }
+        if self.saving {
+            // The shell may already be awaiting this refresh. Retry after the
+            // save settles, including when its mutation is rejected.
+            self.dirty.get_or_insert_with(Instant::now);
             return;
         }
         self.loading = true;
@@ -257,7 +263,10 @@ impl ThreadList {
             let result = task.await;
             let _ = this.update(cx, |this, cx| {
                 this.loading = false;
-                if generation != this.generation {
+                // Stream updates fence stale catalog snapshots, not transport
+                // failures. Suppressing an error leaves the shell waiting for
+                // recovery while the next full request deadline runs again.
+                if result.is_ok() && generation != this.generation {
                     this.dirty = Some(Instant::now());
                     return;
                 }

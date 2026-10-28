@@ -6,7 +6,7 @@ use url::{Host, Url};
 
 // Cold route compilation can outlast window creation. Bound the entire GET,
 // including its response body, without extending mutation request deadlines.
-const LOAD_REQUEST_TIMEOUT: Duration = Duration::from_secs(45);
+pub(crate) const LOAD_REQUEST_TIMEOUT: Duration = Duration::from_secs(45);
 
 fn timed_out(error: &(dyn std::error::Error + 'static)) -> bool {
     error

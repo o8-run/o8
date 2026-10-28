@@ -5,7 +5,7 @@ const mocks = vi.hoisted(() => ({ spawn: vi.fn(), serve: vi.fn(), config: vi.fn(
 vi.mock('node:child_process', () => ({ spawn: mocks.spawn }));
 vi.mock('node:fs', () => ({ accessSync: mocks.access, constants: { X_OK: 1 } }));
 vi.mock('./serve.js', () => ({ runServe: mocks.serve }));
-vi.mock('../config.js', () => ({ resolveConfig: mocks.config, resolveCliDataDir: () => '/fixture' }));
+vi.mock('../config.js', () => ({ resolveConfig: mocks.config, resolveCliDataDir: () => '/fixture', resolveCliTokenFiles: () => ['/fixture/ws-token'] }));
 import { runNext } from './next.js';
 
 const config = (port = 49123) => ({ apiBase: `http://127.0.0.1:${port}`, dataDir: '/fixture',
