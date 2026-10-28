@@ -46,15 +46,17 @@ describe('CustomizePage skills', () => {
       await act(async () => root.render(createElement(CustomizePage, instructionFixture())));
       const tab = [...host.querySelectorAll('button')].find((button) => button.textContent?.startsWith('Instructions'))!;
       expect(tab.textContent).toBe('Instructions3');
-      expect(host.textContent).toContain('3 authored instructions');
-      expect(host.textContent).toContain('1700 indexed sections');
+      expect(host.textContent).not.toContain('authored instructions');
+      expect(host.textContent).not.toContain('The Instructions count shows authored guidance');
       expect(host.textContent).toContain('Personal guide');
       expect(host.textContent).toContain('Project guide');
       expect(host.textContent).toContain('Repository guide');
       const docs = host.querySelector<HTMLElement>('[aria-label="Indexed documentation"]')!;
       expect(docs).not.toBeNull();
       expect(docs.querySelectorAll('[role="button"]')).toHaveLength(20);
-      expect(docs.textContent).toContain('Indexed reference');
+      expect(docs.textContent).toContain('Indexed docs1700');
+      expect(docs.textContent).not.toContain('Indexed reference');
+      expect(docs.textContent).not.toContain('Document sections indexed for retrieval');
       expect(docs.textContent).not.toContain('Repository rule');
       expect(docs.textContent).toContain('Sections 1 to 20 of 1700');
       const button = (label: string) => [...docs.querySelectorAll('button')].find((item) => item.textContent === label)!;
@@ -89,6 +91,8 @@ describe('CustomizePage skills', () => {
     expect(docs()).not.toBeNull();
     expect(docs().querySelectorAll('[role="button"]')).toHaveLength(1);
     expect(docs().textContent).toContain('Section 1699');
+    expect(docs().querySelector('[aria-label="Documentation pages"]')).toBeNull();
+    expect(docs().querySelector('[aria-label="Documentation source"]')).not.toBeNull();
     expect(tab().textContent).toBe('Instructions3');
     enter('sample/docs/operations.md');
     expect(docs().textContent).toContain('Sections 1 to 20 of 700');
@@ -204,7 +208,7 @@ describe('CustomizePage skills', () => {
   it('keeps empty-inventory guidance when no instructions exist', async () => {
     await act(async () => root.render(createElement(CustomizePage)));
     expect(host.textContent).toContain('No additional rules');
-    expect(host.textContent).toContain('Rules appear here with their source and scope.');
+    expect(host.textContent).not.toContain('Rules appear here with their source and scope.');
     expect(host.textContent).not.toContain('No matching instructions');
   });
 
