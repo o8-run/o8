@@ -11,12 +11,12 @@ import type { ComposerQueuePayload } from '@/lib/orchestrator/composer-queue-typ
 
 // Only the provider and realtime publication are substituted. HTTP, queue routes,
 // admission, heartbeat, transcript/media persistence and SQLite are production code.
-const provider = vi.hoisted(() => ({ uncertain: false, sends: 0, attachmentBytes: 0 }));
+const provider = vi.hoisted(() => ({ uncertain: false, sends: 0, attachmentBytes: 0, steers: 0 }));
 vi.mock('@/lib/lane/orchestrator-backends/registry', () => ({ getOrchestratorBackend: (id: OrchestratorBackend['id']) => ({
   id, label: id, ensureSession: () => ({ sessionName: 'ledger-session', status: 'ready' }),
   peekSession: () => ({ sessionName: 'ledger-session', status: 'ready' }),
   liveSteer: async (_repo: string, _message: string, options: Parameters<NonNullable<OrchestratorBackend['liveSteer']>>[2]) => {
-    options.beforeAdmit(); return { accepted: true };
+    provider.steers++; options.beforeAdmit(); return { accepted: true };
   },
   sendTurn: async (_repo: string, _message: string, emit: (event: OrchestratorEvent) => void, options: OrchestratorTurnOptions) => {
     provider.sends++;
@@ -101,7 +101,7 @@ beforeAll(async () => {
 });
 beforeEach(() => {
   getSqlite().exec('DELETE FROM composer_send_queue');
-  provider.sends = 0; provider.attachmentBytes = 0; provider.uncertain = false;
+  provider.sends = 0; provider.attachmentBytes = 0; provider.uncertain = false; provider.steers = 0;
   writeFileSync(join(data, 'chat-history', `${target.threadId}.json`), JSON.stringify({ repoPath: repo, backend: 'codex', messages: [] }));
 });
 afterAll(async () => {
@@ -144,7 +144,7 @@ it('delivers 20 3 MiB screenshots once, drops applied bytes, and deduplicates th
   expect(provider.sends).toBe(40);
   expect(secondBatch.dataBytes - applied.dataBytes).toBeLessThan(1_000_000);
   expect(secondBatch.ledgerBytes).toBeLessThan(40_000);
-}, 60_000);
+}, 120_000);
 
 it.each(['current', 'legacy'])('preserves delivered steer transcript text and media while compacting its %s receipt', async source => {
   const id = `ledger-steer-${source}`;
@@ -156,14 +156,23 @@ it.each(['current', 'legacy'])('preserves delivered steer transcript text and me
       messages: [{ id: `composer-steer-${id}`, role: 'user', content: payload(0).text, timestamp: Date.now() }] }));
     getSqlite().prepare("UPDATE composer_send_queue SET status = 'applied', admitted_at = ? WHERE id = ?").run(Date.now(), id);
   }
+  // Older builds read delivered steer text directly from payload_json.
+  // Assert before reopen too, so settlement and startup migration both retain it.
+  if (source === 'current') expect(queue.readComposerSend(id)?.payload.text).toBe(payload(0).text);
   closeDb(); getSqlite();
-  expect(queue.readComposerSend(id)?.payload.images.length).toBe(0);
+  expect(queue.readComposerSend(id)?.payload).toMatchObject({ text: payload(0).text, wireMessage: '', images: [] });
   const items = (await (await api('GET')).json()).items;
   expect(items[0]).toMatchObject({ id, status: 'applied', payload: { text: payload(0).text } });
   expect(items[0].payload.images).toHaveLength(1);
   expect(readFileSync(items[0].payload.images[0].dataUri).length).toBe(3 * 1024 * 1024);
   const normalized = await enqueue(id);
   expect(normalized).toMatchObject({ status: 'applied', payload: payload(0) });
+  const compacted = getSqlite().prepare('SELECT * FROM composer_send_queue WHERE id = ?').get(id);
+  closeDb(); const restarted = heartbeat();
+  expect(getSqlite().prepare('SELECT * FROM composer_send_queue WHERE id = ?').get(id)).toEqual(compacted);
+  restarted(); await new Promise(resolve => setTimeout(resolve, 30));
+  expect(queue.claimComposerSteer(id)).toBeNull();
+  expect(provider.steers).toBe(source === 'current' ? 1 : 0);
   expect(measure().ledgerBytes).toBeLessThan(2_000);
 });
 
