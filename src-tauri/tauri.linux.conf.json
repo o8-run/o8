@@ -24,6 +24,7 @@
     }
   },
   "bundle": {
+    "externalBin": ["helpers/o8-pi-write"],
     "linux": {
       "deb": {
         "desktopTemplate": "linux/o8.desktop",

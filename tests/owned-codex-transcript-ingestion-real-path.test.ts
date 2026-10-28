@@ -17,6 +17,7 @@ process.env.CORTEX_IDE_DATA_DIR = dataDir;
 process.env.CORTEX_IDE_OWNED_CODEX_ROOT = ownedCodexRoot;
 
 const { POST } = await import('@/app/api/mobile/sync/route');
+const { getRuntime } = await import('@/lib/runtimes/registry');
 const {
   latestTranscriptEventAt,
   readSessionTranscriptEvents,
@@ -178,6 +179,10 @@ describe('owned Codex run-log transcript ingestion real path', () => {
       expect.objectContaining({ text: 'Running /bin/echo first' }),
     ]));
     const firstCursor = first.history.entries.at(-1)!.id;
+    const runtime = getRuntime('codex')!;
+    const running = await runtime.readTranscript(sessionKey, undefined, 200);
+    const runningCall = running.flatMap(entry => entry.toolCalls ?? []);
+    expect(runningCall).toEqual([expect.objectContaining({ status: 'running' })]);
     const firstActivityAt = await transcriptActivityAt(sessionKey);
     expect(firstActivityAt).not.toBeNull();
 
@@ -198,6 +203,18 @@ describe('owned Codex run-log transcript ingestion real path', () => {
       expect.objectContaining({ text: 'Run /bin/echo first' }),
     ]);
     const secondCursor = second.history.entries.at(-1)!.id;
+    expect(secondCursor).not.toBe(firstCursor);
+    // A cursor remains addressable after completion, and repeating the poll
+    // cannot consume another client's copy of the same completion event.
+    expect((await readSync(sessionKey, firstCursor)).history.entries).toEqual(second.history.entries);
+    expect((await readSync(sessionKey, secondCursor)).history.entries).toEqual([]);
+    const settled = await runtime.readTranscript(sessionKey, undefined, 200);
+    const settledCall = settled.flatMap(entry => entry.toolCalls ?? []);
+    expect(settledCall).toEqual([expect.objectContaining({
+      id: runningCall[0]!.id, status: 'done', result: 'first',
+    })]);
+    expect(settled.find(entry => entry.toolCalls?.length)?.id)
+      .toBe(running.find(entry => entry.toolCalls?.length)?.id);
     const secondActivityAt = await transcriptActivityAt(sessionKey);
     expect(Date.parse(secondActivityAt!)).toBeGreaterThan(Date.parse(firstActivityAt!));
 
@@ -211,6 +228,11 @@ describe('owned Codex run-log transcript ingestion real path', () => {
     expect(third.history.entries).toEqual([
       expect.objectContaining({ text: 'Still working after the first burst.' }),
     ]);
+    const thirdCursor = third.history.entries.at(-1)!.id;
+    expect((await readSync(sessionKey, thirdCursor)).history.entries).toEqual([]);
+    const full = await readSync(sessionKey);
+    expect(full.history.entries.filter(entry => entry.id === firstCursor)).toHaveLength(1);
+    expect(full.history.entries.filter(entry => entry.id === secondCursor)).toHaveLength(1);
     const thirdActivityAt = await transcriptActivityAt(sessionKey);
     expect(Date.parse(thirdActivityAt!)).toBeGreaterThan(Date.parse(secondActivityAt!));
   });

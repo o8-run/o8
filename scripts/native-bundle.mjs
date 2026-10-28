@@ -159,6 +159,33 @@ function readMachOArchitecture(filePath) {
   throw new Error(`${filePath} has unsupported Mach-O CPU type 0x${cpuType.toString(16)}`);
 }
 
+const ELF_MACHINES = new Map([[0x3e, 'x64'], [0xb7, 'arm64']]);
+
+export function readElfArchitecture(filePath) {
+  const header = readFileSync(filePath).subarray(0, 20);
+  if (header.length < 20 || header.readUInt32BE(0) !== 0x7f454c46) {
+    throw new Error(`${filePath} is not an ELF binary`);
+  }
+  if (header[4] !== 2 || header[5] !== 1) {
+    throw new Error(`${filePath} is not a 64-bit little-endian ELF binary`);
+  }
+  const machine = header.readUInt16LE(18);
+  const arch = ELF_MACHINES.get(machine);
+  if (!arch) throw new Error(`${filePath} has unsupported ELF machine 0x${machine.toString(16)}`);
+  return arch;
+}
+
+function assertElfArchitecture(filePath, expectedArch) {
+  if (!existsSync(filePath)) {
+    throw new Error(`missing ${expectedArch} native addon: ${filePath}`);
+  }
+  const actualArch = readElfArchitecture(filePath);
+  if (actualArch !== expectedArch) {
+    throw new Error(`wrong architecture at ${filePath}: expected ${expectedArch}, found ${actualArch}`);
+  }
+  return { path: filePath, arch: actualArch };
+}
+
 function assertMachOArchitecture(filePath, expectedArch) {
   if (!existsSync(filePath)) {
     throw new Error(`missing ${expectedArch} native addon: ${filePath}`);
@@ -217,8 +244,8 @@ async function loadNodeReleaseIndex(cacheRoot) {
   return { releases, cachePath, cacheSource: 'download' };
 }
 
-export function betterSqlite3Asset(version, abi, arch) {
-  const filename = `better-sqlite3-v${version}-node-v${abi}-darwin-${arch}.tar.gz`;
+export function betterSqlite3Asset(version, abi, arch, platform = 'darwin') {
+  const filename = `better-sqlite3-v${version}-node-v${abi}-${platform}-${arch}.tar.gz`;
   return {
     filename,
     url: `https://github.com/WiseLibs/better-sqlite3/releases/download/v${version}/${filename}`,
@@ -376,6 +403,97 @@ export async function prepareNativeBundle({ projectRoot, serverRoot, cacheRoot }
   return { nodeAbis, nodeIndex, betterSqlite3, nodePty, prunedPrebuilds, nativeSigning };
 }
 
+async function prepareLinuxBetterSqlite3Bundle({ projectRoot, serverRoot, cacheRoot, nodeAbis, arch }) {
+  const packageRoot = join(projectRoot, 'node_modules', 'better-sqlite3');
+  const packageJsonPath = join(packageRoot, 'package.json');
+  if (!existsSync(packageJsonPath)) {
+    throw new Error(`better-sqlite3 is not installed at ${packageRoot}`);
+  }
+
+  const { version } = JSON.parse(readFileSync(packageJsonPath, 'utf8'));
+  const moduleRoot = join(serverRoot, 'node_modules', 'better-sqlite3');
+  const assets = [];
+  for (const abi of Object.values(nodeAbis)) {
+    const asset = betterSqlite3Asset(version, abi, arch, 'linux');
+    const cachePath = join(cacheRoot, 'better-sqlite3', version, asset.filename);
+    const cacheSource = await ensureCachedAsset(asset, cachePath);
+    const extractRoot = mkdtempSync(join(tmpdir(), 'o8-better-sqlite3-'));
+    const extractedAddon = join(extractRoot, 'build', 'Release', BETTER_SQLITE3_ADDON);
+    try {
+      execFileSync('tar', ['-xzf', cachePath, '-C', extractRoot, `build/Release/${BETTER_SQLITE3_ADDON}`], { stdio: 'pipe' });
+      assertElfArchitecture(extractedAddon, arch);
+      const destination = join(moduleRoot, 'prebuilds', `node-v${abi}`, `linux-${arch}`, BETTER_SQLITE3_ADDON);
+      copyExecutable(extractedAddon, destination);
+    } catch (error) {
+      throw new Error(`failed to extract a valid linux-${arch} addon from ${cachePath}: ${error.stderr?.toString().trim() || error.message}`);
+    } finally {
+      rmSync(extractRoot, { recursive: true, force: true });
+    }
+    assets.push({ abi, arch, url: asset.url, cachePath, cacheSource });
+  }
+  return { version, assets };
+}
+
+/**
+ * Linux counterpart of prepareNativeBundle. The Linux package runs on the
+ * user's system Node, which the shell pre-flight accepts at every major in
+ * SUPPORTED_NODE_MAJORS, so better-sqlite3 (a NODE_MODULE_VERSION addon) ships
+ * once per ABI. node-pty's Linux prebuild is Node-API and loads on every ABI
+ * unchanged, so it keeps its own layout. No signing step exists on Linux.
+ */
+export async function prepareLinuxNativeBundle({ projectRoot, serverRoot, cacheRoot, arch = process.arch } = {}) {
+  const resolvedProjectRoot = resolve(projectRoot ?? process.cwd());
+  const resolvedServerRoot = resolve(serverRoot ?? join(resolvedProjectRoot, 'out', 'server'));
+  const resolvedCacheRoot = resolveNativeBundleCacheRoot(cacheRoot);
+  const nodeIndex = await loadNodeReleaseIndex(resolvedCacheRoot);
+  const nodeAbis = deriveNodeAbis(nodeIndex.releases);
+  const betterSqlite3 = await prepareLinuxBetterSqlite3Bundle({
+    projectRoot: resolvedProjectRoot,
+    serverRoot: resolvedServerRoot,
+    cacheRoot: resolvedCacheRoot,
+    nodeAbis,
+    arch,
+  });
+  // The selector redirects build/Release to the ABI-matched prebuild; drop the
+  // host-compiled copy so a missing ABI fails loudly instead of loading the
+  // wrong NODE_MODULE_VERSION.
+  rmSync(join(resolvedServerRoot, 'node_modules', 'better-sqlite3', 'build'), { recursive: true, force: true });
+
+  const manifest = {
+    schema: 'o8/native-addon-abis/v1',
+    source: NODE_RELEASE_INDEX_URL,
+    platform: 'linux',
+    arch,
+    nodeAbis,
+    addons: { 'better-sqlite3': betterSqlite3.version },
+  };
+  writeFileSync(join(resolvedServerRoot, NATIVE_ABI_MANIFEST), `${JSON.stringify(manifest, null, 2)}\n`);
+  return { nodeAbis, nodeIndex, betterSqlite3 };
+}
+
+/** Packaged-tree gate for Linux: every supported Node major has its addon. */
+export function verifyLinuxNativeBundle(serverRoot, { arch = process.arch, log = console.log } = {}) {
+  const resolvedServerRoot = resolve(serverRoot);
+  const manifest = readNativeAbiManifest(resolvedServerRoot);
+  const verified = [];
+  for (const major of SUPPORTED_NODE_MAJORS) {
+    const abi = String(manifest.nodeAbis[String(major)]);
+    const filePath = join(resolvedServerRoot, 'node_modules', 'better-sqlite3', 'prebuilds',
+      `node-v${abi}`, `linux-${arch}`, BETTER_SQLITE3_ADDON);
+    try {
+      verified.push(assertElfArchitecture(filePath, arch));
+      log(`[native-gate] OK better-sqlite3 Node ${major} ABI ${abi} linux-${arch}: ${filePath}`);
+    } catch (error) {
+      throw new Error(`[native-gate] FAILED better-sqlite3 Node ${major} ABI ${abi} linux-${arch}: ${error.message}`);
+    }
+  }
+  const buildPath = join(resolvedServerRoot, 'node_modules', 'better-sqlite3', 'build');
+  if (existsSync(buildPath)) {
+    throw new Error(`[native-gate] FAILED packaged runtime build output must be absent: ${buildPath}`);
+  }
+  return verified;
+}
+
 function readNativeAbiManifest(serverRoot) {
   const manifestPath = join(serverRoot, NATIVE_ABI_MANIFEST);
   if (!existsSync(manifestPath)) {
@@ -463,12 +581,20 @@ export function verifyNativeBundle(serverRoot, log = console.log) {
 const invokedPath = process.argv[1] ? resolve(process.argv[1]) : '';
 if (invokedPath === fileURLToPath(import.meta.url)) {
   const [command, targetArg] = process.argv.slice(2);
-  if (!targetArg || !['prepare', 'verify'].includes(command)) {
-    console.error(`usage: node ${basename(import.meta.url)} prepare|verify <server-root>`);
+  if (!targetArg || !['prepare', 'verify', 'prepare-linux', 'verify-linux'].includes(command)) {
+    console.error(`usage: node ${basename(import.meta.url)} prepare|verify|prepare-linux|verify-linux <server-root>`);
     process.exit(1);
   }
   try {
-    if (command === 'prepare') {
+    if (command === 'prepare-linux') {
+      const result = await prepareLinuxNativeBundle({ serverRoot: targetArg });
+      console.log(`[native-export] Node ABIs ${JSON.stringify(result.nodeAbis)} from ${result.nodeIndex.cachePath}`);
+      for (const asset of result.betterSqlite3.assets) {
+        console.log(`[native-export] ${asset.cacheSource === 'cache' ? 'using cache' : 'cached download'} ${asset.cachePath}`);
+      }
+    } else if (command === 'verify-linux') {
+      verifyLinuxNativeBundle(targetArg);
+    } else if (command === 'prepare') {
       const result = await prepareNativeBundle({ serverRoot: targetArg });
       console.log(`[native-export] Node ABIs ${JSON.stringify(result.nodeAbis)} from ${result.nodeIndex.cachePath}`);
       for (const asset of result.betterSqlite3.assets) {

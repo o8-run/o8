@@ -1,0 +1,7 @@
+test shell::feature_tests::registered_chrome_slot_state_change_repaints_cached_scene ... ok
+test shell::feature_tests::registered_shell_feature_reaches_render_keys_commands_tick_and_observer ... ok
+test shell::tests::look::shell_chrome_fifteen_workspaces_keeps_one_switcher ... ok
+LOADED_SHELL_CPU_SCENE platform=linux profile=debug messages=200 inputs=100 p50_ms=2.607890 p95_ms=3.551820
+test shell::session::loaded_shell_tests::native_composer_loaded_shell_typing_benchmark ... ok
+test shell::tests::shell_chrome_fifteen_workspaces_keeps_one_switcher ... ok
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 307 filtered out; finished in 5.88s

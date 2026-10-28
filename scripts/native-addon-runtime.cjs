@@ -7,9 +7,10 @@ const path = require('node:path');
 const redirects = new Map();
 let resolverInstalled = false;
 
-function assertSupportedArchitecture(packageName, arch) {
+function assertSupportedArchitecture(packageName, arch, platform = 'darwin') {
   if (arch !== 'x64' && arch !== 'arm64') {
-    throw new Error(`[native-addon] Unsupported macOS architecture for ${packageName}: ${arch}`);
+    const label = platform === 'linux' ? 'Linux' : 'macOS';
+    throw new Error(`[native-addon] Unsupported ${label} architecture for ${packageName}: ${arch}`);
   }
 }
 
@@ -23,13 +24,19 @@ function bundledAbiDirectories(moduleRoot) {
   }
 }
 
-function selectPrebuild(moduleRoot, packageName, addonName, arch, abi, pathExists = fs.existsSync) {
-  assertSupportedArchitecture(packageName, arch);
+function selectPrebuild(moduleRoot, packageName, addonName, arch, abi, pathExists = fs.existsSync, platform = 'darwin') {
+  assertSupportedArchitecture(packageName, arch, platform);
 
   const abiDirectories = bundledAbiDirectories(moduleRoot);
   const selectedAbiDirectory = `node-v${abi}`;
-  const selected = path.join(moduleRoot, 'prebuilds', selectedAbiDirectory, `darwin-${arch}`, addonName);
+  const selected = path.join(moduleRoot, 'prebuilds', selectedAbiDirectory, `${platform}-${arch}`, addonName);
   if (pathExists(selected)) return selected;
+
+  // Linux bundles are always multi-ABI when they have any node-v* directory:
+  // never fall back to another ABI's binary, which cannot load.
+  if (platform !== 'darwin') {
+    throw new Error(`[native-addon] Missing ${packageName} ${platform}-${arch} prebuild for Node ABI ${abi}: ${selected}`);
+  }
 
   // Older single-ABI bundles only have prebuilds/darwin-<arch>. A partially
   // migrated bundle may have one node-v* directory. Preserve both layouts,
@@ -51,8 +58,9 @@ function selectBetterSqlite3Prebuild(
   arch,
   pathExists = fs.existsSync,
   abi = process.versions.modules,
+  platform = 'darwin',
 ) {
-  return selectPrebuild(moduleRoot, 'better-sqlite3', 'better_sqlite3.node', arch, abi, pathExists);
+  return selectPrebuild(moduleRoot, 'better-sqlite3', 'better_sqlite3.node', arch, abi, pathExists, platform);
 }
 
 function selectNodePtyPrebuild(
@@ -92,14 +100,14 @@ function findPackageRoots(serverRoot, packageName) {
     .map((entry) => path.join(nodeModules, entry.name));
 }
 
-function prepareBetterSqlite3(serverRoot, arch = process.arch, abi = process.versions.modules) {
+function prepareBetterSqlite3(serverRoot, arch = process.arch, abi = process.versions.modules, platform = 'darwin') {
   const moduleRoots = findPackageRoots(serverRoot, 'better-sqlite3');
   if (moduleRoots.length === 0) {
     throw new Error(`[native-addon] No packaged better-sqlite3 module found under ${serverRoot}`);
   }
 
   for (const moduleRoot of moduleRoots) {
-    const source = selectBetterSqlite3Prebuild(moduleRoot, arch, fs.existsSync, abi);
+    const source = selectBetterSqlite3Prebuild(moduleRoot, arch, fs.existsSync, abi, platform);
     const target = path.join(moduleRoot, 'build', 'Release', 'better_sqlite3.node');
     redirects.set(path.resolve(target), source);
     installNativeRedirects();
@@ -126,17 +134,35 @@ function prepareNodePty(serverRoot, arch = process.arch, abi = process.versions.
   }
 }
 
-function prepareNativeAddons(serverRoot, arch = process.arch, abi = process.versions.modules) {
-  // The prebuild layout this selects (`prebuilds/node-v*/darwin-<arch>`) only
-  // exists in the macOS dual-arch bundle. Off-darwin bundles ship the
-  // host-compiled build/Release binaries and must load them untouched —
-  // running the selector there threw at boot and killed the server (#1673).
-  if (process.platform !== 'darwin') return;
-  prepareBetterSqlite3(serverRoot, arch, abi);
-  prepareNodePty(serverRoot, arch, abi);
+/** Whether every packaged better-sqlite3 copy carries the multi-ABI layout. */
+function hasMultiAbiBetterSqlite3(serverRoot) {
+  let roots;
+  try {
+    roots = findPackageRoots(serverRoot, 'better-sqlite3');
+  } catch {
+    return false;
+  }
+  return roots.length > 0 && roots.every((root) => bundledAbiDirectories(root).length > 0);
+}
+
+function prepareNativeAddons(serverRoot, arch = process.arch, abi = process.versions.modules, platform = process.platform) {
+  if (platform === 'darwin') {
+    prepareBetterSqlite3(serverRoot, arch, abi);
+    prepareNodePty(serverRoot, arch, abi);
+    return;
+  }
+  // Linux packages ship better-sqlite3 for every supported Node ABI under
+  // `prebuilds/node-v<abi>/linux-<arch>` (one per Node major the pre-flight
+  // accepts). node-pty's Linux prebuild is Node-API, so it loads unchanged on
+  // every ABI. Bundles and source checkouts without the multi-ABI layout keep
+  // the host-compiled build/Release binary and load it untouched (#1673).
+  if (platform === 'linux' && hasMultiAbiBetterSqlite3(serverRoot)) {
+    prepareBetterSqlite3(serverRoot, arch, abi, 'linux');
+  }
 }
 
 module.exports = {
+  hasMultiAbiBetterSqlite3,
   prepareBetterSqlite3,
   prepareNativeAddons,
   prepareNodePty,
