@@ -357,6 +357,8 @@ export function codexParseRunLog(
             toolCall: { id: itemId, name: 'exec_command', args: { command },
               status: item.exit_code != null && item.exit_code !== 0 || item.status === 'failed' ? 'error' : 'done', result: output },
           };
+          const started = entries.find(candidate => candidate.kind === 'tool' && candidate.toolCall?.id === itemId);
+          if (started?.toolCall) Object.assign(started.toolCall, entry.toolCall);
           if (existing) Object.assign(existing, entry);
           else entries.push(entry);
           continue;
