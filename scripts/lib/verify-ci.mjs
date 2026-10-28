@@ -117,7 +117,7 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
       if (!step.uses) continue;
       const supported = setupActions.some(prefix => step.uses.startsWith(prefix))
         || (id === 'security' && step.uses.startsWith(auditAction))
-        || (id === 'integration-changed' && step.uses === './.github/actions/linux-package-prerequisites')
+        || (['integration-changed', 'integration-weekly'].includes(id) && step.uses === './.github/actions/linux-package-prerequisites')
         || (id === 'o8-next-tests' && step.uses === './.github/actions/next-linux-setup');
       requireCondition(supported, `action ${step.uses} in ${id} has no verify:ci equivalent`);
     }
@@ -281,6 +281,11 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
     && Number.isFinite(full['timeout-minutes']) && full['timeout-minutes'] > 0
     && isDeepStrictEqual(full.strategy, { 'fail-fast': false, matrix: { shard: [1, 2, 3, 4, 5, 6] } }),
   'main pushes must retain the complete integration matrix');
+  const fullSetup = full.steps.filter(step => step.uses === packageAction);
+  requireCondition(fullSetup.length === 1
+    && isDeepStrictEqual(Object.fromEntries(Object.entries(fullSetup[0]).filter(([key]) => key !== 'name')), {
+      uses: packageAction, with: { group: 'resources' },
+    }), 'full integration package prerequisites need a verify:ci equivalent');
   const fullRun = full.steps.find(step => step.run === 'npm run test:integration');
   const fullBrowser = full.steps.find(step => step.run === 'npx --no-install playwright-core install --with-deps chromium');
   const fullClassification = full.steps.find(step => step.run === 'npm run test:classification:check');
@@ -291,7 +296,7 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
   for (const step of full.steps.filter(step => step.run)) {
     requireCondition(!step['continue-on-error'] && !step.shell && !step['working-directory']
       && (step === fullRun || step === fullBrowser || step === fullClassification
-        || (!step.if && (bootstrapCommands.has(step.run.trim()) || step.run.trim() === prerequisites))),
+        || (!step.if && bootstrapCommands.has(step.run.trim()))),
     'full integration step needs a verify:ci equivalent');
   }
   if (fullIntegration) {

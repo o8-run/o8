@@ -318,7 +318,7 @@ describe('local CI verification through its command entry point', () => {
     if (options.mainFailure) expect(result.stdout).toContain('FAIL tests/unchanged-integration-0.test.mjs');
   }, 60_000);
 
-  it.each(['main trigger', 'missing shard', 'filtered command', 'missing browser', 'tolerated failure', 'uncovered action'])(
+  it.each(['main trigger', 'missing shard', 'filtered command', 'missing browser', 'tolerated failure', 'uncovered action', 'package group'])(
     'rejects a hidden main integration coverage change: %s', change => {
       const workflow = parse(readFileSync(workflowPath, 'utf8'));
       const job = workflow.jobs['integration-weekly'];
@@ -328,6 +328,7 @@ describe('local CI verification through its command entry point', () => {
       if (change === 'missing browser') job.steps = job.steps.filter((step: { run?: string }) => !step.run?.includes('playwright-core'));
       if (change === 'tolerated failure') job['continue-on-error'] = true;
       if (change === 'uncovered action') job.steps.push({ uses: './.github/actions/uncovered-fixture' });
+      if (change === 'package group') job.steps.find((step: { uses?: string }) => step.uses === './.github/actions/linux-package-prerequisites').with.group = 'rust';
       const result = coverage(workflow);
       expect(result.status, result.stdout).toBe(1);
       expect(result.stderr).toContain('verify:ci');
