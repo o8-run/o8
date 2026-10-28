@@ -143,7 +143,40 @@ impl Composer {
         .detach();
     }
 
+    fn remove_image(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        if index >= self.controls.images.len() {
+            return;
+        }
+        self.controls.images.remove(index);
+        self.controls.error.clear();
+        // The following image now occupies this slot and inherits its Tab stop.
+        let next = (index < self.controls.images.len())
+            .then(|| {
+                self.controls
+                    .focus
+                    .get(&format!("composer-image-remove-{index}"))
+            })
+            .flatten();
+        next.unwrap_or(&self.focus).focus(window);
+        self.images_changed(cx);
+    }
+
     pub(crate) fn image_chips(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let count = self.controls.images.len();
+        self.controls.focus.retain(|id, _| {
+            id.strip_prefix("composer-image-remove-")
+                .and_then(|index| index.parse::<usize>().ok())
+                .is_none_or(|index| index < count)
+        });
+        let focuses: Vec<_> = (0..count)
+            .map(|index| {
+                self.controls
+                    .focus
+                    .entry(format!("composer-image-remove-{index}"))
+                    .or_insert_with(|| cx.focus_handle().tab_stop(true))
+                    .clone()
+            })
+            .collect();
         // Also retire decoded buffers consumed by a confirmed send.
         self.controls.previews.retain(|uri, _| {
             self.controls
@@ -197,17 +230,33 @@ impl Composer {
                                     .debug_selector(move || {
                                         format!("composer-image-remove-{index}")
                                     })
+                                    .track_focus(&focuses[index])
+                                    .tab_stop(true)
                                     .w(px(24.))
                                     .h(px(24.))
+                                    .rounded(px(7.))
                                     .cursor_pointer()
+                                    .focus(|s| s.bg(crate::theme::current().selection))
+                                    .hover(|s| s.bg(crate::theme::current().hover))
                                     .child("×")
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        if index < this.controls.images.len() {
-                                            this.controls.images.remove(index);
-                                            this.controls.error.clear();
-                                            this.images_changed(cx);
-                                        }
-                                    })),
+                                    .on_mouse_down(MouseButton::Left, {
+                                        let focus = focuses[index].clone();
+                                        cx.listener(move |_, _, window, _| focus.focus(window))
+                                    })
+                                    .on_click(cx.listener(move |this, _, window, cx| {
+                                        this.remove_image(index, window, cx);
+                                    }))
+                                    .on_key_down(cx.listener(
+                                        move |this, event: &KeyDownEvent, window, cx| {
+                                            if matches!(
+                                                event.keystroke.key.as_str(),
+                                                "enter" | "space"
+                                            ) {
+                                                this.remove_image(index, window, cx);
+                                                cx.stop_propagation();
+                                            }
+                                        },
+                                    )),
                             )
                     }),
             )

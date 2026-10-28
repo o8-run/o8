@@ -139,3 +139,83 @@ fn native_image_manual_size_and_four_image_capacity(cx: &mut TestAppContext) {
         assert!(s.composer.read(cx).controls.error.contains("4 images"))
     });
 }
+
+#[gpui::test]
+fn native_image_remove_chips_tab_enter_space_restore_focus(cx: &mut TestAppContext) {
+    let fixture = Fixture::start(true);
+    let (surface, cx) = open(cx, &fixture);
+    image_session(cx, &surface);
+    cx.simulate_input("Keep this draft");
+    for _ in 0..3 {
+        paste(png(), cx);
+    }
+    assert_eq!(images(&surface, cx).len(), 3);
+    let focused = |index: usize, cx: &mut VisualTestContext| {
+        surface.update_in(cx, |s, window, cx| {
+            s.composer
+                .read(cx)
+                .controls
+                .focus
+                .get(&format!("composer-image-remove-{index}"))
+                .is_some_and(|focus| focus.is_focused(window))
+        })
+    };
+    // Start at the actual pasted-image editor and navigate using only Tab.
+    cx.simulate_keystrokes("tab");
+    draw(cx);
+    assert!(
+        focused(0, cx),
+        "Tab from the editor must reach the first image remove button"
+    );
+    cx.simulate_keystrokes("tab");
+    draw(cx);
+    assert!(focused(1, cx), "every remove button must be a Tab stop");
+    cx.simulate_keystrokes("tab");
+    draw(cx);
+    assert!(
+        focused(2, cx),
+        "the last remove button must also be reachable"
+    );
+    cx.simulate_keystrokes("shift-tab");
+    draw(cx);
+    assert!(focused(1, cx));
+    cx.simulate_keystrokes("enter");
+    draw(cx);
+    assert_eq!(
+        images(&surface, cx).len(),
+        2,
+        "Enter removes the focused image"
+    );
+    assert!(
+        focused(1, cx),
+        "removal must focus the next image, now in that slot"
+    );
+    cx.simulate_keystrokes("space");
+    draw(cx);
+    assert_eq!(
+        images(&surface, cx).len(),
+        1,
+        "Space removes the focused image"
+    );
+    surface.update_in(cx, |s, window, cx| {
+        assert!(
+            s.composer.read(cx).focus.is_focused(window),
+            "without a next chip, return to the input"
+        );
+    });
+    cx.simulate_keystrokes("tab enter");
+    draw(cx);
+    assert!(images(&surface, cx).is_empty());
+    surface.update_in(cx, |s, window, cx| {
+        let input = s.composer.read(cx);
+        assert!(
+            input.focus.is_focused(window),
+            "removing the final image restores input focus"
+        );
+        assert_eq!(input.text, "Keep this draft");
+    });
+    assert!(
+        surface.read_with(cx, |s, _| s.queue["items"].as_array().unwrap().is_empty()),
+        "image removal must never submit the draft"
+    );
+}

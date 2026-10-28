@@ -421,7 +421,17 @@ impl Surface {
                         if s.composer.read(cx).focus.is_focused(window)
                             && !event.keystroke.modifiers.shift
                         {
-                            s.focus.focus(window);
+                            let input = s.composer.read(cx);
+                            if let Some(focus) = input
+                                .controls
+                                .focus
+                                .get("composer-image-remove-0")
+                                .filter(|_| !input.controls.images.is_empty())
+                            {
+                                focus.focus(window);
+                            } else {
+                                s.focus.focus(window);
+                            }
                         } else if event.keystroke.modifiers.shift {
                             window.focus_prev();
                         } else {
