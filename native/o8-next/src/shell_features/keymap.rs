@@ -67,7 +67,9 @@ fn action(
     cx: &mut Context<Shell>,
 ) {
     use crate::keymap::Shortcut;
-    if registry::extensions().any(|extension| extension.action(s, action, window, cx)) {
+    if palette::action(s, action, window, cx)
+        || registry::extensions().any(|extension| extension.action(s, action, window, cx))
+    {
         s.revision += 1;
         cx.notify();
         return;

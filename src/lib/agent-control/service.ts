@@ -138,6 +138,9 @@ export async function resolveAgentControlTarget(
   const worktreePath = trimmed(lane?.worktreePath ?? packet?.lane?.worktreePath);
   const runtime = trimmed(lane?.runtime ?? packet?.lane?.runtime ?? packet?.runtime ?? hints.runtime);
   const surfaceId = trimmed(hints.surfaceId ?? sessionKey);
+  const owned = ref.kind === 'session'
+    ? await import('@/lib/runtimes/shared/owned-session-index').then(module => module.readOwnedSessionRecord(ref.id))
+    : null;
   const approval = {
     id: null as string | null,
     status: (persistenceReadFailed ? 'unknown' : 'none') as AgentControlTarget['approval']['status'],
@@ -167,19 +170,19 @@ export async function resolveAgentControlTarget(
     }
   }
 
-  const persisted = Boolean(lane || packet);
+  const persisted = Boolean(lane || packet || owned);
   const runtimeResolved = Boolean(hints.runtime || hints.surfaceId || hints.sessionKey);
   return {
     schema: AGENT_CONTROL_TARGET_SCHEMA,
     canonicalRef: canonicalControlRef({ packetId, laneId, sessionKey, fallback: ref }),
     resolution: persisted ? 'persisted' : runtimeResolved ? 'runtime' : 'request',
-    runtime,
+    runtime: runtime ?? (owned ? ref.id.split('-owned:')[0] : null),
     surfaceId,
     sessionKey,
     projectId: trimmed(lane?.projectId),
-    repoPath,
-    worktreePath,
-    branch: trimmed(lane?.branch ?? packet?.branchTarget),
+    repoPath: repoPath ?? owned?.repoPath ?? null,
+    worktreePath: worktreePath ?? owned?.cwd ?? null,
+    branch: trimmed(lane?.branch ?? packet?.branchTarget ?? owned?.branch),
     baseBranch: trimmed(lane?.baseBranch),
     laneId,
     laneStatus: trimmed(lane?.status),
@@ -221,7 +224,7 @@ function mergeAgentControlTargets(
   };
 }
 
-function runtimeActionKind(action: SessionControlAction): RuntimeActionKind {
+function runtimeActionKind(action: Exclude<SessionControlAction, { kind: 'resume' | 'retry' | 'retire' }>): RuntimeActionKind {
   if (action.kind === 'send') return 'send_input';
   return action.kind;
 }
@@ -230,6 +233,11 @@ async function performSessionControl(
   request: SessionControlRequest,
 ): Promise<UnresolvedAgentControlResult> {
   const action = request.action;
+  if (action.kind === 'resume' || action.kind === 'retry' || action.kind === 'retire') {
+    const { controlSavedWorker } = await import('./worker-recovery');
+    return baseResult(request, { ...await controlSavedWorker(request.ref.id, action.kind),
+      surfaceId: request.ref.id, sessionKey: request.ref.id });
+  }
   const runtimeResult = await performRuntimeAction({
     action: runtimeActionKind(action),
     surfaceId: request.ref.id,

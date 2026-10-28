@@ -45,6 +45,10 @@ pub(super) struct PaletteCommand {
 }
 
 pub(super) trait ShellFeature: Sync {
+    // Feature-owned connection policy uses the same lifecycle dispatch as surfaces.
+    fn extension(&self) -> Option<&'static dyn registry::ShellExtension> {
+        None
+    }
     fn ticks(&self) -> &'static [TickHook] {
         &[]
     }
@@ -81,6 +85,11 @@ include!(concat!(env!("OUT_DIR"), "/shell_features.rs"));
 #[derive(Default)]
 pub(super) struct State(HashMap<TypeId, Box<dyn Any>>);
 impl State {
+    pub fn read<T: Default + 'static>(&self) -> Option<&T> {
+        self.0
+            .get(&TypeId::of::<T>())
+            .and_then(|state| state.downcast_ref())
+    }
     pub fn get<T: Default + 'static>(&mut self) -> &mut T {
         self.0
             .entry(TypeId::of::<T>())
@@ -88,6 +97,11 @@ impl State {
             .downcast_mut()
             .expect("feature state type")
     }
+}
+pub(super) fn extensions() -> impl Iterator<Item = &'static dyn registry::ShellExtension> {
+    modules()
+        .iter()
+        .filter_map(|(_, feature)| feature.extension())
 }
 fn ordered<T: 'static>(
     select: impl Fn(&dyn ShellFeature) -> &'static [T],

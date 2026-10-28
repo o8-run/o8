@@ -1,5 +1,4 @@
 //! Palette rendering, filtering, workspace routing and keyboard ownership.
-use super::registry::ShellExtension;
 use super::*;
 use crate::theme::current as theme;
 #[path = "palette_target.rs"]
@@ -86,75 +85,65 @@ pub(super) fn open_commands(shell: &mut Shell, workspace_picker: bool, window: &
 fn toggle(shell: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
     set_open(shell, !shell.palette, false, window, cx);
 }
-impl ShellExtension for Palette {
-    fn action(
-        &self,
-        s: &mut Shell,
-        action: &crate::keymap::Shortcut,
-        window: &mut Window,
-        cx: &mut Context<Shell>,
-    ) -> bool {
-        use crate::keymap::Shortcut;
-        match *action {
-            Shortcut::Palette | Shortcut::PaletteGlobal => toggle(s, window, cx),
-            Shortcut::PaletteCancel => {
-                s.palette = false;
-                s.restore_focus(window, cx);
-            }
-            Shortcut::PaletteMove(next) => {
-                s.choice = if next {
-                    (s.choice + 1).min(entries(s).len().saturating_sub(1))
-                } else {
-                    s.choice.saturating_sub(1)
-                };
-            }
-            Shortcut::PaletteAccept => {
-                if let Some(entry) = entries(s).get(s.choice).cloned() {
-                    entry.run(s, window, cx);
-                }
-            }
-            _ => return false,
+pub(super) fn action(
+    s: &mut Shell,
+    action: &crate::keymap::Shortcut,
+    window: &mut Window,
+    cx: &mut Context<Shell>,
+) -> bool {
+    use crate::keymap::Shortcut;
+    match *action {
+        Shortcut::Palette | Shortcut::PaletteGlobal => toggle(s, window, cx),
+        Shortcut::PaletteCancel => {
+            s.palette = false;
+            s.restore_focus(window, cx);
         }
-        if s.palette {
-            s.palette_scroll.scroll_to_item(s.choice + 1);
+        Shortcut::PaletteMove(next) => {
+            s.choice = if next {
+                (s.choice + 1).min(entries(s).len().saturating_sub(1))
+            } else {
+                s.choice.saturating_sub(1)
+            };
         }
-        true
+        Shortcut::PaletteAccept => {
+            if let Some(entry) = entries(s).get(s.choice).cloned() {
+                entry.run(s, window, cx);
+            }
+        }
+        _ => return false,
     }
-    fn palette(&self, shell: &Shell, cx: &mut Context<Shell>) -> Option<gpui::AnyElement> {
-        Some(
-            div()
-                .id("command-palette")
-                .occlude()
-                .absolute()
-                .top(px(54.))
-                .left(px(12.))
-                .right(px(12.))
-                .debug_selector(|| "command-palette".into())
-                .max_h(px(300.))
-                .overflow_y_scroll()
-                .track_scroll(&shell.palette_scroll)
-                .p(px(12.))
-                .bg(theme().surface_raised)
-                .child(shell.palette_input.clone())
-                .children(entries(shell).into_iter().enumerate().map(|(row, entry)| {
-                    div()
-                        .id(gpui::SharedString::from(entry.identity()))
-                        .debug_selector(move || format!("command-{row}"))
-                        .p(px(6.))
-                        .cursor_pointer()
-                        .bg(if row == shell.choice {
-                            theme().selection
-                        } else {
-                            theme().surface_raised
-                        })
-                        .child(entry.label(&shell.sessions))
-                        .on_click(
-                            cx.listener(move |s, _, window, cx| entry.clone().run(s, window, cx)),
-                        )
-                }))
-                .into_any_element(),
-        )
+    if s.palette {
+        s.palette_scroll.scroll_to_item(s.choice + 1);
     }
+    true
+}
+pub(super) fn render(shell: &Shell, cx: &mut Context<Shell>) -> Option<gpui::AnyElement> {
+    Some(
+        div()
+            .id("command-palette")
+            .debug_selector(|| "command-palette".into())
+            .max_h(px(300.))
+            .overflow_y_scroll()
+            .track_scroll(&shell.palette_scroll)
+            .p(px(12.))
+            .bg(theme().surface_raised)
+            .child(shell.palette_input.clone())
+            .children(entries(shell).into_iter().enumerate().map(|(row, entry)| {
+                div()
+                    .id(gpui::SharedString::from(entry.identity()))
+                    .debug_selector(move || format!("command-{row}"))
+                    .p(px(6.))
+                    .cursor_pointer()
+                    .bg(if row == shell.choice {
+                        theme().selection
+                    } else {
+                        theme().surface_raised
+                    })
+                    .child(entry.label(&shell.sessions))
+                    .on_click(cx.listener(move |s, _, window, cx| entry.clone().run(s, window, cx)))
+            }))
+            .into_any_element(),
+    )
 }
 #[cfg(test)]
 #[path = "palette_tests.rs"]

@@ -20,6 +20,7 @@ fn render(
     let content = registrations()
         .iter()
         .find_map(|r| (r.overlay)(s))
+        .or_else(|| registry::extensions().find_map(|extension| extension.overlay(s)))
         .or_else(|| {
             active
                 .as_ref()

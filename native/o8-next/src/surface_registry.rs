@@ -45,6 +45,12 @@ impl Default for Frame {
     }
 }
 pub(super) trait ShellExtension: Sync {
+    fn overlay(&self, _s: &mut Shell) -> Option<AnyElement> {
+        None
+    }
+    fn capture_blocked(&self, _s: &Shell) -> bool {
+        false
+    }
     fn load(&self, _s: &mut Shell, _cx: &mut Context<Shell>) -> bool {
         false
     }
@@ -82,7 +88,10 @@ pub(super) trait ShellExtension: Sync {
     }
 }
 pub(super) fn extensions() -> impl Iterator<Item = &'static dyn ShellExtension> {
-    registrations().iter().filter_map(|r| r.extension)
+    registrations()
+        .iter()
+        .filter_map(|r| r.extension)
+        .chain(features::extensions())
 }
 pub(super) struct Registration {
     pub extension: Option<&'static dyn ShellExtension>,
