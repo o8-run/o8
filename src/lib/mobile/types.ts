@@ -406,6 +406,9 @@ export interface MobileTranscriptEntry {
     packet?: Record<string, unknown>;
   };
   compaction?: {
+    operationId?: string;
+    startedAt?: number;
+    completedAt?: number;
     timestamp: number;
     tokensBefore?: number;
     contextSource?: string;
