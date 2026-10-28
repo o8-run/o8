@@ -74,7 +74,7 @@ export function RailUpdateControl({ buttonStyle }: { buttonStyle: CSSProperties 
   const [allNotes, setAllNotes] = useState(false);
   const pending = hub.app.installing || hub.syncing;
   const status = hub.checkMessage || hub.app.message;
-  const visibleTools = hub.tools.filter(tool => tool.status !== 'not-installed' && tool.runtimeId !== 'qoder');
+  const visibleTools = hub.tools.filter(tool => tool.status !== 'not-installed');
   const available = Boolean(hub.app.version);
   // The filled icon means an o8 update. Connected-CLI updates alone show a small dot.
   const appReady = Boolean(hub.app.version);
