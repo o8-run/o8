@@ -30,6 +30,7 @@ import { isTauri } from '@/lib/tauri/bridge';
 import { VisualCaptureInput, type VisualCaptureBounds, type VisualCaptureVoice } from '@/components/desktop/visual-instructions/VisualCaptureInput';
 import { VisualCaptureControls } from '@/components/desktop/visual-instructions/VisualCaptureControls';
 import { getPalette, resolveTheme } from '@/lib/theme/registry';
+import { inkOutline, inkPath } from './stroke';
 
 export const dynamic = 'force-dynamic';
 
@@ -189,8 +190,6 @@ export default function SpatialInkPage() {
       const pts = stroke.pts;
       if (pts.length === 0) return;
       const reduced = reducedRef.current;
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
 
       if (pts.length === 1) {
         ctx.globalAlpha = alpha;
@@ -206,30 +205,26 @@ export default function SpatialInkPage() {
         return;
       }
 
-      // Glow + taper pass: thin tail → thick head (comet trail).
-      ctx.strokeStyle = ORANGE;
-      if (!reduced) ctx.shadowColor = ORANGE;
+      // Glow pass: a smoothed, pressure-shaped outline whose tail tapers into
+      // the head (comet trail). The live stroke keeps its leading edge open.
       const n = pts.length;
-      for (let i = 1; i < n; i++) {
-        const f = i / (n - 1); // 0 tail .. 1 head
-        ctx.beginPath();
-        ctx.moveTo(pts[i - 1].x, pts[i - 1].y);
-        ctx.lineTo(pts[i].x, pts[i].y);
-        ctx.lineWidth = reduced ? 3 : 1.4 + f * 2.4;
-        ctx.globalAlpha = reduced ? alpha : alpha * (0.55 + 0.45 * f);
-        ctx.shadowBlur = reduced ? 0 : 11 * glow;
-        ctx.stroke();
+      const complete = !(isHead && phaseRef.current === 'live');
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = ORANGE;
+      if (!reduced) {
+        ctx.shadowColor = ORANGE;
+        ctx.shadowBlur = 11 * glow;
       }
+      const body = inkPath(inkOutline(pts, reduced ? 3 : 4, complete));
+      if (body) ctx.fill(new Path2D(body));
 
       // Hot core — thin, bright, no shadow, over the glow.
       ctx.shadowBlur = 0;
-      ctx.globalAlpha = alpha;
-      ctx.strokeStyle = reduced ? ORANGE : CORE_HOT;
-      ctx.lineWidth = reduced ? 3 : 1.5;
-      ctx.beginPath();
-      ctx.moveTo(pts[0].x, pts[0].y);
-      for (let i = 1; i < n; i++) ctx.lineTo(pts[i].x, pts[i].y);
-      ctx.stroke();
+      if (!reduced) {
+        ctx.fillStyle = CORE_HOT;
+        const core = inkPath(inkOutline(pts, 1.6, complete));
+        if (core) ctx.fill(new Path2D(core));
+      }
 
       // Live head pulse — a bright breathing dot at the leading point.
       if (isHead && !reduced && phaseRef.current === 'live') {

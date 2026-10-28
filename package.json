@@ -177,6 +177,7 @@
     "monaco-editor": "^0.55.1",
     "next": "^16.4.1",
     "parse5": "8.0.1",
+    "perfect-freehand": "^1.2.3",
     "playwright-core": "^1.60.0",
     "prosemirror-commands": "1.7.2",
     "prosemirror-history": "1.5.0",
