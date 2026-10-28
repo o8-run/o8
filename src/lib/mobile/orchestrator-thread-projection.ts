@@ -41,6 +41,8 @@ export type ChatHistoryMessage = {
   model?: string;
   receipt?: MobileTranscriptEntry['receipt'];
   type?: MobileTranscriptEntry['type'];
+  pinned?: boolean;
+  compaction?: MobileTranscriptEntry['compaction'];
   handoff?: MobileTranscriptEntry['handoff'];
   toolCalls?: MobileTranscriptEntry['toolCalls'];
   tokens?: {

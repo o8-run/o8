@@ -5148,6 +5148,27 @@
       ]
     },
     {
+      "path": "tests/owner-chat-chronology-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/owner-chat-compaction-race-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/owner-chat-reading-position-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/packaged-server-smoke-real-path.test.ts",
       "reasons": [
         "child-process",

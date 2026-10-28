@@ -208,7 +208,7 @@ describe('auto compaction context through bridge, telemetry, trigger and persist
     const { compacted } = await runTrigger('thoughts-large-context', telemetry);
     expect(compacted?.applied).toBe(true);
     const stored = JSON.parse(readFileSync(historyPath, 'utf8'));
-    const record = stored.messages[0].compaction;
+    const record = stored.messages.findLast((entry: { type?: string }) => entry.type === 'compaction').compaction;
     // Assert findings first: the old split sends only the user to the summarizer.
     expect(record.summary).toContain('Offsets skip records.');
     expect(record.summary).toContain('Use cursor pagination.');
@@ -266,7 +266,7 @@ describe('auto compaction context through bridge, telemetry, trigger and persist
     const { measuredTotal, compacted } = await runTrigger(threadId, undefined, backend, messages);
     expect(measuredTotal).toBeGreaterThan(15_000);
     expect(compacted?.applied).toBe(true);
-    const record = JSON.parse(readFileSync(historyPath, 'utf8')).messages[0].compaction;
+    const record = JSON.parse(readFileSync(historyPath, 'utf8')).messages.findLast((entry: { type?: string }) => entry.type === 'compaction').compaction;
     expect(record.tokensBefore).toBe(measuredTotal);
     expect(record.contextSource).toBe('transcript-estimate');
     expect(record.summary).toContain('Use cursor pagination.');
