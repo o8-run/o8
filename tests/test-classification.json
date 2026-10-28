@@ -181,6 +181,12 @@
       ]
     },
     {
+      "path": "src/app/api/v2/chat-history/completed-tools-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "src/app/api/v2/keys/route.launch.test.ts",
       "reasons": [
         "child-process",
