@@ -3,6 +3,12 @@
   "generatedBy": "node scripts/classify-tests.mjs --write",
   "resourceOwning": [
     {
+      "path": "cli/src/commands/next.test.ts",
+      "reasons": [
+        "child-process"
+      ]
+    },
+    {
       "path": "cli/src/commands/packet/info-surface.test.ts",
       "reasons": [
         "worktree-api"
@@ -7519,6 +7525,12 @@
       "reasons": [
         "child-process",
         "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/worker-catalog-failure-real-path.test.ts",
+      "reasons": [
         "real-path"
       ]
     },
