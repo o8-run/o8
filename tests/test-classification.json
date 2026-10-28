@@ -2487,6 +2487,28 @@
       ]
     },
     {
+      "path": "tests/compaction-status-browser-real-path.test.ts",
+      "reasons": [
+        "browser",
+        "network-listener",
+        "real-path"
+      ],
+      "browser": true
+    },
+    {
+      "path": "tests/compaction-status-history-race-real-path.test.ts",
+      "reasons": [
+        "executable-fixture",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/compaction-status-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/completion-ledger-model-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -2506,6 +2528,14 @@
         "executable-fixture",
         "real-path"
       ]
+    },
+    {
+      "path": "tests/composer-cache-pill-real-path.test.ts",
+      "reasons": [
+        "browser",
+        "real-path"
+      ],
+      "browser": true
     },
     {
       "path": "tests/composer-chip-layout-real-path.test.ts",
@@ -3466,6 +3496,15 @@
       ]
     },
     {
+      "path": "tests/interrupted-worker-control-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/judgment-client-real-path.test.ts",
       "reasons": [
         "executable-fixture",
@@ -3714,6 +3753,12 @@
       "reasons": [
         "child-process",
         "native-build"
+      ]
+    },
+    {
+      "path": "tests/linux-glibc-baseline.test.ts",
+      "reasons": [
+        "child-process"
       ]
     },
     {
@@ -5321,6 +5366,18 @@
         "real-path",
         "worktree",
         "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/panel-artifact-raster-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/panel-raster-image-serving-real-path.test.ts",
+      "reasons": [
+        "real-path"
       ]
     },
     {
@@ -7469,6 +7526,15 @@
       "reasons": [
         "real-path"
       ]
+    },
+    {
+      "path": "tests/visualization-reload-real-path.test.ts",
+      "reasons": [
+        "browser",
+        "network-listener",
+        "real-path"
+      ],
+      "browser": true
     },
     {
       "path": "tests/voice-codex-realtime-route.test.ts",

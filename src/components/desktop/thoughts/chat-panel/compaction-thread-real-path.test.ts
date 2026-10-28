@@ -3,7 +3,7 @@
 import { EventEmitter } from 'node:events';
 import { NextRequest } from 'next/server';
 import type { RealtimeEventEnvelope } from '@/lib/realtime/types';
-import { act, createElement, useEffect } from 'react';
+import { act, createElement, Fragment, useEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { readFileSync, rmSync } from 'node:fs';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -15,6 +15,7 @@ import type { OrchestratorStreamResult } from '../use-orchestrator-stream/types'
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import { deserializeStoredTranscript, serializeTranscriptForStorage } from '@/lib/transcripts/history-serde';
 import { clearQueuedOrchestratorSessionPrelude } from '@/lib/orchestrator/store';
+import { CompactionStatus } from './CompactionStatus';
 
 const fixture = await vi.hoisted(async () => {
   const { mkdtempSync } = await import('node:fs');
@@ -49,7 +50,7 @@ vi.mock('@/lib/providers/child-process', async original => ({ ...await original<
   });
   return child;
 } }));
-const { POST: compactRoute } = await import('@/app/api/orchestrator/compact/route');
+const { POST: compactRoute, GET: compactionStatusRoute } = await import('@/app/api/orchestrator/compact/route');
 const { getCanonicalChatHistoryPath, persistCanonicalChatHistoryRecord } = await import('@/lib/llm/chat-history-store');
 const threadId = 'thoughts-compaction-render';
 let host: HTMLDivElement;
@@ -59,12 +60,12 @@ let stream: OrchestratorStreamResult;
 function Harness({ restored = [] }: { restored?: MobileTranscriptEntry[] }) {
   const result = useOrchestratorStream('/repo/sample', { threadId });
   useEffect(() => { stream = result; }, [result]);
-  return createElement(ChatMessageList, {
+  return createElement(Fragment, null, createElement(ChatMessageList, {
     displayMessages: resolveVisibleChatMessages({ historyEntries: [], chatMessages: restored, streamMessages: restored.length ? [] : result.messages,
       isOrchestratorMode: true, isChatMode: false }),
     repoPath: '/repo/sample', threadId, displayWaiting: result.status === 'busy', isOrchestratorMode: true, activeTargetLabel: 'Lead', activeTargetColor: 'var(--t-accent)',
     thoughtsMutedGlass: 'var(--t-hover)', thoughtsElevatedBorder: 'var(--t-divider-subtle)', thoughtsElevatedShadow: 'none', emptyStateFallback: null,
-  });
+  }), createElement(CompactionStatus, { repoPath: '/repo/sample', threadId, messages: result.messages, turnBusy: result.status === 'busy' }));
 }
 function receive(event: string, data: Record<string, unknown>) {
   fixture.socket!.onmessage?.({ data: JSON.stringify({ channel: 'orchestrator', event, data: { threadId, backend: 'codex', ...data } }) } as MessageEvent);
@@ -85,6 +86,7 @@ beforeEach(async () => {
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({ font: '', measureText: (text: string) => ({ width: text.length * 6 }) } as unknown as CanvasRenderingContext2D);
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input).startsWith('/api/orchestrator/compact?')) return compactionStatusRoute(new NextRequest(`http://localhost${String(input)}`));
     if (String(input).endsWith('/internal/realtime')) {
       const { mutation } = JSON.parse(init?.body as string);
       fixture.liveEvent?.({ protocol: 1, seq: 1, stream: 'global', channel: 'mutation', event: mutation.status === 'pending' ? 'mutation.record' : 'mutation.settled',
@@ -128,9 +130,10 @@ describe('compaction through persisted history, live stream and real transcript 
     expect(messageIds().at(-1)).toBe(last.id);
     expect(host.textContent).not.toContain('Compaction in progress');
     expect(host.textContent).not.toContain('Messages sent now will be queued and delivered after compaction completes.');
-    expect(host.textContent).toContain('Planning next moves');
+    expect(host.textContent).not.toContain('Planning next moves');
+    expect(host.textContent).toContain(last.role === 'user' ? 'Waiting for response' : 'Working · phase unknown');
   });
-  it.each([false, true])('keeps the live warning while the pre-send summarizer is held, then clears it (failure: %s)', async (failed) => {
+  it.each([false, true])('keeps compact status while the pre-send summarizer is held, then settles it (failure: %s)', async (failed) => {
     fixture.realCompact = true;
     fixture.failCompact = failed;
     act(() => stream.replaceTranscript(persist(compactionThread.slice(0, 2).map((entry, index) => ({ ...entry, timestamp: Date.now() - 60_000 + index * 1_000 })))));
@@ -144,13 +147,15 @@ describe('compaction through persisted history, live stream and real transcript 
       act(() => { handle = stream.send('Continue the original check.', { backend: 'codex' }); });
       await act(async () => { await started; });
       expect(host.textContent).toContain('Compacting to keep turn fast…');
-      expect(host.textContent).toContain('Compaction in progress');
-      expect(host.textContent).toContain('Messages sent now will be queued');
+      await vi.waitFor(() => expect(host.querySelector('[data-compaction-phase="compacting"]')).not.toBeNull());
+      expect(host.textContent).not.toContain('Messages sent now will be queued');
       await act(async () => { release(); await fixture.compactResponse; await new Promise(resolve => setTimeout(resolve, 0)); });
       expect((await fixture.compactResponse)?.status).toBe(failed ? 500 : 200);
       expect(host.textContent).not.toContain('Compacting to keep turn fast…');
       expect(host.textContent).not.toContain('Compaction in progress');
       expect(host.textContent).not.toContain('Messages sent now will be queued');
+      expect(host.querySelector('[data-compaction-phase="compacting"]')).toBeNull();
+      expect(host.querySelector(`[data-compaction-phase="${failed ? 'failed' : 'complete'}"]`)).not.toBeNull();
       if (failed) {
         expect(stream.messages.at(-1)?.text).toContain('Compaction failed before send');
         expect((fixture.socket!.send as ReturnType<typeof vi.fn>).mock.calls.map(([raw]) => JSON.parse(raw as string))

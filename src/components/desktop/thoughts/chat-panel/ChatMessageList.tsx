@@ -7,7 +7,6 @@ import { DesktopAgentMessage } from '../../DesktopAgentMessage';
 import { ComposerEntryDelivery, ComposerQueuedMessages, type ComposerTranscriptQueue } from './ComposerQueuedMessages';
 import { SuggestedReplies } from '../SuggestedReplies';
 import { TurnSummaryCard, type TurnSummary } from './TurnSummaryCard';
-import { ShimmerLine } from './turn-line';
 import { mergeAdjacentToolOnlyEntries } from './ToolCallChipCluster';
 import { CollideProposalCard } from './CollideProposalCard';
 import { MissionCompleteGroupCard } from './MissionCompleteGroupCard';
@@ -83,7 +82,6 @@ interface ChatMessageListProps {
   threadId?: string | null;
   active?: boolean;
   displayWaiting: boolean;
-  liveCompaction?: boolean;
   repoPath?: string | null;
   activeTargetLabel: string;
   activeTargetColor: string;
@@ -99,10 +97,7 @@ interface ChatMessageListProps {
   bottomContent?: React.ReactNode;
   /** Stable transcript-turn slots, keyed by the original turn-start entry. */
   turnContent?: ReadonlyMap<string, React.ReactNode>;
-  // Orchestrator has its own sticky ComposerStatusBar above the textarea
-  // that already surfaces "working" state + elapsed time + running tools.
-  // Duplicating the inline "is thinking…" bubble here makes the chat feel
-  // noisy during tool-heavy turns. CLI lane panels still need the bubble.
+  // Orchestrator activity lives in the transcript; CLI lanes retain their indicator.
   isOrchestratorMode?: boolean;
   // Suggested-reply chips (#771). The parent owns the cache + Gemini fetch and
   // hands us the chip strings for the last assistant message. We render them
@@ -162,7 +157,6 @@ const ChatMessageListPresentation = memo(forwardRef<HTMLDivElement, ChatMessageL
   displayMessages: rawDisplayMessages,
   logLabel,
   displayWaiting,
-  liveCompaction = false,
   threadId,
   active = false,
   repoPath,
@@ -247,6 +241,8 @@ const ChatMessageListPresentation = memo(forwardRef<HTMLDivElement, ChatMessageL
       break;
     }
   }
+  const latestUserIndex = displayMessages.findLastIndex(message => message.role === 'user' && !message.voice);
+  const currentAssistant = lastAssistantIndex > latestUserIndex ? displayMessages[lastAssistantIndex] : undefined;
   const latestAssistantId = displayMessages[lastAssistantIndex]?.id ?? null;
   const [animatingTailId, setAnimatingTailId] = useState<string | null>(() => displayWaiting ? latestAssistantId : null);
   if (displayWaiting && animatingTailId !== latestAssistantId) setAnimatingTailId(latestAssistantId);
@@ -349,21 +345,13 @@ const ChatMessageListPresentation = memo(forwardRef<HTMLDivElement, ChatMessageL
         {bottomContent}
         {composerQueue ? <ComposerQueuedMessages queue={composerQueue} messages={displayMessages} /> : null}
 
-        {liveCompaction && isOrchestratorMode ? (
-          <div role="status" style={{ alignSelf: 'stretch', paddingTop: 10, paddingRight: 14, paddingBottom: 10, paddingLeft: 14, borderRadius: 12,
-            background: 'var(--t-hover)', border: '1px solid var(--t-divider-subtle)' }}>
-            <div style={{ fontSize: 12, fontWeight: 400, color: 'var(--t-text)' }}>Compaction in progress</div>
-            <div style={{ fontSize: 11, fontWeight: 300, color: 'var(--t-text-secondary)', lineHeight: 1.5 }}>
-              Context is being compressed. Messages sent now will be queued and delivered after compaction completes.
-            </div>
-          </div>
-        ) : null}
-
-        {displayWaiting && !liveCompaction && isOrchestratorMode && displayMessages.length > 0 ? (
-          // Cursor's trailing anchor (vid2 study): while the turn is live, a
-          // shimmering status line sits at the bottom of the process block and
-          // is pushed down as new lines land above it. Text, never a bubble.
-          <ShimmerLine style={{ alignSelf: 'flex-start', flexShrink: 0 }}>Planning next moves</ShimmerLine>
+        {displayWaiting && isOrchestratorMode && displayMessages.length > 0
+          && !currentAssistant?.toolCalls?.length
+          && !currentAssistant?.thinkingActive
+          && !currentAssistant?.receipt?.terminal ? (
+          <span role="status" style={{ minHeight: 22, color: 'var(--t-text-muted)', fontSize: 12, fontWeight: 300 }}>
+            {currentAssistant?.isError ? 'Failed' : !currentAssistant ? 'Waiting for response' : 'Working · phase unknown'}
+          </span>
         ) : null}
 
         {displayWaiting && !isOrchestratorMode ? (

@@ -63,6 +63,7 @@ export interface LaneLifecycleEventPayload {
 }
 
 export interface RealtimeMutationRecord {
+  compaction?: import('@/lib/orchestrator/compaction-status').CompactionOperation;
   mutationId: string;
   source: 'desktop' | 'mobile' | 'server';
   action: string;

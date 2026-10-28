@@ -49,7 +49,7 @@ export function ShimmerLine({ children, reducedMotion = false, style }: {
 }
 
 /** The turn grammar's sole affordance: a small chevron, down when open. */
-export function TurnChevron({ open }: { open: boolean }) {
+export function TurnChevron({ open, reducedMotion = false }: { open: boolean; reducedMotion?: boolean }) {
   return (
     <svg
       width="11"
@@ -66,7 +66,7 @@ export function TurnChevron({ open }: { open: boolean }) {
         flexShrink: 0,
         color: 'var(--t-text-faint)',
         transform: open ? 'rotate(90deg)' : 'rotate(0deg)',
-        transition: 'transform 120ms cubic-bezier(0.22, 1, 0.36, 1)',
+        transition: reducedMotion ? 'none' : 'transform 120ms cubic-bezier(0.22, 1, 0.36, 1)',
       }}
     >
       <path d="M9 18l6-6-6-6" />

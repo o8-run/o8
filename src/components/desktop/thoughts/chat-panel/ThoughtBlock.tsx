@@ -60,7 +60,7 @@ export function ThoughtBlock({ thinking, live = false, durationMs = null, style 
     return window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
   });
 
-  // Reopen state — only meaningful once collapsed (after `live` ends).
+  // Reasoning stays collapsed until explicitly opened, including while live.
   const [expanded, setExpanded] = useState(false);
 
   // Client-measured fallback duration for backends that stream reasoning text
@@ -83,8 +83,8 @@ export function ThoughtBlock({ thinking, live = false, durationMs = null, style 
   // Nothing happened: no reasoning text, not live, no duration → render nothing.
   if (!summary && !live && resolvedDurationMs === null) return null;
 
-  const expandable = !live && summary.length > 0;
-  const showBody = (live && summary.length > 0) || (expandable && expanded);
+  const expandable = summary.length > 0;
+  const showBody = expandable && expanded;
 
   return (
     <div
@@ -101,13 +101,14 @@ export function ThoughtBlock({ thinking, live = false, durationMs = null, style 
         type="button"
         onClick={expandable ? () => setExpanded((v) => !v) : undefined}
         aria-expanded={expandable ? expanded : undefined}
-        aria-label={live ? 'Model is reasoning' : (expandable ? (expanded ? 'Hide reasoning' : 'Show reasoning') : 'Reasoning duration')}
+        aria-label={expandable ? (expanded ? 'Hide reasoning' : 'Show reasoning') : live ? 'Model is reasoning' : 'Reasoning duration'}
         disabled={!expandable}
         style={{
           display: 'flex',
           alignItems: 'center',
           gap: 6,
           width: '100%',
+          minHeight: 22,
           border: 'none',
           background: 'transparent',
           padding: 0,
@@ -115,6 +116,7 @@ export function ThoughtBlock({ thinking, live = false, durationMs = null, style 
           cursor: expandable ? 'pointer' : 'default',
           color: 'var(--t-text-muted)',
           WebkitTapHighlightColor: 'transparent',
+          transition: 'none',
         }}
       >
         {live ? (
@@ -125,7 +127,7 @@ export function ThoughtBlock({ thinking, live = false, durationMs = null, style 
               position: 'relative',
               fontFamily: 'var(--font-sans-system)',
               fontSize: 12,
-              fontWeight: 460,
+              fontWeight: 300,
               letterSpacing: '-0.005em',
               color: 'var(--t-text-secondary)',
             }}
@@ -138,7 +140,7 @@ export function ThoughtBlock({ thinking, live = false, durationMs = null, style 
               flexShrink: 0,
               fontFamily: 'var(--font-sans-system)',
               fontSize: 12,
-              fontWeight: 400,
+              fontWeight: 300,
               letterSpacing: '-0.005em',
               color: 'var(--t-text-muted)',
             }}
@@ -207,7 +209,7 @@ function Chevron({ open }: { open: boolean }) {
         flexShrink: 0,
         color: 'var(--t-text-faint)',
         transform: open ? 'rotate(180deg)' : 'rotate(0deg)',
-        transition: 'transform 140ms cubic-bezier(0.22, 1, 0.36, 1)',
+        transition: 'none',
       }}
     >
       <path d="m6 9 6 6 6-6" />

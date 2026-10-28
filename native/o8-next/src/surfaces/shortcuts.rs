@@ -22,6 +22,9 @@ pub(super) const REGISTRATION: Registration =
                 .map(|v| v.clone().into_any_element())
         },
         overlay_open: |s| s.surfaces.shortcuts.view.is_some(),
+        // Creating a recovered session focuses it. Defer hidden content until
+        // dismissal so the active dialog keeps its current control.
+        block_ensure: |s| s.surfaces.shortcuts.view.is_some(),
         key_down: keys,
         nav: |s, position, cx| {
             s.surfaces.shortcuts.inputs.watch(cx);

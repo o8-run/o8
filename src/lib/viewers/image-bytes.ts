@@ -13,6 +13,16 @@ import type { ViewerRedaction } from './route-types';
  */
 const RASTER_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
 
+/**
+ * Whether {@link viewerImageBytes} can verify and serve this declared MIME type.
+ * Routes that serve mixed content (text, SVG, PDF, video) use this to send only
+ * the four verifiable raster types through the image path and keep everything
+ * else on {@link import('./bytes').viewerBytes} unchanged.
+ */
+export function isVerifiableRasterType(mimeType: string): boolean {
+  return RASTER_TYPES.has(mimeType.split(';')[0].trim().toLowerCase());
+}
+
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024; // 20 MiB on the wire.
 const MAX_IMAGE_PIXELS = 100_000_000; // Bound decoded size against decompression bombs.
 
