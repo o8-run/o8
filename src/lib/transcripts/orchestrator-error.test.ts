@@ -42,6 +42,12 @@ describe('orchestrator error display limits', () => {
       'file:///bundle/bridge.mjs:2:1',
       'node:internal/modules/run_main',
       '<anonymous>',
+      'native',
+      'Promise.any (index 0)',
+      'Promise.allSettled (index 1)',
+      'run (<anonymous>)',
+      'run (native)',
+      'run (node:internal/modules/run_main)',
     ]) {
       expect(orchestratorErrorText(`Error: actual reason\n    at ${modifier} ${location}`)).toBe('Error: actual reason');
     }
@@ -51,8 +57,16 @@ describe('orchestrator error display limits', () => {
     'at run (file:///bundle/bridge.mjs:2:1)',
     'at file:///bundle/bridge.mjs:2:1',
     'at async Promise.all (index 0)',
+    'at Promise.any (index 0)',
+    'at async Promise.any (index 0)',
+    'at Promise.allSettled (index 1)',
+    'at async Promise.allSettled (index 1)',
     'at new Worker (node:internal/worker:1:2)',
     'at <anonymous>',
+    'at Array.map (<anonymous>)',
+    'at native',
+    'at callback (native)',
+    'at run (node:internal/modules/run_main)',
     'at node:internal/modules/run_main',
   ])('stops at the V8 frame %s', stackFrame => {
     expect(orchestratorErrorText(`Error: actual reason\n    ${stackFrame}`)).toBe('Error: actual reason');

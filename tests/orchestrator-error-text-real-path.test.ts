@@ -67,6 +67,28 @@ for (const modifier of ['async', 'new']) {
   });
 }
 
+for (const [method, index] of [['any', 0], ['allSettled', 1]] as const) {
+  const message = `Promise.${method} failure`;
+  const script = join(root, `promise-${method}.mjs`);
+  // Omit the helper's frame so V8's real synthetic frame is the first one.
+  writeFileSync(script, `async function fail() {
+  await Promise.resolve();
+  const error = new Error(${JSON.stringify(message)});
+  Error.captureStackTrace(error, fail);
+  throw error;
+}
+${method === 'any'
+    ? 'try { await Promise.any([fail()]); } catch (error) { throw error.errors[0]; }'
+    : 'const results = await Promise.allSettled([Promise.resolve(), fail()]); throw results[1].reason;'}
+`);
+  const result = spawnSync(process.execPath, [script], { encoding: 'utf8' });
+  if (result.error) throw result.error;
+  if (result.status !== 1) throw new Error(`Expected Node fixture failure, got ${result.status}`);
+  expect(result.stderr.split(`Error: ${message}\n`)[1]?.split('\n')[0])
+    .toBe(`    at async Promise.${method} (index ${index})`);
+  nodeDiagnostics.push({ name: `promise-${method}`, diagnostic: result.stderr, expected: `Error: ${message}` });
+}
+
 const token = 'error-turn-token-fixture';
 mkdirSync(dataDir);
 for (const [key, value] of Object.entries({
