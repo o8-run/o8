@@ -1,0 +1,9 @@
+# Conflict and adjust verification
+
+Four GPUI tests first failed on the missing action controls. The route-host test first failed on the missing lane detail endpoint. A separate keyboard test first failed to reach the diff. All eight final Workers tests now pass through the real shell and production routes, including Tab and Enter after correcting the filter-to-action focus transition.
+
+Inspect conflict requests the selected lane workspace and base through `/api/worktrees/diff`, then paints a file in the existing native diff viewer. Keep waiting requests `/api/lanes/:id?events=0` and preserves the persisted queue state. Adjust submits the exact packet, message, operator source and idempotency key through `/api/orchestrator/steer-packet`. A dropped successful response followed by Retry records two identical HTTP bodies and one external runtime delivery through the production persisted idempotency service. Only the external runtime discovery/resume boundary is authored by the disposable fixture.
+
+The broad hermetic completion run passes: 1,243 files and 9,084 tests. The full native run has 169 passed, 1 failed and 3 ignored; its sole failure is the Activity palette adjacency assertion independently reproduced on clean main in item 1. The final focused run includes the additional keyboard test and passes 8/8. Clippy, the isolated surface-boundary cargo check, both type checks, touched TS tests, classification, ESLint and the changed-file rule check pass.
+
+The screenshots are an actual private-display native frame and the existing desktop worker components rendered in All Glass. The native image uses the Linux plain fallback. macOS system glass, exact font shaping and the shared shell's differing chrome remain for #4711. Inspect opens the task's complete workspace diff when the server supplies no exact conflicting-owner file target.
