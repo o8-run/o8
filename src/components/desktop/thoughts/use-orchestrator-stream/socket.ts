@@ -335,9 +335,10 @@ export function createOrchestratorMessageHandler(
           window.dispatchEvent(new CustomEvent('cortex:orchestrator-notice', {
             detail: {
               kind: 'orchestrator-turn-retry',
-              noticeId: `orch-retry-${current?.id ?? 'turn'}-${msg.data?.attempt ?? 2}`,
+              noticeId: `orch-retry-${evtThreadId ?? options.threadIdRef?.current ?? 'thread'}-${assistantId ?? current?.id ?? 'turn'}-${msg.data?.attempt ?? 2}`,
               message: notice,
               repoPath: typeof msg.data?.repoPath === 'string' ? msg.data.repoPath : undefined,
+              threadId: evtThreadId ?? options.threadIdRef?.current,
             },
           }));
         }
