@@ -17,6 +17,7 @@ pub struct RowState {
     pub layouts: usize,
     expanded: Option<bool>,
     cache: Option<Layout>,
+    pub(crate) images: crate::ui::images::Cache,
 }
 impl RowState {
     #[cfg(test)]
@@ -31,6 +32,9 @@ impl RowState {
                 .collect(),
         )
     }
+    pub(crate) fn invalidate_image_layout(&mut self) {
+        self.cache = None;
+    }
     pub fn new(row: Row) -> Self {
         let expanded = (matches!(&row, Row::Activity { .. })
             || matches!(&row, Row::Message { nodes, .. } if nodes.iter().any(crate::rich::system_event)))
@@ -40,6 +44,7 @@ impl RowState {
             layouts: 0,
             expanded,
             cache: None,
+            images: Default::default(),
         }
     }
     /// A row that changed in place (a tool step finished) keeps its disclosure.
@@ -60,19 +65,34 @@ struct Backdrop {
     color: gpui::Rgba,
     radius: Pixels,
 }
+struct Thumbnail {
+    bounds: Bounds<Pixels>,
+    image: Option<std::sync::Arc<gpui::RenderImage>>,
+    selector: String,
+    name: String,
+    unavailable: bool,
+}
 struct Layout {
     size: Size<Pixels>,
     lines: Vec<Line>,
     backgrounds: Vec<Backdrop>,
+    images: Vec<Thumbnail>,
 }
 struct Builder {
+    row_id: String,
+    image_cache: crate::ui::images::Cache,
     width: Pixels,
     y: Pixels,
     lines: Vec<Line>,
     backgrounds: Vec<Backdrop>,
+    images: Vec<Thumbnail>,
 }
 impl Builder {
     fn rich_node(&mut self, kind: &str, data: &serde_json::Value, expanded: bool, window: &Window) {
+        if kind == "media" && data["kind"] == "image" {
+            self.image(data);
+            return;
+        }
         let label = |value: &serde_json::Value| value.as_str().unwrap_or("").to_owned();
         if kind == "table" {
             let headers = data["headers"].as_array().cloned().unwrap_or_default();
@@ -90,6 +110,9 @@ impl Builder {
                 let mut bottom = top;
                 for (column, cell) in cells.iter().enumerate() {
                     let mut builder = Builder {
+                        row_id: self.row_id.clone(),
+                        image_cache: self.image_cache.clone(),
+                        images: vec![],
                         width: width + px(48.),
                         y: top,
                         lines: vec![],
@@ -224,6 +247,46 @@ impl Builder {
             self.y += height;
         }
     }
+    fn image(&mut self, data: &serde_json::Value) {
+        use crate::ui::images::ImageState;
+        let state = self
+            .image_cache
+            .borrow()
+            .get(data["path"].as_str().unwrap_or(""))
+            .cloned();
+        let unavailable = matches!(state, Some(ImageState::Unavailable));
+        let image = match state {
+            Some(ImageState::Ready(image)) => Some(image),
+            _ => None,
+        };
+        let width = (self.width - px(48.)).max(px(1.));
+        let dimensions = image.as_ref().map(|image| {
+            let pixels = image.size(0);
+            let scale = (f32::from(width) / pixels.width.0 as f32)
+                .min(240. / pixels.height.0 as f32)
+                .min(1.);
+            size(
+                pixels.width.0 as f32 * scale,
+                pixels.height.0 as f32 * scale,
+            )
+        });
+        let dimensions = dimensions
+            .map(|s| s.map(px))
+            .unwrap_or(size(width, px(18.)));
+        let index = self.images.len();
+        self.images.push(Thumbnail {
+            bounds: Bounds::new(point(px(24.), self.y + px(4.)), dimensions),
+            selector: format!(
+                "transcript-image-{}{}-{index}",
+                if unavailable { "error-" } else { "" },
+                self.row_id
+            ),
+            name: data["name"].as_str().unwrap_or("Image").to_owned(),
+            image,
+            unavailable,
+        });
+        self.y += dimensions.height + px(12.);
+    }
     fn plain(&mut self, text: String, font_size: f32, line_height: f32, window: &Window) {
         self.text(
             &[Run {
@@ -335,8 +398,17 @@ impl Builder {
         }
     }
 }
-fn layout(row: &Row, width: Pixels, expanded: bool, window: &Window) -> Layout {
+fn layout(
+    row: &Row,
+    width: Pixels,
+    expanded: bool,
+    images: crate::ui::images::Cache,
+    window: &Window,
+) -> Layout {
     let mut b = Builder {
+        row_id: row.id().into(),
+        image_cache: images,
+        images: vec![],
         width,
         y: px(8.),
         lines: vec![],
@@ -470,6 +542,7 @@ fn layout(row: &Row, width: Pixels, expanded: bool, window: &Window) -> Layout {
         size: size(width, b.y + px(8.)),
         lines: b.lines,
         backgrounds: b.backgrounds,
+        images: b.images,
     }
 }
 // The desktop transcript's reading column: the composer width plus the 24px row insets.
@@ -527,7 +600,7 @@ impl IntoElement for RetainedRow {
 }
 impl Element for RetainedRow {
     type RequestLayoutState = ();
-    type PrepaintState = ();
+    type PrepaintState = Vec<gpui::AnyElement>;
     fn id(&self) -> Option<ElementId> {
         None
     }
@@ -561,6 +634,7 @@ impl Element for RetainedRow {
                     &state.row,
                     column,
                     state.expanded.unwrap_or(false),
+                    state.images.clone(),
                     window,
                 ));
                 state.layouts += 1;
@@ -573,11 +647,51 @@ impl Element for RetainedRow {
         &mut self,
         _: Option<&GlobalElementId>,
         _: Option<&InspectorElementId>,
-        _: Bounds<Pixels>,
+        row_bounds: Bounds<Pixels>,
         _: &mut (),
-        _: &mut Window,
-        _: &mut App,
-    ) {
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Vec<gpui::AnyElement> {
+        use gpui::{prelude::*, *};
+        let state = self.state.borrow();
+        state
+            .cache
+            .as_ref()
+            .unwrap()
+            .images
+            .iter()
+            .map(|image| {
+                let selector = image.selector.clone();
+                let mut child = div()
+                    .id(SharedString::from(selector.clone()))
+                    .debug_selector(move || selector.clone())
+                    .w(image.bounds.size.width)
+                    .h(image.bounds.size.height);
+                if let Some(data) = &image.image {
+                    let data = data.clone();
+                    let name = image.name.clone();
+                    child = child
+                        .cursor_pointer()
+                        .child(img(data.clone()).size_full().object_fit(ObjectFit::Contain))
+                        .on_click(move |_, _, cx| {
+                            crate::ui::images::open(data.clone(), name.clone(), cx)
+                        });
+                } else {
+                    child = child
+                        .text_size(px(12.))
+                        .text_color(theme().text_muted)
+                        .child(if image.unavailable {
+                            "Image unavailable"
+                        } else {
+                            "Loading image..."
+                        });
+                }
+                let mut child = child.into_any_element();
+                child.layout_as_root(image.bounds.size.map(AvailableSpace::Definite), window, cx);
+                child.prepaint_at(row_bounds.origin + image.bounds.origin, window, cx);
+                child
+            })
+            .collect()
     }
     fn paint(
         &mut self,
@@ -585,7 +699,7 @@ impl Element for RetainedRow {
         _: Option<&InspectorElementId>,
         bounds: Bounds<Pixels>,
         _: &mut (),
-        _: &mut (),
+        images: &mut Vec<gpui::AnyElement>,
         window: &mut Window,
         cx: &mut App,
     ) {
@@ -626,6 +740,9 @@ impl Element for RetainedRow {
                     cx,
                 )
                 .unwrap();
+        }
+        for image in images {
+            image.paint(window, cx);
         }
         self.painted.borrow_mut().insert(self.index);
     }

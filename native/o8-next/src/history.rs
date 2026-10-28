@@ -48,7 +48,7 @@ impl Surface {
                         if let Some(transcript) = &mut this.transcript {
                             transcript.prepend(history);
                             let rows = transcript.rows.clone();
-                            this.install_rows(rows);
+                            this.install_rows(rows, cx);
                             this.list.scroll_to(ListOffset {
                                 item_ix: anchor.item_ix + this.rows.len().saturating_sub(old),
                                 offset_in_item: anchor.offset_in_item,
