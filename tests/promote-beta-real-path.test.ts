@@ -9,7 +9,10 @@ const roots: string[] = [];
 const source = join(process.cwd(), 'tests/fixtures/build-channel');
 function fixture(options: Record<string, unknown> = {}) {
   const root = mkdtempSync(join(tmpdir(), 'o8-promote-test-'));
-  roots.push(root);
+  const home = mkdtempSync(join(tmpdir(), 'o8-promote-home-'));
+  roots.push(root, home);
+  const profile = join(home, '.o8-release-build-profiles', createHash('sha256').update(realpathSync(root)).digest('hex'));
+  const offerReceipt = join(profile, 'update-publication/v0.1.900.json');
   mkdirSync(join(root, 'src-tauri'), { recursive: true });
   writeFileSync(join(root, 'src-tauri/tauri.conf.json'), JSON.stringify({ plugins: { updater: {
     pubkey: readFileSync(join(source, 'public-key.txt'), 'utf8'), endpoints: [
@@ -66,7 +69,7 @@ export function execFileSync(command,args=[],options={}) {
   }
  }
  if(command==='git')return args[0]==='log'?'a'.repeat(40)+'\\tfeat: a useful change':'';
- if(command==='bash'){record('changelog',args);return '';}
+ if(command==='bash'){record('changelog',args);record('changelogSource',options.env?.O8_CHANGELOG_SOURCE_REF);return '';}
  throw Error('Unexpected command: '+command+' '+args.join(' '));
 }
 export function spawnSync(){throw Error('Tests cannot sign, notarize or build');}
@@ -90,13 +93,19 @@ export const buildManifest=(fixed)=>({fixed});`,
 export async function load(url,context,next){const key=Object.keys(modules).find(key=>url===key||url.endsWith(key));return key?{format:'module',shortCircuit:true,source:modules[key]}:next(url,context);}`);
   writeFileSync(join(root, 'register.mjs'), `${prelude}
 import{register}from'node:module';register(new URL('./loader.mjs',import.meta.url));
-globalThis.fetch=async(url,options)=>{record('fetch',[String(url),options?.method||'GET']);return options?.method==='POST'?{ok:true}:{status:204,body:{cancel:async()=>{}}};};`);
-  return { root, assets, log };
+globalThis.fetch=async(url,options)=>{
+ record('fetch',[String(url),options?.method||'GET']);
+ if(options?.method==='POST')return {ok:true};
+ const receipt=JSON.parse(fs.readFileSync(${JSON.stringify(offerReceipt)},'utf8'));
+ record('offerProbe',{status:receipt.status,lockHeld:fs.existsSync(join(root,'publication.lock'))});
+ return String(url).endsWith('/0.1.900')?{status:204,body:{cancel:async()=>{}}}:{status:200,json:async()=>({version:'0.1.900'})};
+};`);
+  return { root, home, offerReceipt, assets, log };
 }
 function run(f: ReturnType<typeof fixture>, args: string[] = []) {
   return spawnSync(process.execPath, ['--import', join(f.root, 'register.mjs'), join(process.cwd(), 'scripts/promote.mjs'), 'v0.1.900', ...args], {
     cwd: f.root, encoding: 'utf8', timeout: 10000,
-    env: { PATH: process.env.PATH, HOME: f.root, NODE_ENV: 'test', O8_DATA_DIR: join(f.root, 'data'),
+    env: { PATH: process.env.PATH, HOME: f.home, NODE_ENV: 'test', O8_DATA_DIR: join(f.root, 'data'),
       O8_RELEASE_FEED_LOCK: join(f.root, 'publication.lock'), O8_RELEASES_WEBHOOK_URL: 'https://fixture.invalid/webhook' },
   });
 }
@@ -117,16 +126,31 @@ it('case 1: rejects forged manifest-only signatures before any publication or re
   expect(writes(f)).toEqual([]);
   expect(existsSync(join(f.root,'data/release-verification/v0.1.900.json'))).toBe(false);
 });
-it('case 2: retry of an offered version keeps its receipt and never probes 204 with the same current version', ()=>{
+it.each(['offered', 'completed'])('case 2: retry of a %s version keeps its receipt and never probes 204 with the same current version', status=>{
   const f=fixture({stableVersion:'0.1.900'});
-  const receiptDir=join(f.root,'.o8-release-build-profiles',createHash('sha256').update(realpathSync(f.root)).digest('hex'),'update-publication');mkdirSync(receiptDir,{recursive:true});
-  const receiptPath=join(receiptDir,'v0.1.900.json');
-  const offered='{"schema":"o8/update-publication-receipt/v1","version":"0.1.900","status":"offered"}';
-  writeFileSync(receiptPath,offered);
+  mkdirSync(join(f.offerReceipt, '..'),{recursive:true});
+  const offered=JSON.stringify({schema:'o8/update-publication-receipt/v1',version:'0.1.900',status});
+  writeFileSync(f.offerReceipt,offered);
   const result=run(f);
+  expect(readFileSync(f.offerReceipt,'utf8'),JSON.stringify(effects(f).filter(v=>v.name==='offerProbe'))).toBe(offered);
   expect(result.status,result.stderr).toBe(0);
   expect(effects(f).filter(v=>v.name==='fetch'&&JSON.stringify(v.args).includes('GET'))).toEqual([]);
-  expect(readFileSync(receiptPath,'utf8')).toBe(offered);
+  expect(existsSync(join(f.root,'publication.lock'))).toBe(false);
+});
+it('fresh promotion probes both updater endpoints as the previous stable and records an offered receipt', ()=>{
+  const f=fixture();
+  const result=run(f);
+  expect(result.status,result.stderr).toBe(0);
+  const gets=effects(f).filter(v=>v.name==='fetch'&&JSON.stringify(v.args).includes('GET'));
+  expect(gets.map(v=>v.args)).toEqual([
+    ['https://fixture.invalid/primary/0.1.899','GET'], ['https://fixture.invalid/primary/0.1.899','GET'],
+    ['https://fixture.invalid/fallback/0.1.899','GET'], ['https://fixture.invalid/fallback/0.1.899','GET'],
+  ]);
+  expect(JSON.parse(readFileSync(f.offerReceipt,'utf8'))).toMatchObject({
+    schema:'o8/update-publication-receipt/v1',version:'0.1.900',previousVersion:'0.1.899',status:'offered',attempts:1,
+  });
+  expect(effects(f).filter(v=>v.name==='offerProbe').map(v=>v.args)).toEqual(
+    Array.from({length:4},()=>({status:'pending',lockHeld:true})));
   expect(existsSync(join(f.root,'publication.lock'))).toBe(false);
 });
 it('case 3: completes stable manifests, report reconciliation, fixed receipts, changelog and announcements through shared release code', ()=>{
@@ -139,6 +163,7 @@ it('case 3: completes stable manifests, report reconciliation, fixed receipts, c
   expect(latest).toHaveLength(2);
   for(const entry of latest)expect(entry.args).toMatchObject({channel:'stable',version:'0.1.900'});
   expect(calls.find(v=>v.name==='publishFixed')?.args).toMatchObject({version:'0.1.900',range:'v0.1.899..v0.1.900'});
+  expect(calls.find(v=>v.name==='changelogSource')?.args).toBe('v0.1.900');
   const edits=calls.filter(v=>v.name==='edit');
   expect(edits).toHaveLength(2);
   for(const entry of edits)expect(entry.args).toEqual(expect.arrayContaining(['v0.1.900','--prerelease=false','--latest=true']));
@@ -152,6 +177,7 @@ it.each([{mismatch:true},{badStaple:true},{betaVersion:'0.1.899'},{stableVersion
 it('dry-run verifies signatures and identity, writes a hash-bound receipt and only prints planned effects', ()=>{
   const f=fixture();const result=run(f,['--dry-run']);
   expect(result.status,result.stderr).toBe(0);expect(writes(f)).toEqual([]);
+  expect(existsSync(f.offerReceipt)).toBe(false);
   expect(result.stdout).toMatch(/verified/);expect(result.stdout).toMatch(/fixed.json/);
   const receipt=JSON.parse(readFileSync(join(f.root,'data/release-verification/v0.1.900.json'),'utf8'));
   expect(receipt).toMatchObject({version:'0.1.900',channel:'beta',status:'verified',installedSmoke:null});
@@ -178,10 +204,13 @@ it('rejects a signed stable identity masquerading as a beta', ()=>{
 });
 it('a completed retry preserves checkpoints and never repeats stable announcements', ()=>{
   const f=fixture({stableVersion:'0.1.900'});let result=run(f);expect(result.status,result.stderr).toBe(0);
+  const offer=readFileSync(f.offerReceipt,'utf8');
   result=run(f);expect(result.status,result.stderr).toBe(0);
+  expect(readFileSync(f.offerReceipt,'utf8')).toBe(offer);
   expect(effects(f).filter(v=>v.name==='changelog')).toHaveLength(1);
   expect(effects(f).filter(v=>v.name==='publishFixed')).toHaveLength(1);
-  expect(effects(f).filter(v=>v.name==='fetch')).toHaveLength(1);
+  expect(effects(f).filter(v=>v.name==='fetch'&&JSON.stringify(v.args).includes('POST'))).toHaveLength(1);
+  expect(effects(f).filter(v=>v.name==='fetch'&&JSON.stringify(v.args).includes('GET'))).toHaveLength(4);
   expect(existsSync(join(f.root,'publication.lock'))).toBe(false);
 });
 

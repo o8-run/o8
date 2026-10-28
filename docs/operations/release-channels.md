@@ -137,7 +137,12 @@ A partial promotion can be retried with the same command. It completes missing
 stable effects, retains completed effect checkpoints in the hash-bound receipt,
 and never resets an offered update-publication receipt. It does not poll updater
 endpoints with the promoted version as the current version, which can return
-204. A newer stable version always refuses promotion. The shared publication lock
+204. Fresh publication verifies both updater endpoints as the previous stable
+version and records its offer receipt in the separate release build profile,
+as direct stable publication does. Retries preserve offered or completed offer
+receipts byte for byte. Only promotion anchors the changelog source to the
+promoted tag; direct publication retains its existing source selection.
+A newer stable version always refuses promotion. The shared publication lock
 is released on success, refusal, or a caught failure. Preserve receipts when
 recovering interrupted work; report publication failures and retry after the
 provider is available. Release-note archiving remains a separate reviewed PR.

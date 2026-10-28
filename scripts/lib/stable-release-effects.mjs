@@ -237,8 +237,12 @@ export function stableReleaseEffects({ root, version, tag, range, notesRef }) {
         '--latest-ship', latestShipPath,
       ];
       if (preview) args.push('--dry-run', '--out-dir', outDir);
-      execFileSync('bash', args, { cwd: root, stdio: 'inherit',
-        env: { ...process.env, O8_CHANGELOG_SOURCE_REF: tag } });
+      if (notesRef) {
+        execFileSync('bash', args, { cwd: root, stdio: 'inherit',
+          env: { ...process.env, O8_CHANGELOG_SOURCE_REF: notesRef } });
+      } else {
+        execFileSync('bash', args, { cwd: root, stdio: 'inherit' });
+      }
     } finally {
       rmSync(stagingDir, { recursive: true, force: true });
     }

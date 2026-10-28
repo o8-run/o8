@@ -84,7 +84,14 @@ pub fn tasks(state: &Value, lanes: &Value, workspace: &str) -> Vec<Task> {
                 ),
                 lane: project(
                     &lane,
-                    &["id", "packetId", "repoPath", "worktreePath", "status"],
+                    &[
+                        "id",
+                        "packetId",
+                        "repoPath",
+                        "worktreePath",
+                        "baseBranch",
+                        "status",
+                    ],
                 ),
                 filter,
             })

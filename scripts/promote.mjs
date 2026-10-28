@@ -10,7 +10,9 @@ import { dataDir, releaseRange } from './lib/fixed-reports.mjs';
 import { readLinuxBuildChannel } from './lib/linux-build-channel.mjs';
 import { DEFAULT_REPOS } from './lib/linux-appimage-signature.mjs';
 import { verifyMacosDmgMatchesApp } from './lib/macos-release-artifacts.mjs';
+import { releaseBuildProfile } from './lib/release-build-profile.mjs';
 import { acquirePublicationLock, BETA_FEED_TAG, compareVersions } from './lib/release-publication.mjs';
+import { warmUpdatePublication } from './lib/release-update-warmup.mjs';
 import { stableReleaseEffects } from './lib/stable-release-effects.mjs';
 import { verifyUpdaterSignature } from './lib/updater-signature.mjs';
 
@@ -181,8 +183,23 @@ async function main(args) {
       gh(['release', 'upload', tag, latestPath, fixedPath, '--clobber', '--repo', target.repo]);
       gh(['release', 'edit', tag, '--prerelease=false', '--latest=true', '--notes', notes, '--repo', target.repo]);
     }
-    // Do not reset offered receipts or probe with current_version equal to version (204).
-    // Offer timing belongs to direct publication; retries finish missing stable effects.
+    try {
+      const offerPath = join(releaseBuildProfile(root, process.env, { release: true }).profile,
+        'update-publication', `${tag}.json`);
+      const offered = existsSync(offerPath) ? json(offerPath) : null;
+      // A retry must preserve successful offer evidence byte for byte.
+      if (offered?.schema !== 'o8/update-publication-receipt/v1' || offered.version !== version
+        || !['offered', 'completed'].includes(offered.status)) {
+        const previousVersion = range.split('..')[0].replace(/^v/, '');
+        if (compareVersions(previousVersion, version) >= 0) throw new Error('Offer probe requires an older stable version.');
+        const offer = await warmUpdatePublication({ root, version, previousVersion,
+          publishedAt: stable.resolvePublishedAt(pubDate), receiptPath: offerPath });
+        const timing = offer.publishToOfferMs === null ? 'unverified' : `${offer.publishToOfferMs}ms`;
+        console.log(`[promote] update publication ${offer.status}; publish-to-offer ${timing}; within-five-minutes=${offer.withinPublishToOfferBudget ?? 'unverified'}`);
+      }
+    } catch {
+      console.warn('[promote] update publication verification unavailable; no fresh-offer receipt was recorded.');
+    }
     const completion = await stable.complete(pubDate, { completed: verified.completion,
       mark(step) { verified.completion[step] = true; persist(receiptPath, verified); } });
     if (!completion.complete) throw new Error(`Stable completion needs retry: ${completion.failures.join(', ')}`);

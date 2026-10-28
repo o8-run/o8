@@ -1,0 +1,17 @@
+running 1 test
+
+thread 'shell::workers::action_tests::workers_lost_steer_reopens_with_same_key_and_draft' (118708) panicked at src/surfaces/workers/action_tests.rs:157:5:
+assertion `left == right` failed: an unconfirmed draft must survive closing Workers
+  left: ""
+ right: "Retain this adjustment"
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test shell::workers::action_tests::workers_lost_steer_reopens_with_same_key_and_draft ... FAILED
+
+failures:
+
+failures:
+    shell::workers::action_tests::workers_lost_steer_reopens_with_same_key_and_draft
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 174 filtered out; finished in 2.64s
+
+error: test failed, to rerun pass `--bin o8-next`
