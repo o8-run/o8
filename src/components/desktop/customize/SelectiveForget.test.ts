@@ -65,7 +65,7 @@ it('confirms only the selected directive and refreshes Customize, recall and hea
   expect(deleted).toEqual([{ path: '/api/cortex/directives', body: { id: 'remove' } }]);
   await vi.waitFor(() => expect(host.textContent).not.toContain('remove instruction'), { interval: 5 });
   expect(host.textContent).toContain('keep instruction');
-  expect(host.textContent).toContain('1 authored instruction');
+  expect([...host.querySelectorAll('button')].find(b => b.textContent?.startsWith('Instructions'))!.textContent).toBe('Instructions1');
   const counter = [...host.querySelectorAll('span')].find(s => s.textContent === 'Directives count')!.parentElement!;
   expect(counter.textContent).toContain('1');
 });

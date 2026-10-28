@@ -159,6 +159,8 @@ export interface OwnedSessionRecord {
   /** Packet ownership ended without process-exit proof; keep recovery data but hide active discovery. */
   detachedAt?: string;
   detachedReason?: string;
+  /** Explicit operator retirement; the checkout, branch and transcript are retained. */
+  retiredAt?: string;
 }
 
 export interface OwnedWorkspaceBinding {
@@ -500,6 +502,7 @@ export interface OwnedSessionStore {
   getFleetAdditions(options?: { fresh?: boolean }): Promise<OwnedFleetAdditions>;
   sessionState(surfaceId: string): Promise<OwnedSessionState>;
   archiveSession(surfaceId: string, workspace?: string): Promise<OwnedArchiveResponse>;
+  retireSession?(surfaceId: string): Promise<{ retired: boolean; note: string }>;
   setDetachedSession?(surfaceId: string, reason: string | null): Promise<{
     updated: boolean;
     previouslyDetached: boolean;

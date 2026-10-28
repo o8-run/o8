@@ -114,13 +114,13 @@ function executeFixture(selectedFile: string, nestedDependency = false,
   { fail = '', parallel = false, discoveryMs = 0, nativeChange = '', nativeState = 'untracked', setupChange = '',
     nativeDeadlineMinutes = 0, nativeDelayMs = 0, main = false, mainFailure = false, detachedMain = false,
     contend = false, lintDependency = '',
-    browser = false, indirectBrowser = '', staleBrowser = false } = {}) {
+    browser = false, indirectBrowser = '', staleBrowser = false, packageChange = '' } = {}) {
   const directory = mkdtempSync(path.join(root, 'verifier-fixture-'));
   const files = ['scripts/verify-ci.mjs', 'scripts/lib/verify-ci.mjs', 'scripts/ci/check-verify-ci.mjs',
     'scripts/ci/resource-owning-changed.mjs', 'scripts/ci/review-dependency-changes.mjs', 'scripts/ci/native-changes.mjs',
     '.github/workflows/ci.yml', '.github/actions/next-linux-setup/action.yml', 'scripts/ci/native-test-shard.mjs',
     'scripts/ci/native-test-inputs.mjs', 'scripts/ci/install-native-linux-deps.sh', 'scripts/lib/test-classification.mjs',
-    'scripts/lib/browser-prerequisites.mjs'];
+    'scripts/lib/browser-prerequisites.mjs', '.github/actions/linux-package-prerequisites/action.yml'];
   for (const file of files) {
     mkdirSync(path.dirname(path.join(directory, file)), { recursive: true });
     copyFileSync(path.join(repo, file), path.join(directory, file));
@@ -150,6 +150,14 @@ function executeFixture(selectedFile: string, nestedDependency = false,
     if (setupChange === 'architecture') setup.runs.steps[0].with.architecture = 'arm64';
     if (setupChange === 'missing install') setup.runs.steps = setup.runs.steps.filter((step: { run?: string }) => step.run !== 'npm ci --prefer-offline');
     writeFileSync(file, stringify(setup));
+  }
+  if (packageChange) {
+    const file = path.join(directory, '.github/actions/linux-package-prerequisites/action.yml');
+    const action = parse(readFileSync(file, 'utf8'));
+    if (packageChange === 'save on pull requests') delete action.runs.steps.at(-1).if;
+    if (packageChange === 'unpinned cache') action.runs.steps[1].uses = 'actions/cache/restore@v4';
+    if (packageChange === 'extra command') action.runs.steps.push({ shell: 'bash', run: 'false' });
+    writeFileSync(file, stringify(action));
   }
   symlinkSync(path.join(repo, 'node_modules'), path.join(directory, 'node_modules'), 'junction');
   // The verifier's scheduler is under test. Keep unrelated bundle building and
@@ -310,7 +318,7 @@ describe('local CI verification through its command entry point', () => {
     if (options.mainFailure) expect(result.stdout).toContain('FAIL tests/unchanged-integration-0.test.mjs');
   }, 60_000);
 
-  it.each(['main trigger', 'missing shard', 'filtered command', 'missing browser', 'tolerated failure', 'uncovered action'])(
+  it.each(['main trigger', 'missing shard', 'filtered command', 'missing browser', 'tolerated failure', 'uncovered action', 'package group'])(
     'rejects a hidden main integration coverage change: %s', change => {
       const workflow = parse(readFileSync(workflowPath, 'utf8'));
       const job = workflow.jobs['integration-weekly'];
@@ -320,6 +328,7 @@ describe('local CI verification through its command entry point', () => {
       if (change === 'missing browser') job.steps = job.steps.filter((step: { run?: string }) => !step.run?.includes('playwright-core'));
       if (change === 'tolerated failure') job['continue-on-error'] = true;
       if (change === 'uncovered action') job.steps.push({ uses: './.github/actions/uncovered-fixture' });
+      if (change === 'package group') job.steps.find((step: { uses?: string }) => step.uses === './.github/actions/linux-package-prerequisites').with.group = 'rust';
       const result = coverage(workflow);
       expect(result.status, result.stdout).toBe(1);
       expect(result.stderr).toContain('verify:ci');
@@ -385,6 +394,12 @@ describe('local CI verification through its command entry point', () => {
     expect(result.stderr).toContain('tests/composer-screenshot-recovery-real-path.test.ts');
     expect(result.stderr).toContain('browser metadata drifted');
   });
+  it.each(['save on pull requests', 'unpinned cache', 'extra command'])('rejects uncovered Linux package setup: %s', packageChange => {
+    const result = executeFixture('tests/fixture.test.ts', false, { packageChange });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('Linux package prerequisite');
+  });
+
   it('runs the CI commands, environments, classification and all four shards', () => {
     expect(manifest.scripts['verify:ci']).toBe('node scripts/verify-ci.mjs');
     const result = execute();

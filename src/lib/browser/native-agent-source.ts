@@ -38,6 +38,19 @@ import { BROWSER_LOCALIZATION_ROWS_SOURCE } from '@/lib/browser/localization';
 export const NATIVE_BROWSER_AGENT_SOURCE = [
   '(function () {',
   "  if (typeof window === 'undefined' || window.__o8BrowserAgent) return;",
+  // Hide scrollbar chrome without disabling overflow or input scrolling.
+  '  try {',
+  '    function hideScrollbarChrome() {',
+  '      if (!document.documentElement || document.getElementById("o8-native-scrollbars")) return;',
+  '      var style = document.createElement("style");',
+  '      style.id = "o8-native-scrollbars";',
+  '      style.textContent = "* { scrollbar-width: none !important; } *::-webkit-scrollbar { display: none !important; width: 0 !important; height: 0 !important; }";',
+  '      document.documentElement.appendChild(style);',
+  '    }',
+  '    hideScrollbarChrome();',
+  '    document.addEventListener("DOMContentLoaded", hideScrollbarChrome, { once: true });',
+  '  } catch (_) {}',
+
   '',
   '  // ── no-drift shared algorithms ──',
   SELECTOR_FOR_SOURCE,

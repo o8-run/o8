@@ -1,4 +1,5 @@
 import { viewerBytes } from '@/lib/viewers/bytes';
+import { isVerifiableRasterType, viewerImageBytes } from '@/lib/viewers/image-bytes';
 export const dynamic = 'force-dynamic';
 
 import { NextRequest } from 'next/server';
@@ -65,7 +66,11 @@ export async function GET(request: NextRequest) {
     if (opened.stat.size > MAX_PREVIEW_BYTES) {
       return new Response('File too large for preview', { status: 413 });
     }
-    return viewerBytes(await opened.handle.readFile(), mimeType);
+    const buffer = await opened.handle.readFile();
+    // Serve verifiable raster images through the image path (#4773 refuses them via
+    // the text viewer). PDF, audio and video stay on the text viewer and are refused
+    // as before; restoring those opaque types is out of this raster-only scope.
+    return isVerifiableRasterType(mimeType) ? viewerImageBytes(buffer, mimeType) : viewerBytes(buffer, mimeType);
   } catch {
     return new Response('File not found or path refused', { status: 404 });
   } finally {

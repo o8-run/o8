@@ -1,0 +1,30 @@
+running 4 tests
+
+thread 'shell::workers::action_tests::workers_adjust_lost_response_reuses_one_persisted_steer' (85993) panicked at src/surfaces/workers/tests.rs:8:28:
+Missing worker-adjust-worker-blocked
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test shell::workers::action_tests::workers_adjust_lost_response_reuses_one_persisted_steer ... FAILED
+
+thread 'shell::workers::action_tests::workers_keep_waiting_reads_current_lane_and_preserves_queue' (85996) panicked at src/surfaces/workers/tests.rs:8:28:
+Missing worker-wait-worker-blocked
+test shell::workers::action_tests::workers_keep_waiting_reads_current_lane_and_preserves_queue ... FAILED
+
+thread 'shell::workers::action_tests::workers_inspect_conflict_opens_real_worktree_diff' (85995) panicked at src/surfaces/workers/tests.rs:8:28:
+Missing worker-inspect-worker-blocked
+test shell::workers::action_tests::workers_inspect_conflict_opens_real_worktree_diff ... FAILED
+
+thread 'shell::workers::action_tests::workers_adjust_uses_desktop_steer_route_and_operator_provenance' (85994) panicked at src/surfaces/workers/tests.rs:8:28:
+Missing worker-adjust-worker-blocked
+test shell::workers::action_tests::workers_adjust_uses_desktop_steer_route_and_operator_provenance ... FAILED
+
+failures:
+
+failures:
+    shell::workers::action_tests::workers_adjust_lost_response_reuses_one_persisted_steer
+    shell::workers::action_tests::workers_adjust_uses_desktop_steer_route_and_operator_provenance
+    shell::workers::action_tests::workers_inspect_conflict_opens_real_worktree_diff
+    shell::workers::action_tests::workers_keep_waiting_reads_current_lane_and_preserves_queue
+
+test result: FAILED. 0 passed; 4 failed; 0 ignored; 0 measured; 169 filtered out; finished in 4.67s
+
+error: test failed, to rerun pass `--bin o8-next`

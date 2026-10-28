@@ -71,6 +71,7 @@ import { basename, join } from 'node:path';
 const realChildProcess = process.getBuiltinModule('node:child_process');
 export function execFileSync(command, args = [], options = {}) {
   if (command === 'tar') return realChildProcess.execFileSync(command, args, options);
+  if (command === 'bash') record('changelogSource', [options.env?.O8_CHANGELOG_SOURCE_REF ?? process.env.O8_CHANGELOG_SOURCE_REF ?? 'origin/main']);
   if (args.includes('--sign') || args.includes('-s') || command === 'cargo' || (command === 'xcrun' && !args.includes('validate'))) {
     throw new Error('Tests cannot build, sign, or notarize');
   }
@@ -139,6 +140,15 @@ export const buildManifest = (fixed) => ({ fixed });`,
   // channel policy, manifest writer, and publication control flow run unchanged.
   writeFileSync(join(root, 'loader.mjs'), `const modules = ${JSON.stringify(modules)};
 export async function load(url, context, nextLoad) {
+  if (url.endsWith('/scripts/lib/stable-release-effects.mjs') && process.env.O8_CHANNEL_TEST_CHANGELOG_BASELINE) {
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync(new URL(url), 'utf8');
+    const baseline = readFileSync(process.env.O8_CHANNEL_TEST_CHANGELOG_BASELINE, 'utf8');
+    const start = source.indexOf('  function publishPublicRelease(');
+    const end = source.indexOf('\\n  async function announceRelease()', start);
+    if (start < 0 || end < 0) throw new Error('Missing changelog publisher boundary');
+    return { format: 'module', shortCircuit: true, source: source.slice(0, start) + baseline + source.slice(end) };
+  }
   const key = Object.keys(modules).find(key => url === key || url.endsWith(key));
   return key ? { format: 'module', shortCircuit: true, source: modules[key] } : nextLoad(url, context);
 }`);
@@ -209,6 +219,21 @@ afterEach(() => {
 });
 
 describe('release channels through the publication entry point', () => {
+  it.each(['HEAD', undefined])('keeps the origin/main direct-publication changelog source with override %s', sourceRef => {
+    const baseline = fixture('0.1.741');
+    const current = fixture('0.1.741');
+    const env: Record<string, string> = sourceRef ? { O8_CHANGELOG_SOURCE_REF: sourceRef } : {};
+    // Run the captured origin/main publisher inside the same real direct-release
+    // entry point, without requiring remote-tracking refs in a shallow CI checkout.
+    const before = run(baseline, 'stable', [], { ...env,
+      O8_CHANNEL_TEST_CHANGELOG_BASELINE: join(signedFixtures, 'origin-main-public-changelog.txt') });
+    const after = run(current, 'stable', [], env);
+    expect(before.status, before.stdout + before.stderr).toBe(0);
+    expect(after.status, after.stdout + after.stderr).toBe(0);
+    const sources = (f: ReturnType<typeof fixture>) => effects(f).filter(call => call.name === 'changelogSource').map(call => call.args);
+    expect(sources(baseline)).toEqual([[sourceRef ?? 'origin/main']]);
+    expect(sources(current)).toEqual(sources(baseline));
+  });
   it.each(['app', 'updater', 'installer'] as const)('refuses publication when the required o8 next binary is missing from the %s', (distribution) => {
     const f = fixture('0.1.741');
     if (distribution === 'updater') {

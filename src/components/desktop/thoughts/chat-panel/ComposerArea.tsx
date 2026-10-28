@@ -15,6 +15,7 @@ import { composerModeSpec } from '../composer-mode';
 import { SlashCommandPicker } from './SlashCommandPicker';
 import { transcriptRunningTools } from '../../transcript/activity';
 import { ComposerStatusBar } from './ComposerStatusBar';
+import { CompactionStatus } from './CompactionStatus';
 import type { MobileTranscriptToolCall } from '@/lib/mobile/types';
 import { getOrchestratorSlashCommandSuggestions, type OrchestratorSlashCommandDefinition } from '@/lib/slash-commands';
 import { MODE_ROUTING_SLASH_COMMANDS } from '@/lib/composer-mode-routing';
@@ -157,18 +158,6 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   });
   const runningTools = useMemo<MobileTranscriptToolCall[]>(() => isOrchestratorMode
     ? transcriptRunningTools(chatMessages, displayWaiting, now) : [], [chatMessages, displayWaiting, isOrchestratorMode, now]);
-  const latestUserEntry = useMemo(() => {
-    for (let i = chatMessages.length - 1; i >= 0; i--) {
-      if (chatMessages[i].role === 'user') return chatMessages[i];
-    }
-    return null;
-  }, [chatMessages]);
-  const latestUserMessageId = latestUserEntry?.id ?? null;
-  // True while the latest message is the user's own — the orchestrator has been
-  // handed the turn but hasn't streamed a reply yet (the "thinking" gap). The
-  // working indicator must persist through this gap even though orchStream.status
-  // drops to non-busy between accepting the send and the first token. 2026-06-18.
-  const awaitingReply = chatMessages[chatMessages.length - 1]?.role === 'user';
   const slashSuggestions = useMemo(() => {
     const normalizedInput = input.trimStart();
     if (!isOrchestratorMode || literalInput || dismissedSlashInput === input || !normalizedInput.startsWith('/')) {
@@ -273,6 +262,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
     <ComposerVoiceTurnContext.Provider value={dictationId ? null : voiceTurnTarget}>
     <ComposerDictationContext.Provider value={dictationId ?? localDictationId}>
     <div data-o8-composer-root="" style={{
+      position: 'relative',
       paddingTop: 24,
       paddingRight: 12,
       paddingBottom: 12,
@@ -282,16 +272,18 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
       // fades behind it. (2026-07-02)
       background: 'transparent',
     }}>
+      {isOrchestratorMode && repoPath && sessionRulesThreadId ? <CompactionStatus repoPath={repoPath} threadId={sessionRulesThreadId}
+        messages={chatMessages} turnBusy={displayWaiting} /> : null}
       {promptStash ? <PromptStashRow onRestore={promptStash.onRestore} /> : null}
+      {/* Orchestrator activity belongs to the transcript. Keep independent workers visible. */}
       {isOrchestratorMode ? (
         <ComposerStatusBar
-          displayWaiting={displayWaiting}
-          runningTools={runningTools}
+          displayWaiting={false}
+          runningTools={[]}
           workerPackets={workerPackets}
           activeTargetLabel={activeTargetLabel}
-          latestUserMessageId={latestUserMessageId}
-          latestUserMessageAt={latestUserEntry?.timestamp ?? null}
-          awaitingReply={awaitingReply}
+          latestUserMessageId={null}
+          awaitingReply={false}
         />
       ) : null}
       {activityContent}
