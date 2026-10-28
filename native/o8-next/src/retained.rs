@@ -459,6 +459,9 @@ fn layout(
             let pad = px(12.);
             let top = b.y + px(4.);
             let mut bubble = Builder {
+                row_id: b.row_id.clone(),
+                image_cache: b.image_cache.clone(),
+                images: vec![],
                 width: ((width - px(48.)) * 0.8).max(px(1.)) + px(48.),
                 y: top + px(8.),
                 lines: vec![],
@@ -471,6 +474,12 @@ fn layout(
                 .lines
                 .iter()
                 .map(|line| line.origin.x - px(24.) + line.line.width())
+                .chain(
+                    bubble
+                        .images
+                        .iter()
+                        .map(|image| image.bounds.right() - px(24.)),
+                )
                 .fold(px(1.), Pixels::max);
             let right = width - px(24.);
             let shift = right - pad - text - px(24.);
@@ -489,6 +498,10 @@ fn layout(
             for mut line in bubble.lines {
                 line.origin.x += shift;
                 b.lines.push(line);
+            }
+            for mut image in bubble.images {
+                image.bounds.origin.x += shift;
+                b.images.push(image);
             }
             b.y = bubble.y + px(16.);
         }
@@ -513,6 +526,7 @@ fn layout(
                     size: size(width, b.y + px(8.)),
                     lines: b.lines,
                     backgrounds: b.backgrounds,
+                    images: b.images,
                 };
             }
             b.y += px(4.);
