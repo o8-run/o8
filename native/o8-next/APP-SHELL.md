@@ -11,12 +11,31 @@ The switch is saved only after the open native window acknowledges its first
 server load. A startup error, early exit or fifteen-second readiness timeout
 leaves the switch off and shows one short failure message in Settings.
 
-The separate CLI remains available for explicit fixtures and development. Build
-the crate and CLI as described in [the README](README.md#build-and-use), then launch:
+Open the native app shell without a desktop window:
 
 ```sh
-node cli/dist/o8.mjs next --enable-next --binary "$PWD/native/o8-next/target/release/o8-next" --app-shell
+o8 next
 ```
+
+The CLI uses `/Applications/o8.app/Contents/MacOS/o8-next` by default.
+`--binary ABSOLUTE_PATH` selects another executable. It reuses a healthy local
+server from the existing local configuration, whether owned by the desktop or
+`o8 serve`. If none is healthy, it prints startup progress, runs `o8 serve`, and
+waits for API and WebSocket health before opening the window. Startup failures
+report an error instead of opening a disconnected window.
+
+Installed 0.1.811 cold startup currently fails in the existing CLI native-addon
+lookup, tracked in [#4969](https://github.com/o8-run/o8/issues/4969).
+The launcher reports that failure; installed standalone acceptance remains open.
+
+Quitting the native window leaves the headless server running. Run `o8 next`
+again to reconnect. Stop the headless server with `o8 serve stop`.
+
+For a source build, follow [the README](README.md#build-and-use), then use
+`node cli/dist/o8.mjs next --binary "$PWD/native/o8-next/target/release/o8-next"`.
+`--app-shell` remains accepted. Explicit `--server ORIGIN` attaches to that
+origin without starting a daemon. The explicit `--enable-next --server ORIGIN`
+fixture modes remain available.
 
 In this mode the CLI uses its existing local port/token resolver. It passes the
 credential through the child environment, never arguments or saved view state.
