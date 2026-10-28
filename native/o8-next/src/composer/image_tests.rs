@@ -288,3 +288,49 @@ fn native_image_remove_full_enter_press_once(cx: &mut TestAppContext) {
 fn native_image_remove_full_space_press_once(cx: &mut TestAppContext) {
     check_full_remove_press("space", cx);
 }
+
+#[gpui::test]
+fn native_video_drop_attaches_by_path_and_sends_the_path(cx: &mut TestAppContext) {
+    let fixture = Fixture::start(true);
+    let (surface, cx) = open(cx, &fixture);
+    image_session(cx, &surface);
+    let dir = std::env::temp_dir().join(format!("o8-drop-files-{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let video = dir.join("screen recording.mov");
+    let log = dir.join("build.log");
+    fs::write(&video, b"not decoded").unwrap();
+    fs::write(&log, b"line").unwrap();
+    let position = cx.debug_bounds("composer-input").unwrap().center();
+    cx.simulate_event(FileDropEvent::Entered {
+        position,
+        paths: ExternalPaths::new([video.clone(), log.clone(), dir.clone()]),
+    });
+    draw(cx);
+    cx.simulate_event(FileDropEvent::Submit { position });
+    cx.run_until_parked();
+    draw(cx);
+    // Files are never decoded as pictures; the folder is refused with a reason.
+    assert!(images(&surface, cx).is_empty());
+    surface.read_with(cx, |s, cx| {
+        let controls = &s.composer.read(cx).controls;
+        assert_eq!(controls.files, vec![video.clone(), log.clone()]);
+        assert_eq!(controls.error, "Choose a file, not a folder.");
+    });
+    assert!(cx.debug_bounds("composer-file-0").is_some());
+    click("composer-file-remove-1", cx);
+    click("composer-input", cx);
+    cx.simulate_input("What is in this recording?");
+    click("send", cx);
+    let expected = format!(
+        "What is in this recording?\n\nAttached video: {}",
+        video.display()
+    );
+    surface.read_with(cx, |s, cx| {
+        let payload = &s.queue["items"][0]["payload"];
+        assert_eq!(payload["text"], expected);
+        assert!(payload["wireMessage"].as_str().unwrap().ends_with(&expected));
+        assert_eq!(payload["images"], json!([]));
+        assert!(s.composer.read(cx).controls.files.is_empty());
+    });
+    fs::remove_dir_all(dir).unwrap();
+}

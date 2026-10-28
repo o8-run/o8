@@ -57,14 +57,24 @@ impl Surface {
             return;
         };
         let draft = self.composer.read(cx).text.clone();
+        let files = self.composer.read(cx).controls.files.clone();
         // Match the default composer's attachment-only queue payload.
-        let text = if draft.trim().is_empty() && !self.composer.read(cx).controls.images.is_empty()
+        let text = if draft.trim().is_empty()
+            && files.is_empty()
+            && !self.composer.read(cx).controls.images.is_empty()
         {
-            "[Image attached]"
+            "[Image attached]".to_owned()
+        } else if files.is_empty() {
+            draft.trim().to_owned()
         } else {
-            draft.trim()
-        }
-        .to_owned();
+            // Attached files travel as paths the agent opens from disk.
+            [draft.trim(), &crate::composer::images::file_lines(&files)]
+                .iter()
+                .filter(|part| !part.is_empty())
+                .copied()
+                .collect::<Vec<_>>()
+                .join("\n\n")
+        };
         let fresh = !self.pending.contains_key(&session.id);
         let (method, body) = if let Some(id) = promote {
             (
@@ -166,6 +176,7 @@ impl Surface {
                                     i.controls
                                         .images
                                         .retain(|image| !sent_images.contains(image));
+                                    i.controls.files.retain(|file| !files.contains(file));
                                 });
                             }
                         }

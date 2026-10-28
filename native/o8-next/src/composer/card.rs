@@ -363,7 +363,7 @@ impl Surface {
             files: true,
             directories: false,
             multiple: true,
-            prompt: Some("Attach images".into()),
+            prompt: Some("Attach images or files".into()),
         });
         let editor = self.composer.clone();
         cx.spawn(async move |_, cx| {
