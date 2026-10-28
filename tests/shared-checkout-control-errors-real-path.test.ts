@@ -61,11 +61,19 @@ async function setup() {
   mkdirSync(join(owned, 'fixture'), { recursive: true });
   writeFileSync(join(owned, 'fixture', 'session.json'), JSON.stringify({ surfaceId: 'codex-owned:checkout-control-fixture',
     launchMutationId: 'checkout-control-fixture', cwd: repoPath, repoPath, recentRuns: [{ id: 'finished-fixture-run', outcome: 'finished' }] }));
-  const config = toCodexServersMap(buildToolRegistry(repoPath, { threadId: parentThreadId })).cortex;
-  if (config.type !== 'stdio') throw new Error('The production Shared controls require the stdio server.');
-  const child = spawn(config.command, config.args, { cwd: repoPath, env: { ...process.env, ...config.env, NODE_OPTIONS: '--conditions=react-server' }, stdio: ['pipe', 'pipe', 'pipe'] });
-  children.push(child); let diagnostic = ''; child.stderr.on('data', chunk => { diagnostic = (diagnostic + chunk.toString()).slice(-64_000); });
-  const call = toolClient(child);
+  mkdirSync(join(dataDir, 'chat-history'), { recursive: true });
+  for (const id of [parentThreadId, 'thoughts-checkout-second']) {
+    writeFileSync(join(dataDir, 'chat-history', id + '.json'), JSON.stringify({ repoPath, backend: 'codex', messages: [] }));
+  }
+  let diagnostic = '';
+  const start = (threadId: string) => {
+    const config = toCodexServersMap(buildToolRegistry(repoPath, { threadId })).cortex;
+    if (config.type !== 'stdio') throw new Error('The production Shared controls require the stdio server.');
+    const child = spawn(config.command, config.args, { cwd: repoPath, env: { ...process.env, ...config.env, NODE_OPTIONS: '--conditions=react-server' }, stdio: ['pipe', 'pipe', 'pipe'] });
+    children.push(child); child.stderr.on('data', chunk => { diagnostic = (diagnostic + chunk.toString()).slice(-64_000); });
+    return toolClient(child);
+  };
+  const call = start(parentThreadId);
   const status = async () => JSON.parse((await call('cortex_shared_team_status')).content[0].text) as { review: Review };
   const reconcile = async (review: Review) => call('cortex_reconcile_shared_team', { reviewId: review.id, reviewedHead: review.head,
     acknowledgedPaths: review.paths, reviewSummary: 'Reviewed the preserved operator edit; retain it exactly.' });
@@ -79,7 +87,7 @@ async function setup() {
     expect(response.status).toBe(200);
     return await response.json() as { team: { parentThreadId: string } | null };
   };
-  return { target, repoPath, call, status, reconcile, finishArgs, serverState, failureLine: () => diagnostic.split('\n').find(line => line.startsWith('[mcp] Tool failure:')) };
+  return { target, repoPath, call, start, status, reconcile, finishArgs, serverState, failureLine: () => diagnostic.split('\n').find(line => line.startsWith('[mcp] Tool failure:')) };
 }
 
 it.each(['reconcile', 'finish'] as const)('names the %s control and its actual hold, preserves the edit, and recovers after a fresh review', async action => {
@@ -110,6 +118,40 @@ it.each(['reconcile', 'finish'] as const)('names the %s control and its actual h
   expect((await fixture.call('cortex_finish_shared_team', fixture.finishArgs)).isError).not.toBe(true);
   expect(readSharedCheckoutTeam(fixture.target)).toBeNull();
   expect(readFileSync(operatorFile, 'utf8')).toBe('Preserved operator edit, changed after review.\n');
+  const serverAfter = await fixture.serverState();
+  if (serverAfter) expect(serverAfter.team).toBeNull();
+}, 90_000);
+
+
+it.each(['reconcile', 'finish'] as const)('names the %s ownership refusal in a second saved thread without suggesting an unavailable status call', async action => {
+  const fixture = await setup();
+  const operatorFile = join(fixture.repoPath, 'operator-note.txt');
+  writeFileSync(operatorFile, 'Operator edit reviewed in the owning thread.\n');
+  const review = (await fixture.status()).review;
+  expect((await fixture.reconcile(review)).isError).not.toBe(true);
+  expect(readSharedCheckoutTeam(fixture.target)?.reconciliations).toHaveLength(1);
+  const before = JSON.stringify(readSharedCheckoutTeam(fixture.target));
+  const serverBefore = await fixture.serverState();
+  if (serverBefore) expect(serverBefore.team?.parentThreadId).toBe(fixture.target.parentThreadId);
+  const other = fixture.start('thoughts-checkout-second');
+  const name = action === 'reconcile' ? 'cortex_reconcile_shared_team' : 'cortex_finish_shared_team';
+  const result = await other(name, action === 'reconcile' ? { reviewId: review.id, reviewedHead: review.head,
+    acknowledgedPaths: review.paths, reviewSummary: 'Reviewed the current checkout.' } : fixture.finishArgs);
+  expect(result.isError).toBe(true);
+  const message = result.content.map(entry => entry.text).join('\n');
+  console.log(JSON.stringify({ call: name, failure: message }));
+  expect(message).toContain(name);
+  expect(message).toMatch(/another orchestrator thread owns this checkout/i);
+  expect(message).toMatch(/continue in the owning thread/i);
+  expect(message).toMatch(/separate checkout/i);
+  expect(message).not.toContain('cortex_shared_team_status');
+  expect(message).not.toMatch(/unknown|o8 operation failed/i);
+  expect(message).not.toContain(fixture.repoPath);
+  expect(message).not.toContain(fixture.target.parentThreadId);
+  expect(JSON.stringify(readSharedCheckoutTeam(fixture.target))).toBe(before);
+  expect(readFileSync(operatorFile, 'utf8')).toBe('Operator edit reviewed in the owning thread.\n');
+  expect((await fixture.call('cortex_finish_shared_team', fixture.finishArgs)).isError).not.toBe(true);
+  expect(readSharedCheckoutTeam(fixture.target)).toBeNull();
   const serverAfter = await fixture.serverState();
   if (serverAfter) expect(serverAfter.team).toBeNull();
 }, 90_000);

@@ -1,0 +1,30 @@
+FAIL  tests/next-workers-real-path.test.ts > Workers uses the production state, lanes and live event routes behind operator auth
+AssertionError: expected 404 to be 200 // Object.is equality
+
+- Expected
++ Received
+
+- 200
++ 404
+
+ ❯ tests/next-workers-real-path.test.ts:45:25
+     43|     .toEqual(['Read the task', 'Inspect the working tree', 'Check owne…
+     44|   const detail = await fetch(origin + `/api/lanes/${blocked.id}?events…
+     45|   expect(detail.status).toBe(200);
+       |                         ^
+     46|   const fixture = await (await fetch(origin + '/api/workers-fixture', …
+     47|   const diff = await fetch(origin + '/api/worktrees/diff?' + new URLSe…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed (1)
+   Start at  17:14:37
+   Duration  12.61s (transform 83ms, setup 113ms, import 18ms, tests 12.16s, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.9.0 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

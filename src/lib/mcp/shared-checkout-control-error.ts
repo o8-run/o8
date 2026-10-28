@@ -7,6 +7,8 @@ const RECONCILE = 'Run cortex_shared_team_status, review and explicitly reconcil
 // These are fixed descriptions of known pre-write checkout holds. Do not echo
 // arbitrary exceptions, path suffixes or subprocess output into a tool reply.
 const HOLDS: Array<{ matches: RegExp; reason: string; next: string }> = [
+  { matches: /^This checkout is owned by another orchestrator\./,
+    reason: 'Another orchestrator thread owns this checkout.', next: 'Continue in the owning thread, or use a separate checkout.' },
   { matches: /^Checkout review is stale\./, reason: 'Checkout review is stale.', next: REVIEW },
   { matches: /^Pre-existing operator edits changed during this team:/,
     reason: 'Preserved operator edits changed during this team.', next: RECONCILE },

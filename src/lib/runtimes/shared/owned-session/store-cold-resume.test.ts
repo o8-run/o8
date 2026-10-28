@@ -157,6 +157,22 @@ describe('owned-session store cold resume (#1524)', () => {
     await expect(store.resume('test-owned:ghost-session', 'hello')).rejects.toThrow(/was not found/);
   });
 
+  it('continues in the same saved session with task context when its adapter cannot resume threads', async () => {
+    const { createOwnedSessionStore } = await import('./store');
+    const adapter = coldAdapter();
+    adapter.resumeArgs = () => null;
+    const store = createOwnedSessionStore(adapter);
+    const launched = await store.launch({ cwd: repoPath, prompt: 'preserved original task' });
+    await store.getRuntimeTail(launched.surfaceId);
+    const resumed = await store.resume(launched.surfaceId, 'continue after interruption');
+    expect(resumed.ok).toBe(true);
+    expect(resumed.note).toContain('fresh run in the same checkout');
+    const args = spawnMock.mock.calls.at(-1)![1].join(' ');
+    expect(args).toContain('preserved original task');
+    expect(args).toContain('continue after interruption');
+    expect(args).not.toContain('thread-cold-1');
+  });
+
   it('holds new launch and resume at the artifact budget while preserving exact archived recovery', { timeout: 30_000 }, async () => {
     const { createOwnedSessionStore } = await import('./store');
     const store = createOwnedSessionStore(coldAdapter());
