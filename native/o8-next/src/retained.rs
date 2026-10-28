@@ -414,6 +414,9 @@ fn layout(row: &Row, width: Pixels, expanded: bool, window: &Window) -> Layout {
         backgrounds: b.backgrounds,
     }
 }
+// The desktop transcript's reading column: the composer width plus the 24px row insets.
+const COLUMN: f32 = crate::theme::GEOMETRY.composer_width + 48.;
+
 pub struct RetainedRow {
     pub state: Rc<RefCell<RowState>>,
     pub index: usize,
@@ -488,21 +491,23 @@ impl Element for RetainedRow {
                 AvailableSpace::Definite(w) => w,
                 _ => px(1000.),
             });
+            // Rows wrap at the reading column and paint centred in wider panes.
+            let column = width.min(px(COLUMN));
             let mut state = state.borrow_mut();
             if state
                 .cache
                 .as_ref()
-                .is_none_or(|cache| cache.size.width != width)
+                .is_none_or(|cache| cache.size.width != column)
             {
                 state.cache = Some(layout(
                     &state.row,
-                    width,
+                    column,
                     state.expanded.unwrap_or(false),
                     window,
                 ));
                 state.layouts += 1;
             }
-            state.cache.as_ref().unwrap().size
+            size(width, state.cache.as_ref().unwrap().size.height)
         });
         (id, ())
     }
@@ -528,10 +533,15 @@ impl Element for RetainedRow {
     ) {
         let state = self.state.borrow();
         let cache = state.cache.as_ref().expect("measured row");
+        let origin = bounds.origin
+            + point(
+                ((bounds.size.width - cache.size.width) / 2.).max(px(0.)),
+                px(0.),
+            );
         for background in &cache.backgrounds {
             window.paint_quad(gpui::fill(
                 Bounds::new(
-                    bounds.origin + background.bounds.origin,
+                    origin + background.bounds.origin,
                     background.bounds.size,
                 ),
                 background.color,
@@ -540,7 +550,7 @@ impl Element for RetainedRow {
         for line in &cache.lines {
             line.line
                 .paint_background(
-                    bounds.origin + line.origin,
+                    origin + line.origin,
                     line.height,
                     line.align,
                     None,
@@ -550,7 +560,7 @@ impl Element for RetainedRow {
                 .unwrap();
             line.line
                 .paint(
-                    bounds.origin + line.origin,
+                    origin + line.origin,
                     line.height,
                     line.align,
                     None,

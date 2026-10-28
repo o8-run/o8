@@ -149,7 +149,10 @@ impl Shell {
             return;
         }
         self.loading = true;
-        self.notice = "Connecting to local o8 server…".into();
+        // Background refreshes run on every stream wakeup; only the first connect is announced.
+        if !self.connected {
+            self.notice = "Connecting to local o8 server…".into();
+        }
         let client = self.client.clone();
         let task = cx.background_executor().spawn(async move {
             let sessions = client.sessions()?;
