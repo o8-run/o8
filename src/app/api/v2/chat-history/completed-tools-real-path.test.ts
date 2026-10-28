@@ -164,6 +164,32 @@ describe('completed tool history through production save/load routes', () => {
     expect(secret.result).toContain('~/.config/creds');
     expect(secret.result).not.toContain('sk-abc123');
   });
+  it('redacts client-saved tool args and results at the POST boundary before they reach canonical history', async () => {
+    const tabId = 'thoughts-tools-client-redaction';
+    const clean = { id: 'clean', name: 'exec_command', args: { cmd: 'npm test', max_tokens: 5 }, status: 'done', result: 'all 12 passed\n' };
+    const leaky = { id: 'leaky', name: 'exec_command', status: 'done',
+      args: { cmd: 'deploy', authorization: 'Bearer client-bearer-value', OPENAI_API_KEY: 'sk-proj-clientsecret0000', env: { 'X-Api-Key': 'header-secret-value' } },
+      result: 'read /Users/someone/.env\nOPENAI_API_KEY=sk-proj-resultsecret000\nGITHUB_TOKEN="ghs_resultsecret0000000000000000"',
+      preview: 'token=preview-secret-value' };
+    await post({ tabId, repoPath, messages: [
+      { id: 'user', role: 'user', content: 'Deploy.', timestamp: 1 },
+      { id: 'assistant', role: 'assistant', content: 'Done.', timestamp: 2, persistedVersion: 3, toolCalls: [clean, leaky] },
+    ] });
+    const { readFileSync } = await import('node:fs');
+    const { getCanonicalChatHistoryPath } = await import('@/lib/llm/chat-history-store');
+    const atRest = readFileSync(getCanonicalChatHistoryPath(tabId), 'utf-8');
+    const loaded = JSON.stringify((await load(tabId)).messages);
+    for (const stored of [atRest, loaded]) {
+      for (const secret of ['client-bearer-value', 'sk-proj-clientsecret0000', 'header-secret-value', 'sk-proj-resultsecret000',
+        'ghs_resultsecret0000000000000000', 'preview-secret-value', '/Users/someone']) expect(stored).not.toContain(secret);
+    }
+    const calls = (await load(tabId)).messages.find((message: { id: string }) => message.id === 'assistant').toolCalls;
+    expect(calls[0]).toEqual(clean);
+    expect(calls[1].args).toMatchObject({ cmd: 'deploy', authorization: '[redacted]', OPENAI_API_KEY: '[redacted]', env: { 'X-Api-Key': '[redacted]' } });
+    expect(calls[1].result).toContain('~/.env');
+    // A malformed client entry is stored as before rather than failing the save.
+    await post({ tabId: `${tabId}-malformed`, repoPath, messages: [{ id: 'a', role: 'assistant', content: 'x', timestamp: 1, toolCalls: [null] }] });
+  });
   it('discards rejected-attempt tools rather than persisting them with the retry', async () => {
     const record = await runTurn('thoughts-tools-retry', undefined, [
       { type: 'turn_retry', attempt: 2, reason: 'retry', notice: 'Trying again' },

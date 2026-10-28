@@ -1168,6 +1168,12 @@
       ]
     },
     {
+      "path": "src/lib/threads/redaction.test.ts",
+      "reasons": [
+        "git-cli"
+      ]
+    },
+    {
       "path": "src/lib/transcripts/no-git-repo-error.test.ts",
       "reasons": [
         "git-cli"
