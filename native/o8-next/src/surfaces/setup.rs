@@ -49,45 +49,35 @@ pub(super) const REGISTRATION: Registration = Registration {
                 });
             });
         }
-        let mut nav = vec![
-            div()
-                .id("setup-open")
-                .debug_selector(|| "setup-open".into())
-                .cursor_pointer()
-                .p(px(6.))
-                .child("Setup")
-                .on_click(cx.listener(|s, _, window, cx| {
-                    s.capture(window, cx);
-                    s.execute(Command::Setup, window, cx);
-                }))
-                .into_any_element(),
-        ];
-        if s.surfaces.setup.view.is_some() {
-            nav.push(
-                div()
-                    .id("setup-close")
-                    .debug_selector(|| "setup-close".into())
-                    .cursor_pointer()
-                    .p(px(6.))
-                    .child("Close setup")
+        // One rail target: it opens setup, and closes it while open unless setup is busy.
+        if s.surfaces.setup.view.is_none() {
+            return vec![
+                super::rail::button("setup-open", super::rail::Icon::Setup, false)
                     .on_click(cx.listener(|s, _, window, cx| {
-                        if s.surfaces
-                            .setup
-                            .view
-                            .as_ref()
-                            .is_some_and(|v| v.read(cx).busy())
-                        {
-                            return;
-                        }
-                        s.surfaces.setup.view = None;
-                        s.restore_focus(window, cx);
-                        s.revision += 1;
-                        cx.notify();
+                        s.capture(window, cx);
+                        s.execute(Command::Setup, window, cx);
                     }))
                     .into_any_element(),
-            );
+            ];
         }
-        nav
+        vec![
+            super::rail::button("setup-close", super::rail::Icon::Setup, true)
+                .on_click(cx.listener(|s, _, window, cx| {
+                    if s.surfaces
+                        .setup
+                        .view
+                        .as_ref()
+                        .is_some_and(|v| v.read(cx).busy())
+                    {
+                        return;
+                    }
+                    s.surfaces.setup.view = None;
+                    s.restore_focus(window, cx);
+                    s.revision += 1;
+                    cx.notify();
+                }))
+                .into_any_element(),
+        ]
     },
     ..Registration::new("", "Open setup", |s, _, _, cx| {
         s.open_setup(cx);

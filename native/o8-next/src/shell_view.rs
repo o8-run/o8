@@ -24,10 +24,12 @@ impl Render for Shell {
             cx,
         );
         let slots = features::render_content(self, &frame, chrome.into_any_element(), window, cx);
+        let rail = self.render_rail(cx);
         div()
             .size_full()
             .flex()
             .flex_col()
+            .pl(px(rail::WIDTH))
             .bg(if self.system_glass {
                 theme().background
             } else {
@@ -41,6 +43,8 @@ impl Render for Shell {
             .track_focus(&self.focus)
             .capture_key_down(cx.listener(Self::key_down))
             .children(slots)
+            // Painted after the veil so the rail sits on the same glass as the content.
+            .child(rail)
     }
 }
 
@@ -180,9 +184,11 @@ pub(super) fn open_window(
             show: !offscreen,
             window_bounds: Some(WindowBounds::Windowed(bounds)),
             window_min_size: Some(size(px(600.), px(400.))),
+            // The traffic lights sit in the header band above the rail, as in the desktop shell.
             titlebar: Some(gpui::TitlebarOptions {
                 title: Some("o8 next".into()),
-                ..Default::default()
+                appears_transparent: true,
+                traffic_light_position: Some(point(px(16.), px(14.))),
             }),
             ..Default::default()
         },

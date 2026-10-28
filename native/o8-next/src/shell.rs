@@ -376,6 +376,8 @@ impl Shell {
 }
 #[path = "shell_material.rs"]
 mod material;
+#[path = "shell_rail.rs"]
+mod rail;
 #[path = "shell_view.rs"]
 mod view;
 pub use view::try_launch;

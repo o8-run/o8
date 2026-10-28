@@ -16,31 +16,21 @@ fn render(
     _: &mut Window,
     cx: &mut Context<Shell>,
 ) -> Option<AnyElement> {
-    let before_workspaces = registrations()
-        .iter()
-        .flat_map(|r| (r.nav)(s, NavPosition::BeforeWorkspaces, cx))
-        .collect::<Vec<_>>();
-    let after_workspaces = registrations()
-        .iter()
-        .flat_map(|r| (r.nav)(s, NavPosition::AfterWorkspaces, cx))
-        .collect::<Vec<_>>();
+    // Surface entries and the brand live in the navigation rail (shell_rail.rs).
     Some(
         (div()
             .flex()
             .items_center()
             .flex_shrink_0()
             .gap(px(12.))
-            .p(px(8.))
+            .h(px(crate::theme::GEOMETRY.header))
+            // Clears the traffic lights, which extend past the rail column.
+            .pl(px(20.))
+            .pr(px(8.))
             .on_mouse_down(
                 gpui::MouseButton::Left,
                 cx.listener(|_, _, window, _| window.prevent_default()),
             )
-            .children(
-                frame
-                    .brand
-                    .map(|brand| div().debug_selector(move || brand.into()).child(brand)),
-            )
-            .children(before_workspaces)
             .child(
                 div()
                     .id("workspace-switcher")
@@ -69,7 +59,6 @@ fn render(
                         cx.notify();
                     })),
             )
-            .children(after_workspaces)
             .child(
                 div()
                     .id("shell-palette")
