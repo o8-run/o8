@@ -2530,6 +2530,14 @@
       ]
     },
     {
+      "path": "tests/composer-cache-pill-real-path.test.ts",
+      "reasons": [
+        "browser",
+        "real-path"
+      ],
+      "browser": true
+    },
+    {
       "path": "tests/composer-chip-layout-real-path.test.ts",
       "reasons": [
         "browser",

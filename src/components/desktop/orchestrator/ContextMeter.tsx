@@ -1,12 +1,14 @@
 'use client';
 
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useId, useMemo, useRef, useState } from 'react';
 import { formatTokens } from '@/lib/util/format-tokens';
 import { approxTokens } from '@/components/desktop/thoughts/use-orchestrator-stream/shared';
 import { useOrchestratorContextResidency } from './context-residency';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import { ComposerPopover } from '../thoughts/chat-panel/ComposerPopover';
 import { FloatingSurface } from '../FloatingSurface';
+import { useComposerSessionCache } from '../SessionCacheIndicator';
+import { useComposerChipCompact } from '../thoughts/composer-compact-context';
 import { ContextCacheSection, latestContextCacheReuse, type ContextCacheReuse } from './ContextCacheSection';
 
 const CONTEXT_LIMIT = 1_000_000;
@@ -88,6 +90,10 @@ function tokensFor(entry: MobileTranscriptEntry): number {
 
 export function ContextMeter({ tokenCount, runningTotal, onClick }: { tokenCount: number; runningTotal: number; onClick?: () => void }) {
   const [open, setOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const helpId = useId();
+  const cache = useComposerSessionCache();
+  const compact = useComposerChipCompact();
   const buttonRef = useRef<HTMLButtonElement | null>(null);
   const residency = useOrchestratorContextResidency();
   const cacheReuse = useMemo(() => latestContextCacheReuse(residency?.messages ?? []), [residency?.messages]);
@@ -102,6 +108,7 @@ export function ContextMeter({ tokenCount, runningTotal, onClick }: { tokenCount
 
   const handleToggle = useCallback(() => {
     onClick?.();
+    setHelpOpen(false);
     setOpen((prev) => !prev);
   }, [onClick]);
 
@@ -119,15 +126,19 @@ export function ContextMeter({ tokenCount, runningTotal, onClick }: { tokenCount
         ref={buttonRef}
         type="button"
         onClick={handleToggle}
-        aria-label={`${titlePrefix} ${label}.${cacheReuse ? ` Last prompt reused ${cacheReuse.percent}% cached input.` : ''}${tokenCount > 0 ? ` Context grew by ${meterLabel(tokenCount)} tokens since the previous runtime report.` : ''}`}
+        aria-label={`${titlePrefix} ${label}.${cacheReuse ? ` Last prompt reused ${cacheReuse.percent}% cached input.` : ''}${tokenCount > 0 ? ` Context grew by ${meterLabel(tokenCount)} tokens since the previous runtime report.` : ''}${cache ? ` ${cache.text}. ${cache.detail}` : ''}`}
         aria-expanded={open}
         data-context-meter
-        title={tokenCount > 0 ? `${titlePrefix} ${label} · +${meterLabel(tokenCount)} since previous report` : `${titlePrefix} ${label}`}
+        data-session-cache={cache?.session ?? undefined}
+        aria-describedby={cache && helpOpen && !open ? helpId : undefined}
+        onFocus={() => setHelpOpen(true)}
+        onBlur={() => setHelpOpen(false)}
+        title={cache ? undefined : tokenCount > 0 ? `${titlePrefix} ${label} · +${meterLabel(tokenCount)} since previous report` : `${titlePrefix} ${label}`}
         style={{
-          width: 24,
+          width: cache ? 'auto' : 24,
           height: 24,
           paddingTop: 0,
-          paddingRight: 0,
+          paddingRight: cache ? 6 : 0,
           paddingBottom: 0,
           paddingLeft: 0,
           borderRadius: 999,
@@ -137,18 +148,21 @@ export function ContextMeter({ tokenCount, runningTotal, onClick }: { tokenCount
           display: 'inline-flex',
           alignItems: 'center',
           justifyContent: 'center',
+          gap: 4,
           cursor: 'pointer',
           flexShrink: 0,
           transition: 'background 140ms cubic-bezier(0.22, 1, 0.36, 1), color 140ms cubic-bezier(0.22, 1, 0.36, 1)',
         }}
         onMouseEnter={(event) => {
+          setHelpOpen(true);
           if (!open) event.currentTarget.style.background = 'var(--t-hover)';
         }}
         onMouseLeave={(event) => {
+          if (document.activeElement !== event.currentTarget) setHelpOpen(false);
           if (!open) event.currentTarget.style.background = 'transparent';
         }}
       >
-        <svg width={19} height={19} viewBox="0 0 18 18" aria-hidden="true" style={{ display: 'block', transform: 'rotate(-90deg)' }}>
+        <svg width={19} height={19} viewBox="0 0 18 18" aria-hidden="true" style={{ display: 'block', flexShrink: 0, transform: 'rotate(-90deg)' }}>
           <circle
             cx="9"
             cy="9"
@@ -172,7 +186,16 @@ export function ContextMeter({ tokenCount, runningTotal, onClick }: { tokenCount
           <circle cx="9" cy="9" r="3.5" fill="none" stroke="var(--t-divider-subtle)" strokeWidth="1.5" />
           {cacheReuse ? <circle data-testid="context-cache-ring" cx="9" cy="9" r="3.5" fill="none" stroke="var(--t-accent)" strokeWidth="1.5" strokeLinecap="round" strokeDasharray={21.99} strokeDashoffset={21.99 * (1 - cacheReuse.percent / 100)} /> : null}
         </svg>
+        {cache ? <span style={{ fontFamily: 'var(--font-sans-system)', whiteSpace: 'nowrap', color: 'var(--t-text-muted)', fontSize: 9.5,
+          fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.25 }}>{compact ? cache.compactLabel : cache.label}</span> : null}
       </button>
+      <ComposerPopover anchorRef={buttonRef} open={Boolean(cache && helpOpen && !open)} align="end" onClose={() => setHelpOpen(false)}>
+        <div role="tooltip" id={helpId} style={{ maxWidth: 280, padding: 10, borderRadius: 8,
+          background: 'var(--t-popover-surface)', color: 'var(--t-text-muted)', boxShadow: 'var(--t-panel-shadow)',
+          fontFamily: 'var(--font-sans-system)', fontSize: 11, fontWeight: 300, lineHeight: 1.4 }}>
+          {cache?.text}. {cache?.detail}
+        </div>
+      </ComposerPopover>
       <ComposerPopover anchorRef={buttonRef} open={open} align="end" onClose={() => setOpen(false)}>
         <ContextPopover projection={projection} cacheReuse={cacheReuse} onClose={() => setOpen(false)} />
       </ComposerPopover>
