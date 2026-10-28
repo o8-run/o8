@@ -1,4 +1,5 @@
-import { lstatSync, readdirSync, readlinkSync, realpathSync } from 'node:fs';
+import { lstatSync, readFileSync, readdirSync, readlinkSync, realpathSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 export function assertTauriExportInputsSafe(standaloneRoot) {
@@ -55,6 +56,37 @@ export function assertTauriExportInputsSafe(standaloneRoot) {
           if (destination === '..' || destination.startsWith(`..${sep}`) || isAbsolute(destination)) {
             throw new Error(`${label} link escapes the package: ${relative(standaloneRoot, path)}`);
           }
+        }
+      }
+    }
+  }
+  assertNextRuntimeFilesPresent(standaloneRoot);
+}
+
+/** Resolve compiled route externals from the package, never the build checkout. */
+export function assertNextRuntimeFilesPresent(serverRoot) {
+  const compiled = join(serverRoot, '.next/server');
+  if (!lstatSync(compiled, { throwIfNoEntry: false })) return;
+  const root = realpathSync(serverRoot);
+  const pending = [compiled];
+  while (pending.length) {
+    const directory = pending.pop();
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const file = join(directory, entry.name);
+      if (entry.isDirectory()) { pending.push(file); continue; }
+      if (!entry.isFile() || !/\.[cm]?js$/.test(entry.name)) continue;
+      const require = createRequire(resolve(file));
+      const references = readFileSync(file, 'utf8').matchAll(
+        /["'`](next\/dist\/compiled\/next-server\/[^"'`\s]+)["'`]/g,
+      );
+      for (const [, specifier] of references) {
+        let resolved;
+        try { resolved = realpathSync(require.resolve(specifier)); } catch {
+          throw new Error(`Missing packaged Next runtime: ${specifier} (required by ${relative(serverRoot, file)})`);
+        }
+        const destination = relative(root, resolved);
+        if (destination === '..' || destination.startsWith(`..${sep}`) || isAbsolute(destination)) {
+          throw new Error(`Next runtime resolves outside the package: ${specifier}`);
         }
       }
     }

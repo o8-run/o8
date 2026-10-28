@@ -6066,6 +6066,12 @@
       ]
     },
     {
+      "path": "tests/release-next-runtime-verification.test.ts",
+      "reasons": [
+        "child-process"
+      ]
+    },
+    {
       "path": "tests/release-output-delete-ownership-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -6098,6 +6104,15 @@
         "native-build",
         "process-signal",
         "terminal-tool"
+      ]
+    },
+    {
+      "path": "tests/release-runtime-files-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener",
+        "process-signal",
+        "real-path"
       ]
     },
     {
