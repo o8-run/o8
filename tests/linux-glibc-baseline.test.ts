@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { copyFileSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -21,6 +21,34 @@ describe('Linux package glibc baseline', () => {
     const matrix = workflow.jobs.build.strategy.matrix.platform;
     expect(matrix).toContain('"ubuntu-22.04"');
     expect(matrix).not.toContain('ubuntu-latest');
+  });
+
+  it('keeps every Linux bundle prerequisite while explicitly selecting the distribution unwind headers', () => {
+    const prerequisite = workflow.jobs.build.steps.find((step) => step.run?.includes('apt-get install'));
+    const install = prerequisite?.run?.split('\n').find((line) => line.includes('apt-get install'));
+    expect(install?.trim().split(/\s+/)).toEqual(expect.arrayContaining([
+      'libwebkit2gtk-4.1-dev', 'libgtk-3-dev', 'librsvg2-dev', 'patchelf', 'libssl-dev',
+      'build-essential', 'libfuse2', 'libayatana-appindicator3-dev', 'libvips-dev',
+      'libgstreamer1.0-dev', 'libgstreamer-plugins-base1.0-dev', 'gstreamer1.0-plugins-base',
+      'gstreamer1.0-plugins-good', 'gstreamer1.0-gl', 'libunwind-dev',
+    ]));
+  });
+
+  it('selects distribution unwind headers in every 22.04 workflow installing the shell prerequisites', () => {
+    const checked: string[] = [];
+    for (const file of readdirSync(join(root, '.github/workflows')).filter((name) => /\.ya?ml$/.test(name))) {
+      const candidate = parse(readFileSync(join(root, '.github/workflows', file), 'utf8'));
+      for (const job of Object.values(candidate.jobs ?? {}) as { steps?: Step[] }[]) {
+        if (!JSON.stringify(job).includes('ubuntu-22.04')) continue;
+        for (const step of job.steps ?? []) {
+          if (!step.run?.includes('apt-get') || !step.run.includes('libwebkit2gtk-4.1-dev')) continue;
+          checked.push(file);
+          const command = step.run.replace(/\\\n\s*/g, ' ');
+          expect(command, `${file}: select libunwind-dev explicitly to replace conflicting headers`).toMatch(/apt-get[^\n]*\binstall\b[^\n]*\blibunwind-dev\b/);
+        }
+      }
+    }
+    expect(checked).toContain('port-build.yml');
   });
 
   it('fails the build when a shipped binary needs glibc newer than 2.35', () => {
