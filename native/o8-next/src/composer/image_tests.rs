@@ -219,3 +219,72 @@ fn native_image_remove_chips_tab_enter_space_restore_focus(cx: &mut TestAppConte
         "image removal must never submit the draft"
     );
 }
+
+fn full_remove_press(key: &str, cx: &mut VisualTestContext) {
+    let keystroke = gpui::Keystroke::parse(key).unwrap();
+    cx.simulate_event(gpui::KeyDownEvent {
+        keystroke: keystroke.clone(),
+        is_held: false,
+    });
+    // A real frame can replace the removed chip before the key is released.
+    draw(cx);
+    cx.simulate_event(gpui::KeyUpEvent { keystroke });
+    draw(cx);
+}
+
+fn check_full_remove_press(key: &str, cx: &mut TestAppContext) {
+    let fixture = Fixture::start(true);
+    let (surface, cx) = open(cx, &fixture);
+    image_session(cx, &surface);
+    cx.simulate_input("Keep this draft");
+    for _ in 0..3 {
+        paste(png(), cx);
+    }
+    assert_eq!(images(&surface, cx).len(), 3);
+    cx.simulate_keystrokes("tab tab");
+    draw(cx);
+    let focused = |cx: &mut VisualTestContext| {
+        surface.update_in(cx, |s, window, cx| {
+            s.composer.read(cx).controls.focus["composer-image-remove-1"].is_focused(window)
+        })
+    };
+    assert!(focused(cx), "Tab must reach the middle image remove chip");
+    full_remove_press(key, cx);
+    assert_eq!(
+        images(&surface, cx).len(),
+        2,
+        "one full {key} press must remove exactly one image"
+    );
+    assert!(
+        focused(cx),
+        "focus must stay on the following chip in that slot"
+    );
+    full_remove_press(key, cx);
+    assert_eq!(
+        images(&surface, cx).len(),
+        1,
+        "the second full press removes exactly one more image"
+    );
+    surface.update_in(cx, |s, window, cx| {
+        let input = s.composer.read(cx);
+        assert!(
+            input.focus.is_focused(window),
+            "without a following chip, focus returns to the input"
+        );
+        assert_eq!(input.text, "Keep this draft");
+    });
+    assert!(
+        surface.read_with(cx, |s, _| s.queue["items"].as_array().unwrap().is_empty()),
+        "removing images must not submit the draft"
+    );
+}
+
+#[gpui::test]
+fn native_image_remove_full_enter_press_once(cx: &mut TestAppContext) {
+    check_full_remove_press("enter", cx);
+}
+
+#[gpui::test]
+fn native_image_remove_full_space_press_once(cx: &mut TestAppContext) {
+    check_full_remove_press("space", cx);
+}
