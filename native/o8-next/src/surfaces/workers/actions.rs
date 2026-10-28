@@ -48,7 +48,20 @@ impl Card {
             let result = task.await;
             let _ = this.update(cx, |this, cx| {
                 this.busy = false;
-                this.notice = result.err().unwrap_or_default();
+                match result {
+                    Ok(value)
+                        if value["lane"].is_object()
+                            && value["lane"]["id"] == this.task.lane["id"] =>
+                    {
+                        if this.task.lane != value["lane"] {
+                            this.task.lane = value["lane"].clone();
+                            this.revision += 1;
+                        }
+                        this.notice.clear();
+                    }
+                    Ok(_) => this.notice = "The worker state could not be refreshed.".into(),
+                    Err(error) => this.notice = error,
+                }
                 cx.notify();
             });
         })
@@ -61,8 +74,8 @@ impl Card {
         let body = match self.pending.clone() {
             Some(body) => body,
             None => {
-                let message = self.composer.read(cx).text.trim().to_owned();
-                if message.is_empty() {
+                let message = self.composer.read(cx).text.clone();
+                if message.trim().is_empty() {
                     return;
                 }
                 static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -107,8 +120,7 @@ impl Card {
                             && !unknown =>
                     {
                         let draft = this.composer.read(cx).text.clone();
-                        let unchanged =
-                            draft.trim() == body["message"].as_str().unwrap_or_default();
+                        let unchanged = draft == body["message"].as_str().unwrap_or_default();
                         let remaining = if unchanged { String::new() } else { draft };
                         match this.draft_slot.save(remaining, None) {
                             Ok(()) => {

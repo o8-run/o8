@@ -93,6 +93,10 @@ impl Card {
     pub fn focus_actions(&self, window: &mut Window) {
         self.action_focus[0].focus(window);
     }
+    #[cfg(test)]
+    pub(super) fn action_busy(&self) -> bool {
+        self.busy
+    }
     pub fn toggle_activity(&mut self, cx: &mut Context<Self>) {
         self.expanded = !self.expanded;
         if self.expanded && (!self.loaded || !self.error.is_empty()) {

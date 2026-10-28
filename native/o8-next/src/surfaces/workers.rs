@@ -55,3 +55,7 @@ mod card_tests;
 #[cfg(test)]
 #[path = "workers/action_tests.rs"]
 mod action_tests;
+
+#[cfg(test)]
+#[path = "workers/review_tests.rs"]
+mod review_tests;

@@ -100,6 +100,7 @@ export default async function register({ repo }: SurfaceContext): Promise<Surfac
       'GET /api/workers-fixture': async request => {
         if (request.nextUrl.searchParams.has('block')) setLaneStatus(laneIds['worker-running'], 'awaiting_orchestrator', 'system', 'file_owned');
         if (request.nextUrl.searchParams.has('drop')) drop = true;
+        if (request.nextUrl.searchParams.has('refresh')) setLaneStatus(laneIds['worker-blocked'], 'reviewing', 'system', 'fixture_refreshed');
         if (request.nextUrl.searchParams.has('progress')) appendEvent(laneIds['worker-blocked'], 'agent_report', 'system', { event: 'progress', message: 'Progress after refresh' });
         return Response.json({ calls, laneIds, repo, bodies, deliveries });
       },
