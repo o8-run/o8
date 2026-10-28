@@ -5,6 +5,7 @@ edition = "2024"
 license = "Apache-2.0"
 publish = false
 default-run = "o8-next"
+build = "src/shell_feature_build.rs"
 
 [features]
 macos-diagnostics = ["gpui/frame-diagnostics"]

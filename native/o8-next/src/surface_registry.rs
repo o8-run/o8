@@ -167,6 +167,7 @@ macro_rules! register_surfaces {
         enum Command {
             $( $(#[$tab_attr])* $variant $(($payload))?, )*
             $( $(#[$command_attr])* $command_variant, )*
+            Feature(&'static features::PaletteCommand),
             Message(String),
             Refresh,
             Shortcuts,
@@ -177,11 +178,12 @@ macro_rules! register_surfaces {
                     $( $(#[$tab_attr])* Self::$variant { .. } => &$module::REGISTRATION, )*
                     $( $(#[$command_attr])* Self::$command_variant => &$command_module::REGISTRATION, )*
                     Self::Message(_) => &session::REGISTRATION,
-                    Self::Refresh | Self::Shortcuts => unreachable!("shell command"),
+                    Self::Feature(_) | Self::Refresh | Self::Shortcuts => unreachable!("shell command"),
                 }
             }
             fn label(&self, sessions: &[Session]) -> String {
                 match self {
+                    Self::Feature(command) => command.label.into(),
                     Self::Session(id) => session::label(id, sessions),
                     Self::Message(_) => "New message in selected session".into(),
                     Self::Refresh => "Refresh".into(),
