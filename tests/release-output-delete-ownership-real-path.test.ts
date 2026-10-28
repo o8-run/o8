@@ -6,6 +6,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { expect, it, vi } from 'vitest';
 import { createRetainedGeneratedOutputFixture } from './generated-output-fixture';
+import { RUNTIME_INPUT_FILES } from './helpers/packaged-runtime-inputs';
 
 const source = process.cwd();
 const require = createRequire(import.meta.url);
@@ -28,6 +29,10 @@ it.each([
     writeFileSync(path.join(repo, 'node_modules/next/dist/bin/next'), `
       const fs = require('node:fs'); const output = process.env.O8_RELEASE_NEXT_DIST_DIR;
       fs.mkdirSync(output + '/standalone', { recursive: true });
+      for (const [file, contents] of Object.entries(${JSON.stringify(RUNTIME_INPUT_FILES)})) {
+        const target = require('node:path').join(output, 'standalone', file);
+        fs.mkdirSync(require('node:path').dirname(target), { recursive: true }); fs.writeFileSync(target, contents);
+      }
       fs.writeFileSync(output + '/BUILD_ID', 'compiler generation');
       fs.writeFileSync(output + '/standalone/server.js', 'const config = ' + JSON.stringify({distDir:output}));
       fs.mkdirSync('out'); fs.writeFileSync('out/server.js', 'verified fixture artifact');
@@ -116,6 +121,10 @@ it('admits a delayed native worker before its first write and scrubs only its ow
     (async () => {
       const output = process.env.O8_RELEASE_NEXT_DIST_DIR;
       fs.mkdirSync(output + '/standalone', { recursive: true });
+      for (const [file, contents] of Object.entries(${JSON.stringify(RUNTIME_INPUT_FILES)})) {
+        const target = require('node:path').join(output, 'standalone', file);
+        fs.mkdirSync(require('node:path').dirname(target), { recursive: true }); fs.writeFileSync(target, contents);
+      }
       await fs.promises.writeFile(output + '/BUILD_ID', 'worker build');
       await fs.promises.writeFile(output + '/standalone/.env', 'owned environment');
       await fs.promises.writeFile(output + '/standalone/.env.production', 'owned production environment');

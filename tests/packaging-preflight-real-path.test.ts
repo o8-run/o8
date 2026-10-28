@@ -13,6 +13,7 @@ import nextConfig from '../next.config';
 import { assertMacPackageSize } from '../scripts/lib/mac-package-size.mjs';
 import { assertTauriExportInputsSafe } from '../scripts/lib/tauri-export-safety.mjs';
 import { FOOTPRINT_BUDGET } from '../scripts/lib/footprint-budget.mjs';
+import { RUNTIME_INPUT_FILES, stageRuntimeInputs } from './helpers/packaged-runtime-inputs';
 
 const roots: string[] = [];
 const sourceRoot = process.cwd();
@@ -50,6 +51,7 @@ function fixture() {
   roots.push(root);
   const app = join(root, 'src-tauri/target/universal-apple-darwin/release/bundle/macos/o8.app');
   const server = join(app, 'Contents/Resources/server');
+  stageRuntimeInputs(server);
   for (const file of ['server.js', '.next/server/app/page.js', '.next/static/chunks/main.js',
     '.next/required-server-files.json', 'node_modules/better-sqlite3/binding.node']) {
     mkdirSync(dirname(join(server, file)), { recursive: true });
@@ -114,7 +116,9 @@ describe('packaging preflight through real filesystem and script entry points', 
       customConfig: { ...nextConfig, outputFileTracingRoot: root }, silent: true,
     });
     const sharedIgnore = makeIgnoreFn(root, config.outputFileTracingExcludes['*']);
-    for (const file of [...privateFiles, link]) expect(sharedIgnore(join(root, file)), file).toBe(true);
+    const routeIgnore = makeIgnoreFn(root, Object.values(config.outputFileTracingExcludes).flat());
+    for (const file of [...privateFiles, link]) expect(routeIgnore(join(root, file)), file).toBe(true);
+    expect(sharedIgnore(join(root, '.next/.o8-release-build/server/app/api/fixture/route.js'))).toBe(false);
     for (const file of runtimeFiles) expect(sharedIgnore(join(root, file)), file).toBe(false);
     await collectBuildTraces({ dir: root, distDir: dist, outputFileTracingRoot: root, config,
       nextBuildSpan: span, edgeRuntimeRoutes: {}, staticPages: [], buildTraceContext: { chunksTrace: {
@@ -126,6 +130,7 @@ describe('packaging preflight through real filesystem and script entry points', 
     for (const file of [...privateFiles, link]) expect(existsSync(join(dist, 'standalone', file)), file).toBe(false);
     for (const file of runtimeFiles) expect(readFileSync(join(dist, 'standalone', file), 'utf8')).toBe(`fixture:${file}`);
     expect(readFileSync(join(outside, 'keep'), 'utf8')).toBe('outside sentinel');
+    stageRuntimeInputs(join(dist, 'standalone'));
     expect(() => assertTauriExportInputsSafe(join(dist, 'standalone'))).not.toThrow();
   });
 
@@ -135,21 +140,38 @@ describe('packaging preflight through real filesystem and script entry points', 
     writeFileSync(join(root, 'scripts/bust-stale-patch-cache.mjs'), '');
     const bin = join(root, 'node_modules/next/dist/bin/next.js');
     mkdirSync(dirname(bin), { recursive: true });
-    writeFileSync(bin, `const fs = require('node:fs');
-      fs.mkdirSync('.next/standalone/.next/server', { recursive: true });
-      for (const name of ['.env', '.env.production']) fs.copyFileSync(name, '.next/standalone/' + name);
-      fs.writeFileSync('.next/standalone/.next/server/runtime.js', 'runtime');`);
+    writeFileSync(bin, `const fs = require('node:fs'), path = require('node:path');
+      const standalone = (process.env.O8_RELEASE_NEXT_DIST_DIR || '.next') + '/standalone';
+      for (const [file, contents] of Object.entries(${JSON.stringify(RUNTIME_INPUT_FILES)})) {
+        const target = path.join(standalone, file);
+        fs.mkdirSync(path.dirname(target), { recursive: true }); fs.writeFileSync(target, contents);
+      }
+      for (const name of ['.env', '.env.production']) fs.copyFileSync(name, standalone + '/' + name);
+      fs.writeFileSync(standalone + '/.next/server/runtime.js', 'runtime');`);
     for (const name of ['.env', '.env.production']) writeFileSync(join(root, name), 'SYNTHETIC_FIXTURE=preserve-source');
-    const result = spawnSync(process.execPath, [join(sourceRoot, 'scripts/build.mjs')], {
-      cwd: root, encoding: 'utf8', timeout: 20_000,
-      env: { NODE_ENV: 'test', PATH: process.env.PATH, HOME: root },
+    writeFileSync(join(root, '.gitignore'), '.next\nnode_modules\n.o8-generated-output-store\n.env*\n');
+    for (const args of [['init', '-q'], ['add', '.'], ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
+      '-c', 'commit.gpgsign=false', '-c', 'core.hooksPath=/dev/null', 'commit', '-qm', 'fixture']]) {
+      expect(spawnSync('git', args, { cwd: root }).status).toBe(0);
+    }
+    const script = `
+      const producer = await import(${JSON.stringify(join(sourceRoot, 'src/lib/workspace/generated-output-producer.ts'))});
+      const build = await import(${JSON.stringify(join(sourceRoot, 'scripts/lib/registered-build.mjs'))});
+      await (producer.default ?? producer).runGeneratedOutputPrebuild({ workspacePath: process.cwd(), preflight() {},
+        operation: context => context.runBuild(build.runRegisteredBuild) });`;
+    const result = spawnSync(process.execPath, ['--import', join(sourceRoot, 'scripts/register-server-only-stub.mjs'),
+      '--import', createRequire(import.meta.url).resolve('tsx'), '--input-type=module', '-e', script], {
+      cwd: root, encoding: 'utf8', timeout: 60_000,
+      env: { NODE_ENV: 'test', PATH: process.env.PATH, HOME: root, O8_DATA_DIR: join(root, 'data'),
+        TSX_TSCONFIG_PATH: join(sourceRoot, 'tsconfig.json') },
     });
     expect(result.status, result.stderr).toBe(0);
+    const standalone = join(root, '.next/standalone');
     for (const name of ['.env', '.env.production']) {
-      expect(existsSync(join(root, '.next/standalone', name)), name).toBe(false);
+      expect(existsSync(join(standalone, name)), name).toBe(false);
       expect(readFileSync(join(root, name), 'utf8')).toBe('SYNTHETIC_FIXTURE=preserve-source');
     }
-    expect(readFileSync(join(root, '.next/standalone/.next/server/runtime.js'), 'utf8')).toBe('runtime');
+    expect(readFileSync(join(standalone, '.next/server/runtime.js'), 'utf8')).toBe('runtime');
   });
 
   it('refuses a standalone asset link that detours outside before resolving back inside', () => {
@@ -205,7 +227,8 @@ describe('packaging preflight through real filesystem and script entry points', 
       writeFileSync(join(root, 'out/keep'), 'previous staging');
       for (const script of ['tauri-export.mjs', 'native-bundle.mjs', 'tauri-hook-resources.mjs', 'run-lib.mjs',
         'lib/release-config.mjs', 'lib/tauri-export-safety.mjs', 'lib/packaged-build-inputs.mjs',
-        'next/verify-app-bundle.mjs', 'next/build-identity.mjs', 'lib/macos-release-artifacts.mjs']) {
+        'next/verify-app-bundle.mjs', 'next/build-identity.mjs', 'lib/macos-release-artifacts.mjs',
+        'lib/build-channel.mjs', 'lib/updater-signature.mjs']) {
         const destination = join(root, 'scripts', script);
         mkdirSync(dirname(destination), { recursive: true });
         cpSync(join(sourceRoot, 'scripts', script), destination);
@@ -344,7 +367,8 @@ export function spawnSync(command, args) {
     writeFileSync(sentinel, 'previous-output');
     for (const file of ['tauri-export.mjs', 'native-bundle.mjs', 'tauri-hook-resources.mjs',
       'run-lib.mjs', 'lib/release-config.mjs', 'lib/tauri-export-safety.mjs', 'lib/packaged-build-inputs.mjs',
-      'next/verify-app-bundle.mjs', 'next/build-identity.mjs', 'lib/macos-release-artifacts.mjs']) {
+      'next/verify-app-bundle.mjs', 'next/build-identity.mjs', 'lib/macos-release-artifacts.mjs',
+      'lib/build-channel.mjs', 'lib/updater-signature.mjs']) {
       const destination = join(f.root, 'scripts', file);
       mkdirSync(dirname(destination), { recursive: true });
       cpSync(join(sourceRoot, 'scripts', file), destination);

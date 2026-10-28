@@ -13,6 +13,11 @@ const nextConfig: NextConfig = {
   agentRules: false,
   outputFileTracingRoot: __dirname,
   outputFileTracingExcludes: {
+    // Next also matches '*' against its synthetic 'next-server' trace, where
+    // contains:true makes .o8* match the private compiler namespace. Ignoring
+    // those parent bundles drops their runtime dependencies. Apply checkout
+    // metadata exclusions only to routes, after dependency tracing completes.
+    '/*': ['./.{agents,claude,codex,cortex-worktrees,o8*}{,/**/*}'],
     // sharp is Next's image optimizer, pulled in transitively. `images.unoptimized`
     // below is required for standalone output, so it is never invoked at runtime —
     // but it ships ~100MB of vendored libvips into the bundle, and that is what
@@ -25,7 +30,6 @@ const nextConfig: NextConfig = {
       './.git*{,/**/*}',
       './.env*',
       './.mcp.json',
-      './.{agents,claude,codex,cortex-worktrees,o8*}{,/**/*}',
       './*explainer*.html',
       // Build cache can enter route traces through filesystem reads. Keep it
       // available to the compiler, but never copy it into the runtime bundle.

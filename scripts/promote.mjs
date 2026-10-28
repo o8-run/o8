@@ -15,6 +15,7 @@ import { acquirePublicationLock, BETA_FEED_TAG, compareVersions } from './lib/re
 import { warmUpdatePublication } from './lib/release-update-warmup.mjs';
 import { stableReleaseEffects } from './lib/stable-release-effects.mjs';
 import { verifyUpdaterSignature } from './lib/updater-signature.mjs';
+import { assertNextRuntimeFilesPresent } from './lib/tauri-export-safety.mjs';
 
 const json = path => JSON.parse(readFileSync(path, 'utf8'));
 const sha256 = path => createHash('sha256').update(readFileSync(path)).digest('hex');
@@ -130,6 +131,7 @@ async function main(args) {
         const extraction = join(dir, String(index), name + '-app');
         mkdirSync(extraction);
         execFileSync('tar', ['xzf', join(candidateDir, archiveName), '-C', extraction], { stdio: 'pipe' });
+        assertNextRuntimeFilesPresent(join(extraction, 'o8.app/Contents/Resources/server'));
         verifyMacosDmgMatchesApp(join(extraction, 'o8.app'), join(candidateDir, name), version, architecture);
         execFileSync('xcrun', ['stapler', 'validate', join(candidateDir, name)], { stdio: 'pipe' });
       }

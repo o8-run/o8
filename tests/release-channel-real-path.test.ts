@@ -16,6 +16,7 @@ import { spawnSync } from 'node:child_process';
 import { afterEach, describe, expect, it } from 'vitest';
 import { resolveReleaseChannel } from '../scripts/lib/release-channel.mjs';
 import { bundleContentSha256, resolveMacosCpuArtifacts } from '../scripts/lib/macos-release-artifacts.mjs';
+import { copyRuntimeArchive, runtimeFixtureUpdaterKey } from './helpers/signed-runtime-archive';
 
 const roots: string[] = [];
 const releaseScript = join(process.cwd(), 'scripts/release.mjs');
@@ -32,11 +33,10 @@ function thinMachO(cpuType: number) {
   return binary;
 }
 
-/** Public precomputed bytes; tests never create keys or signatures. */
+/** Extend public fixture bytes with the server inputs required by verification. */
 function copySignedArchive(channel: 'stable' | 'preview', variant: string, archive: string, signature: string) {
   const source = join(signedFixtures, `${channel}-${variant}.tar.gz`);
-  copyFileSync(source, archive);
-  copyFileSync(source + '.sig', signature);
+  copyRuntimeArchive(source, archive, signature);
 }
 
 function fixture(version = '0.1.741-preview.1', variant = 'universal') {
@@ -55,7 +55,7 @@ function fixture(version = '0.1.741-preview.1', variant = 'universal') {
   mkdirSync(join(root, 'src-tauri/helpers'), { recursive: true });
   copyFileSync(join(signedFixtures, 'next-build.json'), join(root, 'src-tauri/helpers/o8-next-build.json'));
   writeFileSync(join(root, 'src-tauri/tauri.conf.json'), JSON.stringify({
-    plugins: { updater: { pubkey: readFileSync(join(signedFixtures, 'public-key.txt'), 'utf8').trim() } },
+    plugins: { updater: { pubkey: runtimeFixtureUpdaterKey } },
   }));
   const dmgApp = join(root, 'dmg-fixture', 'o8.app');
   mkdirSync(join(dmgApp, '..'), { recursive: true });
