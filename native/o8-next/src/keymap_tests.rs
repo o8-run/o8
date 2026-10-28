@@ -52,12 +52,13 @@ fn origin(row: &Binding) -> &'static str {
         _ => "Global",
     }
 }
-fn allowed(action: &Shortcut, focus: &str) -> bool {
+fn allowed(row: &Binding, focus: &str) -> bool {
     use Shortcut::*;
     if focus == "none" {
         return false;
     }
-    match action {
+    match &row.action {
+        NextSurface if row.key == "ctrl-tab" || row.key == "ctrl-shift-tab" => focus != "terminal",
         PaletteGlobal | TargetReopen => true,
         Settings => focus != "terminal",
         TargetRefresh | TargetMove(_) | TargetAccept | TargetCancel => focus != "terminal",
@@ -120,12 +121,12 @@ fn keymap_every_binding_dispatches_only_on_its_focus_path(cx: &mut TestAppContex
                 });
                 cx.simulate_keystrokes(&row.key);
                 let actual = view.read_with(cx, |view, _| view.received.clone());
-                let expected = if allowed(&row.action, focus) {
+                let expected = if allowed(&row, focus) {
                     vec![row.action.clone()]
                 } else {
                     vec![]
                 };
-                if isolated || allowed(&row.action, focus) {
+                if isolated || allowed(&row, focus) {
                     assert_eq!(
                         actual,
                         expected,

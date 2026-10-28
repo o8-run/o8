@@ -46,6 +46,8 @@ impl ShellFeature for Keymap {
 fn bind_root(root: gpui::Div, s: &Shell, cx: &mut Context<Shell>) -> gpui::Div {
     let context = if s.surfaces.shortcuts.view.is_some() {
         "Global Reference Modal Overlay"
+    } else if s.surfaces.settings.view.is_some() {
+        "Global SettingsCloseHost Overlay"
     } else if s.palette || s.shortcuts || registrations().iter().any(|r| (r.overlay_open)(s)) {
         "Global Overlay"
     } else {
@@ -84,6 +86,9 @@ fn action(
             } else {
                 s.open_settings(window, cx);
             }
+        }
+        Shortcut::SettingsClose if s.surfaces.settings.view.is_some() => {
+            s.close_settings(window, cx);
         }
         Shortcut::NextSurface | Shortcut::PreviousSurface | Shortcut::SurfaceIndex(_) => {
             let Some(saved) = s.current().filter(|saved| !saved.tabs.is_empty()) else {

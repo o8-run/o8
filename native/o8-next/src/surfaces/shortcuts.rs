@@ -99,6 +99,16 @@ pub(super) fn owns_input(s: &Shell, event: &KeyDownEvent) -> bool {
         return true;
     }
     let (select_tab, close_tab, cycle_tab) = tab_chords(event);
+    if close_tab
+        && event.keystroke.modifiers.control
+        && s.surfaces.settings.view.is_some()
+        && !s.palette
+        && !s.shortcuts
+    {
+        // Settings owns its focused close action. Its context predicate keeps
+        // fields and terminals from dispatching that action to the shell.
+        return false;
+    }
     (select_tab || close_tab || cycle_tab)
         && (s.palette || s.shortcuts || registrations().iter().any(|r| (r.overlay_open)(s)))
 }

@@ -21,6 +21,77 @@ fn two_tabs(shell: &Entity<Shell>, cx: &mut VisualTestContext) {
     ready(shell, cx);
 }
 #[gpui::test]
+fn final_review_ctrl_tab_keeps_main_composer_contract(cx: &mut TestAppContext) {
+    let (_fixture, shell, mut cx) = fixture_shell(cx);
+    two_tabs(&shell, &mut cx);
+    cx.simulate_keystrokes("ctrl-k n e w enter");
+    ready(&shell, &mut cx);
+    assert!(shell.read_with(&cx, |s, _| s.current().unwrap().composer));
+    cx.simulate_input("retained composer draft");
+    cx.simulate_keystrokes("ctrl-tab");
+    ready(&shell, &mut cx);
+    assert_eq!(
+        shell.read_with(&cx, |s, _| s.active()),
+        Some(Tab::Grid),
+        "main's Ctrl+Tab cycles directly from the focused composer"
+    );
+}
+
+#[gpui::test]
+fn final_review_settings_close_keeps_main_field_contract(cx: &mut TestAppContext) {
+    let fixture = Fixture::start(true);
+    let (shell, mut cx) = open(
+        fixture.client.clone(),
+        fixture.root.join("settings-close.json"),
+        State::default(),
+        cx,
+    );
+    ready(&shell, &mut cx);
+    let tab = shell.read_with(&cx, |s, _| s.active());
+    cx.simulate_keystrokes("ctrl-,");
+    cx.run_until_parked();
+    draw(&mut cx);
+    assert!(shell.read_with(&cx, |s, _| s.surfaces.settings.view.is_some()));
+    cx.simulate_keystrokes("cmd-w");
+    draw(&mut cx);
+    assert!(
+        shell.read_with(&cx, |s, _| s.surfaces.settings.view.is_some()),
+        "main's Settings close chord is Control+W, not Command+W"
+    );
+    cx.simulate_keystrokes("ctrl-w");
+    cx.run_until_parked();
+    draw(&mut cx);
+    assert!(
+        shell.read_with(&cx, |s, _| s.surfaces.settings.view.is_none()),
+        "main's Ctrl+W closes non-editing Settings"
+    );
+    assert_eq!(shell.read_with(&cx, |s, _| s.active()), tab);
+    cx.simulate_keystrokes("ctrl-,");
+    shell.update_in(&mut cx, |s, window, _| s.focus.focus(window));
+    draw(&mut cx);
+    let shell_focus = cx.update(|window, cx| window.focused(cx));
+    cx.simulate_keystrokes("ctrl-f");
+    assert_eq!(cx.update(|window, cx| window.focused(cx)), shell_focus);
+    cx.simulate_keystrokes("ctrl-w");
+    cx.run_until_parked();
+    draw(&mut cx);
+    assert!(shell.read_with(&cx, |s, _| s.surfaces.settings.view.is_none()));
+    cx.simulate_keystrokes("ctrl-, ctrl-shift-w");
+    draw(&mut cx);
+    assert!(
+        shell.read_with(&cx, |s, _| s.surfaces.settings.view.is_none()),
+        "main's Settings close handler also accepts Control+Shift+W"
+    );
+    cx.simulate_keystrokes("ctrl-, ctrl-f");
+    cx.simulate_input("field draft");
+    let focus = cx.update(|window, cx| window.focused(cx));
+    cx.simulate_keystrokes("ctrl-w");
+    draw(&mut cx);
+    assert!(shell.read_with(&cx, |s, _| s.surfaces.settings.view.is_some()));
+    assert_eq!(cx.update(|window, cx| window.focused(cx)), focus);
+    assert_eq!(shell.read_with(&cx, |s, _| s.active()), tab);
+}
+#[gpui::test]
 fn review_reference_command_alias(cx: &mut TestAppContext) {
     let (_fixture, shell, mut cx) = fixture_shell(cx);
     cx.simulate_keystrokes("cmd-/");
@@ -249,5 +320,186 @@ fn review_surfaces_attach_shortcuts_only_through_the_keymap() {
     assert!(
         offenders.is_empty(),
         "surface raw shortcut listeners: {offenders:?}"
+    );
+}
+
+// Hostile review: a capture-phase shell shortcut must never preempt a field.
+#[gpui::test]
+fn keymap_text_focus_keeps_palette_and_close_out(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    let (shell, mut visual) = open(
+        fixture.client.clone(),
+        fixture.root.join("keys.json"),
+        State::default(),
+        cx,
+    );
+    let cx = &mut visual;
+    ready(&shell, cx);
+    cx.simulate_keystrokes("ctrl-k n e w enter");
+    ready(&shell, cx);
+    let before = shell.read_with(cx, |s, _| s.active());
+    cx.simulate_input("draft?");
+    cx.simulate_keystrokes("ctrl-k");
+    assert!(
+        !shell.read_with(cx, |s, _| s.palette),
+        "focused text owns Ctrl+K"
+    );
+    cx.simulate_keystrokes("ctrl-w cmd-w");
+    assert_eq!(
+        shell.read_with(cx, |s, _| s.active()),
+        before,
+        "focused text must keep its surface"
+    );
+}
+
+// Hostile review: extra modifiers must not turn a terminal chord into a shell command.
+#[gpui::test]
+fn keymap_modified_palette_chord_does_not_open_palette(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    let (shell, mut visual) = open(
+        fixture.client.clone(),
+        fixture.root.join("modifiers.json"),
+        State::default(),
+        cx,
+    );
+    ready(&shell, &mut visual);
+    visual.simulate_keystrokes("ctrl-alt-k");
+    assert!(
+        !shell.read_with(&visual, |s, _| s.palette),
+        "Ctrl+Alt+K is not Ctrl+K"
+    );
+    visual.simulate_keystrokes("cmd-shift-k");
+    assert!(
+        !shell.read_with(&visual, |s, _| s.palette),
+        "shortcut modifiers must match exactly"
+    );
+}
+
+#[gpui::test]
+fn keymap_composer_focus_survives_surface_switch_and_reconnect(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    let (shell, mut visual) = open(
+        fixture.client.clone(),
+        fixture.root.join("focus-return.json"),
+        State::default(),
+        cx,
+    );
+    let cx = &mut visual;
+    ready(&shell, cx);
+    cx.simulate_keystrokes("ctrl-k n e w enter");
+    ready(&shell, cx);
+    cx.simulate_input("unsent focus fixture");
+    let composer_focus = cx.update(|window, cx| window.focused(cx).unwrap());
+    draw(cx);
+    let commands = cx.debug_bounds("Commands").unwrap();
+    cx.simulate_click(commands.center(), gpui::Modifiers::default());
+    cx.simulate_keystrokes("g r i d enter");
+    ready(&shell, cx);
+    assert_eq!(shell.read_with(cx, |s, _| s.active()), Some(Tab::Grid));
+    let first_tab = cx.debug_bounds("surface-tab-0").unwrap();
+    cx.simulate_click(first_tab.center(), gpui::Modifiers::default());
+    ready(&shell, cx);
+    assert!(
+        cx.update(|window, _| composer_focus.is_focused(window)),
+        "returning to a surface must restore its focused field"
+    );
+    cx.simulate_keystrokes("ctrl-shift-p r e f r e s h enter");
+    ready(&shell, cx);
+    cx.run_until_parked();
+    draw(cx);
+    assert!(shell.read_with(cx, |s, _| s.connected && !s.loading));
+    assert!(
+        cx.update(|window, _| composer_focus.is_focused(window)),
+        "connection refresh must preserve composer focus"
+    );
+}
+
+#[gpui::test]
+fn keymap_composer_keeps_focus_through_real_socket_reconnect(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    let (shell, mut visual) = open(
+        fixture.client.clone(),
+        fixture.root.join("socket-focus.json"),
+        State::default(),
+        cx,
+    );
+    let cx = &mut visual;
+    ready(&shell, cx);
+    shell.update_in(cx, |s, window, cx| {
+        let repo = s
+            .sessions
+            .iter()
+            .find(|session| session.id == "thoughts-long")
+            .unwrap()
+            .repo_path
+            .clone()
+            .unwrap();
+        s.switch(repo, window, cx);
+        s.execute(Command::Message("thoughts-long".into()), window, cx);
+    });
+    ready(&shell, cx);
+    cx.simulate_input("socket reconnect draft");
+    let focus = cx.update(|window, cx| window.focused(cx).unwrap());
+    let deadline = Instant::now() + Duration::from_secs(8);
+    let mut interrupted = false;
+    loop {
+        shell.update_in(cx, |s, window, cx| s.tick(false, window, cx));
+        draw(cx);
+        let notice = shell.read_with(cx, |s, cx| {
+            let Content::Session(session) = s.content.get(&s.key(&s.active().unwrap())).unwrap()
+            else {
+                panic!("session");
+            };
+            session.read(cx).shell_issue_state(cx)["notice"]
+                .as_str()
+                .unwrap()
+                .to_owned()
+        });
+        interrupted |= notice.starts_with("Reconnecting");
+        assert!(
+            cx.update(|window, _| focus.is_focused(window)),
+            "socket progress must never steal composer focus"
+        );
+        if interrupted && notice.is_empty() {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "owned replay must disconnect and reconnect (saw_disconnect={interrupted}, status={notice:?})"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    shell.read_with(cx, |s, cx| {
+        let Content::Session(session) = s.content.get(&s.key(&s.active().unwrap())).unwrap() else {
+            panic!("session");
+        };
+        assert_eq!(
+            session.read(cx).shell_issue_state(cx)["draft"],
+            "socket reconnect draft"
+        );
+    });
+}
+
+#[gpui::test]
+fn keymap_reference_is_reachable_and_field_question_mark_is_text(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    let (shell, mut visual) = open(
+        fixture.client.clone(),
+        fixture.root.join("reference.json"),
+        State::default(),
+        cx,
+    );
+    let cx = &mut visual;
+    ready(&shell, cx);
+    cx.simulate_keystrokes("?");
+    draw(cx);
+    assert!(cx.debug_bounds("keyboard-shortcuts").is_some());
+    cx.simulate_keystrokes("escape ctrl-k n e w enter");
+    ready(&shell, cx);
+    cx.simulate_keystrokes("?");
+    draw(cx);
+    assert!(
+        shell.read_with(cx, |s, _| s.surfaces.shortcuts.view.is_none()),
+        "field question mark must not toggle reference"
     );
 }

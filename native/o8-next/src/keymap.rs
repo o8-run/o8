@@ -241,6 +241,7 @@ pub fn bindings() -> Vec<Binding> {
     };
     const GLOBAL: &str = "Global && !TextInput && !Terminal && !Modal";
     const TABS: &str = "Global && !TextInput && !Terminal && !Modal && !Overlay";
+    const CYCLE_TABS: &str = "Global && !Terminal && !Modal && !Overlay";
     for prefix in ["ctrl-", "cmd-"] {
         bind(&format!("{prefix}/"), GLOBAL, Reference);
         bind(
@@ -255,11 +256,6 @@ pub fn bindings() -> Vec<Binding> {
             PaletteGlobal,
         );
         bind(&format!("{prefix}k"), "Palette && !Terminal", PaletteCancel);
-        bind(
-            &format!("{prefix}w"),
-            "Settings && !TextInput && !Terminal && !Overlay",
-            SettingsClose,
-        );
         bind(&format!("{prefix}w"), TABS, CloseSurface);
         bind(
             &format!("{prefix},"),
@@ -275,8 +271,16 @@ pub fn bindings() -> Vec<Binding> {
         bind(&format!("{prefix}f"), "Brain && !Terminal", BrainFind);
         bind(&format!("{prefix}f"), "Settings && !Terminal", SettingsFind);
     }
-    bind("ctrl-tab", TABS, NextSurface);
-    bind("ctrl-shift-tab", TABS, PreviousSurface);
+    for key in ["ctrl-w", "ctrl-shift-w"] {
+        bind(
+            key,
+            "(Settings || SettingsCloseHost) && !TextInput && !Terminal",
+            SettingsClose,
+        );
+    }
+    // Main cycles from the composer too, and ignores Shift for this chord.
+    bind("ctrl-tab", CYCLE_TABS, NextSurface);
+    bind("ctrl-shift-tab", CYCLE_TABS, NextSurface);
     bind("cmd-alt-right", TABS, NextSurface);
     bind("cmd-alt-left", TABS, PreviousSurface);
     for index in 0..9 {
