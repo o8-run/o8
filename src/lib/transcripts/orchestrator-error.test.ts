@@ -31,6 +31,22 @@ describe('orchestrator error display limits', () => {
     expect(orchestratorErrorText(`${frame}${reason}\n    at main (bridge.mjs:2:1)`)).toBe(reason);
   });
 
+  it.each(['async', 'new'])('keeps a locationless at %s message line', modifier => {
+    const reason = `Error: first line\n    at ${modifier} something\nlast line with actual reason`;
+    expect(orchestratorErrorText(`${frame}${reason}\n    at main (bridge.mjs:2:1)`)).toBe(reason);
+  });
+
+  it.each(['async', 'new'])('stops at at %s frames with locations', modifier => {
+    for (const location of [
+      'run (file:///bundle/bridge.mjs:2:1)',
+      'file:///bundle/bridge.mjs:2:1',
+      'node:internal/modules/run_main',
+      '<anonymous>',
+    ]) {
+      expect(orchestratorErrorText(`Error: actual reason\n    at ${modifier} ${location}`)).toBe('Error: actual reason');
+    }
+  });
+
   it.each([
     'at run (file:///bundle/bridge.mjs:2:1)',
     'at file:///bundle/bridge.mjs:2:1',

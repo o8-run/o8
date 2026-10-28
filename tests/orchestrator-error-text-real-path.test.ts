@@ -1,4 +1,4 @@
-import { execFile, execFileSync, type ChildProcess } from 'node:child_process';
+import { execFile, execFileSync, spawnSync, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
@@ -50,6 +50,22 @@ const nodeDiagnostics = [
     "expected": "Error: parenthesized frame reason"
   }
 ];
+
+// Generate these diagnostics with Node so the source excerpt and real V8 frames
+// surround the locationless message lines exactly as they do in bridge stderr.
+for (const modifier of ['async', 'new']) {
+  const message = `first line\n    at ${modifier} something\nlast line with actual reason`;
+  const script = join(root, `locationless-${modifier}.mjs`);
+  writeFileSync(script, `throw new Error(${JSON.stringify(message)});\n`);
+  const result = spawnSync(process.execPath, [script], { encoding: 'utf8' });
+  if (result.error) throw result.error;
+  if (result.status !== 1) throw new Error(`Expected Node fixture failure, got ${result.status}`);
+  nodeDiagnostics.push({
+    name: `locationless-${modifier}`,
+    diagnostic: result.stderr,
+    expected: `Error: ${message}`,
+  });
+}
 
 const token = 'error-turn-token-fixture';
 mkdirSync(dataDir);
