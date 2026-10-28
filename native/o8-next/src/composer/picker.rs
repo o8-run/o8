@@ -190,7 +190,7 @@ impl Surface {
     ) -> Stateful<Div> {
         self.composer_button(id, "", enabled, cx, action)
             .w_full()
-            .h(px(38.))
+            .h(px(34.))
             .px(px(10.))
             .rounded(px(8.))
             .when(selected, |row| row.bg(theme().hover))
