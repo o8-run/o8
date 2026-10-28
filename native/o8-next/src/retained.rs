@@ -47,8 +47,9 @@ impl RowState {
         self.cache = None;
     }
     pub fn new(row: Row) -> Self {
-        let expanded = matches!(&row, Row::Message { nodes, .. } if nodes.iter().any(crate::rich::system_event))
-            .then_some(false);
+        let expanded = (matches!(&row, Row::Activity { .. })
+            || matches!(&row, Row::Message { nodes, .. } if nodes.iter().any(crate::rich::system_event)))
+        .then_some(false);
         Self {
             row,
             layouts: 0,
@@ -91,6 +92,12 @@ impl RowState {
         }
         changed
     }
+    /// A row that changed in place (a tool step finished) keeps its disclosure.
+    pub fn keep_disclosure(&mut self, previous: &RowState) {
+        if self.expanded.is_some() && previous.expanded.is_some() {
+            self.expanded = previous.expanded;
+        }
+    }
 }
 struct Line {
     line: WrappedLine,
@@ -101,6 +108,7 @@ struct Line {
 struct Backdrop {
     bounds: Bounds<Pixels>,
     color: gpui::Rgba,
+    radius: Pixels,
 }
 struct Thumbnail {
     bounds: Bounds<Pixels>,
@@ -179,6 +187,7 @@ impl Builder {
                 self.backgrounds.push(Backdrop {
                     bounds: Bounds::new(point(px(24.), self.y), size(self.width - px(48.), px(1.))),
                     color: theme().border,
+                    radius: px(0.),
                 });
                 self.y += px(4.);
             }
@@ -190,33 +199,7 @@ impl Builder {
                 .split_whitespace()
                 .collect::<Vec<_>>()
                 .join(" ");
-            let text = format!("{} {summary}", if expanded { "⌄" } else { "›" });
-            let mut runs = vec![text_run(&Run {
-                style: "text".into(),
-                text: text.clone(),
-            })];
-            let text = window
-                .text_system()
-                .line_wrapper(runs[0].font.clone(), px(12.))
-                .truncate_line(
-                    text.into(),
-                    (self.width - px(48.)).max(px(1.)),
-                    "…",
-                    &mut runs,
-                );
-            for line in window
-                .text_system()
-                .shape_text(text, px(12.), &runs, None, None)
-                .expect("event summary")
-            {
-                self.lines.push(Line {
-                    line,
-                    origin: point(px(24.), self.y),
-                    height: px(18.),
-                    align: TextAlign::Left,
-                });
-                self.y += px(18.);
-            }
+            self.disclosure(&summary, "text", expanded, window);
             if expanded {
                 self.y += px(8.);
                 for field in crate::rich::event_fields(data) {
@@ -248,7 +231,38 @@ impl Builder {
                 size(self.width - px(48.), self.y - top),
             ),
             color: theme().surface,
+            radius: px(0.),
         });
+    }
+    /// One truncated summary line with a disclosure chevron.
+    fn disclosure(&mut self, summary: &str, style: &str, expanded: bool, window: &Window) {
+        let text = format!("{} {summary}", if expanded { "⌄" } else { "›" });
+        let mut runs = vec![text_run(&Run {
+            style: style.into(),
+            text: text.clone(),
+        })];
+        let text = window
+            .text_system()
+            .line_wrapper(runs[0].font.clone(), px(12.))
+            .truncate_line(
+                text.into(),
+                (self.width - px(48.)).max(px(1.)),
+                "…",
+                &mut runs,
+            );
+        for line in window
+            .text_system()
+            .shape_text(text, px(12.), &runs, None, None)
+            .expect("disclosure summary")
+        {
+            self.lines.push(Line {
+                line,
+                origin: point(px(24.), self.y),
+                height: px(18.),
+                align: TextAlign::Left,
+            });
+            self.y += px(18.);
+        }
     }
     fn text(
         &mut self,
@@ -345,6 +359,7 @@ impl Builder {
             self.backgrounds.push(Backdrop {
                 bounds: Bounds::new(point(px(24.), self.y), size(self.width - px(48.), px(1.))),
                 color: theme().border,
+                radius: px(0.),
             });
             self.y += px(13.);
             return;
@@ -424,6 +439,7 @@ impl Builder {
                     size(self.width - px(48.), self.y - top - px(16.)),
                 ),
                 color: theme().code_background,
+                radius: px(0.),
             });
         }
     }
@@ -485,8 +501,46 @@ fn layout(
                 b.node(&node, expanded, window);
             }
         }
-        Row::Message { role, nodes, .. } => {
-            let top = b.y;
+        Row::Message { role, nodes, .. } if role == "user" => {
+            // The desktop user bubble: right-aligned and sized to its text, at most
+            // 80% of the reading column.
+            let pad = px(12.);
+            let top = b.y + px(4.);
+            let mut bubble = Builder {
+                width: ((width - px(48.)) * 0.8).max(px(1.)) + px(48.),
+                y: top + px(8.),
+                lines: vec![],
+                backgrounds: vec![],
+            };
+            for node in nodes {
+                bubble.node(node, expanded, window);
+            }
+            let text = bubble
+                .lines
+                .iter()
+                .map(|line| line.origin.x - px(24.) + line.line.width())
+                .fold(px(1.), Pixels::max);
+            let right = width - px(24.);
+            let shift = right - pad - text - px(24.);
+            b.backgrounds.push(Backdrop {
+                bounds: Bounds::new(
+                    point(right - text - pad * 2., top),
+                    size(text + pad * 2., bubble.y - top + px(8.)),
+                ),
+                color: theme().selection,
+                radius: px(14.),
+            });
+            for mut background in bubble.backgrounds {
+                background.bounds.origin.x += shift;
+                b.backgrounds.push(background);
+            }
+            for mut line in bubble.lines {
+                line.origin.x += shift;
+                b.lines.push(line);
+            }
+            b.y = bubble.y + px(16.);
+        }
+        Row::Message { nodes, .. } => {
             for node in nodes {
                 let card = node
                     .data
@@ -533,22 +587,26 @@ fn layout(
                     b.node(node, expanded, window);
                 }
             }
-            if role == "user" {
-                b.backgrounds.insert(
-                    0,
-                    Backdrop {
-                        bounds: Bounds::new(
-                            point(px(16.), top),
-                            size((width - px(32.)).max(px(1.)), b.y - top + px(4.)),
-                        ),
-                        color: theme().selection,
-                    },
-                );
-            }
             b.y += px(8.);
         }
         Row::Activity { steps, .. } => {
-            b.y += px(8.);
+            // The desktop's quiet counted rollup; each step opens under it.
+            b.y += px(2.);
+            b.disclosure(
+                &crate::text::sanitize(&crate::activity::summary(steps)),
+                "muted",
+                expanded,
+                window,
+            );
+            if !expanded {
+                b.y += px(2.);
+                return Layout {
+                    size: size(width, b.y + px(8.)),
+                    lines: b.lines,
+                    backgrounds: b.backgrounds,
+                };
+            }
+            b.y += px(4.);
             let mut previous = None;
             for step in steps {
                 if previous != Some(step.group) {
@@ -579,6 +637,9 @@ fn layout(
         cards: placements,
     }
 }
+// The desktop transcript's reading column: the composer width plus the 24px row insets.
+const COLUMN: f32 = crate::theme::GEOMETRY.composer_width + 48.;
+
 pub struct RetainedRow {
     pub state: Rc<RefCell<RowState>>,
     pub index: usize,
@@ -634,7 +695,7 @@ impl RetainedRow {
         let index = self.index;
         let toggle = move |window: &mut Window| {
             let mut state = state.borrow_mut();
-            let expanded = state.expanded.as_mut().expect("system event");
+            let expanded = state.expanded.as_mut().expect("collapsible row");
             *expanded = !*expanded;
             state.cache = None;
             list.splice(index..index + 1, 1);
@@ -694,15 +755,17 @@ impl Element for RetainedRow {
                 AvailableSpace::Definite(w) => w,
                 _ => px(1000.),
             });
+            // Rows wrap at the reading column and paint centred in wider panes.
+            let column = width.min(px(COLUMN));
             let mut state = state.borrow_mut();
             if state
                 .cache
                 .as_ref()
-                .is_none_or(|cache| cache.size.width != width)
+                .is_none_or(|cache| cache.size.width != column)
             {
                 state.cache = Some(layout(
                     &state.row,
-                    width,
+                    column,
                     state.expanded.unwrap_or(false),
                     state.images.clone(),
                     &state.cards,
@@ -710,7 +773,7 @@ impl Element for RetainedRow {
                 ));
                 state.layouts += 1;
             }
-            state.cache.as_ref().unwrap().size
+            size(width, state.cache.as_ref().unwrap().size.height)
         });
         (id, ())
     }
@@ -806,26 +869,31 @@ impl Element for RetainedRow {
     ) {
         let state = self.state.borrow();
         let cache = state.cache.as_ref().expect("measured row");
+        let origin = bounds.origin
+            + point(
+                ((bounds.size.width - cache.size.width) / 2.).max(px(0.)),
+                px(0.),
+            );
         #[cfg(test)]
         state.painted_geometry.replace(PaintedGeometry {
             row: bounds,
             ..Default::default()
         });
         for background in &cache.backgrounds {
-            let painted_bounds = Bounds::new(
-                bounds.origin + background.bounds.origin,
-                background.bounds.size,
-            );
+            let painted_bounds =
+                Bounds::new(origin + background.bounds.origin, background.bounds.size);
             #[cfg(test)]
             state
                 .painted_geometry
                 .borrow_mut()
                 .backdrop
                 .get_or_insert(painted_bounds);
-            window.paint_quad(gpui::fill(painted_bounds, background.color));
+            window.paint_quad(
+                gpui::fill(painted_bounds, background.color).corner_radii(background.radius),
+            );
         }
         for line in &cache.lines {
-            let painted_origin = bounds.origin + line.origin;
+            let painted_origin = origin + line.origin;
             #[cfg(test)]
             state
                 .painted_geometry
@@ -869,6 +937,8 @@ fn text_run(run: &Run) -> TextRun {
             theme().danger
         } else if run.style == "link" {
             theme().accent
+        } else if run.style == "muted" {
+            theme().text_muted
         } else {
             theme().text
         })

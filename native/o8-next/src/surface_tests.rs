@@ -506,3 +506,41 @@ fn fixture_send_selected_queue_promote_and_echo(cx: &mut TestAppContext) {
 
 #[path = "brain_dock_tests.rs"]
 mod brain_dock_tests;
+
+#[gpui::test]
+fn settled_tool_runs_collapse_to_a_counted_line_and_expand_on_click(cx: &mut TestAppContext) {
+    let (_server, client) = fixture();
+    let saved = client.clone();
+    let (surface, cx) = cx.add_window_view(|window, cx| Surface::new(client, window, cx));
+    surface.update(cx, |s, cx| {
+        s.sessions = saved.sessions().unwrap();
+        s.select("thoughts-tools".into(), cx);
+    });
+    cx.run_until_parked();
+    let draw = |cx: &mut gpui::VisualTestContext| {
+        cx.update(|window, cx| {
+            window.refresh();
+            window.draw(cx).clear();
+        })
+    };
+    draw(cx);
+    draw(cx);
+    let index = surface.read_with(cx, |s, _| {
+        s.rows
+            .iter()
+            .position(|row| matches!(row.borrow().row, Row::Activity { .. }))
+            .expect("activity row")
+    });
+    let row = surface.read_with(cx, |s, _| s.rows[index].clone());
+    let (height, lines) = row.borrow().rendered();
+    assert_eq!(lines.len(), 1, "one summary line: {lines:?}");
+    assert!(lines[0].starts_with("› Explored 2 files"), "{lines:?}");
+    assert!(!lines[0].contains("cat src/a.rs"), "{lines:?}");
+    let bounds = surface.read_with(cx, |s, _| s.list.bounds_for_item(index).unwrap());
+    cx.simulate_click(bounds.center(), gpui::Modifiers::default());
+    draw(cx);
+    let (expanded, lines) = row.borrow().rendered();
+    assert!(expanded > height, "expansion must remeasure the row");
+    assert!(lines[0].starts_with("⌄ "), "{lines:?}");
+    assert!(lines.iter().any(|line| line.contains("cat src/a.rs")), "{lines:?}");
+}

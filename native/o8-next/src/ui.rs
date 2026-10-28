@@ -245,6 +245,9 @@ impl Surface {
                 state.images = self.images.clone();
                 state.cards = cards;
                 state.attach_visualizations(&self.client);
+                if let Some(previous) = indexed.get(state.row.id()).and_then(|c| c.first()) {
+                    state.keep_disclosure(&previous.borrow());
+                }
                 Rc::new(RefCell::new(state))
             }));
         }
