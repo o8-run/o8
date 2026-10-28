@@ -584,9 +584,13 @@ async function sendToCodexOrchestratorAttempt(
     let processTimeout: ReturnType<typeof setTimeout> | null = null;
     let firstEventTimeout: ReturnType<typeof setTimeout> | null = null;
     let sawFirstEvent = false;
+    let bridgeErrorMessage: string | undefined;
     const handleCodexLine = (line: string) => {
       if (codexApp) noteCodexAppTurnLine(line, { tabId: session.historyThreadId, repoPath: session.repoPath });
-      const parsed = handleCodexJsonLine(line, lineState, onEvent, { isLocalModel, model, onActivity,
+      const parsed = handleCodexJsonLine(line, lineState, (event) => {
+        if (codexApp && event.type === 'error') bridgeErrorMessage = event.error;
+        onEvent(event);
+      }, { isLocalModel, model, onActivity,
         onInputAccepted: recovery ? () => noteRuntimeSessionHandoff(session.historyThreadId, recovery, lineState.threadId, true) : undefined });
       noteRuntimeSessionHandoff(session.historyThreadId, recovery, lineState.threadId);
       if (parsed) {
@@ -687,6 +691,8 @@ async function sendToCodexOrchestratorAttempt(
       if (lineBuffer.trim()) {
         handleCodexLine(lineBuffer);
       }
+      // The caught bridge path already selected Error.message without its stack.
+      if (codexApp && code !== 0) drainCrashOutput();
       const crashStderr = crashRecord && code !== 0
         ? readFileSync(crashRecord.stderrPath, 'utf8')
         : '';
@@ -698,8 +704,8 @@ async function sendToCodexOrchestratorAttempt(
       // Keep that diagnostic visible to the one-time missing-thread recovery.
       const error = code === 0
         ? undefined
-        : orchestratorErrorText(diagnostic, `Error: Codex ${codexApp ? 'app bridge' : 'exec'} exited with code ${code}`,
-          line => isMissingCodexRolloutResumeError(line) || isCodexSolUnsupported(model, line)).slice(0, 500);
+        : (bridgeErrorMessage ?? orchestratorErrorText(diagnostic, `Error: Codex ${codexApp ? 'app bridge' : 'exec'} exited with code ${code}`,
+          line => isMissingCodexRolloutResumeError(line) || isCodexSolUnsupported(model, line))).slice(0, 500);
       if (code !== 0) lineState.terminalOutcome = 'failed';
       settle(code === 0 ? 'ready' : 'dead', error, true);
     });

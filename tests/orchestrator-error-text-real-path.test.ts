@@ -38,6 +38,16 @@ const nodeDiagnostics = [
     "name": "non-error-object",
     "diagnostic": "\nnode:internal/modules/run_main:123\n    triggerUncaughtException(\n    ^\n{ reason: 'object actual reason' }\n\nNode.js v22.23.2\n",
     "expected": "{ reason: 'object actual reason' }"
+  },
+  {
+    "name": "stack-like-message",
+    "diagnostic": "file:///fixtures/scripted-codex.mjs:3\nthrow new Error(\"first line\\n    at something\\nlast line with actual reason\");\n      ^\n\nError: first line\n    at something\nlast line with actual reason\n    at file:///fixtures/scripted-codex.mjs:3:7\n    at ModuleJob.run (node:internal/modules/esm/module_job:343:25)\n    at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:681:26)\n    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:117:5)\n\nNode.js v22.23.2\n",
+    "expected": "Error: first line\n    at something\nlast line with actual reason"
+  },
+  {
+    "name": "parenthesized-frame",
+    "diagnostic": "file:///fixtures/parenthesized-frame.mjs:1\nfunction fail() { throw new Error(\"parenthesized frame reason\"); }\n                        ^\n\nError: parenthesized frame reason\n    at fail (file:///fixtures/parenthesized-frame.mjs:1:25)\n    at file:///fixtures/parenthesized-frame.mjs:2:1\n    at ModuleJob.run (node:internal/modules/esm/module_job:343:25)\n    at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:681:26)\n    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:117:5)\n\nNode.js v22.23.2\n",
+    "expected": "Error: parenthesized frame reason"
   }
 ];
 
@@ -223,9 +233,9 @@ process.stderr.write(${JSON.stringify(diagnostic)});
 process.exit(1);
 `);
     const { threadId, events } = await failTurn();
-    expect(events.filter(event => event.event === 'error').map(event => event.data?.error)).toEqual([expected]);
+    expect.soft(events.filter(event => event.event === 'error').map(event => event.data?.error)).toEqual([expected]);
     const saved = JSON.parse(readFileSync(join(dataDir, 'chat-history', `${threadId}.json`), 'utf8'));
-    expect(saved.orchestratorTerminalError).toBe(expected);
+    expect.soft(saved.orchestratorTerminalError).toBe(expected);
     expect(saved.messages.filter((message: { role: string }) => message.role === 'assistant')).toHaveLength(0);
   }, 90_000);
 

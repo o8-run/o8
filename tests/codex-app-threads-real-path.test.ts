@@ -47,7 +47,7 @@ vi.stubEnv('O8_CODEX_APP_TEST_HOME', home);
 vi.stubEnv('O8_CODEX_BIN', binary);
 vi.stubEnv('O8_CRASH_SURVIVABLE_ORCHESTRATOR', '0');
 writeFileSync(binary, `#!/usr/bin/env node
-import { appendFileSync, existsSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 const args = process.argv.slice(2);
 if (args.includes('--version')) { console.log('codex-cli 0.161.0'); process.exit(0); }
@@ -72,7 +72,7 @@ process.stdin.on('data', (chunk) => {
     buffer = buffer.slice(at + 1);
     if (message.method) record({ method: message.method, params: message.params });
     if (message.method === 'initialize') {
-      if (existsSync(join(process.cwd(), 'fail-initialize'))) send({ id: message.id, error: { code: -32600, message: 'protocol fixture failure' } });
+      if (existsSync(join(process.cwd(), 'fail-initialize'))) send({ id: message.id, error: { code: -32600, message: readFileSync(join(process.cwd(), 'fail-initialize'), 'utf8') || 'protocol fixture failure' } });
       else send({ id: message.id, result: {} });
     }
     if (message.method === 'thread/start') {
@@ -353,16 +353,22 @@ describe.skipIf(process.platform === 'win32')('Codex orchestrator chats in the C
 });
 
 describe.skipIf(process.platform === 'win32')('app bridge failure diagnostics (#4963)', () => {
-  it('keeps the error class, runtime step and full caught stack', async () => {
+  it.each([
+    'protocol fixture failure',
+    'first line\n    at something\nlast line with actual reason',
+  ])('keeps the error class, runtime step and full caught stack: %s', async (reason) => {
     await updateOperatorDefaults({ codexAppThreads: true });
-    const cwd = repo('failure-diagnostic');
-    writeFileSync(join(cwd, 'fail-initialize'), '');
+    const cwd = repo(`failure-diagnostic-${Date.now()}`);
+    writeFileSync(join(cwd, 'fail-initialize'), reason);
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
       const events = await turn(cwd, 'Fail initialization.');
-      expect(events).toContainEqual({ type: 'error', error: 'Error: initialize: protocol fixture failure' });
+      expect(events.filter(event => event.type === 'error')).toEqual([
+        { type: 'error', error: `Error: initialize: ${reason}` },
+        { type: 'error', error: `Error: initialize: ${reason}` },
+      ]);
       const diagnostic = log.mock.calls.map(args => args.join(' ')).join('\n');
-      expect(diagnostic).toContain('Error: protocol fixture failure');
+      expect(diagnostic).toContain(`Error: ${reason}`);
       expect(diagnostic).toContain('at onMessage');
     } finally {
       log.mockRestore();

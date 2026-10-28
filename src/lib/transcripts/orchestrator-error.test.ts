@@ -26,6 +26,22 @@ describe('orchestrator error display limits', () => {
     expect(orchestratorErrorText(`${frame}${reason}\n    at main (bridge.mjs:2:1)\n\nNode.js v22.23.2`)).toBe(reason);
   });
 
+  it('keeps message lines that only resemble frames', () => {
+    const reason = 'Error: first line\n    at something\nlast line with actual reason';
+    expect(orchestratorErrorText(`${frame}${reason}\n    at main (bridge.mjs:2:1)`)).toBe(reason);
+  });
+
+  it.each([
+    'at run (file:///bundle/bridge.mjs:2:1)',
+    'at file:///bundle/bridge.mjs:2:1',
+    'at async Promise.all (index 0)',
+    'at new Worker (node:internal/worker:1:2)',
+    'at <anonymous>',
+    'at node:internal/modules/run_main',
+  ])('stops at the V8 frame %s', stackFrame => {
+    expect(orchestratorErrorText(`Error: actual reason\n    ${stackFrame}`)).toBe('Error: actual reason');
+  });
+
   it('keeps the contextual bridge summary without repeating the original stack header', () => {
     expect(orchestratorErrorText('Error: initialize: fixture failure\nError: fixture failure\n    at main (bridge.mjs:2:1)'))
       .toBe('Error: initialize: fixture failure');
