@@ -243,9 +243,15 @@ impl Composer {
                                         let focus = focuses[index].clone();
                                         cx.listener(move |_, _, window, _| focus.focus(window))
                                     })
-                                    .on_click(cx.listener(move |this, _, window, cx| {
-                                        this.remove_image(index, window, cx);
-                                    }))
+                                    .on_click(cx.listener(
+                                        move |this, event: &ClickEvent, window, cx| {
+                                            // KeyDown owns keyboard activation. GPUI also
+                                            // synthesizes a keyboard click on KeyUp.
+                                            if matches!(event, ClickEvent::Mouse(_)) {
+                                                this.remove_image(index, window, cx);
+                                            }
+                                        },
+                                    ))
                                     .on_key_down(cx.listener(
                                         move |this, event: &KeyDownEvent, window, cx| {
                                             if matches!(
