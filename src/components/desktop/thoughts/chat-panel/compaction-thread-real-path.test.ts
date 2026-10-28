@@ -130,7 +130,8 @@ describe('compaction through persisted history, live stream and real transcript 
     expect(messageIds().at(-1)).toBe(last.id);
     expect(host.textContent).not.toContain('Compaction in progress');
     expect(host.textContent).not.toContain('Messages sent now will be queued and delivered after compaction completes.');
-    expect(host.textContent).toContain('Planning next moves');
+    expect(host.textContent).not.toContain('Planning next moves');
+    expect(host.textContent).toContain(last.role === 'user' ? 'Waiting for response' : 'Working · phase unknown');
   });
   it.each([false, true])('keeps compact status while the pre-send summarizer is held, then settles it (failure: %s)', async (failed) => {
     fixture.realCompact = true;
