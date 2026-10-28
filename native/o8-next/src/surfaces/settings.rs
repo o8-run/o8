@@ -37,12 +37,7 @@ pub(super) const REGISTRATION: Registration = Registration {
             return vec![];
         }
         vec![
-            div()
-                .id("shell-settings")
-                .debug_selector(|| "shell-settings".into())
-                .cursor_pointer()
-                .p(px(6.))
-                .child("Settings")
+            super::rail::button("shell-settings", super::rail::Icon::Account, "Account and settings", false)
                 .on_click(cx.listener(|this, _, window, cx| this.open_settings(window, cx)))
                 .into_any_element(),
         ]
