@@ -668,10 +668,14 @@ impl Element for RetainedRow {
     ) -> Vec<gpui::AnyElement> {
         use gpui::{prelude::*, *};
         let state = self.state.borrow();
-        state
-            .cache
-            .as_ref()
-            .unwrap()
+        let cache = state.cache.as_ref().unwrap();
+        // The same centred column origin that paint uses for text and backdrops.
+        let origin = row_bounds.origin
+            + point(
+                ((row_bounds.size.width - cache.size.width) / 2.).max(px(0.)),
+                px(0.),
+            );
+        cache
             .images
             .iter()
             .map(|image| {
@@ -702,7 +706,7 @@ impl Element for RetainedRow {
                 }
                 let mut child = child.into_any_element();
                 child.layout_as_root(image.bounds.size.map(AvailableSpace::Definite), window, cx);
-                child.prepaint_at(row_bounds.origin + image.bounds.origin, window, cx);
+                child.prepaint_at(origin + image.bounds.origin, window, cx);
                 child
             })
             .collect()
