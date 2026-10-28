@@ -111,8 +111,40 @@ it.each(['light', 'dark'] as const)('shows the estimate inside the mounted compo
     expect(await page.getByText('Runtime reported', { exact: true }).count() + await page.getByText('Estimated locally', { exact: true }).count()).toBeGreaterThan(0);
     await page.keyboard.press('Escape');
     await expect.poll(() => pill.getAttribute('aria-expanded')).toBe('false');
-    for (const width of [390, 900]) {
+    await input.fill('Unsent draft remains here');
+    await input.focus();
+    for (const width of [600, 390, 900, 600, 390]) {
       await page.setViewportSize({ width, height: 700 });
+      await page.waitForTimeout(200);
+      const footer = page.getByTestId('composer-selector-footer').filter({ visible: true }).first();
+      const controls = footer.locator('button');
+      expect(await controls.count(), 'footer lost a control').toBe(10);
+      const layout = await controls.evaluateAll(nodes => nodes.map(node => {
+        const box = node.getBoundingClientRect();
+        let clipped = box.width < 1 || box.height < 1 || !node.checkVisibility({ checkVisibilityCSS: true });
+        for (let parent = node.parentElement; parent; parent = parent.parentElement) {
+          const style = getComputedStyle(parent);
+          if (/(hidden|clip)/.test(style.overflowX)) {
+            const bounds = parent.getBoundingClientRect();
+            clipped ||= box.left < bounds.left - 0.5 || box.right > bounds.right + 0.5;
+          }
+        }
+        const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+        return { name: node.getAttribute('aria-label') ?? node.getAttribute('title') ?? node.textContent, clipped, reachable: node.contains(hit) };
+      }));
+      if (proofDir) {
+        await page.screenshot({ path: path.join(proofDir, `${proofState}-${palette}-${width}.png`) });
+        fs.writeFileSync(path.join(proofDir, `${proofState}-${palette}-${width}.json`), JSON.stringify(await footer.evaluate(node => ({ html: node.outerHTML, box: node.getBoundingClientRect().toJSON() })), null, 2));
+      }
+      expect(layout.filter(control => control.clipped), `clipped footer controls at ${width}px`).toEqual([]);
+      expect(layout.filter(control => !control.reachable), `covered footer controls at ${width}px`).toEqual([]);
+      const show = footer.getByRole('button', { name: 'Show with images' }).first();
+      expect(await show.isVisible(), `Show is missing at ${width}px`).toBe(true);
+      expect(await show.evaluate(node => node.scrollWidth <= node.clientWidth + 1), 'Show text clipped').toBe(true);
+      const leadLabel = footer.getByTestId('composer-selector-lead-label');
+      expect(await leadLabel.evaluate(node => node.scrollWidth <= node.clientWidth + 1), 'model label clipped').toBe(true);
+      expect(await pill.innerText(), `cache estimate hidden at ${width}px`).toMatch(/~[1-5]m/);
+      if (width === 900) expect(await pill.innerText()).toMatch(/Warm ~[1-5]m/);
       const box = (await pill.boundingBox())!;
       expect(box.x).toBeGreaterThanOrEqual(0);
       expect(box.x + box.width).toBeLessThanOrEqual(width);
@@ -124,7 +156,13 @@ it.each(['light', 'dark'] as const)('shows the estimate inside the mounted compo
         const box = node.getBoundingClientRect();
         return node.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2));
       })).toBe(true);
-      if (proofDir) await page.screenshot({ path: path.join(proofDir, `${proofState}-${palette}-${width}.png`) });
+      await pill.hover();
+      await expect.poll(() => tooltip.isVisible()).toBe(true);
+      expect(await tooltip.textContent()).toContain('reuse is not guaranteed');
+      await input.focus();
+      await pill.focus();
+      expect(await tooltip.isVisible()).toBe(true);
+      await input.focus();
     }
     await page.locator('[data-o8-workspace-tab="expired"]').click();
     const expired = page.locator('[data-context-meter][data-session-cache="thoughts-expired"]');

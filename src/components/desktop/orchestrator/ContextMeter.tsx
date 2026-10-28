@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useId, useMemo, useRef, useState } from 'react';
+import { useCallback, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { formatTokens } from '@/lib/util/format-tokens';
 import { approxTokens } from '@/components/desktop/thoughts/use-orchestrator-stream/shared';
 import { useOrchestratorContextResidency } from './context-residency';
@@ -8,7 +8,6 @@ import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import { ComposerPopover } from '../thoughts/chat-panel/ComposerPopover';
 import { FloatingSurface } from '../FloatingSurface';
 import { useComposerSessionCache } from '../SessionCacheIndicator';
-import { useComposerChipCompact } from '../thoughts/composer-compact-context';
 import { ContextCacheSection, latestContextCacheReuse, type ContextCacheReuse } from './ContextCacheSection';
 
 const CONTEXT_LIMIT = 1_000_000;
@@ -93,8 +92,36 @@ export function ContextMeter({ tokenCount, runningTotal, onClick }: { tokenCount
   const [helpOpen, setHelpOpen] = useState(false);
   const helpId = useId();
   const cache = useComposerSessionCache();
-  const compact = useComposerChipCompact();
+  const cacheLabel = cache?.label;
+  const cacheCompactLabel = cache?.compactLabel;
+  const [cacheLayout, setCacheLayout] = useState<'full' | 'short' | 'stacked'>('full');
+  const cacheLabelRef = useRef<HTMLSpanElement | null>(null);
+  const cacheShortRef = useRef<HTMLSpanElement | null>(null);
   const buttonRef = useRef<HTMLButtonElement | null>(null);
+  // Spend only the footer's unused spacer width. At minimum the estimate stacks
+  // inside the original 24px ring footprint, preserving every sibling's budget.
+  useLayoutEffect(() => {
+    const button = buttonRef.current;
+    const footer = button?.closest('[data-composer-footer]');
+    const spacer = footer?.querySelector('[data-composer-spacer]');
+    if (!cacheLabel || !button || !spacer || typeof ResizeObserver === 'undefined') return;
+    const measure = () => {
+      // Compare layout pixels with scrollWidth, including when the UI is zoomed.
+      const spare = spacer.clientWidth;
+      // A zero spacer means the row has already begun shrinking other controls.
+      const budget = spare > 0 ? spare + button.offsetWidth - 2 : 24;
+      const fullWidth = 29 + (cacheLabelRef.current?.scrollWidth ?? 0);
+      const shortWidth = 29 + (cacheShortRef.current?.scrollWidth ?? 0);
+      setCacheLayout(budget >= fullWidth ? 'full' : budget >= shortWidth ? 'short' : 'stacked');
+    };
+    const observer = new ResizeObserver(measure);
+    observer.observe(spacer);
+    observer.observe(footer!);
+    if (cacheLabelRef.current) observer.observe(cacheLabelRef.current);
+    if (cacheShortRef.current) observer.observe(cacheShortRef.current);
+    measure();
+    return () => observer.disconnect();
+  }, [cacheLabel, cacheCompactLabel]);
   const residency = useOrchestratorContextResidency();
   const cacheReuse = useMemo(() => latestContextCacheReuse(residency?.messages ?? []), [residency?.messages]);
   const estimatedConversationTokens = useMemo(() => {
@@ -135,10 +162,11 @@ export function ContextMeter({ tokenCount, runningTotal, onClick }: { tokenCount
         onBlur={() => setHelpOpen(false)}
         title={cache ? undefined : tokenCount > 0 ? `${titlePrefix} ${label} · +${meterLabel(tokenCount)} since previous report` : `${titlePrefix} ${label}`}
         style={{
-          width: cache ? 'auto' : 24,
+          width: cache && cacheLayout !== 'stacked' ? 'auto' : 24,
+          position: 'relative',
           height: 24,
           paddingTop: 0,
-          paddingRight: cache ? 6 : 0,
+          paddingRight: cache && cacheLayout !== 'stacked' ? 6 : 0,
           paddingBottom: 0,
           paddingLeft: 0,
           borderRadius: 999,
@@ -162,7 +190,7 @@ export function ContextMeter({ tokenCount, runningTotal, onClick }: { tokenCount
           if (!open) event.currentTarget.style.background = 'transparent';
         }}
       >
-        <svg width={19} height={19} viewBox="0 0 18 18" aria-hidden="true" style={{ display: 'block', flexShrink: 0, transform: 'rotate(-90deg)' }}>
+        <svg width={19} height={19} viewBox="0 0 18 18" aria-hidden="true" style={{ display: 'block', flexShrink: 0, transform: cache && cacheLayout === 'stacked' ? 'translateY(-5px) rotate(-90deg) scale(0.65)' : 'rotate(-90deg)' }}>
           <circle
             cx="9"
             cy="9"
@@ -186,8 +214,17 @@ export function ContextMeter({ tokenCount, runningTotal, onClick }: { tokenCount
           <circle cx="9" cy="9" r="3.5" fill="none" stroke="var(--t-divider-subtle)" strokeWidth="1.5" />
           {cacheReuse ? <circle data-testid="context-cache-ring" cx="9" cy="9" r="3.5" fill="none" stroke="var(--t-accent)" strokeWidth="1.5" strokeLinecap="round" strokeDasharray={21.99} strokeDashoffset={21.99 * (1 - cacheReuse.percent / 100)} /> : null}
         </svg>
-        {cache ? <span style={{ fontFamily: 'var(--font-sans-system)', whiteSpace: 'nowrap', color: 'var(--t-text-muted)', fontSize: 9.5,
-          fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.25 }}>{compact ? cache.compactLabel : cache.label}</span> : null}
+        {cache ? <>
+          <span ref={cacheLabelRef} aria-hidden={cacheLayout !== 'full'} style={{ position: cacheLayout === 'full' ? 'static' : 'absolute',
+            visibility: cacheLayout === 'full' ? 'visible' : 'hidden', width: 'max-content',
+            fontFamily: 'var(--font-sans-system)', whiteSpace: 'nowrap', color: 'var(--t-text-muted)', fontSize: 9.5,
+            fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.25 }}>{cache.label}</span>
+          <span ref={cacheShortRef} aria-hidden={cacheLayout === 'full'} style={{ position: cacheLayout === 'short' ? 'static' : 'absolute',
+            visibility: cacheLayout === 'full' ? 'hidden' : 'visible', width: 'max-content',
+            ...(cacheLayout === 'stacked' ? { bottom: 0, left: '50%', transform: 'translateX(-50%)' } : {}),
+            fontFamily: 'var(--font-sans-system)', whiteSpace: 'nowrap', color: 'var(--t-text-muted)', fontSize: 9.5,
+            fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.25 }}>{cache.compactLabel}</span>
+        </> : null}
       </button>
       <ComposerPopover anchorRef={buttonRef} open={Boolean(cache && helpOpen && !open)} align="end" onClose={() => setHelpOpen(false)}>
         <div role="tooltip" id={helpId} style={{ maxWidth: 280, padding: 10, borderRadius: 8,

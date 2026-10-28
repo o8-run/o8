@@ -15,6 +15,7 @@ async function show(session = 'warm', runtime = 'codex', model = 'fixture') {
     createElement(ContextMeter, { tokenCount: 0, runningTotal: 0 }))));
 }
 const pill = () => host.querySelector<HTMLButtonElement>('[data-context-meter]')!;
+const visibleLabel = () => pill().querySelector('span[aria-hidden="false"]')?.textContent;
 beforeEach(() => {
   vi.useFakeTimers(); vi.setSystemTime(now);
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
@@ -31,25 +32,25 @@ beforeEach(() => {
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 it('updates the existing pill immediately for the selected conversation, runtime and model', async () => {
   await show();
-  expect(pill().textContent).toBe('Warm ~5m');
+  expect(visibleLabel()).toBe('Warm ~5m');
   expect(pill().getAttribute('aria-label')).toContain('Cache warm · about 5 min left · estimate');
   await show('expired');
-  expect(pill().textContent).toBe('Cold · est.');
+  expect(visibleLabel()).toBe('Cold · est.');
   expect(pill().getAttribute('aria-label')).toContain('Cache likely cold · estimate');
-  await show('unseen'); expect(pill().textContent).toBe('Cache ?');
-  await show('warm', 'codex', 'other-model'); expect(pill().textContent).toBe('Cache ?');
-  await show('warm', 'unavailable'); expect(pill().textContent).toBe('Cache n/a');
+  await show('unseen'); expect(visibleLabel()).toBe('Cache ?');
+  await show('warm', 'codex', 'other-model'); expect(visibleLabel()).toBe('Cache ?');
+  await show('warm', 'unavailable'); expect(visibleLabel()).toBe('Cache n/a');
   expect(pill().getAttribute('aria-label')).toContain('unavailable for this runtime');
-  await show(); expect(pill().textContent).toBe('Warm ~5m');
+  await show(); expect(visibleLabel()).toBe('Warm ~5m');
   expect(fetch).not.toHaveBeenCalled();
 });
 it('uses the existing refresh interval and expiry math without counting below zero', async () => {
   await show();
   await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
-  expect(pill().textContent).toBe('Warm ~4m');
+  expect(visibleLabel()).toBe('Warm ~4m');
   await act(async () => { await vi.advanceTimersByTimeAsync(300_000); });
-  expect(pill().textContent).toBe('Cold · est.');
-  expect(pill().textContent).not.toMatch(/\d/);
+  expect(visibleLabel()).toBe('Cold · est.');
+  expect(visibleLabel()).not.toMatch(/\d/);
   expect(fetch).not.toHaveBeenCalled();
 });
 it('exposes the full explanation on keyboard focus and retains the existing context popover', async () => {
