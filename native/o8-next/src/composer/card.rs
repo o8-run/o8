@@ -69,7 +69,7 @@ impl Surface {
                 ),
                 "M12 5v14M5 12h14",
                 theme().text_secondary,
-                "Attach image".into(),
+                "Attach images or files".into(),
             ))
             .when(self.queue["canSteer"] == true, |d| {
                 d.child(self.composer_button(
@@ -410,7 +410,7 @@ impl Surface {
             files: true,
             directories: false,
             multiple: true,
-            prompt: Some("Attach images".into()),
+            prompt: Some("Attach images or files".into()),
         });
         let editor = self.composer.clone();
         cx.spawn(async move |_, cx| {

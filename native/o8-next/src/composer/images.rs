@@ -1,4 +1,6 @@
 //! Manual paste, file picker and OS drop share the desktop's four-image/5 MiB limits.
+//! Other files (a screen recording, a log, a PDF) attach by path: the agent opens
+//! them from disk, since the runtimes take pictures but not video.
 use super::Composer;
 use base64::Engine;
 use gpui::{prelude::*, *};
@@ -7,6 +9,8 @@ use std::{fs, io::Read, path::PathBuf, sync::Arc};
 
 const MAX_IMAGES: usize = 4;
 const MAX_BYTES: usize = 5 * 1024 * 1024;
+const MAX_FILES: usize = 8;
+const VIDEO: &[&str] = &["mov", "mp4", "m4v", "webm", "mkv", "avi"];
 pub(crate) struct ImagesChanged;
 impl EventEmitter<ImagesChanged> for Composer {}
 enum Input {
@@ -28,7 +32,39 @@ impl Composer {
         );
     }
     pub(crate) fn attach_paths(&mut self, paths: Vec<PathBuf>, cx: &mut Context<Self>) {
-        self.attach_images(paths.into_iter().map(Input::Path).collect(), cx);
+        let (images, files): (Vec<_>, Vec<_>) = paths.into_iter().partition(|path| {
+            matches!(
+                extension(path).as_str(),
+                "png" | "jpg" | "jpeg" | "gif" | "webp"
+            )
+        });
+        self.attach_files(files, cx);
+        self.attach_images(images.into_iter().map(Input::Path).collect(), cx);
+    }
+    fn attach_files(&mut self, paths: Vec<PathBuf>, cx: &mut Context<Self>) {
+        if paths.is_empty() {
+            return;
+        }
+        self.controls.error.clear();
+        for path in paths {
+            if !path.is_file() {
+                self.controls.error = "Choose a file, not a folder.".into();
+            } else if self.controls.files.len() >= MAX_FILES {
+                self.controls.error =
+                    "Attach at most 8 files. Remove a file before retrying.".into();
+                break;
+            } else if !self.controls.files.contains(&path) {
+                self.controls.files.push(path);
+            }
+        }
+        self.images_changed(cx);
+    }
+    pub(crate) fn remove_file(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        if index < self.controls.files.len() {
+            self.controls.files.remove(index);
+            self.focus.focus(window);
+            self.images_changed(cx);
+        }
     }
     fn images_changed(&mut self, cx: &mut Context<Self>) {
         cx.notify();
@@ -266,6 +302,83 @@ impl Composer {
                             )
                     }),
             )
+            .children(self.controls.files.iter().enumerate().map(|(index, path)| {
+                let video = VIDEO.contains(&extension(path).as_str());
+                div()
+                    .id(("composer-file", index))
+                    .debug_selector(move || format!("composer-file-{index}"))
+                    .flex()
+                    .items_center()
+                    .gap(px(6.))
+                    .h(px(32.))
+                    .pl(px(8.))
+                    .pr(px(4.))
+                    .rounded(px(6.))
+                    .bg(crate::theme::current().surface)
+                    .child(crate::icon::stroke(
+                        if video {
+                            "M4 6h11a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2Z M17 10l5-3v10l-5-3"
+                        } else {
+                            "M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9l-6-6Zm0 0v6h6"
+                        },
+                        crate::theme::current().text_secondary,
+                        15.,
+                        1.6,
+                    ))
+                    .child(
+                        div()
+                            .max_w(px(160.))
+                            .whitespace_normal()
+                            .line_clamp(1)
+                            .text_ellipsis()
+                            .text_size(px(11.))
+                            .child(
+                                path.file_name()
+                                    .map(|n| n.to_string_lossy().into_owned())
+                                    .unwrap_or_default(),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .id(("composer-file-remove", index))
+                            .debug_selector(move || format!("composer-file-remove-{index}"))
+                            .w(px(24.))
+                            .h(px(24.))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded(px(7.))
+                            .cursor_pointer()
+                            .hover(|s| s.bg(crate::theme::current().hover))
+                            .child("×")
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.remove_file(index, window, cx)
+                            })),
+                    )
+            }))
             .into_any_element()
     }
+}
+
+fn extension(path: &std::path::Path) -> String {
+    path.extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase()
+}
+
+/// The line each attached file adds to the message, so the agent can open it.
+pub(crate) fn file_lines(files: &[PathBuf]) -> String {
+    files
+        .iter()
+        .map(|path| {
+            let kind = if VIDEO.contains(&extension(path).as_str()) {
+                "video"
+            } else {
+                "file"
+            };
+            format!("Attached {kind}: {}", path.display())
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
