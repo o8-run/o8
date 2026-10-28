@@ -213,7 +213,7 @@ it('falls back to following an exhausted empty history without retaining a missi
   await act(async () => root.unmount()); root = createRoot(host); top = 0;
   await render([], 'chat', 'idle', true); scroller = host.querySelector('.thoughts-scroll')!; await frame();
   expect(top).toBe(height - 692);
-  expect(JSON.parse(localStorage.getItem('o8:transcript-reading:v1:chat')!)).toMatchObject({ following: true, anchor: null });
+  expect(localStorage.getItem('o8:transcript-reading:v1:chat')).toBeNull();
   height += 500; resize(); await frame(); expect(top).toBe(height - 692);
 });
 
@@ -245,4 +245,66 @@ it('removes a closed chat record through the deletion client with no mounted tra
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status: 200 })));
   await deleteChatHistory('closed');
   expect(localStorage.getItem(`o8:transcript-reading:v1:${scope}`)).toBeNull();
+});
+
+it('does not persist empty replacement conversations on scroll, pagehide, replacement or disposal', async () => {
+  const scope = (id: string) => JSON.stringify(['/repo', 'thread', id]);
+  const positions = () => Object.keys(localStorage).filter(key => key.startsWith('o8:transcript-reading:v1:'));
+  height = 692; top = 0;
+  await render([], scope('thoughts-placeholder-a')); await frame();
+  scrollTo(0); window.dispatchEvent(new Event('pagehide'));
+  expect(positions()).toEqual([]);
+  await render([], scope('thoughts-placeholder-b')); await frame();
+  window.dispatchEvent(new Event('pagehide'));
+  await act(async () => root.unmount()); root = createRoot(host);
+  expect(positions()).toEqual([]);
+});
+
+it('retires an existing empty default record when its placeholder is replaced or deleted', async () => {
+  const scope = JSON.stringify(['/repo', 'thread', 'thoughts-placeholder']);
+  const key = `o8:transcript-reading:v1:${scope}`;
+  localStorage.setItem(key, JSON.stringify({ following: true, top: 0, anchor: null }));
+  height = 692; top = 0;
+  await render([], scope); await frame();
+  await render(readingLayout(), 'real-chat'); await frame();
+  expect(localStorage.getItem(key)).toBeNull();
+  await render([], scope); await frame();
+  window.dispatchEvent(new CustomEvent('o8:chat-history-deleted', { detail: { tabId: 'thoughts-placeholder' } }));
+  window.dispatchEvent(new Event('pagehide'));
+  expect(localStorage.getItem(key)).toBeNull();
+});
+
+it('keeps saved bottom-follow through a layout clamp without capturing deferred history, then follows live growth after reload', async () => {
+  const messages = readingLayout();
+  await render(messages, 'bottom-chat'); await frame();
+  window.dispatchEvent(new Event('pagehide'));
+  await act(async () => root.unmount()); root = createRoot(host); top = 0;
+  await render(messages, 'bottom-chat'); scroller = host.querySelector('.thoughts-scroll')!; await frame();
+  // The browser clamps the bottom by a few pixels when a deferred turn settles.
+  // Measuring historical rows would lay out skipped turns and expand the range
+  // again, so that measurement must not turn this clamp into a reading anchor.
+  let deferred = true;
+  const layout = vi.mocked(HTMLElement.prototype.getBoundingClientRect).getMockImplementation()!;
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function(this: HTMLElement) {
+    if (deferred && this.hasAttribute('data-o8-message-id')) { height += 2780; deferred = false; }
+    return layout.call(this);
+  });
+  height -= 5; scrollTo(height - 692);
+  window.dispatchEvent(new Event('pagehide'));
+  expect(JSON.parse(localStorage.getItem('o8:transcript-reading:v1:bottom-chat')!)).toMatchObject({ following: true, top: 0, anchor: null });
+  height += 2733; resize(); await frame();
+  expect(height - top - 692).toBe(0);
+  await act(async () => root.unmount()); root = createRoot(host); top = 0;
+  await render(messages, 'bottom-chat'); scroller = host.querySelector('.thoughts-scroll')!; await frame();
+  expect(height - top - 692).toBe(0);
+});
+
+it('keeps the departing real conversation position when the replacement has no messages', async () => {
+  const messages = readingLayout();
+  await render(messages, 'real-chat'); await frame(); scrollTo(2100);
+  await render([], 'empty-replacement'); await frame();
+  window.dispatchEvent(new Event('pagehide'));
+  expect(localStorage.getItem('o8:transcript-reading:v1:empty-replacement')).toBeNull();
+  expect(JSON.parse(localStorage.getItem('o8:transcript-reading:v1:real-chat')!)).toMatchObject({ following: false, top: 2100 });
+  await render(messages, 'real-chat'); await frame(); expect(top).toBe(2100);
 });

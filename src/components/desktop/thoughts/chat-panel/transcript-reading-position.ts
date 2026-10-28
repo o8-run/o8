@@ -40,6 +40,13 @@ export function saveTranscriptReadingPosition(scope: string | null, position: Tr
   }
 }
 
+/** Retire an empty scope without invalidating a conversation's mounted writer. */
+export function removeTranscriptReadingPosition(scope: string | null): void {
+  if (!scope) return;
+  try { window.localStorage.removeItem(key(scope)); }
+  catch { /* Scrolling still works when browser storage is unavailable. */ }
+}
+
 function conversationId(scope: string | null): string | null {
   try {
     const parts: unknown = JSON.parse(scope ?? 'null');

@@ -2,7 +2,7 @@
 
 import { useLayoutEffect, useRef, type RefObject } from 'react';
 import { captureTranscriptReadingAnchor, nearestTranscriptReadingAnchor, restoreTranscriptReadingAnchor } from './transcript-reading-anchor';
-import { isTranscriptReadingConversation, loadTranscriptReadingPosition, observeTranscriptReadingDeletions, saveTranscriptReadingPosition } from './transcript-reading-position';
+import { isTranscriptReadingConversation, loadTranscriptReadingPosition, observeTranscriptReadingDeletions, removeTranscriptReadingPosition, saveTranscriptReadingPosition } from './transcript-reading-position';
 
 interface Options {
   endRef: RefObject<HTMLDivElement | null>;
@@ -19,7 +19,6 @@ export function useTranscriptAutoScroll({ endRef, suppressRef, scope, historyCom
   } | null>(null);
 
   const history = useRef({ complete: historyComplete, messageIds });
-  useLayoutEffect(() => { history.current = { complete: historyComplete, messageIds }; });
   useLayoutEffect(() => observeTranscriptReadingDeletions(tabId => {
     if (connection.current && isTranscriptReadingConversation(connection.current.scope, tabId)) connection.current.forget();
   }), []);
@@ -32,6 +31,8 @@ export function useTranscriptAutoScroll({ endRef, suppressRef, scope, historyCom
     if (connection.current?.container !== container || connection.current?.scope !== scope) {
       connection.current?.dispose(); connection.current = null;
     }
+    // Dispose with the old scope's history, even though React has replaced its DOM.
+    history.current = { complete: historyComplete, messageIds };
     if (!container || !end) return;
     if (!connection.current) {
       const saved = loadTranscriptReadingPosition(scope);
@@ -54,7 +55,13 @@ export function useTranscriptAutoScroll({ endRef, suppressRef, scope, historyCom
       const capture = () => withOrder(captureTranscriptReadingAnchor(container));
       let savedFollowing = saved?.following;
       const save = () => {
-        if (deleted || restoring || (following && savedFollowing === true)) return;
+        if (deleted || restoring) return;
+        if (!history.current.messageIds.length && !anchor && (following || lastTop === 0)) {
+          removeTranscriptReadingPosition(scope);
+          savedFollowing = undefined;
+          return;
+        }
+        if (following && savedFollowing === true) return;
         saveTranscriptReadingPosition(scope, { following, top: following ? 0 : lastTop, anchor: following ? null : anchor });
         savedFollowing = following;
       };
@@ -89,10 +96,12 @@ export function useTranscriptAutoScroll({ endRef, suppressRef, scope, historyCom
       const onScroll = () => {
         if (restoring || container.clientHeight === 0) return;
         const top = container.scrollTop;
-        if (top < lastTop - 1) pause();
         // A deliberate return to the bottom resumes following. Content growth
-        // alone must not revoke an already-following reader.
+        // alone must not revoke an already-following reader. Check the bottom
+        // before pause captures deferred rows: that layout can expand the range
+        // after a browser clamp and turn following into a saved history offset.
         if (container.scrollHeight - top - container.clientHeight <= 4) following = true;
+        else if (top < lastTop - 1) pause();
         if (!following) anchor = capture();
         lastTop = top;
         save();

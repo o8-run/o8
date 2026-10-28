@@ -174,6 +174,9 @@ try {
     await frames();
   };
   const atBottom = name => scroller(name).evaluate(element => ({ gap: element.scrollHeight - element.scrollTop - element.clientHeight }));
+  const storedPositions = () => page.evaluate(() => Object.keys(localStorage)
+    .filter(key => key.startsWith('o8:transcript-reading:v1:'))
+    .map(key => ({ key, record: JSON.parse(localStorage.getItem(key)) })));
   await page.goto(`http://127.0.0.1:${apiPort}/dashboard`, { waitUntil: 'domcontentloaded', timeout: 180000 });
   await loaded('a');
   const before = await read('a-200');
@@ -197,8 +200,12 @@ try {
   await reload('b'); await loaded('b');
   check('reload keeps B independent of A', (await position('b-220')).visible, await position('b-220'));
   await bottom('b');
+  const bottomBefore = await atBottom('b');
+  const bottomIntent = (await storedPositions()).find(item => JSON.parse(item.key.slice('o8:transcript-reading:v1:'.length))[2] === 'thoughts-reading-b')?.record;
   await reload('b'); await loaded('b');
-  check('bottom reader reopens at bottom', (await atBottom('b')).gap <= 4, await atBottom('b'));
+  const bottomAfter = await atBottom('b');
+  check('bottom reader reopens at bottom', bottomBefore.gap <= 4 && bottomIntent?.following === true && bottomAfter.gap <= 4,
+    { bottomBefore, bottomIntent, bottomAfter });
   live = true;
   const emit = (name, data) => { for (const [ws, thread] of subscriptions) if (thread === 'thoughts-reading-b') event(ws, thread, name, data); };
   emit('status', { status: 'busy' });
@@ -227,9 +234,6 @@ try {
   emit('output', { assistantMessageId: 'reading-live-after-reload', text: 'Output continues after reload.\n\n'.repeat(30) });
   await row('reading-live-after-reload').waitFor({ state: 'attached' }); await page.waitForTimeout(1000);
   check('reload during a live turn keeps bottom following', (await atBottom('b')).gap <= 4, await atBottom('b'));
-  const storedPositions = () => page.evaluate(() => Object.keys(localStorage)
-    .filter(key => key.startsWith('o8:transcript-reading:v1:'))
-    .map(key => ({ key, record: JSON.parse(localStorage.getItem(key)) })));
   await page.locator('[data-o8-workspace-tab="reading-a"]').first().click(); await loaded('a');
   await read('a-210');
   const aSaved = (await storedPositions()).find(item => JSON.parse(item.key.slice('o8:transcript-reading:v1:'.length))[2] === 'thoughts-reading-a');
@@ -268,13 +272,15 @@ try {
     assert.equal((await deleted).status(), 200);
     await page.waitForTimeout(800);
     await page.evaluate(() => window.dispatchEvent(new Event('pagehide')));
-    const leftovers = (await storedPositions()).filter(item => JSON.parse(item.key.slice('o8:transcript-reading:v1:'.length))[2] === `thoughts-reading-${name}`);
+    // Only A can still own a record after B is deleted. Fresh reset identities
+    // must not acquire orphan records on pagehide or when A is deleted next.
+    const survivors = name === 'b' ? ['thoughts-reading-a'] : [];
+    const leftovers = (await storedPositions()).filter(item => !survivors.includes(JSON.parse(item.key.slice('o8:transcript-reading:v1:'.length))[2]));
     check(`deleting ${name === 'b' ? 'inactive' : 'active'} chat removes its reading records`, leftovers.length === 0
       && !fs.existsSync(path.join(fixture.dataDir, 'chat-history', `thoughts-reading-${name}.json`)), { leftovers });
   }
   await page.reload({ waitUntil: 'domcontentloaded', timeout: 180000 }); await page.waitForTimeout(1000);
-  const leftovers = (await storedPositions()).filter(item => ['thoughts-reading-a', 'thoughts-reading-b']
-    .includes(JSON.parse(item.key.slice('o8:transcript-reading:v1:'.length))[2]));
+  const leftovers = await storedPositions();
   check('deleted reading records stay absent after reload and unmount', leftovers.length === 0, leftovers);
   check('dashboard has no uncaught errors', errors.length === 0, errors);
   await page.waitForTimeout(500);
