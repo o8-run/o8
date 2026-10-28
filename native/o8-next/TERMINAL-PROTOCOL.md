@@ -19,7 +19,13 @@ no server route or wire message type.
    provider inventories. The normal system acknowledgement is
    `{channel:"system",event:"connected",data:{...}}`.
 3. Send `{type:"terminal-attach",sessionName,cols,rows}` for an existing session.
-   The native pane never sends `terminal-create`, `/terminal-spawn` or kill.
+   The pane itself never sends `terminal-create`, `/terminal-spawn` or kill. The
+   Terminal surface opens the workspace's own shell the way the desktop does: one
+   `{type:"terminal-create",cols,rows,requestId,cwd,ownerKey}` on a short-lived
+   connection, with the stable owner key `o8-next:<workspace>:terminal`. The
+   server adopts the surviving session for that key, or reserves a new one in the
+   workspace, and replies `{channel:"terminal",event:"created",data:{sessionName,requestId}}`.
+   The pane then attaches to that name as below.
    Attach can materialize an existing pending dashboard reservation server-side.
    `readOnly:true` is the observer variant: it cannot write or resize, and the
    server returns source dimensions. The separate `control:true` CLI lease is
