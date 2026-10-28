@@ -1,0 +1,35 @@
+name: Linux package prerequisites
+description: Reuse package payloads authenticated against refreshed signed APT indexes.
+inputs:
+  group:
+    description: Package group, rust or resources.
+    required: true
+runs:
+  using: composite
+  steps:
+    - id: identity
+      shell: bash
+      env:
+        O8_PACKAGE_GROUP: ${{ inputs.group }}
+      run: node scripts/ci/linux-package-prerequisites.mjs key --group="$O8_PACKAGE_GROUP"
+    - uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+      id: archives
+      with:
+        path: |
+          ${{ steps.identity.outputs.path }}/*.deb
+          ${{ steps.identity.outputs.path }}/manifest.json
+        key: ${{ steps.identity.outputs.key }}
+        restore-keys: ${{ steps.identity.outputs.key }}-
+    - id: install
+      shell: bash
+      env:
+        O8_PACKAGE_GROUP: ${{ inputs.group }}
+        O8_PACKAGE_CACHE: ${{ steps.identity.outputs.path }}
+      run: node scripts/ci/linux-package-prerequisites.mjs install --group="$O8_PACKAGE_GROUP" --cache="$O8_PACKAGE_CACHE"
+    - uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+      if: github.ref == 'refs/heads/main' && steps.install.outputs.source == 'download'
+      with:
+        path: |
+          ${{ steps.identity.outputs.path }}/*.deb
+          ${{ steps.identity.outputs.path }}/manifest.json
+        key: ${{ steps.identity.outputs.key }}-${{ steps.install.outputs.revision }}

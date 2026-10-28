@@ -1,4 +1,4 @@
-import { viewerBytes } from '@/lib/viewers/bytes';
+import { viewerImageBytes } from '@/lib/viewers/image-bytes';
 import { readFile, realpath, stat } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 import { NextRequest } from 'next/server';
@@ -69,7 +69,7 @@ export async function GET(request: NextRequest) {
     }
 
     const buffer = await readFile(filePath);
-    return viewerBytes(buffer, contentTypeForExtension(filePath));
+    return viewerImageBytes(buffer, contentTypeForExtension(filePath));
   } catch {
     return new Response('Not found', { status: 404 });
   }
