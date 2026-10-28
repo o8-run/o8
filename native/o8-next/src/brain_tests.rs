@@ -93,6 +93,8 @@ fn brain_fixture_actions_sources_search_clear_and_refusals(cx: &mut TestAppConte
     cx.simulate_input("What is the fixture memory rule? 雪");
     cx.simulate_keystrokes("shift-enter");
     cx.simulate_input("Keep this newline.");
+    let gate = fixture.root.join("brain-response-hold");
+    fs::write(&gate, []).unwrap();
     let started = Instant::now();
     click("brain-send", cx);
     assert!(brain.read_with(cx, |b, _| b.busy));
@@ -103,6 +105,7 @@ fn brain_fixture_actions_sources_search_clear_and_refusals(cx: &mut TestAppConte
         2,
         "busy submit is refused"
     );
+    fs::remove_file(gate).unwrap();
     settle(&brain, cx);
     let answer_ms = started.elapsed().as_secs_f64() * 1000.;
     brain.read_with(cx, |b, _| {
@@ -264,6 +267,8 @@ fn brain_fixture_errors_cancel_retention_and_workspace_isolation(cx: &mut TestAp
     });
     cx.simulate_keystrokes("ctrl-a");
     cx.simulate_input("Fixture slow answer");
+    let gate = fixture.root.join("brain-response-hold");
+    fs::write(&gate, []).unwrap();
     cx.simulate_keystrokes("enter");
     assert!(brain.read_with(cx, |b, _| b.busy));
     let mut reading = false;
@@ -287,6 +292,7 @@ fn brain_fixture_errors_cancel_retention_and_workspace_isolation(cx: &mut TestAp
     );
     click("brain-clear", cx);
     assert!(brain.read_with(cx, |b, _| !b.busy && b.messages.is_empty()));
+    fs::remove_file(gate).unwrap();
     cx.simulate_input("What is the fixture memory rule?");
     cx.simulate_keystrokes("enter");
     settle(&brain, cx);
