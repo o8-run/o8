@@ -534,7 +534,8 @@ fn settled_tool_runs_collapse_to_a_counted_line_and_expand_on_click(cx: &mut Tes
     let row = surface.read_with(cx, |s, _| s.rows[index].clone());
     let (height, lines) = row.borrow().rendered();
     assert_eq!(lines.len(), 1, "one summary line: {lines:?}");
-    assert!(lines[0].starts_with("› Explored 2 files"), "{lines:?}");
+    // Three reads, then the cargo test that failed (tools.history.json).
+    assert_eq!(lines[0], "› Explored 3 files · Ran 1 command · 1 failed");
     assert!(!lines[0].contains("cat src/a.rs"), "{lines:?}");
     let bounds = surface.read_with(cx, |s, _| s.list.bounds_for_item(index).unwrap());
     cx.simulate_click(bounds.center(), gpui::Modifiers::default());
