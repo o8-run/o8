@@ -16,6 +16,7 @@ import type {
   MobileTranscriptToolCall,
 } from '@/lib/mobile/types';
 import { consumePendingTurnWorkers } from '@/lib/mobile/turn-receipt';
+import { redactToolCallForRest } from '@/lib/threads/redaction';
 
 const HISTORY_DIR = join(getDataDir(), 'chat-history');
 const heldHistoryLocks = new Set<string>();
@@ -233,9 +234,11 @@ export function writePersistedLlmChat(
   // desktop ws-server upserting a reply), can never drop a stored turn. This is
   // the second write path alongside the /api/v2/chat-history route. Pass
   // replace:true only for an intentional truncation (none today).
+    const incomingMessages = history.messages.map(message => message.toolCalls
+      ? { ...message, toolCalls: message.toolCalls.map(redactToolCallForRest) } : message);
     const mergedMessages = opts?.replace === true
-      ? history.messages
-      : mergeChatMessages(existingMessages, history.messages);
+      ? incomingMessages
+      : mergeChatMessages(existingMessages, incomingMessages);
 
     const selectedPendingTurnWorkers = Object.prototype.hasOwnProperty.call(history, 'pendingTurnWorkers')
       ? history.pendingTurnWorkers

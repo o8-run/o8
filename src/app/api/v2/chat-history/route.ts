@@ -27,10 +27,11 @@ import {
   withCanonicalChatHistoryLock,
 } from '@/lib/llm/chat-history-store';
 import { resolveRepoGithubIdentity } from '@/lib/repos/github-identity';
+import { redactToolCallForRest } from '@/lib/threads/redaction';
 import { resolveThreadRepoMetadata } from '@/lib/llm/thread-repo-metadata';
 import { matchesMutationWorkspace, mutationWorkspace } from '@/lib/repos/mutation-workspace';
 import { normalizePersistedChatTitle, resolvePersistedChatHistoryTitle } from '@/lib/llm/chat-history-title';
-import type { MobilePendingTurnWorkers } from '@/lib/mobile/types';
+import type { MobilePendingTurnWorkers, MobileTranscriptToolCall } from '@/lib/mobile/types';
 import { consumePendingTurnWorkers } from '@/lib/mobile/turn-receipt';
 import {
   chatHistoryRevision,
@@ -234,6 +235,8 @@ export async function POST(request: NextRequest) {
     content: typeof m.content === 'string'
       ? (m.content as string).replace(/!\[[^\]]*\]\(data:[^)]+\)/g, '[image]')
       : m.content,
+    // Client-supplied tool args/results get the same at-rest redaction as server writes.
+    ...(Array.isArray(m.toolCalls) ? { toolCalls: (m.toolCalls as MobileTranscriptToolCall[]).map(redactToolCallForRest) } : {}),
   })));
   // Preserve starred status from existing file
   let starred = false;

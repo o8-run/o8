@@ -1,24 +1,7 @@
 import type { OrchestratorEvent } from '@/lib/lane/orchestrator-stream-events';
 import type { MobileTranscriptToolCall } from '@/lib/mobile/types';
 import { persistCanonicalChatHistoryRecord, readPersistedLlmChat, withCanonicalChatHistoryLock } from '@/lib/llm/chat-history-store';
-import { redactThreadText, redactThreadValue } from '@/lib/threads/redaction';
-
-/**
- * Tool args and command output can carry credentials (argv tokens, `Bearer …`)
- * and home paths. Previously these lived only in the ephemeral replay buffer and
- * were discarded at turn completion; persisting them into durable canonical
- * history means they must not reach rest in the clear. Apply the project's
- * thread-redaction policy (credential-field + home-path masking) at the write
- * boundary, matching what the thread surfaces already redact for display.
- */
-function redactToolForRest(tool: MobileTranscriptToolCall): MobileTranscriptToolCall {
-  return {
-    ...tool,
-    ...(tool.args ? { args: redactThreadValue(tool.args) as Record<string, unknown> } : {}),
-    ...(typeof tool.result === 'string' ? { result: redactThreadText(tool.result) } : {}),
-    ...(typeof tool.preview === 'string' ? { preview: redactThreadText(tool.preview) } : {}),
-  };
-}
+import { redactToolCallForRest } from '@/lib/threads/redaction';
 
 /** Keep runtime receipts in canonical history before completed-turn replay is discarded. */
 export function observeOrchestratorToolHistory(
@@ -33,7 +16,7 @@ export function observeOrchestratorToolHistory(
   const flush = () => {
     if (!dirty || !threadId?.startsWith('thoughts-') || !assistantMessageId) return;
     // Flush only at a terminal boundary, including a thrown/aborted backend.
-    const settledTools = tools.map(tool => redactToolForRest(tool.status === 'running' ? { ...tool, status: undefined } : tool));
+    const settledTools = tools.map(tool => redactToolCallForRest(tool.status === 'running' ? { ...tool, status: undefined } : tool));
     withCanonicalChatHistoryLock(threadId, () => {
       const saved = readPersistedLlmChat(threadId)?.history;
       // A deleted or reassigned thread must never be recreated by a late event.
