@@ -335,3 +335,30 @@ pub fn group(steps: &mut [Step]) {
         steps[i].group = index;
     }
 }
+
+/// The desktop's counted rollup ("Explored 2 files · Ran 3 commands"); a live
+/// block names the step that is still running.
+pub fn summary(steps: &[Step]) -> String {
+    if let Some(step) = steps.iter().rev().find(|s| s.status == "running") {
+        return format!("Running {}", step.command.lines().next().unwrap_or(""));
+    }
+    let count = |key: &str| steps.iter().filter(|s| s.group_key == key).count();
+    let (explored, edited) = (count("read"), count("edit"));
+    let ran = steps.len() - explored - edited;
+    let failed = steps.iter().filter(|s| s.status == "failed").count();
+    let noun = |n: usize, one: &str, many: &str| format!("{n} {}", if n == 1 { one } else { many });
+    let mut parts = vec![];
+    if explored > 0 {
+        parts.push(format!("Explored {}", noun(explored, "file", "files")));
+    }
+    if ran > 0 {
+        parts.push(format!("Ran {}", noun(ran, "command", "commands")));
+    }
+    if edited > 0 {
+        parts.push(format!("Edited {}", noun(edited, "file", "files")));
+    }
+    if failed > 0 {
+        parts.push(format!("{failed} failed"));
+    }
+    parts.join(" · ")
+}

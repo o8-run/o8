@@ -222,7 +222,13 @@ impl Surface {
                 .get(row.id())
                 .and_then(|candidates| candidates.iter().find(|state| state.borrow().row == row))
                 .cloned();
-            states.push(retained.unwrap_or_else(|| Rc::new(RefCell::new(RowState::new(row)))));
+            states.push(retained.unwrap_or_else(|| {
+                let mut state = RowState::new(row);
+                if let Some(previous) = indexed.get(state.row.id()).and_then(|c| c.first()) {
+                    state.keep_disclosure(&previous.borrow());
+                }
+                Rc::new(RefCell::new(state))
+            }));
         }
         self.list
             .splice(prefix..old.len() - suffix, states.len() - prefix - suffix);

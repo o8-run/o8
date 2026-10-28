@@ -32,13 +32,20 @@ impl RowState {
         )
     }
     pub fn new(row: Row) -> Self {
-        let expanded = matches!(&row, Row::Message { nodes, .. } if nodes.iter().any(crate::rich::system_event))
-            .then_some(false);
+        let expanded = (matches!(&row, Row::Activity { .. })
+            || matches!(&row, Row::Message { nodes, .. } if nodes.iter().any(crate::rich::system_event)))
+        .then_some(false);
         Self {
             row,
             layouts: 0,
             expanded,
             cache: None,
+        }
+    }
+    /// A row that changed in place (a tool step finished) keeps its disclosure.
+    pub fn keep_disclosure(&mut self, previous: &RowState) {
+        if self.expanded.is_some() && previous.expanded.is_some() {
+            self.expanded = previous.expanded;
         }
     }
 }
@@ -123,33 +130,7 @@ impl Builder {
                 .split_whitespace()
                 .collect::<Vec<_>>()
                 .join(" ");
-            let text = format!("{} {summary}", if expanded { "⌄" } else { "›" });
-            let mut runs = vec![text_run(&Run {
-                style: "text".into(),
-                text: text.clone(),
-            })];
-            let text = window
-                .text_system()
-                .line_wrapper(runs[0].font.clone(), px(12.))
-                .truncate_line(
-                    text.into(),
-                    (self.width - px(48.)).max(px(1.)),
-                    "…",
-                    &mut runs,
-                );
-            for line in window
-                .text_system()
-                .shape_text(text, px(12.), &runs, None, None)
-                .expect("event summary")
-            {
-                self.lines.push(Line {
-                    line,
-                    origin: point(px(24.), self.y),
-                    height: px(18.),
-                    align: TextAlign::Left,
-                });
-                self.y += px(18.);
-            }
+            self.disclosure(&summary, "text", expanded, window);
             if expanded {
                 self.y += px(8.);
                 for field in crate::rich::event_fields(data) {
@@ -183,6 +164,36 @@ impl Builder {
             color: theme().surface,
             radius: px(0.),
         });
+    }
+    /// One truncated summary line with a disclosure chevron.
+    fn disclosure(&mut self, summary: &str, style: &str, expanded: bool, window: &Window) {
+        let text = format!("{} {summary}", if expanded { "⌄" } else { "›" });
+        let mut runs = vec![text_run(&Run {
+            style: style.into(),
+            text: text.clone(),
+        })];
+        let text = window
+            .text_system()
+            .line_wrapper(runs[0].font.clone(), px(12.))
+            .truncate_line(
+                text.into(),
+                (self.width - px(48.)).max(px(1.)),
+                "…",
+                &mut runs,
+            );
+        for line in window
+            .text_system()
+            .shape_text(text, px(12.), &runs, None, None)
+            .expect("disclosure summary")
+        {
+            self.lines.push(Line {
+                line,
+                origin: point(px(24.), self.y),
+                height: px(18.),
+                align: TextAlign::Left,
+            });
+            self.y += px(18.);
+        }
     }
     fn text(
         &mut self,
@@ -416,7 +427,23 @@ fn layout(row: &Row, width: Pixels, expanded: bool, window: &Window) -> Layout {
             b.y += px(8.);
         }
         Row::Activity { steps, .. } => {
-            b.y += px(8.);
+            // The desktop's quiet counted rollup; each step opens under it.
+            b.y += px(2.);
+            b.disclosure(
+                &crate::text::sanitize(&crate::activity::summary(steps)),
+                "muted",
+                expanded,
+                window,
+            );
+            if !expanded {
+                b.y += px(2.);
+                return Layout {
+                    size: size(width, b.y + px(8.)),
+                    lines: b.lines,
+                    backgrounds: b.backgrounds,
+                };
+            }
+            b.y += px(4.);
             let mut previous = None;
             for step in steps {
                 if previous != Some(step.group) {
@@ -464,7 +491,7 @@ impl RetainedRow {
         let index = self.index;
         let toggle = move |window: &mut Window| {
             let mut state = state.borrow_mut();
-            let expanded = state.expanded.as_mut().expect("system event");
+            let expanded = state.expanded.as_mut().expect("collapsible row");
             *expanded = !*expanded;
             state.cache = None;
             list.splice(index..index + 1, 1);
@@ -630,6 +657,8 @@ fn text_run(run: &Run) -> TextRun {
             theme().danger
         } else if run.style == "link" {
             theme().accent
+        } else if run.style == "muted" {
+            theme().text_muted
         } else {
             theme().text
         })
