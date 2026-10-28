@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { afterEach, expect, it } from 'vitest';
+import { copyRuntimeArchive, runtimeFixtureUpdaterKey } from './helpers/signed-runtime-archive';
 
 const roots: string[] = [];
 const source = join(process.cwd(), 'tests/fixtures/build-channel');
@@ -15,15 +16,16 @@ function fixture(options: Record<string, unknown> = {}) {
   const offerReceipt = join(profile, 'update-publication/v0.1.900.json');
   mkdirSync(join(root, 'src-tauri'), { recursive: true });
   writeFileSync(join(root, 'src-tauri/tauri.conf.json'), JSON.stringify({ plugins: { updater: {
-    pubkey: readFileSync(join(source, 'public-key.txt'), 'utf8'), endpoints: [
+    pubkey: runtimeFixtureUpdaterKey, endpoints: [
       'https://fixture.invalid/primary/{{current_version}}', 'https://fixture.invalid/fallback/{{current_version}}',
     ],
   } } }));
   writeFileSync(join(root, 'package.json'), '{"version":"0.1.999"}');
   const assets = join(root, 'assets');
   mkdirSync(assets);
-  copyFileSync(join(source, 'beta.tar.gz'), join(assets, 'o8.app.tar.gz'));
-  copyFileSync(join(source, 'beta.tar.gz.sig'), join(assets, 'o8.app.tar.gz.sig'));
+  const archive = join(assets, 'o8.app.tar.gz');
+  copyRuntimeArchive(join(source, options.stableIdentity ? 'stable.tar.gz' : 'beta.tar.gz'), archive, `${archive}.sig`,
+    typeof options.missingRuntime === 'string' ? options.missingRuntime : undefined);
   const candidate = { version: '0.1.900', channel: 'beta', pub_date: '2026-10-01T00:00:00Z', platforms: {
     'darwin-aarch64': { url: 'https://github.com/hurttlocker/o8-releases/releases/download/v0.1.900/o8.app.tar.gz',
       signature: readFileSync(join(assets, 'o8.app.tar.gz.sig'), 'utf8').trim() },
@@ -114,6 +116,15 @@ function effects(f: ReturnType<typeof fixture>): Array<{name: string; args: unkn
 }
 function writes(f: ReturnType<typeof fixture>) { return effects(f).filter(v=>['upload','edit','changelog','publishFixed','fetch'].includes(v.name)); }
 afterEach(()=>{for(const root of roots.splice(0))rmSync(root,{recursive:true,force:true});});
+
+it.each(['.next/server', 'node_modules/bindings'])('rejects authenticated archives missing %s before publication', missingRuntime => {
+  const f = fixture({ missingRuntime });
+  const result = run(f);
+  expect(result.status, result.stdout + result.stderr).toBe(1);
+  expect(result.stderr).toContain(missingRuntime === '.next/server'
+    ? 'Missing packaged compiled server directory' : 'Missing packaged runtime dependency: bindings');
+  expect(writes(f)).toEqual([]);
+});
 
 it('case 1: rejects forged manifest-only signatures before any publication or receipt', ()=>{
   const f=fixture();
@@ -207,8 +218,7 @@ it('validates the archive bytes with the existing verifier, not just signature t
   const result=run(f);expect(result.status,result.stderr).toBe(1);expect(result.stderr).toMatch(/signature does not verify/);expect(writes(f)).toEqual([]);
 });
 it('rejects a signed stable identity masquerading as a beta', ()=>{
-  const f=fixture();copyFileSync(join(source,'stable.tar.gz'),join(f.assets,'o8.app.tar.gz'));
-  copyFileSync(join(source,'stable.tar.gz.sig'),join(f.assets,'o8.app.tar.gz.sig'));
+  const f=fixture({stableIdentity:true});
   const beta=JSON.parse(readFileSync(join(f.assets,'beta.json'),'utf8'));
   beta.platforms['darwin-aarch64'].signature=readFileSync(join(f.assets,'o8.app.tar.gz.sig'),'utf8').trim();
   writeFileSync(join(f.assets,'beta.json'),JSON.stringify(beta));
@@ -231,8 +241,8 @@ it('authenticates the retained universal archive when both feed platforms use CP
   const beta=JSON.parse(readFileSync(join(f.assets,'beta.json'),'utf8'));
   for(const [arch,platform] of [['arm64','aarch64'],['x86_64','x86_64']]){
     const name=`o8_${arch}.app.tar.gz`;
-    copyFileSync(join(source,'beta.tar.gz'),join(f.assets,name));
-    copyFileSync(join(source,'beta.tar.gz.sig'),join(f.assets,name+'.sig'));
+    copyFileSync(join(f.assets,'o8.app.tar.gz'),join(f.assets,name));
+    copyFileSync(join(f.assets,'o8.app.tar.gz.sig'),join(f.assets,name+'.sig'));
     writeFileSync(join(f.assets,`o8_0.1.900_${arch}.dmg`),'fixture cpu dmg');
     beta.platforms['darwin-'+platform]={...beta.platforms['darwin-aarch64'],url:`https://github.com/hurttlocker/o8-releases/releases/download/v0.1.900/${name}`};
   }

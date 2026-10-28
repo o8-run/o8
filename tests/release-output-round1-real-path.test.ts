@@ -5,6 +5,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { expect, it } from 'vitest';
 import { createRetainedGeneratedOutputFixture } from './generated-output-fixture';
+import { RUNTIME_INPUT_FILES } from './helpers/packaged-runtime-inputs';
 
 const source = process.cwd();
 const require = createRequire(import.meta.url);
@@ -20,6 +21,10 @@ async function fixture(scrubRace = false) {
   writeFileSync(path.join(repo, 'node_modules/next/dist/bin/next'), `
     const fs = require('node:fs'); const output = process.env.O8_RELEASE_NEXT_DIST_DIR;
     fs.mkdirSync(output + '/standalone', {recursive:true});
+    for (const [file, contents] of Object.entries(${JSON.stringify(RUNTIME_INPUT_FILES)})) {
+      const target = require('node:path').join(output, 'standalone', file);
+      fs.mkdirSync(require('node:path').dirname(target), { recursive: true }); fs.writeFileSync(target, contents);
+    }
     fs.mkdirSync(output + '/cache', {recursive:true});
     fs.writeFileSync(output + '/BUILD_ID', 'owned build');
     fs.writeFileSync(output + '/cache/compiler.pack', 'owned cache');

@@ -10,6 +10,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { assertTauriExportInputsSafe } from '../scripts/lib/tauri-export-safety.mjs';
+import { stageRuntimeInputs } from './helpers/packaged-runtime-inputs';
 
 const roots: string[] = [];
 
@@ -23,6 +24,7 @@ describe('Tauri export input safety', () => {
     roots.push(root);
     const standalone = join(root, '.next', 'standalone');
     mkdirSync(join(standalone, 'node_modules'), { recursive: true });
+    stageRuntimeInputs(standalone);
 
     expect(() => assertTauriExportInputsSafe(standalone)).not.toThrow();
   });

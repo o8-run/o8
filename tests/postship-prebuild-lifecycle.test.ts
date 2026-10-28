@@ -6,6 +6,7 @@ import { pathToFileURL } from 'node:url';
 import Database from 'better-sqlite3';
 import { expect, it } from 'vitest';
 import { createRetainedGeneratedOutputFixture } from './generated-output-fixture';
+import { RUNTIME_INPUT_FILES } from './helpers/packaged-runtime-inputs';
 
 const source = process.cwd();
 const require = createRequire(import.meta.url);
@@ -90,6 +91,10 @@ it.each([false, true, 'cache', 'rebuild', 'blocked-rebuild'] as const)('journals
     fs.mkdirSync(output + '/server', { recursive: true });
     fs.symlinkSync(require('node:path').join(process.cwd(), 'node_modules/donor'), output + '/server/donor', 'dir');
     fs.mkdirSync(output + '/standalone/.next/server', { recursive: true });
+    for (const [file, contents] of Object.entries(${JSON.stringify(RUNTIME_INPUT_FILES)})) {
+      const target = require('node:path').join(output, 'standalone', file);
+      fs.mkdirSync(require('node:path').dirname(target), { recursive: true }); fs.writeFileSync(target, contents);
+    }
     for (const name of ['.env', '.env.production']) fs.copyFileSync(name, output + '/standalone/' + name);
     fs.writeFileSync(output + '/standalone/.next/server/runtime.js', 'runtime');
     fs.appendFileSync('.fixture/compiler-calls', 'build\\n');

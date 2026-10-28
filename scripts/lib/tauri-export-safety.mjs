@@ -63,32 +63,44 @@ export function assertTauriExportInputsSafe(standaloneRoot) {
   assertNextRuntimeFilesPresent(standaloneRoot);
 }
 
-/** Resolve compiled route externals from the package, never the build checkout. */
+/** Resolve compiled routes and startup loaders from the package, never the build checkout. */
 export function assertNextRuntimeFilesPresent(serverRoot) {
   const compiled = join(serverRoot, '.next/server');
-  if (!lstatSync(compiled, { throwIfNoEntry: false })) return;
+  if (!lstatSync(compiled, { throwIfNoEntry: false })?.isDirectory()) {
+    throw new Error('Missing packaged compiled server directory: .next/server');
+  }
   const root = realpathSync(serverRoot);
-  const pending = [compiled];
+  const resolvePackaged = (file, specifier, label) => {
+    let resolved;
+    try { resolved = realpathSync(createRequire(resolve(file)).resolve(specifier)); } catch {
+      throw new Error(`Missing packaged ${label}: ${specifier} (required by ${relative(root, file)})`);
+    }
+    const destination = relative(root, resolved);
+    if (destination === '..' || destination.startsWith(`..${sep}`) || isAbsolute(destination)) {
+      throw new Error(`${label} resolves outside the package: ${specifier}`);
+    }
+    return resolved;
+  };
+  const pending = [join(root, '.next/server')];
   while (pending.length) {
     const directory = pending.pop();
     for (const entry of readdirSync(directory, { withFileTypes: true })) {
       const file = join(directory, entry.name);
       if (entry.isDirectory()) { pending.push(file); continue; }
       if (!entry.isFile() || !/\.[cm]?js$/.test(entry.name)) continue;
-      const require = createRequire(resolve(file));
       const references = readFileSync(file, 'utf8').matchAll(
         /["'`](next\/dist\/compiled\/next-server\/[^"'`\s]+)["'`]/g,
       );
       for (const [, specifier] of references) {
-        let resolved;
-        try { resolved = realpathSync(require.resolve(specifier)); } catch {
-          throw new Error(`Missing packaged Next runtime: ${specifier} (required by ${relative(serverRoot, file)})`);
-        }
-        const destination = relative(root, resolved);
-        if (destination === '..' || destination.startsWith(`..${sep}`) || isAbsolute(destination)) {
-          throw new Error(`Next runtime resolves outside the package: ${specifier}`);
-        }
+        resolvePackaged(file, specifier, 'Next runtime');
       }
     }
   }
+  // Voice preparation opens SQLite at startup. Check its JavaScript loader chain
+  // even when an HTTP health request succeeds after optional voice setup fails.
+  // Resolve from each actual importer; do not execute cross-platform native code.
+  const sqlite = resolvePackaged(join(root, 'server.js'), 'better-sqlite3', 'runtime dependency');
+  const loader = resolvePackaged(sqlite, './database', 'runtime dependency');
+  const bindings = resolvePackaged(loader, 'bindings', 'runtime dependency');
+  resolvePackaged(bindings, 'file-uri-to-path', 'runtime dependency');
 }
