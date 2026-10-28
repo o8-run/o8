@@ -144,6 +144,28 @@ describe('mobile orchestrator durable send delivery', () => {
     } finally { act(() => { mounted.root.unmount(); mounted.host.remove(); }); }
   });
 
+  it('keeps both sides of a tool boundary before the render flush', async () => {
+    const values: HookValue[] = [];
+    const mounted = mountHook(value => { values.push(value); });
+    try {
+      await flushConnection();
+      const socket = FakeWebSocket.instances.at(-1)!;
+      const data = { repoPath: thread.repoPath, threadId: thread.id, assistantMessageId: 'assistant-burst' };
+      act(() => {
+        socket.emit({ channel: 'orchestrator', event: 'output', data: { ...data, text: 'Before tool.' } });
+        socket.emit({ channel: 'orchestrator', event: 'tool-use', data: { ...data, toolUseId: 'burst-tool', name: 'read_file' } });
+        socket.emit({ channel: 'orchestrator', event: 'output', data: { ...data, text: 'After tool.' } });
+        socket.emit({ channel: 'orchestrator', event: 'tool-result', data: { ...data, toolUseId: 'burst-tool', result: 'Read complete' } });
+        socket.emit({ channel: 'orchestrator', event: 'status', data: { ...data, status: 'ready' } });
+      });
+      expect(values.at(-1)!.transcript.map(entry => [entry.role, entry.text])).toEqual([
+        ['assistant', 'Before tool.'], ['tool', 'read_file'], ['assistant', 'After tool.'],
+      ]);
+      expect(values.at(-1)!.transcript.filter(entry => entry.id === 'tool:burst-tool')).toHaveLength(1);
+      expect(values.at(-1)!.transcript.find(entry => entry.id === 'tool:burst-tool')?.toolDone).toBe(true);
+    } finally { act(() => { mounted.root.unmount(); mounted.host.remove(); }); }
+  });
+
   it('replays an unacked send after remount and removes it only after send-ack', async () => {
     let current: HookValue | null = null;
     const firstMount = mountHook((value) => { current = value; });

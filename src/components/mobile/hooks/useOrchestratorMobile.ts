@@ -153,6 +153,7 @@ export function useOrchestratorMobile({
     thinking: boolean;
     flushed: boolean;
   } | null>(null);
+  const sealedOutputRef = useRef<{ id: string; text: string } | null>(null);
   const flushTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
@@ -238,6 +239,9 @@ export function useOrchestratorMobile({
   }, []);
 
   const sealStreamingBuffer = useCallback(() => {
+    // A later event can arrive before the flushed prefix reaches the transcript.
+    const buffer = streamingBufferRef.current;
+    if (buffer) sealedOutputRef.current = { id: buffer.id, text: buffer.text };
     flushStreamingBuffer();
     streamingBufferRef.current = null;
   }, [flushStreamingBuffer]);
@@ -253,6 +257,7 @@ export function useOrchestratorMobile({
   const activeThreadId = activeThread?.id ?? null;
   const receiveSteerHistory = useMobileSteerHistory(activeThreadId, setHistorySources, setTranscript);
   useEffect(() => {
+    sealedOutputRef.current = null;
     setToolBoundaries(new Map());
     if (!activeThreadId) {
       setHistorySources(new Map());
@@ -416,7 +421,9 @@ export function useOrchestratorMobile({
           if (buffer && messageId && buffer.id !== messageId) { sealStreamingBuffer(); buffer = null; }
           if (!buffer) {
             const id = messageId ?? transcriptIdFor('assistant');
-            const previous = transcriptRef.current.find(entry => entry.id === id);
+            const previous = sealedOutputRef.current?.id === id
+              ? sealedOutputRef.current
+              : transcriptRef.current.find(entry => entry.id === id);
             streamingBufferRef.current = {
               id,
               text: (previous?.text ?? '') + text,
@@ -754,6 +761,7 @@ export function useOrchestratorMobile({
   }, [sealStreamingBuffer]);
 
   const resetTranscript = useCallback(() => {
+    sealedOutputRef.current = null;
     setTranscript([]);
     setErrorNote(null);
     streamingBufferRef.current = null;
