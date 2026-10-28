@@ -1,0 +1,29 @@
+// scripts/release.mjs at cc8658f543d574a09d7ead4e4e0b597fd9ddc5f0 (origin/main).
+function publishPublicRelease({ publishedAt, dryRun: preview = false, outDir = null }) {
+  const notesPath = join(root, 'release-notes', 'next.md');
+  const notesMarkdown = existsSync(notesPath) ? readFileSync(notesPath, 'utf8') : '';
+  const latestShip = buildLatestShip({
+    version,
+    tag,
+    publishedAt,
+    releaseUrl: `https://github.com/${REPO}/releases/tag/${tag}`,
+    commits: releaseCommits(),
+    notesMarkdown,
+    credits: releaseCredits(),
+  });
+  if (releaseSummary) latestShip.summary = releaseSummary.summary;
+  const stagingDir = mkdtempSync(join(tmpdir(), 'o8-latest-ship-'));
+  const latestShipPath = join(stagingDir, 'latest-ship.json');
+
+  try {
+    writeFileSync(latestShipPath, `${JSON.stringify(latestShip, null, 2)}\n`);
+    const args = [
+      join(root, 'scripts', 'sync-public-changelog.sh'),
+      '--latest-ship', latestShipPath,
+    ];
+    if (preview) args.push('--dry-run', '--out-dir', outDir);
+    execFileSync('bash', args, { cwd: root, stdio: 'inherit' });
+  } finally {
+    rmSync(stagingDir, { recursive: true, force: true });
+  }
+}

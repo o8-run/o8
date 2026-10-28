@@ -5795,6 +5795,14 @@
       ]
     },
     {
+      "path": "tests/promote-beta-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/prompt-inventory-real-path.test.ts",
       "reasons": [
         "child-process",
