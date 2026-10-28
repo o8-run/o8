@@ -11,6 +11,7 @@ mod diff;
 mod diff_tests;
 mod diff_ui;
 mod grid_sessions;
+mod icon;
 mod inbox;
 mod issues;
 mod merge;

@@ -33,6 +33,36 @@ pub(crate) fn mode_label(mode: &str) -> &'static str {
         _ => "Solo",
     }
 }
+/// The desktop's model names (formatModelLabel): "gpt-6.1-sol" reads "GPT-6.1 Sol",
+/// "claude-opus-5-5" reads "Opus 5.5". Unknown ids pass through.
+pub(crate) fn model_label(id: &str) -> String {
+    let id = id.rsplit('/').next().unwrap_or(id);
+    let title = |word: &str| {
+        let mut chars = word.chars();
+        chars.next().map_or(String::new(), |c| c.to_uppercase().chain(chars).collect())
+    };
+    let (long, id) = match id.strip_suffix("[1m]") {
+        Some(id) => (" (1M)", id),
+        None => ("", id),
+    };
+    let words: Vec<&str> = id
+        .split('-')
+        .filter(|w| *w != "preview" && !(w.len() == 8 && w.chars().all(|c| c.is_ascii_digit())))
+        .collect();
+    let label = match words.as_slice() {
+        ["gpt", version, "codex"] => format!("Codex {version}"),
+        ["gpt", version, rest @ ..] => {
+            let rest: Vec<String> = rest.iter().map(|w| title(w)).collect();
+            format!("GPT-{version} {}", rest.join(" ")).trim_end().to_owned()
+        }
+        ["claude", family, version @ ..] if !version.is_empty() => {
+            format!("{} {}", title(family), version.join("."))
+        }
+        ["gemini" | "grok", ..] => words.iter().map(|w| title(w)).collect::<Vec<_>>().join(" "),
+        _ => return format!("{id}{long}"),
+    };
+    format!("{label}{long}")
+}
 pub(crate) fn wire(text: &str, mode: &str) -> String {
     if text.starts_with('/') {
         return text.into();

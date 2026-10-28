@@ -119,6 +119,7 @@ fn launch(client: Client, file: PathBuf, state: State, offscreen: bool) {
     } else {
         Application::new()
     })
+    .with_assets(crate::icon::Assets)
     .run(move |cx: &mut App| {
         let (sender, receiver) = async_channel::bounded(1);
         let client = client.with_wakeup(sender);

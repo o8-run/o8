@@ -3,6 +3,7 @@
 //! lays them out and adds the shell-level destinations.
 use super::*;
 use crate::theme::current as theme;
+use crate::icon::Tip;
 use gpui::{AnyElement, Div, Image, ImageFormat, ObjectFit, Rgba, SharedString, Stateful, img, rgb};
 use serde_json::Value;
 use std::sync::{Arc, Mutex, Once, OnceLock};
@@ -61,17 +62,7 @@ impl Icon {
 }
 
 fn glyph(icon: Icon, color: Rgba) -> impl IntoElement {
-    let svg = format!(
-        r##"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#{:02x}{:02x}{:02x}" stroke-opacity="{}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="{}"/></svg>"##,
-        (color.r * 255.) as u8,
-        (color.g * 255.) as u8,
-        (color.b * 255.) as u8,
-        color.a,
-        icon.path()
-    );
-    img(Arc::new(Image::from_bytes(ImageFormat::Svg, svg.into_bytes())))
-        .size(px(ICON))
-        .flex_shrink_0()
+    crate::icon::stroke(icon.path(), color, ICON, 1.8)
 }
 
 /// One rail target. Callers attach the click handler; `active` marks the open destination.
@@ -101,23 +92,6 @@ fn target(id: &'static str) -> Stateful<Div> {
         .rounded(px(10.))
         .cursor_pointer()
         .hover(|view| view.bg(theme().hover))
-}
-
-struct Tip(SharedString);
-impl Render for Tip {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .px(px(8.))
-            .py(px(4.))
-            .rounded(px(6.))
-            .bg(rgb(0x1c1c1e))
-            .border_1()
-            .border_color(theme().border)
-            .text_color(theme().text)
-            .font_family(theme().font_ui)
-            .text_size(px(12.))
-            .child(self.0.clone())
-    }
 }
 
 // Weekly ratios behind the rail gauge, read like useRuntimeUsage and weeklyUsage
