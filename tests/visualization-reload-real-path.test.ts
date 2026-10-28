@@ -28,7 +28,8 @@ let server: Server;
 let browser: Browser;
 let base: string;
 let stalled = false;
-let stallAll = false;
+let stallNearest = false;
+let sourceDelay = 100;
 
 beforeAll(async () => {
   const at = Date.now() - 100_000;
@@ -74,9 +75,9 @@ beforeAll(async () => {
         const request = new NextRequest(`${base}${req.url}`, { headers: { authorization: `Bearer ${token}` } });
         const id = req.url?.split('/').at(-1)?.split('?')[0] ?? '';
         if (!req.url?.includes('?') && req.url?.startsWith('/api/visualizations/')) {
-          if (stallAll || (stalled && id === ids[0])) return;
+          if ((stallNearest && ids.slice(-4).includes(id)) || (stalled && id === ids[0])) return;
           // Keep requests outstanding long enough to expose an unbounded burst.
-          await new Promise(done => setTimeout(done, 100));
+          await new Promise(done => setTimeout(done, sourceDelay));
         }
         const response = req.url === '/history' ? Response.json(readPersistedLlmChat(threadId)!.history)
           : await visualization(request, { params: Promise.resolve({ id }) });
@@ -147,8 +148,35 @@ it('deduplicates the same saved source across two mounted cards', async () => {
   } finally { await page.close(); }
 }, 30_000);
 
-it('settles queued cards when the four active sources stall, without starting expired requests', async () => {
-  stallAll = true;
+it('gives all 30 healthy sources their own deadline after waiting for a fetch slot', async () => {
+  sourceDelay = 2000;
+  const page = await browser.newPage();
+  const requested: string[] = [];
+  page.on('request', request => {
+    const url = new URL(request.url());
+    if (url.pathname.startsWith('/api/visualizations/') && !url.search) requested.push(url.pathname);
+  });
+  try {
+    await page.addInitScript(() => {
+      const errors: string[] = [];
+      Object.assign(window, { visualizationErrors: errors });
+      new MutationObserver(() => {
+        document.querySelectorAll('[data-o8-visualization]').forEach(card => {
+          if (card.querySelector('button')?.textContent === 'Retry visualization') errors.push(card.textContent ?? '');
+        });
+      }).observe(document, { childList: true, subtree: true });
+    });
+    await page.goto(base);
+    await expect.poll(() => page.locator('[data-o8-visualization] > iframe').evaluateAll(nodes =>
+      nodes.filter(n => getComputedStyle(n).opacity === '1').length), { timeout: 25_000 }).toBe(30);
+    expect(requested).toHaveLength(30);
+    expect(await page.evaluate(() => Reflect.get(window, 'visualizationErrors'))).toEqual([]);
+    expect(await page.getByText('Loading visualization…', { exact: true }).count()).toBe(0);
+  } finally { sourceDelay = 100; await page.close(); }
+}, 35_000);
+
+it('releases stalled fetch slots so queued cards can load without expiring first', async () => {
+  stallNearest = true;
   const page = await browser.newPage();
   const requested: string[] = [];
   page.on('request', request => {
@@ -157,13 +185,13 @@ it('settles queued cards when the four active sources stall, without starting ex
   });
   try {
     await page.goto(base);
-    await expect.poll(() => page.getByRole('button', { name: 'Retry visualization' }).count(), { timeout: 16_000 }).toBe(30);
+    await expect.poll(() => page.locator('[data-o8-visualization] > iframe').evaluateAll(nodes =>
+      nodes.filter(n => getComputedStyle(n).opacity === '1').length), { timeout: 20_000 }).toBe(26);
+    expect(await page.getByRole('button', { name: 'Retry visualization' }).count()).toBe(4);
     expect(await page.getByText('Loading visualization…', { exact: true }).count()).toBe(0);
-    // Enqueued deadlines differ slightly; a newly freed slot may start another
-    // still-live request before that card's own deadline.
-    expect(requested.length).toBeLessThan(30);
-    expect(await page.getByRole('button', { name: 'Rebuild visualization', exact: true }).count()).toBe(30);
-  } finally { stallAll = false; await page.close(); }
+    expect(requested).toHaveLength(30);
+    expect(await page.getByRole('button', { name: 'Rebuild visualization', exact: true }).count()).toBe(4);
+  } finally { stallNearest = false; await page.close(); }
 }, 30_000);
 
 it('ends a missing or stalled source with recovery controls, then retries a recovered request', async () => {

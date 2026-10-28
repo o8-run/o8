@@ -100,10 +100,10 @@ function VisualizationDocumentFrame({ version, expanded }: { version: ReturnType
   }, [nonce, expanded, stateId]);
 
   useEffect(() => {
-    if (ready) return;
+    if (!doc || ready) return;
     const timer = window.setTimeout(() => setError('The visualization did not finish loading. Retry it or rebuild it from this chat.'), 15_000);
     return () => window.clearTimeout(timer);
-  }, [ready, attempt]);
+  }, [doc, ready, attempt]);
 
   const open = useCallback(() => window.dispatchEvent(new CustomEvent('o8:open-visualization', { detail: reference })), [reference]);
   const buttonStyle: React.CSSProperties = { border: '1px solid var(--t-border)', borderRadius: 8, background: 'var(--t-bg-elevated)',

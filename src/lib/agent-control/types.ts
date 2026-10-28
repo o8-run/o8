@@ -15,6 +15,14 @@ export type LaneControlRef = { kind: 'lane'; id: string };
 export type PacketControlRef = { kind: 'packet'; id: string };
 export type AgentControlRef = SessionControlRef | LaneControlRef | PacketControlRef;
 
+export interface WorkerRecovery {
+  actions: Array<'resume' | 'retire'>;
+  worktreePath: string;
+  branch: string | null;
+  runId: string | null;
+  retired: boolean;
+}
+
 export type SessionControlAction =
   | {
       kind: 'send';
@@ -26,6 +34,9 @@ export type SessionControlAction =
       steerSource?: AgentControlSteerSource;
     }
   | { kind: 'interrupt'; runId?: string }
+  | { kind: 'resume' }
+  | { kind: 'retry' }
+  | { kind: 'retire' }
   | { kind: 'watch' }
   | { kind: 'resolve' };
 
@@ -161,6 +172,9 @@ export function parseAgentControlRequest(value: unknown): ParseResult {
   }
 
   if (refKind === 'session') {
+    if (actionKind === 'resume' || actionKind === 'retry' || actionKind === 'retire') {
+      return { ok: true, value: { ref: { kind: 'session', id: refId }, action: { kind: actionKind }, clientMutationId } };
+    }
     if (actionKind === 'send') {
       const message = requiredString(actionRecord, 'message');
       if (!message) return { ok: false, error: 'message is required for session send.' };

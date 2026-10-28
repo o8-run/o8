@@ -34,22 +34,13 @@ export function loadVisualization(id: string, distance: Distance = () => Infinit
   const underway = pending.get(id);
   if (underway) { underway.distances.push(distance); return underway.promise; }
   const distances = [distance];
-  // Queue time counts toward the existing source deadline. Stalled sources must
-  // also settle cards still waiting for a slot, without a late request burst.
-  const signal = AbortSignal.timeout(12_000);
   const work = new Promise<VisualizationDocument>((resolve, reject) => {
-    const expire = () => {
-      const index = queue.indexOf(load);
-      if (index !== -1) queue.splice(index, 1);
-      reject(signal.reason);
-    };
     const load: QueuedLoad = { distances, start: () => {
-      signal.removeEventListener('abort', expire);
-      if (signal.aborted) { reject(signal.reason); return; }
+      // Only active source work consumes the deadline, never time in the queue.
+      const signal = AbortSignal.timeout(12_000);
       active++;
       void fetchVisualization(id, signal).then(resolve, reject).finally(() => { active--; scheduleLoads(); });
     } };
-    signal.addEventListener('abort', expire, { once: true });
     queue.push(load);
     scheduleLoads();
   }).catch(error => {

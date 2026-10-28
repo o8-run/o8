@@ -658,9 +658,7 @@ fn shell_palette_switch_restart_and_server_down(cx: &mut TestAppContext) {
     });
     offline_cx.run_until_parked();
     draw(offline_cx);
-    assert!(offline.read_with(offline_cx, |s, _| !s.connected
-        && s.notice.contains("Local server unavailable")
-        && s.notice.contains("Retry")));
+    assert!(offline.read_with(offline_cx, |s, _| !s.connected && s.notice == "Server down"));
 }
 
 #[path = "shell_look_tests.rs"]
