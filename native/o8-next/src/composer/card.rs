@@ -11,7 +11,10 @@ impl Surface {
         } else {
             "Full access"
         };
-        let enabled = self.queue_ready && !self.saving && !self.composer.read(cx).controls.busy;
+        let enabled = self.queue_ready
+            && !self.saving
+            && !self.composer.read(cx).controls.busy
+            && self.composer.read(cx).controls.pending_images == 0;
         let leading = div()
             .flex()
             .flex_wrap()
@@ -363,33 +366,13 @@ impl Surface {
             prompt: Some("Attach images".into()),
         });
         let editor = self.composer.clone();
-        cx.spawn(async move |this, cx| {
-            let Ok(Ok(Some(paths))) = paths.await else { return; };
-            let task = cx.background_executor().spawn(async move {
-                use base64::Engine;
-                paths.into_iter().map(|path| {
-                    let mime = match path.extension().and_then(|s| s.to_str()).unwrap_or("").to_ascii_lowercase().as_str() {
-                        "png" => "image/png", "jpg" | "jpeg" => "image/jpeg", "webp" => "image/webp", "gif" => "image/gif",
-                        _ => return Err("Choose a PNG, JPEG, WebP or GIF image."),
-                    };
-                    if fs::metadata(&path).map_err(|_| "Could not read image.")?.len() > 512 * 1024 { return Err("Image exceeds 512 KiB."); }
-                    let bytes = fs::read(&path).map_err(|_| "Could not read image.")?;
-                    Ok(json!({"name":path.file_name().and_then(|s| s.to_str()).unwrap_or("image"), "dataUri":format!("data:{mime};base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes))}))
-                }).collect::<Result<Vec<_>, _>>()
-            });
-            let result = task.await;
-            let _ = this.update(cx, |_, cx| {
-                editor.update(cx, |i, cx| {
-                    match result {
-                        Ok(images) if i.controls.images.len() + images.len() <= 8 => i.controls.images.extend(images),
-                        Ok(_) => i.controls.error = "Attach at most 8 images.".into(),
-                        Err(error) => i.controls.error = error.into(),
-                    }
-                    cx.notify();
-                });
-                cx.notify();
-            });
-        }).detach();
+        cx.spawn(async move |_, cx| {
+            let Ok(Ok(Some(paths))) = paths.await else {
+                return;
+            };
+            let _ = editor.update(cx, |i, cx| i.attach_paths(paths, cx));
+        })
+        .detach();
     }
     pub(super) fn composer_card(
         &mut self,
@@ -398,7 +381,13 @@ impl Surface {
     ) -> AnyElement {
         let routing = self.composer_routing(cx).unwrap_or(Value::Null);
         let mode = mode_label(routing["pickedMode"].as_str().unwrap_or("solo"));
-        let (open, busy, error, model, images) = self.composer.update(cx, |i, cx| {
+        let (open, busy, error, model) = self.composer.update(cx, |i, cx| {
+            i.controls.attachment_target = true;
+            i.controls.images_enabled = self.queue_ready
+                && matches!(
+                    routing["backend"].as_str(),
+                    Some("codex" | "claude" | "fable" | "collide")
+                );
             let placeholder = format!("Message {mode}…");
             if i.placeholder != placeholder || i.framed {
                 i.placeholder = placeholder;
@@ -410,7 +399,6 @@ impl Surface {
                 i.controls.busy,
                 i.controls.error.clone(),
                 i.controls.model.clone(),
-                i.controls.images.clone(),
             )
         });
         let footer = self.regions.measured_view(
@@ -448,13 +436,12 @@ impl Surface {
                     _ => {}
                 }
             }))
-            .child(self.composer.clone())
-            .children(images.iter().map(|image| {
-                div()
-                    .text_size(px(11.))
-                    .px(px(14.))
-                    .child(image["name"].as_str().unwrap_or("image").to_owned())
+            .on_drop(cx.listener(|s, paths: &gpui::ExternalPaths, _, cx| {
+                s.composer
+                    .update(cx, |i, cx| i.attach_paths(paths.paths().to_vec(), cx));
             }))
+            .child(self.composer.clone())
+            .child(self.composer.update(cx, |i, cx| i.image_chips(cx)))
             .child(footer);
         if let Some(open) = open {
             let mut picker = div()
