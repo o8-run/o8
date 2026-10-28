@@ -676,7 +676,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, ThoughtsCha
   }, [open, imageInjection?.id, imageInjection?.name, imageInjection?.dataUri, imageInjection?.mimeType, addAttachedImage, onImageInjectionConsumed]);
 
   useTranscriptAutoScroll({ endRef: chatEndRef, suppressRef: suppressNextTranscriptAutoScrollRef,
-    scope: isOrchestratorMode ? threadId : targetSessionKey });
+    scope: (isOrchestratorMode ? threadId : targetSessionKey) ? JSON.stringify([resolvedRepoPath, isOrchestratorMode ? 'thread' : 'session', isOrchestratorMode ? threadId : targetSessionKey]) : null });
 
   useEffect(() => {
     return () => {

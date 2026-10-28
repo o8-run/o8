@@ -1,4 +1,4 @@
-interface ReadingRow { id: string; offset: number; element: HTMLElement }
+interface ReadingRow { id: string; offset: number; element?: HTMLElement }
 export interface TranscriptReadingAnchor { rows: ReadingRow[] }
 
 /** Capture visible identity and offset, independently of total content height. */
@@ -28,7 +28,7 @@ export function captureTranscriptReadingAnchor(container: HTMLElement): Transcri
 export function restoreTranscriptReadingAnchor(container: HTMLElement, anchor: TranscriptReadingAnchor | null): boolean {
   if (!anchor || !container.isConnected) return false;
   for (const row of anchor.rows) {
-    const element = container.contains(row.element) ? row.element
+    const element = row.element && container.contains(row.element) ? row.element
       : [...container.querySelectorAll<HTMLElement>('[data-o8-message-id]')].find(node => node.getAttribute('data-o8-message-id') === row.id);
     if (!element) continue;
     const bounds = element.getBoundingClientRect();

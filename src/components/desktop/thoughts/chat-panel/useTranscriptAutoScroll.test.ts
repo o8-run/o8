@@ -27,6 +27,7 @@ async function render(messages: MobileTranscriptEntry[], scope = 'chat', status 
 async function frame() { await act(async () => vi.advanceTimersByTimeAsync(32)); }
 function scrollTo(value: number) { top = value; scroller.dispatchEvent(new Event('scroll')); }
 beforeEach(async () => {
+  localStorage.clear();
   vi.useFakeTimers(); height = 18853; top = 18161; suppress.current = false; observed = new Set();
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   vi.stubGlobal('requestAnimationFrame', (fn: FrameRequestCallback) => setTimeout(() => fn(0), 16));
@@ -129,4 +130,56 @@ it('keeps following when backfill adds no visible height and therefore emits no 
   resize();
   await frame();
   expect(top).toBe(height - 692);
+});
+
+function readingLayout() {
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function(this: HTMLElement) {
+    const id = this.getAttribute('data-o8-message-id');
+    const y = id ? Number(id.slice(1)) * 1000 - top : 0;
+    const size = id ? 200 : 692;
+    return { top: y, bottom: y + size, height: size, left: 0, right: 800, width: 800 } as DOMRect;
+  });
+  return [1, 2, 3].map(index => ({ id: `m${index}`, role: 'user' as const, text: `Message ${index}` }));
+}
+
+it('restores a message and offset after remount, waiting for its history page without saving the tail over it', async () => {
+  const messages = readingLayout();
+  await render(messages); await frame();
+  scrollTo(2100);
+  window.dispatchEvent(new Event('pagehide'));
+  await act(async () => root.unmount());
+  root = createRoot(host); top = 0;
+  await render([messages[2]]); scroller = host.querySelector('.thoughts-scroll')!; await frame();
+  // An asynchronous tail-page scroll is not a reader choosing a new location.
+  scrollTo(0);
+  height += 100;
+  await render(messages); resize(); await frame();
+  expect(top).toBe(2100);
+  height += 300; resize(); await frame();
+  expect(top).toBe(2100);
+});
+
+it('keeps separate saved positions for two chats and persists bottom-follow intent across remount', async () => {
+  const messages = readingLayout();
+  await render(messages, 'a'); await frame(); scrollTo(2100);
+  await render(messages, 'b'); await frame(); scrollTo(3100);
+  await render(messages, 'a'); await frame(); expect(top).toBe(2100);
+  await render(messages, 'b'); await frame(); expect(top).toBe(3100);
+  scrollTo(height - 692);
+  await act(async () => root.unmount()); root = createRoot(host); top = 0; height += 500;
+  await render(messages, 'b'); scroller = host.querySelector('.thoughts-scroll')!; await frame();
+  expect(top).toBe(height - 692);
+  height += 500; resize(); await frame(); expect(top).toBe(height - 692);
+});
+
+it('lets a reader abandon a pending restoration and tolerates unavailable storage', async () => {
+  const messages = readingLayout();
+  await render(messages); await frame(); scrollTo(2100);
+  await act(async () => root.unmount()); root = createRoot(host); top = 0;
+  await render([messages[2]]); scroller = host.querySelector('.thoughts-scroll')!;
+  scroller.dispatchEvent(new WheelEvent('wheel', { deltaY: -50 })); scrollTo(50);
+  await render(messages); resize(); await frame(); expect(top).toBe(50);
+  vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('Storage blocked'); });
+  vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('Storage full'); });
+  await render(messages, 'unavailable'); await frame(); expect(top).toBe(height - 692);
 });

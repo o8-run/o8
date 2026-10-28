@@ -2792,6 +2792,15 @@
       ]
     },
     {
+      "path": "tests/dashboard-reading-position-real-path.test.ts",
+      "reasons": [
+        "browser",
+        "child-process",
+        "real-path"
+      ],
+      "browser": true
+    },
+    {
       "path": "tests/dashboard-startup-real-path.test.ts",
       "reasons": [
         "browser",
