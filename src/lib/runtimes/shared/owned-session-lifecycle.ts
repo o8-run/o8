@@ -16,6 +16,8 @@ export interface OwnedSessionLifecycleRegistration {
   resolveRoot(): string;
   sessionState(surfaceId: string): Promise<OwnedSessionState>;
   archiveSession(surfaceId: string, workspace?: string): Promise<OwnedArchiveResponse>;
+  resumeSession?(surfaceId: string, prompt: string): ReturnType<OwnedSessionStore['resume']>;
+  retireSession?(surfaceId: string): Promise<{ retired: boolean; note: string }>;
   setDetachedSession?(surfaceId: string, reason: string | null): Promise<{
     updated: boolean;
     previouslyDetached: boolean;
@@ -51,6 +53,8 @@ export function registerOwnedSessionLifecycle(options: {
     resolveRoot: () => process.env[options.rootEnvVar] || options.rootDefault,
     sessionState: (surfaceId) => options.store.sessionState(surfaceId),
     archiveSession: (surfaceId, workspace) => options.store.archiveSession(surfaceId, workspace),
+    resumeSession: (surfaceId, prompt) => options.store.resume(surfaceId, prompt),
+    ...(options.store.retireSession ? { retireSession: (surfaceId: string) => options.store.retireSession!(surfaceId) } : {}),
     ...(options.store.setDetachedSession ? {
       setDetachedSession: (surfaceId: string, reason: string | null) => (
         options.store.setDetachedSession!(surfaceId, reason)

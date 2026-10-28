@@ -28,6 +28,9 @@ export async function runConversationPrs(mode: OutputMode, args: string[]): Prom
     let identity: Record<string, unknown>;
     if (values.repo) {
       const resolved = await apiFetch<{ result: { identity: Record<string, unknown> } }>(cfg, endpoint, { query: { ...query, resolve: '1', ...(action === 'add' ? { refresh: '1' } : {}) } });
+      if (!resolved.data?.result?.identity) {
+        throw new CliError('invalid_response', 'Conversation PR identity resolution returned no identity.', EXIT.INVALID_ARGS);
+      }
       identity = resolved.data.result.identity;
     } else identity = { host: 'github.com', repositoryId: Number(values['repository-id']), pullRequestId: Number(values['pr-id']), number: Number(values.number) };
     data = (await apiFetch(cfg, endpoint, { method: action === 'add' ? 'POST' : 'DELETE', body: { ...identity, threadId: values.thread, kind: values.kind ?? 'context' } })).data;

@@ -406,6 +406,9 @@ export interface MobileTranscriptEntry {
     packet?: Record<string, unknown>;
   };
   compaction?: {
+    operationId?: string;
+    startedAt?: number;
+    completedAt?: number;
     timestamp: number;
     tokensBefore?: number;
     contextSource?: string;
@@ -420,6 +423,10 @@ export interface MobileTranscriptEntry {
     };
     /** Stable archive basename; the full turns remain retrievable through /recall. */
     archiveRef?: string;
+    /** Last summarized message identity; the visible history remains intact. */
+    compactedThroughId?: string;
+    /** Cumulative summary coverage; late arrivals before the boundary stay live. */
+    summarizedMessageIds?: string[];
     /** Record-only judgment scores per compacted entry (#2465); nothing reads them. */
     scorer?: import('@/lib/orchestrator/compaction-scorer').CompactionScorerRecord;
   };

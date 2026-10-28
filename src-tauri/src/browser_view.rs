@@ -44,6 +44,14 @@ fn store_rect(x: f64, y: f64, w: f64, h: f64) {
     *slot = Some((x, y, w, h));
 }
 
+#[cfg(target_os = "macos")]
+fn validate_page_zoom(zoom: f64) -> Result<(), String> {
+    if !zoom.is_finite() || zoom <= 0.0 {
+        return Err("[browser-view] page zoom must be finite and positive".into());
+    }
+    Ok(())
+}
+
 /// Open (or re-target) the browser-view child window over `(x, y, w, h)` and
 /// navigate it to `url`. Idempotent: a second call navigates + repositions the
 /// existing window instead of creating a new one. CSS logical px in; converted to
@@ -66,9 +74,11 @@ pub fn open(
     w: f64,
     h: f64,
     init_script: Option<&str>,
+    page_zoom: f64,
 ) -> Result<(), String> {
     use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
+    validate_page_zoom(page_zoom)?;
     store_rect(x, y, w, h);
 
     let parsed: tauri::Url = url
@@ -80,6 +90,7 @@ pub fn open(
         if let Err(e) = win.navigate(parsed) {
             log::warn!("[browser-view] navigate failed: {e}");
         }
+        win.set_zoom(page_zoom).map_err(|e| format!("[browser-view] zoom failed: {e}"))?;
         reposition(app, &win, x, y, w, h);
         let _ = win.show();
         return Ok(());
@@ -107,6 +118,7 @@ pub fn open(
         .build()
         .map_err(|e| format!("[browser-view] failed to build window: {e}"))?;
 
+    win.set_zoom(page_zoom).map_err(|e| format!("[browser-view] zoom failed: {e}"))?;
     reposition(app, &win, x, y, w, h);
     let _ = win.show();
     // Make it a child of `main` so it tracks the app's movement and stays above
@@ -127,12 +139,15 @@ pub fn open(
 /// the panel's ResizeObserver / window move+resize listeners. No-op if the window
 /// isn't open.
 #[cfg(target_os = "macos")]
-pub fn set_rect(app: &tauri::AppHandle, x: f64, y: f64, w: f64, h: f64) {
+pub fn set_rect(app: &tauri::AppHandle, x: f64, y: f64, w: f64, h: f64, page_zoom: f64) -> Result<(), String> {
     use tauri::Manager;
+    validate_page_zoom(page_zoom)?;
     store_rect(x, y, w, h);
     if let Some(win) = app.get_webview_window(BROWSER_VIEW_LABEL) {
+        win.set_zoom(page_zoom).map_err(|e| format!("[browser-view] zoom failed: {e}"))?;
         reposition(app, &win, x, y, w, h);
     }
+    Ok(())
 }
 
 /// Eval `js` into the browser-view page — raw, fire-and-forget. The native host
@@ -406,11 +421,12 @@ pub fn open(
     _w: f64,
     _h: f64,
     _init_script: Option<&str>,
+    _page_zoom: f64,
 ) -> Result<(), String> {
     Ok(())
 }
 #[cfg(not(target_os = "macos"))]
-pub fn set_rect(_app: &tauri::AppHandle, _x: f64, _y: f64, _w: f64, _h: f64) {}
+pub fn set_rect(_app: &tauri::AppHandle, _x: f64, _y: f64, _w: f64, _h: f64, _page_zoom: f64) -> Result<(), String> { Ok(()) }
 #[cfg(not(target_os = "macos"))]
 pub fn eval(_app: &tauri::AppHandle, _js: &str) -> bool {
     false

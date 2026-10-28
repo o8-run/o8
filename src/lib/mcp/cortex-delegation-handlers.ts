@@ -110,13 +110,36 @@ export function createCortexDelegationHandlers(config: {
   const handleWorkerCatalog = async (args: Record<string, unknown>): Promise<ToolResult> => {
     const params = new URLSearchParams({ repoPath: config.repoPath });
     if (typeof args.runtime === 'string' && args.runtime) params.set('runtime', args.runtime);
-    try {
-      const response = await fetch(`${config.apiBase}/api/orchestrator/delegate?${params}`, {
-        headers: { Authorization: `Bearer ${config.wsToken}` }, signal: AbortSignal.timeout(45_000),
-      });
-      const payload = await response.json();
-      return response.ok ? jsonResult(payload) : textResult(safeErrorText(payload), true);
-    } catch (error) { return textResult(`Worker catalog unavailable: ${safeErrorText(error)}`, true); }
+    const call = 'GET /api/orchestrator/delegate';
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      let status: number | null = null;
+      let failure: string;
+      try {
+        const response = await fetch(`${config.apiBase}/api/orchestrator/delegate?${params}`, {
+          headers: { Authorization: `Bearer ${config.wsToken}` }, signal: AbortSignal.timeout(45_000),
+        });
+        status = response.status;
+        if (status >= 400 && status < 500) {
+          // A rejected request is final even when its body is not JSON.
+          const body = await response.text().catch(() => '');
+          let payload;
+          try { payload = JSON.parse(body); }
+          catch { payload = { error: body }; }
+          const step = typeof payload?.step === 'string' ? `; step ${payload.step}` : '';
+          return textResult(`${call} failed (HTTP ${status}${step}): ${safeErrorText(payload)}`, true);
+        }
+        const payload = await response.json();
+        if (response.ok) return jsonResult(payload);
+        const step = typeof payload?.step === 'string' ? `; step ${payload.step}` : '';
+        failure = `${call} failed (HTTP ${status}${step}): ${safeErrorText(payload)}`;
+        if (status < 500) return textResult(failure, true);
+      } catch (error) {
+        failure = `${call} failed (${status === null ? 'network; no HTTP response' : `HTTP ${status}`}): ${safeErrorText(error)}`;
+      }
+      if (attempt === 3) return textResult(`${failure} Stopped after 3 attempts. Retry the catalog read when the service recovers; no worker was started.`, true);
+      await new Promise(resolve => setTimeout(resolve, 250 * 2 ** (attempt - 1)));
+    }
+    return textResult(`${call} unavailable. Retry the catalog read; no worker was started.`, true);
   };
 
   const handleSharedTeamStatus = async (): Promise<ToolResult> => {

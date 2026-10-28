@@ -61,7 +61,7 @@ export interface OwnedSessionDisplay {
   name: string;
   model: string | null;
   runtime: string;
-  status: 'running' | 'completed' | 'failed' | 'interrupted' | 'idle';
+  status: 'running' | 'completed' | 'failed' | 'interrupted' | 'idle' | 'retired';
 }
 
 /** Resolve the owned roots FRESH per call — env may be set after import (tests),
@@ -138,7 +138,7 @@ export async function readOwnedSessionDisplay(surfaceId: string): Promise<OwnedS
   const outcome = Array.isArray(parsed.recentRuns)
     ? [...parsed.recentRuns].sort((left, right) => String(right.startedAt ?? '').localeCompare(String(left.startedAt ?? '')))[0]?.outcome
     : null;
-  const status = parsed.activeRun ? 'running'
+  const status = parsed.retiredAt ? 'retired' : parsed.activeRun ? 'running'
     : outcome === 'finished' ? 'completed'
       : outcome === 'failed' ? 'failed'
         : outcome === 'interrupted' ? 'interrupted'
