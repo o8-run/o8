@@ -37,6 +37,7 @@ pub(super) const REGISTRATION: Registration = Registration {
             super::rail::button(
                 if open { "customize-close" } else { "customize-open" },
                 super::rail::Icon::Plugins,
+                "Customize",
                 open,
             )
             .on_click(cx.listener(move |s, _, window, cx| {

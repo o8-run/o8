@@ -52,7 +52,7 @@ pub(super) const REGISTRATION: Registration = Registration {
         // One rail target: it opens setup, and closes it while open unless setup is busy.
         if s.surfaces.setup.view.is_none() {
             return vec![
-                super::rail::button("setup-open", super::rail::Icon::Setup, false)
+                super::rail::button("setup-open", super::rail::Icon::Setup, "Setup", false)
                     .on_click(cx.listener(|s, _, window, cx| {
                         s.capture(window, cx);
                         s.execute(Command::Setup, window, cx);
@@ -61,7 +61,7 @@ pub(super) const REGISTRATION: Registration = Registration {
             ];
         }
         vec![
-            super::rail::button("setup-close", super::rail::Icon::Setup, true)
+            super::rail::button("setup-close", super::rail::Icon::Setup, "Close setup", true)
                 .on_click(cx.listener(|s, _, window, cx| {
                     if s.surfaces
                         .setup

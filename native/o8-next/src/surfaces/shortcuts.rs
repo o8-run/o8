@@ -35,6 +35,7 @@ pub(super) const REGISTRATION: Registration =
                 super::rail::button(
                     "shortcuts-open",
                     super::rail::Icon::Keyboard,
+                    "Keyboard shortcuts",
                     s.surfaces.shortcuts.view.is_some(),
                 )
                 .on_click(cx.listener(|s, _, window, cx| {

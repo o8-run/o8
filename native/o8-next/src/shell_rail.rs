@@ -3,8 +3,9 @@
 //! lays them out and adds the shell-level destinations.
 use super::*;
 use crate::theme::current as theme;
-use gpui::{AnyElement, Div, Image, ImageFormat, ObjectFit, Rgba, Stateful, img};
-use std::sync::{Arc, OnceLock};
+use gpui::{AnyElement, Div, Image, ImageFormat, ObjectFit, Rgba, SharedString, Stateful, img, rgb};
+use serde_json::Value;
+use std::sync::{Arc, Mutex, Once, OnceLock};
 
 // NAVIGATION_RAIL_WIDTH and the 44px rail target in shell-geometry.ts.
 pub(super) const WIDTH: f32 = 60.;
@@ -13,6 +14,8 @@ const ICON: f32 = 19.;
 
 #[derive(Clone, Copy)]
 pub(super) enum Icon {
+    Play,
+    Gauge,
     Terminal,
     Canvas,
     Plugins,
@@ -27,6 +30,10 @@ impl Icon {
     // Lucide paths used by the desktop rail, embedded for native use.
     fn path(self) -> &'static str {
         match self {
+            Self::Play => {
+                "M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z"
+            }
+            Self::Gauge => "m12 14 4-4 M3.34 19a10 10 0 1 1 17.32 0",
             Self::Terminal => "m4 17 6-6-6-6 M12 19h8",
             Self::Canvas => {
                 "M8 3h8a5 5 0 0 1 5 5v8a5 5 0 0 1-5 5H8a5 5 0 0 1-5-5V8a5 5 0 0 1 5-5Z M9 9h.01 M15 9h.01 M9 15h.01 M15 15h.01"
@@ -68,8 +75,9 @@ fn glyph(icon: Icon, color: Rgba) -> impl IntoElement {
 }
 
 /// One rail target. Callers attach the click handler; `active` marks the open destination.
-pub(super) fn button(id: &'static str, icon: Icon, active: bool) -> Stateful<Div> {
+pub(super) fn button(id: &'static str, icon: Icon, label: &'static str, active: bool) -> Stateful<Div> {
     target(id)
+        .tooltip(move |_, cx| cx.new(|_| Tip(label.into())).into())
         .when(active, |view| view.bg(theme().hover))
         .child(glyph(
             icon,
@@ -94,6 +102,129 @@ fn target(id: &'static str) -> Stateful<Div> {
         .cursor_pointer()
         .hover(|view| view.bg(theme().hover))
 }
+
+struct Tip(SharedString);
+impl Render for Tip {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .px(px(8.))
+            .py(px(4.))
+            .rounded(px(6.))
+            .bg(rgb(0x1c1c1e))
+            .border_1()
+            .border_color(theme().border)
+            .text_color(theme().text)
+            .font_family(theme().font_ui)
+            .text_size(px(12.))
+            .child(self.0.clone())
+    }
+}
+
+// Weekly ratios behind the rail gauge, read like useRuntimeUsage and weeklyUsage
+// in CompactNavigationRail.tsx.
+#[derive(Clone, Copy, Default)]
+struct Usage {
+    codex: Option<f32>,
+    claude: Option<f32>,
+    highest: Option<f32>,
+}
+static USAGE: Mutex<Usage> = Mutex::new(Usage {
+    codex: None,
+    claude: None,
+    highest: None,
+});
+
+fn weekly(snapshot: &Value, runtime: &str) -> Option<f32> {
+    let identity = snapshot["identities"].as_array().and_then(|all| {
+        all.iter()
+            .find(|i| i["runtime"] == runtime && i["selected"] == true)
+    });
+    snapshot["capacities"]
+        .as_array()?
+        .iter()
+        .filter(|c| c["runtime"] == runtime && c["status"] == "available" && c["confidence"] == "exact")
+        .filter(|c| identity.is_none_or(|i| c["identityId"] == i["id"]))
+        .flat_map(|c| c["buckets"].as_array().cloned().unwrap_or_default())
+        .filter(|b| b["label"] == "Weekly")
+        .filter_map(|b| b["usedRatio"].as_f64())
+        .map(|ratio| ratio.clamp(0., 1.) as f32)
+        .reduce(f32::max)
+}
+
+fn read_usage(snapshot: &Value) -> Usage {
+    let highest = snapshot["capacities"].as_array().and_then(|all| {
+        all.iter()
+            .filter(|c| c["status"] == "available")
+            .flat_map(|c| c["buckets"].as_array().cloned().unwrap_or_default())
+            .filter_map(|b| b["usedRatio"].as_f64())
+            .map(|ratio| ratio as f32)
+            .reduce(f32::max)
+    });
+    Usage {
+        codex: weekly(snapshot, "codex"),
+        claude: weekly(snapshot, "claude-code"),
+        highest,
+    }
+}
+
+fn watch_usage(client: &Client) {
+    // Fixture servers record every request, so tests never start the poll.
+    if cfg!(test) {
+        return;
+    }
+    static STARTED: Once = Once::new();
+    STARTED.call_once(|| {
+        let client = client.clone();
+        std::thread::spawn(move || loop {
+            if let Ok(snapshot) = client.get::<Value>("/api/runtime/capacity", &[]) {
+                *USAGE.lock().unwrap() = read_usage(&snapshot);
+            }
+            std::thread::sleep(Duration::from_secs(60));
+        });
+    });
+}
+
+fn percent(ratio: Option<f32>) -> String {
+    ratio.map_or("not reported".into(), |r| format!("{}% used", (r * 100.).round()))
+}
+
+fn gauge() -> Stateful<Div> {
+    let usage = *USAGE.lock().unwrap();
+    let label: SharedString = format!(
+        "Weekly usage: Codex {}, Claude {}",
+        percent(usage.codex),
+        percent(usage.claude)
+    )
+    .into();
+    let meter = |ratio: Option<f32>, color: Rgba, bottom: f32| {
+        div()
+            .absolute()
+            .left(px(16.))
+            .bottom(px(bottom))
+            .w(px(12.))
+            .h(px(2.))
+            .rounded(px(2.))
+            .overflow_hidden()
+            .bg(theme().border)
+            .children(ratio.map(|r| div().h_full().w(px(12. * r)).bg(color)))
+    };
+    target("rail-usage")
+        .relative()
+        .tooltip(move |_, cx| cx.new(|_| Tip(label.clone())).into())
+        .child(glyph(
+            Icon::Gauge,
+            if usage.highest.is_some_and(|r| r >= 0.8) {
+                rgb(BRAND_ORANGE)
+            } else {
+                theme().text_muted
+            },
+        ))
+        .child(meter(usage.codex, theme().accent, 6.))
+        .child(meter(usage.claude, rgb(BRAND_ORANGE), 2.))
+}
+
+// --t-brand-orange in src/lib/theme/registry.ts.
+const BRAND_ORANGE: u32 = 0xff5a1f;
 
 fn divider() -> Div {
     div()
@@ -127,9 +258,10 @@ impl Shell {
             .iter()
             .flat_map(|r| (r.nav)(self, NavPosition::AfterWorkspaces, cx))
             .collect::<Vec<_>>();
+        watch_usage(&self.client);
         let active = self.active();
-        let tab = |id: &'static str, icon: Icon, tab: Tab, command: fn() -> Command| {
-            button(id, icon, active.as_ref() == Some(&tab)).on_click(cx.listener(
+        let tab = |id: &'static str, icon: Icon, label: &'static str, tab: Tab, command: fn() -> Command| {
+            button(id, icon, label, active.as_ref() == Some(&tab)).on_click(cx.listener(
                 move |this, _, window, cx| {
                     this.capture(window, cx);
                     this.execute(command(), window, cx);
@@ -160,6 +292,7 @@ impl Shell {
                 } else {
                     "shell-home"
                 })
+                .tooltip(|_, cx| cx.new(|_| Tip("o8 — Home".into())).into())
                 .child(brand())
                 .on_click(cx.listener(|this, _, window, cx| {
                     this.surfaces.projects.open = false;
@@ -167,23 +300,38 @@ impl Shell {
                     cx.notify();
                 })),
             )
+            .child(
+                // Opens the workspace orchestrator with its composer focused.
+                button("rail-orchestrator", Icon::Play, "Run orchestrator", false).on_click(
+                    cx.listener(|this, _, window, cx| {
+                        this.capture(window, cx);
+                        match this.workspace_sessions().first().map(|s| s.id.clone()) {
+                            Some(id) => this.execute(Command::Message(id), window, cx),
+                            None => this.execute(Command::Setup, window, cx),
+                        }
+                    }),
+                ),
+            )
             .child(tab(
                 "rail-terminal",
                 Icon::Terminal,
+                "Run terminal",
                 Tab::Terminal,
                 || Command::Terminal,
             ))
-            .child(tab("rail-grid", Icon::Canvas, Tab::Grid, || Command::Grid))
+            .child(tab("rail-grid", Icon::Canvas, "Grid", Tab::Grid, || Command::Grid))
             .child(divider())
             .children(top)
             .child(tab(
                 "rail-pull-requests",
                 Icon::PullRequest,
+                "PRs",
                 Tab::PullRequests,
                 || Command::PullRequests,
             ))
             .child(divider())
             .child(div().flex_1().min_h_0())
+            .child(gauge())
             .children(bottom)
             .into_any_element()
     }
