@@ -2175,6 +2175,14 @@
       ]
     },
     {
+      "path": "tests/cli-sqlite-lookup-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/cli-standalone-real-path.test.ts",
       "reasons": [
         "child-process",
