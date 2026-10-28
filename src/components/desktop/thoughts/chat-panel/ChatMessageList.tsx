@@ -7,7 +7,6 @@ import { DesktopAgentMessage } from '../../DesktopAgentMessage';
 import { ComposerEntryDelivery, ComposerQueuedMessages, type ComposerTranscriptQueue } from './ComposerQueuedMessages';
 import { SuggestedReplies } from '../SuggestedReplies';
 import { TurnSummaryCard, type TurnSummary } from './TurnSummaryCard';
-import { ShimmerLine } from './turn-line';
 import { mergeAdjacentToolOnlyEntries } from './ToolCallChipCluster';
 import { CollideProposalCard } from './CollideProposalCard';
 import { MissionCompleteGroupCard } from './MissionCompleteGroupCard';
@@ -99,10 +98,7 @@ interface ChatMessageListProps {
   bottomContent?: React.ReactNode;
   /** Stable transcript-turn slots, keyed by the original turn-start entry. */
   turnContent?: ReadonlyMap<string, React.ReactNode>;
-  // Orchestrator has its own sticky ComposerStatusBar above the textarea
-  // that already surfaces "working" state + elapsed time + running tools.
-  // Duplicating the inline "is thinking…" bubble here makes the chat feel
-  // noisy during tool-heavy turns. CLI lane panels still need the bubble.
+  // Orchestrator activity lives in the transcript; CLI lanes retain their indicator.
   isOrchestratorMode?: boolean;
   // Suggested-reply chips (#771). The parent owns the cache + Gemini fetch and
   // hands us the chip strings for the last assistant message. We render them
@@ -247,6 +243,8 @@ const ChatMessageListPresentation = memo(forwardRef<HTMLDivElement, ChatMessageL
       break;
     }
   }
+  const latestUserIndex = displayMessages.findLastIndex(message => message.role === 'user' && !message.voice);
+  const currentAssistant = lastAssistantIndex > latestUserIndex ? displayMessages[lastAssistantIndex] : undefined;
   const latestAssistantId = displayMessages[lastAssistantIndex]?.id ?? null;
   const [animatingTailId, setAnimatingTailId] = useState<string | null>(() => displayWaiting ? latestAssistantId : null);
   if (displayWaiting && animatingTailId !== latestAssistantId) setAnimatingTailId(latestAssistantId);
@@ -359,11 +357,13 @@ const ChatMessageListPresentation = memo(forwardRef<HTMLDivElement, ChatMessageL
           </div>
         ) : null}
 
-        {displayWaiting && !liveCompaction && isOrchestratorMode && displayMessages.length > 0 ? (
-          // Cursor's trailing anchor (vid2 study): while the turn is live, a
-          // shimmering status line sits at the bottom of the process block and
-          // is pushed down as new lines land above it. Text, never a bubble.
-          <ShimmerLine style={{ alignSelf: 'flex-start', flexShrink: 0 }}>Planning next moves</ShimmerLine>
+        {displayWaiting && !liveCompaction && isOrchestratorMode && displayMessages.length > 0
+          && !currentAssistant?.toolCalls?.length
+          && !currentAssistant?.thinkingActive
+          && !currentAssistant?.receipt?.terminal ? (
+          <span role="status" style={{ minHeight: 22, color: 'var(--t-text-muted)', fontSize: 12, fontWeight: 300 }}>
+            {currentAssistant?.isError ? 'Failed' : !currentAssistant ? 'Waiting for response' : 'Working · phase unknown'}
+          </span>
         ) : null}
 
         {displayWaiting && !isOrchestratorMode ? (
