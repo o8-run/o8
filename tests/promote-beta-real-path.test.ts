@@ -139,6 +139,7 @@ it.each(['offered', 'completed'])('case 2: retry of a %s version keeps its recei
 });
 it('fresh promotion probes both updater endpoints as the previous stable and records an offered receipt', ()=>{
   const f=fixture();
+  const started=Date.now();
   const result=run(f);
   expect(result.status,result.stderr).toBe(0);
   const gets=effects(f).filter(v=>v.name==='fetch'&&JSON.stringify(v.args).includes('GET'));
@@ -152,6 +153,17 @@ it('fresh promotion probes both updater endpoints as the previous stable and rec
   expect(effects(f).filter(v=>v.name==='offerProbe').map(v=>v.args)).toEqual(
     Array.from({length:4},()=>({status:'pending',lockHeld:true})));
   expect(existsSync(join(f.root,'publication.lock'))).toBe(false);
+  // The beta was published on 2026-10-01; offer timing starts at this promotion.
+  const offer=JSON.parse(readFileSync(f.offerReceipt,'utf8'));
+  expect(offer.publishToOfferMs).toBeLessThan(60_000);
+  expect(offer.withinPublishToOfferBudget).toBe(true);
+  const { promotedAt }=JSON.parse(readFileSync(join(f.root,'data/release-verification/v0.1.900.json'),'utf8'));
+  expect(Date.parse(promotedAt)).toBeGreaterThanOrEqual(started);
+  expect(offer.publishedAt).toBe(promotedAt);
+  // A retry after the offer evidence was lost probes again from the same promotion time.
+  rmSync(f.offerReceipt);
+  expect(run(f).status).toBe(0);
+  expect(JSON.parse(readFileSync(f.offerReceipt,'utf8')).publishedAt).toBe(promotedAt);
 });
 it('case 3: completes stable manifests, report reconciliation, fixed receipts, changelog and announcements through shared release code', ()=>{
   const f=fixture({stableVersion:'0.1.900'});

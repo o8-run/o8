@@ -152,7 +152,8 @@ async function main(args) {
       verifiedAt: new Date().toISOString(), repositories: DEFAULT_REPOS, assets, range,
       checks: { updaterSignatures: true, embeddedIdentity: true, dmgMatchesArchive: true, staple: true, identicalRepositories: true, betaFeed: true },
       completion: previous?.version === version && isDeepStrictEqual(previous.assets, assets) ? previous.completion ?? {} : {},
-      installedSmoke: previous?.version === version && isDeepStrictEqual(previous.assets, assets) ? previous.installedSmoke ?? null : null };
+      installedSmoke: previous?.version === version && isDeepStrictEqual(previous.assets, assets) ? previous.installedSmoke ?? null : null,
+      promotedAt: previous?.version === version && isDeepStrictEqual(previous.assets, assets) ? previous.promotedAt ?? null : null };
     persist(receiptPath, receipt);
     // Publication consumes a persisted receipt, never a manifest-only assertion.
     const verified = json(receiptPath);
@@ -183,6 +184,8 @@ async function main(args) {
       gh(['release', 'upload', tag, latestPath, fixedPath, '--clobber', '--repo', target.repo]);
       gh(['release', 'edit', tag, '--prerelease=false', '--latest=true', '--notes', notes, '--repo', target.repo]);
     }
+    // Offer timing starts when stable is served, not when the beta was published. A retry reuses it.
+    if (!verified.promotedAt) { verified.promotedAt = new Date().toISOString(); persist(receiptPath, verified); }
     try {
       const offerPath = join(releaseBuildProfile(root, process.env, { release: true }).profile,
         'update-publication', `${tag}.json`);
@@ -193,7 +196,7 @@ async function main(args) {
         const previousVersion = range.split('..')[0].replace(/^v/, '');
         if (compareVersions(previousVersion, version) >= 0) throw new Error('Offer probe requires an older stable version.');
         const offer = await warmUpdatePublication({ root, version, previousVersion,
-          publishedAt: stable.resolvePublishedAt(pubDate), receiptPath: offerPath });
+          publishedAt: verified.promotedAt, receiptPath: offerPath });
         const timing = offer.publishToOfferMs === null ? 'unverified' : `${offer.publishToOfferMs}ms`;
         console.log(`[promote] update publication ${offer.status}; publish-to-offer ${timing}; within-five-minutes=${offer.withinPublishToOfferBudget ?? 'unverified'}`);
       }
