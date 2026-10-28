@@ -40,6 +40,7 @@ mod theme;
 mod theme_tests;
 mod transport;
 mod ui;
+mod visualizations;
 mod wake;
 use crate::{
     client::Client,

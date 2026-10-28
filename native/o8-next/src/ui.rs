@@ -236,8 +236,15 @@ impl Surface {
                 .and_then(|candidates| candidates.iter().find(|state| state.borrow().row == row))
                 .cloned();
             states.push(retained.unwrap_or_else(|| {
+                let cards = indexed
+                    .get(row.id())
+                    .and_then(|candidates| candidates.first())
+                    .map(|state| state.borrow().cards.clone())
+                    .unwrap_or_default();
                 let mut state = RowState::new(row);
                 state.images = self.images.clone();
+                state.cards = cards;
+                state.attach_visualizations(&self.client);
                 if let Some(previous) = indexed.get(state.row.id()).and_then(|c| c.first()) {
                     state.keep_disclosure(&previous.borrow());
                 }
@@ -253,6 +260,16 @@ impl Surface {
         }
     }
     fn poll_stream(&mut self, cx: &mut Context<Self>) -> bool {
+        let mut visualizations_changed = false;
+        for (index, row) in self.rows.iter().enumerate() {
+            if row.borrow_mut().poll_visualizations() {
+                self.list.splice(index..index + 1, 1);
+                visualizations_changed = true;
+            }
+        }
+        if visualizations_changed {
+            cx.notify();
+        }
         let follow_tail = !self.rows.is_empty()
             && self
                 .list
@@ -295,7 +312,7 @@ impl Surface {
             }
             cx.notify();
         }
-        changed
+        changed || visualizations_changed
     }
     fn snapshot_label(&self) -> String {
         let count = self
@@ -775,3 +792,7 @@ mod image_history_tests;
 #[cfg(test)]
 #[path = "image_cache_tests.rs"]
 mod image_cache_tests;
+
+#[cfg(test)]
+#[path = "visualization_tests.rs"]
+mod visualization_tests;

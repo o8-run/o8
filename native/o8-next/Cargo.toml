@@ -19,6 +19,7 @@ required-features = ["macos-diagnostics"]
 async-channel = "=2.5.0"
 alacritty_terminal = { version = "=0.26.0", default-features = false }
 base64 = "=0.22.1"
+getrandom = "=0.3.4"
 tungstenite = { version = "=0.28.0", default-features = false, features = ["handshake"] }
 gpui = { version = "=0.2.2", default-features = false, features = ["font-kit"] }
 regex = "=1.13.1"
@@ -43,6 +44,7 @@ gpui = { version = "=0.2.2", default-features = false, features = ["font-kit", "
 [target.'cfg(target_os = "macos")'.dependencies]
 cocoa = "=0.26.0"
 objc = "=0.2.7"
+block = "=0.1.6"
 raw-window-handle = "=0.6.2"
 
 [workspace]
@@ -55,3 +57,8 @@ path = "test-support/window_occlusion.rs"
 [patch.crates-io]
 gpui = { path = "vendor/gpui" }
 taffy = { path = "vendor/taffy" }
+
+[[bin]]
+name = "o8-next-visualization-check"
+path = "diagnostics/visualization_check.rs"
+test = false

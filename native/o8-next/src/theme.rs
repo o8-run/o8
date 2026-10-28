@@ -59,7 +59,12 @@ pub fn glass() -> bool {
     matches!(*SELECTED, Appearance::Glass)
 }
 pub fn plain_background() -> Rgba {
-    Theme::for_appearance(Appearance::Dark).background
+    Theme::for_appearance(if matches!(*SELECTED, Appearance::Light) {
+        Appearance::Light
+    } else {
+        Appearance::Dark
+    })
+    .background
 }
 // --t-brand-orange in src/lib/theme/registry.ts.
 pub fn brand_orange() -> Rgba {
@@ -249,4 +254,26 @@ impl Theme {
             },
         }
     }
+}
+
+pub fn visualization() -> serde_json::Value {
+    let theme = current();
+    let css = |color: Rgba| {
+        format!(
+            "rgba({},{},{},{})",
+            color.r * 255.,
+            color.g * 255.,
+            color.b * 255.,
+            color.a
+        )
+    };
+    serde_json::json!({"colorScheme": if matches!(*SELECTED, Appearance::Light) { "light" } else { "dark" }, "variables": {
+        "--background":"transparent", "--foreground":css(theme.text), "--muted":css(theme.hover),
+        "--muted-foreground":css(theme.text_muted), "--card":css(theme.surface), "--card-foreground":css(theme.text),
+        "--popover":css(theme.surface_raised), "--border":css(theme.border), "--accent":css(theme.accent),
+        "--accent-foreground":"#172238", "--primary":css(theme.accent), "--primary-foreground":"#172238",
+        "--chart-1":css(theme.text), "--chart-2":"#dd835b", "--chart-3":"#70b5c4",
+        "--chart-4":"#a599d8", "--chart-5":"#69bea6", "--chart-6":"#d8b16d",
+        "--font-sans":"-apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif", "--font-mono":"ui-monospace, SFMono-Regular, Consolas, monospace",
+    }})
 }

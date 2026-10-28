@@ -81,6 +81,7 @@ pub struct Pane {
     pub list: ListState,
     pub(crate) images: crate::ui::images::Cache,
     subscription: Option<Subscription>,
+    client: Option<Client>,
     pub revision: u64,
     pub painted: Rc<Cell<u64>>,
     pub paints: Rc<Cell<usize>>,
@@ -100,6 +101,7 @@ impl Pane {
             images: Default::default(),
             list: ListState::new(0, ListAlignment::Top, px(0.)),
             subscription: None,
+            client: None,
             revision: 0,
             painted: Rc::new(Cell::new(u64::MAX)),
             paints: Rc::new(Cell::new(0)),
@@ -120,6 +122,7 @@ impl Pane {
         }
     }
     pub fn install(&mut self, history: History, client: Client) {
+        self.client = Some(client.clone());
         let key = history.session_key.clone();
         self.transcript = Some(Transcript::new(history));
         self.sync_rows();
@@ -149,6 +152,14 @@ impl Pane {
                     .unwrap_or_else(|| {
                         let mut state = RowState::new(row.clone());
                         state.images = self.images.clone();
+                        state.cards = old
+                            .iter()
+                            .find(|state| state.borrow().row.id() == row.id())
+                            .map(|state| state.borrow().cards.clone())
+                            .unwrap_or_default();
+                        if let Some(client) = &self.client {
+                            state.attach_visualizations(client);
+                        }
                         Rc::new(RefCell::new(state))
                     })
             })
@@ -158,6 +169,13 @@ impl Pane {
         self.rows = Rc::new(states);
     }
     pub fn poll(&mut self) -> bool {
+        let mut visualizations_changed = false;
+        for (index, row) in self.rows.iter().enumerate() {
+            if row.borrow_mut().poll_visualizations() {
+                self.list.splice(index..index + 1, 1);
+                visualizations_changed = true;
+            }
+        }
         let follow = self.rows.is_empty()
             || self
                 .list
@@ -190,7 +208,7 @@ impl Pane {
                 self.navigate(true);
             }
         }
-        changed
+        changed || visualizations_changed
     }
     pub fn navigate(&mut self, end: bool) {
         if !self.rows.is_empty() {
