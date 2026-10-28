@@ -12,6 +12,7 @@ import { spawnSync } from 'node:child_process';
 import { appendFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { selectedTestsRequireBrowser } from '../lib/test-classification.mjs';
 
 /**
  * Parses `diff --name-status -z -M` output into the paths that exist on the
@@ -63,7 +64,8 @@ function main() {
   for (const file of files) console.log(file);
   console.error(`[resource-owning-changed] ${files.length} resource-owning test file(s) touched since ${mergeBase.slice(0, 12)}`);
   if (process.env.GITHUB_OUTPUT) {
-    appendFileSync(process.env.GITHUB_OUTPUT, `count=${files.length}\nfiles=${files.join(' ')}\n`);
+    appendFileSync(process.env.GITHUB_OUTPUT,
+      `count=${files.length}\nfiles=${files.join(' ')}\nbrowser=${selectedTestsRequireBrowser(files, classification)}\n`);
   }
 }
 

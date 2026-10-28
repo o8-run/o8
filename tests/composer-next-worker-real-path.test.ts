@@ -1,5 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { once } from 'node:events';
+import { readFileSync } from 'node:fs';
 import { WebSocket } from 'ws';
 import { afterAll, beforeAll, expect, it, vi } from 'vitest';
 import type { ComposerQueuePayload } from '@/lib/orchestrator/composer-queue-types';
@@ -10,6 +11,7 @@ const threadId = 'thoughts-composer-first';
 let child: ChildProcessWithoutNullStreams;
 let origin = '';
 let repoPath = '';
+let runtimeLog = '';
 let socket: WebSocket;
 const snapshots: string[] = [];
 const payload = (text: string): ComposerQueuePayload => ({ text, wireMessage: text, images: [], routing: {
@@ -43,7 +45,7 @@ beforeAll(async () => {
       pending += String(bytes);
       const lines = pending.split('\n'); pending = lines.pop()!;
       for (const line of lines) {
-        try { const ready = JSON.parse(line); if (ready.origin) { origin = ready.origin; clearTimeout(timeout); resolve(); } } catch { /* server diagnostics */ }
+        try { const ready = JSON.parse(line); if (ready.origin) { origin = ready.origin; runtimeLog = ready.runtimeLog; clearTimeout(timeout); resolve(); } } catch { /* server diagnostics */ }
       }
     });
   });
@@ -68,6 +70,7 @@ afterAll(async () => {
 });
 
 it('sends, steers, queues, promotes and removes through production session APIs and a running worker', async () => {
+  child.stdin.write('queue-hold\n');
   await mutate('POST', { id: 'native-start', intent: 'steer-now', payload: payload('Start streaming') });
   await vi.waitFor(async () => {
     expect((await history()).transcript.some(row => row.role === 'assistant' && row.text.includes('Worker streaming')),
@@ -88,16 +91,27 @@ it('sends, steers, queues, promotes and removes through production session APIs 
   expect((await history()).transcript.some(row => row.text === 'Queued instruction')).toBe(false);
   // Fixture model release, outside the application protocol. No new server route.
   child.stdin.write('release\n');
+  await vi.waitFor(() => expect(snapshots.some(frame => frame.includes('history.snapshot') && frame.includes('Queued worker pending.'))).toBe(true), { timeout: 15_000 });
+  child.stdin.write('sync-hold\n');
+  await vi.waitFor(() => expect(readFileSync(runtimeLog, 'utf8')).toContain('[fixture-history-read-held]'), { timeout: 10_000 });
+  child.stdin.write('queue-complete\n');
   await vi.waitFor(async () => {
     const rows = (await history()).transcript;
     expect(rows.some(row => row.role === 'assistant' && row.text.includes('Worker received: Queued instruction'))).toBe(true);
     expect(rows.some(row => row.role === 'assistant' && row.text.includes('Steered instruction') && row.text.includes('Promoted instruction'))).toBe(true);
     expect(rows.some(row => row.text.includes('Removed instruction'))).toBe(false);
   }, { timeout: 30_000, interval: 100 });
+  // Let the production terminal debounce run while the older HTTP read is held.
+  await new Promise(resolve => setTimeout(resolve, 150));
+  child.stdin.write('sync-release\n');
   await vi.waitFor(() => expect(snapshots.some(frame => frame.includes('history.snapshot') && frame.includes('Worker received: Queued instruction'))).toBe(true), { timeout: 10_000 });
   // Retry the exact saved identity after completion: no second worker turn or echo.
-  await mutate('POST', { id: 'native-next', intent: 'send-next', payload: payload('Queued instruction') });
+  const retries = await Promise.all(Array.from({ length: 3 }, () => mutate('POST', {
+    id: 'native-next', intent: 'send-next', payload: payload('Queued instruction'),
+  })));
+  expect(retries.map(receipt => receipt.item)).toEqual(Array.from({ length: 3 }, () => expect.objectContaining({ id: 'native-next', status: 'applied' })));
   expect((await history()).transcript.filter(row => row.role === 'user' && row.text === 'Queued instruction')).toHaveLength(1);
+  expect(readFileSync(runtimeLog, 'utf8').match(/\[fixture-queued-model-turn\]/g)).toHaveLength(1);
 }, 70_000);
 
 it('retains the real refusal for an unsupported concrete effort pin', async () => {

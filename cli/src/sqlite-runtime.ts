@@ -13,7 +13,9 @@ function loadDatabase(): typeof BundledDatabase {
     && existsSync(join(serverRoot, 'ws-server.mjs'))) {
     // Match the desktop and worker bootstrap before loading the shipped module.
     // Keeping its JavaScript external preserves the package's binding root.
-    if (process.platform === 'darwin') runtimeRequire(loader).prepareBetterSqlite3(serverRoot);
+    const nativeRuntime = runtimeRequire(loader);
+    if (typeof nativeRuntime.prepareNativeAddons === 'function') nativeRuntime.prepareNativeAddons(serverRoot);
+    else if (process.platform === 'darwin') nativeRuntime.prepareBetterSqlite3(serverRoot);
     return runtimeRequire(join(serverRoot, 'node_modules', 'better-sqlite3'));
   }
 

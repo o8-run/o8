@@ -4,6 +4,7 @@ import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { buildSync } from 'esbuild';
 
 const root = process.cwd();
 const require = createRequire(import.meta.url);
@@ -41,13 +42,22 @@ describe('built CLI SQLite lookup', () => {
       let selectedBinding = hostBinding;
       if (mode === 'packaged') {
         copyFileSync(join(root, 'scripts', 'native-addon-runtime.cjs'), join(server, 'native-addon-runtime.cjs'));
-        if (process.platform === 'darwin') {
+        const nativeRuntime = require(join(server, 'native-addon-runtime.cjs'));
+        if (process.platform === 'darwin' || (process.platform === 'linux' && nativeRuntime.hasMultiAbiBetterSqlite3)) {
           // Use the production bundle layout, with no build/Release fallback.
-          const prebuild = join(moduleRoot, 'prebuilds', `node-v${process.versions.modules}`, `darwin-${process.arch}`);
+          const prebuild = join(moduleRoot, 'prebuilds', `node-v${process.versions.modules}`, `${process.platform}-${process.arch}`);
           mkdirSync(prebuild, { recursive: true });
           selectedBinding = join(prebuild, 'better_sqlite3.node');
           renameSync(hostBinding, selectedBinding);
           rmSync(join(moduleRoot, 'build'), { recursive: true });
+        }
+        if (process.platform === 'darwin') {
+          // The shared loader validates PTY presence, but this fixture only loads SQLite.
+          for (const layout of [`node-v${process.versions.modules}/darwin-${process.arch}`, `darwin-${process.arch}`]) {
+            const prebuild = join(server, 'node_modules', 'node-pty', 'prebuilds', layout);
+            mkdirSync(prebuild, { recursive: true });
+            for (const name of ['pty.node', 'spawn-helper']) writeFileSync(join(prebuild, name), 'unused PTY fixture');
+          }
         }
       }
       // The listeners are protocol peers; process identity and the provider lock
@@ -66,8 +76,25 @@ describe('built CLI SQLite lookup', () => {
       started = true;
       expect(status).toMatchObject({ running: true, healthy: true, mode: 'packaged' });
       expect(JSON.parse(run('serve', 'status')).pid).toBe(status.pid);
-      expect(existsSync(join(profile, '.provider-keys.lock'))).toBe(true);
       expect(existsSync(selectedBinding)).toBe(true);
+      // Linux uses /proc for identity and does not open the provider-store lock.
+      if (process.platform === 'darwin') {
+        expect(existsSync(join(profile, '.provider-keys.lock'))).toBe(true);
+        const loaded = readFileSync(loadedAddons, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+        expect(loaded).toContain(realpathSync(selectedBinding));
+      } else if (process.platform === 'linux') {
+        expect(existsSync(join(profile, '.provider-keys.lock'))).toBe(false);
+      }
+      // Exercise the same bundled bridge explicitly on platforms whose identity
+      // checks do not open SQLite, including Linux's multi-ABI packaged layout.
+      const probe = join(server, 'bin', 'sqlite-probe.mjs');
+      buildSync({ stdin: { contents: `import Database from ${JSON.stringify(join(root, 'cli/src/sqlite-runtime.ts'))};
+          const db = new Database(${JSON.stringify(join(profile, 'probe.db'))});
+          db.exec('CREATE TABLE probe (value INTEGER)'); db.close();`, resolveDir: root }, outfile: probe,
+        bundle: true, platform: 'node', format: 'esm',
+        banner: { js: "import { createRequire as probeRequire } from 'node:module'; const require = probeRequire(import.meta.url);" } });
+      execFileSync(process.execPath, [probe], { cwd: directory, env });
+      expect(existsSync(join(profile, 'probe.db'))).toBe(true);
       const loaded = readFileSync(loadedAddons, 'utf8').trim().split('\n').map(line => JSON.parse(line));
       expect(loaded).toContain(realpathSync(selectedBinding));
       expect(existsSync(join(server, 'build', 'Release', 'better_sqlite3.node'))).toBe(false);
@@ -82,4 +109,33 @@ describe('built CLI SQLite lookup', () => {
       rmSync(directory, { recursive: true, force: true });
     }
   }, 90_000);
+
+  it.each([
+    ['modern', 'darwin', 'prepareNativeAddons'],
+    ['modern', 'linux', 'prepareNativeAddons'],
+    ['legacy', 'darwin', 'prepareBetterSqlite3'],
+    ['legacy', 'linux', null],
+  ] as const)('uses the %s loader on %s', (shape, platform, expected) => {
+    const server = mkdtempSync(join(tmpdir(), 'o8-cli-sqlite-loader-'));
+    try {
+      const calls = join(server, 'calls.json');
+      const output = join(server, 'bin', 'runtime.mjs');
+      mkdirSync(join(server, 'node_modules', 'better-sqlite3'), { recursive: true });
+      writeFileSync(join(server, 'node_modules', 'better-sqlite3', 'index.js'), 'module.exports = {};');
+      for (const name of ['server.js', 'ws-server.mjs']) writeFileSync(join(server, name), '');
+      const method = (name: string) => `(...args) => require('node:fs').writeFileSync(${JSON.stringify(calls)}, JSON.stringify({name:${JSON.stringify(name)},args}))`;
+      writeFileSync(join(server, 'native-addon-runtime.cjs'), `module.exports = {
+        prepareBetterSqlite3: ${method('prepareBetterSqlite3')},
+        ${shape === 'modern' ? `prepareNativeAddons: ${method('prepareNativeAddons')},` : ''}
+      };`);
+      buildSync({ entryPoints: [join(root, 'cli/src/sqlite-runtime.ts')], outfile: output,
+        bundle: true, platform: 'node', format: 'esm', external: ['better-sqlite3'],
+        define: { 'process.platform': JSON.stringify(platform) } });
+      execFileSync(process.execPath, [output]);
+      if (expected) expect(JSON.parse(readFileSync(calls, 'utf8'))).toEqual({ name: expected, args: [realpathSync(server)] });
+      else expect(existsSync(calls)).toBe(false);
+    } finally {
+      rmSync(server, { recursive: true, force: true });
+    }
+  });
 });
