@@ -4,6 +4,7 @@ import type { OrchestratorBackendId } from '@/lib/lane/orchestrator-backends/typ
 import { readPiOrchestratorContext } from '@/lib/pi/orchestrator/context';
 import { getRuntime } from '@/lib/runtimes/registry';
 import type { RuntimeTelemetry } from '@/lib/runtimes/types';
+import { projectModelContext } from '@/lib/transcripts/model-context';
 import { estimateOrchestratorContext } from './context-estimate';
 
 /** Use persisted active history so silent compaction does not re-count the
@@ -26,7 +27,7 @@ export async function readOrchestratorContextTelemetry(threadId: string, backend
   }
   return {
     ...telemetry,
-    contextTokens: estimateOrchestratorContext(mapLlmHistoryToMobileTranscript(history?.messages ?? [])),
+    contextTokens: estimateOrchestratorContext(mapLlmHistoryToMobileTranscript(projectModelContext(history?.messages ?? []))),
     contextSource: 'transcript-estimate',
   };
 }

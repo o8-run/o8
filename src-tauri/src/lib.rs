@@ -36,7 +36,16 @@ mod voice_input;
 mod managed_voice_window;
 mod launch_updater;
 mod update_ping;
+#[cfg(target_os = "linux")]
+mod linux_ptt;
+#[cfg(target_os = "linux")]
+mod linux_voice;
 #[cfg(target_os = "macos")]
+mod live_dictation;
+// Live caret streaming drives the macOS Accessibility API. Linux keeps the
+// same call sites in `stt_engine` behind inert stand-ins.
+#[cfg(target_os = "linux")]
+#[path = "live_dictation_linux.rs"]
 mod live_dictation;
 #[cfg(target_os = "macos")]
 mod macos_webview_scale;
@@ -56,7 +65,7 @@ mod shell_env;
 mod sidecar_lifecycle;
 mod sound;
 mod speech_text;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 mod stt;
 #[cfg(target_os = "macos")]
 mod tts;
@@ -70,9 +79,9 @@ mod windows_node_locate;
 // #1741: PATH string logic is unconditional so `cargo test --lib` exercises
 // it on every host OS; only its `windows_impl` submodule is cfg-gated.
 mod windows_cli_path;
-// Plan-token + managed-inference proxy routing. macOS-only: reads keys via the
-// (macOS-gated) stt module, consumed by the macOS-gated agent / ai / stt paths.
-#[cfg(target_os = "macos")]
+// Plan-token + managed-inference proxy routing: reads keys via the stt module,
+// consumed by the agent / ai paths (macOS) and the stt engine (macOS + Linux).
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 mod entitlement;
 // #2158: scopes the Control-as-Fn dictation substitute to an attached
 // non-Apple external keyboard instead of leaving it a global toggle. macOS-only
@@ -849,6 +858,45 @@ fn bind_ephemeral_port(skip: Option<u16>) -> u16 {
         }
     }
     0
+}
+
+/// Bind host for the bundled Next server (and, via the inherited
+/// `O8_LAN_ACCESS`, the ws-server — see src/lib/panel/listen-host.ts).
+/// Loopback by default: every desktop caller uses 127.0.0.1, and a wildcard
+/// bind exposes the API to the whole LAN/VPN. `O8_LAN_ACCESS=1` opts in to
+/// 0.0.0.0 so a phone can reach this machine directly for mobile pairing.
+fn sidecar_listen_host() -> &'static str {
+    listen_host_for(std::env::var("O8_LAN_ACCESS").ok().as_deref())
+}
+
+fn listen_host_for(lan_access: Option<&str>) -> &'static str {
+    match lan_access
+        .map(|value| value.trim().to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("1" | "true" | "yes" | "on") => "0.0.0.0",
+        _ => "127.0.0.1",
+    }
+}
+
+#[cfg(test)]
+mod listen_host_tests {
+    use super::listen_host_for;
+
+    #[test]
+    fn bundled_servers_bind_loopback_by_default() {
+        assert_eq!(listen_host_for(None), "127.0.0.1");
+        for value in ["", "0", "false", "no", "off", "0.0.0.0"] {
+            assert_eq!(listen_host_for(Some(value)), "127.0.0.1", "{value:?}");
+        }
+    }
+
+    #[test]
+    fn lan_access_opt_in_binds_all_interfaces() {
+        for value in ["1", "true", "TRUE", " yes ", "on"] {
+            assert_eq!(listen_host_for(Some(value)), "0.0.0.0", "{value:?}");
+        }
+    }
 }
 
 #[cfg(test)]
@@ -2209,31 +2257,46 @@ fn spawn_bundled_ws_server(
 // would see. If nothing works, returns None and the caller shows a dialog.
 
 const MIN_NODE_MAJOR: u32 = 22;
-// F40 (#1032), #1456: the bundle ships better-sqlite3 and node-pty prebuilds
-// for both Node 22 and Node 24. Prefer the user's login-shell default when it
-// is either first-class runtime; Node 22 discovery remains a fallback when the
-// default is missing or has an unsupported native module ABI.
+// macOS ships multiple native-addon ABIs. Linux keeps the host-built Node 22
+// addons, so it must not accept Node 24 merely because macOS supports it.
+// Linux also loads the actual packaged addons before admitting a runtime.
 const PREFERRED_NODE_MAJOR: u32 = 22;
 const LATEST_SUPPORTED_NODE_MAJOR: u32 = 24;
+#[cfg(target_os = "linux")]
+const SUPPORTED_NATIVE_NODE_MAJORS: &[u32] = &[PREFERRED_NODE_MAJOR];
+#[cfg(not(target_os = "linux"))]
 const SUPPORTED_NATIVE_NODE_MAJORS: &[u32] = &[PREFERRED_NODE_MAJOR, LATEST_SUPPORTED_NODE_MAJOR];
 
 /// Look in well-known places for a Node 22.x install regardless of the user's
 /// nvm/fnm/volta default. Order matches the rough population of users on each.
-fn find_preferred_node_22() -> Option<String> {
+fn find_preferred_node_22(server_dir: &std::path::Path) -> Option<String> {
     let home = std::env::var("HOME").ok()?;
-    find_preferred_node_22_in(&home, check_node_version)
+    find_preferred_node_22_in(&home, |candidate| {
+        let version = check_node_version(candidate)?;
+        supports_packaged_native_addons(candidate, server_dir).then_some(version)
+    })
 }
 
 fn find_preferred_node_22_in<F>(home: &str, mut check_node: F) -> Option<String>
 where
     F: FnMut(&str) -> Option<(u32, String)>,
 {
-    let glob_dirs: [(String, &str); 5] = [
+    let glob_dirs = [
         (format!("{}/.nvm/versions/node", home), "v22"),
         (format!("{}/.fnm/node-versions", home), "v22"),
+        // fnm's default root on Linux is $XDG_DATA_HOME/fnm, not ~/.fnm.
+        #[cfg(target_os = "linux")]
+        (format!("{}/.local/share/fnm/node-versions", home), "v22"),
         (format!("{}/.volta/tools/image/node", home), "22"),
+        // Extra Linux manager roots must not change macOS/Windows discovery.
+        #[cfg(target_os = "linux")]
+        (format!("{}/.asdf/installs/nodejs", home), "22."),
+        #[cfg(target_os = "linux")]
+        (format!("{}/.local/share/mise/installs/node", home), "22"),
         ("/opt/homebrew/opt/node@22".to_string(), ""),
         ("/usr/local/opt/node@22".to_string(), ""),
+        #[cfg(target_os = "linux")]
+        ("/home/linuxbrew/.linuxbrew/opt/node@22".to_string(), ""),
     ];
     for (dir, prefix) in glob_dirs {
         // Homebrew's node@22 keg has node directly at <keg>/bin/node — no
@@ -2369,6 +2432,34 @@ fn check_node_version(node_bin: &str) -> Option<(u32, String)> {
     shell_env::check_node_version_cached(node_bin)
 }
 
+/// Linux exports host-built addons. Loading both catches the actual ABI (and
+/// architecture), including a mismatched Node 22 or a stale addon payload.
+#[cfg(target_os = "linux")]
+fn supports_packaged_native_addons(node_bin: &str, server_dir: &std::path::Path) -> bool {
+    let script = r#"
+        const path = require('node:path');
+        const modules = path.join(process.argv[1], 'node_modules');
+        try {
+            const Database = require(path.join(modules, 'better-sqlite3'));
+            new Database(':memory:').close();
+            require(path.join(modules, 'node-pty'));
+        } catch { process.exit(1); }
+    "#;
+    Command::new(node_bin)
+        .args(["-e", script])
+        .arg(server_dir)
+        .no_window()
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
+}
+
+// Preserve the existing macOS/Windows runtime selection without an extra probe.
+#[cfg(not(target_os = "linux"))]
+fn supports_packaged_native_addons(_node_bin: &str, _server_dir: &std::path::Path) -> bool {
+    true
+}
+
 fn supports_native_node_major(major: u32) -> bool {
     SUPPORTED_NATIVE_NODE_MAJORS.contains(&major)
 }
@@ -2444,10 +2535,10 @@ mod node_preflight_tests {
         if !Path::new(path).exists() {
             return None;
         }
-        if path.contains("/v22.") || path.contains("/node/22.") {
+        if path.contains("/v22.") || path.contains("/22.") {
             return Some((22, "v22.19.0".to_string()));
         }
-        if path.contains("/v24.") || path.contains("/node/24.") {
+        if path.contains("/v24.") || path.contains("/24.") {
             return Some((24, "v24.11.1".to_string()));
         }
         None
@@ -2488,6 +2579,32 @@ mod node_preflight_tests {
         );
     }
 
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn preferred_node_discovery_supports_linux_manager_layouts() {
+        let fnm = TempHome::new("fnm-xdg");
+        let fnm_node =
+            fnm.touch_node(".local/share/fnm/node-versions/v22.18.0/installation/bin/node");
+        assert_eq!(
+            find_preferred_node_22_in(fnm.str(), checker),
+            Some(fnm_node.to_string_lossy().to_string())
+        );
+
+        let asdf = TempHome::new("asdf");
+        let asdf_node = asdf.touch_node(".asdf/installs/nodejs/22.17.0/bin/node");
+        assert_eq!(
+            find_preferred_node_22_in(asdf.str(), checker),
+            Some(asdf_node.to_string_lossy().to_string())
+        );
+
+        let mise = TempHome::new("mise");
+        let mise_node = mise.touch_node(".local/share/mise/installs/node/22.17.0/bin/node");
+        assert_eq!(
+            find_preferred_node_22_in(mise.str(), checker),
+            Some(mise_node.to_string_lossy().to_string())
+        );
+    }
+
     #[test]
     fn preferred_node_discovery_ignores_newer_native_abi_majors() {
         let home = TempHome::new("ignore-newer");
@@ -2501,10 +2618,56 @@ mod node_preflight_tests {
     #[test]
     fn native_abi_support_matches_shipped_node_majors() {
         assert!(supports_native_node_major(PREFERRED_NODE_MAJOR));
-        assert!(supports_native_node_major(24));
+        assert_eq!(supports_native_node_major(24), cfg!(not(target_os = "linux")));
         assert!(!supports_native_node_major(23));
         assert!(!supports_native_node_major(25));
     }
+
+    #[cfg(not(target_os = "linux"))]
+    #[test]
+    fn non_linux_discovery_keeps_main_fallback_order() {
+        let home = TempHome::new("platform-order");
+        home.touch_node(".local/share/fnm/node-versions/v22.18.0/installation/bin/node");
+        home.touch_node(".asdf/installs/nodejs/22.17.0/bin/node");
+        home.touch_node(".local/share/mise/installs/node/22.17.0/bin/node");
+        let brew = "/opt/homebrew/opt/node@22/bin/node";
+        assert_eq!(find_preferred_node_22_in(home.str(), |path| {
+            if path == brew { Some((22, "v22.19.0".into())) } else { checker(path) }
+        }), Some(brew.into()));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_native_abi_support_rejects_node24() {
+        assert!(!supports_native_node_major(24));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_install_hint_avoids_distro_version_claims() {
+        let hint = super::node_install_hint();
+        assert!(!hint.contains("Ubuntu"));
+        assert!(!hint.contains("Debian"));
+        assert!(hint.contains("Node 22"));
+        assert!(hint.contains("nvm install 22"));
+    }
+
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[ignore = "requires a packaged Linux server plus Node 22 and Node 24 binaries"]
+    fn linux_preflight_matches_real_packaged_addons() {
+        let server = PathBuf::from(std::env::var("O8_TEST_NATIVE_SERVER").expect("packaged server"));
+        let node22 = std::env::var("O8_TEST_NODE22").expect("Node 22 binary");
+        let node24 = std::env::var("O8_TEST_NODE24").expect("Node 24 binary");
+        assert!(super::supports_packaged_native_addons(&node22, &server));
+        assert!(!super::supports_packaged_native_addons(&node24, &server));
+        assert_eq!(super::run_node_preflight(Some(&node22), &server).unwrap(), node22);
+        assert!(!matches!(super::run_node_preflight(Some(&node24), &server), Ok(path) if path == node24));
+        let missing = TempHome::new("missing-native-addons");
+        assert!(super::run_node_preflight(Some(&node22), &missing.path).is_err());
+    }
+
 }
 
 #[derive(Debug)]
@@ -2522,23 +2685,29 @@ enum NodePreflightError {
 /// answer instead of spawning another login shell here. Only when the probe
 /// came back empty (no shell answered at all) do we fall back to asking
 /// directly.
-fn run_node_preflight(shell_node: Option<&str>) -> Result<String, NodePreflightError> {
+fn run_node_preflight(
+    shell_node: Option<&str>,
+    server_dir: &std::path::Path,
+) -> Result<String, NodePreflightError> {
     let node_bin = shell_node
         .map(str::to_string)
         .or_else(resolve_node_via_login_shell)
-        .or_else(find_preferred_node_22)
+        .or_else(|| find_preferred_node_22(server_dir))
         .or_else(resolve_node_windows)
         .ok_or(NodePreflightError::Missing)?;
     let (major, raw) = check_node_version(&node_bin).ok_or(NodePreflightError::Missing)?;
-    if major >= MIN_NODE_MAJOR && supports_native_node_major(major) {
+    if major >= MIN_NODE_MAJOR
+        && supports_native_node_major(major)
+        && supports_packaged_native_addons(&node_bin, server_dir)
+    {
         log::info!("Node.js pre-flight OK: {} ({})", raw, node_bin);
         return Ok(node_bin);
     }
 
     // Preserve #1032's rescue path when the user's default is too old or newer
-    // than the ABIs bundled by this release, but do not override a valid 22/24
+    // than the ABIs bundled by this release, but do not override a compatible
     // default merely because another Node 22 installation exists.
-    if let Some(node22) = find_preferred_node_22() {
+    if let Some(node22) = find_preferred_node_22(server_dir) {
         if node22 != node_bin {
             if let Some((22, fallback_raw)) = check_node_version(&node22) {
                 log::info!(
@@ -2571,7 +2740,20 @@ fn node_install_hint() -> String {
         .to_string()
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
+fn node_install_hint() -> String {
+    format!(
+        "Your distribution's Node.js may be too old for this build.\n\
+         Install Node {major} with nvm (`nvm install {major}`), fnm (`fnm install {major}`),\n\
+         or the NodeSource packages at https://github.com/nodesource/distributions,\n\
+         then launch o8 again.\n\n\
+         o8 also finds Node {major} under nvm, fnm, Volta, asdf, mise, and Linuxbrew\n\
+         even when your default `node` is older.",
+        major = PREFERRED_NODE_MAJOR
+    )
+}
+
+#[cfg(all(not(target_os = "windows"), not(target_os = "linux")))]
 fn node_install_hint() -> String {
     format!(
         "Install a supported version with `brew install node@{major}` / `nvm install {major}`\n\
@@ -2586,26 +2768,36 @@ fn node_install_hint() -> String {
 /// Show a native error dialog and exit. Uses platform-native tools so we
 /// don't need to pull in tauri-plugin-dialog.
 fn show_node_error_and_exit(err: NodePreflightError) -> ! {
+    #[cfg(target_os = "linux")]
+    let versions = format!("{}.x", PREFERRED_NODE_MAJOR);
+    #[cfg(not(target_os = "linux"))]
+    let versions = format!("{}.x or {}.x", PREFERRED_NODE_MAJOR, LATEST_SUPPORTED_NODE_MAJOR);
     let (title, body) = match err {
         NodePreflightError::Missing => (
             "Node.js not found",
             format!(
-                "o8 needs Node.js {major}.x or {latest}.x to run its backend.\n\n{hint}",
-                major = PREFERRED_NODE_MAJOR,
-                latest = LATEST_SUPPORTED_NODE_MAJOR,
+                "o8 needs Node.js {versions} to run its backend.\n\n{hint}",
                 hint = node_install_hint()
             ),
         ),
         NodePreflightError::TooOld { raw } => (
             "Node.js is too old",
             format!(
-                "o8 needs Node.js {major}.x or {latest}.x but found {raw}.\n\n{hint}",
-                major = PREFERRED_NODE_MAJOR,
-                latest = LATEST_SUPPORTED_NODE_MAJOR,
+                "o8 needs Node.js {versions} but found {raw}.\n\n{hint}",
                 raw = raw,
                 hint = node_install_hint()
             ),
         ),
+        #[cfg(target_os = "linux")]
+        NodePreflightError::UnsupportedNativeAbi { raw, .. } => (
+            "Node.js is not compatible with this o8 build",
+            format!(
+                "o8 found {raw}, but this Linux build requires Node {major}.x with matching native addons.\n\n{hint}",
+                major = PREFERRED_NODE_MAJOR,
+                hint = node_install_hint()
+            ),
+        ),
+        #[cfg(not(target_os = "linux"))]
         NodePreflightError::UnsupportedNativeAbi { raw, major: found_major } => (
             "Node.js version is not supported by o8 yet",
             format!(
@@ -4151,7 +4343,7 @@ fn ensure_cli_on_path(_cli_source: &Path) {
 // Anthropic is intentionally NOT a provider here — polish is Gemini-only,
 // transcription is Whisper-via-OpenRouter. Both bill outside the Anthropic
 // subscription pool, so this engine never touches the Claude REPL path.
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 mod stt_engine {
     use super::*;
     use std::collections::VecDeque;
@@ -4334,6 +4526,9 @@ mod stt_engine {
         if payload["type"] == "system-start" && payload["startId"].is_null() {
             payload["startId"] = serde_json::Value::String(uuid::Uuid::new_v4().to_string());
         }
+        #[cfg(not(target_os = "macos"))]
+        let _ = origin;
+        #[cfg(target_os = "macos")]
         if origin == "system" {
             let _ = app.emit_to(
                 crate::dock_window::DOCK_LABEL,
@@ -4478,7 +4673,7 @@ mod stt_engine {
                     }
                     crate::fn_hotkey::set_system_origin(false);
                     let _ = crate::fn_hotkey::take_smart_compose_mode();
-                    #[cfg(target_os = "macos")]
+                    #[cfg(any(target_os = "macos", target_os = "linux"))]
                     crate::audio_ducker::restore();
                     // Teardown path — restore ink click-through + clear strokes.
                     #[cfg(target_os = "macos")]
@@ -4865,8 +5060,13 @@ mod stt_engine {
                                 serde_json::json!({ "type": "system-idle", "origin": "system" });
                             emit_stt(&app, "system", idle);
                         }
-                        #[cfg(not(target_os = "macos"))]
-                        let _ = t;
+                        #[cfg(target_os = "linux")]
+                        {
+                            crate::linux_voice::speak_in_background(t);
+                            let idle =
+                                serde_json::json!({ "type": "system-idle", "origin": "system" });
+                            emit_stt(&app, "system", idle);
+                        }
                         return;
                     }
                 }
@@ -4882,6 +5082,7 @@ mod stt_engine {
             // the surrounding window's tone. Best-effort — empty/None for canvas /
             // Electron apps that don't expose AX text. (System-wide Symon fold P1.)
             let window_ctx = crate::paste::gather_window_context();
+            #[cfg(target_os = "macos")]
             let compose_window_ctx = window_ctx.clone();
 
             let ctx = crate::stt::polish::PolishContext {
@@ -5407,14 +5608,14 @@ mod stt_engine {
 
 /// Begin a dictation via the native Apple-Speech sidecar. Returns the session
 /// id so the frontend can correlate `o8:stt-event` payloads. macOS only.
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 #[tauri::command]
 fn o8_stt_start() -> Result<u64, String> {
     stt_engine::start()
 }
 
 /// End the active native dictation; triggers the finalize chain. macOS only.
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 #[tauri::command]
 fn o8_stt_stop() -> Result<(), String> {
     stt_engine::stop()
@@ -5428,7 +5629,7 @@ fn o8_system_dictation_finish() -> Result<(), String> {
 }
 
 /// Set the native recognizer locale (e.g. "en-US"). macOS only.
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 #[tauri::command]
 fn o8_stt_locale(locale: String) -> Result<(), String> {
     stt_engine::set_locale(&locale)
@@ -5443,7 +5644,7 @@ pub struct InputDeviceDto {
 }
 
 /// List connected audio input devices for the Settings mic picker. macOS only.
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 #[tauri::command]
 fn stt_list_input_devices() -> Result<Vec<InputDeviceDto>, String> {
     stt_engine::list_input_devices()
@@ -5451,7 +5652,7 @@ fn stt_list_input_devices() -> Result<Vec<InputDeviceDto>, String> {
 
 /// Route dictation to a specific microphone (uid); applied live + saved per-start
 /// via the `dictation_microphone_uid` pref. macOS only.
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 #[tauri::command]
 fn stt_set_input_device(device_uid: String) -> Result<(), String> {
     let uid = device_uid.trim();
@@ -5465,7 +5666,7 @@ fn stt_set_input_device(device_uid: String) -> Result<(), String> {
 /// DictationHost's delivery receipt for a nonce-carrying `system-fill` event
 /// (J5PHEN root fix): the emitter blocks on this ack before claiming the
 /// paste happened. See stt_engine::ack_fill.
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 #[tauri::command]
 fn o8_stt_fill_ack(nonce: u64, delivered: bool, via: Option<String>) {
     stt_engine::ack_fill(nonce, delivered, via);
@@ -5884,7 +6085,7 @@ fn make_window_zoom_instant(win: &tauri::WebviewWindow) {
 /// Read the voice preferences (`~/.o8/dictation.json`) for the settings panel,
 /// with API keys stripped. The config is mtime-cached, so writes apply live.
 /// macOS only — the pref store lives in the macOS-gated stt module (#1673).
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 #[tauri::command]
 async fn voice_prefs_get() -> Result<serde_json::Value, String> {
     // Even metadata-only Keychain I/O must not hold the native event loop.
@@ -5897,7 +6098,7 @@ async fn voice_prefs_get() -> Result<serde_json::Value, String> {
 /// Takes effect on the next read without a relaunch (mtime cache). Keys:
 /// `ducking_enabled`, `sounds_enabled`, `dictionary` (array), `polish_instructions`,
 /// `reading_speed`, `tts_provider`, `tts_voice_id`, etc. macOS only (#1673).
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 #[tauri::command]
 fn voice_prefs_set(app: tauri::AppHandle, key: String, value: serde_json::Value) -> Result<(), String> {
     let top_pill = if key == "dictation_top_pill" { value.as_bool() } else { None };
@@ -5914,7 +6115,10 @@ fn voice_prefs_set(app: tauri::AppHandle, key: String, value: serde_json::Value)
     if let Some(enabled) = external_symon_left_control {
         // #2158: hand the pref to the device watcher, which re-evaluates at once
         // and arms the tap only while a non-Apple external keyboard is attached.
+        #[cfg(target_os = "macos")]
         crate::external_keyboard::set_pref_enabled(enabled);
+        #[cfg(not(target_os = "macos"))]
+        let _ = enabled;
     }
     Ok(())
 }
@@ -6940,7 +7144,7 @@ impl BundledNextSpawn {
             .env("CORTEX_IDE_DATA_DIR", &self.data_dir)
             .no_window()
             .env("PORT", self.api_port.to_string())
-            .env("HOSTNAME", "0.0.0.0")
+            .env("HOSTNAME", sidecar_listen_host())
             .env("NODE_ENV", "production")
             .env("O8_PACKAGED_APP", "1")
             .env("O8_NODE_BIN", &self.node_bin)
@@ -8133,7 +8337,12 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            update_ping::begin_update_check,
+            update_ping::read_update_check_ticket,
             update_ping::check_app_update,
+            update_ping::read_update_channel,
+            update_ping::read_update_channel_status,
+            update_ping::set_update_channel,
             update_ping::download_app_update,
             update_ping::discard_app_update_download,
             update_ping::install_app_update,
@@ -8175,7 +8384,7 @@ pub fn run() {
             master_key_get,
             #[cfg(target_os = "macos")]
             master_key_ensure,
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
             o8_stt_start,
             managed_voice_window::managed_voice_overlay_update,
             managed_voice_window::managed_voice_presentation_epoch,
@@ -8195,17 +8404,17 @@ pub fn run() {
             visual_capture::o8_visual_capture_finish,
             #[cfg(target_os = "macos")]
             visual_capture::o8_visual_capture_cancel,
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
             o8_stt_stop,
             #[cfg(target_os = "macos")]
             o8_system_dictation_finish,
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
             o8_stt_locale,
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
             o8_stt_fill_ack,
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
             stt_list_input_devices,
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
             stt_set_input_device,
             #[cfg(target_os = "macos")]
             tts_speak,
@@ -8221,6 +8430,12 @@ pub fn run() {
             tts_set_speed,
             #[cfg(target_os = "macos")]
             tts_is_active,
+            #[cfg(target_os = "linux")]
+            linux_voice::system_tts_speak,
+            #[cfg(target_os = "linux")]
+            linux_voice::system_tts_stop,
+            #[cfg(target_os = "linux")]
+            linux_voice::system_tts_backend,
             #[cfg(target_os = "macos")]
             dock_set_expanded,
             dock_set_hit_rect,
@@ -8248,9 +8463,9 @@ pub fn run() {
             remote_preview::remote_preview_close,
             #[cfg(target_os = "macos")]
             open_voice_settings,
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
             voice_prefs_get,
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
             voice_prefs_set,
             #[cfg(target_os = "macos")]
             external_keyboard_fn_state,
@@ -8553,7 +8768,21 @@ pub fn run() {
             // logs surface (idempotent — `try_init` no-ops if one already set),
             // then spawn the Apple-Speech sidecar daemon ONCE. Both are
             // best-effort: a missing Swift helper or a poisoned mutex is logged
-            // and skipped, leaving the existing dictation path intact. macOS only.
+            // and skipped, leaving the existing dictation path intact.
+            // Linux runs the whisper.cpp helper (`o8-speech-recognizer`, #1672)
+            // behind the same daemon protocol; the macOS-only extras (sound
+            // cues, screen dock TTS, Fn hotkey) stay in the block below.
+            #[cfg(target_os = "linux")]
+            if !preship_gate {
+                let _ = tracing_subscriber::fmt()
+                    .with_env_filter(
+                        tracing_subscriber::EnvFilter::try_from_default_env()
+                            .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+                    )
+                    .try_init();
+                stt_engine::spawn(app.handle().clone());
+                linux_ptt::register(app);
+            }
             #[cfg(target_os = "macos")]
             if !preship_gate {
                 let _ = tracing_subscriber::fmt()
@@ -8956,6 +9185,11 @@ pub fn run() {
                         html_traffic_lights,
                         std::env::consts::OS,
                     );
+                    #[cfg(target_os = "linux")]
+                    let init_script = format!(
+                        "{init_script} window.__O8_LINUX_GLASS__ = {};",
+                        std::env::var("O8_LINUX_GLASS").map(|v| v.trim() == "1").unwrap_or(false),
+                    );
                     tauri::WebviewWindowBuilder::from_config(app, config)?
                         .initialization_script(init_script)
                         .build()?;
@@ -9198,7 +9432,7 @@ pub fn run() {
                     std::thread::spawn(move || {
                         let shell = shell_env::probe_login_shell();
                         log::info!("[boot] login-shell probe done at {}ms (off the main thread)", boot_ms());
-                        let node_bin = match run_node_preflight(shell.node.as_deref()) {
+                        let node_bin = match run_node_preflight(shell.node.as_deref(), &server_dir) {
                             Ok(path) => path,
                             Err(err) => show_node_error_and_exit(err),
                         };
@@ -9230,7 +9464,7 @@ pub fn run() {
                         .unwrap_or_default();
                     std::thread::spawn(move || {
                         let shell = shell_env::probe_login_shell();
-                        let node_bin = match run_node_preflight(shell.node.as_deref()) {
+                        let node_bin = match run_node_preflight(shell.node.as_deref(), &server_dir) {
                             Ok(path) => path,
                             Err(err) => show_node_error_and_exit(err),
                         };

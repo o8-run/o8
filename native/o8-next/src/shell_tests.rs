@@ -842,13 +842,13 @@ fn keymap_reference_is_reachable_and_field_question_mark_is_text(cx: &mut TestAp
     ready(&shell, cx);
     cx.simulate_keystrokes("?");
     draw(cx);
-    assert!(cx.debug_bounds("shortcut-reference").is_some());
-    cx.simulate_keystrokes("? ctrl-k n e w enter");
+    assert!(cx.debug_bounds("keyboard-shortcuts").is_some());
+    cx.simulate_keystrokes("escape ctrl-k n e w enter");
     ready(&shell, cx);
     cx.simulate_keystrokes("?");
     draw(cx);
     assert!(
-        !shell.read_with(cx, |s, _| s.shortcuts),
+        shell.read_with(cx, |s, _| s.surfaces.shortcuts.view.is_none()),
         "field question mark must not toggle reference"
     );
 }

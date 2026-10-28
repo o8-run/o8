@@ -59,6 +59,7 @@ fn allowed(action: &Shortcut, focus: &str) -> bool {
     }
     match action {
         PaletteGlobal | TargetReopen => true,
+        Settings => focus != "terminal",
         TargetRefresh | TargetMove(_) | TargetAccept | TargetCancel => focus != "terminal",
         Edit { .. } | IssueRemoveLabel => focus == "text",
         Terminal(_) | TerminalText(_) | TerminalScroll(_) | TerminalPaste => focus == "terminal",

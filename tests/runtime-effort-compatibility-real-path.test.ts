@@ -7,6 +7,12 @@ import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 const root = join(getDataDir(), 'effort-contract');
 const repo = join(root, 'repo');
 const sessions = join(root, 'sessions');
+const configHome = join(root, 'codex-home');
+mkdirSync(configHome, { recursive: true });
+writeFileSync(join(configHome, 'models_cache.json'), JSON.stringify({ models: [{
+  slug: 'gpt-6-luna', supported_reasoning_levels: ['low', 'medium', 'high', 'xhigh', 'max'].map(effort => ({ effort })),
+}] }));
+vi.stubEnv('CODEX_HOME', configHome);
 const binary = join(root, 'codex-fixture.cjs');
 const capture = join(root, 'transport.jsonl');
 mkdirSync(repo, { recursive: true });

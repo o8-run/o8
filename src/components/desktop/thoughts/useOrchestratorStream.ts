@@ -1,6 +1,7 @@
 'use client';
 
 import { useImageSendAdmissions } from './use-orchestrator-stream/image-send-admission';
+import { useOrchestratorThreadBinding } from './use-orchestrator-stream/thread-binding';
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { stopRunningTools } from '@/components/desktop/transcript/activity';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
@@ -25,6 +26,7 @@ import { trackComposerSubmission } from './use-orchestrator-stream/track-submiss
 import { canReadSessionContext } from './use-orchestrator-stream/session-context-preflight';
 import { optimisticUserEntry } from './use-orchestrator-stream/optimistic-user-entry';
 import { withSessionPrelude } from '@/lib/orchestrator/composer-wire';
+import { mergeTranscriptSources } from '@/lib/transcripts/merge-ordered';
 import { archiveMissionThread as archiveCompletedMissionThread } from './use-orchestrator-stream/mission-history';
 import { primeCompactedOrchestratorSession, requestOrchestratorCompaction } from './use-orchestrator-stream/session';
 import {
@@ -43,7 +45,6 @@ import {
   normalizeRepoPath,
   openOrchestratorWebSocket,
   refreshWsCredentials,
-  sortTranscriptEntries,
   type OrchestratorStreamStatus,
 } from './use-orchestrator-stream/shared';
 import { useOrchestratorAutoCompaction } from './use-orchestrator-stream/auto-compaction';
@@ -109,12 +110,7 @@ export function useOrchestratorStream(
   const projectIdRef = useRef<string | null>(options?.projectId ?? null);
   projectIdRef.current = options?.projectId ?? null;
   const threadId = options?.threadId ?? null;
-  const threadIdRef = useRef<string | null>(threadId);
-  // Only mirror the parent-supplied threadId when it is set. If the hook has
-  // already minted an id inside send() (because the parent's state hadn't
-  // landed yet), don't wipe it on the next render — the parent's eventual
-  // setThreadId call will replace it with the same value via onThreadIdMint.
-  if (threadId) threadIdRef.current = threadId;
+  const { threadIdRef, allowUnboundRecoveryRef } = useOrchestratorThreadBinding(threadId, options?.allowUnboundRecovery);
   const onThreadIdMintRef = useRef(options?.onThreadIdMint);
   onThreadIdMintRef.current = options?.onThreadIdMint;
   const onSettledAssistantMissingRef = useRef(options?.onSettledAssistantMissing);
@@ -247,7 +243,7 @@ export function useOrchestratorStream(
       telemetryTotalRef,
       isCurrent: () => mountedRef.current && repoPathRef.current === activeRepoPath && threadIdRef.current === compactThreadId,
     });
-  }, [syncMessages, updateRunningTotal]);
+  }, [syncMessages, threadIdRef, updateRunningTotal]);
 
   const estimateNextTurnTokens = useCallback((message: string) => (
     runningTotalRef.current
@@ -257,27 +253,15 @@ export function useOrchestratorStream(
   ), []);
 
   const replaceTranscript = useCallback((entries: MobileTranscriptEntry[]) => {
-    const next = sortTranscriptEntries(entries);
-    syncMessages(next);
+    syncMessages(entries);
   }, [syncMessages]);
 
   const appendLocalEntries = useCallback((entries: MobileTranscriptEntry[]) => {
     if (entries.length === 0) return;
     setMessages((prev) => {
-      const next = [...prev];
-      const indexById = new Map(next.map((entry, index) => [entry.id, index] as const));
-      for (const entry of entries) {
-        const existingIndex = indexById.get(entry.id);
-        if (existingIndex == null) {
-          indexById.set(entry.id, next.length);
-          next.push(entry);
-        } else {
-          next[existingIndex] = entry;
-        }
-      }
-      const sorted = sortTranscriptEntries(next);
-      messagesRef.current = sorted;
-      return sorted;
+      const next = mergeTranscriptSources(prev, entries);
+      messagesRef.current = next;
+      return next;
     });
   }, []);
 
@@ -315,7 +299,7 @@ export function useOrchestratorStream(
     }
     clearQueuedOrchestratorSessionPrelude(repoPathRef.current, threadIdRef.current);
     emitTokenUsage({ repoPath: repoPathRef.current, tokenCount: 0, runningTotal: 0 });
-  }, [connected, resetFirstTurnPlanCapture, syncMessages, turnOptionResolution, updateRunningTotal]);
+  }, [connected, resetFirstTurnPlanCapture, syncMessages, threadIdRef, turnOptionResolution, updateRunningTotal]);
 
   const archiveMissionThread = useCallback(async (detail: OrchestratorMissionCompletedDetail) => {
     const activeRepoPath = repoPathRef.current;
@@ -538,6 +522,7 @@ export function useOrchestratorStream(
       eventCountRef,
       snapshotSeenRef,
       threadIdRef,
+      allowUnboundRecoveryRef,
       finalizeFirstTurnPlanCapture,
       firstTurnPlanChunksRef,
       firstTurnPlanStartedRef,
@@ -587,7 +572,7 @@ export function useOrchestratorStream(
     ws.onerror = () => {
       // onclose will fire after this
     };
-  }, [finalizeFirstTurnPlanCapture, flushCurrentAssistant, scheduleFlushCurrentAssistant, healStaleBusyState, reconcileSnapshotTerminalTurn, settlePendingSend]);
+  }, [allowUnboundRecoveryRef, finalizeFirstTurnPlanCapture, flushCurrentAssistant, scheduleFlushCurrentAssistant, healStaleBusyState, reconcileSnapshotTerminalTurn, settlePendingSend, threadIdRef]);
 
   const setPendingStatusReady = useCallback(() => {
     const nextStatus = wsRef.current?.readyState === WebSocket.OPEN || connected ? 'ready' : 'connecting';
@@ -764,7 +749,7 @@ export function useOrchestratorStream(
       resumePrelude: primed.resumePrelude,
       tokensAfter: primed.nextTotal,
     };
-  }, [primeCompactedSession, requestCompaction]);
+  }, [primeCompactedSession, requestCompaction, threadIdRef]);
 
   // #624 — User clicked the stop pill. Fire-and-forget the interrupt message
   // to ws-server and optimistically flip status back to ready/connecting so
@@ -795,7 +780,7 @@ export function useOrchestratorStream(
       activeTurnRef.current = null;
       currentAssistantRef.current = null;
     }
-  }, [connected, syncMessages, turnOptionResolution]);
+  }, [connected, syncMessages, threadIdRef, turnOptionResolution]);
   const send = useCallback((message: string, options?: OrchestratorSendOptions) => {
     if (!canReadSessionContext(repoPathRef.current, threadIdRef.current, setMessages, messagesRef)) return null;
     suppressTurnEventsRef.current = false;
@@ -983,7 +968,7 @@ export function useOrchestratorStream(
       setPendingStatusBusy();
     });
     return sendHandle;
-  }, [connect, connected, durablePendingSend, imageAdmissions, estimateNextTurnTokens, primeCompactedSession, requestCompaction, setPendingStatusBusy, turnOptionResolution, updateRunningTotal]);
+  }, [connect, connected, durablePendingSend, imageAdmissions, estimateNextTurnTokens, primeCompactedSession, requestCompaction, setPendingStatusBusy, threadIdRef, turnOptionResolution, updateRunningTotal]);
 
   const undoSend = useCallback((handle: OrchestratorSendHandle) => {
     imageAdmissions.settle(handle.clientMessageId, { status: 'cancelled' });

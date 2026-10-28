@@ -1,7 +1,7 @@
 import { childEnvironment } from '@/lib/providers/spawn-environment';
 import { hasCloseProcessObservation, settleCloseObservedHelper } from '@/lib/runtime/close-process-observation';
 import { spawn } from '@/lib/providers/child-process';
-import { lstat, realpath } from 'node:fs/promises';
+import { lstat, readdir, realpath } from 'node:fs/promises';
 import path from 'node:path';
 
 import { readProcessCwdSnapshot, type ProcessCwdSnapshot } from '@/lib/runtime/process-cwd-snapshot';
@@ -172,6 +172,8 @@ export interface ExactDirectoryManifest {
   entries: ExactDirectoryManifestEntry[];
 }
 
+export interface ExactDirectoryKeptEntry { relative: string; reason: string }
+
 const PURGE_CAPTURE_SCRIPT = String.raw`
 const crypto = require('node:crypto');
 const fs = require('node:fs');
@@ -180,7 +182,7 @@ const path = require('node:path');
 const readline = require('node:readline');
 let rootCanonical;
 const directories = [];
-const sealBuffer = process.env.O8_PURGE_CAPTURE_CONTENTS === '1' ? Buffer.allocUnsafe(1024 * 1024) : null;
+let sealBuffer = process.env.O8_PURGE_CAPTURE_CONTENTS === '1' ? Buffer.allocUnsafe(1024 * 1024) : null;
 let sealBytes = 0;
 let phase = 'capture';
 let phaseStarted = Date.now();
@@ -258,7 +260,31 @@ function sameFileRevision(actual, expected, links = expected.linkCount) {
     && (links !== expected.linkCount || actual.ctimeMs === expected.ctimeMs);
 }
 
-async function manifestAt() {
+// Read from the no-follow descriptor and pin the current revision even when
+// our earlier unlinks legitimately changed its original ctime/link count.
+function hashOpenedFile(handle, expected, links = expected.linkCount) {
+  const before = fs.fstatSync(handle.fd);
+  if (!sameNamespaceIdentity(before, expected) || before.nlink !== links
+    || !sameFileRevision(before, expected, links)) throw new Error('Sealed file contents changed before reading.');
+  const revision = { ...expected, linkCount: links, ctimeMs: before.ctimeMs };
+  const hash = crypto.createHash('sha256');
+  const buffer = sealBuffer ||= Buffer.allocUnsafe(1024 * 1024);
+  let read = 0;
+  for (;;) {
+    const bytesRead = fs.readSync(handle.fd, buffer, 0, buffer.length, read);
+    if (!bytesRead) break;
+    read += bytesRead;
+    if (read > before.size) throw new Error('Sealed file contents grew while reading.');
+    hash.update(buffer.subarray(0, bytesRead));
+  }
+  const after = fs.fstatSync(handle.fd);
+  if (read !== before.size || !sameNamespaceIdentity(after, revision)
+    || after.nlink !== links || !sameFileRevision(after, revision)) throw new Error('Sealed file contents changed while reading.');
+  return { digest: hash.digest('hex'), revision };
+}
+
+async function manifestAt(durable = []) {
+  const durableByPath = new Map(durable.map(entry => [entry.relative, entry]));
   const entries = [];
   const byPath = new Map([[ '.', directories[0].entry ]]);
   const pending = ['.'];
@@ -277,29 +303,18 @@ async function manifestAt() {
       mtimeMs: stat.mtimeMs,
       ctimeMs: stat.ctimeMs,
     };
-    if (process.env.O8_PURGE_CAPTURE_CONTENTS === '1' && kind === 'file') {
+    const prior = durableByPath.get(relative);
+    if (kind === 'file' && (process.env.O8_PURGE_CAPTURE_CONTENTS === '1' || stat.nlink > 1
+      || prior?.linkCount > 1 || prior?.contentSha256 !== undefined)) {
       sealBytes += stat.size;
-      if (sealBytes > 4 * 1024 ** 3) throw new Error('Warm seal byte budget exceeded.');
+      if (sealBytes > 4 * 1024 ** 3) throw new Error('File seal byte budget exceeded.');
       entry.contentSha256 = await inDirectory(path.dirname(relative), byPath, async () => {
         const handle = await fsp.open(path.basename(relative), fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
         try {
-          const before = await handle.stat();
-          if (!sameIdentity(before, entry) || !sameFileRevision(before, entry) || before.nlink !== entry.linkCount) throw new Error('Sealed file changed before reading.');
-          const hash = crypto.createHash('sha256');
-          const buffer = sealBuffer;
-          let read = 0;
-          for (;;) {
-            const { bytesRead } = await handle.read(buffer, 0, buffer.length, null);
-            if (!bytesRead) break;
-            read += bytesRead;
-            if (read > before.size) throw new Error('Sealed file grew while reading.');
-            hash.update(buffer.subarray(0, bytesRead));
-          }
-          const after = await handle.stat();
-          const named = await fsp.lstat(path.basename(relative));
-          if (read !== before.size || !sameIdentity(after, entry) || !sameFileRevision(after, entry) || after.nlink !== entry.linkCount
-            || !sameIdentity(named, entry) || !sameFileRevision(named, entry)) throw new Error('Sealed file changed while reading.');
-          return hash.digest('hex');
+          const sealed = hashOpenedFile(handle, entry);
+          const named = fs.lstatSync(path.basename(relative));
+          if (!sameIdentity(named, entry) || !sameFileRevision(named, sealed.revision)) throw new Error('Sealed file contents changed while reading.');
+          return sealed.digest;
         } finally { await handle.close(); }
       });
     } else if (process.env.O8_PURGE_CAPTURE_CONTENTS === '1' && kind === 'symlink') {
@@ -378,6 +393,12 @@ function verifyMonotonicManifest(current, expected) {
       if (!sameFileRevision(actual, prior, actual.linkCount)) {
         throw new Error('Exact purge file contents changed after its durable manifest.');
       }
+      if (actual.linkCount !== prior.linkCount && !prior.contentSha256) {
+        throw new Error('Exact purge changed-link replay lacks a durable content digest.');
+      }
+      if (prior.contentSha256 !== undefined && actual.contentSha256 !== prior.contentSha256) {
+        throw new Error('Exact purge file contents differ from their durable digest: ' + actual.relative);
+      }
     }
     let parent = path.dirname(actual.relative);
     while (parent !== '.' && parent !== actual.relative) {
@@ -389,12 +410,47 @@ function verifyMonotonicManifest(current, expected) {
   }
 }
 
+function selectOwnedSubset(current, expected) {
+  const priorByPath = new Map(expected.map(entry => [entry.relative, entry]));
+  const originalNames = countFileNames(expected);
+  const sameInodes = current.filter(entry => {
+    const prior = priorByPath.get(entry.relative);
+    return prior && entry.device === prior.device && entry.inode === prior.inode && entry.kind === prior.kind;
+  });
+  const remainingNames = countFileNames(sameInodes);
+  const selected = new Set();
+  return current.filter(entry => {
+    const prior = priorByPath.get(entry.relative);
+    let reason;
+    if (!prior) reason = 'it is not in the release-owned inventory';
+    else if (entry.device !== prior.device || entry.inode !== prior.inode || entry.kind !== prior.kind) {
+      reason = 'its build ownership identity changed';
+    } else if (entry.kind === 'file' && (entry.linkCount !== prior.linkCount
+      - (originalNames.get(inodeKey(entry)) - remainingNames.get(inodeKey(entry)))
+      || !sameFileRevision(entry, prior, entry.linkCount)
+      || (entry.linkCount !== prior.linkCount && !prior.contentSha256)
+      || (prior.contentSha256 !== undefined && entry.contentSha256 !== prior.contentSha256))) {
+      reason = 'its build ownership revision changed';
+    } else if (entry.relative !== '.' && !selected.has(path.dirname(entry.relative))) {
+      reason = 'its parent ownership changed';
+    }
+    if (reason) {
+      if (entry.relative === '.') throw new Error('Exact purge root ownership changed.');
+      process.stdout.write('O8_PURGE_KEPT ' + JSON.stringify({relative:entry.relative,reason}) + '\n');
+      return false;
+    }
+    selected.add(entry.relative);
+    return true;
+  });
+}
+
 async function releaseContent(manifest) {
   // Preflight the entire tree before unlinking anything. Never chmod or
   // truncate: another name or an already-open descriptor may own those bytes.
   if (manifest.some((entry) => entry.kind === 'other')) {
     throw new Error('Exact purge refuses non-file workspace entries.');
   }
+  const preserveUnlisted = process.env.O8_PURGE_PRESERVE_UNLISTED === '1';
   const expectedChildNames = childNamesByParent(manifest);
   const byPath = new Map(manifest.map(entry => [entry.relative, entry]));
   beginPhase('preflight');
@@ -410,7 +466,7 @@ async function releaseContent(manifest) {
     if (expected.kind === 'directory') {
       const actualNames = (await inDirectory(expected.relative, byPath, () => fsp.readdir('.'))).sort();
       const expectedNames = expectedChildNames.get(expected.relative) || [];
-      if (JSON.stringify(actualNames) !== JSON.stringify(expectedNames)) {
+      if (JSON.stringify(preserveUnlisted ? actualNames.filter(name => expectedNames.includes(name)) : actualNames) !== JSON.stringify(expectedNames)) {
         throw new Error('Exact purge directory entries changed after capture.');
       }
     }
@@ -437,13 +493,21 @@ async function releaseContent(manifest) {
             || !sameFileRevision(fs.fstatSync(handle.fd), expected, links)))) {
           throw new Error('Exact purge tree identity or file contents changed before namespace release.');
         }
+        let revision = expected;
+        if (handle && expected.contentSha256 !== undefined) {
+          const sealed = hashOpenedFile(handle, expected, links);
+          if (sealed.digest !== expected.contentSha256) throw new Error('Exact purge file contents changed before namespace release: ' + expected.relative);
+          revision = sealed.revision;
+        }
         const final = fs.lstatSync(name);
         if (!sameNamespaceIdentity(final, expected)
-          || (handle && (final.nlink !== links || !sameFileRevision(final, expected, links)))) {
+          || (handle && (final.nlink !== links || !sameFileRevision(final, revision, links)))) {
           throw new Error('Exact purge file changed during descriptor verification.');
         }
         verifyLocation();
-        if (expected.kind === 'directory') fs.rmdirSync(name);
+        if (expected.kind === 'directory') {
+          if (!preserveUnlisted || fs.readdirSync(name).length === 0) fs.rmdirSync(name);
+        }
         else fs.unlinkSync(name);
         if (handle) releasedNames.set(key, (releasedNames.get(key) || 0) + 1);
       } finally { if (handle) await handle.close(); }
@@ -456,7 +520,7 @@ async function releaseContent(manifest) {
       process.kill(process.pid, 'SIGSTOP');
     }
   }
-  if ((await fsp.readdir('.')).length !== 0) {
+  if (!preserveUnlisted && (await fsp.readdir('.')).length !== 0) {
     throw new Error('Exact purge namespace release left unexpected entries.');
   }
   progress(releasedEntries, true);
@@ -480,7 +544,12 @@ async function main() {
   const rootHandle = await fsp.open('.', fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW);
   directories.push({ relative: '.', entry: { device: captured.dev, inode: captured.ino, kind: 'directory' }, handle: rootHandle });
   beginPhase('capture');
-  const manifest = await manifestAt();
+  const capturedManifest = await manifestAt(expectedManifest);
+  const owned = new Set(expectedManifest.map(entry => entry.relative));
+  const manifest = process.env.O8_PURGE_PRESERVE_CHANGED === '1'
+    ? selectOwnedSubset(capturedManifest, expectedManifest)
+    : process.env.O8_PURGE_PRESERVE_UNLISTED === '1'
+      ? capturedManifest.filter(entry => owned.has(entry.relative)) : capturedManifest;
   const fingerprint = crypto.createHash('sha256').update(JSON.stringify(manifest)).digest('hex');
   const expectedFingerprint = process.env.O8_PURGE_EXPECTED_FINGERPRINT || '';
   if (expectedManifest.length > 0) {
@@ -512,10 +581,12 @@ async function runCapturedPurge(
   expectedManifest: ExactDirectoryManifestEntry[] | undefined,
   afterTreeCapture: AfterTreeCapture | undefined,
   namespace: PurgeNamespace,
-): Promise<void> {
+  preserveUnlisted = false,
+  preserveChanged = false,
+): Promise<ExactDirectoryKeptEntry[]> {
   const child = spawn(process.execPath, ['-e', PURGE_CAPTURE_SCRIPT], {
     cwd: namespace.canonicalPath,
-    env: childEnvironment({ env: { O8_PURGE_EXPECTED_DEVICE: String(identity.device), O8_PURGE_EXPECTED_INODE: String(identity.inode), ...(expectedFingerprint ? { O8_PURGE_EXPECTED_FINGERPRINT: expectedFingerprint } : {}) } }),
+    env: childEnvironment({ env: { O8_PURGE_PRESERVE_UNLISTED: preserveUnlisted ? '1' : '0', O8_PURGE_PRESERVE_CHANGED: preserveChanged ? '1' : '0', O8_PURGE_EXPECTED_DEVICE: String(identity.device), O8_PURGE_EXPECTED_INODE: String(identity.inode), ...(expectedFingerprint ? { O8_PURGE_EXPECTED_FINGERPRINT: expectedFingerprint } : {}) } }),
     stdio: ['pipe', 'pipe', 'pipe'],
     windowsHide: true,
   });
@@ -600,6 +671,8 @@ async function runCapturedPurge(
   const code = await closed;
   reportPurgePhases(stdout);
   if (code !== 0) throw new Error(stderr.trim() || 'Exact purge content release failed.');
+  return stdout.split('\n').filter(line => line.startsWith('O8_PURGE_KEPT '))
+    .map(line => JSON.parse(line.slice('O8_PURGE_KEPT '.length)) as ExactDirectoryKeptEntry);
 }
 
 function reportPurgePhases(stdout: string): void {
@@ -635,7 +708,8 @@ export async function captureExactDirectoryManifest(
   child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
   child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
   child.stdin.end('{"entries":[]}\n');
-  const deadline = options.contents ? setTimeout(() => child.kill('SIGKILL'), 60_000) : undefined;
+  // Metadata captures can also hash hardlinks; every capture has a read bound.
+  const deadline = setTimeout(() => child.kill('SIGKILL'), 60_000);
   const code = await new Promise<number | null>((resolve) => child.once('close', resolve));
   clearTimeout(deadline);
   reportPurgePhases(stdout);
@@ -649,6 +723,23 @@ export async function captureExactDirectoryManifest(
   return { fingerprint: match[1], entries: entries as ExactDirectoryManifestEntry[] };
 }
 
+/** Release only a prior compiler inventory, retaining the registered output root. */
+export async function clearExactDirectoryContents(
+  candidatePath: string,
+  identity: { device: number; inode: number },
+  manifest: ExactDirectoryManifest,
+  beforeCapture: (candidatePath: string) => Promise<void>,
+  afterTreeCapture: AfterTreeCapture,
+): Promise<void> {
+  if (!manifest.entries.length) throw new Error('Compiler replacement requires its prior ownership inventory.');
+  const namespace = await capturePurgeNamespace(candidatePath, identity);
+  await beforeCapture(candidatePath);
+  await assertPurgeNamespace(namespace, identity);
+  await runCapturedPurge(candidatePath, identity, manifest.fingerprint, manifest.entries,
+    afterTreeCapture, namespace, true);
+  await assertPurgeNamespace(namespace, identity);
+}
+
 /** Release receipted file bytes and namespace entries through captured cwd boundaries. */
 export async function purgeExactDirectory(
   candidatePath: string,
@@ -658,18 +749,22 @@ export async function purgeExactDirectory(
   afterContentRelease?: (candidatePath: string) => Promise<void>,
   expectedFingerprint?: string,
   expectedManifest?: ExactDirectoryManifestEntry[],
-): Promise<void> {
+  preserveUnlisted = false,
+): Promise<ExactDirectoryKeptEntry[] | void> {
   const namespace = await capturePurgeNamespace(candidatePath, identity);
   await beforeCapture?.(candidatePath);
   await assertPurgeNamespace(namespace, identity);
-  await runCapturedPurge(
+  const kept = await runCapturedPurge(
     candidatePath,
     identity,
     expectedFingerprint,
     expectedManifest,
     afterTreeCapture,
     namespace,
+    preserveUnlisted,
+    preserveUnlisted,
   );
+  if (preserveUnlisted && (await readdir(namespace.canonicalPath)).length > 0) return kept;
   await afterContentRelease?.(candidatePath);
   await assertPurgeNamespace(namespace, identity);
   // The caller already journals this exact namespace. Keep it replayable until
@@ -677,4 +772,5 @@ export async function purgeExactDirectory(
   await removeExactEmptyChildDirectory(
     namespace.parentIdentity.canonicalPath, namespace.parentIdentity, namespace.canonicalPath, identity,
   );
+  if (preserveUnlisted) return kept;
 }

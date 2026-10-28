@@ -27,6 +27,8 @@
  */
 
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
+import { EffortPinRejectionError } from '@/lib/orchestrator/effort-pin';
+import { assertCollideEffortPins } from './collide-effort';
 import { claudeBackend } from './claude';
 import { codexBackend } from './codex';
 import { resolveCollideConfig } from './collide-config';
@@ -314,6 +316,18 @@ export function makeMoaBackend(
       const config = resolveConfig(options);
       const mainThreadId = options?.threadId ?? null;
       const signal = options?.signal;
+      // Only an explicit turn/configuration pin overrides the runtime default.
+      // Adaptive is an explicit reset, including when configuration has a pin.
+      const aggregatorChoice = { ...config.aggregator, model: options?.model ?? config.aggregator.model,
+        thinkingEffort: options?.thinkingEffort ?? config.aggregator.thinkingEffort };
+      try {
+        await assertCollideEffortPins(options?.orchestrationMode === 'single' ? [] : config.proposers, aggregatorChoice);
+      } catch (error) {
+        onEvent({ type: 'error', error: error instanceof Error ? error.message : String(error),
+          ...(error instanceof EffortPinRejectionError ? { code: error.code } : {}) });
+        onEvent({ type: 'done', sessionId: null, cost: null });
+        return;
+      }
 
       // Collide is a composition backend, not a Solo runtime. If an existing
       // setting points at Collide while the composer chooses Solo, run only its
@@ -323,8 +337,8 @@ export function makeMoaBackend(
         await aggregator.sendTurn(repoPath, message, onEvent, {
           ...options,
           permissionMode: options.permissionMode ?? 'full',
-          model: options.model ?? config.aggregator.model,
-          thinkingEffort: options.thinkingEffort ?? config.aggregator.thinkingEffort,
+          model: aggregatorChoice.model,
+          thinkingEffort: aggregatorChoice.thinkingEffort,
           threadId: mainThreadId,
           signal,
           toolProfile: 'solo',
@@ -386,8 +400,8 @@ export function makeMoaBackend(
         },
         {
           permissionMode: options?.permissionMode ?? 'full',
-          model: options?.model ?? config.aggregator.model,
-          thinkingEffort: options?.thinkingEffort ?? config.aggregator.thinkingEffort,
+          model: aggregatorChoice.model,
+          thinkingEffort: aggregatorChoice.thinkingEffort,
           threadId: mainThreadId,
           signal,
           ...(options?.attachments?.length ? { attachments: options.attachments } : {}),

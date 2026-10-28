@@ -1,4 +1,6 @@
 use super::*;
+#[path = "shell_geometry.rs"]
+mod geometry;
 use crate::theme::current as theme;
 impl Render for Shell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -11,18 +13,6 @@ impl Render for Shell {
         if !registrations().iter().any(|r| (r.block_ensure)(self)) {
             self.ensure(window, cx);
         }
-        let revision = self.revision;
-        let painted = self.painted.clone();
-        let active = self.active();
-        let content = registrations()
-            .iter()
-            .find_map(|r| (r.overlay)(self))
-            .or_else(|| {
-                active
-                    .as_ref()
-                    .and_then(|t| self.content.get(&self.key(t)))
-                    .map(Content::element)
-            });
         let mut style = gpui::StyleRefinement::default();
         style.size.width = Some(gpui::relative(1.).into());
         style.flex_shrink = Some(0.);
@@ -33,6 +23,7 @@ impl Render for Shell {
             window.viewport_size().width,
             cx,
         );
+        let slots = features::render_content(self, &frame, chrome.into_any_element(), window, cx);
         div()
             .size_full()
             .relative()
@@ -49,214 +40,21 @@ impl Render for Shell {
             .text_size(px(crate::theme::TYPE.chrome))
             .line_height(gpui::relative(crate::theme::TYPE.chrome_line))
             .track_focus(&self.focus)
-            .key_context("Global")
-            .map(|view| {
-                crate::keymap::legacy_registration_input(view, cx.listener(Self::legacy_key_down))
-            })
-            .map(|view| {
-                crate::keymap::sidebar_navigation_input(view, cx.listener(Self::sidebar_key_down))
-            })
-            .on_action(cx.listener(Self::action))
-            .when(self.system_glass, |view| view.child(material::veil()))
-            .child(chrome)
-            .when(self.shortcuts, |view| {
-                view.child(
-                    div()
-                        .id("shortcut-reference")
-                        .track_focus(&self.shortcuts_focus)
-                        .key_context("Shortcuts Modal")
-                        .debug_selector(|| "shortcut-reference".into())
-                        .max_h(px(300.))
-                        .overflow_y_scroll()
-                        .p(px(12.))
-                        .child("Shortcuts (? to close)")
-                        .children(
-                            crate::keymap::reference()
-                                .into_iter()
-                                .map(|row| div().child(row)),
-                        ),
-                )
-            })
-            .child(
-                registrations().iter().fold(
-                    div()
-                        .debug_selector(|| "shell-content".into())
-                        .flex_1()
-                        .min_h_0()
-                        .child(content.unwrap_or_else(|| {
-                            div().p(px(24.)).child(frame.empty).into_any_element()
-                        }))
-                        .into_any_element(),
-                    |content, registration| (registration.decorate)(self, content),
-                ),
-            )
-            .when(self.palette, |view| {
-                view.children(
-                    registry::extensions().find_map(|extension| extension.palette(self, cx)),
-                )
-            })
-            .child(canvas(|_, _, _| (), move |_, _, _, _| painted.set(revision)).size(px(1.)))
+            .map(|root| features::bind_input(root, self, cx))
+            .children(slots)
     }
 }
 
 impl Shell {
-    fn render_chrome(&mut self, _: &mut Window, cx: &mut Context<Self>) -> gpui::AnyElement {
+    fn render_chrome(&mut self, window: &mut Window, cx: &mut Context<Self>) -> gpui::AnyElement {
         let frame = registry::extensions()
-            .find_map(|e| e.frame(self))
+            .find_map(|extension| extension.frame(self))
             .unwrap_or_default();
-        let active = self.active();
-        let before_workspaces = registrations()
-            .iter()
-            .flat_map(|r| (r.nav)(self, NavPosition::BeforeWorkspaces, cx))
-            .collect::<Vec<_>>();
-        let after_workspaces = registrations()
-            .iter()
-            .flat_map(|r| (r.nav)(self, NavPosition::AfterWorkspaces, cx))
-            .collect::<Vec<_>>();
         div()
             .w_full()
             .flex()
             .flex_col()
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .flex_shrink_0()
-                    .gap(px(12.))
-                    .p(px(8.))
-                    .on_mouse_down(
-                        gpui::MouseButton::Left,
-                        cx.listener(|_, _, window, _| window.prevent_default()),
-                    )
-                    .children(
-                        frame
-                            .brand
-                            .map(|brand| div().debug_selector(move || brand.into()).child(brand)),
-                    )
-                    .children(before_workspaces)
-                    .child(
-                        div()
-                            .id("workspace-switcher")
-                            .debug_selector(|| "workspace-switcher".into())
-                            .max_w(px(220.))
-                            .overflow_hidden()
-                            .p(px(6.))
-                            .cursor_pointer()
-                            .child(
-                                self.state
-                                    .selected
-                                    .as_deref()
-                                    .and_then(|path| std::path::Path::new(path).file_name())
-                                    .map(|name| name.to_string_lossy().to_string())
-                                    .unwrap_or_else(|| "Workspaces".into()),
-                            )
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                palette::open_commands(this, true, window, cx);
-                                cx.notify();
-                            })),
-                    )
-                    .children(after_workspaces)
-                    .child(
-                        div()
-                            .id("shell-palette")
-                            .cursor_pointer()
-                            .p(px(6.))
-                            .child(
-                                div()
-                                    .debug_selector(move || frame.commands.into())
-                                    .child(frame.commands),
-                            )
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                palette::open_commands(this, false, window, cx);
-                                this.revision += 1;
-                                cx.notify();
-                            })),
-                    )
-                    .when(frame.retry, |view| {
-                        view.child(
-                            div()
-                                .id("shell-retry")
-                                .cursor_pointer()
-                                .p(px(6.))
-                                .child("Retry")
-                                .on_click(cx.listener(|this, _, _, cx| this.load(cx))),
-                        )
-                    }),
-            )
-            .when(frame.status, |view| {
-                view.child(
-                    div()
-                        .debug_selector(|| "shell-status".into())
-                        .p(px(8.))
-                        .child(self.notice.clone()),
-                )
-            })
-            .child(
-                div()
-                    .flex()
-                    .h(px(crate::theme::GEOMETRY.header))
-                    .items_center()
-                    .gap(px(crate::theme::GEOMETRY.gap))
-                    .id("surface-tabs")
-                    .overflow_x_scroll()
-                    .on_mouse_down(
-                        gpui::MouseButton::Left,
-                        cx.listener(|_, _, window, _| window.prevent_default()),
-                    )
-                    .children(
-                        self.current()
-                            .map(|w| w.tabs.clone())
-                            .unwrap_or_default()
-                            .into_iter()
-                            .enumerate()
-                            .map(|(i, t)| {
-                                div()
-                                    .id(("surface-tab", i))
-                                    .debug_selector(move || format!("surface-tab-{i}"))
-                                    .cursor_pointer()
-                                    .h(px(crate::theme::GEOMETRY.tab_height))
-                                    .px(px(crate::theme::GEOMETRY.gap))
-                                    .flex()
-                                    .items_center()
-                                    .flex_shrink_0()
-                                    .rounded(px(crate::theme::GEOMETRY.tab_radius))
-                                    .bg(if active.as_ref() == Some(&t) {
-                                        theme().selection
-                                    } else {
-                                        theme().surface_raised
-                                    })
-                                    .child(match &t {
-                                        Tab::Session(id) => {
-                                            let selected = self
-                                                .current()
-                                                .and_then(|w| w.selections.get(id))
-                                                .unwrap_or(id);
-                                            self.sessions
-                                                .iter()
-                                                .find(|s| &s.id == selected)
-                                                .map(|s| s.title.clone())
-                                                .unwrap_or_else(|| "Chat".into())
-                                        }
-                                        _ => t.label().into(),
-                                    })
-                                    .on_click(cx.listener(move |this, _, window, cx| {
-                                        this.capture(window, cx);
-                                        for registration in registrations() {
-                                            (registration.after_tab)(this);
-                                        }
-                                        this.state
-                                            .workspaces
-                                            .get_mut(this.state.selected.as_deref().unwrap_or(""))
-                                            .unwrap()
-                                            .active = i;
-                                        this.ensure(window, cx);
-                                        this.restore_focus(window, cx);
-                                        this.persist();
-                                        cx.notify();
-                                    }))
-                            }),
-                    ),
-            )
+            .children(features::render_chrome(self, &frame, window, cx))
             .into_any_element()
     }
 }
@@ -358,20 +156,30 @@ pub(super) fn start_pump(
 pub(super) fn open_window(
     client: Client,
     file: PathBuf,
-    state: State,
+    mut state: State,
     offscreen: bool,
     cx: &mut App,
 ) -> gpui::WindowHandle<Shell> {
     let [x, y, w, h] = state.bounds;
+    let bounds = geometry::visible(
+        Bounds::new(point(px(x), px(y)), size(px(w), px(h))),
+        &cx.displays()
+            .iter()
+            .map(|display| display.bounds())
+            .collect::<Vec<_>>(),
+    );
+    state.bounds = [
+        bounds.origin.x.into(),
+        bounds.origin.y.into(),
+        bounds.size.width.into(),
+        bounds.size.height.into(),
+    ];
     cx.open_window(
         WindowOptions {
             window_background: material::background(offscreen),
             focus: false,
             show: !offscreen,
-            window_bounds: Some(WindowBounds::Windowed(Bounds::new(
-                point(px(x), px(y)),
-                size(px(w), px(h)),
-            ))),
+            window_bounds: Some(WindowBounds::Windowed(bounds)),
             window_min_size: Some(size(px(600.), px(400.))),
             titlebar: Some(gpui::TitlebarOptions {
                 title: Some("o8 next".into()),
@@ -380,8 +188,9 @@ pub(super) fn open_window(
             ..Default::default()
         },
         |window, cx| {
+            let system_glass = material::apply(window, offscreen);
+            geometry::restore_size(window, bounds.size);
             cx.new(|cx| {
-                let system_glass = material::apply(window, offscreen);
                 let mut shell = Shell::new(client, file, state, window, cx);
                 shell.system_glass = system_glass;
                 shell

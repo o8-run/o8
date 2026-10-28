@@ -1,3 +1,4 @@
+import { hasForgottenPacketOutcome } from '@/lib/cortex/outcome-exclusion';
 import { buildHistoricalMissionStatus } from './historical-status';
 import { readLaneTerminalReason } from '@/lib/lane/terminal-reason';
 import { missionDispatchQueue } from './dispatch-queue';
@@ -625,7 +626,7 @@ export async function getMissionStatus(input: MissionStatusInput) {
         blockedReason: queueById.get(packet.id)?.detail ?? packet.blockedReason ?? null,
         dispatchQueue: queueById.get(packet.id) ?? null,
         terminalReason: readLaneTerminalReason(lane),
-        summary: packet.completionSummary?.trim()
+        summary: (!hasForgottenPacketOutcome(packet.id) ? packet.completionSummary?.trim() : null)
           || completionContext?.selfReview?.outcome?.trim()
           || completionContext?.summary?.trim()
           || null,

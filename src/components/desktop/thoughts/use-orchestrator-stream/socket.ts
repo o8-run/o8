@@ -81,6 +81,7 @@ interface CreateOrchestratorMessageHandlerOptions {
    * never paint into this transcript.
    */
   threadIdRef?: RefLike<string | null>;
+  allowUnboundRecoveryRef?: RefLike<boolean>;
   lastEventAtRef: RefLike<number>;
   messagesRef: RefLike<MobileTranscriptEntry[]>;
   onOrchestratorActivity?: (event: {
@@ -164,17 +165,16 @@ export function createOrchestratorMessageHandler(
     // orchestrator emission stamps data.threadId. With several live chat
     // views on one repo:
     // - a view bound to thread X drops events for thread Y outright;
-    // - an UNBOUND view (fresh empty chat) still reattaches to in-flight
-    //   turns (durable-turn recovery) UNLESS the turn's thread is owned by a
-    //   thread pane — without this, a pane's send hijacked the empty main
-    //   chat (title + transcript + busy state).
+    // - an unbound recovery view can reattach to in-flight turns unless a
+    //   thread pane owns them; fresh workspace views explicitly disable that
+    //   recovery until their own send or history load binds a conversation.
     const evtThreadId = typeof msg.data?.threadId === 'string' && msg.data.threadId
       ? msg.data.threadId
       : null;
     if (evtThreadId) {
       const ownThreadId = options.threadIdRef?.current ?? null;
       if (ownThreadId && evtThreadId !== ownThreadId) return;
-      if (!ownThreadId && isPaneOwnedThread(evtThreadId)) return;
+      if (!ownThreadId && (options.allowUnboundRecoveryRef?.current === false || isPaneOwnedThread(evtThreadId))) return;
     }
 
     // A prime/replay turn reuses carried context, not an operator send. Its

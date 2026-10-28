@@ -15,6 +15,7 @@
  */
 
 export const UI_ZOOM_KEY = 'o8:ui-zoom';
+export const UI_ZOOM_CHANGED_EVENT = 'o8:ui-zoom-changed';
 
 // Apple / Chrome-style preset ladder. 1.0 is "actual size" — the ⌘0 reset target.
 export const UI_ZOOM_STEPS: readonly number[] = [
@@ -60,6 +61,11 @@ export function readAppliedUiZoom(): number {
   if (typeof document === 'undefined') return 1;
   const zoom = Number.parseFloat(getComputedStyle(document.documentElement).zoom);
   return Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
+}
+
+/** Space available to the inverse-sized dashboard, in CSS layout units. */
+export function readViewportLayoutWidth(): number {
+  return typeof window === 'undefined' ? Number.POSITIVE_INFINITY : window.innerWidth / readAppliedUiZoom();
 }
 
 export function readStoredUiZoom(): number {
@@ -112,6 +118,7 @@ export function applyUiZoom(level: number): void {
     root.style.setProperty('width', `${100 / level}vw`);
     root.style.setProperty('height', `${100 / level}vh`);
   }
+  window.dispatchEvent(new Event(UI_ZOOM_CHANGED_EVENT));
 }
 
 // Drop the inline zoom override (used on IDE unmount so the IDE zoom never leaks

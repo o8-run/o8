@@ -44,7 +44,7 @@ import {
   repoPathLabel,
   resolveThreadLoadPlan,
 } from './utils';
-import { useOrchestratorStream } from './useOrchestratorStream';
+import { useWorkspaceOrchestratorStream } from './chat-panel/useWorkspaceOrchestratorStream';
 import { useSlashOrchestration } from './useSlashOrchestration';
 import type { OrchestratorSendOptions } from './use-orchestrator-stream/types';
 import { useOrchestratorStatusFeed } from './useOrchestratorStatusFeed';
@@ -96,6 +96,7 @@ import { useTranscriptAutoScroll } from './chat-panel/useTranscriptAutoScroll';
 import { useThreadHistoryBackfill } from './chat-panel/useThreadHistoryBackfill';
 import {
   fetchOlderThreadPage,
+  fetchThreadHistoryPage,
   useBoundedThreadHistoryWindow,
 } from './chat-panel/thread-history-window';
 import { ScreenshotAnnotator } from './chat-panel/ScreenshotAnnotator';
@@ -422,8 +423,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, ThoughtsCha
   const soloOrchestrator = operatorDefaults.readyRuntimeCount === 1 && lockedMode !== 'single' && !isChatMode;
   const isOrchestratorMode = !isSingleMode && !isChatMode && (targetAgentKey === '__claude__' || !sessionTargets.some((s) => s.key === targetAgentKey));
 
-  const orchStream = useOrchestratorStream(isOrchestratorMode && orchestrationSettingsLoaded && !isChatMode ? resolvedRepoPath : null, {
-    projectId: threadProjectId, visible: open,
+  const orchStream = useWorkspaceOrchestratorStream(isOrchestratorMode && orchestrationSettingsLoaded && !isChatMode ? resolvedRepoPath : null, {
+    projectId: threadProjectId, visible: open, scopeTabId, suppressAutoRestore,
     seededPlanText: planText,
     hasHistory: chatMessages.some(message => !message.voice),
     threadId,
@@ -1115,6 +1116,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, ThoughtsCha
     onPrepend: prependThreadHistoryPage,
   });
 
+  const loadTranscriptRef = useRef({ stream: orchStream.messages, retained: chatMessages });
+  loadTranscriptRef.current = { stream: orchStream.messages, retained: chatMessages };
   const handleLoadThread = useCallback(async (tabId: string) => {
     const now = Date.now();
     if (inFlightLoadKeyRef.current === tabId) return;
@@ -1128,20 +1131,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, ThoughtsCha
     cancelBackfill();
     resetThreadHistoryWindow();
     try {
-      const fetchHistoryOnce = async (): Promise<Response | null> => {
-        const controller = new AbortController();
-        const timer = window.setTimeout(() => controller.abort(), 6000);
-        try {
-          const params = new URLSearchParams({ tabId, limit: '60' });
-          return await fetch(`/api/v2/chat-history?${params.toString()}`, { signal: controller.signal });
-        } catch {
-          return null;
-        } finally {
-          window.clearTimeout(timer);
-        }
-      };
-      let res = await fetchHistoryOnce();
-      if (!res || !res.ok) res = await fetchHistoryOnce();
+      let res = await fetchThreadHistoryPage(tabId);
+      if (!res || !res.ok) res = await fetchThreadHistoryPage(tabId);
       if (!res || !res.ok) {
         // Loud on purpose: a silent return here leaves the tab wearing the
         // thread's TITLE over an empty transcript (stale-header class).
@@ -1158,7 +1149,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, ThoughtsCha
       const msgs = mapHistoryMessagesToTranscript(data.messages ?? [], data.pendingTurnWorkers);
       console.log(`[orchestrator] loadThread ${tabId} — applying ${msgs.length} messages`);
       const isSameOpenThread = threadIdRef.current === tabId;
-      const liveTranscript = orchStream.messages.length > 0 ? orchStream.messages : chatMessages;
+      const currentTranscript = loadTranscriptRef.current;
+      const liveTranscript = currentTranscript.stream.length > 0 ? currentTranscript.stream : currentTranscript.retained;
       const mergedLoad = isSameOpenThread
         ? mergeSameThreadHistoryLoad(liveTranscript, msgs)
         : { entries: msgs, preservedLiveEntries: false };
@@ -1217,7 +1209,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, ThoughtsCha
         inFlightLoadKeyRef.current = null;
       }
     }
-  }, [cancelBackfill, chatMessages, clearPolling, orchStream, isOrchestratorMode, resolvedRepoPath, resetThreadHistoryWindow, startBackfill]);
+  }, [cancelBackfill, clearPolling, orchStream, isOrchestratorMode, resolvedRepoPath, resetThreadHistoryWindow, startBackfill]);
 
   settledAssistantRefetchRef.current = () => {
     const activeThreadId = threadIdRef.current;
@@ -1271,16 +1263,16 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, ThoughtsCha
     // review 2026-07-15). The label falls back to the default (OpenClaw → 'main').
     ? orchestratorBackendDisplayLabel({ backend: activeBackendIdentity, agent: null })
     : null;
-  // A thread-bound tab whose history (incl. backend) hasn't loaded yet must
-  // not claim the default backend — "…" is the truthful label until the load
+  // A requested history owns its draft before its binding is ready to send.
+  // Keep sends blocked and the backend label pending until that history
   // lands (threadId flips non-null). See expectsThreadLoad prop doc.
-  const backendHydrating = isOrchestratorMode && expectsThreadLoad && threadId === null;
+  const threadBindingPending = expectsThreadLoad && threadId === null;
   const activeTargetLabel = isChatMode
     ? selectedChatModel.label
     : isSingleMode
       ? orchestratorRuntimeTone(singleRuntime).label
       : isOrchestratorMode
-        ? (backendHydrating ? '…' : activeBackendLabel ?? 'Claude Code')
+        ? (threadBindingPending ? '…' : activeBackendLabel ?? 'Claude Code')
         : (targetAgent?.name ?? orchestratorRuntimeTone(preferredRuntime).label);
   const activeTargetColor = isSingleMode
     ? orchestratorRuntimeTone(singleRuntime).color
@@ -1475,7 +1467,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, ThoughtsCha
 
   const handleTaskSend = useCallback(async (explicitText?: string) => {
     const rawMsg = (explicitText ?? input).trim();
-    if (!rawMsg) return;
+    if (!rawMsg || threadBindingPending) return;
     // The mode directive goes to the model, while bubbles and auto-titles keep
     // the operator's exact words. Slash commands pass through untouched.
     const { displayMessage, wireMessage, orchestrationMode: turnOrchestrationMode } = composeComposerTurnMessage(rawMsg, composerModeRef.current, soloOrchestrator);
@@ -1728,11 +1720,11 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, ThoughtsCha
       ]);
       if (!receiptUnsettled) setWaitingForReply(false);
     }
-  }, [input, soloOrchestrator, lockedMode, isChatMode, waitingForReply, isOrchestratorMode, orchStream.status, isSingleMode, runLocalOrchestratorSlash, setInput, clearAttachments, targetSessionKey, onSpawnSingleTab, onSpawnChatTab, attachedImages, sendOrchestrator, permissionMode, orchestratorBackend, thinkingEffort, orchestratorModel, collideEnabled, selectedChatModel, chatStreamRequest, chatMessages, resolvedRepoPath, chatOpenrouterModel, ensureSingleRuntimeSession, captureServerSnapshot, startPollingForSession, singleRuntime, startPolling, targetAgent]);
+  }, [threadBindingPending, input, soloOrchestrator, lockedMode, isChatMode, waitingForReply, isOrchestratorMode, orchStream.status, isSingleMode, runLocalOrchestratorSlash, setInput, clearAttachments, targetSessionKey, onSpawnSingleTab, onSpawnChatTab, attachedImages, sendOrchestrator, permissionMode, orchestratorBackend, thinkingEffort, orchestratorModel, collideEnabled, selectedChatModel, chatStreamRequest, chatMessages, resolvedRepoPath, chatOpenrouterModel, ensureSingleRuntimeSession, captureServerSnapshot, startPollingForSession, singleRuntime, startPolling, targetAgent]);
 
   const sendNow = useCallback((text?: string, options?: ThoughtsSendNowOptions) => {
     const msg = (typeof text === 'string' ? text : latestInputRef.current).trim();
-    if (!msg) return false;
+    if (!msg || threadBindingPending) return false;
     if (isChatMode) {
       if (waitingForReply) return false;
       setInput(msg);
@@ -1777,7 +1769,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, ThoughtsCha
     latestInputRef.current = msg;
     setTimeout(() => { void handleTaskSend(msg); }, 0);
     return true;
-  }, [isChatMode, isOrchestratorMode, setInput, waitingForReply, handleTaskSend, orchStream.status, runLocalOrchestratorSlash, attachedImages, soloOrchestrator, sendOrchestrator, permissionMode, orchestratorBackend, thinkingEffort, orchestratorModel, collideEnabled, clearAttachments]);
+  }, [threadBindingPending, isChatMode, isOrchestratorMode, setInput, waitingForReply, handleTaskSend, orchStream.status, runLocalOrchestratorSlash, attachedImages, soloOrchestrator, sendOrchestrator, permissionMode, orchestratorBackend, thinkingEffort, orchestratorModel, collideEnabled, clearAttachments]);
 
   // #1699 — interactive task artifacts attached to this thread. Their accepted
   // actions return through the same send path as a typed message, stamped so
@@ -1789,7 +1781,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, ThoughtsCha
     transcriptLength: displayMessages.length,
   });
   const deliverTaskArtifactAction = useCallback((input: TaskArtifactDeliverInput): boolean => {
-    if (!isOrchestratorMode || orchStream.status === 'busy') return false;
+    if (threadBindingPending || !isOrchestratorMode || orchStream.status === 'busy') return false;
     const { wireMessage, orchestrationMode: turnOrchestrationMode } = composeComposerTurnMessage(input.wireMessage, composerModeRef.current, soloOrchestrator);
     track('orchestrator.message');
     sendOrchestrator(input.displayMessage, {
@@ -1804,7 +1796,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, ThoughtsCha
       taskArtifactAction: { artifactId: input.artifactId, actionId: input.actionId },
     });
     return true;
-  }, [collideEnabled, isOrchestratorMode, orchStream.status, orchestratorBackend, orchestratorModel, permissionMode, sendOrchestrator, soloOrchestrator, thinkingEffort]);
+  }, [threadBindingPending, collideEnabled, isOrchestratorMode, orchStream.status, orchestratorBackend, orchestratorModel, permissionMode, sendOrchestrator, soloOrchestrator, thinkingEffort]);
 
   const { dispatch: dispatchBufferedOrchestratorSend, capture: captureQueuedSend } = useBufferedOrchestratorSend({
     active: isOrchestratorMode, backend: orchestratorBackend, model: orchestratorModel, effort: thinkingEffort,
@@ -1813,7 +1805,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, ThoughtsCha
   });
 
   const { sendBuffer, durable, handleSend: handleComposerSend, handleSteer, saving: queueSaving, attachmentError } = useDefaultComposerSendBuffer({
-    active: isOrchestratorMode, backend: orchestratorBackend,
+    active: isOrchestratorMode, backend: orchestratorBackend, blocked: threadBindingPending,
     capabilityBackend: collideEnabled && resolveComposerExecutionMode(composerMode, soloOrchestrator) !== 'single' ? 'collide' : orchestratorBackend,
     busy: displayWaiting,
     threadId,
@@ -2057,7 +2049,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, ThoughtsCha
         onUndoEnhance={handleUndoEnhance}
         onSubmit={handleComposerSend}
         onStop={sendBuffer.stopOrUndo}
-        onSteer={handleSteer} canSteerLive={durable.canSteer} queueSaving={queueSaving}
+        onSteer={handleSteer} canSteerLive={durable.canSteer} queueSaving={queueSaving || threadBindingPending}
         sendBufferStatus={<ComposerSendStatus attachmentError={attachmentError} sendBuffer={sendBuffer} active={isOrchestratorMode} uploads={{ uploading, failed: failedUploads.length > 0, retry: retryFailedUploads, discard: discardFailedUploads }} />}
         onSlashCommand={handleSlashCommand}
         modelLabel={isChatMode ? selectedChatModel.label : isSingleMode ? activeTargetLabel : isOrchestratorMode ? activeBackendLabel ?? formatComposerBackendLabel(orchestratorBackend, orchestratorModel) : activeTargetLabel}

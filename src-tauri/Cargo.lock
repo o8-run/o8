@@ -3696,6 +3696,7 @@ dependencies = [
  "image 0.25.10",
  "libc",
  "log",
+ "o8-linux-voice",
  "o8-restart-safety",
  "objc2",
  "objc2-app-kit",
@@ -3707,6 +3708,7 @@ dependencies = [
  "rusqlite",
  "screencapturekit",
  "security-framework",
+ "semver",
  "sentry",
  "sentry-rust-minidump",
  "serde",
@@ -3738,6 +3740,17 @@ dependencies = [
  "window-vibrancy",
  "windows-sys 0.59.0",
  "winreg 0.55.0",
+ "x11rb",
+]
+
+[[package]]
+name = "o8-linux-voice"
+version = "0.1.0"
+dependencies = [
+ "hound",
+ "serde",
+ "serde_json",
+ "sha2",
 ]
 
 [[package]]

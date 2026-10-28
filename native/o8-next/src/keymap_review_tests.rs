@@ -26,17 +26,20 @@ fn review_reference_command_alias(cx: &mut TestAppContext) {
     cx.simulate_keystrokes("cmd-/");
     draw(&mut cx);
     assert!(
-        shell.read_with(&cx, |s, _| s.shortcuts),
+        shell.read_with(&cx, |s, _| s.surfaces.shortcuts.view.is_some()),
         "Cmd+/ must open the reference from the focused list"
     );
 }
 #[gpui::test]
 fn review_reference_escape_closes(cx: &mut TestAppContext) {
     let (_fixture, shell, mut cx) = fixture_shell(cx);
-    cx.simulate_keystrokes("? escape");
+    cx.simulate_keystrokes("?");
+    draw(&mut cx);
+    assert!(shell.read_with(&cx, |s, _| s.surfaces.shortcuts.view.is_some()));
+    cx.simulate_keystrokes("escape");
     draw(&mut cx);
     assert!(
-        !shell.read_with(&cx, |s, _| s.shortcuts),
+        shell.read_with(&cx, |s, _| s.surfaces.shortcuts.view.is_none()),
         "Escape must close the visible reference"
     );
 }
@@ -169,26 +172,58 @@ fn review_palette_does_not_resize_the_retained_surface(cx: &mut TestAppContext) 
 }
 
 #[gpui::test]
-fn review_reference_dismissal_restores_selected_surface_focus(cx: &mut TestAppContext) {
+fn review_reference_modal_keeps_tabs_and_restores_focus(cx: &mut TestAppContext) {
     let (_fixture, shell, mut cx) = fixture_shell(cx);
     two_tabs(&shell, &mut cx);
     let first = shell.read_with(&cx, |s, _| s.active());
+    let focus = cx.update(|window, cx| window.focused(cx));
     cx.simulate_keystrokes("cmd-/");
     draw(&mut cx);
-    assert!(shell.read_with(&cx, |s, _| s.shortcuts));
-    let grid = cx.debug_bounds("surface-tab-1").unwrap();
-    cx.simulate_click(grid.center(), gpui::Modifiers::default());
+    assert!(shell.read_with(&cx, |s, _| s.surfaces.shortcuts.view.is_some()));
+    cx.simulate_keystrokes("cmd-2 cmd-alt-right ctrl-tab");
     draw(&mut cx);
-    assert_eq!(shell.read_with(&cx, |s, _| s.active()), Some(Tab::Grid));
+    assert_eq!(
+        shell.read_with(&cx, |s, _| s.active()),
+        first,
+        "the modal reference must keep tab chords off the underlying tabs"
+    );
+    cx.simulate_keystrokes("cmd-/");
+    draw(&mut cx);
+    assert!(shell.read_with(&cx, |s, _| s.surfaces.shortcuts.view.is_none()));
+    assert_eq!(
+        cx.update(|window, cx| window.focused(cx)),
+        focus,
+        "Cmd+/ dismissal must restore the focused view"
+    );
+    cx.simulate_keystrokes("cmd-/ cmd-2 cmd-alt-right ctrl-tab");
+    draw(&mut cx);
+    assert_eq!(
+        shell.read_with(&cx, |s, _| s.active()),
+        first,
+        "the modal reference must keep tab chords off the underlying tabs"
+    );
     cx.simulate_keystrokes("escape");
     draw(&mut cx);
-    assert!(!shell.read_with(&cx, |s, _| s.shortcuts));
+    assert!(shell.read_with(&cx, |s, _| s.surfaces.shortcuts.view.is_none()));
+    assert_eq!(
+        cx.update(|window, cx| window.focused(cx)),
+        focus,
+        "Escape must restore the focused view"
+    );
+    cx.simulate_keystrokes("cmd-2");
+    ready(&shell, &mut cx);
+    assert_eq!(shell.read_with(&cx, |s, _| s.active()), Some(Tab::Grid));
     cx.simulate_keystrokes("cmd-1");
     ready(&shell, &mut cx);
     assert_eq!(
         shell.read_with(&cx, |s, _| s.active()),
         first,
-        "Cmd+/ → click Grid → Escape → Cmd+1 must return to the first surface"
+        "dismissed reference must return shortcut ownership to the selected surface"
+    );
+    assert_eq!(
+        cx.update(|window, cx| window.focused(cx)),
+        focus,
+        "returning from Grid must restore the original surface's focus"
     );
 }
 

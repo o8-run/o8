@@ -90,4 +90,21 @@ describe('long-lived fetch budget guard', () => {
     await Promise.all(requests);
     expect(snapshotLongLivedFetchBudgetForTests()).toEqual([]);
   });
+
+  it('still aborts ordinary app requests without headers after 45 seconds', async () => {
+    vi.useFakeTimers();
+    try {
+      window.fetch = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(init.signal!.reason), { once: true });
+      })) as typeof fetch;
+      installLongLivedFetchBudgetGuard();
+      const pending = window.fetch('/api/panel/app/update-state');
+      const rejected = expect(pending).rejects.toThrow('no response headers in 45s');
+      await vi.advanceTimersByTimeAsync(45_000);
+      await rejected;
+      expect(snapshotLongLivedFetchBudgetForTests()).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

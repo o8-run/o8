@@ -8,7 +8,8 @@ import { cpSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, rea
 import { execFileSync as runFileSync } from 'child_process';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { prepareNativeBundle } from './native-bundle.mjs';
+import { writeBuildChannel } from './lib/build-channel.mjs';
+import { prepareLinuxNativeBundle, prepareNativeBundle, verifyLinuxNativeBundle } from './native-bundle.mjs';
 import { exportTauriSafetyHookResources } from './tauri-hook-resources.mjs';
 import { resolveReleaseConfig } from './lib/release-config.mjs';
 import { canonicalizeServerOnlyStubEnv } from './run-lib.mjs';
@@ -427,11 +428,10 @@ try {
 // Select the immutable packaged prebuild for the user's Node ABI and
 // architecture before either package loads. This must never copy or chmod files
 // inside the signed app bundle; native-bundle.mjs removes build/ at export time.
-// macOS only: the multi-ABI prebuild layout exists solely for the darwin
-// dual-arch artifact. Windows/Linux bundles keep the host-compiled
-// build/Release binaries, which load through the normal require path —
-// running the darwin selector there crashed the server at boot (#1673).
-if (process.platform === 'darwin') {
+// macOS ships a dual-arch multi-ABI layout and Linux a per-ABI layout for
+// better-sqlite3. Windows bundles keep the host-compiled build/Release
+// binaries; the selector is a no-op for any bundle without the layout (#1673).
+if (process.platform === 'darwin' || process.platform === 'linux') {
   require('./native-addon-runtime.cjs').prepareNativeAddons(__dirname);
 }
 
@@ -558,6 +558,20 @@ if (process.platform === 'darwin') {
     console.log(`📦 Signed and verified ${nativeBundle.nativeSigning.binaries.length} nested Mach-O binaries`);
   } catch (error) {
     console.error(`❌ multi-ABI native addon export failed: ${error.message}`);
+    process.exit(1);
+  }
+} else if (process.platform === 'linux') {
+  // Linux runs on the user's system Node (22 or 24 per the shell pre-flight),
+  // so better-sqlite3 ships once per supported ABI like the Mac bundle does.
+  try {
+    const nativeBundle = await prepareLinuxNativeBundle({ projectRoot: root, serverRoot: server });
+    verifyLinuxNativeBundle(server);
+    const abiSummary = Object.entries(nativeBundle.nodeAbis)
+      .map(([major, abi]) => `Node ${major}=ABI ${abi}`)
+      .join(', ');
+    console.log(`📦 Bundled better-sqlite3 linux-${process.arch} (${abiSummary})`);
+  } catch (error) {
+    console.error(`❌ Linux multi-ABI native addon export failed: ${error.message}`);
     process.exit(1);
   }
 } else {
@@ -761,3 +775,6 @@ try { size = execSync(`du -sh "${server}" 2>/dev/null`).toString().trim().split(
 console.log('\\n✅ Export complete');
 console.log(`   frontend/ → loader HTML`);
 console.log(`   server/ → ${size}`);
+
+// Written before packaging: the app seal and updater signature cover this manifest.
+writeBuildChannel(root, server, loaderAppVersion);

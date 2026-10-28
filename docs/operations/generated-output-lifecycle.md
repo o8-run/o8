@@ -2,6 +2,10 @@
 
 Source `build`, `dev`, `start` and source `serve` launches register `.next` output when the containing workspace has current managed ownership. Registration precedes output creation, and native producer identity precedes compiler execution. Unmanaged checkouts keep the ordinary build retry behavior and do not acquire generated-output retirement authority.
 
+Release prebuild additionally requires write-time ownership receipts before
+scrubbing, normalizing, promoting or cleaning compiler output. Unknown or
+replaced entries remain held; see [release build output ownership](release-output-ownership.md).
+
 The maintenance script uses the selected lifecycle data profile. Run it from a trusted source checkout outside the workspace being maintained:
 
 ```sh

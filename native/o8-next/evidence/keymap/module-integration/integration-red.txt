@@ -1,0 +1,21 @@
+shell::shortcuts::tests::bindings::shortcuts_every_displayed_chord_has_a_live_binding
+thread 'shell::shortcuts::tests::bindings::shortcuts_every_displayed_chord_has_a_live_binding' (fixture) panicked at src/surfaces/shortcuts/binding_tests.rs:84:13:
+displayed "⌘ / · ?" (cmd-/) has no live Show this help binding in its focus context
+
+shell::shortcuts::tests::shortcuts_overlay_bindings_dismissal_and_typing
+thread 'shell::shortcuts::tests::shortcuts_overlay_bindings_dismissal_and_typing' (fixture) panicked at src/surfaces/shortcuts/tests.rs:38:5:
+Cmd+/ must open the native overlay
+
+shell::shortcuts::tests::modal::shortcuts_modal_surfaces_keep_all_tab_chords_off_underlying_tabs
+thread 'shell::shortcuts::tests::modal::shortcuts_modal_surfaces_keep_all_tab_chords_off_underlying_tabs' (fixture) panicked at src/surfaces/shortcuts/modal_tests.rs:143:5:
+modal tab shortcut ordering: ["projects: ctrl-w", "projects: cmd-w", "projects: cmd-3", "projects: cmd-4", "projects: cmd-5", "projects: cmd-6", "projects: cmd-7", "projects: cmd-8", "projects: cmd-9", "setup: ctrl-w", "setup: cmd-w", "setup: cmd-alt-left", "setup: cmd-alt-right", "setup: ctrl-tab", "setup: ctrl-shift-tab", "setup: cmd-2", "help: ctrl-w", "help: cmd-w", "help: cmd-alt-left", "help: cmd-alt-right", "help: ctrl-tab", "help: ctrl-shift-tab", "help: cmd-2"]
+
+shell::shortcuts::tests::review::shortcuts_reopen_retains_list_scroll
+thread 'shell::shortcuts::tests::review::shortcuts_reopen_retains_list_scroll' (fixture) panicked at src/surfaces/shortcuts/review_tests.rs:28:14:
+called `Option::unwrap()` on a `None` value
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+shell::shortcuts::tests::review::correction_2::shortcuts_text_fields_pass_palette_chords
+thread 'shell::shortcuts::tests::review::correction_2::shortcuts_text_fields_pass_palette_chords' (fixture) panicked at src/surfaces/shortcuts/correction_2_tests.rs:131:9:
+text fields pass palette and Settings chords: cmd-,
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace

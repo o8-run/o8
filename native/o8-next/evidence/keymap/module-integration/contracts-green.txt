@@ -1,0 +1,36 @@
+running 32 tests
+test keymap::tests::keymap_reference_has_exactly_the_registered_rows ... ok
+test keymap::tests::keymap_nested_terminal_and_text_take_precedence ... ok
+test shell::feature_tests::registered_chrome_slot_state_change_repaints_cached_scene ... ok
+test shell::fake::review_registered_raw_hook_composes_and_respects_focus ... ok
+test shell::feature_tests::registered_shell_feature_reaches_render_keys_commands_tick_and_observer ... ok
+test shell::keymap_review_tests::review_palette_does_not_resize_the_retained_surface ... ok
+test shell::keymap_review_tests::review_palette_release_cpu_frame_budget ... ignored, release CPU measurement; run explicitly without competing workloads
+test shell::keymap_review_tests::review_pattern_documentation_avoids_product_attribution ... ok
+test shell::keymap_review_tests::review_numbered_surface_binding ... ok
+test shell::keymap_review_tests::review_directional_surface_binding ... ok
+test keymap::tests::keymap_every_binding_dispatches_only_on_its_focus_path ... ok
+test shell::keymap_review_tests::review_surfaces_attach_shortcuts_only_through_the_keymap ... ok
+test shell::keymap_review_tests::review_reference_command_alias ... ok
+test shell::keymap_review_tests::review_reference_escape_closes ... ok
+test shell::keymap_review_tests::review_reference_modal_keeps_tabs_and_restores_focus ... ok
+test shell::projects::tests::review::keymap_hidden_rename_returns_focus_to_projects ... ok
+test shell::setup::tests::onboarding_registered_workspace_without_sessions_still_starts_setup ... ok
+test shell::session::loaded_shell_tests::native_composer_loaded_shell_typing_benchmark ... ok
+test shell::shortcuts::tests::review::shortcuts_reopen_retains_list_scroll ... ok
+test shell::shortcuts::tests::shortcuts_overlay_bindings_dismissal_and_typing ... ok
+test shell::shortcuts::tests::bindings::shortcuts_every_displayed_chord_has_a_live_binding ... ok
+test shell::shortcuts::tests::review::correction_2::shortcuts_text_fields_pass_palette_chords ... ok
+test shell::sidebar::tests::sidebar_bootstrap_keeps_registered_active_workspace ... ok
+test shell::tests::keymap_composer_focus_survives_surface_switch_and_reconnect ... ok
+test shell::tests::keymap_composer_keeps_focus_through_real_socket_reconnect ... ok
+test shell::tests::keymap_modified_palette_chord_does_not_open_palette ... ok
+test shell::tests::keymap_reference_is_reachable_and_field_question_mark_is_text ... ok
+test shell::tests::keymap_text_focus_keeps_palette_and_close_out ... ok
+test shell::tests::look::shell_chrome_fifteen_workspaces_keeps_one_switcher ... ok
+test shell::tests::shell_chrome_fifteen_workspaces_keeps_one_switcher ... ok
+test terminal::tests::keymap_terminal_control_keys_reach_real_pty_before_shell ... ok
+test shell::shortcuts::tests::modal::shortcuts_modal_surfaces_keep_all_tab_chords_off_underlying_tabs has been running for over 60 seconds
+test shell::shortcuts::tests::modal::shortcuts_modal_surfaces_keep_all_tab_chords_off_underlying_tabs ... ok
+
+test result: ok. 31 passed; 0 failed; 1 ignored; 0 measured; 300 filtered out; finished in 139.64s

@@ -518,7 +518,8 @@ async function performAutoReview(review: QueuedReview, reviewerSlot: number): Pr
   let completionContext = null;
   if (lane.packetId && lane.sessionKey) {
     try {
-      completionContext = await capturePacketCompletionContext(lane.packetId, lane.sessionKey);
+      await capturePacketCompletionContext(lane.packetId, lane.sessionKey);
+      completionContext = await readPacketCompletionContext(lane.packetId);
     } catch (error) {
       console.warn(`[auto-review] Failed to refresh completion context for lane ${lane.id}:`, error);
       completionContext = await readPacketCompletionContext(lane.packetId);

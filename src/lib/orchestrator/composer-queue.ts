@@ -93,7 +93,7 @@ export function enqueueComposerSend(input: ComposerQueueTarget & { id: string; i
     getSqlite().prepare(`INSERT INTO composer_send_queue (id, repo_path, thread_id, intent, payload_json, status, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, 'queued', ?, ?)`).run(input.id, target.repoPath, target.threadId, input.intent, serialized, now, now);
     return readComposerSend(input.id)!;
-  })();
+  }).immediate();
 }
 export function claimNextComposerSend(target: ComposerQueueTarget): QueuedComposerSendRecord | null {
   return getSqlite().transaction(() => {
@@ -101,7 +101,7 @@ export function claimNextComposerSend(target: ComposerQueueTarget): QueuedCompos
     if (first?.status !== 'queued' || first.intent !== 'send-next') return null;
     const claimed = getSqlite().prepare(`UPDATE composer_send_queue SET status = 'dispatching', updated_at = ? WHERE id = ? AND status = 'queued' AND intent = 'send-next'`).run(Date.now(), first.id);
     return claimed.changes ? readComposerSend(first.id) : null;
-  })();
+  }).immediate();
 }
 
 /** A promotion changes intent only; the saved destination and routing stay frozen. */
@@ -113,7 +113,7 @@ export function promoteComposerSend(target: ComposerQueueTarget, id: string): Qu
     if (item.status !== 'queued' || item.admittedAt !== null || item.payload.afterTaskId) throw new Error('This message cannot be steered after delivery has started.');
     getSqlite().prepare("UPDATE composer_send_queue SET intent = 'steer-now', updated_at = ? WHERE id = ?").run(Date.now(), id);
     return readComposerSend(id)!;
-  })();
+  }).immediate();
 }
 
 export function claimComposerSteer(id: string): QueuedComposerSendRecord | null {
@@ -129,7 +129,9 @@ export function deferComposerSteer(id: string, reason: string): void {
 export function listComposerTranscriptSends(target: ComposerQueueTarget): QueuedComposerSendRecord[] {
   const applied = getSqlite().prepare("SELECT * FROM composer_send_queue WHERE repo_path = ? AND thread_id = ? AND intent = 'steer-now' AND status = 'applied' ORDER BY sequence DESC LIMIT 40")
     .all(composerQueueRepoKey(target.repoPath), target.threadId) as Row[];
-  return [...applied.map(view), ...listQueuedComposerSends(target)].sort((a, b) => a.sequence - b.sequence);
+  const messages = readPersistedLlmChat(target.threadId)?.history.messages ?? [];
+  return [...applied.map(view), ...listQueuedComposerSends(target)].sort((a, b) => a.sequence - b.sequence)
+    .map(item => ({ ...item, steerAnchor: messages.find(message => message.id === `composer-steer-${item.id}`)?.steerAnchor }));
 }
 /** Recheck after every asynchronous preparation step, immediately before provider admission. */
 export function assertComposerSendClaim(id: string): void {

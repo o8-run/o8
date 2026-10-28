@@ -92,6 +92,28 @@ fn editing(s: &Shell, window: &Window, cx: &App) -> bool {
             _ => false,
         })
 }
+// The registered reference owns every key while open. Other overlays own tab
+// chords before focused actions can dispatch them to hidden shell content.
+pub(super) fn owns_input(s: &Shell, event: &KeyDownEvent) -> bool {
+    if s.surfaces.shortcuts.view.is_some() {
+        return true;
+    }
+    let (select_tab, close_tab, cycle_tab) = tab_chords(event);
+    (select_tab || close_tab || cycle_tab)
+        && (s.palette || s.shortcuts || registrations().iter().any(|r| (r.overlay_open)(s)))
+}
+fn tab_chords(event: &KeyDownEvent) -> (bool, bool, bool) {
+    let key = event.keystroke.key.as_str();
+    let m = event.keystroke.modifiers;
+    let command = m.control || m.platform;
+    let select_tab = command
+        && !m.shift
+        && ((m.platform && !m.control && m.alt && ["left", "right"].contains(&key))
+            || (!m.alt && key.parse::<usize>().is_ok_and(|i| (1..=9).contains(&i))));
+    let close_tab = command && !m.alt && !m.shift && key == "w";
+    let cycle_tab = m.control && !m.alt && !m.platform && key == "tab";
+    (select_tab, close_tab, cycle_tab)
+}
 fn keys(s: &mut Shell, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Shell>) -> bool {
     let key = event.keystroke.key.as_str();
     let m = event.keystroke.modifiers;
@@ -131,12 +153,7 @@ fn keys(s: &mut Shell, event: &KeyDownEvent, window: &mut Window, cx: &mut Conte
         cx.notify();
         return true;
     }
-    let select_tab = command
-        && !m.shift
-        && ((m.platform && !m.control && m.alt && ["left", "right"].contains(&key))
-            || (!m.alt && key.parse::<usize>().is_ok_and(|i| (1..=9).contains(&i))));
-    let close_tab = command && !m.alt && !m.shift && key == "w";
-    let cycle_tab = m.control && !m.alt && !m.platform && key == "tab";
+    let (select_tab, close_tab, cycle_tab) = tab_chords(event);
     if (select_tab || close_tab || cycle_tab)
         && (s.palette || s.shortcuts || registrations().iter().any(|r| (r.overlay_open)(s)))
     {

@@ -3,7 +3,7 @@
 import { execFileSync, spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { randomBytes } from 'node:crypto';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -28,7 +28,7 @@ export async function startWorkerServer() {
   writeFileSync(join(data, 'chat-history', 'thoughts-composer-first.json'), JSON.stringify({
     title: 'Fixture worker', repoPath: repo, backend: 'pi', model: 'pi', orchestratorVisible: true,
     savedAt: '2026-10-01T00:00:00.000Z', messages: [{ id: 'initial', role: 'assistant', content: 'Fixture ready',
-      timestamp: 1790812800000, receipt: { permissionMode: 'plan' } }],
+      timestamp: 1790812800000, receipt: { permissionMode: 'plan', effort: 'adaptive', effortSource: 'runtime-default' } }],
   }));
   const wsPort = await freePort();
   Object.assign(process.env, { NODE_ENV: 'test', O8_DATA_DIR: data, CORTEX_IDE_DATA_DIR: data,
@@ -90,7 +90,9 @@ export async function startWorkerServer() {
           ...(req.headers.authorization ? { authorization: req.headers.authorization } : {}) }, ...(body ? { body } : {}) });
       const gate = panelGateMiddleware(request);
       const response = gate.headers.get('x-middleware-next') === '1' ? await route(request) : gate;
-      res.writeHead(response.status, Object.fromEntries(response.headers)); res.end(Buffer.from(await response.arrayBuffer()));
+      const responseBody = Buffer.from(await response.arrayBuffer());
+      if (response.status >= 400 && response.status !== 401) console.error(`Fixture request rejected: ${req.method} ${url.pathname} ${response.status} ${responseBody.toString()}`);
+      res.writeHead(response.status, Object.fromEntries(response.headers)); res.end(responseBody);
     } catch { res.writeHead(500).end('fixture route failed'); }
   });
   server.listen(0, '127.0.0.1'); await once(server, 'listening');
@@ -107,13 +109,20 @@ export async function startWorkerServer() {
       NEXT_ORIGIN: origin, CORTEX_REALTIME_INTERNAL_ORIGIN: `http://127.0.0.1:${wsPort}`,
       ...(process.env.O8_TEST_FILE_MARKER ? { O8_TEST_FILE_MARKER: process.env.O8_TEST_FILE_MARKER } : {}) },
   });
-  // Capture diagnostics in owned storage only. Never print paths or runtime data.
+  // Keep worker output in owned storage, addressed only by the private test receipt.
   const log = join(root, 'runtime.log');
+  writeFileSync(log, '');
   const { appendFileSync } = await import('node:fs');
   worker.stderr.on('data', chunk => appendFileSync(log, chunk));
   worker.stdout.on('data', chunk => appendFileSync(log, chunk));
   process.stdin.on('data', chunk => { if (!worker.stdin.destroyed) worker.stdin.write(chunk); });
   let closing = false;
+  worker.on('exit', (code, signal) => {
+    if (!closing) {
+      const output = readFileSync(log, 'utf8').slice(-64 * 1024);
+      console.error(`Fixture worker exited: code=${code} signal=${signal}\n${output}`);
+    }
+  });
   async function close() {
     if (closing) return; closing = true;
     issues?.close();
@@ -135,5 +144,5 @@ export async function startWorkerServer() {
     if (Date.now() > deadline) { await close(); throw new Error('Fixture runtime did not become ready'); }
     await new Promise(resolve => setTimeout(resolve, 25));
   }
-  process.stdout.write(`${JSON.stringify({ origin })}\n`);
+  process.stdout.write(`${JSON.stringify({ origin, runtimeLog: log })}\n`);
 }

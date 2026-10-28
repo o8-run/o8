@@ -24,14 +24,15 @@
     }
   },
   "bundle": {
+    "externalBin": ["helpers/o8-pi-write"],
     "linux": {
       "deb": {
         "desktopTemplate": "linux/o8.desktop",
-        "depends": ["nodejs (>= 22)"]
+        "recommends": ["nodejs (>= 22)"]
       },
       "rpm": {
         "desktopTemplate": "linux/o8.desktop",
-        "depends": ["nodejs >= 22.0.0"]
+        "recommends": ["nodejs >= 22.0.0"]
       }
     }
   }

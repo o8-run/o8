@@ -35,6 +35,7 @@ impl Entry {
             Self::Workspace(path) => format!("workspace:{path}"),
             Self::Surface(Command::Session(id)) => format!("session:{id}"),
             Self::Surface(Command::Message(id)) => format!("message:{id}"),
+            Self::Surface(Command::Feature(command)) => format!("command:{}", command.id),
             Self::Surface(Command::Refresh) => "command:refresh".into(),
             Self::Surface(Command::Shortcuts) => "command:shortcuts".into(),
             Self::Surface(command) => format!("surface:{}", command.registration().command_label),

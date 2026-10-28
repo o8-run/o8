@@ -131,7 +131,7 @@ export function bundleServers({ root, outDir }) {
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 const require = createRequire(import.meta.url);
-if (process.platform === 'darwin') {
+if (process.platform === 'darwin' || process.platform === 'linux') {
   require('./native-addon-runtime.cjs').prepareNativeAddons(dirname(fileURLToPath(import.meta.url)));
 }
 `;

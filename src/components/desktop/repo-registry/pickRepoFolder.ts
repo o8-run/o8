@@ -11,14 +11,14 @@ export async function pickRepoFolder(title: string, promptMessage: string, promp
   } catch {
     try {
       const response = await fetch('/api/panel/browse-folder', { method: 'POST' });
-      const data = await response.json() as { path?: string | null };
-      if (!response.ok) throw new Error('Folder picker unavailable.');
+      const data = await response.json() as { path?: string | null; unavailable?: boolean };
+      if (!response.ok || data.unavailable) throw new Error('Folder picker unavailable.');
       if (typeof data.path === 'string') folderPath = data.path;
     } catch (error) {
       if (!promptFallback) throw error;
-      folderPath = await requestPrompt({ title, message: promptMessage, placeholder: '/path/to/folder' });
+      const typedPath = await requestPrompt({ title, message: promptMessage, placeholder: '/path/to/folder' });
+      folderPath = typedPath?.trim() || null;
     }
   }
-  const trimmedPath = folderPath?.trim() ?? '';
-  return trimmedPath || null;
+  return folderPath || null;
 }

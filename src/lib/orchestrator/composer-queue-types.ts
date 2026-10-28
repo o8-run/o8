@@ -36,4 +36,5 @@ export interface QueuedComposerSendRecord extends ComposerQueueTarget {
   createdAt: number;
   updatedAt: number;
   admittedAt: number | null;
+  steerAnchor?: import('@/lib/transcripts/steer-anchor').SteerTranscriptAnchor;
 }

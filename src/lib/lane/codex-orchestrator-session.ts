@@ -366,7 +366,7 @@ async function sendToCodexOrchestratorAttempt(
   }
   if (settleBeforeSpawnIfAborted()) return;
   const isLocalModel = !!parseLocalModel(model);
-  let reasoningEffort: Exclude<ThinkingEffort, 'adaptive'>;
+  let reasoningEffort: Exclude<ThinkingEffort, 'adaptive'> | undefined;
 
   const { resolveCli, CliNotFoundError } = await import('@/lib/runtimes/shared/cli-resolver');
   if (settleBeforeSpawnIfAborted()) return;
@@ -379,7 +379,7 @@ async function sendToCodexOrchestratorAttempt(
     });
     codexBin = resolved.path;
     reasoningEffort = reasoningEffortFromThinkingEffort(options.thinkingEffort, model, {
-      explicitModel: options.model, installedCliVersion: resolved.version ?? null,
+      explicitModel: options.model, installedCliVersion: resolved.version ?? null, codexHome: userCodexHome(),
     });
   } catch (err) {
     if (settleBeforeSpawnIfAborted()) return;
@@ -403,7 +403,8 @@ async function sendToCodexOrchestratorAttempt(
     return;
   }
 
-  onEvent({ type: 'turn_receipt', leadModel: model, effort: reasoningEffort });
+  onEvent({ type: 'turn_receipt', leadModel: model, effort: reasoningEffort ?? 'adaptive',
+    ...(reasoningEffort === undefined ? { effortSource: 'runtime-default' } : {}) });
 
   const serviceTier = serviceTierForTurn(options.serviceTier, 'codex', resolveOrchestratorModelSync(options.model), 'codex', model);
   if (serviceTier && serviceTier !== 'default') {

@@ -5,6 +5,7 @@ import { resolveSubscriptionProfileRouting } from '@/lib/operator/subscription-p
 import { assertExecutionCarrierDispatchable } from '@/lib/runtimes/shared/execution-carrier-preflight';
 import { getDispatchableRuntimeAvailability } from '@/lib/runtimes/shared/auth-detect';
 import { getCodexSpeedCatalogue } from '@/lib/codex/service-tier-catalogue';
+import { codexModelDiscoveryHome } from '@/lib/codex/model-discovery-cache';
 import { parseLocalModel } from '@/lib/codex/local-model';
 import { readCodexSubscriptionProxyModels } from '@/lib/claude-code/codex-subscription-proxy';
 import { resolveClaudeCodeWorkerSelection } from '@/lib/claude-code/worker-profile';
@@ -17,6 +18,22 @@ import { probeMuseModels } from '@/lib/muse/models';
 import { getRuntimeCapability, type OrchestratorRuntime } from './runtime-capabilities';
 import { resolveEffortPin } from './effort-pin';
 import { THINKING_EFFORTS, type ThinkingEffort } from './thinking-effort';
+
+export class WorkerCatalogSelectionError extends Error {}
+
+export class WorkerCatalogReadError extends Error {
+  constructor(readonly call: string, cause: unknown) {
+    super(cause instanceof Error ? cause.message : 'Worker catalog unavailable.');
+  }
+}
+
+async function readCatalog<T>(call: string, read: () => Promise<T>): Promise<T> {
+  try { return await read(); }
+  catch (error) {
+    if (error instanceof WorkerCatalogSelectionError) throw error;
+    throw new WorkerCatalogReadError(call, error);
+  }
+}
 
 export interface WorkerModelCatalog {
   models: Array<{ id: string; efforts: ThinkingEffort[] }>;
@@ -37,6 +54,7 @@ export function configuredWorkerPool(snapshot = getOperatorDefaultsSync()): Orch
 }
 
 export async function workerModelCatalog(runtime: OrchestratorRuntime, repoPath: string): Promise<WorkerModelCatalog> {
+  const codexHome = runtime === 'codex' ? codexModelDiscoveryHome() : undefined;
   const defaults = getOperatorDefaultsSync().values;
   const capability = getRuntimeCapability(runtime);
   let defaultModel = runtime === 'opencode' ? defaults.opencodeWorkerModel
@@ -68,7 +86,7 @@ export async function workerModelCatalog(runtime: OrchestratorRuntime, repoPath:
     ids = defaultModel ? [defaultModel] : [];
     source = 'configured-execution-carrier-model';
   } else if (runtime === 'codex') {
-    ids = Object.keys((await getCodexSpeedCatalogue()).models);
+    ids = Object.keys((await getCodexSpeedCatalogue(codexHome)).models);
     if (defaultModel && parseLocalModel(defaultModel)) ids.push(defaultModel);
     source = 'installed-model-list';
   } else if (runtime === '3code') {
@@ -77,7 +95,7 @@ export async function workerModelCatalog(runtime: OrchestratorRuntime, repoPath:
     source = catalog.source;
   } else if (runtime === 'opencode') {
     const launch = resolveAcpLaunch('opencode');
-    if (!launch) throw new Error('The selected runtime is not installed.');
+    if (!launch) throw new WorkerCatalogSelectionError('The selected runtime is not installed.');
     const catalog = await probeAcpModels('opencode', launch, repoPath);
     ids = catalog.models.map(model => model.value);
     defaultModel ??= catalog.currentModel;
@@ -90,7 +108,7 @@ export async function workerModelCatalog(runtime: OrchestratorRuntime, repoPath:
     ids = defaultModel ? [defaultModel] : [];
   }
   return {
-    models: [...new Set(ids)].map(id => ({ id, efforts: THINKING_EFFORTS.filter(effort => resolveEffortPin({ runtime, model: id, requestedEffort: effort }).ok) })),
+    models: [...new Set(ids)].map(id => ({ id, efforts: THINKING_EFFORTS.filter(effort => resolveEffortPin({ runtime, model: id, requestedEffort: effort, codexHome }).ok) })),
     defaultModel, carrier, source, observedAt: new Date().toISOString(),
   };
 }
@@ -99,7 +117,7 @@ export async function workerModelCatalog(runtime: OrchestratorRuntime, repoPath:
 export async function getWorkerCatalog(repoPath: string, runtime?: OrchestratorRuntime | null) {
   const snapshot = getOperatorDefaultsSync();
   const pool = configuredWorkerPool(snapshot);
-  const inventory = await getDispatchableRuntimeAvailability();
+  const inventory = await readCatalog('getDispatchableRuntimeAvailability', getDispatchableRuntimeAvailability);
   const workers = await Promise.all(pool.map(async id => {
     const readiness = inventory.find(item => item.id === id);
     let available = readiness?.available === true;
@@ -118,11 +136,11 @@ export async function getWorkerCatalog(repoPath: string, runtime?: OrchestratorR
     };
   }));
   if (runtime && !workers.some(worker => worker.runtime === runtime && worker.available)) {
-    throw new Error('Choose an available runtime from the configured worker pool. Manage the pool in Settings > Models.');
+    throw new WorkerCatalogSelectionError('Choose an available runtime from the configured worker pool. Manage the pool in Settings > Models.');
   }
   return {
     workers,
-    ...(runtime ? { runtime, catalog: await workerModelCatalog(runtime, repoPath) } : {}),
+    ...(runtime ? { runtime, catalog: await readCatalog(`workerModelCatalog(${runtime})`, () => workerModelCatalog(runtime, repoPath)) } : {}),
     selectionPolicy: 'Honor explicit task choices. Otherwise choose a suitable available worker from this pool. Do not change settings or silently replace a refused choice. Availability is preflight evidence, not proof of execution.',
   };
 }

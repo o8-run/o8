@@ -1,0 +1,35 @@
+Main 2c80b0c7674b434f20369bd145f49e1c69538f3f: 316 passed / 0 failed / 8 ignored
+Head source tree ea6a5ab934b8b191115728a2fe16c25ab7618511: 335 passed / 0 failed / 9 ignored
+Main cases retained: 324/324; head cases: 344; head-only failures: none
+Locked all-target checks: main PASS; head PASS
+Focused contracts: 31 passed / 0 failed / 1 existing release-only benchmark ignored
+
+Full head native harness results:
+test result: ok. 82 passed; 0 failed; 1 ignored; 0 measured; 249 filtered out; finished in 224.48s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.01s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.02s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+test result: ok. 77 passed; 0 failed; 2 ignored; 0 measured; 253 filtered out; finished in 245.06s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.03s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.01s
+test result: ok. 83 passed; 0 failed; 1 ignored; 0 measured; 248 filtered out; finished in 266.62s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 330 filtered out; finished in 50.31s
+test result: ok. 79 passed; 0 failed; 5 ignored; 0 measured; 248 filtered out; finished in 84.09s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.01s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.01s
+
+Local CI statuses:
+PASS: Lint
+PASS: Security Audit
+PASS: Test Classification
+PASS: Integration Tests (changed files)
+PASS: Server Bundle Size
+PASS: Type Check
+PASS: Governance Smoke
+PASS: o8 next Native Tests (Linux)
+FAIL: Hermetic Unit Tests
+Hermetic unit tests: 9769 passed / 1 failed / 5 skipped
+The unchanged credential fixture cannot create its home data directory in this sandbox.

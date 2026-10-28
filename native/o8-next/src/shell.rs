@@ -15,9 +15,9 @@ use std::{
     time::Duration,
 };
 
-// The parent waits for the first server load in the open window. This channel
+// The parent waits only for the first paint of the open window. This channel
 // carries only fixed control signals, never diagnostics or credentials.
-fn report_startup(ready: bool) {
+fn report_startup() {
     use std::{
         io::Write,
         sync::atomic::{AtomicBool, Ordering},
@@ -29,12 +29,9 @@ fn report_startup(ready: bool) {
         return;
     }
     let mut output = std::io::stdout().lock();
-    let signal: &[u8] = if ready {
-        b"o8-next-ready\n"
-    } else {
-        b"o8-next-startup-error\n"
-    };
-    let _ = output.write_all(signal).and_then(|_| output.flush());
+    let _ = output
+        .write_all(b"o8-next-ready\n")
+        .and_then(|_| output.flush());
 }
 
 pub const HELP: &str = "App shell: --app-shell --shell-state ABSOLUTE_FILE --server ORIGIN [--offscreen]. The o8 next launcher resolves existing local configuration.";
@@ -69,7 +66,11 @@ register_surfaces! {
     }
 }
 
+#[path = "shell_features.rs"]
+mod features;
+
 pub struct Shell {
+    features: features::State,
     system_glass: bool,
     chrome: crate::render_region::Regions<Shell>,
     client: Client,
@@ -104,20 +105,10 @@ impl Shell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        crate::keymap::install(cx);
-        let palette_input = cx.new(|cx| {
-            let mut input = crate::composer::Composer::new(cx);
-            input.context = "TextInput Palette";
-            input
-        });
-        let palette_subscription = cx.observe(&palette_input, |this: &mut Self, input, cx| {
-            this.query = input.read(cx).text.clone();
-            this.choice = 0;
-            cx.notify();
-        });
         let focus = cx.focus_handle();
         focus.focus(window);
         let mut shell = Self {
+            features: features::State::default(),
             system_glass: false,
             chrome: crate::render_region::Regions::default(),
             client,
@@ -130,7 +121,7 @@ impl Shell {
             surface_focus: HashMap::new(),
             palette: false,
             workspace_picker: false,
-            palette_input,
+            palette_input: cx.new(crate::composer::Composer::new),
             shortcuts: false,
             shortcuts_focus: cx.focus_handle(),
             query: String::new(),
@@ -141,32 +132,10 @@ impl Shell {
             connected: false,
             revision: 0,
             painted: Rc::new(Cell::new(u64::MAX)),
-            subscriptions: vec![palette_subscription],
+            subscriptions: vec![],
             surfaces: SurfaceRuntime::default(),
         };
-        shell
-            .subscriptions
-            .push(cx.observe_window_bounds(window, |this, window, _| {
-                let bounds = window.window_bounds().get_bounds();
-                this.state.bounds = [
-                    bounds.origin.x.into(),
-                    bounds.origin.y.into(),
-                    bounds.size.width.into(),
-                    bounds.size.height.into(),
-                ];
-                this.persist();
-            }));
-        let view = cx.weak_entity();
-        window.on_window_should_close(cx, move |window, cx| {
-            let _ = view.update(cx, |this, cx| {
-                this.capture(window, cx);
-                this.persist();
-            });
-            true
-        });
-        for registration in registrations() {
-            (registration.initialize)(&mut shell, window, cx);
-        }
+        features::observe(&mut shell, window, cx);
         shell.load(cx);
         shell
     }
@@ -220,11 +189,9 @@ impl Shell {
                         }
                         this.notice.clear();
                         this.persist();
-                        report_startup(true);
                     }
                     Err(error) => {
                         this.connected = false;
-                        report_startup(false);
                         this.notice = format!("Local server unavailable: {error}. Start the local o8 server, then Retry.");
                     }
                 }
@@ -358,37 +325,12 @@ impl Shell {
         palette::entries(self)
     }
     fn surface_commands(&self) -> Vec<Command> {
-        let mut entries = registrations()
-            .iter()
-            .filter_map(|r| r.command)
-            .collect::<Vec<_>>();
-        entries.sort_by_key(|(order, _)| *order);
-        let mut commands = entries
+        features::commands(self)
             .into_iter()
-            .map(|(_, command)| command())
-            .collect::<Vec<_>>();
-        if let Some(id) = match self.active() {
-            Some(Tab::Session(id)) => Some(
-                self.current()
-                    .and_then(|w| w.selections.get(&id))
-                    .cloned()
-                    .unwrap_or(id),
-            ),
-            _ => self.workspace_sessions().first().map(|s| s.id.clone()),
-        } {
-            commands.insert(0, Command::Message(id));
-        }
-        commands.extend(
-            self.workspace_sessions()
-                .iter()
-                .map(|s| Command::Session(s.id.clone())),
-        );
-        commands.extend([Command::Refresh, Command::Shortcuts]);
-        commands
-            .into_iter()
-            .filter(|c| {
-                registry::extensions().all(|extension| extension.allow_command(self, c))
-                    && c.label(&self.sessions)
+            .filter(|command| {
+                registry::extensions().all(|extension| extension.allow_command(self, command))
+                    && command
+                        .label(&self.sessions)
                         .to_lowercase()
                         .contains(&self.query.to_lowercase())
             })
@@ -398,28 +340,8 @@ impl Shell {
         if !registry::extensions().all(|extension| extension.allow_command(self, &command)) {
             return;
         }
-        match command {
-            Command::Refresh => {
-                self.capture(window, cx);
-                if let Some(content) = self
-                    .active()
-                    .and_then(|tab| self.content.get(&self.key(&tab)))
-                {
-                    content.refresh(cx);
-                }
-                self.palette = false;
-                self.load(cx);
-                self.restore_focus(window, cx);
-                return;
-            }
-            Command::Shortcuts => {
-                self.palette = false;
-                self.shortcuts = true;
-                self.shortcuts_focus.focus(window);
-                cx.notify();
-                return;
-            }
-            _ => {}
+        if features::execute(self, &command, window, cx) {
+            return;
         }
         let registration = command.registration();
         if registration.overlay_command {
@@ -464,137 +386,8 @@ impl Shell {
         self.revision += 1;
         cx.notify();
     }
-    fn action(
-        &mut self,
-        action: &crate::keymap::Shortcut,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        use crate::keymap::Shortcut;
-        if registry::extensions().any(|extension| extension.action(self, action, window, cx)) {
-            self.revision += 1;
-            cx.notify();
-            return;
-        }
-        match *action {
-            Shortcut::Reference => {
-                self.capture(window, cx);
-                self.shortcuts = true;
-                self.shortcuts_focus.focus(window);
-            }
-            Shortcut::ReferenceCancel => {
-                self.shortcuts = false;
-                self.restore_focus(window, cx);
-            }
-            Shortcut::Settings => {
-                if self.surfaces.settings.view.is_some() {
-                    self.close_settings(window, cx);
-                } else {
-                    self.open_settings(window, cx);
-                }
-            }
-            Shortcut::NextSurface | Shortcut::PreviousSurface | Shortcut::SurfaceIndex(_) => {
-                let Some(saved) = self.current().filter(|saved| !saved.tabs.is_empty()) else {
-                    return;
-                };
-                let index = match *action {
-                    Shortcut::PreviousSurface => {
-                        (saved.active + saved.tabs.len() - 1) % saved.tabs.len()
-                    }
-                    Shortcut::SurfaceIndex(index) if index < saved.tabs.len() => index,
-                    Shortcut::SurfaceIndex(_) => return,
-                    _ => (saved.active + 1) % saved.tabs.len(),
-                };
-                self.capture(window, cx);
-                for registration in registrations() {
-                    (registration.after_tab)(self);
-                }
-                if let Some(saved) = self
-                    .state
-                    .selected
-                    .as_ref()
-                    .and_then(|w| self.state.workspaces.get_mut(w))
-                    && !saved.tabs.is_empty()
-                {
-                    saved.active = index;
-                }
-                self.ensure(window, cx);
-                self.restore_focus(window, cx);
-                self.persist();
-            }
-            Shortcut::CloseSurface => {
-                if let Some(tab) = self.active() {
-                    self.surface_focus.remove(&self.key(&tab));
-                    self.content.remove(&self.key(&tab));
-                    let saved = self
-                        .state
-                        .workspaces
-                        .get_mut(self.state.selected.as_deref().unwrap_or(""))
-                        .unwrap();
-                    (tab.registration().remove)(saved, &tab);
-                    saved.tabs.remove(saved.active);
-                    saved.active = saved.active.min(saved.tabs.len().saturating_sub(1));
-                    self.ensure(window, cx);
-                    self.restore_focus(window, cx);
-                    self.persist();
-                }
-            }
-            #[cfg(test)]
-            Shortcut::Probe => self.execute(Command::Fake, window, cx),
-            _ => {
-                cx.propagate();
-                return;
-            }
-        }
-        if self.palette {
-            // The palette header is the first child of the scrolling container.
-            self.palette_scroll.scroll_to_item(self.choice + 1);
-        }
-        self.revision += 1;
-        cx.notify();
-    }
-    fn sidebar_key_down(
-        &mut self,
-        event: &KeyDownEvent,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if (sidebar::REGISTRATION.key_down)(self, event, window, cx) {
-            self.revision += 1;
-            cx.notify();
-            cx.stop_propagation();
-        }
-    }
-    fn legacy_key_down(
-        &mut self,
-        event: &KeyDownEvent,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if registrations()
-            .iter()
-            .any(|registration| (registration.key_down)(self, event, window, cx))
-        {
-            self.revision += 1;
-            cx.notify();
-            cx.stop_propagation();
-        }
-    }
     fn tick(&mut self, refresh: bool, window: &mut Window, cx: &mut Context<Self>) {
-        for extension in registry::extensions() {
-            extension.tick(self, refresh, window, cx);
-        }
-        for registration in registrations() {
-            (registration.tick)(self, window, cx);
-        }
-        let before = serde_json::to_vec(&self.state).unwrap();
-        self.capture(window, cx);
-        if before != serde_json::to_vec(&self.state).unwrap() {
-            self.persist();
-        }
-        for content in self.content.values() {
-            content.tick(refresh, cx);
-        }
+        features::tick(self, refresh, window, cx);
     }
 }
 #[path = "shell_material.rs"]
@@ -602,6 +395,10 @@ mod material;
 #[path = "shell_view.rs"]
 mod view;
 pub use view::try_launch;
+
+#[cfg(test)]
+#[path = "shell_window_tests.rs"]
+mod window_tests;
 
 #[cfg(test)]
 #[path = "shell_tests.rs"]
@@ -614,3 +411,11 @@ mod test_support;
 #[cfg(test)]
 #[path = "keymap_review_tests.rs"]
 mod keymap_review_tests;
+
+#[cfg(test)]
+#[path = "shell_feature_tests.rs"]
+mod feature_tests;
+
+#[cfg(test)]
+#[path = "startup_tests.rs"]
+mod startup_tests;

@@ -18,6 +18,7 @@
  * the gate authorizes by token — the loopback heuristic alone intermittently 401'd.
  */
 
+import { unmappedEffortError } from './unmapped-effort';
 import { resolveBackendTurnModel } from '@/lib/orchestrator/turn-model-selection';
 import { sessionNameForRepo } from '@/lib/lane/orchestrator-session-core';
 import { readFile } from 'node:fs/promises';
@@ -192,7 +193,7 @@ async function sendTextOnlyTurn(
       ? prior
       : [...prior, { role: 'user', content: message }];
   const tier = O8_FALLBACK_TIER;
-  onEvent({ type: 'turn_receipt', leadModel: o8ReceiptModel(options), effort: tier });
+  onEvent({ type: 'turn_receipt', leadModel: o8ReceiptModel(options), effort: 'adaptive', effortSource: 'runtime-default', serviceTier: tier });
   // Say why before anything streams, so a text-only answer is never mistaken for the agent.
   onEvent({ type: 'text', text: `${blocker}, so this reply is text only, without o8 commands, file edits or tools.\n\n` });
   const messages: ProxyMessage[] = [{ role: 'system', content: o8SystemPrompt(tier) }, ...history];
@@ -415,6 +416,11 @@ export function createO8Backend(deps: O8BackendDeps = {}): OrchestratorBackend {
       return { sessionName, status: 'ready' };
     },
     sendTurn(repoPath, message, onEvent, options) {
+      const effortError = unmappedEffortError(options?.thinkingEffort);
+      if (effortError) {
+        onEvent(effortError); onEvent({ type: 'done', sessionId: null, cost: null });
+        return Promise.resolve();
+      }
       const reason = blocker();
       // The composer's access mode reaches Pi: Full access writes and runs without asking, Plan only is read-only.
       if (!reason) {

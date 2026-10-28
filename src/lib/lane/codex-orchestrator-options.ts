@@ -26,16 +26,16 @@ export function sandboxFlagsForMode(mode: CodexOrchestratorPermissionMode): stri
   return ['--dangerously-bypass-approvals-and-sandbox'];
 }
 
-/** Omitted and adaptive lead choices use xhigh; explicit pins never normalize. */
+/** Omitted and adaptive lead choices leave effort to the runtime; explicit pins never normalize. */
 export function reasoningEffortFromThinkingEffort(
   effort: ThinkingEffort | undefined,
   model?: string,
-  compatibility: { installedCliVersion?: string | null; explicitModel?: string } = {},
-): Exclude<ThinkingEffort, 'adaptive'> {
+  compatibility: { installedCliVersion?: string | null; explicitModel?: string; codexHome?: string } = {},
+): Exclude<ThinkingEffort, 'adaptive'> | undefined {
   const pin = resolveEffortPin({ runtime: 'codex', model: model ?? null,
     requestedEffort: effort, ...compatibility });
   if (!pin.ok) throw new EffortPinRejectionError(pin.code, pin.message);
-  return (pin.selectedEffort as Exclude<ThinkingEffort, 'adaptive'> | null) ?? 'xhigh';
+  return (pin.selectedEffort as Exclude<ThinkingEffort, 'adaptive'> | null) ?? undefined;
 }
 
 /**
@@ -64,16 +64,15 @@ export function resolveOrchestratorModelSync(explicit?: string): string {
 /**
  * Build the model `-c`/flag pairs for `codex exec`. A local model expands to the
  * `--oss --local-provider … --model` form (no reasoning-effort tier — local
- * models don't have one). A cloud model keeps the historical `-c model=` +
- * `-c model_reasoning_effort=` pair verbatim, so the default path is unchanged.
- * Exported for the unit test that locks the cloud-path invariant.
+ * models don't have one). A cloud model sends an effort override only for a
+ * concrete pin; omission leaves the runtime's configured default in effect.
  */
-export function codexOrchestratorModelFlags(model: string, reasoningEffort: string): string[] {
+export function codexOrchestratorModelFlags(model: string, reasoningEffort?: string): string[] {
   const local = parseLocalModel(model);
   if (local) {
     return ['--oss', '--local-provider', local.provider, '--model', local.model];
   }
-  return ['-c', `model=${model}`, '-c', `model_reasoning_effort=${reasoningEffort}`];
+  return ['-c', `model=${model}`, ...(reasoningEffort ? ['-c', `model_reasoning_effort=${reasoningEffort}`] : [])];
 }
 
 function codexBrainFirstSection(mcpServers: boolean): string {

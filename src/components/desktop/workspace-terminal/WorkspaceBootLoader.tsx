@@ -24,7 +24,7 @@ const CELL = 6;
 const SCALE = 0.4;
 const TEXT = 'o8';
 
-function WorkspaceBootLoaderBase() {
+function WorkspaceBootLoaderBase({ contained = false }: { contained?: boolean }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -51,14 +51,21 @@ function WorkspaceBootLoaderBase() {
     let activeCells: Array<{ i: number; j: number; base: number }> = [];
     let cx = -1;
     let cy = -1;
+    let canvasLeft = 0;
+    let canvasTop = 0;
     const off = document.createElement('canvas');
-    const onPointerMove = (e: PointerEvent) => { cx = e.clientX / CELL; cy = e.clientY / CELL; };
+    const onPointerMove = (e: PointerEvent) => {
+      cx = (e.clientX - canvasLeft) / CELL;
+      cy = (e.clientY - canvasTop) / CELL;
+    };
     const onPointerLeave = () => { cx = -1; cy = -1; };
     window.addEventListener('pointermove', onPointerMove);
     window.addEventListener('pointerleave', onPointerLeave);
 
     function build() {
       const rect = canvas!.getBoundingClientRect();
+      canvasLeft = rect.left;
+      canvasTop = rect.top;
       cssW = Math.max(1, Math.floor(rect.width));
       cssH = Math.max(1, Math.floor(rect.height));
       dpr = Math.min(window.devicePixelRatio || 1, 3);
@@ -174,9 +181,12 @@ function WorkspaceBootLoaderBase() {
   return (
     <div
       style={{
-        position: 'fixed',
-        inset: 0,
-        zIndex: 180,
+        position: contained ? 'relative' : 'fixed',
+        inset: contained ? undefined : 0,
+        zIndex: contained ? undefined : 180,
+        flex: contained ? 1 : undefined,
+        minHeight: contained ? 120 : undefined,
+        width: contained ? '100%' : undefined,
         // OPAQUE in both surfaces (Q ruling 2026-07-16): the old glass tint
         // (alpha ~0.6, borrowed from the bundled splash) let the mounted
         // chrome + the solid center tile read THROUGH the loader — the
@@ -187,6 +197,7 @@ function WorkspaceBootLoaderBase() {
         background: 'var(--o8-boot-cover-bg, #F4F2ED)',
         animation: 'o8BootBackdropIn 200ms ease-out both',
       }}
+      role="status"
       aria-label="Loading workspace"
       aria-live="polite"
     >

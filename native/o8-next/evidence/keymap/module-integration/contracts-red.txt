@@ -1,0 +1,34 @@
+running 3 tests
+test keymap::tests::keymap_every_binding_dispatches_only_on_its_focus_path ... FAILED
+test shell::keymap_review_tests::review_reference_command_alias ... FAILED
+test shell::keymap_review_tests::review_reference_modal_keeps_tabs_and_restores_focus ... FAILED
+
+failures:
+
+---- keymap::tests::keymap_every_binding_dispatches_only_on_its_focus_path stdout ----
+
+thread 'keymap::tests::keymap_every_binding_dispatches_only_on_its_focus_path' (fixture) panicked at src/keymap_tests.rs:129:21:
+assertion `left == right` failed: ctrl-, · Open settings · Global && !Terminal && !TextInput with text focus (isolated=true)
+  left: []
+ right: [Settings]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- shell::keymap_review_tests::review_reference_command_alias stdout ----
+
+thread 'shell::keymap_review_tests::review_reference_command_alias' (fixture) panicked at src/keymap_review_tests.rs:28:5:
+Cmd+/ must open the reference from the focused list
+
+---- shell::keymap_review_tests::review_reference_modal_keeps_tabs_and_restores_focus stdout ----
+
+thread 'shell::keymap_review_tests::review_reference_modal_keeps_tabs_and_restores_focus' (fixture) panicked at src/keymap_review_tests.rs:182:5:
+assertion failed: shell.read_with(&cx, |s, _| s.surfaces.shortcuts.view.is_some())
+
+
+failures:
+    keymap::tests::keymap_every_binding_dispatches_only_on_its_focus_path
+    shell::keymap_review_tests::review_reference_command_alias
+    shell::keymap_review_tests::review_reference_modal_keeps_tabs_and_restores_focus
+
+test result: FAILED. 0 passed; 3 failed; 0 ignored; 0 measured; 329 filtered out; finished in 4.64s
+
+error: test failed, to rerun pass `--bin o8-next`

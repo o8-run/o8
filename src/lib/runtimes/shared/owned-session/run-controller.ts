@@ -1,8 +1,11 @@
+import { assertWorkerMemoryCurrent, mergePreparedWorkerMemory, refreshOwnedWorkerMemory } from '@/lib/dispatch/worker-memory-context';
+import { hasRuntimeLaunchDeadline, runtimeLaunchRead, runtimeLaunchStep } from '@/lib/runtime/launch-deadline';
 import { createWorkerFailureHandler } from './worker-failure';
 import { assertRuntimeEffortPin } from '@/lib/orchestrator/effort-pin';
 import { assertOwnedActionFence, hasOwnedActionFence } from './action-fence';
 import { createCapacityRecovery } from './capacity-wait';
 import { packetCargoEnvironment } from '@/lib/worktree/cargo-target-cache';
+import { createRunArtifactReader } from './run-artifact-reader';
 import { controlledProviderSandbox } from './controlled-provider-sandbox';
 import { providerCredentialName } from '@/lib/providers/spawn-environment';
 import { credentialPolicyFingerprint } from '@/lib/providers/credential-policy';
@@ -20,7 +23,7 @@ import { createFailureRetry } from './failure-retry';
 import { assertOwnedSingleAttemptSpawn, assertDurableOwnedSpawn } from './execution-policy';
 import type { ChildProcess } from 'node:child_process';
 import { closeSync, constants, fstatSync, openSync } from 'node:fs';
-import { readFile, stat, writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { getOrCreateLocalWorkerToken } from '@/lib/auth/worker-token';
@@ -40,9 +43,9 @@ import { guardedWorkspaceInvocation } from '@/lib/worktree/materialization-execu
 import { tmuxSessionName } from '@/lib/terminal/tmux';
 import { pathWithNodeRuntime } from '@/lib/util/node-on-path';
 import { crashSurvivableWorkersEnabled } from './crash-survival';
-import { assertOwnedSessionProcessIdentity, captureOwnedRunIdentity } from './process-identity';
+import { assertOwnedSessionProcessIdentity, captureOwnedRunIdentity, verifyStartedChildIdentity } from './process-identity';
 import { emitRuntimeFallbackNotification, notifySupervisorOfCleanExit } from './run-notifications';
-import { observeChildExit, readAbnormalStderrTail } from './exit-outcome';
+import { observeChildExit, readAbnormalStderrTail, silentCleanExitMessage } from './exit-outcome';
 import { prepareOwnedLaunchArgs } from './launch-args';
 import { WorkerO8CliUnavailableError } from './worker-o8-cli';
 import { stageOwnedLaunchFailure } from './launch-failure';
@@ -72,14 +75,13 @@ import { preparedRuntimeStateSandboxPolicy } from './runtime-state-sandbox';
 import type { OwnedSessionIo } from './session-io';
 import type {
   OwnedChildExitOutcome,
-  ParsedRunLog,
   OwnedRunMode,
   OwnedRunRecord,
   OwnedRuntimeAdapter,
   OwnedSessionRecord,
 } from './types';
 export interface OwnedRunController {
-  readRunArtifacts(run: OwnedRunRecord): Promise<{
+  readRunArtifacts(run: OwnedRunRecord, includeStdout?: boolean): Promise<{
     stdoutRaw: string;
     stderrRaw: string;
     parsed: ReturnType<OwnedRuntimeAdapter['parseRunLog']>;
@@ -89,8 +91,7 @@ export interface OwnedRunController {
   reconcilePreparedRuns(session: OwnedSessionRecord): Promise<OwnedSessionRecord>;
   spawnOwnedRun(
     session: OwnedSessionRecord,
-    prompt: string,
-    mode: OwnedRunMode,
+    prompt: string, mode: OwnedRunMode, options?: { freshRequest?: boolean },
   ): Promise<OwnedRunRecord>;
 }
 
@@ -118,16 +119,8 @@ export function createOwnedRunController({
   invalidateFleetCache: () => void;
 }): OwnedRunController {
   const capacityRecovery = createCapacityRecovery({ adapter, io, spawnOwnedRun });
+  const readRunArtifacts = createRunArtifactReader(adapter, detectRunSandboxDenial);
   const handleWorkerFailure = createWorkerFailureHandler({ adapter, io, readRunArtifacts, park: capacityRecovery.park });
-  const runArtifactCache = new Map<string, {
-    key: string;
-    /** null = raw exceeded RAW_RETENTION_MAX_BYTES; re-read from disk on hit. */
-    stdoutRaw: string | null;
-    stderrRaw: string | null;
-    parsed: ParsedRunLog;
-  }>();
-  const RUN_ARTIFACT_CACHE_MAX = 48;
-  const RAW_RETENTION_MAX_BYTES = 2 * 1024 * 1024;
   const recoverModelCompatibility = createModelCompatibilityRecovery({ adapter, io, withSurfaceLock, readRunArtifacts, spawnOwnedRun });
   const scheduleFailureRetry = createFailureRetry({ adapter, io, withSurfaceLock, readRunArtifacts, spawnOwnedRun,
     notify: (session, from, to, reason) => emitRuntimeFallbackNotification(runtimeId, session, from, to, reason), invalidateFleetCache, retryDelayMs });
@@ -151,63 +144,6 @@ export function createOwnedRunController({
 
   function quoteShellArg(value: string): string {
     return `'${value.replace(/'/g, "'\\''")}'`;
-  }
-
-  async function statKey(filePath: string): Promise<string> {
-    try {
-      const info = await stat(filePath);
-      return `${info.size}:${info.mtimeMs}`;
-    } catch {
-      return 'absent';
-    }
-  }
-
-  async function readRunArtifacts(run: OwnedRunRecord) {
-    const [stdoutKey, stderrKey] = await Promise.all([
-      statKey(run.stdoutPath),
-      statKey(run.stderrPath),
-    ]);
-    const key = JSON.stringify([
-      stdoutKey, stderrKey, run.outcome, run.finishedAt, run.interruptRequestedAt, run.childExit,
-    ]);
-    const cached = runArtifactCache.get(run.id);
-    if (cached?.key === key) {
-      runArtifactCache.delete(run.id);
-      runArtifactCache.set(run.id, cached);
-      if (cached.stdoutRaw !== null && cached.stderrRaw !== null) {
-        return { stdoutRaw: cached.stdoutRaw, stderrRaw: cached.stderrRaw, parsed: cached.parsed };
-      }
-      const [rereadStdout, rereadStderr] = await Promise.all([
-        cached.stdoutRaw ?? (stdoutKey === 'absent' ? '' : readFile(run.stdoutPath, 'utf8').catch(() => '')),
-        cached.stderrRaw ?? (stderrKey === 'absent' ? '' : readFile(run.stderrPath, 'utf8').catch(() => '')),
-      ]);
-      return { stdoutRaw: rereadStdout, stderrRaw: rereadStderr, parsed: cached.parsed };
-    }
-
-    const [stdoutRaw, stderrRaw] = await Promise.all([
-      stdoutKey === 'absent' ? '' : readFile(run.stdoutPath, 'utf8').catch(() => ''),
-      stderrKey === 'absent' ? '' : readFile(run.stderrPath, 'utf8').catch(() => ''),
-    ]);
-
-    const withinRawCap = stdoutRaw.length + stderrRaw.length <= RAW_RETENTION_MAX_BYTES;
-    const entry = {
-      key,
-      stdoutRaw: withinRawCap ? stdoutRaw : null,
-      stderrRaw: withinRawCap ? stderrRaw : null,
-      parsed: adapter.parseRunLog(
-        stdoutRaw,
-        run,
-        stdoutKey === 'absent' ? undefined
-          : new Date(Number(stdoutKey.slice(stdoutKey.indexOf(':') + 1))).toISOString(),
-      ),
-    };
-    runArtifactCache.set(run.id, entry);
-    while (runArtifactCache.size > RUN_ARTIFACT_CACHE_MAX) {
-      const oldest = runArtifactCache.keys().next().value;
-      if (oldest === undefined) break;
-      runArtifactCache.delete(oldest);
-    }
-    return { stdoutRaw, stderrRaw, parsed: entry.parsed };
   }
 
   async function readOwnedRunStdout(run: OwnedRunRecord): Promise<string> {
@@ -247,6 +183,22 @@ export function createOwnedRunController({
       laneId = current.laneId;
       const currentRun = current.recentRuns.find((run) => run.id === runId);
       artifacts = currentRun ? await readRunArtifacts({ ...currentRun, childExit }).catch(() => null) : null;
+      if (current.recentRuns[0]?.id === runId && artifacts?.parsed.providerFailure?.subtype === 'stdin_delivery_failed' && artifacts.parsed.providerFailure.message) {
+        current.latestSummary = artifacts.parsed.providerFailure.message;
+      }
+      // A worker that exits 0 without writing a byte did no work (for example
+      // a CLI that ignored its input). Surface that instead of a silent success
+      // unless the runtime's own parser recognized a completed turn.
+      const silentCleanExit = Boolean(artifacts) && childExit.classification === 'clean-exit'
+        && !artifacts!.parsed.completedTurn
+        && !currentRun?.interruptRequestedAt && currentRun?.outcome !== 'interrupted'
+        && !artifacts!.stdoutRaw.trim() && !artifacts!.stderrRaw.trim();
+      if (silentCleanExit) {
+        const message = silentCleanExitMessage(humanLabel);
+        artifacts = { ...artifacts!, parsed: { ...artifacts!.parsed, outcome: 'failed', completedTurn: false,
+          providerFailure: { subtype: 'empty_output', message } } };
+        current.latestSummary = message;
+      }
       let dirty = false;
       const finishedAt = nowIso();
       const applyExit = (run: OwnedRunRecord): OwnedRunRecord => {
@@ -353,7 +305,7 @@ export function createOwnedRunController({
       // A prepared journal is deliberately preserved until the binding path,
       // under the same surface lock as spawn, reconciles its durable marker.
       if (run.spawnState === 'prepared') continue;
-      const { stdoutRaw, stderrRaw, parsed } = await readRunArtifacts(run);
+      const { stderrRaw, parsed, sandboxDenial } = await readRunArtifacts(run, false, false);
 
       if (!session.threadId && parsed.threadId) {
         session.threadId = parsed.threadId;
@@ -374,7 +326,9 @@ export function createOwnedRunController({
       }
 
       if (run.sandboxed && !run.sandboxDenial) {
-        const denial = detectRunSandboxDenial(runtimeId, stdoutRaw, stderrRaw);
+        const denial = sandboxDenial === undefined
+          ? (await readRunArtifacts(run, false, false, true)).sandboxDenial
+          : sandboxDenial;
         if (denial) {
           run.sandboxDenial = denial;
           session.latestSummary = sandboxDenialOperatorMessage(runtimeId, denial);
@@ -390,6 +344,10 @@ export function createOwnedRunController({
       }
 
       const nextOutcome = deriveRunOutcome(run, parsed, stderrRaw, stderrNoise);
+      if (session.recentRuns[0]?.id === run.id && parsed.providerFailure?.subtype === 'stdin_delivery_failed' && parsed.providerFailure.message && session.latestSummary !== parsed.providerFailure.message) {
+        session.latestSummary = parsed.providerFailure.message;
+        dirty = true;
+      }
       if (run.outcome !== nextOutcome) {
         run.outcome = nextOutcome;
         dirty = true;
@@ -438,18 +396,19 @@ export function createOwnedRunController({
     return session;
   }
 
-  async function spawnOwnedRun(session: OwnedSessionRecord, prompt: string, mode: OwnedRunMode) {
+  async function spawnOwnedRun(session: OwnedSessionRecord, prompt: string, mode: OwnedRunMode, options?: { freshRequest?: boolean }) {
     return withOwnedArtifactAdmission(root, () => (
       withPacketLifecycleSpawnLock(session.packetId ?? session.workspaceBinding?.packetId ?? null, () => (
-        spawnOwnedRunInner(session, prompt, mode)
+        spawnOwnedRunInner(session, prompt, mode, options?.freshRequest)
       ))
     ));
   }
 
-  async function spawnOwnedRunInner(session: OwnedSessionRecord, prompt: string, mode: OwnedRunMode) {
-    assertRuntimeEffortPin(runtimeId, session.model, session.effort);
+  async function spawnOwnedRunInner(session: OwnedSessionRecord, prompt: string, mode: OwnedRunMode, freshRequest = false) {
+    ({ prompt, mode } = await refreshOwnedWorkerMemory(session, prompt, mode, freshRequest));
+    assertRuntimeEffortPin(runtimeId, session.model, session.effort, session.identity?.configHomeRef ?? adapter.defaultConfigHome?.());
     assertOwnedSingleAttemptSpawn(session, runtimeId, mode);
-    await ensureDir(path.join(session.sessionDir, RUNS_DIR));
+    await runtimeLaunchStep(session, 'run_directory', () => ensureDir(path.join(session.sessionDir, RUNS_DIR)));
 
     const runId = `${Date.now()}-${randomUUID().slice(0, 8)}`;
     const stdoutPath = path.join(session.sessionDir, RUNS_DIR, `${runId}.jsonl`);
@@ -457,15 +416,15 @@ export function createOwnedRunController({
 
     let binary: string;
     try {
-      binary = (await resolveCli({
+      binary = (await runtimeLaunchStep(session, 'binary_resolution', () => runtimeLaunchRead(() => resolveCli({
         runtimeId,
         binaryName: adapter.binaryName,
         envOverride: adapter.binaryEnvOverride,
         extraEnvOverrides: adapter.binaryExtraEnvOverrides,
-      })).path;
+      })))).path;
     } catch (error) {
       if (!(error instanceof CliNotFoundError)) {
-        if (session.executionPolicy !== undefined) throw error;
+        if (hasRuntimeLaunchDeadline() || session.executionPolicy !== undefined) throw error;
         console.error(`[owned-session] ${runtimeId} CLI resolution failed, falling back to bare "${adapter.binaryName}":`, error);
         binary = adapter.binaryName;
       } else {
@@ -495,7 +454,7 @@ export function createOwnedRunController({
     const credentialPolicy = credentialPolicyFingerprint(runtimeId);
     let preparedLaunch;
     try {
-      preparedLaunch = await prepareOwnedLaunchArgs({
+      preparedLaunch = await runtimeLaunchStep(session, 'launch_arguments', () => prepareOwnedLaunchArgs({
         adapter,
         session,
         runId,
@@ -504,7 +463,7 @@ export function createOwnedRunController({
         sandboxEnabled,
         humanLabel,
         artifactRoot: root,
-      });
+      }));
     } catch (error) {
       if (!(error instanceof WorkerO8CliUnavailableError)) throw error;
       const held = await stageOwnedLaunchFailure({ session, runId, mode, prompt, stdoutPath, stderrPath, message: error.message });
@@ -515,11 +474,11 @@ export function createOwnedRunController({
     // Prepare the exact isolated config root before Seatbelt is built.
     const { adapterEnv, runtimeState, carrierLaunch } = await (async () => {
       const adapterEnv: Record<string, string> = adapter.extraSpawnEnv
-        ? await adapter.extraSpawnEnv(session)
+        ? await runtimeLaunchStep(session, 'runtime_environment', () => adapter.extraSpawnEnv!(session))
         : {};
       const runtimeState = preparedRuntimeStateSandboxPolicy(adapter, session, adapterEnv);
 
-      const carrierLaunch = await resolveExecutionCarrierInvocation({ runtime: runtimeId as OrchestratorRuntime, runtimeConfig: session.runtimeConfig, runtimeBinary: binary, runtimeArgs: args });
+      const carrierLaunch = await runtimeLaunchStep(session, 'execution_carrier', () => resolveExecutionCarrierInvocation({ runtime: runtimeId as OrchestratorRuntime, runtimeConfig: session.runtimeConfig, runtimeBinary: binary, runtimeArgs: args }));
       return { adapterEnv, runtimeState, carrierLaunch };
     })().catch(async error => { await preparedLaunch.workerO8?.cleanupUnstarted(true).catch(() => {}); throw error; });
     let spawnBinary = carrierLaunch.command;
@@ -528,7 +487,7 @@ export function createOwnedRunController({
     if (sandboxEnabled) {
       try {
         const controlledSandbox = controlledProviderSandbox(session, spawnBinary);
-        const prepared = await prepareWorkerSandbox({
+        const prepared = await runtimeLaunchStep(session, 'sandbox_preparation', () => prepareWorkerSandbox({
           ...controlledSandbox,
           runId,
           profileDir: path.join(session.sessionDir, RUNS_DIR),
@@ -547,7 +506,7 @@ export function createOwnedRunController({
           finalAllowReadWritePaths: runtimeState.writablePaths,
           finalImmutableWritePaths: [...(runtimeState.immutablePaths ?? []), ...(preparedLaunch.workerO8?.immutablePaths ?? [])],
           finalImmutableAncestorPaths: preparedLaunch.workerO8?.immutableAncestorPaths,
-        });
+        }));
         spawnBinary = prepared.binary;
         spawnArgs = prepared.args;
         const { apiPort, wsPort } = resolvePortInfo();
@@ -563,6 +522,7 @@ export function createOwnedRunController({
           : `${humanLabel} dispatch refused: worker sandbox preparation failed — ${(error as Error).message}`;
         console.error(`[owned-session] ${runtimeId} sandbox prep failed (fail-closed):`, error);
         const failedRun = await stageOwnedLaunchFailure({ session, runId, mode, prompt, stdoutPath, stderrPath, message });
+        failedRun.memoryRevision = session.promptMemoryRevision;
         await io.saveSession(session);
         return failedRun;
       }
@@ -606,22 +566,22 @@ export function createOwnedRunController({
     };
     try {
       if (session.laneId) {
-        await ensureDispatchBackendReady(runtimeId, mode, { laneId: session.laneId, packetId: session.packetId });
+        await runtimeLaunchStep(session, 'backend_gate', () => ensureDispatchBackendReady(runtimeId, mode, { laneId: session.laneId!, packetId: session.packetId }));
       } else {
-        await ensureDispatchBackendReady(runtimeId, mode);
+        await runtimeLaunchStep(session, 'backend_gate', () => ensureDispatchBackendReady(runtimeId, mode));
       }
-      const durableSession = await io.findSession(session.surfaceId);
+      const durableSession = await runtimeLaunchStep(session, 'durable_session', () => io.findSession(session.surfaceId));
       assertOwnedActionAdmission(durableSession);
       assertDurableOwnedSpawn(durableSession, session, runtimeId, mode);
-      Object.assign(session, durableSession);
+      mergePreparedWorkerMemory(session, durableSession);
       return await withControlledTaskSpawn(session, runtimeId, runId, async () => {
-        const spawnDecision = await assertOwnedWorkspaceSpawnAvailable({
+        const spawnDecision = await runtimeLaunchStep(session, 'workspace_spawn_guard', () => assertOwnedWorkspaceSpawnAvailable({
           surfaceId: session.surfaceId, sessionPacketId: session.packetId ?? null, laneId: session.laneId ?? null,
           runtimeId, mode, binding: session.workspaceBinding ?? null, repoPath: session.repoPath,
-        }, workspaceSpawnGuard);
+        }, workspaceSpawnGuard));
         const materializationIdentity = spawnDecision.materializationIdentity ?? null;
-        assertOwnedActionAdmission(await io.findSession(session.surfaceId));
-        await assertOwnedActionFence(session.surfaceId, await io.findSession(session.surfaceId));
+        assertOwnedActionAdmission(await runtimeLaunchStep(session, 'spawn_session', () => io.findSession(session.surfaceId)));
+        await runtimeLaunchStep(session, 'action_fence', async () => assertOwnedActionFence(session.surfaceId, await io.findSession(session.surfaceId)));
         const bridgeLaunch = guardedWorkspaceInvocation(spawnBinary, spawnArgs, materializationIdentity);
         const cliCmd = [bridgeLaunch.command, ...bridgeLaunch.args].map(quoteShellArg).join(' ');
         const shellCmd = `${stdinPayload ? `printf %s ${quoteShellArg(stdinPayload)} | ` : ''}${cliCmd} | tee '${stdoutPath}' 2>'${stderrPath}'`;
@@ -630,11 +590,12 @@ export function createOwnedRunController({
           id: runId,
           mode,
           prompt,
+          memoryRevision: session.promptMemoryRevision,
           startedAt: nowIso(),
           pid: 0,
           ...(useSupervisor ? { supervisor: { id: runId, owner: session.surfaceId, epoch: '', cursor: 0 } } : {}),
           processIdentityRequired: crashSurvivableWorkersEnabled() && Boolean(session.packetId) && process.platform !== 'win32',
-          commandIdentity: executionCarrierCommandIdentity(carrierLaunch, spawnBinary),
+          commandIdentity: process.platform === 'win32' && stdinPayload && !useSupervisor ? process.execPath : executionCarrierCommandIdentity(carrierLaunch, spawnBinary),
           processMarker: runId,
           spawnState: 'prepared',
           stdoutPath,
@@ -648,15 +609,16 @@ export function createOwnedRunController({
         session.reviewDispositionUpdatedAt = nowIso();
         session.activeRun = preparedRun;
         prependOwnedRun(session, preparedRun);
-        await io.saveSession(session);
+        await runtimeLaunchStep(session, 'prepared_journal', () => io.saveSession(session));
 
         try {
           assertOwnedActionAdmission(session, runId);
+          assertWorkerMemoryCurrent(session);
           assertLaunchCredentialPolicy(runtimeId, credentialPolicy);
           const bridgeEnv = ownedSpawnEnvironment(session, spawnEnv, true);
           const hasProviderCredentials = Object.entries(bridgeEnv).some(([name, value]) => value && providerCredentialName(name));
           // Credential-bearing launches require policy validation at OS spawn.
-          if (!hasOwnedActionFence() && !useSupervisor && !hasProviderCredentials && !workerMcp.configPath && workerMcp.servers.length === 0 && process.platform !== 'win32' && session.executionPolicy === undefined && !carrierLaunch.carried && !crashSurvivableWorkersEnabled()) {
+          if (!hasRuntimeLaunchDeadline() && !hasOwnedActionFence() && !useSupervisor && !hasProviderCredentials && !workerMcp.configPath && workerMcp.servers.length === 0 && process.platform !== 'win32' && session.executionPolicy === undefined && !carrierLaunch.carried && !crashSurvivableWorkersEnabled()) {
             try {
               preparedLaunch.workerO8?.assertCurrent();
               spawnSubmitted = true;
@@ -690,17 +652,17 @@ export function createOwnedRunController({
               const launchInput = {
                 session, runtimeId, policy: credentialPolicy, runId,
                 binary: spawnBinary, args: spawnArgs, env: spawnEnv,
-                stdinFd, stdoutFd, stderrFd, mcpConfigPath: workerMcp.configPath, mcpServers: workerMcp.servers,
+                stdinFd, stdinPath, stdinBytes: stdinPayload ? Buffer.byteLength(stdinPayload) : undefined, stdoutFd, stderrFd, mcpConfigPath: workerMcp.configPath, mcpServers: workerMcp.servers,
                 materializationIdentity,
                 assertWorkerO8Current: preparedLaunch.workerO8?.assertCurrent,
                 onSubmit: () => { spawnSubmitted = true; },
               };
               if (useSupervisor) {
-                supervised = await spawnCredentialCheckedSupervised({ ...launchInput, stdoutPath, stderrPath, stdinPath });
+                supervised = await runtimeLaunchStep(session, 'process_spawn', () => spawnCredentialCheckedSupervised({ ...launchInput, stdoutPath, stderrPath, stdinPath }));
                 pid = supervised.pid;
                 detachMode = 'detached';
               } else {
-                const child = spawnCredentialCheckedChild(launchInput);
+                const child = await runtimeLaunchStep(session, 'process_spawn', async () => spawnCredentialCheckedChild(launchInput));
                 detachedChild = child;
                 observeChildExit(child, (childExit) => {
                   if (!runPersisted) {
@@ -730,7 +692,7 @@ export function createOwnedRunController({
 
         const processGroupId = process.platform !== 'win32' && detachMode === 'detached' && pid > 0
           ? pid
-          : await resolveSpawnedProcessGroupId(pid);
+          : await runtimeLaunchStep(session, 'process_group', () => resolveSpawnedProcessGroupId(pid));
         const run: OwnedRunRecord = {
           ...preparedRun,
           pid,
@@ -742,7 +704,7 @@ export function createOwnedRunController({
           ...(supervised ? { supervisor: { id: runId, owner: session.surfaceId, epoch: supervised.epoch, cursor: 0 },
             processIdentity: supervised.identity, processIdentitySource: 'platform' as const, processIdentityRequired: true } : {}),
         };
-        if (!supervised) await captureOwnedRunIdentity(session, runtimeId, run);
+        if (!supervised) await runtimeLaunchStep(session, 'process_identity', () => captureOwnedRunIdentity(session, runtimeId, run));
 
         if (session.packetId && session.executionPolicy === undefined) {
           try {
@@ -760,14 +722,15 @@ export function createOwnedRunController({
 
         session.activeRun = run;
         session.recentRuns = session.recentRuns.map((candidate) => candidate.id === run.id ? run : candidate);
-        await io.saveSession(session);
+        await runtimeLaunchStep(session, 'started_journal', () => io.saveSession(session));
         runPersisted = true;
         if (detachedChild && pendingDetachedExit) {
           void recordDetachedChildExit(session.surfaceId, run.id, run.stderrPath, pendingDetachedExit).catch((err) => {
             console.warn(`[owned-store] ${runtimeId} child-exit recording failed for ${run.id}:`, err);
           });
         }
-        await assertOwnedSessionProcessIdentity(session, runtimeId);
+        await verifyStartedChildIdentity(() => runtimeLaunchStep(session, 'identity_proof',
+          () => assertOwnedSessionProcessIdentity(session, runtimeId)), run, detachedChild, runPersisted);
         return run;
       });
     } catch (error) {

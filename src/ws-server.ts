@@ -1,3 +1,4 @@
+import { startProductSession, endProductSession } from '@/lib/analytics/session';
 import { mutationToLaneLifecyclePayload } from '@/lib/realtime/lane-lifecycle';
 import { assertOrchestratorPermissionMode, resolveOrchestratorPermissionMode } from '@/lib/orchestrator/permission-mode';
 import { managedCommandLaunch } from './lib/terminal/managed-command-launch';
@@ -76,6 +77,7 @@ import { expireStaleApprovals } from '@/lib/approvals/store';
 import { getDb } from '@/lib/db';
 import { resolvePortInfo } from '@/lib/panel/api-port';
 import { getInstanceIdentity } from '@/lib/panel/instance-identity';
+import { resolveListenHost } from '@/lib/panel/listen-host';
 import { HEADLESS_LAUNCH_DEADLINE_MS } from '@/lib/orchestrator/headless-tick-deadline';
 import {
   startAgentSession,
@@ -1173,6 +1175,10 @@ function broadcastToOrchestratorSession(sessionName: string, rawMsg: string): vo
         || (parsed.event === 'status' && (parsed.data?.status === 'ready' || parsed.data?.status === 'dead'))
       ) {
         latestOrchestratorPlanBySession.delete(sessionName);
+        const threadId = parsed.data?.threadId;
+        if (typeof threadId === 'string' && threadId.startsWith('thoughts-')) {
+          scheduleRealtimeSessionHistoryRefresh(`llm-chat:${threadId}`, true, undefined, { urgent: true });
+        }
       }
       outMsg = orchestratorReplay.record(sessionName, parsed);
     }
@@ -2515,6 +2521,8 @@ const sessionHistoryReadsInFlight = new Map<string, {
   promise: Promise<SessionTranscriptRead>;
 }>();
 const lastRealtimeHistoryId = new Map<string, string>();
+const sessionHistoryPublications = new Map<string, Promise<void>>();
+const freshSessionHistoryRequested = new Set<string>();
 let browserDiscoveryTimer: ReturnType<typeof setInterval> | null = null;
 let attachedBrowserRefreshTimer: ReturnType<typeof setInterval> | null = null;
 let stopHeadlessLoop: (() => void) | null = null;
@@ -3391,10 +3399,32 @@ async function publishMobileInboxRealtimeSnapshot(fresh = false) {
 
 async function publishSessionHistoryRealtimeSnapshot(sessionKey: string, fresh = false) {
   if (!sessionKey || !hasRealtimeSessionSubscriber(sessionKey)) return;
+  if (fresh) freshSessionHistoryRequested.add(sessionKey);
+  const active = sessionHistoryPublications.get(sessionKey);
+  if (active) return active;
+  const nextFresh = freshSessionHistoryRequested.delete(sessionKey);
+  const job = readAndPublishSessionHistory(sessionKey, nextFresh).finally(() => {
+    sessionHistoryPublications.delete(sessionKey);
+    const backoff = sessionHistoryBridgeBackoffs.get(sessionKey);
+    if (freshSessionHistoryRequested.has(sessionKey) && (!backoff || canAttemptRealtimeBridge(backoff))) {
+      scheduleRealtimeSessionHistoryRefresh(sessionKey, true, undefined, { urgent: true });
+    }
+  });
+  sessionHistoryPublications.set(sessionKey, job);
+  return job;
+}
+
+async function readAndPublishSessionHistory(sessionKey: string, fresh: boolean) {
   const backoff = sessionHistoryBridgeBackoffs.get(sessionKey) ?? createRealtimeBridgeBackoffState();
   sessionHistoryBridgeBackoffs.set(sessionKey, backoff);
-  if (!canAttemptRealtimeBridge(backoff) || sessionHistoryReadsInFlight.has(sessionKey)) return;
+  if (!canAttemptRealtimeBridge(backoff)) {
+    if (fresh) freshSessionHistoryRequested.add(sessionKey);
+    return;
+  }
   try {
+    // A bootstrap may already hold a read captured before completion. A fresh
+    // publication must read again after that response, even with the same cursor.
+    if (fresh) await sessionHistoryReadsInFlight.get(sessionKey)?.promise.catch(() => undefined);
     const sinceId = fresh ? undefined : lastRealtimeHistoryId.get(sessionKey);
     const transcript = await getSessionTranscriptSingleFlight(sessionKey, 200, sinceId);
     const entries = transcript.entries;
@@ -3426,6 +3456,7 @@ async function publishSessionHistoryRealtimeSnapshot(sessionKey: string, fresh =
       ),
     ]);
   } catch (error) {
+    if (fresh) freshSessionHistoryRequested.add(sessionKey);
     const failure = recordRealtimeBridgeFailure(backoff, Date.now(), {
       threshold: 1,
       initialDelayMs: REALTIME_SESSION_HISTORY_POLL_MS,
@@ -3480,7 +3511,8 @@ function scheduleRealtimeSessionHistoryRefresh(
   delayMs?: number,
   options: { urgent?: boolean } = {},
 ) {
-  const resolvedDelay = delayMs ?? (options.urgent ? URGENT_HISTORY_REFRESH_MS : 350);
+  if (fresh) freshSessionHistoryRequested.add(sessionKey);
+  const resolvedDelay = delayMs ?? (options.urgent || freshSessionHistoryRequested.has(sessionKey) ? URGENT_HISTORY_REFRESH_MS : 350);
   const existing = sessionHistoryTimers.get(sessionKey);
   if (existing) clearTimeout(existing);
   const timer = setTimeout(() => {
@@ -5649,6 +5681,7 @@ async function handleOrchestratorSendMsgOnce(
       const effectiveModel = resolveTurnModel(turnBackend, overrideModel);
       return sendOrchestratorBackendTurn(turnBackend, repoPath, overrideMessage ?? turnMessage, onEvent, {
         rawMessage: transcriptMessage,
+        transcriptMessageId: assistantMessageId ?? undefined,
         permissionMode,
         thinkingEffort,
         serviceTier: serviceTierForTurn(serviceTier, requestedBackend.id, model, turnBackend.id, effectiveModel),
@@ -5774,6 +5807,8 @@ async function handleOrchestratorSendMsgOnce(
               permissionMode,
               leadModel: event.leadModel,
               effort: event.effort,
+              effortSource: event.effortSource,
+              serviceTier: event.serviceTier,
               mode,
               ...(pickedMode ? { pickedMode } : {}),
             };
@@ -6573,7 +6608,11 @@ function subscribedRealtimeSessionKeys(): string[] {
     ...sessionKeys,
     ...sessionHistoryTimers.keys(),
     ...sessionHistoryReadsInFlight.keys(),
+    ...sessionHistoryPublications.keys(),
   ]);
+  for (const sessionKey of freshSessionHistoryRequested) {
+    if (!retainedSessionKeys.has(sessionKey)) freshSessionHistoryRequested.delete(sessionKey);
+  }
   for (const sessionKey of sessionHistoryBridgeBackoffs.keys()) {
     if (!retainedSessionKeys.has(sessionKey)) sessionHistoryBridgeBackoffs.delete(sessionKey);
   }
@@ -8801,7 +8840,9 @@ const httpServer = createServer(async (req, res) => {
   res.end();
 });
 
-const o8dBridge = process.env.O8_WS_O8D === '1' ? new O8dBridge(httpServer, WS_PORT, REALTIME_EPOCH) : null;
+// Loopback by default; O8_LAN_ACCESS=1 opts in to 0.0.0.0 for phone access.
+const WS_LISTEN_HOST = resolveListenHost();
+const o8dBridge = process.env.O8_WS_O8D === '1' ? new O8dBridge(httpServer, WS_PORT, REALTIME_EPOCH, WS_LISTEN_HOST) : null;
 
 const WS_TOKEN = getOrCreateWsToken();
 console.log(`[ws-auth] WS token loaded (source: ${process.env.WS_TOKEN ? 'env' : WS_TOKEN_PATH})`);
@@ -9504,7 +9545,7 @@ async function recoverFromPortInUse(): Promise<void> {
     }
     setTimeout(() => {
       if (shuttingDown) return;
-      httpServer.listen(WS_PORT, '0.0.0.0');
+      httpServer.listen(WS_PORT, WS_LISTEN_HOST);
     }, 500);
   } catch (error) {
     console.error(
@@ -9534,10 +9575,10 @@ async function bootstrapWsServer() {
   } else {
     await new Promise<void>((done) => {
       httpServer.once('listening', () => {
-        console.log(`[ws-server] o8 WebSocket server listening on ws://0.0.0.0:${WS_PORT}/ws`);
+        console.log(`[ws-server] o8 WebSocket server listening on ws://${WS_LISTEN_HOST}:${WS_PORT}/ws`);
         done();
       });
-      httpServer.listen(WS_PORT, '0.0.0.0');
+      httpServer.listen(WS_PORT, WS_LISTEN_HOST);
     });
   }
 
@@ -9994,7 +10035,9 @@ async function bootstrapWsServer() {
 }
 
 let shuttingDown = false;
-const wsStartupReady = bootstrapWsServer().catch(() => {
+const wsStartupReady = bootstrapWsServer().then(() => {
+  if (!shuttingDown) void startProductSession();
+}).catch(() => {
   console.error('[ws-server] Startup initialization failed.');
   shutdown('startup-failed', 1);
 });
@@ -10060,16 +10103,20 @@ async function shutdown(signal: string, exitCode = 0) {
     exitCode = 1;
   }
 
+  // Force exit after 3s if something hangs
+  const forceShutdownTimer = setTimeout(() => {
+    exitCode ||= 1;
+    void endProductSession(false).finally(() => process.exit(exitCode || 1));
+  }, 3000).unref();
+
   // Close HTTP + WS server, then exit
   wss.close(() => {
     httpServer.close(() => {
+      clearTimeout(forceShutdownTimer);
       console.log('[ws-server] Clean shutdown complete');
-      process.exit(exitCode);
+      void endProductSession(exitCode === 0).finally(() => process.exit(exitCode));
     });
   });
-
-  // Force exit after 3s if something hangs
-  setTimeout(() => process.exit(exitCode), 3000).unref();
 }
 
 process.on('SIGTERM', () => shutdown('SIGTERM'));

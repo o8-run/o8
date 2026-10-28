@@ -1,0 +1,181 @@
+{
+  "main_commit": "120163cc1bb2ab9f069b7291a88752904db87992",
+  "main": [
+    316,
+    0,
+    8
+  ],
+  "head": [
+    330,
+    5,
+    9
+  ],
+  "main_cases": 324,
+  "head_cases": 344,
+  "missing_or_changed": [
+    {
+      "name": "shell::shortcuts::tests::bindings::shortcuts_every_displayed_chord_has_a_live_binding",
+      "status": "ok",
+      "count": 1
+    },
+    {
+      "name": "shell::shortcuts::tests::modal::shortcuts_modal_surfaces_keep_all_tab_chords_off_underlying_tabs",
+      "status": "ok",
+      "count": 1
+    },
+    {
+      "name": "shell::shortcuts::tests::review::correction_2::shortcuts_text_fields_pass_palette_chords",
+      "status": "ok",
+      "count": 1
+    },
+    {
+      "name": "shell::shortcuts::tests::review::shortcuts_reopen_retains_list_scroll",
+      "status": "ok",
+      "count": 1
+    },
+    {
+      "name": "shell::shortcuts::tests::shortcuts_overlay_bindings_dismissal_and_typing",
+      "status": "ok",
+      "count": 1
+    }
+  ],
+  "added_or_changed": [
+    {
+      "name": "keymap::tests::keymap_every_binding_dispatches_only_on_its_focus_path",
+      "status": "ok",
+      "count": 1
+    },
+    {
+      "name": "keymap::tests::keymap_nested_terminal_and_text_take_precedence",
+      "status": "ok",
+      "count": 1
+    },
+    {
+      "name": "keymap::tests::keymap_reference_has_exactly_the_registered_rows",
+      "status": "ok",
+      "count": 1
+    },
+    {
+      "name": "shell::fake::review_registered_raw_hook_composes_and_respects_focus",
+      "status": "ok",
+      "count": 1
+    },
+    {
+      "name": "shell::keymap_review_tests::review_directional_surface_binding",
+      "status": "ok",
+      "count": 1
+    },
+    {
+      "name": "shell::keymap_review_tests::review_numbered_surface_binding",
+      "status": "ok",
+      "count": 1
+    },
+    {
+      "name": "shell::keymap_review_tests::review_palette_does_not_resize_the_retained_surface",
+      "status": "ok",
+      "count": 1
+    },
+    {
+      "name": "shell::keymap_review_tests::review_palette_release_cpu_frame_budget",
+      "status": "ignored",
+      "count": 1
+    },
+    {
+      "name": "shell::keymap_review_tests::review_pattern_documentation_avoids_product_attribution",
+      "status": "ok",
+      "count": 1
+    },
+    {
+      "name": "shell::keymap_review_tests::review_reference_command_alias",
+      "status": "ok",
+      "count": 1
+    },
+    {
+      "name": "shell::keymap_review_tests::review_reference_dismissal_restores_selected_surface_focus",
+      "status": "ok",
+      "count": 1
+    },
+    {
+      "name": "shell::keymap_review_tests::review_reference_escape_closes",
+      "status": "ok",
+      "count": 1
+    },
+    {
+      "name": "shell::keymap_review_tests::review_surfaces_attach_shortcuts_only_through_the_keymap",
+      "status": "ok",
+      "count": 1
+    },
+    {
+      "name": "shell::projects::tests::review::keymap_hidden_rename_returns_focus_to_projects",
+      "status": "ok",
+      "count": 1
+    },
+    {
+      "name": "shell::shortcuts::tests::bindings::shortcuts_every_displayed_chord_has_a_live_binding",
+      "status": "FAILED",
+      "count": 1
+    },
+    {
+      "name": "shell::shortcuts::tests::modal::shortcuts_modal_surfaces_keep_all_tab_chords_off_underlying_tabs",
+      "status": "FAILED",
+      "count": 1
+    },
+    {
+      "name": "shell::shortcuts::tests::review::correction_2::shortcuts_text_fields_pass_palette_chords",
+      "status": "FAILED",
+      "count": 1
+    },
+    {
+      "name": "shell::shortcuts::tests::review::shortcuts_reopen_retains_list_scroll",
+      "status": "FAILED",
+      "count": 1
+    },
+    {
+      "name": "shell::shortcuts::tests::shortcuts_overlay_bindings_dismissal_and_typing",
+      "status": "FAILED",
+      "count": 1
+    },
+    {
+      "name": "shell::tests::keymap_composer_focus_survives_surface_switch_and_reconnect",
+      "status": "ok",
+      "count": 1
+    },
+    {
+      "name": "shell::tests::keymap_composer_keeps_focus_through_real_socket_reconnect",
+      "status": "ok",
+      "count": 1
+    },
+    {
+      "name": "shell::tests::keymap_modified_palette_chord_does_not_open_palette",
+      "status": "ok",
+      "count": 1
+    },
+    {
+      "name": "shell::tests::keymap_reference_is_reachable_and_field_question_mark_is_text",
+      "status": "ok",
+      "count": 1
+    },
+    {
+      "name": "shell::tests::keymap_text_focus_keeps_palette_and_close_out",
+      "status": "ok",
+      "count": 1
+    },
+    {
+      "name": "terminal::tests::keymap_terminal_control_keys_reach_real_pty_before_shell",
+      "status": "ok",
+      "count": 1
+    }
+  ],
+  "head_only_failures": [
+    "shell::shortcuts::tests::bindings::shortcuts_every_displayed_chord_has_a_live_binding",
+    "shell::shortcuts::tests::modal::shortcuts_modal_surfaces_keep_all_tab_chords_off_underlying_tabs",
+    "shell::shortcuts::tests::review::correction_2::shortcuts_text_fields_pass_palette_chords",
+    "shell::shortcuts::tests::review::shortcuts_reopen_retains_list_scroll",
+    "shell::shortcuts::tests::shortcuts_overlay_bindings_dismissal_and_typing"
+  ],
+  "added_ignored": [
+    "shell::keymap_review_tests::review_palette_release_cpu_frame_budget"
+  ],
+  "omitted_case_names": [],
+  "duplicate_cases": []
+}

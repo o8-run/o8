@@ -24,6 +24,8 @@ const HISTORY_STALE_LOCK_MS = 30_000;
 const historyLockWaiter = new Int32Array(new SharedArrayBuffer(4));
 
 export interface PersistedLlmChatMessage {
+  steerAnchor?: import('@/lib/transcripts/steer-anchor').SteerTranscriptAnchor;
+
   id: string;
   role: MobileTranscriptEntry['role'];
   content: string;
@@ -36,6 +38,7 @@ export interface PersistedLlmChatMessage {
   costUsd?: number;
   inferenceRoute?: { provider: 'chatgpt-plan'; billing: 'subscription'; allowanceUse: 'unknown'; meter: 'provider-tokens' };
   timestamp: number;
+  persistedVersion?: number;
   timestampLabel?: string;
   toolCalls?: MobileTranscriptToolCall[];
   sources?: MobileTranscriptSource[];
@@ -288,6 +291,7 @@ export function mapLlmHistoryToMobileTranscript(
     id: message.id,
     role: message.role,
     text: message.content,
+    persistedVersion: message.persistedVersion,
     type: message.type ?? (message.compaction || message.isCompaction ? 'compaction' : 'message'),
     media: message.media,
     timestamp: message.timestamp,
@@ -307,6 +311,7 @@ export function mapLlmHistoryToMobileTranscript(
     recalledFacts: message.recalledFacts,
     command: message.command,
     handoff: message.handoff,
+    steerAnchor: message.steerAnchor,
     compaction: message.compaction,
   }));
 }

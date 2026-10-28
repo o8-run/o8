@@ -119,7 +119,7 @@ async function latestVersion(release: CliUpdateSpec['release'], refresh: boolean
   }
 }
 
-export async function checkCliUpdates(refresh = false, runtimeId?: string): Promise<CliUpdateRecord[]> {
+export async function checkCliUpdates(refresh = false, runtimeId?: string, onTool?: (tool: CliUpdateRecord) => void): Promise<CliUpdateRecord[]> {
   return Promise.all(UPDATE_SPECS.filter((spec) => !runtimeId || spec.runtimeId === runtimeId).map(async (spec): Promise<CliUpdateRecord> => {
     let installedVersion: string | null = null;
     let selectedPath: string | null = null;
@@ -157,7 +157,7 @@ export async function checkCliUpdates(refresh = false, runtimeId?: string): Prom
         : compareUpdateVersions(installedVersion, latest) < 0
           ? 'update-available'
           : 'current';
-    return {
+    const tool: CliUpdateRecord = {
       runtimeId: spec.runtimeId,
       label: spec.label,
       installedVersion,
@@ -169,5 +169,7 @@ export async function checkCliUpdates(refresh = false, runtimeId?: string): Prom
       updateSupported: ['codex', 'claude-code', 'grok', 'opencode', 'gemini'].includes(spec.runtimeId) && manager !== 'manual' && !(spec.runtimeId === 'grok' && manager === 'npm'),
       ...(release.kind === 'manual' || manager === 'manual' ? { updateHint: 'Use this tool’s original updater, then check its version again.' } : {}),
     };
+    onTool?.(tool);
+    return tool;
   }));
 }

@@ -16,8 +16,34 @@ async function main() {
     return Reflect.apply(listen, this, args);
   } as typeof listen;
   let released = false;
+  let holdQueued = false;
+  let queuedReleased = false;
+  let holdSync = false;
+  let releaseSync: (() => void) | null = null;
   process.stdin.setEncoding('utf8');
-  process.stdin.on('data', input => { if (String(input).includes('release')) released = true; });
+  let commands = '';
+  process.stdin.on('data', input => {
+    commands += String(input);
+    const lines = commands.split(/\r?\n/); commands = lines.pop()!;
+    for (const command of lines) {
+      if (command === 'release') released = true;
+      if (command === 'queue-hold') holdQueued = true;
+      if (command === 'queue-complete') queuedReleased = true;
+      if (command === 'sync-hold') holdSync = true;
+      if (command === 'sync-release') releaseSync?.();
+    }
+  });
+  // Delay one real sync response after its route has captured the old state.
+  const nativeFetch = globalThis.fetch;
+  globalThis.fetch = async (input, init) => {
+    const response = await nativeFetch(input, init);
+    if (holdSync && String(input).includes('/api/mobile/sync')) {
+      holdSync = false;
+      await new Promise<void>(resolve => { releaseSync = resolve; console.log('[fixture-history-read-held]'); });
+      releaseSync = null;
+    }
+    return response;
+  };
   const { createPiOrchestratorBackend } = await import('../../src/lib/lane/orchestrator-backends/pi');
   const { getOrchestratorBackend, withOrchestrationMode } = await import('../../src/lib/lane/orchestrator-backends/registry');
   const { O8_MANAGED_PI_MODEL } = await import('../../src/lib/pi/sdk/live-contract');
@@ -49,6 +75,13 @@ async function main() {
           yield append(` ${tick}`);
         }
       } else {
+        if (words.includes('Queued instruction')) {
+          console.log('[fixture-queued-model-turn]');
+          if (holdQueued) {
+            yield append('Queued worker pending. ');
+            while (!queuedReleased) await delay(10, undefined, { signal });
+          }
+        }
         const issueContext = text.includes('Linked GitHub issue #7 in fixture/alpha') && text.includes('Issue fixture context.');
         yield append(issueContext ? 'Linked issue context received' : `Worker received: ${words}`);
       }
@@ -57,4 +90,4 @@ async function main() {
   Object.assign(getOrchestratorBackend('pi'), withOrchestrationMode(fixture));
   await import('../../src/ws-server');
 }
-void main().catch(() => { console.error('[o8-next-worker] Fixture runtime failed'); process.exitCode = 1; });
+void main().catch(error => { console.error('[o8-next-worker] Fixture runtime failed', error); process.exitCode = 1; });

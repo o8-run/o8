@@ -1,3 +1,6 @@
+import { readSteerTranscriptAnchor } from '@/lib/ws-server/steer-transcript-anchor';
+import { appendMobileOrchestratorUserMessage } from '@/lib/mobile/orchestrator-thread-history';
+import type { SteerTranscriptAnchor } from '@/lib/transcripts/steer-anchor';
 import { createHash, randomUUID } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { createConnection, createServer, type Socket } from 'node:net';
@@ -7,6 +10,7 @@ import { getDataDir } from '@/lib/data-dir-migration';
 import { isPidAlive } from '@/lib/lane/orchestrator-crash-survival';
 import { composerQueueRepoKey, readComposerSend } from '@/lib/orchestrator/composer-queue';
 import type { OrchestratorBackend } from '@/lib/lane/orchestrator-backends/types';
+import { assertCodexLiveSteerEffort } from './app-bridge-steer-effort';
 
 type LiveSteer = NonNullable<OrchestratorBackend['liveSteer']>;
 interface Target { repoPath: string; threadId: string }
@@ -68,6 +72,8 @@ export function createCodexSteerRelay(target: Target, steer: LiveSteer, running:
             socket.end(`${JSON.stringify({ accepted: false })}\n`); return;
           }
           const { checkComposerQueueBinding } = await import('@/lib/ws-server/composer-queue-heartbeat');
+          let anchor: SteerTranscriptAnchor | undefined;
+          let admittedAt = Date.now();
           const result = await steer(target.repoPath, message.message, { ...message.options, beforeAdmit: () => {
             const item = readComposerSend(message.options.clientUserMessageId ?? '');
             if (!item || item.admittedAt === null || item.intent !== 'steer-now' || item.threadId !== target.threadId
@@ -77,7 +83,14 @@ export function createCodexSteerRelay(target: Target, steer: LiveSteer, running:
               throw new Error('Codex steer does not match its admitted queue item.');
             }
             checkComposerQueueBinding(item);
+            anchor = readSteerTranscriptAnchor(target.repoPath, target.threadId);
+            admittedAt = Date.now();
           } });
+          if (result.accepted && anchor) {
+            const item = readComposerSend(message.options.clientUserMessageId!)!;
+            appendMobileOrchestratorUserMessage({ tabId: target.threadId, repoPath: target.repoPath,
+              messageId: `composer-steer-${item.id}`, message: item.payload.text, backend: 'codex', timestampMs: admittedAt, steerAnchor: anchor });
+          }
           socket.end(`${JSON.stringify(result)}\n`);
         } catch { socket.end(`${JSON.stringify({ unconfirmed: true })}\n`); }
       })();
@@ -103,6 +116,7 @@ export function getRemoteCodexAppBridgeSteer(target: Target): LiveSteer | undefi
   const receipt = readReceipt(target);
   if (!receipt) return undefined;
   return async (_repoPath, message, options) => {
+    assertCodexLiveSteerEffort(options.thinkingEffort);
     if (options.attachments?.length) return { accepted: false };
     return new Promise<{ accepted: boolean }>((resolve, reject) => {
       const socket = createConnection(receipt.address);

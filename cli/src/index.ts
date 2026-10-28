@@ -1,6 +1,7 @@
 import { runPrStack } from './commands/pr-stack.js';
 import { runBrainSources } from './commands/brain-sources.js';
 import { runThreads } from './commands/threads.js';
+import { runWorkspaceCleanup } from './commands/workspace-cleanup.js';
 import { runNext } from './commands/next.js';
 import { runSetup } from './commands/setup.js';
 import { commandUsage } from './command-help.js';
@@ -318,6 +319,8 @@ commands:
   pr-stack --repo owner/repo --number N  read native PR layers, revisions and provenance
   threads list         project work grouped by waiting/review/working/resolved (--repo path, --state, --offset, --limit)
   threads show <id>    exact recorded thread evidence (--repo path)
+  workspace-cleanup preview --repo <path>  review completed owned work and retained recovery
+  workspace-cleanup execute --plan <id> --approve <fingerprint> --entry <id>  execute that exact selection; status --plan <id> reads its receipt
   problem list         recurring problems detected across independent work (--all includes suppressed)
   problem show <id>    full evidence, remedy, and closure state for one problem dossier
   plugin list          list reviewed executable actions [--plugin ID]
@@ -335,7 +338,7 @@ commands:
   inbox approve <id>   approve a card → runs the deferred action (e.g. a held merge)
   inbox reject <id>    reject a pending approval
 ${OPERATOR_PACKET_COMMAND_LINES}
-  next --enable-next --binary PATH --server URL  opt-in native saved transcript
+  next                 open the native app shell; start or reuse a local server
   session show <key>   provider-native transform capabilities, lineage, and checkpoints
   session import <key> add a discovered provider session without claiming packet ownership
   session checkpoint <key> save a durable provider position for later forks
@@ -403,6 +406,7 @@ async function dispatch(args: ParsedArgs): Promise<number> {
   // `run` owns all flag parsing for its wrapped command (extractRunCommand reads
   // raw argv), so a `--help`/`-h` meant for the wrapped tool must NOT trigger o8's
   // global help here — otherwise `o8 run node --help` prints o8 USAGE + exit 0.
+  if (args.help && primary === 'next') return runNext(['--help']);
   if (args.help && primary !== 'run') {
     process.stdout.write((primary && commandUsage(primary, secondary)) || (primary && groupUsage(primary)) || USAGE);
     return 0;
@@ -515,6 +519,8 @@ async function dispatch(args: ParsedArgs): Promise<number> {
       return runPrStack(args.mode, singleLevelArgs(secondary, args.rest, args.secondaryBeforeRest));
     case 'threads':
       return runThreads(args.mode, secondary, args.rest);
+    case 'workspace-cleanup':
+      return runWorkspaceCleanup(args.mode, secondary, args.rest);
     case 'problem':
       return runProblem(args.mode, secondary, args.rest);
     case 'plugin':

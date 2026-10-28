@@ -1,0 +1,124 @@
+{
+  "main": [
+    316,
+    0,
+    8
+  ],
+  "head": [
+    335,
+    0,
+    9
+  ],
+  "main_cases": 324,
+  "head_cases": 344,
+  "missing_or_changed": [],
+  "added_or_changed": [
+    {
+      "name": "keymap::tests::keymap_every_binding_dispatches_only_on_its_focus_path",
+      "status": "ok",
+      "count": 1
+    },
+    {
+      "name": "keymap::tests::keymap_nested_terminal_and_text_take_precedence",
+      "status": "ok",
+      "count": 1
+    },
+    {
+      "name": "keymap::tests::keymap_reference_has_exactly_the_registered_rows",
+      "status": "ok",
+      "count": 1
+    },
+    {
+      "name": "shell::fake::review_registered_raw_hook_composes_and_respects_focus",
+      "status": "ok",
+      "count": 1
+    },
+    {
+      "name": "shell::keymap_review_tests::review_directional_surface_binding",
+      "status": "ok",
+      "count": 1
+    },
+    {
+      "name": "shell::keymap_review_tests::review_numbered_surface_binding",
+      "status": "ok",
+      "count": 1
+    },
+    {
+      "name": "shell::keymap_review_tests::review_palette_does_not_resize_the_retained_surface",
+      "status": "ok",
+      "count": 1
+    },
+    {
+      "name": "shell::keymap_review_tests::review_palette_release_cpu_frame_budget",
+      "status": "ignored",
+      "count": 1
+    },
+    {
+      "name": "shell::keymap_review_tests::review_pattern_documentation_avoids_product_attribution",
+      "status": "ok",
+      "count": 1
+    },
+    {
+      "name": "shell::keymap_review_tests::review_reference_command_alias",
+      "status": "ok",
+      "count": 1
+    },
+    {
+      "name": "shell::keymap_review_tests::review_reference_escape_closes",
+      "status": "ok",
+      "count": 1
+    },
+    {
+      "name": "shell::keymap_review_tests::review_reference_modal_keeps_tabs_and_restores_focus",
+      "status": "ok",
+      "count": 1
+    },
+    {
+      "name": "shell::keymap_review_tests::review_surfaces_attach_shortcuts_only_through_the_keymap",
+      "status": "ok",
+      "count": 1
+    },
+    {
+      "name": "shell::projects::tests::review::keymap_hidden_rename_returns_focus_to_projects",
+      "status": "ok",
+      "count": 1
+    },
+    {
+      "name": "shell::tests::keymap_composer_focus_survives_surface_switch_and_reconnect",
+      "status": "ok",
+      "count": 1
+    },
+    {
+      "name": "shell::tests::keymap_composer_keeps_focus_through_real_socket_reconnect",
+      "status": "ok",
+      "count": 1
+    },
+    {
+      "name": "shell::tests::keymap_modified_palette_chord_does_not_open_palette",
+      "status": "ok",
+      "count": 1
+    },
+    {
+      "name": "shell::tests::keymap_reference_is_reachable_and_field_question_mark_is_text",
+      "status": "ok",
+      "count": 1
+    },
+    {
+      "name": "shell::tests::keymap_text_focus_keeps_palette_and_close_out",
+      "status": "ok",
+      "count": 1
+    },
+    {
+      "name": "terminal::tests::keymap_terminal_control_keys_reach_real_pty_before_shell",
+      "status": "ok",
+      "count": 1
+    }
+  ],
+  "head_only_failures": [],
+  "ignored_same": false,
+  "main_commit": "2c80b0c7674b434f20369bd145f49e1c69538f3f",
+  "source_tree": "ea6a5ab934b8b191115728a2fe16c25ab7618511",
+  "additional_ignored": [
+    "shell::keymap_review_tests::review_palette_release_cpu_frame_budget"
+  ]
+}

@@ -1,0 +1,9 @@
+sidebar -> keymap -> preferences: clean merge; tree 61c497e96b1004bad03790a0f7435c03a8f04100
+sidebar -> preferences -> keymap: clean merge; tree 61c497e96b1004bad03790a0f7435c03a8f04100
+keymap -> sidebar -> preferences: clean merge; tree 61c497e96b1004bad03790a0f7435c03a8f04100
+keymap -> preferences -> sidebar: clean merge; tree 61c497e96b1004bad03790a0f7435c03a8f04100
+preferences -> sidebar -> keymap: clean merge; tree 61c497e96b1004bad03790a0f7435c03a8f04100
+preferences -> keymap -> sidebar: clean merge; tree 61c497e96b1004bad03790a0f7435c03a8f04100
+6/6 orders clean; identical trees; each feature adds one module with one registration line.
+test shell::features::order_preferences::tests::independent_shell_features_survive_order ... ok
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 332 filtered out; finished in 5.30s

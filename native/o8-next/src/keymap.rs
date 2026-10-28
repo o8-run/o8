@@ -240,6 +240,7 @@ pub fn bindings() -> Vec<Binding> {
         })
     };
     const GLOBAL: &str = "Global && !TextInput && !Terminal && !Modal";
+    const TABS: &str = "Global && !TextInput && !Terminal && !Modal && !Overlay";
     for prefix in ["ctrl-", "cmd-"] {
         bind(&format!("{prefix}/"), GLOBAL, Reference);
         bind(
@@ -250,19 +251,19 @@ pub fn bindings() -> Vec<Binding> {
         bind(&format!("{prefix}k"), GLOBAL, Palette);
         bind(
             &format!("{prefix}shift-p"),
-            "Global && !Shortcuts",
+            "Global && !Shortcuts && !Reference",
             PaletteGlobal,
         );
         bind(&format!("{prefix}k"), "Palette && !Terminal", PaletteCancel);
         bind(
             &format!("{prefix}w"),
-            "Settings && !TextInput && !Terminal",
+            "Settings && !TextInput && !Terminal && !Overlay",
             SettingsClose,
         );
-        bind(&format!("{prefix}w"), GLOBAL, CloseSurface);
+        bind(&format!("{prefix}w"), TABS, CloseSurface);
         bind(
             &format!("{prefix},"),
-            "Global && !Terminal && !TextInput",
+            "Global && !Terminal && !Reference",
             Settings,
         );
         bind(
@@ -274,12 +275,12 @@ pub fn bindings() -> Vec<Binding> {
         bind(&format!("{prefix}f"), "Brain && !Terminal", BrainFind);
         bind(&format!("{prefix}f"), "Settings && !Terminal", SettingsFind);
     }
-    bind("ctrl-tab", GLOBAL, NextSurface);
-    bind("ctrl-shift-tab", GLOBAL, PreviousSurface);
-    bind("cmd-alt-right", GLOBAL, NextSurface);
-    bind("cmd-alt-left", GLOBAL, PreviousSurface);
+    bind("ctrl-tab", TABS, NextSurface);
+    bind("ctrl-shift-tab", TABS, PreviousSurface);
+    bind("cmd-alt-right", TABS, NextSurface);
+    bind("cmd-alt-left", TABS, PreviousSurface);
     for index in 0..9 {
-        bind(&format!("cmd-{}", index + 1), GLOBAL, SurfaceIndex(index));
+        bind(&format!("cmd-{}", index + 1), TABS, SurfaceIndex(index));
     }
     bind(
         "escape",
@@ -700,4 +701,13 @@ pub fn sidebar_navigation_input<E: gpui::InteractiveElement>(
             listener(event, window, cx);
         }
     })
+}
+
+/// Preserve registered feature contexts at capture before focused action dispatch.
+/// Their handlers decide whether a key is handled or belongs to the focused child.
+pub fn registered_context_input<E: gpui::InteractiveElement>(
+    element: E,
+    listener: impl Fn(&gpui::KeyDownEvent, &mut gpui::Window, &mut App) + 'static,
+) -> E {
+    element.capture_key_down(listener)
 }

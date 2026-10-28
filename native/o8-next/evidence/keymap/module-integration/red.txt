@@ -1,0 +1,21 @@
+Binding omitted from the feature registry (temporary diagnostic mutation):
+
+running 1 test
+
+thread 'shell::keymap_review_tests::review_reference_command_alias' (fixture) panicked at src/keymap_review_tests.rs:28:5:
+Cmd+/ must open the reference from the focused list
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test shell::keymap_review_tests::review_reference_command_alias ... FAILED
+
+failures:
+
+failures:
+    shell::keymap_review_tests::review_reference_command_alias
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 331 filtered out; finished in 6.39s
+
+error: test failed, to rerun pass `--bin o8-next`
+
+Shared-root attachment rejected by the unchanged source guard:
+
+surface raw shortcut listeners: ["shell_view.rs"]

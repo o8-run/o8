@@ -1,9 +1,9 @@
 import { controlledProviderPins } from './controlled-provider';
 import { isManualThinkingEffort, type ManualThinkingEffort } from '@/lib/orchestrator/thinking-effort';
-import { resolveEffortPin } from '@/lib/orchestrator/effort-pin';
+import { assertRuntimeEffortPin, resolveEffortPin } from '@/lib/orchestrator/effort-pin';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
 import { CODEX_MODEL_IDS, SUPPORTED_MODEL_IDS } from '@/lib/models';
-import type { OwnedLaunchRequest, OwnedRunMode, OwnedSessionRecord } from './types';
+import type { OwnedLaunchRequest, OwnedRunMode, OwnedRuntimeAdapter, OwnedSessionRecord } from './types';
 
 export interface OwnedExecutionPolicy {
   version: 1;
@@ -23,7 +23,7 @@ function nativeModel(runtime: string, model: string): boolean {
     : runtime === 'claude-code' && model.startsWith('claude-') && SUPPORTED_MODEL_IDS.some((entry) => entry === model);
 }
 
-export function createOwnedExecutionPolicy(request: OwnedLaunchRequest, runtime: string): OwnedExecutionPolicy | undefined {
+export function createOwnedExecutionPolicy(request: OwnedLaunchRequest, runtime: string, codexHome?: string): OwnedExecutionPolicy | undefined {
   if (request.executionPolicy === undefined) return undefined;
   const controlled = !!request.controlledTask && runtime === 'claude-code'
     && controlledProviderPins(request.model, request.effort, request.runtimeConfig);
@@ -35,7 +35,7 @@ export function createOwnedExecutionPolicy(request: OwnedLaunchRequest, runtime:
   if (controlled) return { version: 1, mode: 'single-attempt', runtime, model: request.model!,
     effort: undefined, runtimeConfig: { ...request.runtimeConfig } };
   const effort = resolveEffortPin({ runtime: runtime as OrchestratorRuntime, model: request.model,
-    explicitModel: request.model, requestedEffort: request.effort });
+    explicitModel: request.model, requestedEffort: request.effort, codexHome });
   if (!effort.ok || effort.selectedEffort !== request.effort
     || !nativeModel(runtime, request.model)
     || request.runtimeConfig.executionCarrier !== undefined
@@ -46,13 +46,24 @@ export function createOwnedExecutionPolicy(request: OwnedLaunchRequest, runtime:
     effort: request.effort as ManualThinkingEffort, runtimeConfig: { ...request.runtimeConfig } };
 }
 
+/** Preserve early legacy admission; discovery-only tiers wait for account selection. */
+export function resolveOwnedLaunchPolicy(request: OwnedLaunchRequest, adapter: OwnedRuntimeAdapter,
+  account: { deferDiscovery?: boolean; identity?: OwnedSessionRecord['identity'] } = {}): OwnedExecutionPolicy | undefined {
+  if (account.deferDiscovery && adapter.runtimeId === 'codex'
+    && (request.effort === 'none' || request.effort === 'minimal')) return undefined;
+  const codexHome = account.identity?.configHomeRef ?? adapter.defaultConfigHome?.();
+  const policy = createOwnedExecutionPolicy(request, adapter.runtimeId, codexHome);
+  assertRuntimeEffortPin(adapter.runtimeId, request.model ?? adapter.defaultModel, request.effort, codexHome);
+  return policy;
+}
+
 /** An execution limit, not an authorization, account grant or dispatch receipt. */
 export function assertOwnedSingleAttemptSpawn(session: OwnedSessionRecord, runtime: string, mode: OwnedRunMode): void {
   const policy = session.executionPolicy;
   if (policy === undefined) return;
   const fresh = createOwnedExecutionPolicy({ cwd: session.cwd, prompt: session.latestPrompt,
     controlledTask: session.controlledTask, executionPolicy: 'single-attempt',
-    model: session.model, effort: session.effort, runtimeConfig: session.runtimeConfig }, runtime);
+    model: session.model, effort: session.effort, runtimeConfig: session.runtimeConfig }, runtime, session.identity?.configHomeRef);
   if (policy?.version !== 1 || policy.mode !== 'single-attempt' || policy.runtime !== runtime
     || policy.model !== session.model || policy.effort !== session.effort
     || configKey(fresh?.runtimeConfig) !== configKey(policy.runtimeConfig)

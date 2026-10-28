@@ -86,9 +86,23 @@ export function retainedOwners(file) {
     return { ...label(node), retainedBytes: retained[node], shallowBytes: heap.nodes[node * nw + ni.self_size], dominators: ancestry.reverse() };
   });
   const requestObjects = { Request: 0, NextRequest: 0, Response: 0, NextResponse: 0 };
+  const runArtifactCaches = { parsedEntries: { count: 0, retainedBytes: 0 }, serialized: { count: 0, retainedBytes: 0 },
+    serializedEntries: { count: 0, retainedBytes: 0 } };
   for (const node of order) {
     const { type, name } = label(node);
     if (type === 'object' && Object.hasOwn(requestObjects, name)) requestObjects[name]++;
+    if (type !== 'object') continue;
+    const properties = new Set();
+    for (let edge = offsets[node]; edge < offsets[node + 1]; edge += ew) {
+      if (et[ei.type][heap.edges[edge + ei.type]] === 'property') properties.add(heap.strings[heap.edges[edge + ei.name_or_index]]);
+    }
+    const serialized = name === 'RunArtifactCache'
+      || ['entries', 'bytes', 'maxBytes', 'maxEntries', 'ttlMs'].every(key => properties.has(key));
+    const bucket = serialized ? runArtifactCaches.serialized
+      : ['payload', 'bytes', 'expiresAt'].every(key => properties.has(key)) ? runArtifactCaches.serializedEntries
+      : ['key', 'parsed', 'stdoutRaw', 'stderrRaw'].every(key => properties.has(key)) ? runArtifactCaches.parsedEntries : null;
+    if (bucket) { bucket.count++; bucket.retainedBytes += retained[node]; }
   }
-  return { method: 'Immediate dominators over reachable non-weak snapshot edges', passes, reachableNodes: order.length, requestObjects, owners };
+  return { method: 'Immediate dominators over reachable non-weak snapshot edges', passes, reachableNodes: order.length,
+    requestObjects, runArtifactCaches, owners };
 }
