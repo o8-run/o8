@@ -368,6 +368,7 @@ export interface MobileTranscriptEntry {
   id: string;
   role: 'user' | 'assistant' | 'system' | 'tool';
   text: string;
+  steerAnchor?: import('@/lib/transcripts/steer-anchor').SteerTranscriptAnchor;
   /** Monotonic server persistence revision for this message. */
   persistedVersion?: number;
   pinned?: boolean;
@@ -419,6 +420,10 @@ export interface MobileTranscriptEntry {
     };
     /** Stable archive basename; the full turns remain retrievable through /recall. */
     archiveRef?: string;
+    /** Last summarized message identity; the visible history remains intact. */
+    compactedThroughId?: string;
+    /** Cumulative summary coverage; late arrivals before the boundary stay live. */
+    summarizedMessageIds?: string[];
     /** Record-only judgment scores per compacted entry (#2465); nothing reads them. */
     scorer?: import('@/lib/orchestrator/compaction-scorer').CompactionScorerRecord;
   };

@@ -19,6 +19,22 @@ import { getRuntimeCapability, type OrchestratorRuntime } from './runtime-capabi
 import { resolveEffortPin } from './effort-pin';
 import { THINKING_EFFORTS, type ThinkingEffort } from './thinking-effort';
 
+export class WorkerCatalogSelectionError extends Error {}
+
+export class WorkerCatalogReadError extends Error {
+  constructor(readonly call: string, cause: unknown) {
+    super(cause instanceof Error ? cause.message : 'Worker catalog unavailable.');
+  }
+}
+
+async function readCatalog<T>(call: string, read: () => Promise<T>): Promise<T> {
+  try { return await read(); }
+  catch (error) {
+    if (error instanceof WorkerCatalogSelectionError) throw error;
+    throw new WorkerCatalogReadError(call, error);
+  }
+}
+
 export interface WorkerModelCatalog {
   models: Array<{ id: string; efforts: ThinkingEffort[] }>;
   defaultModel: string | null;
@@ -84,7 +100,7 @@ export async function workerModelCatalog(runtime: OrchestratorRuntime, repoPath:
     source = catalog.source;
   } else if (runtime === 'opencode') {
     const launch = resolveAcpLaunch('opencode');
-    if (!launch) throw new Error('The selected runtime is not installed.');
+    if (!launch) throw new WorkerCatalogSelectionError('The selected runtime is not installed.');
     const catalog = await probeAcpModels('opencode', launch, repoPath);
     ids = catalog.models.map(model => model.value);
     defaultModel ??= catalog.currentModel;
@@ -117,7 +133,7 @@ export async function workerModelCatalog(runtime: OrchestratorRuntime, repoPath:
 export async function getWorkerCatalog(repoPath: string, runtime?: OrchestratorRuntime | null) {
   const snapshot = getOperatorDefaultsSync();
   const pool = configuredWorkerPool(snapshot);
-  const inventory = await getDispatchableRuntimeAvailability();
+  const inventory = await readCatalog('getDispatchableRuntimeAvailability', getDispatchableRuntimeAvailability);
   const workers = await Promise.all(pool.map(async id => {
     const readiness = inventory.find(item => item.id === id);
     let available = readiness?.available === true;
@@ -136,11 +152,11 @@ export async function getWorkerCatalog(repoPath: string, runtime?: OrchestratorR
     };
   }));
   if (runtime && !workers.some(worker => worker.runtime === runtime && worker.available)) {
-    throw new Error('Choose an available runtime from the configured worker pool. Manage the pool in Settings > Models.');
+    throw new WorkerCatalogSelectionError('Choose an available runtime from the configured worker pool. Manage the pool in Settings > Models.');
   }
   return {
     workers,
-    ...(runtime ? { runtime, catalog: await workerModelCatalog(runtime, repoPath) } : {}),
+    ...(runtime ? { runtime, catalog: await readCatalog(`workerModelCatalog(${runtime})`, () => workerModelCatalog(runtime, repoPath)) } : {}),
     selectionPolicy: 'Honor explicit task choices. Otherwise choose a suitable available worker from this pool. Do not change settings or silently replace a refused choice. Availability is preflight evidence, not proof of execution.',
   };
 }

@@ -39,9 +39,12 @@ try {
           counts[entry.id] = (counts[entry.id] ?? 0) + 1;
         `) };
       });
-      if (forceInvalidation) plugin.onLoad({ filter: /chat-panel\/ChatMessageList\.tsx$/ }, async args => ({ loader: 'tsx',
-        contents: (await readFile(args.path, 'utf8')).replace('animateStreaming={active && index === lastAssistantIndex}', 'animateStreaming={active}'),
-      }));
+      if (forceInvalidation) plugin.onLoad({ filter: /chat-panel\/ChatMessageList\.tsx$/ }, async args => {
+        const source = await readFile(args.path, 'utf8');
+        const marker = 'animateStreaming={animateLatestAssistant && index === lastAssistantIndex}';
+        if (source.split(marker).length !== 2) throw new Error('Missing production row invalidation seam');
+        return { loader: 'tsx', contents: source.replace(marker, 'animateStreaming={active}') };
+      });
     } }],
     stdin: { resolveDir: root, loader: 'tsx', contents: `
       import React, { useEffect, useRef, useState } from 'react';

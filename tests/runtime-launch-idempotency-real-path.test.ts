@@ -5,7 +5,7 @@ import { NextRequest } from 'next/server';
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RuntimeLaunchRequest, RuntimeLaunchResult } from '@/lib/runtime/actions';
 import { RuntimeLaunchPostEffectError } from '@/lib/runtime/launch-governance';
-import { THINKING_EFFORTS } from '@/lib/orchestrator/thinking-effort';
+import { MANUAL_THINKING_EFFORTS, THINKING_EFFORTS } from '@/lib/orchestrator/thinking-effort';
 
 const h = vi.hoisted(() => ({
   launch: vi.fn<(request: RuntimeLaunchRequest) => Promise<RuntimeLaunchResult>>(async (request) => ({
@@ -38,6 +38,14 @@ const dataDir = mkdtempSync(join(os.tmpdir(), 'o8-runtime-launch-idempotency-'))
 process.env.O8_DATA_DIR = dataDir;
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
 process.env.CORTEX_IDE_OWNED_CODEX_ROOT = join(dataDir, 'owned-codex');
+const codexHome = join(dataDir, 'codex-account');
+mkdirSync(codexHome);
+vi.stubEnv('CODEX_HOME', codexHome);
+writeFileSync(join(codexHome, 'models_cache.json'), JSON.stringify({ models: [{
+  slug: 'gpt-6.1-sol',
+  supported_reasoning_levels: MANUAL_THINKING_EFFORTS.map(effort => ({ effort })),
+}] }));
+const codexIdentity = { id: 'codex-local-default', label: 'Current local sign-in', configHomeRef: codexHome };
 
 const modelFile = join(dataDir, 'models.json');
 const museBinary = join(dataDir, 'muse.cjs');
@@ -126,7 +134,7 @@ describe('runtime launch persisted idempotency through the real route', () => {
 
       const corrected = { ...body, effort: 'high' };
       expect((await route.POST(post(corrected))).status).toBe(200);
-      expect(h.launch).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ effort: 'high' }));
+      expect(h.launch).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ effort: 'high' }), codexIdentity);
       closeDb();
       const replay = await route.POST(post(corrected));
       expect(replay.status).toBe(200);
@@ -142,7 +150,7 @@ describe('runtime launch persisted idempotency through the real route', () => {
       clientMutationId: 'valid-effort', model: 'gpt-6.1-sol', effort,
     }));
     expect(response.status).toBe(200);
-    expect(h.launch).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ effort }));
+    expect(h.launch).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ effort }), codexIdentity);
   });
 
   it.each([
@@ -171,7 +179,7 @@ describe('runtime launch persisted idempotency through the real route', () => {
     expect((await route.POST(post(corrected))).status).toBe(200);
     expect(h.launch).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
       runtime: 'codex', model: 'gpt-6.1-sol', effort: 'high',
-    }));
+    }), codexIdentity);
     closeDb();
     const replay = await route.POST(post(corrected));
     expect(replay.status).toBe(200);
@@ -193,7 +201,8 @@ describe('runtime launch persisted idempotency through the real route', () => {
       clientMutationId: 'supported-runtime-effort',
     }));
     expect(response.status).toBe(200);
-    expect(h.launch).toHaveBeenCalledExactlyOnceWith(expect.objectContaining(selection));
+    const identity = selection.runtime === 'codex' ? [codexIdentity] : [];
+    expect(h.launch).toHaveBeenCalledExactlyOnceWith(expect.objectContaining(selection), ...identity);
   });
 
   it('refuses a previously supported choice after its discovered model evidence changes', async () => {
@@ -225,7 +234,7 @@ describe('runtime launch persisted idempotency through the real route', () => {
         expect(h.launch).not.toHaveBeenCalled();
         expect(h.publish).not.toHaveBeenCalled();
       } else {
-        expect(h.launch).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ effort: 'ultra', model }));
+        expect(h.launch).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ effort: 'ultra', model }), codexIdentity);
       }
     } finally {
       await updateOperatorDefaults({ defaultDispatchModel: original });
@@ -237,7 +246,7 @@ describe('runtime launch persisted idempotency through the real route', () => {
       model: 'gpt-6.1-sol', effort: 'high', workMode: 'read-only',
       executionPolicy: 'single-attempt', clientMutationId: 'single-attempt-route-proof' };
     expect((await route.POST(post(body))).status).toBe(200);
-    expect(h.launch).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ executionPolicy: 'single-attempt' }));
+    expect(h.launch).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ executionPolicy: 'single-attempt' }), codexIdentity);
     closeDb();
     expect((await route.POST(post(body))).headers.get('x-o8-idempotency-replayed')).toBe('1');
     expect((await route.POST(post({ ...body, executionPolicy: undefined }))).status).toBe(409);

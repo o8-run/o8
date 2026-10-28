@@ -1,3 +1,4 @@
+import { projectModelContext } from '@/lib/transcripts/model-context';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { readdir as readdirAsync, stat as statAsync } from 'node:fs/promises';
 import { basename, join } from 'node:path';
@@ -58,8 +59,8 @@ function readHistoryRecord(tabId: string): OrchestratorHistoryRecord | null {
 }
 
 /**
- * Read a thread's persisted transcript as an ordered user/assistant message
- * array — the context the free `o8` orchestrator backend replays to the gateway
+ * Read ordered user/assistant messages with retained summary context, which
+ * the free `o8` orchestrator backend replays to the gateway
  * each turn (it holds no session of its own). Empty (never null) when the thread
  * has no file yet or no usable turns. Reads straight from disk so it reflects
  * the user message ws-server persists just before calling the backend.
@@ -122,12 +123,16 @@ export function readAttributedThreadMessages(
 
 export function readOrchestratorThreadMessages(
   tabId: string | null | undefined,
-): Array<{ role: 'user' | 'assistant'; content: string }> {
+): Array<{ role: 'system' | 'user' | 'assistant'; content: string }> {
   if (!tabId) return [];
   const record = readHistoryRecord(tabId);
   if (!record?.messages) return [];
-  const out: Array<{ role: 'user' | 'assistant'; content: string }> = [];
-  for (const message of record.messages) {
+  const out: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [];
+  for (const message of projectModelContext(record.messages)) {
+    if (message.compaction?.source === 'summary' && message.compaction.summary) {
+      out.push({ role: 'system', content: message.compaction.summary });
+      continue;
+    }
     if (message.role !== 'user' && message.role !== 'assistant') continue;
     if (typeof message.content !== 'string' || message.content.trim().length === 0) continue;
     out.push({ role: message.role, content: message.content });
@@ -404,6 +409,7 @@ export function appendMobileOrchestratorUserMessage(input: {
   agent?: string | null;
   timestampMs?: number;
   handoff?: MobileTranscriptEntry['handoff'];
+  steerAnchor?: MobileTranscriptEntry['steerAnchor'];
 }): MobileOrchestratorThread | null {
   const tabId = input.tabId;
   if (!tabId?.startsWith('thoughts-')) return null;
@@ -434,7 +440,7 @@ export function appendMobileOrchestratorUserMessage(input: {
   const nextMessages = appendUserHistoryMessage({
     messages: Array.isArray(existing.messages) ? existing.messages : [],
     content, messageId: input.messageId, media: input.media,
-    handoff: input.handoff, timestamp,
+    handoff: input.handoff, steerAnchor: input.steerAnchor, timestamp,
   });
   writeHistoryRecord(tabId, {
     ...existing,

@@ -23,11 +23,11 @@ export function AddRepoDialog(options: AddRepoOptions) {
   const { dragOver } = useTauriFileDrop({
     hostRef, disabled: !options.open || flow.busy,
     onDrop: paths => {
-      if (paths.length === 1) void flow.submit(paths[0]);
+      if (paths.length === 1) void flow.submit(paths[0], 'path');
       else flow.setError('Choose one project folder at a time.');
     },
   });
-  const existing = flow.repos.find(repo => repo.localPath.replace(/\/+$/, '') === flow.value.trim().replace(/\/+$/, ''));
+  const existing = flow.repos.find(repo => repo.localPath.replace(/\/+$/, '') === flow.registrationValue.replace(/\/+$/, ''));
   const cloning = !existing && !flow.registered && isRepoUrl(flow.value);
   return <GlassModal open={options.open} onClose={flow.close} title="Add repository" width={480} popoverSurface>
     <div ref={hostRef} onDragOver={event => event.preventDefault()} onDrop={event => {
@@ -35,7 +35,7 @@ export function AddRepoDialog(options: AddRepoOptions) {
       if (flow.busy) return;
       const path = droppedRepoPath(event.dataTransfer);
       if (event.dataTransfer.files.length > 1) flow.setError('Choose one project folder at a time.');
-      else if (path) void flow.submit(path);
+      else if (path) void flow.submit(path, 'path');
       else flow.setError('This browser does not share folder paths. Choose a folder or paste its full path.');
     }} style={{ display: 'flex', flexDirection: 'column', gap: 16, outline: dragOver ? '2px solid var(--t-accent)' : undefined, borderRadius: 10 }}>
       <form onSubmit={event => { event.preventDefault(); void flow.submit(flow.value); }} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -59,7 +59,7 @@ export function AddRepoDialog(options: AddRepoOptions) {
         {flow.error ? <div role="alert" style={{ color: 'var(--t-danger)', fontSize: 12, lineHeight: 1.45 }}>{flow.error}</div> : null}
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
           <ProjectButton onClick={flow.close} disabled={flow.busy}>Cancel</ProjectButton>
-          <ProjectButton primary onClick={() => { void flow.submit(flow.value); }} busy={flow.busy} disabled={!flow.value.trim() || flow.busy}>
+          <ProjectButton primary onClick={() => { void flow.submit(flow.value); }} busy={flow.busy} disabled={!flow.registrationValue || flow.busy}>
             {flow.busy ? cloning ? 'Cloning…' : 'Opening…' : flow.retryState ? 'Retry' : cloning ? 'Clone and open' : 'Open'}
           </ProjectButton>
         </div>
@@ -67,7 +67,7 @@ export function AddRepoDialog(options: AddRepoOptions) {
       {flow.recents.length ? <nav aria-label="Recent folders" style={{ display: 'flex', flexDirection: 'column', gap: 2, borderTop: '1px solid var(--t-divider-subtle)', paddingTop: 12, maxHeight: 260, overflowY: 'auto' }}>
         {flow.recents.map(folder => <button key={folder.localPath} type="button" disabled={flow.busy}
           title={folder.localPath} aria-label={`Open ${folder.name}`}
-          onClick={() => { void flow.submit(folder.localPath); }}
+          onClick={() => { void flow.submit(folder.localPath, 'path'); }}
           onMouseEnter={event => { event.currentTarget.style.background = 'var(--t-hover)'; }}
           onMouseLeave={event => { event.currentTarget.style.background = 'transparent'; }} style={rowStyle}>
           <FolderOpen size={14} style={{ flexShrink: 0, color: 'var(--t-text-muted)' }} />

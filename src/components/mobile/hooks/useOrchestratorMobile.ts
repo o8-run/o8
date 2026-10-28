@@ -24,13 +24,16 @@
  * delta starts a new entry.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { serializeTranscriptForStorage, type StoredTranscriptMessage } from '@/lib/transcripts/history-serde';
+import { historyToMobileTranscript as historyToTranscript, placeMobileTranscript, rememberMobileToolBoundary, useMobileSteerHistory, type MobileToolBoundary } from './orchestrator-mobile-history';
 import { getBrowserWsPort } from '@/lib/panel/ws-port-client';
 import { getMobileWsToken } from '@/lib/mobile/ws-token-client';
 import { skipDuplicateBySeq } from '@/lib/orchestrator/replay-cursor';
 import type {
   MobileOrchestratorThread,
   MobileOrchestratorTranscriptEntry,
+  MobileTranscriptEntry,
 } from '@/lib/mobile/types';
 import {
   enqueuePending,
@@ -85,12 +88,6 @@ const PING_INTERVAL = 20_000;
 const STREAM_FLUSH_MS = 60;
 const PERSIST_DEBOUNCE_MS = 800;
 
-interface ChatHistoryMessage {
-  id?: string;
-  role?: string;
-  content?: string;
-}
-
 function getWsUrl(): string {
   if (typeof window === 'undefined') return '';
   const { hostname, protocol } = window.location;
@@ -115,31 +112,6 @@ function toolPreviewFromOutput(value: unknown): string | undefined {
   return firstLine.length > 80 ? `${firstLine.slice(0, 80)}…` : firstLine;
 }
 
-function historyToTranscript(messages: ChatHistoryMessage[]): MobileOrchestratorTranscriptEntry[] {
-  const entries: MobileOrchestratorTranscriptEntry[] = [];
-  let counter = 0;
-  for (const message of messages) {
-    if (typeof message.content !== 'string') continue;
-    const text = message.content.trim();
-    if (!text) continue;
-    const role: MobileOrchestratorTranscriptEntry['role'] =
-      message.role === 'user' ? 'user'
-        : message.role === 'assistant' ? 'assistant'
-          : message.role === 'tool' ? 'tool'
-            : 'system';
-    const entryId = typeof message.id === 'string' && message.id.trim()
-      ? message.id
-      : `history-${counter}`;
-    counter += 1;
-    entries.push({
-      id: entryId,
-      role,
-      text,
-      timestamp: Date.now() - (messages.length - counter),
-    });
-  }
-  return entries;
-}
 
 export function useOrchestratorMobile({
   activeThread,
@@ -147,8 +119,12 @@ export function useOrchestratorMobile({
   const [connectionState, setConnectionState] = useState<MobileOrchestratorConnectionState>('disconnected');
   const [turnStatus, setTurnStatus] = useState<MobileOrchestratorTurnStatus>('idle');
   const [transcript, setTranscript] = useState<MobileOrchestratorTranscriptEntry[]>([]);
+  const [toolBoundaries, setToolBoundaries] = useState<ReadonlyMap<string, MobileToolBoundary>>(new Map());
+  const [historySources, setHistorySources] = useState<ReadonlyMap<string, MobileTranscriptEntry>>(new Map());
   const [transcriptLoading, setTranscriptLoading] = useState(false);
   const [errorNote, setErrorNote] = useState<string | null>(null);
+  const transcriptRef = useRef(transcript);
+  useEffect(() => { transcriptRef.current = transcript; }, [transcript]);
 
   const wsRef = useRef<WebSocket | null>(null);
   const disposedRef = useRef(false);
@@ -177,6 +153,7 @@ export function useOrchestratorMobile({
     thinking: boolean;
     flushed: boolean;
   } | null>(null);
+  const sealedOutputRef = useRef<{ id: string; text: string } | null>(null);
   const flushTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
@@ -198,17 +175,18 @@ export function useOrchestratorMobile({
     }
     persistTimerRef.current = setTimeout(() => {
       persistTimerRef.current = null;
-      const messages = entries
+      const messages = serializeTranscriptForStorage(entries
         // Skip queued entries — they live in the pending-queue localStorage
         // until reconnect commits them; persisting both would duplicate the
         // bubble on reload (once from chat-history, once from queue).
         .filter((entry) => (entry.role === 'user' || entry.role === 'assistant') && !entry.queued)
         .map((entry) => ({
+          ...historySources.get(entry.id),
           id: entry.id,
           role: entry.role,
-          content: entry.text,
+          text: entry.text,
           timestamp: entry.timestamp ?? Date.now(),
-        }));
+        })));
       if (messages.length === 0) return;
       const firstUserText = entries.find((entry) => entry.role === 'user')?.text ?? '';
       const fallbackTitle = firstUserText
@@ -231,7 +209,7 @@ export function useOrchestratorMobile({
         }),
       }).catch((error) => console.log('[mobile-orchestrator] persist failed', error));
     }, PERSIST_DEBOUNCE_MS);
-  }, []);
+  }, [historySources]);
 
   const flushStreamingBuffer = useCallback(() => {
     const buffer = streamingBufferRef.current;
@@ -239,11 +217,12 @@ export function useOrchestratorMobile({
     buffer.flushed = true;
 
     setTranscript((current) => {
-      const last = current[current.length - 1];
-      if (last && last.id === buffer.id) {
+      const index = current.findIndex(entry => entry.id === buffer.id);
+      const last = current[index];
+      if (last) {
         if (last.text === buffer.text && last.thinking === buffer.thinking) return current;
-        const next = current.slice(0, -1);
-        next.push({ ...last, text: buffer.text, thinking: buffer.thinking });
+        const next = current.slice();
+        next[index] = { ...last, text: buffer.text, thinking: buffer.thinking };
         return next;
       }
       return [
@@ -260,6 +239,9 @@ export function useOrchestratorMobile({
   }, []);
 
   const sealStreamingBuffer = useCallback(() => {
+    // A later event can arrive before the flushed prefix reaches the transcript.
+    const buffer = streamingBufferRef.current;
+    if (buffer) sealedOutputRef.current = { id: buffer.id, text: buffer.text };
     flushStreamingBuffer();
     streamingBufferRef.current = null;
   }, [flushStreamingBuffer]);
@@ -273,9 +255,12 @@ export function useOrchestratorMobile({
   // server-side yet). Keying on .id keeps the transcript stable across
   // polling refreshes for the same thread.
   const activeThreadId = activeThread?.id ?? null;
+  const receiveSteerHistory = useMobileSteerHistory(activeThreadId, setHistorySources, setTranscript);
   useEffect(() => {
+    sealedOutputRef.current = null;
+    setToolBoundaries(new Map());
     if (!activeThreadId) {
-
+      setHistorySources(new Map());
       setTranscript([]);
       setTranscriptLoading(false);
 
@@ -290,13 +275,16 @@ export function useOrchestratorMobile({
     fetch(`/api/v2/chat-history?tabId=${encodeURIComponent(activeThreadId)}`, { cache: 'no-store' })
       .then(async (response) => {
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const data = await response.json() as { messages?: ChatHistoryMessage[] };
+        const data = await response.json() as { messages?: StoredTranscriptMessage[] };
         if (cancelled) return;
-        setTranscript(historyToTranscript(data.messages ?? []));
+        const { entries, sources } = historyToTranscript(data.messages ?? []);
+        setHistorySources(sources);
+        setTranscript(entries);
       })
       .catch((error) => {
         console.log('[mobile-orchestrator] history load failed', error);
         if (!cancelled) {
+          setHistorySources(new Map());
           setTranscript([]);
           setErrorNote('Unable to load thread history.');
         }
@@ -386,6 +374,7 @@ export function useOrchestratorMobile({
         // Defer one tick so the subscription send above lands first.
         setTimeout(() => drainQueueRef.current?.(), 0);
       }
+      if (channel === 'realtime') { receiveSteerHistory(raw); return; }
       if (channel !== 'orchestrator') return;
       // Skip replayed events we've already applied (no double tokens).
       if (skipDuplicateBySeq(raw, lastSeqRef)) return;
@@ -427,11 +416,19 @@ export function useOrchestratorMobile({
           const thinking = data.thinking === true;
           if (!text) return;
           setTurnStatus('busy');
-          const buffer = streamingBufferRef.current;
+          const messageId = typeof data.assistantMessageId === 'string' ? data.assistantMessageId : null;
+          let buffer = streamingBufferRef.current;
+          if (buffer && messageId && buffer.id !== messageId) { sealStreamingBuffer(); buffer = null; }
           if (!buffer) {
+            const id = messageId ?? transcriptIdFor('assistant');
+            const previous = transcriptRef.current.find(entry => entry.id === id);
+            const sealed = sealedOutputRef.current;
+            const prefix = sealed?.id === id && (!previous || sealed.text.startsWith(previous.text))
+              ? sealed.text
+              : previous?.text ?? '';
             streamingBufferRef.current = {
-              id: transcriptIdFor('assistant'),
-              text,
+              id,
+              text: prefix + text,
               thinking,
               flushed: false,
             };
@@ -447,10 +444,16 @@ export function useOrchestratorMobile({
           const toolUseId = typeof data.toolUseId === 'string' ? data.toolUseId : null;
           // Seal any in-flight assistant buffer so the tool entry slots in
           // after the assistant's prose, not before it.
+          const output = streamingBufferRef.current;
+          const assistantId = typeof data.assistantMessageId === 'string' ? data.assistantMessageId : output?.id;
+          const entryId = toolUseId ? `tool:${toolUseId}` : transcriptIdFor('tool');
+          if (assistantId) {
+            const prefix = output?.text ?? transcriptRef.current.find(entry => entry.id === assistantId)?.text ?? '';
+            setToolBoundaries(current => rememberMobileToolBoundary(current, entryId, assistantId, prefix));
+          }
           sealStreamingBuffer();
           // Stable id keyed off toolUseId when we have one, so tool-result
           // can find the matching entry deterministically.
-          const entryId = toolUseId ? `tool:${toolUseId}` : transcriptIdFor('tool');
           setTranscript((current) => [
             ...current,
             {
@@ -536,6 +539,7 @@ export function useOrchestratorMobile({
         wsRef.current = ws;
         backoffRef.current = INITIAL_BACKOFF;
         sendSubscription(ws);
+        ws.send(JSON.stringify({ type: 'realtime-subscribe', subscriptions: [{ stream: 'global' }] }));
         pingTimerRef.current = setInterval(() => {
           if (ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({ type: 'ping' }));
@@ -598,7 +602,7 @@ export function useOrchestratorMobile({
       subscribedRouteRef.current = null;
       setConnectionState('disconnected');
     };
-  }, [flushStreamingBuffer, sealStreamingBuffer, sendSubscription]);
+  }, [flushStreamingBuffer, receiveSteerHistory, sealStreamingBuffer, sendSubscription]);
 
   // ── Pending offline-queue (packet #646) ──
   // When the WS is disconnected/reconnecting, user sends are persisted to
@@ -759,15 +763,20 @@ export function useOrchestratorMobile({
   }, [sealStreamingBuffer]);
 
   const resetTranscript = useCallback(() => {
+    sealedOutputRef.current = null;
     setTranscript([]);
     setErrorNote(null);
     streamingBufferRef.current = null;
   }, []);
 
+  // Split only the returned view. Persistence above retains each aggregate and
+  // its original metadata, using the same placement as the desktop renderer.
+  const presentedTranscript = useMemo(() => placeMobileTranscript(transcript, historySources, toolBoundaries),
+    [transcript, historySources, toolBoundaries]);
   return {
     connectionState,
     turnStatus,
-    transcript,
+    transcript: presentedTranscript,
     transcriptLoading,
     errorNote,
     sendMessage,

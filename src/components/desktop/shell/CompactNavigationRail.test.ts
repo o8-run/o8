@@ -271,16 +271,15 @@ it('keeps o8 primary and requires expanding Tools before any explicit CLI update
     const tools = popup.querySelector<HTMLButtonElement>('[aria-label="Tools updates"]')!;
     expect(tools).not.toBeNull(); expect(tools.getAttribute('aria-expanded')).toBe('false');
     const notesHeading = [...popup.querySelectorAll('div')].find(element => element.textContent === 'What’s changed')!;
-    expect(notesHeading.compareDocumentPosition(tools) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(tools.compareDocumentPosition(notesHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     await act(async () => tools.click());
     expect(popup.textContent).toContain('codex');
-    expect(popup.textContent).not.toMatch(/claude-code|grok|gemini|Fetch is aborted/);
+    expect(popup.textContent).not.toMatch(/grok|Fetch is aborted/);
     expect(popup.textContent).toContain('Update checks couldn’t finish');
-    const current = [...popup.querySelectorAll('button')].find(button => button.textContent?.startsWith('Current CLIs'))!;
-    expect(current.getAttribute('aria-expanded')).toBe('false');
-    act(() => current.click());
     expect(popup.textContent).toContain('claude-code');
-    expect(current.getAttribute('aria-expanded')).toBe('true');
+    expect(popup.textContent).toContain('gemini');
+    expect([...popup.querySelectorAll('[data-cli-update-row]')].map(row => row.getAttribute('data-cli-update-row')))
+      .toEqual(['codex', 'claude-code', 'gemini']);
     const update = [...popup.querySelectorAll('button')].find(button => button.textContent === 'Update o8')!;
     expect(update.style.minHeight).toBe('30px');
     const unregister = registerAppUpdateCheck(async () => {
@@ -386,7 +385,6 @@ it('shows installed CLIs under Tools while keeping the default ready state speci
     await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Updates"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, cancelable: true })));
     const popup = document.querySelector('[aria-label="Updates and release notes"]')!;
     await act(async () => popup.querySelector<HTMLButtonElement>('[aria-label="Tools updates"]')!.click());
-    await act(async () => [...popup.querySelectorAll('button')].find(button => button.textContent?.startsWith('Current CLIs'))!.click());
     expect(popup.textContent).toContain('Grok Build'); expect(popup.textContent).toContain('Claude Code');
     expect(popup.textContent).not.toContain('Codex CLI'); expect(popup.textContent).toContain('Gemini CLI');
     tools[2]!.status = 'update-available';

@@ -1,5 +1,7 @@
 'use client';
 
+import { placeSteerTranscriptEntries } from '@/lib/transcripts/steer-anchor';
+
 import { Fragment, forwardRef, memo, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { DesktopAgentMessage } from '../../DesktopAgentMessage';
 import { ComposerEntryDelivery, ComposerQueuedMessages, type ComposerTranscriptQueue } from './ComposerQueuedMessages';
@@ -196,10 +198,12 @@ const ChatMessageListPresentation = memo(forwardRef<HTMLDivElement, ChatMessageL
   // line) instead of a stack of shimmer rows. Render-time derivation — the
   // underlying message state is untouched.
   const scrollRef = useRef<HTMLDivElement>(null);
-  const displayMessages = useMemo(() => mergeAdjacentToolOnlyEntries(rawDisplayMessages), [rawDisplayMessages]);
+  const steerItems = composerQueue?.items;
+  const displayMessages = useMemo(() => mergeAdjacentToolOnlyEntries(placeSteerTranscriptEntries(rawDisplayMessages, steerItems)), [rawDisplayMessages, steerItems]);
   const items = useMemo(() => buildMissionRenderItems(displayMessages), [displayMessages]);
   const visualizations = useTranscriptVisualizations({ repoPath, threadId, active, length: rawDisplayMessages.length });
-  const visualsByIndex = useMemo(() => placeTranscriptVisualizations(visualizations, displayMessages), [visualizations, displayMessages]);
+  const anchors = useMemo(() => new Map<string, string>(), [repoPath, threadId]);
+  const visualsByIndex = useMemo(() => placeTranscriptVisualizations(visualizations, displayMessages, anchors), [visualizations, displayMessages, anchors]);
   const renderVisualizations = (index: number) => (visualsByIndex.get(index) ?? []).map(reference => (
     <VisualizationFrame key={reference.id} reference={reference} />
   ));

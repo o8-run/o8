@@ -6,19 +6,41 @@ import { join } from 'node:path';
 import { NextRequest } from 'next/server';
 
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { RuntimeSession } from '@/lib/runtimes/types';
 
 const root = mkdtempSync(join(tmpdir(), 'o8-auth-before-attach-'));
 const dataDir = join(root, 'data');
 const ownedRoot = join(dataDir, 'owned-codex');
 const repoPath = join(dataDir, 'fixture-repo');
 const shimPath = join(root, 'codex-auth-shim.js');
+const shimModePath = join(root, 'shim-mode');
 const execCountPath = join(root, 'exec-count');
 const exitOrderingRace = vi.hoisted(() => ({ enabled: false, injected: false }));
 const inventoryRace = vi.hoisted(() => ({
   enabled: false,
   primeStatus: null as number | null,
   primeAgentStatus: null as string | null,
+  surfaceId: null as string | null,
+  staleSession: null as RuntimeSession | null,
 }));
+
+// Replay the actual pre-exit discovery receipt for this surface while the real
+// exit and lane reconciliation run, without relying on incidental cache timing.
+vi.mock('@/lib/runtimes/codex', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/runtimes/codex')>();
+  return { ...actual, codexRuntime: { ...actual.codexRuntime,
+    discoverSessions: async (...args: Parameters<typeof actual.codexRuntime.discoverSessions>) => {
+      const sessions = await actual.codexRuntime.discoverSessions(...args);
+      if (!inventoryRace.enabled) return sessions;
+      if (!inventoryRace.staleSession) {
+        const target = sessions.find(session => session.sessionKey === inventoryRace.surfaceId);
+        if (target) inventoryRace.staleSession = structuredClone(target);
+      }
+      return sessions.map(session => session.sessionKey === inventoryRace.surfaceId && inventoryRace.staleSession
+        ? structuredClone(inventoryRace.staleSession) : session);
+    },
+  } };
+});
 
 process.env.O8_DATA_DIR = dataDir;
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
@@ -40,18 +62,19 @@ const fs = require('node:fs');
 const args = process.argv.slice(2);
 if (args[0] === '--version') { console.log('codex-cli 0.130.0'); process.exit(0); }
 ${codexModelListFixtureScript()}
+const mode = fs.readFileSync(${JSON.stringify(shimModePath)}, 'utf8');
 if (args[0] === 'exec') {
   const path = ${JSON.stringify(execCountPath)};
   const count = Number(fs.existsSync(path) ? fs.readFileSync(path, 'utf8') : '0') + 1;
   fs.writeFileSync(path, String(count));
-  if (process.env.O8_TEST_AUTH_SHIM_MODE === 'auth-delay') {
+  if (mode === 'auth-delay') {
     setTimeout(() => {
       process.stderr.write('Failed to refresh token: 401 refresh_token_reused\\n');
       process.exit(1);
     }, 5000);
     return;
   }
-  if (process.env.O8_TEST_AUTH_SHIM_MODE === 'clean-delay') {
+  if (mode === 'clean-delay') {
     setTimeout(() => process.exit(0), 1000);
     return;
   }
@@ -117,6 +140,7 @@ vi.mock('@/lib/runtime/actions', async (importOriginal) => {
     launchRuntimeSurface: async (request: Parameters<typeof actual.launchRuntimeSurface>[0]) => {
       const result = await actual.launchRuntimeSurface(request);
       if (inventoryRace.enabled && result.ok && result.surfaceId) {
+        inventoryRace.surfaceId = result.surfaceId;
         const { invalidateRuntimeInventoryCache } = await import('@/lib/runtime/inventory');
         const { GET } = await import('@/app/api/runtime/inventory/route');
         invalidateRuntimeInventoryCache();
@@ -208,19 +232,19 @@ async function waitForRuntimeExit(laneId: string, surfaceId: string) {
 }
 
 beforeEach(() => {
-  vi.stubEnv('O8_WORKER_ENV_ALLOW', 'O8_TEST_AUTH_SHIM_MODE');
   exitOrderingRace.enabled = false;
   exitOrderingRace.injected = false;
   inventoryRace.enabled = false;
   inventoryRace.primeStatus = null;
   inventoryRace.primeAgentStatus = null;
-  delete process.env.O8_TEST_AUTH_SHIM_MODE;
+  inventoryRace.surfaceId = null;
+  inventoryRace.staleSession = null;
+  writeFileSync(shimModePath, 'auth');
   writeFileSync(execCountPath, '0');
   for (const lane of listLanes()) deleteLane(lane.id);
 });
 
 afterAll(() => {
-  vi.unstubAllEnvs();
   rmSync(root, { recursive: true, force: true });
 });
 
@@ -268,7 +292,7 @@ describe('Codex authentication exit before launch attachment', () => {
         review: null,
       }],
     });
-    process.env.O8_TEST_AUTH_SHIM_MODE = 'auth-delay';
+    writeFileSync(shimModePath, 'auth-delay');
     inventoryRace.enabled = true;
 
     const launched = await dispatch({
@@ -399,7 +423,7 @@ describe('Codex authentication exit before launch attachment', () => {
         blockedReason: null, lane: null, review: null,
       }],
     });
-    process.env.O8_TEST_AUTH_SHIM_MODE = 'clean-delay';
+    writeFileSync(shimModePath, 'clean-delay');
     exitOrderingRace.enabled = true;
 
     const launched = await dispatch({

@@ -1,11 +1,34 @@
 use super::*;
 use gpui::TestAppContext;
 use std::{
-    io::{BufRead, BufReader},
+    io::{BufRead, BufReader, Read},
     process::{Child, Stdio},
+    sync::{Arc, Mutex},
 };
 
-struct Server(Child);
+struct Server(Child, Arc<Mutex<Vec<u8>>>, Option<std::path::PathBuf>);
+impl Server {
+    fn diagnostics(&mut self) -> String {
+        let status = match self.0.try_wait() {
+            Ok(Some(status)) => status.to_string(),
+            Ok(None) => "still running".into(),
+            Err(error) => error.to_string(),
+        };
+        let worker = self.2.as_ref().map(|path| {
+            use std::io::{Seek, SeekFrom};
+            let mut file = std::fs::File::open(path)?;
+            let len = file.metadata()?.len();
+            file.seek(SeekFrom::Start(len.saturating_sub(64 * 1024)))?;
+            let mut bytes = Vec::new();
+            file.read_to_end(&mut bytes)?;
+            Ok::<_, std::io::Error>(String::from_utf8_lossy(&bytes).into_owned())
+        });
+        format!(
+            "fixture host: {status}\nfixture stderr:\n{}\nworker log:\n{worker:?}",
+            String::from_utf8_lossy(&self.1.lock().unwrap())
+        )
+    }
+}
 impl Drop for Server {
     fn drop(&mut self) {
         let _ = Command::new("kill")
@@ -41,17 +64,35 @@ fn fixture_options(worker: bool, empty: bool) -> (Server, Client) {
         .env("O8_NEXT_API_TOKEN", "fixture-operator-bearer")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .spawn()
         .expect("fixture host");
-    let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
-    let origin = lines
+    let errors = Arc::new(Mutex::new(Vec::new()));
+    let captured = errors.clone();
+    let mut stderr = child.stderr.take().unwrap();
+    std::thread::spawn(move || {
+        let mut chunk = [0; 4096];
+        while let Ok(len) = stderr.read(&mut chunk) {
+            if len == 0 {
+                break;
+            }
+            let mut errors = captured.lock().unwrap();
+            errors.extend_from_slice(&chunk[..len]);
+            let excess = errors.len().saturating_sub(64 * 1024);
+            errors.drain(..excess);
+        }
+    });
+    let mut server = Server(child, errors, None);
+    let mut lines = BufReader::new(server.0.stdout.take().unwrap()).lines();
+    let receipt = lines
         .find_map(|line| {
-            serde_json::from_str::<Value>(&line.ok()?).ok()?["origin"]
-                .as_str()
-                .map(str::to_owned)
+            let receipt = serde_json::from_str::<Value>(&line.ok()?).ok()?;
+            receipt["origin"].as_str()?;
+            Some(receipt)
         })
-        .expect("fixture origin");
+        .unwrap_or_else(|| panic!("fixture origin missing\n{}", server.diagnostics()));
+    let origin = receipt["origin"].as_str().unwrap().to_owned();
+    server.2 = receipt["runtimeLog"].as_str().map(std::path::PathBuf::from);
     let anonymous = Client::authenticated(&origin, None).unwrap();
     assert_eq!(
         anonymous.sessions().unwrap_err(),
@@ -73,7 +114,7 @@ fn fixture_options(worker: bool, empty: bool) -> (Server, Client) {
             );
         }
     }
-    (Server(child), client)
+    (server, client)
 }
 
 #[path = "worker_tests.rs"]
