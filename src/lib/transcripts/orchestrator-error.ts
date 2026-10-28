@@ -7,21 +7,35 @@ export function orchestratorErrorText(
   // Node can color stack frames even when the bridge's protocol is plain JSON.
   const lines = diagnostic.replace(/\u001b\[[0-9;]*m/g, '').split(/\r?\n/);
   const sourceLines = new Set<number>();
-  let hasFrame = false;
+  const errorHeader = /^\s*(?:[\w.$]*(?:Error|Exception))(?: \[[^\]]+\])?:/;
+  let afterCaret = -1;
   for (let index = 0; index < lines.length; index += 1) {
-    if (/^(?:file:\/\/\S+|(?:[A-Za-z]:)?[\\/].+|[^\s:]+\.[cm]?[jt]s):\d+(?::\d+)?$/.test(lines[index].trim())) {
-      hasFrame = true;
+    // Includes node:internal, relative paths and other non-file URL schemes.
+    if (/^(?:[A-Za-z]:[\\/].+|[\\/].+|\S+):\d+(?::\d+)?$/.test(lines[index].trim())) {
       sourceLines.add(index);
       sourceLines.add(index + 1);
+      if (/^\s*\^/.test(lines[index + 2] ?? '')) afterCaret = index + 3;
     }
   }
-  const candidates = lines.filter((line, index) => !sourceLines.has(index) && !/^\s*(?:\^|at\s)/.test(line));
-  const error = (preferLine && candidates.find(preferLine))
-    || candidates.find(line => /^\s*(?:[\w.$]*(?:Error|Exception))(?: \[[^\]]+\])?:/.test(line));
-  if (error) return error.trim();
-  // Incomplete frames and thrown non-Errors must never fall back to source.
-  if (hasFrame) return fallback;
-  const first = lines.find(line => line.trim())?.trim();
-  if (!first || /^(?:file:\/\/|at\s|\^|var\b|const\b|let\b|throw\b|function\b|import\b|export\b)|[;{}]/.test(first)) return fallback;
-  return first;
+  const isBoundary = (line: string, index: number) => sourceLines.has(index)
+    || /^\s*(?:\^|at\s|Node\.js v\d|\(Use `node --trace-uncaught)/.test(line);
+  const isCandidate = (line: string, index: number) => line.trim() && !isBoundary(line, index);
+  let start = preferLine ? lines.findIndex((line, index) => isCandidate(line, index) && preferLine(line)) : -1;
+  if (start < 0 && afterCaret >= 0) {
+    // The message need not have an Error class: Node also prints strings/objects.
+    start = lines.findIndex((line, index) => index >= afterCaret && isCandidate(line, index));
+  }
+  if (start < 0) start = lines.findIndex((line, index) => isCandidate(line, index) && errorHeader.test(line));
+  if (start < 0) {
+    // Incomplete frames must never fall back to source.
+    if (sourceLines.size) return fallback;
+    start = lines.findIndex(line => line.trim());
+    if (start < 0 || /^(?:file:\/\/|at\s|\^|var\b|const\b|let\b|throw\b|function\b|import\b|export\b)/.test(lines[start].trim())) return fallback;
+  }
+  let end = start + 1;
+  for (; end < lines.length && !isBoundary(lines[end], end); end += 1) {
+    // The bridge prints its contextual summary before the original Error stack.
+    if (errorHeader.test(lines[end]) && /^\s*at\s/.test(lines[end + 1] ?? '')) break;
+  }
+  return lines.slice(start, end).join('\n').trim() || fallback;
 }

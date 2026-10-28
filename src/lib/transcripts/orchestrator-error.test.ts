@@ -16,4 +16,22 @@ describe('orchestrator error display limits', () => {
   it('removes terminal colors from the failure line', () => {
     expect(orchestratorErrorText(frame + '\u001b[31mTypeError: invalid input\u001b[39m')).toBe('TypeError: invalid input');
   });
+
+  it.each(['node:internal/modules/run_main:123', 'webpack://bundle/bootstrap:12:3', 'relative-script:4'])('recognizes a non-file frame at %s', location => {
+    expect(orchestratorErrorText(`${location}\ntriggerUncaughtException(\n  ^\nactual reason`)).toBe('actual reason');
+  });
+
+  it('keeps continuation lines, blank lines and object formatting before the stack', () => {
+    const reason = "{\n  reason: 'first line',\n\n  detail: 'second line'\n}";
+    expect(orchestratorErrorText(`${frame}${reason}\n    at main (bridge.mjs:2:1)\n\nNode.js v22.23.2`)).toBe(reason);
+  });
+
+  it('keeps the contextual bridge summary without repeating the original stack header', () => {
+    expect(orchestratorErrorText('Error: initialize: fixture failure\nError: fixture failure\n    at main (bridge.mjs:2:1)'))
+      .toBe('Error: initialize: fixture failure');
+  });
+
+  it.each(["{ reason: 'object actual reason' }", 'actual reason; retry later'])('preserves an already selected diagnostic: %s', reason => {
+    expect(orchestratorErrorText(reason)).toBe(reason);
+  });
 });
