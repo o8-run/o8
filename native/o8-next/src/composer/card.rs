@@ -197,7 +197,7 @@ impl Surface {
         }
         Some(routing)
     }
-    fn composer_button(
+    pub(super) fn composer_button(
         &self,
         id: &str,
         label: &str,
@@ -296,6 +296,13 @@ impl Surface {
             .unwrap_or("")
             .to_owned();
         self.composer.update(cx, |i, cx| {
+            // A second press on the same chip closes its menu, as on the desktop.
+            if i.controls.open == Some(picker) {
+                i.controls.open = None;
+                i.controls.model = None;
+                cx.notify();
+                return;
+            }
             i.controls.open = Some(picker);
             i.controls.error.clear();
             if picker == "model" {
@@ -310,7 +317,7 @@ impl Surface {
         });
         cx.notify();
     }
-    fn composer_choice(
+    pub(super) fn composer_choice(
         &mut self,
         field: &'static str,
         value: &str,
@@ -501,71 +508,9 @@ impl Surface {
             .child(self.composer.update(cx, |i, cx| i.image_chips(cx)))
             .child(footer);
         if let Some(open) = open {
-            let mut picker = div()
-                .id("composer-picker")
-                .p(px(8.))
-                .flex()
-                .flex_wrap()
-                .gap(px(6.));
-            let choices: &[(&str, &str)] = match open {
-                "mode" => &[
-                    ("solo", "Solo"),
-                    ("fast", "Shared"),
-                    ("multitask", "Worktrees"),
-                ],
-                "access" => &[("plan", "Plan only"), ("full", "Full access")],
-                "effort" => &[
-                    ("low", "Low"),
-                    ("medium", "Medium"),
-                    ("high", "High"),
-                    ("xhigh", "Extra high"),
-                    ("max", "Max"),
-                ],
-                _ => &[],
-            };
-            for &(value, label) in choices {
-                let field = match open {
-                    "mode" => "pickedMode",
-                    "access" => "permissionMode",
-                    _ => "effort",
-                };
-                picker = picker.child(self.composer_button(
-                    &format!("{open}-{value}"),
-                    label,
-                    !busy,
-                    cx,
-                    move |s, w, cx| s.composer_choice(field, value, w, cx),
-                ));
-            }
-            if let Some(model) = model {
-                let input = model.clone();
-                picker = picker
-                    .child(
-                        div()
-                            .id("composer-model-input")
-                            .debug_selector(|| "composer-model-input".into())
-                            .w_full()
-                            .child(model),
-                    )
-                    .child(self.composer_button(
-                        "composer-model-save",
-                        if busy { "Saving…" } else { "Save" },
-                        !busy,
-                        cx,
-                        move |s, w, cx| {
-                            let model = input.read(cx).text.trim().to_owned();
-                            s.composer_choice("model", &model, w, cx);
-                        },
-                    ));
-            }
-            picker = picker.child(self.composer_button(
-                "composer-picker-close",
-                "Close",
-                !busy,
-                cx,
-                |s, w, cx| s.dismiss_composer_picker(w, cx),
-            ));
-            card = card.child(picker);
+            card = card
+                .relative()
+                .child(self.composer_popover(open, busy, model, &routing, cx));
         }
         card.when(!error.is_empty(), |d| {
             d.child(

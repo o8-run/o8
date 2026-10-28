@@ -219,6 +219,44 @@ fn native_composer_card_controls_persist_and_send_the_selected_routing(cx: &mut 
 }
 
 #[gpui::test]
+fn native_composer_lead_picker_moves_a_thread_with_history_to_a_fresh_conversation(
+    cx: &mut TestAppContext,
+) {
+    let fixture = Fixture::start(true);
+    let (surface, cx) = open(cx, &fixture);
+    click("composer-model", cx);
+    // Runtimes are grouped as in the desktop picker: Claude above Codex.
+    let opus = cx.debug_bounds("model-claude-opus-5-5").expect("Opus 5.5 row");
+    let astra = cx.debug_bounds("model-gpt-6-astra").expect("GPT-6 Astra row");
+    assert!(opus.top() < astra.top());
+    // The fixture thread runs on another runtime and already has a reply, so
+    // the lead moves to a fresh conversation instead of rewriting this one.
+    click("model-claude-opus-5-5", cx);
+    let defaults: Value = fixture
+        .client
+        .get("/api/panel/operator-defaults", &[("include", "values")])
+        .unwrap();
+    assert_eq!(defaults["values"]["orchestratorBackend"], "claude");
+    assert_eq!(defaults["values"]["orchestratorModel"], "claude-opus-5-5");
+    let selected = surface.read_with(cx, |s, cx| {
+        assert!(s.composer.read(cx).controls.open.is_none());
+        s.selected.clone().unwrap()
+    });
+    assert!(selected.starts_with("thoughts-next-"), "{selected}");
+    let history: Value = fixture
+        .client
+        .get("/api/v2/chat-history", &[("tabId", selected.as_str())])
+        .unwrap();
+    assert_eq!(history["backend"], "claude");
+    assert_eq!(history["model"], "claude-opus-5-5");
+    let original: Value = fixture
+        .client
+        .get("/api/v2/chat-history", &[("tabId", "thoughts-composer-first")])
+        .unwrap();
+    assert_ne!(original["backend"], "claude");
+}
+
+#[gpui::test]
 fn native_composer_card_restores_focus_and_keeps_each_session_choice(cx: &mut TestAppContext) {
     let fixture = Fixture::start(true);
     let (surface, cx) = open(cx, &fixture);
