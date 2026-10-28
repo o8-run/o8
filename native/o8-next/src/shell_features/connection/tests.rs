@@ -111,7 +111,7 @@ fn shell_names_missing_and_rejected_tokens_without_leaking_them(cx: &mut TestApp
 
 #[gpui::test]
 fn shell_connection_checks_are_single_flight_and_keep_current_view(cx: &mut TestAppContext) {
-    let fixture = Fixture::new();
+    let fixture = Fixture::start_mode(false, "--sidebar");
     let (shell, mut visual) = open(
         fixture.client.clone(),
         fixture.root.join("checks.json"),
@@ -135,6 +135,72 @@ fn shell_connection_checks_are_single_flight_and_keep_current_view(cx: &mut Test
         before
     );
     assert!(shell.read_with(cx, |s, _| s.notice.is_empty()));
+
+    // Let the stable global subscription deliver its initial catalog snapshot.
+    let warmup = Instant::now() + Duration::from_secs(1);
+    while Instant::now() < warmup {
+        shell.update_in(cx, |s, window, cx| s.tick(false, window, cx));
+        cx.run_until_parked();
+        draw(cx);
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    // A maintenance refresh can interleave with a rejected sidebar rename.
+    // Dispatch Enter without draining the task, as the real event loop does.
+    cx.simulate_keystrokes("ctrl-f");
+    cx.simulate_input("Sidebar thread 1999");
+    cx.simulate_keystrokes("enter f8 f2");
+    cx.simulate_input("Rejected rename");
+    let sidebar = shell.read_with(cx, |s, _| s.surfaces.sidebar.view.as_ref().unwrap().clone());
+    let id = sidebar.read_with(cx, |s, _| {
+        s.diagnostic()["rename"].as_str().unwrap().to_owned()
+    });
+    let session = fixture
+        .client
+        .sessions()
+        .unwrap()
+        .into_iter()
+        .find(|s| s.id == id)
+        .unwrap();
+    let record = PathBuf::from(session.repo_path.unwrap())
+        .parent()
+        .unwrap()
+        .join("data/chat-history")
+        .join(format!("{id}.json"));
+    let original = fs::read(&record).unwrap();
+    let mut changed: Value = serde_json::from_slice(&original).unwrap();
+    changed["repoPath"] = json!(fixture.root);
+    fs::write(&record, serde_json::to_vec(&changed).unwrap()).unwrap();
+    cx.update(|window, cx| window.dispatch_keystroke(gpui::Keystroke::parse("enter").unwrap(), cx));
+    assert!(sidebar.read_with(cx, |s, _| s.diagnostic()["saving"] == true));
+    shell.update_in(cx, |s, window, cx| s.tick(true, window, cx));
+    assert!(shell.read_with(cx, |s, _| s.loading));
+    cx.run_until_parked();
+    draw(cx);
+    assert!(
+        sidebar.read_with(cx, |s, _| {
+            let state = s.diagnostic();
+            state["saving"] == false
+                && state["notice"]
+                    .as_str()
+                    .is_some_and(|n| n.contains("HTTP 404"))
+        }),
+        "the production PATCH must refuse the changed workspace"
+    );
+    fs::write(&record, &original).unwrap();
+    // A declined catalog load must remain queued after the failed mutation.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while shell.read_with(cx, |s, _| s.loading) {
+        shell.update_in(cx, |s, window, cx| s.tick(false, window, cx));
+        cx.run_until_parked();
+        draw(cx);
+        assert!(
+            Instant::now() < deadline,
+            "refresh deferred by a failed save must settle"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(shell.read_with(cx, |s, _| s.connected && s.notice.is_empty()));
 }
 
 #[gpui::test]

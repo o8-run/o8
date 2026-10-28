@@ -219,7 +219,13 @@ impl ThreadList {
         self.dirty.get_or_insert_with(Instant::now);
     }
     pub fn load(&mut self, cx: &mut Context<Self>) {
-        if self.loading || self.saving {
+        if self.loading {
+            return;
+        }
+        if self.saving {
+            // The shell may already be awaiting this refresh. Retry after the
+            // save settles, including when its mutation is rejected.
+            self.dirty.get_or_insert_with(Instant::now);
             return;
         }
         self.loading = true;
