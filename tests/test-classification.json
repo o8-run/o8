@@ -3697,6 +3697,12 @@
       ]
     },
     {
+      "path": "tests/linux-native-addon-abis.test.ts",
+      "reasons": [
+        "child-process"
+      ]
+    },
+    {
       "path": "tests/linux-pi-write-helper.test.ts",
       "reasons": [
         "child-process"
