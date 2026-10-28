@@ -90,9 +90,57 @@ with `node scripts/release.mjs --dry-run`. Beta artifact inspection uses
 `node scripts/release-beta.mjs --dry-run`; neither command signs, notarizes or
 publishes during a dry run.
 
-Promotion is separate work in #4857. Installed-build smoke acceptance remains
-in draft #4813. This change does not establish a smoke receipt or perform a
-release, tag operation or promotion.
+## Promote a verified beta to stable
+
+Promotion requires explicit operator approval. It reuses the published beta bytes;
+it does not build, sign, notarize, change keys or change workflow permissions.
+Use `npm run promote -- vX.Y.Z --dry-run` to verify and inspect the plan first.
+After approval, `npm run promote -- vX.Y.Z` performs the planned stable effects.
+Neither command moves the `beta` tag or uploads `beta.json`.
+
+Before any remote write, promotion downloads the candidate assets from both
+repositories, compares their SHA-256 hashes, verifies every updater signature
+against the configured public key, and reads the exact version and `beta` channel
+from the authenticated archive. It verifies that each DMG contains the signed
+archive's app, validates its staple, and checks that both rolling beta feeds name
+the candidate or a newer version. Unknown assets and unsupported authenticated
+platforms fail closed. Both stable destinations must allow this version without
+losing a platform or downgrading. An already served version must have identical
+platform entries and an explicit `stable` channel marker.
+
+A successful check writes a local `o8/promotion-verification/v1` receipt at
+`<operator-data>/release-verification/vX.Y.Z.json`, including `status: verified`,
+`version`, `channel: beta`, repository names, asset-name to SHA-256 mappings,
+verification checks, the published stable ancestor range, and a verification time.
+Publication reads that receipt and rechecks the exact version and downloaded
+asset hashes before proceeding. Each retry verifies the remote bytes again;
+a saved receipt cannot bypass verification. Failure changes no remote release.
+Dry-run performs verification and writes this local receipt only.
+
+The receipt reserves `installedSmoke: null` for the independently owned #4813
+acceptance work. A future installed-smoke section must identify its schema,
+version, the same asset hashes, tested platform, observed result, and evidence
+location. Promotion preserves this section only while its version and asset
+hashes match. This verifier does not claim installed-build acceptance or alter
+the smoke-test implementation.
+
+Promotion uploads `latest.json` marked `stable` and cumulative `fixed.json` to the
+candidate tag in both repositories, then changes those releases to non-prerelease
+and latest. The signed build identity remains `beta`; the stable updater's exact
+manifest-channel guard remains intact. The fixed-report reconciliation,
+`Fixes-Report` range, reporter notifications, public changelog, latest-ship feed,
+and community announcement use the same code as direct stable publication in
+`scripts/lib/stable-release-effects.mjs`. Metadata is anchored to the promoted
+tag, even if the checkout or rolling beta feed is newer.
+
+A partial promotion can be retried with the same command. It completes missing
+stable effects, retains completed effect checkpoints in the hash-bound receipt,
+and never resets an offered update-publication receipt. It does not poll updater
+endpoints with the promoted version as the current version, which can return
+204. A newer stable version always refuses promotion. The shared publication lock
+is released on success, refusal, or a caught failure. Preserve receipts when
+recovering interrupted work; report publication failures and retry after the
+provider is available. Release-note archiving remains a separate reviewed PR.
 
 ## Development and nightly verification
 

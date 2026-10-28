@@ -98,7 +98,7 @@ async function postFixed(webhookUrl, entry) {
  * release.mjs can call it directly after the public mirror lands — announcing a
  * fix "in v0.1.592" before v0.1.592 exists would be a lie.
  */
-export async function publishFixed({ range, dryRun = false } = {}) {
+export async function publishFixed({ range, dryRun = false, version = appVersion() } = {}) {
   const resolvedRange = range || defaultRange();
   const webhookUrl = resolveFixedWebhook();
 
@@ -123,7 +123,6 @@ export async function publishFixed({ range, dryRun = false } = {}) {
     console.warn('  Only reports filed on THIS machine will resolve — a fix for someone else\'s bug will be skipped.');
   }
 
-  const version = appVersion();
   const { entries, missing, published } = resolveNewFixes(resolvedRange, version);
 
   // The reporter's raw prose is about to hit #fixed AND fixed.json, which is a
