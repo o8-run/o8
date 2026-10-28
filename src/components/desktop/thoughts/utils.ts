@@ -2,6 +2,7 @@ import { orchestratorRuntimeTone } from '@/lib/orchestrator/display';
 import { listDispatchableRuntimes } from '@/lib/orchestrator/runtime-capabilities';
 import { nextPacketReferenceLabel } from '@/lib/orchestrator/store';
 import { preserveVoiceCaption } from '@/lib/transcripts/voice-captions';
+import { mergeTranscriptSources } from '@/lib/transcripts/merge-ordered';
 import type {
   OrchestratorPacket,
   OrchestratorRuntime,
@@ -212,20 +213,7 @@ export function mergeTranscriptEntries(
 ) {
   if (incoming.length === 0) return existing;
 
-  const next = [...existing];
-  const indexById = new Map(next.map((entry, index) => [entry.id, index]));
-
-  for (const entry of incoming) {
-    const existingIndex = indexById.get(entry.id);
-    if (existingIndex == null) {
-      indexById.set(entry.id, next.length);
-      next.push(entry);
-      continue;
-    }
-    next[existingIndex] = entry;
-  }
-
-  return retainTranscriptEntries(next);
+  return retainTranscriptEntries(mergeTranscriptSources(existing, incoming));
 }
 
 export function mergeSameThreadHistoryLoad(
@@ -237,7 +225,7 @@ export function mergeSameThreadHistoryLoad(
 
   const liveById = new Map(liveEntries.map((entry) => [entry.id, entry]));
   let preservedLiveEntries = false;
-  const entries = fetchedEntries.map((fetchedEntry) => {
+  const fetched = fetchedEntries.map((fetchedEntry) => {
     const liveEntry = liveById.get(fetchedEntry.id);
     if (!liveEntry) return fetchedEntry;
     liveById.delete(fetchedEntry.id);
@@ -255,13 +243,10 @@ export function mergeSameThreadHistoryLoad(
 
   if (liveById.size > 0) {
     preservedLiveEntries = true;
-    for (const liveEntry of liveEntries) {
-      if (liveById.has(liveEntry.id)) entries.push(liveEntry);
-    }
   }
 
   return {
-    entries,
+    entries: mergeTranscriptSources(liveEntries, fetched),
     preservedLiveEntries,
   };
 }

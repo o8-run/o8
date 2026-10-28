@@ -16,8 +16,9 @@ impl Render for ThreadList {
             .is_some_and(|id| !id.contains(':'));
         div()
             .id("thread-sidebar")
+            .debug_selector(|| "thread-sidebar".into())
             .group("thread-sidebar")
-            .w(px(280.))
+            .w(px(RAIL_WIDTH))
             .h_full()
             .flex_shrink_0()
             .min_h_0()
@@ -73,12 +74,20 @@ impl Render for ThreadList {
                 uniform_list(
                     "native-threads",
                     self.rows.len(),
-                    cx.processor(|this, range: std::ops::Range<usize>, _, cx| {
+                    cx.processor(|this, range: std::ops::Range<usize>, window, cx| {
                         this.materialized.set(range.len());
+                        let keyboard = this.focus.is_focused(window);
                         range
                             .map(|i| {
                                 let row = this.rows[i].clone();
                                 let thread = row.id.is_some();
+                                let title =
+                                    gpui::StyledText::new(crate::text::sanitize(&row.title));
+                                #[cfg(test)]
+                                if let Some(id) = &row.id {
+                                    this.title_layouts
+                                        .insert(id.clone(), title.layout().clone());
+                                }
                                 let selected = row.id.as_ref() == this.selected.as_ref() && thread;
                                 let painted = this.painted.clone();
                                 let identity = row
@@ -91,6 +100,9 @@ impl Render for ThreadList {
                                 div()
                                     .id(gpui::ElementId::Name(identity.into()))
                                     .debug_selector(move || format!("thread-row-{i}"))
+                                    .group("thread-row")
+                                    .w(px(RAIL_WIDTH))
+                                    .min_w_0()
                                     .h(px(28.))
                                     .flex()
                                     .items_center()
@@ -109,14 +121,17 @@ impl Render for ThreadList {
                                         div()
                                             .flex()
                                             .w_full()
+                                            .min_w_0()
                                             .items_center()
                                             .justify_between()
                                             .gap(px(6.))
                                             .child(
                                                 div()
                                                     .flex_1()
-                                                    .overflow_hidden()
-                                                    .whitespace_nowrap()
+                                                    .min_w_0()
+                                                    // Recompute truncation when flex assigns the final width.
+                                                    .whitespace_normal()
+                                                    .line_clamp(1)
                                                     .text_ellipsis()
                                                     .text_size(px(if thread { 13.5 } else { 12. }))
                                                     .text_color(if thread {
@@ -124,7 +139,7 @@ impl Render for ThreadList {
                                                     } else {
                                                         theme().text_muted
                                                     })
-                                                    .child(crate::text::sanitize(&row.title)),
+                                                    .child(title),
                                             )
                                             .when(thread, |view| {
                                                 view.child(
@@ -161,7 +176,25 @@ impl Render for ThreadList {
                                                             )
                                                         }),
                                                 )
+                                                .child(this.row_archive_control(&row, keyboard, cx))
                                             }),
+                                    )
+                                    .when(
+                                        row.kind == "section" && row.title == "Archived",
+                                        |view| {
+                                            view.debug_selector(|| "sidebar-archived-header".into())
+                                                .track_focus(&this.archived_focus)
+                                                .focus(|style| {
+                                                    style
+                                                        .bg(theme().selection)
+                                                        .text_color(theme().text)
+                                                })
+                                                .cursor_pointer()
+                                                .on_click(cx.listener(|this, _, window, cx| {
+                                                    this.archived_focus.focus(window);
+                                                    this.toggle_archived(cx);
+                                                }))
+                                        },
                                     )
                                     .when(row.kind == "more", |view| {
                                         let group = row.status.clone();
@@ -232,7 +265,7 @@ impl Render for ThreadList {
                                 .id("thread-rename")
                                 .debug_selector(|| "thread-rename".into())
                                 .cursor_pointer()
-                                .child("Rename (F2)")
+                                .child("Rename")
                                 .on_click(
                                     cx.listener(|this, _, window, cx| {
                                         this.start_rename(window, cx)
@@ -245,9 +278,26 @@ impl Render for ThreadList {
                             .id("thread-archive")
                             .debug_selector(|| "thread-archive".into())
                             .cursor_pointer()
-                            .child("Archive / Restore (Delete)")
+                            .child(if this_archived(self) {
+                                "Restore"
+                            } else {
+                                "Archive"
+                            })
                             .on_click(cx.listener(|this, _, _, cx| this.archive(cx))),
                     ),
             )
+            .when(
+                self.query.is_empty()
+                    && (!self.archived_open
+                        || !self
+                            .rows
+                            .iter()
+                            .any(|r| r.kind == "section" && r.title == "Archived")),
+                |view| view.child(self.archived_control(cx)),
+            )
     }
+}
+
+fn this_archived(this: &ThreadList) -> bool {
+    this.choice_row().is_some_and(|r| r.status == "archived")
 }
