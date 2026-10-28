@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, createElement, useEffect, useRef } from 'react';
+import { act, createElement, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ChatMessageList } from '@/components/desktop/thoughts/chat-panel/ChatMessageList';
@@ -22,16 +22,16 @@ function prepend(older: MobileTranscriptEntry[]) {
   messages = [...older, ...messages]; root.render(createElement(Harness));
 }
 function Harness({ scope = 'fixture' }: { scope?: string }) {
-  const end = useRef<HTMLDivElement>(null);
+  const [end, setEnd] = useState<HTMLDivElement | null>(null);
   const suppress = useRef(false);
-  useTranscriptAutoScroll({ endRef: end, suppressRef: suppress, scope });
+  useTranscriptAutoScroll({ endRef: { current: end }, suppressRef: suppress, scope });
   const activeBackfill = useThreadHistoryBackfill<MobileTranscriptEntry>({
     fetchPage: () => new Promise(resolve => { resolvePage = resolve; }),
-    getScrollContainer: () => end.current?.closest('.thoughts-scroll') ?? null,
+    getScrollContainer: () => end?.closest('.thoughts-scroll') ?? null,
     onPrepend: prepend,
   });
   useEffect(() => { backfill = activeBackfill; }, [activeBackfill]);
-  return createElement(ChatMessageList, { ref: end, displayMessages: messages, displayWaiting: false,
+  return createElement(ChatMessageList, { ref: setEnd, displayMessages: messages, displayWaiting: false,
     activeTargetLabel: 'Fixture', activeTargetColor: 'var(--t-accent)', thoughtsMutedGlass: 'transparent',
     thoughtsElevatedBorder: 'none', thoughtsElevatedShadow: 'none', emptyStateFallback: null });
 }

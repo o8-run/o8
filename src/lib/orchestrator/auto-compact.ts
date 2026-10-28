@@ -339,6 +339,14 @@ export async function autoCompactOrchestratorThread(input: {
     if (compactedTurns.length === 0) {
       return notApplied(transcript);
     }
+    const activeIds = new Set(transcript.map(entry => entry.id));
+    const priorSummary = thread.messages.findLast(entry => entry.compaction?.source === 'summary');
+    const summarizedIds = new Set([...(priorSummary?.compaction?.summarizedMessageIds ?? []),
+      ...compactedTurns.map(entry => entry.id)]);
+    // Carry prior summary coverage forward from this snapshot, never from the
+    // later commit-time record where unsummarized replies may have arrived.
+    const summarizedMessageIds = thread.messages.filter(entry => entry.type !== 'compaction'
+      && (!activeIds.has(entry.id) || summarizedIds.has(entry.id))).map(entry => entry.id);
     return withLiveCompaction({ repoPath, threadId }, async () => {
       // Record-only judgment scores (#2465), asked beside the summarizer; nothing reads them.
       const scorerJob = scoreCompactionSegment(compactedTurns);
@@ -363,6 +371,7 @@ export async function autoCompactOrchestratorThread(input: {
           trigger: input.trigger === 'handoff' ? 'manual' : input.trigger ?? 'auto',
           source: 'summary',
           compactedThroughId: transcript[compactedCount - 1]!.id,
+          summarizedMessageIds,
           summary: displaySummary,
           compactedBy: ORCHESTRATOR_COMPACTION_PROVENANCE,
         },

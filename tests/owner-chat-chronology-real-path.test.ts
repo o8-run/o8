@@ -277,6 +277,51 @@ it('sends only the compact context on the next actual o8 fallback turn and telem
   expect(store.readPersistedLlmChat(threadId)!.history.messages).toHaveLength(72);
 });
 
+it.each(['during', 'after'] as const)('keeps an unsummarized historical reply arriving %s compaction in persisted fallback context', async timing => {
+  const delayed: MobileTranscriptEntry = { id: 'delayed-old-reply', role: 'assistant',
+    text: 'Unsummarized delayed answer.', timestamp: at + 250 };
+  const saveDelayed = async () => {
+    const response = await saveHistory(new NextRequest('http://localhost/api/v2/chat-history', { method: 'POST',
+      body: JSON.stringify({ tabId: threadId, messages: serializeTranscriptForStorage([entries[0], delayed]) }) }));
+    expect(response.status).toBe(200);
+  };
+  const previous = transport.summarize;
+  const run = compact(new NextRequest('http://localhost/api/orchestrator/compact', { method: 'POST',
+    body: JSON.stringify({ repoPath: repo, threadId, keepTailCount: 4, trigger: 'manual' }) }));
+  await vi.waitFor(() => expect(transport.summarize).not.toBe(previous));
+  expect(transport.prompts.at(-1)).not.toContain(delayed.text);
+  if (timing === 'during') await saveDelayed();
+  transport.summarize();
+  const response = await run;
+  expect(response.status).toBe(200);
+  expect((await response.json()).applied).toBe(true);
+  if (timing === 'after') await saveDelayed();
+  const saved = store.readPersistedLlmChat(threadId)!.history.messages;
+  expect(ids(saved).slice(0, 3)).toEqual(['user-0', delayed.id, 'reply-0']);
+  const { readOrchestratorThreadMessages } = await import('@/lib/mobile/orchestrator-thread-history');
+  let request: { messages: Array<{ role: string; content: string }> } | undefined;
+  vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
+    request = JSON.parse(String(init?.body));
+    return new Response('data: [DONE]\n\n');
+  }));
+  const { createO8Backend } = await import('@/lib/lane/orchestrator-backends/o8');
+  await createO8Backend({ blocker: () => 'Fixture platform' }).sendTurn(repo, 'Continue.', () => {}, { threadId });
+  expect(request!.messages.filter(entry => entry.content === delayed.text)).toHaveLength(1);
+  expect(JSON.stringify(readOrchestratorThreadMessages(threadId))).toContain(delayed.text);
+  expect(JSON.stringify(request)).not.toContain('Request 0');
+  const beforeSecond = transport.summarize;
+  const second = compact(new NextRequest('http://localhost/api/orchestrator/compact', { method: 'POST',
+    body: JSON.stringify({ repoPath: repo, threadId, keepTailCount: 2, trigger: 'manual' }) }));
+  await vi.waitFor(() => expect(transport.summarize).not.toBe(beforeSecond));
+  expect(transport.prompts.at(-1)).toContain(delayed.text);
+  expect(transport.prompts.at(-1)).not.toContain('Request 0');
+  transport.summarize();
+  expect((await (await second).json()).applied).toBe(true);
+  expect(JSON.stringify(readOrchestratorThreadMessages(threadId))).not.toContain(delayed.text);
+  expect(JSON.stringify(readOrchestratorThreadMessages(threadId))).not.toContain('Request 0');
+  expect(ids(store.readPersistedLlmChat(threadId)!.history.messages)).toContain(delayed.id);
+});
+
 it('waits for backfill before anchoring an older visualization on a cold tail', () => {
   const anchors = new Map<string, string>();
   const tail = entries.slice(-4).map(entry => ({ ...entry, toolCalls: undefined }));
