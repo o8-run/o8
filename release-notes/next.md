@@ -1,2 +1,15 @@
+- Reloading a chat keeps your reading position. If you were at the bottom, it stays at the bottom and keeps following live output.
+- Long chats keep their message order, visualizations and compaction history through compaction and reload, and completed turns keep their tool results.
+- Chat images and saved visualizations load again after a reload.
+- A worker that fails to launch shows why, with a Retry, instead of a bare HTTP 500. An interrupted worker can be resumed or retired from its own thread.
+- When o8 recovers a lost runtime session, the chat says so instead of carrying on silently.
+- Errors show the real message and where it happened, instead of minified source. Worker catalog and shared-checkout failures name what failed and what to do next.
+- Live agent activity is one short, honest line, and compaction shows as a small status instead of a banner.
+- The message queue no longer keeps copies of screenshots it already delivered, so its storage stays small.
+- The phone receives command completions and acknowledged steers in open threads, and queued worker history publishes reliably.
+- Updates lists every installed tool, and the Tools list stays still while it refreshes. Failed setup checks can be retried.
+- The sidebar fits small chat windows, the Browser stays inside its pane and picture-in-picture card, and the composer's cache pill shows its estimate.
+- Customize > Instructions drops helper copy that explained the screen.
 - Usage analytics count the first successful worker launch, first completed merge, and clean or unclean backend session endings. The existing opt-out and first-run gate apply to every event; no content or new identity fields are sent.
-- Add `npm run metrics:daily` for dated usage aggregates by app version. A verified fixture is included; live reads require the separately hosted telemetry export endpoint and an environment-supplied read credential.
+- Experimental: o8 next can open on its own, can archive sidebar rows into an Archived section, and shows worker task cards with their conflict and steer actions.
+- 0.1.812 was withdrawn from stable because its package was missing server files. This release includes everything from it, packaged correctly.
