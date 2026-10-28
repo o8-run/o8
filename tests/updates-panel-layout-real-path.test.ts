@@ -12,11 +12,12 @@ const hubFixture = `
 import { useSyncExternalStore } from 'react';
 let state = { app: { currentVersion: '0.1.0' }, tools: [], checking: false,
   checkingAll: false, cliBusy: null, cliProgress: {}, syncing: false,
-  cliError: null, cliMessage: null, checkMessage: null, checkedAt: 0 };
+  cliError: null, cliMessage: null, checkMessage: null, cliDiscovery: null, cliDiscoveryChecked: [], checkedAt: 0 };
 const listeners = new Set();
 window.publishTools = patch => { state = { ...state, ...patch }; listeners.forEach(fn => fn()); };
 export const useUpdateHub = () => useSyncExternalStore(fn => { listeners.add(fn); return () => listeners.delete(fn); }, () => state);
-export const refreshCliUpdateView = async () => window.publishTools({ checking: true });
+export const refreshCliUpdateView = async () => window.publishTools({ checking: true,
+  cliError: null, cliMessage: null, cliDiscovery: null, cliDiscoveryChecked: [], checkedAt: 0 });
 export const checkAppUpdates = async () => ({ hasUpdates: false });
 export const synchronizeConnectedClis = async () => {};
 export const loadCachedReleaseNotes = async () => ({ source: 'changelog', summary: 'Published changes',
@@ -84,7 +85,7 @@ describe.skipIf(!executablePath)('Updates panel discovery layout in a real brows
               label: 'Installed tool ' + i, installedVersion: '1.0.0', latestVersion: '1.1.0',
               status: i === 0 ? firstStatus : i % 2 ? 'unknown' : firstStatus === 'current' ? 'update-available' : 'current' }));
             (window as unknown as { publishTools: (patch: unknown) => void }).publishTools({ tools, checking,
-              cliDiscoveryChecked: tools.map(tool => tool.runtimeId), checkedAt: checking ? 0 : Date.now() });
+              cliDiscoveryChecked: checking ? tools.map(tool => tool.runtimeId) : [], checkedAt: checking ? 0 : Date.now() });
           }, { count, checking, firstStatus });
           await publish(1, true);
           const first = panel.locator('[data-cli-update-row="tool-0"]');
@@ -106,11 +107,31 @@ describe.skipIf(!executablePath)('Updates panel discovery layout in a real brows
             expect(await panel.locator('[data-cli-update-row]').evaluateAll(rows => rows.map(row => row.getAttribute('data-cli-update-row'))))
               .toEqual(Array.from({ length: count }, (_, i) => 'tool-' + i));
           }
+          const geometry = () => panel.locator('[data-cli-update-row]').evaluateAll(rows => rows.map(row => {
+            const { y, height } = row.getBoundingClientRect();
+            return { id: row.getAttribute('data-cli-update-row')!, y, height };
+          }));
+          const loadedRows = await geometry();
           await tools.click();
           await tools.click();
-          await page.getByRole('progressbar', { name: 'Tool discovery' }).waitFor();
-          expect((await first.boundingBox())?.y, 'the original row moves on reopening and rechecking').toBe(initial?.y);
+          const progress = page.getByRole('progressbar', { name: 'Tool discovery' });
+          await progress.waitFor();
+          expect(await panel.locator('[data-cli-update-row][aria-busy="true"]').count()).toBe(10);
+          expect(await geometry(), 'every retained row keeps its y and height on reopen').toEqual(loadedRows);
+          // Each streamed result clears checking for that row while the other rows remain pending.
+          for (let completed = 1; completed <= loadedRows.length; completed++) {
+            await page.evaluate(completed => {
+              (window as unknown as { publishTools: (patch: unknown) => void }).publishTools({
+                cliDiscoveryChecked: Array.from({ length: completed }, (_, i) => 'tool-' + i),
+                cliDiscovery: { completed, total: 10 },
+              });
+            }, completed);
+            await page.waitForFunction(completed => document.querySelectorAll('[data-cli-update-row][aria-busy="true"]').length === 10 - completed, completed);
+            expect(await geometry(), `every retained row keeps its geometry after result ${completed}`).toEqual(loadedRows);
+          }
           await publish(10, false);
+          await progress.waitFor({ state: 'detached' });
+          expect(await geometry(), 'every retained row keeps its geometry after recheck completion').toEqual(loadedRows);
         });
       }
     }
@@ -150,6 +171,7 @@ describe.skipIf(!executablePath)('Updates panel discovery layout in a real brows
           const publish = async (count: number, checking: boolean) => page.evaluate(({ count, checking }) => {
             (window as unknown as { publishTools: (patch: unknown) => void }).publishTools({ checking,
               checkedAt: checking ? 0 : Date.now(),
+              cliDiscoveryChecked: checking ? Array.from({ length: count }, (_, i) => 'tool-' + i) : [],
               tools: Array.from({ length: count }, (_, i) => ({ runtimeId: 'tool-' + i,
                 label: 'Installed tool ' + i, status: 'unknown', installedVersion: '1.0.0' })),
             });
