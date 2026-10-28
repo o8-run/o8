@@ -5,6 +5,7 @@ use std::ops::Range;
 use unicode_segmentation::UnicodeSegmentation;
 
 pub(crate) mod controls;
+pub(crate) mod images;
 
 #[derive(Clone)]
 struct Snapshot {
@@ -237,7 +238,16 @@ impl Composer {
                 }
             }
             "v" if command => {
-                if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
+                let item = cx.read_from_clipboard();
+                if self.controls.attachment_target
+                    && let Some(item) = &item
+                    && item
+                        .entries()
+                        .iter()
+                        .any(|entry| matches!(entry, ClipboardEntry::Image(_)))
+                {
+                    self.attach_clipboard(item, cx);
+                } else if let Some(text) = item.and_then(|item| item.text()) {
                     self.replace_text_in_range(
                         None,
                         &text.replace("\r\n", "\n").replace('\r', "\n"),
