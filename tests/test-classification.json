@@ -2009,13 +2009,6 @@
       ]
     },
     {
-      "path": "tests/child-creation-guard-real-path.test.ts",
-      "reasons": [
-        "child-process",
-        "real-path"
-      ]
-    },
-    {
       "path": "tests/ci-gates-real-path.test.ts",
       "reasons": [
         "child-process",
