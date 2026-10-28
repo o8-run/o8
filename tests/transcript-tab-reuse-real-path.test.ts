@@ -1,3 +1,4 @@
+// @o8-test-browser
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, rm } from 'node:fs/promises';

@@ -1,3 +1,4 @@
+// @o8-test-browser
 import { execFileSync, spawnSync } from 'node:child_process';
 import { chmodSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';

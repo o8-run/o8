@@ -1,4 +1,5 @@
 import { basename } from 'node:path';
+import { orchestratorErrorText } from '@/lib/transcripts/orchestrator-error';
 import { isOrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
 import type {
   MobileOrchestratorBackend,
@@ -41,6 +42,8 @@ export type ChatHistoryMessage = {
   model?: string;
   receipt?: MobileTranscriptEntry['receipt'];
   type?: MobileTranscriptEntry['type'];
+  pinned?: boolean;
+  compaction?: MobileTranscriptEntry['compaction'];
   handoff?: MobileTranscriptEntry['handoff'];
   toolCalls?: MobileTranscriptEntry['toolCalls'];
   tokens?: {
@@ -130,7 +133,7 @@ export function normalizeAgent(value: unknown): string | null {
 export function normalizeErrorMessage(value: unknown): string | null {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
-  return trimmed ? trimmed.slice(0, 500) : null;
+  return trimmed ? orchestratorErrorText(trimmed).slice(0, 500) : null;
 }
 
 function inferRuntime(model: string | undefined | null): MobileOrchestratorThread['runtime'] {

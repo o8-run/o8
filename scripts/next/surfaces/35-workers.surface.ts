@@ -1,8 +1,11 @@
-import { writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { fork, type ChildProcess } from 'node:child_process';
+import { once } from 'node:events';
+import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import type { SurfaceContext, SurfaceRoutes } from '../surface-routes';
 
-export default async function register({ repo }: SurfaceContext): Promise<SurfaceRoutes> {
+export default async function register({ repo, dataDir }: SurfaceContext): Promise<SurfaceRoutes> {
   if (!process.argv.includes('--workers')) return {};
   const { createLane, setLaneStatus, appendEvent } = await import('../../../src/lib/lane/registry');
   const { createEmptyOrchestratorMissionState } = await import('../../../src/lib/orchestrator/store');
@@ -22,6 +25,38 @@ export default async function register({ repo }: SurfaceContext): Promise<Surfac
   const bodies: unknown[] = [];
   const deliveries: Array<{ sessionKey: string; message: string }> = [];
   let drop = false;
+  let restarting = false;
+  let restarts = 0;
+  let routeProcess: ChildProcess | undefined;
+  let routeOrigin = '';
+  let routeExit: Promise<unknown[]> | undefined;
+  const routePids: number[] = [];
+  const responses: Array<{ status: number; code: unknown; outcome: string | null }> = [];
+  const deliveryFile = join(dataDir, 'worker-steer-deliveries.jsonl');
+  async function startRoute(crash: boolean) {
+    routeProcess = fork(fileURLToPath(new URL('../workers-restart-fixture.ts', import.meta.url)), [], {
+      execArgv: ['--import', './scripts/register-server-only-stub.mjs', '--import', 'tsx'],
+      env: { ...process.env, O8_NEXT_STEER_REPO: repo, O8_NEXT_STEER_DELIVERIES: deliveryFile,
+        O8_NEXT_STEER_CRASH: crash ? '1' : '0' }, stdio: ['ignore', 'ignore', 'inherit', 'ipc'],
+    });
+    routePids.push(routeProcess.pid!);
+    routeExit = once(routeProcess, 'exit');
+    const ready = once(routeProcess, 'message').then(([message]) => message as { origin: string });
+    const result = await Promise.race([ready, routeExit.then(() => { throw new Error('Route process exited before ready'); })]);
+    routeOrigin = result.origin;
+  }
+  async function forwardSteer(request: Request) {
+    const body = await request.text();
+    const send = () => fetch(routeOrigin + '/api/orchestrator/steer-packet', { method: 'POST', body,
+      headers: { 'content-type': 'application/json', authorization: request.headers.get('authorization')! } });
+    try { return await send(); } catch (error) {
+      await routeExit;
+      if (routeProcess?.exitCode !== 74 || restarts !== 0) throw error;
+      restarts++;
+      await startRoute(false);
+      return send();
+    }
+  }
   const packets = [];
   const laneIds: Record<string, string> = {};
   const calls: string[] = [];
@@ -88,9 +123,16 @@ export default async function register({ repo }: SurfaceContext): Promise<Surfac
         invalidateRuntimeInventoryCache();
       }
     },
-    after: ({ method, url }, response) => {
+    run: (route, request) => restarting && request.nextUrl.pathname === '/api/orchestrator/steer-packet'
+      ? forwardSteer(request) : route(request),
+    close: async () => {
+      if (routeProcess?.exitCode === null) { routeProcess.kill('SIGTERM'); await routeExit; }
+    },
+    after: async ({ method, url }, response) => {
       if (method === 'POST' && url.pathname === '/api/orchestrator/steer-packet') {
         runtime.discoverSessions = discovery; runtime.resume = resume; invalidateRuntimeInventoryCache();
+        if (restarting) responses.push({ status: response.status, code: (await response.clone().json()).error?.code,
+          outcome: response.headers.get('x-o8-steer-outcome') });
         if (drop && response.ok) { drop = false; return true; }
       }
       return false;
@@ -100,9 +142,13 @@ export default async function register({ repo }: SurfaceContext): Promise<Surfac
       'GET /api/workers-fixture': async request => {
         if (request.nextUrl.searchParams.has('block')) setLaneStatus(laneIds['worker-running'], 'awaiting_orchestrator', 'system', 'file_owned');
         if (request.nextUrl.searchParams.has('drop')) drop = true;
+        if (request.nextUrl.searchParams.has('restart') && !restarting) { restarting = true; await startRoute(true); }
         if (request.nextUrl.searchParams.has('refresh')) setLaneStatus(laneIds['worker-blocked'], 'reviewing', 'system', 'fixture_refreshed');
         if (request.nextUrl.searchParams.has('progress')) appendEvent(laneIds['worker-blocked'], 'agent_report', 'system', { event: 'progress', message: 'Progress after refresh' });
-        return Response.json({ calls, laneIds, repo, bodies, deliveries });
+        const durableDeliveries = existsSync(deliveryFile)
+          ? readFileSync(deliveryFile, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line)) : [];
+        return Response.json({ calls, laneIds, repo, bodies, deliveries: [...deliveries, ...durableDeliveries],
+          responses, restarts, routePids });
       },
       'GET /api/lanes': lanes.GET,
       'GET /api/orchestrator/lane-events': events.GET,

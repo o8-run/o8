@@ -1,4 +1,5 @@
 import { parseSnapshotTurn } from './snapshot-turn';
+import { orchestratorErrorText } from '@/lib/transcripts/orchestrator-error';
 import type { Dispatch, SetStateAction } from 'react';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import { isCortexAskTool, parseBrainFeed } from '@/components/desktop/thoughts/brain-feed';
@@ -777,7 +778,7 @@ export function createOrchestratorMessageHandler(
 
       case 'error': {
         if (options.statusRef.current !== 'busy' && options.messagesRef.current.length === 0) break;
-        const error = typeof msg.data?.error === 'string' ? msg.data.error : 'Unknown error';
+        const error = orchestratorErrorText(typeof msg.data?.error === 'string' ? msg.data.error : 'Unknown error');
         console.error('[orchestrator-stream] Error:', error);
         options.flushCurrentAssistant();
         options.finalizeFirstTurnPlanCapture();

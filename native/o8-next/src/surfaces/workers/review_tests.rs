@@ -184,3 +184,55 @@ fn workers_workspace_isolation_preserves_peer_draft_during_lane_refresh(cx: &mut
         "refreshing A must retain A's fetched state while B's same-ID card stays isolated"
     );
 }
+
+#[gpui::test]
+fn workers_restart_outcome_unknown_retry_keeps_one_steer(cx: &mut TestAppContext) {
+    let fixture = Fixture::start_mode(false, "--workers");
+    let file = fixture.root.join("restart-steer.json");
+    let (_shell, mut visual, card) = open_workers(&fixture, file.clone(), cx);
+    control(&fixture, "restart");
+    super::tests::click(&mut visual, "worker-adjust-worker-blocked");
+    visual.simulate_input("Resolve ownership once");
+    submit_without_draining(&mut visual);
+    let frozen = card.read_with(&visual, |c, _| c.pending.clone()).unwrap();
+    settle(&mut visual, &fixture, |v| {
+        card.read_with(v, |c, _| !c.action_busy())
+    });
+    let first = receipt(&fixture);
+    assert_eq!(
+        first["restarts"], 1,
+        "the route owner must actually exit mid-steer"
+    );
+    assert_ne!(first["routePids"][0], first["routePids"][1]);
+    assert_eq!(first["responses"][0]["status"], 409);
+    assert_eq!(first["responses"][0]["code"], "outcome_unknown");
+    assert!(
+        first["responses"][0]["outcome"].is_null(),
+        "restart quarantine has no checked header"
+    );
+    super::tests::click(&mut visual, "worker-send-worker-blocked");
+    settle(&mut visual, &fixture, |v| {
+        card.read_with(v, |c, _| !c.action_busy())
+    });
+    let retried = receipt(&fixture);
+    assert_eq!(
+        retried["deliveries"].as_array().unwrap().len(),
+        1,
+        "retry after a headerless outcome_unknown must not deliver the steer twice"
+    );
+    assert_eq!(retried["bodies"].as_array().unwrap().len(), 2);
+    assert_eq!(retried["bodies"][0], frozen);
+    assert_eq!(
+        retried["bodies"][1], frozen,
+        "retry must keep the exact request and idempotency key"
+    );
+    assert_eq!(retried["responses"][1]["status"], 409);
+    assert_eq!(retried["responses"][1]["code"], "outcome_unknown");
+    assert_eq!(
+        card.read_with(&visual, |c, _| c.pending.clone()),
+        Some(frozen.clone())
+    );
+    let saved = fs::read_to_string(file.with_extension("workers.json")).unwrap();
+    assert!(saved.contains(frozen["idempotencyKey"].as_str().unwrap()));
+    assert!(saved.contains("Resolve ownership once"));
+}

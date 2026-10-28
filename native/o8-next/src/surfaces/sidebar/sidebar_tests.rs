@@ -720,3 +720,6 @@ mod project_round2_tests;
 
 #[path = "recents_tests.rs"]
 mod recents_tests;
+
+#[path = "archive_tests.rs"]
+mod archive_tests;

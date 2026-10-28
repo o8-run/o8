@@ -18,6 +18,7 @@ fn main() {
   // We need the triple-suffixed copies in place before that validation runs.
   build_speech_recognizer();
   build_visual_capture_media();
+  stage_linux_pi_write();
 
   // #932: tauri-plugin-mcp permissions are only registered when the
   // `dev-mcp-plugin` Cargo feature is on. Tauri's compile-time capability
@@ -63,6 +64,51 @@ fn main() {
   bake_sentry_dsn();
 
   tauri_build::build()
+}
+
+/// Linux bundles `o8-pi-write` as an externalBin (it is both the approved-write
+/// helper and the Pi command supervisor there), and tauri-build refuses to
+/// compile in any profile when that sidecar is missing. Packaged builds stage
+/// a fresh release binary through `scripts/build-pi-write.mjs` (tauri:prebuild)
+/// before cargo runs, so an existing staged copy is always kept. A bare
+/// `cargo check` or `cargo build` (CI compile gates, dev) builds the sidecar
+/// crate here instead, in its own target directory under OUT_DIR.
+fn stage_linux_pi_write() {
+  if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("linux") {
+    return;
+  }
+  let target = std::env::var("TARGET").expect("TARGET");
+  let staged = Path::new("helpers").join(format!("o8-pi-write-{target}"));
+  println!("cargo:rerun-if-changed={}", staged.display());
+  if staged.exists() {
+    return;
+  }
+
+  let manifest = Path::new("sidecars/pi-write/Cargo.toml");
+  let out_dir = std::path::PathBuf::from(std::env::var_os("OUT_DIR").expect("OUT_DIR"));
+  let target_dir = out_dir.join("pi-write-target");
+  let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+  let status = std::process::Command::new(cargo)
+    .args(["build", "--release", "--locked", "--manifest-path"])
+    .arg(manifest)
+    .args(["--target", &target, "--target-dir"])
+    .arg(&target_dir)
+    // The outer build's flags and target dir belong to the Tauri crate.
+    .env_remove("CARGO_ENCODED_RUSTFLAGS")
+    .env_remove("RUSTFLAGS")
+    .env_remove("CARGO_TARGET_DIR")
+    .env_remove("CARGO_BUILD_TARGET")
+    .status()
+    .expect("run cargo for the o8-pi-write sidecar");
+  assert!(
+    status.success(),
+    "o8-pi-write failed to build for {target}; run `node scripts/build-pi-write.mjs` to stage it"
+  );
+  let built = target_dir.join(&target).join("release").join("o8-pi-write");
+  let _ = fs::create_dir_all("helpers");
+  fs::copy(&built, &staged).unwrap_or_else(|error| {
+    panic!("stage {} -> {}: {error}", built.display(), staged.display())
+  });
 }
 
 fn build_visual_capture_media() {

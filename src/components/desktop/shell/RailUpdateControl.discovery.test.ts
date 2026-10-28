@@ -71,6 +71,40 @@ function stream(signal?: AbortSignal | null) {
     send: (event: string, data: unknown) => controller.enqueue(new TextEncoder().encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)),
     end: () => controller.close() };
 }
+it.each(['stream', 'json'] as const)('shows all eleven installed tools from %s discovery with their versions and update states', async transport => {
+  const runtimeIds = ['codex', 'claude-code', 'grok', 'opencode', 'antigravity', 'gemini', 'cursor', 'pi', '3code', 'copilot-cli', 'qoder'];
+  const tools = runtimeIds.map((runtimeId, index) => ({ ...tool(runtimeId, `Installed tool ${index + 1}`,
+    index % 3 === 0 ? 'current' : index % 3 === 1 ? 'update-available' : 'unknown'),
+    installedVersion: `1.${index}.0`, latestVersion: `2.${index}.0` }));
+  const report = [...tools, tool('absent-fixture', 'Absent tool', 'not-installed')];
+  const result = transport === 'stream' ? stream() : null;
+  const fetcher = await openTools(async () => result?.response ?? Response.json({ tools: report }));
+  if (result) {
+    await act(async () => {
+      report.forEach((tool, index) => result.send('tool', { tool, completed: index + 1, total: report.length }));
+      result.send('result', { tools: report }); result.end();
+    });
+  }
+  await tick();
+  const toolsToggle = panel().querySelector('[aria-label="Tools updates"]')!;
+  expect(toolsToggle.getAttribute('aria-expanded')).toBe('true');
+  expect([...panel().querySelectorAll('button')].some(button => button.textContent?.startsWith('Current CLIs'))).toBe(false);
+  const toolsList = document.getElementById(toolsToggle.getAttribute('aria-controls')!)!;
+  expect([...toolsList.querySelectorAll('[data-cli-update-row]')].map(row => row.getAttribute('data-cli-update-row'))).toEqual(runtimeIds);
+  for (const tool of tools) {
+    const row = panel().querySelector(`[data-cli-update-row="${tool.runtimeId}"]`)!;
+    expect(row.textContent).toContain(tool.label);
+    expect(row.textContent).toContain(tool.installedVersion);
+    expect(row.getAttribute('aria-busy')).toBe('false');
+    if (tool.status === 'current') expect(row.textContent).toContain('Current');
+    else {
+      expect(row.querySelector(`[aria-label="Update ${tool.label}"]`)).not.toBeNull();
+      if (tool.status === 'update-available') expect(row.textContent).toContain(`→ ${tool.latestVersion}`);
+    }
+  }
+  expect(panel().textContent).not.toContain('Absent tool');
+  expect(fetcher.mock.calls.every(([, options]) => !options?.method || options.method === 'GET')).toBe(true);
+});
 it('finishes the first Tools open when cold discovery takes longer than fifteen seconds', async () => {
   await openTools(options => delayedReport(options));
   await tick(15_100);

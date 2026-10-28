@@ -332,7 +332,12 @@ fn steer(client: &Client, body: &Value) -> Result<(u16, Value, bool), String> {
         Err(_) => return Err("Delivery unconfirmed. Retry to check the same adjustment.".into()),
     };
     let status = response.status();
-    let unknown = response.header("x-o8-steer-outcome") == Some("unknown");
-    let value = Client::read(response)?;
+    let header_unknown = response.header("x-o8-steer-outcome") == Some("unknown");
+    let value: Value = Client::read(response)?;
+    let unknown = header_unknown
+        || matches!(
+            value["error"]["code"].as_str(),
+            Some("outcome_unknown" | "steer_outcome_unknown")
+        );
     Ok((status, value, unknown))
 }
