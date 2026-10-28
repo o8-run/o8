@@ -1326,6 +1326,12 @@ function handleReboundOrchestratorEvent(record: OrchestratorTurnRecord, event: O
       break;
     case 'error':
       persistAssistantText(null);
+      try {
+        const failedThread = markMobileOrchestratorThreadFailed({ tabId: threadId, repoPath, assistantMessageId, error: event.error, backend });
+        if (failedThread) broadcast({ channel: 'orchestrator-threads', event: 'upsert', data: { thread: failedThread } });
+      } catch (error) {
+        console.warn('[orchestrator-rehydrate] failed to mark thread failed', error);
+      }
       wsMsg = JSON.stringify({
         channel: 'orchestrator',
         event: 'error',
@@ -6018,6 +6024,7 @@ async function handleOrchestratorSendMsgOnce(
             try {
               const failedThread = markMobileOrchestratorThreadFailed({
                 tabId: threadId,
+                assistantMessageId,
                 repoPath,
                 error: event.error,
                 backend: turnBackend.id,
@@ -6243,6 +6250,7 @@ async function handleOrchestratorSendMsgOnce(
       try {
         const failedThread = markMobileOrchestratorThreadFailed({
           tabId: threadId,
+          assistantMessageId,
           repoPath,
           error: err instanceof Error ? err.message : 'Failed to send message',
           backend: activeBackend.id,

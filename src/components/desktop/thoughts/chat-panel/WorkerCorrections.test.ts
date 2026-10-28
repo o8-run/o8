@@ -150,7 +150,7 @@ it.each(['interrupted', 'completed', 'retired', 'failed'])('keeps %s consistent 
   const sessions = [{ sessionKey: worker.surfaceId, name: worker.taskName, runtime: worker.runtime, status }];
   await act(async () => root.render(createElement(WorkerDisclosureProvider, null,
     createElement(WorkerCorrections, { key: 'composer', repoPath: '/repo', threadId: 'thoughts-one', draft: '',
-      hasAttachments: false, working: false, onDelivered: delivered, workerContext: { sessions } }),
+      hasAttachments: false, working: false, onDelivered: delivered, workerContext: { sessions, packets: [] } }),
     createElement(ThreadWorkerCard, { key: 'turn', group: { sessions, packets: [], scouts: [] } }),
   )));
   await act(async () => button('Correct workers').click());

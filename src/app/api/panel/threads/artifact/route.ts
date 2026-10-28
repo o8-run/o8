@@ -2,6 +2,7 @@ import { redactOutputText } from '@/lib/acp/output-redaction';
 import { viewerRedactionPolicy } from '@/lib/viewers/policy';
 import { redactThreadText } from '@/lib/threads/redaction';
 import { viewerBytes } from '@/lib/viewers/bytes';
+import { isVerifiableRasterType, viewerImageBytes } from '@/lib/viewers/image-bytes';
 import { viewerJson } from '@/lib/viewers/response';
 import { type NextRequest } from 'next/server';
 import { join, relative } from 'node:path';
@@ -49,6 +50,10 @@ export async function GET(request: NextRequest) {
     opened = await openWorkspaceFile(join(getDataDir(), 'artifacts'), relative('artifacts', record.relPath), 'read');
     if (opened.stat.size > (text ? 2 : 25) * 1024 * 1024) return viewerJson({ error: 'Artifact too large.' }, { status: 413 });
     const bytes = await opened.handle.readFile();
+    // Screenshot artifacts are rasters; serve them through the verified image path
+    // (#4773 otherwise refuses them). Reports/receipts (text) and video stay on the
+    // text viewer with its thread-text redactor, which images do not need.
+    if (!text && isVerifiableRasterType(mime)) return viewerImageBytes(bytes, mime);
     return viewerBytes(bytes, text ? (mime === 'application/json' ? mime : 'text/plain; charset=utf-8') : mime, undefined, redactThreadText);
   } catch {
     return viewerJson({ error: 'Artifact unavailable.' }, { status: 404 });

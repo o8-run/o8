@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { NextRequest } from 'next/server';
@@ -91,7 +91,7 @@ async function interrupted(id: string, noThread = false) {
     { headers: { authorization: `Bearer ${getOrCreateWsToken()}` } }));
   expect(summary.status).toBe(200);
   expect(await summary.json()).toMatchObject({ session: { status: 'interrupted' }, recovery: { actions: ['resume', 'retire'], worktreePath: repo } });
-  return { repo, thread, surface, branch: launched.branch as string };
+  return { base, repo, thread, surface, branch: launched.branch as string };
 }
 beforeAll(async () => {
   const { updateOperatorDefaults } = await import('@/lib/operator/defaults');
@@ -143,4 +143,37 @@ it('retires a worker while retaining committed and uncommitted edits and reports
   expect(record(worker.surface).activeRun).toBeUndefined();
   expect((await card(worker.repo, worker.thread))[0]).toMatchObject({ status: 'retired', recovery: { actions: [], worktreePath: worker.repo, branch: worker.branch } });
   expect((await action(worker.surface, 'retire')).body.result.replayed).toBe(true);
+}, 60_000);
+
+it.each(['present', 'absent', 'unknown'])('reports a missing checkout with %s branch evidence through the control route', async branchState => {
+  const worker = await interrupted(`missing-${branchState}`);
+  const retained = `${worker.repo}-retained`;
+  if (branchState !== 'unknown') {
+    const { createLane } = await import('@/lib/lane/registry');
+    createLane({ repoPath: worker.base, worktreePath: worker.repo, branch: worker.branch,
+      runtime: 'codex', sessionKey: worker.surface });
+  }
+  renameSync(worker.repo, retained);
+  try {
+    if (branchState === 'absent') git(worker.base, 'update-ref', '-d', `refs/heads/${worker.branch}`);
+    const resumed = await action(worker.surface, 'resume');
+    expect(resumed.status, JSON.stringify(resumed.body)).toBe(409);
+    const note = resumed.body.result.note as string;
+    expect(note).toContain(`Checkout folder is missing at ${worker.repo}.`);
+    expect(note).toContain(`Branch ${worker.branch}`);
+    expect(note).toContain(branchState === 'present' ? 'still exists in the repository'
+      : branchState === 'absent' ? 'does not exist in the repository' : 'could not be verified');
+    expect(note).toContain('Retire');
+    expect(note).not.toContain('edits remain at');
+    expect(record(worker.surface).activeRun).toBeUndefined();
+    expect(record(worker.surface).recentRuns[0].outcome).toBe('interrupted');
+    const retired = await action(worker.surface, 'retire');
+    expect(retired.status, JSON.stringify(retired.body)).toBe(200);
+    expect(retired.body.result.note).toContain(`Checkout folder is missing at ${worker.repo}.`);
+    expect(retired.body.result.note).not.toContain('edits remain at');
+    expect(readFileSync(join(retained, 'edit.txt'), 'utf8')).toBe('PRESERVED_4965');
+  } finally {
+    if (branchState === 'absent') git(worker.base, 'update-ref', `refs/heads/${worker.branch}`, 'HEAD');
+    renameSync(retained, worker.repo);
+  }
 }, 60_000);
