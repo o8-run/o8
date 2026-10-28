@@ -149,6 +149,21 @@ describe('completed tool history through production save/load routes', () => {
     expect(calls.find((tool: { id: string }) => tool.id === 'pending')).not.toHaveProperty('status');
     expect(calls.find((tool: { id: string }) => tool.id === 'unmatched').status).toBe('error');
   });
+  it('redacts credentials and home paths from tool args and results before they reach canonical history', async () => {
+    const record = await runTurn('thoughts-tools-redaction', undefined, [
+      { type: 'tool_use', id: 'secret', name: 'exec_command', input: { cmd: 'deploy', authorization: 'Bearer sk-livesecret' } },
+      { type: 'tool_result', id: 'secret', name: 'exec_command', output: 'wrote /Users/quise/.config/creds using "api_key":"sk-abc123"' },
+    ]);
+    const secret = record.messages.find((message: { id: string }) => message.id === 'assistant').toolCalls
+      .find((tool: { id: string }) => tool.id === 'secret');
+    // Credential-keyed argument is masked; the raw token never reaches at-rest storage.
+    expect(secret.args.authorization).toBe('[redacted]');
+    expect(JSON.stringify(secret.args)).not.toContain('sk-livesecret');
+    // Home path collapsed and the quoted credential masked in the persisted result.
+    expect(secret.result).not.toContain('/Users/quise');
+    expect(secret.result).toContain('~/.config/creds');
+    expect(secret.result).not.toContain('sk-abc123');
+  });
   it('discards rejected-attempt tools rather than persisting them with the retry', async () => {
     const record = await runTurn('thoughts-tools-retry', undefined, [
       { type: 'turn_retry', attempt: 2, reason: 'retry', notice: 'Trying again' },
