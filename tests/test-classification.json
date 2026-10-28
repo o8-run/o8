@@ -6611,6 +6611,14 @@
       ]
     },
     {
+      "path": "tests/runtime-recovery-notice-real-path.test.ts",
+      "reasons": [
+        "browser",
+        "real-path"
+      ],
+      "browser": true
+    },
+    {
       "path": "tests/sandbox-owned-stop-real-path.test.ts",
       "reasons": [
         "child-process",

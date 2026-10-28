@@ -1098,7 +1098,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, ThoughtsCha
   });
 
   const { notice: reloadNotice, dismiss: dismissReloadNotice } = useOrchestratorReloadNotice(
-    isOrchestratorMode ? resolvedRepoPath : null,
+    isOrchestratorMode ? resolvedRepoPath : null, threadId,
   );
 
   const prependThreadHistoryPage = useCallback((historyMessages: ThoughtsHistoryMessage[]) => {
