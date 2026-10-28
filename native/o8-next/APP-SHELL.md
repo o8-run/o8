@@ -24,9 +24,10 @@ server from the existing local configuration, whether owned by the desktop or
 waits for API and WebSocket health before opening the window. Startup failures
 report an error instead of opening a disconnected window.
 
-Installed 0.1.811 cold startup currently fails in the existing CLI native-addon
-lookup, tracked in [#4969](https://github.com/o8-run/o8/issues/4969).
-The launcher reports that failure; installed standalone acceptance remains open.
+Packaged startup uses the server payload's native-addon loader before opening
+SQLite. The installed 0.1.811 server payload and native binary have been verified
+with this CLI using a separate data directory, including cold startup, saved
+thread loading, daemon reuse after window closure, and complete daemon shutdown.
 
 Quitting the native window leaves the headless server running. Run `o8 next`
 again to reconnect. Stop the headless server with `o8 serve stop`.

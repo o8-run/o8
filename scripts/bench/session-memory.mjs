@@ -64,9 +64,11 @@ export async function bundleWs(outfile) {
   const outDir = outfile + '.modules';
   fs.mkdirSync(outDir, { recursive: true });
   fs.symlinkSync(path.join(root, 'node_modules'), path.join(outDir, 'node_modules'), 'dir');
-  // Exercise the exact minified, split entry shipped by the desktop exporter.
+  // Exercise the desktop export's minified, split implementation. This fixture
+  // links installed development addons, so it must not use the packaged entry's
+  // selector for architecture/ABI prebuilds staged only by the exporter.
   bundleServers({ root, outDir });
-  fs.writeFileSync(outfile, `await import(${JSON.stringify(pathToFileURL(path.join(outDir, 'ws-server.mjs')).href)});\n`);
+  fs.writeFileSync(outfile, `await import(${JSON.stringify(pathToFileURL(path.join(outDir, 'ws-server-impl.mjs')).href)});\n`);
 }
 
 async function openAndCloseSession(wsPort, token, sessionKey, worker = false) {
