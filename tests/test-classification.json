@@ -7528,6 +7528,15 @@
       ]
     },
     {
+      "path": "tests/visualization-reload-real-path.test.ts",
+      "reasons": [
+        "browser",
+        "network-listener",
+        "real-path"
+      ],
+      "browser": true
+    },
+    {
       "path": "tests/voice-codex-realtime-route.test.ts",
       "reasons": [
         "executable-fixture"
