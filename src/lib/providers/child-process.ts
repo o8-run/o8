@@ -21,7 +21,11 @@ export function execKeychainCommand(operation: 'find-generic-password' | 'add-ge
 const creationGuard = new AsyncLocalStorage<() => void>();
 export function withChildCreationGuard<T>(check: () => void, operation: () => T): T {
   const parent = creationGuard.getStore();
-  return creationGuard.run(() => { parent?.(); check(); }, operation);
+  return creationGuard.run(() => {
+    // Inspection subprocesses retain child policy checks without recursively
+    // inspecting the worker launch they are meant to validate.
+    creationGuard.exit(() => { parent?.(); check(); });
+  }, operation);
 }
 
 export interface SecretToolResult { code: number | null; stdout: string; stderr: string; missing?: boolean }
