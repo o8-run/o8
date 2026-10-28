@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readVerificationPlan } from './lib/verify-ci.mjs';
+import { selectedTestsRequireBrowser } from './lib/test-classification.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 let interrupted = false;
@@ -22,7 +23,7 @@ function run(step) {
   const dataDir = step.temporaryData ? mkdtempSync(path.join(tmpdir(), 'o8-verify-ci-smoke-')) : null;
   const env = { ...environment(), ...step.env, ...(dataDir ? { CORTEX_IDE_DATA_DIR: dataDir } : {}) };
   let command = step.command;
-  if (step.selectedFiles || step.requiresFiles) {
+  if (step.selectedFiles || step.requiresBrowser) {
     const selected = spawnSync(process.execPath, ['scripts/ci/resource-owning-changed.mjs', 'origin/main', '--worktree'], {
       cwd: root, env, encoding: 'utf8', timeout: step.timeoutMs, maxBuffer: 4 * 1024 * 1024,
     });
@@ -30,8 +31,8 @@ function run(step) {
     if (selected.status !== 0) return Promise.resolve(false);
     const files = selected.stdout.trim().split('\n').filter(Boolean);
     if (!files.length) return Promise.resolve(true);
-    const changed = files.join(' ').toLowerCase();
-    if (step.requiresFiles && !step.requiresFiles.some(file => changed.includes(file.toLowerCase()))) return Promise.resolve(true);
+    if (step.requiresBrowser && !selectedTestsRequireBrowser(files,
+      JSON.parse(readFileSync(path.join(root, 'tests/test-classification.json'), 'utf8')))) return Promise.resolve(true);
     if (step.selectedFiles) command += files.map(file => ` '${file.replaceAll("'", "'\"'\"'")}'`).join('');
     console.log(`[verify:ci] selected ${files.length} changed integration files against origin/main`);
   }
