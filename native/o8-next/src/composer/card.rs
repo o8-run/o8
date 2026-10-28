@@ -128,8 +128,16 @@ impl Surface {
                         s.composer.read(cx).focus.focus(window);
                     },
                 )
+                // Round send target, as in the desktop composer. White reads on the
+                // accent in every appearance; the glass background token is transparent.
+                .w(px(26.))
+                .px(px(0.))
+                .rounded_full()
+                .justify_center()
+                .text_size(px(14.))
+                .font_weight(gpui::FontWeight::MEDIUM)
                 .bg(theme().accent)
-                .text_color(theme().background),
+                .text_color(gpui::white()),
             );
         div()
             .flex()

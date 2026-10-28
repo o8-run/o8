@@ -51,6 +51,7 @@ struct Line {
 struct Backdrop {
     bounds: Bounds<Pixels>,
     color: gpui::Rgba,
+    radius: Pixels,
 }
 struct Layout {
     size: Size<Pixels>,
@@ -110,6 +111,7 @@ impl Builder {
                 self.backgrounds.push(Backdrop {
                     bounds: Bounds::new(point(px(24.), self.y), size(self.width - px(48.), px(1.))),
                     color: theme().border,
+                    radius: px(0.),
                 });
                 self.y += px(4.);
             }
@@ -179,6 +181,7 @@ impl Builder {
                 size(self.width - px(48.), self.y - top),
             ),
             color: theme().surface,
+            radius: px(0.),
         });
     }
     fn text(
@@ -236,6 +239,7 @@ impl Builder {
             self.backgrounds.push(Backdrop {
                 bounds: Bounds::new(point(px(24.), self.y), size(self.width - px(48.), px(1.))),
                 color: theme().border,
+                radius: px(0.),
             });
             self.y += px(13.);
             return;
@@ -315,6 +319,7 @@ impl Builder {
                     size(self.width - px(48.), self.y - top - px(16.)),
                 ),
                 color: theme().code_background,
+                radius: px(0.),
             });
         }
     }
@@ -365,22 +370,48 @@ fn layout(row: &Row, width: Pixels, expanded: bool, window: &Window) -> Layout {
                 b.node(&node, expanded, window);
             }
         }
-        Row::Message { role, nodes, .. } => {
-            let top = b.y;
+        Row::Message { role, nodes, .. } if role == "user" => {
+            // The desktop user bubble: right-aligned and sized to its text, at most
+            // 80% of the reading column.
+            let pad = px(12.);
+            let top = b.y + px(4.);
+            let mut bubble = Builder {
+                width: ((width - px(48.)) * 0.8).max(px(1.)) + px(48.),
+                y: top + px(8.),
+                lines: vec![],
+                backgrounds: vec![],
+            };
+            for node in nodes {
+                bubble.node(node, expanded, window);
+            }
+            let text = bubble
+                .lines
+                .iter()
+                .map(|line| line.origin.x - px(24.) + line.line.width())
+                .fold(px(1.), Pixels::max);
+            let right = width - px(24.);
+            let shift = right - pad - text - px(24.);
+            b.backgrounds.push(Backdrop {
+                bounds: Bounds::new(
+                    point(right - text - pad * 2., top),
+                    size(text + pad * 2., bubble.y - top + px(8.)),
+                ),
+                color: theme().selection,
+                radius: px(14.),
+            });
+            for mut background in bubble.backgrounds {
+                background.bounds.origin.x += shift;
+                b.backgrounds.push(background);
+            }
+            for mut line in bubble.lines {
+                line.origin.x += shift;
+                b.lines.push(line);
+            }
+            b.y = bubble.y + px(16.);
+        }
+        Row::Message { nodes, .. } => {
             for node in nodes {
                 b.node(node, expanded, window);
-            }
-            if role == "user" {
-                b.backgrounds.insert(
-                    0,
-                    Backdrop {
-                        bounds: Bounds::new(
-                            point(px(16.), top),
-                            size((width - px(32.)).max(px(1.)), b.y - top + px(4.)),
-                        ),
-                        color: theme().selection,
-                    },
-                );
             }
             b.y += px(8.);
         }
@@ -539,13 +570,16 @@ impl Element for RetainedRow {
                 px(0.),
             );
         for background in &cache.backgrounds {
-            window.paint_quad(gpui::fill(
-                Bounds::new(
-                    origin + background.bounds.origin,
-                    background.bounds.size,
-                ),
-                background.color,
-            ));
+            window.paint_quad(
+                gpui::fill(
+                    Bounds::new(
+                        origin + background.bounds.origin,
+                        background.bounds.size,
+                    ),
+                    background.color,
+                )
+                .corner_radii(background.radius),
+            );
         }
         for line in &cache.lines {
             line.line

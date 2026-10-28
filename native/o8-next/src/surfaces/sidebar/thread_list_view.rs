@@ -54,7 +54,8 @@ impl Render for ThreadList {
                     .px(px(12.))
                     .child(if self.saving {
                         "Saving…".to_string()
-                    } else if self.loading {
+                    } else if self.loading && self.rows.is_empty() {
+                        // Background refreshes keep the current list without a status flash.
                         "Refreshing…".to_string()
                     } else if self.search_running || self.search_pending.is_some() {
                         "Searching messages…".to_string()
