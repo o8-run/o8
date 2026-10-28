@@ -347,7 +347,7 @@ export async function autoCompactOrchestratorThread(input: {
     // later commit-time record where unsummarized replies may have arrived.
     const summarizedMessageIds = thread.messages.filter(entry => entry.type !== 'compaction'
       && (!activeIds.has(entry.id) || summarizedIds.has(entry.id))).map(entry => entry.id);
-    return withLiveCompaction({ repoPath, threadId }, async () => {
+    return withLiveCompaction({ repoPath, threadId }, async (operation) => {
       // Record-only judgment scores (#2465), asked beside the summarizer; nothing reads them.
       const scorerJob = scoreCompactionSegment(compactedTurns);
       const summaryResult = await summarizeWithCodex(repoPath, ['Summarize this orchestrator thread segment using exactly these sections and terse bullets:', 'Decisions made', 'Files touched', 'Open questions', 'Current mission state', 'Use file paths verbatim. If a section is empty, write "- None."', '', buildExcerpt(compactedTurns, 90_000)].join('\n'));
@@ -364,6 +364,8 @@ export async function autoCompactOrchestratorThread(input: {
         timestamp: compactedAt.getTime(),
         timestampLabel: compactedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         compaction: {
+          operationId: operation.operationId,
+          startedAt: operation.startedAt,
           timestamp: compactedAt.getTime(),
           tokensBefore: typeof input.runningTotal === 'number' ? input.runningTotal : undefined,
           contextSource: input.contextSource,
@@ -418,6 +420,7 @@ export async function autoCompactOrchestratorThread(input: {
         const resumePrelude = [`Compaction summary (${compactedStamp})`, summary, '', 'Most recent uncompressed turns:', buildExcerpt(retainedTurns, 80_000) || '- None.', '', 'Continue from that context. The operator message follows below.'].join('\n');
         const tokensAfter = approxTokens(resumePrelude);
         compactionEntry.compaction!.tokensAfter = tokensAfter;
+        compactionEntry.compaction!.completedAt = Date.now();
         persistCanonicalChatHistoryRecordUnlocked(thread.tabId, {
           ...current,
           messages: [...current.messages, toStoredMessage(compactionEntry)],

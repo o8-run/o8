@@ -291,7 +291,10 @@ impl Shell {
         cx.notify();
     }
     fn capture(&mut self, window: &Window, cx: &App) {
-        if self.palette || registrations().iter().any(|r| (r.overlay_open)(self)) {
+        if self.palette
+            || registrations().iter().any(|r| (r.overlay_open)(self))
+            || registry::extensions().any(|extension| extension.capture_blocked(self))
+        {
             return;
         }
         for registration in registrations() {

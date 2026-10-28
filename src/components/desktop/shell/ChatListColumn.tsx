@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, type CSSProperties, type ReactNode } from 'react';
 import { ComposerPopoverVisibilityContext } from '@/components/desktop/thoughts/chat-panel/ComposerPopover';
 import { useFloatingSurfaceMaterial } from '../FloatingSurface';
 
@@ -17,6 +17,41 @@ export function ChatListColumn({ visible, width, overlay, railWidth = NAVIGATION
   children?: ReactNode;
 }) {
   const material = useFloatingSurfaceMaterial();
+  const columnRef = useRef<HTMLElement>(null);
+  useLayoutEffect(() => {
+    if (!visible || !overlay) return;
+    const column = columnRef.current;
+    if (!column) return;
+    const controls = () => Array.from(column.querySelectorAll<HTMLElement>(
+      'button, [href], input, select, textarea, [tabindex]',
+    )).filter(node => node.tabIndex >= 0 && !node.matches(':disabled')
+      && !node.closest('[inert]') && node.getClientRects().length > 0 && getComputedStyle(node).visibility !== 'hidden');
+    const focusFirst = () => (controls()[0] ?? column).focus({ preventScroll: true });
+    // Portaled menus and dialogs own their focus while above the drawer.
+    const inPopover = (target: EventTarget | null) => target instanceof Element
+      && Boolean(target.closest('[role="menu"], [role="dialog"], [data-composer-overlay]'));
+    const containFocus = (event: FocusEvent) => {
+      if (column.getClientRects().length === 0 || column.contains(event.target as Node) || inPopover(event.target)) return;
+      focusFirst();
+    };
+    const trapTab = (event: KeyboardEvent) => {
+      if (event.key !== 'Tab' || event.defaultPrevented || inPopover(event.target)) return;
+      const items = controls();
+      const first = items[0] ?? column;
+      const last = items[items.length - 1] ?? column;
+      if (document.activeElement === column || document.activeElement === (event.shiftKey ? first : last)) {
+        event.preventDefault();
+        (event.shiftKey ? last : first).focus({ preventScroll: true });
+      }
+    };
+    if (!column.contains(document.activeElement)) focusFirst();
+    document.addEventListener('focusin', containFocus);
+    column.addEventListener('keydown', trapTab);
+    return () => {
+      document.removeEventListener('focusin', containFocus);
+      column.removeEventListener('keydown', trapTab);
+    };
+  }, [visible, overlay]);
   useEffect(() => {
     if (!visible || !overlay) return;
     const dismiss = (event: KeyboardEvent) => {
@@ -34,6 +69,8 @@ export function ChatListColumn({ visible, width, overlay, railWidth = NAVIGATION
         onClick={onClose} style={{ position: 'absolute', inset: 0, left: railWidth,
           border: 0, padding: 0, background: 'transparent', zIndex: 179 }} /> : null}
     <aside
+      ref={columnRef}
+      tabIndex={-1}
       id="o8-chat-list"
       aria-label="Chats and workers"
       aria-hidden={!visible}

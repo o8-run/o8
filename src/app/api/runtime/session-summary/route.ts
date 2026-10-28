@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import { readOwnedSessionDisplay } from '@/lib/runtimes/shared/owned-session-index';
+import { readWorkerRecovery } from '@/lib/agent-control/worker-recovery';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -15,7 +16,7 @@ export async function GET(request: NextRequest) {
   try {
     const session = await readOwnedSessionDisplay(sessionKey);
     if (!session) return NextResponse.json({ error: 'Session not found.' }, { status: 404 });
-    return NextResponse.json({ session }, { headers: { 'Cache-Control': 'no-store, max-age=0' } });
+    return NextResponse.json({ session, recovery: await readWorkerRecovery(sessionKey) }, { headers: { 'Cache-Control': 'no-store, max-age=0' } });
   } catch {
     return NextResponse.json({ error: 'Unable to read session summary.' }, { status: 500 });
   }

@@ -13,6 +13,7 @@ pub(super) type Slice = EmptyState;
 pub(super) struct Runtime {
     pub view: Option<Entity<ThreadList>>,
     workspace_ledger: Option<Ledger>,
+    bootstrapped: bool,
 }
 pub(super) const REGISTRATION: Registration = Registration {
     initialize,
@@ -169,7 +170,10 @@ impl Shell {
         refreshed: bool,
         cx: &mut Context<Self>,
     ) {
-        let bootstrap = self.loading || !self.connected;
+        // Loading also describes healthy maintenance and recovery requests.
+        // Only the first catalog adopts the server's active project; subsequent
+        // catalogs keep the user's workspace as long as it still exists.
+        let bootstrap = !self.surfaces.sidebar.bootstrapped;
         self.sessions = sessions;
         let mut workspaces = self
             .sessions
@@ -181,13 +185,14 @@ impl Shell {
         }
         self.workspaces = workspaces.into_iter().collect();
         if refreshed {
+            self.surfaces.sidebar.bootstrapped = true;
             self.loading = false;
             self.connected = true;
-            let missing = self
+            let missing = !self
                 .state
                 .selected
                 .as_ref()
-                .is_some_and(|w| !self.workspaces.contains(w));
+                .is_some_and(|w| self.workspaces.contains(w));
             if bootstrap || missing {
                 let active = self
                     .surfaces

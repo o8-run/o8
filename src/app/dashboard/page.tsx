@@ -781,11 +781,20 @@ function DashboardInner() {
       current.left ? { ...current, left: false } : current
     ));
   }, [sidebarManualIntentRef]);
+  const closeChatList = useCallback(() => {
+    noteSidebarManualIntent(false);
+    setSidebarVisible(false);
+    window.requestAnimationFrame(() => {
+      const toggles = document.querySelectorAll<HTMLButtonElement>('[aria-label="Toggle sidebar"]');
+      Array.from(toggles).find((button) => button.getClientRects().length > 0 && !button.closest('[inert]'))?.focus({ preventScroll: true });
+    });
+  }, [noteSidebarManualIntent, setSidebarVisible]);
   const toggleSidebarFromChrome = useCallback(() => {
     const nextVisible = !sidebarVisible || responsiveAutoCollapsed.left;
+    if (!nextVisible) { closeChatList(); return; }
     noteSidebarManualIntent(nextVisible);
     setSidebarVisible(nextVisible);
-  }, [noteSidebarManualIntent, responsiveAutoCollapsed.left, setSidebarVisible, sidebarVisible]);
+  }, [closeChatList, noteSidebarManualIntent, responsiveAutoCollapsed.left, setSidebarVisible, sidebarVisible]);
   const openRightPanelFromUser = useCallback(() => {
     if (getResponsiveViewportWidth() < RESPONSIVE_RIGHT_PANEL_COLLAPSE_WIDTH) return;
     if (typeof window !== 'undefined') {
@@ -4126,14 +4135,6 @@ function DashboardInner() {
   const showSidebarColumn = sidebarVisible && !responsiveAutoCollapsed.left;
   const showCompactNavigationRail = !compactShell;
   const sidebarOverlay = Boolean(viewportBands?.belowLeftCollapse);
-  const closeChatList = () => {
-    noteSidebarManualIntent(false);
-    setSidebarVisible(false);
-    window.requestAnimationFrame(() => {
-      const toggles = document.querySelectorAll<HTMLButtonElement>('[aria-label="Toggle sidebar"]');
-      Array.from(toggles).find((button) => button.getClientRects().length > 0)?.focus();
-    });
-  };
   const showRightPanelColumn = chatVisible && !compactShell && !viewportBands?.belowRightCollapse;
   const workspaceInset = compactShell ? 2 : 4;
 

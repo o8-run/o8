@@ -1,4 +1,4 @@
-import { execFile, execFileSync, type ChildProcess } from 'node:child_process';
+import { execFile, execFileSync, spawnSync, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
@@ -50,6 +50,44 @@ const nodeDiagnostics = [
     "expected": "Error: parenthesized frame reason"
   }
 ];
+
+// Generate these diagnostics with Node so the source excerpt and real V8 frames
+// surround the locationless message lines exactly as they do in bridge stderr.
+for (const modifier of ['async', 'new']) {
+  const message = `first line\n    at ${modifier} something\nlast line with actual reason`;
+  const script = join(root, `locationless-${modifier}.mjs`);
+  writeFileSync(script, `throw new Error(${JSON.stringify(message)});\n`);
+  const result = spawnSync(process.execPath, [script], { encoding: 'utf8' });
+  if (result.error) throw result.error;
+  if (result.status !== 1) throw new Error(`Expected Node fixture failure, got ${result.status}`);
+  nodeDiagnostics.push({
+    name: `locationless-${modifier}`,
+    diagnostic: result.stderr,
+    expected: `Error: ${message}`,
+  });
+}
+
+for (const [method, index] of [['any', 0], ['allSettled', 1]] as const) {
+  const message = `Promise.${method} failure`;
+  const script = join(root, `promise-${method}.mjs`);
+  // Omit the helper's frame so V8's real synthetic frame is the first one.
+  writeFileSync(script, `async function fail() {
+  await Promise.resolve();
+  const error = new Error(${JSON.stringify(message)});
+  Error.captureStackTrace(error, fail);
+  throw error;
+}
+${method === 'any'
+    ? 'try { await Promise.any([fail()]); } catch (error) { throw error.errors[0]; }'
+    : 'const results = await Promise.allSettled([Promise.resolve(), fail()]); throw results[1].reason;'}
+`);
+  const result = spawnSync(process.execPath, [script], { encoding: 'utf8' });
+  if (result.error) throw result.error;
+  if (result.status !== 1) throw new Error(`Expected Node fixture failure, got ${result.status}`);
+  expect(result.stderr.split(`Error: ${message}\n`)[1]?.split('\n')[0])
+    .toBe(`    at async Promise.${method} (index ${index})`);
+  nodeDiagnostics.push({ name: `promise-${method}`, diagnostic: result.stderr, expected: `Error: ${message}` });
+}
 
 const token = 'error-turn-token-fixture';
 mkdirSync(dataDir);
