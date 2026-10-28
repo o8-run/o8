@@ -120,6 +120,8 @@ function normalized(value: unknown, threadId: string): string {
   return JSON.stringify(value)
     .split(threadId).join('<thread>')
     .replace(/orch-compaction-\d+/g, 'orch-compaction-<t>')
+    .replace(/"operationId":"compaction-[\w-]+"/g, '"operationId":"<operation>"')
+    .replace(/"(startedAt|completedAt)":\d+/g, '"$1":<t>')
     .replace(/"timestamp":\d{13}/g, '"timestamp":<t>')
     .replace(/"(savedAt|archivedAt)":"[^"]*"/g, '"$1":"<t>"')
     .replace(/"timestampLabel":"[^"]*"/g, '"timestampLabel":"<t>"')
