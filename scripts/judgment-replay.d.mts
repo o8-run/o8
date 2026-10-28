@@ -11,6 +11,7 @@ export interface ReplayOptions {
   dryRun: boolean;
   limit: number | null;
   out: string | null;
+  label: string | null;
   help?: boolean;
 }
 export declare function parseReplayArgs(argv: string[]): { options: ReplayOptions; error?: undefined } | { error: string; options?: undefined };

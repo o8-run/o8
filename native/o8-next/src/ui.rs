@@ -9,6 +9,8 @@ mod composer_regions;
 mod conversation;
 #[path = "history.rs"]
 mod history;
+#[path = "transcript_images.rs"]
+pub(crate) mod images;
 #[path = "session_sidebar.rs"]
 mod session_sidebar;
 #[path = "shell_session.rs"]
@@ -58,6 +60,7 @@ pub(crate) struct Surface {
     sessions: Vec<Session>,
     selected: Option<String>,
     rows: Rc<Vec<Rc<RefCell<RowState>>>>,
+    images: images::Cache,
     transcript: Option<Transcript>,
     subscription: Option<Subscription>,
     list: ListState,
@@ -93,6 +96,7 @@ impl Surface {
             sessions: vec![],
             selected: None,
             rows: Rc::new(vec![]),
+            images: Default::default(),
             transcript: None,
             subscription: None,
             list: ListState::new(0, ListAlignment::Top, px(400.)),
@@ -172,7 +176,7 @@ impl Surface {
                     Ok((history, queue, routing)) => {
                         let key = history.session_key.clone();
                         let transcript = Transcript::new(history);
-                        this.install_rows(transcript.rows.clone());
+                        this.install_rows(transcript.rows.clone(), cx);
                         this.transcript = Some(transcript);
                         this.subscription = Some(transport::subscribe(this.client.clone(), key));
                         this.notice = "Connecting live stream".into();
@@ -195,7 +199,7 @@ impl Surface {
         })
         .detach();
     }
-    fn install_rows(&mut self, next: Vec<Row>) {
+    fn install_rows(&mut self, next: Vec<Row>, cx: &mut Context<Self>) {
         let old = &self.rows;
         let initial = old.is_empty();
         let prefix = old
@@ -222,11 +226,16 @@ impl Surface {
                 .get(row.id())
                 .and_then(|candidates| candidates.iter().find(|state| state.borrow().row == row))
                 .cloned();
-            states.push(retained.unwrap_or_else(|| Rc::new(RefCell::new(RowState::new(row)))));
+            states.push(retained.unwrap_or_else(|| {
+                let mut state = RowState::new(row);
+                state.images = self.images.clone();
+                Rc::new(RefCell::new(state))
+            }));
         }
         self.list
             .splice(prefix..old.len() - suffix, states.len() - prefix - suffix);
         self.rows = Rc::new(states);
+        self.load_images(cx);
         if initial {
             self.list = self.list.clone().measure_all();
         }
@@ -265,7 +274,7 @@ impl Surface {
             }
         }
         if changed {
-            self.install_rows(self.transcript.as_ref().unwrap().rows.clone());
+            self.install_rows(self.transcript.as_ref().unwrap().rows.clone(), cx);
             if follow_tail && !self.rows.is_empty() {
                 self.list.scroll_to(ListOffset {
                     item_ix: self.rows.len() - 1,

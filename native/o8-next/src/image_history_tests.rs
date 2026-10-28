@@ -39,7 +39,8 @@ fn native_image_history_route_paints_user_and_media_thumbnails(cx: &mut TestAppC
         .expect("fixture origin");
     std::thread::spawn(move || for _ in lines {});
     let _host = Host(host);
-    let client = Client::authenticated(&origin, Some("fixture-image-history-bearer".into())).unwrap();
+    let client =
+        Client::authenticated(&origin, Some("fixture-image-history-bearer".into())).unwrap();
     let reader = client.clone();
     let (surface, cx) = cx.add_window_view(|window, cx| Surface::new(client, window, cx));
     surface.update(cx, |s, cx| {

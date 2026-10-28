@@ -1,5 +1,11 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
+import { assertBrowserDeclarations, declaresBrowser } from './browser-prerequisites.mjs';
+
+export function selectedTestsRequireBrowser(files, classification) {
+  const selected = new Set(files);
+  return (classification.resourceOwning ?? []).some(entry => selected.has(entry.path) && entry.browser === true);
+}
 
 // Match Vitest's production include contract exactly. Fixture files with other
 // extensions are helpers, not independently scheduled tests.
@@ -54,6 +60,7 @@ export function classifyTestSource(path, source) {
   for (const [reason, pattern] of SOURCE_RULES) {
     if (pattern.test(source)) reasons.push(reason);
   }
+  if (declaresBrowser(path, source)) reasons.push('browser');
   return [...new Set(reasons)].sort();
 }
 
@@ -64,9 +71,10 @@ export function buildTestClassificationReport(root) {
     try { walkTestFiles(root, absolute, files); } catch {}
   }
   files.sort();
+  assertBrowserDeclarations(root, files);
   const resourceOwning = files.flatMap((path) => {
     const reasons = classifyTestSource(path, readFileSync(join(root, path), 'utf8'));
-    return reasons.length > 0 ? [{ path, reasons }] : [];
+    return reasons.length > 0 ? [{ path, reasons, ...(reasons.includes('browser') ? { browser: true } : {}) }] : [];
   });
   return {
     hermeticFiles: files.filter(path => !resourceOwning.some(entry => entry.path === path)),

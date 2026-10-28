@@ -64,6 +64,12 @@ fn native_composer_loaded_shell_images_typing_benchmark(cx: &mut TestAppContext)
 
 fn typing_benchmark(cx: &mut TestAppContext, images: bool) {
     let (_fixture, shell, session, mut cx) = loaded_shell(cx, images);
+    if images {
+        let bounds = cx.debug_bounds("transcript-image-loaded-199-0")
+            .expect("typing workload must paint its image thumbnail");
+        assert_eq!(bounds.size, size(px(80.), px(48.)),
+            "typing workload must contain decoded images");
+    }
     let notifications = Rc::new(Cell::new(0));
     let observed = notifications.clone();
     let _shell =

@@ -33,8 +33,27 @@ Governance Smoke, and Security Audit. Fetch `origin/main` before running. Change
 integration files use CI's merge-base selector, including staged, unstaged and untracked
 classified tests locally, and the same integration configuration and baseline as CI.
 Install `ripgrep` and the system secure-shell tools for resource-owning tests.
-When the routing ownership test is selected, the command also runs CI's conditional
-browser installation before the integration command.
+Linux CI restores prerequisite `.deb` archives for Rust and resource tests using
+the package definitions, installer version, architecture and exact runner image
+version. Every run refreshes signed APT indexes and verifies cached bytes against
+the exact package/version/architecture SHA256 before normal APT installation.
+Missing, stale or damaged payloads are downloaded by APT. Only main saves shared
+caches; authenticated archive revisions keep later security updates reusable.
+This privileged runner setup is
+explicitly hosted in the coverage guard; local verification uses the installed
+system prerequisites. The package-cache proof workflow transfers a short-lived
+archive directory between fresh containers on one hosted runner to measure miss
+and authenticated hit behavior against an identical base image, without allowing
+a PR to save the shared cache.
+Browser tests declare Chromium through their runtime import, or a first-line
+`// @o8-test-browser` marker for an indirect launcher. Classification generates
+`browser: true`; CI and local verification select the prerequisite from that same
+metadata. Adding a browser test does not require editing the workflow or verifier.
+Both coverage and classification guards trace runtime imports, called exports and
+Node script launches. An indirect browser launcher requires the first-line marker;
+the refusal names its test and the marker to add. A file-wide mocked launch does
+not require a browser, while restoring the real launch restores the prerequisite.
+The coverage guard also rejects browser flags that disagree with the source.
 It sets `CI=true`, uses the CI test configuration and environment, gives type checking
 an 8192 MiB heap, and runs the smoke in a fresh temporary data directory with its CI
 timeout. Each check prints PASS or FAIL under its CI name; any failed command makes

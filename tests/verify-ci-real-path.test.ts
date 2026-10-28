@@ -29,17 +29,41 @@ fs.appendFileSync(process.env.VERIFY_FIXTURE_RECEIPT, JSON.stringify({
   cargoHome: process.env.CARGO_HOME, targetDir: process.env.CARGO_TARGET_DIR,
   daemon: process.env.O8D_HTTP_TEST_BINARY, display: process.env.DISPLAY, wayland: process.env.WAYLAND_DISPLAY,
   nativeShard: process.env.O8_NATIVE_TEST_SHARD, nativePhase: process.env.O8_NATIVE_TEST_PHASE,
+  integrationShard: process.env.O8_INTEGRATION_SHARD,
 }) + '\\n');
+if ('${name}' === 'npm' && args.includes('test:integration') && process.env.VERIFY_FIXTURE_REAL_INTEGRATION === '1') {
+  const separator = args.indexOf('--');
+  const result = require('node:child_process').spawnSync(process.execPath,
+    ['scripts/integration-test-gate.mjs', ...(separator < 0 ? [] : args.slice(separator + 1))], { stdio: 'inherit' });
+  process.exit(result.status ?? 1);
+}
+const contention = process.env.VERIFY_FIXTURE_CONTENTION;
+if (contention) {
+  if (args.includes('protocol:check')) {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1500);
+  }
+  if (args.includes('lint')) {
+    const started = Date.now();
+    let work = 0;
+    while (work < 150) {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+      if (!fs.existsSync(contention)) work += 10;
+    }
+    fs.appendFileSync(process.env.VERIFY_FIXTURE_RECEIPT, JSON.stringify({
+      tool: 'lint-complete', args, elapsedMs: Date.now() - started,
+    }) + '\\n');
+  }
+}
 const barrier = process.env.VERIFY_FIXTURE_BARRIER;
 if (barrier) {
   const path = require('node:path');
   const wait = () => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
-  // Classification is independent of Lint. Shard 1 also awaits discovery, so
+  // Classification and fast type checking can overlap after lint. Shard 1 awaits discovery, so
   // requiring it to start within this barrier falsely fails slow discovery.
   const classification = args.includes('test:classification:check');
-  if (args.includes('lint') || classification) {
-    fs.writeFileSync(path.join(barrier, classification ? 'classification' : 'lint'), 'started');
-    const peer = path.join(barrier, classification ? 'lint' : 'classification');
+  if (args.includes('typecheck:fast') || classification) {
+    fs.writeFileSync(path.join(barrier, classification ? 'classification' : 'typecheck'), 'started');
+    const peer = path.join(barrier, classification ? 'typecheck' : 'classification');
     const deadline = Date.now() + 15000;
     while (!fs.existsSync(peer) && Date.now() < deadline) wait();
     if (!fs.existsSync(peer)) process.exit(9);
@@ -88,12 +112,15 @@ function coverage(workflow: object) {
 }
 function executeFixture(selectedFile: string, nestedDependency = false,
   { fail = '', parallel = false, discoveryMs = 0, nativeChange = '', nativeState = 'untracked', setupChange = '',
-    nativeDeadlineMinutes = 0, nativeDelayMs = 0 } = {}) {
+    nativeDeadlineMinutes = 0, nativeDelayMs = 0, main = false, mainFailure = false, detachedMain = false,
+    contend = false, lintDependency = '',
+    browser = false, indirectBrowser = '', staleBrowser = false, packageChange = '' } = {}) {
   const directory = mkdtempSync(path.join(root, 'verifier-fixture-'));
   const files = ['scripts/verify-ci.mjs', 'scripts/lib/verify-ci.mjs', 'scripts/ci/check-verify-ci.mjs',
     'scripts/ci/resource-owning-changed.mjs', 'scripts/ci/review-dependency-changes.mjs', 'scripts/ci/native-changes.mjs',
     '.github/workflows/ci.yml', '.github/actions/next-linux-setup/action.yml', 'scripts/ci/native-test-shard.mjs',
-    'scripts/ci/native-test-inputs.mjs', 'scripts/ci/install-native-linux-deps.sh'];
+    'scripts/ci/native-test-inputs.mjs', 'scripts/ci/install-native-linux-deps.sh', 'scripts/lib/test-classification.mjs',
+    'scripts/lib/browser-prerequisites.mjs', '.github/actions/linux-package-prerequisites/action.yml'];
   for (const file of files) {
     mkdirSync(path.dirname(path.join(directory, file)), { recursive: true });
     copyFileSync(path.join(repo, file), path.join(directory, file));
@@ -104,12 +131,33 @@ function executeFixture(selectedFile: string, nestedDependency = false,
     workflow.jobs['o8-next-tests']['timeout-minutes'] = nativeDeadlineMinutes;
     writeFileSync(file, stringify(workflow));
   }
+  if (contend) {
+    const file = path.join(directory, '.github/workflows/ci.yml');
+    const workflow = parse(readFileSync(file, 'utf8'));
+    // Keep the same scaled deadline on main and the fix; production stays 15 minutes.
+    workflow.jobs.lint['timeout-minutes'] = 1 / 60;
+    writeFileSync(file, stringify(workflow));
+  }
+  if (lintDependency) {
+    const file = path.join(directory, '.github/workflows/ci.yml');
+    const workflow = parse(readFileSync(file, 'utf8'));
+    workflow.jobs.lint.needs = lintDependency;
+    writeFileSync(file, stringify(workflow));
+  }
   if (setupChange) {
     const file = path.join(directory, '.github/actions/next-linux-setup/action.yml');
     const setup = parse(readFileSync(file, 'utf8'));
     if (setupChange === 'architecture') setup.runs.steps[0].with.architecture = 'arm64';
     if (setupChange === 'missing install') setup.runs.steps = setup.runs.steps.filter((step: { run?: string }) => step.run !== 'npm ci --prefer-offline');
     writeFileSync(file, stringify(setup));
+  }
+  if (packageChange) {
+    const file = path.join(directory, '.github/actions/linux-package-prerequisites/action.yml');
+    const action = parse(readFileSync(file, 'utf8'));
+    if (packageChange === 'save on pull requests') delete action.runs.steps.at(-1).if;
+    if (packageChange === 'unpinned cache') action.runs.steps[1].uses = 'actions/cache/restore@v4';
+    if (packageChange === 'extra command') action.runs.steps.push({ shell: 'bash', run: 'false' });
+    writeFileSync(file, stringify(action));
   }
   symlinkSync(path.join(repo, 'node_modules'), path.join(directory, 'node_modules'), 'junction');
   // The verifier's scheduler is under test. Keep unrelated bundle building and
@@ -124,7 +172,26 @@ function executeFixture(selectedFile: string, nestedDependency = false,
   mkdirSync(path.join(directory, 'tests'));
   const browserFile = selectedFile;
   writeFileSync(path.join(directory, browserFile), 'base\n');
-  writeFileSync(path.join(directory, 'tests/test-classification.json'), JSON.stringify({ resourceOwning: [{ path: browserFile }] }));
+  const integrationFiles = main ? Array.from({ length: 6 }, (_, index) => `tests/unchanged-integration-${index}.test.mjs`) : [browserFile];
+  writeFileSync(path.join(directory, 'tests/test-classification.json'), JSON.stringify({ resourceOwning: integrationFiles.map(path => ({ path, ...(path === browserFile && browser && !staleBrowser ? { browser: true } : {}) })) }));
+  if (main) {
+    for (const file of ['scripts/integration-test-gate.mjs', 'scripts/lib/red-baseline.mjs']) {
+      copyFileSync(path.join(repo, file), path.join(directory, file));
+    }
+    mkdirSync(path.join(directory, 'config/vitest'), { recursive: true });
+    writeFileSync(path.join(directory, 'config/vitest/vitest.integration.config.ts'), `export default {
+      test: { include: ['tests/*.test.mjs'], maxWorkers: 1, reporters: ['json'], outputFile: process.env.O8_TEST_GATE_REPORT_PATH }
+    };`);
+    writeFileSync(path.join(directory, 'tests/integration-linux-baseline.json'), JSON.stringify({ files: [] }));
+    for (const [index, file] of integrationFiles.entries()) {
+      writeFileSync(path.join(directory, file), `import { it } from 'vitest';
+        import { appendFileSync } from 'node:fs';
+        it('unchanged integration fixture ${index}', () => {
+          appendFileSync(${JSON.stringify(path.join(directory, 'executed.jsonl'))}, '${index}\\n');
+          ${mainFailure && index === 0 ? "throw new Error('unchanged integration failure');" : ''}
+        });`);
+    }
+  }
   writeFileSync(path.join(directory, 'package.json'), JSON.stringify(manifest));
   mkdirSync(path.join(directory, 'native/o8-next/src'), { recursive: true });
   writeFileSync(path.join(directory, 'native/o8-next/src/input_fixture.rs'),
@@ -144,7 +211,32 @@ function executeFixture(selectedFile: string, nestedDependency = false,
   }
   git('commit', '-qm', 'fixture base');
   git('update-ref', 'refs/remotes/origin/main', 'HEAD');
-  writeFileSync(path.join(directory, browserFile), 'changed\n');
+  if (detachedMain) git('checkout', '--detach', '-q');
+  else if (!main) git('checkout', '-qb', 'fixture-branch');
+  if (!main) writeFileSync(path.join(directory, browserFile), 'changed\n');
+  if (browser) writeFileSync(path.join(directory, browserFile), "import { chromium } from 'playwright-core';\n// changed\n");
+  if (indirectBrowser) {
+    writeFileSync(path.join(directory, browserFile), "import { launch } from './browser-helper.mjs'; launch();\n");
+    writeFileSync(path.join(directory, 'tests/browser-helper.mjs'), "import { chromium } from 'playwright-core'; export const launch = () => chromium.launch();\n");
+    if (indirectBrowser.startsWith('alias')) {
+      writeFileSync(path.join(directory, browserFile), "import { start } from './browser-helper.mjs'; start();\n");
+      writeFileSync(path.join(directory, 'tests/browser-helper.mjs'), "import { chromium } from 'playwright-core'; const launch = () => chromium.launch(); export { launch as start };\n");
+    }
+    if (indirectBrowser === 'alias-before') writeFileSync(path.join(directory, 'tests/browser-helper.mjs'), "import { chromium } from 'playwright-core'; export { launch as start }; function launch() { return chromium.launch(); }\n");
+    if (indirectBrowser === 'alias-import') {
+      writeFileSync(path.join(directory, 'tests/browser-helper.mjs'), "import { launch } from './launcher.mjs'; export { launch as start };\n");
+      writeFileSync(path.join(directory, 'tests/launcher.mjs'), "import { chromium } from 'playwright-core'; export function launch() { return chromium.launch(); }\n");
+    }
+    if (indirectBrowser === 'barrel') {
+      writeFileSync(path.join(directory, browserFile), "import { launch } from './barrel.mjs'; launch();\n");
+      writeFileSync(path.join(directory, 'tests/barrel.mjs'), "export * from './browser-helper.mjs';\n");
+    }
+    if (indirectBrowser === 'promisify') {
+      writeFileSync(path.join(directory, browserFile), "import { execFile } from 'node:child_process'; import { promisify } from 'node:util'; const run = promisify(execFile); await run(process.execPath, ['tests/browser-helper.mjs']);\n");
+      writeFileSync(path.join(directory, 'tests/browser-helper.mjs'), "import { chromium } from 'playwright-core'; await chromium.launch();\n");
+    }
+    if (indirectBrowser === 'restore') writeFileSync(path.join(directory, browserFile), "import { vi } from 'vitest'; import { chromium } from 'playwright-core'; const spy = vi.spyOn(chromium, 'launch').mockResolvedValue({}); spy.mockRestore(); chromium.launch();\n");
+  }
   if (nestedDependency) {
     const nested = path.join(directory, 'nested');
     mkdirSync(nested);
@@ -165,10 +257,41 @@ function executeFixture(selectedFile: string, nestedDependency = false,
 
   const receipt = path.join(root, 'browser-receipt.jsonl');
   writeFileSync(receipt, '');
-  const result = spawnSync(process.execPath, [path.join(directory, 'scripts/verify-ci.mjs')], {
+  const contention = path.join(directory, 'active-peer');
+  const preload = path.join(directory, 'register-contention.mjs');
+  if (contend) {
+    writeFileSync(path.join(directory, 'contention-loader.mjs'), `
+      export async function load(url, context, next) {
+        if (url !== 'node:child_process') return next(url, context);
+        return { format: 'module', shortCircuit: true, source: ${JSON.stringify(`
+          const real = process.getBuiltinModule('node:child_process');
+          const fs = process.getBuiltinModule('node:fs');
+          const peers = new Set();
+          export const spawnSync = real.spawnSync;
+          export function spawn(command, args, options) {
+            const child = real.spawn(command, args, options);
+            if (!args.at(-1).startsWith('npm run lint ')) {
+              peers.add(child.pid);
+              fs.writeFileSync(process.env.VERIFY_FIXTURE_CONTENTION, 'busy');
+              child.once('close', () => {
+                peers.delete(child.pid);
+                if (!peers.size) fs.rmSync(process.env.VERIFY_FIXTURE_CONTENTION, { force: true });
+              });
+            }
+            return child;
+          }
+        `)} };
+      }
+    `);
+    writeFileSync(preload, "import { register } from 'node:module'; register(new URL('./contention-loader.mjs', import.meta.url));");
+  }
+  const result = spawnSync(process.execPath, [...(contend ? ['--import', preload] : []), path.join(directory, 'scripts/verify-ci.mjs')], {
     cwd: directory, encoding: 'utf8', timeout: 60_000,
     env: { ...process.env, PATH: bin + path.delimiter + process.env.PATH, CI: '', NODE_ENV: 'development',
       VERIFY_FIXTURE_RECEIPT: receipt, VERIFY_FIXTURE_FAIL: fail,
+      VERIFY_FIXTURE_REAL_INTEGRATION: main ? '1' : '',
+      ...(detachedMain ? { GITHUB_EVENT_NAME: 'push', GITHUB_REF: 'refs/heads/main' } : {}),
+      VERIFY_FIXTURE_CONTENTION: contend ? contention : '',
       VERIFY_FIXTURE_NATIVE_DELAY_MS: String(nativeDelayMs),
       DISPLAY: 'fixture-display', WAYLAND_DISPLAY: 'fixture-wayland',
       VERIFY_FIXTURE_BARRIER: parallel ? mkdtempSync(path.join(root, 'parallel-')) : '' },
@@ -178,6 +301,105 @@ function executeFixture(selectedFile: string, nestedDependency = false,
 }
 
 describe('local CI verification through its command entry point', () => {
+  it.each([
+    { mainFailure: true, detachedMain: false },
+    { mainFailure: false, detachedMain: false },
+    { mainFailure: true, detachedMain: true },
+  ])('runs unchanged integration fixtures on main and propagates failure ($mainFailure, detached=$detachedMain)', options => {
+    const result = executeFixture('tests/fixture.test.ts', false, { main: true, ...options });
+    expect(result.error).toBeUndefined();
+    expect(result.status, result.stderr + result.stdout).toBe(options.mainFailure ? 1 : 0);
+    const integration = result.calls.filter(call => call.args.includes('test:integration'));
+    expect(integration.map(call => call.integrationShard)).toEqual(['1/6', '2/6', '3/6', '4/6', '5/6', '6/6']);
+    expect(integration.every(call => !call.args.some((arg: string) => arg.endsWith('.test.mjs')))).toBe(true);
+    expect(result.stderr).not.toContain('[resource-owning-changed]');
+    expect(readFileSync(path.join(result.directory, 'executed.jsonl'), 'utf8').trim().split('\n')).toEqual(['0', '1', '2', '3', '4', '5']);
+    expect(spawnSync('git', ['diff', '--exit-code', 'HEAD', '--', 'tests'], { cwd: result.directory }).status).toBe(0);
+    if (options.mainFailure) expect(result.stdout).toContain('FAIL tests/unchanged-integration-0.test.mjs');
+  }, 60_000);
+
+  it.each(['main trigger', 'missing shard', 'filtered command', 'missing browser', 'tolerated failure', 'uncovered action', 'package group'])(
+    'rejects a hidden main integration coverage change: %s', change => {
+      const workflow = parse(readFileSync(workflowPath, 'utf8'));
+      const job = workflow.jobs['integration-weekly'];
+      if (change === 'main trigger') job.if = "github.event.schedule == '17 5 * * 0'";
+      if (change === 'missing shard') job.strategy.matrix.shard.pop();
+      if (change === 'filtered command') job.steps.find((step: { run?: string }) => step.run === 'npm run test:integration').run += ' -- tests/selected.test.ts';
+      if (change === 'missing browser') job.steps = job.steps.filter((step: { run?: string }) => !step.run?.includes('playwright-core'));
+      if (change === 'tolerated failure') job['continue-on-error'] = true;
+      if (change === 'uncovered action') job.steps.push({ uses: './.github/actions/uncovered-fixture' });
+      if (change === 'package group') job.steps.find((step: { uses?: string }) => step.uses === './.github/actions/linux-package-prerequisites').with.group = 'rust';
+      const result = coverage(workflow);
+      expect(result.status, result.stdout).toBe(1);
+      expect(result.stderr).toContain('verify:ci');
+    },
+  );
+  it.each(['', 'typecheck'])('honors lint prerequisites and propagates their %s failures before running the remaining checks', fail => {
+    const result = executeFixture('tests/fixture.test.ts', false, { lintDependency: 'typecheck', fail });
+    expect(result.status, result.stderr + result.stdout).toBe(fail ? 1 : 0);
+    const lint = result.calls.findIndex(call => call.args.includes('lint'));
+    const typecheck = result.calls.findIndex(call => call.args.includes('typecheck'));
+    expect(typecheck).toBeGreaterThanOrEqual(0);
+    expect(lint).toBeGreaterThan(typecheck);
+    expect(result.calls.findIndex(call => call.args.includes('test:classification:check'))).toBeGreaterThan(lint);
+    expect(result.stdout).toContain('PASS Lint');
+    expect(result.stdout).toContain('PASS Test Classification');
+    expect(result.calls.filter(call => call.args.includes('test:unit'))).toHaveLength(4);
+  }, 60_000);
+
+  it.each(['', 'lint', 'typecheck'])('protects cold lint from controlled resource contention without hiding %s failures', fail => {
+    const result = executeFixture('tests/fixture.test.ts', false, {
+      contend: true, fail, nativeChange: nativeLocal ? 'native/o8-next/src/main.rs' : '',
+    });
+    expect(result.error).toBeUndefined();
+    expect(result.status, result.stderr + result.stdout).toBe(fail ? 1 : 0);
+    expect(result.stderr).not.toContain('exceeded its CI timeout');
+    expect(result.stdout).toContain(`${fail === 'lint' ? 'FAIL' : 'PASS'} Lint`);
+    expect(result.calls.find(call => call.tool === 'lint-complete')?.elapsedMs).toBeLessThan(1000);
+    const lintCompleted = result.calls.findIndex(call => call.tool === 'lint-complete');
+    expect(result.calls.slice(0, lintCompleted).every(call => call.args.includes('lint'))).toBe(true);
+    for (const [command, name] of [['lint', 'Lint'], ['typecheck', 'Type Check'],
+      ['unit', 'Hermetic Unit Tests'], ['classification', 'Test Classification'],
+      ['bundle', 'Server Bundle Size'], ['integration', 'Integration Tests (changed files)'],
+      ['audit', 'Security Audit'], ['governance', 'Governance Smoke']]) {
+      expect(result.stdout).toContain(`${fail === command ? 'FAIL' : 'PASS'} ${name}`);
+    }
+    if (nativeLocal) {
+      expect(result.stdout).toContain('PASS o8 next Native Tests (Linux)');
+      expect(result.calls.filter(call => call.tool === 'cargo')).toHaveLength(12);
+    }
+    for (const command of ['lint', 'protocol:check', 'typecheck:fast', 'typecheck',
+      'test:classification:check', 'test:integration', 'scripts/smoke-merge-requires-review.ts', 'audit']) {
+      expect(result.calls.some(call => call.args.includes(command)), command).toBe(true);
+    }
+    expect(result.calls.filter(call => call.args.includes('test:unit'))).toHaveLength(4);
+    expect(parse(readFileSync(workflowPath, 'utf8')).jobs.lint['timeout-minutes']).toBe(15);
+  }, 60_000);
+
+  it.each(['import', 'alias', 'alias-before', 'alias-import', 'barrel', 'promisify'])('rejects an indirect browser launch through %s without its test-local marker before running checks', indirectBrowser => {
+    const result = executeFixture('tests/undeclared.test.ts', false, { indirectBrowser });
+    expect(result.status, result.stderr + result.stdout).toBe(1);
+    expect(result.stderr).toContain('tests/undeclared.test.ts');
+    expect(result.stderr).toContain('// @o8-test-browser');
+  });
+  it('rejects missing browser metadata after a launch spy is restored', () => {
+    const result = executeFixture('tests/restored.test.ts', false, { indirectBrowser: 'restore' });
+    expect(result.status, result.stderr + result.stdout).toBe(1);
+    expect(result.stderr).toContain('tests/restored.test.ts');
+    expect(result.stderr).toContain('browser metadata drifted');
+  });
+  it('rejects missing browser metadata for the newly added screenshot test', () => {
+    const result = executeFixture('tests/composer-screenshot-recovery-real-path.test.ts', false, { browser: true, staleBrowser: true });
+    expect(result.status, result.stderr + result.stdout).toBe(1);
+    expect(result.stderr).toContain('tests/composer-screenshot-recovery-real-path.test.ts');
+    expect(result.stderr).toContain('browser metadata drifted');
+  });
+  it.each(['save on pull requests', 'unpinned cache', 'extra command'])('rejects uncovered Linux package setup: %s', packageChange => {
+    const result = executeFixture('tests/fixture.test.ts', false, { packageChange });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('Linux package prerequisite');
+  });
+
   it('runs the CI commands, environments, classification and all four shards', () => {
     expect(manifest.scripts['verify:ci']).toBe('node scripts/verify-ci.mjs');
     const result = execute();
@@ -427,34 +649,54 @@ describe('local CI verification through its command entry point', () => {
     expect(result.stderr).toContain('required-fixture');
   });
 
-  it('covers the conditional browser prerequisite added to the changed integration lane', () => {
+  it('covers the browser prerequisite selected by classification metadata', () => {
     const workflow = parse(readFileSync(workflowPath, 'utf8'));
     workflow.jobs['integration-changed'].steps = workflow.jobs['integration-changed'].steps
       .filter((step: { name?: string }) => step.name !== 'Install touched browser-test prerequisites');
     workflow.jobs['integration-changed'].steps.splice(-1, 0, {
       name: 'Install touched browser-test prerequisites',
-      if: "contains(steps.select.outputs.files, 'tests/next-parity-route-ownership-real-path.test.ts') || contains(steps.select.outputs.files, 'tests/review-diff-position-real-path.test.ts') || contains(steps.select.outputs.files, 'tests/sidebar-window-layout-real-path.test.ts') || contains(steps.select.outputs.files, 'tests/compaction-progress-inference-real-path.test.ts') || contains(steps.select.outputs.files, 'tests/composer-screenshot-recovery-real-path.test.ts')",
+      if: "steps.select.outputs.browser == 'true'",
       run: 'npx --no-install playwright-core install --with-deps chromium',
     });
     const result = coverage(workflow);
     expect(result.status, result.stderr).toBe(0);
   });
 
-  it.each(['tests/next-parity-route-ownership-real-path.test.ts',
-    'tests/review-diff-position-real-path.test.ts',
-    'tests/sidebar-window-layout-real-path.test.ts',
-    'tests/compaction-progress-inference-real-path.test.ts',
-    'tests/composer-screenshot-recovery-real-path.test.ts',
-    'tests/next-parity-route-ownership-real-path.test.ts-extra.test.ts',
-    'tests/NEXT-PARITY-ROUTE-OWNERSHIP-REAL-PATH.test.ts'])('runs the CI conditional prerequisite for %s through the verifier entry point', selectedFile => {
-    const result = executeFixture(selectedFile);
+  it.each(['missing', 'duplicate', 'filename condition'])('rejects a %s browser prerequisite contract', change => {
+    const workflow = parse(readFileSync(workflowPath, 'utf8'));
+    const steps = workflow.jobs['integration-changed'].steps;
+    const browser = steps.find((step: { name?: string }) => step.name === 'Install touched browser-test prerequisites');
+    if (change === 'missing') steps.splice(steps.indexOf(browser), 1);
+    if (change === 'duplicate') steps.push({ ...browser });
+    if (change === 'filename condition') browser.if = "contains(steps.select.outputs.files, 'tests/example.test.ts')";
+    const result = coverage(workflow);
+    expect(result.status, result.stderr).toBe(1);
+    expect(result.stderr).toContain('browser prerequisite');
+  });
+
+  it.each([
+    { selectedFile: 'tests/new-layout.test.ts', browser: true },
+    { selectedFile: 'tests/renamed-layout.test.ts', browser: true },
+    { selectedFile: 'tests/next-parity-route-ownership-real-path.test.ts', browser: false },
+    { selectedFile: 'tests/next-parity-route-ownership-real-path.test.ts-extra.test.ts', browser: false },
+    { selectedFile: 'tests/NEXT-PARITY-ROUTE-OWNERSHIP-REAL-PATH.test.ts', browser: false },
+  ])('uses declared browser=$browser for $selectedFile through the verifier entry point', ({ selectedFile, browser }) => {
+    const result = executeFixture(selectedFile, false, { browser });
     expect(result.status, result.stderr + result.stdout).toBe(0);
     const calls = result.calls;
     const prerequisite = calls.findIndex(call => call.args.includes('playwright-core'));
     const integration = calls.findIndex(call => call.args.includes('test:integration'));
-    expect(prerequisite).toBeGreaterThanOrEqual(0);
-    expect(calls[prerequisite].args).toEqual(['--no-install', 'playwright-core', 'install', '--with-deps', 'chromium']);
-    expect(integration).toBeGreaterThan(prerequisite);
+    if (browser) {
+      expect(prerequisite).toBeGreaterThanOrEqual(0);
+      expect(calls[prerequisite].args).toEqual(['--no-install', 'playwright-core', 'install', '--with-deps', 'chromium']);
+      expect(integration).toBeGreaterThan(prerequisite);
+    } else expect(prerequisite).toBe(-1);
+  }, 60_000);
+
+  it('fails local verification when the declared browser prerequisite fails', () => {
+    const result = executeFixture('tests/new-layout.test.ts', false, { browser: true, fail: 'playwright-core' });
+    expect(result.status, result.stderr + result.stdout).toBe(1);
+    expect(result.stdout).toContain('FAIL Integration Tests (changed files)');
   }, 60_000);
 
 

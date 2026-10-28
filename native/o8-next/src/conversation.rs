@@ -183,7 +183,7 @@ impl Surface {
                                 if let Some(transcript) = &mut this.transcript {
                                     transcript.operator_echoes(history);
                                     let rows = transcript.rows.clone();
-                                    this.install_rows(rows);
+                                    this.install_rows(rows, cx);
                                 }
                             }
                             Err(error) => this.notice = error,
@@ -247,7 +247,7 @@ impl Surface {
                             if captured.is_some_and(|stamp| transcript.saved_tail(history, stamp)) {
                                 changed = true;
                                 let rows = transcript.rows.clone();
-                                this.install_rows(rows);
+                                this.install_rows(rows, cx);
                             }
                         }
                     }

@@ -14,10 +14,9 @@
  *   inbound can no longer wipe the file.
  * - A confirmed orchestrator user entry retires only its matching delivery
  *   warning. Confirmation survives stale writes; it does not mean turn success.
- * - Result is ordered chronologically by numeric `timestamp` (handles the
- *   interleaved case where a preserved reply belongs *between* two inbound
- *   messages). Missing/invalid timestamps carry the prior message's value so
- *   they stay put; ties keep concat order (inbound before preserved).
+ * - Stored identities keep their causal sequence. New inbound runs use shared
+ *   identities as insertion boundaries. Disjoint sources use timestamps only
+ *   as a fallback without globally sorting either source.
  * - A `timestamp` is a CREATION time and never moves: on an id match the
  *   earlier of the two timestamps wins, so a client that re-POSTs an existing
  *   message stamped Date.now() can't shove it to the bottom of the thread.
@@ -31,6 +30,7 @@ import { areDistinctOrchestratorSends, preserveDeliveryConfirmation, removeConfi
 import type { MobileTurnReceipt } from '@/lib/mobile/types';
 import { mergeMobileTurnReceipts } from '@/lib/mobile/turn-receipt';
 import { preserveVoiceCaption } from '@/lib/transcripts/voice-captions';
+import { mergeOrderedEntries } from '@/lib/transcripts/merge-ordered';
 
 export interface ChatMessageLike {
   voice?: unknown;
@@ -45,9 +45,12 @@ export interface ChatMessageLike {
   deliveryConfirmed?: unknown;
 }
 
-const SERVER_METADATA_FIELDS = ['backend', 'model', 'receipt', 'persistedVersion', 'type', 'handoff', 'media', 'steerAnchor'] as const;
+const SERVER_METADATA_FIELDS = ['backend', 'model', 'receipt', 'persistedVersion', 'type', 'handoff', 'media', 'steerAnchor', 'toolCalls'] as const;
 
 function preserveStoredAuthorship<T extends ChatMessageLike>(existing: T, inbound: T): T {
+  if (typeof existing.persistedVersion === 'number' && existing.persistedVersion > (typeof inbound.persistedVersion === 'number' ? inbound.persistedVersion : 0)) {
+    return preserveDeliveryConfirmation(inbound, preserveVoiceCaption(inbound, existing));
+  }
   inbound = preserveVoiceCaption(existing, inbound);
   const existingRecord = existing as Record<string, unknown>;
   const inboundRecord = inbound as Record<string, unknown>;
@@ -75,7 +78,7 @@ function preserveStoredAuthorship<T extends ChatMessageLike>(existing: T, inboun
 }
 
 function duplicateAdjacentMessage(left: ChatMessageLike, right: ChatMessageLike): boolean {
-  if (left.voice || right.voice) return false;
+  if (left.voice || right.voice || left.type === 'compaction' || right.type === 'compaction') return false;
   const leftRecord = left as Record<string, unknown>;
   const rightRecord = right as Record<string, unknown>;
   if (areDistinctOrchestratorSends(leftRecord, rightRecord)) return false;
@@ -109,14 +112,8 @@ export function mergeChatMessages<T extends ChatMessageLike>(existing: T[], inbo
   const inboundList = Array.isArray(inbound) ? inbound : [];
   const existingList = Array.isArray(existing) ? existing : [];
 
-  // A message's `timestamp` is its CREATION time — immutable for ordering. Some
-  // clients re-POST an existing message stamped with Date.now() (a mobile sync
-  // path did exactly this: it re-sent the user's messages stamped "now" as a
-  // partial, so — because we sort by timestamp — every reply floated ABOVE the
-  // question it answered). On an id match we therefore pin the inbound message
-  // back to the EARLIER of the two timestamps: a re-stamp can never push a
-  // message forward, so no client bug can reorder a thread. (The Assistant
-  // tab's legitimate edits bypass merge entirely via replace:true.)
+  // Preserve original creation metadata as well as identity-based order. A
+  // later client re-stamp must not move fallback visualization anchors.
   const existingById = new Map<string, T>();
   for (const message of existingList) {
     if (message && typeof message.id === 'string') {
@@ -139,33 +136,6 @@ export function mergeChatMessages<T extends ChatMessageLike>(existing: T[], inbo
     return withAuthorship;
   });
 
-  const inboundIds = new Set<string>();
-  for (const message of normalizedInbound) {
-    if (message && typeof message.id === 'string') inboundIds.add(message.id);
-  }
-
-  // On-disk messages the inbound payload doesn't carry — the turns a partial
-  // POST would otherwise drop. Messages without an id can't be matched, so we
-  // keep them too (defensive; desktop + mobile always stamp ids).
-  const preserved = existingList.filter(
-    (message) => !(message && typeof message.id === 'string' && inboundIds.has(message.id)),
-  );
-
-  // Fast path: inbound already covers everything on disk AND no timestamp had
-  // to be pinned (the normal full-transcript POST) — return it untouched, no
-  // reordering. If we pinned anything we must fall through to the sort so the
-  // corrected timestamps actually reorder the thread.
-  if (preserved.length === 0 && !normalizedAny) return removeConfirmedDeliveryWarnings(collapseAdjacentDuplicates(inboundList));
-
-  const concat: T[] = [...normalizedInbound, ...preserved];
-  const decorated = concat.map((message, index) => ({ message, index, ts: timestampOf(message) }));
-  // Carry a missing/invalid timestamp forward from the prior message so an
-  // unstamped row sorts next to where it actually sat.
-  let carry = 0;
-  for (const entry of decorated) {
-    if (entry.ts === null) entry.ts = carry;
-    else carry = entry.ts;
-  }
-  decorated.sort((a, b) => (a.ts! - b.ts!) || (a.index - b.index));
-  return removeConfirmedDeliveryWarnings(collapseAdjacentDuplicates(decorated.map((entry) => entry.message)));
+  const merged = mergeOrderedEntries(existingList, normalizedAny ? normalizedInbound : inboundList);
+  return removeConfirmedDeliveryWarnings(collapseAdjacentDuplicates(merged));
 }
