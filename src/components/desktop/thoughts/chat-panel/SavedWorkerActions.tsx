@@ -7,7 +7,11 @@ import { ThreadActionButton } from '../../o8-panel/ThreadActions';
 import { InterruptedWorkerActions } from './InterruptedWorkerActions';
 
 /** Packet rows retain recovery even when they have no Shared-team membership. */
-export function SavedWorkerActions({ sessionKey, name, status }: { sessionKey: string; name: string; status: string }) {
+export function SavedWorkerActions({ sessionKey, name, status, unavailableNote }: {
+  sessionKey: string; name: string; status: string;
+  /** Shown once the saved record loads without any recovery action, instead of rendering nothing. */
+  unavailableNote?: string;
+}) {
   const [saved, setSaved] = useState<{ sessionKey: string; status: string; recovery: WorkerRecovery | null } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
@@ -35,6 +39,8 @@ export function SavedWorkerActions({ sessionKey, name, status }: { sessionKey: s
   return <>
     {current?.recovery && (current.recovery.actions.length || current.recovery.retired) ? <div style={{ paddingTop: 4, paddingRight: 12, paddingBottom: 10, paddingLeft: 12 }}>
       <InterruptedWorkerActions key={current.recovery.runId} sessionKey={sessionKey} name={name} recovery={current.recovery} status={current.status} />
+    </div> : current && unavailableNote ? <div role="status" style={{ paddingTop: 4, paddingRight: 12, paddingBottom: 10, paddingLeft: 12, color: 'var(--t-text-muted)', fontSize: 11, fontWeight: 300 }}>
+      {name} · {unavailableNote}
     </div> : null}
     {error ? <div role="status" style={{ padding: 12, color: 'var(--t-text-muted)', fontSize: 11 }}>{error} <ThreadActionButton label="Refresh worker recovery" onClick={() => setRevision(value => value + 1)} /></div> : null}
   </>;
