@@ -197,14 +197,19 @@ describe('owned-session store cold resume (#1524)', () => {
     const refused = await store.launch({ cwd: repoPath, prompt: 'must not write' });
     expect(refused).toMatchObject({ ok: false, sideEffect: 'none' });
     expect(refused.note).toContain('artifact');
+    const identityHome = path.join(tempRoot, 'identity-home');
+    // Policy may look up this path, but refusal must leave it unprepared.
+    expect(existsSync(identityHome)).toBe(false);
     const missingCliStore = createOwnedSessionStore({
       ...coldAdapter(), binaryName: 'missing-owned-fixture', isolatedConfigHomeEnv: 'O8_TEST_ISOLATED_HOME',
-      defaultConfigHome: () => { throw new Error('Refused launches must not prepare identity configuration'); },
+      defaultConfigHome: () => identityHome,
     });
     expect(await missingCliStore.launch({ cwd: repoPath, prompt: 'must not stage CLI output', packetId: 'budget-held-packet' }))
       .toMatchObject({ ok: false, sideEffect: 'none' });
+    expect(existsSync(identityHome)).toBe(false);
     expect(readdirSync(sessionsRoot)).toEqual([]);
     expect(await store.resume(launched.surfaceId, 'must not resume')).toMatchObject({ ok: false, sideEffect: 'none' });
+    expect(existsSync(identityHome)).toBe(false);
     expect(spawnMock).toHaveBeenCalledTimes(calls);
     expect(readdirSync(archived.archivePath!).sort()).toEqual(entries);
     // Cold-resume refusal must not change the original archived metadata.
@@ -218,6 +223,7 @@ describe('owned-session store cold resume (#1524)', () => {
     expect(await store.sessionState(launched.surfaceId)).toBe('active');
     expect((await store.archiveSession(launched.surfaceId)).archived).toBe(true);
     expect(statSync(retained)).toMatchObject({ dev: identity.dev, ino: identity.ino, size: identity.size });
+    expect(existsSync(identityHome)).toBe(false);
   });
 
   it('refuses a redirected artifact root without following or writing its target', async () => {
