@@ -30,16 +30,33 @@ fs.appendFileSync(process.env.VERIFY_FIXTURE_RECEIPT, JSON.stringify({
   daemon: process.env.O8D_HTTP_TEST_BINARY, display: process.env.DISPLAY, wayland: process.env.WAYLAND_DISPLAY,
   nativeShard: process.env.O8_NATIVE_TEST_SHARD, nativePhase: process.env.O8_NATIVE_TEST_PHASE,
 }) + '\\n');
+const contention = process.env.VERIFY_FIXTURE_CONTENTION;
+if (contention) {
+  if (args.includes('protocol:check')) {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1500);
+  }
+  if (args.includes('lint')) {
+    const started = Date.now();
+    let work = 0;
+    while (work < 150) {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+      if (!fs.existsSync(contention)) work += 10;
+    }
+    fs.appendFileSync(process.env.VERIFY_FIXTURE_RECEIPT, JSON.stringify({
+      tool: 'lint-complete', args, elapsedMs: Date.now() - started,
+    }) + '\\n');
+  }
+}
 const barrier = process.env.VERIFY_FIXTURE_BARRIER;
 if (barrier) {
   const path = require('node:path');
   const wait = () => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
-  // Classification is independent of Lint. Shard 1 also awaits discovery, so
+  // Classification and fast type checking can overlap after lint. Shard 1 awaits discovery, so
   // requiring it to start within this barrier falsely fails slow discovery.
   const classification = args.includes('test:classification:check');
-  if (args.includes('lint') || classification) {
-    fs.writeFileSync(path.join(barrier, classification ? 'classification' : 'lint'), 'started');
-    const peer = path.join(barrier, classification ? 'lint' : 'classification');
+  if (args.includes('typecheck:fast') || classification) {
+    fs.writeFileSync(path.join(barrier, classification ? 'classification' : 'typecheck'), 'started');
+    const peer = path.join(barrier, classification ? 'typecheck' : 'classification');
     const deadline = Date.now() + 15000;
     while (!fs.existsSync(peer) && Date.now() < deadline) wait();
     if (!fs.existsSync(peer)) process.exit(9);
@@ -88,7 +105,8 @@ function coverage(workflow: object) {
 }
 function executeFixture(selectedFile: string, nestedDependency = false,
   { fail = '', parallel = false, discoveryMs = 0, nativeChange = '', nativeState = 'untracked', setupChange = '',
-    nativeDeadlineMinutes = 0, nativeDelayMs = 0, browser = false, indirectBrowser = '', staleBrowser = false } = {}) {
+    nativeDeadlineMinutes = 0, nativeDelayMs = 0, contend = false, lintDependency = '',
+    browser = false, indirectBrowser = '', staleBrowser = false } = {}) {
   const directory = mkdtempSync(path.join(root, 'verifier-fixture-'));
   const files = ['scripts/verify-ci.mjs', 'scripts/lib/verify-ci.mjs', 'scripts/ci/check-verify-ci.mjs',
     'scripts/ci/resource-owning-changed.mjs', 'scripts/ci/review-dependency-changes.mjs', 'scripts/ci/native-changes.mjs',
@@ -103,6 +121,19 @@ function executeFixture(selectedFile: string, nestedDependency = false,
     const file = path.join(directory, '.github/workflows/ci.yml');
     const workflow = parse(readFileSync(file, 'utf8'));
     workflow.jobs['o8-next-tests']['timeout-minutes'] = nativeDeadlineMinutes;
+    writeFileSync(file, stringify(workflow));
+  }
+  if (contend) {
+    const file = path.join(directory, '.github/workflows/ci.yml');
+    const workflow = parse(readFileSync(file, 'utf8'));
+    // Keep the same scaled deadline on main and the fix; production stays 15 minutes.
+    workflow.jobs.lint['timeout-minutes'] = 1 / 60;
+    writeFileSync(file, stringify(workflow));
+  }
+  if (lintDependency) {
+    const file = path.join(directory, '.github/workflows/ci.yml');
+    const workflow = parse(readFileSync(file, 'utf8'));
+    workflow.jobs.lint.needs = lintDependency;
     writeFileSync(file, stringify(workflow));
   }
   if (setupChange) {
@@ -189,10 +220,39 @@ function executeFixture(selectedFile: string, nestedDependency = false,
 
   const receipt = path.join(root, 'browser-receipt.jsonl');
   writeFileSync(receipt, '');
-  const result = spawnSync(process.execPath, [path.join(directory, 'scripts/verify-ci.mjs')], {
+  const contention = path.join(directory, 'active-peer');
+  const preload = path.join(directory, 'register-contention.mjs');
+  if (contend) {
+    writeFileSync(path.join(directory, 'contention-loader.mjs'), `
+      export async function load(url, context, next) {
+        if (url !== 'node:child_process') return next(url, context);
+        return { format: 'module', shortCircuit: true, source: ${JSON.stringify(`
+          const real = process.getBuiltinModule('node:child_process');
+          const fs = process.getBuiltinModule('node:fs');
+          const peers = new Set();
+          export const spawnSync = real.spawnSync;
+          export function spawn(command, args, options) {
+            const child = real.spawn(command, args, options);
+            if (!args.at(-1).startsWith('npm run lint ')) {
+              peers.add(child.pid);
+              fs.writeFileSync(process.env.VERIFY_FIXTURE_CONTENTION, 'busy');
+              child.once('close', () => {
+                peers.delete(child.pid);
+                if (!peers.size) fs.rmSync(process.env.VERIFY_FIXTURE_CONTENTION, { force: true });
+              });
+            }
+            return child;
+          }
+        `)} };
+      }
+    `);
+    writeFileSync(preload, "import { register } from 'node:module'; register(new URL('./contention-loader.mjs', import.meta.url));");
+  }
+  const result = spawnSync(process.execPath, [...(contend ? ['--import', preload] : []), path.join(directory, 'scripts/verify-ci.mjs')], {
     cwd: directory, encoding: 'utf8', timeout: 60_000,
     env: { ...process.env, PATH: bin + path.delimiter + process.env.PATH, CI: '', NODE_ENV: 'development',
       VERIFY_FIXTURE_RECEIPT: receipt, VERIFY_FIXTURE_FAIL: fail,
+      VERIFY_FIXTURE_CONTENTION: contend ? contention : '',
       VERIFY_FIXTURE_NATIVE_DELAY_MS: String(nativeDelayMs),
       DISPLAY: 'fixture-display', WAYLAND_DISPLAY: 'fixture-wayland',
       VERIFY_FIXTURE_BARRIER: parallel ? mkdtempSync(path.join(root, 'parallel-')) : '' },
@@ -202,6 +262,48 @@ function executeFixture(selectedFile: string, nestedDependency = false,
 }
 
 describe('local CI verification through its command entry point', () => {
+  it.each(['', 'typecheck'])('honors lint prerequisites and propagates their %s failures before running the remaining checks', fail => {
+    const result = executeFixture('tests/fixture.test.ts', false, { lintDependency: 'typecheck', fail });
+    expect(result.status, result.stderr + result.stdout).toBe(fail ? 1 : 0);
+    const lint = result.calls.findIndex(call => call.args.includes('lint'));
+    const typecheck = result.calls.findIndex(call => call.args.includes('typecheck'));
+    expect(typecheck).toBeGreaterThanOrEqual(0);
+    expect(lint).toBeGreaterThan(typecheck);
+    expect(result.calls.findIndex(call => call.args.includes('test:classification:check'))).toBeGreaterThan(lint);
+    expect(result.stdout).toContain('PASS Lint');
+    expect(result.stdout).toContain('PASS Test Classification');
+    expect(result.calls.filter(call => call.args.includes('test:unit'))).toHaveLength(4);
+  }, 60_000);
+
+  it.each(['', 'lint', 'typecheck'])('protects cold lint from controlled resource contention without hiding %s failures', fail => {
+    const result = executeFixture('tests/fixture.test.ts', false, {
+      contend: true, fail, nativeChange: nativeLocal ? 'native/o8-next/src/main.rs' : '',
+    });
+    expect(result.error).toBeUndefined();
+    expect(result.status, result.stderr + result.stdout).toBe(fail ? 1 : 0);
+    expect(result.stderr).not.toContain('exceeded its CI timeout');
+    expect(result.stdout).toContain(`${fail === 'lint' ? 'FAIL' : 'PASS'} Lint`);
+    expect(result.calls.find(call => call.tool === 'lint-complete')?.elapsedMs).toBeLessThan(1000);
+    const lintCompleted = result.calls.findIndex(call => call.tool === 'lint-complete');
+    expect(result.calls.slice(0, lintCompleted).every(call => call.args.includes('lint'))).toBe(true);
+    for (const [command, name] of [['lint', 'Lint'], ['typecheck', 'Type Check'],
+      ['unit', 'Hermetic Unit Tests'], ['classification', 'Test Classification'],
+      ['bundle', 'Server Bundle Size'], ['integration', 'Integration Tests (changed files)'],
+      ['audit', 'Security Audit'], ['governance', 'Governance Smoke']]) {
+      expect(result.stdout).toContain(`${fail === command ? 'FAIL' : 'PASS'} ${name}`);
+    }
+    if (nativeLocal) {
+      expect(result.stdout).toContain('PASS o8 next Native Tests (Linux)');
+      expect(result.calls.filter(call => call.tool === 'cargo')).toHaveLength(12);
+    }
+    for (const command of ['lint', 'protocol:check', 'typecheck:fast', 'typecheck',
+      'test:classification:check', 'test:integration', 'scripts/smoke-merge-requires-review.ts', 'audit']) {
+      expect(result.calls.some(call => call.args.includes(command)), command).toBe(true);
+    }
+    expect(result.calls.filter(call => call.args.includes('test:unit'))).toHaveLength(4);
+    expect(parse(readFileSync(workflowPath, 'utf8')).jobs.lint['timeout-minutes']).toBe(15);
+  }, 60_000);
+
   it.each(['import', 'alias', 'alias-before', 'alias-import', 'barrel', 'promisify'])('rejects an indirect browser launch through %s without its test-local marker before running checks', indirectBrowser => {
     const result = executeFixture('tests/undeclared.test.ts', false, { indirectBrowser });
     expect(result.status, result.stderr + result.stdout).toBe(1);

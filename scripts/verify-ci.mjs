@@ -84,10 +84,17 @@ try {
   const expectedNpm = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8')).packageManager.split('@')[1];
   const npm = spawnSync('npm --version', { shell: true, encoding: 'utf8', env: environment() });
   if (npm.status !== 0 || npm.stdout.trim() !== expectedNpm) throw new Error(`Use npm ${expectedNpm} from packageManager to match CI.`);
+  const beforeLint = new Set(['lint']);
+  for (const check of [...plan.checks].reverse()) {
+    if (beforeLint.has(check.id)) check.after.forEach(id => beforeLint.add(id));
+  }
   const tasks = new Map();
   for (const check of plan.checks) {
     tasks.set(check.id, (async () => {
       const dependencies = await Promise.all(check.after.map(id => tasks.get(id)));
+      // Run lint's prerequisites first, then lint alone. A failed lint still
+      // releases the remaining checks with their existing execution budgets.
+      if (!beforeLint.has(check.id)) await tasks.get('lint');
       if (check.nativeInputs) {
         const selection = spawnSync(process.execPath, ['scripts/ci/native-changes.mjs', '--o8-next', '--worktree'], {
           cwd: root, env: environment(), encoding: 'utf8', timeout: 30_000,
