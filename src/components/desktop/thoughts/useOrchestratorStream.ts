@@ -26,6 +26,7 @@ import { trackComposerSubmission } from './use-orchestrator-stream/track-submiss
 import { canReadSessionContext } from './use-orchestrator-stream/session-context-preflight';
 import { optimisticUserEntry } from './use-orchestrator-stream/optimistic-user-entry';
 import { withSessionPrelude } from '@/lib/orchestrator/composer-wire';
+import { mergeTranscriptSources } from '@/lib/transcripts/merge-ordered';
 import { archiveMissionThread as archiveCompletedMissionThread } from './use-orchestrator-stream/mission-history';
 import { primeCompactedOrchestratorSession, requestOrchestratorCompaction } from './use-orchestrator-stream/session';
 import {
@@ -44,7 +45,6 @@ import {
   normalizeRepoPath,
   openOrchestratorWebSocket,
   refreshWsCredentials,
-  sortTranscriptEntries,
   type OrchestratorStreamStatus,
 } from './use-orchestrator-stream/shared';
 import { useOrchestratorAutoCompaction } from './use-orchestrator-stream/auto-compaction';
@@ -253,27 +253,15 @@ export function useOrchestratorStream(
   ), []);
 
   const replaceTranscript = useCallback((entries: MobileTranscriptEntry[]) => {
-    const next = sortTranscriptEntries(entries);
-    syncMessages(next);
+    syncMessages(entries);
   }, [syncMessages]);
 
   const appendLocalEntries = useCallback((entries: MobileTranscriptEntry[]) => {
     if (entries.length === 0) return;
     setMessages((prev) => {
-      const next = [...prev];
-      const indexById = new Map(next.map((entry, index) => [entry.id, index] as const));
-      for (const entry of entries) {
-        const existingIndex = indexById.get(entry.id);
-        if (existingIndex == null) {
-          indexById.set(entry.id, next.length);
-          next.push(entry);
-        } else {
-          next[existingIndex] = entry;
-        }
-      }
-      const sorted = sortTranscriptEntries(next);
-      messagesRef.current = sorted;
-      return sorted;
+      const next = mergeTranscriptSources(prev, entries);
+      messagesRef.current = next;
+      return next;
     });
   }, []);
 

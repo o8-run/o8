@@ -200,7 +200,8 @@ const ChatMessageListPresentation = memo(forwardRef<HTMLDivElement, ChatMessageL
   const displayMessages = useMemo(() => mergeAdjacentToolOnlyEntries(placeSteerTranscriptEntries(rawDisplayMessages, steerItems)), [rawDisplayMessages, steerItems]);
   const items = useMemo(() => buildMissionRenderItems(displayMessages), [displayMessages]);
   const visualizations = useTranscriptVisualizations({ repoPath, threadId, active, length: rawDisplayMessages.length });
-  const visualsByIndex = useMemo(() => placeTranscriptVisualizations(visualizations, displayMessages), [visualizations, displayMessages]);
+  const anchors = useMemo(() => new Map<string, string>(), [repoPath, threadId]);
+  const visualsByIndex = useMemo(() => placeTranscriptVisualizations(visualizations, displayMessages, anchors), [visualizations, displayMessages, anchors]);
   const renderVisualizations = (index: number) => (visualsByIndex.get(index) ?? []).map(reference => (
     <VisualizationFrame key={reference.id} reference={reference} />
   ));

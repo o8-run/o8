@@ -5170,6 +5170,27 @@
       ]
     },
     {
+      "path": "tests/owner-chat-chronology-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/owner-chat-compaction-race-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/owner-chat-reading-position-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/packaged-server-smoke-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -7349,6 +7370,14 @@
         "child-process",
         "real-path"
       ]
+    },
+    {
+      "path": "tests/updates-panel-layout-real-path.test.ts",
+      "reasons": [
+        "browser",
+        "real-path"
+      ],
+      "browser": true
     },
     {
       "path": "tests/v65-orchestrator-lead-legacy-schema-real-path.test.ts",

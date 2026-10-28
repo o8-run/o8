@@ -1,6 +1,7 @@
 'use client';
 
 import { useLayoutEffect, useRef, type RefObject } from 'react';
+import { captureTranscriptReadingAnchor, restoreTranscriptReadingAnchor } from './transcript-reading-anchor';
 
 interface Options {
   endRef: RefObject<HTMLDivElement | null>;
@@ -11,7 +12,7 @@ interface Options {
 /** Follow content growth, but let the reader own the viewport until they return to the bottom. */
 export function useTranscriptAutoScroll({ endRef, suppressRef, scope }: Options) {
   const connection = useRef<{
-    container: HTMLElement; scope: string | null; follow: () => void; cancel: () => void; dispose: () => void;
+    container: HTMLElement; scope: string | null; follow: () => void; preserve: () => void; cancel: () => void; dispose: () => void;
   } | null>(null);
 
   // The empty composer can acquire a transcript without changing chat identity.
@@ -27,10 +28,17 @@ export function useTranscriptAutoScroll({ endRef, suppressRef, scope }: Options)
       let following = true;
       let lastTop = container.scrollTop;
       let frame = 0;
+      let anchor: ReturnType<typeof captureTranscriptReadingAnchor> = null;
       const cancel = () => { cancelAnimationFrame(frame); frame = 0; };
-      const pause = () => { following = false; cancel(); };
+      const pause = () => { following = false; cancel(); anchor = captureTranscriptReadingAnchor(container); };
+      const preserve = () => {
+        if (following) return;
+        restoreTranscriptReadingAnchor(container, anchor);
+        lastTop = container.scrollTop;
+      };
       const follow = () => {
-        if (!following || frame) return;
+        if (!following) { preserve(); return; }
+        if (frame) return;
         frame = requestAnimationFrame(() => {
           frame = 0;
           if (!following || !container.isConnected) return;
@@ -44,6 +52,7 @@ export function useTranscriptAutoScroll({ endRef, suppressRef, scope }: Options)
         // A deliberate return to the bottom resumes following. Content growth
         // alone must not revoke an already-following reader.
         if (container.scrollHeight - top - container.clientHeight <= 4) following = true;
+        if (!following) anchor = captureTranscriptReadingAnchor(container);
         lastTop = top;
       };
       const onWheel = (event: WheelEvent) => { if (event.deltaY < 0) pause(); };
@@ -70,8 +79,8 @@ export function useTranscriptAutoScroll({ endRef, suppressRef, scope }: Options)
       };
       observeContent();
       const mutations = typeof MutationObserver === 'undefined' ? null : new MutationObserver(observeContent);
-      if (content) mutations?.observe(content, { childList: true });
-      connection.current = { container, scope, follow, cancel, dispose: () => {
+      if (content) mutations?.observe(content, { childList: true, subtree: true });
+      connection.current = { container, scope, follow, preserve, cancel, dispose: () => {
         pause(); observer?.disconnect(); mutations?.disconnect();
         container.removeEventListener('scroll', onScroll);
         container.removeEventListener('wheel', onWheel);
@@ -84,6 +93,7 @@ export function useTranscriptAutoScroll({ endRef, suppressRef, scope }: Options)
       // Backfill owns this frame, but is not a reader gesture. If it adds no
       // visible height there may be no scroll event to reattach following.
       connection.current.cancel();
+      connection.current.preserve();
     } else connection.current.follow();
   });
 

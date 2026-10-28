@@ -32,7 +32,7 @@ const repoPath = join(rootDir, 'repo');
 const binary = join(rootDir, 'fixture-codex.mjs');
 const rollout = join(rootDir, 'rollout.jsonl');
 const promptCapture = join(rootDir, 'prompt.txt');
-const contextFixture = join(rootDir, 'context.json');
+const contextInput = join(rootDir, 'context.json');
 vi.stubEnv('CORTEX_IDE_DATA_DIR', dataDir);
 vi.stubEnv('O8_DATA_DIR', dataDir);
 vi.stubEnv('O8_CODEX_BIN', binary);
@@ -67,10 +67,10 @@ process.stdin.on('data', (chunk) => {
     if (message.method === 'thread/start') out({ id: message.id, result: { thread: { id: threadId } } });
     if (message.method === 'turn/start') {
       out({ id: message.id, result: { turn: { id: 'turn-1' } } });
+      const inputTokens = JSON.parse(readFileSync(${JSON.stringify(contextInput)}, 'utf8'));
       for (let i = 0; i < 16; i++) {
         notify('item/completed', { item: { type: 'mcpToolCall', id: 'tool-' + i, tool: 'inspect_records',
           result: { content: [{ type: 'text', text: 'Evidence: 42 records recovered.' }] } } });
-        const inputTokens = JSON.parse(readFileSync(${JSON.stringify(contextFixture)}, 'utf8')).inputTokens;
         notify('thread/tokenUsage/updated', { tokenUsage: {
           last: { inputTokens, cachedInputTokens: 18000, outputTokens: 100, reasoningOutputTokens: 0, totalTokens: inputTokens + 100 },
           total: { inputTokens: inputTokens * (i + 1), cachedInputTokens: 18000 * (i + 1), outputTokens: 100 * (i + 1),
@@ -120,12 +120,13 @@ afterAll(async () => {
 });
 
 async function replay(threadId: string, promptTokens: number) {
-  writeFileSync(contextFixture, JSON.stringify({ inputTokens: promptTokens }));
+  // The bridge's child inherits only supported runtime environment variables.
+  writeFileSync(contextInput, JSON.stringify(promptTokens));
   const specPath = join(rootDir, 'spec.json');
   writeFileSync(specPath, JSON.stringify({ codexBin: binary, cwd: repoPath, threadId: null,
     message: 'Inspect pagination.', imagePaths: [], config: {}, model: 'gpt-5.5', effort: 'medium', sandbox: 'read-only' }));
   const { stdout } = await promisify(execFile)(process.execPath, ['--import', 'tsx', resolve('src/lib/codex/app-server-exec-bridge.ts'), specPath], {
-    env: { ...process.env, O8_COMPACTION_TEST_CONTEXT: String(promptTokens) }, timeout: 15_000,
+    timeout: 15_000,
   });
   writeFileSync(rollout, stdout);
   const assistant: MobileTranscriptEntry = { id: 'answer', role: 'assistant', text: '', toolCalls: [] };
@@ -208,7 +209,7 @@ describe('auto compaction context through bridge, telemetry, trigger and persist
     const { compacted } = await runTrigger('thoughts-large-context', telemetry);
     expect(compacted?.applied).toBe(true);
     const stored = JSON.parse(readFileSync(historyPath, 'utf8'));
-    const record = stored.messages[0].compaction;
+    const record = stored.messages.findLast((entry: { type?: string }) => entry.type === 'compaction').compaction;
     // Assert findings first: the old split sends only the user to the summarizer.
     expect(record.summary).toContain('Offsets skip records.');
     expect(record.summary).toContain('Use cursor pagination.');
@@ -266,7 +267,7 @@ describe('auto compaction context through bridge, telemetry, trigger and persist
     const { measuredTotal, compacted } = await runTrigger(threadId, undefined, backend, messages);
     expect(measuredTotal).toBeGreaterThan(15_000);
     expect(compacted?.applied).toBe(true);
-    const record = JSON.parse(readFileSync(historyPath, 'utf8')).messages[0].compaction;
+    const record = JSON.parse(readFileSync(historyPath, 'utf8')).messages.findLast((entry: { type?: string }) => entry.type === 'compaction').compaction;
     expect(record.tokensBefore).toBe(measuredTotal);
     expect(record.contextSource).toBe('transcript-estimate');
     expect(record.summary).toContain('Use cursor pagination.');
