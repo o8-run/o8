@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { EventEmitter } from 'node:events';
-import { mkdtempSync, mkdirSync, realpathSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { act, createElement, useEffect } from 'react';
@@ -43,11 +43,15 @@ vi.mock('@/lib/providers/child-process', async original => ({
 vi.mock('@/lib/pretext/hooks', () => ({ usePretextHeight: () => 24 }));
 const fixture = realpathSync(mkdtempSync(join(tmpdir(), 'o8-owner-chronology-')));
 const repo = join(fixture, 'repo'); mkdirSync(repo);
+// This fixture models an existing installation, after its historical migrations.
+for (const marker of ['.transcript-order-repaired-v1', '.composer-preamble-repaired-v1']) {
+  writeFileSync(join(fixture, marker), 'fixture');
+}
 vi.stubEnv('O8_DATA_DIR', fixture); vi.stubEnv('CORTEX_IDE_DATA_DIR', fixture);
 vi.stubEnv('CORTEX_IDE_DB_PATH', join(fixture, 'history.db'));
 const store = await import('@/lib/llm/chat-history-store');
 const { closeDb } = await import('@/lib/db');
-const { GET: readHistory } = await import('@/app/api/v2/chat-history/route');
+const { GET: readHistory, POST: saveHistory } = await import('@/app/api/v2/chat-history/route');
 const { POST: compact } = await import('@/app/api/orchestrator/compact/route');
 const { placeTranscriptVisualizations } = await import('@/lib/visualizations/transcript');
 const threadId = 'thoughts-owner-chronology-fixture';
@@ -223,3 +227,62 @@ it('does not resurrect a conversation deleted while summarization is running', a
   expect(store.readPersistedLlmChat(threadId)).toBeNull();
 });
 let previousSummary = transport.summarize;
+
+it('inserts a late partial reply after its shared prompt before a newer stored prompt', async () => {
+  const user = { id: 'u1', role: 'user', content: 'First prompt', timestamp: 100 };
+  const post = (messages: unknown[], replace = false) => saveHistory(new NextRequest('http://localhost/api/v2/chat-history', {
+    method: 'POST', body: JSON.stringify({ tabId: threadId, messages, replace, title: 'Fixture' }),
+  }));
+  expect((await post([user, { ...user, id: 'u2', content: 'Second prompt', timestamp: 200 }], true)).status).toBe(200);
+  expect((await post([user, { id: 'a1', role: 'assistant', content: 'Delayed reply', timestamp: 150 }])).status).toBe(200);
+  expect(ids(store.readPersistedLlmChat(threadId)!.history.messages)).toEqual(['u1', 'a1', 'u2']);
+});
+
+it('preserves two adjacent distinct summary boundaries through a partial route save', async () => {
+  const markers = [1, 2].map(index => ({ id: `boundary-${index}`, role: 'system' as const, text: 'Context compaction event',
+    type: 'compaction' as const, timestamp: at + index, compaction: { timestamp: at + index, trigger: 'manual' as const, source: 'summary' as const,
+      summary: `Summary ${index}`, compactedThroughId: entries[0].id } }));
+  persist([entries[0], ...markers]);
+  const response = await saveHistory(new NextRequest('http://localhost/api/v2/chat-history', { method: 'POST',
+    body: JSON.stringify({ tabId: threadId, messages: serializeTranscriptForStorage([entries[0]]) }) }));
+  expect(response.status).toBe(200);
+  expect(ids(store.readPersistedLlmChat(threadId)!.history.messages)).toEqual([entries[0].id, ...ids(markers)]);
+});
+
+it('sends only the compact context on the next actual o8 fallback turn and telemetry read', async () => {
+  const previous = transport.summarize;
+  const run = compact(new NextRequest('http://localhost/api/orchestrator/compact', { method: 'POST',
+    body: JSON.stringify({ repoPath: repo, threadId, keepTailCount: 4, trigger: 'manual' }) }));
+  await vi.waitFor(() => expect(transport.summarize).not.toBe(previous));
+  transport.summarize();
+  const result = await (await run).json();
+  expect(result.applied).toBe(true);
+  store.writePersistedLlmChat(threadId, { messages: [{ id: 'next-user', role: 'user', content: 'Continue.', timestamp: Date.now() }] });
+  let request: { messages: Array<{ role: string; content: string }> } | undefined;
+  vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
+    request = JSON.parse(String(init?.body));
+    return new Response('data: [DONE]\n\n');
+  }));
+  const { createO8Backend } = await import('@/lib/lane/orchestrator-backends/o8');
+  await createO8Backend({ blocker: () => 'Fixture platform' }).sendTurn(repo, 'Continue.', () => {}, { threadId });
+  expect(request!.messages).toHaveLength(result.transcript.length + 2);
+  expect(request!.messages[1]).toMatchObject({ role: 'system', content: expect.stringContaining('Keep the fixture order.') });
+  expect(JSON.stringify(request)).not.toContain('Request 0');
+  expect(request!.messages.at(-1)?.content).toBe('Continue.');
+  const { readOrchestratorContextTelemetry } = await import('@/lib/orchestrator/context-telemetry');
+  const { estimateOrchestratorContext } = await import('@/lib/orchestrator/context-estimate');
+  const telemetry = await readOrchestratorContextTelemetry(threadId, 'codex');
+  expect(telemetry.contextTokens).toBe(estimateOrchestratorContext([...result.transcript,
+    { id: 'next-user', role: 'user', text: 'Continue.', timestamp: Date.now() }]));
+  expect(store.readPersistedLlmChat(threadId)!.history.messages).toHaveLength(72);
+});
+
+it('waits for backfill before anchoring an older visualization on a cold tail', () => {
+  const anchors = new Map<string, string>();
+  const tail = entries.slice(-4).map(entry => ({ ...entry, toolCalls: undefined }));
+  expect(placeTranscriptVisualizations([visual], tail, anchors).size).toBe(0);
+  expect(anchors.size).toBe(0);
+  const backfilled = entries.map(entry => ({ ...entry, toolCalls: undefined }));
+  expect([...placeTranscriptVisualizations([visual], backfilled, anchors)]).toEqual([[1, [visual]]]);
+  expect(anchors.get(visual.id)).toBe('reply-0');
+});

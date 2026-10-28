@@ -78,7 +78,7 @@ function preserveStoredAuthorship<T extends ChatMessageLike>(existing: T, inboun
 }
 
 function duplicateAdjacentMessage(left: ChatMessageLike, right: ChatMessageLike): boolean {
-  if (left.voice || right.voice) return false;
+  if (left.voice || right.voice || left.type === 'compaction' || right.type === 'compaction') return false;
   const leftRecord = left as Record<string, unknown>;
   const rightRecord = right as Record<string, unknown>;
   if (areDistinctOrchestratorSends(leftRecord, rightRecord)) return false;

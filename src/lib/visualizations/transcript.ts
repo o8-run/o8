@@ -66,6 +66,9 @@ export function placeTranscriptVisualizations(refs: VisualizationReference[], me
     // Legacy transcripts with no clocks used the tail slot. Remember that
     // identity on first placement so later growth cannot move the document.
     if (index < 0 && messages.length && !messages.some(message => typeof message.timestamp === 'number' && Number.isFinite(message.timestamp))) index = messages.length - 1;
+    // On a cold tail, no loaded turn precedes this historical document.
+    // Wait for backfill rather than remembering the first unrelated reply.
+    if (index < 0 && messages.length) continue;
     // A visual created during a provider turn can precede its final assistant
     // timestamp. Attach it to that reply, before the reply's actions, rather
     // than leaving it underneath the operator's prompt.

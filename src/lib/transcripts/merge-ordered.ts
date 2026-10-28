@@ -12,9 +12,9 @@ function timestamp(entry: OrderedEntry): number | null {
 
 /**
  * Keep the established sequence. Insert unseen runs before their next shared
- * identity, or at the live end. A partial page cannot move an existing row.
- * Only completely disjoint sources need a timestamp fallback; even then each
- * source retains its causal order, including equal/missing or skewed clocks.
+ * identity. A trailing run uses timestamps after its preceding shared identity.
+ * A partial page cannot move an existing row; each source retains its causal
+ * order, including equal/missing or skewed clocks.
  */
 export function mergeOrderedEntries<T extends OrderedEntry>(existing: T[], incoming: T[], update: (prior: T, next: T) => T = (_prior, next) => next): T[] {
   if (!incoming.length) return existing;
@@ -45,12 +45,15 @@ export function mergeOrderedEntries<T extends OrderedEntry>(existing: T[], incom
     const shared = positions.get(key(entry));
     if (shared !== undefined) { previousShared = Math.max(previousShared, shared); continue; }
     let slot = existing.length;
-    if (hasOverlap) {
-      if (nextShared[index] > previousShared) slot = nextShared[index];
+    if (hasOverlap && nextShared[index] > previousShared) {
+      slot = nextShared[index];
     } else {
       const time = timestamp(entry);
       if (time !== null) {
-        const later = existing.findIndex(prior => { const priorTime = timestamp(prior); return priorTime !== null && priorTime > time; });
+        const later = existing.findIndex((prior, priorIndex) => {
+          const priorTime = timestamp(prior);
+          return priorIndex > previousShared && priorTime !== null && priorTime > time;
+        });
         if (later >= 0) slot = later;
       }
     }

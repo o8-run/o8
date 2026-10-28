@@ -1,5 +1,6 @@
 import { childEnvironment } from '@/lib/providers/spawn-environment';
 import 'server-only';
+import { projectModelContext } from '@/lib/transcripts/model-context';
 
 import { spawn } from '@/lib/providers/child-process';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
@@ -87,18 +88,6 @@ function buildExcerpt(messages: MobileTranscriptEntry[], maxChars: number) {
   return chunks.filter((_, index) => index >= start || isSummary(index)).join('\n\n');
 }
 const toStoredMessage = (entry: MobileTranscriptEntry) => ({ ...entry, content: entry.text });
-
-/** Model context is a projection; compaction never truncates the visible record. */
-function contextTranscript(messages: MobileTranscriptEntry[]): MobileTranscriptEntry[] {
-  const summary = messages.findLast(entry => entry.compaction?.source === 'summary');
-  const throughId = summary?.compaction?.compactedThroughId;
-  const boundary = throughId ? messages.findIndex(entry => entry.id === throughId) : -1;
-  // Legacy summaries already replaced their prefix. Preserve that input shape
-  // until a new summary records an explicit identity boundary.
-  if (!summary || boundary < 0) return messages;
-  return [summary, ...messages.filter((entry, index) => entry.type !== 'compaction'
-    && (entry.pinned === true || index > boundary))];
-}
 
 function splitCompactionWindow(transcript: MobileTranscriptEntry[], compactedCount: number) {
   const compactedWindow = transcript.slice(0, compactedCount);
@@ -330,7 +319,7 @@ export async function autoCompactOrchestratorThread(input: {
   const job = (async () => {
     const thread = await readThread(repoPath, threadId);
     if (!thread) return notApplied([]);
-    const transcript = contextTranscript(thread.messages);
+    const transcript = projectModelContext(thread.messages);
     if (transcript.length < 2) return notApplied(transcript);
     const keepTailCount = typeof input.keepTailCount === 'number' && Number.isFinite(input.keepTailCount)
       ? Math.max(1, Math.floor(input.keepTailCount))
@@ -402,12 +391,20 @@ export async function autoCompactOrchestratorThread(input: {
           throw new Error('Conversation changed while compaction was running.');
         }
         const latest = current.messages.map(coerceEntry).filter(Boolean) as MobileTranscriptEntry[];
+        // Another route process may have committed while this summarizer ran.
+        // Compare the starting boundary under the durable writer lock so only
+        // one summary can advance that snapshot, even across processes.
+        const startingSummary = thread.messages.findLast(entry => entry.compaction?.source === 'summary');
+        const committedSummary = latest.findLast(entry => entry.compaction?.source === 'summary');
+        if (startingSummary?.id !== committedSummary?.id) {
+          return notApplied(projectModelContext(latest), committedSummary?.compaction?.tokensAfter);
+        }
         const summarized = new Map(compactedTurns.map(entry => [entry.id, JSON.stringify(entry)]));
         const latestById = new Map(latest.map(entry => [entry.id, JSON.stringify(entry)]));
         if (compactedTurns.some(entry => latestById.get(entry.id) !== summarized.get(entry.id))) {
           throw new Error('Summarized messages changed while compaction was running.');
         }
-        const retainedTurns = contextTranscript(latest).filter(entry => !summarized.has(entry.id));
+        const retainedTurns = projectModelContext(latest).filter(entry => !summarized.has(entry.id));
         const nextTranscript = [compactionEntry, ...retainedTurns];
         const resumePrelude = [`Compaction summary (${compactedStamp})`, summary, '', 'Most recent uncompressed turns:', buildExcerpt(retainedTurns, 80_000) || '- None.', '', 'Continue from that context. The operator message follows below.'].join('\n');
         const tokensAfter = approxTokens(resumePrelude);
