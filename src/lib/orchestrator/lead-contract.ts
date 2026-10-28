@@ -3,6 +3,7 @@ import { realpathSync } from 'node:fs';
 import { assertNotKnowledgeSource } from '@/lib/cortex/knowledge/sources';
 
 import type { OrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
+import { userCodexHome } from '@/lib/lane/codex-orchestrator-config';
 import { modelBelongsToRuntime } from '@/lib/lane/orchestrator-model-guard';
 import { assertOrchestratorRepoPath } from '@/lib/lane/repo-preflight';
 import { resolveEffortPin, type ConcreteThinkingEffort } from '@/lib/orchestrator/effort-pin';
@@ -215,6 +216,7 @@ export function validateLeadRouting(input: {
     runtime,
     model,
     explicitModel: model,
+    codexHome: userCodexHome(),
   });
   if (!effort.ok || !effort.selectedEffort || effort.selectedEffort === 'adaptive') {
     throw new LeadLifecycleError(

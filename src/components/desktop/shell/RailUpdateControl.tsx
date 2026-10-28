@@ -200,20 +200,29 @@ export function RailUpdateControl({ buttonStyle }: { buttonStyle: CSSProperties 
         </section>
         <section style={{ borderTop: '1px solid var(--t-divider-subtle)', paddingTop: 10 }}>
           <button type="button" aria-label="Tools updates" aria-expanded={toolsExpanded} aria-controls={`${id}-tools`}
-            onClick={() => { setToolsExpanded(value => !value); if (!toolsExpanded) void refreshCliUpdateView(true); }}
+            onClick={() => { setToolsExpanded(value => !value); if (!toolsExpanded) {
+              if (!hub.checkedAt) setCurrentExpanded(true);
+              if (!hub.checking) void refreshCliUpdateView(true);
+            } }}
             style={{ ...button, width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingLeft: 0, paddingRight: 0, background: 'transparent' }}>
             <span>Tools{visibleTools.some(tool => tool.status === 'update-available') ? ' · updates available' : ''}</span><ChevronDown size={13} style={{ transform: toolsExpanded ? 'rotate(180deg)' : undefined }} />
           </button>
           {toolsExpanded ? <div id={`${id}-tools`} style={{ display: 'grid', gap: 12, paddingTop: 8 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><span style={{ flex: 1, fontSize: 10.5, lineHeight: 1.5, color: 'var(--t-text-muted)' }}>Update each tool explicitly. Running sessions stay protected.</span>
-              <button type="button" aria-label="Check tool versions" disabled={hub.checking || pending} onClick={() => { void refreshCliUpdateView(true); }} style={{ ...button, paddingLeft: 6, paddingRight: 6 }}><RefreshCw size={12} /></button></div>
-            {actionTools.length ? <ConnectedCliUpdateRows tools={actionTools} busy={hub.cliBusy} progress={hub.cliProgress} checking={hub.checking} disabled={pending || hub.checkingAll} onUpdate={runtime => { setPinned(true); void synchronizeConnectedClis(runtime).catch(() => {}); }} /> : null}
+              <button type="button" aria-label={hub.cliError ? 'Retry tool discovery' : 'Check tool versions'} disabled={hub.checking || pending} onClick={() => { void refreshCliUpdateView(true); }} style={{ ...button, paddingLeft: 6, paddingRight: 6 }}>{hub.cliError ? 'Retry' : <RefreshCw size={12} />}</button></div>
+            <div style={{ minHeight: 15, fontSize: 11, fontWeight: 300, lineHeight: 1.35, color: 'var(--t-text-muted)' }}>
+              {hub.checking ? <div role="progressbar" aria-label="Tool discovery" aria-valuemin={0}
+                aria-valuemax={hub.cliDiscovery?.total} aria-valuenow={hub.cliDiscovery?.completed}>
+                {hub.cliDiscovery ? `Checking tools… ${hub.cliDiscovery.completed} of ${hub.cliDiscovery.total} checked` : 'Checking installed tools…'}
+              </div> : hub.checkedAt ? <span role="status">Tool discovery complete.</span> : null}
+            </div>
+            {actionTools.length ? <ConnectedCliUpdateRows tools={actionTools} busy={hub.cliBusy} progress={hub.cliProgress} checking={hub.checking} checked={hub.cliDiscoveryChecked} disabled={pending || hub.checkingAll || hub.checking} onUpdate={runtime => { setPinned(true); void synchronizeConnectedClis(runtime).catch(() => {}); }} /> : null}
             {currentTools.length ? <div>
               <button type="button" aria-expanded={currentExpanded} aria-controls={`${id}-current`} onClick={() => setCurrentExpanded(value => !value)} style={{ ...button, minHeight: 26, width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: 0, background: 'transparent', color: 'var(--t-text-muted)', fontSize: 11 }}><span>Current CLIs · {currentTools.length}</span><ChevronDown size={13} style={{ transform: currentExpanded ? 'rotate(180deg)' : undefined }} /></button>
-              {currentExpanded ? <div id={`${id}-current`} style={{ paddingTop: 9 }}><ConnectedCliUpdateRows tools={currentTools} busy={hub.cliBusy} progress={hub.cliProgress} checking={hub.checking} /></div> : null}
+              {currentExpanded ? <div id={`${id}-current`} style={{ paddingTop: 9 }}><ConnectedCliUpdateRows tools={currentTools} busy={hub.cliBusy} progress={hub.cliProgress} checking={hub.checking} checked={hub.cliDiscoveryChecked} /></div> : null}
             </div> : null}
             {hub.cliError || hub.cliMessage ? <div role={hub.cliError ? 'alert' : 'status'} style={{ fontSize: 11, lineHeight: 1.5, color: hub.cliError ? 'var(--t-danger)' : 'var(--t-text-secondary)' }}>{hub.cliError || hub.cliMessage}</div> : null}
-            {!visibleTools.length ? <span role="status" style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>{hub.checking ? 'Checking installed tools…' : hub.cliError ?? 'No supported CLI installation was found.'}</span> : null}
+            {!visibleTools.length && !hub.checking && !hub.cliError ? <span role="status" style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>No supported CLI installation was found.</span> : null}
           </div> : null}
         </section>
       </div>

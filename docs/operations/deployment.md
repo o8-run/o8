@@ -56,6 +56,8 @@ Linux release artifacts are produced on a Linux build host. Before `npm run ship
 
 ### Linux signature
 
+Publishing a stable release also starts the `Linux Release Preview` workflow, which dispatches the port-build workflow for that tag with `publish_target: linux`. It attaches the `.deb`, `.rpm` and AppImage previews and their checksum file about an hour after publication. Only the AppImage carries an embedded GPG signature; the `.deb` and `.rpm` packages carry build-provenance attestations. It fails without uploading if Linux preview assets are already on the release; dispatch port-build with `replace_existing_assets` to replace them.
+
 When the AppImage was built by the port-build workflow instead, it is published unsigned — that build disables updater artifacts, and the updater signing key never reaches a CI runner. Sign the published asset afterwards, from the release host:
 
 ```bash

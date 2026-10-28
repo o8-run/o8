@@ -56,6 +56,46 @@ async function startRelay(onConnection?: (socket: WebSocket, index: number, auth
   return { url: `ws://127.0.0.1:${address.port}`, sockets, connectedAt, authorizations };
 }
 
+// Independent /mac relay fixture. Only an explicit declaration enables expiry;
+// transport pongs and other application traffic never renew this deadline.
+async function startHeartbeatRelay(advertise = true, timeoutMs = 90_000) {
+  const frames: Array<{ raw: string; at: number; connection: number }> = [];
+  const offlineAt: number[] = [];
+  const deadlines = new Map<WebSocket, ReturnType<typeof setTimeout>>();
+  const online = new Set<WebSocket>();
+  const relay = await startRelay((socket, connection) => {
+    online.add(socket);
+    let declared = false;
+    const expire = () => {
+      const prior = deadlines.get(socket);
+      if (prior) clearTimeout(prior);
+      deadlines.set(socket, setTimeout(() => {
+        online.delete(socket);
+        offlineAt.push(Date.now());
+        socket.close(1012, 'heartbeat_timeout');
+      }, timeoutMs));
+    };
+    socket.on('message', (raw) => {
+      const text = raw.toString();
+      frames.push({ raw: text, at: Date.now(), connection });
+      if (text === '{"t":"relay-capabilities","heartbeat":"app-v1"}') {
+        if (!declared) { declared = true; expire(); }
+      } else if (declared && text === '{"t":"relay-heartbeat","v":1}') {
+        expire();
+        socket.send('{"t":"relay-heartbeat-ack","v":1}');
+      }
+    });
+    socket.on('close', () => {
+      online.delete(socket);
+      const deadline = deadlines.get(socket);
+      if (deadline) clearTimeout(deadline);
+      deadlines.delete(socket);
+    });
+    if (advertise) socket.send('{"t":"devices","count":0,"heartbeat":"app-v1"}');
+  });
+  return { ...relay, frames, offlineAt, online };
+}
+
 function startConnector(relayUrl: string, timing: {
   keepAliveIntervalMs?: number;
   pongTimeoutMs?: number;
@@ -96,6 +136,79 @@ afterEach(async () => {
 });
 
 describe('desktop relay socket recovery through /mac', () => {
+  it('keeps the desktop online while healthy, then expires a silent desktop within 90 seconds and redials', async () => {
+    const relay = await startHeartbeatRelay();
+    // Isolate relay-side detection from the separately tested desktop ping path.
+    startConnector(relay.url, { keepAliveIntervalMs: 300_000 });
+    await waitFor(() => relay.sockets.length === 1);
+    await new Promise((resolve) => setTimeout(resolve, 100_100));
+    expect(relay.online.size).toBe(1);
+    const socket = relay.sockets[0] as WebSocket & { _socket: Socket };
+    const silentAt = Date.now();
+    socket._socket.pause(); // no FIN, error, or close; relay retains the TCP peer
+    await new Promise((resolve) => setTimeout(resolve, 90_300));
+    const elapsed = relay.offlineAt.length ? (relay.offlineAt[0] - silentAt) / 1_000 : null;
+    process.stdout.write(`[relay-heartbeat-test] silence-to-offline=${elapsed ?? '>90.300'}s\n`);
+    expect(relay.online.size).toBe(0);
+    expect(elapsed).toBeGreaterThan(0);
+    expect(elapsed).toBeLessThanOrEqual(90.1);
+    const first = relay.frames.filter((frame) => frame.connection === 0);
+    expect(first[0].raw).toBe('{"t":"relay-capabilities","heartbeat":"app-v1"}');
+    expect(first.slice(1).map((frame) => frame.raw)).toEqual(Array(5).fill('{"t":"relay-heartbeat","v":1}'));
+    expect(first[1].at - first[0].at).toBeLessThan(100);
+    for (let index = 2; index < first.length; index++) {
+      expect(first[index].at - first[index - 1].at).toBeGreaterThanOrEqual(24_900);
+      expect(first[index].at - first[index - 1].at).toBeLessThan(25_500);
+    }
+    let close: { code: number; reason: string } | undefined;
+    socket.on('close', (code, reason) => { close = { code, reason: reason.toString() }; });
+    socket._socket.resume();
+    await waitFor(() => relay.sockets.length === 2);
+    expect(close).toEqual({ code: 1012, reason: 'heartbeat_timeout' });
+    await waitFor(() => relay.frames.some((frame) => frame.connection === 1));
+    expect(relay.frames.filter((frame) => frame.connection === 1).map((frame) => frame.raw))
+      .toEqual(['{"t":"relay-capabilities","heartbeat":"app-v1"}', '{"t":"relay-heartbeat","v":1}']);
+  }, 200_000);
+
+  it('sends no unknown frames to an older relay', async () => {
+    const relay = await startHeartbeatRelay(false, 100);
+    startConnector(relay.url, { keepAliveIntervalMs: 25, pongTimeoutMs: 80 });
+    await waitFor(() => relay.sockets.length === 1);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(relay.frames).toEqual([]);
+    expect(relay.online.size).toBe(1);
+  });
+
+  it('exempts desktops that never declare heartbeat even when the relay supports it', async () => {
+    const relay = await startHeartbeatRelay(true, 100);
+    const desktop = new WebSocket(`${relay.url}/mac`, { headers: { authorization: 'Bearer fixture-license' } });
+    try {
+      await waitFor(() => desktop.readyState === WebSocket.OPEN);
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      expect(relay.online.size).toBe(1);
+      expect(relay.offlineAt).toEqual([]);
+    } finally { desktop.terminate(); }
+  });
+
+  it.each([1, 2])('accepts only a version 1 heartbeat acknowledgement as liveness (version %s)', async (version) => {
+    let pings = 0;
+    const relay = await startRelay((socket) => {
+      (socket as WebSocket & { _autoPong: boolean })._autoPong = false;
+      socket.send('{"t":"devices","count":0,"heartbeat":"app-v1"}');
+      socket.on('ping', () => {
+        pings++;
+        socket.send(JSON.stringify({ t: 'relay-heartbeat-ack', v: version }));
+      });
+    });
+    startConnector(relay.url, { keepAliveIntervalMs: 25, pongTimeoutMs: 50 });
+    if (version === 1) {
+      await waitFor(() => pings >= 5);
+      expect(relay.sockets).toHaveLength(1);
+    } else {
+      await waitFor(() => relay.sockets.length === 2);
+    }
+  });
+
   it('redials a silently blackholed established socket within the production deadline', async () => {
     let pings = 0;
     let detectedAt = 0;

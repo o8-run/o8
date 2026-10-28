@@ -2351,6 +2351,15 @@
       ]
     },
     {
+      "path": "tests/codex-effort-discovery-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/codex-home-executable-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -2749,8 +2758,10 @@
     {
       "path": "tests/dashboard-startup-real-path.test.ts",
       "reasons": [
+        "browser",
         "real-path"
-      ]
+      ],
+      "browser": true
     },
     {
       "path": "tests/data-handoff-real-path.test.ts",
@@ -6702,6 +6713,12 @@
     },
     {
       "path": "tests/steer-queue-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/steer-transcript-boundary-real-path.test.ts",
       "reasons": [
         "real-path"
       ]

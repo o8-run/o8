@@ -9,6 +9,12 @@ const msg = (
 ): Record<string, unknown> => ({ id, role, timestamp, content: `${role}:${id}`, ...extra });
 
 describe('mergeChatMessages (#1282 transcript-loss)', () => {
+  it('retains distinct acknowledged steer identities with identical text through a stale save', () => {
+    const first = msg('composer-steer-queue-first', 'user', 100, { content: 'Keep going' });
+    const second = msg('composer-steer-queue-second', 'user', 200, { content: 'Keep going' });
+    expect(mergeChatMessages([first, second], [first]).map(entry => entry.id)).toEqual([first.id, second.id]);
+    expect(mergeChatMessages([], [first, second]).map(entry => entry.id)).toEqual([first.id, second.id]);
+  });
   it('preserves a stored assistant reply when inbound is the user-only partial (THE bug)', () => {
     const existing = [msg('u1', 'user', 100), msg('a1', 'assistant', 101)];
     const inbound = [msg('u1', 'user', 100)]; // mobile missed the assistant output event

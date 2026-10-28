@@ -45,7 +45,7 @@ export interface ChatMessageLike {
   deliveryConfirmed?: unknown;
 }
 
-const SERVER_METADATA_FIELDS = ['backend', 'model', 'receipt', 'persistedVersion', 'type', 'handoff', 'media'] as const;
+const SERVER_METADATA_FIELDS = ['backend', 'model', 'receipt', 'persistedVersion', 'type', 'handoff', 'media', 'steerAnchor'] as const;
 
 function preserveStoredAuthorship<T extends ChatMessageLike>(existing: T, inbound: T): T {
   inbound = preserveVoiceCaption(existing, inbound);
@@ -55,7 +55,7 @@ function preserveStoredAuthorship<T extends ChatMessageLike>(existing: T, inboun
   const confirmed = preserveDeliveryConfirmation(existingRecord, inboundRecord);
   if (confirmed !== inboundRecord) next = confirmed;
   for (const field of SERVER_METADATA_FIELDS) {
-    if (inboundRecord[field] !== undefined || existingRecord[field] === undefined) continue;
+    if (existingRecord[field] === undefined || (field !== 'steerAnchor' && inboundRecord[field] !== undefined)) continue;
     next ??= { ...inboundRecord };
     next[field] = existingRecord[field];
   }

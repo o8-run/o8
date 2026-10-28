@@ -1,9 +1,11 @@
 'use client';
 
 import { useSyncExternalStore } from 'react';
+import { fetchWithLongLivedBudget } from '@/lib/connection-budget';
 import type { StableCli } from '@/lib/setup/cli-installation';
 import type { CliUpdateProgress, CliUpdateStage } from '@/lib/setup/cli-update-progress';
 import { readCliUpdateResponse } from './cli-update-response';
+import { readCliDiscoveryResponse, type CliDiscoveryProgress } from './cli-discovery-response';
 import type { CliUpdateRecord } from '@/lib/setup/cli-updates';
 import type { ReleaseNotes } from './release-notes';
 import type { UpdateProgress } from './client-restart';
@@ -36,6 +38,8 @@ interface UpdateHub {
   checkingAll: boolean;
   cliBusy: string | null;
   cliProgress: Record<string, CliUpdateProgress>;
+  cliDiscovery: CliDiscoveryProgress | null;
+  cliDiscoveryChecked: string[];
   syncing: boolean;
   cliError: string | null;
   cliMessage: string | null;
@@ -43,7 +47,7 @@ interface UpdateHub {
   checkedAt: number;
 }
 const initial: UpdateHub = { app: { version: null, outcome: 'never', installing: false, message: null, error: null, downloadOnly: false },
-  tools: [], checking: false, checkingAll: false, cliBusy: null, cliProgress: {}, syncing: false, cliError: null, cliMessage: null, checkMessage: null, checkedAt: 0 };
+  tools: [], checking: false, checkingAll: false, cliBusy: null, cliProgress: {}, cliDiscovery: null, cliDiscoveryChecked: [], syncing: false, cliError: null, cliMessage: null, checkMessage: null, checkedAt: 0 };
 type AppCheckResult = { version: string | null; error?: string };
 export type UpdateCheckResult = { hasUpdates: boolean; incomplete: boolean };
 const global = globalThis as typeof globalThis & { __o8UpdateHub?: { snapshot: UpdateHub; listeners: Set<() => void>;
@@ -51,6 +55,7 @@ const global = globalThis as typeof globalThis & { __o8UpdateHub?: { snapshot: U
 const hub = global.__o8UpdateHub ??= { snapshot: initial, listeners: new Set() };
 // A running dev session can retain the shared hub through a module update.
 if (!hub.snapshot.cliProgress) hub.snapshot = { ...hub.snapshot, cliProgress: {} };
+if (!hub.snapshot.cliDiscoveryChecked) hub.snapshot = { ...hub.snapshot, cliDiscoveryChecked: [] };
 function patch(value: Partial<UpdateHub>) { hub.snapshot = { ...hub.snapshot, ...value }; for (const listener of hub.listeners) listener(); }
 export function publishAppUpdateView(app: AppUpdateView) {
   if (JSON.stringify(hub.snapshot.app) !== JSON.stringify(app)) {
@@ -117,15 +122,26 @@ export async function refreshCliUpdateView(fresh = false): Promise<void> {
   const ttl = hub.snapshot.tools.some(tool => tool.status === 'unknown') ? 60_000 : 30 * 60_000;
   if (!fresh && Date.now() - hub.snapshot.checkedAt < ttl) return;
   hub.check = (async () => {
-    patch({ checking: true, cliError: null });
+    patch({ checking: true, cliError: null, cliMessage: null, cliDiscovery: null, cliDiscoveryChecked: [], checkedAt: 0 });
     try {
-      const response = await fetch(`/api/setup/cli-updates${fresh ? '?refresh=1' : ''}`, { cache: 'no-store', signal: AbortSignal.timeout(15_000) });
-      if (!response.ok) throw new Error('CLI update checks are unavailable.');
-      const payload = await response.json() as { tools: CliUpdateRecord[] };
-      if (!Array.isArray(payload.tools)) throw new Error('CLI update checks are unavailable.');
-      patch({ tools: payload.tools, checkedAt: Date.now() });
+      const response = await fetchWithLongLivedBudget(`/api/setup/cli-updates${fresh ? '?refresh=1' : ''}`, {
+        // Cold probes can delay headers too. Keep the whole discovery bounded at
+        // five minutes without the generic 45-second headers guard racing it.
+        cache: 'no-store', headers: { Accept: 'text/event-stream' }, signal: AbortSignal.timeout(300_000),
+      }, 300_000);
+      const tools = await readCliDiscoveryResponse(response, {
+        progress: cliDiscovery => {
+          if (hub.snapshot.cliDiscovery?.completed !== cliDiscovery.completed || hub.snapshot.cliDiscovery?.total !== cliDiscovery.total) patch({ cliDiscovery });
+        },
+        tool: tool => patch({ cliDiscoveryChecked: [...hub.snapshot.cliDiscoveryChecked, tool.runtimeId], tools: hub.snapshot.tools.some(row => row.runtimeId === tool.runtimeId)
+          ? hub.snapshot.tools.map(row => row.runtimeId === tool.runtimeId ? tool : row) : [...hub.snapshot.tools, tool] }),
+      });
+      // Keep streamed rows in their arrival order when the final report arrives.
+      const order = new Map(hub.snapshot.tools.map((tool, index) => [tool.runtimeId, index]));
+      patch({ tools: [...tools].sort((a, b) => (order.get(a.runtimeId) ?? order.size) - (order.get(b.runtimeId) ?? order.size)),
+        cliDiscoveryChecked: tools.map(tool => tool.runtimeId), checkedAt: Date.now() });
     } catch { patch({ cliError: 'CLI checks couldn’t finish. Try again.' }); }
-    finally { patch({ checking: false }); }
+    finally { patch({ checking: false, cliDiscovery: null, cliDiscoveryChecked: [] }); }
   })().finally(() => { hub.check = undefined; });
   return hub.check;
 }

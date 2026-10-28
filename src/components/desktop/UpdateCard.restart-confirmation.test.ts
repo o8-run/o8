@@ -90,6 +90,18 @@ describe('explicit staged-update restart through the real rail and confirmation 
     await act(async () => restart!.click());
   }
 
+  it('keeps tool discovery out of launch and checks versions when Tools is opened', async () => {
+    await mount(false);
+    const toolReads = () => vi.mocked(fetch).mock.calls.filter(([url]) => String(url).startsWith('/api/setup/cli-updates'));
+    expect(toolReads()).toHaveLength(0);
+    const tools = host.ownerDocument.querySelector<HTMLButtonElement>('[aria-label="Tools updates"]');
+    expect(tools).not.toBeNull();
+    await act(async () => tools!.click());
+    expect(toolReads()).toHaveLength(1);
+    expect(toolReads()[0]?.[0]).toBe('/api/setup/cli-updates?refresh=1');
+    expect(toolReads()[0]?.[1]?.method).toBeUndefined();
+  });
+
   it('keeps Restart now accessible with cached running work; cancellation never reserves or restarts', async () => {
     await mount();
     const before = reads;

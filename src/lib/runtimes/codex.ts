@@ -26,6 +26,7 @@ import { readCodexContext } from './codex-context';
 import { parseCost } from '@/lib/runtimes/shared/cost-parser-registry';
 import { ownedTailToRuntimeTranscript } from '@/lib/runtimes/shared/owned-transcript';
 import { createOwnedExecutionPolicy } from '@/lib/runtimes/shared/owned-session/execution-policy';
+import { resolveCodexLaunchIdentity } from '@/lib/codex/launch-context';
 import {
   getCodexDiscoveredFleetAdditions,
   getCodexRolloutPath,
@@ -342,10 +343,11 @@ export const codexRuntime: AgentRuntime = {
   },
 
   async launch(opts: LaunchOptions): Promise<RuntimeActionResult> {
+    const runtimeIdentity = opts.runtimeIdentity ?? resolveCodexLaunchIdentity(opts.packetId);
     createOwnedExecutionPolicy({ ...opts, runtimeConfig: {
       ...(opts.workMode ? { workMode: opts.workMode } : {}),
       ...(opts.executionCarrier ? { executionCarrier: opts.executionCarrier } : {}),
-    } }, 'codex');
+    } }, 'codex', runtimeIdentity.configHomeRef);
     const startedAtMs = Date.now();
     // Fall back to the operator's default worker model when the dispatch didn't
     // pin one — that's how "run every worker on my local model" (an
@@ -354,6 +356,7 @@ export const codexRuntime: AgentRuntime = {
     const model = opts.model ?? (resolveDefaultDispatchModelSync() || undefined);
     const effort = resolveDefaultWorkerEffortSync('codex', opts.effort, model);
     const result = await launchOwnedCodexSession({
+      runtimeIdentity,
       cwd: opts.cwd,
       prompt: opts.prompt,
       promptMemoryRevision: opts.promptMemoryRevision,

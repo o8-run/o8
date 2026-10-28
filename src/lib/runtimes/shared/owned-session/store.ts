@@ -55,7 +55,8 @@ import {
   OwnedWorkspaceUnavailableError,
   type OwnedWorkspaceSpawnGuard,
 } from './workspace-spawn-guard';
-import { createOwnedExecutionPolicy, refuseOwnedSingleAttemptResume } from './execution-policy';
+import { resolveOwnedLaunchPolicy, refuseOwnedSingleAttemptResume } from './execution-policy';
+import { readPacketSessionIdentitySync } from './packet-identity';
 import type {
   OwnedFleetAdditions,
   OwnedLaunchRequest,
@@ -156,8 +157,7 @@ export function createOwnedSessionStore(
   });
 
   async function launch(request: OwnedLaunchRequest): Promise<OwnedLaunchResponse> {
-    const executionPolicy = createOwnedExecutionPolicy(request, runtimeId);
-    assertRuntimeEffortPin(runtimeId, request.model ?? adapter.defaultModel, request.effort);
+    const executionPolicy = resolveOwnedLaunchPolicy(request, adapter, { deferDiscovery: true });
     const prompt = request.prompt.trim();
     if (!prompt) {
       throw new Error('prompt is required');
@@ -184,31 +184,19 @@ export function createOwnedSessionStore(
 
   async function launchAdmitted(
     request: OwnedLaunchRequest, repoPath: string, repo: Awaited<ReturnType<typeof resolveRepoContext>>,
-    id: string, executionPolicy: ReturnType<typeof createOwnedExecutionPolicy>, prompt: string,
+    id: string, executionPolicy: ReturnType<typeof resolveOwnedLaunchPolicy>, prompt: string,
   ): Promise<OwnedLaunchResponse> {
     const sessionDir = path.join(root, id);
     const selectedIdentity = await runtimeLaunchStep(request, 'identity_selection', async () => {
-      let selectedIdentity: Awaited<ReturnType<typeof getSelectedRuntimeIdentity>> = null;
+      let selectedIdentity: OwnedSessionRecord['identity'] | null = null;
       if (adapter.isolatedConfigHomeEnv && adapter.defaultConfigHome && request.packetId) {
         const defaultConfigHome = adapter.defaultConfigHome();
-        let latestPacketSession: OwnedSessionRecord | null = null;
-        for (const sessionDir of await io.listSessionDirs()) {
-          try {
-            const candidate = await io.loadSession(sessionDir);
-            if (candidate.packetId === request.packetId
-              && candidate.identity
-              && (!latestPacketSession || candidate.updatedAt > latestPacketSession.updatedAt)) {
-              latestPacketSession = candidate;
-            }
-          } catch {
-            // One corrupt legacy session must not block a new, otherwise valid launch.
-          }
-        }
-        const existingPacketIdentity = latestPacketSession?.identity;
+        const preferred = request.runtimeIdentity
+          ?? readPacketSessionIdentitySync(root, surfacePrefix, request.packetId);
         selectedIdentity = await getOrPinPacketRuntimeIdentity({
           runtime: runtimeId,
           packetId: request.packetId,
-          preferred: existingPacketIdentity,
+          preferred: preferred ?? undefined,
           fallback: {
             id: `${runtimeId}-local-default`,
             label: 'Current local sign-in',
@@ -216,11 +204,12 @@ export function createOwnedSessionStore(
           },
         });
       } else if (adapter.isolatedConfigHomeEnv && !providerFromConfig(request.runtimeConfig)) {
-        selectedIdentity = await getSelectedRuntimeIdentity(runtimeId);
+        selectedIdentity = request.runtimeIdentity ?? await getSelectedRuntimeIdentity(runtimeId);
       }
 
       return selectedIdentity;
     });
+    executionPolicy ??= resolveOwnedLaunchPolicy(request, adapter, { identity: selectedIdentity ?? undefined });
     const createdAt = nowIso();
     const session = {
       surfaceId: `${surfacePrefix}${id}`,
@@ -312,7 +301,7 @@ export function createOwnedSessionStore(
   async function resumeInner(surfaceId: string, prompt: string) {
     let session = await io.findSession(surfaceId);
     await assertOwnedActionFence(surfaceId, session);
-    if (session) assertRuntimeEffortPin(runtimeId, session.model, session.effort);
+    if (session) assertRuntimeEffortPin(runtimeId, session.model, session.effort, session.identity?.configHomeRef ?? adapter.defaultConfigHome?.());
     assertOwnedActionAdmission(session);
     refuseOwnedSingleAttemptResume(session);
     const automaticRunId = requestedAutomaticRecoveryRun(surfaceId);
@@ -327,7 +316,7 @@ export function createOwnedSessionStore(
 
     if (!session) {
       const archived = await io.findArchivedSession(surfaceId);
-      if (archived) assertRuntimeEffortPin(runtimeId, archived.model, archived.effort);
+      if (archived) assertRuntimeEffortPin(runtimeId, archived.model, archived.effort, archived.identity?.configHomeRef ?? adapter.defaultConfigHome?.());
       refuseOwnedSingleAttemptResume(archived);
       if (archived?.threadId) {
         const restore = await restoreArchivedOwnedSessionDir(root, surfaceId, surfacePrefix);

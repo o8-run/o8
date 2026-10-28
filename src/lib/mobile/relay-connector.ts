@@ -68,6 +68,7 @@ const HTTP_REPLAY_TIMEOUT_MS = 55_000; // must beat the mobile tunnel's 60s dead
 // Same ping/pong settings as machine attach, with a 30s total detection budget.
 const DEFAULT_KEEP_ALIVE_INTERVAL_MS = 20_000;
 const DEFAULT_PONG_TIMEOUT_MS = 10_000;
+const RELAY_HEARTBEAT_INTERVAL_MS = 25_000;
 const DEFAULT_ENTITLEMENT_RETRY_INTERVAL_MS = 5 * 60_000;
 
 // v1.1 contract sequence: Mac-initiated E2EE handshake on bridge → device identified
@@ -112,6 +113,7 @@ export class RelayConnector {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private keepAliveTimer: ReturnType<typeof setInterval> | null = null;
   private pongTimer: ReturnType<typeof setTimeout> | null = null;
+  private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private stopped = true;
   private awaitingEntitlement = false;
   private liveDeviceCount = 0;
@@ -192,9 +194,7 @@ export class RelayConnector {
       console.log(`${P} connector up → ${this.relayUrl} (routingId=${this.routingId.slice(0, 8)}…)`);
     });
     ws.on('pong', () => {
-      if (ws !== this.ws || !this.pongTimer) return;
-      clearTimeout(this.pongTimer);
-      this.pongTimer = null;
+      if (ws === this.ws) this.acknowledgeLiveness();
     });
     ws.on('message', (raw) => {
       if (ws === this.ws && !this.stopped) this.onRelayMessage(raw);
@@ -255,8 +255,24 @@ export class RelayConnector {
   private clearKeepAlive(): void {
     if (this.keepAliveTimer) clearInterval(this.keepAliveTimer);
     if (this.pongTimer) clearTimeout(this.pongTimer);
+    if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
     this.keepAliveTimer = null;
     this.pongTimer = null;
+    this.heartbeatTimer = null;
+  }
+
+  private acknowledgeLiveness(): void {
+    if (this.pongTimer) clearTimeout(this.pongTimer);
+    this.pongTimer = null;
+  }
+
+  private startHeartbeat(): void {
+    if (this.heartbeatTimer) return;
+    this.sendControl({ t: 'relay-capabilities', heartbeat: 'app-v1' });
+    const beat = () => this.sendControl({ t: 'relay-heartbeat', v: 1 });
+    beat();
+    this.heartbeatTimer = setInterval(beat, RELAY_HEARTBEAT_INTERVAL_MS);
+    this.heartbeatTimer.unref?.();
   }
 
   // ── relay → connector ──
@@ -273,8 +289,14 @@ export class RelayConnector {
       case 'devices':
         this.awaitingEntitlement = false;
         this.reconnect.reset();
+        // An explicit relay advertisement is required: older relays must never
+        // receive control frames they do not understand.
+        if (frame.heartbeat === 'app-v1') this.startHeartbeat();
         this.liveDeviceCount = typeof frame.count === 'number' ? frame.count : 0;
         this.maybePushOnDevices();
+        return;
+      case 'relay-heartbeat-ack':
+        if (this.heartbeatTimer && frame.v === 1) this.acknowledgeLiveness();
         return;
       case 'mux':
         if (typeof frame.sid === 'string' && typeof frame.payload === 'string') {

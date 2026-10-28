@@ -1,0 +1,68 @@
+failures:
+
+---- shell::activity::tests::activity_empty_local_auth_and_scoped_retention stdout ----
+
+thread 'shell::activity::tests::activity_empty_local_auth_and_scoped_retention' (104349) panicked at src/surfaces/activity/tests.rs:74:28:
+Missing control: workspace-1
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- shell::brain::tests::brain_fixture_actions_sources_search_clear_and_refusals stdout ----
+
+thread 'shell::brain::tests::brain_fixture_actions_sources_search_clear_and_refusals' (106500) panicked at src/surfaces/../brain_tests.rs:92:5:
+assertion failed: brain.read_with(cx, |b, _| b.busy)
+
+---- shell::issues::tests::review_tests::round1_symlink_worker_survives_real_refresh_and_send stdout ----
+
+thread 'shell::issues::tests::review_tests::round1_symlink_worker_survives_real_refresh_and_send' (109511) panicked at src/surfaces/../issue_review_tests.rs:197:53:
+called `Option::unwrap()` on a `None` value
+
+---- shell::settings::tests1::settings_fixture_all_default_controls_persist_and_refresh stdout ----
+
+thread 'shell::settings::tests1::settings_fixture_all_default_controls_persist_and_refresh' (118241) panicked at src/surfaces/../settings_tests.rs:121:10:
+called `Result::unwrap()` on an `Err` value: "Could not reach the selected server"
+
+---- shell::tests::glass_and_plain_open_through_the_production_shell stdout ----
+
+thread 'shell::tests::glass_and_plain_open_through_the_production_shell' (132020) panicked at src/shell_tests.rs:21:9:
+glass shell probe:
+
+running 1 test
+test shell::tests::glass_shell_probe ... FAILED
+
+failures:
+
+failures:
+    shell::tests::glass_shell_probe
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 225 filtered out; finished in 4.76s
+
+
+
+thread 'shell::tests::glass_shell_probe' (132022) panicked at src/shell_tests.rs:75:56:
+called `Option::unwrap()` on a `None` value
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+---- shell::tests::look::placement_shell_tabs_use_compact_rows stdout ----
+
+thread 'shell::tests::look::placement_shell_tabs_use_compact_rows' (133077) panicked at src/shell_look_tests.rs:401:10:
+called `Option::unwrap()` on a `None` value
+
+---- shell::tests::look::shell_chrome_fifteen_workspaces_keeps_one_switcher stdout ----
+
+thread 'shell::tests::look::shell_chrome_fifteen_workspaces_keeps_one_switcher' (133125) panicked at src/shell_look_tests.rs:246:5:
+connected shell has no permanent hints
+
+
+failures:
+    shell::activity::tests::activity_empty_local_auth_and_scoped_retention
+    shell::brain::tests::brain_fixture_actions_sources_search_clear_and_refusals
+    shell::issues::tests::review_tests::round1_symlink_worker_survives_real_refresh_and_send
+    shell::settings::tests1::settings_fixture_all_default_controls_persist_and_refresh
+    shell::tests::glass_and_plain_open_through_the_production_shell
+    shell::tests::look::placement_shell_tabs_use_compact_rows
+    shell::tests::look::shell_chrome_fifteen_workspaces_keeps_one_switcher
+
+test result: FAILED. 213 passed; 7 failed; 6 ignored; 0 measured; 0 filtered out; finished in 871.57s
+
+error: test failed, to rerun pass `--bin o8-next`

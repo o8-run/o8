@@ -101,9 +101,10 @@ async function running(outcome = 'accepted', options: { bridge?: boolean; model?
   await updateOperatorDefaults({ codexAppThreads: options.bridge !== false });
   vi.stubEnv('O8_CRASH_SURVIVABLE_ORCHESTRATOR', options.crashSurvival ? '1' : '0');
   const controller = new AbortController();
-  const turn = getOrchestratorBackend('codex').sendTurn(cwd, 'Start working', () => {}, {
-    threadId: target.threadId, model: options.model ?? 'gpt-5.5', signal: controller.signal, orchestrationMode: options.orchestrationMode,
-  });
+  const { sendOrchestratorBackendTurn } = await import('@/lib/lane/orchestrator-send-entry');
+  const turn = sendOrchestratorBackendTurn(getOrchestratorBackend('codex'), cwd, 'Start working', () => {}, {
+    transcriptMessageId: 'working', threadId: target.threadId, model: options.model ?? 'gpt-5.5', signal: controller.signal, orchestrationMode: options.orchestrationMode,
+  }, options.orchestrationMode);
   const close = async () => {
     const proc = getCodexOrchestratorSession(cwd, target.threadId)?.proc;
     const closed = proc && proc.exitCode === null && proc.signalCode === null ? new Promise<void>(resolve => proc.once('close', () => resolve())) : Promise.resolve();
@@ -349,6 +350,8 @@ describe.skipIf(process.platform === 'win32')('Codex native live steer through t
       { cwd: process.cwd(), env: { ...process.env, CODEX_HOME: join(home, '.codex') }, timeout: 30_000 });
       const capability = JSON.parse(result.stdout.split('\n').find(line => line.startsWith('CAPABILITY '))!.slice('CAPABILITY '.length));
       expect(capability.canSteer).toBe(true);
+      const messages = (await import('@/lib/llm/chat-history-store')).readPersistedLlmChat(fixture.target.threadId)!.history.messages;
+      expect(messages.filter(message => message.id === `composer-steer-${id}`)).toEqual([expect.objectContaining({ steerAnchor: expect.objectContaining({ assistantMessageId: 'working', text: '' }) })]);
       expect(queue.readComposerSend(id)?.status).toBe('applied');
       expect(fixture.steers()).toHaveLength(1);
       const input = fixture.steers()[0].params?.input as Array<{ text: string }>;
