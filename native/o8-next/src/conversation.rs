@@ -3,6 +3,8 @@ use crate::theme::current as theme;
 
 #[path = "composer/card.rs"]
 mod composer_card;
+#[path = "composer/picker.rs"]
+mod composer_picker;
 
 #[cfg(test)]
 #[path = "composer/card_tests.rs"]
