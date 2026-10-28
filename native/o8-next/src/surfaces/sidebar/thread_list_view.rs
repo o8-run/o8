@@ -81,6 +81,13 @@ impl Render for ThreadList {
                             .map(|i| {
                                 let row = this.rows[i].clone();
                                 let thread = row.id.is_some();
+                                let title =
+                                    gpui::StyledText::new(crate::text::sanitize(&row.title));
+                                #[cfg(test)]
+                                if let Some(id) = &row.id {
+                                    this.title_layouts
+                                        .insert(id.clone(), title.layout().clone());
+                                }
                                 let selected = row.id.as_ref() == this.selected.as_ref() && thread;
                                 let painted = this.painted.clone();
                                 let identity = row
@@ -122,8 +129,9 @@ impl Render for ThreadList {
                                                 div()
                                                     .flex_1()
                                                     .min_w_0()
-                                                    .overflow_hidden()
-                                                    .whitespace_nowrap()
+                                                    // Recompute truncation when flex assigns the final width.
+                                                    .whitespace_normal()
+                                                    .line_clamp(1)
                                                     .text_ellipsis()
                                                     .text_size(px(if thread { 13.5 } else { 12. }))
                                                     .text_color(if thread {
@@ -131,7 +139,7 @@ impl Render for ThreadList {
                                                     } else {
                                                         theme().text_muted
                                                     })
-                                                    .child(crate::text::sanitize(&row.title)),
+                                                    .child(title),
                                             )
                                             .when(thread, |view| {
                                                 view.child(
@@ -174,9 +182,18 @@ impl Render for ThreadList {
                                     .when(
                                         row.kind == "section" && row.title == "Archived",
                                         |view| {
-                                            view.cursor_pointer().on_click(cx.listener(
-                                                |this, _, _, cx| this.toggle_archived(cx),
-                                            ))
+                                            view.debug_selector(|| "sidebar-archived-header".into())
+                                                .track_focus(&this.archived_focus)
+                                                .focus(|style| {
+                                                    style
+                                                        .bg(theme().selection)
+                                                        .text_color(theme().text)
+                                                })
+                                                .cursor_pointer()
+                                                .on_click(cx.listener(|this, _, window, cx| {
+                                                    this.archived_focus.focus(window);
+                                                    this.toggle_archived(cx);
+                                                }))
                                         },
                                     )
                                     .when(row.kind == "more", |view| {
@@ -269,9 +286,15 @@ impl Render for ThreadList {
                             .on_click(cx.listener(|this, _, _, cx| this.archive(cx))),
                     ),
             )
-            .when(!self.archived_open && self.query.is_empty(), |view| {
-                view.child(self.archived_control(cx))
-            })
+            .when(
+                self.query.is_empty()
+                    && (!self.archived_open
+                        || !self
+                            .rows
+                            .iter()
+                            .any(|r| r.kind == "section" && r.title == "Archived")),
+                |view| view.child(self.archived_control(cx)),
+            )
     }
 }
 

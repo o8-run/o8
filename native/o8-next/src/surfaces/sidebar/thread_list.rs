@@ -62,11 +62,14 @@ pub struct ThreadList {
     pub selected: Option<String>,
     pub scroll: UniformListScrollHandle,
     focus: FocusHandle,
+    archived_focus: FocusHandle,
     editor: Entity<Composer>,
     query: String,
     expanded: HashSet<String>,
     branch_ids: HashSet<String>,
     archived_open: bool,
+    #[cfg(test)]
+    pub(super) title_layouts: HashMap<String, gpui::TextLayout>,
     last_age: Instant,
     search_pending: Option<Instant>,
     search_running: bool,
@@ -126,11 +129,14 @@ impl ThreadList {
             selected: None,
             scroll: UniformListScrollHandle::new(),
             focus: cx.focus_handle(),
+            archived_focus: cx.focus_handle().tab_stop(true),
             editor,
             query: String::new(),
             expanded: HashSet::new(),
             branch_ids: HashSet::new(),
             archived_open: false,
+            #[cfg(test)]
+            title_layouts: HashMap::new(),
             last_age: Instant::now(),
             search_pending: None,
             search_running: false,
@@ -640,6 +646,9 @@ impl ThreadList {
     }
     fn key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         if self.header_key(event, window, cx) {
+            return;
+        }
+        if self.archived_key(event, window, cx) {
             return;
         }
         let key = event.keystroke.key.as_str();
