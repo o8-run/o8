@@ -43,7 +43,7 @@ function transcript(backend = 'codex') {
   } };
 }
 
-it('uses runtime call/result identities for parallel status, readable labels and persisted details (#4881)', () => {
+it('uses runtime call/result identities for parallel status, readable labels and a serializer round-trip (#4881)', () => {
   const h = transcript();
   const command = 'printf "%s\\n" ' + 'long-command-argument '.repeat(30);
   for (const id of ['one', 'two', 'three']) h.fire('tool-use', { name: 'functions.exec_command', toolUseId: id, args: { cmd: command } });
@@ -62,6 +62,7 @@ it('uses runtime call/result identities for parallel status, readable labels and
   expect(host.textContent).not.toContain('Planning');
   h.fire('tool-result', { name: 'functions.exec_command', toolUseId: 'three', output: 'third result' });
   h.fire('status', { status: 'ready' });
+  // Serializer coverage only. Completed-turn history reload is tracked in #5015.
   h.messagesRef.current = deserializeStoredTranscript(serializeTranscriptForStorage(h.messagesRef.current));
   h.render();
   expect(h.messagesRef.current.at(-1)?.toolCalls?.map(call => call.id)).toEqual(['one', 'two', 'three']);
@@ -69,6 +70,13 @@ it('uses runtime call/result identities for parallel status, readable labels and
   const rows = host.querySelectorAll('button[aria-label$="show detail"]');
   expect(rows).toHaveLength(3);
   act(() => (rows[1] as HTMLButtonElement).click());
+  const detail = host.querySelector(`#${rows[1].getAttribute('aria-controls')}`)!;
+  const technical = detail.querySelector('details')!;
+  expect(technical.open).toBe(false);
+  expect(technical.textContent).toContain('functions.exec_command');
+  expect(technical.textContent).toContain('Arguments');
+  expect([...detail.querySelectorAll('pre')].filter(node => !node.closest('details')).map(node => node.textContent))
+    .toEqual([command.trim(), 'second result']);
   expect(host.textContent).toContain(command.trim());
   expect(host.textContent).toContain('second result');
   expect(host.textContent).toContain('two');

@@ -82,7 +82,6 @@ interface ChatMessageListProps {
   threadId?: string | null;
   active?: boolean;
   displayWaiting: boolean;
-  liveCompaction?: boolean;
   repoPath?: string | null;
   activeTargetLabel: string;
   activeTargetColor: string;
@@ -158,7 +157,6 @@ const ChatMessageListPresentation = memo(forwardRef<HTMLDivElement, ChatMessageL
   displayMessages: rawDisplayMessages,
   logLabel,
   displayWaiting,
-  liveCompaction = false,
   threadId,
   active = false,
   repoPath,
@@ -347,17 +345,7 @@ const ChatMessageListPresentation = memo(forwardRef<HTMLDivElement, ChatMessageL
         {bottomContent}
         {composerQueue ? <ComposerQueuedMessages queue={composerQueue} messages={displayMessages} /> : null}
 
-        {liveCompaction && isOrchestratorMode ? (
-          <div role="status" style={{ alignSelf: 'stretch', paddingTop: 10, paddingRight: 14, paddingBottom: 10, paddingLeft: 14, borderRadius: 12,
-            background: 'var(--t-hover)', border: '1px solid var(--t-divider-subtle)' }}>
-            <div style={{ fontSize: 12, fontWeight: 400, color: 'var(--t-text)' }}>Compaction in progress</div>
-            <div style={{ fontSize: 11, fontWeight: 300, color: 'var(--t-text-secondary)', lineHeight: 1.5 }}>
-              Context is being compressed. Messages sent now will be queued and delivered after compaction completes.
-            </div>
-          </div>
-        ) : null}
-
-        {displayWaiting && !liveCompaction && isOrchestratorMode && displayMessages.length > 0
+        {displayWaiting && isOrchestratorMode && displayMessages.length > 0
           && !currentAssistant?.toolCalls?.length
           && !currentAssistant?.thinkingActive
           && !currentAssistant?.receipt?.terminal ? (

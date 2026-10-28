@@ -108,17 +108,29 @@ function toolStatusLabel(tool: MobileTranscriptToolCall) {
   return 'status unknown';
 }
 
-function detailRows(tool: MobileTranscriptToolCall) {
-  return [
+function detailRows(tool: MobileTranscriptToolCall, technical = false) {
+  const shellCommand = shellCommandOf(tool);
+  return (technical ? [
     { label: 'Tool ID', value: tool.id ?? '' },
     { label: 'Name', value: tool.name },
     { label: 'Status', value: toolStatusLabel(tool) },
-    { label: 'Command', value: shellCommandOf(tool) ?? '' },
-    { label: 'Arguments', value: stringifyValue(tool.args) },
+    { label: 'Arguments', value: shellCommand ? stringifyValue(tool.args) : '' },
+  ] : [
+    { label: 'Command', value: shellCommand ?? '' },
+    { label: 'Arguments', value: shellCommand ? '' : stringifyValue(tool.args) },
     { label: 'Preview', value: stringifyValue(tool.preview) },
     { label: 'Result', value: stringifyValue(tool.result) },
     { label: 'Launch', value: stringifyValue(tool.launchLink) },
-  ].filter((row) => row.value.trim().length > 0);
+  ]).filter((row) => row.value.trim().length > 0);
+}
+
+function ToolDetailRows({ tool, technical = false }: { tool: MobileTranscriptToolCall; technical?: boolean }) {
+  return detailRows(tool, technical).map(row => <div key={row.label} style={{ paddingTop: 6 }}>
+    <div style={{ color: 'var(--t-text-faint)', fontSize: 9.5, fontWeight: 260 }}>{row.label}</div>
+    <pre tabIndex={0} style={{ margin: 0, maxHeight: 200, overflow: 'auto', whiteSpace: 'pre-wrap',
+      overflowWrap: 'anywhere', color: 'var(--t-text-secondary)', fontFamily: 'var(--font-mono)',
+      fontSize: 11, fontWeight: 300, lineHeight: 1.5 }}>{row.value}</pre>
+  </div>);
 }
 
 function toolKey(tool: MobileTranscriptToolCall, index: number) {
@@ -276,12 +288,13 @@ export function ToolCallChipCluster({ toolCalls, suppressSettledRollup = false, 
             <TurnChevron open={open} reducedMotion />
           </button>
           <div id={id} hidden={!open} style={{ paddingLeft: 12, minWidth: 0 }}>
-            {open ? detailRows(tool).map(row => <div key={row.label} style={{ paddingTop: 6 }}>
-              <div style={{ color: 'var(--t-text-faint)', fontSize: 9.5, fontWeight: 260 }}>{row.label}</div>
-              <pre tabIndex={0} style={{ margin: 0, maxHeight: 200, overflow: 'auto', whiteSpace: 'pre-wrap',
-                overflowWrap: 'anywhere', color: 'var(--t-text-secondary)', fontFamily: 'var(--font-mono)',
-                fontSize: 11, fontWeight: 300, lineHeight: 1.5 }}>{row.value}</pre>
-            </div>) : null}
+            {open ? <>
+              <ToolDetailRows tool={tool} />
+              <details style={{ paddingTop: 8, color: 'var(--t-text-faint)', fontSize: 10, fontWeight: 260 }}>
+                <summary style={{ cursor: 'pointer' }}>Technical details</summary>
+                <ToolDetailRows tool={tool} technical />
+              </details>
+            </> : null}
           </div>
         </Fragment>;
       }) : null}

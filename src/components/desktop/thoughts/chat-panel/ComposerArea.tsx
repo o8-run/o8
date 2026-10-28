@@ -15,6 +15,7 @@ import { composerModeSpec } from '../composer-mode';
 import { SlashCommandPicker } from './SlashCommandPicker';
 import { transcriptRunningTools } from '../../transcript/activity';
 import { ComposerStatusBar } from './ComposerStatusBar';
+import { CompactionStatus } from './CompactionStatus';
 import type { MobileTranscriptToolCall } from '@/lib/mobile/types';
 import { getOrchestratorSlashCommandSuggestions, type OrchestratorSlashCommandDefinition } from '@/lib/slash-commands';
 import { MODE_ROUTING_SLASH_COMMANDS } from '@/lib/composer-mode-routing';
@@ -261,6 +262,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
     <ComposerVoiceTurnContext.Provider value={dictationId ? null : voiceTurnTarget}>
     <ComposerDictationContext.Provider value={dictationId ?? localDictationId}>
     <div data-o8-composer-root="" style={{
+      position: 'relative',
       paddingTop: 24,
       paddingRight: 12,
       paddingBottom: 12,
@@ -270,6 +272,8 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
       // fades behind it. (2026-07-02)
       background: 'transparent',
     }}>
+      {isOrchestratorMode && repoPath && sessionRulesThreadId ? <CompactionStatus repoPath={repoPath} threadId={sessionRulesThreadId}
+        messages={chatMessages} turnBusy={displayWaiting} /> : null}
       {promptStash ? <PromptStashRow onRestore={promptStash.onRestore} /> : null}
       {/* Orchestrator activity belongs to the transcript. Keep independent workers visible. */}
       {isOrchestratorMode ? (

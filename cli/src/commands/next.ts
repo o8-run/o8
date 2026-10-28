@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { accessSync, constants } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import { CliError, EXIT } from '../api.js';
-import { resolveConfig, resolveCliDataDir } from '../config.js';
+import { resolveConfig, resolveCliDataDir, resolveCliTokenFiles } from '../config.js';
 import { runServe } from './serve.js';
 
 const INSTALLED_BINARY = '/Applications/o8.app/Contents/MacOS/o8-next';
@@ -56,6 +56,10 @@ export async function runNext(args: string[]): Promise<number> {
   const env = { ...process.env };
   if (shell) {
     const config = resolveConfig();
+    const explicitNativeToken = Boolean(env.O8_NEXT_API_TOKEN?.trim());
+    delete env.O8_NEXT_TOKEN_FILE;
+    delete env.O8_NEXT_TOKEN_FILES;
+    delete env.O8_NEXT_TOKEN_ORIGIN;
     const serverAt = forwarded.indexOf('--server');
     const origin = serverAt < 0 ? config.apiBase : forwarded[serverAt + 1];
     let url: URL;
@@ -77,6 +81,13 @@ export async function runNext(args: string[]): Promise<number> {
       if (url.origin === config.apiBase && config.token) env.O8_NEXT_API_TOKEN = config.token;
     } else if (!env.O8_NEXT_API_TOKEN && url.origin === config.apiBase && config.token) {
       env.O8_NEXT_API_TOKEN = config.token;
+    }
+    if (!explicitNativeToken && config.source.token !== 'worker' && config.source.token !== 'env'
+      && url.origin === config.apiBase) {
+      const files = resolveCliTokenFiles();
+      env.O8_NEXT_TOKEN_FILE = files[0];
+      env.O8_NEXT_TOKEN_FILES = JSON.stringify(files);
+      env.O8_NEXT_TOKEN_ORIGIN = url.origin;
     }
     if (!forwarded.includes('--shell-state')) forwarded.push('--shell-state', join(config.dataDir || resolveCliDataDir(), 'next-shell.json'));
   }
