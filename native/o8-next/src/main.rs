@@ -5,6 +5,7 @@ mod app_parent;
 mod brain;
 #[path = "shell_features/connection/client.rs"]
 mod client;
+mod clock;
 mod composer;
 mod diff;
 #[cfg(test)]
