@@ -1,0 +1,13 @@
+running 1 test
+test shell::tests::look::placement_shell_tabs_use_compact_rows ...
+thread 'shell::tests::look::placement_shell_tabs_use_compact_rows' (134505) panicked at src/shell_look_tests.rs:401:10:
+called `Option::unwrap()` on a `None` value
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    shell::tests::look::placement_shell_tabs_use_compact_rows
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 224 filtered out; finished in 2.74s

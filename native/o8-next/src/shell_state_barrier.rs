@@ -103,3 +103,10 @@ pub(crate) fn before_save(file: &Path, state: &State) {
         released = barrier.wake.wait(released).unwrap();
     }
 }
+
+pub(crate) fn is_held(file: &Path) -> bool {
+    let barrier = ACTIVE
+        .get()
+        .and_then(|active| active.lock().unwrap().get(file).cloned());
+    barrier.is_some_and(|barrier| !*barrier.released.lock().unwrap())
+}

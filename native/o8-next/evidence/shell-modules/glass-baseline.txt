@@ -1,0 +1,32 @@
+running 1 test
+test shell::tests::glass_and_plain_open_through_the_production_shell ...
+thread 'shell::tests::glass_and_plain_open_through_the_production_shell' (112221) panicked at src/shell_tests.rs:21:9:
+glass shell probe:
+
+running 1 test
+test shell::tests::glass_shell_probe ... FAILED
+
+failures:
+
+failures:
+    shell::tests::glass_shell_probe
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 224 filtered out; finished in 10.87s
+
+
+
+thread 'shell::tests::glass_shell_probe' (112223) panicked at src/shell_tests.rs:75:56:
+called `Option::unwrap()` on a `None` value
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    shell::tests::glass_and_plain_open_through_the_production_shell
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 224 filtered out; finished in 10.89s
+
+error: test failed, to rerun pass `--bin o8-next`

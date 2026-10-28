@@ -865,6 +865,22 @@ impl VisualTestContext {
     /// Simulates the user closing the window.
     /// Returns true if the window was closed.
     pub fn simulate_close(&mut self) -> bool {
+        if self.simulate_close_request() {
+            return true;
+        }
+        // Async close callbacks keep the window until their durable work completes.
+        // Drive that lifecycle in the test harness, outside the input callback.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while self.cx.windows().contains(&self.window) && std::time::Instant::now() < deadline {
+            self.cx.run_until_parked();
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        !self.cx.windows().contains(&self.window)
+    }
+
+    /// Issue one native close request without waiting for asynchronous completion.
+    /// Returns the platform callback's immediate decision.
+    pub fn simulate_close_request(&mut self) -> bool {
         let handler = self
             .cx
             .update_window(self.window, |_, window, _| {
@@ -884,7 +900,7 @@ impl VisualTestContext {
                 .update_window(self.window, |_, window, _| {
                     window.platform_window.on_should_close(handler);
                 })
-                .unwrap();
+                .ok();
             should_close
         } else {
             false

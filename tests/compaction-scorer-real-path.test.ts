@@ -111,7 +111,7 @@ async function compact(threadId: string) {
   expect(result.applied).toBe(true);
   const record = JSON.parse(readFileSync(join(dataDir, 'chat-history', `${threadId}.json`), 'utf8')) as { messages: Array<Record<string, unknown>> };
   const archive = JSON.parse(readFileSync(join(dataDir, 'orchestrator-archives', result.archiveRef!), 'utf8')) as Record<string, unknown>;
-  const entry = record.messages[0] as { text: string; compaction: Record<string, unknown> & { summary: string } };
+  const entry = record.messages.findLast(message => message.type === 'compaction') as { text: string; compaction: Record<string, unknown> & { summary: string } };
   return { result, record, archive, entry };
 }
 
@@ -120,6 +120,8 @@ function normalized(value: unknown, threadId: string): string {
   return JSON.stringify(value)
     .split(threadId).join('<thread>')
     .replace(/orch-compaction-\d+/g, 'orch-compaction-<t>')
+    .replace(/"operationId":"compaction-[\w-]+"/g, '"operationId":"<operation>"')
+    .replace(/"(startedAt|completedAt)":\d+/g, '"$1":<t>')
     .replace(/"timestamp":\d{13}/g, '"timestamp":<t>')
     .replace(/"(savedAt|archivedAt)":"[^"]*"/g, '"$1":"<t>"')
     .replace(/"timestampLabel":"[^"]*"/g, '"timestampLabel":"<t>"')
@@ -199,7 +201,7 @@ describe('judgment-scored compaction through autoCompactOrchestratorThread', () 
     expect(stampFree(on.result.resumePrelude)).toBe(stampFree(off.result.resumePrelude));
     const { scorer: _entryScorer, ...onCompaction } = on.entry.compaction;
     expect(normalized(onCompaction, 'thoughts-scorer-on')).toBe(normalized(off.entry.compaction, 'thoughts-scorer-baseline'));
-    expect(normalized(on.record.messages.slice(1), 'thoughts-scorer-on')).toBe(normalized(off.record.messages.slice(1), 'thoughts-scorer-baseline'));
+    expect(normalized(on.record.messages.filter(message => message.type !== 'compaction'), 'thoughts-scorer-on')).toBe(normalized(off.record.messages.filter(message => message.type !== 'compaction'), 'thoughts-scorer-baseline'));
   }, 30_000);
 
   it('with the setting off sends nothing and writes the record and archive the unhooked path writes', async () => {

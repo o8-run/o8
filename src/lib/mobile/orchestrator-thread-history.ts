@@ -1,3 +1,4 @@
+import { projectModelContext } from '@/lib/transcripts/model-context';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { readdir as readdirAsync, stat as statAsync } from 'node:fs/promises';
 import { basename, join } from 'node:path';
@@ -58,8 +59,8 @@ function readHistoryRecord(tabId: string): OrchestratorHistoryRecord | null {
 }
 
 /**
- * Read a thread's persisted transcript as an ordered user/assistant message
- * array — the context the free `o8` orchestrator backend replays to the gateway
+ * Read ordered user/assistant messages with retained summary context, which
+ * the free `o8` orchestrator backend replays to the gateway
  * each turn (it holds no session of its own). Empty (never null) when the thread
  * has no file yet or no usable turns. Reads straight from disk so it reflects
  * the user message ws-server persists just before calling the backend.
@@ -122,12 +123,16 @@ export function readAttributedThreadMessages(
 
 export function readOrchestratorThreadMessages(
   tabId: string | null | undefined,
-): Array<{ role: 'user' | 'assistant'; content: string }> {
+): Array<{ role: 'system' | 'user' | 'assistant'; content: string }> {
   if (!tabId) return [];
   const record = readHistoryRecord(tabId);
   if (!record?.messages) return [];
-  const out: Array<{ role: 'user' | 'assistant'; content: string }> = [];
-  for (const message of record.messages) {
+  const out: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [];
+  for (const message of projectModelContext(record.messages)) {
+    if (message.compaction?.source === 'summary' && message.compaction.summary) {
+      out.push({ role: 'system', content: message.compaction.summary });
+      continue;
+    }
     if (message.role !== 'user' && message.role !== 'assistant') continue;
     if (typeof message.content !== 'string' || message.content.trim().length === 0) continue;
     out.push({ role: message.role, content: message.content });
@@ -609,6 +614,7 @@ export function markMobileOrchestratorThreadFailed(input: {
   tabId: string | null | undefined;
   repoPath: string;
   error: string;
+  assistantMessageId?: string | null;
   backend?: MobileOrchestratorBackend | null;
   agent?: string | null;
   timestampMs?: number;
@@ -639,7 +645,11 @@ export function markMobileOrchestratorThreadFailed(input: {
 
   writeHistoryRecord(tabId, {
     ...existing,
-    messages: Array.isArray(existing.messages) ? existing.messages : [],
+    // Receipts reserve a row before any text arrives. A failed turn must not
+    // leave that placeholder behind; preserve partial replies and other turns.
+    messages: (Array.isArray(existing.messages) ? existing.messages : []).filter(message =>
+      !input.assistantMessageId || message.id !== input.assistantMessageId || message.role !== 'assistant'
+      || !!message.content?.trim() || !!message.toolCalls?.length || !!message.media?.length),
     model: existing.model ?? modelForBackend(input.backend ?? DEFAULT_BACKEND) ?? DEFAULT_MODEL,
     savedAt: now,
     repoPath: typeof existing.repoPath === 'string' && existing.repoPath.trim()

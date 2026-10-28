@@ -1,5 +1,5 @@
 //! One in-flight save and one replaceable pending snapshot per shell.
-use super::State;
+use crate::shell_state::State;
 use async_channel::{Receiver, Sender};
 use std::{
     path::PathBuf,

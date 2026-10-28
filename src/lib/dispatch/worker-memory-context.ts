@@ -29,11 +29,11 @@ export async function rebuildWorkerMemoryContext(session: WorkerMemorySession): 
   return buildPacketPrompt(packet, state.packets, lane?.baseBranch ?? 'main', lane?.worktreePath ?? session.cwd);
 }
 
-/** Every automatic retry shares this boundary, including compatibility and capacity recovery. */
-export async function refreshOwnedWorkerMemory(session: WorkerMemorySession, prompt: string, mode: OwnedRunMode, freshRequest = false) {
+/** Every retry shares this boundary. Operator input stays separate from assembled history. */
+export async function refreshOwnedWorkerMemory(session: WorkerMemorySession, prompt: string, mode: OwnedRunMode, freshRequest = false, operatorRequest = prompt) {
   const revision = readMemoryRevision();
   if (workerMemoryNeedsRefresh(session)) {
-    const request = freshRequest ? prompt : '';
+    const request = freshRequest ? operatorRequest : '';
     prompt = await rebuildWorkerMemoryContext(session);
     if (request) prompt += `\n\nCurrent operator request:\n${request}`;
     // A resumed provider thread still holds forgotten memory despite a clean prompt.

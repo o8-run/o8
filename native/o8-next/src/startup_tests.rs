@@ -1,5 +1,5 @@
 //! Slow and failed first loads through the production offscreen shell.
-use super::test_support::{close, draw, open, wait_saved};
+use super::test_support::{draw, open};
 use super::*;
 use serde_json::{Value, json};
 use std::{
@@ -228,12 +228,11 @@ fn first_load_probe(cx: &mut gpui::TestAppContext) {
         "window-to-load-ms={:.1}",
         (started.elapsed() - window).as_secs_f64() * 1000.
     );
-    wait_saved(&shell, &mut visual);
     assert!(
         root.join("shell.json").exists(),
         "successful load persists state"
     );
-    close(&mut visual);
+    assert!(visual.simulate_close());
     std::fs::remove_dir_all(root).unwrap();
 }
 

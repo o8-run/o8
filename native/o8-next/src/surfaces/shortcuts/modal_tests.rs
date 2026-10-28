@@ -22,7 +22,6 @@ fn shortcuts_settings_control_w_preserves_live_and_persisted_tabs(cx: &mut TestA
     let workspace = shell.read_with(&visual, |s, _| s.state.selected.clone().unwrap());
     let before = tabs(&shell, &visual);
     assert_eq!(before.0.len(), 1);
-    crate::shell::test_support::wait_saved(&shell, &mut visual);
     assert_eq!(saved_tabs(&file, &workspace), before);
     visual.simulate_keystrokes("cmd-,");
     shortcuts_draw(&mut visual);
@@ -131,7 +130,6 @@ fn shortcuts_modal_surfaces_keep_all_tab_chords_off_underlying_tabs(cx: &mut Tes
                 }
                 let dismissed = !projects_navigation
                     || shell.read_with(&visual, |s, _| !s.surfaces.projects.open);
-                crate::shell::test_support::wait_saved(&shell, &mut visual);
                 if tabs(&shell, &visual) != expected
                     || saved_tabs(&file, &workspace) != expected
                     || !dismissed

@@ -66,14 +66,16 @@ register_surfaces! {
     }
 }
 
+#[path = "shell_features.rs"]
+mod features;
+
 pub struct Shell {
+    features: features::State,
     system_glass: bool,
     chrome: crate::render_region::Regions<Shell>,
     client: Client,
     file: PathBuf,
     state: State,
-    writer: crate::shell_state::Writer,
-    closing: bool,
     sessions: Vec<Session>,
     workspaces: Vec<String>,
     content: HashMap<String, Content>,
@@ -102,29 +104,13 @@ impl Shell {
     ) -> Self {
         let focus = cx.focus_handle();
         focus.focus(window);
-        let (writer, errors) = crate::shell_state::Writer::new(file.clone());
-        cx.spawn(async move |this, cx| {
-            while let Ok(error) = errors.recv().await {
-                if this
-                    .update(cx, |this, cx| {
-                        this.notice = format!("{error}. View state remains in memory.");
-                        cx.notify();
-                    })
-                    .is_err()
-                {
-                    break;
-                }
-            }
-        })
-        .detach();
         let mut shell = Self {
+            features: features::State::default(),
             system_glass: false,
             chrome: crate::render_region::Regions::default(),
             client,
             file,
             state,
-            writer,
-            closing: false,
             sessions: vec![],
             workspaces: vec![],
             content: HashMap::new(),
@@ -143,72 +129,12 @@ impl Shell {
             subscriptions: vec![],
             surfaces: SurfaceRuntime::default(),
         };
-        shell
-            .subscriptions
-            .push(cx.observe_window_bounds(window, |this, window, _| {
-                this.capture_bounds(window);
-                this.persist();
-            }));
-        let view = cx.weak_entity();
-        window.on_window_should_close(cx, move |window, cx| {
-            let _ = view.update(cx, |this, cx| {
-                this.close(window, cx);
-            });
-            false
-        });
-        for registration in registrations() {
-            (registration.initialize)(&mut shell, window, cx);
-        }
+        features::observe(&mut shell, window, cx);
         shell.load(cx);
         shell
     }
     fn persist(&mut self) {
-        self.writer.submit(self.state.clone());
-    }
-    fn close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.closing {
-            return;
-        }
-        self.closing = true;
-        self.capture(window, cx);
-        let saved = self.writer.flush(self.state.clone());
-        cx.spawn_in(window, async move |this, cx| {
-            let result = saved
-                .recv()
-                .await
-                .unwrap_or_else(|_| Err("Shell state writer unavailable".into()));
-            let _ = this.update_in(cx, |this, window, cx| {
-                this.closing = false;
-                match result {
-                    Ok(()) => {
-                        let saved_bounds = this.state.bounds;
-                        this.capture_bounds(window);
-                        // Input and bounds events may continue while a close
-                        // flush is in flight. Include them before removing the window.
-                        if this.writer.is_idle() && this.state.bounds == saved_bounds {
-                            window.remove_window();
-                        } else {
-                            this.close(window, cx);
-                        }
-                    }
-                    Err(error) => {
-                        this.notice =
-                            format!("{error}. View state remains in memory. Close again to retry.");
-                        cx.notify();
-                    }
-                }
-            });
-        })
-        .detach();
-    }
-    fn capture_bounds(&mut self, window: &Window) {
-        let bounds = window.window_bounds().get_bounds();
-        self.state.bounds = [
-            bounds.origin.x.into(),
-            bounds.origin.y.into(),
-            bounds.size.width.into(),
-            bounds.size.height.into(),
-        ];
+        features::persist_window_state(self);
     }
     fn load(&mut self, cx: &mut Context<Self>) {
         if registry::extensions().any(|extension| extension.load(self, cx)) {
@@ -363,8 +289,10 @@ impl Shell {
         cx.notify();
     }
     fn capture(&mut self, window: &Window, cx: &App) {
-        self.capture_bounds(window);
-        if self.palette || registrations().iter().any(|r| (r.overlay_open)(self)) {
+        if self.palette
+            || registrations().iter().any(|r| (r.overlay_open)(self))
+            || registry::extensions().any(|extension| extension.capture_blocked(self))
+        {
             return;
         }
         for registration in registrations() {
@@ -375,37 +303,12 @@ impl Shell {
         palette::entries(self)
     }
     fn surface_commands(&self) -> Vec<Command> {
-        let mut entries = registrations()
-            .iter()
-            .filter_map(|r| r.command)
-            .collect::<Vec<_>>();
-        entries.sort_by_key(|(order, _)| *order);
-        let mut commands = entries
+        features::commands(self)
             .into_iter()
-            .map(|(_, command)| command())
-            .collect::<Vec<_>>();
-        if let Some(id) = match self.active() {
-            Some(Tab::Session(id)) => Some(
-                self.current()
-                    .and_then(|w| w.selections.get(&id))
-                    .cloned()
-                    .unwrap_or(id),
-            ),
-            _ => self.workspace_sessions().first().map(|s| s.id.clone()),
-        } {
-            commands.insert(0, Command::Message(id));
-        }
-        commands.extend(
-            self.workspace_sessions()
-                .iter()
-                .map(|s| Command::Session(s.id.clone())),
-        );
-        commands.extend([Command::Refresh, Command::Shortcuts]);
-        commands
-            .into_iter()
-            .filter(|c| {
-                registry::extensions().all(|extension| extension.allow_command(self, c))
-                    && c.label(&self.sessions)
+            .filter(|command| {
+                registry::extensions().all(|extension| extension.allow_command(self, command))
+                    && command
+                        .label(&self.sessions)
                         .to_lowercase()
                         .contains(&self.query.to_lowercase())
             })
@@ -415,28 +318,8 @@ impl Shell {
         if !registry::extensions().all(|extension| extension.allow_command(self, &command)) {
             return;
         }
-        match command {
-            Command::Refresh => {
-                self.capture(window, cx);
-                if let Some(content) = self
-                    .active()
-                    .and_then(|tab| self.content.get(&self.key(&tab)))
-                {
-                    content.refresh(cx);
-                }
-                self.palette = false;
-                self.load(cx);
-                self.restore_focus(window, cx);
-                return;
-            }
-            Command::Shortcuts => {
-                self.palette = false;
-                self.shortcuts = true;
-                self.focus.focus(window);
-                cx.notify();
-                return;
-            }
-            _ => {}
+        if features::execute(self, &command, window, cx) {
+            return;
         }
         let registration = command.registration();
         if registration.overlay_command {
@@ -479,130 +362,14 @@ impl Shell {
         cx.notify();
     }
     fn key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        for extension in registry::extensions() {
-            match extension.key(self, event, window, cx) {
-                registry::KeyResult::Unhandled => {}
-                registry::KeyResult::Propagate => return,
-                registry::KeyResult::Handled => {
-                    self.revision += 1;
-                    cx.notify();
-                    cx.stop_propagation();
-                    return;
-                }
-            }
+        if features::key(self, event, window, cx) == registry::KeyResult::Handled {
+            self.revision += 1;
+            cx.notify();
+            cx.stop_propagation();
         }
-        let key = event.keystroke.key.as_str();
-        let modifiers = event.keystroke.modifiers;
-        if registrations()
-            .iter()
-            .any(|r| (r.key_down)(self, event, window, cx))
-        {
-        } else if (modifiers.control || modifiers.platform) && key == "k" {
-            if !self.palette {
-                self.capture(window, cx);
-            }
-            self.palette = !self.palette;
-            self.workspace_picker = false;
-            self.shortcuts = false;
-            self.query.clear();
-            self.choice = 0;
-            self.restore_focus(window, cx);
-        } else if self.shortcuts && key == "escape" {
-            self.shortcuts = false;
-            self.restore_focus(window, cx);
-        } else if self.palette {
-            match key {
-                "escape" => {
-                    self.palette = false;
-                    self.restore_focus(window, cx);
-                }
-                "up" => self.choice = self.choice.saturating_sub(1),
-                "down" => {
-                    self.choice = (self.choice + 1).min(self.commands().len().saturating_sub(1))
-                }
-                "enter" => {
-                    if let Some(command) = self.commands().get(self.choice).cloned() {
-                        command.run(self, window, cx);
-                    }
-                }
-                "backspace" => {
-                    self.query.pop();
-                    self.choice = 0;
-                }
-                _ => {
-                    if !modifiers.control
-                        && !modifiers.platform
-                        && !modifiers.alt
-                        && let Some(text) = &event.keystroke.key_char
-                    {
-                        self.query.push_str(text);
-                        self.choice = 0;
-                    }
-                }
-            }
-        } else if modifiers.control && !modifiers.alt && !modifiers.platform && key == "tab" {
-            self.capture(window, cx);
-            for registration in registrations() {
-                (registration.after_tab)(self);
-            }
-            if let Some(saved) = self
-                .state
-                .selected
-                .as_ref()
-                .and_then(|w| self.state.workspaces.get_mut(w))
-                && !saved.tabs.is_empty()
-            {
-                saved.active = (saved.active + 1) % saved.tabs.len();
-            }
-            self.ensure(window, cx);
-            self.restore_focus(window, cx);
-            self.persist();
-        } else if modifiers.control
-            && !modifiers.alt
-            && !modifiers.platform
-            && !modifiers.shift
-            && key == "w"
-        {
-            if let Some(tab) = self.active() {
-                self.content.remove(&self.key(&tab));
-                let saved = self
-                    .state
-                    .workspaces
-                    .get_mut(self.state.selected.as_deref().unwrap_or(""))
-                    .unwrap();
-                (tab.registration().remove)(saved, &tab);
-                saved.tabs.remove(saved.active);
-                saved.active = saved.active.min(saved.tabs.len().saturating_sub(1));
-                self.ensure(window, cx);
-                self.restore_focus(window, cx);
-                self.persist();
-            }
-        } else {
-            return;
-        }
-        if self.palette {
-            // The palette header is the first child of the scrolling container.
-            self.palette_scroll.scroll_to_item(self.choice + 1);
-        }
-        self.revision += 1;
-        cx.notify();
-        cx.stop_propagation();
     }
     fn tick(&mut self, refresh: bool, window: &mut Window, cx: &mut Context<Self>) {
-        for extension in registry::extensions() {
-            extension.tick(self, refresh, window, cx);
-        }
-        for registration in registrations() {
-            (registration.tick)(self, window, cx);
-        }
-        let before = serde_json::to_vec(&self.state).unwrap();
-        self.capture(window, cx);
-        if before != serde_json::to_vec(&self.state).unwrap() {
-            self.persist();
-        }
-        for content in self.content.values() {
-            content.tick(refresh, cx);
-        }
+        features::tick(self, refresh, window, cx);
     }
 }
 #[path = "shell_material.rs"]
@@ -622,6 +389,10 @@ mod tests;
 #[cfg(test)]
 #[path = "shell_test_support.rs"]
 mod test_support;
+
+#[cfg(test)]
+#[path = "shell_feature_tests.rs"]
+mod feature_tests;
 
 #[cfg(test)]
 #[path = "startup_tests.rs"]

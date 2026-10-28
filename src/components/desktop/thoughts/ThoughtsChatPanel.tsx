@@ -1,6 +1,6 @@
 'use client';
 import { ComposerFrame } from './chat-panel/ComposerFrame';
-import { SessionCacheIndicator } from '../SessionCacheIndicator';
+import { SessionCacheProvider } from '../SessionCacheIndicator';
 
 import { sendBoundComposerTurn } from './use-orchestrator-stream/bound-composer-turn';
 import { ManagedChatVoiceEntry } from './chat-panel/ManagedChatVoiceEntry';
@@ -96,6 +96,7 @@ import { useTranscriptAutoScroll } from './chat-panel/useTranscriptAutoScroll';
 import { useThreadHistoryBackfill } from './chat-panel/useThreadHistoryBackfill';
 import {
   fetchOlderThreadPage,
+  fetchThreadHistoryPage,
   useBoundedThreadHistoryWindow,
 } from './chat-panel/thread-history-window';
 import { ScreenshotAnnotator } from './chat-panel/ScreenshotAnnotator';
@@ -1115,6 +1116,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, ThoughtsCha
     onPrepend: prependThreadHistoryPage,
   });
 
+  const loadTranscriptRef = useRef({ stream: orchStream.messages, retained: chatMessages });
+  loadTranscriptRef.current = { stream: orchStream.messages, retained: chatMessages };
   const handleLoadThread = useCallback(async (tabId: string) => {
     const now = Date.now();
     if (inFlightLoadKeyRef.current === tabId) return;
@@ -1128,20 +1131,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, ThoughtsCha
     cancelBackfill();
     resetThreadHistoryWindow();
     try {
-      const fetchHistoryOnce = async (): Promise<Response | null> => {
-        const controller = new AbortController();
-        const timer = window.setTimeout(() => controller.abort(), 6000);
-        try {
-          const params = new URLSearchParams({ tabId, limit: '60' });
-          return await fetch(`/api/v2/chat-history?${params.toString()}`, { signal: controller.signal });
-        } catch {
-          return null;
-        } finally {
-          window.clearTimeout(timer);
-        }
-      };
-      let res = await fetchHistoryOnce();
-      if (!res || !res.ok) res = await fetchHistoryOnce();
+      let res = await fetchThreadHistoryPage(tabId);
+      if (!res || !res.ok) res = await fetchThreadHistoryPage(tabId);
       if (!res || !res.ok) {
         // Loud on purpose: a silent return here leaves the tab wearing the
         // thread's TITLE over an empty transcript (stale-header class).
@@ -1158,7 +1149,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, ThoughtsCha
       const msgs = mapHistoryMessagesToTranscript(data.messages ?? [], data.pendingTurnWorkers);
       console.log(`[orchestrator] loadThread ${tabId} — applying ${msgs.length} messages`);
       const isSameOpenThread = threadIdRef.current === tabId;
-      const liveTranscript = orchStream.messages.length > 0 ? orchStream.messages : chatMessages;
+      const currentTranscript = loadTranscriptRef.current;
+      const liveTranscript = currentTranscript.stream.length > 0 ? currentTranscript.stream : currentTranscript.retained;
       const mergedLoad = isSameOpenThread
         ? mergeSameThreadHistoryLoad(liveTranscript, msgs)
         : { entries: msgs, preservedLiveEntries: false };
@@ -1217,7 +1209,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, ThoughtsCha
         inFlightLoadKeyRef.current = null;
       }
     }
-  }, [cancelBackfill, chatMessages, clearPolling, orchStream, isOrchestratorMode, resolvedRepoPath, resetThreadHistoryWindow, startBackfill]);
+  }, [cancelBackfill, clearPolling, orchStream, isOrchestratorMode, resolvedRepoPath, resetThreadHistoryWindow, startBackfill]);
 
   settledAssistantRefetchRef.current = () => {
     const activeThreadId = threadIdRef.current;
@@ -2025,10 +2017,10 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, ThoughtsCha
           onCancel={backendSwitch.clearPending}
         />
       ) : null}
-      {!isChatMode ? <SessionCacheIndicator session={isSingleMode ? singleRuntimeSessionRef.current : threadId ?? null}
+      <SessionCacheProvider enabled={!isChatMode} session={isSingleMode ? singleRuntimeSessionRef.current : threadId ?? null}
         runtime={isSingleMode ? singleRuntime : activeBackendIdentity}
         model={orchestratorModel ?? [...backendMessages].reverse().find(entry => entry.role === 'assistant')?.model ?? null}
-        entries={backendMessages} running={displayWaiting} /> : null}
+        entries={backendMessages} running={displayWaiting}>
       <VisualComposerArea dictationScopeKey={JSON.stringify([workspaceModeKey, lockedMode ?? orchestrationMode, threadId ?? 'draft'])} visual={{ active: open && isOrchestratorMode && !contextualConversation,
         target: threadId && resolvedRepoPath ? { threadId, repoPath: resolvedRepoPath } : null,
         label: `${composerRepoLabel} · current chat`, capture: captureQueuedSend }}
@@ -2109,7 +2101,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, ThoughtsCha
         onPermissionModeChange={setPermissionMode}
         contextLocationSlot={composeFirst ? composerBelowSlot : undefined}
         promptStash={isOrchestratorMode && !isChatMode ? { repoPath: resolvedRepoPath ?? '~', threadId, onRestore: fillInput } : undefined}
-      />
+      /></SessionCacheProvider>
       {annotatingIndex !== null && attachedImages[annotatingIndex] ? (() => {
         const idx = annotatingIndex;
         const target = attachedImages[idx];

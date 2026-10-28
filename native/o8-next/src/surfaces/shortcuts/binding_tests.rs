@@ -89,7 +89,6 @@ fn shortcuts_every_displayed_chord_has_a_live_binding(cx: &mut TestAppContext) {
                 *label,
                 "Cycle tabs" | "Jump to tab 1–9" | "Close active tab"
             ) {
-                crate::shell::test_support::wait_saved(&shell, &mut visual);
                 let persisted = State::load(&file).unwrap();
                 shell.read_with(&visual, |s, _| {
                     let saved = &persisted.workspaces[s.state.selected.as_ref().unwrap()];

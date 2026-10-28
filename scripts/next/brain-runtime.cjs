@@ -2,6 +2,7 @@
 // middleware remain real. No executable, provider or account is contacted.
 const Module = require('node:module');
 const { setTimeout: delay } = require('node:timers/promises');
+const { existsSync } = require('node:fs');
 const original = Module._load;
 Module._load = function (request, parent, isMain) {
   if (/\/operator\/composer-brain-route(?:\.ts)?$/.test(request)) {
@@ -12,6 +13,8 @@ Module._load = function (request, parent, isMain) {
     return { CODEX_DEFAULT_MODEL: 'fixture-model', callCodex: async (prompt, options) => {
       if (options?.readOnly !== true) throw new Error('Fixture requires the production read-only runtime contract');
       const question = prompt.split('Question: ').at(-1).split('\n\nThe following workspace context')[0];
+      const gate = process.env.O8_NEXT_BRAIN_RESPONSE_GATE;
+      while (gate && existsSync(gate)) await delay(10);
       await delay(question.includes('Fixture slow answer') ? 600 : 100);
       if (question.includes('Fixture runtime error')) throw new Error('private fixture failure');
       if (question.includes('Fixture empty answer')) return ' ';

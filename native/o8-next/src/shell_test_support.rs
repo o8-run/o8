@@ -25,6 +25,12 @@ impl Fixture {
         Self::start_mode(false, if settings { "--settings" } else { "" })
     }
     pub(super) fn start_mode(projects: bool, option: &str) -> Self {
+        Self::start_port(projects, option, 0)
+    }
+    pub(super) fn on_port(port: u16) -> Self {
+        Self::start_port(false, "", port)
+    }
+    fn start_port(projects: bool, option: &str, port: u16) -> Self {
         let root = std::env::temp_dir().join(format!(
             "o8-shell-{}-{}",
             std::process::id(),
@@ -64,9 +70,14 @@ impl Fixture {
         command.arg("--owned-stdio");
         let mut server = command
             .current_dir(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.."))
+            .env("O8_NEXT_FIXTURE_PORT", port.to_string())
             .env(
                 "O8_NEXT_BRAIN_REQUEST_LOG",
                 root.join("brain-requests.json"),
+            )
+            .env(
+                "O8_NEXT_BRAIN_RESPONSE_GATE",
+                root.join("brain-response-hold"),
             )
             .env("O8_NEXT_API_TOKEN", "fixture-shell-bearer")
             .stdin(Stdio::piped())
@@ -109,9 +120,11 @@ impl Fixture {
 
 impl Drop for Fixture {
     fn drop(&mut self) {
-        let _ = Process::new("kill")
-            .args(["-TERM", &self.server.id().to_string()])
-            .status();
+        if self.server.try_wait().ok().flatten().is_none() {
+            let _ = Process::new("kill")
+                .args(["-TERM", &self.server.id().to_string()])
+                .status();
+        }
         let _ = self.server.wait();
         if let Ok(directory) = std::env::var("O8_NEXT_SETTINGS_DIAGNOSTICS") {
             let _ = fs::copy(
@@ -140,6 +153,9 @@ pub(super) fn draw(cx: &mut VisualTestContext) {
         window.refresh();
         window.draw(cx).clear();
     });
+    if let Some(shell) = cx.update(|window, _| window.root::<Shell>().flatten()) {
+        features::settle_test_window(&shell, cx);
+    }
 }
 pub(super) fn ready(shell: &Entity<Shell>, cx: &mut VisualTestContext) {
     for _ in 0..20 {
@@ -153,35 +169,14 @@ pub(super) fn ready(shell: &Entity<Shell>, cx: &mut VisualTestContext) {
             return;
         }
     }
-    panic!("selected fixture history must reach CPU scene paint through the existing surface");
-}
-
-pub(super) fn close(cx: &mut VisualTestContext) {
-    let handle = cx.update(|window, _| window.window_handle());
-    assert!(
-        !cx.simulate_close(),
-        "close must wait for the final state write"
-    );
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while cx.cx.windows().contains(&handle) && Instant::now() < deadline {
-        cx.run_until_parked();
-        std::thread::sleep(Duration::from_millis(1));
-    }
-    assert!(
-        !cx.cx.windows().contains(&handle),
-        "close must finish after saving state"
-    );
-}
-
-pub(super) fn wait_saved(shell: &Entity<Shell>, cx: &mut VisualTestContext) {
-    let deadline = Instant::now() + Duration::from_secs(5);
-    // Wait only for already-requested saves. Captured focus metadata may remain
-    // in memory until close, and pending UI work belongs after this assertion.
-    while !shell.read_with(cx, |s, _| s.writer.is_idle()) && Instant::now() < deadline {
-        std::thread::sleep(Duration::from_millis(1));
-    }
-    assert!(
-        shell.read_with(cx, |s, _| s.writer.is_idle()),
-        "pending autosaves must finish before reading the real file"
+    panic!(
+        "selected fixture history must reach CPU scene paint through the existing surface: {:?}",
+        shell.read_with(cx, |s, _| (
+            s.connected,
+            s.loading,
+            s.state.selected.clone(),
+            s.active(),
+            s.notice.clone()
+        ))
     );
 }

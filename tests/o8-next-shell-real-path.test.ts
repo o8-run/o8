@@ -1,16 +1,16 @@
 import { spawn, execFileSync, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import { createServer } from 'node:http';
-import { mkdtempSync, writeFileSync, readFileSync, rmSync, chmodSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, rmSync, chmodSync, realpathSync, symlinkSync, mkdirSync, copyFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, isAbsolute, relative, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 
 let host: ChildProcess;
 let origin = '';
 let configDir = '';
-const root = mkdtempSync(join(tmpdir(), 'o8-shell-launch-'));
+const root = realpathSync(mkdtempSync(join(tmpdir(), 'o8-shell-launch-')));
 const token = 'fixture-shell-operator';
 beforeAll(async () => {
   execFileSync(process.execPath, ['cli/esbuild.config.mjs'], { stdio: 'pipe' });
@@ -43,18 +43,26 @@ function launcherProbe(receipt: string) {
       headers: { authorization: 'Bearer ' + process.env.O8_NEXT_API_TOKEN }
     });
     const body = await response.json();
-    require('node:fs').writeFileSync(${JSON.stringify(receipt)}, JSON.stringify({ args, status: response.status, sessions: body.threads?.length, desktopSession: Boolean(process.env.O8_NEXT_CLERK_SESSION_TOKEN) }));
+    require('node:fs').writeFileSync(${JSON.stringify(receipt)}, JSON.stringify({ args, status: response.status, sessions: body.threads?.length, desktopSession: Boolean(process.env.O8_NEXT_CLERK_SESSION_TOKEN), tokenFile: process.env.O8_NEXT_TOKEN_FILE || null, tokenOrigin: process.env.O8_NEXT_TOKEN_ORIGIN || null, tokenFiles: process.env.O8_NEXT_TOKEN_FILES ? JSON.parse(process.env.O8_NEXT_TOKEN_FILES) : null }));
   })().catch(() => process.exit(1));\n`);
   chmodSync(binary, 0o700);
   return binary;
 }
+
+it('built CLI help describes the default binary, startup, override and stop command', () => {
+  const help = execFileSync(process.execPath, ['cli/dist/o8.mjs', 'next', '--help'], { encoding: 'utf8' });
+  expect(help).toContain('/Applications/o8.app/Contents/MacOS/o8-next');
+  expect(help).toContain('--binary ABSOLUTE_PATH');
+  expect(help).toContain('starts o8 serve');
+  expect(help).toContain('o8 serve stop');
+});
 
 it('built CLI resolves the existing local config and authenticates production fixture routes without typed secrets', () => {
   const receipt = join(root, 'receipt.json');
   const binary = launcherProbe(receipt);
   const env: NodeJS.ProcessEnv = { ...process.env, O8_DATA_DIR: configDir, O8_NEXT_CLERK_SESSION_TOKEN: 'fixture-desktop-session' };
   for (const key of ['O8_API_PORT', 'O8_API_TOKEN', 'O8_NEXT_API_TOKEN', 'O8_WORKER_TOKEN', 'O8_SPECTATOR_TOKEN']) delete env[key];
-  execFileSync(process.execPath, ['cli/dist/o8.mjs', 'next', '--enable-next', '--binary', binary, '--app-shell'], { env, stdio: 'pipe' });
+  execFileSync(process.execPath, ['cli/dist/o8.mjs', 'next', '--binary', binary], { env, stdio: 'pipe' });
   const result = JSON.parse(readFileSync(receipt, 'utf8')) as { args: string[]; status: number; sessions: number; desktopSession: boolean };
   expect(result.status).toBe(200);
   expect(result.desktopSession).toBe(true);
@@ -122,3 +130,126 @@ it('does not forward the desktop account session to a different explicit loopbac
   expect(result.status).toBe(200);
   expect(result.desktopSession).toBe(false);
 });
+
+
+it('resolves token and state configuration through a directory alias using canonical paths', () => {
+  const alias = join(root, 'config-alias');
+  symlinkSync(configDir, alias, 'junction');
+  const receipt = join(root, 'alias-receipt.json');
+  const env: NodeJS.ProcessEnv = { ...process.env, O8_DATA_DIR: alias };
+  for (const key of ['O8_API_PORT', 'O8_API_TOKEN', 'O8_NEXT_API_TOKEN', 'O8_WORKER_TOKEN', 'O8_SPECTATOR_TOKEN']) delete env[key];
+  execFileSync(process.execPath, ['cli/dist/o8.mjs', 'next', '--enable-next', '--binary', launcherProbe(receipt), '--app-shell'], { env, stdio: 'pipe' });
+  const result = JSON.parse(readFileSync(receipt, 'utf8')) as { args: string[]; status: number };
+  expect(result.status).toBe(200);
+  expect(realpathSync(dirname(result.args[result.args.indexOf('--shell-state') + 1]))).toBe(realpathSync(configDir));
+});
+
+it('forwards reloadable token-file authority only for the configured local origin', () => {
+  const receipt = join(root, 'reloadable.json');
+  const env: NodeJS.ProcessEnv = { ...process.env, O8_DATA_DIR: configDir };
+  for (const key of ['O8_API_PORT', 'O8_API_TOKEN', 'O8_NEXT_API_TOKEN', 'O8_WORKER_TOKEN']) delete env[key];
+  const launch = (source: NodeJS.ProcessEnv) => {
+    execFileSync(process.execPath, ['cli/dist/o8.mjs', 'next', '--enable-next', '--binary', launcherProbe(receipt), '--app-shell', '--server', origin], { env: source, stdio: 'pipe' });
+    return JSON.parse(readFileSync(receipt, 'utf8'));
+  };
+  for (const missing of [false, true]) {
+    try {
+      if (missing) rmSync(join(configDir, 'ws-token'));
+      const result = launch(env);
+      expect(result.tokenFile).toBe(join(configDir, 'ws-token'));
+      expect(result.tokenFiles).toEqual([join(configDir, 'ws-token')]);
+      expect(result.tokenOrigin).toBe(origin);
+    } finally { writeFileSync(join(configDir, 'ws-token'), token); }
+  }
+  const inherited = { ...env, O8_NEXT_TOKEN_FILE: join(configDir, 'ws-token'), O8_NEXT_TOKEN_FILES: JSON.stringify([join(configDir, 'ws-token')]), O8_NEXT_TOKEN_ORIGIN: origin };
+  for (const source of [{ ...inherited, O8_WORKER_TOKEN: 'fixture-invalid-worker' },
+    { ...inherited, O8_API_TOKEN: token },
+    { ...inherited, O8_NEXT_API_TOKEN: token },
+    { ...inherited, O8_API_PORT: String(Number(new URL(origin).port) === 65535 ? 65534 : Number(new URL(origin).port) + 1) }]) {
+    const result = launch(source);
+    expect(result.tokenFile).toBeNull();
+    expect(result.tokenFiles).toBeNull();
+    expect(result.tokenOrigin).toBeNull();
+  }
+});
+
+it('reloads a legacy token when the port is in the current profile directory', () => {
+  const profile = join(root, 'split-profile');
+  const current = join(profile, '.o8');
+  const legacy = join(profile, '.cortex-ide');
+  mkdirSync(current, { recursive: true });
+  mkdirSync(legacy, { recursive: true });
+  writeFileSync(join(current, 'api-port'), new URL(origin).port);
+  writeFileSync(join(legacy, 'ws-token'), token);
+  const receipt = join(root, 'split-profile.json');
+  const env: NodeJS.ProcessEnv = { ...process.env, HOME: profile, USERPROFILE: profile };
+  for (const key of ['O8_DATA_DIR', 'CORTEX_IDE_DATA_DIR', 'O8_API_PORT', 'O8_API_TOKEN', 'O8_NEXT_API_TOKEN', 'O8_WORKER_TOKEN']) delete env[key];
+  execFileSync(process.execPath, ['cli/dist/o8.mjs', 'next', '--enable-next', '--binary', launcherProbe(receipt), '--app-shell'], { env, stdio: 'pipe' });
+  const result = JSON.parse(readFileSync(receipt, 'utf8')) as { status: number; tokenFiles: string[] | null };
+  expect(result.status).toBe(200);
+  expect(result.tokenFiles).toEqual([join(current, 'ws-token'), join(legacy, 'ws-token')]);
+});
+
+it('makes explicitly relative token candidates absolute at the native process boundary', () => {
+  const receipt = join(root, 'relative-source.json');
+  const env: NodeJS.ProcessEnv = { ...process.env, O8_DATA_DIR: relative(process.cwd(), configDir) };
+  for (const key of ['O8_API_PORT', 'O8_API_TOKEN', 'O8_NEXT_API_TOKEN', 'O8_WORKER_TOKEN']) delete env[key];
+  execFileSync(process.execPath, ['cli/dist/o8.mjs', 'next', '--enable-next', '--binary', launcherProbe(receipt),
+    '--app-shell', '--shell-state', join(root, 'relative-state.json')], { env, stdio: 'pipe' });
+  const result = JSON.parse(readFileSync(receipt, 'utf8')) as { status: number; tokenFiles: string[] };
+  expect(result.status).toBe(200);
+  expect(result.tokenFiles.every(file => isAbsolute(file))).toBe(true);
+  expect(realpathSync(dirname(result.tokenFiles[0]))).toBe(realpathSync(configDir));
+});
+
+it('built CLI starts one detached serve daemon and reuses it after the native child exits', () => {
+  const packaged = join(root, 'standalone-server');
+  const dataDir = join(root, 'standalone-profile');
+  mkdirSync(join(packaged, 'cli'), { recursive: true });
+  mkdirSync(dataDir);
+  // This fixture supplies its native payload. Installed-bundle acceptance must
+  // separately verify the shipped addon's lookup layout.
+  mkdirSync(join(packaged, 'build', 'Release'), { recursive: true });
+  copyFileSync(resolve('node_modules/better-sqlite3/build/Release/better_sqlite3.node'),
+    join(packaged, 'build', 'Release', 'better_sqlite3.node'));
+  writeFileSync(join(packaged, 'package.json'), JSON.stringify({ name: 'o8-standalone-fixture' }));
+  const cli = join(packaged, 'cli', 'o8.mjs');
+  copyFileSync('cli/dist/o8.mjs', cli);
+  // Only the server payload and native renderer are fixtures. The bundled CLI,
+  // serve ownership records, detached processes, health checks and stop are real.
+  writeFileSync(join(packaged, 'server.js'), `
+    const http = require('node:http');
+    const server = http.createServer((req, res) => {
+      res.setHeader('content-type', 'application/json');
+      if (req.url === '/api/setup/identity') return res.end(JSON.stringify({product:'o8'}));
+      if (req.headers.authorization !== 'Bearer ' + process.env.WS_TOKEN) return res.writeHead(401).end('{}');
+      res.end(JSON.stringify({threads:[{id:'fixture-thread'}]}));
+    });
+    server.listen(Number(process.env.PORT), '127.0.0.1');
+  `);
+  writeFileSync(join(packaged, 'ws-server.mjs'), `
+    import { createServer } from 'node:net';
+    createServer(socket => socket.end()).listen(Number(process.env.WS_PORT), '127.0.0.1');
+  `);
+  const env: NodeJS.ProcessEnv = { ...process.env, O8_DATA_DIR: dataDir, O8_REVIEW_MODE: 'manual' };
+  for (const key of ['O8_API_PORT', 'O8_API_TOKEN', 'O8_NEXT_API_TOKEN', 'O8_WORKER_TOKEN',
+    'O8_SPECTATOR_TOKEN', 'O8_NEXT_PARENT_PIPE', 'O8_SERVE_SUPERVISOR_PID', 'O8_SERVE_GENERATION']) delete env[key];
+  const invoke = (...args: string[]) => execFileSync(process.execPath, [cli, ...args], { env, encoding: 'utf8', timeout: 30_000 });
+  const status = () => JSON.parse(invoke('serve', 'status')) as { pid: number; healthy: boolean; running: boolean };
+  expect(status().running).toBe(false);
+  try {
+    const receipt = join(root, 'standalone-launch.json');
+    const binary = launcherProbe(receipt);
+    invoke('next', '--binary', binary);
+    const first = status();
+    expect(first.healthy).toBe(true);
+    expect(JSON.parse(readFileSync(receipt, 'utf8')).status).toBe(200);
+    expect(JSON.parse(readFileSync(receipt, 'utf8')).sessions).toBe(1);
+    invoke('next', '--binary', binary);
+    expect(status()).toMatchObject({ pid: first.pid, healthy: true, running: true });
+    expect(JSON.parse(readFileSync(join(dataDir, 'serve-state.json'), 'utf8')).children).toHaveLength(2);
+  } finally {
+    invoke('serve', 'stop');
+  }
+  expect(status().running).toBe(false);
+}, 60_000);

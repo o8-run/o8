@@ -10,10 +10,6 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-#[path = "shell_state_writer.rs"]
-mod writer;
-pub(crate) use writer::Writer;
-
 #[cfg(test)]
 #[path = "shell_state_barrier.rs"]
 pub(crate) mod barrier;
@@ -121,14 +117,14 @@ impl State {
         Ok(state)
     }
     pub fn save(&self, file: &Path) -> Result<(), String> {
+        #[cfg(test)]
+        barrier::before_save(file, self);
         // An unreadable source may contain valid state. Keep this session in
         // memory rather than replacing bytes we could not inspect.
         if self.retain_file {
             return Ok(());
         }
         self.validate()?;
-        #[cfg(test)]
-        barrier::before_save(file, self);
         let bytes = serde_json::to_vec_pretty(self).map_err(|_| "Cannot encode shell state")?;
         if bytes.len() > 1024 * 1024 {
             return Err("Shell state exceeds 1 MiB".into());

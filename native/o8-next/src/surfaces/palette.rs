@@ -1,5 +1,5 @@
 //! Palette rendering, filtering, workspace routing and keyboard ownership.
-use super::registry::{KeyResult, ShellExtension};
+use super::registry::KeyResult;
 use super::*;
 use crate::theme::current as theme;
 #[path = "palette_target.rs"]
@@ -7,10 +7,8 @@ pub(super) mod target;
 pub(super) type Slice = EmptyState;
 pub(super) type Runtime = ();
 pub(super) const REGISTRATION: Registration = Registration {
-    extension: Some(&Palette),
     ..Registration::new("", "", |_, _, _, _| None)
 };
-struct Palette;
 #[derive(Clone)]
 pub(super) enum Entry {
     Surface(Command),
@@ -35,6 +33,7 @@ impl Entry {
             Self::Workspace(path) => format!("workspace:{path}"),
             Self::Surface(Command::Session(id)) => format!("session:{id}"),
             Self::Surface(Command::Message(id)) => format!("message:{id}"),
+            Self::Surface(Command::Feature(command)) => format!("command:{}", command.id),
             Self::Surface(Command::Refresh) => "command:refresh".into(),
             Self::Surface(Command::Shortcuts) => "command:shortcuts".into(),
             Self::Surface(command) => format!("surface:{}", command.registration().command_label),
@@ -91,102 +90,97 @@ fn focused_control_owns_keys(shell: &Shell, window: &Window, cx: &App) -> bool {
         _ => true,
     }
 }
-impl ShellExtension for Palette {
-    fn key(
-        &self,
-        s: &mut Shell,
-        event: &KeyDownEvent,
-        window: &mut Window,
-        cx: &mut Context<Shell>,
-    ) -> KeyResult {
-        let key = event.keystroke.key.as_str();
-        let modifiers = event.keystroke.modifiers;
-        let command = modifiers.control || modifiers.platform;
-        let global = command && modifiers.shift && !modifiers.alt && key == "p";
-        if command
-            && key == "k"
-            && (modifiers.shift
-                || modifiers.alt
-                || (!s.palette && focused_control_owns_keys(s, window, cx)))
-        {
-            return KeyResult::Propagate;
-        }
-        if (global || (command && key == "k") || s.palette)
-            && registrations()
-                .iter()
-                .any(|registration| (registration.key_down)(s, event, window, cx))
-        {
-            return KeyResult::Handled;
-        }
-        if global || (command && key == "k") {
-            toggle(s, window, cx);
-        } else if s.palette {
-            match key {
-                "escape" => {
-                    s.palette = false;
-                    s.restore_focus(window, cx);
+pub(super) fn key(
+    s: &mut Shell,
+    event: &KeyDownEvent,
+    window: &mut Window,
+    cx: &mut Context<Shell>,
+) -> KeyResult {
+    let key = event.keystroke.key.as_str();
+    let modifiers = event.keystroke.modifiers;
+    let command = modifiers.control || modifiers.platform;
+    let global = command && modifiers.shift && !modifiers.alt && key == "p";
+    if command
+        && key == "k"
+        && (modifiers.shift
+            || modifiers.alt
+            || (!s.palette && focused_control_owns_keys(s, window, cx)))
+    {
+        return KeyResult::Propagate;
+    }
+    if (global || (command && key == "k") || s.palette)
+        && registrations()
+            .iter()
+            .any(|registration| (registration.key_down)(s, event, window, cx))
+    {
+        return KeyResult::Handled;
+    }
+    if global || (command && key == "k") {
+        toggle(s, window, cx);
+    } else if s.palette {
+        match key {
+            "escape" => {
+                s.palette = false;
+                s.restore_focus(window, cx);
+            }
+            "up" => s.choice = s.choice.saturating_sub(1),
+            "down" => s.choice = (s.choice + 1).min(entries(s).len().saturating_sub(1)),
+            "enter" => {
+                if let Some(entry) = entries(s).get(s.choice).cloned() {
+                    entry.run(s, window, cx);
                 }
-                "up" => s.choice = s.choice.saturating_sub(1),
-                "down" => s.choice = (s.choice + 1).min(entries(s).len().saturating_sub(1)),
-                "enter" => {
-                    if let Some(entry) = entries(s).get(s.choice).cloned() {
-                        entry.run(s, window, cx);
-                    }
-                }
-                "backspace" => {
-                    s.query.pop();
+            }
+            "backspace" => {
+                s.query.pop();
+                s.choice = 0;
+            }
+            _ if !command && !modifiers.alt => {
+                if let Some(text) = &event.keystroke.key_char {
+                    s.query.push_str(text);
                     s.choice = 0;
                 }
-                _ if !command && !modifiers.alt => {
-                    if let Some(text) = &event.keystroke.key_char {
-                        s.query.push_str(text);
-                        s.choice = 0;
-                    }
-                }
-                _ => return KeyResult::Propagate,
             }
-        } else {
-            return KeyResult::Unhandled;
+            _ => return KeyResult::Propagate,
         }
-        if s.palette {
-            s.palette_scroll.scroll_to_item(s.choice + 1);
-        }
-        KeyResult::Handled
+    } else {
+        return KeyResult::Unhandled;
     }
-    fn palette(&self, shell: &Shell, cx: &mut Context<Shell>) -> Option<gpui::AnyElement> {
-        Some(
-            div()
-                .id("command-palette")
-                .debug_selector(|| "command-palette".into())
-                .max_h(px(300.))
-                .overflow_y_scroll()
-                .track_scroll(&shell.palette_scroll)
-                .p(px(12.))
-                .bg(theme().surface_raised)
-                .child(if shell.query.is_empty() {
-                    "Commands".into()
-                } else {
-                    shell.query.clone()
-                })
-                .children(entries(shell).into_iter().enumerate().map(|(row, entry)| {
-                    div()
-                        .id(gpui::SharedString::from(entry.identity()))
-                        .debug_selector(move || format!("command-{row}"))
-                        .p(px(6.))
-                        .cursor_pointer()
-                        .bg(if row == shell.choice {
-                            theme().selection
-                        } else {
-                            theme().surface_raised
-                        })
-                        .child(entry.label(&shell.sessions))
-                        .on_click(
-                            cx.listener(move |s, _, window, cx| entry.clone().run(s, window, cx)),
-                        )
-                }))
-                .into_any_element(),
-        )
+    if s.palette {
+        s.palette_scroll.scroll_to_item(s.choice + 1);
     }
+    KeyResult::Handled
+}
+pub(super) fn render(shell: &Shell, cx: &mut Context<Shell>) -> Option<gpui::AnyElement> {
+    Some(
+        div()
+            .id("command-palette")
+            .debug_selector(|| "command-palette".into())
+            .max_h(px(300.))
+            .overflow_y_scroll()
+            .track_scroll(&shell.palette_scroll)
+            .p(px(12.))
+            .bg(theme().surface_raised)
+            .child(if shell.query.is_empty() {
+                "Commands".into()
+            } else {
+                shell.query.clone()
+            })
+            .children(entries(shell).into_iter().enumerate().map(|(row, entry)| {
+                div()
+                    .id(gpui::SharedString::from(entry.identity()))
+                    .debug_selector(move || format!("command-{row}"))
+                    .p(px(6.))
+                    .cursor_pointer()
+                    .bg(if row == shell.choice {
+                        theme().selection
+                    } else {
+                        theme().surface_raised
+                    })
+                    .child(entry.label(&shell.sessions))
+                    .on_click(cx.listener(move |s, _, window, cx| entry.clone().run(s, window, cx)))
+            }))
+            .into_any_element(),
+    )
 }
 #[cfg(test)]
 #[path = "palette_tests.rs"]
