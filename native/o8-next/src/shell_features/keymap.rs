@@ -46,9 +46,13 @@ impl ShellFeature for Keymap {
 fn bind_root(root: gpui::Div, s: &Shell, cx: &mut Context<Shell>) -> gpui::Div {
     let context = if s.surfaces.shortcuts.view.is_some() {
         "Global Reference Modal Overlay"
+    } else if s.shortcuts {
+        "Global Shortcuts Modal Overlay"
+    } else if s.palette {
+        "Global Palette Overlay"
     } else if s.surfaces.settings.view.is_some() {
         "Global SettingsCloseHost Overlay"
-    } else if s.palette || s.shortcuts || registrations().iter().any(|r| (r.overlay_open)(s)) {
+    } else if registrations().iter().any(|r| (r.overlay_open)(s)) {
         "Global Overlay"
     } else {
         "Global"

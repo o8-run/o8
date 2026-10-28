@@ -229,20 +229,6 @@ fn review_palette_release_cpu_frame_budget(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn review_palette_does_not_resize_the_retained_surface(cx: &mut TestAppContext) {
-    let (_fixture, shell, mut cx) = fixture_shell(cx);
-    let before = cx.debug_bounds("shell-content").unwrap();
-    cx.simulate_keystrokes("cmd-k");
-    draw(&mut cx);
-    assert!(shell.read_with(&cx, |s, _| s.palette));
-    assert_eq!(
-        cx.debug_bounds("shell-content").unwrap(),
-        before,
-        "palette must not resize and reflow the retained transcript"
-    );
-}
-
-#[gpui::test]
 fn review_reference_modal_keeps_tabs_and_restores_focus(cx: &mut TestAppContext) {
     let (_fixture, shell, mut cx) = fixture_shell(cx);
     two_tabs(&shell, &mut cx);

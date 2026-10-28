@@ -315,6 +315,7 @@ impl Shell {
             return;
         }
         if let Some(tab) = self.active()
+            && self.content.contains_key(&self.key(&tab))
             && let Some(focus) = window.focused(cx)
         {
             self.surface_focus.insert(self.key(&tab), focus);

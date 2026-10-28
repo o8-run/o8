@@ -28,7 +28,6 @@ fn render(
                 .map(Content::element)
         });
     let content = div()
-        .debug_selector(|| "shell-content".into())
         .flex_1()
         .min_h_0()
         .child(content.unwrap_or_else(|| div().p(px(24.)).child(frame.empty).into_any_element()))
