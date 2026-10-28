@@ -5,7 +5,7 @@ import { useSharedDesktopWs } from '@/components/desktop/hooks/DesktopWebSocketC
 import type { RealtimeMutationRecord } from '@/lib/realtime/types';
 import type { ComposerQueuePayload, ComposerQueueTarget, QueuedComposerSendRecord } from '@/lib/orchestrator/composer-queue-types';
 
-import { composerQueuePayloadMatches, confirmComposerSend, findPendingComposerSend, prepareComposerSend } from './composer-queue-recovery';
+import { composerRecoveryNotice, composerQueuePayloadMatches, confirmComposerSend, findPendingComposerSend, prepareComposerSend } from './composer-queue-recovery';
 import { composerQueueRequest, ComposerQueueRequestError } from './composer-queue-request';
 import { voiceFollowupRemovalReceipt } from './managed-voice-followup';
 
@@ -66,7 +66,7 @@ export function useDurableComposerQueue(target: ComposerQueueTarget | null, busy
     if (!snapshot) throw new Error('Wait for this chat to be saved before using Send next.');
     const owner = ownerRef.current;
     const payload = (await findPendingComposerSend(snapshot, draft))?.payload ?? capture();
-    const { attempt, fresh } = await prepareComposerSend(snapshot, payload);
+    const { attempt, fresh, recoveryError } = await prepareComposerSend(snapshot, payload);
     if (ownerRef.current !== owner) throw new Error('The chat changed before submission. The message was not queued. Keep the original draft.');
     let item: QueuedComposerSendRecord;
     try {
@@ -80,16 +80,23 @@ export function useDurableComposerQueue(target: ComposerQueueTarget | null, busy
     } catch (cause) {
       // A first, explicit client rejection did not accept the new submission.
       // A retry rejection cannot disprove delivery of the earlier uncertain request.
-      if (ownerRef.current === owner && fresh && cause instanceof ComposerQueueRequestError && cause.status >= 400 && cause.status < 500) confirmComposerSend(snapshot, attempt.id);
+      if (ownerRef.current === owner && fresh && cause instanceof ComposerQueueRequestError && cause.status >= 400 && cause.status < 500) { try { await confirmComposerSend(snapshot, attempt.id); } catch { /* The server explicitly refused this first request. */ } }
+      if (recoveryError) throw new Error(composerRecoveryNotice(recoveryError, fresh && cause instanceof ComposerQueueRequestError && cause.status < 500 ? 'rejected' : false, cause instanceof ComposerQueueRequestError ? cause.message : undefined));
       throw cause;
     }
     if (item.status === 'cancelled') {
-      if (ownerRef.current === owner) confirmComposerSend(snapshot, attempt.id);
+      if (ownerRef.current === owner) await confirmComposerSend(snapshot, attempt.id).catch(() => {});
       throw new Error('The previous send was cancelled. No new message was sent. Send again only if you want a new turn.');
     }
     if (ownerRef.current === owner) { setError(null); await refresh(); }
+    if (recoveryError) throw new Error(composerRecoveryNotice(recoveryError, true));
     // The still-current composer retires recovery immediately before consuming its draft.
-    return () => { if (ownerRef.current === owner) confirmComposerSend(snapshot, attempt.id); };
+    return async () => {
+      if (ownerRef.current === owner) {
+        try { await confirmComposerSend(snapshot, attempt.id); }
+        catch { throw new Error('Message queued. The browser could not finish saving that change. Check your current draft before sending again.'); }
+      }
+    };
   }, [refresh]);
   // Voice supplies its durable delegation id; ordinary composer retries retain
   // the separate draft-recovery contract above. Both write the same server queue.

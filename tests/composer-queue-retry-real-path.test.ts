@@ -2,6 +2,7 @@
 import { mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { resetComposerQueueRecoveryMemoryForTests } from '@/components/desktop/thoughts/chat-panel/composer-queue-recovery';
 import { act, createElement, useLayoutEffect, useRef, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextRequest } from 'next/server';
@@ -9,6 +10,13 @@ import { afterAll, afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { writeComposerServiceTier } from '@/components/desktop/thoughts/composer-selector/service-tier-store';
 import type { ComposerQueuePayload } from '@/lib/orchestrator/composer-queue-types';
 
+const attachmentCopies = vi.hoisted(() => new Map<string, unknown>());
+vi.mock('@/components/desktop/thoughts/chat-panel/composer-queue-attachment-store', () => ({
+  saveComposerAttachmentPayload: async (key: string, value: unknown) => { attachmentCopies.set(key, value); },
+  readComposerAttachmentPayload: async (key: string) => attachmentCopies.get(key),
+  removeComposerAttachmentPayload: async (key: string) => { attachmentCopies.delete(key); },
+  listComposerAttachmentKeys: async () => [...attachmentCopies.keys()],
+}));
 vi.mock('@/components/desktop/hooks/DesktopWebSocketContext', () => ({ useSharedDesktopWs: () => {} }));
 vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: vi.fn(async () => {}) }));
 vi.mock('@/components/desktop/thoughts/InputButtons', () => ({ InputButtons: () => null, RepoTargetChip: () => null }));
@@ -62,6 +70,7 @@ function Harness({ busy, model }: { busy: boolean; model: string }) {
 let host: HTMLDivElement; let root: Root;
 let posts: Array<{ id: string; payload: ComposerQueuePayload }>; let dropResponse = true;
 beforeEach(() => {
+  resetComposerQueueRecoveryMemoryForTests(); attachmentCopies.clear();
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   ensureV71ComposerQueueSchema(getSqlite()); getSqlite().exec('DELETE FROM composer_send_queue');
   localStorage.clear(); writeComposerServiceTier('codex', 'original-model', 'priority'); dispatch.mockClear(); posts = []; dropResponse = true;

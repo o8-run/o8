@@ -37,3 +37,5 @@ function transaction<T>(mode: IDBTransactionMode, action: (store: IDBObjectStore
 export const saveComposerAttachmentPayload = (key: string, value: unknown) => transaction('readwrite', store => store.put(value, key));
 export const readComposerAttachmentPayload = (key: string): Promise<unknown> => transaction('readonly', store => store.get(key));
 export const removeComposerAttachmentPayload = (key: string) => transaction('readwrite', store => store.delete(key));
+
+export const listComposerAttachmentKeys = () => transaction('readonly', store => store.getAllKeys());

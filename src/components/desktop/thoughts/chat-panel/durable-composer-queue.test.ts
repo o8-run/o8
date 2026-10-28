@@ -1,5 +1,6 @@
 /** @vitest-environment jsdom */
 /* eslint-disable react-hooks/refs -- test harness owns its draft and imperative controller */
+import { resetComposerQueueRecoveryMemoryForTests } from '@/components/desktop/thoughts/chat-panel/composer-queue-recovery';
 import { act, createElement, createRef, forwardRef, useImperativeHandle, useRef, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -14,6 +15,13 @@ import { ChatMessageList } from './ChatMessageList';
 import { ComposerSendBufferStatus } from './ComposerSendBufferStatus';
 
 const { ws } = vi.hoisted(() => ({ ws: { options: null as null | { onRealtimeEvent: (event: unknown) => void } } }));
+const attachmentCopies = vi.hoisted(() => new Map<string, unknown>());
+vi.mock('@/components/desktop/thoughts/chat-panel/composer-queue-attachment-store', () => ({
+  saveComposerAttachmentPayload: async (key: string, value: unknown) => { attachmentCopies.set(key, value); },
+  readComposerAttachmentPayload: async (key: string) => attachmentCopies.get(key),
+  removeComposerAttachmentPayload: async (key: string) => { attachmentCopies.delete(key); },
+  listComposerAttachmentKeys: async () => [...attachmentCopies.keys()],
+}));
 vi.mock('@/components/desktop/hooks/DesktopWebSocketContext', () => ({ useSharedDesktopWs: (_: unknown, options: typeof ws.options) => { ws.options = options; } }));
 vi.mock('../InputButtons', () => ({ InputButtons: ({ inlineLeadingExtras, sendDisabled }: { inlineLeadingExtras: React.ReactNode; sendDisabled: boolean }) => createElement('footer', null, inlineLeadingExtras, createElement('button', { disabled: sendDisabled, 'aria-label': 'Send message' }, 'Send')), RepoTargetChip: () => null }));
 vi.mock('./SlashCommandPicker', () => ({ SlashCommandPicker: () => null }));
@@ -62,6 +70,7 @@ function applySteer(item: QueuedComposerSendRecord) {
 let failAfterPersist = false;
 let delayPost: (() => Promise<void>) | null = null;
 beforeEach(() => {
+  resetComposerQueueRecoveryMemoryForTests(); attachmentCopies.clear();
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
@@ -317,15 +326,15 @@ describe('durable Send next through the normal composer', () => {
     expect(host.querySelector('[role="alert"]')).toBeNull();
   });
 
-  it('refuses before posting if recovery cannot be saved, preserving text and attachment', async () => {
+  it('queues when recovery cannot be saved, preserving text and attachment', async () => {
     await render();
     const write = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('Quota exceeded'); });
     try {
       await enter();
-      expect(posts).toHaveLength(0);
+      expect(posts).toHaveLength(1);
       expect(host.querySelector('textarea')!.value).toBe('Queue this message');
       expect(host.textContent).toContain('proof.png');
-      expect(host.querySelector('[role="alert"]')?.textContent).toContain('Message was not queued');
+      expect(host.querySelector('[role="alert"]')?.textContent).toContain('Message queued.');
     } finally { write.mockRestore(); }
   });
 
@@ -333,17 +342,17 @@ describe('durable Send next through the normal composer', () => {
     [new DOMException('Full', 'QuotaExceededError'), 'Browser storage is full'],
     [new DOMException('Blocked', 'SecurityError'), 'Browser storage is unavailable'],
     [new Error('Unknown write failure'), 'The draft could not be saved'],
-  ])('reports the actual preparation failure without claiming queue acceptance: %s', async (failure, advice) => {
+  ])('reports actual storage failures after a matching queue receipt: %s', async (failure, advice) => {
     await render();
     const write = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw failure; });
     try {
       await enter();
-      expect(posts).toEqual([]);
-      expect(rows).toEqual([]);
+      expect(posts).toHaveLength(1);
+      expect(rows).toHaveLength(1);
       expect(host.querySelector('textarea')!.value).toBe('Queue this message');
       expect(host.textContent).toContain('proof.png');
       const error = host.querySelector('[role="alert"]')?.textContent;
-      expect(error).toContain('Message was not queued');
+      expect(error).toContain('Message queued.');
       expect(error).toContain(advice);
       expect(error).not.toContain('Send next recovery');
       if (!(failure instanceof DOMException && failure.name === 'QuotaExceededError')) expect(error).not.toContain('Free browser storage');

@@ -10,8 +10,8 @@ import { resolveBrowserPath } from '../scripts/bench/measure-browser-boot.mjs';
 vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: async () => {} }));
 const fixture = await vi.hoisted(async () => {
   const fs = await import('node:fs'); const path = await import('node:path'); const os = await import('node:os');
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'o8-screenshot-queue-')));
-  const repo = path.join(root, 'repo'); fs.mkdirSync(repo); fs.mkdirSync(path.join(root, 'chat-history'));
+  const root = process.env.O8_SCREENSHOT_QUEUE_DATA_DIR || fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'o8-screenshot-queue-')));
+  const repo = path.join(root, 'repo'); fs.mkdirSync(repo, { recursive: true }); fs.mkdirSync(path.join(root, 'chat-history'), { recursive: true });
   return { root, repo };
 });
 vi.stubEnv('O8_DATA_DIR', fixture.root); vi.stubEnv('CORTEX_IDE_DATA_DIR', fixture.root); vi.stubEnv('CORTEX_IDE_DB_PATH', path.join(fixture.root, 'queue.db'));
@@ -52,6 +52,7 @@ beforeAll(async () => {
         const result = useDefaultComposerSendBuffer({ active: true, backend: 'codex', busy: !location.search.includes('idle'), threadId, repoPath: config.repo,
           attachedImages: images, latestInputRef, inputRef, setInput, addAttachedImage: entry => setImages(previous => [...previous, entry]), clearAttachments: () => setImages([]),
           dispatch, captureQueuedSend: capture, interrupt() {}, undoSend() {}, shouldBypass: () => false, sendUnbuffered() {} });
+        window.fixtureQueueReady = result.durable.ready;
         return createElement('main', { style: { maxWidth: 760, margin: '24px auto', color: 'var(--t-text)', background: 'var(--t-chat-surface-bg)' } },
           createElement(ComposerArea, { input, inputLabel: 'Screenshot composer', onInputChange: value => { latestInputRef.current = value; setInput(value); },
             activeComposer: true, isOrchestratorMode: true, displayWaiting: true, chatMessages: [], activeTargetLabel: 'Agent', targetAgentExists: true,
@@ -80,7 +81,7 @@ beforeEach(() => {
   ensureV71ComposerQueueSchema(getSqlite()); getSqlite().exec('DELETE FROM composer_send_queue');
   for (const thread of ['thoughts-screenshot', 'thoughts-other']) fs.writeFileSync(path.join(fixture.root, `chat-history/${thread}.json`), JSON.stringify({ repoPath: fixture.repo, backend: 'codex', messages: [] }));
 });
-afterAll(async () => { await browser?.close(); closeDb(); vi.unstubAllEnvs(); fs.rmSync(fixture.root, { recursive: true, force: true }); });
+afterAll(async () => { await browser?.close(); closeDb(); vi.unstubAllEnvs(); if (!process.env.O8_SCREENSHOT_QUEUE_DATA_DIR) fs.rmSync(fixture.root, { recursive: true, force: true }); });
 
 async function mount(page: Page, image: string, url = 'http://localhost/screenshot', productionDraft = false, imageName = 'screenshot.png') {
   await page.goto(url);
@@ -88,6 +89,7 @@ async function mount(page: Page, image: string, url = 'http://localhost/screensh
   await page.addStyleTag({ content: fs.readFileSync('src/app/globals.css', 'utf8') });
   await page.addScriptTag({ content: bundle });
   await page.getByRole('textbox', { name: 'Screenshot composer' }).waitFor({ timeout: 5000 });
+  await page.waitForFunction(() => (window as unknown as { fixtureQueueReady: boolean }).fixtureQueueReady, null, { timeout: 10_000 });
 }
 async function connect(page: Page, posts: Array<{ id: string; payload: { images: Array<{ dataUri: string }>; routing: { model: string } } }>, loseFirst = false) {
   await page.route('**/*', async route => {
@@ -95,7 +97,9 @@ async function connect(page: Page, posts: Array<{ id: string; payload: { images:
     if (url.pathname === '/api/orchestrator/composer-queue') {
       const method = request.method(); const body = request.postData();
       const native = new NextRequest(request.url(), { method, headers: { host: 'localhost', 'Content-Type': 'application/json' }, ...(body ? { body } : {}) });
-      const response = method === 'POST' ? await api.POST(native) : await api.GET(native);
+      const response = process.env.O8_SCREENSHOT_QUEUE_DEV_URL
+        ? await fetch(new URL(url.pathname + url.search, process.env.O8_SCREENSHOT_QUEUE_DEV_URL), { method, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + fs.readFileSync(path.join(fixture.root, 'ws-token'), 'utf8').trim() }, ...(body ? { body } : {}) })
+        : method === 'POST' ? await api.POST(native) : await api.GET(native);
       if (method === 'POST') { posts.push(JSON.parse(body!)); if (loseFirst) { loseFirst = false; await route.abort('failed'); return; } }
       await route.fulfill({ status: response.status, contentType: 'application/json', body: await response.text() }); return;
     }
@@ -109,7 +113,7 @@ it.each([false, true])('queues a supported screenshot and reuses its original re
   try {
     await connect(page, posts, true); await mount(page, imageUri(large));
     await page.getByRole('textbox').press('Enter');
-    await expect.poll(() => posts.length, { timeout: screenshotPollTimeout }).toBe(1);
+    await expect.poll(async () => ({ posts: posts.length, alerts: posts.length ? [] : await page.getByRole('alert').allTextContents() }), { timeout: screenshotPollTimeout }).toEqual({ posts: 1, alerts: [] });
     await expect.poll(() => page.getByRole('alert').count(), { timeout: screenshotPollTimeout }).toBe(1);
     expect(await page.getByRole('textbox').inputValue()).toBe('Queue the screenshot.');
     expect(await page.getByText('screenshot.png', { exact: true }).count()).toBeGreaterThan(0);
@@ -118,7 +122,7 @@ it.each([false, true])('queues a supported screenshot and reuses its original re
     if (proofDir) fs.writeFileSync(path.join(proofDir, `payload-${large ? 'large' : 'small'}.json`), JSON.stringify({ serializedRequestCharacters: normalizedLength, imageDataUriCharacters: posts[0].payload.images[0].dataUri.length, outcome: 'saved by the queue API; first response lost; exact identity replayed after reload' }, null, 2));
     expect(large ? normalizedLength > 4_000_000 : normalizedLength < 4_000_000).toBe(true);
     expect(posts[0].payload.images[0].dataUri.length).toBeLessThan(5_000_000);
-    if (large) expect(await page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith('o8:composer-queue-recovery:')).every(key => localStorage.getItem(key)!.length < 1000))).toBe(true);
+    expect(await page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith('o8:composer-queue-recovery:')).every(key => localStorage.getItem(key)!.length < 1000))).toBe(true);
     closeDb(); ensureV71ComposerQueueSchema(getSqlite());
     expect(queue.listQueuedComposerSends({ repoPath: fixture.repo, threadId: 'thoughts-screenshot' })).toHaveLength(1);
     await mount(page, imageUri(large), 'http://localhost/screenshot?model=changed-model&idle');
@@ -135,15 +139,15 @@ it.each([false, true])('queues a supported screenshot and reuses its original re
 
 it.each([
   ['QuotaExceededError', 'Browser storage is full'], ['SecurityError', 'Browser storage is unavailable'], ['UnknownError', 'The draft could not be saved'],
-])('keeps a large screenshot draft when attachment persistence fails with %s', async (name, advice) => {
+])('queues a large screenshot despite attachment recovery failure with %s', async (name, advice) => {
   const page = await browser.newPage({ viewport: { width: 900, height: 700 } }); const posts: Parameters<typeof connect>[1] = [];
   try {
     await connect(page, posts); await mount(page, imageUri(true));
     await page.evaluate(name => { IDBObjectStore.prototype.put = () => { throw new DOMException('Fixture storage failure', name); }; }, name);
     await page.getByRole('textbox').press('Enter');
     await expect.poll(() => page.getByRole('alert').textContent(), { timeout: screenshotPollTimeout }).toContain(advice);
-    expect(await page.getByRole('alert').textContent()).toContain('Message was not queued');
-    expect(posts).toEqual([]);
+    expect(await page.getByRole('alert').textContent()).toContain('Message queued.');
+    expect(posts).toHaveLength(1);
     expect(await page.getByRole('textbox').inputValue()).toBe('Queue the screenshot.');
     expect(await page.getByText('screenshot.png', { exact: true }).count()).toBeGreaterThan(0);
     if (proofDir) { fs.mkdirSync(proofDir, { recursive: true }); await page.screenshot({ path: path.join(proofDir, `failure-${name}.png`) }); }
@@ -151,7 +155,7 @@ it.each([
 }, 30_000);
 
 
-it('holds the draft and does not post when a successful attachment request aborts before transaction commit', async () => {
+it('queues and retains the draft when attachment recovery aborts before commit', async () => {
   const page = await browser.newPage(); const posts: Parameters<typeof connect>[1] = [];
   try {
     await connect(page, posts); await mount(page, imageUri(true));
@@ -164,15 +168,15 @@ it('holds the draft and does not post when a successful attachment request abort
       };
     });
     await page.getByRole('textbox').press('Enter');
-    await expect.poll(() => page.getByRole('alert').textContent(), { timeout: screenshotPollTimeout }).toContain('Message was not queued');
-    expect(posts).toEqual([]);
+    await expect.poll(() => page.getByRole('alert').textContent(), { timeout: screenshotPollTimeout }).toContain('Message queued.');
+    expect(posts).toHaveLength(1);
     expect(await page.getByRole('textbox').inputValue()).toBe('Queue the screenshot.');
     expect(await page.getByText('screenshot.png', { exact: true }).count()).toBeGreaterThan(0);
     expect(await page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith('o8:composer-queue-recovery:')).length)).toBe(0);
   } finally { await page.close(); }
 });
 
-it('does not post or leave an attachment behind when the small manifest hits quota after the attachment commits', async () => {
+it('queues with attachment recovery when the small manifest hits quota', async () => {
   const page = await browser.newPage(); const posts: Parameters<typeof connect>[1] = [];
   try {
     await connect(page, posts); await mount(page, imageUri(true));
@@ -185,7 +189,7 @@ it('does not post or leave an attachment behind when the small manifest hits quo
     });
     await page.getByRole('textbox').press('Enter');
     await expect.poll(() => page.getByRole('alert').textContent(), { timeout: screenshotPollTimeout }).toContain('Browser storage is full');
-    expect(posts).toEqual([]);
+    expect(posts).toHaveLength(1);
     expect(await page.getByRole('textbox').inputValue()).toBe('Queue the screenshot.');
     expect(await page.getByText('screenshot.png', { exact: true }).count()).toBeGreaterThan(0);
     expect(await page.evaluate(() => new Promise<number>((resolve, reject) => {
@@ -193,7 +197,7 @@ it('does not post or leave an attachment behind when the small manifest hits quo
       opening.onsuccess = () => { const db = opening.result; const count = db.transaction('attempts').objectStore('attempts').count();
         count.onsuccess = () => { db.close(); resolve(count.result); }; count.onerror = () => reject(count.error); };
       opening.onerror = () => reject(opening.error);
-    }))).toBe(0);
+    }))).toBe(1);
   } finally { await page.close(); }
 });
 
@@ -219,7 +223,7 @@ it('retains an uncertain identity and refuses another POST when its saved attach
   } finally { await page.close(); }
 });
 
-it('keeps a late attachment save scoped to its original thread and preserves the new chat draft', async () => {
+it('keeps a late attachment recovery read scoped to its original thread and preserves the new chat draft', async () => {
   const page = await browser.newPage(); const posts: Parameters<typeof connect>[1] = [];
   try {
     await connect(page, posts); await mount(page, imageUri(true));
@@ -240,7 +244,7 @@ it('keeps a late attachment save scoped to its original thread and preserves the
     await page.evaluate(() => (window as unknown as { changeDraft: (thread: string, text: string, image: string) => void }).changeDraft('thoughts-other', 'Different chat draft.', ''));
     await expect.poll(() => page.getByRole('textbox').inputValue(), { timeout: screenshotPollTimeout }).toBe('Different chat draft.');
     await page.evaluate(() => (window as unknown as { releaseAttachment: () => void }).releaseAttachment());
-    await expect.poll(() => page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith('o8:composer-queue-recovery:')).length), { timeout: screenshotPollTimeout }).toBe(1);
+    await expect.poll(() => page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith('o8:composer-queue-recovery:')).length), { timeout: screenshotPollTimeout }).toBe(0);
     expect(posts).toEqual([]);
     expect(await page.getByRole('textbox').inputValue()).toBe('Different chat draft.');
     expect(await page.getByRole('alert').count()).toBe(0);
@@ -248,7 +252,7 @@ it('keeps a late attachment save scoped to its original thread and preserves the
   } finally { await page.close(); }
 });
 
-it('reports the application message limit without quota advice or a queue POST', async () => {
+it('names a browser payload limit and server refusal without quota advice', async () => {
   const page = await browser.newPage(); const posts: Parameters<typeof connect>[1] = [];
   try {
     await connect(page, posts); await mount(page, '');
@@ -257,7 +261,8 @@ it('reports the application message limit without quota advice or a queue POST',
     await expect.poll(() => page.getByRole('alert').textContent(), { timeout: screenshotPollTimeout }).toContain('This message is too large');
     expect(await page.getByRole('alert').textContent()).toContain('Shorten it and retry');
     expect(await page.getByRole('alert').textContent()).not.toContain('storage is full');
-    expect(posts).toEqual([]);
+    expect(posts).toHaveLength(1);
+    expect(await page.getByRole('alert').textContent()).toContain('Message was not queued');
     expect((await page.getByRole('textbox').inputValue()).length).toBe(2_000_100);
   } finally { await page.close(); }
 });
@@ -296,7 +301,7 @@ it.each([['Queue the screenshot.', 'screenshot.png'], ['', 'screenshot.png'], ['
 it('review: a native localStorage quota failure gives storage advice, without monkeypatching storage', async () => {
   const page = await browser.newPage(); const posts: Parameters<typeof connect>[1] = [];
   try {
-    await connect(page, posts); await mount(page, imageUri(false));
+    await connect(page, posts); await mount(page, imageUri(true));
     const quota = await page.evaluate(() => {
       let count = 0;
       let name = 'no quota hit';
@@ -309,7 +314,7 @@ it('review: a native localStorage quota failure gives storage advice, without mo
     expect(quota.name).toBe('QuotaExceededError');
     await page.getByRole('textbox').press('Enter');
     await expect.poll(() => page.getByRole('alert').textContent(), { timeout: screenshotPollTimeout }).toContain('Browser storage is full');
-    expect(posts).toEqual([]);
+    expect(posts).toHaveLength(1);
     expect(await page.getByRole('textbox').inputValue()).toBe('Queue the screenshot.');
     expect(await page.getByText('screenshot.png', { exact: true }).count()).toBeGreaterThan(0);
   } finally { await page.close(); }
@@ -469,5 +474,68 @@ it('retains image and identity when clearing fails after acceptance and queue re
     await expect.poll(() => page.getByRole('textbox').inputValue(), { timeout: screenshotPollTimeout }).toBe('');
     expect(queue.listQueuedComposerSends({ repoPath: fixture.repo, threadId: 'thoughts-screenshot' })).toHaveLength(1);
     expect(posts[1].payload.images[0].dataUri).toBe(imageUri(true));
+  } finally { await page.close(); }
+});
+
+
+it('reconciles the original screenshot and routing after reload when local recovery manifests cannot be written', async () => {
+  const page = await browser.newPage(); const posts: Parameters<typeof connect>[1] = [];
+  try {
+    await page.addInitScript(() => {
+      const set = Storage.prototype.setItem;
+      Storage.prototype.setItem = function(key, value) {
+        if (key.startsWith('o8:composer-queue-recovery:')) throw new DOMException('Fixture quota', 'QuotaExceededError');
+        return set.call(this, key, value);
+      };
+    });
+    await connect(page, posts, true); await mount(page, '', 'http://localhost/screenshot', true);
+    await page.evaluate(image => (window as unknown as { changeDraft: (thread: string, text: string, image: string) => void })
+      .changeDraft('thoughts-screenshot', 'Queue the screenshot.', image), imageUri(true));
+    await page.getByRole('textbox').press('Enter');
+    await expect.poll(() => posts.length, { timeout: screenshotPollTimeout }).toBe(1);
+    await expect.poll(() => page.getByRole('alert').textContent()).toContain('Queue submission is unconfirmed.');
+    expect(await page.getByRole('alert').textContent()).toContain('Browser storage is full');
+    await mount(page, '', 'http://localhost/screenshot?model=changed-model&idle', true);
+    await page.getByRole('textbox').press('Enter');
+    await expect.poll(() => posts.length, { timeout: screenshotPollTimeout }).toBe(2);
+    expect(posts[1]).toEqual(posts[0]);
+    expect(queue.listQueuedComposerSends({ repoPath: fixture.repo, threadId: 'thoughts-screenshot' })).toHaveLength(1);
+    await expect.poll(() => page.getByRole('alert').textContent()).toContain('Message queued.');
+    expect(await page.getByRole('textbox').inputValue()).toBe('Queue the screenshot.');
+  } finally { await page.close(); }
+});
+
+it.each([1_500_000, 3_136_623])('never embeds a screenshot payload in a local recovery record: %s bytes', async size => {
+  const page = await browser.newPage(); const posts: Parameters<typeof connect>[1] = [];
+  const uri = 'data:image/png;base64,' + Buffer.concat([pixel, Buffer.alloc(size - pixel.length)]).toString('base64');
+  try {
+    await connect(page, posts, true); await mount(page, uri);
+    await page.getByRole('textbox').press('Enter');
+    await expect.poll(() => posts.length, { timeout: screenshotPollTimeout }).toBe(1);
+    const lengths = await page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith('o8:composer-queue-recovery:')).map(key => localStorage.getItem(key)!.length));
+    expect(lengths).toHaveLength(1); expect(lengths[0]).toBeLessThan(1000);
+    console.log(JSON.stringify({ imageBytes: size, normalizedPayloadCharacters: JSON.stringify(posts[0]).length, recoveryRecordCharacters: lengths[0], outcome: 'server saved; response lost' }));
+  } finally { await page.close(); }
+});
+
+
+it('keeps the original identity in the open composer when both browser stores fail and the server receipt is lost', async () => {
+  const page = await browser.newPage(); const posts: Parameters<typeof connect>[1] = [];
+  try {
+    await connect(page, posts, true); await mount(page, imageUri(true));
+    await page.evaluate(() => {
+      IDBObjectStore.prototype.put = () => { throw new DOMException('Unavailable', 'SecurityError'); };
+      Object.defineProperty(window, 'localStorage', { get() { throw new DOMException('Unavailable', 'SecurityError'); } });
+    });
+    await page.getByRole('textbox').press('Enter');
+    await expect.poll(() => posts.length, { timeout: screenshotPollTimeout }).toBe(1);
+    await expect.poll(() => page.getByRole('alert').textContent()).toContain('Queue submission is unconfirmed.');
+    expect(await page.getByRole('alert').textContent()).toContain('Browser storage is unavailable');
+    expect(await page.getByRole('textbox').inputValue()).toBe('Queue the screenshot.');
+    await page.getByRole('textbox').press('Enter');
+    await expect.poll(() => posts.length, { timeout: screenshotPollTimeout }).toBe(2);
+    expect(posts[1]).toEqual(posts[0]);
+    await expect.poll(() => page.getByRole('alert').textContent()).toContain('Message queued.');
+    expect(queue.listQueuedComposerSends({ repoPath: fixture.repo, threadId: 'thoughts-screenshot' })).toHaveLength(1);
   } finally { await page.close(); }
 });
