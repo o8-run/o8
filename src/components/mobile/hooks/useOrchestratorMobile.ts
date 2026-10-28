@@ -421,12 +421,14 @@ export function useOrchestratorMobile({
           if (buffer && messageId && buffer.id !== messageId) { sealStreamingBuffer(); buffer = null; }
           if (!buffer) {
             const id = messageId ?? transcriptIdFor('assistant');
-            const previous = sealedOutputRef.current?.id === id
-              ? sealedOutputRef.current
-              : transcriptRef.current.find(entry => entry.id === id);
+            const previous = transcriptRef.current.find(entry => entry.id === id);
+            const sealed = sealedOutputRef.current;
+            const prefix = sealed?.id === id && (!previous || sealed.text.startsWith(previous.text))
+              ? sealed.text
+              : previous?.text ?? '';
             streamingBufferRef.current = {
               id,
-              text: (previous?.text ?? '') + text,
+              text: prefix + text,
               thinking,
               flushed: false,
             };
