@@ -131,7 +131,8 @@ fn tabs(s: &Shell, cx: &mut Context<Shell>) -> impl IntoElement {
                         .items_center()
                         .flex_shrink_0()
                         .overflow_hidden()
-                        .whitespace_nowrap()
+                        .whitespace_normal()
+                        .line_clamp(1)
                         .text_ellipsis()
                         .rounded(px(geometry.tab_radius))
                         .text_color(if selected {
