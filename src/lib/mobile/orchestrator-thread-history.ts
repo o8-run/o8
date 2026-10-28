@@ -609,6 +609,7 @@ export function markMobileOrchestratorThreadFailed(input: {
   tabId: string | null | undefined;
   repoPath: string;
   error: string;
+  assistantMessageId?: string | null;
   backend?: MobileOrchestratorBackend | null;
   agent?: string | null;
   timestampMs?: number;
@@ -639,7 +640,11 @@ export function markMobileOrchestratorThreadFailed(input: {
 
   writeHistoryRecord(tabId, {
     ...existing,
-    messages: Array.isArray(existing.messages) ? existing.messages : [],
+    // Receipts reserve a row before any text arrives. A failed turn must not
+    // leave that placeholder behind; preserve partial replies and other turns.
+    messages: (Array.isArray(existing.messages) ? existing.messages : []).filter(message =>
+      !input.assistantMessageId || message.id !== input.assistantMessageId || message.role !== 'assistant'
+      || !!message.content?.trim() || !!message.toolCalls?.length || !!message.media?.length),
     model: existing.model ?? modelForBackend(input.backend ?? DEFAULT_BACKEND) ?? DEFAULT_MODEL,
     savedAt: now,
     repoPath: typeof existing.repoPath === 'string' && existing.repoPath.trim()

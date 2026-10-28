@@ -26,6 +26,7 @@ import { splitCodexOrchestratorPrompt, writeCodexAppBridgeSpec } from '@/lib/cod
 import { codexAppBridgeLaunch } from '@/lib/codex/app-bridge-launch';
 import { registerCodexAppBridgeSteer } from '@/lib/codex/app-bridge-steer';
 import { noteCodexAppTurnLine } from '@/lib/codex/app-thread-sync';
+import { orchestratorErrorText } from '@/lib/transcripts/orchestrator-error';
 export { ensureCodexHome, mergeCodexMcpConfig, prepareCodexHome, stripPluginSections } from './codex-orchestrator-config';
 import { parseLocalModel } from '@/lib/codex/local-model';
 import { resolveCodexAppThreadsSync } from '@/lib/operator/defaults';
@@ -690,15 +691,16 @@ async function sendToCodexOrchestratorAttempt(
         ? readFileSync(crashRecord.stderrPath, 'utf8')
         : '';
       const diagnostic = (stderr || crashStderr).trim();
+      // The desktop tees stderr into logs/ws-server.log (and its .prev run).
+      // Keep the complete bridge stack there, outside the bounded app log/UI.
+      if (code !== 0 && diagnostic) console.error(`[codex-orchestrator-session] ${session.sessionName} exited (${code})\n${diagnostic}`);
       // Startup warnings can fill the display limit before the resume failure.
       // Keep that diagnostic visible to the one-time missing-thread recovery.
-      const resumeDiagnostic = diagnostic.split(/\r?\n/).find((line) => isMissingCodexRolloutResumeError(line)
-        || isCodexSolUnsupported(model, line));
-      // Node prints a bundle URL and potentially huge code frame before the error.
-      const errorDiagnostic = diagnostic.split(/\r?\n/).find((line) => /^\s*\w*Error(?: \[[^\]]+\])?:/.test(line));
       const error = code === 0
         ? undefined
-        : (resumeDiagnostic || errorDiagnostic?.trim() || diagnostic).slice(0, 500) || `codex exited with code ${code}`;
+        : orchestratorErrorText(diagnostic, `Error: Codex ${codexApp ? 'app bridge' : 'exec'} exited with code ${code}`,
+          line => isMissingCodexRolloutResumeError(line) || isCodexSolUnsupported(model, line)).slice(0, 500);
+      if (code !== 0) lineState.terminalOutcome = 'failed';
       settle(code === 0 ? 'ready' : 'dead', error, true);
     });
 
