@@ -1,6 +1,6 @@
 'use client';
 import { ComposerFrame } from './chat-panel/ComposerFrame';
-import { SessionCacheIndicator } from '../SessionCacheIndicator';
+import { SessionCacheProvider } from '../SessionCacheIndicator';
 
 import { sendBoundComposerTurn } from './use-orchestrator-stream/bound-composer-turn';
 import { ManagedChatVoiceEntry } from './chat-panel/ManagedChatVoiceEntry';
@@ -2017,10 +2017,10 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, ThoughtsCha
           onCancel={backendSwitch.clearPending}
         />
       ) : null}
-      {!isChatMode ? <SessionCacheIndicator session={isSingleMode ? singleRuntimeSessionRef.current : threadId ?? null}
+      <SessionCacheProvider enabled={!isChatMode} session={isSingleMode ? singleRuntimeSessionRef.current : threadId ?? null}
         runtime={isSingleMode ? singleRuntime : activeBackendIdentity}
         model={orchestratorModel ?? [...backendMessages].reverse().find(entry => entry.role === 'assistant')?.model ?? null}
-        entries={backendMessages} running={displayWaiting} /> : null}
+        entries={backendMessages} running={displayWaiting}>
       <VisualComposerArea dictationScopeKey={JSON.stringify([workspaceModeKey, lockedMode ?? orchestrationMode, threadId ?? 'draft'])} visual={{ active: open && isOrchestratorMode && !contextualConversation,
         target: threadId && resolvedRepoPath ? { threadId, repoPath: resolvedRepoPath } : null,
         label: `${composerRepoLabel} · current chat`, capture: captureQueuedSend }}
@@ -2101,7 +2101,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, ThoughtsCha
         onPermissionModeChange={setPermissionMode}
         contextLocationSlot={composeFirst ? composerBelowSlot : undefined}
         promptStash={isOrchestratorMode && !isChatMode ? { repoPath: resolvedRepoPath ?? '~', threadId, onRestore: fillInput } : undefined}
-      />
+      /></SessionCacheProvider>
       {annotatingIndex !== null && attachedImages[annotatingIndex] ? (() => {
         const idx = annotatingIndex;
         const target = attachedImages[idx];
