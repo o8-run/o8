@@ -757,3 +757,7 @@ mod transcript_tests;
 #[cfg(test)]
 #[path = "image_history_tests.rs"]
 mod image_history_tests;
+
+#[cfg(test)]
+#[path = "image_cache_tests.rs"]
+mod image_cache_tests;
