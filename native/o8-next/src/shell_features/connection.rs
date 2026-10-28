@@ -6,6 +6,7 @@ use std::io::Read;
 
 #[derive(Default)]
 pub(super) struct Runtime {
+    bootstrapped: bool,
     hidden: bool,
     restore: Option<(Option<String>, FocusHandle)>,
     status: Option<Entity<Status>>,
@@ -127,19 +128,29 @@ impl ShellExtension for Connection {
                 s.loading = false;
                 match result {
                     Ok((sessions, load)) => {
+                        let bootstrap = !s.features.get::<Runtime>().bootstrapped;
+                        s.features.get::<Runtime>().bootstrapped = true;
                         let recovering = !s.connected;
                         let selected = s.state.selected.clone();
                         s.sessions = sessions;
                         s.workspaces = load.paths.into_iter().collect();
                         s.connected = true;
                         let active = load.active_project.as_ref().unwrap_or(&s.workspaces);
-                        if !s
-                            .state
-                            .selected
-                            .as_ref()
-                            .is_some_and(|w| active.contains(w))
+                        if bootstrap
+                            || !s
+                                .state
+                                .selected
+                                .as_ref()
+                                .is_some_and(|w| s.workspaces.contains(w))
                         {
-                            s.state.selected = active.first().cloned();
+                            if !s
+                                .state
+                                .selected
+                                .as_ref()
+                                .is_some_and(|w| active.contains(w))
+                            {
+                                s.state.selected = active.first().cloned();
+                            }
                         }
                         if recovering {
                             s.notice.clear();

@@ -98,7 +98,7 @@ impl EventEmitter<Event> for ThreadList {}
 impl ThreadList {
     #[cfg(test)]
     pub(crate) fn diagnostic(&self) -> serde_json::Value {
-        json!({"headerMenu":self.header_menu,"project":self.header.ledger.active_project_id,"notice":self.notice,"rename":self.rename,"editing":self.editing,"saving":self.saving,"loading":self.loading,"selected":self.selected,"choice":self.choice_row()})
+        json!({"headerMenu":self.header_menu,"project":self.header.ledger.active_project_id,"notice":self.notice,"rename":self.rename,"editing":self.editing,"saving":self.saving,"loading":self.loading,"selected":self.selected,"choice":self.choice_row(),"dirty":self.dirty.is_some(),"generation":self.generation})
     }
     pub fn new(client: Client, cx: &mut Context<Self>) -> Self {
         let editor = cx.new(Composer::new);

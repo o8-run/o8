@@ -166,5 +166,14 @@ pub(super) fn ready(shell: &Entity<Shell>, cx: &mut VisualTestContext) {
             return;
         }
     }
-    panic!("selected fixture history must reach CPU scene paint through the existing surface");
+    panic!(
+        "selected fixture history must reach CPU scene paint through the existing surface: {:?}",
+        shell.read_with(cx, |s, _| (
+            s.connected,
+            s.loading,
+            s.state.selected.clone(),
+            s.active(),
+            s.notice.clone()
+        ))
+    );
 }

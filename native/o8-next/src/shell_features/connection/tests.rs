@@ -1,6 +1,8 @@
 use super::*;
 use crate::shell::test_support::*;
 use crate::shell_state::State;
+#[path = "refresh_tests.rs"]
+mod maintenance;
 // Drive main's retained sidebar lifecycle too: a streamed update can fence an
 // in-flight HTTP load, which is retried by the normal shell tick.
 fn settled(shell: &Entity<Shell>, cx: &mut VisualTestContext) {
@@ -37,9 +39,9 @@ fn shell_recovers_from_down_and_restart_without_reopening(cx: &mut TestAppContex
     assert_eq!(shell.read_with(cx, |s, _| s.notice.clone()), "Server down");
     let _restarted = Fixture::on_port(url::Url::parse(&origin).unwrap().port().unwrap());
     shell.update_in(cx, |s, window, cx| s.tick(true, window, cx));
-    ready(&shell, cx);
     settled(&shell, cx);
     assert!(shell.read_with(cx, |s, _| s.connected));
+    ready(&shell, cx);
     let selected = shell.read_with(cx, |s, _| s.state.selected.clone());
     let tab = shell.read_with(cx, |s, _| s.active().unwrap());
     let entity = shell.read_with(cx, |s, _| match &s.content[&s.key(&tab)] {
@@ -75,7 +77,6 @@ fn shell_recovers_from_down_and_restart_without_reopening(cx: &mut TestAppContex
     let overlay_focus = cx.update(|window, cx| window.focused(cx).unwrap());
     let _again = Fixture::on_port(url::Url::parse(&origin).unwrap().port().unwrap());
     shell.update_in(cx, |s, window, cx| s.tick(true, window, cx));
-    ready(&shell, cx);
     settled(&shell, cx);
     assert!(shell.read_with(cx, |s, _| s.connected));
     cx.update(|window, cx| {
@@ -87,6 +88,9 @@ fn shell_recovers_from_down_and_restart_without_reopening(cx: &mut TestAppContex
     });
     cx.simulate_keystrokes("escape");
     assert!(shell.read_with(cx, |s, _| s.surfaces.shortcuts.view.is_none()));
+    // The restarted fixture has a new workspace and history surface. That
+    // surface can acknowledge paint only after the preserved overlay closes.
+    ready(&shell, cx);
 }
 
 #[gpui::test]
@@ -196,7 +200,8 @@ fn shell_connection_checks_are_single_flight_and_keep_current_view(cx: &mut Test
         draw(cx);
         assert!(
             Instant::now() < deadline,
-            "refresh deferred by a failed save must settle"
+            "refresh deferred by a failed save must settle: {}",
+            sidebar.read_with(cx, |s, _| s.diagnostic())
         );
         std::thread::sleep(Duration::from_millis(10));
     }
@@ -688,9 +693,17 @@ fn reconnect_preserves_main_palette_recovery_and_shortcut_commands(cx: &mut Test
     });
     draw(cx);
     assert!(cx.debug_bounds("shortcut-reference").is_some());
+    assert!(shell.read_with(cx, |s, _| s.shortcuts));
+    let before = renders(cx);
     cx.simulate_keystrokes("escape");
     draw(cx);
-    assert!(cx.debug_bounds("shortcut-reference").is_none());
+    assert!(
+        !shell.read_with(cx, |s, _| s.shortcuts),
+        "Escape must dismiss shortcut state"
+    );
+    // GPUI retains old debug bounds across frames. Check the live state and
+    // that its owner repainted, rather than absence from that historical map.
+    assert!(renders(cx) > before, "dismissal must repaint shell chrome");
     assert!(!shell.read_with(cx, |s, _| s.connected));
     static OFFLINE_FEATURE: super::super::PaletteCommand = super::super::PaletteCommand {
         id: "offline-refusal",
