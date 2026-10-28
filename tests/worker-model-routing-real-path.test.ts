@@ -1,3 +1,4 @@
+import { codexModelListFixtureScript } from './helpers/codex-model-list-fixture';
 import { execFileSync } from 'node:child_process';
 import {
   chmodSync,
@@ -138,8 +139,9 @@ if (args.includes('--version')) {
   process.stdout.write('codex-cli 0.145.0\\n');
   process.exit(0);
 }
+${codexModelListFixtureScript()}
 if (args[0] !== 'exec') process.exit(0);
-appendFileSync(process.env.O8_TEST_CODEX_ARGS_FILE, JSON.stringify(args) + '\\n');
+appendFileSync(${JSON.stringify(argsPath)}, JSON.stringify(args) + '\\n');
 const outputIndex = args.indexOf('--output-last-message');
 if (outputIndex >= 0 && args[outputIndex + 1]) {
   writeFileSync(args[outputIndex + 1], 'Configured Brain answer.');
@@ -147,6 +149,7 @@ if (outputIndex >= 0 && args[outputIndex + 1]) {
 }
 process.stdout.write(JSON.stringify({ type: 'thread.started', thread_id: 'worker-' + process.pid }) + '\\n');
 process.stdout.write(JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 1, output_tokens: 1 } }) + '\\n');
+}
 `;
   writeFileSync(fakeCodexPath, fixture, 'utf8');
   chmodSync(fakeCodexPath, 0o755);

@@ -34,7 +34,7 @@ const receipt = {
   kind: 'native', pid: process.pid, cwd: process.cwd(), home: process.env.CODEX_HOME, threadId, args,
 };
 if (!args.some(arg => arg.startsWith('sandbox_mode='))) {
-  appendFileSync(process.env.O8_NATIVE_TEST_RECEIPTS, JSON.stringify(receipt) + '\\n');
+  appendFileSync(${JSON.stringify(receipts)}, JSON.stringify(receipt) + '\\n');
 }
 let writeDenied = false;
 try { writeFileSync(process.cwd() + '/sandbox-write-probe', 'fixture'); } catch { writeDenied = true; }
@@ -47,17 +47,28 @@ console.log(JSON.stringify({ type: 'turn.completed' }));
 writeFileSync(entry, `#!/usr/bin/env node
 import { appendFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
-if (!process.argv.includes('--version')) appendFileSync(process.env.O8_NATIVE_TEST_RECEIPTS,
+if (process.argv[2] === 'app-server') {
+  appendFileSync(${JSON.stringify(receipts)}, JSON.stringify({ kind: 'discovery', home: process.env.CODEX_HOME }) + '\\n');
+  const { createInterface } = await import('node:readline');
+  createInterface({ input: process.stdin }).on('line', line => {
+    const message = JSON.parse(line); if (!message.id) return;
+    const result = message.method === 'model/list' ? { data: [{ model: 'gpt-6.1-sol', isDefault: true,
+      supportedReasoningEfforts: [{ reasoningEffort: 'medium' }] }] }
+      : message.method === 'config/read' ? { config: {} } : {};
+    console.log(JSON.stringify({ id: message.id, result }));
+  }).on('close', () => process.exit(0));
+} else {
+if (!process.argv.includes('--version')) appendFileSync(${JSON.stringify(receipts)},
   JSON.stringify({ kind: 'npm-launcher', pid: process.pid }) + '\\n');
 const child = spawn(${JSON.stringify(native)}, process.argv.slice(2), { stdio: 'inherit', env: process.env });
 child.on('exit', code => process.exit(code ?? 1));
+}
 `);
 chmodSync(native, 0o700);
 chmodSync(entry, 0o700);
 if (process.platform !== 'win32') symlinkSync(entry, binary);
 vi.stubEnv('O8_CODEX_BIN', binary);
 vi.stubEnv('CORTEX_IDE_OWNED_CODEX_ROOT', sessions);
-vi.stubEnv('O8_NATIVE_TEST_RECEIPTS', receipts);
 vi.stubEnv('O8_CRASH_SURVIVABLE_WORKERS', '1');
 vi.stubEnv('O8_WORKER_SANDBOX', 'off');
 
@@ -125,6 +136,7 @@ describe.skipIf(process.platform === 'win32')('native Codex worker launch throug
     const proof = raw.split('\n').filter(Boolean).map(line => JSON.parse(line)).find(event => event.type === 'fixture.start');
     expect(proof).toMatchObject({ writeDenied: true, receipt: { cwd: worker.saved.repoPath, home: worker.home, threadId: worker.saved.threadId } });
     expect(proof.receipt.args).toContain('sandbox_mode="danger-full-access"');
+    expect(calls()).toContainEqual(expect.objectContaining({ kind: 'discovery', home: worker.home }));
     expect(existsSync(join(worker.cwd, 'sandbox-write-probe'))).toBe(false);
   }, 30_000);
 

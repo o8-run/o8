@@ -1,3 +1,4 @@
+import { codexModelListFixtureScript } from './helpers/codex-model-list-fixture';
 import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { delimiter, join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -43,11 +44,13 @@ beforeAll(() => {
 const fs = require('node:fs');
 const args = process.argv.slice(2);
 if (args.includes('--version')) { console.log('codex-cli 0.159.2'); process.exit(0); }
+${codexModelListFixtureScript()}
 fs.appendFileSync(${JSON.stringify(capture)}, JSON.stringify(args) + '\\n');
 console.log(JSON.stringify({ type: 'thread.started', thread_id: 'fixture-thread' }));
 console.log(JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 1, output_tokens: 1 } }));
 // Keep the finite transport alive long enough for process-identity admission.
 setTimeout(() => {}, 100);
+}
 `);
   chmodSync(binary, 0o700);
   writeFileSync(join(root, 'codex'), readFileSync(binary));

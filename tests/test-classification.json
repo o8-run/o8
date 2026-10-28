@@ -2951,6 +2951,14 @@
       ]
     },
     {
+      "path": "tests/discovered-worker-effort-review-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/dispatch-mission-runtime-override-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -4341,6 +4349,15 @@
       "reasons": [
         "network-listener",
         "real-path"
+      ]
+    },
+    {
+      "path": "tests/model-effort-evidence-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path",
+        "worktree-api"
       ]
     },
     {
@@ -7539,6 +7556,15 @@
         "real-path"
       ],
       "browser": true
+    },
+    {
+      "path": "tests/worker-effort-evidence-matrix-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path",
+        "worktree-api"
+      ]
     },
     {
       "path": "tests/worker-environment-dispatch-real-path.test.ts",

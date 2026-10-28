@@ -1,7 +1,7 @@
 import { assertWorkerMemoryCurrent, mergePreparedWorkerMemory, refreshOwnedWorkerMemory } from '@/lib/dispatch/worker-memory-context';
 import { hasRuntimeLaunchDeadline, runtimeLaunchRead, runtimeLaunchStep } from '@/lib/runtime/launch-deadline';
 import { createWorkerFailureHandler } from './worker-failure';
-import { assertRuntimeEffortPin } from '@/lib/orchestrator/effort-pin';
+import { assertRuntimeModelEffortPin } from '@/lib/orchestrator/effort-pin';
 import { assertOwnedActionFence, hasOwnedActionFence } from './action-fence';
 import { createCapacityRecovery } from './capacity-wait';
 import { packetCargoEnvironment } from '@/lib/worktree/cargo-target-cache';
@@ -406,7 +406,8 @@ export function createOwnedRunController({
 
   async function spawnOwnedRunInner(session: OwnedSessionRecord, prompt: string, mode: OwnedRunMode, freshRequest = false) {
     ({ prompt, mode } = await refreshOwnedWorkerMemory(session, prompt, mode, freshRequest));
-    assertRuntimeEffortPin(runtimeId, session.model, session.effort, session.identity?.configHomeRef ?? adapter.defaultConfigHome?.());
+    await assertRuntimeModelEffortPin(runtimeId, session.model, session.effort, { cwd: session.repoPath,
+      configHome: session.identity?.configHomeRef ?? (runtimeId === 'muse' ? session.runtimeConfig?.museConfigRoot : adapter.defaultConfigHome?.()), runtimeConfig: session.runtimeConfig });
     assertOwnedSingleAttemptSpawn(session, runtimeId, mode);
     await runtimeLaunchStep(session, 'run_directory', () => ensureDir(path.join(session.sessionDir, RUNS_DIR)));
 

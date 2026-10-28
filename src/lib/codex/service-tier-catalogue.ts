@@ -9,17 +9,25 @@ import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 import { pathWithNodeRuntime } from '@/lib/util/node-on-path';
 import { codexServiceTierOptions, isOrchestratorServiceTier, type OrchestratorServiceTier, type ServiceTierOption } from '@/lib/orchestrator/service-tier';
 
-export interface CodexSpeedCatalogue { models: Record<string, ServiceTierOption[]>; configuredTier?: OrchestratorServiceTier }
+export interface CodexSpeedCatalogue {
+  models: Record<string, ServiceTierOption[]>;
+  /** Complete model/list effort choices; null means the capability was not reported. */
+  reasoningEfforts?: Record<string, string[] | null>;
+  configuredTier?: OrchestratorServiceTier;
+  /** model/list default, before config/read overrides; exec ignores user config. */
+  nativeDefaultModel?: string;
+  defaultModel?: string;
+}
 let cache: { key: string; at: number; promise: Promise<CodexSpeedCatalogue> } | null = null;
 
 /** Read-only model/list and config/read; never creates a thread or a provider turn. */
-export async function getCodexSpeedCatalogue(home = path.join(homedir(), '.codex')): Promise<CodexSpeedCatalogue> {
+export async function getCodexSpeedCatalogue(home = path.join(homedir(), '.codex'), fresh = false): Promise<CodexSpeedCatalogue> {
   const binary = await resolveCli({ runtimeId: 'codex', binaryName: 'codex', envOverride: 'O8_CODEX_BIN' });
   // Match prepareCodexHome's source account; validation passes the prepared home.
   const authStat = await stat(path.join(home, 'auth.json')).catch(() => null);
   const configStat = await stat(path.join(home, 'config.toml')).catch(() => null);
   const key = `${binary.path}:${binary.version}:${home}:${authStat?.mtimeMs}:${configStat?.mtimeMs}:${credentialPolicyFingerprint('codex')}`;
-  if (cache?.key === key && Date.now() - cache.at < 5 * 60_000) return cache.promise;
+  if (!fresh && cache?.key === key && Date.now() - cache.at < 5 * 60_000) return cache.promise;
   const promise = readCodexSpeedCatalogue(binary.path, childEnvironment({ runtimeId: 'codex', env: { CODEX_HOME: home, PATH: pathWithNodeRuntime() } }));
   cache = { key, at: Date.now(), promise };
   promise.catch(() => { if (cache?.promise === promise) cache = null; });
@@ -56,19 +64,32 @@ export function readCodexSpeedCatalogue(binary: string, env: NodeJS.ProcessEnv, 
           send(2, 'model/list', { includeHidden: false }); send(3, 'config/read', { includeLayers: false });
         } else if (reply.id === 2) {
           if (reply.error || !Array.isArray(reply.result?.data)) { finish(new Error('Codex did not return a model catalogue.')); return; }
-          catalogue = { models: Object.fromEntries(reply.result.data.flatMap((model: { model?: unknown; serviceTiers?: unknown; additionalSpeedTiers?: unknown }) => typeof model.model === 'string' ? [[model.model, codexServiceTierOptions(model)]] : [])) };
+          const models = reply.result.data as Array<{ model?: unknown; serviceTiers?: unknown; additionalSpeedTiers?: unknown; supportedReasoningEfforts?: unknown; isDefault?: unknown }>;
+          catalogue = {
+            nativeDefaultModel: models.find(model => model.isDefault === true && typeof model.model === 'string')?.model as string | undefined,
+            defaultModel: models.find(model => model.isDefault === true && typeof model.model === 'string')?.model as string | undefined,
+            models: Object.fromEntries(models.flatMap(model => typeof model.model === 'string' ? [[model.model, codexServiceTierOptions(model)]] : [])),
+            reasoningEfforts: Object.fromEntries(models.flatMap(model => typeof model.model === 'string' ? [[model.model,
+              Array.isArray(model.supportedReasoningEfforts)
+                ? model.supportedReasoningEfforts.flatMap(option => option && typeof option.reasoningEffort === 'string' ? [option.reasoningEffort] : [])
+                : null,
+            ]] : [])),
+          };
         } else if (reply.id === 3) {
           configDone = true;
           const tier = reply.result?.config?.service_tier;
+          const model = reply.result?.config?.model;
+          if (typeof model === 'string' && model.trim()) configuredModel = model;
           if (isOrchestratorServiceTier(tier)) {
             // config/read may arrive before model/list.
             configuredTier = tier;
           }
         }
-        if (catalogue && configDone) { if (configuredTier) catalogue.configuredTier = configuredTier; finish(); return; }
+        if (catalogue && configDone) { if (configuredModel) catalogue.defaultModel = configuredModel; if (configuredTier) catalogue.configuredTier = configuredTier; finish(); return; }
       }
     });
     let configuredTier: OrchestratorServiceTier | undefined;
+    let configuredModel: string | undefined;
     send(1, 'initialize', { clientInfo: { name: 'o8-speed-catalogue', version: '1' }, capabilities: { experimentalApi: true } });
   });
 }

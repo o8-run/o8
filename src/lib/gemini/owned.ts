@@ -19,6 +19,7 @@
  */
 
 import path from 'node:path';
+import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { RuntimeReviewCommandEvidence } from '@/lib/fleet/types';
 import {
   compactText,
@@ -41,6 +42,7 @@ export type OwnedGeminiLaunchRequest = {
   promptMemoryRevision?: string;
   clientMutationId?: string;
   model?: string;
+  effort?: ThinkingEffort;
   laneId?: string;
   packetId?: string;
 };

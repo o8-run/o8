@@ -8,7 +8,7 @@ import { createMission, type ExistingBranchPolicy, type LoadedIssue } from '@/li
 import { getOperatorDefaultsSync, resolveDefaultDispatchRuntimeSync } from '@/lib/operator/defaults';
 import { resolveSubscriptionProfileRouting } from '@/lib/operator/subscription-profile';
 import { resolveWorkerHuddle } from '@/lib/operator/worker-start-mode';
-import { resolveEffortAliases, resolveEffortPin } from '@/lib/orchestrator/effort-pin';
+import { resolveEffortAliases, resolveRuntimeEffortPin } from '@/lib/orchestrator/effort-pin';
 import { resolveComparisonCandidateTarget } from '@/lib/orchestrator/comparison-fanout';
 import { normalizePacketTaskContract } from '@/lib/orchestrator/packet-task-contract';
 import {
@@ -275,14 +275,14 @@ export async function POST(request: NextRequest) {
   const missionRoutingUsed = issues.some((issue) => !issue.runtime);
   const missionAndIssueRoutings = missionRoutingUsed ? [workerRouting, ...issueRoutings] : issueRoutings;
   const comparisonCandidates = normalizeComparisonModels(record.comparisonModels) ?? [];
-  const effortPinFailure = [
-    ...missionAndIssueRoutings.map((routing) => resolveEffortPin({
+  const effortPinFailure = (await Promise.all([
+    ...missionAndIssueRoutings.map((routing) => resolveRuntimeEffortPin({
       requestedEffort: requestedEffortRaw,
       runtime: routing.selectedRuntime,
       explicitModel: requestedModelText,
       model: actualMissionModel(routing),
       modelDisposition: routing.modelDisposition,
-    })),
+    }, { cwd: repoPath })),
     // Each packet fans comparison candidates out on ITS runtime; judge every
     // candidate against the runtime/model it will actually launch on.
     ...missionAndIssueRoutings.flatMap((routing) => comparisonCandidates.map((candidate) => {
@@ -296,15 +296,15 @@ export async function POST(request: NextRequest) {
         confidence: routing.confidence,
         source: 'create-mission-api-comparison',
       });
-      return resolveEffortPin({
+      return resolveRuntimeEffortPin({
         requestedEffort: requestedEffortRaw,
         runtime: candidateRouting.selectedRuntime,
         explicitModel: target.explicitModel,
         model: actualMissionModel(candidateRouting),
         modelDisposition: candidateRouting.modelDisposition,
-      });
+      }, { cwd: repoPath });
     })),
-  ].find((result) => !result.ok);
+  ])).find((result) => !result.ok);
   if (effortPinFailure && !effortPinFailure.ok) {
     return operatorError(effortPinFailure.code, effortPinFailure.message, 400);
   }

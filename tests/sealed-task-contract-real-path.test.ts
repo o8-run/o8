@@ -9,6 +9,8 @@ import { MODEL_IDS } from '@/lib/models';
 import type { RuntimeLaunchRequest } from '@/lib/runtime/actions';
 import type { McpToolResult } from '@/lib/mcp/operator-handlers/shared';
 
+vi.mock('@/lib/codex/service-tier-catalogue', async () => ({ getCodexSpeedCatalogue: async () =>
+  (await import('./helpers/codex-model-list-fixture')).codexEffortCatalogFixture }));
 vi.mock('@/lib/skeleton/autoscan', () => ({ triggerScan: vi.fn(), triggerScanIfStale: vi.fn(), startChangePolling: vi.fn(), stopChangePolling: vi.fn() }));
 vi.mock('@/lib/runtimes/shared/auth-detect', async (original) => ({
   ...await original<typeof import('@/lib/runtimes/shared/auth-detect')>(),

@@ -1,16 +1,14 @@
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
-import { randomUUID } from 'node:crypto';
-import { getDataDir } from '@/lib/data-dir-migration';
 import { boundedMuseRequest, createMuseHost } from './host';
 import { museRecord } from './protocol';
+import { captureMuseRuntimeConfig, museRoot } from './roots';
+import { getSelectedRuntimeIdentity } from '@/lib/runtime/identity-catalog';
 
 export interface MuseModel {
   id: string;
   label: string;
   provider: string;
   isDefault: boolean;
-  efforts: string[];
+  efforts: string[] | null;
 }
 
 export interface MuseModelCatalog {
@@ -20,7 +18,6 @@ export interface MuseModelCatalog {
   authStatus: 'unknown';
 }
 
-const inFlight = new Map<string, Promise<MuseModelCatalog>>();
 const validEfforts = new Set(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']);
 
 export function decodeMuseModels(value: unknown): MuseModel[] {
@@ -33,32 +30,25 @@ export function decodeMuseModels(value: unknown): MuseModel[] {
     seen.add(row.modelId);
     return [{ id: row.modelId, label: typeof row.displayLabel === 'string' ? row.displayLabel : row.modelId,
       provider: 'meta', isDefault: row.isDefault === true,
-      efforts: Array.isArray(row.variants) ? row.variants.filter((value): value is string => typeof value === 'string' && validEfforts.has(value)) : [] }];
+      efforts: Array.isArray(row.variants) ? row.variants.filter((value): value is string => typeof value === 'string' && validEfforts.has(value)) : null }];
   });
 }
 
 /** Discovery executes no turn and never promotes catalog presence into login evidence. */
-export async function probeMuseModels(cwd: string, force = false): Promise<MuseModelCatalog> {
-  const cache = join(getDataDir(), 'muse', 'models.json');
-  if (!force) {
-    const saved = await readFile(cache, 'utf8').then(raw => JSON.parse(raw) as MuseModelCatalog).catch(() => null);
-    if (saved && Array.isArray(saved.models) && Date.now() - Date.parse(saved.observedAt) < 15 * 60_000) return { ...saved, source: 'cache', authStatus: 'unknown' };
-  }
-  const key = cwd;
-  const existing = inFlight.get(key);
-  if (existing) return existing;
-  const promise = (async () => {
-    const host = await createMuseHost({ cwd, readOnly: true });
-    try {
-      const models = decodeMuseModels(await boundedMuseRequest(host.connection.request('model/list', {}), host));
-      const result: MuseModelCatalog = { models, observedAt: new Date().toISOString(), source: 'probe', authStatus: 'unknown' };
-      await mkdir(dirname(cache), { recursive: true });
-      const temporary = `${cache}.${randomUUID()}.tmp`;
-      await writeFile(temporary, JSON.stringify(result), { mode: 0o600 });
-      await rename(temporary, cache);
-      return result;
-    } finally { await host.close(); }
-  })();
-  inFlight.set(key, promise);
-  try { return await promise; } finally { if (inFlight.get(key) === promise) inFlight.delete(key); }
+export async function probeMuseModels(cwd: string, _force = false, config = captureMuseRuntimeConfig()): Promise<MuseModelCatalog> {
+  // The protocol snapshot has no account revision or subscription. A cached
+  // result cannot establish support after sign-in, config or model changes.
+  const host = await createMuseHost({ cwd, readOnly: true,
+    configRoot: museRoot(config.museConfigRoot, true), dataRoot: museRoot(config.museDataRoot, true) });
+  try {
+    return { models: decodeMuseModels(await boundedMuseRequest(host.connection.request('model/list', {}), host)),
+      observedAt: new Date().toISOString(), source: 'probe', authStatus: 'unknown' };
+  } finally { await host.close(); }
+}
+
+export async function museWorkerModelContext(persisted?: Record<string, string>) {
+  if (persisted?.museConfigRoot && persisted.museDataRoot) return persisted;
+  const config = captureMuseRuntimeConfig();
+  const selected = await getSelectedRuntimeIdentity('muse');
+  return { ...config, museConfigRoot: selected ? museRoot(selected.configHomeRef) : config.museConfigRoot };
 }
