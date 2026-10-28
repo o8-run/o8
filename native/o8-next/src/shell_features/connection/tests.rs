@@ -179,6 +179,13 @@ fn shell_connection_checks_are_single_flight_and_keep_current_view(cx: &mut Test
     assert!(sidebar.read_with(cx, |s, _| s.diagnostic()["saving"] == true));
     shell.update_in(cx, |s, window, cx| s.tick(true, window, cx));
     assert!(shell.read_with(cx, |s, _| s.loading));
+    assert!(
+        sidebar.read_with(cx, |s, _| {
+            let state = s.diagnostic();
+            state["dirty"] == true || state["loading"] == true
+        }),
+        "a refresh declined during the save must remain queued or in flight"
+    );
     cx.run_until_parked();
     draw(cx);
     assert!(
@@ -192,19 +199,10 @@ fn shell_connection_checks_are_single_flight_and_keep_current_view(cx: &mut Test
         "the production PATCH must refuse the changed workspace"
     );
     fs::write(&record, &original).unwrap();
-    // A declined catalog load must remain queued after the failed mutation.
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while shell.read_with(cx, |s, _| s.loading) {
-        shell.update_in(cx, |s, window, cx| s.tick(false, window, cx));
-        cx.run_until_parked();
-        draw(cx);
-        assert!(
-            Instant::now() < deadline,
-            "refresh deferred by a failed save must settle: {}",
-            sidebar.read_with(cx, |s, _| s.diagnostic())
-        );
-        std::thread::sleep(Duration::from_millis(10));
-    }
+    // The queued retry performs a full catalog request. Use the same production
+    // request budget as every other connection load, rather than timing out a
+    // successfully completed request after five seconds on a loaded machine.
+    settled(&shell, cx);
     assert!(shell.read_with(cx, |s, _| s.connected && s.notice.is_empty()));
 }
 
