@@ -31,12 +31,42 @@ describe('orchestrator error display limits', () => {
     expect(orchestratorErrorText(`${frame}${reason}\n    at main (bridge.mjs:2:1)`)).toBe(reason);
   });
 
+  it.each(['async', 'new'])('keeps a locationless at %s message line', modifier => {
+    const reason = `Error: first line\n    at ${modifier} something\nlast line with actual reason`;
+    expect(orchestratorErrorText(`${frame}${reason}\n    at main (bridge.mjs:2:1)`)).toBe(reason);
+  });
+
+  it.each(['async', 'new'])('stops at at %s frames with locations', modifier => {
+    for (const location of [
+      'run (file:///bundle/bridge.mjs:2:1)',
+      'file:///bundle/bridge.mjs:2:1',
+      'node:internal/modules/run_main',
+      '<anonymous>',
+      'native',
+      'Promise.any (index 0)',
+      'Promise.allSettled (index 1)',
+      'run (<anonymous>)',
+      'run (native)',
+      'run (node:internal/modules/run_main)',
+    ]) {
+      expect(orchestratorErrorText(`Error: actual reason\n    at ${modifier} ${location}`)).toBe('Error: actual reason');
+    }
+  });
+
   it.each([
     'at run (file:///bundle/bridge.mjs:2:1)',
     'at file:///bundle/bridge.mjs:2:1',
     'at async Promise.all (index 0)',
+    'at Promise.any (index 0)',
+    'at async Promise.any (index 0)',
+    'at Promise.allSettled (index 1)',
+    'at async Promise.allSettled (index 1)',
     'at new Worker (node:internal/worker:1:2)',
     'at <anonymous>',
+    'at Array.map (<anonymous>)',
+    'at native',
+    'at callback (native)',
+    'at run (node:internal/modules/run_main)',
     'at node:internal/modules/run_main',
   ])('stops at the V8 frame %s', stackFrame => {
     expect(orchestratorErrorText(`Error: actual reason\n    ${stackFrame}`)).toBe('Error: actual reason');
