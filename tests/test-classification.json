@@ -7501,6 +7501,12 @@
       ]
     },
     {
+      "path": "tests/worker-catalog-failure-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/worker-corrections-real-path.test.ts",
       "reasons": [
         "child-process",
