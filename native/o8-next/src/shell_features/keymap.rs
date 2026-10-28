@@ -67,7 +67,7 @@ fn action(
     cx: &mut Context<Shell>,
 ) {
     use crate::keymap::Shortcut;
-    if palette::action(s, action, window, cx)
+    if super::super::palette::action(s, action, window, cx)
         || registry::extensions().any(|extension| extension.action(s, action, window, cx))
     {
         s.revision += 1;

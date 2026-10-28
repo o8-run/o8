@@ -6,10 +6,8 @@ pub(super) mod target;
 pub(super) type Slice = EmptyState;
 pub(super) type Runtime = ();
 pub(super) const REGISTRATION: Registration = Registration {
-    extension: Some(&Palette),
     ..Registration::new("", "", |_, _, _, _| None)
 };
-struct Palette;
 #[derive(Clone)]
 pub(super) enum Entry {
     Surface(Command),
