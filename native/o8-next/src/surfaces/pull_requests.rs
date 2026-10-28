@@ -25,6 +25,26 @@ pub(super) const REGISTRATION: Registration = Registration {
             .insert(workspace, view.clone());
         Some(Content::PullRequests(view))
     },
+    // The rail entry lives with the surface, so removing this registration
+    // removes the entry with it.
+    nav: |s, position, cx| {
+        if position != NavPosition::BeforeWorkspaces {
+            return vec![];
+        }
+        vec![
+            super::rail::button(
+                "rail-pull-requests",
+                super::rail::Icon::PullRequest,
+                "PRs",
+                s.active() == Some(Tab::PullRequests),
+            )
+            .on_click(cx.listener(|this, _, window, cx| {
+                this.capture(window, cx);
+                this.execute(Command::PullRequests, window, cx);
+            }))
+            .into_any_element(),
+        ]
+    },
     ..Registration::new("Pull requests", "Open pull requests", |_, _, _, _| {
         Some((Tab::PullRequests, false))
     })

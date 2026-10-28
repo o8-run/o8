@@ -59,7 +59,7 @@ fn material() -> NSVisualEffectMaterial {
     // SAFETY: the name is NUL-terminated and the buffer length is passed in and out.
     let found = unsafe {
         sysctlbyname(
-            c"kern.osproductversion".as_ptr(),
+            b"kern.osproductversion\0".as_ptr().cast(),
             buffer.as_mut_ptr().cast(),
             &mut length,
             std::ptr::null_mut(),
@@ -85,7 +85,12 @@ fn material() -> NSVisualEffectMaterial {
     }
 }
 
-unsafe extern "C" {
+// The pinned syntax reader treats macro token trees opaquely (as in
+// sidebar/calendar.rs); the compiler still checks the declaration.
+macro_rules! system_abi {
+    ($($declaration:tt)*) => { unsafe extern "C" { $($declaration)* } };
+}
+system_abi! {
     fn sysctlbyname(
         name: *const std::ffi::c_char,
         oldp: *mut std::ffi::c_void,

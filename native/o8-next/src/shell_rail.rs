@@ -201,17 +201,14 @@ fn gauge() -> Stateful<Div> {
         .child(glyph(
             Icon::Gauge,
             if usage.highest.is_some_and(|r| r >= 0.8) {
-                rgb(BRAND_ORANGE)
+                crate::theme::brand_orange()
             } else {
                 theme().text_muted
             },
         ))
         .child(meter(usage.codex, theme().accent, 6.))
-        .child(meter(usage.claude, rgb(BRAND_ORANGE), 2.))
+        .child(meter(usage.claude, crate::theme::brand_orange(), 2.))
 }
-
-// --t-brand-orange in src/lib/theme/registry.ts.
-const BRAND_ORANGE: u32 = 0xff5a1f;
 
 fn divider() -> Div {
     div()
@@ -315,13 +312,6 @@ impl Shell {
             }))
             .child(divider())
             .children(top)
-            .child(tab(
-                "rail-pull-requests",
-                Icon::PullRequest,
-                "PRs",
-                Tab::PullRequests,
-                || Command::PullRequests,
-            ))
             .child(divider())
             .child(div().flex_1().min_h_0())
             .child(gauge())

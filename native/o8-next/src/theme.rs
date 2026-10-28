@@ -61,8 +61,12 @@ pub fn glass() -> bool {
 pub fn plain_background() -> Rgba {
     Theme::for_appearance(Appearance::Dark).background
 }
-/// Floating menus stay opaque: glass surfaces are translucent and would show
-/// the transcript through them.
+// --t-brand-orange in src/lib/theme/registry.ts.
+pub fn brand_orange() -> Rgba {
+    rgb(0xff5a1f)
+}
+/// Floating menus and tooltips stay opaque: glass surfaces are translucent and
+/// would show the content underneath.
 pub fn menu_fill() -> Rgba {
     if glass() {
         Theme::for_appearance(Appearance::Dark).surface_raised

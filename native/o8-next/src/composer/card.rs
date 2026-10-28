@@ -52,7 +52,7 @@ impl Surface {
                 } else {
                     "M7 11h10a3 3 0 0 1 3 3v4a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3v-4a3 3 0 0 1 3-3Z M8 11V7a4 4 0 0 1 7.5-2M12 15v2"
                 },
-                if plan { theme().accent } else { gpui::rgb(0xff5a1f) },
+                if plan { theme().accent } else { crate::theme::brand_orange() },
                 format!("Permissions: {access}"),
             ))
             .child(icon_only(

@@ -3,7 +3,7 @@
 use crate::theme::current as theme;
 use gpui::{
     AssetSource, Context, IntoElement, ParentElement, Render, Rgba, SharedString, Styled, Svg,
-    Window, div, px, rgb, svg,
+    Window, div, px, svg,
 };
 use std::borrow::Cow;
 
@@ -44,7 +44,7 @@ impl Render for Tip {
             .px(px(8.))
             .py(px(4.))
             .rounded(px(6.))
-            .bg(rgb(0x1c1c1e))
+            .bg(crate::theme::menu_fill())
             .border_1()
             .border_color(theme().border)
             .text_color(theme().text)
@@ -60,7 +60,10 @@ mod tests {
 
     #[test]
     fn stroke_assets_carry_weight_and_path() {
-        let svg = Assets.load("o8-stroke/1.6/M12 5v14M5 12h14").unwrap().unwrap();
+        let svg = Assets
+            .load("o8-stroke/1.6/M12 5v14M5 12h14")
+            .unwrap()
+            .unwrap();
         let svg = std::str::from_utf8(&svg).unwrap();
         assert!(svg.contains(r#"stroke-width="1.6""#), "{svg}");
         assert!(svg.contains(r#"d="M12 5v14M5 12h14""#), "{svg}");
