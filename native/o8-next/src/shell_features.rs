@@ -24,7 +24,6 @@ pub(super) struct RenderSlot {
     pub render: fn(&mut Shell, &Frame, &mut Window, &mut Context<Shell>) -> Option<AnyElement>,
 }
 pub(super) struct KeyContext {
-    pub bind_root: Option<fn(gpui::Div, &Shell, &mut Context<Shell>) -> gpui::Div>,
     pub order: i32,
     pub dispatch: fn(&mut Shell, &KeyDownEvent, &mut Window, &mut Context<Shell>) -> KeyResult,
 }
@@ -57,6 +56,9 @@ pub(super) trait ShellFeature: Sync {
     }
     fn keys(&self) -> &'static [KeyContext] {
         &[]
+    }
+    fn bind_input(&self, root: gpui::Div, _: &Shell, _: &mut Context<Shell>) -> gpui::Div {
+        root
     }
     fn commands(&self) -> &'static [PaletteCommands] {
         &[]
@@ -170,9 +172,9 @@ pub(super) fn render_content(
         .collect()
 }
 pub(super) fn bind_input(root: gpui::Div, s: &Shell, cx: &mut Context<Shell>) -> gpui::Div {
-    KEYS.iter()
-        .filter_map(|context| context.bind_root)
-        .fold(root, |root, bind| bind(root, s, cx))
+    modules()
+        .iter()
+        .fold(root, |root, (_, feature)| feature.bind_input(root, s, cx))
 }
 pub(super) fn key(
     s: &mut Shell,

@@ -6,6 +6,9 @@ struct Observers {
     subscriptions: Vec<gpui::Subscription>,
 }
 impl ShellFeature for Keymap {
+    fn bind_input(&self, root: gpui::Div, s: &Shell, cx: &mut Context<Shell>) -> gpui::Div {
+        bind_root(root, s, cx)
+    }
     fn keys(&self) -> &'static [KeyContext] {
         &[KeyContext {
             order: 100,
@@ -19,7 +22,6 @@ impl ShellFeature for Keymap {
                 }
                 KeyResult::Handled
             },
-            bind_root: Some(bind_root),
         }]
     }
     fn observers(&self) -> &'static [PreferenceObserver] {
@@ -71,6 +73,16 @@ fn action(
     cx: &mut Context<Shell>,
 ) {
     use crate::keymap::Shortcut;
+    // Main's connection policy admits management commands while offline, but
+    // hidden content must not receive named actions before the raw-key fallback.
+    if !s.connected
+        && !s.palette
+        && !s.shortcuts
+        && !registrations().iter().any(|r| r.overlay_command && (r.overlay_open)(s))
+        && !matches!(action, Shortcut::Palette | Shortcut::PaletteGlobal | Shortcut::Settings)
+    {
+        return;
+    }
     if super::super::palette::action(s, action, window, cx)
         || registry::extensions().any(|extension| extension.action(s, action, window, cx))
     {

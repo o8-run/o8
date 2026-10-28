@@ -54,7 +54,6 @@ impl ShellFeature for Probe {
     }
     fn keys(&self) -> &'static [KeyContext] {
         &[KeyContext {
-            bind_root: None,
             order: -10,
             dispatch: |s, event, _, _| {
                 if active(s) && event.keystroke.modifiers.alt && event.keystroke.key == "c" {

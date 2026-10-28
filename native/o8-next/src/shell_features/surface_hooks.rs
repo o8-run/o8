@@ -37,7 +37,6 @@ impl ShellFeature for SurfaceHooks {
     }
     fn keys(&self) -> &'static [KeyContext] {
         &[KeyContext {
-            bind_root: None,
             order: 0,
             dispatch: |s, event, window, cx| {
                 for extension in registry::extensions() {
