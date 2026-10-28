@@ -32,6 +32,7 @@ const repoPath = join(rootDir, 'repo');
 const binary = join(rootDir, 'fixture-codex.mjs');
 const rollout = join(rootDir, 'rollout.jsonl');
 const promptCapture = join(rootDir, 'prompt.txt');
+const contextFixture = join(rootDir, 'context.json');
 vi.stubEnv('CORTEX_IDE_DATA_DIR', dataDir);
 vi.stubEnv('O8_DATA_DIR', dataDir);
 vi.stubEnv('O8_CODEX_BIN', binary);
@@ -39,7 +40,7 @@ vi.stubEnv('O8_COMPACTION_TEST_ROLLOUT', rollout);
 mkdirSync(join(dataDir, 'chat-history'), { recursive: true });
 mkdirSync(repoPath);
 writeFileSync(binary, `#!/usr/bin/env node
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 const out = (message) => console.log(JSON.stringify(message));
 if (process.argv.includes('--version')) { console.log('codex-cli 0.161.0'); process.exit(0); }
 if (process.argv[2] !== 'app-server') {
@@ -69,7 +70,7 @@ process.stdin.on('data', (chunk) => {
       for (let i = 0; i < 16; i++) {
         notify('item/completed', { item: { type: 'mcpToolCall', id: 'tool-' + i, tool: 'inspect_records',
           result: { content: [{ type: 'text', text: 'Evidence: 42 records recovered.' }] } } });
-        const inputTokens = Number(process.env.O8_COMPACTION_TEST_CONTEXT);
+        const inputTokens = JSON.parse(readFileSync(${JSON.stringify(contextFixture)}, 'utf8')).inputTokens;
         notify('thread/tokenUsage/updated', { tokenUsage: {
           last: { inputTokens, cachedInputTokens: 18000, outputTokens: 100, reasoningOutputTokens: 0, totalTokens: inputTokens + 100 },
           total: { inputTokens: inputTokens * (i + 1), cachedInputTokens: 18000 * (i + 1), outputTokens: 100 * (i + 1),
@@ -119,6 +120,7 @@ afterAll(async () => {
 });
 
 async function replay(threadId: string, promptTokens: number) {
+  writeFileSync(contextFixture, JSON.stringify({ inputTokens: promptTokens }));
   const specPath = join(rootDir, 'spec.json');
   writeFileSync(specPath, JSON.stringify({ codexBin: binary, cwd: repoPath, threadId: null,
     message: 'Inspect pagination.', imagePaths: [], config: {}, model: 'gpt-5.5', effort: 'medium', sandbox: 'read-only' }));
@@ -147,6 +149,7 @@ async function runTrigger(threadId: string, telemetry: RuntimeTelemetry | undefi
   let measuredTotal = 0;
   let compacted: Record<string, unknown> | undefined;
   const fetchMock = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+    if (String(url).endsWith('/internal/realtime')) return Response.json({ ok: true });
     if (String(url).startsWith('/api/runtime/telemetry')) {
       return telemetry ? Response.json({ telemetry }) : GET(new NextRequest(`http://localhost${url}`));
     }

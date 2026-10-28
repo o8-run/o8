@@ -8,7 +8,7 @@ import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import { MODEL_IDS } from '@/lib/models';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
-import { getCanonicalChatHistoryPath, persistCanonicalChatHistoryRecord } from '@/lib/llm/chat-history-store';
+import { getCanonicalChatHistoryPath, persistCanonicalChatHistoryRecord, readPersistedLlmChat, withCanonicalChatHistoryLock } from '@/lib/llm/chat-history-store';
 import { logUsage } from '@/lib/db/usage';
 import { scoreCompactionSegment } from '@/lib/orchestrator/compaction-scorer';
 import { clipCompactionText, compactionEntryText } from './compaction-text';
@@ -335,11 +335,11 @@ export async function autoCompactOrchestratorThread(input: {
     while (compactedCount < transcript.length && transcript[compactedCount]!.role !== 'user') {
       compactedCount += 1;
     }
-    const { compactedTurns, pinnedTurns, liveTurns, retainedTurns } = splitCompactionWindow(transcript, compactedCount);
+    const { compactedTurns } = splitCompactionWindow(transcript, compactedCount);
     if (compactedTurns.length === 0) {
       return notApplied(transcript);
     }
-    return withLiveCompaction({ repoPath, threadId }, async () => {
+    return withLiveCompaction({ repoPath, threadId }, async (operation) => {
       const compactedAt = new Date();
       const compactedStamp = fmtStamp(compactedAt);
       // Record-only judgment scores (#2465), asked beside the summarizer; nothing reads them.
@@ -356,6 +356,8 @@ export async function autoCompactOrchestratorThread(input: {
         timestamp: compactedAt.getTime(),
         timestampLabel: compactedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         compaction: {
+          operationId: operation.operationId,
+          startedAt: operation.startedAt,
           timestamp: compactedAt.getTime(),
           tokensBefore: typeof input.runningTotal === 'number' ? input.runningTotal : undefined,
           contextSource: input.contextSource,
@@ -366,10 +368,6 @@ export async function autoCompactOrchestratorThread(input: {
           compactedBy: ORCHESTRATOR_COMPACTION_PROVENANCE,
         },
       };
-      const nextTranscript = [compactionEntry, ...pinnedTurns, ...liveTurns];
-      const resumePrelude = [`Compaction summary (${compactedStamp})`, summary, '', 'Most recent uncompressed turns:', buildExcerpt(retainedTurns, 80_000) || '- None.', '', 'Continue from that context. The operator message follows below.'].join('\n');
-      const tokensAfter = approxTokens(resumePrelude);
-      compactionEntry.compaction!.tokensAfter = tokensAfter;
       const scorer = await scorerJob;
       if (scorer) compactionEntry.compaction!.scorer = scorer;
       await mkdir(ARCHIVE_DIR, { recursive: true });
@@ -385,10 +383,27 @@ export async function autoCompactOrchestratorThread(input: {
         compactedBy: ORCHESTRATOR_COMPACTION_PROVENANCE,
         ...(scorer ? { scorer } : {}),
       }));
-      persistCanonicalChatHistoryRecord(thread.tabId, {
-        ...thread.payload,
-        messages: nextTranscript.map(toStoredMessage),
-        savedAt: compactedAt.toISOString(),
+      const { nextTranscript, resumePrelude, tokensAfter } = withCanonicalChatHistoryLock(thread.tabId, () => {
+        const current = readPersistedLlmChat(thread.tabId)?.history;
+        if (!current || current.repoPath !== repoPath) throw new Error('The conversation changed before compaction could be saved.');
+        const currentMessages = current.messages.map(coerceEntry).filter((entry): entry is MobileTranscriptEntry => entry !== null);
+        const compactedIds = new Set(compactedTurns.map(entry => entry.id));
+        // The summarizer held an earlier snapshot. Never remove an updated
+        // entry based on that snapshot, or overwrite newly admitted turns.
+        for (const original of compactedTurns) {
+          const latest = currentMessages.find(entry => entry.id === original.id);
+          if (!latest || JSON.stringify(latest) !== JSON.stringify(original)) {
+            throw new Error('The compacted turns changed. Their latest history was kept; try compaction again.');
+          }
+        }
+        const retained = currentMessages.filter(entry => !compactedIds.has(entry.id));
+        const nextTranscript = [compactionEntry, ...retained];
+        const resumePrelude = [`Compaction summary (${compactedStamp})`, summary, '', 'Most recent uncompressed turns:', buildExcerpt(retained, 80_000) || '- None.', '', 'Continue from that context. The operator message follows below.'].join('\n');
+        const tokensAfter = approxTokens(resumePrelude);
+        compactionEntry.compaction!.tokensAfter = tokensAfter;
+        compactionEntry.compaction!.completedAt = Date.now();
+        persistCanonicalChatHistoryRecord(thread.tabId, { ...current, messages: nextTranscript.map(toStoredMessage), savedAt: new Date().toISOString() });
+        return { nextTranscript, resumePrelude, tokensAfter };
       });
       return {
         applied: true,

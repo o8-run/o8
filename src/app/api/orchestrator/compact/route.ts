@@ -3,9 +3,30 @@ import { requirePanelAuth } from '@/lib/panel/auth';
 import { resolveRepoPathFromRegistry } from '@/lib/repos/repo-path-registry';
 import { autoCompactOrchestratorThread } from '@/lib/orchestrator/auto-compact';
 import { isOrchestratorHomePath, resolveOrchestratorRepoPath } from '@/lib/orchestrator/repo-path';
+import { readCompactionOperation } from '@/lib/orchestrator/compaction-status-store';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+
+export async function GET(request: NextRequest) {
+  const denied = requirePanelAuth(request);
+  if (denied) return denied;
+  const repoPath = request.nextUrl.searchParams.get('repoPath')?.trim() ?? '';
+  const threadId = request.nextUrl.searchParams.get('threadId')?.trim() ?? '';
+  if (!repoPath || !/^thoughts-[\w-]+$/.test(threadId)) return NextResponse.json({ error: 'repoPath and threadId are required' }, { status: 400 });
+  const home = isOrchestratorHomePath(repoPath) ? resolveOrchestratorRepoPath(repoPath) : null;
+  const resolved = home ? null : await resolveRepoPathFromRegistry(repoPath);
+  if (resolved && !resolved.ok) return NextResponse.json({ error: resolved.message }, { status: resolved.status });
+  const root = home ?? (resolved?.ok ? resolved.repoRoot : null);
+  if (!root) return NextResponse.json({ error: 'Unable to resolve repoPath' }, { status: 400 });
+  try {
+    return NextResponse.json({ operation: await readCompactionOperation({ repoPath: root, threadId }) }, {
+      headers: { 'Cache-Control': 'no-store, max-age=0' },
+    });
+  } catch {
+    return NextResponse.json({ error: 'Compaction status could not be verified' }, { status: 503 });
+  }
+}
 
 export async function POST(request: NextRequest) {
   const denied = requirePanelAuth(request);
