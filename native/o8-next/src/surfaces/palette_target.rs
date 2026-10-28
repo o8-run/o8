@@ -18,6 +18,11 @@ pub(in crate::shell) trait Port: 'static {
         cx: &mut Context<Self::View>,
     ) -> Self::View;
     fn tick(_view: &Entity<Self::View>, _cx: &mut Context<Shell>) {}
+    /// The target a surface opens by itself when nothing is selected (the
+    /// workspace's own shell). `None` keeps the picker.
+    fn own(_client: &Client, _workspace: &str) -> Option<Result<String, String>> {
+        None
+    }
     #[cfg(test)]
     fn ready(view: &Entity<Self::View>, cx: &App) -> bool;
 }
@@ -34,6 +39,8 @@ pub(in crate::shell) struct Picker<P: Port> {
     loading: bool,
     failed: bool,
     requested: Option<String>,
+    // The surface's own target opens once; reopening the picker (Ctrl+Alt+O) lists.
+    offered_own: bool,
 }
 impl<P: Port> Picker<P> {
     pub fn new(
@@ -55,6 +62,7 @@ impl<P: Port> Picker<P> {
             loading: false,
             failed: false,
             requested: selected,
+            offered_own: false,
         };
         view.load(cx);
         view
@@ -67,15 +75,27 @@ impl<P: Port> Picker<P> {
         self.failed = false;
         let client = self.client.clone();
         let workspace = self.workspace.clone();
-        let task = cx
-            .background_executor()
-            .spawn(async move { P::choices(&client, &workspace) });
+        let open = !self.offered_own && self.requested.is_none() && self.selected.is_none();
+        self.offered_own = true;
+        let task = cx.background_executor().spawn(async move {
+            let own = open.then(|| P::own(&client, &workspace)).flatten();
+            (P::choices(&client, &workspace), own)
+        });
         cx.spawn(async move |this, cx| {
-            let result = task.await;
+            let (result, own) = task.await;
             let _ = this.update(cx, |s, cx| {
                 s.loading = false;
                 match result {
                     Ok(mut choices) => {
+                        if let Some(Ok(id)) = own {
+                            if !choices.iter().any(|choice| choice.id == id) {
+                                choices.push(Choice {
+                                    id: id.clone(),
+                                    label: id.clone(),
+                                });
+                            }
+                            s.requested.get_or_insert(id);
+                        }
                         choices.sort_by(|a, b| a.label.cmp(&b.label).then_with(|| a.id.cmp(&b.id)));
                         choices.dedup_by(|a, b| a.id == b.id);
                         s.choices = choices;
