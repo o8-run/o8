@@ -11,7 +11,7 @@ export interface InkPoint { x: number; y: number }
 export function inkOutline(points: readonly InkPoint[], size: number, complete: boolean): number[][] {
   return getStroke(points.map(point => [point.x, point.y]), {
     size,
-    thinning: 0.6,
+    thinning: 0.4,
     smoothing: 0.5,
     streamline: 0.45,
     simulatePressure: true,

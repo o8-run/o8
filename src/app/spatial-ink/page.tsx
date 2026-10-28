@@ -215,14 +215,14 @@ export default function SpatialInkPage() {
         ctx.shadowColor = ORANGE;
         ctx.shadowBlur = 11 * glow;
       }
-      const body = inkPath(inkOutline(pts, reduced ? 3 : 4, complete));
+      const body = inkPath(inkOutline(pts, reduced ? 3 : 6, complete));
       if (body) ctx.fill(new Path2D(body));
 
       // Hot core — thin, bright, no shadow, over the glow.
       ctx.shadowBlur = 0;
       if (!reduced) {
         ctx.fillStyle = CORE_HOT;
-        const core = inkPath(inkOutline(pts, 1.6, complete));
+        const core = inkPath(inkOutline(pts, 2.2, complete));
         if (core) ctx.fill(new Path2D(core));
       }
 
