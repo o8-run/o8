@@ -48,7 +48,12 @@ function repoAdmissionErrorResponse(error: RepoDispatchAdmissionError) {
  * masks any status >= 500 as "o8 API error (n)").
  */
 function admissionHeldResponse(error: PacketStorageAdmissionError) {
-  const { reason, state } = error.receipt;
+  const { state } = error.receipt;
+  // Some admission reasons are free-form strings that interpolate a caught
+  // error (e.g. `post_launch_accounting_failed: <error>`), which can carry an
+  // internal path or message. Expose only the stable enum-like prefix to the
+  // client — it is a better machine-readable signal and leaks no internal text.
+  const reason = error.receipt.reason.split(':')[0].trim();
   let message: string;
   let nextAction: 'retry_packet' | 'reset_packet' | 'wait';
   if (reason === 'launch_in_progress') {
