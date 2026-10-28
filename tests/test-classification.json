@@ -3469,6 +3469,14 @@
       ]
     },
     {
+      "path": "tests/judgment-surface-merge-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/knowledge-source-direct-writers-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -3694,6 +3702,12 @@
         "child-process",
         "executable-fixture",
         "real-path"
+      ]
+    },
+    {
+      "path": "tests/linux-pi-write-helper.test.ts",
+      "reasons": [
+        "child-process"
       ]
     },
     {
