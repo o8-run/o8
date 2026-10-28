@@ -6,9 +6,10 @@ interface DeliveryEntry {
 
 /** Modern send IDs are correlated identities, not legacy optimistic echoes. */
 export function areDistinctOrchestratorSends(left: DeliveryEntry, right: DeliveryEntry): boolean {
+  const correlated = (id: unknown): id is string => typeof id === 'string'
+    && (id.startsWith('orch-user-orch-send-') || id.startsWith('composer-steer-'));
   return left.role === 'user' && right.role === 'user'
-    && typeof left.id === 'string' && left.id.startsWith('orch-user-orch-send-')
-    && typeof right.id === 'string' && right.id.startsWith('orch-user-orch-send-')
+    && correlated(left.id) && correlated(right.id)
     && left.id !== right.id;
 }
 

@@ -18,6 +18,46 @@ export async function GET(request: Request) {
     if (refresh) {
       for (const id of runtimeId ? [runtimeId] : CLI_UPDATE_RUNTIME_IDS) invalidateCliCache(id);
     }
+    if (request.headers.get('accept')?.includes('text/event-stream')) {
+      const total = runtimeId ? 1 : CLI_UPDATE_RUNTIME_IDS.length;
+      const encoder = new TextEncoder();
+      let connected = true;
+      let completed = 0;
+      let heartbeat: ReturnType<typeof setInterval> | undefined;
+      let scheduled: ReturnType<typeof setTimeout> | undefined;
+      let abort: (() => void) | undefined;
+      const cleanup = () => {
+        clearInterval(heartbeat); clearTimeout(scheduled);
+        if (abort) request.signal.removeEventListener('abort', abort);
+      };
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          const send = (event: string, data: unknown) => {
+            if (!connected) return;
+            try { controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)); }
+            catch { connected = false; cleanup(); }
+          };
+          const close = () => {
+            cleanup();
+            if (connected) { connected = false; controller.close(); }
+          };
+          abort = close;
+          request.signal.addEventListener('abort', abort, { once: true });
+          if (request.signal.aborted) { close(); return; }
+          send('progress', { completed, total });
+          heartbeat = setInterval(() => send('progress', { completed, total }), 1000);
+          // Flush the response before potentially slow synchronous version probes.
+          scheduled = setTimeout(() => {
+            void checkCliUpdates(refresh, runtimeId, tool => send('tool', { tool, completed: ++completed, total }))
+              .then(tools => send('result', { tools, checkedAt: new Date().toISOString() }))
+              .catch(() => send('error', { error: 'Unable to check CLI updates.' }))
+              .finally(close);
+          }, 0);
+        },
+        cancel() { connected = false; cleanup(); },
+      });
+      return new Response(stream, { headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' } });
+    }
     return NextResponse.json({ tools: await checkCliUpdates(refresh, runtimeId), checkedAt: new Date().toISOString() });
   } catch {
     return NextResponse.json({ error: 'Unable to check CLI updates.' }, { status: 503 });

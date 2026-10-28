@@ -5,6 +5,7 @@ import { resolveSubscriptionProfileRouting } from '@/lib/operator/subscription-p
 import { assertExecutionCarrierDispatchable } from '@/lib/runtimes/shared/execution-carrier-preflight';
 import { getDispatchableRuntimeAvailability } from '@/lib/runtimes/shared/auth-detect';
 import { getCodexSpeedCatalogue } from '@/lib/codex/service-tier-catalogue';
+import { codexModelDiscoveryHome } from '@/lib/codex/model-discovery-cache';
 import { parseLocalModel } from '@/lib/codex/local-model';
 import { readCodexSubscriptionProxyModels } from '@/lib/claude-code/codex-subscription-proxy';
 import { resolveClaudeCodeWorkerSelection } from '@/lib/claude-code/worker-profile';
@@ -37,6 +38,7 @@ export function configuredWorkerPool(snapshot = getOperatorDefaultsSync()): Orch
 }
 
 export async function workerModelCatalog(runtime: OrchestratorRuntime, repoPath: string): Promise<WorkerModelCatalog> {
+  const codexHome = runtime === 'codex' ? codexModelDiscoveryHome() : undefined;
   const defaults = getOperatorDefaultsSync().values;
   const capability = getRuntimeCapability(runtime);
   let defaultModel = runtime === 'opencode' ? defaults.opencodeWorkerModel
@@ -68,7 +70,7 @@ export async function workerModelCatalog(runtime: OrchestratorRuntime, repoPath:
     ids = defaultModel ? [defaultModel] : [];
     source = 'configured-execution-carrier-model';
   } else if (runtime === 'codex') {
-    ids = Object.keys((await getCodexSpeedCatalogue()).models);
+    ids = Object.keys((await getCodexSpeedCatalogue(codexHome)).models);
     if (defaultModel && parseLocalModel(defaultModel)) ids.push(defaultModel);
     source = 'installed-model-list';
   } else if (runtime === '3code') {
@@ -90,7 +92,7 @@ export async function workerModelCatalog(runtime: OrchestratorRuntime, repoPath:
     ids = defaultModel ? [defaultModel] : [];
   }
   return {
-    models: [...new Set(ids)].map(id => ({ id, efforts: THINKING_EFFORTS.filter(effort => resolveEffortPin({ runtime, model: id, requestedEffort: effort }).ok) })),
+    models: [...new Set(ids)].map(id => ({ id, efforts: THINKING_EFFORTS.filter(effort => resolveEffortPin({ runtime, model: id, requestedEffort: effort, codexHome }).ok) })),
     defaultModel, carrier, source, observedAt: new Date().toISOString(),
   };
 }

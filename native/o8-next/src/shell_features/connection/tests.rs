@@ -1,5 +1,6 @@
 use super::*;
 use crate::shell::test_support::*;
+use crate::shell_state::State;
 // Drive main's retained sidebar lifecycle too: a streamed update can fence an
 // in-flight HTTP load, which is retried by the normal shell tick.
 fn settled(shell: &Entity<Shell>, cx: &mut VisualTestContext) {
@@ -9,10 +10,12 @@ fn settled(shell: &Entity<Shell>, cx: &mut VisualTestContext) {
         shell.update_in(cx, |s, window, cx| s.tick(false, window, cx));
         cx.run_until_parked();
         draw(cx);
+        // A parked executor can return after a second blocked HTTP request.
+        // Enforce the existing deadline even when that late result clears loading.
+        assert!(Instant::now() < deadline, "connection load must settle");
         if !shell.read_with(cx, |s, _| s.loading) {
             return;
         }
-        assert!(Instant::now() < deadline, "connection load must settle");
         std::thread::sleep(Duration::from_millis(10));
     }
 }
@@ -64,11 +67,26 @@ fn shell_recovers_from_down_and_restart_without_reopening(cx: &mut TestAppContex
         }),
         entity
     );
+    shell.update_in(cx, |s, window, cx| {
+        s.execute(Command::ShortcutReference, window, cx)
+    });
+    cx.simulate_keystrokes("tab");
+    draw(cx);
+    let overlay_focus = cx.update(|window, cx| window.focused(cx).unwrap());
     let _again = Fixture::on_port(url::Url::parse(&origin).unwrap().port().unwrap());
     shell.update_in(cx, |s, window, cx| s.tick(true, window, cx));
     ready(&shell, cx);
     settled(&shell, cx);
     assert!(shell.read_with(cx, |s, _| s.connected));
+    cx.update(|window, cx| {
+        assert_eq!(
+            window.focused(cx),
+            Some(overlay_focus),
+            "reconnect must preserve the current shortcut dialog control"
+        )
+    });
+    cx.simulate_keystrokes("escape");
+    assert!(shell.read_with(cx, |s, _| s.surfaces.shortcuts.view.is_none()));
 }
 
 #[gpui::test]
@@ -119,17 +137,21 @@ fn shell_connection_checks_are_single_flight_and_keep_current_view(cx: &mut Test
     assert!(shell.read_with(cx, |s, _| s.notice.is_empty()));
 }
 
-#[test]
-fn round1_token_file_created_after_launch_connects_on_retry() {
+#[gpui::test]
+fn round1_token_file_created_after_launch_connects_on_retry(cx: &mut TestAppContext) {
+    if std::env::var("O8_NEXT_CONNECTION_CHILD").as_deref() == Ok("late") {
+        round1_late_token_child(cx);
+        return;
+    }
     let fixture = Fixture::new();
     let token_file = fixture.root.join("late-token");
     let output = Process::new(std::env::current_exe().unwrap())
         .args([
-            "--ignored",
             "--exact",
-            "shell::connection::tests::round1_late_token_child",
+            "shell::features::connection::tests::round1_token_file_created_after_launch_connects_on_retry",
             "--nocapture",
         ])
+        .env("O8_NEXT_CONNECTION_CHILD", "late")
         .env("O8_NEXT_TOKEN_FILE", &token_file)
         .env_remove("O8_NEXT_TOKEN_FILES")
         .env("O8_NEXT_TOKEN_ORIGIN", &fixture.origin)
@@ -149,8 +171,6 @@ fn round1_token_file_created_after_launch_connects_on_retry() {
     );
 }
 
-#[gpui::test]
-#[ignore = "owned subprocess supplies isolated launcher configuration"]
 fn round1_late_token_child(cx: &mut TestAppContext) {
     let origin = std::env::var("O8_NEXT_CORRECTION_ORIGIN").unwrap();
     let file = PathBuf::from(std::env::var("O8_NEXT_CORRECTION_STATE").unwrap());
@@ -253,10 +273,22 @@ fn round1_reconnect_keeps_composer_focus_draft_and_queue(cx: &mut TestAppContext
     });
     settled(&shell, cx);
     assert!(!shell.read_with(cx, |s, _| s.connected));
+    shell.update_in(cx, |s, window, cx| s.execute(Command::Settings, window, cx));
+    // Resume before draining Settings HTTP work against the stopped host.
+    let overlay_focus = cx.update(|window, cx| window.focused(cx).unwrap());
     drop(resume);
     shell.update_in(cx, |s, _, cx| s.load(cx));
     ready(&shell, cx);
     settled(&shell, cx);
+    cx.update(|window, cx| {
+        assert_eq!(
+            window.focused(cx),
+            Some(overlay_focus),
+            "reconnect must preserve the active management overlay's focus"
+        )
+    });
+    cx.simulate_keystrokes("ctrl-,");
+    draw(cx);
     cx.simulate_input(" after reconnect");
     assert_eq!(
         view.read_with(cx, |v, cx| v.shell_issue_state(cx)["draft"].clone()),
@@ -281,19 +313,18 @@ fn round1_connection_is_a_registered_module(cx: &mut TestAppContext) {
         visual.debug_bounds("connection-state").is_some(),
         "connection state must render through its registered module"
     );
-    assert!(!include_str!("../shell.rs").contains("Token missing"));
-    assert!(!include_str!("../shell_view.rs").contains("Server down"));
-    assert_eq!(
-        include_str!("../shell.rs")
-            .lines()
-            .filter(|line| line.contains("surfaces/connection.rs"))
-            .count(),
-        1
-    );
+    assert!(!include_str!("../../shell.rs").contains("Token missing"));
+    assert!(!include_str!("../../shell_view.rs").contains("Server down"));
+    assert!(!include_str!("../../shell.rs").contains("surfaces/connection.rs"));
+    assert!(include_str!("../connection.rs").contains("register_shell_feature!(Connection);"));
 }
 
-#[test]
-fn round2_rotation_reaches_retained_composer_and_request_clones() {
+#[gpui::test]
+fn round2_rotation_reaches_retained_composer_and_request_clones(cx: &mut TestAppContext) {
+    if std::env::var("O8_NEXT_CONNECTION_CHILD").as_deref() == Ok("rotation") {
+        round2_rotation_child(cx);
+        return;
+    }
     let fixture = Fixture::new();
     let server_token = PathBuf::from(
         fixture.client.sessions().unwrap()[0]
@@ -309,11 +340,11 @@ fn round2_rotation_reaches_retained_composer_and_request_clones() {
     fs::copy(&server_token, &token_file).unwrap();
     let output = Process::new(std::env::current_exe().unwrap())
         .args([
-            "--ignored",
             "--exact",
-            "shell::connection::tests::round2_rotation_child",
+            "shell::features::connection::tests::round2_rotation_reaches_retained_composer_and_request_clones",
             "--nocapture",
         ])
+        .env("O8_NEXT_CONNECTION_CHILD", "rotation")
         .env("O8_NEXT_TOKEN_FILE", &token_file)
         .env("O8_NEXT_CORRECTION_SERVER_TOKEN", &server_token)
         .env_remove("O8_NEXT_TOKEN_FILES")
@@ -338,8 +369,6 @@ fn round2_rotation_reaches_retained_composer_and_request_clones() {
     );
 }
 
-#[gpui::test]
-#[ignore = "owned subprocess supplies isolated launcher configuration"]
 fn round2_rotation_child(cx: &mut TestAppContext) {
     let origin = std::env::var("O8_NEXT_CORRECTION_ORIGIN").unwrap();
     let token_file = PathBuf::from(std::env::var("O8_NEXT_TOKEN_FILE").unwrap());
@@ -457,8 +486,12 @@ fn round2_rotation_child(cx: &mut TestAppContext) {
     assert!(retained.sessions().is_ok());
 }
 
-#[test]
-fn round2_legacy_candidates_reach_the_real_shell() {
+#[gpui::test]
+fn round2_legacy_candidates_reach_the_real_shell(cx: &mut TestAppContext) {
+    if std::env::var("O8_NEXT_CONNECTION_CHILD").as_deref() == Ok("legacy") {
+        round2_legacy_child(cx);
+        return;
+    }
     let fixture = Fixture::new();
     let sessions = fixture.client.sessions().unwrap();
     let token_file = PathBuf::from(sessions[0].repo_path.as_ref().unwrap())
@@ -468,11 +501,11 @@ fn round2_legacy_candidates_reach_the_real_shell() {
     let missing = fixture.root.join("current-token");
     let output = Process::new(std::env::current_exe().unwrap())
         .args([
-            "--ignored",
             "--exact",
-            "shell::connection::tests::round2_legacy_child",
+            "shell::features::connection::tests::round2_legacy_candidates_reach_the_real_shell",
             "--nocapture",
         ])
+        .env("O8_NEXT_CONNECTION_CHILD", "legacy")
         .env("O8_NEXT_TOKEN_FILE", &missing)
         .env(
             "O8_NEXT_TOKEN_FILES",
@@ -496,8 +529,6 @@ fn round2_legacy_candidates_reach_the_real_shell() {
     );
 }
 
-#[gpui::test]
-#[ignore = "owned subprocess supplies isolated launcher configuration"]
 fn round2_legacy_child(cx: &mut TestAppContext) {
     let origin = std::env::var("O8_NEXT_CORRECTION_ORIGIN").unwrap();
     let (shell, mut visual) = open(
@@ -526,13 +557,37 @@ fn reconnect_preserves_main_palette_recovery_and_shortcut_commands(cx: &mut Test
     );
     let cx = &mut visual;
     settled(&shell, cx);
+    let renders = |cx: &VisualTestContext| {
+        shell.read_with(cx, |s, app| {
+            s.chrome
+                .renders(app)
+                .into_iter()
+                .find_map(|(id, count)| (id == "shell-chrome").then_some(count))
+                .unwrap_or(0)
+        })
+    };
+    let before = renders(cx);
     cx.simulate_keystrokes("ctrl-shift-p");
     draw(cx);
+    assert!(
+        renders(cx) > before,
+        "opening the palette must invalidate cached chrome"
+    );
+    let before = renders(cx);
+    cx.simulate_keystrokes("r e f r e s h");
+    draw(cx);
+    assert!(
+        renders(cx) > before,
+        "palette query state must invalidate cached chrome"
+    );
     assert!(cx.debug_bounds("command-palette").is_some());
     assert!(shell.read_with(cx, |s, _| {
-        s.commands()
-            .iter()
-            .any(|entry| matches!(entry, palette::Entry::Surface(Command::Refresh)))
+        s.commands().iter().any(|entry| {
+            matches!(
+                entry,
+                crate::shell::palette::Entry::Surface(Command::Refresh)
+            )
+        })
     }));
     shell.update_in(cx, |s, window, cx| s.execute(Command::Refresh, window, cx));
     settled(&shell, cx);
@@ -542,4 +597,16 @@ fn reconnect_preserves_main_palette_recovery_and_shortcut_commands(cx: &mut Test
     });
     draw(cx);
     assert!(cx.debug_bounds("shortcut-reference").is_some());
+    cx.simulate_keystrokes("escape");
+    draw(cx);
+    assert!(cx.debug_bounds("shortcut-reference").is_none());
+    assert!(!shell.read_with(cx, |s, _| s.connected));
+    static OFFLINE_FEATURE: super::super::PaletteCommand = super::super::PaletteCommand {
+        id: "offline-refusal",
+        label: "Offline refusal",
+        run: |_, _, _| panic!("offline feature handler must not run"),
+    };
+    shell.update_in(cx, |s, window, cx| {
+        s.execute(Command::Feature(&OFFLINE_FEATURE), window, cx)
+    });
 }

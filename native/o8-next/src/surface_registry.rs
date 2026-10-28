@@ -45,6 +45,12 @@ impl Default for Frame {
     }
 }
 pub(super) trait ShellExtension: Sync {
+    fn overlay(&self, _s: &mut Shell) -> Option<AnyElement> {
+        None
+    }
+    fn capture_blocked(&self, _s: &Shell) -> bool {
+        false
+    }
     fn load(&self, _s: &mut Shell, _cx: &mut Context<Shell>) -> bool {
         false
     }
@@ -73,7 +79,10 @@ pub(super) trait ShellExtension: Sync {
     }
 }
 pub(super) fn extensions() -> impl Iterator<Item = &'static dyn ShellExtension> {
-    registrations().iter().filter_map(|r| r.extension)
+    registrations()
+        .iter()
+        .filter_map(|r| r.extension)
+        .chain(features::extensions())
 }
 pub(super) struct Registration {
     pub extension: Option<&'static dyn ShellExtension>,
@@ -167,6 +176,7 @@ macro_rules! register_surfaces {
         enum Command {
             $( $(#[$tab_attr])* $variant $(($payload))?, )*
             $( $(#[$command_attr])* $command_variant, )*
+            Feature(&'static features::PaletteCommand),
             Message(String),
             Refresh,
             Shortcuts,
@@ -177,11 +187,12 @@ macro_rules! register_surfaces {
                     $( $(#[$tab_attr])* Self::$variant { .. } => &$module::REGISTRATION, )*
                     $( $(#[$command_attr])* Self::$command_variant => &$command_module::REGISTRATION, )*
                     Self::Message(_) => &session::REGISTRATION,
-                    Self::Refresh | Self::Shortcuts => unreachable!("shell command"),
+                    Self::Feature(_) | Self::Refresh | Self::Shortcuts => unreachable!("shell command"),
                 }
             }
             fn label(&self, sessions: &[Session]) -> String {
                 match self {
+                    Self::Feature(command) => command.label.into(),
                     Self::Session(id) => session::label(id, sessions),
                     Self::Message(_) => "New message in selected session".into(),
                     Self::Refresh => "Refresh".into(),

@@ -406,7 +406,7 @@ export function createOwnedRunController({
 
   async function spawnOwnedRunInner(session: OwnedSessionRecord, prompt: string, mode: OwnedRunMode, freshRequest = false) {
     ({ prompt, mode } = await refreshOwnedWorkerMemory(session, prompt, mode, freshRequest));
-    assertRuntimeEffortPin(runtimeId, session.model, session.effort);
+    assertRuntimeEffortPin(runtimeId, session.model, session.effort, session.identity?.configHomeRef ?? adapter.defaultConfigHome?.());
     assertOwnedSingleAttemptSpawn(session, runtimeId, mode);
     await runtimeLaunchStep(session, 'run_directory', () => ensureDir(path.join(session.sessionDir, RUNS_DIR)));
 

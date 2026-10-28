@@ -1,33 +1,22 @@
-//! Local connection policy, credential refresh, recovery focus and error UI.
+// Local connection policy, credential refresh, recovery focus and error UI.
 use super::registry::{Frame, KeyResult, ShellExtension};
 use super::*;
 use crate::theme::current as theme;
 use std::io::Read;
 
-pub(super) type Slice = EmptyState;
 #[derive(Default)]
 pub(super) struct Runtime {
     hidden: bool,
     restore: Option<(Option<String>, FocusHandle)>,
     status: Option<Entity<Status>>,
 }
-pub(super) const REGISTRATION: Registration = Registration {
-    extension: Some(&Connection),
-    overlay: |s| {
-        if !s.connected {
-            s.surfaces
-                .connection
-                .status
-                .as_ref()
-                .map(|v| v.clone().into_any_element())
-        } else {
-            None
-        }
-    },
-    overlay_open: |s| s.surfaces.connection.hidden,
-    ..Registration::new("", "", |_, _, _, _| None)
-};
 struct Connection;
+register_shell_feature!(Connection);
+impl ShellFeature for Connection {
+    fn extension(&self) -> Option<&'static dyn ShellExtension> {
+        Some(&Connection)
+    }
+}
 fn management(s: &Shell) -> bool {
     registrations()
         .iter()
@@ -76,6 +65,21 @@ fn refresh(client: &Client) -> Result<Client, String> {
     Ok(client.clone())
 }
 impl ShellExtension for Connection {
+    fn overlay(&self, s: &mut Shell) -> Option<gpui::AnyElement> {
+        if s.connected {
+            return None;
+        }
+        s.features
+            .get::<Runtime>()
+            .status
+            .as_ref()
+            .map(|v| v.clone().into_any_element())
+    }
+    fn capture_blocked(&self, s: &Shell) -> bool {
+        s.features
+            .read::<Runtime>()
+            .is_some_and(|state| state.hidden)
+    }
     fn load(&self, shell: &mut Shell, cx: &mut Context<Shell>) -> bool {
         if shell.loading {
             return true;
@@ -185,26 +189,32 @@ impl ShellExtension for Connection {
             }
         }
         if !s.connected && !management(s) {
-            if !s.surfaces.connection.hidden {
+            if !s.features.get::<Runtime>().hidden {
                 s.capture(window, cx);
-                s.surfaces.connection.restore = window.focused(cx).map(|focus| (key(s), focus));
-                s.surfaces.connection.hidden = true;
+                let restore = window.focused(cx).map(|focus| (key(s), focus));
+                s.features.get::<Runtime>().restore = restore;
+                s.features.get::<Runtime>().hidden = true;
             }
             s.focus.focus(window);
-        } else if s.connected && s.surfaces.connection.hidden {
-            s.surfaces.connection.hidden = false;
-            if let Some((saved, focus)) = s.surfaces.connection.restore.take()
-                && saved == key(s)
-            {
-                focus.focus(window);
-            } else {
-                s.restore_focus(window, cx);
+        } else if s.connected && s.features.get::<Runtime>().hidden {
+            s.features.get::<Runtime>().hidden = false;
+            let restore = s.features.get::<Runtime>().restore.take();
+            // An overlay opened during the outage owns its current control.
+            // Re-running its focus hook would also reset an active editor.
+            if !s.palette && !s.shortcuts && !management(s) {
+                if let Some((saved, focus)) = restore
+                    && saved == key(s)
+                {
+                    focus.focus(window);
+                } else {
+                    s.restore_focus(window, cx);
+                }
             }
         }
         let weak = cx.weak_entity();
         let status = s
-            .surfaces
-            .connection
+            .features
+            .get::<Runtime>()
             .status
             .get_or_insert_with(|| {
                 cx.new(|_| Status {
@@ -244,7 +254,7 @@ impl ShellExtension for Connection {
     fn allow_command(&self, s: &Shell, command: &Command) -> bool {
         s.connected
             || matches!(command, Command::Refresh | Command::Shortcuts)
-            || command.registration().overlay_command
+            || (!matches!(command, Command::Feature(_)) && command.registration().overlay_command)
     }
     fn allow_switch(&self, s: &Shell) -> bool {
         s.connected
@@ -256,7 +266,7 @@ impl ShellExtension for Connection {
         _: &mut Window,
         cx: &mut Context<Shell>,
     ) -> KeyResult {
-        if s.connected || management(s) || s.palette {
+        if s.connected || management(s) || s.palette || s.shortcuts {
             return KeyResult::Unhandled;
         }
         let k = &e.keystroke;
@@ -309,5 +319,5 @@ impl Render for Status {
     }
 }
 #[cfg(test)]
-#[path = "connection_tests.rs"]
+#[path = "connection/tests.rs"]
 mod tests;

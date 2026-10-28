@@ -58,13 +58,6 @@
   },
   "surfaces": [
     {
-      "id": "connection",
-      "flags": [],
-      "webRoute": "/dashboard",
-      "nativeSelectors": [],
-      "remaining": "Disconnected startup and retry states need matching fixtures before paired capture"
-    },
-    {
       "id": "sidebar",
       "flags": [
         "--sidebar"

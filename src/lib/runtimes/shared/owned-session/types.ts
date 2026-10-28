@@ -284,6 +284,8 @@ export type OwnedCodexFleetAdditions = OwnedFleetAdditions;
 // ── Public launch I/O ────────────────────────────────────────────────────────
 
 export interface OwnedLaunchRequest {
+  /** Authoritative server-resolved account shared by admission and execution. */
+  runtimeIdentity?: import('@/lib/runtime/identity-catalog').RuntimeLaunchIdentity;
   /** Recall epoch bound before assembling this launch prompt. */
   promptMemoryRevision?: string;
   cwd: string;

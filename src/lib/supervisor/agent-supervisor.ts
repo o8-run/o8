@@ -1,4 +1,4 @@
-import { resolveStatus, readOwnedRecoveryState } from './recovery-status';
+import { resolveStatus, readOwnedRecoveryState, readOwnedCompletionState } from './recovery-status';
 import { sharedWorkerLaunchContext } from '@/lib/orchestrator/shared-worker-recovery';
 import { access, readdir, stat } from 'node:fs/promises';
 import os from 'node:os';
@@ -281,7 +281,7 @@ export function getWatchedAgents(repoPath?: string): WatchedAgent[] {
 export async function ingestAgentCompletionSignal(surfaceId: string, runId?: string): Promise<boolean> {
   const watched = watchedAgents.get(surfaceId);
   if (!watched || !callbacks) return false;
-  const current = await readOwnedRecoveryState(surfaceId);
+  const current = await readOwnedCompletionState(surfaceId);
   if (current.owned && (current.packetHoldReason || current.interrupted || current.outcome !== 'finished' || (runId && runId !== current.runId))) return true;
   await handleStatusChange(watched, 'finished', Date.now());
   return true;
@@ -442,7 +442,7 @@ async function pollWatchedAgent(
   }
   watched.lastRuntimeStatus = runtimeAgent?.status ?? null;
 
-  const recovery = await readOwnedRecoveryState(watched.surfaceId);
+  const recovery = await (resolveStatus(runtimeAgent, watched, now) === 'finished' ? readOwnedCompletionState : readOwnedRecoveryState)(watched.surfaceId);
   const currentStatus = recovery.owned
     ? recovery.interrupted ? 'interrupted' : !recovery.runId || recovery.packetHoldReason ? 'unavailable' : resolveStatus(runtimeAgent, watched, now)
     : resolveStatus(runtimeAgent, watched, now);
