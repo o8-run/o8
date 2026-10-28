@@ -67,7 +67,7 @@ it('does not learn from a running or partially reported turn, or inherit another
   await show('codex', 'fixture-model', 'session-a', true); expect(host.textContent).toContain('Cache unknown');
   await show(); expect(host.textContent).toContain('Cache warm');
   await show('codex', 'other-model'); expect(host.textContent).toContain('Cache unknown');
-  await show('unknown-runtime'); expect(host.textContent).toContain('Cache estimate unavailable');
+  await show('unknown-runtime'); expect(host.textContent).toBe('');
 });
 it('deduplicates remounts and recovers local observations across a component reload', async () => {
   entries = [...turn(1, now - 180_000, now - 120_000, 100, 900), ...turn(2, now - 60_000, now, 100, 900)];

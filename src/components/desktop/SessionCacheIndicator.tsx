@@ -45,6 +45,7 @@ export function SessionCacheProvider({ children, enabled = true, ...input }: Ses
 
 export function SessionCacheIndicator(input: SessionCacheInput) {
   const status = useSessionCachePresentation(input);
+  if (input.runtime !== 'codex' && input.runtime !== 'claude-code') return null;
   return <span data-session-cache={input.session ?? ''} title={status.detail}
     style={{ display: 'block', color: 'var(--t-text-faint)', fontSize: 9.5, fontWeight: 260, letterSpacing: '-0.4px', lineHeight: 1.25, paddingLeft: 8, paddingRight: 8, paddingTop: 2, paddingBottom: 2 }}>{status.text}</span>;
 }
