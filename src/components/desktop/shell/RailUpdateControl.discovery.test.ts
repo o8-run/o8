@@ -86,9 +86,11 @@ it.each(['stream', 'json'] as const)('shows all eleven installed tools from %s d
     });
   }
   await tick();
-  const current = [...panel().querySelectorAll('button')].find(button => button.textContent?.startsWith('Current CLIs'))!;
-  if (current.getAttribute('aria-expanded') !== 'true') await act(async () => current.click());
-  expect([...panel().querySelectorAll('[data-cli-update-row]')].map(row => row.getAttribute('data-cli-update-row')).sort()).toEqual([...runtimeIds].sort());
+  const toolsToggle = panel().querySelector('[aria-label="Tools updates"]')!;
+  expect(toolsToggle.getAttribute('aria-expanded')).toBe('true');
+  expect([...panel().querySelectorAll('button')].some(button => button.textContent?.startsWith('Current CLIs'))).toBe(false);
+  const toolsList = document.getElementById(toolsToggle.getAttribute('aria-controls')!)!;
+  expect([...toolsList.querySelectorAll('[data-cli-update-row]')].map(row => row.getAttribute('data-cli-update-row'))).toEqual(runtimeIds);
   for (const tool of tools) {
     const row = panel().querySelector(`[data-cli-update-row="${tool.runtimeId}"]`)!;
     expect(row.textContent).toContain(tool.label);
