@@ -156,8 +156,11 @@ export async function captureComposerRecoveryReconcile(target: ComposerQueueTarg
       if (revision !== clearRevisions.get(target.threadId) || retiredKeys.has(key)
         || (acceptedVersions.get(key) ?? 0) > acceptedBeforeRead) continue;
       const item = items.find(item => item.id === attempt.id);
-      if ((!item && attempt.accepted) || item?.status === 'applied' || item?.status === 'cancelled') await confirmComposerSend(target, attempt.id);
-      else if (item && !attempt.accepted && JSON.stringify(item.payload) === JSON.stringify(attempt.payload)) {
+      if ((!item && attempt.accepted) || item?.status === 'applied' || item?.status === 'cancelled') {
+        // A retained text draft has no separate attachment copy of its retry ID.
+        // Only consuming or discarding that draft can retire this identity.
+        if (attempt.payload.images.length) await confirmComposerSend(target, attempt.id);
+      } else if (item && !attempt.accepted && JSON.stringify(item.payload) === JSON.stringify(attempt.payload)) {
         // A successful read also settles a lost POST response.
         memory.set(keyFor(target) + attempt.id, attempt);
         await acceptComposerSend(target, attempt);

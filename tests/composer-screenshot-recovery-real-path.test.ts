@@ -585,6 +585,7 @@ it('retires all browser screenshot recovery after confirmed discard and draft cl
       await page.getByRole('textbox').press('Enter');
       await expect.poll(() => posts.length, { timeout: screenshotPollTimeout }).toBe(round + 1);
       await expect.poll(() => page.getByRole('alert').textContent()).toContain('Message queued.');
+      const retainedCharacters = await recoveryBytes(page);
       await page.getByRole('button', { name: /^Remove queued message:/ }).click();
       await expect.poll(() => queue.readComposerSend(posts[round].id)?.status).toBe('cancelled');
       await page.getByRole('textbox').fill('');
@@ -593,7 +594,11 @@ it('retires all browser screenshot recovery after confirmed discard and draft cl
       await mount(page, '', 'http://localhost/screenshot?reload=' + round, true);
       expect(await page.getByRole('textbox').inputValue()).toBe('');
       expect(await page.getByRole('button', { name: 'Remove screenshot.png', exact: true }).count()).toBe(0);
-      expect(await recoveryBytes(page)).toBe(baseline);
+      const afterReloadCharacters = await recoveryBytes(page);
+      expect(afterReloadCharacters).toBe(baseline);
+      const measurement = { discardCycle: round + 1, beforeDiscardCharacters: retainedCharacters, afterDiscardAndReloadCharacters: afterReloadCharacters };
+      console.log(JSON.stringify(measurement));
+      if (proofDir) { fs.mkdirSync(proofDir, { recursive: true }); fs.writeFileSync(path.join(proofDir, `discard-cycle-${round + 1}.json`), JSON.stringify(measurement)); }
     }
     expect(posts).toHaveLength(2);
   } finally { await page.close(); }
@@ -673,3 +678,62 @@ it('keeps text-only queueing independent of an unavailable attachment store', as
     expect(await page.getByRole('alert').allTextContents()).toEqual([]);
   } finally { await page.close(); }
 });
+
+
+it.each(['reconcile', 'reload', 'receipt'] as const)('keeps a retained text draft retry identity after delivery through %s until consumption', async mode => {
+  const page = await browser.newPage(); const posts: Parameters<typeof connect>[1] = [];
+  const target = { repoPath: fixture.repo, threadId: 'thoughts-screenshot' };
+  const delivered: string[] = [];
+  const deliverNext = () => {
+    const claimed = queue.claimNextComposerSend(target);
+    if (!claimed) return;
+    expect(queue.admitComposerSend(claimed.id)).toBe(true);
+    expect(queue.settleComposerSend(claimed.id, { status: 'applied' })).toBe(true);
+    delivered.push(claimed.id);
+  };
+  const reconcile = async () => {
+    if (mode === 'reload') await mount(page, '', 'http://localhost/screenshot?model=changed-model', true);
+    else await page.evaluate(() => window.dispatchEvent(new Event('o8:lifecycle-reconcile')));
+    await expect.poll(() => page.getByRole('list', { name: 'Queued messages' }).count()).toBe(0);
+  };
+  try {
+    await connect(page, posts); await mount(page, '', 'http://localhost/screenshot', true);
+    await page.getByRole('textbox').fill('Keep this text follow-up.');
+    await fullStorage(page);
+    await page.getByRole('textbox').press('Enter');
+    await expect.poll(() => posts.length, { timeout: screenshotPollTimeout }).toBe(1);
+    await page.waitForFunction(() => !(window as unknown as { fixtureQueueSaving: boolean }).fixtureQueueSaving);
+    expect(await page.getByRole('alert').textContent()).toContain('Message queued.');
+    expect(await page.getByRole('alert').textContent()).toContain('Retry checks the same send.');
+    deliverNext();
+    expect(delivered).toHaveLength(1);
+    for (let retry = 0; retry < 2; retry++) {
+      // The receipt case also exercises a terminal POST before any reconciliation event.
+      if (mode !== 'receipt' || retry > 0) await reconcile();
+      expect(await page.getByRole('textbox').inputValue()).toBe('Keep this text follow-up.');
+      await page.getByRole('textbox').press('Enter');
+      await expect.poll(() => posts.length, { timeout: screenshotPollTimeout }).toBe(retry + 2);
+      await page.waitForFunction(() => !(window as unknown as { fixtureQueueSaving: boolean }).fixtureQueueSaving);
+      expect(await page.getByRole('alert').textContent()).toContain('Retry checks the same send.');
+      deliverNext();
+    }
+    // Count actual claims/admissions through the persisted queue, not just matching UI text.
+    expect(delivered).toHaveLength(1);
+    expect(posts[1]).toEqual(posts[0]); expect(posts[2]).toEqual(posts[0]);
+    expect(posts[0].payload.routing.model).toBe('original-model');
+    // Once browser storage recovers, consuming this same draft retires its identity.
+    await page.evaluate(() => { for (const key of Object.keys(localStorage)) if (key.startsWith('fixture-quota-')) localStorage.removeItem(key); });
+    await page.getByRole('textbox').press('Enter');
+    await expect.poll(() => posts.length, { timeout: screenshotPollTimeout }).toBe(4);
+    await page.waitForFunction(() => !(window as unknown as { fixtureQueueSaving: boolean }).fixtureQueueSaving);
+    expect(posts[3]).toEqual(posts[0]); expect(queue.claimNextComposerSend(target)).toBeNull();
+    expect(await page.getByRole('textbox').inputValue()).toBe('');
+    await expect.poll(() => recoveryBytes(page), { timeout: screenshotPollTimeout }).toBe(0);
+    await mount(page, '', 'http://localhost/screenshot?consumed', true);
+    expect(await page.getByRole('textbox').inputValue()).toBe('');
+    expect(await recoveryBytes(page)).toBe(0);
+    const measurement = { textRetryPath: mode, queueRequests: posts.length, appliedDeliveries: delivered.length, recoveryCharactersAfterConsumption: 0 };
+    console.log(JSON.stringify(measurement));
+    if (proofDir) { fs.mkdirSync(proofDir, { recursive: true }); fs.writeFileSync(path.join(proofDir, `text-retry-${mode}.json`), JSON.stringify(measurement)); }
+  } finally { await page.close(); }
+}, 40_000);

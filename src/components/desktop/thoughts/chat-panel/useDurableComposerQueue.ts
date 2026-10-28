@@ -96,7 +96,8 @@ export function useDurableComposerQueue(target: ComposerQueueTarget | null, busy
       throw new Error('The previous send was cancelled. No new message was sent. Send again only if you want a new turn.');
     }
     await acceptComposerSend(snapshot, attempt);
-    if (item.status === 'applied') await confirmComposerSend(snapshot, attempt.id).catch(() => {});
+    // Text recovery is also the retained draft's identity until consumption below.
+    if (item.status === 'applied' && attempt.payload.images.length) await confirmComposerSend(snapshot, attempt.id).catch(() => {});
     if (ownerRef.current === owner) { setError(null); await refresh(); }
     if (recoveryError) throw new Error(composerRecoveryNotice(recoveryError, true));
     // The still-current composer retires recovery immediately before consuming its draft.
