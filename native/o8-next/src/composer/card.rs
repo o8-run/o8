@@ -1,42 +1,72 @@
 use super::*;
-use crate::composer::controls::mode_label;
+use crate::composer::controls::{mode_label, model_label};
 use gpui::{AnyElement, Div, KeyDownEvent, SharedString, Stateful};
+
+/// An icon-only footer control: a 28px target with the label as its tooltip.
+fn icon_only(button: Stateful<Div>, path: &str, color: gpui::Rgba, label: String) -> Stateful<Div> {
+    let label = SharedString::from(label);
+    button
+        .w(px(28.))
+        .h(px(28.))
+        .px(px(0.))
+        .justify_center()
+        .tooltip(move |_, cx| cx.new(|_| crate::icon::Tip(label.clone())).into())
+        .child(crate::icon::stroke(path, color, 18., 1.6))
+}
 
 impl Surface {
     pub(crate) fn composer_footer(&mut self, _: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let routing = self.composer_routing(cx).unwrap_or(Value::Null);
-        let mode = mode_label(routing["pickedMode"].as_str().unwrap_or("solo"));
-        let access = if routing["permissionMode"] == "plan" {
-            "Plan only"
-        } else {
-            "Full access"
-        };
+        let picked = routing["pickedMode"].as_str().unwrap_or("solo");
+        let mode = mode_label(picked);
+        let plan = routing["permissionMode"] == "plan";
+        let access = if plan { "Plan only" } else { "Full access" };
         let enabled = self.queue_ready && !self.saving && !self.composer.read(cx).controls.busy;
         let leading = div()
             .flex()
             .flex_wrap()
             .items_center()
             .gap(px(6.))
-            .child(
-                self.composer_button("composer-mode", mode, enabled, cx, |s, w, cx| {
+            // The desktop footer's icon-only mode, permission and attach controls.
+            .child(icon_only(
+                self.composer_button("composer-mode", "", enabled, cx, |s, w, cx| {
                     s.open_composer_picker("mode", w, cx)
                 }),
-            )
-            .child(
-                self.composer_button("composer-access", access, enabled, cx, |s, w, cx| {
+                match picked {
+                    "multitask" => "M6 6v12m0-9h8a4 4 0 0 0 4-4 M6 2a2 2 0 1 0 0 4 2 2 0 1 0 0-4Z M6 18a2 2 0 1 0 0 4 2 2 0 1 0 0-4Z M18 1a2 2 0 1 0 0 4 2 2 0 1 0 0-4Z",
+                    "fast" => "M6 5h12a3 3 0 0 1 3 3v8a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V8a3 3 0 0 1 3-3Z M8 10v4m-2-2h4m5 0h3",
+                    _ => "M6 5h12a3 3 0 0 1 3 3v8a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V8a3 3 0 0 1 3-3Z M8 12h8",
+                },
+                theme().text_secondary,
+                format!("Mode: {}", if picked == "solo" { "Delegation off" } else { mode }),
+            ))
+            .child(icon_only(
+                self.composer_button("composer-access", "", enabled, cx, |s, w, cx| {
                     s.open_composer_picker("access", w, cx)
                 }),
-            )
-            .child(self.composer_button(
-                "composer-attach",
-                "+",
-                enabled
-                    && matches!(
-                        routing["backend"].as_str(),
-                        Some("codex" | "claude" | "fable" | "collide")
-                    ),
-                cx,
-                |s, _, cx| s.attach_composer_image(cx),
+                if plan {
+                    "M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9l-6-6Zm0 0v6h6M8 13h8M8 17h5"
+                } else {
+                    "M7 11h10a3 3 0 0 1 3 3v4a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3v-4a3 3 0 0 1 3-3Z M8 11V7a4 4 0 0 1 7.5-2M12 15v2"
+                },
+                if plan { theme().accent } else { gpui::rgb(0xff5a1f) },
+                format!("Permissions: {access}"),
+            ))
+            .child(icon_only(
+                self.composer_button(
+                    "composer-attach",
+                    "",
+                    enabled
+                        && matches!(
+                            routing["backend"].as_str(),
+                            Some("codex" | "claude" | "fable" | "collide")
+                        ),
+                    cx,
+                    |s, _, cx| s.attach_composer_image(cx),
+                ),
+                "M12 5v14M5 12h14",
+                theme().text_secondary,
+                "Attach image".into(),
             ))
             .when(self.queue["canSteer"] == true, |d| {
                 d.child(self.composer_button(
@@ -57,7 +87,9 @@ impl Surface {
             .child(
                 self.composer_button(
                     "composer-model",
-                    routing["model"].as_str().unwrap_or("Model"),
+                    &routing["model"]
+                        .as_str()
+                        .map_or("Model".into(), model_label),
                     enabled,
                     cx,
                     |s, w, cx| s.open_composer_picker("model", w, cx),
@@ -128,8 +160,16 @@ impl Surface {
                         s.composer.read(cx).focus.focus(window);
                     },
                 )
+                // Round send target, as in the desktop composer. White reads on the
+                // accent in every appearance; the glass background token is transparent.
+                .w(px(26.))
+                .px(px(0.))
+                .rounded_full()
+                .justify_center()
+                .text_size(px(14.))
+                .font_weight(gpui::FontWeight::MEDIUM)
                 .bg(theme().accent)
-                .text_color(theme().background),
+                .text_color(gpui::white()),
             );
         div()
             .flex()

@@ -735,3 +735,21 @@ fn native_composer_loaded_focus_and_pending_switch_keep_current_scene(cx: &mut T
         assert_eq!(old_editor.read(cx).text, "Late draft");
     });
 }
+
+#[test]
+fn model_names_read_like_the_desktop() {
+    use crate::composer::controls::model_label;
+    for (id, label) in [
+        ("gpt-6.1-sol", "GPT-6.1 Sol"),
+        ("gpt-5.6-terra", "GPT-5.6 Terra"),
+        ("gpt-5.5", "GPT-5.5"),
+        ("gpt-5.3-codex", "Codex 5.3"),
+        ("claude-opus-5-5", "Opus 5.5"),
+        ("claude-fable-5[1m]", "Fable 5 (1M)"),
+        ("claude-sonnet-4-20250514", "Sonnet 4"),
+        ("gemini-3-flash-preview", "Gemini 3 Flash"),
+        ("local-model", "local-model"),
+    ] {
+        assert_eq!(model_label(id), label);
+    }
+}

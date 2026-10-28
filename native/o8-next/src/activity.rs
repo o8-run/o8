@@ -335,3 +335,70 @@ pub fn group(steps: &mut [Step]) {
         steps[i].group = index;
     }
 }
+
+/// The desktop's counted rollup ("Explored 2 files · Ran 3 commands"); a live
+/// block names the step that is still running.
+pub fn summary(steps: &[Step]) -> String {
+    if let Some(step) = steps.iter().rev().find(|s| s.status == "running") {
+        return format!("Running {}", step.command.lines().next().unwrap_or(""));
+    }
+    let count = |key: &str| steps.iter().filter(|s| s.group_key == key).count();
+    let (explored, edited) = (count("read"), count("edit"));
+    let ran = steps.len() - explored - edited;
+    let failed = steps.iter().filter(|s| s.status == "failed").count();
+    let noun = |n: usize, one: &str, many: &str| format!("{n} {}", if n == 1 { one } else { many });
+    let mut parts = vec![];
+    if explored > 0 {
+        parts.push(format!("Explored {}", noun(explored, "file", "files")));
+    }
+    if ran > 0 {
+        parts.push(format!("Ran {}", noun(ran, "command", "commands")));
+    }
+    if edited > 0 {
+        parts.push(format!("Edited {}", noun(edited, "file", "files")));
+    }
+    if failed > 0 {
+        parts.push(format!("{failed} failed"));
+    }
+    parts.join(" · ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn step(command: &str, key: &str, status: &str) -> Step {
+        Step {
+            id: command.into(),
+            command: command.into(),
+            status: status.into(),
+            reason: None,
+            group: 0,
+            group_key: key.into(),
+        }
+    }
+
+    #[test]
+    fn summary_counts_like_the_desktop_rollup() {
+        let steps = [
+            step("cat a.rs", "read", "ok"),
+            step("sed -n 1,20p b.rs", "read", "ok"),
+            step("cargo test", "test", "failed"),
+            step("apply_patch", "edit", "ok"),
+        ];
+        assert_eq!(
+            summary(&steps),
+            "Explored 2 files · Ran 1 command · Edited 1 file · 1 failed"
+        );
+        assert_eq!(summary(&steps[..1]), "Explored 1 file");
+    }
+
+    #[test]
+    fn summary_names_the_running_step() {
+        let steps = [
+            step("cat a.rs", "read", "ok"),
+            step("cargo test\n--all", "test", "running"),
+        ];
+        assert_eq!(summary(&steps), "Running cargo test");
+    }
+}
