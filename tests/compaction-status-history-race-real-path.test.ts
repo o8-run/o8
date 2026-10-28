@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync, writeSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { NextRequest } from 'next/server';
@@ -49,13 +49,15 @@ it('preserves a follow-up and its completed turn admitted while the real compact
     expect(saved.messages.filter(message => message.id === 'composer-queued-follow-up')).toHaveLength(1);
     expect(saved.messages.filter(message => message.id === 'follow-up-completed')).toHaveLength(1);
     expect(saved.title).toBe('Latest conversation title');
-    const getStatus = Reflect.get(compactRoute, 'GET');
-    if (typeof getStatus === 'function') {
-      const receipt = (await (await getStatus(new NextRequest(`http://localhost/api/orchestrator/compact?${new URLSearchParams({ repoPath, threadId })}`))).json()).operation;
-      process.stdout.write(`Measured scripted compaction: ${JSON.stringify({ phase: receipt.phase,
-        waitingMs: receipt.startedAt - receipt.requestedAt, compactingMs: receipt.settledAt - receipt.startedAt,
-        preservedFollowUps: 1, preservedCompletedTurns: 1 })}\n`);
-    }
+    const statusRoot = join(root, 'compaction-status');
+    const operationId = saved.messages.find(message => message.compaction)?.compaction?.operationId;
+    const receipt = JSON.parse(readFileSync(join(statusRoot, readdirSync(statusRoot)[0], `${operationId}.json`), 'utf8'));
+    expect(receipt.phase).toBe('complete');
+    expect(receipt.requestedAt).toBeLessThanOrEqual(receipt.startedAt);
+    expect(receipt.startedAt).toBeLessThanOrEqual(receipt.settledAt);
+    writeSync(1, `Measured scripted compaction: ${JSON.stringify({ phase: receipt.phase,
+      waitingMs: receipt.startedAt - receipt.requestedAt, compactingMs: receipt.settledAt - receipt.startedAt,
+      preservedFollowUps: 1, preservedCompletedTurns: 1 })}\n`);
     const archive = (await response.json()).archiveRef;
     expect(JSON.parse(readFileSync(join(root, 'orchestrator-archives', archive), 'utf8')).turns.length).toBeGreaterThan(0);
   } finally { writeFileSync(release, 'continue'); await running; }
