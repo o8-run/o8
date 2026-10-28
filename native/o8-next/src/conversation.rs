@@ -182,12 +182,9 @@ impl Surface {
                                 });
                             }
                         }
-                        this.notice = if method == "DELETE" {
-                            "Queued message removed."
-                        } else {
-                            "Message saved. Delivery status is shown below."
-                        }
-                        .into();
+                        // The queue rows under the composer show delivery, as on
+                        // the desktop; the transcript keeps no confirmation line.
+                        this.notice.clear();
                         match queue {
                             Ok(queue) => this.queue = queue,
                             Err(error) => this.notice = error,
