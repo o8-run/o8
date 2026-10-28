@@ -75,7 +75,8 @@ it.each([
       await page.evaluate(() => (window as unknown as { setBusy: (busy: boolean) => void }).setBusy(true));
       if (proofDir) { fs.mkdirSync(proofDir, { recursive: true }); await page.screenshot({ path: path.join(proofDir, `${palette}-${surface}-${width}-before-assert.png`) }); }
       await expect.poll(() => page.getByText('Compaction in progress', { exact: true }).count()).toBe(0);
-      await expect.poll(() => page.getByText('Planning next moves', { exact: true }).count()).toBe(1);
+      await expect.poll(() => page.getByText('Planning next moves', { exact: true }).count()).toBe(0);
+      await expect.poll(() => page.getByText(/^(Waiting for response|Working · phase unknown)$/).count()).toBe(1);
       if (proofDir) { fs.mkdirSync(proofDir, { recursive: true }); await page.screenshot({ path: path.join(proofDir, `${palette}-${surface}-${width}.png`) }); }
       expect(await page.getByText('Messages sent now will be queued', { exact: false }).count()).toBe(0);
       expect(await queue.textContent()).toContain('Keep this follow-up queued.');

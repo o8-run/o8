@@ -776,17 +776,25 @@ function DashboardInner() {
   ), []);
   const noteSidebarManualIntent = useCallback((nextVisible: boolean) => {
     sidebarManualIntentRef.current = true;
-    responsiveManualOpenRef.current.left = nextVisible
-      && getResponsiveViewportWidth() < RESPONSIVE_LEFT_PANEL_COLLAPSE_WIDTH;
+    responsiveManualOpenRef.current.left = nextVisible;
     setResponsiveAutoCollapsed((current) => (
       current.left ? { ...current, left: false } : current
     ));
-  }, [getResponsiveViewportWidth, sidebarManualIntentRef]);
+  }, [sidebarManualIntentRef]);
+  const closeChatList = useCallback(() => {
+    noteSidebarManualIntent(false);
+    setSidebarVisible(false);
+    window.requestAnimationFrame(() => {
+      const toggles = document.querySelectorAll<HTMLButtonElement>('[aria-label="Toggle sidebar"]');
+      Array.from(toggles).find((button) => button.getClientRects().length > 0 && !button.closest('[inert]'))?.focus({ preventScroll: true });
+    });
+  }, [noteSidebarManualIntent, setSidebarVisible]);
   const toggleSidebarFromChrome = useCallback(() => {
     const nextVisible = !sidebarVisible || responsiveAutoCollapsed.left;
+    if (!nextVisible) { closeChatList(); return; }
     noteSidebarManualIntent(nextVisible);
     setSidebarVisible(nextVisible);
-  }, [noteSidebarManualIntent, responsiveAutoCollapsed.left, setSidebarVisible, sidebarVisible]);
+  }, [closeChatList, noteSidebarManualIntent, responsiveAutoCollapsed.left, setSidebarVisible, sidebarVisible]);
   const openRightPanelFromUser = useCallback(() => {
     if (getResponsiveViewportWidth() < RESPONSIVE_RIGHT_PANEL_COLLAPSE_WIDTH) return;
     if (typeof window !== 'undefined') {
@@ -802,10 +810,10 @@ function DashboardInner() {
   useEffect(() => {
     if (viewportBands === null) return;
     if (viewportBands.belowRightCollapse && chatVisible) setChatVisible(false);
-    if (!viewportBands.belowLeftCollapse) responsiveManualOpenRef.current.left = false;
-    const autoCollapsed = viewportBands.belowLeftCollapse && !responsiveManualOpenRef.current.left;
+    const autoCollapsed = viewportBands.belowLeftCollapse
+      && !responsiveManualOpenRef.current.left && !sidebarManualIntentRef.current;
     setResponsiveAutoCollapsed((current) => current.left === autoCollapsed ? current : { left: autoCollapsed });
-  }, [chatVisible, viewportBands]);
+  }, [chatVisible, viewportBands, sidebarManualIntentRef]);
   const [o8ActiveTab, setO8ActiveTab] = useState<O8Tab>(DEFAULT_O8_ACTIVE_TAB);
   const [o8ActiveTabHydrated, setO8ActiveTabHydrated] = useState(false);
   const { tabs: rightPrTabs, open: rememberRightPr, close: forgetRightPr } = useRightPrTabs();
@@ -4124,14 +4132,9 @@ function DashboardInner() {
       });
   }, []);
 
-  const showSidebarColumn = sidebarVisible && !responsiveAutoCollapsed.left && !compactShell;
+  const showSidebarColumn = sidebarVisible && !responsiveAutoCollapsed.left;
   const showCompactNavigationRail = !compactShell;
   const sidebarOverlay = Boolean(viewportBands?.belowLeftCollapse);
-  const closeChatList = () => {
-    noteSidebarManualIntent(false);
-    setSidebarVisible(false);
-    window.requestAnimationFrame(() => document.getElementById('o8-chat-list-toggle')?.focus());
-  };
   const showRightPanelColumn = chatVisible && !compactShell && !viewportBands?.belowRightCollapse;
   const workspaceInset = compactShell ? 2 : 4;
 
@@ -4583,7 +4586,8 @@ function DashboardInner() {
           </div>
         );
         return (
-        <ChatListColumn visible={showSidebarColumn} width={effectiveLeftWidth} overlay={sidebarOverlay} onClose={closeChatList}>
+        <ChatListColumn visible={showSidebarColumn} width={effectiveLeftWidth} overlay={sidebarOverlay}
+          railWidth={showCompactNavigationRail ? NAVIGATION_RAIL_WIDTH : 0} onClose={closeChatList}>
         <motion.div
           animate={{ opacity: 1 }}
           transition={

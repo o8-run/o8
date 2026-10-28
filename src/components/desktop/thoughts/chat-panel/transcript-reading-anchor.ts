@@ -1,4 +1,4 @@
-interface ReadingRow { id: string; offset: number; element?: HTMLElement }
+interface ReadingRow { id: string; offset: number; index?: number; element?: HTMLElement }
 export interface TranscriptReadingAnchor { rows: ReadingRow[] }
 
 /** Capture visible identity and offset, independently of total content height. */
@@ -38,4 +38,29 @@ export function restoreTranscriptReadingAnchor(container: HTMLElement, anchor: T
     return true;
   }
   return false;
+}
+
+/** Resolve a pruned identity by its saved order, or its pixel position for v1 records without order. */
+export function nearestTranscriptReadingAnchor(
+  container: HTMLElement, anchor: TranscriptReadingAnchor, top: number, messageIds: readonly string[],
+): TranscriptReadingAnchor | null {
+  const saved = anchor.rows[0];
+  if (!saved) return null;
+  const bounds = container.getBoundingClientRect();
+  let nearest: ReadingRow | null = null;
+  let distance = Infinity;
+  const order = new Map(messageIds.map((id, index) => [id, index]));
+  for (const element of container.querySelectorAll<HTMLElement>('[data-o8-message-id]')) {
+    const id = element.getAttribute('data-o8-message-id')!;
+    const rect = element.getBoundingClientRect();
+    if (rect.height <= 0) continue;
+    const index = order.get(id);
+    const delta = saved.index !== undefined && index !== undefined
+      ? Math.abs(index - saved.index)
+      : Math.abs(container.scrollTop + rect.top - bounds.top - top - saved.offset);
+    if (delta >= distance) continue;
+    distance = delta;
+    nearest = { id, offset: Math.max(0, saved.offset), index, element };
+  }
+  return nearest ? { rows: [nearest] } : null;
 }

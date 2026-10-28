@@ -59,26 +59,27 @@ export function ComposerSelectorFooterView({
     <div
       ref={containerRef}
       data-testid="composer-selector-footer"
+      data-composer-footer
       style={{
         display: 'flex',
         alignItems: 'center',
-        gap: compact ? 4 : 6,
+        gap: compact ? 0 : 6,
         minHeight: 36,
         paddingTop: 4,
-        paddingRight: 8,
+        paddingRight: compact ? 0 : 8,
         paddingBottom: 8,
-        paddingLeft: 8,
+        paddingLeft: compact ? 0 : 8,
       }}
     >
       <ModeChip state={state} onModeChange={onModeChange} />
       {permissionControl}
       <span data-testid="composer-selector-attach" style={{ display: 'inline-flex', alignItems: 'center', flexShrink: 0 }}>{attachControl}</span>
       {leadingControls ? (
-        <span data-testid="composer-selector-leading-controls" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0, overflow: 'hidden' }}>
+        <span data-testid="composer-selector-leading-controls" style={{ display: 'inline-flex', alignItems: 'center', gap: compact ? 0 : 6, minWidth: 0, flexShrink: 0 }}>
           {leadingControls}
         </span>
       ) : null}
-      <span data-testid="composer-selector-spacer" style={{ flex: 1, minWidth: 0 }} />
+      <span data-composer-spacer data-testid="composer-selector-spacer" style={{ flex: 1, minWidth: 0 }} />
       {meterControl ? (
         <span data-testid="composer-selector-meter" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
           {meterControl}

@@ -11,6 +11,7 @@ const directPersistenceSeams: Record<string, string> = {
   'ThoughtsChatPanel.tsx': 'Owns the one-shot suppression flag for automatic thread restoration.',
   'chat-panel/composer-queue-recovery.ts': 'Owns versioned uncertain Send next identities and exact payloads per conversation and attempt; recovery never automatically sends work.',
   'chat-panel/composer-draft-store.ts': 'Owns versioned unsent text, completed images and file context per repository and conversation; saving never sends a turn.',
+  'chat-panel/transcript-reading-position.ts': 'Owns o8:transcript-reading:v1: reading intent, bounded identities, offsets and order per workspace and thread/session conversation; history deletion removes all matching workspace buckets and invalidates mounted writers before teardown.',
   'chat-panel/TaskArtifactCard.tsx': 'Owns unsent task-artifact drafts keyed by artifact id.',
   'chat-panel/WorkerCorrections.tsx': 'Owns pending correction identity and exact payload per repository and conversation, preventing duplicate delivery after reload.',
   'chat-panel/useAgentVoiceMode.ts': 'Owns the per-agent voice-mode preference.',

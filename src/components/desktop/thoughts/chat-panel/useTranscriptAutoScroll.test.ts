@@ -2,6 +2,7 @@
 import { act, createElement, useRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { deleteChatHistory } from '@/lib/llm/chat-history';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import { LiveCaptions } from '@/lib/voice/managed-live/captions';
 import { visibleVoiceTranscript } from '@/lib/transcripts/voice-captions';
@@ -15,14 +16,14 @@ let observed: Set<Element>;
 const suppress = { current: false };
 const scrollTopDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollTop');
 const scrollToDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollTo');
-function Harness({ messages, scope = 'chat' }: { messages: MobileTranscriptEntry[]; scope?: string; status?: string }) {
+function Harness({ messages, scope = 'chat', historyComplete = false }: { messages: MobileTranscriptEntry[]; scope?: string; status?: string; historyComplete?: boolean }) {
   const end = useRef<HTMLDivElement>(null);
-  useTranscriptAutoScroll({ endRef: end, suppressRef: suppress, scope });
+  useTranscriptAutoScroll({ endRef: end, suppressRef: suppress, scope, historyComplete, messageIds: messages.map(message => message.id) });
   return createElement('div', { className: 'thoughts-scroll' }, createElement('div', null,
     messages.map(m => createElement('div', { key: m.id, 'data-o8-message-id': m.id }, m.text)), createElement('div', { ref: end })));
 }
-async function render(messages: MobileTranscriptEntry[], scope = 'chat', status = 'idle') {
-  await act(async () => root.render(createElement(Harness, { messages, scope, status })));
+async function render(messages: MobileTranscriptEntry[], scope = 'chat', status = 'idle', historyComplete = false) {
+  await act(async () => root.render(createElement(Harness, { messages, scope, status, historyComplete })));
 }
 async function frame() { await act(async () => vi.advanceTimersByTimeAsync(32)); }
 function scrollTo(value: number) { top = value; scroller.dispatchEvent(new Event('scroll')); }
@@ -144,9 +145,11 @@ function readingLayout() {
 
 it('restores a message and offset after remount, waiting for its history page without saving the tail over it', async () => {
   const messages = readingLayout();
-  await render(messages); await frame();
+  await render(messages.slice(1)); await frame();
   scrollTo(2100);
+  await render(messages); await frame();
   window.dispatchEvent(new Event('pagehide'));
+  expect(JSON.parse(localStorage.getItem('o8:transcript-reading:v1:chat')!).anchor.rows[0].index).toBe(1);
   await act(async () => root.unmount());
   root = createRoot(host); top = 0;
   await render([messages[2]]); scroller = host.querySelector('.thoughts-scroll')!; await frame();
@@ -182,4 +185,64 @@ it('lets a reader abandon a pending restoration and tolerates unavailable storag
   vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('Storage blocked'); });
   vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('Storage full'); });
   await render(messages, 'unavailable'); await frame(); expect(top).toBe(height - 692);
+});
+
+it.each([true, false])('settles a permanently removed anchor after backfill completes and resumes saving (saved order: %s)', async withOrder => {
+  const messages = readingLayout();
+  await render(messages); await frame(); scrollTo(2100);
+  await act(async () => root.unmount()); root = createRoot(host); top = 0;
+  if (!withOrder) {
+    const key = 'o8:transcript-reading:v1:chat';
+    const saved = JSON.parse(localStorage.getItem(key)!);
+    for (const row of saved.anchor.rows) delete row.index;
+    localStorage.setItem(key, JSON.stringify(saved));
+  }
+  await render([messages[2]]); scroller = host.querySelector('.thoughts-scroll')!; await frame();
+  const key = 'o8:transcript-reading:v1:chat';
+  expect(JSON.parse(localStorage.getItem(key)!).anchor.rows[0].id).toBe('m2');
+  await render([messages[0], messages[2]], 'chat', 'idle', true); await frame();
+  expect(top).toBe(withOrder ? 3000 : 1000);
+  expect(JSON.parse(localStorage.getItem(key)!).anchor.rows[0].id).toBe(withOrder ? 'm3' : 'm1');
+  scrollTo(1000);
+  expect(JSON.parse(localStorage.getItem(key)!).top).toBe(1000);
+});
+
+it('falls back to following an exhausted empty history without retaining a missing identity', async () => {
+  const messages = readingLayout();
+  await render(messages); await frame(); scrollTo(2100);
+  await act(async () => root.unmount()); root = createRoot(host); top = 0;
+  await render([], 'chat', 'idle', true); scroller = host.querySelector('.thoughts-scroll')!; await frame();
+  expect(top).toBe(height - 692);
+  expect(JSON.parse(localStorage.getItem('o8:transcript-reading:v1:chat')!)).toMatchObject({ following: true, anchor: null });
+  height += 500; resize(); await frame(); expect(top).toBe(height - 692);
+});
+
+it('deletes active and inactive conversation positions across workspace buckets without recreating them on pagehide or unmount', async () => {
+  const messages = readingLayout();
+  const a = JSON.stringify(['/repo', 'thread', 'a']);
+  const alias = JSON.stringify(['/alias', 'thread', 'a']);
+  const b = JSON.stringify(['/repo', 'thread', 'b']);
+  for (const scope of [alias, a, b]) { await render(messages, scope); await frame(); scrollTo(2100); }
+  window.dispatchEvent(new CustomEvent('cortex-llm-history-deleted', { detail: { tabId: 'a' } }));
+  expect(localStorage.getItem(`o8:transcript-reading:v1:${a}`)).toBeNull();
+  expect(localStorage.getItem(`o8:transcript-reading:v1:${alias}`)).toBeNull();
+  expect(localStorage.getItem(`o8:transcript-reading:v1:${b}`)).not.toBeNull();
+  const remove = vi.fn().mockResolvedValueOnce(new Response(null, { status: 500 })).mockResolvedValueOnce(new Response(null, { status: 200 }));
+  vi.stubGlobal('fetch', remove);
+  await deleteChatHistory('b');
+  expect(localStorage.getItem(`o8:transcript-reading:v1:${b}`)).not.toBeNull();
+  await deleteChatHistory('b');
+  window.dispatchEvent(new Event('pagehide')); scrollTo(1000);
+  await render(messages, 'new-chat'); await frame();
+  expect(localStorage.getItem(`o8:transcript-reading:v1:${b}`)).toBeNull();
+});
+
+it('removes a closed chat record through the deletion client with no mounted transcript', async () => {
+  const scope = JSON.stringify(['/repo', 'thread', 'closed']);
+  await render(readingLayout(), scope); await frame(); scrollTo(2100);
+  await act(async () => root.unmount()); root = createRoot(host);
+  expect(localStorage.getItem(`o8:transcript-reading:v1:${scope}`)).not.toBeNull();
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status: 200 })));
+  await deleteChatHistory('closed');
+  expect(localStorage.getItem(`o8:transcript-reading:v1:${scope}`)).toBeNull();
 });

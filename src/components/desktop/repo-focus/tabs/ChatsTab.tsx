@@ -1,5 +1,6 @@
 'use client';
 
+import { removeTranscriptReadingPositions } from '@/components/desktop/thoughts/chat-panel/transcript-reading-position';
 import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { orchestratorBackendDisplayLabel } from '@/lib/orchestrator/display';
 import { OrchestratorHoverCard } from '@/components/desktop/OrchestratorHoverCard';
@@ -281,6 +282,7 @@ export function ChatsTab({
         // dropped from this rail, but the center tab had no signal until now
         // (operator reports v0.1.557/560/580).
         if (typeof window !== 'undefined') {
+          removeTranscriptReadingPositions(item.tabId);
           window.dispatchEvent(new CustomEvent('o8:chat-history-deleted', { detail: { tabId: item.tabId } }));
           // And clear the last-active restore keys — in any repo bucket — that
           // point at the deleted thread, so a reload can't resurrect it into a

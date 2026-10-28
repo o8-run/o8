@@ -1,20 +1,28 @@
 'use client';
 
 import { useLayoutEffect, useRef, type RefObject } from 'react';
-import { captureTranscriptReadingAnchor, restoreTranscriptReadingAnchor } from './transcript-reading-anchor';
-import { loadTranscriptReadingPosition, saveTranscriptReadingPosition } from './transcript-reading-position';
+import { captureTranscriptReadingAnchor, nearestTranscriptReadingAnchor, restoreTranscriptReadingAnchor } from './transcript-reading-anchor';
+import { isTranscriptReadingConversation, loadTranscriptReadingPosition, observeTranscriptReadingDeletions, saveTranscriptReadingPosition } from './transcript-reading-position';
 
 interface Options {
   endRef: RefObject<HTMLDivElement | null>;
   suppressRef: RefObject<boolean>;
   scope: string | null;
+  historyComplete?: boolean;
+  messageIds?: readonly string[];
 }
 
 /** Follow content growth, but let the reader own the viewport until they return to the bottom. */
-export function useTranscriptAutoScroll({ endRef, suppressRef, scope }: Options) {
+export function useTranscriptAutoScroll({ endRef, suppressRef, scope, historyComplete = false, messageIds = [] }: Options) {
   const connection = useRef<{
-    container: HTMLElement; scope: string | null; follow: () => void; preserve: () => void; cancel: () => void; dispose: () => void;
+    container: HTMLElement; scope: string | null; follow: () => void; preserve: () => void; cancel: () => void; dispose: () => void; forget: () => void;
   } | null>(null);
+
+  const history = useRef({ complete: historyComplete, messageIds });
+  useLayoutEffect(() => { history.current = { complete: historyComplete, messageIds }; });
+  useLayoutEffect(() => observeTranscriptReadingDeletions(tabId => {
+    if (connection.current && isTranscriptReadingConversation(connection.current.scope, tabId)) connection.current.forget();
+  }), []);
 
   // The empty composer can acquire a transcript without changing chat identity.
   // Reconcile its actual element after each commit; listeners survive caption updates.
@@ -35,20 +43,37 @@ export function useTranscriptAutoScroll({ endRef, suppressRef, scope }: Options)
       if (saved && !following) container.scrollTop = saved.top;
       let lastTop = container.scrollTop;
       let frame = 0;
+      let deleted = false;
+      const withOrder = (captured: ReturnType<typeof captureTranscriptReadingAnchor>) => {
+        if (captured) for (const row of captured.rows) {
+          const index = history.current.messageIds.indexOf(row.id);
+          if (index >= 0) row.index = index;
+        }
+        return captured;
+      };
+      const capture = () => withOrder(captureTranscriptReadingAnchor(container));
       let savedFollowing = saved?.following;
       const save = () => {
-        if (restoring || (following && savedFollowing === true)) return;
+        if (deleted || restoring || (following && savedFollowing === true)) return;
         saveTranscriptReadingPosition(scope, { following, top: following ? 0 : lastTop, anchor: following ? null : anchor });
         savedFollowing = following;
       };
       const cancel = () => { cancelAnimationFrame(frame); frame = 0; };
       const pause = () => {
         restoring = false; following = false; cancel();
-        anchor = captureTranscriptReadingAnchor(container); lastTop = container.scrollTop; save();
+        anchor = capture(); lastTop = container.scrollTop; save();
       };
       const preserve = () => {
         if (following) return;
-        if (restoreTranscriptReadingAnchor(container, anchor)) restoring = false;
+        if (restoreTranscriptReadingAnchor(container, anchor)) { restoring = false; anchor = withOrder(anchor); }
+        else if (restoring && history.current.complete && anchor) {
+          anchor = nearestTranscriptReadingAnchor(container, anchor, saved?.top ?? lastTop, history.current.messageIds);
+          restoring = false;
+          if (anchor) restoreTranscriptReadingAnchor(container, anchor);
+          else { following = true; container.scrollTop = container.scrollHeight; }
+          lastTop = container.scrollTop;
+          save();
+        }
         lastTop = container.scrollTop;
       };
       const follow = () => {
@@ -68,7 +93,7 @@ export function useTranscriptAutoScroll({ endRef, suppressRef, scope }: Options)
         // A deliberate return to the bottom resumes following. Content growth
         // alone must not revoke an already-following reader.
         if (container.scrollHeight - top - container.clientHeight <= 4) following = true;
-        if (!following) anchor = captureTranscriptReadingAnchor(container);
+        if (!following) anchor = capture();
         lastTop = top;
         save();
       };
@@ -101,7 +126,7 @@ export function useTranscriptAutoScroll({ endRef, suppressRef, scope }: Options)
       observeContent();
       const mutations = typeof MutationObserver === 'undefined' ? null : new MutationObserver(observeContent);
       if (content) mutations?.observe(content, { childList: true, subtree: true });
-      connection.current = { container, scope, follow, preserve, cancel, dispose: () => {
+      connection.current = { container, scope, follow, preserve, cancel, forget: () => { deleted = true; cancel(); }, dispose: () => {
         // React may already have replaced the rows for a different scope.
         // Save the last observed position, never capture from that new DOM.
         save(); cancel(); observer?.disconnect(); mutations?.disconnect();

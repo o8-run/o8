@@ -155,15 +155,22 @@ try {
     assert([...subscriptions.values()].includes(`thoughts-reading-${name}`), 'fixture WebSocket must be subscribed before live output');
   };
   const read = async id => {
+    await row(id).locator('xpath=ancestor::*[contains(@class, "thoughts-scroll")]').hover();
+    await page.mouse.wheel(0, -1);
+    await frames();
     await row(id).evaluate(element => {
       element.scrollIntoView({ block: 'start' });
-      element.closest('.thoughts-scroll').scrollTop -= 75;
+      const host = element.closest('.thoughts-scroll');
+      host.scrollTop -= 75;
+      host.dispatchEvent(new Event('scroll'));
     });
     await frames(); await page.waitForTimeout(500);
     return position(id);
   };
   const bottom = async name => {
-    await scroller(name).evaluate(element => { element.scrollTop = element.scrollHeight; });
+    await scroller(name).hover();
+    await page.mouse.wheel(0, 100000);
+    await page.waitForTimeout(300);
     await frames();
   };
   const atBottom = name => scroller(name).evaluate(element => ({ gap: element.scrollHeight - element.scrollTop - element.clientHeight }));
@@ -220,6 +227,55 @@ try {
   emit('output', { assistantMessageId: 'reading-live-after-reload', text: 'Output continues after reload.\n\n'.repeat(30) });
   await row('reading-live-after-reload').waitFor({ state: 'attached' }); await page.waitForTimeout(1000);
   check('reload during a live turn keeps bottom following', (await atBottom('b')).gap <= 4, await atBottom('b'));
+  const storedPositions = () => page.evaluate(() => Object.keys(localStorage)
+    .filter(key => key.startsWith('o8:transcript-reading:v1:'))
+    .map(key => ({ key, record: JSON.parse(localStorage.getItem(key)) })));
+  await page.locator('[data-o8-workspace-tab="reading-a"]').first().click(); await loaded('a');
+  await read('a-210');
+  const aSaved = (await storedPositions()).find(item => JSON.parse(item.key.slice('o8:transcript-reading:v1:'.length))[2] === 'thoughts-reading-a');
+  assert(aSaved?.record.anchor?.rows.length);
+  const missingIds = aSaved.record.anchor.rows.map(row => row.id);
+  const headers = { Authorization: `Bearer ${token}`, 'content-type': 'application/json' };
+  const historyUrl = `http://127.0.0.1:${apiPort}/api/v2/chat-history`;
+  const full = await fetch(`${historyUrl}?tabId=thoughts-reading-a`, { headers }).then(response => response.json());
+  const surviving = full.messages.filter(message => !missingIds.includes(message.id));
+  const savedIndex = full.messages.findIndex(message => message.id === missingIds[0]);
+  const expectedNeighbor = surviving[Math.min(savedIndex, surviving.length - 1)].id;
+  const replaced = await fetch(historyUrl, { method: 'POST', headers,
+    body: JSON.stringify({ ...full, tabId: 'thoughts-reading-a', replace: true, messages: surviving }) });
+  assert.equal(replaced.status, 200); await replaced.arrayBuffer();
+  const readback = await fetch(`${historyUrl}?tabId=thoughts-reading-a`, { headers }).then(response => response.json());
+  assert(readback.messages.every(message => !missingIds.includes(message.id)));
+  await reload('a'); await loaded('a'); await page.waitForTimeout(1000);
+  const neighbor = await position(expectedNeighbor);
+  const settled = (await storedPositions()).find(item => item.key === aSaved.key)?.record;
+  check('missing anchor resolves to its saved-order neighbor and retires stale identities', neighbor.visible
+    && settled?.anchor?.rows.length > 0
+    && settled.anchor.rows.every(row => surviving.some(message => message.id === row.id)), { missingIds, expectedNeighbor, neighbor, settled });
+  const resumed = await read('a-220');
+  const resumedStore = (await storedPositions()).find(item => item.key === aSaved.key)?.record;
+  check('ordinary scrolling saves again after a missing-anchor fallback', Math.abs(resumedStore.top - resumed.top) < 2, { resumed, resumedStore });
+
+  // The sidebar owns the real confirmation and DELETE route. Delete B while
+  // inactive, then A while active, and check teardown cannot recreate either.
+  for (const name of ['b', 'a']) {
+    const deleted = page.waitForResponse(response => response.request().method() === 'DELETE'
+      && response.url().includes(`/api/v2/chat-history?tabId=thoughts-reading-${name}`));
+    await page.getByRole('button', { name: new RegExp(`^Reading ${name.toUpperCase()} ·`) }).first().click({ button: 'right' });
+    await page.getByRole('button', { name: 'Delete', exact: true }).click();
+    await page.getByRole('dialog').filter({ hasText: 'from chat history?' }).waitFor();
+    await page.getByRole('button', { name: 'Delete', exact: true }).click();
+    assert.equal((await deleted).status(), 200);
+    await page.waitForTimeout(800);
+    await page.evaluate(() => window.dispatchEvent(new Event('pagehide')));
+    const leftovers = (await storedPositions()).filter(item => JSON.parse(item.key.slice('o8:transcript-reading:v1:'.length))[2] === `thoughts-reading-${name}`);
+    check(`deleting ${name === 'b' ? 'inactive' : 'active'} chat removes its reading records`, leftovers.length === 0
+      && !fs.existsSync(path.join(fixture.dataDir, 'chat-history', `thoughts-reading-${name}.json`)), { leftovers });
+  }
+  await page.reload({ waitUntil: 'domcontentloaded', timeout: 180000 }); await page.waitForTimeout(1000);
+  const leftovers = (await storedPositions()).filter(item => ['thoughts-reading-a', 'thoughts-reading-b']
+    .includes(JSON.parse(item.key.slice('o8:transcript-reading:v1:'.length))[2]));
+  check('deleted reading records stay absent after reload and unmount', leftovers.length === 0, leftovers);
   check('dashboard has no uncaught errors', errors.length === 0, errors);
   await page.waitForTimeout(500);
   fs.writeFileSync(path.join(evidence, 'receipt.json'), JSON.stringify({ checks, apiPort, wsPort: socket.address().port,

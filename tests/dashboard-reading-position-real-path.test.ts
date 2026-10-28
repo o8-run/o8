@@ -8,4 +8,6 @@ it.runIf(process.env.O8_READING_POSITION_CHECK === '1')('restores each conversat
   const result = await promisify(execFile)(process.execPath, ['scripts/bench/transcript-reading-position.mjs'], { timeout: 300000 });
   expect(result.stdout).toContain('reload keeps the same compacted-history message and offset PASS');
   expect(result.stdout).toContain('live turn follows the bottom PASS');
+  expect(result.stdout).toContain('missing anchor resolves to its saved-order neighbor and retires stale identities PASS');
+  expect(result.stdout).toContain('deleted reading records stay absent after reload and unmount PASS');
 }, 320000);
