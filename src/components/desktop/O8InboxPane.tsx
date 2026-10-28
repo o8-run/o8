@@ -232,7 +232,7 @@ export function O8InboxPane({ active = true, repoPath = null, repos = [] }: { ac
 
   const openTranscript = useCallback(async (item: SupervisorInboxItem) => {
     if (!item.transcriptLink) {
-      setActionNote(item.id, 'No transcript for this incident.');
+      setActionNote(item.id, 'No transcript for this item.');
       return;
     }
     if (expandedTranscriptById[item.id]) {
@@ -259,7 +259,7 @@ export function O8InboxPane({ active = true, repoPath = null, repos = [] }: { ac
   const openWorktree = useCallback(async (item: SupervisorInboxItem) => {
     const path = item.worktreePath ?? item.repoPath;
     if (!path) {
-      setActionNote(item.id, 'No worktree path for this incident.');
+      setActionNote(item.id, 'No worktree path for this item.');
       return;
     }
     try {
@@ -316,7 +316,7 @@ export function O8InboxPane({ active = true, repoPath = null, repos = [] }: { ac
     try {
       const requestBody = JSON.stringify({
         packetId: item.packetId,
-        feedback: `Operator retried manually from the Incident Queue after bounded retries were exhausted. Original failure: ${item.errorExcerpt || 'see lane events.'}`,
+        feedback: `Operator retried manually from the Inbox after bounded retries were exhausted. Original failure: ${item.errorExcerpt || 'see lane events.'}`,
         idempotencyKey: crypto.randomUUID(),
       });
       const { response, payload } = await fetchCorrelatedActionReceipt<{
@@ -616,7 +616,7 @@ export function O8InboxPane({ active = true, repoPath = null, repos = [] }: { ac
                   </>
                   {!isSelfHealed && !isResolved ? (
                     <InboxActionButton
-                      title="Dismiss incident"
+                      title="Dismiss"
                       onClick={() => { void dismiss(item.id).catch(() => setActionNote(item.id, 'The item could not be dismissed.')); }}
                     >
                       <ArchiveGlyph />
