@@ -51,6 +51,7 @@ it('preserves a follow-up and its completed turn admitted while the real compact
     expect(saved.title).toBe('Latest conversation title');
     const statusRoot = join(root, 'compaction-status');
     const operationId = saved.messages.find(message => message.compaction)?.compaction?.operationId;
+    expect(operationId).toEqual(expect.any(String));
     const receipt = JSON.parse(readFileSync(join(statusRoot, readdirSync(statusRoot)[0], `${operationId}.json`), 'utf8'));
     expect(receipt.phase).toBe('complete');
     expect(receipt.requestedAt).toBeLessThanOrEqual(receipt.startedAt);

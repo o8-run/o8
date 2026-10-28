@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { act, createElement } from 'react';
@@ -225,4 +226,37 @@ it('never revives a completed operation from a late live start before reload rea
   expect(host.textContent).not.toContain('Compaction in progress');
   expect(host.querySelector('[data-compaction-phase="compacting"]')).toBeNull();
   expect(host.querySelector('[data-compaction-phase="uncertain"]')).not.toBeNull();
+});
+
+it('reconciles a missing terminal receipt as uncertain even while its old owner process is alive', async () => {
+  const operation = await start();
+  await act(async () => { operation.release(); await operation.job; });
+  const pending = captured.find(mutation => mutation.status === 'pending')!;
+  // Model the last durable receipt left behind when terminal persistence fails.
+  const receipt = { ...scope, operationId: pending.mutationId, phase: 'compacting' as const,
+    requestedAt: Date.now() - 50_000, startedAt: Date.now() - 49_000, updatedAt: Date.now() - 46_000, ownerPid: process.pid };
+  const key = createHash('sha256').update(JSON.stringify([repoPath, threadId])).digest('hex');
+  const dir = join(directory, 'compaction-status', key); mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, `${receipt.operationId}.json`), JSON.stringify(receipt));
+  await act(async () => root.unmount()); root = createRoot(host);
+  await render(); await act(async () => Socket.current.onopen?.());
+  await vi.waitFor(() => expect(host.querySelector('[data-compaction-phase="uncertain"]')).not.toBeNull());
+  await act(async () => receive({ ...pending, compaction: receipt }));
+  expect(host.querySelector('[data-compaction-phase="compacting"]')).toBeNull();
+  expect(host.textContent).toContain('Check status');
+});
+
+it('refreshes a long-running operation receipt while its runtime still works', async () => {
+  const operation = await start();
+  try {
+    const initial = (await (await status()).json()).operation;
+    expect(initial?.phase).toBe('compacting');
+    const later = Date.now() + 46_000;
+    vi.spyOn(Date, 'now').mockReturnValue(later);
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 6300)); });
+    const refreshed = (await (await status()).json()).operation;
+    expect(refreshed.updatedAt).toBeGreaterThanOrEqual(later);
+    expect(refreshed.phase).toBe('compacting');
+    expect(host.querySelector('[data-compaction-phase="compacting"]')).not.toBeNull();
+  } finally { await act(async () => { operation.release(); await operation.job; }); }
 });

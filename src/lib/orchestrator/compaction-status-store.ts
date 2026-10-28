@@ -4,7 +4,7 @@ import { mkdir, readdir, readFile, rename, unlink, writeFile } from 'node:fs/pro
 import { join } from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { readPersistedLlmChat } from '@/lib/llm/chat-history-store';
-import { isCompactionOperation, isCompactionTerminal, type CompactionOperation } from './compaction-status';
+import { COMPACTION_UNVERIFIED_MS, isCompactionOperation, isCompactionTerminal, type CompactionOperation } from './compaction-status';
 
 function directory(scope: { repoPath: string; threadId: string }): string {
   const key = createHash('sha256').update(JSON.stringify([scope.repoPath, scope.threadId])).digest('hex');
@@ -46,6 +46,8 @@ export async function readCompactionOperation(scope: { repoPath: string; threadI
     // Only this operation's boundary is evidence; an older summary proves nothing.
     const boundary = readPersistedLlmChat(scope.threadId)?.history.messages.find(entry => entry.compaction?.operationId === operation.operationId);
     if (boundary) return { ...operation, phase: 'complete', settledAt: boundary.compaction?.completedAt ?? operation.updatedAt };
+    // A live server process is not proof that this operation is still running.
+    if (Date.now() - operation.updatedAt >= COMPACTION_UNVERIFIED_MS) return { ...operation, phase: 'uncertain' };
     try { process.kill(ownerPid, 0); }
     catch { return { ...operation, phase: 'uncertain' }; }
   }

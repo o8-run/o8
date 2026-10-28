@@ -21,9 +21,17 @@ export async function withLiveCompaction<T>(scope: { repoPath: string; threadId:
       ...(operation.settledAt !== undefined ? { settledAt: new Date(operation.settledAt).toISOString() } : {}) } }).catch(() => {});
   };
   await report('queued');
+  let heartbeat: ReturnType<typeof setInterval> | undefined;
+  let pulse: Promise<void> | undefined;
   try {
     operation.phase = 'compacting'; operation.startedAt = Date.now();
     await report('pending');
+    heartbeat = setInterval(() => {
+      if (pulse) return;
+      operation.updatedAt = Date.now();
+      pulse = saveCompactionOperation({ ...operation }).catch(() => {}).finally(() => { pulse = undefined; });
+    }, 5_000);
+    heartbeat.unref?.();
     const result = await run(operation);
     operation.phase = 'complete';
     return result;
@@ -31,6 +39,9 @@ export async function withLiveCompaction<T>(scope: { repoPath: string; threadId:
     operation.phase = error instanceof Error && error.name === 'AbortError' ? 'cancelled' : 'failed';
     throw error;
   } finally {
+    clearInterval(heartbeat);
+    // Finish an older heartbeat before writing the terminal receipt.
+    await pulse;
     operation.settledAt = Date.now();
     await report(operation.phase === 'complete' ? 'completed' : 'failed');
   }
