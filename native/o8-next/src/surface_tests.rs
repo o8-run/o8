@@ -423,8 +423,11 @@ fn fixture_send_selected_queue_promote_and_echo(cx: &mut TestAppContext) {
     cx.run_until_parked();
     let promoted = saved.queue(&second).unwrap()["items"][0].clone();
     assert_eq!(promoted["id"], queued["id"]);
-    assert_eq!(promoted["payload"], queued["payload"]);
+    for field in ["text", "routing", "images"] {
+        assert_eq!(promoted["payload"][field], queued["payload"][field]);
+    }
     assert_eq!(promoted["status"], "applied");
+    assert_eq!(promoted["payload"]["wireMessage"], "");
     let history = saved.history(&second.id).unwrap();
     assert_eq!(
         history.transcript.last().unwrap().text,
