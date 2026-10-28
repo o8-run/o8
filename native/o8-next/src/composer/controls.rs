@@ -39,7 +39,9 @@ pub(crate) fn model_label(id: &str) -> String {
     let id = id.rsplit('/').next().unwrap_or(id);
     let title = |word: &str| {
         let mut chars = word.chars();
-        chars.next().map_or(String::new(), |c| c.to_uppercase().chain(chars).collect())
+        chars
+            .next()
+            .map_or(String::new(), |c| c.to_uppercase().chain(chars).collect())
     };
     let (long, id) = match id.strip_suffix("[1m]") {
         Some(id) => (" (1M)", id),
@@ -53,7 +55,9 @@ pub(crate) fn model_label(id: &str) -> String {
         ["gpt", version, "codex"] => format!("Codex {version}"),
         ["gpt", version, rest @ ..] => {
             let rest: Vec<String> = rest.iter().map(|w| title(w)).collect();
-            format!("GPT-{version} {}", rest.join(" ")).trim_end().to_owned()
+            format!("GPT-{version} {}", rest.join(" "))
+                .trim_end()
+                .to_owned()
         }
         ["claude", family, version @ ..] if !version.is_empty() => {
             format!("{} {}", title(family), version.join("."))

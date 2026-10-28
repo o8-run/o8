@@ -144,10 +144,8 @@ fn tabs(s: &Shell, cx: &mut Context<Shell>) -> impl IntoElement {
                         .when(!selected, |pill| pill.hover(|pill| pill.bg(theme().hover)))
                         .child(match &t {
                             Tab::Session(id) => {
-                                let selected = s
-                                    .current()
-                                    .and_then(|w| w.selections.get(id))
-                                    .unwrap_or(id);
+                                let selected =
+                                    s.current().and_then(|w| w.selections.get(id)).unwrap_or(id);
                                 s.sessions
                                     .iter()
                                     .find(|s| &s.id == selected)

@@ -588,9 +588,7 @@ pub fn launch(
     stream_benchmark: Option<(String, u64)>,
     started: Instant,
 ) {
-    (if offscreen { Application::headless() } else { Application::new() })
-        .with_assets(crate::icon::Assets)
-        .run(move |cx: &mut App| {
+    (if offscreen { Application::headless() } else { Application::new() }).with_assets(crate::icon::Assets).run(move |cx: &mut App| {
         let handle = cx.open_window(WindowOptions { focus: false, show: !offscreen,
             window_bounds: Some(WindowBounds::Windowed(Bounds::new(point(px(if offscreen { -10000. } else { 100. }), px(if offscreen { -10000. } else { 100. })), size(px(1200.), px(816.))))),
             titlebar: Some(gpui::TitlebarOptions { title: Some("o8 next".into()), ..Default::default() }),

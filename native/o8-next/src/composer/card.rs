@@ -3,12 +3,7 @@ use crate::composer::controls::{mode_label, model_label};
 use gpui::{AnyElement, Div, KeyDownEvent, SharedString, Stateful};
 
 /// An icon-only footer control: a 28px target with the label as its tooltip.
-fn icon_only(
-    button: Stateful<Div>,
-    path: &str,
-    color: gpui::Rgba,
-    label: String,
-) -> Stateful<Div> {
+fn icon_only(button: Stateful<Div>, path: &str, color: gpui::Rgba, label: String) -> Stateful<Div> {
     let label = SharedString::from(label);
     button
         .w(px(28.))
@@ -92,7 +87,9 @@ impl Surface {
             .child(
                 self.composer_button(
                     "composer-model",
-                    &routing["model"].as_str().map_or("Model".into(), model_label),
+                    &routing["model"]
+                        .as_str()
+                        .map_or("Model".into(), model_label),
                     enabled,
                     cx,
                     |s, w, cx| s.open_composer_picker("model", w, cx),

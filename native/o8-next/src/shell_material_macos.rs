@@ -70,7 +70,9 @@ fn material() -> NSVisualEffectMaterial {
         .then(|| std::str::from_utf8(&buffer[..length.saturating_sub(1)]).ok())
         .flatten()
         .unwrap_or("");
-    let mut parts = version.split('.').map(|part| part.parse::<u32>().unwrap_or(0));
+    let mut parts = version
+        .split('.')
+        .map(|part| part.parse::<u32>().unwrap_or(0));
     let (major, minor, patch) = (
         parts.next().unwrap_or(0),
         parts.next().unwrap_or(0),

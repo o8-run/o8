@@ -599,10 +599,7 @@ impl Element for RetainedRow {
         for background in &cache.backgrounds {
             window.paint_quad(
                 gpui::fill(
-                    Bounds::new(
-                        origin + background.bounds.origin,
-                        background.bounds.size,
-                    ),
+                    Bounds::new(origin + background.bounds.origin, background.bounds.size),
                     background.color,
                 )
                 .corner_radii(background.radius),

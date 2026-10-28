@@ -102,8 +102,7 @@ impl Client {
             .map_err(|e| e.to_string())?;
         tcp.set_read_timeout(Some(Duration::from_secs(1)))
             .map_err(|e| e.to_string())?;
-        let (mut socket, _) =
-            tungstenite::client(url.as_str(), tcp).map_err(|e| e.to_string())?;
+        let (mut socket, _) = tungstenite::client(url.as_str(), tcp).map_err(|e| e.to_string())?;
         let request = format!("o8-next-{}", std::process::id());
         socket
             .send(Message::Text(
@@ -124,7 +123,10 @@ impl Client {
                 Ok(Message::Text(text)) => text,
                 Ok(_) => continue,
                 Err(tungstenite::Error::Io(e))
-                    if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) =>
+                    if matches!(
+                        e.kind(),
+                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                    ) =>
                 {
                     continue;
                 }
@@ -143,7 +145,10 @@ impl Client {
                         .ok_or_else(|| "Terminal did not start".into());
                 }
                 Some("error") if data["sessionName"] == "" => {
-                    break Err(data["error"].as_str().unwrap_or("Terminal did not start").into());
+                    break Err(data["error"]
+                        .as_str()
+                        .unwrap_or("Terminal did not start")
+                        .into());
                 }
                 _ => {}
             }

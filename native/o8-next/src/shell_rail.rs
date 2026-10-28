@@ -2,9 +2,11 @@
 //! Surfaces keep their own entries through `Registration::nav`; the rail only
 //! lays them out and adds the shell-level destinations.
 use super::*;
-use crate::theme::current as theme;
 use crate::icon::Tip;
-use gpui::{AnyElement, Div, Image, ImageFormat, ObjectFit, Rgba, SharedString, Stateful, img, rgb};
+use crate::theme::current as theme;
+use gpui::{
+    AnyElement, Div, Image, ImageFormat, ObjectFit, Rgba, SharedString, Stateful, img, rgb,
+};
 use serde_json::Value;
 use std::sync::{Arc, Mutex, Once, OnceLock};
 
@@ -66,7 +68,12 @@ fn glyph(icon: Icon, color: Rgba) -> impl IntoElement {
 }
 
 /// One rail target. Callers attach the click handler; `active` marks the open destination.
-pub(super) fn button(id: &'static str, icon: Icon, label: &'static str, active: bool) -> Stateful<Div> {
+pub(super) fn button(
+    id: &'static str,
+    icon: Icon,
+    label: &'static str,
+    active: bool,
+) -> Stateful<Div> {
     target(id)
         .tooltip(move |_, cx| cx.new(|_| Tip(label.into())).into())
         .when(active, |view| view.bg(theme().hover))
@@ -116,7 +123,9 @@ fn weekly(snapshot: &Value, runtime: &str) -> Option<f32> {
     snapshot["capacities"]
         .as_array()?
         .iter()
-        .filter(|c| c["runtime"] == runtime && c["status"] == "available" && c["confidence"] == "exact")
+        .filter(|c| {
+            c["runtime"] == runtime && c["status"] == "available" && c["confidence"] == "exact"
+        })
         .filter(|c| identity.is_none_or(|i| c["identityId"] == i["id"]))
         .flat_map(|c| c["buckets"].as_array().cloned().unwrap_or_default())
         .filter(|b| b["label"] == "Weekly")
@@ -149,17 +158,21 @@ fn watch_usage(client: &Client) {
     static STARTED: Once = Once::new();
     STARTED.call_once(|| {
         let client = client.clone();
-        std::thread::spawn(move || loop {
-            if let Ok(snapshot) = client.get::<Value>("/api/runtime/capacity", &[]) {
-                *USAGE.lock().unwrap() = read_usage(&snapshot);
+        std::thread::spawn(move || {
+            loop {
+                if let Ok(snapshot) = client.get::<Value>("/api/runtime/capacity", &[]) {
+                    *USAGE.lock().unwrap() = read_usage(&snapshot);
+                }
+                std::thread::sleep(Duration::from_secs(60));
             }
-            std::thread::sleep(Duration::from_secs(60));
         });
     });
 }
 
 fn percent(ratio: Option<f32>) -> String {
-    ratio.map_or("not reported".into(), |r| format!("{}% used", (r * 100.).round()))
+    ratio.map_or("not reported".into(), |r| {
+        format!("{}% used", (r * 100.).round())
+    })
 }
 
 fn gauge() -> Stateful<Div> {
@@ -234,7 +247,11 @@ impl Shell {
             .collect::<Vec<_>>();
         watch_usage(&self.client);
         let active = self.active();
-        let tab = |id: &'static str, icon: Icon, label: &'static str, tab: Tab, command: fn() -> Command| {
+        let tab = |id: &'static str,
+                   icon: Icon,
+                   label: &'static str,
+                   tab: Tab,
+                   command: fn() -> Command| {
             button(id, icon, label, active.as_ref() == Some(&tab)).on_click(cx.listener(
                 move |this, _, window, cx| {
                     this.capture(window, cx);
@@ -293,7 +310,9 @@ impl Shell {
                 Tab::Terminal,
                 || Command::Terminal,
             ))
-            .child(tab("rail-grid", Icon::Canvas, "Grid", Tab::Grid, || Command::Grid))
+            .child(tab("rail-grid", Icon::Canvas, "Grid", Tab::Grid, || {
+                Command::Grid
+            }))
             .child(divider())
             .children(top)
             .child(tab(
