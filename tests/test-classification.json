@@ -3189,6 +3189,12 @@
       ]
     },
     {
+      "path": "tests/fresh-setup-recovery-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/fuzzy-watch-real-path.test.ts",
       "reasons": [
         "executable-fixture",
