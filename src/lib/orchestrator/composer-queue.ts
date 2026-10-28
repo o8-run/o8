@@ -9,6 +9,7 @@ import { isThinkingEffort } from './thinking-effort';
 import { isComposerWireMode } from './composer-wire';
 import { assertOrchestratorPermissionMode, isOrchestratorPermissionMode } from './permission-mode';
 import { type ComposerQueuePayload, type ComposerQueueTarget, type QueuedComposerSendRecord } from './composer-queue-types';
+import { compactComposerPayload, composerPayloadHash, withComposerPayloadRemoval } from './composer-queue-ledger';
 
 interface Row {
   sequence: number; id: string; repo_path: string; thread_id: string;
@@ -79,19 +80,25 @@ export function enqueueComposerSend(input: ComposerQueueTarget & { id: string; i
   const target = validateComposerQueueTarget(input);
   const payload = validateComposerQueuePayload(input.payload);
   const serialized = JSON.stringify(payload);
+  const hash = composerPayloadHash(serialized);
   return getSqlite().transaction(() => {
     const existing = readComposerSend(input.id);
     if (existing) {
-      if (existing.repoPath !== target.repoPath || existing.threadId !== target.threadId || JSON.stringify(existing.payload) !== serialized) throw new Error('This queue identity already belongs to another message.');
-      return existing;
+      const receipt = getSqlite().prepare('SELECT payload_hash, payload_bytes FROM composer_send_queue WHERE id = ?').get(input.id) as { payload_hash: string | null; payload_bytes: number | null };
+      if (existing.repoPath !== target.repoPath || existing.threadId !== target.threadId
+        || (receipt.payload_hash ?? composerPayloadHash(JSON.stringify(existing.payload))) !== hash
+        || (receipt.payload_bytes !== null && receipt.payload_bytes !== Buffer.byteLength(serialized))) throw new Error('This queue identity already belongs to another message.');
+      // Clients compare their retry receipt to the submitted payload. Echo it
+      // after matching its digest, without putting delivered bytes back on disk.
+      return { ...existing, payload };
     }
     if (payload.afterTaskId && listQueuedComposerSends(target).some(item => item.payload.afterTaskId)) {
       throw new Error('A voice follow-up is already queued. Remove it before replacing it.');
     }
     if (listQueuedComposerSends(target).length >= 20) throw new Error('This chat already has 20 queued messages. Remove one before adding another.');
     const now = Date.now();
-    getSqlite().prepare(`INSERT INTO composer_send_queue (id, repo_path, thread_id, intent, payload_json, status, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, 'queued', ?, ?)`).run(input.id, target.repoPath, target.threadId, input.intent, serialized, now, now);
+    getSqlite().prepare(`INSERT INTO composer_send_queue (id, repo_path, thread_id, intent, payload_json, payload_hash, payload_bytes, status, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)`).run(input.id, target.repoPath, target.threadId, input.intent, serialized, hash, Buffer.byteLength(serialized), now, now);
     return readComposerSend(input.id)!;
   }).immediate();
 }
@@ -131,7 +138,11 @@ export function listComposerTranscriptSends(target: ComposerQueueTarget): Queued
     .all(composerQueueRepoKey(target.repoPath), target.threadId) as Row[];
   const messages = readPersistedLlmChat(target.threadId)?.history.messages ?? [];
   return [...applied.map(view), ...listQueuedComposerSends(target)].sort((a, b) => a.sequence - b.sequence)
-    .map(item => ({ ...item, steerAnchor: messages.find(message => message.id === `composer-steer-${item.id}`)?.steerAnchor }));
+    .map(item => {
+      const message = messages.find(message => message.id === `composer-steer-${item.id}`);
+      const images = item.payload.deliveredMedia?.map(media => ({ name: media.name ?? 'Image', dataUri: media.path })) ?? [];
+      return { ...item, ...(item.status === 'applied' ? { payload: { ...item.payload, text: message?.content ?? '', images } } : {}), steerAnchor: message?.steerAnchor };
+    });
 }
 /** Recheck after every asynchronous preparation step, immediately before provider admission. */
 export function assertComposerSendClaim(id: string): void {
@@ -142,13 +153,29 @@ export function admitComposerSend(id: string): boolean {
     WHERE id = ? AND status = 'dispatching' AND admitted_at IS NULL`).run(Date.now(), Date.now(), id).changes > 0;
 }
 export function settleComposerSend(id: string, outcome: { status: 'applied' | 'held'; reason?: string }): boolean {
-  return getSqlite().prepare(`UPDATE composer_send_queue SET status = ?, reason = ?, updated_at = ? WHERE id = ? AND status = 'dispatching' AND (? != 'applied' OR admitted_at IS NOT NULL)`)
-    .run(outcome.status, outcome.reason ?? null, Date.now(), id, outcome.status).changes > 0;
+  return getSqlite().transaction(() => {
+    const changed = getSqlite().prepare(`UPDATE composer_send_queue SET status = ?, reason = ?, updated_at = ? WHERE id = ? AND status = 'dispatching' AND (? != 'applied' OR admitted_at IS NOT NULL)`)
+      .run(outcome.status, outcome.reason ?? null, Date.now(), id, outcome.status).changes > 0;
+    if (changed && outcome.status === 'applied') compactComposerSend(id);
+    return changed;
+  }).immediate();
 }
 export function cancelComposerSend(target: ComposerQueueTarget, id: string): boolean {
-  return getSqlite().prepare(`UPDATE composer_send_queue SET status = 'cancelled', reason = 'Removed by operator.', updated_at = ?
-    WHERE id = ? AND repo_path = ? AND thread_id = ? AND (status IN ('queued','held') OR (status = 'dispatching' AND admitted_at IS NULL))`)
-    .run(Date.now(), id, composerQueueRepoKey(target.repoPath), target.threadId).changes > 0;
+  return getSqlite().transaction(() => {
+    const changed = getSqlite().prepare(`UPDATE composer_send_queue SET status = 'cancelled', reason = 'Removed by operator.', updated_at = ?
+      WHERE id = ? AND repo_path = ? AND thread_id = ? AND (status IN ('queued','held') OR (status = 'dispatching' AND admitted_at IS NULL))`)
+      .run(Date.now(), id, composerQueueRepoKey(target.repoPath), target.threadId).changes > 0;
+    if (changed) compactComposerSend(id);
+    return changed;
+  }).immediate();
+}
+function compactComposerSend(id: string): void {
+  const sqlite = getSqlite();
+  const row = sqlite.prepare('SELECT payload_json, status, intent FROM composer_send_queue WHERE id = ?').get(id) as { payload_json: string; status: string; intent: string };
+  withComposerPayloadRemoval(sqlite, () => sqlite.prepare(`UPDATE composer_send_queue SET payload_hash = COALESCE(payload_hash, ?),
+    payload_bytes = COALESCE(payload_bytes, ?), payload_json = ?, payload_compacted_at = ? WHERE id = ?`)
+    .run(composerPayloadHash(row.payload_json), Buffer.byteLength(row.payload_json),
+      compactComposerPayload(row.payload_json, row.status === 'applied' && row.intent === 'steer-now'), Date.now(), id));
 }
 /** A provider may have received an interrupted dispatch. Never replay uncertain work. */
 export function recoverComposerSends(): void {

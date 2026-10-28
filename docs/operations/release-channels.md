@@ -54,6 +54,16 @@ superseded completions and queued events. Returning to Stable uses the normal
 version comparator: an older stable version reports current and never installs
 over a newer installed build. It waits for a newer stable release.
 
+## Manual downgrade compatibility
+
+The queue ledger compaction migration in #5021 keeps applied steer text readable
+by older builds, including v0.1.812. Inline images are removed from delivered
+receipts, so older builds can omit those images from the steer transcript.
+After a manual downgrade below the release containing this migration, retrying a
+message that was already delivered returns an identity conflict instead of its
+receipt. Nothing is lost and new messages work. The updater never downgrades;
+returning to Stable waits for a newer stable release as described above.
+
 ## Linux signature completion
 
 The Linux build must include the same embedded build identity in the AppImage.

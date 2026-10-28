@@ -11,6 +11,8 @@ export interface ComposerQueuePayload {
   text: string;
   wireMessage: string;
   images: Array<{ name: string; dataUri: string }>;
+  /** Compact receipts can reference delivered steer media without inline bytes. */
+  deliveredMedia?: import('@/lib/mobile/types').MobileTranscriptMedia[];
   routing: {
     backend: OrchestratorBackendId;
     /** Refuse route normalization or fallback for a bound voice request. */

@@ -264,7 +264,7 @@ fn issues_missing_paint_reports_elapsed_and_bound(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn issues_view_search_link_clear_and_worker_task(cx: &mut TestAppContext) {
-    let fixture = Fixture::new();
+    let fixture = Fixture::start(true);
     let (_shell, mut visual, open_ms) = open(&fixture, cx);
     let cx = &mut visual;
     input(cx, "issue-search", "unmatched");
@@ -297,45 +297,43 @@ fn issues_view_search_link_clear_and_worker_task(cx: &mut TestAppContext) {
     );
     click(cx, "issue-work");
     wait(cx, "issue-worker");
-    // Work on issue goes through the existing native composer queue. Read its
-    // durable receipt through the production route, with canonical workspace identity.
+    // The fixture provider emits this reply only when its delivered user turn
+    // contains both "Linked GitHub issue #7 in fixture/alpha" and
+    // "Issue fixture context." (scripts/next/worker-runtime.ts).
+    // Confirm delivery through history; terminal queue receipts compact wireMessage.
     let sessions = fixture.client.sessions().unwrap();
     let worker = sessions
         .iter()
         .find(|s| s.id == "thoughts-composer-first")
         .unwrap();
-    let mut persisted = Value::Null;
-    for _ in 0..40 {
+    let mut context_received = false;
+    let deadline = Instant::now() + Duration::from_secs(35);
+    while Instant::now() < deadline {
         draw(cx);
-        persisted = fixture.client.queue(worker).unwrap();
-        if persisted["items"].as_array().unwrap().iter().any(|i| {
-            i["payload"]["wireMessage"]
-                .as_str()
-                .unwrap_or("")
-                .contains("Linked GitHub issue #7 in fixture/alpha")
-        }) {
+        context_received = fixture
+            .client
+            .history(&worker.id)
+            .unwrap()
+            .transcript
+            .iter()
+            .any(|entry| {
+                entry.role == "assistant" && entry.text == "Linked issue context received"
+            });
+        if context_received {
             break;
         }
+        std::thread::sleep(Duration::from_millis(20));
     }
-    let item = persisted["items"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|i| {
-            i["payload"]["wireMessage"]
-                .as_str()
-                .unwrap_or("")
-                .contains("Linked GitHub issue #7 in fixture/alpha")
-        })
-        .expect("issue context persisted in worker task");
     assert!(
-        item["payload"]["wireMessage"]
-            .as_str()
-            .unwrap()
-            .contains("Issue fixture context.")
+        context_received,
+        "fixture provider must receive the linked issue and its body"
     );
+    let history: Value = fixture
+        .client
+        .get("/api/v2/chat-history", &[("tabId", &worker.id)])
+        .unwrap();
     assert_eq!(
-        fs::canonicalize(item["repoPath"].as_str().unwrap()).unwrap(),
+        fs::canonicalize(history["repoPath"].as_str().unwrap()).unwrap(),
         fs::canonicalize(worker.repo_path.as_ref().unwrap()).unwrap()
     );
     println!(

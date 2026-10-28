@@ -2584,6 +2584,13 @@
       ]
     },
     {
+      "path": "tests/composer-queue-ledger-real-path.test.ts",
+      "reasons": [
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/composer-queue-real-path.test.ts",
       "reasons": [
         "real-path"

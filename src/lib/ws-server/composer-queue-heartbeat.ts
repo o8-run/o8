@@ -19,6 +19,7 @@ import { permissionModeRank } from '@/lib/orchestrator/permission-mode';
 import { claimComposerSteer, deferComposerSteer } from '@/lib/orchestrator/composer-queue';
 import { appendMobileOrchestratorUserMessage } from '@/lib/mobile/orchestrator-thread-history';
 import { EffortPinRejectionError } from '@/lib/orchestrator/effort-pin';
+import { persistComposerImages } from '@/lib/mobile/orchestrator-image-media';
 
 export function publishComposerQueueChange(threadId: string) {
   void publishRealtimeMutation({ mutation: { mutationId: `composer-queue-${threadId}-${Date.now()}`,
@@ -68,7 +69,8 @@ export async function runQueuedComposerSteer(item: QueuedComposerSendRecord): Pr
   });
   if (result.accepted !== true) { deferComposerSteer(item.id, 'Steer declined; queued for the next turn.'); return; }
   // A relay owner may already have saved its exact boundary before replying.
-  if (!readPersistedLlmChat(item.threadId)?.history.messages.some(message => message.id === `composer-steer-${item.id}`)) appendMobileOrchestratorUserMessage({ tabId: item.threadId, repoPath: item.repoPath, message: item.payload.text,
+  if (item.payload.images.length || !readPersistedLlmChat(item.threadId)?.history.messages.some(message => message.id === `composer-steer-${item.id}`)) appendMobileOrchestratorUserMessage({ tabId: item.threadId, repoPath: item.repoPath, message: item.payload.text,
+    ...(item.payload.images.length ? { media: persistComposerImages(item.payload.images) } : {}),
     messageId: `composer-steer-${item.id}`, backend: item.payload.routing.backend, timestampMs: admittedAt ?? item.createdAt, steerAnchor });
   settleComposerSend(item.id, { status: 'applied' });
 }
