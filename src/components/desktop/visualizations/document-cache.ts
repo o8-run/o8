@@ -11,11 +11,11 @@ export function loadVisualization(id: string): Promise<VisualizationDocument> {
   const underway = pending.get(id);
   if (underway) return underway;
   const work = (async () => {
-    const response = await fetch(`/api/visualizations/${encodeURIComponent(id)}`, { cache: 'no-store' });
+    const response = await fetch(`/api/visualizations/${encodeURIComponent(id)}`, { cache: 'no-store', signal: AbortSignal.timeout(12_000) });
     const body = await response.json() as { result?: { visualization?: VisualizationDocument }; error?: { message?: string } };
     const doc = body.result?.visualization;
     if (!response.ok || !doc || !isVisualizationReference(doc) || doc.id !== id || typeof doc.html !== 'string'
-      || new TextEncoder().encode(doc.html).length > VISUALIZATION_LIMITS.documentBytes) throw new Error(body.error?.message ?? 'This visualization is unavailable.');
+      || new TextEncoder().encode(doc.html).length > VISUALIZATION_LIMITS.documentBytes) throw new Error(response.status === 404 ? 'This saved visualization is unavailable. Its source could not be found.' : body.error?.message ?? 'This visualization is unavailable.');
     cache.set(id, doc);
     let bytes = [...cache.values()].reduce((sum, entry) => sum + entry.html.length * 2, 0);
     while (cache.size > 6 || bytes > CACHE_BYTES) {
@@ -25,7 +25,12 @@ export function loadVisualization(id: string): Promise<VisualizationDocument> {
       bytes -= removed.html.length * 2;
     }
     return doc;
-  })().finally(() => pending.delete(id));
+  })().catch(error => {
+    if (error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')) {
+      throw new Error('This visualization could not be loaded in time. Retry it or rebuild it from this chat.');
+    }
+    throw error;
+  }).finally(() => pending.delete(id));
   pending.set(id, work);
   return work;
 }
