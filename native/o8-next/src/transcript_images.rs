@@ -1,11 +1,18 @@
 //! Transcript bytes only cross the existing media route's canonical path checks.
 use super::{BTreeSet, Client, HashMap, Rc, RefCell, Row, Surface, theme};
+use crate::retained::RowState;
 use gpui::{prelude::*, *};
-use std::{io::Read, sync::Arc};
+use std::{
+    io::Read,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
+};
 
 #[derive(Clone)]
 pub(crate) enum ImageState {
-    Loading,
+    Loading(u64),
     Ready(Arc<RenderImage>),
     Unavailable,
 }
@@ -56,63 +63,136 @@ fn read(client: &Client, path: &str) -> Result<Image, ()> {
     }
     Ok(Image::from_bytes(format, bytes))
 }
-impl Surface {
-    pub(super) fn load_images(&mut self, cx: &mut Context<Self>) {
-        let mut pending = Vec::new();
+// Bound loading, decoded and failed entries alike. The scroll anchor chooses a
+// small working set; retained row layouts are invalidated on eviction as they
+// also own RenderImage Arcs. A viewer may deliberately keep its opened image.
+pub(crate) const CAPACITY: usize = 24;
+static NEXT_LOAD: AtomicU64 = AtomicU64::new(1);
+type Rows = Rc<Vec<Rc<RefCell<RowState>>>>;
+type Changed<T> = fn(&mut T, &Cache, &BTreeSet<String>, &mut Context<T>);
+type Refresh<T> = fn(&mut T, &mut Context<T>);
+
+pub(crate) fn invalidate(rows: &Rows, list: &ListState, changed: &BTreeSet<String>) -> bool {
+    let mut visible = false;
+    for (index, row) in rows.iter().enumerate() {
+        if paths(&row.borrow().row)
+            .iter()
+            .any(|path| changed.contains(path))
         {
-            let mut cache = self.images.borrow_mut();
-            for row in self.rows.iter() {
-                for path in paths(&row.borrow().row) {
-                    if let std::collections::hash_map::Entry::Vacant(entry) =
-                        cache.entry(path.clone())
-                    {
-                        entry.insert(ImageState::Loading);
-                        pending.push(path);
+            row.borrow_mut().invalidate_image_layout();
+            list.splice(index..index + 1, 1);
+            visible = true;
+        }
+    }
+    visible
+}
+
+// Both Surface and Grid use this loader and the existing checked media route.
+// All network reads and decoding stay on the background executor.
+pub(crate) fn load<T: 'static>(
+    client: Client,
+    rows: &Rows,
+    list: &ListState,
+    cache: &Cache,
+    cx: &mut Context<T>,
+    changed: Changed<T>,
+    refresh: Refresh<T>,
+) {
+    let owner = cx.entity().downgrade();
+    list.set_scroll_handler(move |_, _, cx| {
+        let owner = owner.clone();
+        // ListState is borrowed during its scroll callback.
+        cx.defer(move |cx| {
+            let _ = owner.update(cx, refresh);
+        });
+    });
+    let anchor = list.logical_scroll_top().item_ix.min(rows.len());
+    let mut wanted = BTreeSet::new();
+    for row in rows[anchor..].iter().chain(rows[..anchor].iter().rev()) {
+        for path in paths(&row.borrow().row) {
+            if wanted.len() < CAPACITY {
+                wanted.insert(path);
+            }
+        }
+    }
+    let id = NEXT_LOAD.fetch_add(1, Ordering::Relaxed);
+    let mut pending = Vec::new();
+    let mut evicted = BTreeSet::new();
+    {
+        let mut entries = cache.borrow_mut();
+        entries.retain(|path, _| {
+            let keep = wanted.contains(path);
+            if !keep {
+                evicted.insert(path.clone());
+            }
+            keep
+        });
+        for path in wanted {
+            if let std::collections::hash_map::Entry::Vacant(entry) = entries.entry(path.clone()) {
+                entry.insert(ImageState::Loading(id));
+                pending.push(path);
+            }
+        }
+    }
+    // Owners invalidate their current rows, including reused layouts. Completion
+    // never closes over an obsolete session's row list or retains its images.
+    if !evicted.is_empty() {
+        invalidate(rows, list, &evicted);
+    }
+    if pending.is_empty() {
+        return;
+    }
+    let renderer = cx.svg_renderer();
+    let task = cx.background_executor().spawn(async move {
+        pending
+            .into_iter()
+            .map(|path| {
+                let state = match read(&client, &path)
+                    .and_then(|image| image.to_image_data(renderer.clone()).map_err(|_| ()))
+                {
+                    Ok(image) => ImageState::Ready(image),
+                    Err(()) => ImageState::Unavailable,
+                };
+                (path, state)
+            })
+            .collect::<Vec<_>>()
+    });
+    let cache = cache.clone();
+    cx.spawn(async move |this, cx| {
+        let loaded = task.await;
+        let _ = this.update(cx, |owner, cx| {
+            let mut updated = BTreeSet::new();
+            {
+                let mut entries = cache.borrow_mut();
+                for (path, state) in loaded {
+                    // A switched session, trimmed row or evicted/readded path
+                    // cannot be resurrected by an old request's completion.
+                    if matches!(entries.get(&path), Some(ImageState::Loading(current)) if *current == id) {
+                        entries.insert(path.clone(), state);
+                        updated.insert(path);
                     }
                 }
             }
-        }
-        if pending.is_empty() {
-            return;
-        }
-        let client = self.client.clone();
-        let renderer = cx.svg_renderer();
-        let task = cx.background_executor().spawn(async move {
-            pending
-                .into_iter()
-                .map(|path| {
-                    let state = match read(&client, &path)
-                        .and_then(|image| image.to_image_data(renderer.clone()).map_err(|_| ()))
-                    {
-                        Ok(image) => ImageState::Ready(image),
-                        Err(()) => ImageState::Unavailable,
-                    };
-                    (path, state)
-                })
-                .collect::<Vec<_>>()
+            if !updated.is_empty() { changed(owner, &cache, &updated, cx); }
         });
-        cx.spawn(async move |this, cx| {
-            let loaded = task.await;
-            let _ = this.update(cx, |s, cx| {
-                let changed: BTreeSet<_> = loaded.iter().map(|(path, _)| path.clone()).collect();
-                s.images.borrow_mut().extend(loaded);
-                let mut visible = false;
-                for (index, row) in s.rows.iter().enumerate() {
-                    if paths(&row.borrow().row)
-                        .iter()
-                        .any(|path| changed.contains(path))
-                    {
-                        row.borrow_mut().invalidate_image_layout();
-                        s.list.splice(index..index + 1, 1);
-                        visible = true;
-                    }
-                }
-                if visible {
+    }).detach();
+}
+
+impl Surface {
+    pub(super) fn load_images(&mut self, cx: &mut Context<Self>) {
+        load(
+            self.client.clone(),
+            &self.rows,
+            &self.list,
+            &self.images,
+            cx,
+            |s, cache, changed, cx| {
+                if Rc::ptr_eq(cache, &s.images) && invalidate(&s.rows, &s.list, changed) {
                     cx.notify();
                 }
-            });
-        })
-        .detach();
+            },
+            Self::load_images,
+        );
     }
 }
 

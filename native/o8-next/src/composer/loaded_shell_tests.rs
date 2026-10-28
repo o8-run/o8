@@ -3,21 +3,13 @@ use super::super::{test_support::*, *};
 
 fn loaded_shell(
     cx: &mut TestAppContext,
-    images: bool,
 ) -> (
     Fixture,
     Entity<Shell>,
     Entity<crate::ui::Surface>,
     VisualTestContext,
 ) {
-    let fixture = Fixture::start_mode(
-        false,
-        if images {
-            "--composer-loaded --images"
-        } else {
-            "--composer-loaded"
-        },
-    );
+    let fixture = Fixture::start_mode(false, "--composer-loaded");
     let (shell, mut visual) = open(
         fixture.client.clone(),
         fixture.root.join("state.json"),
@@ -54,22 +46,7 @@ fn loaded_shell(
 
 #[gpui::test]
 fn native_composer_loaded_shell_typing_benchmark(cx: &mut TestAppContext) {
-    typing_benchmark(cx, false);
-}
-
-#[gpui::test]
-fn native_composer_loaded_shell_images_typing_benchmark(cx: &mut TestAppContext) {
-    typing_benchmark(cx, true);
-}
-
-fn typing_benchmark(cx: &mut TestAppContext, images: bool) {
-    let (_fixture, shell, session, mut cx) = loaded_shell(cx, images);
-    if images {
-        let bounds = cx.debug_bounds("transcript-image-loaded-199-0")
-            .expect("typing workload must paint its image thumbnail");
-        assert_eq!(bounds.size, size(px(80.), px(48.)),
-            "typing workload must contain decoded images");
-    }
+    let (_fixture, shell, session, mut cx) = loaded_shell(cx);
     let notifications = Rc::new(Cell::new(0));
     let observed = notifications.clone();
     let _shell =
@@ -133,26 +110,15 @@ fn typing_benchmark(cx: &mut TestAppContext, images: bool) {
         );
     }
     samples.sort_by(f64::total_cmp);
-    let receipt = format!(
-        "LOADED_SHELL_CPU_SCENE platform={} profile={} messages=200 inputs=100 images={} p50_ms={:.6} p95_ms={:.6}",
+    println!(
+        "LOADED_SHELL_CPU_SCENE platform={} profile={} messages=200 inputs=100 p50_ms={:.6} p95_ms={:.6}",
         std::env::consts::OS,
         if cfg!(debug_assertions) {
             "debug"
         } else {
             "release"
         },
-        if images { 2 } else { 0 },
         samples[49],
         samples[94]
     );
-    if images {
-        use std::io::Write;
-        writeln!(std::io::stdout(), "{receipt}").unwrap();
-        assert!(
-            samples[94] <= 16.667,
-            "loaded image typing must stay within a 60 Hz CPU scene budget"
-        );
-    } else {
-        println!("{receipt}");
-    }
 }

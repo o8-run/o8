@@ -146,6 +146,7 @@ impl Surface {
         self.transcript = None;
         self.selected = Some(id.clone());
         self.rows = Rc::new(vec![]);
+        self.images.borrow_mut().clear();
         self.list = ListState::new(0, ListAlignment::Top, px(400.));
         self.notice = "Reading history…".into();
         cx.notify();
@@ -335,6 +336,7 @@ impl Surface {
                             this.transcript = None;
                             this.selected = None;
                             this.rows = Rc::new(vec![]);
+                            this.images.borrow_mut().clear();
                             this.list = ListState::new(0, ListAlignment::Top, px(400.));
                             this.notice = "No saved sessions.".into();
                         }
@@ -360,6 +362,7 @@ impl Surface {
 
 impl Render for Surface {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.load_images(cx);
         let painted = self.painted.clone();
         let revision = self.key_revision;
         let geometry = &crate::theme::GEOMETRY;

@@ -79,6 +79,7 @@ pub struct Pane {
     pub transcript: Option<Transcript>,
     pub rows: Rc<Vec<Rc<RefCell<RowState>>>>,
     pub list: ListState,
+    pub(crate) images: crate::ui::images::Cache,
     subscription: Option<Subscription>,
     pub revision: u64,
     pub painted: Rc<Cell<u64>>,
@@ -96,6 +97,7 @@ impl Pane {
             notice: String::new(),
             transcript: None,
             rows: Rc::new(vec![]),
+            images: Default::default(),
             list: ListState::new(0, ListAlignment::Top, px(0.)),
             subscription: None,
             revision: 0,
@@ -144,7 +146,11 @@ impl Pane {
                 old.iter()
                     .find(|s| s.borrow().row == *row)
                     .cloned()
-                    .unwrap_or_else(|| Rc::new(RefCell::new(RowState::new(row.clone()))))
+                    .unwrap_or_else(|| {
+                        let mut state = RowState::new(row.clone());
+                        state.images = self.images.clone();
+                        Rc::new(RefCell::new(state))
+                    })
             })
             .collect();
         self.list
