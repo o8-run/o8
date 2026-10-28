@@ -52,9 +52,9 @@ it('preserves a follow-up and its completed turn admitted while the real compact
     const getStatus = Reflect.get(compactRoute, 'GET');
     if (typeof getStatus === 'function') {
       const receipt = (await (await getStatus(new NextRequest(`http://localhost/api/orchestrator/compact?${new URLSearchParams({ repoPath, threadId })}`))).json()).operation;
-      console.log('Measured scripted compaction:', JSON.stringify({ phase: receipt.phase,
+      process.stdout.write(`Measured scripted compaction: ${JSON.stringify({ phase: receipt.phase,
         waitingMs: receipt.startedAt - receipt.requestedAt, compactingMs: receipt.settledAt - receipt.startedAt,
-        preservedFollowUps: 1, preservedCompletedTurns: 1 }));
+        preservedFollowUps: 1, preservedCompletedTurns: 1 })}\n`);
     }
     const archive = (await response.json()).archiveRef;
     expect(JSON.parse(readFileSync(join(root, 'orchestrator-archives', archive), 'utf8')).turns.length).toBeGreaterThan(0);
