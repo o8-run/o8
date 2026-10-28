@@ -4339,6 +4339,12 @@
       ]
     },
     {
+      "path": "tests/mobile-media-image-serving-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/mobile-ripple-device-real-path.test.ts",
       "reasons": [
         "real-path"
