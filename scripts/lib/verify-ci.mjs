@@ -8,7 +8,7 @@ import { buildTestClassificationReport } from './test-classification.mjs';
 // jobs fail closed, including jobs added without updating a separate inventory.
 const alwaysHostedJobs = {
   'typecheck-parity': 'weekly comparison',
-  'integration-weekly': 'weekly integration lane',
+  'integration-weekly': 'main and scheduled full integration matrix',
   'integration-weekly-report': 'hosted reporting',
   'integration-weekly-watch': 'hosted scheduling',
   build: 'manual build',
@@ -83,12 +83,17 @@ function selectedSteps(job, shard) {
 }
 
 export function readVerificationPlan(root, workflowPath = path.join(root, '.github/workflows/ci.yml'),
-  { platform = process.platform, arch = process.arch } = {}) {
+  { platform = process.platform, arch = process.arch, fullIntegration = false } = {}) {
   const nativeLocal = platform === 'linux' && arch === 'x64';
   const hostedJobs = { ...alwaysHostedJobs, ...(!nativeLocal ? {
     'o8-next-tests': 'Linux x64 GPUI/X11 suite requires the hosted Linux x64 runner on this platform',
   } : {}) };
-  const localJobs = [...alwaysLocalJobs, ...(nativeLocal ? ['o8-next-tests'] : [])];
+  if (fullIntegration) {
+    delete hostedJobs['integration-weekly'];
+    hostedJobs['integration-changed'] = 'pull request and merge-group selection';
+  }
+  const localJobs = [...alwaysLocalJobs.filter(id => !fullIntegration || id !== 'integration-changed'),
+    ...(fullIntegration ? ['integration-weekly'] : []), ...(nativeLocal ? ['o8-next-tests'] : [])];
   const scripts = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8')).scripts;
   const workflow = parse(readFileSync(workflowPath, 'utf8'));
   const jobs = workflow.jobs;
@@ -107,7 +112,7 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
     requireCondition(job.defaults?.run === undefined, `${id} run defaults need a verify:ci equivalent`);
     job.env = { ...workflow.env, ...job.env };
     requireCondition(typeof job.name === 'string', `${id} needs a CI check name`);
-    requireCondition(!job.strategy || ['test-shards', 'o8-next-tests'].includes(id), `${id} has an unsupported matrix`);
+    requireCondition(!job.strategy || ['test-shards', 'o8-next-tests', 'integration-weekly'].includes(id), `${id} has an unsupported matrix`);
     for (const step of job.steps ?? []) {
       if (!step.uses) continue;
       const supported = setupActions.some(prefix => step.uses.startsWith(prefix))
@@ -270,10 +275,40 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
       && (bootstrapCommands.has(step.run.trim()) || step === integrationRun)),
     'integration step needs a verify:ci equivalent');
   }
-  checks.push({ id: 'integration-changed', after: dependencies(integration), name: integration.name, steps: [
-    ...browserSteps.map(step => ({ ...runStep(step, integration, undefined, scripts), requiresBrowser: true })),
-    { ...runStep({ ...integrationRun, run: 'npm run test:integration --' }, integration, undefined, scripts), selectedFiles: true },
-  ] });
+  const full = jobs['integration-weekly'];
+  requireCondition(full.if === "(github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event.schedule == '17 5 * * 0' || (github.event_name == 'workflow_dispatch' && inputs.integration_base == '')"
+    && full.needs === 'test' && !full['continue-on-error'] && full['runs-on'] === 'ubuntu-latest'
+    && Number.isFinite(full['timeout-minutes']) && full['timeout-minutes'] > 0
+    && isDeepStrictEqual(full.strategy, { 'fail-fast': false, matrix: { shard: [1, 2, 3, 4, 5, 6] } }),
+  'main pushes must retain the complete integration matrix');
+  const fullRun = full.steps.find(step => step.run === 'npm run test:integration');
+  const fullBrowser = full.steps.find(step => step.run === 'npx --no-install playwright-core install --with-deps chromium');
+  const fullClassification = full.steps.find(step => step.run === 'npm run test:classification:check');
+  requireCondition(fullRun && !fullRun.if && fullBrowser && !fullBrowser.if
+    && fullClassification?.if === 'matrix.shard == 1'
+    && isDeepStrictEqual(fullRun.env, { O8_INTEGRATION_SHARD: '${{ matrix.shard }}/6', O8_INTEGRATION_BASELINE: 'tests/integration-linux-baseline.json' }),
+  'full integration commands and prerequisites need a verify:ci equivalent');
+  for (const step of full.steps.filter(step => step.run)) {
+    requireCondition(!step['continue-on-error'] && !step.shell && !step['working-directory']
+      && (step === fullRun || step === fullBrowser || step === fullClassification
+        || (!step.if && (bootstrapCommands.has(step.run.trim()) || step.run.trim() === prerequisites))),
+    'full integration step needs a verify:ci equivalent');
+  }
+  if (fullIntegration) {
+    checks.push({ id: 'integration-weekly', after: dependencies(full), name: 'Weekly Integration Tests (all shards)',
+      timeoutMs: full['timeout-minutes'] * 60_000,
+      steps: [
+        { ...runStep(fullBrowser, full, 1, scripts), budgetGroup: 1 },
+        { ...runStep(fullClassification, full, 1, scripts), budgetGroup: 1 },
+        ...full.strategy.matrix.shard.map(shard => ({ ...runStep(fullRun, full, shard, scripts), budgetGroup: shard })),
+      ],
+    });
+  } else {
+    checks.push({ id: 'integration-changed', after: dependencies(integration), name: integration.name, steps: [
+      ...browserSteps.map(step => ({ ...runStep(step, integration, undefined, scripts), requiresBrowser: true })),
+      { ...runStep({ ...integrationRun, run: 'npm run test:integration --' }, integration, undefined, scripts), selectedFiles: true },
+    ] });
+  }
   const audit = jobs.security.steps.find(step => step.uses?.startsWith(auditAction));
   requireCondition(audit, 'native dependency audit is missing');
   const ignores = String(audit.with?.ignore ?? '').split(',').map(value => value.trim()).filter(Boolean);
