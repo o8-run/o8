@@ -94,10 +94,11 @@ async function main(): Promise<void> {
   }
 
   const child = spawn(spec.codexBin, ['app-server'], { cwd: spec.cwd, env: childEnvironment({ runtimeId: 'codex' }), stdio: ['pipe', 'pipe', 'pipe'] });
-  let childStderr = '';
-  child.stderr.on('data', (chunk: Buffer) => { childStderr = (childStderr + chunk.toString('utf8')).slice(-2_000); });
+  // The parent retains this stream in the desktop's existing server log.
+  child.stderr.on('data', (chunk: Buffer) => { process.stderr.write(chunk); });
 
   const pending = new Map<number, { resolve: (value: Json) => void; reject: (error: Error) => void }>();
+  let runtimeStep = 'initialize';
   let nextId = 0;
   let threadId: string | null = null;
   let turnId: string | null = null;
@@ -107,6 +108,7 @@ async function main(): Promise<void> {
 
   const send = (message: Json) => child.stdin.write(`${JSON.stringify(message)}\n`);
   const call = (method: string, params: Json) => new Promise<Json>((resolve, reject) => {
+    runtimeStep = method;
     const id = ++nextId;
     pending.set(id, { resolve, reject });
     send({ id, method, params });
@@ -202,15 +204,14 @@ async function main(): Promise<void> {
       try { onMessage(JSON.parse(line) as Json); } catch { /* app-server prints only JSON-RPC on stdout */ }
     }
   });
-  child.on('exit', (code, signal) => {
+  child.on('close', (code, signal) => {
     for (const waiter of pending.values()) waiter.reject(new Error('codex app-server exited'));
     pending.clear();
-    const tail = childStderr.trim().split(/\r?\n/).slice(-3).join('\n');
-    process.stderr.write(`codex app-server exited (${signal ?? code})${tail ? `: ${tail}` : ''}\n`);
+    process.stderr.write(`codex app-server exited (${signal ?? code})\n`);
     finish(1);
   });
   child.on('error', (error) => {
-    process.stderr.write(`codex app-server failed to start: ${error.message}\n`);
+    process.stderr.write(`${error.toString()} (codex app-server spawn)\n${error.stack ?? ''}\n`);
     finish(1);
   });
 
@@ -282,14 +283,14 @@ async function main(): Promise<void> {
     if (stopping && turnId) send({ id: ++nextId, method: 'turn/interrupt', params: { threadId, turnId } });
   };
   run().catch((error: unknown) => {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = `${error instanceof Error ? error.name : 'Error'}: ${runtimeStep}: ${error instanceof Error ? error.message : String(error)}`;
     out({ type: 'error', message });
-    process.stderr.write(`${message}\n`);
+    process.stderr.write(`${message}\n${error instanceof Error ? error.stack ?? '' : ''}\n`);
     finish(1);
   });
 
   const code = await finished;
-  child.removeAllListeners('exit');
+  child.removeAllListeners('close');
   child.kill('SIGTERM');
   process.exit(code);
 }
