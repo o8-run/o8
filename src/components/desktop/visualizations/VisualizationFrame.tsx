@@ -23,6 +23,7 @@ function VisualizationDocumentFrame({ version, expanded }: { version: ReturnType
   const nonce = `${identity}:${reference.id}`;
   const { paletteId, workspaceGlass, surface } = useTheme();
   const frameRef = useRef<HTMLIFrameElement>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
   const themeRef = useRef<VisualizationTheme | null>(null);
   const [doc, setDoc] = useState<VisualizationDocument | undefined>(() => cachedVisualization(reference.id));
   const [error, setError] = useState<string | null>(null);
@@ -64,9 +65,14 @@ function VisualizationDocumentFrame({ version, expanded }: { version: ReturnType
 
   useEffect(() => {
     let stopped = false;
-    // Saved cards must settle even when a restored thread opens at its tail.
-    // Viewport observation left historical cards on Loading without a request.
-    void loadVisualization(reference.id).then(document => {
+    // Every saved card enters the bounded queue, even outside the viewport.
+    void loadVisualization(reference.id, () => {
+      const card = cardRef.current;
+      if (!card?.isConnected) return Infinity;
+      const rect = card.getBoundingClientRect();
+      return Math.hypot(Math.max(0, -rect.bottom, rect.top - window.innerHeight),
+        Math.max(0, -rect.right, rect.left - window.innerWidth));
+    }).then(document => {
       if (!stopped) { setDoc(document); setError(null); }
     }).catch(reason => { if (!stopped) setError(reason instanceof Error ? reason.message : 'This visualization is unavailable.'); });
     return () => { stopped = true; };
@@ -104,7 +110,7 @@ function VisualizationDocumentFrame({ version, expanded }: { version: ReturnType
     color: 'var(--t-text-primary)', font: '12px var(--font-sans-system)', paddingTop: 6, paddingBottom: 6, paddingLeft: 8, paddingRight: 8, cursor: 'pointer',
     backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)' };
 
-  return <div data-o8-visualization={reference.id} style={{ position: 'relative', width: '100%', minWidth: 0, minHeight: error ? 96 : height }}
+  return <div ref={cardRef} data-o8-visualization={reference.id} style={{ position: 'relative', width: '100%', minWidth: 0, minHeight: error ? 96 : height }}
     onMouseEnter={() => setControls(true)} onMouseLeave={() => setControls(false)} onFocusCapture={() => setControls(true)}
     onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget)) setControls(false); }}>
     {error ? <div role="status" style={{ paddingTop: 16, paddingBottom: 16, color: 'var(--t-text-muted)', fontSize: 13 }}>

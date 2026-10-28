@@ -150,6 +150,7 @@ async function runTrigger(threadId: string, telemetry: RuntimeTelemetry | undefi
   let measuredTotal = 0;
   let compacted: Record<string, unknown> | undefined;
   const fetchMock = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+    if (String(url).endsWith('/internal/realtime')) return Response.json({ ok: true });
     if (String(url).startsWith('/api/runtime/telemetry')) {
       return telemetry ? Response.json({ telemetry }) : GET(new NextRequest(`http://localhost${url}`));
     }

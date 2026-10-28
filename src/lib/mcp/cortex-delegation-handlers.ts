@@ -119,11 +119,20 @@ export function createCortexDelegationHandlers(config: {
           headers: { Authorization: `Bearer ${config.wsToken}` }, signal: AbortSignal.timeout(45_000),
         });
         status = response.status;
+        if (status >= 400 && status < 500) {
+          // A rejected request is final even when its body is not JSON.
+          const body = await response.text().catch(() => '');
+          let payload;
+          try { payload = JSON.parse(body); }
+          catch { payload = { error: body }; }
+          const step = typeof payload?.step === 'string' ? `; step ${payload.step}` : '';
+          return textResult(`${call} failed (HTTP ${status}${step}): ${safeErrorText(payload)}`, true);
+        }
         const payload = await response.json();
         if (response.ok) return jsonResult(payload);
         const step = typeof payload?.step === 'string' ? `; step ${payload.step}` : '';
         failure = `${call} failed (HTTP ${status}${step}): ${safeErrorText(payload)}`;
-        if (status < 500 && status !== 408 && status !== 429) return textResult(failure, true);
+        if (status < 500) return textResult(failure, true);
       } catch (error) {
         failure = `${call} failed (${status === null ? 'network; no HTTP response' : `HTTP ${status}`}): ${safeErrorText(error)}`;
       }

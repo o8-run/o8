@@ -17,7 +17,9 @@ export function orchestratorErrorText(
       if (/^\s*\^/.test(lines[index + 2] ?? '')) afterCaret = index + 3;
     }
   }
-  const isV8Frame = (line: string) => /^\s*at\s+(?:(?:async|new)\s+.+|<anonymous>|node:internal\S*|.+ \([^()\r\n]+:\d+:\d+\)|[^()\r\n]+:\d+:\d+)\s*$/.test(line);
+  // Prefixes still need a file or synthetic V8 location, so locationless
+  // "at async" and "at new" message lines remain part of the diagnostic.
+  const isV8Frame = (line: string) => /^\s*at\s+(?:(?:async|new)\s+)?(?:<anonymous>|native|node:internal\S*|.+ \((?:[^()\r\n]+:\d+:\d+|index \d+|<anonymous>|native|node:internal[^()\s]*)\)|[^()\r\n]+:\d+:\d+)\s*$/.test(line);
   const isBoundary = (line: string, index: number) => sourceLines.has(index) || isV8Frame(line)
     || /^\s*(?:\^|Node\.js v\d|\(Use `node --trace-uncaught)/.test(line);
   const isCandidate = (line: string, index: number) => line.trim() && !isBoundary(line, index);
