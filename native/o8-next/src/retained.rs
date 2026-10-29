@@ -721,10 +721,16 @@ impl Element for RetainedRow {
         }
         let state = self.state.borrow();
         if let Some(cache) = &state.cache {
+            // The same centred column origin that paint uses for text and backdrops.
+            let origin = bounds.origin
+                + point(
+                    ((bounds.size.width - cache.size.width) / 2.).max(px(0.)),
+                    px(0.),
+                );
             for (id, placement) in &cache.cards {
                 if let Some(card) = state.cards.get(id) {
                     card.borrow_mut().paint(
-                        Bounds::new(bounds.origin + placement.origin, placement.size),
+                        Bounds::new(origin + placement.origin, placement.size),
                         window.content_mask().bounds,
                         window,
                     );
