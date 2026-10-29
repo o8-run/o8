@@ -6,8 +6,8 @@ import 'server-only';
  * Intake is PRIVATE (the report + screenshot + crash traces go to a private ops
  * channel — someone's whole screen and their repo paths are in there). The public
  * artifact is the FIX: when a commit lands carrying `Fixes-Report: <id>`,
- * scripts/publish-fixed.mjs looks the id up here and announces it in #fixed,
- * credited to the reporter. Open problems stay private; closed ones go public.
+ * scripts/publish-fixed.mjs looks the id up here and records it in the public
+ * fix manifest. Open problems stay private; closed ones go public.
  *
  * That is the only reason this file exists: a fix, weeks later, has to be able to
  * find out what the report SAID and who FILED it. Discord can't answer that — the
@@ -31,7 +31,7 @@ export interface ReportRecord {
   id: string;
   ts: number;
   category: 'bug' | 'request';
-  /** One-line summary — the headline of the eventual #fixed post. */
+  /** One-line summary — the headline of the eventual fix receipt. */
   title: string;
   /** GitHub login when the operator has connected GitHub; null when anonymous. */
   reporter: string | null;
@@ -72,7 +72,7 @@ export function newReportId(): string {
 }
 
 /**
- * Condense the report body into the line that will headline the #fixed post.
+ * Condense the report body into the line that will headline the fix receipt.
  * The operator writes prose ("the diff panel goes blank when the worktree is
  * big, every time"); the changelog wants one clean line.
  */

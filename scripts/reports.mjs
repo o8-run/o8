@@ -23,7 +23,7 @@
  * survives this machine.
  *
  * `fixed` is NOT set here. It is set by the commit trailer at ship time, so the
- * code and the announcement can never disagree. See scripts/publish-fixed.mjs.
+ * code and the receipt can never disagree. See scripts/publish-fixed.mjs.
  */
 
 import {

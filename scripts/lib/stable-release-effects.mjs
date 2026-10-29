@@ -76,23 +76,23 @@ export function stableReleaseEffects({ root, version, tag, range, notesRef }) {
       console.log('[release] Archive release-notes/next.md through a follow-up PR; protected main is not modified by publication.');
     }
 
-    // Announce the fixes ONLY now — the mirror is what makes v${version} real, and
+    // Record the fixes ONLY now — the mirror is what makes v${version} real, and
     // "fixed in v0.1.592" is a lie until an operator can actually install it.
-    // Non-fatal: a Discord hiccup must never fail a shipped release. The next
-    // publish:fixed picks up anything missed (published.json is the dedupe).
+    // Non-fatal: the next publish:fixed picks up anything missed (published.json
+    // is the dedupe).
     if (pendingFixes.length > 0 && !completed.fixed) {
       try {
         await publishFixed({ range: releaseMetadataRange(), version });
         mark('fixed');
       } catch (err) {
-        failures.push('fixed announcements');
-        console.error(`[release] #fixed announce failed (release is fine):`, err?.message ?? err);
+        failures.push('fixed report records');
+        console.error(`[release] fixed report record failed (release is fine):`, err?.message ?? err);
         console.error(`[release] re-run later with: npm run publish:fixed`);
       }
     }
 
     // Community #releases announce rides the mirror for the same reason: the
-    // mirror is what makes the update installable. Non-fatal, same as #fixed.
+    // mirror is what makes the update installable. Non-fatal, same as the fix records.
     try {
       if (!completed.announcement) {
         const sent = await announceRelease();
