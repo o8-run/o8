@@ -68,7 +68,7 @@ fn shortcuts_every_displayed_chord_has_a_live_binding(cx: &mut TestAppContext) {
             });
             shortcuts_draw(&mut visual);
             if *label == "Dismiss / close" {
-                shortcuts_click(&mut visual, "shortcuts-open");
+                shortcuts_open(&mut visual);
             }
             visual.simulate_keystrokes(chord);
             shortcuts_draw(&mut visual);

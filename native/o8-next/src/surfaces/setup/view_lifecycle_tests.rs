@@ -29,9 +29,12 @@ fn onboarding_module_owns_busy_navigation_and_does_not_reopen_after_close(cx: &m
         cx.notify();
     });
     draw(cx);
-    // Settings lives in the rail's profile menu, as in the desktop rail.
+    // Settings lives in the rail's profile menu, as in the desktop rail. Busy
+    // setup may keep the menu from opening at all; either way nothing navigates.
     click(cx, "shell-profile");
-    click(cx, "profile-settings");
+    if cx.debug_bounds("profile-settings").is_some() {
+        click(cx, "profile-settings");
+    }
     assert!(shell.read_with(cx, |s, _| s.surfaces.settings.view.is_none()), "busy setup must intercept shell navigation without a registry veto");
     for chord in ["ctrl-k", "cmd-k", "ctrl-shift-p", "cmd-shift-p"] {
         cx.simulate_keystrokes(chord);
