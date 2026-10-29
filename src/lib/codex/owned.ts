@@ -303,8 +303,8 @@ export async function ownedCodexSessionState(surfaceId: string) {
   return codexStore.sessionState(surfaceId);
 }
 
-export async function sweepOrphanedCodexSessions(activeSurfaceIds: Set<string>, maxAgeMs: number) {
-  return codexStore.sweepOrphanedSessions(activeSurfaceIds, maxAgeMs);
+export async function sweepOrphanedCodexSessions(activeSurfaceIds: Set<string>, maxAgeMs: number, chatOwnedSurfaceIds?: ReadonlySet<string>) {
+  return codexStore.sweepOrphanedSessions(activeSurfaceIds, maxAgeMs, chatOwnedSurfaceIds);
 }
 
 export async function launchOwnedCodexSession(

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { execFileSync } from '@/lib/providers/child-process';
-import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, realpathSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, realpathSync, renameSync, writeFileSync } from 'node:fs';
 import { mkdir, rm, stat } from 'node:fs/promises';
 import { dirname, join, sep } from 'node:path';
 
@@ -169,6 +169,31 @@ function writeTeam(file: string, team: SharedCheckoutTeam): void {
 
 export function readSharedCheckoutTeam(input: TeamInput): SharedCheckoutTeam | null {
   return readFile(teamLocation(input).file);
+}
+
+/**
+ * Workers a chat launched into its shared checkout. They have no lane, so the owned-session
+ * orphan sweeps must not treat their live runs as orphans; the chat owns them.
+ */
+export function listRunningSharedCheckoutSurfaceIds(dataDir = getDataDir()): Set<string> {
+  const directory = join(dataDir, 'shared-checkout-teams');
+  const surfaceIds = new Set<string>();
+  let names: string[];
+  try {
+    names = readdirSync(directory).filter((name) => name.endsWith('.json'));
+  } catch {
+    return surfaceIds;
+  }
+  for (const name of names) {
+    try {
+      for (const member of readFile(join(directory, name))?.members ?? []) {
+        if (member.state === 'running' && member.surfaceId) surfaceIds.add(member.surfaceId);
+      }
+    } catch {
+      // An unreadable receipt protects nothing.
+    }
+  }
+  return surfaceIds;
 }
 
 /** Read-only workspace restoration. No branch check: a drifted team still needs to be visible. */

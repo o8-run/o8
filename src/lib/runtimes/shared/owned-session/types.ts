@@ -509,8 +509,9 @@ export interface OwnedSessionStore {
     note: string;
   }>;
   /** #1292 — archive owned-session dirs not bound to an active lane (orphans) so
-   *  discovery can't re-spawn phantom lanes. Skips active/in-flight sessions. */
-  sweepOrphanedSessions(activeSurfaceIds: Set<string>, maxAgeMs: number): Promise<number>;
+   *  discovery can't re-spawn phantom lanes. Skips active/in-flight sessions, and never
+   *  interrupts the live run of a surface in `chatOwnedSurfaceIds`. */
+  sweepOrphanedSessions(activeSurfaceIds: Set<string>, maxAgeMs: number, chatOwnedSurfaceIds?: ReadonlySet<string>): Promise<number>;
   getTelemetrySources(surfaceId: string): Promise<{
     threadId?: string;
     model?: string;
