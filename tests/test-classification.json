@@ -4821,6 +4821,13 @@
       ]
     },
     {
+      "path": "tests/next-voice-host-real-path.test.ts",
+      "reasons": [
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/next-workers-real-path.test.ts",
       "reasons": [
         "child-process",

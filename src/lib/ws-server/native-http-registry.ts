@@ -94,6 +94,7 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
 
 // Authoritative producers requested by the existing WS checkpoint/command path.
 const producers = [
+  route('/api/next/voice-host', 'GET POST', () => import('@/app/api/next/voice-host/route')),
   route('/api/panel/status', 'GET', () => import('@/app/api/panel/status/route')),
   route('/api/setup/identity', 'GET', () => import('@/app/api/setup/identity/route')),
   route('/api/mobile/sync', 'POST', () => import('@/app/api/mobile/sync/route')),

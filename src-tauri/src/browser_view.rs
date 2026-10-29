@@ -297,7 +297,7 @@ pub fn show(app: &tauri::AppHandle) {
 #[cfg(target_os = "macos")]
 pub(crate) fn reposition(app: &tauri::AppHandle, win: &tauri::WebviewWindow, x: f64, y: f64, w: f64, h: f64) {
     use tauri::{LogicalPosition, LogicalSize, Manager};
-    let Some(main) = app.get_webview_window("main") else {
+    let Some(main) = crate::voice_host::classic_window(&app) else {
         return;
     };
     let scale = main.scale_factor().unwrap_or(1.0);
@@ -328,7 +328,7 @@ fn attach_as_child(app: &tauri::AppHandle, child: &tauri::WebviewWindow) {
     use objc2::{msg_send, runtime::AnyObject};
     use tauri::Manager;
 
-    let Some(main) = app.get_webview_window("main") else {
+    let Some(main) = crate::voice_host::classic_window(&app) else {
         return;
     };
     let main_ptr = match main.ns_window() {

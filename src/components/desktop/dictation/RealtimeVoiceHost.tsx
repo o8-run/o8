@@ -179,6 +179,7 @@ export function RealtimeVoiceHost() {
   const [status, setStatus] = useState<RealtimeStatus>('idle');
   const managedOwner = useRef(false);
   const selectingVoice = useRef(false);
+  const selectionGeneration = useRef(0);
   useEffect(() => {
     const changed = (event: Event) => {
       const state = (event as CustomEvent<string>).detail;
@@ -213,6 +214,7 @@ export function RealtimeVoiceHost() {
   // full-page canvas nav never reaches here (the browser unloads the page), so
   // the heartbeat's fresh marker survives and the destination resumes.
   const stop = useCallback(() => {
+    selectionGeneration.current++;
     clearIdle();
     clearHeartbeat();
     clearHandoff();
@@ -287,15 +289,17 @@ export function RealtimeVoiceHost() {
     if (sessionRef.current) { stop(); return; }
     if (selectingVoice.current) return;
     selectingVoice.current = true;
+    const selection = ++selectionGeneration.current;
     void fetch('/api/voice/live', { headers: { authorization: `Bearer ${getMobileWsToken()}` } })
       .then(response => response.json()).then(capability => {
+        if (selection !== selectionGeneration.current) return;
         if (capability.enabled === true) {
           clearHandoff(); managedOwner.current = true;
           window.dispatchEvent(new Event('o8:managed-symon-toggle'));
           return;
         }
         toggleLegacy();
-      }).catch(() => { setStatus('error'); setStatusDetail('Could not determine voice availability.'); }).finally(() => { selectingVoice.current = false; });
+      }).catch(() => { if (selection === selectionGeneration.current) { setStatus('error'); setStatusDetail('Could not determine voice availability.'); } }).finally(() => { if (selection === selectionGeneration.current) selectingVoice.current = false; });
     function toggleLegacy() {
     if (sessionRef.current) {
       console.log(`${LOG} toggle → off`);
@@ -306,6 +310,16 @@ export function RealtimeVoiceHost() {
     }
     }
   }, [start, stop]);
+
+  useEffect(() => {
+    const stopHost = () => {
+      selectionGeneration.current++; selectingVoice.current = false;
+      if (sessionRef.current) stop();
+      window.dispatchEvent(new Event('o8:managed-symon-stop'));
+    };
+    window.addEventListener('o8:voice-host-stop-all', stopHost);
+    return () => window.removeEventListener('o8:voice-host-stop-all', stopHost);
+  }, [stop]);
 
   // Right-⌘ double-tap → `o8:realtime-toggle` (emitted from fn_hotkey.rs).
   useEffect(() => {
@@ -527,6 +541,7 @@ export function RealtimeVoiceHost() {
   useEffect(() => {
     if (resumedRef.current || !isTauri()) return;
     resumedRef.current = true;
+    if ((window as Window & { __O8_VOICE_HOST__?: boolean }).__O8_VOICE_HOST__) { clearHandoff(); return; }
     let raw: string | null = null;
     try { raw = localStorage.getItem(HANDOFF_KEY); } catch { /* no localStorage */ }
     if (!raw) return;

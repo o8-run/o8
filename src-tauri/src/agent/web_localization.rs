@@ -51,8 +51,7 @@ fn window_frame(app: &tauri::AppHandle, coordinate_space: &str) -> Option<(f64, 
     if window.is_visible().ok()? != true {
         return None;
     }
-    let main_focused = app
-        .get_webview_window("main")
+    let main_focused = crate::voice_host::classic_window(&app)
         .and_then(|main| main.is_focused().ok())
         .unwrap_or(false);
     if window.is_focused().ok()? != true && !main_focused {

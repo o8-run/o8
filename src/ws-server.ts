@@ -1,4 +1,5 @@
 import { recordInboxConversationEvent } from '@/lib/inbox/store';
+import { VoiceHostBroker, handleVoiceHostHttp } from '@/lib/ws-server/voice-host';
 import { startProductSession, endProductSession } from '@/lib/analytics/session';
 import { mutationToLaneLifecyclePayload } from '@/lib/realtime/lane-lifecycle';
 import { assertOrchestratorPermissionMode, resolveOrchestratorPermissionMode } from '@/lib/orchestrator/permission-mode';
@@ -1160,6 +1161,7 @@ const ORCH_SNAPSHOT_STALE_MS = 120_000;
 const latestOrchestratorPlanBySession = new Map<string, Record<string, unknown>>();
 
 function broadcastToOrchestratorSession(sessionName: string, rawMsg: string): void {
+  try { voiceHostBroker.observe(JSON.parse(rawMsg)); } catch { /* Existing transport handles malformed frames. */ }
   lastOrchestratorActivityAt.set(sessionName, Date.now());
   // Stamp the event with a monotonic seq and buffer it so a (re)subscribing
   // client can replay what it missed (reload / reconnect / first-turn re-
@@ -2259,6 +2261,7 @@ function handleE2eeInit(client: ClientState, msg: Record<string, unknown>): void
 }
 
 function send(client: ClientState, msg: Record<string, unknown>) {
+  voiceHostBroker.observe(msg);
   if (client.ws.readyState !== WebSocket.OPEN) return;
   // #5 — during the E2EE handshake window, suppress app frames so nothing leaks
   // in plaintext before the key is agreed. The post-ready full sync + durable-
@@ -2348,6 +2351,8 @@ function recordTerminalBenchDrop(preStringified: string) {
     // Bench diagnostics never affect delivery.
   }
 }
+
+const voiceHostBroker = new VoiceHostBroker(frame => broadcast(frame));
 
 function broadcast(msg: Record<string, unknown>, filter?: (c: ClientState) => boolean) {
   const json = JSON.stringify(msg);
@@ -8788,6 +8793,12 @@ const httpServer = createServer(async (req, res) => {
         }));
       }
     });
+    return;
+  }
+
+  if (req.url === '/internal/next/voice-host') {
+    if (!isAuthorizedInternalRequest(req)) { res.writeHead(401).end('unauthorized'); return; }
+    await handleVoiceHostHttp(req, res, voiceHostBroker);
     return;
   }
 
