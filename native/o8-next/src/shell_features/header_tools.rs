@@ -31,6 +31,22 @@ struct Menus {
     error: Option<String>,
     /// When the open card started its 150ms appearance.
     opened: Option<std::time::Instant>,
+    /// The supervisor inbox's human-required count.
+    inbox: Option<u64>,
+    /// Openable local pages from /api/panel/ports: (port, label).
+    ports: Vec<(u64, String)>,
+    /// The active packet in this workspace: (reference, rows of (label, done)).
+    progress: Option<(String, Vec<(String, bool)>)>,
+    worktrees_open: bool,
+    progress_open: bool,
+    ports_open: bool,
+}
+
+#[derive(Clone)]
+struct Worktree {
+    path: String,
+    branch: Option<String>,
+    current: bool,
 }
 
 /// The fields of /api/review/workspace the card shows.
@@ -43,6 +59,7 @@ struct Snapshot {
     additions: u64,
     deletions: u64,
     pull_request: Option<(u64, String)>,
+    worktrees: Vec<Worktree>,
 }
 
 impl Snapshot {
@@ -63,8 +80,81 @@ impl Snapshot {
             additions: sum("additions"),
             deletions: sum("deletions"),
             pull_request,
+            // Agent scratch worktrees stay out of the list unless current.
+            worktrees: body["worktrees"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|tree| {
+                    let path = tree["absolutePath"].as_str().or(tree["path"].as_str())?.to_string();
+                    let current = tree["isCurrent"] == true;
+                    (current || !path.contains("/.claude/worktrees/agent-")).then(|| Worktree {
+                        path,
+                        branch: tree["branch"].as_str().map(String::from),
+                        current,
+                    })
+                })
+                .collect(),
         }
     }
+}
+
+/// The supervisor inbox count, as the desktop status bar reads it.
+fn read_inbox(menus: &mut Menus, body: &Value, _: &str) {
+    menus.inbox = body["summary"]["humanRequired"]
+        .as_u64()
+        .or(body["summary"]["active"].as_u64());
+}
+
+fn read_ports(menus: &mut Menus, body: &Value, _: &str) {
+    menus.ports = body["ports"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|port| port["kind"] == "page")
+        .filter_map(|port| {
+            let label = port["label"].as_str().unwrap_or("Local page");
+            let label = match port["repo"].as_str() {
+                Some(repo) if !repo.is_empty() => format!("{label} · {repo}"),
+                _ => label.to_string(),
+            };
+            Some((port["port"].as_u64()?, label))
+        })
+        .collect();
+}
+
+/// The workspace's active packet, ranked as BranchDetailsLauncher ranks it.
+fn read_progress(menus: &mut Menus, body: &Value, workspace: &str) {
+    let rank = |status: &str| match status {
+        "awaiting_review" => 4,
+        "running" => 3,
+        "dispatched" => 2,
+        "blocked" => 1,
+        _ => 0,
+    };
+    let packet = body["mission"]["packets"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|packet| {
+            packet["workspaceTargetPath"]
+                .as_str()
+                .is_some_and(|path| crate::client::same_workspace(path, workspace))
+        })
+        .max_by_key(|packet| rank(packet["status"].as_str().unwrap_or("")))
+        .filter(|packet| rank(packet["status"].as_str().unwrap_or("")) > 0);
+    menus.progress = packet.map(|packet| {
+        let status = packet["status"].as_str().unwrap_or("");
+        let title = packet["title"].as_str().or(packet["referenceLabel"].as_str()).unwrap_or("Packet");
+        let mut rows = vec![
+            (title.to_string(), true),
+            (status.replace('_', " "), !matches!(status, "blocked" | "failed")),
+        ];
+        if let Some(event) = packet["lastEventLabel"].as_str() {
+            rows.push((event.to_string(), true));
+        }
+        (packet["referenceLabel"].as_str().unwrap_or("").to_string(), rows)
+    });
 }
 
 /// Whether a header card or menu is open (native views hide under it).
@@ -94,6 +184,30 @@ fn load(s: &mut Shell, cx: &mut Context<Shell>) {
     menus.loading = true;
     menus.error = None;
     let client = s.client.in_workspace(&workspace);
+    let side: [(&'static str, Vec<(&'static str, String)>, fn(&mut Menus, &Value, &str)); 3] = [
+        ("/api/panel/supervisor-inbox", vec![("scope", "all".into())], read_inbox),
+        ("/api/panel/ports", vec![], read_ports),
+        ("/api/orchestrator/state", vec![], read_progress),
+    ];
+    for (route, query, apply) in side {
+        let client = client.clone();
+        let task = cx.background_executor().spawn(async move {
+            let query: Vec<(&str, &str)> = query.iter().map(|(k, v)| (*k, v.as_str())).collect();
+            client.get::<Value>(route, &query)
+        });
+        let scope = workspace.clone();
+        cx.spawn(async move |this, cx| {
+            let Ok(body) = task.await else { return };
+            let _ = this.update(cx, |this, cx| {
+                let menus = this.features.get::<Menus>();
+                if menus.scope.as_deref() == Some(scope.as_str()) {
+                    apply(menus, &body, &scope);
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
     for changes_only in [true, false] {
         let client = client.clone();
         let path = workspace.clone();
@@ -119,6 +233,9 @@ fn load(s: &mut Shell, cx: &mut Context<Shell>) {
                         // The fast read has no pull requests; keep one already found.
                         if changes_only && next.pull_request.is_none() {
                             next.pull_request = menus.snapshot.as_ref().and_then(|s| s.pull_request.clone());
+                        }
+                        if next.worktrees.is_empty() {
+                            next.worktrees = menus.snapshot.as_ref().map(|s| s.worktrees.clone()).unwrap_or_default();
                         }
                         menus.snapshot = Some(next);
                     }
@@ -346,8 +463,16 @@ fn card(menus: &Menus, workspace: Option<String>, cx: &mut Context<Shell>) -> gp
                         .mt(px(7.))
                         .flex()
                         .gap(px(4.))
+                        .child(
+                            action("workspace-files", cx, |this, window, cx| {
+                                super::right_panel::open_files(this, None, window, cx)
+                            })
+                            .flex_1()
+                            .child(crate::icon::stroke(FILE, theme().text_secondary, 14., 1.6))
+                            .child("Files"),
+                        )
                         .child(action("workspace-changes", cx, |this, window, cx| {
-                            this.execute(Command::Diff, window, cx)
+                            super::right_panel::open_review(this, window, cx)
                         })
                         .flex_1()
                         .child(div().mr(px(2.)).text_size(px(15.)).child("±"))
@@ -356,13 +481,7 @@ fn card(menus: &Menus, workspace: Option<String>, cx: &mut Context<Shell>) -> gp
                             snapshot.files.to_string()
                         } else {
                             "…".into()
-                        }))))
-                        .child(action("workspace-pull-requests", cx, |this, window, cx| {
-                            this.execute(Command::PullRequests, window, cx)
-                        })
-                        .flex_1()
-                        .child(crate::icon::stroke(PULL_REQUEST, theme().text_secondary, 14., 1.6))
-                        .child("Pull requests")),
+                        })))),
                 )
                 .when_some(summary, |section, summary| {
                     section.child(
@@ -386,8 +505,89 @@ fn card(menus: &Menus, workspace: Option<String>, cx: &mut Context<Shell>) -> gp
                                 )
                             }),
                     )
+                })
+                .when(!snapshot.worktrees.is_empty(), |section| {
+                    let open = menus.worktrees_open;
+                    section.child(
+                        div()
+                            .mt(px(10.))
+                            .pt(px(5.))
+                            .border_t_1()
+                            .border_color(theme().border)
+                            .child(
+                                toggle_row("workspace-worktrees", "Worktrees", open, cx, |menus| {
+                                    menus.worktrees_open = !menus.worktrees_open
+                                })
+                                .child(div().ml_auto().child(meta(snapshot.worktrees.len().to_string()))),
+                            )
+                            .when(open, |list| {
+                                list.children(snapshot.worktrees.iter().enumerate().map(|(i, tree)| {
+                                    let path = tree.path.clone();
+                                    div()
+                                        .id(("workspace-worktree", i))
+                                        .min_h(px(30.))
+                                        .px(px(8.))
+                                        .flex()
+                                        .flex_col()
+                                        .justify_center()
+                                        .rounded(px(8.))
+                                        .cursor_pointer()
+                                        .hover(|row| row.bg(theme().hover))
+                                        .child(
+                                            div()
+                                                .flex()
+                                                .gap(px(6.))
+                                                .text_size(px(11.))
+                                                .text_color(theme().text_secondary)
+                                                .child(tree.branch.clone().unwrap_or_else(|| "Detached".into()))
+                                                .when(tree.current, |row| row.child(meta("Current".into()))),
+                                        )
+                                        .child(meta(home_relative(&tree.path)))
+                                        .on_click(cx.listener(move |this, _, window, cx| {
+                                            this.capture(window, cx);
+                                            close(this, window, cx);
+                                            super::right_panel::open_files(this, Some(path.clone()), window, cx);
+                                        }))
+                                }))
+                            }),
+                    )
                 }),
         )
+        .when_some(menus.progress.clone(), |card, (hint, rows)| {
+            let open = menus.progress_open;
+            card.child(
+                div()
+                    .pt(px(8.))
+                    .pb(px(9.))
+                    .border_b_1()
+                    .border_color(theme().border)
+                    .child(
+                        toggle_row("workspace-progress", "Progress", open, cx, |menus| {
+                            menus.progress_open = !menus.progress_open
+                        })
+                        .child(div().ml_auto().child(meta(hint))),
+                    )
+                    .when(open, |section| {
+                        section.children(rows.into_iter().map(|(label, done)| {
+                            div()
+                                .min_h(px(24.))
+                                .px(px(8.))
+                                .flex()
+                                .items_center()
+                                .gap(px(7.))
+                                .text_size(px(11.))
+                                .text_color(theme().text_secondary)
+                                .child(crate::icon::stroke(
+                                    if done { CHECK } else { DOT },
+                                    if done { theme().success } else { theme().text_muted },
+                                    12.,
+                                    2.,
+                                ))
+                                .child(div().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(label))
+                        }))
+                    }),
+            )
+        })
         .when_some(snapshot.pull_request.clone(), |card, (number, title)| {
             card.child(
                 div()
@@ -428,14 +628,113 @@ fn card(menus: &Menus, workspace: Option<String>, cx: &mut Context<Shell>) -> gp
                 .flex()
                 .justify_between()
                 .gap(px(4.))
-                .child(
+                .child({
+                    let count = menus.inbox.filter(|count| *count > 0);
                     action("workspace-inbox", cx, |this, window, cx| {
                         super::right_panel::open(this, window, cx)
                     })
-                    .child(crate::icon::stroke(INBOX, theme().text_secondary, 14., 1.6))
-                    .child("Inbox"),
+                    .when(count.is_some(), |button| button.text_color(theme().warning))
+                    .child(crate::icon::stroke(
+                        INBOX,
+                        if count.is_some() { theme().warning } else { theme().text_secondary },
+                        14.,
+                        1.6,
+                    ))
+                    .when_some(count, |button, count| button.child(count.to_string()))
+                    .child("Inbox")
+                })
+                .child(
+                    action("workspace-spec", cx, |this, window, cx| {
+                        super::right_panel::open_spec(this, window, cx)
+                    })
+                    .child(crate::icon::stroke(SPEC, theme().text_secondary, 14., 1.6))
+                    .child("o8.md"),
+                )
+                .child(
+                    div()
+                        .id("workspace-ports")
+                        .debug_selector(|| "workspace-ports".into())
+                        .min_h(px(30.))
+                        .px(px(8.))
+                        .flex()
+                        .items_center()
+                        .gap(px(6.))
+                        .rounded(px(8.))
+                        .cursor_pointer()
+                        .text_size(px(11.))
+                        .text_color(theme().text_secondary)
+                        .hover(|button| button.bg(theme().hover))
+                        .when(menus.ports_open, |button| button.bg(theme().hover))
+                        .tooltip(|_, cx| cx.new(|_| crate::icon::Tip("Ports and browser preview".into())).into())
+                        .child(crate::icon::stroke(GLOBE, theme().text_secondary, 14., 1.6))
+                        .child("Ports")
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            let menus = this.features.get::<Menus>();
+                            menus.ports_open = !menus.ports_open;
+                            cx.notify();
+                        })),
                 ),
         )
+        .when(menus.ports_open, |card| {
+            card.child(
+                div()
+                    .pt(px(4.))
+                    .flex()
+                    .flex_col()
+                    .when(menus.ports.is_empty(), |list| {
+                        list.child(div().px(px(8.)).py(px(6.)).child(meta("No local pages are running.".into())))
+                    })
+                    .children(menus.ports.iter().enumerate().map(|(i, (port, label))| {
+                        let url = format!("http://localhost:{port}");
+                        div()
+                            .id(("workspace-port", i))
+                            .min_h(px(28.))
+                            .px(px(8.))
+                            .flex()
+                            .items_center()
+                            .gap(px(8.))
+                            .rounded(px(8.))
+                            .cursor_pointer()
+                            .text_size(px(11.))
+                            .text_color(theme().text_secondary)
+                            .hover(|row| row.bg(theme().hover))
+                            .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(label.clone()))
+                            .child(meta(format!(":{port}")))
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.capture(window, cx);
+                                close(this, window, cx);
+                                super::right_panel::open_browser(this, url.clone(), window, cx);
+                            }))
+                    })),
+            )
+        })
+}
+
+/// A disclosure row (chevron, label) that flips one Menus flag.
+fn toggle_row(
+    id: &'static str,
+    label: &'static str,
+    open: bool,
+    cx: &mut Context<Shell>,
+    flip: fn(&mut Menus),
+) -> gpui::Stateful<gpui::Div> {
+    div()
+        .id(id)
+        .debug_selector(move || id.into())
+        .min_h(px(30.))
+        .flex()
+        .items_center()
+        .gap(px(6.))
+        .rounded(px(8.))
+        .cursor_pointer()
+        .text_size(px(11.))
+        .text_color(theme().text_secondary)
+        .child(crate::icon::stroke(if open { CHEVRON_DOWN } else { CHEVRON_RIGHT }, theme().text_secondary, 12., 1.8))
+        .child(label)
+        .on_click(cx.listener(move |this, _, _, cx| {
+            flip(this.features.get::<Menus>());
+            cx.notify();
+        }))
 }
 
 /// The open card's 150ms appearance (the desktop overlay's scale-in from its
@@ -578,3 +877,10 @@ const PULL_REQUEST: &str = "M18 15a3 3 0 1 0 0 6 3 3 0 1 0 0-6Z M6 3a3 3 0 1 0 0
 const INBOX: &str = "M22 12h-6l-2 3h-4l-2-3H2 M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z";
 const REFRESH: &str = "M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8 M21 3v5h-5 M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16 M8 16H3v5";
 const COPY: &str = "M10 8h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2V10a2 2 0 0 1 2-2Z M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2";
+const FILE: &str = "M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z M14 3v6h6 M8 13h8 M8 17h5";
+const SPEC: &str = "M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h5 M14 3l5 5v3 M8 9h6 M8 13h4 M18.4 13.6a1.4 1.4 0 0 1 2 2L16 20l-3 1 1-3Z";
+const GLOBE: &str = "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Z M2 12h20 M12 2c5 5 5 15 0 20-5-5-5-15 0-20Z";
+const CHEVRON_RIGHT: &str = "m9 6 6 6-6 6";
+const CHEVRON_DOWN: &str = "m6 9 6 6 6-6";
+const CHECK: &str = "M5 12l5 5L20 7";
+const DOT: &str = "M12 11a1 1 0 1 0 0 2 1 1 0 0 0 0-2Z";

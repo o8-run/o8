@@ -35,6 +35,8 @@ pub struct BrowserPanel {
     web: Rc<RefCell<Option<web::Web>>>,
     #[cfg(not(target_os = "macos"))]
     web: Rc<RefCell<Option<()>>>,
+    /// An address asked for before the native page exists.
+    pending: Rc<RefCell<Option<String>>>,
     /// Hidden while the panel moves, or a menu or the palette sits over it.
     covered: bool,
     focus: FocusHandle,
@@ -70,6 +72,7 @@ impl BrowserPanel {
             address_focus: address.read(cx).focus.clone(),
             address,
             web: Rc::default(),
+            pending: Rc::default(),
             covered: false,
             focus: cx.focus_handle(),
             _subscriptions: vec![submit],
@@ -91,10 +94,18 @@ impl BrowserPanel {
         }
     }
 
+    /// Opens a page and shows its address.
+    pub fn navigate(&mut self, url: &str, cx: &mut Context<Self>) {
+        self.address.update(cx, |field, cx| field.set_text(url, cx));
+        self.load(url);
+        cx.notify();
+    }
+
     fn load(&self, url: &str) {
         #[cfg(target_os = "macos")]
-        if let Some(web) = self.web.borrow().as_ref() {
-            web.load(url);
+        match self.web.borrow().as_ref() {
+            Some(web) => web.load(url),
+            None => *self.pending.borrow_mut() = Some(url.into()),
         }
         #[cfg(not(target_os = "macos"))]
         let _ = url;
@@ -144,6 +155,7 @@ impl Render for BrowserPanel {
                 .child(crate::icon::stroke(path, theme().text_secondary, 15., 1.7))
         };
         let web = self.web.clone();
+        let pending = self.pending.clone();
         let covered = self.covered;
         div()
             .track_focus(&self.focus)
@@ -202,6 +214,9 @@ impl Render for BrowserPanel {
                                     let mut slot = web.borrow_mut();
                                     if slot.is_none() {
                                         *slot = web::Web::new(window);
+                                        if let (Some(page), Some(url)) = (slot.as_ref(), pending.borrow_mut().take()) {
+                                            page.load(&url);
+                                        }
                                     }
                                     // Blank until an address loads, so no white page shows.
                                     if let Some(page) = slot.as_ref() {
@@ -213,7 +228,7 @@ impl Render for BrowserPanel {
                                     }
                                 }
                                 #[cfg(not(target_os = "macos"))]
-                                let _ = (bounds, window, &web, covered);
+                                let _ = (bounds, window, &web, &pending, covered);
                             },
                         )
                         .absolute()

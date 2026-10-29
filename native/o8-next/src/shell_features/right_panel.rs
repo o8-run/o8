@@ -206,6 +206,41 @@ pub(super) fn open(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) 
     show(s, Tool::Inbox, window, cx);
 }
 
+pub(super) fn open_review(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
+    show(s, Tool::Review, window, cx);
+}
+
+pub(super) fn open_spec(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
+    show(s, Tool::Spec, window, cx);
+}
+
+/// Files for the workspace, or for another of its worktrees.
+pub(super) fn open_files(
+    s: &mut Shell,
+    root: Option<String>,
+    window: &mut Window,
+    cx: &mut Context<Shell>,
+) {
+    if let Some(root) = root {
+        let key = key(s, Tool::Files);
+        let client = s.client.in_workspace(&root);
+        let view = cx.new(|cx| {
+            crate::files_panel::FilesPanel::new(client, root, crate::files_panel::Mode::Files, cx)
+        });
+        s.features.get::<Panel>().files.insert(key, view);
+    }
+    show(s, Tool::Files, window, cx);
+}
+
+/// The Browser, at a page.
+pub(super) fn open_browser(s: &mut Shell, url: String, window: &mut Window, cx: &mut Context<Shell>) {
+    show(s, Tool::Browser, window, cx);
+    let key = key(s, Tool::Browser);
+    if let Some(view) = s.features.read::<Panel>().and_then(|panel| panel.browsers.get(&key)).cloned() {
+        view.update(cx, |browser, cx| browser.navigate(&url, cx));
+    }
+}
+
 pub(super) fn toggle(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
     if is_open(s) {
         s.features.get::<Panel>().motion.set(false);
