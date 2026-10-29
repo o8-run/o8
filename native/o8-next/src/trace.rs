@@ -184,17 +184,18 @@ fn quoted(text: &str, limit: usize) -> String {
 
 fn badge(name: &str) -> Badge {
     let extension = name.rsplit_once('.').map(|(_, e)| e.to_lowercase());
+    let marks = &crate::theme::FILE_MARKS;
     match extension.as_deref() {
-        Some("ts" | "mts" | "cts") => Badge::Text("TS", 0x4f9fbf),
-        Some("tsx" | "jsx") => Badge::Glyph(ATOM, 0x4f9fbf),
-        Some("js" | "mjs" | "cjs") => Badge::Text("JS", 0xc9a43a),
-        Some("rs") => Badge::Text("RS", 0xd0875a),
-        Some("py") => Badge::Text("PY", 0x4b8bbe),
-        Some("go") => Badge::Text("GO", 0x4fa8c8),
-        Some("md" | "mdx") => Badge::Text("MD", 0x8a8f98),
-        Some("json" | "toml" | "yaml" | "yml") => Badge::Text("{}", 0x8a8f98),
-        Some("css" | "scss") => Badge::Text("CSS", 0x6c8fd6),
-        Some("swift") => Badge::Text("SW", 0xe0794c),
+        Some("ts" | "mts" | "cts") => Badge::Text("TS", marks.typescript),
+        Some("tsx" | "jsx") => Badge::Glyph(ATOM, marks.typescript),
+        Some("js" | "mjs" | "cjs") => Badge::Text("JS", marks.javascript),
+        Some("rs") => Badge::Text("RS", marks.rust),
+        Some("py") => Badge::Text("PY", marks.python),
+        Some("go") => Badge::Text("GO", marks.go),
+        Some("md" | "mdx") => Badge::Text("MD", marks.neutral),
+        Some("json" | "toml" | "yaml" | "yml") => Badge::Text("{}", marks.neutral),
+        Some("css" | "scss") => Badge::Text("CSS", marks.css),
+        Some("swift") => Badge::Text("SW", marks.swift),
         _ => Badge::None,
     }
 }
@@ -444,7 +445,7 @@ fn phrase(
             };
             let links = atoms.iter().flat_map(|a| a.step.links.iter());
             let chips = links
-                .map(|(title, url)| (page(url, Some(title)), Badge::Glyph(GLOBE, 0x8a8f98)))
+                .map(|(title, url)| (page(url, Some(title)), Badge::Glyph(GLOBE, crate::theme::FILE_MARKS.neutral)))
                 .collect();
             (Icon::Globe, label, chip_list(chips))
         }
@@ -459,7 +460,7 @@ fn phrase(
                 .map(|url| {
                     (
                         page(url, titles.get(*url).map(String::as_str)),
-                        Badge::Glyph(GLOBE, 0x8a8f98),
+                        Badge::Glyph(GLOBE, crate::theme::FILE_MARKS.neutral),
                     )
                 })
                 .collect();
@@ -953,7 +954,7 @@ fn icon(line: &Line, clock: f32) -> AnyElement {
             .flex()
             .items_center()
             .justify_center()
-            .child(crate::icon::stroke(CHECK, gpui::rgb(0xffffff), 11., 2.6))
+            .child(crate::icon::stroke(CHECK, crate::theme::on_accent(), 11., 2.6))
             .into_any_element(),
         Icon::Ring => div()
             .size(px(8.))
