@@ -157,6 +157,9 @@ pub fn render_tree_cached(entries: &[Entry], previous: &[Entry], old_rows: &[Row
             reasoning = marker;
         }
         for (index, tool) in entry.tools.as_deref().unwrap_or(&[]).iter().enumerate() {
+            if crate::activity::internal(tool) {
+                continue;
+            }
             let id = tool["id"]
                 .as_str()
                 .filter(|s| !s.is_empty())

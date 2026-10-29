@@ -244,9 +244,22 @@ impl Transcript {
                             tool["args"] = args;
                         }
                     }
-                    None => tools.push(
-                        serde_json::json!({"id":id,"name":name,"args":args,"status":"running"}),
-                    ),
+                    None => {
+                        // A call that starts while another still runs joins its batch.
+                        let batch = tools
+                            .iter()
+                            .rev()
+                            .find(|tool| tool["status"] == "running")
+                            .and_then(|tool| tool["batch"].as_str())
+                            .map(str::to_owned)
+                            .or_else(|| id.clone());
+                        if let (Some(id), Some(batch)) = (&id, &batch) {
+                            crate::activity::note_batch(id, batch);
+                        }
+                        tools.push(serde_json::json!({
+                            "id":id,"name":name,"args":args,"status":"running","batch":batch
+                        }));
+                    }
                 }
             }
             "tool-result" => {
@@ -540,7 +553,21 @@ mod tests {
             !transcript.apply(&other),
             "another thread's events are ignored"
         );
-        assert!(transcript.apply(&event(5, "status", serde_json::json!({"status":"ready"}))));
+        for (seq, id) in [(5, "t2"), (6, "t3")] {
+            assert!(transcript.apply(&event(
+                seq,
+                "tool-use",
+                serde_json::json!({"toolUseId":id,"name":"WebFetch",
+                    "args":{"url":format!("https://example.com/{id}")}})
+            )));
+        }
+        let (steps, _) = trace(&transcript).unwrap();
+        assert_eq!(
+            steps.iter().map(|s| s.batch.as_deref()).collect::<Vec<_>>(),
+            [Some("t1"), Some("t2"), Some("t2")],
+            "a call that starts while another runs joins its batch"
+        );
+        assert!(transcript.apply(&event(7, "status", serde_json::json!({"status":"ready"}))));
         assert!(
             !trace(&transcript).unwrap().1.live,
             "ready settles the trace"

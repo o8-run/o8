@@ -300,6 +300,14 @@ impl Surface {
             }
         }
     }
+    /// Each frame of a followed turn keeps its last row in view, so a trace
+    /// that opens its rows over a few frames scrolls with them. The reader
+    /// scrolling the transcript ends the follow.
+    pub(crate) fn follow_frame(&mut self) {
+        if self.following.is_some() && !self.rows.is_empty() {
+            self.list.scroll_to_reveal_item(self.rows.len() - 1);
+        }
+    }
     fn poll_stream(&mut self, cx: &mut Context<Self>) -> bool {
         let mut visualizations_changed = false;
         for (index, row) in self.rows.iter().enumerate() {
