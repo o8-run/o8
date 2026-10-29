@@ -1,6 +1,6 @@
 // Owned HTTP host for native Files tests. Imports the production route handlers.
 import { createServer } from 'node:http';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { NextRequest } from 'next/server';
@@ -28,12 +28,19 @@ const server = createServer(async (req, res) => {
   try {
     const url = new URL(req.url!, 'http://127.0.0.1');
     log.push(`${req.method} ${url.pathname}${url.search}`);
-    writeFileSync(join(root, 'requests.json'), JSON.stringify(log));
+    writeFileSync(join(root, 'requests-next.json'), JSON.stringify(log));
+    renameSync(join(root, 'requests-next.json'), join(root, 'requests.json'));
     const chunks: Buffer[] = [];
     for await (const chunk of req) chunks.push(Buffer.from(chunk));
     const request = new NextRequest(url, { method: req.method, headers: { 'content-type': 'application/json' }, ...(req.method === 'POST' ? { body: Buffer.concat(chunks) } : {}) });
     const route = url.pathname;
-    const response = route === '/api/v2/files/quick-docs' ? await docs.GET(request)
+    // Simulate an older server's incomplete fallback, enabled only by
+    // the regression test. Other tests exercise the production handlers.
+    const fallbackPath = join(root, 'fallback-files.json');
+    const fallbackKey = url.searchParams.has('search') ? 'search' : url.searchParams.get('recursive') === 'files' ? 'flat' : null;
+    const fallback = route === '/api/panel/files' && fallbackKey && existsSync(fallbackPath)
+      ? JSON.parse(readFileSync(fallbackPath, 'utf8'))[fallbackKey] : null;
+    const response = fallback ? Response.json(fallback) : route === '/api/v2/files/quick-docs' ? await docs.GET(request)
         : route === '/api/v2/files' ? await preview.GET(request) : await files.GET(request);
     // Exercise stale completion: the earlier query/file finishes last.
     if (url.searchParams.get('search') === 'slow' || url.searchParams.get('path') === 'AGENTS.md') await new Promise(resolve => setTimeout(resolve, 250));
