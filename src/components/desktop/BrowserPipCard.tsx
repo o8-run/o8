@@ -21,6 +21,10 @@ export const BROWSER_PIP_EVENT = 'o8:browser-pip';
 
 const ORIENTATION_KEY = 'o8:browser-pip-orientation';
 
+/** Workspace tab kinds with a transcript. Page tabs (Pull requests and other canvases) and
+ *  terminals hide the preview; it comes back when the chat is selected again. */
+const PIP_TAB_KINDS = new Set(['chat', 'llm-chat', 'chatgpt-plan', 'orchestrator']);
+
 export function BrowserPipCard({
   active,
   scopeKey,
@@ -28,6 +32,7 @@ export function BrowserPipCard({
   panelVisible = false,
   browserVisible = false,
   boundsRef,
+  tabKind = null,
 }: {
   /** No side panel is open — the only mode where the PIP earns its place. */
   active: boolean;
@@ -37,6 +42,8 @@ export function BrowserPipCard({
   panelVisible?: boolean;
   browserVisible?: boolean;
   boundsRef?: RefObject<HTMLElement | null>;
+  /** Kind of the selected workspace tab; null when no workspace tab is tracked. */
+  tabKind?: string | null;
 }) {
   const tabs = useO8BrowserTabs(scopeKey);
   const [inTauri] = useState<boolean>(() => isTauri());
@@ -59,7 +66,7 @@ export function BrowserPipCard({
 
   return (
     <HoverPipCard
-      active={active}
+      active={active && (tabKind === null || PIP_TAB_KINDS.has(tabKind))}
       available={Boolean(tab)}
       eventName={BROWSER_PIP_EVENT}
       storageKey={ORIENTATION_KEY}

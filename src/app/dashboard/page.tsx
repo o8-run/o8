@@ -5069,11 +5069,12 @@ function DashboardInner() {
       {/* Failed New-session spawns surface here — never silent (D3YPBP). */}
       <SpawnErrorToast message={spawnErrorMessage} onDismiss={() => setSpawnErrorMessage(null)} />
 
-      {/* Floating browser PIP — only when no side panel is
+      {/* Floating browser PIP — only on a chat tab with no side panel
           open; triggered by hovering browser tool clusters in the transcript.
           Scope key MUST match the O8Panel browserStateKey above. */}
       <BrowserPipCard
-        active={!showRightPanelColumn}
+        active={!showRightPanelColumn && !workspaceSurfaceHidden}
+        tabKind={activeWorkspaceTabKind}
         panelVisible={showRightPanelColumn}
         browserVisible={showRightPanelColumn && rightPanelKind === 'o8' && o8ActiveTab === 'browser'}
         boundsRef={workspaceSurfaceRef}
