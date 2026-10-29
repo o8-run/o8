@@ -41,6 +41,10 @@ pub(in crate::shell) struct Picker<P: Port> {
     requested: Option<String>,
     // The surface's own target opens once; reopening the picker (Ctrl+Alt+O) lists.
     offered_own: bool,
+    /// Why the own target could not be created; F5 and Retry try again.
+    own_error: Option<String>,
+    /// Each load's number; a reply from an older load is dropped.
+    generation: u64,
 }
 impl<P: Port> Picker<P> {
     pub fn new(
@@ -63,16 +67,19 @@ impl<P: Port> Picker<P> {
             failed: false,
             requested: selected,
             offered_own: false,
+            own_error: None,
+            generation: 0,
         };
         view.load(cx);
         view
     }
     fn load(&mut self, cx: &mut Context<Self>) {
-        if self.loading {
-            return;
-        }
+        // A newer load (Ctrl+Alt+O, F5) supersedes one in flight.
+        self.generation += 1;
+        let generation = self.generation;
         self.loading = true;
         self.failed = false;
+        self.own_error = None;
         let client = self.client.clone();
         let workspace = self.workspace.clone();
         // The first load always adopts the surface's own target (a terminal's owner
@@ -87,7 +94,14 @@ impl<P: Port> Picker<P> {
         cx.spawn(async move |this, cx| {
             let (result, own) = task.await;
             let _ = this.update(cx, |s, cx| {
+                if generation != s.generation {
+                    return;
+                }
                 s.loading = false;
+                if let Some(Err(error)) = &own {
+                    s.own_error = Some(error.clone());
+                    s.offered_own = false;
+                }
                 match result {
                     Ok(mut choices) => {
                         adopt(&mut choices, &mut s.requested, own);
@@ -209,6 +223,21 @@ impl<P: Port> Render for Picker<P> {
                             self.query.clone()
                         })
                         .when(self.loading, |view| view.child("Loading…"))
+                        .when_some(self.own_error.clone(), |view, error| {
+                            view.child(
+                                div()
+                                    .debug_selector(|| "target-own-error".into())
+                                    .child(format!("Could not start one: {error}"))
+                                    .child(
+                                        div()
+                                            .id("target-own-retry")
+                                            .cursor_pointer()
+                                            .p(px(8.))
+                                            .child("Retry (F5)")
+                                            .on_click(cx.listener(|s, _, _, cx| s.load(cx))),
+                                    ),
+                            )
+                        })
                         .when(self.failed, |view| {
                             view.child(
                                 div().child("Targets unavailable").child(
@@ -334,6 +363,116 @@ mod tests {
         assert_eq!(requested, None);
         assert_eq!(choices.len(), 1);
     }
+
+    /// A port whose own-target replies are queued per workspace, so a test
+    /// controls what creation returns and when the picker sees it.
+    struct Owned;
+    struct Opened(String);
+    impl Render for Opened {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div().child(self.0.clone())
+        }
+    }
+    static REPLIES: std::sync::Mutex<
+        Vec<(
+            &'static str,
+            std::collections::VecDeque<Result<String, String>>,
+        )>,
+    > = std::sync::Mutex::new(Vec::new());
+    fn queue(workspace: &'static str, replies: Vec<Result<String, String>>) {
+        REPLIES.lock().unwrap().push((workspace, replies.into()));
+    }
+    impl Port for Owned {
+        type View = Opened;
+        const TITLE: &'static str = "Owned";
+        const EMPTY: &'static str = "None";
+        fn choices(_: &Client, _: &str) -> Result<Vec<Choice>, String> {
+            Ok(vec![])
+        }
+        fn create(_: Client, id: String, _: &mut Window, _: &mut Context<Opened>) -> Opened {
+            Opened(id)
+        }
+        fn own(_: &Client, workspace: &str) -> Option<Result<String, String>> {
+            let mut replies = REPLIES.lock().unwrap();
+            let (_, queued) = replies.iter_mut().find(|(w, _)| *w == workspace)?;
+            queued.pop_front()
+        }
+        fn ready(_: &Entity<Opened>, _: &App) -> bool {
+            true
+        }
+    }
+    fn press(
+        picker: &mut Picker<Owned>,
+        key: &str,
+        window: &mut Window,
+        cx: &mut Context<Picker<Owned>>,
+    ) {
+        let event = KeyDownEvent {
+            keystroke: gpui::Keystroke::parse(key).unwrap(),
+            is_held: false,
+        };
+        picker.key(&event, window, cx);
+    }
+    fn paint(cx: &mut gpui::VisualTestContext) {
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            window.refresh();
+            window.draw(cx).clear();
+        });
+    }
+
+    #[gpui::test]
+    fn reopening_while_the_own_target_is_created_lists_instead_of_reopening(
+        cx: &mut TestAppContext,
+    ) {
+        queue("reopen-pending", vec![Ok("own-shell".into())]);
+        let client = Client::new("http://127.0.0.1:9").unwrap();
+        // Ctrl+Alt+O lands before the creation reply, as a person reopening the list does.
+        let (picker, cx) = cx.add_window_view(|window, cx| {
+            let mut picker = Picker::<Owned>::new(client, "reopen-pending".into(), None, cx);
+            press(&mut picker, "ctrl-alt-o", window, cx);
+            picker
+        });
+        paint(cx);
+        picker.read_with(cx, |picker, _| {
+            assert!(
+                picker.child.is_none() && picker.selected.is_none(),
+                "the list stays open"
+            );
+            assert!(!picker.loading);
+        });
+    }
+
+    #[gpui::test]
+    fn an_own_target_creation_error_shows_and_f5_retries(cx: &mut TestAppContext) {
+        queue(
+            "create-fails",
+            vec![
+                Err("terminal service refused".into()),
+                Ok("own-shell".into()),
+            ],
+        );
+        let client = Client::new("http://127.0.0.1:9").unwrap();
+        let (picker, cx) = cx
+            .add_window_view(|_, cx| Picker::<Owned>::new(client, "create-fails".into(), None, cx));
+        paint(cx);
+        assert!(
+            cx.debug_bounds("target-own-error").is_some(),
+            "the error is shown"
+        );
+        picker.read_with(cx, |picker, _| assert!(picker.child.is_none()));
+        picker.update_in(cx, |picker, window, cx| press(picker, "f5", window, cx));
+        paint(cx);
+        picker.read_with(cx, |picker, _| {
+            assert_eq!(
+                picker.selected.as_deref(),
+                Some("own-shell"),
+                "F5 created and opened it"
+            );
+            assert!(picker.child.is_some());
+        });
+    }
+
     use crate::shell::test_support::*;
 
     #[gpui::test]
