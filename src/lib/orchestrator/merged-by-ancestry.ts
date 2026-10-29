@@ -101,6 +101,25 @@ export interface MergedByAncestrySweepResult {
 // pipeline every 30s tick.
 const detectBackoff = new MergedByAncestryBackoff();
 
+// #5064 — a commit's patch id never changes, so each one is computed once per
+// server process. Without this every 30s sweep re-ran `git show` and
+// `git patch-id` for every main commit since each lane's merge base (hundreds
+// of processes for an old lane). Keys are commit shas or `mergeBase..head`
+// sha pairs; both name immutable content.
+const PATCH_ID_CACHE_LIMIT = 20_000;
+const patchIdCache = new Map<string, string | null>();
+
+async function cachedPatchId(key: string, compute: () => Promise<string | null>): Promise<string | null> {
+  if (patchIdCache.has(key)) return patchIdCache.get(key) ?? null;
+  const patchId = await compute();
+  if (patchIdCache.size >= PATCH_ID_CACHE_LIMIT) {
+    const oldest = patchIdCache.keys().next().value;
+    if (oldest !== undefined) patchIdCache.delete(oldest);
+  }
+  patchIdCache.set(key, patchId);
+  return patchId;
+}
+
 function candidateKey(candidate: Candidate): string {
   return candidate.laneId
     ?? (candidate.packet ? `packet:${candidate.packet.id}` : `repo:${candidate.repoPath}:${candidate.branch}`);
@@ -231,7 +250,18 @@ async function revParse(repoPath: string, ref: string): Promise<string | null> {
   }
 }
 
-async function refreshOriginBase(repoPath: string, baseBranch: string): Promise<void> {
+async function refreshOriginBase(repoPath: string, baseBranch: string, refreshed: Set<string>): Promise<void> {
+  // Worktrees share their repository's refs, so one fetch per repository and
+  // base serves every candidate in the same sweep.
+  let repository = repoPath;
+  try {
+    repository = await git(repoPath, ['rev-parse', '--path-format=absolute', '--git-common-dir'], { timeout: 3_000 });
+  } catch {
+    // An unreadable repository keys on its own path; the fetch below fails too.
+  }
+  const key = `${repository}\0${baseBranch}`;
+  if (refreshed.has(key)) return;
+  refreshed.add(key);
   try {
     await git(repoPath, ['fetch', '--quiet', 'origin', `${baseBranch}:refs/remotes/origin/${baseBranch}`], {
       timeout: 20_000,
@@ -272,8 +302,8 @@ async function mergeBase(repoPath: string, branchRef: string, baseRef: string): 
   }
 }
 
-async function patchIdForDiff(repoPath: string, diffArgs: string[]): Promise<string | null> {
-  const diff = await git(repoPath, ['diff', ...diffArgs], { timeout: 10_000 });
+async function patchIdOf(repoPath: string, diffArgs: string[]): Promise<string | null> {
+  const diff = await git(repoPath, diffArgs, { timeout: 10_000 });
   if (!diff.trim()) return null;
   const patchOutput = await git(repoPath, ['patch-id', '--stable'], {
     input: `${diff}\n`,
@@ -289,13 +319,7 @@ async function patchIdsForMainCommits(repoPath: string, range: string): Promise<
     .filter(Boolean);
   const ids = new Set<string>();
   for (const sha of shas) {
-    const diff = await git(repoPath, ['show', '--format=', '--no-ext-diff', sha], { timeout: 10_000 });
-    if (!diff.trim()) continue;
-    const output = await git(repoPath, ['patch-id', '--stable'], {
-      input: `${diff}\n`,
-      timeout: 10_000,
-    });
-    const patchId = output.split(/\s+/)[0];
+    const patchId = await cachedPatchId(sha, () => patchIdOf(repoPath, ['show', '--format=', '--no-ext-diff', sha]));
     if (patchId) ids.add(patchId);
   }
   return ids;
@@ -303,13 +327,14 @@ async function patchIdsForMainCommits(repoPath: string, range: string): Promise<
 
 async function squashPatchExistsOnBase(
   repoPath: string,
-  branchRef: string,
+  headSha: string,
   baseRef: string,
 ): Promise<{ merged: boolean; mergeBaseSha?: string; patchId?: string }> {
-  const mergeBaseSha = await mergeBase(repoPath, branchRef, baseRef);
+  const mergeBaseSha = await mergeBase(repoPath, headSha, baseRef);
   if (!mergeBaseSha) return { merged: false };
 
-  const aggregatePatchId = await patchIdForDiff(repoPath, [`${mergeBaseSha}..${branchRef}`]);
+  const range = `${mergeBaseSha}..${headSha}`;
+  const aggregatePatchId = await cachedPatchId(range, () => patchIdOf(repoPath, ['diff', range]));
   if (!aggregatePatchId) return { merged: false, mergeBaseSha };
 
   const mainPatchIds = await patchIdsForMainCommits(repoPath, `${mergeBaseSha}..${baseRef}`);
@@ -320,11 +345,11 @@ async function squashPatchExistsOnBase(
   };
 }
 
-async function detectMergedByAncestry(candidate: Candidate): Promise<MergeEvidence | null> {
+async function detectMergedByAncestry(candidate: Candidate, refreshedBases: Set<string>): Promise<MergeEvidence | null> {
   const { repoPath, branch, baseBranch } = candidate;
   if (!branch) return null;
 
-  await refreshOriginBase(repoPath, baseBranch);
+  await refreshOriginBase(repoPath, baseBranch, refreshedBases);
 
   const branchRef = await resolveBranchRef(repoPath, branch);
   const baseRef = await resolveBaseRef(repoPath, baseBranch);
@@ -420,7 +445,7 @@ async function detectMergedByAncestry(candidate: Candidate): Promise<MergeEviden
     };
   }
 
-  const patch = await squashPatchExistsOnBase(repoPath, branchRef, baseRef);
+  const patch = await squashPatchExistsOnBase(repoPath, headSha, baseRef);
   if (!patch.merged) return null;
 
   return {
@@ -542,7 +567,7 @@ async function evidenceStillHolds(evidence: MergeEvidence): Promise<boolean> {
   }
   return (await squashPatchExistsOnBase(
     evidence.repoPath,
-    evidence.branchRef,
+    currentHeadSha,
     evidence.baseRef,
   )).merged;
 }
@@ -705,8 +730,21 @@ async function finishWithoutChanges(candidate: Candidate, evidence: MergeEvidenc
   return true;
 }
 
-export async function sweepPacketsMergedByAncestry(): Promise<MergedByAncestrySweepResult> {
+let sweepInFlight: Promise<MergedByAncestrySweepResult> | null = null;
+
+// The 30s interval does not wait for the previous sweep. On a loaded machine
+// overlapping sweeps multiplied the git work instead of finishing it, so a
+// caller that arrives mid-sweep shares the running one (#5064).
+export function sweepPacketsMergedByAncestry(): Promise<MergedByAncestrySweepResult> {
+  sweepInFlight ??= runSweep().finally(() => {
+    sweepInFlight = null;
+  });
+  return sweepInFlight;
+}
+
+async function runSweep(): Promise<MergedByAncestrySweepResult> {
   const candidates = buildCandidates();
+  const refreshedBases = new Set<string>();
   let merged = 0;
   let skipped = 0;
 
@@ -739,7 +777,7 @@ export async function sweepPacketsMergedByAncestry(): Promise<MergedByAncestrySw
     try {
       const generation = candidate.packet && candidate.laneId
         ? packetReleaseGeneration(candidate.packet, candidate.laneId) : null;
-      const evidence = await detectMergedByAncestry(candidate);
+      const evidence = await detectMergedByAncestry(candidate, refreshedBases);
       detectBackoff.recordSuccess(key);
       if (!evidence) {
         skipped += 1;
