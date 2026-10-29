@@ -67,6 +67,9 @@ struct State {
     tools_open: bool,
     tools_checking: bool,
     tool_busy: Option<String>,
+    /// "Update all" is running, and what the last run reported.
+    tools_all: bool,
+    tools_status: Option<String>,
     open: bool,
     pinned: bool,
     /// When a hover opened the panel; the panel slides in from there.
@@ -731,26 +734,31 @@ fn load_tools(s: &mut Shell, refresh: bool, cx: &mut Context<Shell>) {
     .detach();
 }
 
+/// POST /api/setup/cli-updates for one runtime; installs can take minutes.
+fn post_tool(client: &crate::client::Client, runtime: &str) -> Result<Value, String> {
+    let url = client
+        .url("/api/setup/cli-updates")
+        .map_err(|_| "Invalid route".to_string())?;
+    let request = client
+        .request("POST", &url)
+        .timeout(Duration::from_secs(360));
+    match request.send_json(json!({ "runtime": runtime })) {
+        Ok(response) => crate::client::Client::read::<Value>(response),
+        Err(ureq::Error::Status(_, response)) => crate::client::Client::read::<Value>(response),
+        Err(_) => Err("Could not reach the server".to_string()),
+    }
+}
+
 fn update_tool(s: &mut Shell, runtime: String, cx: &mut Context<Shell>) {
     let state = s.features.get::<State>();
-    if state.tool_busy.is_some() {
+    if state.tool_busy.is_some() || state.tools_all {
         return;
     }
     state.tool_busy = Some(runtime.clone());
     let client = s.client.clone();
-    let task = cx.background_executor().spawn(async move {
-        let url = client
-            .url("/api/setup/cli-updates")
-            .map_err(|_| "Invalid route".to_string())?;
-        let request = client
-            .request("POST", &url)
-            .timeout(Duration::from_secs(360));
-        match request.send_json(json!({ "runtime": runtime })) {
-            Ok(response) => crate::client::Client::read::<Value>(response),
-            Err(ureq::Error::Status(_, response)) => crate::client::Client::read::<Value>(response),
-            Err(_) => Err("Could not reach the server".to_string()),
-        }
-    });
+    let task = cx
+        .background_executor()
+        .spawn(async move { post_tool(&client, &runtime) });
     cx.spawn(async move |this, cx| {
         let result = task.await;
         let _ = this.update(cx, |this, cx| {
@@ -764,6 +772,81 @@ fn update_tool(s: &mut Shell, runtime: String, cx: &mut Context<Shell>) {
         });
     })
     .detach();
+}
+
+/// "Update all" (T3 Code's ProviderUpdatesAction): every tool with an update,
+/// one after another, then one line saying what happened.
+fn update_all(s: &mut Shell, cx: &mut Context<Shell>) {
+    let state = s.features.get::<State>();
+    if state.tool_busy.is_some() || state.tools_all {
+        return;
+    }
+    let targets: Vec<(String, String)> = state
+        .tools
+        .iter()
+        .filter(|tool| tool.status == "update-available")
+        .map(|tool| (tool.runtime.clone(), tool.label.clone()))
+        .collect();
+    if targets.is_empty() {
+        return;
+    }
+    state.tools_all = true;
+    state.tools_status = None;
+    let client = s.client.clone();
+    let task = cx.background_executor().spawn(async move {
+        targets
+            .into_iter()
+            .map(|(runtime, label)| {
+                let outcome = match post_tool(&client, &runtime) {
+                    Ok(body) => match body["error"].as_str() {
+                        Some(error) => Err(error.to_string()),
+                        None => Ok(()),
+                    },
+                    Err(error) => Err(error),
+                };
+                (label, outcome)
+            })
+            .collect::<Vec<_>>()
+    });
+    cx.spawn(async move |this, cx| {
+        let results = task.await;
+        let _ = this.update(cx, |this, cx| {
+            let state = this.features.get::<State>();
+            state.tools_all = false;
+            state.tools_status = Some(update_summary(&results));
+            load_tools(this, true, cx);
+        });
+    })
+    .detach();
+}
+
+/// What an "Update all" run did, in one line.
+fn update_summary(results: &[(String, Result<(), String>)]) -> String {
+    let names = |done: Vec<&String>| match done.as_slice() {
+        [one] => one.to_string(),
+        [first, second] => format!("{first} and {second}"),
+        many => format!("{} tools", many.len()),
+    };
+    let updated: Vec<&String> = results
+        .iter()
+        .filter(|(_, outcome)| outcome.is_ok())
+        .map(|(label, _)| label)
+        .collect();
+    let failed: Vec<(&String, &String)> = results
+        .iter()
+        .filter_map(|(label, outcome)| outcome.as_ref().err().map(|error| (label, error)))
+        .collect();
+    let failure = match failed.as_slice() {
+        [] => None,
+        [(label, error)] => Some(format!("{label} failed: {error}")),
+        many => Some(format!("{} tools failed to update.", many.len())),
+    };
+    match (updated.is_empty(), failure) {
+        (false, None) => format!("Updated {}.", names(updated)),
+        (false, Some(failure)) => format!("Updated {}. {failure}", names(updated)),
+        (true, Some(failure)) => failure,
+        (true, None) => "Nothing to update.".into(),
+    }
 }
 
 fn show(s: &mut Shell, animate: bool, cx: &mut Context<Shell>) {
@@ -822,6 +905,47 @@ fn appear(state: &State) -> (f32, bool) {
     }
 }
 
+/// The clock the checking glyph turns by.
+static SPIN: std::sync::LazyLock<Instant> = std::sync::LazyLock::new(Instant::now);
+
+/// Download progress drawn around the 32 px circle, clockwise from the top,
+/// over a faint full track (DesktopUpdateDownloadingIcon).
+fn ring(color: gpui::Rgba, fraction: f32) -> impl IntoElement {
+    let track = gpui::Rgba {
+        a: color.a * 0.22,
+        ..color
+    };
+    div()
+        .absolute()
+        .top(px(0.))
+        .left(px(0.))
+        .size(px(32.))
+        .child(
+            div()
+                .absolute()
+                .child(crate::icon::stroke(&arc(1.), track, 32., 1.1)),
+        )
+        .child(
+            div()
+                .absolute()
+                .child(crate::icon::stroke(&arc(fraction), color, 32., 1.1)),
+        )
+}
+
+/// An SVG arc on the 24-unit icon grid: radius 10.5 around the centre,
+/// starting at the top. Fractions round to whole percents so the rasterised
+/// paths stay few.
+fn arc(fraction: f32) -> String {
+    let fraction = (fraction.clamp(0., 1.) * 100.).round() / 100.;
+    if fraction >= 1. {
+        return "M12 1.5a10.5 10.5 0 1 1 0 21a10.5 10.5 0 1 1 0-21".into();
+    }
+    let angle = fraction * std::f32::consts::TAU;
+    let (x, y) = (12. + 10.5 * angle.sin(), 12. - 10.5 * angle.cos());
+    let large = u8::from(fraction > 0.5);
+    format!("M12 1.5A10.5 10.5 0 {large} 1 {x:.2} {y:.2}")
+}
+
 fn control(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) -> gpui::AnyElement {
     let state = s.features.get::<State>();
     // Frames are requested while rendering: ticks run outside any view, where
@@ -835,7 +959,25 @@ fn control(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) -> gpui:
         .iter()
         .any(|tool| tool.status == "update-available");
     let busy = state.checking || state.applying;
+    let checking = state.checking;
+    // T3 Code's DesktopUpdateStatusIcon states over the classic button: a ring
+    // while downloading, a restart glyph with a check once installing, and a
+    // turning refresh glyph while a check runs.
+    let stage = state
+        .progress
+        .as_ref()
+        .map(|progress| progress.stage.clone());
+    let restarting = matches!(stage.as_deref(), Some("installing" | "restarting"));
+    let downloading = !restarting && (stage.is_some() || (state.applying && state.phase.is_none()));
+    let fraction = state
+        .progress
+        .as_ref()
+        .and_then(|progress| describe(progress).1)
+        .unwrap_or(0.15);
     let open = state.open;
+    if checking || downloading {
+        window.request_animation_frame();
+    }
     let viewport = f32::from(window.viewport_size().height);
     let panel = open.then(|| panel(s, viewport, cx));
     div()
@@ -873,16 +1015,50 @@ fn control(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) -> gpui:
                         .justify_center()
                         .rounded_full()
                         .when(ready, |circle| circle.bg(crate::theme::update_ready()))
-                        .child(crate::icon::stroke(
-                            DOWNLOAD,
-                            if ready {
+                        .child({
+                            let color = if ready {
                                 crate::theme::on_accent()
                             } else {
                                 theme().text_muted
-                            },
-                            19.,
-                            1.8,
-                        ))
+                            };
+                            if restarting {
+                                crate::icon::stroke(ROTATE, color, 16., 2.)
+                            } else if checking {
+                                let turn = SPIN.elapsed().as_secs_f32() / 0.9;
+                                crate::icon::stroke(REFRESH, color, 16., 2.).with_transformation(
+                                    gpui::Transformation::rotate(gpui::radians(
+                                        turn.fract() * std::f32::consts::TAU,
+                                    )),
+                                )
+                            } else {
+                                crate::icon::stroke(DOWNLOAD, color, 19., 1.8)
+                            }
+                        })
+                        .when(downloading, |circle| {
+                            let color = if ready {
+                                crate::theme::on_accent()
+                            } else {
+                                theme().text
+                            };
+                            circle.child(ring(color, fraction))
+                        })
+                        .when(restarting, |circle| {
+                            circle.child(
+                                div()
+                                    .absolute()
+                                    .right(px(-2.))
+                                    .bottom(px(-2.))
+                                    .size(px(13.))
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .rounded_full()
+                                    .bg(theme().text)
+                                    .border_2()
+                                    .border_color(theme().background)
+                                    .child(crate::icon::stroke(CHECK, theme().background, 8., 3.5)),
+                            )
+                        })
                         .when(!ready && tools_ready, |circle| {
                             circle.child(
                                 div()
@@ -934,6 +1110,8 @@ fn panel(s: &mut Shell, viewport: f32, cx: &mut Context<Shell>) -> gpui::AnyElem
     let tools_rows = state.tools.clone();
     let tools_checking = state.tools_checking;
     let tool_busy = state.tool_busy.clone();
+    let tools_all = state.tools_all;
+    let tools_status = state.tools_status.clone();
     let tools_ready = tools_rows
         .iter()
         .any(|tool| tool.status == "update-available");
@@ -1178,6 +1356,22 @@ fn panel(s: &mut Shell, viewport: f32, cx: &mut Context<Shell>) -> gpui::AnyElem
                                     .flex_1()
                                     .min_w_0(),
                                 )
+                                .when(tools_ready || tools_all, |row| {
+                                    row.child(
+                                        button(
+                                            "update-tools-all",
+                                            if tools_all { "Updating…" } else { "Update all" }
+                                                .into(),
+                                            false,
+                                        )
+                                        .flex_shrink_0()
+                                        .h(px(26.))
+                                        .px(px(8.))
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            update_all(this, cx)
+                                        })),
+                                    )
+                                })
                                 .child(
                                     button("update-tools-check", "Check".into(), false)
                                         .flex_shrink_0()
@@ -1188,6 +1382,9 @@ fn panel(s: &mut Shell, viewport: f32, cx: &mut Context<Shell>) -> gpui::AnyElem
                                         })),
                                 ),
                         )
+                        .when_some(tools_status, |section, status| {
+                            section.child(muted(status.into(), 11.))
+                        })
                         .when(tools_checking, |section| {
                             section.child(muted("Checking installed tools…".into(), 11.))
                         })
@@ -1199,7 +1396,8 @@ fn panel(s: &mut Shell, viewport: f32, cx: &mut Context<Shell>) -> gpui::AnyElem
                         })
                         .children(tools_rows.into_iter().map(|tool| {
                             let available = tool.status == "update-available";
-                            let busy = tool_busy.as_deref() == Some(tool.runtime.as_str());
+                            let busy = tool_busy.as_deref() == Some(tool.runtime.as_str())
+                                || (tools_all && available);
                             let versions = match (&tool.installed, &tool.latest) {
                                 (Some(installed), Some(latest)) if available => {
                                     format!("{installed} → {latest}")
@@ -1401,6 +1599,9 @@ fn panel(s: &mut Shell, viewport: f32, cx: &mut Context<Shell>) -> gpui::AnyElem
 const DOWNLOAD: &str = "M12 15V3 M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4 M7 10l5 5 5-5";
 const REFRESH: &str = "M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8 M21 3v5h-5 M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16 M8 16H3v5";
 const CHEVRON: &str = "m6 9 6 6 6-6";
+// Lucide rotate-cw and check.
+const ROTATE: &str = "M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8 M21 3v5h-5";
+const CHECK: &str = "M20 6 9 17l-5-5";
 const CHEVRON_UP: &str = "m18 15-6-6-6 6";
 const EXTERNAL: &str =
     "M15 3h6v6 M10 14 21 3 M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6";

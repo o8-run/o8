@@ -79,3 +79,38 @@ fn the_installed_version_comes_from_the_bundle_plist() {
     assert_eq!(plist_version(plist).as_deref(), Some("0.1.815"));
     assert_eq!(plist_version("<dict></dict>"), None);
 }
+
+#[test]
+fn update_all_reports_what_each_tool_did_in_one_line() {
+    use super::update_summary;
+    let ok = |label: &str| (label.to_string(), Ok(()));
+    let failed = |label: &str, error: &str| (label.to_string(), Err(error.to_string()));
+    assert_eq!(update_summary(&[ok("Gemini CLI")]), "Updated Gemini CLI.");
+    assert_eq!(
+        update_summary(&[ok("Gemini CLI"), ok("Qwen Code")]),
+        "Updated Gemini CLI and Qwen Code."
+    );
+    assert_eq!(
+        update_summary(&[ok("A"), ok("B"), ok("C")]),
+        "Updated 3 tools."
+    );
+    assert_eq!(
+        update_summary(&[ok("Gemini CLI"), failed("Qwen Code", "npm exited 1")]),
+        "Updated Gemini CLI. Qwen Code failed: npm exited 1"
+    );
+    assert_eq!(
+        update_summary(&[failed("A", "x"), failed("B", "y")]),
+        "2 tools failed to update."
+    );
+    assert_eq!(update_summary(&[]), "Nothing to update.");
+}
+
+#[test]
+fn the_download_ring_runs_clockwise_from_the_top() {
+    use super::arc;
+    assert_eq!(arc(0.25), "M12 1.5A10.5 10.5 0 0 1 22.50 12.00");
+    assert_eq!(arc(0.5), "M12 1.5A10.5 10.5 0 0 1 12.00 22.50");
+    assert!(arc(0.75).starts_with("M12 1.5A10.5 10.5 0 1 1 1.50 "));
+    assert_eq!(arc(1.), arc(1.4));
+    assert_eq!(arc(0.251), arc(0.25));
+}
