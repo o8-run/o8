@@ -1,6 +1,24 @@
 //! Narrow embedding API. The shell uses the production Surface and composer.
 use super::*;
 impl Surface {
+    /// Puts Symon's drafted message ahead of the draft, unsent, as the desktop's
+    /// orchestrator_draft injection does, and focuses the composer.
+    pub(crate) fn prepend_draft(
+        &mut self,
+        text: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let current = self.composer.read(cx).text.trim().to_string();
+        let next = if current.is_empty() {
+            text.to_string()
+        } else {
+            format!("{text}\n\n{current}")
+        };
+        self.composer
+            .update(cx, |composer, cx| composer.set_text(&next, cx));
+        self.composer.read(cx).focus.focus(window);
+    }
     #[cfg(test)]
     pub(crate) fn shell_loaded_probe(&mut self, load_older: bool, cx: &mut Context<Self>) -> Value {
         if load_older {

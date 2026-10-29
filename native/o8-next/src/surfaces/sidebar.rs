@@ -240,6 +240,7 @@ fn initialize(shell: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
                     }
                 }
                 ThreadEvent::Selected(id) => shell.open_thread(id.clone(), window, cx),
+                ThreadEvent::UiCommand(frame) => shell.ui_command(frame, window, cx),
                 ThreadEvent::Error(error) => {
                     shell.loading = false;
                     shell.connected = false;

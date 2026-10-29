@@ -496,6 +496,38 @@ fn show(s: &mut Shell, tool: Tool, window: &mut Window, cx: &mut Context<Shell>)
     cx.notify();
 }
 
+/// Opens the panel on a desktop O8 panel tab as Symon names it
+/// (O8_TAB_SURFACES), loading `url` into the Browser; false for any other name.
+pub(super) fn open_surface(
+    s: &mut Shell,
+    surface: &str,
+    url: Option<&str>,
+    window: &mut Window,
+    cx: &mut Context<Shell>,
+) -> bool {
+    let tool = match surface {
+        "inbox" => Tool::Inbox,
+        "activity" => Tool::Activity,
+        "review" => Tool::Review,
+        "o8md" => Tool::Spec,
+        "workspace" | "files" => Tool::Files,
+        "terminal" => Tool::Terminal,
+        "browser" => Tool::Browser,
+        _ => return false,
+    };
+    show(s, tool, window, cx);
+    if let (Tool::Browser, Some(url)) = (tool, url)
+        && let Some(view) = s
+            .features
+            .read::<Panel>()
+            .and_then(|panel| panel.browsers.get(&key(s, Tool::Browser)))
+            .cloned()
+    {
+        view.update(cx, |browser, cx| browser.navigate(url, cx));
+    }
+    true
+}
+
 pub(super) fn open(s: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
     show(s, Tool::Inbox, window, cx);
 }

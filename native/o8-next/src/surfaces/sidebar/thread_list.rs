@@ -28,6 +28,9 @@ pub enum Event {
     Selected(String),
     Error(String),
     Workspace(Option<String>, Ledger),
+    /// A `ui-command` frame for the main window. Every socket receives the
+    /// broadcast; only this global one hands it on.
+    UiCommand(serde_json::Value),
 }
 #[derive(Clone, Debug, Serialize, PartialEq)]
 pub struct Row {
@@ -323,6 +326,10 @@ impl ThreadList {
         let mut changed = false;
         for message in messages {
             if let Incoming::Frame(frame) = message {
+                if frame["type"] == "ui-command" {
+                    cx.emit(Event::UiCommand(frame));
+                    continue;
+                }
                 if frame["channel"] == "orchestrator-threads"
                     && matches!(
                         frame["event"].as_str(),
