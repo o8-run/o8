@@ -79,6 +79,32 @@ pub fn popover_background() -> Rgba {
 pub fn brand_orange() -> Rgba {
     rgb(0xff5a1f)
 }
+/// The mark drawn on an accent fill, such as the trace's completed check.
+pub fn on_accent() -> Rgba {
+    rgb(0xffffff)
+}
+/// Language colors for the file-type marks on the thinking trace's chips. The
+/// neutral mark covers prose, data files and web pages.
+pub struct FileMarks {
+    pub typescript: u32,
+    pub javascript: u32,
+    pub rust: u32,
+    pub python: u32,
+    pub go: u32,
+    pub css: u32,
+    pub swift: u32,
+    pub neutral: u32,
+}
+pub const FILE_MARKS: FileMarks = FileMarks {
+    typescript: 0x4f9fbf,
+    javascript: 0xc9a43a,
+    rust: 0xd0875a,
+    python: 0x4b8bbe,
+    go: 0x4fa8c8,
+    css: 0x6c8fd6,
+    swift: 0xe0794c,
+    neutral: 0x8a8f98,
+};
 /// Floating menus and tooltips stay opaque: glass surfaces are translucent and
 /// would show the content underneath.
 pub fn menu_fill() -> Rgba {
