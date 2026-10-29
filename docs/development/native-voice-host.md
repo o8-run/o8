@@ -2,7 +2,8 @@
 
 In native main-window mode, the macOS shell creates a hidden, unfocusable Tauri
 `main` webview at `/voice-host`. It mounts only `RealtimeVoiceHost`,
-`SymonTextBridgeHost`, `NarrationSpeakerHost`, and `ChatLiveHost`, under the
+`SymonTextBridgeHost`, `NarrationSpeakerHost`, `ChatLiveHost`, and
+`HeadlessDictationHost`, under the
 existing root layout. Classic mode keeps its existing dashboard hosts.
 
 The host waits for this shell boot's server identity. Window-state restoration
@@ -51,7 +52,7 @@ The voice route broadcasts `voice-delegate` and `voice-host-state` frames:
 interrupt requests, Symon state, confirmations, dismissals and decisions.
 
 Next submits delegated text with `POST /api/orchestrator/composer-queue`,
-`intent: send-next`, and an item ID of `next-<nonce>-<pid>`. After the durable
+`intent: send-next`, and an item ID of `next-<Live session nonce>-<any suffix>`. After the durable
 POST succeeds, next sends `accepted` with that `queueItemId`. The broker checks
 the queue item's saved thread, canonical repository, intent and nonce prefix;
 a queue item cannot belong to two delegations. No socket send or synthetic
@@ -85,6 +86,59 @@ capture and requests closure without claiming provider-confirmed closure.
 Existing personal-key receipts, unknown-closure admission and usage remain in
 `/api/voice/live`; no key handling, authorization, tool dispatcher or native
 confirmation gate changes are made.
+
+## Composer dictation
+
+Only `/voice-host` mounts `HeadlessDictationHost`. It shares the native STT
+invoke/event contract from `useNativeDictation`; Classic `DictationHost` and
+its textarea routing and shortcuts stay unchanged. Next owns the composer,
+keyboard handling and send action. Dictation and Live have separate bindings.
+
+Both actions use `POST /api/next/voice-host`, the four binding fields, and a
+fresh body-bound `requestId`. Retries of the same request are idempotent within
+the bounded receipt cache. The binding nonce can be reused with a fresh start
+request ID. Frames also carry that start `requestId`, so delayed publications
+from an earlier recording cannot affect a retry. There is no lifetime limit on
+recordings.
+
+```json
+{"action":"dictation-start","requestId":"mic-start-1","binding":"composer","nonce":"dictation-1","threadId":"thoughts-chat","repoPath":"/workspace"}
+```
+
+```json
+{"action":"dictation-stop","requestId":"mic-stop-1","binding":"composer","nonce":"dictation-1","threadId":"thoughts-chat","repoPath":"/workspace","submit":true}
+```
+
+HTTP 202 means dispatched. The corresponding state frame confirms microphone
+admission. Another active dictation returns HTTP 409 with `VOICE_INPUT_BUSY`.
+Fn or Live ownership is checked atomically by Rust; refusal produces an error
+state with the existing "Another voice input is active" message. No host still
+returns prompt HTTP 503 `VOICE_HOST_UNAVAILABLE`.
+
+The UI relay broadcasts full transcript snapshots, not append deltas:
+
+```json
+{"type":"ui-command","kind":"dictation-text","payload":{"hostId":"host","requestId":"mic-start-1","binding":"composer","nonce":"dictation-1","threadId":"thoughts-chat","repoPath":"/workspace","text":"Check the build.","final":true}}
+```
+
+```json
+{"type":"ui-command","kind":"dictation-state","payload":{"hostId":"host","requestId":"mic-start-1","binding":"composer","nonce":"dictation-1","threadId":"thoughts-chat","repoPath":"/workspace","state":"listening"}}
+```
+
+`dictation-state.state` is `listening`, `idle` or `error`; an error can include
+`error`. Partial text uses `final:false`. `submit:true` stops capture, waits for
+the polished result and sends one `final:true` frame before idle. Next can then
+submit its composer. `submit:false` cancels delivery, discarding late text. Empty
+speech or a missing final result yields an error instead of a submission.
+
+The native start opts into exclusive ownership without changing Classic's
+start behavior. Native stops carry the exact STT session ID. Fn/system events
+and mismatched session IDs are ignored. The native pipeline pins a headless
+session's in-window origin through finalization so a subsequent Fn gesture
+cannot redirect its text to system paste or consume that gesture's mode flags.
+Disconnect/unmount stops the owned capture, including a late startup reply;
+stale publication failures cannot stop a replacement binding. The host has no
+textarea, pill, focus listener or keyboard shortcut.
 
 ## Symon and microphone ownership
 
@@ -180,3 +234,21 @@ Amendment verification:
   touched-file ESLint, classification manifest, rule and whitespace checks passed.
 - Rust and `native/o8-next` sources did not change in this amendment. The packaged
   checks listed above remain pending.
+
+## Headless dictation verification
+
+- At `5caf89703`, the new route-to-host test was red: dictation start returned
+  HTTP 409 instead of dispatching. It passes with the adapter and protocol.
+- Focused voice/dictation acceptance: 80 tests passed across eight files in
+  71.34 seconds, including retrying the same binding after cancellation/busy. The new
+  real-path suite drives actual API handlers, native HTTP registration, the WS
+  broker and the mounted host handler. Only native hardware IPC is deterministic.
+- Native microphone admission: five Rust tests passed, including production
+  STT-command refusal before hardware access. Six STT tests and three hidden
+  host guards passed as well: 14 Rust tests total.
+- Hermetic completion gate: 9,925 passed, five skipped (1,295 passed files,
+  three skipped), in 957.90 seconds. Fast type checking, touched-file lint,
+  classification manifest, rule checks and whitespace checks passed.
+- Packaged microphone/TCC, audible Live coexistence, physical Fn and composer
+  integration checks remain pending with an operator; source fixtures do not
+  establish them.
