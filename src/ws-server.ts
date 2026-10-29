@@ -168,6 +168,7 @@ import { isOrchestratorServiceTier, serviceTierForTurn } from './lib/orchestrato
 import { normalizeObservedOrchestratorTurnModel, normalizeOrchestratorTurnModel } from './lib/orchestrator/turn-model-selection';
 import { withSessionRules } from './lib/orchestrator/session-rules-prompt';
 import { withOrchestratorTurnReceiptContext } from './lib/orchestrator/turn-receipt-context';
+import { terminalReceipt } from './lib/mobile/turn-receipt';
 import { resolveOrchestratorExecutionMode } from './lib/lane/orchestrator-backends/orchestration-mode';
 import {
   backendSwitchRequiresExplicitHandoff,
@@ -5781,8 +5782,8 @@ async function handleOrchestratorSendMsgOnce(
         if (threadId && event.sessionId && (turnBackend.id === 'claude' || turnBackend.id === 'codex')) {
           writeOrchestratorBackendSessionId(threadId, turnBackend.id, event.sessionId);
         }
-        if (activeAssistantReceipt) activeAssistantReceipt = { ...activeAssistantReceipt, terminal: { userMessageId,
-          outcome: turnController?.signal.aborted ? 'unconfirmed' : event.terminalOutcome ?? 'unconfirmed' } };
+        if (activeAssistantReceipt) activeAssistantReceipt = { ...activeAssistantReceipt, terminal: terminalReceipt(userMessageId,
+          turnController?.signal.aborted ? 'unconfirmed' : event.terminalOutcome ?? 'unconfirmed') };
         persistAssistantText(event.sessionId ?? null, turnBackend.id, event, effectiveTurnModel);
         if (sessionName) {
           broadcastToOrchestratorSession(sessionName, JSON.stringify({
