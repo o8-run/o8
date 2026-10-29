@@ -1409,6 +1409,8 @@ mod tests {
             found: vec![],
             links: vec![],
             batch: None,
+            started: None,
+            finished: None,
         }
     }
 
@@ -1663,6 +1665,52 @@ mod tests {
                 "Ran a Node script",
                 "Finished",
             ]
+        );
+    }
+
+    #[test]
+    fn a_saved_turn_keeps_its_branches_and_how_long_it_worked() {
+        // The server saves each call's start and finish and the turn's outcome time.
+        let entries: Vec<crate::model::Entry> = serde_json::from_value(serde_json::json!([
+            {"id":"ask","role":"user","text":"Research it","timestamp":"1000"},
+            {"id":"reply","role":"assistant","text":"Done.","timestamp":"1001",
+             "receipt":{"terminal":{"userMessageId":"ask","outcome":"completed","completedAt":32_000}},
+             "toolCalls":[
+                {"id":"s","name":"WebSearch","args":{"query":"gpui"},"status":"done","startedAt":2_000,"finishedAt":5_000},
+                {"id":"g","name":"Grep","args":{"pattern":"shape_line"},"status":"done","startedAt":2_010,"finishedAt":3_000},
+                {"id":"r","name":"Read","args":{"file_path":"src/a.rs"},"status":"done","startedAt":6_000,"finishedAt":6_500}
+             ]}
+        ]))
+        .unwrap();
+        let rows = crate::model::render_tree(&entries);
+        let (steps, trace) = rows
+            .iter()
+            .find_map(|row| match row {
+                crate::model::Row::Activity { steps, trace, .. } => {
+                    Some((steps.clone(), trace.clone()))
+                }
+                _ => None,
+            })
+            .unwrap();
+        assert!(!trace.live);
+        assert_eq!(title(&steps, &trace, 0.).0, "Worked for 31s");
+        let shown = lines(&steps, &trace);
+        assert_eq!(
+            shown.iter().map(|l| l.rail).collect::<Vec<_>>(),
+            [
+                Rail::Fork {
+                    first: true,
+                    last: false
+                },
+                Rail::Fork {
+                    first: false,
+                    last: true
+                },
+                Rail::Join,
+                Rail::Main,
+                Rail::Main,
+            ],
+            "the search and grep overlapped, the read came after"
         );
     }
 

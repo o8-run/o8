@@ -27,6 +27,11 @@ pub struct Step {
     /// Tool calls that ran at the same time share a batch.
     #[serde(skip)]
     pub batch: Option<String>,
+    /// When the call started and finished, epoch ms, as saved history records them.
+    #[serde(skip)]
+    pub started: Option<f64>,
+    #[serde(skip)]
+    pub finished: Option<f64>,
 }
 
 /// One command's worth of work, for wording the trace.
@@ -625,6 +630,8 @@ pub fn activity(id: &str, tool: &Value, entry_text: &str) -> Step {
             .as_str()
             .map(str::to_owned)
             .or_else(|| batch_of(id)),
+        started: tool["startedAt"].as_f64(),
+        finished: tool["finishedAt"].as_f64(),
         status,
         reason,
         group: 0,
@@ -645,6 +652,31 @@ pub fn group(steps: &mut [Step]) {
             index += 1;
         }
         steps[i].group = index;
+    }
+}
+
+/// Saved history keeps when each call started and finished; a call that
+/// started while an earlier one was still running joins that call's batch.
+pub fn batch_by_time(steps: &mut [Step]) {
+    for index in 1..steps.len() {
+        let Some(started) = steps[index]
+            .started
+            .filter(|_| steps[index].batch.is_none())
+        else {
+            continue;
+        };
+        let open = (0..index).find(|&earlier| {
+            steps[earlier].started.is_some_and(|s| s <= started)
+                && steps[earlier]
+                    .finished
+                    .is_none_or(|finished| finished > started)
+        });
+        if let Some(earlier) = open {
+            if steps[earlier].batch.is_none() {
+                steps[earlier].batch = Some(steps[earlier].id.clone());
+            }
+            steps[index].batch = steps[earlier].batch.clone();
+        }
     }
 }
 
@@ -692,7 +724,33 @@ mod tests {
             found: vec![],
             links: vec![],
             batch: None,
+            started: None,
+            finished: None,
         }
+    }
+
+    #[test]
+    fn calls_whose_saved_times_overlap_share_a_batch() {
+        let timed = |id: &str, started: f64, finished: f64| Step {
+            id: id.into(),
+            started: Some(started),
+            finished: Some(finished),
+            ..step(id, "read", "ok")
+        };
+        let mut steps = vec![
+            timed("a", 0., 100.),
+            timed("b", 200., 900.),
+            timed("c", 201., 400.),
+            timed("d", 450., 800.),
+            timed("e", 1_000., 1_100.),
+            step("f", "read", "ok"),
+        ];
+        batch_by_time(&mut steps);
+        assert_eq!(
+            steps.iter().map(|s| s.batch.as_deref()).collect::<Vec<_>>(),
+            [None, Some("b"), Some("b"), Some("b"), None, None],
+            "c and d started while b ran; e started after; untimed history stays as it was"
+        );
     }
 
     fn parts(command: &str) -> Vec<(String, Option<String>, Option<String>)> {
