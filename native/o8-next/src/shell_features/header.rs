@@ -91,7 +91,7 @@ fn render(
             .when(!hidden, |row| {
                 row.child(
                     div()
-                        .w(px(super::super::sidebar::WIDTH))
+                        .w(px(super::super::sidebar::width(s)))
                         .h_full()
                         .flex_shrink_0()
                         .flex()

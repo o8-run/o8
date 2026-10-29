@@ -35,6 +35,9 @@ pub struct State {
     pub bounds: [f32; 4],
     pub selected: Option<String>,
     pub workspaces: BTreeMap<String, Workspace>,
+    /// The chat list width the person dragged; absent keeps the default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sidebar_width: Option<f32>,
     #[serde(skip)]
     pub(crate) retain_file: bool,
     #[serde(skip)]
@@ -47,6 +50,7 @@ impl Default for State {
             bounds: [100., 100., 1200., 816.],
             selected: None,
             workspaces: BTreeMap::new(),
+            sidebar_width: None,
             retain_file: false,
             backup_file: Arc::default(),
         }

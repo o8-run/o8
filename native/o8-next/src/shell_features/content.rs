@@ -53,11 +53,29 @@ fn render(
             .into_any_element(),
         None => content,
     };
+    // The width saves once, when the edge is let go.
+    if s.surfaces.sidebar.resizing && !cx.has_active_drag() {
+        s.surfaces.sidebar.resizing = false;
+        s.persist();
+    }
+    let content = registrations()
+        .iter()
+        .fold(content, |content, registration| {
+            (registration.decorate)(s, content)
+        });
     Some(
-        registrations()
-            .iter()
-            .fold(content, |content, registration| {
-                (registration.decorate)(s, content)
-            }),
+        div()
+            .flex()
+            .flex_1()
+            .min_h_0()
+            .min_w_0()
+            .on_drag_move(cx.listener(
+                |s, event: &gpui::DragMoveEvent<super::super::sidebar::Resize>, _, cx| {
+                    super::super::sidebar::resize(s, event, cx);
+                    cx.notify();
+                },
+            ))
+            .child(content)
+            .into_any_element(),
     )
 }

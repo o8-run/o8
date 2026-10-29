@@ -21,8 +21,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-pub(super) const RAIL_WIDTH: f32 = 280.;
-
 #[derive(Clone)]
 pub enum Event {
     Loaded(Vec<Session>),
